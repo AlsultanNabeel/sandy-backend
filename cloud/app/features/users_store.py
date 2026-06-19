@@ -131,6 +131,17 @@ def upsert_from_oauth(
     return doc
 
 
+def get_or_create_owner(name: str = "") -> Optional[str]:
+    """The owner is user #1 — a stable account keyed by provider='owner'.
+
+    Returns the owner's stable ``user_id`` (or None if Mongo is unavailable).
+    """
+    import os
+    sub = (os.getenv("OWNER_CHAT_ID") or os.getenv("SANDY_USER_CHAT_ID") or "owner").strip() or "owner"
+    user = upsert_from_oauth("owner", sub, name=name)
+    return (user or {}).get("_id")
+
+
 def touch_last_seen(user_id: str) -> None:
     coll = _coll()
     if coll is None or not user_id:

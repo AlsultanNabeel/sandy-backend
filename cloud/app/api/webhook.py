@@ -583,11 +583,13 @@ def create_telegram_webhook_app(
         password = (body.get("password") or "").strip()
         if not password or not check_owner_password(password):
             return jsonify({"error": "invalid_password", "remaining": remaining - 1}), 401
+        from app.features import users_store
+        owner_uid = users_store.get_or_create_owner(name="نبيل")
         try:
-            token = make_token("owner")
+            token = make_token("owner", user_id=owner_uid)
         except RuntimeError:
             return jsonify({"error": "auth_not_configured"}), 503
-        return jsonify({"token": token, "role": "owner"}), 200
+        return jsonify({"token": token, "role": "owner", "user_id": owner_uid}), 200
 
     @app.route("/api/access/request", methods=["POST"])
     def web_access_request():
@@ -676,20 +678,20 @@ def create_telegram_webhook_app(
         lang = (body.get("lang") or "ar").strip().lower()
 
         role = claims.get("role", "guest")
+        # Identity from the token: every authenticated user has a stable
+        # user_id (minted in users_store). The owner is just user #1.
+        user_id = claims.get("user_id") or str(SANDY_USER_CHAT_ID)
 
         # Owner gets the full SA pipeline.
         if role == "owner":
             try:
                 import base64
-                from app.utils.user_profiles import (
-                    active_user_profile_context, OWNER_CHAT_ID,
-                )
-                # The privileged handlers (reminders/tasks/calendar) refuse
-                # with "خاصة بنبيل" unless an owner profile is active. The
-                # Telegram path sets it via active_user_profile_context, so the
-                # web path does the same to give the owner full access.
+                from app.utils.user_profiles import active_user_profile_context
+                # The privileged handlers (reminders/tasks) refuse with
+                # "خاصة بنبيل" unless an owner profile is active. The web path
+                # sets it so the owner gets full access to their own data.
                 _owner_profile = {
-                    "chat_id": OWNER_CHAT_ID or str(SANDY_USER_CHAT_ID),
+                    "chat_id": user_id,
                     "name": "", "relation": "owner",
                     "tone": "casual", "permissions": "all",
                 }
@@ -702,8 +704,8 @@ def create_telegram_webhook_app(
                 with active_user_profile_context(_owner_profile):
                     state = run_graph(
                         graph_message,
-                        user_id=str(SANDY_USER_CHAT_ID),
-                        chat_id=str(SANDY_USER_CHAT_ID),
+                        user_id=user_id,
+                        chat_id=user_id,
                         source="web",
                     )
                 reply = get_final_reply(state)

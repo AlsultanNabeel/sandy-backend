@@ -31,7 +31,7 @@ def _jwt_secret() -> str:
     return secret
 
 
-def make_token(role: str) -> str:
+def make_token(role: str, user_id: Optional[str] = None) -> str:
     hours = OWNER_TOKEN_HOURS if role == "owner" else GUEST_TOKEN_HOURS
     payload = {
         "role": role,
@@ -39,6 +39,8 @@ def make_token(role: str) -> str:
         "iat": datetime.now(timezone.utc),
         "jti": str(uuid.uuid4()),
     }
+    if user_id:
+        payload["user_id"] = str(user_id)
     return jwt.encode(payload, _jwt_secret(), algorithm=_JWT_ALGO)
 
 
