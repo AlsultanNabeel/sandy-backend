@@ -682,6 +682,23 @@ def create_telegram_webhook_app(
         # user_id (minted in users_store). The owner is just user #1.
         user_id = claims.get("user_id") or str(SANDY_USER_CHAT_ID)
 
+        # Cost control: meter every authenticated request per user. The owner is
+        # exempt from rejection (limit 0) but still counted; subscribers get a
+        # generous quota, free users a modest one. Guests use demo data — skip.
+        if role != "guest":
+            from app.features import users_store, usage_store
+            if role == "owner":
+                _daily, _per_min = 0, 0
+            elif users_store.is_subscriber(user_id):
+                _daily, _per_min = 5000, 60
+            else:
+                _daily, _per_min = 40, 12
+            _over = usage_store.check_and_record(
+                user_id, daily_limit=_daily, per_min_limit=_per_min
+            )
+            if _over:
+                return jsonify({"error": _over}), 429
+
         # Owner gets the full SA pipeline.
         if role == "owner":
             try:
