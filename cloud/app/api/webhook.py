@@ -385,6 +385,9 @@ def create_telegram_webhook_app(
     from app.api.subscriptions_api import register_subscriptions_api
     register_subscriptions_api(app)
 
+    from app.api.social_auth_api import register_social_auth_api
+    register_social_auth_api(app)
+
     # Langfuse stats for the /status frontend page.
     @app.route("/api/langfuse-stats", methods=["GET"])
     def langfuse_stats():
@@ -705,18 +708,21 @@ def create_telegram_webhook_app(
             if _over:
                 return jsonify({"error": _over}), 429
 
-        # Owner gets the full SA pipeline.
-        if role == "owner":
+        # Authenticated users (owner + signed-in users) get the full per-user
+        # pipeline; only true guests fall through to the basic demo chat.
+        if role in ("owner", "user"):
             try:
                 import base64
                 from app.utils.user_profiles import active_user_profile_context
-                # The privileged handlers (reminders/tasks) refuse with
-                # "خاصة بنبيل" unless an owner profile is active. The web path
-                # sets it so the owner gets full access to their own data.
-                _owner_profile = {
+                # The active profile scopes data to this user. The owner gets
+                # full permissions; a regular user gets self-only, so owner-only
+                # tools still refuse while their own data works.
+                _is_owner = role == "owner"
+                _profile = {
                     "chat_id": user_id,
-                    "name": "", "relation": "owner",
-                    "tone": "casual", "permissions": "all",
+                    "name": "", "relation": "owner" if _is_owner else "user",
+                    "tone": "casual",
+                    "permissions": "all" if _is_owner else "chat-only",
                 }
                 graph_message = message
                 if lang == "en":
@@ -724,7 +730,7 @@ def create_telegram_webhook_app(
                         f"{message}\n\n(Note: I'm on the English interface — please "
                         "reply in English, keeping your usual personality.)"
                     )
-                with active_user_profile_context(_owner_profile):
+                with active_user_profile_context(_profile):
                     state = run_graph(
                         graph_message,
                         user_id=user_id,
@@ -741,11 +747,11 @@ def create_telegram_webhook_app(
                     return jsonify({
                         "reply": caption,
                         "image_url": f"data:image/png;base64,{b64}",
-                        "role": "owner",
+                        "role": role,
                     }), 200
-                return jsonify({"reply": text, "role": "owner"}), 200
+                return jsonify({"reply": text, "role": role}), 200
             except Exception as exc:
-                logger.exception("[web_agent] owner pipeline failed")
+                logger.exception("[web_agent] user pipeline failed")
                 log_unhandled_exception(mongo_db, exc, source="web_agent")
                 return jsonify({"error": "internal_error"}), 500
 
