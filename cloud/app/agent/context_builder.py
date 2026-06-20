@@ -167,6 +167,9 @@ def get_persona_directives(
                 summaries.append(str(d["summary"]))
 
     blocks: List[str] = []
+    onboarding_line = get_onboarding_directive()
+    if onboarding_line:
+        blocks.append(onboarding_line)
     if summaries and include_summaries:
         blocks.append("[ملخصات محادثات سابقة: " + " | ".join(summaries[:3]) + "]")
     if prefs:
@@ -176,3 +179,39 @@ def get_persona_directives(
     if lessons:
         blocks.append("[دروس سابقة: " + " | ".join(lessons[:3]) + "]")
     return "\n".join(blocks) if blocks else None
+
+
+def get_onboarding_directive() -> Optional[str]:
+    """Short Arabic line seeding the current user's onboarding profile.
+
+    Pulls the preferred name + interests the user gave during first-open
+    onboarding (``sandy_users.onboarding``) so Sandy greets them by name and
+    knows what they care about. Best-effort and crash-safe: returns None if the
+    multi-user store is unavailable, no user is active, or onboarding is unset.
+    """
+    try:
+        from app.utils.user_profiles import current_user_id
+        from app.features import users_store
+
+        user_id = current_user_id()
+        if not user_id:
+            return None
+        user = users_store.get_user(user_id) or {}
+        onboarding = user.get("onboarding") or {}
+
+        preferred_name = str(onboarding.get("preferred_name", "") or "").strip()
+        raw_interests = onboarding.get("interests") or []
+        interests = [str(i).strip() for i in raw_interests if str(i).strip()] \
+            if isinstance(raw_interests, list) else []
+
+        if not preferred_name and not interests:
+            return None
+
+        parts: List[str] = []
+        if preferred_name:
+            parts.append(f"نادِ المستخدم باسم «{preferred_name}»")
+        if interests:
+            parts.append("اهتماماته: " + "، ".join(interests[:8]))
+        return "[ملف المستخدم: " + " · ".join(parts) + "]"
+    except Exception:
+        return None
