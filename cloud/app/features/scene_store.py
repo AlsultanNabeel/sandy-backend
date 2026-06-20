@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from app.utils.user_profiles import active_profile_allows_privileged_access
+from app.utils.user_profiles import current_user_id
 
 # Scene action vocabulary (data only — nothing here drives hardware).
 VALID_DEVICES = frozenset({"light", "color", "music", "fan", "curtain", "scene"})
@@ -98,30 +98,29 @@ def init_scene_store(mongo_db) -> None:
     if mongo_db is None:
         return
     try:
-        mongo_db[_COLL].create_index("name", unique=True, background=True)
-        mongo_db[_TIMERS].create_index("fire_at", background=True)
-        _seed_builtins()
+        mongo_db[_COLL].create_index(
+            [("user_id", 1), ("name", 1)], unique=True, background=True
+        )
+        mongo_db[_TIMERS].create_index(
+            [("user_id", 1), ("fire_at", 1)], background=True
+        )
         print("[SceneStore] ready")
     except Exception as e:  # noqa: BLE001
         print(f"[SceneStore] index skipped: {e}")
-
-
-def _require_owner() -> None:
-    if not active_profile_allows_privileged_access():
-        raise PermissionError("هذا خاص بنبيل 😊")
 
 
 def _now():
     return datetime.now(timezone.utc)
 
 
-def _seed_builtins() -> None:
-    """Insert any built-in scene that doesn't exist yet (idempotent)."""
+def _seed_builtins(uid: str) -> None:
+    """Insert any built-in scene this user doesn't have yet (idempotent)."""
     if _mongo_db is None:
         return
     for name, spec in _BUILTIN.items():
-        if _mongo_db[_COLL].find_one({"name": name}) is None:
+        if _mongo_db[_COLL].find_one({"user_id": uid, "name": name}) is None:
             _mongo_db[_COLL].insert_one({
+                "user_id": uid,
                 "name": name,
                 "label": spec["label"],
                 "icon": spec["icon"],
@@ -169,29 +168,41 @@ def _public(d: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_scenes() -> List[Dict[str, Any]]:
-    _require_owner()
+    uid = current_user_id()
+    if uid is None:
+        return []
     if _mongo_db is None:
         return []
-    return [_public(d) for d in _mongo_db[_COLL].find().sort("builtin", -1)]
+    _seed_builtins(uid)   # ensure this user has the default set
+    return [
+        _public(d)
+        for d in _mongo_db[_COLL].find({"user_id": uid}).sort("builtin", -1)
+    ]
 
 
 def get_scene(name: str) -> Optional[Dict[str, Any]]:
-    if _mongo_db is None:
+    uid = current_user_id()
+    if uid is None or _mongo_db is None:
         return None
-    d = _mongo_db[_COLL].find_one({"name": (name or "").strip().lower()})
+    _seed_builtins(uid)
+    d = _mongo_db[_COLL].find_one(
+        {"user_id": uid, "name": (name or "").strip().lower()}
+    )
     return _public(d) if d else None
 
 
 def set_scene_actions(name: str, actions: List[Dict[str, str]]) -> Dict[str, Any]:
     """Customise what a scene does to the room. Works for built-ins too."""
-    _require_owner()
+    uid = current_user_id()
+    if uid is None:
+        return {"ok": False}
     if _mongo_db is None:
         return {"ok": False}
     name = (name or "").strip().lower()
     if not name:
         return {"ok": False, "error": "empty_name"}
     _mongo_db[_COLL].update_one(
-        {"name": name},
+        {"user_id": uid, "name": name},
         {"$set": {"actions": _clean_actions(actions), "updated_at": _now()}},
     )
     return {"ok": True, "name": name}
@@ -199,15 +210,18 @@ def set_scene_actions(name: str, actions: List[Dict[str, str]]) -> Dict[str, Any
 
 def add_scene(name: str, label: str = "", icon: str = "🎛️",
               actions: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
-    _require_owner()
+    uid = current_user_id()
+    if uid is None:
+        return {"ok": False}
     if _mongo_db is None:
         return {"ok": False}
     name = (name or "").strip().lower()
     if not name:
         return {"ok": False, "error": "empty_name"}
-    if _mongo_db[_COLL].find_one({"name": name}):
+    if _mongo_db[_COLL].find_one({"user_id": uid, "name": name}):
         return {"ok": False, "error": "exists"}
     _mongo_db[_COLL].insert_one({
+        "user_id": uid,
         "name": name,
         "label": (label or name).strip(),
         "icon": (icon or "🎛️").strip(),
@@ -220,20 +234,22 @@ def add_scene(name: str, label: str = "", icon: str = "🎛️",
 
 def delete_scene(name: str) -> Dict[str, Any]:
     """Delete a custom scene; built-ins are reset to defaults instead."""
-    _require_owner()
+    uid = current_user_id()
+    if uid is None:
+        return {"ok": False}
     if _mongo_db is None:
         return {"ok": False}
     name = (name or "").strip().lower()
-    d = _mongo_db[_COLL].find_one({"name": name})
+    d = _mongo_db[_COLL].find_one({"user_id": uid, "name": name})
     if not d:
         return {"ok": False, "error": "not_found"}
     if d.get("builtin") and name in _BUILTIN:
         _mongo_db[_COLL].update_one(
-            {"name": name},
+            {"user_id": uid, "name": name},
             {"$set": {"actions": _BUILTIN[name]["actions"], "updated_at": _now()}},
         )
         return {"ok": True, "reset": True, "name": name}
-    _mongo_db[_COLL].delete_one({"name": name})
+    _mongo_db[_COLL].delete_one({"user_id": uid, "name": name})
     return {"ok": True, "deleted": True, "name": name}
 
 
@@ -245,17 +261,21 @@ def apply_scene(name: str) -> Dict[str, Any]:
     reverts still pending from the previous one, then schedules this scene's
     own `for_min` reverts as data.
     """
-    _require_owner()
+    uid = current_user_id()
+    if uid is None:
+        return {"ok": False, "error": "not_found"}
     sc = get_scene(name)
     if not sc:
         return {"ok": False, "error": "not_found"}
 
     timers = 0
     if _mongo_db is not None:
-        _mongo_db[_TIMERS].delete_many({})   # new scene supersedes old reverts
+        # new scene supersedes this user's old reverts
+        _mongo_db[_TIMERS].delete_many({"user_id": uid})
         now = _now()
         docs = [
-            {"fire_at": now + timedelta(minutes=a["for_min"]),
+            {"user_id": uid,
+             "fire_at": now + timedelta(minutes=a["for_min"]),
              "device": a["device"], "value": a["then"]}
             for a in sc["actions"] if a.get("for_min")
         ]
@@ -276,13 +296,16 @@ def run_due_timers() -> List[Dict[str, str]]:
 
     Returns the due revert actions as data (a list of {device, value}) and
     clears them from the store; a caller can hand them to an app to execute.
-    Runs without an owner check — it's a scheduler job acting on the owner's
-    own scene timers, not a user-facing entry point.
+    A scheduler job — it runs inside the active user's profile context, so it
+    only ever fires that user's own scene timers.
     """
-    if _mongo_db is None:
+    uid = current_user_id()
+    if uid is None or _mongo_db is None:
         return []
     due: List[Dict[str, str]] = []
-    for t in list(_mongo_db[_TIMERS].find({"fire_at": {"$lte": _now()}})):
+    for t in list(
+        _mongo_db[_TIMERS].find({"user_id": uid, "fire_at": {"$lte": _now()}})
+    ):
         due.append({"device": t.get("device", ""), "value": t.get("value", "")})
-        _mongo_db[_TIMERS].delete_one({"_id": t["_id"]})
+        _mongo_db[_TIMERS].delete_one({"_id": t["_id"], "user_id": uid})
     return due

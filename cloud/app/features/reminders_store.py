@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.time import USER_TZ
-from app.utils.user_profiles import active_profile_allows_privileged_access
+from app.utils.user_profiles import current_user_id
 
 _COLL = "sandy_reminders"
 _mongo_db = None
@@ -44,7 +44,7 @@ def init_reminders_store(mongo_db) -> None:
         return
     try:
         mongo_db[_COLL].create_index(
-            [("send_state", 1), ("remind_at", 1)], background=True
+            [("user_id", 1), ("send_state", 1), ("remind_at", 1)], background=True
         )
         print("[RemindersStore] ready")
     except Exception as e:  # noqa: BLE001
@@ -57,11 +57,6 @@ def is_available() -> bool:
 
 def _coll():
     return _mongo_db[_COLL] if _mongo_db is not None else None
-
-
-def _require_owner() -> None:
-    if not active_profile_allows_privileged_access():
-        raise PermissionError("هذا خاص بنبيل 😊")
 
 
 def _parse_iso(value: str) -> Optional[datetime]:
@@ -133,7 +128,9 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
 def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
     """Upcoming (not yet sent) reminders, soonest first."""
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return []
         coll = _coll()
         if coll is None:
             return []
@@ -141,6 +138,7 @@ def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
         docs = (
             coll.find(
                 {
+                    "user_id": uid,
                     "send_state": {"$in": ["pending", "sending", "failed"]},
                     "remind_at": {"$gte": cutoff},
                 }
@@ -149,8 +147,6 @@ def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
             .limit(max_results)
         )
         return [_normalize(d) for d in docs]
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[RemindersStore] load failed: {e}")
         return []
@@ -172,7 +168,9 @@ def add_reminder(
     parent_summary: str = "",
 ) -> Dict[str, Any]:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return {"success": False, "error": "unauthorized"}
         coll = _coll()
         if coll is None:
             return {"success": False, "error": "no_store"}
@@ -189,6 +187,7 @@ def add_reminder(
 
         doc = {
             "_id": uuid.uuid4().hex,
+            "user_id": uid,
             "text": text,
             "remind_at": _to_utc(remind_dt),
             "recurrence": str(recurrence or "").strip(),
@@ -203,8 +202,6 @@ def add_reminder(
         coll.insert_one(doc)
         print(f"[RemindersStore] reminder created: {text} @ {remind_at_iso}")
         return {"success": True, "id": doc["_id"]}
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[RemindersStore] create failed: {e}")
         return {"success": False, "error": str(e)}
@@ -218,7 +215,9 @@ def update_reminder(
 ) -> Dict[str, Any]:
     """Empty title/start_iso means "leave unchanged"; recurrence=None too."""
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return {"success": False, "error": "unauthorized"}
         coll = _coll()
         if coll is None or not reminder_id:
             return {"success": False, "error": "missing"}
@@ -240,12 +239,10 @@ def update_reminder(
         if not updates:
             return {"success": False, "error": "nothing_to_update"}
 
-        r = coll.update_one({"_id": reminder_id}, {"$set": updates})
+        r = coll.update_one({"_id": reminder_id, "user_id": uid}, {"$set": updates})
         if r.matched_count == 0:
             return {"success": False, "error": "not_found"}
         return {"success": True}
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[RemindersStore] update failed: {e}")
         return {"success": False, "error": str(e)}
@@ -254,13 +251,15 @@ def update_reminder(
 def snooze_reminder(reminder_id: str, minutes: int = 30) -> Dict[str, Any]:
     """Push a reminder forward from now (works on sent ones too — that's the point)."""
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return {"success": False, "error": "unauthorized"}
         coll = _coll()
         if coll is None or not reminder_id:
             return {"success": False, "error": "missing"}
         new_dt = datetime.now(USER_TZ) + timedelta(minutes=max(1, int(minutes)))
         r = coll.update_one(
-            {"_id": reminder_id},
+            {"_id": reminder_id, "user_id": uid},
             {
                 "$set": {
                     "remind_at": _to_utc(new_dt),
@@ -272,8 +271,6 @@ def snooze_reminder(reminder_id: str, minutes: int = 30) -> Dict[str, Any]:
         if r.matched_count == 0:
             return {"success": False, "error": "not_found"}
         return {"success": True, "new_iso": new_dt.isoformat()}
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[RemindersStore] snooze failed: {e}")
         return {"success": False, "error": str(e)}
@@ -282,12 +279,14 @@ def snooze_reminder(reminder_id: str, minutes: int = 30) -> Dict[str, Any]:
 def complete_reminder(reminder_id: str) -> bool:
     """Owner tapped "done" — close it out, recurring or not."""
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll()
         if coll is None or not reminder_id:
             return False
         r = coll.update_one(
-            {"_id": reminder_id},
+            {"_id": reminder_id, "user_id": uid},
             {
                 "$set": {
                     "send_state": "sent",
@@ -297,8 +296,6 @@ def complete_reminder(reminder_id: str) -> bool:
             },
         )
         return r.matched_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[RemindersStore] complete failed: {e}")
         return False
@@ -306,13 +303,13 @@ def complete_reminder(reminder_id: str) -> bool:
 
 def delete_reminder(reminder_id: str) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll()
         if coll is None or not reminder_id:
             return False
-        return coll.delete_one({"_id": reminder_id}).deleted_count > 0
-    except PermissionError:
-        raise
+        return coll.delete_one({"_id": reminder_id, "user_id": uid}).deleted_count > 0
     except Exception as e:
         print(f"[RemindersStore] delete failed: {e}")
         return False
@@ -320,13 +317,15 @@ def delete_reminder(reminder_id: str) -> bool:
 
 def delete_sandy_reminder_by_task_id(task_id: str) -> int:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return 0
         coll = _coll()
         if coll is None or not task_id:
             return 0
-        return coll.delete_many({"linked_task_id": task_id}).deleted_count
-    except PermissionError:
-        raise
+        return coll.delete_many(
+            {"linked_task_id": task_id, "user_id": uid}
+        ).deleted_count
     except Exception as e:
         print(f"[RemindersStore] delete by task failed: {e}")
         return 0
@@ -334,15 +333,15 @@ def delete_sandy_reminder_by_task_id(task_id: str) -> int:
 
 def delete_all_sandy_reminders() -> int:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return 0
         coll = _coll()
         if coll is None:
             return 0
-        r = coll.delete_many({})
+        r = coll.delete_many({"user_id": uid})
         print(f"[RemindersStore] deleted all reminders: {r.deleted_count}")
         return r.deleted_count
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[RemindersStore] delete all failed: {e}")
         return 0
@@ -360,13 +359,16 @@ def check_due_reminders(
     keyboard_builder(reminder_dict) → a Telegram reply_markup (snooze/done
     buttons) or None. Built by the runtime so this module stays free of
     telebot imports.
+
+    Runs as a scheduler job (no active profile), so it scopes by the
+    user_chat_id it's polling for — only that user's reminders are claimed.
     """
     try:
-        _require_owner()
         coll = _coll()
         if coll is None or not send_message_fn or not user_chat_id:
             return None
 
+        uid = str(user_chat_id)
         now = datetime.now(timezone.utc)
         window = {
             "$gte": now - timedelta(minutes=_LOOKBACK_MIN),
@@ -377,7 +379,7 @@ def check_due_reminders(
         while True:
             # Atomic claim: pending → sending. Two dynos can race; only one wins.
             doc = coll.find_one_and_update(
-                {"send_state": "pending", "remind_at": window},
+                {"user_id": uid, "send_state": "pending", "remind_at": window},
                 {
                     "$set": {
                         "send_state": "sending",
@@ -412,7 +414,7 @@ def check_due_reminders(
                 print(f"[RemindersStore] sent: {message_text}")
             except Exception as e:
                 coll.update_one(
-                    {"_id": doc["_id"]},
+                    {"_id": doc["_id"], "user_id": uid},
                     {
                         "$set": {
                             "send_state": "failed",
@@ -428,7 +430,7 @@ def check_due_reminders(
                 nxt = _next_occurrence(recurrence, base, max(base, now))
                 if nxt:
                     coll.update_one(
-                        {"_id": doc["_id"]},
+                        {"_id": doc["_id"], "user_id": uid},
                         {
                             "$set": {
                                 "remind_at": nxt,
@@ -442,14 +444,12 @@ def check_due_reminders(
                 # Rule exhausted — fall through and close it out.
 
             coll.update_one(
-                {"_id": doc["_id"]},
+                {"_id": doc["_id"], "user_id": uid},
                 {"$set": {"send_state": "sent", "sent_at": now}},
             )
             sent_count += 1
 
         return f"Sent {sent_count} reminder(s)" if sent_count else None
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[RemindersStore] check failed: {e}")
         return None

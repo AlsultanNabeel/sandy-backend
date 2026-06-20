@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.time import USER_TZ
-from app.utils.user_profiles import active_profile_allows_privileged_access
+from app.utils.user_profiles import current_user_id
 
 _COLL = "sandy_tasks"
 _mongo_db = None
@@ -40,8 +40,12 @@ def init_tasks_store(mongo_db) -> None:
     if mongo_db is None:
         return
     try:
-        mongo_db[_COLL].create_index([("done", 1), ("created_at", 1)], background=True)
-        mongo_db[_COLL].create_index([("done", 1), ("completed_at", -1)], background=True)
+        mongo_db[_COLL].create_index(
+            [("user_id", 1), ("done", 1), ("created_at", 1)], background=True
+        )
+        mongo_db[_COLL].create_index(
+            [("user_id", 1), ("done", 1), ("completed_at", -1)], background=True
+        )
         print("[TasksStore] ready")
     except Exception as e:  # noqa: BLE001
         print(f"[TasksStore] index skipped: {e}")
@@ -58,11 +62,6 @@ def _db(mongo_db=None):
 def _coll(mongo_db=None):
     db = _db(mongo_db)
     return db[_COLL] if db is not None else None
-
-
-def _require_owner() -> None:
-    if not active_profile_allows_privileged_access():
-        raise PermissionError("هذا خاص بنبيل 😊")
 
 
 def _iso(dt: Optional[datetime]) -> str:
@@ -105,14 +104,14 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return []
         coll = _coll(mongo_db)
         if coll is None:
             return []
-        docs = list(coll.find({"done": False}).sort("created_at", 1))
+        docs = list(coll.find({"user_id": uid, "done": False}).sort("created_at", 1))
         return [_normalize(d) for d in docs]
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] load failed: {e}")
         return []
@@ -120,14 +119,18 @@ def load_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
 
 def load_completed_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return []
         coll = _coll(mongo_db)
         if coll is None:
             return []
-        docs = list(coll.find({"done": True}).sort("completed_at", -1).limit(100))
+        docs = list(
+            coll.find({"user_id": uid, "done": True})
+            .sort("completed_at", -1)
+            .limit(100)
+        )
         return [_normalize(d) for d in docs]
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] load completed failed: {e}")
         return []
@@ -149,8 +152,6 @@ def load_overdue_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
             if due_date and due_date < today:
                 overdue.append(task)
         return overdue
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] load overdue failed: {e}")
         return []
@@ -169,13 +170,16 @@ def add_task(
 ) -> str:
     """Returns the new task id, or "" on failure (incl. past due) — same as before."""
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return ""
         coll = _coll(mongo_db)
         if coll is None:
             return ""
 
         doc: Dict[str, Any] = {
             "_id": uuid.uuid4().hex,
+            "user_id": uid,
             "text": str(task_text or "").strip(),
             "notes": str(notes or "").strip(),
             "done": False,
@@ -201,8 +205,6 @@ def add_task(
         coll.insert_one(doc)
         print(f"[TasksStore] task created: {doc['text']}")
         return doc["_id"]
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] create failed: {e}")
         return ""
@@ -210,17 +212,17 @@ def add_task(
 
 def complete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         if coll is None or not task_id:
             return False
         r = coll.update_one(
-            {"_id": task_id},
+            {"_id": task_id, "user_id": uid},
             {"$set": {"done": True, "completed_at": datetime.now(timezone.utc)}},
         )
         return r.matched_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] complete failed: {e}")
         return False
@@ -228,17 +230,17 @@ def complete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
 
 def uncomplete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         if coll is None or not task_id:
             return False
         r = coll.update_one(
-            {"_id": task_id},
+            {"_id": task_id, "user_id": uid},
             {"$set": {"done": False, "completed_at": None}},
         )
         return r.matched_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] uncomplete failed: {e}")
         return False
@@ -248,7 +250,9 @@ def update_task_due_date(
     task_id: str, due_iso: str, mongo_db=None, tasks_file=None
 ) -> dict:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return {"ok": False, "reason": "unauthorized"}
         coll = _coll(mongo_db)
         task_id = str(task_id or "").strip()
         due_iso = str(due_iso or "").strip()
@@ -261,7 +265,7 @@ def update_task_due_date(
         if due_dt.date() < datetime.now(USER_TZ).date():
             return {"ok": False, "reason": "past"}
 
-        current = coll.find_one({"_id": task_id})
+        current = coll.find_one({"_id": task_id, "user_id": uid})
         if not current:
             return {"ok": False, "reason": "missing"}
         # A task with an exact due TIME needs update_task_due_time, not this.
@@ -269,11 +273,10 @@ def update_task_due_date(
             return {"ok": False, "reason": "has_time"}
 
         coll.update_one(
-            {"_id": task_id}, {"$set": {"due_date": due_dt.date().isoformat()}}
+            {"_id": task_id, "user_id": uid},
+            {"$set": {"due_date": due_dt.date().isoformat()}},
         )
         return {"ok": True, "due_date": due_dt.date().isoformat()}
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] update due date failed: {e}")
         return {"ok": False, "reason": "error"}
@@ -283,7 +286,9 @@ def update_task_due_time(
     task_id: str, due_iso: str, mongo_db=None, tasks_file=None
 ) -> dict:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return {"ok": False, "reason": "unauthorized"}
         coll = _coll(mongo_db)
         task_id = str(task_id or "").strip()
         due_iso = str(due_iso or "").strip()
@@ -297,14 +302,12 @@ def update_task_due_time(
             return {"ok": False, "reason": "past"}
 
         r = coll.update_one(
-            {"_id": task_id},
+            {"_id": task_id, "user_id": uid},
             {"$set": {"due_date": due_dt.date().isoformat(), "due_at": due_dt}},
         )
         if r.matched_count == 0:
             return {"ok": False, "reason": "missing"}
         return {"ok": True, "due_at": due_dt.isoformat()}
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] update due time failed: {e}")
         return {"ok": False, "reason": "error"}
@@ -312,14 +315,14 @@ def update_task_due_time(
 
 def delete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         if coll is None or not task_id:
             return False
-        r = coll.delete_one({"_id": task_id})
+        r = coll.delete_one({"_id": task_id, "user_id": uid})
         return r.deleted_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] delete failed: {e}")
         return False
@@ -327,16 +330,18 @@ def delete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
 
 def rename_task(task_id: str, new_title: str, mongo_db=None, tasks_file=None) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         task_id = str(task_id or "").strip()
         new_title = str(new_title or "").strip()
         if coll is None or not task_id or not new_title:
             return False
-        r = coll.update_one({"_id": task_id}, {"$set": {"text": new_title}})
+        r = coll.update_one(
+            {"_id": task_id, "user_id": uid}, {"$set": {"text": new_title}}
+        )
         return r.matched_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] rename failed: {e}")
         return False
@@ -346,21 +351,23 @@ def append_task_note(
     task_id: str, note_text: str, mongo_db=None, tasks_file=None
 ) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         task_id = str(task_id or "").strip()
         note_text = str(note_text or "").strip()
         if coll is None or not task_id or not note_text:
             return False
-        current = coll.find_one({"_id": task_id})
+        current = coll.find_one({"_id": task_id, "user_id": uid})
         if not current:
             return False
         old = str(current.get("notes", "") or "").strip()
         new_notes = "\n".join(part for part in [old, note_text] if part).strip()
-        coll.update_one({"_id": task_id}, {"$set": {"notes": new_notes}})
+        coll.update_one(
+            {"_id": task_id, "user_id": uid}, {"$set": {"notes": new_notes}}
+        )
         return True
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] append note failed: {e}")
         return False
@@ -370,17 +377,18 @@ def replace_task_note(
     task_id: str, note_text: str, mongo_db=None, tasks_file=None
 ) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         task_id = str(task_id or "").strip()
         if coll is None or not task_id:
             return False
         r = coll.update_one(
-            {"_id": task_id}, {"$set": {"notes": str(note_text or "").strip()}}
+            {"_id": task_id, "user_id": uid},
+            {"$set": {"notes": str(note_text or "").strip()}},
         )
         return r.matched_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] replace note failed: {e}")
         return False
@@ -388,17 +396,19 @@ def replace_task_note(
 
 def set_task_priority(task_id: str, priority: str, mongo_db=None) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         if coll is None or not task_id:
             return False
         clean = str(priority or "").strip().lower()
         if clean not in {"", "high", "normal", "low"}:
             return False
-        r = coll.update_one({"_id": task_id}, {"$set": {"priority": clean}})
+        r = coll.update_one(
+            {"_id": task_id, "user_id": uid}, {"$set": {"priority": clean}}
+        )
         return r.matched_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] set priority failed: {e}")
         return False
@@ -406,16 +416,17 @@ def set_task_priority(task_id: str, priority: str, mongo_db=None) -> bool:
 
 def set_task_project(task_id: str, project: str, mongo_db=None) -> bool:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return False
         coll = _coll(mongo_db)
         if coll is None or not task_id:
             return False
         r = coll.update_one(
-            {"_id": task_id}, {"$set": {"project": str(project or "").strip()}}
+            {"_id": task_id, "user_id": uid},
+            {"$set": {"project": str(project or "").strip()}},
         )
         return r.matched_count > 0
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] set project failed: {e}")
         return False
@@ -425,18 +436,18 @@ def set_task_project(task_id: str, project: str, mongo_db=None) -> bool:
 
 def complete_all_tasks(mongo_db=None, tasks_file=None) -> int:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return 0
         coll = _coll(mongo_db)
         if coll is None:
             return 0
         r = coll.update_many(
-            {"done": False},
+            {"user_id": uid, "done": False},
             {"$set": {"done": True, "completed_at": datetime.now(timezone.utc)}},
         )
         print(f"[TasksStore] completed {r.modified_count} tasks")
         return r.modified_count
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] complete_all failed: {e}")
         return 0
@@ -444,15 +455,15 @@ def complete_all_tasks(mongo_db=None, tasks_file=None) -> int:
 
 def delete_active_tasks(mongo_db=None, tasks_file=None) -> int:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return 0
         coll = _coll(mongo_db)
         if coll is None:
             return 0
-        r = coll.delete_many({"done": False})
+        r = coll.delete_many({"user_id": uid, "done": False})
         print(f"[TasksStore] deleted {r.deleted_count} active tasks")
         return r.deleted_count
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] delete active failed: {e}")
         return 0
@@ -460,15 +471,15 @@ def delete_active_tasks(mongo_db=None, tasks_file=None) -> int:
 
 def delete_completed_tasks(mongo_db=None, tasks_file=None) -> int:
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return 0
         coll = _coll(mongo_db)
         if coll is None:
             return 0
-        r = coll.delete_many({"done": True})
+        r = coll.delete_many({"user_id": uid, "done": True})
         print(f"[TasksStore] deleted {r.deleted_count} completed tasks")
         return r.deleted_count
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] delete completed failed: {e}")
         return 0
@@ -478,15 +489,15 @@ def clear_all_tasks(mongo_db=None) -> int:
     """Delete every task. The explicit operation that the google-era
     save_tasks([]) wipe used to hide. Returns how many were deleted."""
     try:
-        _require_owner()
+        uid = current_user_id()
+        if uid is None:
+            return 0
         coll = _coll(mongo_db)
         if coll is None:
             return 0
-        r = coll.delete_many({})
+        r = coll.delete_many({"user_id": uid})
         print(f"[TasksStore] cleared all tasks: {r.deleted_count}")
         return r.deleted_count
-    except PermissionError:
-        raise
     except Exception as e:
         print(f"[TasksStore] clear-all failed: {e}")
         return 0
