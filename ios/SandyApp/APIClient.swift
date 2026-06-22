@@ -56,8 +56,391 @@ final class APIClient {
     }
 
     func sendMessage(_ text: String) async throws -> String {
+        // نرسل لغة المستخدم الحالية (عربي/إنجليزي) حتى ترد ساندي بنفس اللغة.
+        let lang = await LanguageManager.shared.lang.rawValue
         let r = try await request("/api/agent", method: "POST",
-                                  body: ["message": text, "lang": "ar"])
+                                  body: ["message": text, "lang": lang])
         return r["reply"] as? String ?? "…"
+    }
+
+    /// يجيب صوت ساندي الطبيعي (WAV من جيميني) لنصّ معيّن — للتشغيل ومزامنة الفم.
+    /// نطلب JSON خام (مش عبر `request` لأنه يفكّ JSON؛ هون الناتج بايتات صوت).
+    func synthesizeVoice(text: String, mood: String = "neutral") async throws -> Data {
+        guard let url = URL(string: baseURL + "/api/voice/tts") else {
+            throw APIError(message: "عنوان غير صالح")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "mood": mood])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code >= 400 { throw APIError(message: "صوت غير متاح (\(code))") }
+        return data
+    }
+
+    // ── المهام ──────────────────────────────────────────────────────────
+    // GET /api/tasks → {"items":[{id,text,done,due_at,note?,priority?}], "demo":bool}
+    // note و priority إضافيان واختياريان — نقرأهما بحذر مع قيم افتراضية.
+    func getTasks(completed: Bool = false) async throws -> ListResult<TaskItem> {
+        let path = completed ? "/api/tasks?completed=1" : "/api/tasks"
+        let r = try await request(path)
+        let items = r["items"] as? [[String: Any]] ?? []
+        let parsed: [TaskItem] = items.compactMap { row in
+            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+            let priority = (row["priority"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "normal"
+            return TaskItem(id: id,
+                            text: row["text"] as? String ?? "",
+                            done: row["done"] as? Bool ?? false,
+                            dueAt: row["due_at"] as? String ?? "",
+                            note: row["note"] as? String ?? "",
+                            priority: priority)
+        }
+        return ListResult(items: parsed, demo: r["demo"] as? Bool ?? false)
+    }
+
+    // POST /api/tasks body {"text","due","note"?,"priority"?} → {"ok":true,"id":...}
+    // note و priority اختياريان — نضيفهما فقط لو موجودين (additive + آمن).
+    func addTask(text: String,
+                 due: String = "",
+                 note: String? = nil,
+                 priority: String? = nil) async throws {
+        var body: [String: Any] = ["text": text, "due": due]
+        if let note { body["note"] = note }
+        if let priority { body["priority"] = priority }
+        _ = try await request("/api/tasks", method: "POST", body: body)
+    }
+
+    // PATCH /api/tasks/<id> body {"done":bool} (للمالك فقط)
+    func setTaskDone(id: String, done: Bool) async throws {
+        _ = try await request("/api/tasks/\(id)", method: "PATCH",
+                              body: ["done": done])
+    }
+
+    // PATCH /api/tasks/<id> — تعديل شامل: نص/إنجاز/ملاحظة/أولوية.
+    // الباك-إند يدعم text و done؛ note و priority إضافيان واختياريان وآمنان.
+    // نمرّر فقط الحقول غير nil حتى لا نمسح قيمة موجودة عن طريق الخطأ.
+    func updateTask(id: String,
+                    text: String? = nil,
+                    done: Bool? = nil,
+                    note: String? = nil,
+                    priority: String? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let text { body["text"] = text }
+        if let done { body["done"] = done }
+        if let note { body["note"] = note }
+        if let priority { body["priority"] = priority }
+        guard !body.isEmpty else { return }
+        _ = try await request("/api/tasks/\(id)", method: "PATCH", body: body)
+    }
+
+    // ── التذكيرات ───────────────────────────────────────────────────────
+    // GET /api/reminders → {"items":[{id,text,remind_at,is_recurring,note?}], "demo":bool}
+    // note إضافي واختياري — نقرأه بحذر مع قيمة افتراضية فاضية.
+    func getReminders() async throws -> ListResult<ReminderItem> {
+        let r = try await request("/api/reminders")
+        let items = r["items"] as? [[String: Any]] ?? []
+        let parsed: [ReminderItem] = items.compactMap { row in
+            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+            return ReminderItem(id: id,
+                                text: row["text"] as? String ?? "",
+                                remindAt: row["remind_at"] as? String ?? "",
+                                isRecurring: row["is_recurring"] as? Bool ?? false,
+                                note: row["note"] as? String ?? "")
+        }
+        return ListResult(items: parsed, demo: r["demo"] as? Bool ?? false)
+    }
+
+    // POST /api/reminders body {"text","remind_at","note"?} → {"ok":true} (للمالك فقط)
+    // الباك-إند يرفض إن كان أحدهما فاضي (text_and_remind_at_required).
+    // note اختياري — نضيفه فقط لو موجود (additive + آمن).
+    func addReminder(text: String, remindAt: String, note: String? = nil) async throws {
+        var body: [String: Any] = ["text": text, "remind_at": remindAt]
+        if let note { body["note"] = note }
+        _ = try await request("/api/reminders", method: "POST", body: body)
+    }
+
+    // DELETE /api/reminders/<id> → {"ok":true} (للمالك فقط)
+    func deleteReminder(id: String) async throws {
+        _ = try await request("/api/reminders/\(id)", method: "DELETE")
+    }
+
+    // ── العادات ─────────────────────────────────────────────────────────
+    // GET /api/life/habits → {"items":[{id,name,streak,done_today}], "demo":bool}
+    func getHabits() async throws -> ListResult<HabitItem> {
+        let r = try await request("/api/life/habits")
+        let items = r["items"] as? [[String: Any]] ?? []
+        let parsed: [HabitItem] = items.compactMap { row in
+            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+            return HabitItem(id: id,
+                             name: row["name"] as? String ?? "",
+                             streak: (row["streak"] as? NSNumber)?.intValue ?? 0,
+                             doneToday: row["done_today"] as? Bool ?? false)
+        }
+        return ListResult(items: parsed, demo: r["demo"] as? Bool ?? false)
+    }
+
+    // POST /api/life/habits body {"name"} → {"ok":bool} (للمالك فقط)
+    func addHabit(name: String) async throws {
+        _ = try await request("/api/life/habits", method: "POST",
+                              body: ["name": name])
+    }
+
+    // POST /api/life/habits/checkin body {"name"} → {"ok":bool} (للمالك فقط)
+    func checkinHabit(name: String) async throws {
+        _ = try await request("/api/life/habits/checkin", method: "POST",
+                              body: ["name": name])
+    }
+
+    // POST /api/life/habits/uncheckin body {"id"} → {"ok":bool} (للمالك فقط)
+    // تراجع عن تسجيل حضور اليوم لو انضغط بالغلط.
+    func uncheckinHabit(id: String) async throws {
+        _ = try await request("/api/life/habits/uncheckin", method: "POST",
+                              body: ["id": id])
+    }
+
+    // ── الفوكس (بومودورو) ───────────────────────────────────────────────
+    // GET /api/life/focus → حالة الجلسة الحالية.
+    func getFocusStatus() async throws -> FocusStatus {
+        let r = try await request("/api/life/focus")
+        return FocusStatus(
+            active: r["active"] as? Bool ?? false,
+            label: r["label"] as? String ?? "",
+            scene: r["scene"] as? String ?? "",
+            phase: r["phase"] as? String ?? "focus",
+            cycleIdx: (r["cycle_idx"] as? NSNumber)?.intValue ?? 1,
+            cycles: (r["cycles"] as? NSNumber)?.intValue ?? 1,
+            focusMin: (r["focus_min"] as? NSNumber)?.intValue ?? 25,
+            breakMin: (r["break_min"] as? NSNumber)?.intValue ?? 0,
+            remainingSec: (r["remaining_sec"] as? NSNumber)?.intValue ?? 0,
+            totalSec: (r["total_sec"] as? NSNumber)?.intValue ?? 0,
+            demo: r["demo"] as? Bool ?? false)
+    }
+
+    // POST /api/life/focus/start (للمالك فقط)
+    func startFocus(focusMin: Int, breakMin: Int, cycles: Int,
+                    scene: String, endScene: String, label: String) async throws {
+        _ = try await request("/api/life/focus/start", method: "POST", body: [
+            "focus_min": focusMin, "break_min": breakMin, "cycles": cycles,
+            "scene": scene, "end_scene": endScene, "label": label,
+        ])
+    }
+
+    // POST /api/life/focus/stop body {"cancel":bool} (للمالك فقط)
+    func stopFocus(cancel: Bool) async throws {
+        _ = try await request("/api/life/focus/stop", method: "POST",
+                              body: ["cancel": cancel])
+    }
+
+    // GET /api/life/focus/history?limit=
+    func getFocusHistory(limit: Int = 30) async throws -> [FocusSession] {
+        let r = try await request("/api/life/focus/history?limit=\(limit)")
+        let rows = r["sessions"] as? [[String: Any]] ?? []
+        return rows.map { row in
+            FocusSession(label: row["label"] as? String ?? "",
+                         minutes: (row["minutes"] as? NSNumber)?.intValue ?? 0,
+                         completed: row["completed"] as? Bool ?? false,
+                         startedAt: row["started_at"] as? String ?? "")
+        }
+    }
+
+    // ── مشاهد الغرفة (تحكّم room-node عبر MQTT) ──────────────────────────
+    // GET /api/life/scenes → {"items":[{name,label,icon,actions:[{device,value}]}], "demo":bool}
+    func getScenes() async throws -> ListResult<RoomScene> {
+        let r = try await request("/api/life/scenes")
+        let items = r["items"] as? [[String: Any]] ?? []
+        let parsed: [RoomScene] = items.compactMap { row in
+            guard let name = row["name"] as? String, !name.isEmpty else { return nil }
+            let acts = (row["actions"] as? [[String: Any]] ?? []).map { a -> SceneAction in
+                let dev = a["device"] as? String ?? ""
+                let val: String
+                if let s = a["value"] as? String { val = s }
+                else if let n = a["value"] as? NSNumber { val = n.stringValue }
+                else { val = "" }
+                return SceneAction(device: dev, value: val)
+            }
+            return RoomScene(name: name,
+                             label: row["label"] as? String ?? name,
+                             icon: row["icon"] as? String ?? "🎛️",
+                             actions: acts)
+        }
+        return ListResult(items: parsed, demo: r["demo"] as? Bool ?? false)
+    }
+
+    // POST /api/life/scenes/apply body {"name"} → {"ok":bool,"online":bool}
+    // ok = طُبّق المشهد، online = وصل لـ room-node فعليًا.
+    @discardableResult
+    func applyScene(name: String) async throws -> (ok: Bool, online: Bool) {
+        let r = try await request("/api/life/scenes/apply", method: "POST",
+                                  body: ["name": name])
+        return (r["ok"] as? Bool ?? false, r["online"] as? Bool ?? false)
+    }
+
+    // POST /api/life/scenes body {"name","label","icon","actions"} (للمالك فقط)
+    func addScene(name: String, label: String, icon: String, actions: [SceneAction]) async throws {
+        _ = try await request("/api/life/scenes", method: "POST", body: [
+            "name": name, "label": label, "icon": icon,
+            "actions": actions.map { ["device": $0.device, "value": $0.value] },
+        ])
+    }
+
+    // POST /api/life/scenes/actions body {"name","actions"} (للمالك فقط)
+    func setSceneActions(name: String, actions: [SceneAction]) async throws {
+        _ = try await request("/api/life/scenes/actions", method: "POST", body: [
+            "name": name,
+            "actions": actions.map { ["device": $0.device, "value": $0.value] },
+        ])
+    }
+
+    // POST /api/life/scenes/delete body {"name"} (للمالك فقط)
+    func deleteScene(name: String) async throws {
+        _ = try await request("/api/life/scenes/delete", method: "POST",
+                              body: ["name": name])
+    }
+
+    // ── المصاريف ────────────────────────────────────────────────────────
+    // GET /api/life/expenses → {"items":[{id,amount,note,category,at}],
+    //                           "summary":{total,count,...}, "demo":bool}
+    func getExpenses() async throws -> ExpensesResult {
+        let r = try await request("/api/life/expenses")
+        let items = r["items"] as? [[String: Any]] ?? []
+        let parsed: [ExpenseItem] = items.compactMap { row in
+            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+            return ExpenseItem(id: id,
+                               amount: (row["amount"] as? NSNumber)?.doubleValue ?? 0,
+                               note: row["note"] as? String ?? "",
+                               category: row["category"] as? String ?? "",
+                               at: row["at"] as? String ?? "")
+        }
+        let s = r["summary"] as? [String: Any] ?? [:]
+        let summary = ExpensesSummary(total: (s["total"] as? NSNumber)?.doubleValue ?? 0,
+                                      count: (s["count"] as? NSNumber)?.intValue ?? 0)
+        return ExpensesResult(items: parsed, summary: summary, demo: r["demo"] as? Bool ?? false)
+    }
+
+    // POST /api/life/expenses body {"amount","note","category"} → {"ok":bool} (للمالك فقط)
+    func addExpense(amount: Double, note: String, category: String) async throws {
+        _ = try await request("/api/life/expenses", method: "POST",
+                              body: ["amount": amount, "note": note, "category": category])
+    }
+
+    // ── اليوميات ────────────────────────────────────────────────────────
+    // GET /api/life/journal → {"items":[{id,date,text}], "demo":bool}
+    func getJournal() async throws -> ListResult<JournalEntry> {
+        let r = try await request("/api/life/journal")
+        let items = r["items"] as? [[String: Any]] ?? []
+        let parsed: [JournalEntry] = items.compactMap { row in
+            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+            return JournalEntry(id: id,
+                                date: row["date"] as? String ?? "",
+                                text: row["text"] as? String ?? "")
+        }
+        return ListResult(items: parsed, demo: r["demo"] as? Bool ?? false)
+    }
+
+    // POST /api/life/journal body {"text"} → {"ok":bool} (للمالك فقط)
+    func addJournalEntry(text: String) async throws {
+        _ = try await request("/api/life/journal", method: "POST",
+                              body: ["text": text])
+    }
+
+    // ── لقطة الشاشة الرئيسية ─────────────────────────────────────────────
+    /// تجميع خفيف وذكي للشاشة الرئيسية: يجلب المهام + التذكيرات + المصاريف
+    /// بالتوازي، ويتحمّل فشل كل قسم وحده (لا يرمي خطأ — يرجّع لقطة جزئية).
+    /// مبني بالكامل من نداءات GET الموجودة، بدون أي نقطة نهاية جديدة.
+    func getHomeSnapshot() async -> HomeSnapshot {
+        // نجلب الثلاثة بالتوازي؛ كل واحد محاط بـ try? فلا يُسقط البقية.
+        async let tasksRes = try? getTasks()
+        async let remindersRes = try? getReminders()
+        async let expensesRes = try? getExpenses()
+
+        let tasks = await tasksRes
+        let reminders = await remindersRes
+        let expenses = await expensesRes
+
+        var snap = HomeSnapshot()
+        // hadError = فشل قسم واحد على الأقل (رجّع nil).
+        snap.hadError = (tasks == nil) || (reminders == nil) || (expenses == nil)
+
+        let now = Date()
+        let cal = Calendar.current
+        // مُحلِّل ISO متسامح: ISO8601 يتطلّب منطقة زمنية، لكن الباك-إند يرسل
+        // أحيانًا بلا منطقة (مثل "2026-06-05T16:00:00")، فنرجع لـ DateFormatter.
+        let isoFull = ISO8601DateFormatter()
+        isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+        isoPlain.formatOptions = [.withInternetDateTime]
+        let plainNoTZ = DateFormatter()
+        plainNoTZ.locale = Locale(identifier: "en_US_POSIX")
+        plainNoTZ.timeZone = TimeZone.current
+        plainNoTZ.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        let dateOnly = DateFormatter()
+        dateOnly.locale = Locale(identifier: "en_US_POSIX")
+        dateOnly.timeZone = TimeZone.current
+        dateOnly.dateFormat = "yyyy-MM-dd"
+        func parseISO(_ s: String) -> Date? {
+            if s.isEmpty { return nil }
+            return isoFull.date(from: s)
+                ?? isoPlain.date(from: s)
+                ?? plainNoTZ.date(from: s)
+                ?? dateOnly.date(from: s)
+        }
+
+        // ── المهام ──
+        if let tasks {
+            if tasks.demo { snap.demo = true }
+            let open = tasks.items.filter { !$0.done }
+            snap.openTasks = open.count
+            for t in open {
+                guard let due = parseISO(t.dueAt) else { continue }
+                if due < now {
+                    snap.overdueTasks += 1
+                } else if cal.isDateInToday(due) {
+                    snap.todayTasks += 1
+                }
+            }
+            // عيّنة حتى 3 نصوص للعرض (مفتوحة، نتجاهل الفاضي).
+            snap.sampleTaskTexts = open
+                .map { $0.text }
+                .filter { !$0.isEmpty }
+                .prefix(3)
+                .map { $0 }
+        }
+
+        // ── التذكيرات ──
+        if let reminders {
+            if reminders.demo { snap.demo = true }
+            // القادمة فقط (وقتها ≥ الآن)، مرتّبة بالأقرب، حتى 3.
+            let upcoming = reminders.items
+                .compactMap { r -> (ReminderItem, Date)? in
+                    guard let at = parseISO(r.remindAt), at >= now else { return nil }
+                    return (r, at)
+                }
+                .sorted { $0.1 < $1.1 }
+                .map { $0.0 }
+            snap.upcomingReminders = Array(upcoming.prefix(3))
+            if let first = upcoming.first {
+                snap.nextReminderText = first.text
+                snap.nextReminderAt = first.remindAt
+            }
+        }
+
+        // ── المصاريف ──
+        if let expenses {
+            if expenses.demo { snap.demo = true }
+            // إجمالي المدى (الملخّص) ≈ مصاريف الأسبوع/الشهر حسب نطاق الـ GET.
+            snap.weekExpenseTotal = expenses.summary.total
+            // مجموع مصاريف اليوم من العناصر التي وقتها اليوم.
+            var todaySum = 0.0
+            for e in expenses.items {
+                if let at = parseISO(e.at), cal.isDateInToday(at) {
+                    todaySum += e.amount
+                }
+            }
+            snap.todayExpenseTotal = todaySum
+        }
+
+        return snap
     }
 }

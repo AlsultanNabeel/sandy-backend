@@ -3,17 +3,19 @@ import AuthenticationServices
 
 struct AuthView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
     @State private var password = ""
     @State private var error = ""
     @State private var loading = false
 
     var body: some View {
         VStack(spacing: 18) {
+            HStack { Spacer(); LanguageToggle().frame(width: 120) }
             Spacer()
-            Text("ساندي").font(.largeTitle).bold()
-            Text("سكرتيرك الشخصي").foregroundColor(.secondary)
+            Text(lang.s("auth.title")).font(.largeTitle).bold()
+            Text(lang.s("auth.tagline")).foregroundColor(.secondary)
 
-            TextField("عنوان الخادم", text: $state.baseURL)
+            TextField(lang.s("auth.serverUrl"), text: $state.baseURL)
                 .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -25,10 +27,10 @@ struct AuthView: View {
                 .signInWithAppleButtonStyle(.black)
 
             Divider().padding(.vertical, 6)
-            Text("أو دخول المطوّر (للتجربة)").font(.caption).foregroundColor(.secondary)
-            SecureField("كلمة سر المالك", text: $password).textFieldStyle(.roundedBorder)
+            Text(lang.s("auth.devLogin")).font(.caption).foregroundColor(.secondary)
+            SecureField(lang.s("auth.ownerPassword"), text: $password).textFieldStyle(.roundedBorder)
             Button(action: devLogin) {
-                Text(loading ? "..." : "دخول").frame(maxWidth: .infinity)
+                Text(loading ? "..." : lang.s("auth.login")).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .disabled(loading)
@@ -56,7 +58,7 @@ struct AuthView: View {
               let cred = authResult.credential as? ASAuthorizationAppleIDCredential,
               let data = cred.identityToken,
               let idToken = String(data: data, encoding: .utf8) else {
-            error = "فشل تسجيل الدخول بآبل"; return
+            error = lang.s("auth.appleFailed"); return
         }
         let name = [cred.fullName?.givenName, cred.fullName?.familyName]
             .compactMap { $0 }.joined(separator: " ")

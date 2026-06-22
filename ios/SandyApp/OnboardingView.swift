@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
     @State private var preferredName = ""
     @State private var interestsText = ""
     @State private var error = ""
@@ -10,19 +11,19 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
-            Text("نتعرّف عليك 👋").font(.title).bold()
+            Text(lang.s("onboarding.title")).font(.title).bold()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("شو تحب ساندي تناديك؟")
-                TextField("اسمك المفضّل", text: $preferredName).textFieldStyle(.roundedBorder)
+                Text(lang.s("onboarding.nameLabel"))
+                TextField(lang.s("onboarding.namePlaceholder"), text: $preferredName).textFieldStyle(.roundedBorder)
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text("اهتماماتك (افصلها بفاصلة)")
-                TextField("مثلاً: قراءة، رياضة، سفر", text: $interestsText).textFieldStyle(.roundedBorder)
+                Text(lang.s("onboarding.interestsLabel"))
+                TextField(lang.s("onboarding.interestsPlaceholder"), text: $interestsText).textFieldStyle(.roundedBorder)
             }
 
             Button(action: save) {
-                Text(saving ? "..." : "يلا نبدأ").frame(maxWidth: .infinity)
+                Text(saving ? "..." : lang.s("onboarding.save")).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .disabled(saving || preferredName.isEmpty)
