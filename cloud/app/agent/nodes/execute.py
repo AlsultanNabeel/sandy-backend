@@ -356,24 +356,6 @@ def execute_node(state: SandyState) -> SandyState:
             pending_archived = session.get("archived_pending") or []
 
             reply_markup = result.get("reply_markup")
-            _bulk_actions = {"delete_all", "complete_all"}
-            if (
-                new_pending
-                and isinstance(new_pending, dict)
-                and new_pending.get("confirmation_status") == "pending"
-                and new_pending.get("action") not in _bulk_actions
-                and reply_markup is None
-            ):
-                try:
-                    import telebot.types as _tg
-                    markup = _tg.InlineKeyboardMarkup()
-                    markup.row(
-                        _tg.InlineKeyboardButton("✅ نعم", callback_data="confirm_yes"),
-                        _tg.InlineKeyboardButton("❌ لا", callback_data="confirm_no"),
-                    )
-                    reply_markup = markup
-                except Exception:
-                    pass
 
             updates: Dict[str, Any] = {
                 "pending_state": new_pending,
@@ -397,19 +379,10 @@ def execute_node(state: SandyState) -> SandyState:
     if fc and fc.get("name") == "request_confirmation" and not state.get("pending_state"):
         summary = (fc.get("args") or {}).get("summary", "هذه العملية")
         reply = f"متأكد تريد: {summary}؟"
-        try:
-            import telebot.types as _tg
-            markup = _tg.InlineKeyboardMarkup()
-            markup.row(
-                _tg.InlineKeyboardButton("✅ نعم", callback_data="confirm_yes"),
-                _tg.InlineKeyboardButton("❌ لا", callback_data="confirm_no"),
-            )
-        except Exception:
-            markup = None
         return merge_state(state, {
             "execution_result": {
                 "handled": True, "reply": reply,
-                "reply_markup": markup, "source": "execute_node_confirm",
+                "reply_markup": None, "source": "execute_node_confirm",
             },
             "final_response": reply,
         })
@@ -473,25 +446,6 @@ def execute_node(state: SandyState) -> SandyState:
     pending_archived = session.get("archived_pending") or []
     if isinstance(pending_archived, dict):
         pending_archived = [pending_archived]
-
-    # Add confirm/reject buttons when a pending action needs confirmation
-    if (
-        new_pending
-        and isinstance(new_pending, dict)
-        and new_pending.get("confirmation_status") == "pending"
-        and reply_markup is None
-    ):
-        try:
-            import telebot.types as tgtypes
-
-            markup = tgtypes.InlineKeyboardMarkup()
-            markup.row(
-                tgtypes.InlineKeyboardButton("✅ نعم", callback_data="confirm_yes"),
-                tgtypes.InlineKeyboardButton("❌ لا", callback_data="confirm_no"),
-            )
-            reply_markup = markup
-        except Exception:
-            pass
 
     # Propagate gmail_last_list if updated by email handlers
     new_gmail_list = session.get("gmail_last_list")

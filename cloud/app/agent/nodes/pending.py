@@ -149,26 +149,6 @@ def pending_node(state: SandyState) -> SandyState:
 
     pending_updates = _extract_results_from_session(session, original_pending)
 
-    # Add confirm/reject buttons when clarification resolves to a confirmation step
-    new_pending = pending_updates.get("pending_state")
-    if (
-        new_pending
-        and isinstance(new_pending, dict)
-        and new_pending.get("confirmation_status") == "pending"
-        and reply_markup is None
-    ):
-        try:
-            import telebot.types as tgtypes
-
-            markup = tgtypes.InlineKeyboardMarkup()
-            markup.row(
-                tgtypes.InlineKeyboardButton("✅ نعم", callback_data="confirm_yes"),
-                tgtypes.InlineKeyboardButton("❌ لا", callback_data="confirm_no"),
-            )
-            reply_markup = markup
-        except Exception:
-            pass
-
     updates: Dict[str, Any] = {
         **pending_updates,
         "execution_result": {

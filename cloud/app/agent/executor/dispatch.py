@@ -175,27 +175,7 @@ def execute_operational_action(
                 from app.agent.email_resolve import _render_email_preview
 
                 preview = _render_email_preview(to, subject, body)
-                try:
-                    import telebot.types as _tg
-
-                    markup = _tg.InlineKeyboardMarkup()
-                    markup.row(
-                        _tg.InlineKeyboardButton("📨 ارسل", callback_data="email_send"),
-                        _tg.InlineKeyboardButton(
-                            "💾 مسودة", callback_data="email_draft"
-                        ),
-                    )
-                    markup.row(
-                        _tg.InlineKeyboardButton(
-                            "✏️ تعديل", callback_data="email_edit"
-                        ),
-                        _tg.InlineKeyboardButton(
-                            "❌ الغاء", callback_data="email_cancel"
-                        ),
-                    )
-                    return {"handled": True, "reply": preview, "reply_markup": markup}
-                except Exception:
-                    return {"handled": True, "reply": preview}
+                return {"handled": True, "reply": preview}
 
             if email_action == "reply":
                 email_id = str(ep.get("email_id") or "").strip()

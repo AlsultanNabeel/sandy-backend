@@ -17,17 +17,6 @@ def _noop(*_args, **_kwargs):
 
 
 if _ENABLED:
-    # HTTP / webhook metrics
-    telegram_webhook_ingress_total = Counter(
-        "sandy_telegram_webhook_ingress_total", "Total telegram webhook ingresses"
-    )
-    telegram_webhook_dedup_total = Counter(
-        "sandy_telegram_webhook_dedup_total", "Total telegram webhook dedup hits"
-    )
-    telegram_webhook_processing_seconds = Histogram(
-        "sandy_telegram_webhook_processing_seconds", "Webhook processing latency"
-    )
-
     # LLM metrics
     llm_completion_seconds = Histogram(
         "sandy_llm_completion_seconds", "LLM chat completion latency"
@@ -52,9 +41,6 @@ if _ENABLED:
 
 else:
     # No-op shim
-    inc_webhook_ingress = _noop
-    inc_webhook_dedup = _noop
-    observe_webhook_duration = _noop
     observe_llm_completion = _noop
     inc_llm_completion_success = _noop
     inc_llm_completion_failure = _noop

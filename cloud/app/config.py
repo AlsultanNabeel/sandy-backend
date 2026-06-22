@@ -18,15 +18,12 @@ load_dotenv(BASE_DIR / ".env", override=False)
 
 # Runtime
 APP_ENV = os.getenv("APP_ENV", "prod").lower()
-RUN_MODE = os.getenv("RUN_MODE", "webhook").lower()
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# Telegram
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_SECRET_TOKEN = os.getenv("TELEGRAM_SECRET_TOKEN", "").strip()
+# Owner identity (legacy single-owner ids — the owner becomes tenant #1; these
+# get folded into a tenant role in Phase 3 of the product migration).
 SANDY_USER_CHAT_ID = os.getenv("SANDY_USER_CHAT_ID", "").strip()
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
-SANDY_COMMAND_MODE = os.getenv("SANDY_COMMAND_MODE", "cloud").strip()
 
 # AI models
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()

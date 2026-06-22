@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Local HTTP API server for the iOS app (development only).
+"""HTTP API server for the Sandy app/web clients.
 
-Serves the exact same Flask app as production (``/api/auth``, ``/api/onboarding``,
-``/api/subscription``, ``/api/agent`` …) on port 8080, but WITHOUT Telegram
-polling or webhook — so it never touches the production bot.
-
-This launcher exists because ``RUN_MODE=polling`` starts Telegram polling only
-and does not serve the HTTP API, while webhook mode would register a Telegram
-webhook URL. Neither is what the mobile client needs locally.
+Builds the Flask app via ``app.api.server.create_app`` and serves the product
+API (``/api/auth``, ``/api/onboarding``, ``/api/subscription``, ``/api/agent`` …)
+on port 8080.
 
 Run from the repo root:
     python cloud/serve_api.py
@@ -33,16 +29,19 @@ from app.bootstrap import bootstrap
 
 # Import the runtime *module* explicitly: the facade package re-exports an
 # ``agent`` instance, so ``from app.agent.facade import agent`` would shadow the
-# submodule. importlib gives us the module that holds ``telegram_webhook_runtime``.
+# submodule. importlib gives us the module that holds ``mongo_db``/``APP_ENV``.
 facade = importlib.import_module("app.agent.facade.agent")
 
 
 def main() -> None:
-    app = facade.telegram_webhook_runtime["app"]
-    bootstrap(app_env=facade.APP_ENV, app=app)
+    from app.api.server import create_app
+    from app.config import APP_ENV
+
+    app = create_app(mongo_db=facade.mongo_db)
+    bootstrap(app_env=APP_ENV, app=app)
     port = int(os.getenv("PORT", "8080"))
     print("=" * 60)
-    print(f"🦞 Sandy HTTP API (no Telegram) → http://localhost:{port}")
+    print(f"🦞 Sandy HTTP API → http://localhost:{port}")
     print("=" * 60)
     app.run(host="0.0.0.0", port=port)  # nosec B104 — local dev only
 

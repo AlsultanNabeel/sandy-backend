@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import Any, Dict
 
@@ -30,67 +29,6 @@ from app.agent.executor.helpers import _has_visible_task_note
 from app.utils.user_profiles import active_profile_is_owner
 
 
-def _task_alias_sort_key(alias: str) -> int:
-    match = re.match(r"^T(\d+)$", str(alias or "").strip().upper())
-    return int(match.group(1)) if match else 10**9
-
-
-def _build_task_inline_markup(task_aliases: Dict[str, Any], include_add: bool = True):
-    import telebot.types as tgtypes
-
-    markup = tgtypes.InlineKeyboardMarkup()
-    if include_add:
-        markup.row(
-            tgtypes.InlineKeyboardButton("➕ أضف مهمة", callback_data="task:add"),
-        )
-
-    for alias in sorted((task_aliases or {}).keys(), key=_task_alias_sort_key):
-        task = (task_aliases or {}).get(alias, {}) or {}
-        text = str(task.get("text", "") or "").strip()
-        task_id = str(task.get("id", "") or "").strip()
-        label = alias if not text else f"{alias}"
-        reference = f"id:{task_id}" if task_id else alias
-        markup.row(
-            tgtypes.InlineKeyboardButton(
-                f"✅ {label}", callback_data=f"task:complete:{reference}"
-            ),
-            tgtypes.InlineKeyboardButton(
-                f"🗑️ {label}", callback_data=f"task:delete:{reference}"
-            ),
-        )
-    return markup
-
-
-def _task_callback_to_message(callback_data: str, task_aliases: Dict[str, Any]) -> str:
-    parts = str(callback_data or "").split(":")
-    if len(parts) < 2 or parts[0] != "task":
-        return ""
-
-    action = parts[1].strip().lower()
-
-    if action == "add":
-        return "أضف مهمة"
-
-    if len(parts) == 4 and parts[2].strip().lower() == "id":
-        task_reference = f"ID:{parts[3].strip()}"
-        if action == "complete":
-            return f"كملي المهمة {task_reference}"
-        if action == "delete":
-            return f"احذفي المهمة {task_reference}"
-        return ""
-
-    if len(parts) != 3:
-        return ""
-
-    alias = parts[2].strip().upper()
-
-    if action == "complete":
-        return f"كملي المهمة {alias}"
-    if action == "delete":
-        return f"احذفي المهمة {alias}"
-    return ""
-
-
 def _handle_list(
     task_action: str,
     *,
@@ -103,25 +41,19 @@ def _handle_list(
     if task_action == "list":
         reply, aliases = build_task_display(mongo_db=mongo_db, tasks_file=tasks_file)
         session["task_aliases"] = aliases
-        reply_markup = _build_task_inline_markup(aliases)
     elif task_action == "list_completed":
         reply, aliases = build_completed_task_display(
             mongo_db=mongo_db, tasks_file=tasks_file
         )
         session["completed_task_aliases"] = aliases
-        reply_markup = None
     else:  # list_all
         reply, active_aliases, completed_aliases = build_all_tasks_display(
             mongo_db=mongo_db, tasks_file=tasks_file
         )
         session["task_aliases"] = active_aliases
         session["completed_task_aliases"] = completed_aliases
-        reply_markup = _build_task_inline_markup(active_aliases)
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-    result = {"handled": True, "reply": reply}
-    if reply_markup is not None:
-        result["reply_markup"] = reply_markup
-    return result
+    return {"handled": True, "reply": reply}
 
 
 def _handle_rename(

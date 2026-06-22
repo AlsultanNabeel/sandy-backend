@@ -23,13 +23,6 @@ _MAX_REPINGS = 3
 # counter per guest, so a guest gets `_DEFAULT_LIMIT` messages across everything.
 _CHAT_TYPES = frozenset({"all", "image", "search", "chat"})
 
-_TYPE_LABELS = {
-    "all": "محادثة 💬",
-    "image": "صور 🖼",
-    "search": "بحث 🔍",
-    "chat": "محادثة 💬",
-}
-
 
 def guest_label(jti: str) -> str:
     """User-friendly label from JTI: 'Guest #A92K'"""
@@ -189,48 +182,11 @@ def get_usage_doc(jti: str, chat_type: str, mongo_db) -> Optional[dict]:
 
 
 def _notify_owner(jti: str, name: str, chat_type: str, count: int, limit: int) -> None:
-    """Send approval request to owner via Telegram inline keyboard."""
-    try:
-        import telebot as _telebot
-        from app.config import OWNER_CHAT_ID
-        from app.agent.facade.agent import telegram_bot as bot
+    """Owner notification for a guest's access request.
 
-        if not OWNER_CHAT_ID or bot is None:
-            logger.debug("[guest_usage] no bot/OWNER_CHAT_ID, skip notify")
-            return
-
-        label = guest_label(jti)
-        display_name = (name or label)[:40]
-        type_label = _TYPE_LABELS.get(chat_type, chat_type)
-
-        text = (
-            f"🚨 طلب وصول — {label}\n"
-            f"الاسم: {display_name}\n"
-            f"النوع: {type_label}\n"
-            f"الاستخدام: {count}/{limit}\n\n"
-            f"تعطيه امتداد؟"
-        )
-
-        markup = _telebot.types.InlineKeyboardMarkup()
-        markup.row(
-            _telebot.types.InlineKeyboardButton(
-                "✅ +3", callback_data=f"gapprove:{jti}:{chat_type}:3"
-            ),
-            _telebot.types.InlineKeyboardButton(
-                "✅ +5", callback_data=f"gapprove:{jti}:{chat_type}:5"
-            ),
-            _telebot.types.InlineKeyboardButton(
-                "✅ +10", callback_data=f"gapprove:{jti}:{chat_type}:10"
-            ),
-        )
-        markup.row(
-            _telebot.types.InlineKeyboardButton(
-                "✏️ رقم مخصص", callback_data=f"gcustom:{jti}:{chat_type}"
-            ),
-            _telebot.types.InlineKeyboardButton(
-                "❌ ارفض", callback_data=f"greject:{jti}:{chat_type}"
-            ),
-        )
-        bot.send_message(OWNER_CHAT_ID, text, reply_markup=markup)
-    except Exception as exc:
-        logger.debug("[guest_usage] notify_owner failed: %s", exc)
+    Telegram was removed in the product migration; the request is still recorded
+    as ``pending`` on the usage doc by the caller. Delivering the notification
+    (and the approve/extend action) moves to in-app push in a later phase, so
+    this is intentionally a no-op for now.
+    """
+    return

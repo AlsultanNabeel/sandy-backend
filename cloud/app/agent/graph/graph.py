@@ -445,7 +445,7 @@ def _update_session_state_async(state: "SandyState") -> None:
         try:
             from app.agent.facade.agent import mongo_db
             from app.agent.session_state import update_session_state
-            update_session_state(chat_id, mongo_db, mood=mood, platform="telegram")
+            update_session_state(chat_id, mongo_db, mood=mood, platform="app")
         except Exception:
             pass
 

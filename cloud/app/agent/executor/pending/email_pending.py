@@ -43,24 +43,6 @@ _EMAIL_DRAFT_WORDS = {
 }
 
 
-def _email_inline_markup():
-    try:
-        import telebot.types as _tg
-
-        markup = _tg.InlineKeyboardMarkup()
-        markup.row(
-            _tg.InlineKeyboardButton("📨 ارسل", callback_data="email_send"),
-            _tg.InlineKeyboardButton("💾 مسودة", callback_data="email_draft"),
-        )
-        markup.row(
-            _tg.InlineKeyboardButton("✏️ تعديل", callback_data="email_edit"),
-            _tg.InlineKeyboardButton("❌ الغاء", callback_data="email_cancel"),
-        )
-        return markup
-    except Exception:
-        return None
-
-
 def _handle_email_confirm_pending(
     user_message: str,
     pending: Dict[str, Any],
@@ -162,11 +144,7 @@ def _handle_email_confirm_pending(
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
 
         preview = _render_email_preview(to, subject, body)
-        markup = _email_inline_markup()
-        result = {"handled": True, "reply": preview}
-        if markup:
-            result["reply_markup"] = markup
-        return result
+        return {"handled": True, "reply": preview}
 
     return {"handled": False}
 
@@ -213,11 +191,7 @@ def _handle_await_email_body(
     except Exception:
         preview = f"إلى: {to}\nالموضوع: {subject}\n\n{body}"
 
-    markup = _email_inline_markup()
-    result = {"handled": True, "reply": preview}
-    if markup:
-        result["reply_markup"] = markup
-    return result
+    return {"handled": True, "reply": preview}
 
 
 def _exec_email_send(

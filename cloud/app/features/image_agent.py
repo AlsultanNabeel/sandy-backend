@@ -129,7 +129,7 @@ def render_image_reply_with_ai(
                         + "Behavior by action: "
                         "  • action=generate_new/edit_last/variation AND success=true: "
                         "    – mention the subject naturally (use short_caption_ar as hint, don't copy verbatim). "
-                        "    – mention you sent the image to Telegram (vary wording: 'بعتها', 'وصلتك ع التيلي', 'شوفها بالشات', 'حمّلتلك ياها'). "
+                        "    – mention you sent/shared the image (vary wording: 'بعتها', 'شوفها بالشات', 'حمّلتلك ياها'). "
                         "  • action=describe_last AND success=true: "
                         "    – describe the image content naturally in 1-2 sentences. "
                         "    – DO NOT mention sending the image (the image is already shown — no need to say 'بعتها'). "

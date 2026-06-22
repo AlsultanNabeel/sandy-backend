@@ -134,10 +134,9 @@ def maybe_escalate(
     category: str,
     detail: str = "",
     evidence: str = "",
-    notify: bool = True,
 ) -> Optional[str]:
     """Record an incident; if the key just crossed the threshold,
-    open a GitHub issue and (optionally) ping Telegram with the link.
+    open a GitHub issue with the link.
     Returns the issue URL when it opens one this call, else None."""
     key = record(source, category)
     if not should_open_issue(key):
@@ -172,15 +171,6 @@ def maybe_escalate(
     if not url:
         return None
     mark_issue_opened(key, url)
-    if notify:
-        try:
-            from app.integrations import owner_notify as notifier
-            notifier.notify_owner(
-                f"💀 خلل متكرر من `{source}` — فتحت GitHub issue تلقائياً.\n"
-                f"التكرار: {count} مرة في آخر ساعة.\n{url}"
-            )
-        except Exception as exc:
-            logger.debug("[incident_tracker] notify failed: %s", exc)
     logger.info(
         "[incident_tracker] auto-issue opened key=%s url=%s",
         key, url,
