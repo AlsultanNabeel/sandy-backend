@@ -367,6 +367,9 @@ def create_telegram_webhook_app(
     from app.api.voice_ws import register_voice_ws
     register_voice_ws(app)
 
+    from app.api.voice_api import register_voice_api
+    register_voice_api(app)
+
     from app.api.productivity_api import register_productivity_api
     register_productivity_api(app, mongo_db=mongo_db)
 
@@ -592,8 +595,12 @@ def create_telegram_webhook_app(
         password = (body.get("password") or "").strip()
         if not password or not check_owner_password(password):
             return jsonify({"error": "invalid_password", "remaining": remaining - 1}), 401
-        from app.features import users_store
-        owner_uid = users_store.get_or_create_owner(name="نبيل")
+        # The owner's existing data (memory, tasks, reminders) lives under the
+        # canonical Telegram id (SANDY_USER_CHAT_ID). Scope the app/web owner to
+        # THAT id so the iPhone app is the SAME Sandy as Telegram — not a fresh,
+        # empty owner bucket. (A minted owner_uid would be a separate scope.)
+        from app.config import SANDY_USER_CHAT_ID
+        owner_uid = str(SANDY_USER_CHAT_ID)
         try:
             token = make_token("owner", user_id=owner_uid)
         except RuntimeError:
@@ -713,17 +720,14 @@ def create_telegram_webhook_app(
         if role in ("owner", "user"):
             try:
                 import base64
-                from app.utils.user_profiles import active_user_profile_context
+                from app.utils.user_profiles import (
+                    active_user_profile_context,
+                    build_user_profile,
+                )
                 # The active profile scopes data to this user. The owner gets
                 # full permissions; a regular user gets self-only, so owner-only
                 # tools still refuse while their own data works.
-                _is_owner = role == "owner"
-                _profile = {
-                    "chat_id": user_id,
-                    "name": "", "relation": "owner" if _is_owner else "user",
-                    "tone": "casual",
-                    "permissions": "all" if _is_owner else "chat-only",
-                }
+                _profile = build_user_profile(claims)
                 graph_message = message
                 if lang == "en":
                     graph_message = (

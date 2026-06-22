@@ -1,12 +1,11 @@
-"""Studio web APIs: project-builder list, GitHub issues, and the unified
-search box.
+"""Studio web APIs: project plans, GitHub issues, and the unified search box.
 
 Owner/guest split everywhere, same as productivity_api: guests see demo
 payloads with `demo: true` and no mutating endpoints; the owner gets the
 real thing inside the owner profile context.
 
 Endpoints:
-  GET  /api/projects            project-builder tasks (done + in-flight)
+  GET  /api/plans               saved project plans
   GET  /api/github/issues       repo issues, ?state=open|closed|all
   GET  /api/search?q=...        one box across tasks/reminders/plans/emails
 """

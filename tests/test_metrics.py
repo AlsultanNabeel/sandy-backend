@@ -79,36 +79,6 @@ class MetricsWiringTests(unittest.TestCase):
         mock_success.assert_called_once()
         mock_failure.assert_not_called()
 
-    def test_wait_for_resume_shutdown_records_metric(self):
-        from app.agent.project_builder import task_state
-        from app.agent.project_builder import _redis as sa_store
-        from app.agent.project_builder import shutdown as sa_shutdown
-
-        class FakeClient:
-            def get(self, key):
-                return None
-
-            def delete(self, key):
-                return None
-
-            def hget(self, key, field):
-                return None
-
-        with patch.object(sa_store, "get_client", return_value=FakeClient()), \
-             patch.object(sa_shutdown, "is_shutdown_requested", return_value=True), \
-             patch.object(sa_shutdown, "interruptible_sleep", return_value=True), \
-             patch("app.agent.project_builder.task_state.metrics.observe_resume_wait") as mock_observe, \
-             patch("app.agent.project_builder.task_state.metrics.inc_resume_wait_shutdown") as mock_shutdown, \
-             patch("app.agent.project_builder.task_state.metrics.inc_resume_wait_resumed") as mock_resumed, \
-             patch("app.agent.project_builder.task_state.metrics.inc_resume_wait_timeout") as mock_timeout:
-            ok = task_state.wait_for_resume("sa_test_123", timeout=5, poll_interval=0)
-
-        self.assertFalse(ok)
-        mock_observe.assert_called_once()
-        mock_shutdown.assert_called_once()
-        mock_resumed.assert_not_called()
-        mock_timeout.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()

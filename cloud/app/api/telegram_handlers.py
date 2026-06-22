@@ -1210,7 +1210,7 @@ def register_basic_telegram_handlers(
             )
 
             if image_bytes:
-                # صورة + صوت Sandy بيقول "جهزت الصورة" (تجربة روبوت كاملة)
+                # صورة + صوت Sandy بيقول "جهزت الصورة" (تجربة كاملة)
                 _send_photo_async(chat_id, image_bytes, caption or "", source=image_source or "generated")
                 if text and text.strip():
                     _send_voice_reply(chat_id, text, skip_text=True)

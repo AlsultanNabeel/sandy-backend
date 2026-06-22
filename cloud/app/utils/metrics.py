@@ -39,26 +39,6 @@ if _ENABLED:
         "sandy_llm_completion_failure_total", "Failed LLM completions"
     )
 
-    # Project Builder metrics
-    agent_resume_state_saved_total = Counter(
-        "sandy_agent_resume_state_saved_total", "Times agent resume_state was saved"
-    )
-    agent_resume_signal_total = Counter(
-        "sandy_agent_resume_signal_total", "Times owner signalled resume"
-    )
-    agent_resume_wait_seconds = Histogram(
-        "sandy_agent_resume_wait_seconds", "Time spent waiting for resume"
-    )
-    agent_resume_wait_resumed_total = Counter(
-        "sandy_agent_resume_wait_resumed_total", "Resume waits that completed successfully"
-    )
-    agent_resume_wait_shutdown_total = Counter(
-        "sandy_agent_resume_wait_shutdown_total", "Resume waits interrupted by shutdown"
-    )
-    agent_resume_wait_timeout_total = Counter(
-        "sandy_agent_resume_wait_timeout_total", "Resume waits that expired naturally"
-    )
-
     # Error persistence metrics
     error_log_total = Counter(
         "sandy_error_log_total", "Unhandled errors persisted successfully"
@@ -78,12 +58,6 @@ else:
     observe_llm_completion = _noop
     inc_llm_completion_success = _noop
     inc_llm_completion_failure = _noop
-    inc_agent_resume_saved = _noop
-    inc_agent_resume_signal = _noop
-    observe_resume_wait = _noop
-    inc_resume_wait_resumed = _noop
-    inc_resume_wait_shutdown = _noop
-    inc_resume_wait_timeout = _noop
     inc_error_log_success = _noop
     inc_error_log_failure = _noop
 

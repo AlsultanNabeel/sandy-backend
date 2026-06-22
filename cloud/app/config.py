@@ -36,7 +36,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 # Azure OpenAI (chat + vision)
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-# Single canonical default — keep azure_intent_client / code_llm / azure_image
+# Single canonical default — keep azure_intent_client / azure_image
 # fallbacks in sync with this value (they read the env late on purpose).
 AZURE_OPENAI_API_VERSION = os.getenv(
     "AZURE_OPENAI_API_VERSION", "2024-08-01-preview"
@@ -123,16 +123,3 @@ SYSTEM_PROMPT_ADDITION: str = os.getenv(
 # The owner writes a short line about himself: "أنا ذكر، استخدمي صياغة المذكر دائماً"
 # or "أنا أنثى، استخدمي صياغة المؤنث", or leaves it empty.
 OWNER_ADDRESS_NOTE: str = os.getenv("SANDY_OWNER_ADDRESS_NOTE", "").strip()
-
-# Project Builder agent (Project Builder)
-SANDY_SA_MAX_QUEUE: int = int(os.getenv("SANDY_SA_MAX_QUEUE", "10").strip() or "10")
-
-# Claude Sonnet via Vertex AI (the fixer LLM)
-GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
-VERTEX_REGION: str = os.getenv("VERTEX_REGION", "us-east5").strip()
-CLAUDE_VERTEX_MODEL: str = os.getenv(
-    "CLAUDE_VERTEX_MODEL", "claude-sonnet-4-5@20250929"
-).strip()
-
-# AWS region (Bedrock)
-AWS_REGION: str = os.getenv("AWS_REGION", "us-west-2").strip()

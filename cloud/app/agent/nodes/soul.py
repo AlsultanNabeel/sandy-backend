@@ -117,6 +117,8 @@ def soul_node(state: SandyState) -> SandyState:
             # Prefetch (comfort + directives only) started before maestro.
             _s1 = {}
             for k, fut in prefetch.items():
+                if k.startswith("__"):
+                    continue   # prefetched semantic search — collected in stage2
                 try:
                     _s1[k] = fut.result(timeout=3.0)
                 except Exception:
@@ -230,12 +232,20 @@ def soul_node(state: SandyState) -> SandyState:
                 get_wellness_context, chat_id=chat_id, user_id=user_id, mongo_db=mongo_db
             )
         if message:
-            try:
-                from app.agent.semantic_memory import search_relevant_summaries, search_relevant_facts
-                _s2_futs["summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, chat_id)
-                _s2_futs["sem_facts"] = _SOUL_POOL.submit(search_relevant_facts, message)
-            except Exception:
-                pass
+            pf = state.get("soul_prefetch") or {}
+            if "__summaries" in pf or "__sem_facts" in pf:
+                # Already started during prefetch (overlapped the router) — just collect.
+                if "__summaries" in pf:
+                    _s2_futs["summaries"] = pf["__summaries"]
+                if "__sem_facts" in pf:
+                    _s2_futs["sem_facts"] = pf["__sem_facts"]
+            else:
+                try:
+                    from app.agent.semantic_memory import search_relevant_summaries, search_relevant_facts
+                    _s2_futs["summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, chat_id)
+                    _s2_futs["sem_facts"] = _SOUL_POOL.submit(search_relevant_facts, message)
+                except Exception:
+                    pass
 
         _s2 = {}
         for k, fut in _s2_futs.items():
@@ -378,5 +388,19 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str) -> dict:
         pass
 
     futures["directives"] = _SOUL_POOL.submit(get_persona_directives, chat_id, user_id, mongo_db)
+
+    # Semantic memory search only needs the message — start it here so it overlaps
+    # the router FC call (~4s) instead of running serially after it in stage2.
+    # The "__" keys are collected later in stage2, not awaited in stage1.
+    if message:
+        try:
+            from app.agent.semantic_memory import (
+                search_relevant_facts,
+                search_relevant_summaries,
+            )
+            futures["__summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, chat_id)
+            futures["__sem_facts"] = _SOUL_POOL.submit(search_relevant_facts, message)
+        except Exception:
+            pass
 
     return futures

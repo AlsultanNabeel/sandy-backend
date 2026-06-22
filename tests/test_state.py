@@ -28,12 +28,6 @@ class TestSandyState(unittest.TestCase):
 
         self.assertNotEqual(s1["session_id"], s2["session_id"])
 
-    def test_create_initial_state_redis_key_format(self):
-        """مفتاح Redis يجب أن يكون بالتنسيق الصحيح."""
-        state = self.create_initial_state("hello", "user_99", "chat_77")
-
-        self.assertEqual(state["stm_redis_key"], "stm:chat_77:user_99")
-
     def test_create_initial_state_defaults(self):
         """الحقول الاختيارية تبدأ None أو قيمة افتراضية."""
         state = self.create_initial_state("hello", "u1", "c1")

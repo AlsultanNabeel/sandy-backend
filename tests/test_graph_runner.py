@@ -1,7 +1,7 @@
 """Tests for graph.py — Sandy pipeline runner."""
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from app.agent.graph.state import create_initial_state, merge_state
 
 
@@ -209,26 +209,6 @@ class TestGetFinalReply(unittest.TestCase):
         })
         reply = get_final_reply(state)
         self.assertIsNone(reply["reply_markup"])
-
-
-class TestSTMHelpers(unittest.TestCase):
-
-    def test_stm_load_returns_empty_on_no_redis(self):
-        from app.agent.graph.graph import _stm_load
-        with patch("app.utils.redis_stm.get_redis_stm_client") as mock_client:
-            mock_instance = MagicMock()
-            mock_instance.enabled = False
-            mock_client.return_value = mock_instance
-            result = _stm_load("c1", "u1")
-        self.assertEqual(result, [])
-
-    def test_stm_save_skips_on_no_redis(self):
-        from app.agent.graph.graph import _stm_save
-        with patch("app.utils.redis_stm.get_redis_stm_client") as mock_client:
-            mock_instance = MagicMock()
-            mock_instance.enabled = False
-            mock_client.return_value = mock_instance
-            _stm_save("c1", "u1", "مرحبا", "أهلا")
 
 
 if __name__ == "__main__":

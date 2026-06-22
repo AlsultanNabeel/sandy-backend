@@ -1,7 +1,5 @@
 """Owner Telegram notifier — a tiny stateless client.
 
-Extracted from the old ``project_builder/notifier.py`` (general owner-notify
-part only; the build/CI-specific notifications went away with self-coding).
 Used by the incident tracker to alert the owner when it auto-opens an issue.
 """
 

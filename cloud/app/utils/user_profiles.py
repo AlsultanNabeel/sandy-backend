@@ -351,3 +351,31 @@ def is_sensitive_domain_request(message_text: str) -> bool:
     # Public alias kept for callers (telegram_handlers, tests); the canonical
     # implementation is is_sensitive_request.
     return is_sensitive_request(message_text)
+
+
+def build_user_profile(claims: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build the active-user profile for an authenticated web/app request.
+
+    The profile's ``chat_id`` is the caller's stable ``user_id`` from their JWT,
+    which is what ``current_user_id()`` resolves to — so every feature store
+    read/write inside ``active_user_profile_context(...)`` is scoped to THIS
+    user. The owner gets full permissions (owner-only tools still work); a
+    regular signed-in user gets self-only ``chat-only`` permissions, so their
+    own life/productivity data works while privileged tools still refuse.
+
+    Shared by the web agent and the REST tab endpoints so the per-user wiring
+    lives in exactly one place.
+    """
+    claims = claims or {}
+    role = claims.get("role", "guest")
+    is_owner = role == "owner"
+    # Fall back to the legacy single-owner id only for the owner; a non-owner
+    # without a user_id must never inherit owner-scoped data.
+    user_id = claims.get("user_id") or (LEGACY_OWNER_CHAT_ID if is_owner else "")
+    return {
+        "chat_id": str(user_id),
+        "name": "",
+        "relation": "owner" if is_owner else "user",
+        "tone": "casual",
+        "permissions": "all" if is_owner else "chat-only",
+    }

@@ -440,12 +440,27 @@ def focus_review(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
 # ── مشاهد الغرفة ──────────────────────────────────────────────────────────────
 
 def scene_apply(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
-    from app.features.scene_store import apply_scene
+    from app.features.scene_store import apply_scene, get_scene
 
-    r = apply_scene(str(args.get("name", "")))
+    name = str(args.get("name", ""))
+    r = apply_scene(name)
     if not r.get("ok"):
         return {"handled": True, "reply": "ما عرفت هاد المشهد — جرّب: دراسة، قراءة، عصف ذهني، راحة، فيلم، نوم، صباح، إطفاء."}
-    return {"handled": True, "reply": f"✨ جهّزت مشهد «{r['label']}»."}
+
+    # فعّل المشهد فعليًا على الروم-نود عبر MQTT (نشر فقط؛ تجاهل لطيف لو غير متصل).
+    sent_to_room = False
+    try:
+        from app.integrations.room_device import get_room_device_client
+
+        sc = get_scene(name) or {}
+        actions = sc.get("actions") or []
+        res = get_room_device_client().apply_actions(actions)
+        sent_to_room = bool(res.get("available")) and bool(res.get("sent"))
+    except Exception:
+        pass
+
+    suffix = " وأرسلتها للغرفة 🏠" if sent_to_room else " (الغرفة مش متّصلة)"
+    return {"handled": True, "reply": f"✨ جهّزت مشهد «{r['label']}»{suffix}."}
 
 
 def scene_list(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -743,7 +758,7 @@ LIFE_TOOLS = [
     },
     {
         "name": "focus_sound",
-        "description": "غيّر أو اعرض صوت بازر التركيز على الروبوت — «خلي صوت بداية التركيز happy» أو «شو أصوات التركيز؟». الأحداث: start|break|end",
+        "description": "غيّر أو اعرض صوت تنبيه التركيز — «خلي صوت بداية التركيز happy» أو «شو أصوات التركيز؟». الأحداث: start|break|end",
         "parameters": {
             "type": "object",
             "properties": {

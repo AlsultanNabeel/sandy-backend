@@ -6,8 +6,8 @@ are plain Mongo documents and the same poller contract reads them directly.
 
 Collection: sandy_reminders
   {_id, text, remind_at (datetime UTC), recurrence ("RRULE:FREQ=..." or ""),
-   kind ("reminder" | "event_followup"), parent_summary, linked_task_id,
-   send_state ("pending" | "sending" | "sent" | "failed"),
+   kind ("reminder" | "event_followup"), parent_summary, note (""),
+   linked_task_id, send_state ("pending" | "sending" | "sent" | "failed"),
    created_at, sent_at, last_error}
 
 Recurring reminders never reach "sent": after each delivery remind_at advances
@@ -120,6 +120,7 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         "task_id": doc.get("linked_task_id", "") or "",
         "kind": doc.get("kind", "reminder") or "reminder",
         "send_state": doc.get("send_state", "pending"),
+        "note": doc.get("note", "") or "",
     }
 
 
@@ -166,6 +167,7 @@ def add_reminder(
     linked_task_id: str = "",
     kind: str = "reminder",
     parent_summary: str = "",
+    note: str = "",
 ) -> Dict[str, Any]:
     try:
         uid = current_user_id()
@@ -193,6 +195,7 @@ def add_reminder(
             "recurrence": str(recurrence or "").strip(),
             "kind": kind or "reminder",
             "parent_summary": str(parent_summary or "").strip(),
+            "note": str(note or "").strip(),
             "linked_task_id": str(linked_task_id or "").strip(),
             "send_state": "pending",
             "created_at": datetime.now(timezone.utc),

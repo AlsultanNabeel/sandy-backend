@@ -1,8 +1,7 @@
 """Cross-process Telegram webhook dedup — MongoDB setnx with TTL.
 
-Extracted from the old ``project_builder/_redis.py`` (a general Mongo KV store
-that was misfiled under the now-removed self-coding package). ``webhook_seen_setnx``
-was the only general-purpose piece the web/Telegram path used from it.
+A general-purpose Mongo KV store; ``webhook_seen_setnx`` is the piece the
+web/Telegram path uses for cross-process dedup.
 
 Collection: sandy_sa_kv  ({_id: namespaced key, value, expire_at}). A TTL index
 on ``expire_at`` self-cleans entries; the function also drops a stale key on touch.
