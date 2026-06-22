@@ -131,7 +131,6 @@ init_brainstorm(mongo_db)
 
 from app.features.tasks_store import init_tasks_store
 from app.features.reminders_store import init_reminders_store
-from app.features.email_watch import init_email_watch
 from app.features.shopping_store import init_shopping_store
 from app.features.habits_store import init_habits_store
 from app.features.expenses_store import init_expenses_store
@@ -144,7 +143,6 @@ from app.features.usage_store import init_usage_store
 
 init_tasks_store(mongo_db)
 init_reminders_store(mongo_db)
-init_email_watch(mongo_db)
 init_shopping_store(mongo_db)
 init_habits_store(mongo_db)
 init_expenses_store(mongo_db)

@@ -1,7 +1,7 @@
 """ToolDispatcher — ينفذ tool calls من Gemini.
 
 يأخذ اسم الـ tool والـ args، يبحث في الـ registry،
-ويستدعي الـ Python handler أو MCPHub.
+ويستدعي الـ Python handler.
 """
 
 from __future__ import annotations
@@ -29,21 +29,13 @@ class DispatchContext:
 
 
 class ToolDispatcher:
-    """ينفذ tool بالاسم — Python handler أو MCP server."""
+    """ينفذ tool بالاسم — Python handler."""
 
     def __init__(
         self,
         registry: Optional[ToolRegistry] = None,
-        mcp_hub: Any = None,
     ) -> None:
         self.registry = registry or get_registry()
-        if mcp_hub is None:
-            try:
-                from app.integrations.mcp_client import get_mcp_hub
-                mcp_hub = get_mcp_hub()
-            except Exception:
-                pass
-        self.mcp_hub = mcp_hub
 
     def dispatch(
         self,
@@ -76,10 +68,6 @@ class ToolDispatcher:
             _trace_span(
                 name=f"tool:{tool_name}",
                 input_data=args or {},
-                metadata={
-                    "tool_type": tool.tool_type,
-                    "mcp_server": getattr(tool, "mcp_server", None),
-                },
             )
             if _trace_span is not None
             else _noop_ctx()
@@ -87,25 +75,12 @@ class ToolDispatcher:
 
         with span_ctx as span:
             try:
-                logger.info(f"[Tool] {tool_name} | type={tool.tool_type} | args={list((args or {}).keys())}")
-                if tool.tool_type == "python":
-                    if not tool.handler:
-                        result = {"handled": False, "reply": f"handler غير مسجل: {tool_name}"}
-                        error_for_health = "handler missing"
-                    else:
-                        result = tool.handler(args or {}, context)
-                elif tool.tool_type == "mcp":
-                    if not self.mcp_hub:
-                        logger.warning(f"[Dispatcher] MCP not ready: {tool_name}")
-                        result = {"handled": False, "reply": "MCP غير متاح حالياً."}
-                        error_for_health = "mcp hub down"
-                    else:
-                        result = self.mcp_hub.call(
-                            tool.mcp_server, tool.mcp_method, args or {}
-                        )
+                logger.info(f"[Tool] {tool_name} | args={list((args or {}).keys())}")
+                if not tool.handler:
+                    result = {"handled": False, "reply": f"handler غير مسجل: {tool_name}"}
+                    error_for_health = "handler missing"
                 else:
-                    result = {"handled": False, "reply": "نوع أداة غير معروف."}
-                    error_for_health = f"unknown tool_type={tool.tool_type}"
+                    result = tool.handler(args or {}, context)
             except Exception as exc:
                 logger.error(f"[Dispatcher] {tool_name} failed: {exc}")
                 try:

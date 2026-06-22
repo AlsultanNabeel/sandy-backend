@@ -34,9 +34,7 @@ _ANTI_REPLAY_MS: int = 30_000
 # على التلي/الموقع الهوية معروفة، فالتحقّق هون فقط. مفعّل بـ SANDY_REQUIRE_SPEAKER_AUTH=1.
 _SENSITIVE_TOOLS = {
     "task_delete", "reminder_delete", "calendar_delete",
-    "email_send", "email_reply",
-    "github_create_issue", "github_close_issue", "github_reopen_issue",
-    "github_build_project", "schedule_message_to_self",
+    "schedule_message_to_self",
 }
 # نحتفظ بآخر ~5 ثوانٍ من صوت الجهاز (16kHz·16bit·mono = 32KB/s) للتحقّق عند أمر حسّاس.
 _RECENT_AUDIO_MAX_BYTES = 160_000

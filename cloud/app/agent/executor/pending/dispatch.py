@@ -35,12 +35,6 @@ from app.agent.executor.pending.reminder_pending import (
     _handle_await_remind_at,
     _exec_reminder_delete_all,
 )
-from app.agent.executor.pending.email_pending import (
-    _handle_email_confirm_pending,
-    _handle_await_email_body,
-    _exec_email_send,
-    _exec_email_draft,
-)
 
 
 def classify_response_to_pending(user_message: str, pending_type: str) -> str:
@@ -98,16 +92,6 @@ def execute_pending_action(
                 user_message,
                 pending,
                 create_chat_completion_fn=create_chat_completion_fn,
-                session=session,
-                session_file=session_file,
-                mongo_db=mongo_db,
-                save_session_fn=save_session_fn,
-            )
-
-        if pending_type == "email" and pending_action == "await_body":
-            return _handle_await_email_body(
-                user_message,
-                pending,
                 session=session,
                 session_file=session_file,
                 mongo_db=mongo_db,
@@ -186,18 +170,6 @@ def execute_pending_action(
             **_clarify_common,
         )
 
-    # For email confirm/edit, catch edits before the quick-confirmation gate.
-    if pending_type == "email" and pending_action == "confirm_send":
-        edit_result = _handle_email_confirm_pending(
-            user_message,
-            pending,
-            create_chat_completion_fn=create_chat_completion_fn,
-            **_clarify_common,
-        )
-        if edit_result.get("handled"):
-            return edit_result
-        # otherwise fall through to the quick-confirmation gate for "ارسل"/"اه"
-
     # Quick-confirmation gate.
     if not _is_quick_confirmation(user_message):
         return {"handled": False}
@@ -251,11 +223,5 @@ def execute_pending_action(
 
     if pending_type == "reminder" and pending_action == "delete_all":
         return _exec_reminder_delete_all(**_exec_no_tasks)
-
-    # Email execution
-    if pending_type == "email" and pending_action == "confirm_send":
-        return _exec_email_send(**_exec_no_tasks)
-    if pending_type == "email" and pending_action == "draft":
-        return _exec_email_draft(**_exec_no_tasks)
 
     return {"handled": False}

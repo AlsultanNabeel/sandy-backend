@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _GPT_ROUTING_SYSTEM = """أنت مساعد يحدد نوع طلب المستخدم.
 أجب بـ JSON فقط: {"intent": "<نوع الطلب>"}
-الأنواع: task | reminder | calendar | email | chat | search | other"""
+الأنواع: task | reminder | calendar | chat | search | other"""
 
 _openai_direct_client: Any = None
 

@@ -75,11 +75,6 @@ WEB_RESEARCH_MAX_CANDIDATES = int(
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "sany-db").strip()
 
-# GitHub
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
-GITHUB_DEFAULT_REPO = os.getenv("GITHUB_DEFAULT_REPO", "").strip()
-GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "").strip()
-
 # Paths
 DATA_DIR = BASE_DIR.parent / "data"
 MEMORY_DIR = DATA_DIR / "memory"

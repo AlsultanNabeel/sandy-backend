@@ -125,11 +125,6 @@ def build_agent_runtime_state(session: Optional[Dict[str, Any]]) -> Dict[str, An
             }
         )
 
-    draft = sess.get("email_send_draft")
-    draft_waiting = ""
-    if isinstance(draft, dict):
-        draft_waiting = str(draft.get("waiting", "") or "").strip()
-
     return {
         "last_action": {
             "kind": lac.get("kind"),
@@ -147,7 +142,6 @@ def build_agent_runtime_state(session: Optional[Dict[str, Any]]) -> Dict[str, An
             "items_preview": preview_rows,
             "has_buffer": len(preview_rows) > 0,
         },
-        "email_send_draft_waiting": draft_waiting or None,
     }
 
 
@@ -165,18 +159,6 @@ def runtime_state_chat_block(session: Optional[Dict[str, Any]]) -> str:
         dq = sr.get("query", "")
         parts.append(
             f"آخر خيارات/نتائج مُعرضة للمستخدم ({sr.get('domain')}, عن «{dq}»، عددها ~{n})."
-        )
-
-    dw = blob.get("email_send_draft_waiting")
-    if dw:
-        draft = session.get("email_send_draft") if isinstance(session, dict) else {}
-        to_txt = ""
-        if isinstance(draft, dict):
-            to_txt = str(draft.get("to", "") or "").strip()
-        parts.append(
-            f"في انتظار نص رسالة إلى {to_txt or '(مجهول)'}."
-            if to_txt
-            else "في انتظار نص الإرسال."
         )
 
     if not parts:

@@ -55,15 +55,6 @@ def get_time(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
 def get_weather(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     return _call_dispatch("weather", args, ctx)
 
-def cost_report(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
-    return _call_dispatch("cost", args, ctx)
-
-def github_info(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
-    return _call_dispatch("github", args, ctx)
-
-def heroku_info(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
-    return _call_dispatch("heroku", args, ctx)
-
 
 # Schemas
 
@@ -162,38 +153,5 @@ OTHER_TOOLS = [
             "required": [],
         },
         "handler": get_weather,
-    },
-    {
-        "name": "cost_report",
-        "description": "عرض تقرير تكاليف الخدمات (Azure/Heroku/OpenAI...)",
-        "parameters": {
-            "type": "object",
-            "properties": {"provider": {"type": "string", "description": "all|azure|heroku|openai"}},
-            "required": [],
-        },
-        "handler": cost_report,
-    },
-    {
-        "name": "github_info",
-        "description": "اعرض معلومات من GitHub (commits/issues/PRs)",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "description": "commits|issues|pull_requests|stats"},
-                "repo": {"type": "string", "description": "اسم الـ repo"},
-            },
-            "required": [],
-        },
-        "handler": github_info,
-    },
-    {
-        "name": "heroku_info",
-        "description": "اعرض حالة Heroku (logs/status/hours)",
-        "parameters": {
-            "type": "object",
-            "properties": {"action": {"type": "string", "description": "logs|status|hours|diagnose"}},
-            "required": [],
-        },
-        "handler": heroku_info,
     },
 ]

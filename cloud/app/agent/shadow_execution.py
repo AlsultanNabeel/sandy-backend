@@ -9,8 +9,8 @@ from uuid import uuid4
 from app.utils.time import USER_TZ
 
 SESSION_KEY = "shadow_draft"
-# Longer than pending.py's 10-min window on purpose: a shadow draft (e.g. an
-# email body) is something the user reviews and may come back to, not a quick
+# Longer than pending.py's 10-min window on purpose: a shadow draft (e.g. a
+# task plan) is something the user reviews and may come back to, not a quick
 # yes/no confirmation.
 _TTL_MINUTES = 30
 
@@ -51,8 +51,6 @@ def handle_shadow_draft_action(
 # Formatting
 
 _DRAFT_TYPE_LABELS = {
-    "email_draft": "مسودة إيميل",
-    "reply_draft": "مسودة رد إيميل",
     "task_plan": "خطة مهام",
     "general": "مسودة",
 }

@@ -168,25 +168,59 @@ code path entirely.
      `api/server.py` (register_emails_api), `studio_api.py`, `facade/briefing.py`,
      executor `dispatch.py` + `pending/dispatch.py`. (Same shape as the social
      removal: a clean feature deletion.)
+     DONE (2026-06-23) — boot-tested: `/health` 200, `/api/emails` now 404, ruff
+     clean. Also deleted the Gmail-only OAuth helpers (`integrations/google_oauth_env.py`,
+     `utils/google_oauth_errors.py`), dropped the dead `GoogleOAuthReconnectNeeded`
+     path + unread-inbox block from `facade/briefing.py`, removed `gmail_list_state`
+     from the graph state + `email_send_draft` from `memory.py`/`deep_context.py`,
+     swept every email example/template out of `fc_router.py`, `model_fallback.py`,
+     `response_templates.py`, `shadow_execution.py`, `voice_ws.py`,
+     `self_awareness_tools.py`, and dropped `google-api-python-client` +
+     `google-auth-oauthlib` from requirements.
   2. REMOVE in-app ops/admin agent tools (owner does ops outside): GitHub
      (`integrations/github_api.py`, `heroku_tool.py`, incident/deploy tooling) and
      their tool schemas — wherever they were owner-gated.
+     DONE (2026-06-23) — boot-tested: `/api/github/issues` + `/webhook/sentry` now
+     404, 78 tools registered with zero leftover ops tools, dispatcher builds.
+     Deleted `integrations/github_api.py`, `tools/heroku_tool.py`,
+     `tools/cost_tool.py`, `agent/incident_tracker.py`. Removed the GitHub tools
+     (commits/issues/create/close/reopen/comment/file/changelog) from
+     `schemas/mcp_tools.py` (now memory+fetch only) and `cost_report`/`github_info`/
+     `heroku_info` from `schemas/other_tools.py`; dropped the `heroku`/`cost`
+     dispatch handlers. Removed the now-dead `_is_owner_only_tool` filter from
+     `graph/graph.py` and the github_/heroku_/cost_ owner prefixes from
+     `nodes/execute.py`. Deleted the now-orphan MCP hub: `integrations/mcp_client.py`
+     + `register_mcp`/`tool_type`/`mcp_server` plumbing in `tools/registry.py` +
+     `tools/dispatcher.py` (GitHub was its only consumer). Removed the Sentry
+     incident webhook from `api/server.py`, the `/api/github/issues` route from
+     `studio_api.py`, github sensitive-tools from `voice_ws.py`, and `GITHUB_*`
+     from `config.py`.
   3. DE-HARDCODE the owner: drop the `628544372`/`SANDY_USER_CHAT_ID` fallback and
      the `is_owner`/`role=="owner"`/`active_profile_allows_privileged_access`
      branches that gate *a user's own data*. Every authenticated user gets full
      CRUD on THEIR data (productivity_api already does this via guest-vs-user).
+     NOT STARTED. Key insight from the step-2 mapping: `utils/user_profiles.py`
+     conflates "not owner" with "guest" — `active_profile_is_guest()` returns
+     `not active_profile_is_owner()`, and `build_user_profile(claims)` gives every
+     non-owner `permissions="chat-only"`. So in the AGENT pipeline a regular
+     signed-in user is treated as a guest and blocked from their own task/reminder/
+     memory writes (`task_handlers.py:~1609`, `reminder_handlers.py:~49`,
+     `memory.py:99/171`). Fix: authenticated users (role `user` or `owner`) get
+     `permissions="all"` on THEIR tenant; only true unauthenticated visitors stay
+     `chat-only`. Then delete `active_profile_is_owner`/`allows_privileged_access`
+     gates and the owner-id fallback. KEEP `_is_guest(claims)` in the REST APIs.
   4. ENFORCE fail-closed: stores refuse a read/write when `current_user_id()` is
-     None (the security core). Do this last + test carefully.
+     None (the security core). Do this last + test carefully. NOT STARTED.
   KEEP (do NOT remove): the guest-vs-authenticated gating (`_is_guest`, demo
   payloads for visitors) — that is visitor limiting, not owner privilege. Robot/
   room stay the owner's device controls transitionally (his only hardware), per
   the per-tenant device-controls model above.
 
-  Footprint to touch (owner-gating): `api/{productivity,life,emails,server,
-  voice_ws,auth_handlers}.py`, `features/gmail.py`, `agent/memory.py`,
-  `agent/graph/graph.py`, `agent/nodes/execute.py`,
-  `agent/executor/{task,reminder}_handlers.py`, `utils/user_profiles.py`.
-  Not started yet — implement in a fresh session, chunk by chunk, boot-tested.
+  Footprint left for steps 3+4 (owner-gating): `api/{productivity,life,server,
+  voice_ws,auth_handlers,studio_api}.py`, `agent/memory.py`,
+  `agent/nodes/execute.py`, `agent/executor/{task,reminder}_handlers.py`,
+  `agent/semantic_memory.py`, `utils/user_profiles.py`. Steps 1+2 done this
+  session; resume at step 3, chunk by chunk, boot-tested.
 
 **Phase 4 — Close the globals.** `search_relevant_facts` becomes per-tenant.
 Persona becomes a per-tenant field (starts pleasant, evolves with use).

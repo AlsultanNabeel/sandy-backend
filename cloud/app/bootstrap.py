@@ -25,8 +25,6 @@ _QUIET_LOGGERS = (
     "websockets.client",
     "websockets.protocol",
     "apscheduler",
-    "googleapiclient",
-    "googleapiclient.discovery",
     "openai",
     "openai._base_client",
     "anthropic",

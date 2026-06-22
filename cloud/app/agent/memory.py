@@ -183,8 +183,6 @@ def save_session(
                 "task_aliases": session.get("task_aliases", {}),
                 "completed_task_aliases": session.get("completed_task_aliases", {}),
                 "image_state": session.get("image_state", {}),
-                "gmail_last_list": session.get("gmail_last_list"),
-                "email_send_draft": session.get("email_send_draft"),
                 "last_search_results": session.get("last_search_results"),
                 "last_action_context": session.get("last_action_context"),
                 "audit_trace": (

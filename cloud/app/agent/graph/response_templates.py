@@ -75,16 +75,6 @@ _TEMPLATES: dict[str, dict[str, str]] = {
         "formal": "تم حذف الحدث.",
         "minimal": "",
     },
-    "email.send": {
-        "standard": "تم إرسال الإيميل ✉️",
-        "formal": "تم إرسال البريد الإلكتروني.",
-        "minimal": "",
-    },
-    "email.reply": {
-        "standard": "تم الرد ✉️",
-        "formal": "تم إرسال الرد.",
-        "minimal": "",
-    },
     "research.web": {
         "standard": "إليك ما وجدت 🔍",
         "formal": "نتائج البحث:",

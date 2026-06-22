@@ -26,14 +26,6 @@ from app.agent.nodes.execute import execute_node
 from app.agent.nodes.clarify import clarify_node
 from app.agent.nodes.response import response_node
 
-# Owner-only tools — they act on the owner's external accounts (social) or on
-# infra/dev (heroku/cost/github). Never exposed to a non-owner user's pipeline.
-_OWNER_ONLY_TOOL_PREFIXES = ("fb_", "ig_", "linkedin_", "tg_channel_", "github_", "heroku_")
-
-
-def _is_owner_only_tool(name: str) -> bool:
-    return name == "cost_report" or name.startswith(_OWNER_ONLY_TOOL_PREFIXES)
-
 logger = logging.getLogger(__name__)
 
 
@@ -296,17 +288,8 @@ def _route_intent(state: "SandyState") -> "SandyState":
     """
     from app.agent.agents.fc_router import route_with_fc
     from app.agent.tools.registry import get_registry
-    from app.utils.user_profiles import active_profile_is_owner
 
     declarations = get_registry().get_function_declarations()
-    # Security: owner-only tools (the owner's social accounts + ops/dev/infra)
-    # are never offered to a non-owner user, so a regular signed-in user can't
-    # post to the owner's accounts or touch infra. Their own secretary tools
-    # (tasks/reminders/life/etc., already user-scoped) stay available.
-    if not active_profile_is_owner():
-        declarations = [
-            d for d in declarations if not _is_owner_only_tool(d.get("name", ""))
-        ]
     logger.info("[router] single-call FC routing with %d tools", len(declarations))
     return route_with_fc(state, declarations, agent_name="router")
 
@@ -322,7 +305,6 @@ def run_graph(
     pending_state: Optional[Dict[str, Any]] = None,
     source: str = "user",
     image_state: Optional[Dict[str, Any]] = None,
-    gmail_list_state: Optional[Dict[str, Any]] = None,
 ) -> SandyState:
     """ينفذ الـ Sandy pipeline كاملاً وتُرجع الـ SandyState النهائية.
 
@@ -347,7 +329,6 @@ def run_graph(
         source=source,
         pending_state=pending_state,
         image_state=image_state,
-        gmail_list_state=gmail_list_state,
     )
     if history:
         state = merge_state(state, {"conversation_history": history})

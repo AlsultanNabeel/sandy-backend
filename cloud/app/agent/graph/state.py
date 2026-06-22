@@ -50,7 +50,6 @@ class SandyState(TypedDict):
 
     # تمرير من الـ session
     image_state: Optional[dict]  # image bytes + history من agent.session
-    gmail_list_state: Optional[dict]  # gmail_last_list للردود الموضعية
 
     # تحسين النداء الواحد
     chat_reply: Optional[str]      # رد دردشة inline من maestro (يوفر نداء LLM ثاني)
@@ -71,7 +70,6 @@ def create_initial_state(
     source: str = "user",
     pending_state: Optional[dict] = None,
     image_state: Optional[dict] = None,
-    gmail_list_state: Optional[dict] = None,
 ) -> SandyState:
     """أنشئ SandyState فارغة جاهزة لـ graph.ainvoke().
 
@@ -110,7 +108,6 @@ def create_initial_state(
         source=source,
         created_at=datetime.now(timezone.utc).isoformat(),
         image_state=image_state,
-        gmail_list_state=gmail_list_state,
         soul_prefetch=None,
     )
 

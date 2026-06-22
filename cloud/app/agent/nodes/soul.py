@@ -147,7 +147,7 @@ def soul_node(state: SandyState) -> SandyState:
 
         # Chat-only context (dreams/anniv/future) is fetched here — only for chat
         # tools — since routing has run and fc_name is now known. Avoids wasting
-        # Mongo round-trips on task/email/calendar messages.
+        # Mongo round-trips on task/calendar messages.
         if fc_name in _CHAT_TOOLS:
             _get_dreams_ctx = _get_anniv_ctx = _get_future_ctx = None
             try:
@@ -372,7 +372,7 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str) -> dict:
 
     Only the queries needed for EVERY message (comfort + directives) are
     prefetched here, since routing has not run yet and chat-only context
-    (dreams/anniv/future) would be wasted on task/email/calendar messages.
+    (dreams/anniv/future) would be wasted on task/calendar messages.
     soul_node fetches those conditionally once fc_name is known.
 
     Returns a dict of Future objects. Attach to state['soul_prefetch'] so

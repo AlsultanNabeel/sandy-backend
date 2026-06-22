@@ -42,8 +42,8 @@ _META_TOOL_NAMES = frozenset(t["name"] for t in _META_TOOLS)
 # prefixes تتطلب صلاحية owner — أي tool يبدأ بأحد هذه لا ينفَّذ إلا للأونر
 # chat/weather/web_search/image لا تحتاج صلاحية خاصة لأنها بيانات عامة
 _OWNER_ONLY_PREFIXES = (
-    "calendar_", "task_", "email_", "reminder_",
-    "github_", "hardware_", "heroku_", "memory_", "cost_",
+    "calendar_", "task_", "reminder_",
+    "hardware_", "memory_",
 )
 
 
@@ -447,17 +447,9 @@ def execute_node(state: SandyState) -> SandyState:
     if isinstance(pending_archived, dict):
         pending_archived = [pending_archived]
 
-    # Propagate gmail_last_list if updated by email handlers
-    new_gmail_list = session.get("gmail_last_list")
-    if new_gmail_list is not None:
-        updates_extra: Dict[str, Any] = {"gmail_list_state": new_gmail_list}
-    else:
-        updates_extra = {}
-
     updates: Dict[str, Any] = {
         "pending_state": new_pending,
         "pending_archived": pending_archived,
-        **updates_extra,
         "execution_result": {
             "handled": handled,
             "reply": reply,

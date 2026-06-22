@@ -1,4 +1,4 @@
-"""Studio web APIs: project plans, GitHub issues, and the unified search box.
+"""Studio web APIs: project plans and the unified search box.
 
 Owner/guest split everywhere, same as productivity_api: guests see demo
 payloads with `demo: true` and no mutating endpoints; the owner gets the
@@ -6,8 +6,7 @@ real thing inside the owner profile context.
 
 Endpoints:
   GET  /api/plans               saved project plans
-  GET  /api/github/issues       repo issues, ?state=open|closed|all
-  GET  /api/search?q=...        one box across tasks/reminders/plans/emails
+  GET  /api/search?q=...        one box across tasks/reminders/plans
 """
 
 from __future__ import annotations
@@ -25,18 +24,10 @@ _OWNER_PROFILE = {
     "permissions": "all",
 }
 
-_DEMO_ISSUES = [
-    {"number": 12, "title": "تحسين سرعة فتح الصفحة الرئيسية", "state": "open",
-     "labels": ["enhancement"], "html_url": "", "created_at": "2026-06-09T08:00:00Z", "comments": 2},
-    {"number": 9, "title": "خطأ في عرض الصور على الموبايل", "state": "open",
-     "labels": ["bug"], "html_url": "", "created_at": "2026-06-07T10:00:00Z", "comments": 5},
-]
-
 _DEMO_SEARCH = {
     "tasks": [{"id": "demo-t1", "text": "تجهيز العرض التقديمي"}],
     "reminders": [{"id": "demo-r1", "text": "موعد طبيب الأسنان", "remind_at": "2026-06-15T16:00:00"}],
     "plans": [{"topic": "خطة تعلم البرمجة", "summary": "ثلاث مراحل خلال شهرين"}],
-    "emails": [{"id": "demo-e2", "subject": "بخصوص الاجتماع القادم", "sender": "أحمد"}],
 }
 
 
@@ -83,22 +74,6 @@ def register_studio_api(app, mongo_db=None):
             print(f"[StudioAPI] plans list failed: {e}")
         return jsonify({"items": items, "demo": False}), 200
 
-    # ── GitHub issues ────────────────────────────────────────────────────
-    @app.route("/api/github/issues", methods=["GET"])
-    @require_auth
-    def api_github_issues(claims):
-        if claims.get("role") != "owner":
-            return jsonify({"items": _DEMO_ISSUES, "demo": True}), 200
-        state = (request.args.get("state") or "open").strip().lower()
-        if state not in {"open", "closed", "all"}:
-            state = "open"
-        from app.integrations.github_api import list_issues
-
-        result = list_issues(state=state)
-        if not result.get("ok"):
-            return jsonify({"items": [], "error": result.get("error", "failed")}), 200
-        return jsonify({"items": result.get("items", []), "demo": False}), 200
-
     # ── Unified search ───────────────────────────────────────────────────
     @app.route("/api/search", methods=["GET"])
     @require_auth
@@ -110,7 +85,7 @@ def register_studio_api(app, mongo_db=None):
             return jsonify({**_DEMO_SEARCH, "demo": True}), 200
 
         ql = q.lower()
-        out = {"tasks": [], "reminders": [], "plans": [], "emails": [], "demo": False}
+        out = {"tasks": [], "reminders": [], "plans": [], "demo": False}
 
         with active_user_profile_context(_OWNER_PROFILE):
             try:
@@ -148,21 +123,5 @@ def register_studio_api(app, mongo_db=None):
                             )
             except Exception as e:  # noqa: BLE001
                 print(f"[StudioAPI] search plans failed: {e}")
-
-            try:
-                from app.features.gmail import list_inbox_emails
-
-                for e in list_inbox_emails(max_results=20):
-                    hay = f"{e.get('subject','')} {e.get('sender','')} {e.get('snippet','')}".lower()
-                    if ql in hay:
-                        out["emails"].append(
-                            {
-                                "id": e["id"],
-                                "subject": e.get("subject", ""),
-                                "sender": e.get("sender", ""),
-                            }
-                        )
-            except Exception as e:  # noqa: BLE001
-                print(f"[StudioAPI] search emails failed: {e}")
 
         return jsonify(out), 200

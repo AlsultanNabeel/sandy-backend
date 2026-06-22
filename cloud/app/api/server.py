@@ -1,10 +1,8 @@
 import logging
 import os
-import hmac
-import hashlib
 from datetime import datetime, timezone
 
-from flask import Flask, abort, jsonify, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from app.utils import metrics as metrics
@@ -75,125 +73,6 @@ def create_app(
             }
         ), (200 if overall_ok else 503)
 
-    # M14b: Sentry incident webhook.
-    #
-    # One-time setup on the Sentry side:
-    #   1. Settings → Developer Settings → "New Internal Integration"
-    #   2. Webhook URL: https://<host>/webhook/sentry
-    #   3. Permissions: Issue & Event → Read
-    #   4. Webhooks: tick "issue" (created / resolved)
-    #   5. Save → copy the "Client Secret"
-    #   6. set SENTRY_WEBHOOK_SECRET=<that secret>
-    #
-    # Sentry signs every POST body with HMAC-SHA256 of the raw body using the
-    # integration's client secret; we verify before doing anything.
-
-    @app.route("/webhook/sentry", methods=["POST"])
-    def sentry_webhook():
-        sentry_secret = os.getenv("SENTRY_WEBHOOK_SECRET", "").strip()
-        signature = request.headers.get("Sentry-Hook-Signature", "")
-        payload_raw = request.get_data(as_text=True)
-
-        if not sentry_secret:
-            # Without a secret we can't verify the signature, so refuse rather
-            # than accept unsigned posts. Log it so the owner spots the misconfig.
-            print(
-                "[Sentry Webhook] SENTRY_WEBHOOK_SECRET not set, refusing"
-            )
-            abort(503)
-
-        expected_sig = hmac.new(
-            sentry_secret.encode(),
-            payload_raw.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        if not (signature and hmac.compare_digest(signature, expected_sig)):
-            print("[Sentry Webhook] Signature verification failed")
-            abort(403)
-
-        try:
-            payload = request.get_json(silent=True) or {}
-            data = payload.get("data") or {}
-            issue = data.get("issue") or {}
-            event = data.get("event") or {}
-
-            # Only act on new or regressed issues. Don't ping Telegram for
-            # `resolved` and friends, that's just noise.
-            action = (payload.get("action") or "").strip()
-            if action not in ("created", "triggered", ""):
-                return "OK", 200
-
-            title = (
-                issue.get("title")
-                or event.get("title")
-                or payload.get("title")
-                or "Sentry issue"
-            )
-            level = (
-                issue.get("level")
-                or event.get("level")
-                or payload.get("level")
-                or "error"
-            )
-            project = (
-                issue.get("project", {}).get("slug")
-                if isinstance(issue.get("project"), dict)
-                else issue.get("project")
-            ) or payload.get("project_slug") or ""
-            culprit = (
-                issue.get("culprit") or event.get("culprit") or ""
-            )
-
-            # Top of the stack trace, the most actionable line.
-            stack_tail = ""
-            try:
-                frames = (
-                    event.get("exception", {})
-                    .get("values", [{}])[0]
-                    .get("stacktrace", {})
-                    .get("frames", [])
-                )
-                if frames:
-                    # Sentry orders frames bottom-to-top; the last entry is
-                    # the one that raised. Show the last 3.
-                    pieces = []
-                    for f in frames[-3:]:
-                        loc = (
-                            f.get('filename')
-                            or f.get('abs_path')
-                            or '?'
-                        )
-                        line = f.get('lineno', '?')
-                        func = f.get('function') or '?'
-                        pieces.append(f"  {loc}:{line} in {func}()")
-                    stack_tail = "\n".join(pieces)
-            except Exception:
-                stack_tail = ""
-
-            # M5: record it, and open a tracking issue if this same title
-            # keeps firing.
-            try:
-                from app.agent import incident_tracker
-                incident_tracker.maybe_escalate(
-                    source="sentry",
-                    category=str(title)[:120],
-                    detail=(
-                        f"level={level}, project={project}, "
-                        f"culprit={culprit or 'n/a'}"
-                    ),
-                    evidence=stack_tail or "",
-                )
-            except Exception as exc:
-                print(f"[Sentry Webhook] incident_tracker hook failed: {exc}")
-
-            return "OK", 200
-        except Exception as exc:
-            print(f"[Sentry Webhook] Error: {exc}")
-            log_unhandled_exception(mongo_db, exc, source="sentry_webhook")
-            # Always 200 so Sentry doesn't disable the integration over a
-            # one-off parse failure.
-            return "OK", 200
-
     @app.route("/metrics", methods=["GET"])
     def metrics_endpoint():
         data, content_type = metrics.metrics_wsgi()
@@ -210,9 +89,6 @@ def create_app(
 
     from app.api.productivity_api import register_productivity_api
     register_productivity_api(app, mongo_db=mongo_db)
-
-    from app.api.emails_api import register_emails_api
-    register_emails_api(app, mongo_db=mongo_db)
 
     from app.api.studio_api import register_studio_api
     register_studio_api(app, mongo_db=mongo_db)

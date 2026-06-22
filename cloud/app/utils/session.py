@@ -18,7 +18,4 @@ def build_session_from_state(state: SandyState) -> Dict[str, Any]:
     if image_state:
         session["image_state"] = image_state
         session["last_image_bytes"] = image_state.get("active_image_bytes")
-    gmail_list = state.get("gmail_list_state")
-    if gmail_list:
-        session["gmail_last_list"] = gmail_list
     return session

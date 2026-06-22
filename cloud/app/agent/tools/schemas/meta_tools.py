@@ -20,10 +20,6 @@ META_TOOLS = [
         "description": (
             "رد على المستخدم — استخدم عند عدم وجود أمر محدد أو دردشة عامة.\n\n"
             "🚫 ممنوع تستخدميه لو الرسالة فيها أفعال action واضحة + objects:\n"
-            "- 'اقفلي/افتحي/سكّري/بطّلي/علّقي/افتحي ... من جديد' + 'issue' → "
-            "استدعي github_close_issue / github_reopen_issue / github_comment_issue\n"
-            "- 'افتحي/اعملي/حطي/ضيفي' + 'issue' + موضوع → github_create_issue\n"
-            "- 'جيبيلي/اعرضيلي' + 'issues/commits' → github_issues / github_commits\n"
             "- أوامر tasks/reminders/calendar → الـ FC المخصص لها\n\n"
             "STM ممكن يكون فيه نفس الموضوع — مش مبرر للذهاب لـ chat. الـ FC handler "
             "يتعامل مع التكرار/الـ idempotency بنفسه."

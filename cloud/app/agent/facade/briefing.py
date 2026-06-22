@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from app.utils.time import USER_TZ
-from app.utils.google_oauth_errors import GoogleOAuthReconnectNeeded
 
 
 def should_send_briefing(memory: Dict[str, Any], user_message: str) -> bool:
@@ -66,12 +65,7 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
     now = datetime.now(USER_TZ)
     today_end = now.replace(hour=23, minute=59, second=59, microsecond=0)
 
-    oauth_note = ""
-    try:
-        tasks = load_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
-    except GoogleOAuthReconnectNeeded as e:
-        oauth_note = str(e)
-        tasks = []
+    tasks = load_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
     # Today's reminders take the slot calendar events used to fill.
     todays_reminders = []
     try:
@@ -84,20 +78,6 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
                 continue
     except Exception:
         todays_reminders = []
-
-    # Unread inbox — count + the top few, so the briefing can mention them.
-    unread_lines: List[str] = []
-    unread_count = 0
-    try:
-        from app.features.gmail import get_unread_emails
-
-        unread = get_unread_emails(max_results=10)
-        unread_count = len(unread)
-        for e in unread[:3]:
-            sender = (e.get("sender", "") or "").split("<", 1)[0].strip()
-            unread_lines.append(f"- {sender}: {e.get('subject', '(بدون عنوان)')}")
-    except Exception:
-        pass
 
     city = str(memory.get("sandy_state", {}).get("home_city", "") or "").strip() or "October City"
     weather_raw = format_weather_for_prompt(get_weather(city))
@@ -137,12 +117,7 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
 المهام النشطة ({len(active_tasks)}):
 {chr(10).join(tasks_lines) if tasks_lines else "لا توجد مهام"}
 تذكيرات اليوم:
-{chr(10).join(cal_lines) if cal_lines else "لا توجد تذكيرات"}
-إيميلات غير مقروءة ({unread_count}):
-{chr(10).join(unread_lines) if unread_lines else "لا يوجد"}"""
-
-    if oauth_note:
-        data_block += f"\nتحذير OAuth: {oauth_note}"
+{chr(10).join(cal_lines) if cal_lines else "لا توجد تذكيرات"}"""
 
     from app.config import SANDY_PERSONALITY
     prompt = f"""{SANDY_PERSONALITY}
@@ -155,7 +130,6 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
 - اجمعي المشتريات الموجودة في البيانات بجملة واحدة — لا تخترعي مشتريات من عندك
 - اذكري المهام الأخرى بإيجاز
 - اذكري تذكيرات اليوم لو في
-- اذكري عدد الإيميلات غير المقروءة وأهمها بجملة لو في
 - اختمي قبل الجملة الشخصية باقتراح ذكي لترتيب اليوم بسطر أو سطرين (شو يبدأ فيه وليش)
 - اختمي بجملة واحدة شخصية شامية مختلفة كل يوم (مذكر)
 - لا تكتبي قوائم منقطة ولا عناوين رسمية
@@ -181,13 +155,11 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
     # Fallback when the model call fails: plain structured text.
     tasks_block = "\n".join(tasks_lines[:6]) if tasks_lines else "ما في مهام"
     cal_block = "\n".join(cal_lines) if cal_lines else "ما في تذكيرات"
-    mail_block = f"📬 {unread_count} إيميل غير مقروء" if unread_count else ""
     return (
         f"صباح الخير ☀️\n\n"
         f"🌤 {weather_raw}\n\n"
         f"📋 مهامك:\n{tasks_block}\n\n"
         f"⏰ تذكيرات اليوم:\n{cal_block}"
-        + (f"\n\n{mail_block}" if mail_block else "")
     )
 
 

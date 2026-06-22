@@ -15,9 +15,7 @@ sherpa-onnx>=1.10.0  # local CAM++ speaker verification (Phase 4); ONNX, no torc
 numpy>=1.24
 google-genai>=1.0.0
 google-cloud-texttospeech>=2.16.2
-google-api-python-client
-google-auth>=2.0.0
-google-auth-oauthlib
+google-auth>=2.0.0  # transitive dep of google-cloud-texttospeech / google-genai
 Pillow>=10.0.0
 pypdf>=4.0.0
 python-docx>=1.1.0

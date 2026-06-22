@@ -28,7 +28,6 @@ def register_all_tools() -> None:
     from app.agent.tools.registry import get_registry
     from app.agent.tools.schemas.task_tools import TASK_TOOLS
     from app.agent.tools.schemas.reminder_tools import REMINDER_TOOLS
-    from app.agent.tools.schemas.email_tools import EMAIL_TOOLS
     from app.agent.tools.schemas.meta_tools import META_TOOLS
     from app.agent.tools.schemas.other_tools import OTHER_TOOLS
     from app.agent.tools.schemas.mcp_tools import MCP_TOOLS
@@ -44,7 +43,7 @@ def register_all_tools() -> None:
     registry = get_registry()
     count = 0
 
-    for tool_list in (TASK_TOOLS, REMINDER_TOOLS, EMAIL_TOOLS, META_TOOLS, OTHER_TOOLS, MCP_TOOLS, GOAL_TOOLS, FUTURE_MESSAGE_TOOLS, GIFT_TOOLS, CONTENT_SHARE_TOOLS, SELF_AWARENESS_TOOLS, PHOTO_TOOLS, BRAINSTORM_TOOLS, LIFE_TOOLS):
+    for tool_list in (TASK_TOOLS, REMINDER_TOOLS, META_TOOLS, OTHER_TOOLS, MCP_TOOLS, GOAL_TOOLS, FUTURE_MESSAGE_TOOLS, GIFT_TOOLS, CONTENT_SHARE_TOOLS, SELF_AWARENESS_TOOLS, PHOTO_TOOLS, BRAINSTORM_TOOLS, LIFE_TOOLS):
         for t in tool_list:
             registry.register(
                 name=t["name"],
