@@ -170,12 +170,13 @@ def create_app(
         password = (body.get("password") or "").strip()
         if not password or not check_owner_password(password):
             return jsonify({"error": "invalid_password", "remaining": remaining - 1}), 401
-        # The owner's existing data (memory, tasks, reminders) lives under the
-        # canonical Telegram id (SANDY_USER_CHAT_ID). Scope the app/web owner to
-        # THAT id so the iPhone app is the SAME Sandy as Telegram — not a fresh,
-        # empty owner bucket. (A minted owner_uid would be a separate scope.)
+        # The owner is tenant #1: log him in under his clean sandy_users uuid
+        # (provider="owner") — the id Phase 1 migrated his data onto — not the
+        # legacy Telegram id. get_or_create_owner() is idempotent and returns
+        # that stable uuid; fall back to SANDY_USER_CHAT_ID only if Mongo is down.
         from app.config import SANDY_USER_CHAT_ID
-        owner_uid = str(SANDY_USER_CHAT_ID)
+        from app.features import users_store
+        owner_uid = users_store.get_or_create_owner() or str(SANDY_USER_CHAT_ID)
         try:
             token = make_token("owner", user_id=owner_uid)
         except RuntimeError:
