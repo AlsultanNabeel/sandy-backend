@@ -104,17 +104,6 @@ def active_user_profile_context(profile: Optional[Dict[str, Any]]):
         set_active_user_profile(previous)
 
 
-def active_profile_is_owner() -> bool:
-    profile = get_active_user_profile()
-    if not profile:
-        return False
-    relation = str(profile.get("relation", "guest") or "guest").strip().lower()
-    permissions = (
-        str(profile.get("permissions", "chat-only") or "chat-only").strip().lower()
-    )
-    return relation == "owner" or permissions == "all"
-
-
 def address_instruction(profile: Optional[Dict[str, Any]] = None) -> str:
     """Arabic line telling Sandy which grammatical gender to address the current
     speaker with. The default speaker is the owner (male), so anything that
@@ -130,18 +119,18 @@ def address_instruction(profile: Optional[Dict[str, Any]] = None) -> str:
     )
 
 
-def active_profile_allows_privileged_access() -> bool:
-    profile = get_active_user_profile()
-    if profile is None:
-        return False
-    return active_profile_is_owner()
-
-
 def active_profile_is_guest() -> bool:
+    """True for an unauthenticated visitor (chat-only). Every authenticated user
+    — owner included — has ``permissions == "all"`` and is NOT a guest, so they
+    get full CRUD on THEIR own tenant data. Data isolation is enforced by the
+    per-user ``current_user_id()`` scoping, not by an owner check."""
     profile = get_active_user_profile()
     if not profile:
         return False
-    return not active_profile_is_owner()
+    permissions = (
+        str(profile.get("permissions", "chat-only") or "chat-only").strip().lower()
+    )
+    return permissions != "all"
 
 
 def _normalize_relation(value: str) -> str:
@@ -353,23 +342,22 @@ def build_user_profile(claims: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     The profile's ``chat_id`` is the caller's stable ``user_id`` from their JWT,
     which is what ``current_user_id()`` resolves to — so every feature store
     read/write inside ``active_user_profile_context(...)`` is scoped to THIS
-    user. The owner gets full permissions (owner-only tools still work); a
-    regular signed-in user gets self-only ``chat-only`` permissions, so their
-    own life/productivity data works while privileged tools still refuse.
+    user. The owner is just an authenticated user (tenant #1): every
+    authenticated caller (owner or regular user) gets ``permissions == "all"``
+    and so full CRUD on THEIR own data; only a true guest is ``chat-only``.
+    There is no owner-id fallback — a token without a ``user_id`` yields an
+    empty scope, so nobody can ever inherit another user's data.
 
     Shared by the web agent and the REST tab endpoints so the per-user wiring
     lives in exactly one place.
     """
     claims = claims or {}
-    role = claims.get("role", "guest")
-    is_owner = role == "owner"
-    # Fall back to the legacy single-owner id only for the owner; a non-owner
-    # without a user_id must never inherit owner-scoped data.
-    user_id = claims.get("user_id") or (LEGACY_OWNER_CHAT_ID if is_owner else "")
+    is_guest = claims.get("role", "guest") == "guest"
+    user_id = str(claims.get("user_id") or "")
     return {
-        "chat_id": str(user_id),
+        "chat_id": user_id,
         "name": "",
-        "relation": "owner" if is_owner else "user",
+        "relation": "guest" if is_guest else "user",
         "tone": "casual",
-        "permissions": "all" if is_owner else "chat-only",
+        "permissions": "chat-only" if is_guest else "all",
     }

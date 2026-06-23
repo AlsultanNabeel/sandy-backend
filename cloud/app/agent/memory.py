@@ -6,10 +6,15 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.utils.files import read_json_file, write_json_file
-from app.utils.user_profiles import (
-    active_profile_allows_privileged_access,
-    active_profile_is_guest,
-)
+# NOTE: this module is the legacy GLOBAL memory/session ("sandy_memory" /
+# "current_session" — one doc for everyone), not per-user. It stays scoped to
+# the owner tenant transitionally; Phase 4 ("close the globals") makes it
+# per-tenant. Gating on the owner id keeps other users out of his global state.
+from app.utils.user_profiles import current_user_id, is_owner_chat_id
+
+
+def _is_owner_context() -> bool:
+    return is_owner_chat_id(current_user_id())
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +60,7 @@ def load_memory(
     """Load persistent memory from MongoDB (preferred) or disk JSON."""
     default_memory = _default_memory()
 
-    if active_profile_is_guest():
+    if not _is_owner_context():
         return default_memory
 
     if mongo_db is not None:
@@ -96,7 +101,7 @@ def save_memory(
     mongo_db: Optional[Any] = None,
 ) -> None:
     """Save persistent memory to MongoDB (preferred) or disk JSON."""
-    if not active_profile_allows_privileged_access():
+    if not _is_owner_context():
         return
 
     if mongo_db is not None:
@@ -127,7 +132,7 @@ def load_session(
     """Load session memory from MongoDB (preferred) or disk JSON."""
     default_session = _default_session()
 
-    if active_profile_is_guest():
+    if not _is_owner_context():
         return default_session
 
     if mongo_db is not None:
@@ -168,7 +173,7 @@ def save_session(
     mongo_db: Optional[Any] = None,
 ) -> None:
     """Save session memory to MongoDB (preferred) or disk JSON."""
-    if not active_profile_allows_privileged_access():
+    if not _is_owner_context():
         return
 
     if mongo_db is not None:

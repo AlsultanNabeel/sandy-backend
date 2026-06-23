@@ -16,8 +16,8 @@ from flask import jsonify, request
 logger = logging.getLogger(__name__)
 
 _JWT_ALGO = "HS256"
-OWNER_TOKEN_HOURS = 24 * 7   # 7 days
-GUEST_TOKEN_HOURS = 48        # 2 days
+AUTH_TOKEN_HOURS = 24 * 7    # 7 days — any authenticated user (owner + signed-in)
+GUEST_TOKEN_HOURS = 48        # 2 days — visitors
 _RATE_WINDOW = 900            # 15 minutes
 _RATE_MAX = 5                 # max login attempts per window
 
@@ -32,7 +32,7 @@ def _jwt_secret() -> str:
 
 
 def make_token(role: str, user_id: Optional[str] = None) -> str:
-    hours = OWNER_TOKEN_HOURS if role == "owner" else GUEST_TOKEN_HOURS
+    hours = GUEST_TOKEN_HOURS if role == "guest" else AUTH_TOKEN_HOURS
     payload = {
         "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
@@ -80,21 +80,6 @@ def require_auth(view):
         claims = _claims_from_request()
         if not claims:
             return jsonify({"error": "unauthorized"}), 401
-        return view(*args, claims=claims, **kwargs)
-
-    return _wrapped
-
-
-def require_owner(view):
-    """Like ``require_auth`` but also requires the ``owner`` role (403 otherwise)."""
-
-    @functools.wraps(view)
-    def _wrapped(*args, **kwargs):
-        claims = _claims_from_request()
-        if not claims:
-            return jsonify({"error": "unauthorized"}), 401
-        if claims.get("role") != "owner":
-            return jsonify({"error": "forbidden"}), 403
         return view(*args, claims=claims, **kwargs)
 
     return _wrapped

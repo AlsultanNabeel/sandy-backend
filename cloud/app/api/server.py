@@ -203,9 +203,10 @@ def create_app(
 
     # Web chat history (MongoDB)
     def _chat_history_key(claims):
-        from app.config import SANDY_USER_CHAT_ID
-        if claims.get("role") == "owner":
-            return f"web_chat_{SANDY_USER_CHAT_ID}"
+        # Authenticated users (owner + signed-in) key history by their stable
+        # user_id; only guests fall back to the per-token jti.
+        if claims.get("role") != "guest":
+            return f"web_chat_{claims.get('user_id', '')}"
         return f"web_chat_{claims.get('jti', 'guest')}"
 
     @app.route("/api/chat/history", methods=["GET"])
@@ -226,7 +227,7 @@ def create_app(
         body = request.get_json(silent=True) or {}
         messages = body.get("messages", [])
         key = _chat_history_key(claims)
-        expire_at = None if claims.get("role") == "owner" else \
+        expire_at = None if claims.get("role") != "guest" else \
             datetime.now(timezone.utc) + timedelta(hours=48)
         doc = {"_id": key, "messages": messages, "updated_at": datetime.now(timezone.utc)}
         if expire_at:
@@ -239,7 +240,6 @@ def create_app(
     @require_auth
     def web_agent(claims):
         from app.agent.graph.graph import run_graph, get_final_reply
-        from app.config import SANDY_USER_CHAT_ID
 
         body = request.get_json(silent=True) or {}
 
@@ -252,17 +252,16 @@ def create_app(
 
         role = claims.get("role", "guest")
         # Identity from the token: every authenticated user has a stable
-        # user_id (minted in users_store). The owner is just user #1.
-        user_id = claims.get("user_id") or str(SANDY_USER_CHAT_ID)
+        # user_id (minted in users_store). The owner is just user #1 — no
+        # owner-id fallback, so a token without a user_id gets an empty scope.
+        user_id = claims.get("user_id") or ""
 
         # Cost control: meter every authenticated request per user. The owner is
-        # exempt from rejection (limit 0) but still counted; subscribers get a
-        # generous quota, free users a modest one. Guests use demo data — skip.
+        # tenant #1 / operator, so he shares the top (subscriber) tier; free
+        # users get a modest quota. Guests use demo data — skip.
         if role != "guest":
             from app.features import users_store, usage_store
-            if role == "owner":
-                _daily, _per_min = 0, 0
-            elif users_store.is_subscriber(user_id):
+            if role == "owner" or users_store.is_subscriber(user_id):
                 _daily, _per_min = 5000, 60
             else:
                 _daily, _per_min = 40, 12
@@ -281,9 +280,9 @@ def create_app(
                     active_user_profile_context,
                     build_user_profile,
                 )
-                # The active profile scopes data to this user. The owner gets
-                # full permissions; a regular user gets self-only, so owner-only
-                # tools still refuse while their own data works.
+                # The active profile scopes data to THIS user via
+                # current_user_id(). Every authenticated user (owner included)
+                # gets full CRUD on their own data; isolation is by scope.
                 _profile = build_user_profile(claims)
                 graph_message = message
                 if lang == "en":
@@ -370,8 +369,9 @@ def create_app(
         if not prompt:
             return jsonify({"error": "no prompt"}), 400
 
-        # Rate-limit guests on image generation
-        if claims.get("role") != "owner":
+        # Rate-limit guests on image generation (authenticated users are metered
+        # in /api/agent instead, not via the visitor-approval flow).
+        if claims.get("role") == "guest":
             from app.agent.guest_usage import check_and_increment, guest_label
             jti = claims.get("jti", "")
             guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
@@ -407,7 +407,7 @@ def create_app(
         """Read-only poll so the web UI can tell a guest when the owner
         approved or rejected their pending request. Does NOT consume usage."""
         from app.agent.guest_usage import get_usage_doc
-        if claims.get("role") == "owner":
+        if claims.get("role") != "guest":
             return jsonify({"state": "approved", "count": 0, "limit": 0}), 200
         # unified budget → always read the shared "all" doc, whatever type the UI polls
         jti = claims.get("jti", "")
@@ -431,8 +431,9 @@ def create_app(
         if not image_b64:
             return jsonify({"error": "no image"}), 400
 
-        # Rate-limit guests (shared unified budget)
-        if claims.get("role") != "owner":
+        # Rate-limit guests (shared unified budget). Authenticated users are
+        # metered in /api/agent, not via the visitor-approval flow.
+        if claims.get("role") == "guest":
             from app.agent.guest_usage import check_and_increment, guest_label
             jti = claims.get("jti", "")
             guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")

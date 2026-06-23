@@ -15,7 +15,7 @@ from app.features.reminders_store import (
     load_reminders,
     update_reminder,
 )
-from app.utils.user_profiles import active_profile_is_owner
+from app.utils.user_profiles import active_profile_is_guest
 
 
 def _parse_snooze_minutes(time_text: str) -> int:
@@ -46,8 +46,8 @@ def handle_reminder_action(
     create_chat_completion_fn,
     save_session_fn,
 ) -> Dict[str, Any]:
-    if not active_profile_is_owner():
-        return {"handled": True, "reply": "التذكيرات خاصة بنبيل 😊"}
+    if active_profile_is_guest():
+        return {"handled": True, "reply": "سجّل دخولك عشان أقدر أذكّرك 😊"}
 
     reply = ""
     reminder_action = str(params.get("action", "create")).strip().lower()

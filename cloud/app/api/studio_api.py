@@ -1,8 +1,8 @@
 """Studio web APIs: project plans and the unified search box.
 
-Owner/guest split everywhere, same as productivity_api: guests see demo
-payloads with `demo: true` and no mutating endpoints; the owner gets the
-real thing inside the owner profile context.
+Guest/authenticated split everywhere, same as productivity_api: guests see
+demo payloads with `demo: true`; every authenticated user gets their own data,
+scoped to current_user_id() inside their profile context.
 
 Endpoints:
   GET  /api/plans               saved project plans
@@ -14,15 +14,22 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
-from app.utils.user_profiles import active_user_profile_context, OWNER_CHAT_ID
+from app.utils.user_profiles import active_user_profile_context, build_user_profile
 
-_OWNER_PROFILE = {
-    "chat_id": OWNER_CHAT_ID,
-    "name": "",
-    "relation": "owner",
-    "tone": "casual",
-    "permissions": "all",
-}
+
+def _is_guest(claims) -> bool:
+    return claims.get("role") == "guest"
+
+
+def _brainstorm_chat_ids(claims) -> list:
+    """The caller's brainstorm chat_id, both string and int forms (legacy docs
+    stored numeric Telegram ids)."""
+    uid = str(claims.get("user_id") or "")
+    ids = [uid]
+    if uid.isdigit():
+        ids.append(int(uid))
+    return ids
+
 
 _DEMO_SEARCH = {
     "tasks": [{"id": "demo-t1", "text": "تجهيز العرض التقديمي"}],
@@ -36,7 +43,7 @@ def register_studio_api(app, mongo_db=None):
     @app.route("/api/plans", methods=["GET"])
     @require_auth
     def api_list_plans(claims):
-        if claims.get("role") != "owner":
+        if _is_guest(claims):
             return jsonify(
                 {
                     "items": [
@@ -54,10 +61,9 @@ def register_studio_api(app, mongo_db=None):
         items = []
         try:
             if mongo_db is not None:
-                owner = str(OWNER_CHAT_ID or "")
                 for d in (
                     mongo_db["sandy_brainstorms"]
-                    .find({"status": "done", "chat_id": {"$in": [owner, int(owner) if owner.isdigit() else owner]}})
+                    .find({"status": "done", "chat_id": {"$in": _brainstorm_chat_ids(claims)}})
                     .sort("finished_at", -1)
                     .limit(30)
                 ):
@@ -81,13 +87,13 @@ def register_studio_api(app, mongo_db=None):
         q = (request.args.get("q") or "").strip()
         if not q:
             return jsonify({"error": "q_required"}), 400
-        if claims.get("role") != "owner":
+        if _is_guest(claims):
             return jsonify({**_DEMO_SEARCH, "demo": True}), 200
 
         ql = q.lower()
         out = {"tasks": [], "reminders": [], "plans": [], "demo": False}
 
-        with active_user_profile_context(_OWNER_PROFILE):
+        with active_user_profile_context(build_user_profile(claims)):
             try:
                 from app.features.tasks_store import load_tasks, load_completed_tasks
 
@@ -114,7 +120,8 @@ def register_studio_api(app, mongo_db=None):
             try:
                 if mongo_db is not None:
                     for d in mongo_db["sandy_brainstorms"].find(
-                        {"status": "done"}, {"topic": 1, "summary": 1, "plan_text": 1}
+                        {"status": "done", "chat_id": {"$in": _brainstorm_chat_ids(claims)}},
+                        {"topic": 1, "summary": 1, "plan_text": 1},
                     ).limit(100):
                         hay = f"{d.get('topic','')} {d.get('summary','')} {d.get('plan_text','')}".lower()
                         if ql in hay:

@@ -41,14 +41,25 @@ _META_TOOL_NAMES = frozenset(t["name"] for t in _META_TOOLS)
 
 # prefixes تتطلب صلاحية owner — أي tool يبدأ بأحد هذه لا ينفَّذ إلا للأونر
 # chat/weather/web_search/image لا تحتاج صلاحية خاصة لأنها بيانات عامة
-_OWNER_ONLY_PREFIXES = (
-    "calendar_", "task_", "reminder_",
-    "hardware_", "memory_",
+# Tools that act on the caller's own tenant data — available to ANY
+# authenticated user; refused only for guests (chat-only visitors). Data
+# isolation is by current_user_id() scoping, not an owner check.
+_ACCOUNT_TOOL_PREFIXES = (
+    "calendar_", "task_", "reminder_", "memory_",
 )
 
+# The owner's physical devices (robot/room). Transitional: the owner is the
+# only tenant with hardware today, so these stay gated to his chat id until
+# per-tenant device controls land.
+_OWNER_DEVICE_PREFIXES = ("hardware_",)
 
-def _requires_owner(tool_name: str) -> bool:
-    return any(tool_name.startswith(p) for p in _OWNER_ONLY_PREFIXES)
+
+def _requires_account(tool_name: str) -> bool:
+    return any(tool_name.startswith(p) for p in _ACCOUNT_TOOL_PREFIXES)
+
+
+def _is_owner_device_tool(tool_name: str) -> bool:
+    return any(tool_name.startswith(p) for p in _OWNER_DEVICE_PREFIXES)
 
 _CHAT_INTENTS = frozenset(
     {
@@ -232,7 +243,7 @@ def execute_node(state: SandyState) -> SandyState:
         from app.agent.tools.registry import get_registry
         from app.agent.tools.dispatcher import ToolDispatcher, DispatchContext
         from app.utils.nlp_normalizer import normalize_user_message
-        from app.utils.user_profiles import is_owner_chat_id
+        from app.utils.user_profiles import is_owner_chat_id, active_profile_is_guest
 
         try:
             create_chat_completion_fn = _get_chat_completion_fn()
@@ -265,8 +276,12 @@ def execute_node(state: SandyState) -> SandyState:
             tool = registry.get_tool(t_name)
             if not tool:
                 continue
-            if _requires_owner(t_name) and not is_owner_chat_id(state.get("chat_id")):
-                logger.warning(f"[execute_node] multi: blocked {t_name} for non-owner")
+            if _requires_account(t_name) and active_profile_is_guest():
+                logger.warning(f"[execute_node] multi: blocked {t_name} for guest")
+                blocked_any = True
+                continue
+            if _is_owner_device_tool(t_name) and not is_owner_chat_id(state.get("chat_id")):
+                logger.warning(f"[execute_node] multi: blocked device {t_name} for non-owner")
                 blocked_any = True
                 continue
             try:
@@ -280,10 +295,10 @@ def execute_node(state: SandyState) -> SandyState:
                 logger.error(f"[execute_node] multi: {t_name} failed: {exc}")
 
         if blocked_any and not replies:
-            # كل الأدوات المطلوبة خاصة بالأونر — وضّح بدل "تم." الصامتة
-            combined = "هذا خاص بنبيل 😊"
+            # كل الأدوات المطلوبة مش متاحة إلك — وضّح بدل "تم." الصامتة
+            combined = "بعض الطلبات مش متاحة إلك حالياً 😊"
         elif blocked_any:
-            combined = "\n".join(replies) + "\n(بعض الطلبات خاصة بنبيل 😊)"
+            combined = "\n".join(replies) + "\n(بعض الطلبات مش متاحة إلك حالياً 😊)"
         else:
             combined = "\n".join(replies) if replies else "تم."
         updates: Dict[str, Any] = {
@@ -310,16 +325,24 @@ def execute_node(state: SandyState) -> SandyState:
         tool = registry.get_tool(tool_name)
 
         if tool and tool_name not in _META_TOOL_NAMES:
-            # حماية: أدوات شخصية لا تُنفَّذ إلا للأونر — بغض النظر عن صياغة الطلب
-            if _requires_owner(tool_name):
-                from app.utils.user_profiles import is_owner_chat_id
-                if not is_owner_chat_id(state.get("chat_id")):
-                    logger.warning(
-                        f"[execute_node] blocked tool={tool_name} for non-owner chat_id={state.get('chat_id')}"
-                    )
-                    return merge_state(state, {
-                        "execution_result": {"handled": True, "reply": "هذا خاص بنبيل 😊"},
-                    })
+            from app.utils.user_profiles import is_owner_chat_id, active_profile_is_guest
+
+            # أدوات الحساب (مهام/تذكير/تقويم/ذاكرة) متاحة لأي مستخدم مسجّل،
+            # ممنوعة على الضيف فقط — العزل عبر current_user_id() لكل مستخدم.
+            if _requires_account(tool_name) and active_profile_is_guest():
+                logger.warning(f"[execute_node] blocked tool={tool_name} for guest")
+                return merge_state(state, {
+                    "execution_result": {"handled": True, "reply": "سجّل دخولك عشان أقدر أساعدك بهالطلب 😊"},
+                })
+            # أجهزة المالك (الروبوت/الغرفة) — انتقالياً للمالك فقط حتى تجي
+            # أدوات التحكم لكل مستأجر.
+            if _is_owner_device_tool(tool_name) and not is_owner_chat_id(state.get("chat_id")):
+                logger.warning(
+                    f"[execute_node] blocked device tool={tool_name} for non-owner chat_id={state.get('chat_id')}"
+                )
+                return merge_state(state, {
+                    "execution_result": {"handled": True, "reply": "هذا جهاز خاص بنبيل 😊"},
+                })
 
             try:
                 create_chat_completion_fn = _get_chat_completion_fn()

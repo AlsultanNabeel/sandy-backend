@@ -199,31 +199,57 @@ code path entirely.
      the `is_owner`/`role=="owner"`/`active_profile_allows_privileged_access`
      branches that gate *a user's own data*. Every authenticated user gets full
      CRUD on THEIR data (productivity_api already does this via guest-vs-user).
-     NOT STARTED. Key insight from the step-2 mapping: `utils/user_profiles.py`
-     conflates "not owner" with "guest" — `active_profile_is_guest()` returns
-     `not active_profile_is_owner()`, and `build_user_profile(claims)` gives every
-     non-owner `permissions="chat-only"`. So in the AGENT pipeline a regular
-     signed-in user is treated as a guest and blocked from their own task/reminder/
-     memory writes (`task_handlers.py:~1609`, `reminder_handlers.py:~49`,
-     `memory.py:99/171`). Fix: authenticated users (role `user` or `owner`) get
-     `permissions="all"` on THEIR tenant; only true unauthenticated visitors stay
-     `chat-only`. Then delete `active_profile_is_owner`/`allows_privileged_access`
-     gates and the owner-id fallback. KEEP `_is_guest(claims)` in the REST APIs.
+     DONE (2026-06-23) — boot-tested. Root fix in `utils/user_profiles.py`:
+     `build_user_profile` now gives EVERY authenticated caller (owner + user)
+     `permissions="all"` and `relation="user"` (no owner branch, no owner-id
+     fallback — a token without `user_id` yields an empty scope). Deleted
+     `active_profile_is_owner` + `active_profile_allows_privileged_access`;
+     rewrote `active_profile_is_guest()` to test `permissions != "all"`. Agent
+     gates now block GUESTS, not non-owners: `task_handlers`, `reminder_handlers`,
+     and the `nodes/execute.py` tool gate (split into `_requires_account` →
+     guest-blocked secretary tools, and `_OWNER_DEVICE_PREFIXES`/`hardware_` →
+     owner device, transitional). `api/server.py` flipped every `role=="owner"`
+     vs-rest check to guest-vs-authenticated (chat-history key/expiry, image +
+     analyze + guest-usage limits) and dropped the owner-id fallback; owner now
+     shares the top (subscriber) usage tier instead of being unmetered.
+     `studio_api.py` de-ownered (per-user plans/search, brainstorm queries scoped
+     by the caller's id — closed an unscoped global brainstorm search). `auth_handlers`
+     token lifetime is now authenticated-vs-guest; deleted the dead `require_owner`.
+     KEPT (transitional, owner identity not privilege): owner password login +
+     `SANDY_USER_CHAT_ID`/`OWNER_CHAT_ID` (his current tenant id until the Phase 1
+     migration is run and the clean id is wired), `users_store.get_or_create_owner`,
+     and `semantic_memory` legacy-doc tagging (assigns pre-isolation docs to the
+     owner = tenant #1).
+     DEFERRED to Phase 4/5 (would otherwise LEAK): `agent/memory.py` is the legacy
+     GLOBAL memory/session (`sandy_memory`/`current_session`, one doc for everyone)
+     — kept owner-scoped via `is_owner_chat_id(current_user_id())` so other users
+     can't read/write his global state; Phase 4 makes it per-tenant. `api/voice_ws.py`
+     stays owner-only (owner token + owner STM + CAM++ speaker-id); opening it
+     needs per-user voice wiring (Phase 5/6), else it would serve the owner's STM
+     to others.
   4. ENFORCE fail-closed: stores refuse a read/write when `current_user_id()` is
-     None (the security core). Do this last + test carefully. NOT STARTED.
+     None (the security core). DONE/VERIFIED (2026-06-23) — the prior multi-user
+     pass already added `uid = current_user_id(); if uid is None: return []/{}`
+     to every feature store (tasks, reminders, habits, expenses, scenes, journal,
+     reading, shopping, focus) and every query filters by `{"user_id": uid}`.
+     Audited all mongo ops across the nine stores: no unscoped read/write remains.
+     Smoke-tested: with no active profile, `load_tasks()` returns `[]` and
+     `current_user_id()` is None. (Global facts/persona are the remaining globals —
+     Phase 4.)
   KEEP (do NOT remove): the guest-vs-authenticated gating (`_is_guest`, demo
   payloads for visitors) — that is visitor limiting, not owner privilege. Robot/
   room stay the owner's device controls transitionally (his only hardware), per
   the per-tenant device-controls model above.
 
-  Footprint left for steps 3+4 (owner-gating): `api/{productivity,life,server,
-  voice_ws,auth_handlers,studio_api}.py`, `agent/memory.py`,
-  `agent/nodes/execute.py`, `agent/executor/{task,reminder}_handlers.py`,
-  `agent/semantic_memory.py`, `utils/user_profiles.py`. Steps 1+2 done this
-  session; resume at step 3, chunk by chunk, boot-tested.
+  ALL FOUR STEPS DONE (2026-06-23), boot-tested + ruff-clean. Phase 3 complete.
+  Carried into Phase 4: make `agent/memory.py` (global `sandy_memory`/
+  `current_session`) per-tenant, and `search_relevant_facts` + persona per-tenant.
+  Carried into Phase 5/6: per-user voice (`api/voice_ws.py` is owner-only today).
 
 **Phase 4 — Close the globals.** `search_relevant_facts` becomes per-tenant.
-Persona becomes a per-tenant field (starts pleasant, evolves with use).
+Persona becomes a per-tenant field (starts pleasant, evolves with use). Also make
+`agent/memory.py` (`sandy_memory`/`current_session`) per-tenant — it is the last
+shared global, kept owner-scoped transitionally at the end of Phase 3.
 
 **Phase 5 — Unify routes.** life/productivity APIs serve any tenant (no owner-only,
 no demo payloads). Robot/room actuation gated to the owner tenant only.

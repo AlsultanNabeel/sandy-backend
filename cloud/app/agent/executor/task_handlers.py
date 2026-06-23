@@ -26,7 +26,7 @@ from app.features.tasks_store import (
     complete_all_tasks,
 )
 from app.agent.executor.helpers import _has_visible_task_note
-from app.utils.user_profiles import active_profile_is_owner
+from app.utils.user_profiles import active_profile_is_guest
 
 
 def _handle_list(
@@ -1606,8 +1606,8 @@ def handle_task_action(
     create_chat_completion_fn,
     save_session_fn,
 ) -> Dict[str, Any]:
-    if not active_profile_is_owner():
-        return {"handled": True, "reply": "المهام خاصة بنبيل 😊"}
+    if active_profile_is_guest():
+        return {"handled": True, "reply": "سجّل دخولك عشان أقدر أنظّم مهامك 😊"}
 
     task_action = str(params.get("action", "create")).strip().lower()
     if task_action not in {
