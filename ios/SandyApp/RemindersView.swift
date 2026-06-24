@@ -10,10 +10,8 @@ import SwiftUI
 struct RemindersView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    @State private var reminders: [ReminderItem] = []
-    @State private var loading = false
-    @State private var notice = ""          // رسالة ساندي عند فشل التحميل (فاضي = ما في)
-    @State private var demo = false
+    /// مصدر الحقيقة للتذكيرات (يملك البيانات + الجلب + التعديلات، مستقل عن الشاشة).
+    @StateObject private var store = RemindersStore()
     @State private var showAdd = false
 
     var body: some View {
@@ -21,11 +19,11 @@ struct RemindersView: View {
             SandyBackground()
 
             VStack(spacing: 0) {
-                if demo { DemoBanner() }
+                if store.demo { DemoBanner() }
 
                 // خطأ تحميل القائمة — بصوت ساندي مو سطر أحمر.
-                if !notice.isEmpty {
-                    SandyNotice(notice, kind: .gentleWarning)
+                if !store.notice.isEmpty {
+                    SandyNotice(store.notice, kind: .gentleWarning)
                         .padding(.horizontal, Theme.Spacing.md)
                         .padding(.top, Theme.Spacing.sm)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -35,7 +33,7 @@ struct RemindersView: View {
             }
 
             // زر الإضافة الجميل — عائم بالأسفل، نص + أيقونة (مو "+").
-            if !demo {
+            if !store.demo {
                 VStack {
                     Spacer()
                     SandyButton(title: lang.s("reminders.add"),
@@ -51,32 +49,31 @@ struct RemindersView: View {
         .navigationTitle(lang.s("reminders.title"))
         .sheet(isPresented: $showAdd) {
             AddReminderSheet { text, remindAt, note in
-                try await state.api.addReminder(text: text, remindAt: remindAt, note: note)
-                await load()
+                try await store.add(api: state.api, text: text, remindAt: remindAt, note: note)
             }
         }
-        .task { await load() }
-        .refreshable { await load() }
-        .animation(.spring(response: 0.45, dampingFraction: 0.82), value: reminders.map(\.id))
-        .animation(.easeInOut(duration: 0.25), value: notice)
+        .task { await store.load(api: state.api) }
+        .refreshable { await store.load(api: state.api) }
+        .animation(.spring(response: 0.45, dampingFraction: 0.82), value: store.reminders.map(\.id))
+        .animation(.easeInOut(duration: 0.25), value: store.notice)
     }
 
     // ── المحتوى: تحميل / فاضي / قائمة ──────────────────────────────────────
     @ViewBuilder
     private var content: some View {
-        if loading && reminders.isEmpty {
+        if store.loading && store.reminders.isEmpty {
             Spacer()
             ProgressView()
                 .tint(Theme.Colors.accent)
             Spacer()
-        } else if reminders.isEmpty {
+        } else if store.reminders.isEmpty {
             Spacer()
             emptyState
             Spacer()
         } else {
             ScrollView {
                 VStack(spacing: Theme.Spacing.sm) {
-                    ForEach(reminders) { reminder in
+                    ForEach(store.reminders) { reminder in
                         reminderRow(reminder)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .top).combined(with: .opacity),
@@ -160,9 +157,9 @@ struct RemindersView: View {
                             .background(Theme.Colors.accent.opacity(0.12))
                             .clipShape(Capsule())
                     }
-                    if !demo {
+                    if !store.demo {
                         Button {
-                            delete(reminder)
+                            store.delete(api: state.api, reminder: reminder)
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 15))
@@ -173,33 +170,6 @@ struct RemindersView: View {
                 }
             }
         }
-    }
-
-    /// حذف تذكير — تفاؤليًا من القائمة ثم نطلب من السيرفر.
-    private func delete(_ reminder: ReminderItem) {
-        withAnimation { reminders.removeAll { $0.id == reminder.id } }
-        Task {
-            do {
-                try await state.api.deleteReminder(id: reminder.id)
-            } catch {
-                notice = lang.s("reminders.loadFailed")
-                await load()
-            }
-        }
-    }
-
-    private func load() async {
-        loading = true
-        notice = ""
-        do {
-            let r = try await state.api.getReminders()
-            reminders = r.items
-            demo = r.demo
-        } catch {
-            // خطأ تحميل — بصوت ساندي ودّي (مو localizedDescription جاف لوحده).
-            if !error.isCancellation { notice = lang.s("reminders.loadFailed") }
-        }
-        loading = false
     }
 
     // ── أدوات تنسيق الوقت (ثابتة، قابلة لإعادة الاستخدام داخل العرض) ──────
@@ -240,6 +210,57 @@ struct RemindersView: View {
         f.dateStyle = .medium
         f.timeStyle = .short
         return f.string(from: date)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: - الستور (مصدر الحقيقة)
+
+/// يملك تذكيرات المستخدم والجلب والتعديلات، مستقل عن دورة حياة الشاشة. الجلب
+/// بمهمة مملوكة للستور، فإلغاء إيماءة السحب ما يلغيه — والجديد يبيّن دايماً.
+@MainActor
+final class RemindersStore: ObservableObject {
+    @Published var reminders: [ReminderItem] = []
+    @Published var loading = false
+    @Published var demo = false
+    @Published var notice = ""
+
+    private var loadTask: Task<Void, Never>?
+
+    func load(api: APIClient) async {
+        loadTask?.cancel()
+        let task = Task { @MainActor in
+            loading = true
+            defer { loading = false }
+            do {
+                let r = try await api.getReminders()
+                reminders = r.items
+                demo = r.demo
+            } catch {
+                if !error.isCancellation { notice = LanguageManager.shared.s("reminders.loadFailed") }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    /// إضافة تذكير ثم إعادة جلب — يرمي عند الفشل ليتعامل الشيت معه.
+    func add(api: APIClient, text: String, remindAt: String, note: String?) async throws {
+        try await api.addReminder(text: text, remindAt: remindAt, note: note)
+        await load(api: api)
+    }
+
+    /// حذف تفاؤلي ثم مصالحة مع الباك-إند عند الفشل.
+    func delete(api: APIClient, reminder: ReminderItem) {
+        reminders.removeAll { $0.id == reminder.id }
+        Task { @MainActor in
+            do {
+                try await api.deleteReminder(id: reminder.id)
+            } catch {
+                notice = LanguageManager.shared.s("reminders.loadFailed")
+                await load(api: api)
+            }
+        }
     }
 }
 

@@ -101,10 +101,8 @@ private struct HubRowSpec: Identifiable {
 struct HabitsView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    @State private var habits: [HabitItem] = []
-    @State private var loading = false
-    @State private var error = ""
-    @State private var demo = false
+    /// مصدر الحقيقة للعادات (يملك البيانات + الجلب + التعديلات، مستقل عن الشاشة).
+    @StateObject private var store = HabitsStore()
     @State private var showAdd = false
     /// آيدي العادة التي سُجّل حضورها للتو — يشغّل أنميشن الاحتفال بالسلسلة.
     @State private var celebratingID: String? = nil
@@ -114,10 +112,10 @@ struct HabitsView: View {
             SandyBackground()
 
             VStack(spacing: 0) {
-                if demo { DemoBanner() }
+                if store.demo { DemoBanner() }
 
-                if !error.isEmpty {
-                    SandyNotice(error, kind: .gentleWarning)
+                if !store.error.isEmpty {
+                    SandyNotice(store.error, kind: .gentleWarning)
                         .padding(.horizontal, Theme.Spacing.md)
                         .padding(.top, Theme.Spacing.sm)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -129,14 +127,14 @@ struct HabitsView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.vertical, Theme.Spacing.md)
-                .disabled(demo)
-                .opacity(demo ? 0.5 : 1)
+                .disabled(store.demo)
+                .opacity(store.demo ? 0.5 : 1)
 
-                if loading && habits.isEmpty {
+                if store.loading && store.habits.isEmpty {
                     Spacer()
                     ProgressView()
                     Spacer()
-                } else if habits.isEmpty {
+                } else if store.habits.isEmpty {
                     LivelyEmptyState(
                         line: lang.s("life.habits.empty"),
                         mood: .happy)
@@ -144,7 +142,7 @@ struct HabitsView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: Theme.Spacing.sm) {
-                            ForEach(habits) { habit in
+                            ForEach(store.habits) { habit in
                                 habitRow(habit)
                                     .transition(.asymmetric(
                                         insertion: .scale(scale: 0.92).combined(with: .opacity),
@@ -152,7 +150,7 @@ struct HabitsView: View {
                             }
                         }
                         .padding(Theme.Spacing.md)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: habits.count)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.habits.count)
                     }
                 }
             }
@@ -160,12 +158,11 @@ struct HabitsView: View {
         .navigationTitle(lang.s("life.habits"))
         .sheet(isPresented: $showAdd) {
             AddHabitSheet { name in
-                try await state.api.addHabit(name: name)
-                await load()
+                try await store.add(api: state.api, name: name)
             }
         }
-        .task { await load() }
-        .refreshable { await load() }
+        .task { await store.load(api: state.api) }
+        .refreshable { await store.load(api: state.api) }
     }
 
     @ViewBuilder
@@ -173,7 +170,12 @@ struct HabitsView: View {
         let isCelebrating = celebratingID == habit.id
         HStack(spacing: Theme.Spacing.md) {
             Button {
-                if habit.doneToday { uncheckin(habit) } else { checkin(habit) }
+                if habit.doneToday {
+                    store.uncheckin(api: state.api, habit: habit)
+                } else {
+                    celebrate(habit.id)
+                    store.checkin(api: state.api, habit: habit)
+                }
             } label: {
                 Image(systemName: habit.doneToday ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
@@ -183,7 +185,7 @@ struct HabitsView: View {
                     .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isCelebrating)
             }
             .buttonStyle(.plain)
-            .disabled(demo)
+            .disabled(store.demo)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(habit.name)
@@ -218,49 +220,13 @@ struct HabitsView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isCelebrating)
     }
 
-    private func load() async {
-        loading = true
-        withAnimation { error = "" }
-        do {
-            let r = try await state.api.getHabits()
-            withAnimation { habits = r.items }
-            demo = r.demo
-        } catch {
-            if !error.isCancellation { withAnimation { self.error = lang.s("life.habits.loadError") } }
-        }
-        loading = false
-    }
-
-    private func checkin(_ habit: HabitItem) {
-        guard !habit.doneToday else { return }
-        // نشغّل الاحتفال فورًا (قبل ما يرجع السيرفر) ليكون الإحساس فوري.
+    /// احتفال السلسلة (واجهة بحتة) — يضيء لحظة تسجيل الحضور ثم يهدأ.
+    private func celebrate(_ id: String) {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-            celebratingID = habit.id
+            celebratingID = id
         }
-        // نطفّي الاحتفال بعد لحظة لطيفة.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-            withAnimation { if celebratingID == habit.id { celebratingID = nil } }
-        }
-        Task {
-            do {
-                try await state.api.checkinHabit(name: habit.name)
-                await load()
-            } catch {
-                withAnimation { self.error = lang.s("life.habits.checkinError") }
-            }
-        }
-    }
-
-    // تراجع عن تسجيل حضور اليوم (لو انضغط بالغلط).
-    private func uncheckin(_ habit: HabitItem) {
-        guard habit.doneToday else { return }
-        Task {
-            do {
-                try await state.api.uncheckinHabit(id: habit.id)
-                await load()
-            } catch {
-                withAnimation { self.error = lang.s("life.habits.checkinError") }
-            }
+            withAnimation { if celebratingID == id { celebratingID = nil } }
         }
     }
 }
@@ -357,11 +323,8 @@ private struct AddHabitSheet: View {
 struct ExpensesView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    @State private var items: [ExpenseItem] = []
-    @State private var summary = ExpensesSummary(total: 0, count: 0)
-    @State private var loading = false
-    @State private var error = ""
-    @State private var demo = false
+    /// مصدر الحقيقة للمصاريف (يملك البيانات + الجلب + الإضافة، مستقل عن الشاشة).
+    @StateObject private var store = ExpensesStore()
     @State private var showAdd = false
     /// المجموع المعروض — نحرّكه نحو القيمة الحقيقية ليبان "عدّاد حيّ".
     @State private var animatedTotal: Double = 0
@@ -371,10 +334,10 @@ struct ExpensesView: View {
             SandyBackground()
 
             VStack(spacing: 0) {
-                if demo { DemoBanner() }
+                if store.demo { DemoBanner() }
 
-                if !error.isEmpty {
-                    SandyNotice(error, kind: .gentleWarning)
+                if !store.error.isEmpty {
+                    SandyNotice(store.error, kind: .gentleWarning)
                         .padding(.horizontal, Theme.Spacing.md)
                         .padding(.top, Theme.Spacing.sm)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -385,10 +348,10 @@ struct ExpensesView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.vertical, Theme.Spacing.md)
-                .disabled(demo)
-                .opacity(demo ? 0.5 : 1)
+                .disabled(store.demo)
+                .opacity(store.demo ? 0.5 : 1)
 
-                if loading && items.isEmpty {
+                if store.loading && store.items.isEmpty {
                     Spacer()
                     ProgressView()
                     Spacer()
@@ -396,12 +359,12 @@ struct ExpensesView: View {
                     ScrollView {
                         VStack(spacing: Theme.Spacing.sm) {
                             summaryCard
-                            if items.isEmpty {
+                            if store.items.isEmpty {
                                 LivelyEmptyState(
                                     line: lang.s("life.expenses.empty"),
                                     mood: .soft)
                             } else {
-                                ForEach(items) { item in
+                                ForEach(store.items) { item in
                                     expenseRow(item)
                                         .transition(.asymmetric(
                                             insertion: .move(edge: .top).combined(with: .opacity),
@@ -410,7 +373,7 @@ struct ExpensesView: View {
                             }
                         }
                         .padding(Theme.Spacing.md)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: items.count)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.items.count)
                     }
                 }
             }
@@ -418,15 +381,14 @@ struct ExpensesView: View {
         .navigationTitle(lang.s("life.expenses"))
         .sheet(isPresented: $showAdd) {
             AddExpenseSheet { amount, note, category in
-                try await state.api.addExpense(amount: amount, note: note, category: category)
-                await load()
+                try await store.add(api: state.api, amount: amount, note: note, category: category)
             }
         }
-        .task { await load() }
-        .refreshable { await load() }
+        .task { await store.load(api: state.api) }
+        .refreshable { await store.load(api: state.api) }
         // عدّاد المجموع المتحرّك: كل ما تتغيّر القيمة الحقيقية، ننزلق إليها بنعومة.
         // نستعمل صيغة onChange ذات الباراميتر الواحد (iOS 16) كما ببقية المشروع.
-        .onChange(of: summary.total) { newValue in
+        .onChange(of: store.summary.total) { newValue in
             withAnimation(.easeOut(duration: 0.6)) { animatedTotal = newValue }
         }
     }
@@ -448,7 +410,7 @@ struct ExpensesView: View {
             VStack(spacing: 2) {
                 Image(systemName: "list.bullet.rectangle")
                     .foregroundColor(Theme.Colors.accent)
-                Text(String(format: lang.s("life.expenses.count"), "\(summary.count)"))
+                Text(String(format: lang.s("life.expenses.count"), "\(store.summary.count)"))
                     .font(.caption2)
                     .foregroundColor(Theme.Colors.secondaryText)
             }
@@ -504,19 +466,6 @@ struct ExpensesView: View {
         }
     }
 
-    private func load() async {
-        loading = true
-        withAnimation { error = "" }
-        do {
-            let r = try await state.api.getExpenses()
-            withAnimation { items = r.items }
-            summary = r.summary
-            demo = r.demo
-        } catch {
-            if !error.isCancellation { withAnimation { self.error = lang.s("life.expenses.loadError") } }
-        }
-        loading = false
-    }
 }
 
 /// شيت إضافة مصروف: مبلغ (رقمي) + تصنيف (Picker بتصنيفات عربية شائعة) + ملاحظة.
@@ -615,10 +564,8 @@ private struct AddExpenseSheet: View {
 struct JournalView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    @State private var entries: [JournalEntry] = []
-    @State private var loading = false
-    @State private var error = ""
-    @State private var demo = false
+    /// مصدر الحقيقة لليوميات (يملك البيانات + الجلب + الإضافة، مستقل عن الشاشة).
+    @StateObject private var store = JournalStore()
     @State private var showAdd = false
 
     var body: some View {
@@ -626,10 +573,10 @@ struct JournalView: View {
             SandyBackground()
 
             VStack(spacing: 0) {
-                if demo { DemoBanner() }
+                if store.demo { DemoBanner() }
 
-                if !error.isEmpty {
-                    SandyNotice(error, kind: .gentleWarning)
+                if !store.error.isEmpty {
+                    SandyNotice(store.error, kind: .gentleWarning)
                         .padding(.horizontal, Theme.Spacing.md)
                         .padding(.top, Theme.Spacing.sm)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -640,14 +587,14 @@ struct JournalView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.vertical, Theme.Spacing.md)
-                .disabled(demo)
-                .opacity(demo ? 0.5 : 1)
+                .disabled(store.demo)
+                .opacity(store.demo ? 0.5 : 1)
 
-                if loading && entries.isEmpty {
+                if store.loading && store.entries.isEmpty {
                     Spacer()
                     ProgressView()
                     Spacer()
-                } else if entries.isEmpty {
+                } else if store.entries.isEmpty {
                     LivelyEmptyState(
                         line: lang.s("life.journal.empty"),
                         mood: .happy)
@@ -655,7 +602,7 @@ struct JournalView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: Theme.Spacing.sm) {
-                            ForEach(entries) { entry in
+                            ForEach(store.entries) { entry in
                                 entryRow(entry)
                                     .transition(.asymmetric(
                                         insertion: .move(edge: .top).combined(with: .opacity),
@@ -663,7 +610,7 @@ struct JournalView: View {
                             }
                         }
                         .padding(Theme.Spacing.md)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: entries.count)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.entries.count)
                     }
                 }
             }
@@ -671,12 +618,11 @@ struct JournalView: View {
         .navigationTitle(lang.s("life.journal"))
         .sheet(isPresented: $showAdd) {
             AddJournalSheet { text in
-                try await state.api.addJournalEntry(text: text)
-                await load()
+                try await store.add(api: state.api, text: text)
             }
         }
-        .task { await load() }
-        .refreshable { await load() }
+        .task { await store.load(api: state.api) }
+        .refreshable { await store.load(api: state.api) }
     }
 
     @ViewBuilder
@@ -701,18 +647,6 @@ struct JournalView: View {
         .sandyCard()
     }
 
-    private func load() async {
-        loading = true
-        withAnimation { error = "" }
-        do {
-            let r = try await state.api.getJournal()
-            withAnimation { entries = r.items }
-            demo = r.demo
-        } catch {
-            if !error.isCancellation { withAnimation { self.error = lang.s("life.journal.loadError") } }
-        }
-        loading = false
-    }
 }
 
 /// شيت إضافة خاطرة: محرّر متعدّد الأسطر مريح + عدّاد أحرف خفيف.
@@ -807,5 +741,133 @@ private struct LivelyEmptyState: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Spacing.xl)
         .onAppear { bob = true }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: - الستورات (مصدر الحقيقة لكل قسم)
+//
+// كل ستور يملك بياناته + الجلب + التعديلات، مستقل عن دورة حياة الشاشة. الجلب
+// بمهمة مملوكة للستور، فإلغاء إيماءة السحب/التنقّل ما يلغيه — والجديد يبيّن دايماً.
+
+@MainActor
+final class HabitsStore: ObservableObject {
+    @Published var habits: [HabitItem] = []
+    @Published var loading = false
+    @Published var demo = false
+    @Published var error = ""
+
+    private var loadTask: Task<Void, Never>?
+
+    func load(api: APIClient) async {
+        loadTask?.cancel()
+        let task = Task { @MainActor in
+            loading = true
+            defer { loading = false }
+            do {
+                let r = try await api.getHabits()
+                withAnimation { habits = r.items }
+                demo = r.demo
+            } catch {
+                if !error.isCancellation { withAnimation { self.error = LanguageManager.shared.s("life.habits.loadError") } }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    func add(api: APIClient, name: String) async throws {
+        try await api.addHabit(name: name)
+        await load(api: api)
+    }
+
+    func checkin(api: APIClient, habit: HabitItem) {
+        guard !habit.doneToday else { return }
+        Task { @MainActor in
+            do {
+                try await api.checkinHabit(name: habit.name)
+                await load(api: api)
+            } catch {
+                withAnimation { self.error = LanguageManager.shared.s("life.habits.checkinError") }
+            }
+        }
+    }
+
+    func uncheckin(api: APIClient, habit: HabitItem) {
+        guard habit.doneToday else { return }
+        Task { @MainActor in
+            do {
+                try await api.uncheckinHabit(id: habit.id)
+                await load(api: api)
+            } catch {
+                withAnimation { self.error = LanguageManager.shared.s("life.habits.checkinError") }
+            }
+        }
+    }
+}
+
+@MainActor
+final class ExpensesStore: ObservableObject {
+    @Published var items: [ExpenseItem] = []
+    @Published var summary = ExpensesSummary(total: 0, count: 0)
+    @Published var loading = false
+    @Published var demo = false
+    @Published var error = ""
+
+    private var loadTask: Task<Void, Never>?
+
+    func load(api: APIClient) async {
+        loadTask?.cancel()
+        let task = Task { @MainActor in
+            loading = true
+            defer { loading = false }
+            do {
+                let r = try await api.getExpenses()
+                withAnimation { items = r.items }
+                summary = r.summary
+                demo = r.demo
+            } catch {
+                if !error.isCancellation { withAnimation { self.error = LanguageManager.shared.s("life.expenses.loadError") } }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    func add(api: APIClient, amount: Double, note: String, category: String) async throws {
+        try await api.addExpense(amount: amount, note: note, category: category)
+        await load(api: api)
+    }
+}
+
+@MainActor
+final class JournalStore: ObservableObject {
+    @Published var entries: [JournalEntry] = []
+    @Published var loading = false
+    @Published var demo = false
+    @Published var error = ""
+
+    private var loadTask: Task<Void, Never>?
+
+    func load(api: APIClient) async {
+        loadTask?.cancel()
+        let task = Task { @MainActor in
+            loading = true
+            defer { loading = false }
+            do {
+                let r = try await api.getJournal()
+                withAnimation { entries = r.items }
+                demo = r.demo
+            } catch {
+                if !error.isCancellation { withAnimation { self.error = LanguageManager.shared.s("life.journal.loadError") } }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    func add(api: APIClient, text: String) async throws {
+        try await api.addJournalEntry(text: text)
+        await load(api: api)
     }
 }

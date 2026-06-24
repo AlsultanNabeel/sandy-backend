@@ -6,27 +6,25 @@ struct TasksView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
 
-    @State private var tasks: [TaskItem] = []
-    @State private var loading = false
-    @State private var demo = false
+    /// مصدر الحقيقة للمهام: يملك البيانات + الجلب + التعديلات، مستقل عن دورة حياة
+    /// الشاشة — فالسحب/التنقّل ما يلغي الجلب، والجديد يبيّن دايماً.
+    @StateObject private var store = TasksStore()
+
     @State private var showAddSheet = false
     /// false = النشطة، true = المكتملة.
     @State private var showCompleted = false
-
-    /// رسالة خطأ ودّية بصوت ساندي (فاضية = ما في خطأ).
-    @State private var noticeText = ""
 
     var body: some View {
         ZStack {
             SandyBackground()
 
             VStack(spacing: 0) {
-                if demo { DemoBanner() }
+                if store.demo { DemoBanner() }
 
                 filterBar
 
-                if !noticeText.isEmpty {
-                    SandyNotice(noticeText, kind: .gentleWarning)
+                if !store.notice.isEmpty {
+                    SandyNotice(store.notice, kind: .gentleWarning)
                         .padding(.horizontal, Theme.Spacing.md)
                         .padding(.top, Theme.Spacing.sm)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -41,10 +39,10 @@ struct TasksView: View {
                 addButton
             }
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: tasks.map(\.id))
-        .animation(.easeInOut(duration: 0.25), value: noticeText)
-        .task { await load() }
-        .refreshable { await load() }
+        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.tasks.map(\.id))
+        .animation(.easeInOut(duration: 0.25), value: store.notice)
+        .task { await store.load(api: state.api, completed: showCompleted) }
+        .refreshable { await store.load(api: state.api, completed: showCompleted) }
         .sheet(isPresented: $showAddSheet) {
             AddTaskSheet { text, due, note, priority in
                 await submit(text: text, due: due, note: note, priority: priority)
@@ -63,7 +61,7 @@ struct TasksView: View {
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.top, Theme.Spacing.sm)
         .onChange(of: showCompleted) { _ in
-            Task { await load() }
+            Task { await store.load(api: state.api, completed: showCompleted) }
         }
     }
 
@@ -71,15 +69,15 @@ struct TasksView: View {
 
     @ViewBuilder
     private var content: some View {
-        if loading && tasks.isEmpty {
+        if store.loading && store.tasks.isEmpty {
             loadingState
-        } else if tasks.isEmpty {
+        } else if store.tasks.isEmpty {
             emptyState
         } else {
             ScrollView {
                 VStack(spacing: Theme.Spacing.sm) {
-                    ForEach(tasks) { task in
-                        TaskRow(task: task) { toggle(task) }
+                    ForEach(store.tasks) { task in
+                        TaskRow(task: task) { store.toggle(api: state.api, task: task) }
                             .transition(
                                 .asymmetric(
                                     insertion: .scale(scale: 0.92).combined(with: .opacity),
@@ -123,7 +121,7 @@ struct TasksView: View {
             if !showCompleted {
                 SandyButton(title: lang.s("tasks.add"),
                             systemImage: "plus.circle.fill") {
-                    noticeText = ""
+                    store.notice = ""
                     showAddSheet = true
                 }
             }
@@ -139,71 +137,25 @@ struct TasksView: View {
         SandyButton(title: lang.s("tasks.add"),
                     systemImage: "plus.circle.fill",
                     style: .secondary) {
-            noticeText = ""
+            store.notice = ""
             showAddSheet = true
         }
     }
 
     // MARK: - البيانات
 
-    private func load() async {
-        loading = true
-        withAnimation { noticeText = "" }
-        do {
-            let r = try await state.api.getTasks(completed: showCompleted)
-            tasks = r.items
-            demo = r.demo
-        } catch {
-            if !error.isCancellation { withAnimation { noticeText = lang.s("tasks.errorLoad") } }
-        }
-        loading = false
-    }
-
-    /// إرسال مهمة جديدة من الورقة. الموعد يُرسَل ISO فقط لو المستخدم فعّله.
-    /// نرجّع Bool: نجاح = نقفل الورقة، فشل = نُبقيها ونعرض تنبيه ودّي.
+    /// إرسال مهمة جديدة من الورقة. الموعد يُنسّق ISO هون؛ باقي المنطق (إضافة +
+    /// إعادة جلب) بالستور. نرجّع Bool: نجاح = نقفل الورقة، فشل = نُبقيها.
     private func submit(text: String,
                         due: Date?,
                         note: String,
                         priority: String) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-
         let dueISO = due.map { Self.iso.string(from: $0) } ?? ""
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        do {
-            try await state.api.addTask(text: trimmed,
-                                        due: dueISO,
-                                        note: trimmedNote.isEmpty ? nil : trimmedNote,
-                                        priority: priority)
-            withAnimation { noticeText = "" }
-            await load()
-            return true
-        } catch {
-            withAnimation { noticeText = lang.s("tasks.errorAdd") }
-            return false
-        }
-    }
-
-    /// تبديل حالة الإنجاز: تحديث متفائل فوري ثم مصالحة مع الباك-إند.
-    private func toggle(_ task: TaskItem) {
-        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        let target = !task.done
-        // تحديث متفائل (يحرّك الـ check فورًا).
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
-            tasks[idx].done = target
-        }
-        Task {
-            do {
-                try await state.api.setTaskDone(id: task.id, done: target)
-            } catch {
-                // مصالحة: نرجّع الحالة ونعتذر بلطف.
-                if let i = tasks.firstIndex(where: { $0.id == task.id }) {
-                    withAnimation { tasks[i].done = !target }
-                }
-                withAnimation { noticeText = lang.s("tasks.errorToggle") }
-            }
-        }
+        return await store.add(api: state.api, text: trimmed, due: dueISO,
+                               note: trimmedNote.isEmpty ? nil : trimmedNote, priority: priority)
     }
 
     // مُنسّق ISO8601 موحّد للموعد المُرسَل للباك-إند.
@@ -212,6 +164,70 @@ struct TasksView: View {
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
+}
+
+// MARK: - الستور (مصدر الحقيقة)
+
+/// يملك مهام المستخدم والجلب والتعديلات، منفصل عن دورة حياة الشاشة. مفتاح الحل:
+/// الجلب بيشتغل بمهمة **مملوكة للستور** (`loadTask`)، فلمّا إيماءة السحب/التنقّل
+/// تنتهي وتلغي إطار الواجهة، الجلب بيكمّل ويحدّث `tasks` — والجديد يبيّن دايماً.
+/// هاي معمارية "مصدر حقيقة واحد"، نفس نمط التطبيقات الكبيرة.
+@MainActor
+final class TasksStore: ObservableObject {
+    @Published var tasks: [TaskItem] = []
+    @Published var loading = false
+    @Published var demo = false
+    /// رسالة ودّية بصوت ساندي (فاضية = ما في خطأ).
+    @Published var notice = ""
+
+    private var loadTask: Task<Void, Never>?
+
+    /// يبدأ جلباً مملوكاً للستور وينتظره — يصلح للـ `.task` و`.refreshable` معاً.
+    /// لو انلغى انتظار الواجهة، المهمة المملوكة بتكمّل وبتحدّث الحالة.
+    func load(api: APIClient, completed: Bool) async {
+        loadTask?.cancel()
+        let task = Task { @MainActor in
+            loading = true
+            defer { loading = false }
+            do {
+                let r = try await api.getTasks(completed: completed)
+                tasks = r.items
+                demo = r.demo
+            } catch {
+                if !error.isCancellation { notice = LanguageManager.shared.s("tasks.errorLoad") }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    /// إضافة مهمة ثم إعادة جلب. يرجّع نجاح/فشل لتقرّر الورقة تتقفل.
+    func add(api: APIClient, text: String, due: String, note: String?, priority: String) async -> Bool {
+        do {
+            try await api.addTask(text: text, due: due, note: note, priority: priority)
+            notice = ""
+            await load(api: api, completed: false)
+            return true
+        } catch {
+            notice = LanguageManager.shared.s("tasks.errorAdd")
+            return false
+        }
+    }
+
+    /// تبديل الإنجاز بتحديث متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
+    func toggle(api: APIClient, task: TaskItem) {
+        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        let target = !task.done
+        tasks[idx].done = target
+        Task { @MainActor in
+            do {
+                try await api.setTaskDone(id: task.id, done: target)
+            } catch {
+                if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i].done = !target }
+                notice = LanguageManager.shared.s("tasks.errorToggle")
+            }
+        }
+    }
 }
 
 // MARK: - صف المهمة
