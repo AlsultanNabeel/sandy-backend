@@ -33,13 +33,11 @@ frontend/
 # Personal photos converted to RGB565 — regenerate via tools/photo_to_rgb565.py
 sandy/me_photo.h
 sandy/*_photo.h
-Sandy.paln.md
 sandy_camera_config.json
 sandy_local.py
 sandy_config.py
 test_gemini_tts.py
 tts_samples/
-لكي لا ننسى.txt
 # ══════════════════════════════════════════════════════════════════════════════
 # 🗃️ ذاكرة وقواعد بيانات محلية
 # ══════════════════════════════════════════════════════════════════════════════
@@ -85,8 +83,6 @@ __MACOSX/
 *.bak
 *.tmp
 *.zip
-vscode-cli.tar.gz
-code
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 🤖 ESP32 / Hardware
@@ -97,10 +93,6 @@ wake_word_training/
 wake_word_model.pkl
 .python_packages/
 refresh_google_token.py
-
-
-
-merge_for_ai.py
 
 # Claude Code local state (settings, scheduled tasks, etc.)
 .claude/
