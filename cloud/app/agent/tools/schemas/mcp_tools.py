@@ -31,9 +31,14 @@ def memory_store(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
         return {"handled": True, "reply": "دوّنتها 📝"}  # graceful in tests
 
     from datetime import datetime, timezone
-    chat_id = str((ctx.state or {}).get("chat_id", "default"))
+    from app.utils.user_profiles import current_user_id
+
+    uid = current_user_id()
+    if not uid:
+        # fail-closed: no tenant in context → never write to a shared bucket.
+        return {"handled": True, "reply": "دوّنتها 📝"}
     coll.insert_one({
-        "chat_id": chat_id,
+        "chat_id": uid,
         "label": str(args.get("label") or "user_fact").strip(),
         "content": content,
         "created_at": datetime.now(timezone.utc),
@@ -50,11 +55,16 @@ def memory_recall(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
     if coll is None:
         return {"handled": True, "reply": "ما عندي ذكريات محفوظة بعد."}
 
-    chat_id = str((ctx.state or {}).get("chat_id", "default"))
+    from app.utils.user_profiles import current_user_id
+
+    uid = current_user_id()
+    if not uid:
+        # fail-closed: no tenant → never read a shared bucket.
+        return {"handled": True, "reply": "ما عندي ذكريات محفوظة بعد."}
 
     # Try regex match on content first
     docs = list(coll.find(
-        {"chat_id": chat_id, "content": {"$regex": query, "$options": "i"}},
+        {"chat_id": uid, "content": {"$regex": query, "$options": "i"}},
         {"_id": 0, "content": 1},
         limit=10,
     ))
@@ -62,7 +72,7 @@ def memory_recall(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
     # Broad query (e.g. "شو تعرفيه عني") → return all
     if not docs:
         docs = list(coll.find(
-            {"chat_id": chat_id},
+            {"chat_id": uid},
             {"_id": 0, "content": 1},
             sort=[("created_at", -1)],
             limit=20,

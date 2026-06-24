@@ -57,6 +57,17 @@ VALID_DEVICES = frozenset(_DEVICE_TOPIC)
 _VALID_COLOR = {"warm", "cool", "white", "red", "green", "blue", "purple", "amber"}
 
 
+def _caller_owns_room() -> bool:
+    """The room node is the owner's physical hardware. Actuation is enforced at
+    THIS boundary — not at call sites — so no path can drive the owner's room
+    without being the owner. Transitional until per-tenant device ownership lands
+    (Phase 5); then this becomes ``tenant_owns_device(current_tenant, "room")``.
+    """
+    from app.utils.user_profiles import current_user_id, is_owner_chat_id
+
+    return is_owner_chat_id(current_user_id())
+
+
 def normalize_action(device: str, value: str) -> Optional[str]:
     """Return a clean payload for (device, value), or None if invalid.
 
@@ -141,7 +152,11 @@ class RoomDeviceClient:
             return False
 
     def send(self, device: str, value: str) -> bool:
-        """Send one normalized command. Returns False if invalid or offline."""
+        """Send one normalized command. Returns False if invalid, offline, or the
+        caller doesn't own the room (only the owner may drive his hardware)."""
+        if not _caller_owns_room():
+            logger.warning("[room_device] actuation refused for non-owner caller")
+            return False
         payload = normalize_action(device, value)
         if payload is None:
             return False
@@ -149,7 +164,11 @@ class RoomDeviceClient:
         return self._publish(topic, payload)
 
     def apply_actions(self, actions: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Send a list of [{device, value}]. Returns how many reached the broker."""
+        """Send a list of [{device, value}]. Returns how many reached the broker.
+        Refuses entirely (sent=[]) when the caller isn't the room's owner."""
+        if not _caller_owns_room():
+            logger.warning("[room_device] apply_actions refused for non-owner caller")
+            return {"available": self.available, "sent": [], "skipped": list(actions or [])}
         sent, skipped = [], []
         for a in actions or []:
             dev, val = a.get("device", ""), a.get("value", "")
