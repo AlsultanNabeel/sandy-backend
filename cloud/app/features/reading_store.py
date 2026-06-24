@@ -16,6 +16,10 @@ Collections:
 الدورة: «بديت أقرا» → جلسة نشطة (وحدة بس بكل وقت) → «توقف مؤقت» يجمّد
 العداد → «كمل» يرجّعه → «وقفت» يسكّر الجلسة ويسأل «وين وصلت؟» — صفحة
 التوقف بتحدّث الكتاب وبتنحسب صفحات الجلسة ومدتها.
+
+عزل المستأجرين مفروض من طبقة scoped(): _books()/_sess()/_meta() ترجع None لو ما
+في مستأجر. خانة الهدف (goal) بتضمّن معرّف المستأجر في الـ _id، فبنحتاج
+current_user_id() لبناء المفتاح فقط — والعزل نفسه من scoped().
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.utils.tenant_db import scoped
 from app.utils.user_profiles import current_user_id
 
 _BOOKS = "sandy_books"
@@ -50,6 +55,21 @@ def init_reading_store(mongo_db) -> None:
         print(f"[ReadingStore] index skipped: {e}")
 
 
+def _books():
+    """Tenant-scoped books collection, or None when no db / no active tenant."""
+    return scoped(_mongo_db, _BOOKS)
+
+
+def _sess():
+    """Tenant-scoped reading-sessions collection, or None when no db / no tenant."""
+    return scoped(_mongo_db, _SESS)
+
+
+def _meta():
+    """Tenant-scoped reading-meta collection, or None when no db / no tenant."""
+    return scoped(_mongo_db, _META)
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -60,15 +80,16 @@ def _aware(dt):
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
-def _find_book(title: str, uid: str) -> Optional[Dict[str, Any]]:
+def _find_book(title: str) -> Optional[Dict[str, Any]]:
     tl = str(title or "").strip().lower()
-    if not tl or _mongo_db is None:
+    coll = _books()
+    if not tl or coll is None:
         return None
     # تطابق كامل أول، بعدين احتواء
-    for d in _mongo_db[_BOOKS].find({"user_id": uid}):
+    for d in coll.find({}):
         if (d.get("title", "") or "").strip().lower() == tl:
             return d
-    for d in _mongo_db[_BOOKS].find({"user_id": uid}):
+    for d in coll.find({}):
         if tl in (d.get("title", "") or "").lower():
             return d
     return None
@@ -86,22 +107,19 @@ def add_book(
     category: str = "",
     fmt: str = "",
 ) -> Dict[str, Any]:
-    uid = current_user_id()
-    if uid is None:
+    coll = _books()
+    if coll is None:
         return {"ok": False, "error": "unauthorized"}
-    if _mongo_db is None:
-        return {"ok": False}
     title = str(title or "").strip()
     if not title:
         return {"ok": False, "error": "empty_title"}
-    existing = _find_book(title, uid)
+    existing = _find_book(title)
     if existing and (existing.get("title", "") or "").strip().lower() == title.lower():
         return {"ok": False, "error": "exists"}
     status = status if status in {"reading", "done", "wishlist"} else "reading"
     fmt = fmt if fmt in _FORMATS else ""
     doc = {
         "_id": uuid.uuid4().hex,
-        "user_id": uid,
         "title": title,
         "author": str(author or "").strip(),
         "category": str(category or "").strip(),
@@ -117,7 +135,7 @@ def add_book(
         "created_at": _now(),
         "finished_at": _now() if status == "done" else None,
     }
-    _mongo_db[_BOOKS].insert_one(doc)
+    coll.insert_one(doc)
     return {"ok": True, "id": doc["_id"], "title": title}
 
 
@@ -131,10 +149,10 @@ def set_book_meta(
     current_page: Optional[int] = None,
 ) -> Dict[str, Any]:
     """تحديث جزئي لميتاداتا الكتاب — أي حقل None بينحفظ زي ما هو."""
-    uid = current_user_id()
-    if uid is None:
+    coll = _books()
+    if coll is None:
         return {"ok": False, "error": "unauthorized"}
-    b = _find_book(title, uid)
+    b = _find_book(title)
     if not b:
         return {"ok": False, "error": "not_found"}
     updates: Dict[str, Any] = {}
@@ -152,21 +170,21 @@ def set_book_meta(
         updates["current_page"] = max(0, int(current_page))
     if not updates:
         return {"ok": False, "error": "nothing_to_update"}
-    _mongo_db[_BOOKS].update_one({"_id": b["_id"], "user_id": uid}, {"$set": updates})
+    coll.update_one({"_id": b["_id"]}, {"$set": updates})
     return {"ok": True, "title": b.get("title", ""), "updated": list(updates)}
 
 
 def add_note(title: str, text: str) -> Dict[str, Any]:
     """ملاحظة حرة على كتاب."""
-    uid = current_user_id()
-    if uid is None:
+    coll = _books()
+    if coll is None:
         return {"ok": False}
-    b = _find_book(title, uid)
+    b = _find_book(title)
     text = str(text or "").strip()
     if not b or not text:
         return {"ok": False}
-    _mongo_db[_BOOKS].update_one(
-        {"_id": b["_id"], "user_id": uid},
+    coll.update_one(
+        {"_id": b["_id"]},
         {"$push": {"notes": {"text": text, "at": _now()}}},
     )
     return {"ok": True, "title": b.get("title", "")}
@@ -174,25 +192,25 @@ def add_note(title: str, text: str) -> Dict[str, Any]:
 
 def add_quote(title: str, text: str, page: int = 0) -> Dict[str, Any]:
     """اقتباس من كتاب، مع رقم صفحة اختياري."""
-    uid = current_user_id()
-    if uid is None:
+    coll = _books()
+    if coll is None:
         return {"ok": False}
-    b = _find_book(title, uid)
+    b = _find_book(title)
     text = str(text or "").strip()
     if not b or not text:
         return {"ok": False}
-    _mongo_db[_BOOKS].update_one(
-        {"_id": b["_id"], "user_id": uid},
+    coll.update_one(
+        {"_id": b["_id"]},
         {"$push": {"quotes": {"text": text, "page": max(0, int(page or 0)), "at": _now()}}},
     )
     return {"ok": True, "title": b.get("title", "")}
 
 
 def set_book_status(title: str, status: str) -> Dict[str, Any]:
-    uid = current_user_id()
-    if uid is None:
+    coll = _books()
+    if coll is None:
         return {"ok": False}
-    b = _find_book(title, uid)
+    b = _find_book(title)
     if not b or status not in {"reading", "done", "wishlist"}:
         return {"ok": False}
     updates: Dict[str, Any] = {"status": status}
@@ -202,35 +220,33 @@ def set_book_status(title: str, status: str) -> Dict[str, Any]:
             updates["current_page"] = b["total_pages"]
     elif status == "reading" and not b.get("started_at"):
         updates["started_at"] = _now()
-    _mongo_db[_BOOKS].update_one({"_id": b["_id"], "user_id": uid}, {"$set": updates})
+    coll.update_one({"_id": b["_id"]}, {"$set": updates})
     return {"ok": True, "title": b.get("title", "")}
 
 
 def set_book_cover(title: str, cover_url: str) -> bool:
-    uid = current_user_id()
-    if uid is None:
+    coll = _books()
+    if coll is None:
         return False
-    b = _find_book(title, uid)
+    b = _find_book(title)
     if not b:
         return False
-    _mongo_db[_BOOKS].update_one(
-        {"_id": b["_id"], "user_id": uid},
+    coll.update_one(
+        {"_id": b["_id"]},
         {"$set": {"cover_url": str(cover_url or "").strip()}},
     )
     return True
 
 
 def list_books(status: str = "") -> List[Dict[str, Any]]:
-    uid = current_user_id()
-    if uid is None:
+    coll = _books()
+    if coll is None:
         return []
-    if _mongo_db is None:
-        return []
-    q: Dict[str, Any] = {"user_id": uid}
+    q: Dict[str, Any] = {}
     if status in {"reading", "done", "wishlist"}:
         q["status"] = status
     out = []
-    for d in _mongo_db[_BOOKS].find(q).sort("created_at", -1).limit(100):
+    for d in coll.find(q).sort("created_at", -1).limit(100):
         out.append(
             {
                 "id": d["_id"],
@@ -252,10 +268,9 @@ def list_books(status: str = "") -> List[Dict[str, Any]]:
 
 def get_book(title: str) -> Optional[Dict[str, Any]]:
     """تفاصيل كتاب كاملة مع الملاحظات والاقتباسات."""
-    uid = current_user_id()
-    if uid is None:
+    if _books() is None:
         return None
-    d = _find_book(title, uid)
+    d = _find_book(title)
     if not d:
         return None
     return {
@@ -275,39 +290,37 @@ def get_book(title: str) -> Optional[Dict[str, Any]]:
 
 
 def delete_book(title: str) -> str:
-    uid = current_user_id()
-    if uid is None:
+    books = _books()
+    sess = _sess()
+    if books is None or sess is None:
         return ""
-    b = _find_book(title, uid)
+    b = _find_book(title)
     if not b:
         return ""
-    _mongo_db[_SESS].delete_many({"book_id": b["_id"], "user_id": uid})
-    _mongo_db[_BOOKS].delete_one({"_id": b["_id"], "user_id": uid})
+    sess.delete_many({"book_id": b["_id"]})
+    books.delete_one({"_id": b["_id"]})
     return b.get("title", "")
 
 
 # ─── الجلسات ─────────────────────────────────────────────────────────────────
 
 def active_session() -> Optional[Dict[str, Any]]:
-    uid = current_user_id()
-    if uid is None or _mongo_db is None:
+    sess = _sess()
+    if sess is None:
         return None
-    return _mongo_db[_SESS].find_one(
-        {"user_id": uid, "state": {"$in": ["active", "paused"]}}
-    )
+    return sess.find_one({"state": {"$in": ["active", "paused"]}})
 
 
 def start_session(title: str = "") -> Dict[str, Any]:
     """«بديت أقرا» — يفتح جلسة عالكتاب المسمّى أو آخر كتاب قيد القراءة."""
-    uid = current_user_id()
-    if uid is None:
+    books = _books()
+    sess = _sess()
+    if books is None or sess is None:
         return {"ok": False, "error": "unauthorized"}
-    if _mongo_db is None:
-        return {"ok": False}
     if active_session():
         return {"ok": False, "error": "already_active"}
 
-    book = _find_book(title, uid) if title else None
+    book = _find_book(title) if title else None
     if book is None:
         reading = list_books(status="reading")
         if title and not book:
@@ -315,20 +328,17 @@ def start_session(title: str = "") -> Dict[str, Any]:
             r = add_book(title, status="reading")
             if not r.get("ok"):
                 return {"ok": False, "error": "no_book"}
-            book = _mongo_db[_BOOKS].find_one({"_id": r["id"], "user_id": uid})
+            book = books.find_one({"_id": r["id"]})
         elif reading:
-            book = _mongo_db[_BOOKS].find_one({"_id": reading[0]["id"], "user_id": uid})
+            book = books.find_one({"_id": reading[0]["id"]})
         else:
             return {"ok": False, "error": "no_book"}
 
     if book.get("status") != "reading":
-        _mongo_db[_BOOKS].update_one(
-            {"_id": book["_id"], "user_id": uid}, {"$set": {"status": "reading"}}
-        )
+        books.update_one({"_id": book["_id"]}, {"$set": {"status": "reading"}})
 
-    sess = {
+    session = {
         "_id": uuid.uuid4().hex,
-        "user_id": uid,
         "book_id": book["_id"],
         "started_at": _now(),
         "ended_at": None,
@@ -338,26 +348,26 @@ def start_session(title: str = "") -> Dict[str, Any]:
         "end_page": None,
         "state": "active",
     }
-    _mongo_db[_SESS].insert_one(sess)
+    sess.insert_one(session)
     return {
         "ok": True,
         "title": book.get("title", ""),
-        "start_page": sess["start_page"],
+        "start_page": session["start_page"],
     }
 
 
 def pause_session() -> Dict[str, Any]:
     """«توقف مؤقت» — يجمّد عداد الوقت بدون إغلاق الجلسة."""
-    uid = current_user_id()
-    if uid is None:
+    sess = _sess()
+    if sess is None:
         return {"ok": False, "error": "unauthorized"}
     s = active_session()
     if not s:
         return {"ok": False, "error": "no_session"}
     if s["state"] == "paused":
         return {"ok": False, "error": "already_paused"}
-    _mongo_db[_SESS].update_one(
-        {"_id": s["_id"], "user_id": uid},
+    sess.update_one(
+        {"_id": s["_id"]},
         {"$set": {"state": "paused", "paused_at": _now()}},
     )
     return {"ok": True}
@@ -365,8 +375,8 @@ def pause_session() -> Dict[str, Any]:
 
 def resume_session() -> Dict[str, Any]:
     """«كمل قراءة» — يرجّع العداد بعد التوقف المؤقت."""
-    uid = current_user_id()
-    if uid is None:
+    sess = _sess()
+    if sess is None:
         return {"ok": False, "error": "unauthorized"}
     s = active_session()
     if not s or s["state"] != "paused":
@@ -375,8 +385,8 @@ def resume_session() -> Dict[str, Any]:
     pa = _aware(s.get("paused_at"))
     if pa:
         paused_sec = int((_now() - pa).total_seconds())
-    _mongo_db[_SESS].update_one(
-        {"_id": s["_id"], "user_id": uid},
+    sess.update_one(
+        {"_id": s["_id"]},
         {
             "$set": {"state": "active", "paused_at": None},
             "$inc": {"paused_total_sec": paused_sec},
@@ -388,8 +398,9 @@ def resume_session() -> Dict[str, Any]:
 def stop_session(end_page: Optional[int] = None) -> Dict[str, Any]:
     """«وقفت» — يسكّر الجلسة. لو end_page مش معطى يرجّع needs_page=True
     (ساندي بتسأل «وين وصلت؟») والنداء التالي بمرر الصفحة."""
-    uid = current_user_id()
-    if uid is None:
+    books = _books()
+    sess = _sess()
+    if books is None or sess is None:
         return {"ok": False, "error": "unauthorized"}
     s = active_session()
     if not s:
@@ -407,8 +418,8 @@ def stop_session(end_page: Optional[int] = None) -> Dict[str, Any]:
     duration_min = max(0, int(((now - started).total_seconds() - paused_sec) / 60))
     pages = max(0, end_page - int(s.get("start_page", 0) or 0))
 
-    _mongo_db[_SESS].update_one(
-        {"_id": s["_id"], "user_id": uid},
+    sess.update_one(
+        {"_id": s["_id"]},
         {
             "$set": {
                 "state": "done",
@@ -419,15 +430,13 @@ def stop_session(end_page: Optional[int] = None) -> Dict[str, Any]:
         },
     )
 
-    book = _mongo_db[_BOOKS].find_one({"_id": s["book_id"], "user_id": uid}) or {}
+    book = books.find_one({"_id": s["book_id"]}) or {}
     updates: Dict[str, Any] = {"current_page": end_page}
     finished = bool(book.get("total_pages")) and end_page >= book["total_pages"]
     if finished:
         updates["status"] = "done"
         updates["finished_at"] = now
-    _mongo_db[_BOOKS].update_one(
-        {"_id": s["book_id"], "user_id": uid}, {"$set": updates}
-    )
+    books.update_one({"_id": s["book_id"]}, {"$set": updates})
 
     return {
         "ok": True,
@@ -442,11 +451,9 @@ def stop_session(end_page: Optional[int] = None) -> Dict[str, Any]:
 
 def reading_stats(days: int = 30) -> Dict[str, Any]:
     """{sessions, pages, minutes, pages_per_day, streak_days} عبر فترة."""
-    uid = current_user_id()
+    sess = _sess()
     empty = {"sessions": 0, "pages": 0, "minutes": 0, "pages_per_day": 0, "streak_days": 0}
-    if uid is None:
-        return empty
-    if _mongo_db is None:
+    if sess is None:
         return empty
     from datetime import timedelta
 
@@ -455,9 +462,7 @@ def reading_stats(days: int = 30) -> Dict[str, Any]:
     since = _now() - timedelta(days=max(1, days))
     sessions = pages = minutes = 0
     active_dates = set()
-    for s in _mongo_db[_SESS].find(
-        {"user_id": uid, "state": "done", "ended_at": {"$gte": since}}
-    ):
+    for s in sess.find({"state": "done", "ended_at": {"$gte": since}}):
         sessions += 1
         sp, ep = int(s.get("start_page", 0) or 0), int(s.get("end_page", 0) or 0)
         pages += max(0, ep - sp)
@@ -473,13 +478,14 @@ def reading_stats(days: int = 30) -> Dict[str, Any]:
         "pages": pages,
         "minutes": minutes,
         "pages_per_day": round(pages / len(active_dates)) if active_dates else 0,
-        "streak_days": _reading_streak(uid),
+        "streak_days": _reading_streak(),
     }
 
 
-def _reading_streak(uid: str) -> int:
+def _reading_streak() -> int:
     """عدد الأيام المتتالية (تنتهي اليوم أو أمس) اللي فيها جلسة قراءة منجزة."""
-    if _mongo_db is None:
+    sess = _sess()
+    if sess is None:
         return 0
     from datetime import timedelta
 
@@ -487,8 +493,8 @@ def _reading_streak(uid: str) -> int:
 
     since = _now() - timedelta(days=400)
     days_set = set()
-    for s in _mongo_db[_SESS].find(
-        {"user_id": uid, "state": "done", "ended_at": {"$gte": since}}, {"ended_at": 1}
+    for s in sess.find(
+        {"state": "done", "ended_at": {"$gte": since}}, {"ended_at": 1}
     ):
         en = _aware(s.get("ended_at"))
         if en:
@@ -511,11 +517,12 @@ def set_reading_goal(books_year: int = 0, pages_year: int = 0) -> Dict[str, Any]
     uid = current_user_id()
     if uid is None:
         return {"ok": False}
-    if _mongo_db is None:
+    meta = _meta()
+    if meta is None:
         return {"ok": False}
     by, py = max(0, int(books_year or 0)), max(0, int(pages_year or 0))
-    _mongo_db[_META].update_one(
-        {"_id": f"goal:{uid}", "user_id": uid},
+    meta.update_one(
+        {"_id": f"goal:{uid}"},
         {"$set": {"user_id": uid, "books_year": by, "pages_year": py}},
         upsert=True,
     )
@@ -525,22 +532,21 @@ def set_reading_goal(books_year: int = 0, pages_year: int = 0) -> Dict[str, Any]
 def goal_progress() -> Dict[str, Any]:
     """تقدّم هدف السنة الحالية: كتب منجزة + صفحات مقروءة مقابل الهدف."""
     uid = current_user_id()
-    if uid is None:
-        return {"books_year": 0, "pages_year": 0, "books_done": 0, "pages_read": 0}
-    if _mongo_db is None:
+    books = _books()
+    sess = _sess()
+    meta = _meta()
+    if uid is None or books is None or sess is None or meta is None:
         return {"books_year": 0, "pages_year": 0, "books_done": 0, "pages_read": 0}
     from app.utils.time import USER_TZ
 
-    goal = _mongo_db[_META].find_one({"_id": f"goal:{uid}", "user_id": uid}) or {}
+    goal = meta.find_one({"_id": f"goal:{uid}"}) or {}
     now_local = _now().astimezone(USER_TZ)
     year_start = datetime(now_local.year, 1, 1, tzinfo=USER_TZ).astimezone(timezone.utc)
-    books_done = _mongo_db[_BOOKS].count_documents(
-        {"user_id": uid, "status": "done", "finished_at": {"$gte": year_start}}
+    books_done = books.count_documents(
+        {"status": "done", "finished_at": {"$gte": year_start}}
     )
     pages_read = 0
-    for s in _mongo_db[_SESS].find(
-        {"user_id": uid, "state": "done", "ended_at": {"$gte": year_start}}
-    ):
+    for s in sess.find({"state": "done", "ended_at": {"$gte": year_start}}):
         pages_read += max(0, int(s.get("end_page", 0) or 0) - int(s.get("start_page", 0) or 0))
     return {
         "books_year": int(goal.get("books_year", 0)),

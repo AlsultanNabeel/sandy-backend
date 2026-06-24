@@ -6,6 +6,10 @@ Collection: sandy_focus
 
 التنبيه عند النهاية بمر عبر نظام التذكيرات نفسه (مخزَّن في Mongo) — يعني
 بنجو من إعادة تشغيل السيرفر، وبوصل تيليجرام بأزرار الغفوة العادية.
+
+عزل المستأجرين مفروض من طبقة scoped(): _coll()/_meta() ترجع None لو ما في
+مستأجر. خانات الميتا (sounds/goals) بتضمّن معرّف المستأجر في الـ _id لأنه
+مفرد لكل مستأجر، فبنحتاج current_user_id() لبناء المفتاح فقط — والعزل نفسه من scoped().
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import current_user_id
 
@@ -32,12 +37,23 @@ def init_focus_store(mongo_db) -> None:
         print("[FocusStore] ready")
 
 
+def _coll():
+    """Tenant-scoped focus-session collection, or None when no db / no tenant."""
+    return scoped(_mongo_db, _COLL)
+
+
+def _meta():
+    """Tenant-scoped focus-meta collection, or None when no db / no tenant."""
+    return scoped(_mongo_db, _META)
+
+
 def get_focus_sounds() -> Dict[str, str]:
     """صوت البازر المضبوط لكل حدث (start/break/end) فوق الافتراضي."""
     out = dict(_DEFAULT_SOUNDS)
     uid = current_user_id()
-    if uid is not None and _mongo_db is not None:
-        doc = _mongo_db[_META].find_one({"_id": f"sounds:{uid}", "user_id": uid}) or {}
+    meta = _meta()
+    if uid is not None and meta is not None:
+        doc = meta.find_one({"_id": f"sounds:{uid}"}) or {}
         for k in out:
             if doc.get(k):
                 out[k] = doc[k]
@@ -55,10 +71,11 @@ def set_focus_sound(event: str, melody: str) -> Dict[str, Any]:
         return {"ok": False, "error": "bad_event"}
     if not melody:
         return {"ok": False, "error": "bad_melody"}
-    if _mongo_db is None:
+    meta = _meta()
+    if meta is None:
         return {"ok": False}
-    _mongo_db[_META].update_one(
-        {"_id": f"sounds:{uid}", "user_id": uid},
+    meta.update_one(
+        {"_id": f"sounds:{uid}"},
         {"$set": {"user_id": uid, event: melody}},
         upsert=True,
     )
@@ -73,10 +90,10 @@ def _phase_total_sec(s: Dict[str, Any]) -> int:
 
 
 def active_focus() -> Optional[Dict[str, Any]]:
-    uid = current_user_id()
-    if uid is None or _mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return None
-    return _mongo_db[_COLL].find_one({"user_id": uid, "state": "active"})
+    return coll.find_one({"state": "active"})
 
 
 def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
@@ -88,10 +105,8 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
     على حالها فما يطفّي إشي وإنت لسا موجود. انتقالات الأطوار بتمر عبر
     advance_focus_phase() اللي بتنده الجدولة كل دقيقة.
     """
-    uid = current_user_id()
-    if uid is None:
-        return {"ok": False}
-    if _mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return {"ok": False}
     if active_focus():
         return {"ok": False, "error": "already_active"}
@@ -110,7 +125,6 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
 
     doc = {
         "_id": uuid.uuid4().hex,
-        "user_id": uid,
         "label": str(label or "").strip(),
         "scene": str(scene or "").strip().lower(),
         "end_scene": str(end_scene or "").strip().lower(),
@@ -123,7 +137,7 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
         "started_at": now,
         "state": "active",
     }
-    _mongo_db[_COLL].insert_one(doc)
+    coll.insert_one(doc)
     return {
         "ok": True, "focus_min": focus_min, "break_min": break_min,
         "cycles": cycles, "label": label, "scene": scene,
@@ -141,8 +155,8 @@ def _aware(dt):
 def stop_focus(completed: bool = True) -> Dict[str, Any]:
     """ينهي الجلسة. completed=True إنجاز (احتفال)، False = إلغاء.
     لو الجلسة مربوط فيها end_scene بيتطبّق عند الإنجاز."""
-    uid = current_user_id()
-    if uid is None:
+    coll = _coll()
+    if coll is None:
         return {"ok": False, "error": "no_session"}
     s = active_focus()
     if not s:
@@ -167,8 +181,8 @@ def stop_focus(completed: bool = True) -> Dict[str, Any]:
             focused_min += max(0, int((focus_min * 60 - rem) // 60))
     focused_min = max(0, focused_min)
 
-    _mongo_db[_COLL].update_one(
-        {"_id": s["_id"], "user_id": uid},
+    coll.update_one(
+        {"_id": s["_id"]},
         {"$set": {"state": "done" if completed else "cancelled",
                   "ended_at": now, "focused_min": focused_min}},
     )
@@ -195,8 +209,8 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
     في شي مستحق. عند الرجوع للتركيز بتعيد تطبيق المشهد (لأن الراحة أو مؤقت
     داخل المشهد ممكن يكون غيّر الغرفة).
     """
-    uid = current_user_id()
-    if uid is None or _mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return None
     s = active_focus()
     if not s or s.get("state") != "active":
@@ -221,8 +235,8 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
 
     # خلص تركيز وفي راحة → ادخل طور الراحة
     if phase == "focus" and break_min > 0:
-        _mongo_db[_COLL].update_one(
-            {"_id": s["_id"], "user_id": uid},
+        coll.update_one(
+            {"_id": s["_id"]},
             {"$set": {"phase": "break", "phase_ends_at": now + timedelta(minutes=break_min)}},
         )
         return {"event": "break", "break_min": break_min,
@@ -230,8 +244,8 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
 
     # خلصت راحة (أو تركيز بدون راحة) → دورة تركيز جديدة
     cycle_idx += 1
-    _mongo_db[_COLL].update_one(
-        {"_id": s["_id"], "user_id": uid},
+    coll.update_one(
+        {"_id": s["_id"]},
         {"$set": {"phase": "focus", "cycle_idx": cycle_idx,
                   "phase_ends_at": now + timedelta(minutes=focus_min)}},
     )
@@ -246,8 +260,6 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
 
 
 def focus_status() -> Dict[str, Any]:
-    if current_user_id() is None:
-        return {"active": False}
     s = active_focus()
     if not s:
         return {"active": False}
@@ -278,15 +290,13 @@ _GOAL_KEYS = ("day", "week", "month", "year")
 
 def focus_history(limit: int = 50) -> List[Dict[str, Any]]:
     """Finished sessions, newest first — the review list."""
-    uid = current_user_id()
-    if uid is None:
-        return []
-    if _mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return []
     limit = max(1, min(200, int(limit or 50)))
     out: List[Dict[str, Any]] = []
-    cur = (_mongo_db[_COLL]
-           .find({"user_id": uid, "state": {"$in": ["done", "cancelled"]}})
+    cur = (coll
+           .find({"state": {"$in": ["done", "cancelled"]}})
            .sort("started_at", -1).limit(limit))
     for d in cur:
         started = _aware(d.get("started_at"))
@@ -311,9 +321,10 @@ def get_focus_goals() -> Dict[str, int]:
     """Target focused-minutes per period (0 = no goal set)."""
     out = {k: 0 for k in _GOAL_KEYS}
     uid = current_user_id()
-    if uid is None or _mongo_db is None:
+    meta = _meta()
+    if uid is None or meta is None:
         return out
-    doc = _mongo_db[_META].find_one({"_id": f"goals:{uid}", "user_id": uid}) or {}
+    doc = meta.find_one({"_id": f"goals:{uid}"}) or {}
     for k in _GOAL_KEYS:
         try:
             out[k] = max(0, int(doc.get(k, 0) or 0))
@@ -330,14 +341,15 @@ def set_focus_goal(period: str, minutes: int) -> Dict[str, Any]:
     period = (period or "").strip().lower()
     if period not in _GOAL_KEYS:
         return {"ok": False, "error": "bad_period", "choices": list(_GOAL_KEYS)}
-    if _mongo_db is None:
+    meta = _meta()
+    if meta is None:
         return {"ok": False}
     try:
         minutes = max(0, min(100000, int(minutes)))
     except (TypeError, ValueError):
         return {"ok": False, "error": "bad_minutes"}
-    _mongo_db[_META].update_one(
-        {"_id": f"goals:{uid}", "user_id": uid},
+    meta.update_one(
+        {"_id": f"goals:{uid}"},
         {"$set": {"user_id": uid, period: minutes}},
         upsert=True,
     )
@@ -360,18 +372,15 @@ def _period_starts() -> Dict[str, datetime]:
 
 def focus_stats() -> Dict[str, Any]:
     """Focused-minute totals + session counts + goal progress per period."""
-    uid = current_user_id()
+    coll = _coll()
     empty = {k: {"minutes": 0, "sessions": 0, "goal_min": 0, "pct": 0} for k in _GOAL_KEYS}
-    if uid is None:
-        return empty
-    if _mongo_db is None:
+    if coll is None:
         return empty
     goals = get_focus_goals()
     out: Dict[str, Any] = {}
     for key, start in _period_starts().items():
-        agg = list(_mongo_db[_COLL].aggregate([
-            {"$match": {"user_id": uid,
-                        "state": {"$in": ["done", "cancelled"]},
+        agg = list(coll.aggregate([
+            {"$match": {"state": {"$in": ["done", "cancelled"]},
                         "ended_at": {"$gte": start}}},
             {"$group": {"_id": None,
                         "minutes": {"$sum": {"$ifNull": ["$focused_min", 0]}},

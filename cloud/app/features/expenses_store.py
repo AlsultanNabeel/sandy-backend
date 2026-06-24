@@ -4,6 +4,7 @@ Collection: sandy_expenses
   {_id, amount (float), note, category, at (datetime UTC)}
 
 التصنيف اختياري وبسيط؛ الملخص بجمع حسب التصنيف لو موجود.
+عزل المستأجرين مفروض من طبقة scoped(): _coll() ترجع None لو ما في مستأجر.
 """
 
 from __future__ import annotations
@@ -12,8 +13,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
-from app.utils.user_profiles import current_user_id
 
 _COLL = "sandy_expenses"
 _mongo_db = None
@@ -31,11 +32,14 @@ def init_expenses_store(mongo_db) -> None:
         print(f"[ExpensesStore] index skipped: {e}")
 
 
+def _coll():
+    """Tenant-scoped expenses collection, or None when no db / no active tenant."""
+    return scoped(_mongo_db, _COLL)
+
+
 def add_expense(amount: float, note: str = "", category: str = "") -> bool:
-    uid = current_user_id()
-    if uid is None:
-        return False
-    if _mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return False
     try:
         amount = float(amount)
@@ -43,10 +47,9 @@ def add_expense(amount: float, note: str = "", category: str = "") -> bool:
         return False
     if amount <= 0:
         return False
-    _mongo_db[_COLL].insert_one(
+    coll.insert_one(
         {
             "_id": uuid.uuid4().hex,
-            "user_id": uid,
             "amount": amount,
             "note": str(note or "").strip(),
             "category": str(category or "").strip(),
@@ -57,21 +60,14 @@ def add_expense(amount: float, note: str = "", category: str = "") -> bool:
 
 
 def list_expenses(days: int = 30, limit: int = 100) -> List[Dict[str, Any]]:
-    uid = current_user_id()
-    if uid is None:
-        return []
-    if _mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return []
     from datetime import timedelta
 
     since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
     out = []
-    for d in (
-        _mongo_db[_COLL]
-        .find({"user_id": uid, "at": {"$gte": since}})
-        .sort("at", -1)
-        .limit(limit)
-    ):
+    for d in coll.find({"at": {"$gte": since}}).sort("at", -1).limit(limit):
         at = d.get("at")
         if at and at.tzinfo is None:
             at = at.replace(tzinfo=timezone.utc)
@@ -88,15 +84,10 @@ def list_expenses(days: int = 30, limit: int = 100) -> List[Dict[str, Any]]:
 
 
 def delete_expense(expense_id: str) -> bool:
-    uid = current_user_id()
-    if uid is None:
+    coll = _coll()
+    if coll is None or not expense_id:
         return False
-    if _mongo_db is None or not expense_id:
-        return False
-    return (
-        _mongo_db[_COLL].delete_one({"_id": expense_id, "user_id": uid}).deleted_count
-        > 0
-    )
+    return coll.delete_one({"_id": expense_id}).deleted_count > 0
 
 
 def month_summary(days: int = 30) -> Dict[str, Any]:

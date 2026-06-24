@@ -246,6 +246,32 @@ code path entirely.
   `current_session`) per-tenant, and `search_relevant_facts` + persona per-tenant.
   Carried into Phase 5/6: per-user voice (`api/voice_ws.py` is owner-only today).
 
+  **Phase 3b — Isolation by construction (2026-06-24).** The fail-closed scoping
+  above was still per-query (`{"user_id": uid}` hand-written in every function) —
+  fragile: one forgotten filter is a cross-tenant leak. That class of bug actually
+  shipped (any authenticated user could drive the owner's room scenes). Two root
+  fixes landed so it can't recur:
+    1. **Enforced data layer** `cloud/app/utils/tenant_db.py` — `ScopedCollection`
+       + `scoped(db, name)`. It stamps `user_id` onto every find/insert/update/
+       delete/aggregate automatically and returns `None` when there's no tenant, so
+       each store's existing `if coll is None` guard now fails closed on "no tenant"
+       too. The 8 data stores (tasks, shopping, reminders, habits, journal,
+       expenses, focus, reading, scene) were converted to it; manual `user_id`
+       injection removed. Two deliberate exceptions keep an explicit-tenant raw
+       path (no thread-local profile): the reminder minute-poller and `usage_store`
+       rate-limiter, both scoped by an id passed in / embedded in `_id`.
+    2. **Device boundary gate** `integrations/room_device.py` — owner-ownership is
+       checked INSIDE `send()`/`apply_actions()`, not at call sites, so no path can
+       actuate the room without being the owner (transitional until per-tenant
+       device ownership in Phase 5).
+    3. **Automated isolation test** `tests/test_tenant_isolation.py` — for every
+       store + the memory tool: tenant A's data is invisible to B, B can't mutate
+       A by id, and every op fails closed with no tenant. The regression net that
+       turns this bug class into a red CI run instead of a production leak. Also
+       fixed the stale `tests/conftest.py` import of the Phase-2-deleted
+       `mcp_client`. (Pre-existing Phase-2 orphan tests that import removed modules
+       — voice/webhook/heroku/telegram — still error on collection; separate cleanup.)
+
 **Phase 4 — Close the globals.** `search_relevant_facts` becomes per-tenant.
 Persona becomes a per-tenant field (starts pleasant, evolves with use). Also make
 `agent/memory.py` (`sandy_memory`/`current_session`) per-tenant — it is the last

@@ -17,6 +17,11 @@ Return contracts mirror the old google_calendar functions so the executor
 handlers keep working with an import swap:
   add_reminder / update_reminder → {"success": bool, "error": ...}
   check_due_reminders            → "Sent N reminder(s)" or None
+
+Tenant isolation: the request-path functions use the scoped() layer (tenant from
+context). The minute poller runs as a scheduler job with NO active profile, so
+it can't use scoped() — it acts on behalf of the specific user_chat_id it is
+polling for and scopes the raw collection by that id explicitly (_raw_coll()).
 """
 
 from __future__ import annotations
@@ -25,8 +30,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
-from app.utils.user_profiles import current_user_id
 
 _COLL = "sandy_reminders"
 _mongo_db = None
@@ -56,6 +61,13 @@ def is_available() -> bool:
 
 
 def _coll():
+    """Tenant-scoped collection (request path). None when no db / no tenant."""
+    return scoped(_mongo_db, _COLL)
+
+
+def _raw_coll():
+    """Unscoped collection — ONLY for the background poller, which has no active
+    profile and scopes by the user_chat_id it polls for explicitly."""
     return _mongo_db[_COLL] if _mongo_db is not None else None
 
 
@@ -129,9 +141,6 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
 def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
     """Upcoming (not yet sent) reminders, soonest first."""
     try:
-        uid = current_user_id()
-        if uid is None:
-            return []
         coll = _coll()
         if coll is None:
             return []
@@ -139,7 +148,6 @@ def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
         docs = (
             coll.find(
                 {
-                    "user_id": uid,
                     "send_state": {"$in": ["pending", "sending", "failed"]},
                     "remind_at": {"$gte": cutoff},
                 }
@@ -170,9 +178,6 @@ def add_reminder(
     note: str = "",
 ) -> Dict[str, Any]:
     try:
-        uid = current_user_id()
-        if uid is None:
-            return {"success": False, "error": "unauthorized"}
         coll = _coll()
         if coll is None:
             return {"success": False, "error": "no_store"}
@@ -189,7 +194,6 @@ def add_reminder(
 
         doc = {
             "_id": uuid.uuid4().hex,
-            "user_id": uid,
             "text": text,
             "remind_at": _to_utc(remind_dt),
             "recurrence": str(recurrence or "").strip(),
@@ -218,9 +222,6 @@ def update_reminder(
 ) -> Dict[str, Any]:
     """Empty title/start_iso means "leave unchanged"; recurrence=None too."""
     try:
-        uid = current_user_id()
-        if uid is None:
-            return {"success": False, "error": "unauthorized"}
         coll = _coll()
         if coll is None or not reminder_id:
             return {"success": False, "error": "missing"}
@@ -242,7 +243,7 @@ def update_reminder(
         if not updates:
             return {"success": False, "error": "nothing_to_update"}
 
-        r = coll.update_one({"_id": reminder_id, "user_id": uid}, {"$set": updates})
+        r = coll.update_one({"_id": reminder_id}, {"$set": updates})
         if r.matched_count == 0:
             return {"success": False, "error": "not_found"}
         return {"success": True}
@@ -254,15 +255,12 @@ def update_reminder(
 def snooze_reminder(reminder_id: str, minutes: int = 30) -> Dict[str, Any]:
     """Push a reminder forward from now (works on sent ones too — that's the point)."""
     try:
-        uid = current_user_id()
-        if uid is None:
-            return {"success": False, "error": "unauthorized"}
         coll = _coll()
         if coll is None or not reminder_id:
             return {"success": False, "error": "missing"}
         new_dt = datetime.now(USER_TZ) + timedelta(minutes=max(1, int(minutes)))
         r = coll.update_one(
-            {"_id": reminder_id, "user_id": uid},
+            {"_id": reminder_id},
             {
                 "$set": {
                     "remind_at": _to_utc(new_dt),
@@ -282,14 +280,11 @@ def snooze_reminder(reminder_id: str, minutes: int = 30) -> Dict[str, Any]:
 def complete_reminder(reminder_id: str) -> bool:
     """Owner tapped "done" — close it out, recurring or not."""
     try:
-        uid = current_user_id()
-        if uid is None:
-            return False
         coll = _coll()
         if coll is None or not reminder_id:
             return False
         r = coll.update_one(
-            {"_id": reminder_id, "user_id": uid},
+            {"_id": reminder_id},
             {
                 "$set": {
                     "send_state": "sent",
@@ -306,13 +301,10 @@ def complete_reminder(reminder_id: str) -> bool:
 
 def delete_reminder(reminder_id: str) -> bool:
     try:
-        uid = current_user_id()
-        if uid is None:
-            return False
         coll = _coll()
         if coll is None or not reminder_id:
             return False
-        return coll.delete_one({"_id": reminder_id, "user_id": uid}).deleted_count > 0
+        return coll.delete_one({"_id": reminder_id}).deleted_count > 0
     except Exception as e:
         print(f"[RemindersStore] delete failed: {e}")
         return False
@@ -320,15 +312,10 @@ def delete_reminder(reminder_id: str) -> bool:
 
 def delete_sandy_reminder_by_task_id(task_id: str) -> int:
     try:
-        uid = current_user_id()
-        if uid is None:
-            return 0
         coll = _coll()
         if coll is None or not task_id:
             return 0
-        return coll.delete_many(
-            {"linked_task_id": task_id, "user_id": uid}
-        ).deleted_count
+        return coll.delete_many({"linked_task_id": task_id}).deleted_count
     except Exception as e:
         print(f"[RemindersStore] delete by task failed: {e}")
         return 0
@@ -336,13 +323,10 @@ def delete_sandy_reminder_by_task_id(task_id: str) -> int:
 
 def delete_all_sandy_reminders() -> int:
     try:
-        uid = current_user_id()
-        if uid is None:
-            return 0
         coll = _coll()
         if coll is None:
             return 0
-        r = coll.delete_many({"user_id": uid})
+        r = coll.delete_many({})
         print(f"[RemindersStore] deleted all reminders: {r.deleted_count}")
         return r.deleted_count
     except Exception as e:
@@ -363,11 +347,12 @@ def check_due_reminders(
     buttons) or None. Built by the runtime so this module stays free of
     telebot imports.
 
-    Runs as a scheduler job (no active profile), so it scopes by the
-    user_chat_id it's polling for — only that user's reminders are claimed.
+    Runs as a scheduler job (no active profile), so it can't use the scoped()
+    layer — it scopes the raw collection by the user_chat_id it's polling for,
+    so only that user's reminders are claimed.
     """
     try:
-        coll = _coll()
+        coll = _raw_coll()
         if coll is None or not send_message_fn or not user_chat_id:
             return None
 

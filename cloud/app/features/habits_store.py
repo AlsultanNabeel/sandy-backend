@@ -5,6 +5,7 @@ Collections:
   sandy_habit_log {_id, habit_id, date "YYYY-MM-DD"}  ← تسجيلة واحدة باليوم
 
 السلسلة (streak) تتحسب وقت القراءة من السجل — بدون عدادات تتعفن.
+عزل المستأجرين مفروض من طبقة scoped(): _habits()/_log() ترجع None لو ما في مستأجر.
 """
 
 from __future__ import annotations
@@ -13,8 +14,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
-from app.utils.user_profiles import current_user_id
 
 _HABITS = "sandy_habits"
 _LOG = "sandy_habit_log"
@@ -35,39 +36,48 @@ def init_habits_store(mongo_db) -> None:
         print(f"[HabitsStore] index skipped: {e}")
 
 
+def _habits():
+    """Tenant-scoped habits collection, or None when no db / no active tenant."""
+    return scoped(_mongo_db, _HABITS)
+
+
+def _log():
+    """Tenant-scoped habit-log collection, or None when no db / no active tenant."""
+    return scoped(_mongo_db, _LOG)
+
+
 def _today() -> str:
     return datetime.now(USER_TZ).date().isoformat()
 
 
-def _find_habit(name: str, uid: str) -> Optional[Dict[str, Any]]:
+def _find_habit(name: str) -> Optional[Dict[str, Any]]:
     nl = str(name or "").strip().lower()
-    if not nl or _mongo_db is None:
+    coll = _habits()
+    if not nl or coll is None:
         return None
-    for d in _mongo_db[_HABITS].find({"user_id": uid, "archived": {"$ne": True}}):
+    for d in coll.find({"archived": {"$ne": True}}):
         if nl in (d.get("name", "") or "").lower():
             return d
     return None
 
 
-def _find_by_id(habit_id: str, uid: str) -> Optional[Dict[str, Any]]:
-    if not habit_id or _mongo_db is None:
+def _find_by_id(habit_id: str) -> Optional[Dict[str, Any]]:
+    coll = _habits()
+    if not habit_id or coll is None:
         return None
-    return _mongo_db[_HABITS].find_one({"_id": habit_id, "user_id": uid})
+    return coll.find_one({"_id": habit_id})
 
 
 def add_habit(name: str) -> bool:
-    uid = current_user_id()
-    if uid is None:
-        return False
-    if _mongo_db is None:
+    coll = _habits()
+    if coll is None:
         return False
     name = str(name or "").strip()
-    if not name or _find_habit(name, uid):
+    if not name or _find_habit(name):
         return False
-    _mongo_db[_HABITS].insert_one(
+    coll.insert_one(
         {
             "_id": uuid.uuid4().hex,
-            "user_id": uid,
             "name": name,
             "created_at": datetime.now(timezone.utc),
             "archived": False,
@@ -77,50 +87,45 @@ def add_habit(name: str) -> bool:
 
 
 def archive_habit(name: str) -> str:
-    uid = current_user_id()
-    if uid is None:
+    coll = _habits()
+    if coll is None:
         return ""
-    h = _find_habit(name, uid)
+    h = _find_habit(name)
     if not h:
         return ""
-    _mongo_db[_HABITS].update_one(
-        {"_id": h["_id"], "user_id": uid}, {"$set": {"archived": True}}
-    )
+    coll.update_one({"_id": h["_id"]}, {"$set": {"archived": True}})
     return h.get("name", "")
 
 
 def checkin(name: str, date: str = "") -> Dict[str, Any]:
     """يسجل إنجاز اليوم (أو تاريخ معطى). يرجّع {ok, name, streak, already}."""
-    uid = current_user_id()
-    if uid is None:
+    log = _log()
+    if log is None:
         return {"ok": False}
-    h = _find_habit(name, uid)
-    if not h or _mongo_db is None:
+    h = _find_habit(name)
+    if not h:
         return {"ok": False}
     d = (date or _today())[:10]
     key = f"{h['_id']}:{d}"
-    already = _mongo_db[_LOG].find_one({"_id": key, "user_id": uid}) is not None
+    already = log.find_one({"_id": key}) is not None
     if not already:
-        _mongo_db[_LOG].insert_one(
-            {"_id": key, "user_id": uid, "habit_id": h["_id"], "date": d}
-        )
+        log.insert_one({"_id": key, "habit_id": h["_id"], "date": d})
     return {
         "ok": True,
         "name": h.get("name", ""),
-        "streak": _streak(h["_id"], uid),
+        "streak": _streak(h["_id"]),
         "already": already,
     }
 
 
-def _streak(habit_id: str, uid: str) -> int:
+def _streak(habit_id: str) -> int:
     """أيام متتالية لليوم (أو لمبارح إذا اليوم لسا ما انعمل)."""
-    if _mongo_db is None:
+    log = _log()
+    if log is None:
         return 0
     dates = {
         d["date"]
-        for d in _mongo_db[_LOG]
-        .find({"user_id": uid, "habit_id": habit_id}, {"date": 1})
-        .limit(2000)
+        for d in log.find({"habit_id": habit_id}, {"date": 1}).limit(2000)
     }
     if not dates:
         return 0
@@ -136,27 +141,19 @@ def _streak(habit_id: str, uid: str) -> int:
 
 def list_habits() -> List[Dict[str, Any]]:
     """كل العادات النشطة مع سلسلة كل وحدة وهل انعملت اليوم."""
-    uid = current_user_id()
-    if uid is None:
-        return []
-    if _mongo_db is None:
+    habits = _habits()
+    log = _log()
+    if habits is None or log is None:
         return []
     today = _today()
     out = []
-    for h in (
-        _mongo_db[_HABITS]
-        .find({"user_id": uid, "archived": {"$ne": True}})
-        .sort("created_at", 1)
-    ):
-        done_today = (
-            _mongo_db[_LOG].find_one({"_id": f"{h['_id']}:{today}", "user_id": uid})
-            is not None
-        )
+    for h in habits.find({"archived": {"$ne": True}}).sort("created_at", 1):
+        done_today = log.find_one({"_id": f"{h['_id']}:{today}"}) is not None
         out.append(
             {
                 "id": h["_id"],
                 "name": h.get("name", ""),
-                "streak": _streak(h["_id"], uid),
+                "streak": _streak(h["_id"]),
                 "done_today": done_today,
             }
         )
@@ -165,65 +162,62 @@ def list_habits() -> List[Dict[str, Any]]:
 
 def delete_habit(habit_id: str) -> bool:
     """حذف نهائي: العادة + كل سجلّاتها (مش أرشفة)."""
-    uid = current_user_id()
-    if uid is None:
+    habits = _habits()
+    log = _log()
+    if habits is None or log is None:
         return False
-    h = _find_by_id(habit_id, uid)
-    if not h or _mongo_db is None:
+    h = _find_by_id(habit_id)
+    if not h:
         return False
-    _mongo_db[_LOG].delete_many({"user_id": uid, "habit_id": habit_id})
-    _mongo_db[_HABITS].delete_one({"_id": habit_id, "user_id": uid})
+    log.delete_many({"habit_id": habit_id})
+    habits.delete_one({"_id": habit_id})
     return True
 
 
 def rename_habit(habit_id: str, new_name: str) -> bool:
     """إعادة تسمية العادة (بعد فحص التكرار مع عادة أخرى نشطة)."""
-    uid = current_user_id()
-    if uid is None:
+    coll = _habits()
+    if coll is None:
         return False
     new_name = str(new_name or "").strip()
-    h = _find_by_id(habit_id, uid)
-    if not h or not new_name or _mongo_db is None:
+    h = _find_by_id(habit_id)
+    if not h or not new_name:
         return False
-    dup = _find_habit(new_name, uid)
+    dup = _find_habit(new_name)
     if dup and dup.get("_id") != habit_id:
         return False
-    _mongo_db[_HABITS].update_one(
-        {"_id": habit_id, "user_id": uid}, {"$set": {"name": new_name}}
-    )
+    coll.update_one({"_id": habit_id}, {"$set": {"name": new_name}})
     return True
 
 
 def uncheckin(habit_id: str, date: str = "") -> Dict[str, Any]:
     """يتراجع عن إنجاز يوم (افتراضياً اليوم). يرجّع {ok, streak, removed}."""
-    uid = current_user_id()
-    if uid is None:
+    log = _log()
+    if log is None:
         return {"ok": False}
-    h = _find_by_id(habit_id, uid)
-    if not h or _mongo_db is None:
+    h = _find_by_id(habit_id)
+    if not h:
         return {"ok": False}
     d = (date or _today())[:10]
-    res = _mongo_db[_LOG].delete_one({"_id": f"{habit_id}:{d}", "user_id": uid})
+    res = log.delete_one({"_id": f"{habit_id}:{d}"})
     return {
         "ok": True,
-        "streak": _streak(habit_id, uid),
+        "streak": _streak(habit_id),
         "removed": res.deleted_count > 0,
     }
 
 
 def habit_history(habit_id: str, days: int = 35) -> Dict[str, Any]:
     """تفاصيل عادة: أيام الإنجاز بآخر فترة، أطول سلسلة، ونسبة الالتزام منذ الإنشاء."""
-    uid = current_user_id()
-    if uid is None:
+    log = _log()
+    if log is None:
         return {"ok": False}
-    h = _find_by_id(habit_id, uid)
-    if not h or _mongo_db is None:
+    h = _find_by_id(habit_id)
+    if not h:
         return {"ok": False}
     all_dates = sorted(
         d["date"]
-        for d in _mongo_db[_LOG]
-        .find({"user_id": uid, "habit_id": habit_id}, {"date": 1})
-        .limit(5000)
+        for d in log.find({"habit_id": habit_id}, {"date": 1}).limit(5000)
     )
     date_set = set(all_dates)
     today = datetime.now(USER_TZ).date()

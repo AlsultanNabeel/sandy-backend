@@ -5,6 +5,9 @@ Collection: sandy_shopping
 
 ضيف (بتصنيف)، اعرض، اشطب (انشترى — ولو فيه سعر بنضيفه للمصاريف تلقائياً)،
 احذف، فضّي المشتراة.
+
+عزل المستأجرين مفروض من طبقة scoped(): _coll() ترجع None لو ما في مستأجر،
+فكل حارس "coll is None" يفشل مغلقاً، وuser_id ينحقن تلقائياً بكل قراءة/كتابة.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from app.utils.user_profiles import current_user_id
+from app.utils.tenant_db import scoped
 
 _COLL = "sandy_shopping"
 _mongo_db = None
@@ -34,14 +37,12 @@ def init_shopping_store(mongo_db) -> None:
 
 
 def _coll():
-    return _mongo_db[_COLL] if _mongo_db is not None else None
+    """Tenant-scoped shopping collection, or None when no db / no active tenant."""
+    return scoped(_mongo_db, _COLL)
 
 
 def add_item(text: str, category: str = "") -> bool:
     """يضيف عنصر واحد مع تصنيف اختياري؛ يتجاهل المكرر النشط."""
-    uid = current_user_id()
-    if uid is None:
-        return False
     coll = _coll()
     if coll is None:
         return False
@@ -50,14 +51,13 @@ def add_item(text: str, category: str = "") -> bool:
         return False
     existing = {
         (d.get("text", "") or "").strip().lower()
-        for d in coll.find({"user_id": uid, "done": False}, {"text": 1})
+        for d in coll.find({"done": False}, {"text": 1})
     }
     if text.lower() in existing:
         return False
     coll.insert_one(
         {
             "_id": uuid.uuid4().hex,
-            "user_id": uid,
             "text": text,
             "category": str(category or "").strip(),
             "done": False,
@@ -77,13 +77,10 @@ def add_items(texts: List[str]) -> int:
 
 
 def list_items(include_bought: bool = False) -> List[Dict[str, Any]]:
-    uid = current_user_id()
-    if uid is None:
-        return []
     coll = _coll()
     if coll is None:
         return []
-    q = {"user_id": uid} if include_bought else {"user_id": uid, "done": False}
+    q = {} if include_bought else {"done": False}
     out = []
     for d in coll.find(q).sort("created_at", 1).limit(200):
         out.append({
@@ -98,12 +95,12 @@ def list_items(include_bought: bool = False) -> List[Dict[str, Any]]:
     return out
 
 
-def _match(coll, text: str, uid: str):
+def _match(coll, text: str):
     """أقرب عنصر نشط لنص معطى (احتواء، غير حساس لحالة الأحرف)."""
     tl = str(text or "").strip().lower()
     if not tl:
         return None
-    for d in coll.find({"user_id": uid, "done": False}):
+    for d in coll.find({"done": False}):
         if tl in (d.get("text", "") or "").lower():
             return d
     return None
@@ -111,17 +108,14 @@ def _match(coll, text: str, uid: str):
 
 def check_item(text: str) -> str:
     """يشطب عنصر (انشترى). يرجّع اسم المشطوب أو ""."""
-    uid = current_user_id()
-    if uid is None:
-        return ""
     coll = _coll()
     if coll is None:
         return ""
-    d = _match(coll, text, uid)
+    d = _match(coll, text)
     if not d:
         return ""
     coll.update_one(
-        {"_id": d["_id"], "user_id": uid},
+        {"_id": d["_id"]},
         {"$set": {"done": True, "bought_at": datetime.now(timezone.utc)}},
     )
     return d.get("text", "")
@@ -129,29 +123,23 @@ def check_item(text: str) -> str:
 
 def remove_item(text: str) -> str:
     """يحذف عنصر نهائياً (مش انشترى — انحذف). يرجّع اسمه أو ""."""
-    uid = current_user_id()
-    if uid is None:
-        return ""
     coll = _coll()
     if coll is None:
         return ""
-    d = _match(coll, text, uid)
+    d = _match(coll, text)
     if not d:
         return ""
-    coll.delete_one({"_id": d["_id"], "user_id": uid})
+    coll.delete_one({"_id": d["_id"]})
     return d.get("text", "")
 
 
 def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
     """يشطب عنصر (انشترى). لو فيه سعر (ممرّر الآن أو محفوظ) بنضيفه تلقائياً
     للمصاريف بتصنيف العنصر. يرجّع {ok, expense_added}."""
-    uid = current_user_id()
-    if uid is None:
-        return {"ok": False, "expense_added": False}
     coll = _coll()
     if coll is None or not item_id:
         return {"ok": False, "expense_added": False}
-    d = coll.find_one({"_id": item_id, "user_id": uid})
+    d = coll.find_one({"_id": item_id})
     if not d:
         return {"ok": False, "expense_added": False}
 
@@ -170,7 +158,7 @@ def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
             set_fields["qty"] = eff_qty
         except (TypeError, ValueError):
             pass
-    coll.update_one({"_id": item_id, "user_id": uid}, {"$set": set_fields})
+    coll.update_one({"_id": item_id}, {"$set": set_fields})
 
     expense_added = False
     if eff_price and eff_price > 0:
@@ -192,9 +180,6 @@ def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
 
 def set_item_purchase(item_id: str, price=None, qty=None, unit=None) -> bool:
     """يحدّد سعر/كمية/وحدة عنصر بدون ما يشطبه — للإجمالي التقديري قبل الشراء."""
-    uid = current_user_id()
-    if uid is None:
-        return False
     coll = _coll()
     if coll is None or not item_id:
         return False
@@ -213,19 +198,11 @@ def set_item_purchase(item_id: str, price=None, qty=None, unit=None) -> bool:
         set_fields["unit"] = str(unit or "").strip()
     if not set_fields:
         return False
-    return (
-        coll.update_one(
-            {"_id": item_id, "user_id": uid}, {"$set": set_fields}
-        ).matched_count
-        > 0
-    )
+    return coll.update_one({"_id": item_id}, {"$set": set_fields}).matched_count > 0
 
 
 def last_price_for(text: str) -> float:
     """آخر سعر مدفوع لصنف بنفس الاسم (من عنصر مشترى سابقاً). 0 لو ما في."""
-    uid = current_user_id()
-    if uid is None:
-        return 0
     coll = _coll()
     if coll is None:
         return 0
@@ -233,27 +210,21 @@ def last_price_for(text: str) -> float:
     if not text:
         return 0
     d = coll.find_one(
-        {"user_id": uid, "text": text, "done": True, "price": {"$gt": 0}},
+        {"text": text, "done": True, "price": {"$gt": 0}},
         sort=[("bought_at", -1)],
     )
     return float(d.get("price", 0)) if d else 0
 
 
 def delete_item_by_id(item_id: str) -> bool:
-    uid = current_user_id()
-    if uid is None:
-        return False
     coll = _coll()
     if coll is None or not item_id:
         return False
-    return coll.delete_one({"_id": item_id, "user_id": uid}).deleted_count > 0
+    return coll.delete_one({"_id": item_id}).deleted_count > 0
 
 
 def clear_bought() -> int:
-    uid = current_user_id()
-    if uid is None:
-        return 0
     coll = _coll()
     if coll is None:
         return 0
-    return coll.delete_many({"user_id": uid, "done": True}).deleted_count
+    return coll.delete_many({"done": True}).deleted_count
