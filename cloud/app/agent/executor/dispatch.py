@@ -25,12 +25,6 @@ def execute_operational_action(
     action_type = str(action_type or "").strip().lower()
     params = params or {}
 
-    # Shadow draft: stash in session and ask for confirmation.
-    if action_type == "shadow_draft":
-        from app.agent.shadow_execution import handle_shadow_draft_action
-
-        return handle_shadow_draft_action(params, session)
-
     if action_type == "task":
         return handle_task_action(
             params,

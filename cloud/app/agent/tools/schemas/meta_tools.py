@@ -20,7 +20,7 @@ META_TOOLS = [
         "description": (
             "رد على المستخدم — استخدم عند عدم وجود أمر محدد أو دردشة عامة.\n\n"
             "🚫 ممنوع تستخدميه لو الرسالة فيها أفعال action واضحة + objects:\n"
-            "- أوامر tasks/reminders/calendar → الـ FC المخصص لها\n\n"
+            "- أوامر tasks/reminders → الـ FC المخصص لها\n\n"
             "STM ممكن يكون فيه نفس الموضوع — مش مبرر للذهاب لـ chat. الـ FC handler "
             "يتعامل مع التكرار/الـ idempotency بنفسه."
         ),
