@@ -226,7 +226,7 @@ struct HabitsView: View {
             withAnimation { habits = r.items }
             demo = r.demo
         } catch {
-            withAnimation { self.error = lang.s("life.habits.loadError") }
+            if !error.isCancellation { withAnimation { self.error = lang.s("life.habits.loadError") } }
         }
         loading = false
     }
@@ -513,7 +513,7 @@ struct ExpensesView: View {
             summary = r.summary
             demo = r.demo
         } catch {
-            withAnimation { self.error = lang.s("life.expenses.loadError") }
+            if !error.isCancellation { withAnimation { self.error = lang.s("life.expenses.loadError") } }
         }
         loading = false
     }
@@ -709,7 +709,7 @@ struct JournalView: View {
             withAnimation { entries = r.items }
             demo = r.demo
         } catch {
-            withAnimation { self.error = lang.s("life.journal.loadError") }
+            if !error.isCancellation { withAnimation { self.error = lang.s("life.journal.loadError") } }
         }
         loading = false
     }

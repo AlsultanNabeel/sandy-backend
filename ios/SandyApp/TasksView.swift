@@ -154,7 +154,7 @@ struct TasksView: View {
             tasks = r.items
             demo = r.demo
         } catch {
-            withAnimation { noticeText = lang.s("tasks.errorLoad") }
+            if !error.isCancellation { withAnimation { noticeText = lang.s("tasks.errorLoad") } }
         }
         loading = false
     }

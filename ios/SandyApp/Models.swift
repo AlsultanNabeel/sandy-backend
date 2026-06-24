@@ -147,3 +147,11 @@ struct APIError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
 }
+
+extension Error {
+    /// طلب اتلغى (سحب-للريفرش انتهى، أو المستخدم طلع من الشاشة) — هاد سلوك طبيعي
+    /// من النظام، مش فشل شبكة. أي معالج خطأ بالتطبيق لازم يتجاهله ولا يعرضه.
+    var isCancellation: Bool {
+        self is CancellationError || (self as? URLError)?.code == .cancelled
+    }
+}

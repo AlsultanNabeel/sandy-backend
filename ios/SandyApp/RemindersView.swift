@@ -197,7 +197,7 @@ struct RemindersView: View {
             demo = r.demo
         } catch {
             // خطأ تحميل — بصوت ساندي ودّي (مو localizedDescription جاف لوحده).
-            notice = lang.s("reminders.loadFailed")
+            if !error.isCancellation { notice = lang.s("reminders.loadFailed") }
         }
         loading = false
     }
