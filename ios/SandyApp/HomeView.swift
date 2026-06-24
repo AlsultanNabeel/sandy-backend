@@ -25,14 +25,9 @@ struct HomeView: View {
     /// تبديل التبويب برمجيًّا — ممرَّر من MainTabView حتى نقدر نقفز لتبويب الشات.
     @Binding var selection: MainTab
 
-    @State private var snapshot = HomeSnapshot()
-    @State private var loading = false
-    /// فشل التحميل بالكامل (لقطة فاضية + خطأ) — نعرض تنبيه ودّي.
-    @State private var loadFailed = false
-    /// هل خلّصنا أوّل تحميل؟ (نتحكّم فيه بدخول البطاقات المتدرّج).
-    @State private var didAppear = false
-    /// عدّاد لإجبار إعادة تشغيل حركة الدخول عند كل تحميل/تحديث.
-    @State private var revealKey = 0
+    /// مصدر الحقيقة للرئيسية (يملك اللقطة + الجلب، مستقل عن الشاشة) — فالسحب
+    /// الملغى ما يمسح لوحتك بأصفار.
+    @StateObject private var store = HomeStore()
     /// يفتح حساب المستخدم (ProfileView) كـ sheet — الحساب مش تبويب.
     @State private var showProfile = false
 
@@ -60,8 +55,8 @@ struct HomeView: View {
             // حتى يظهر عنوانها وأزرار التعديل/الخروج صح داخل الـ sheet.
             NavigationStack { ProfileView() }
         }
-        .task { await loadIfNeeded() }
-        .refreshable { await load() }
+        .task { await store.loadIfNeeded(api: state.api) }
+        .refreshable { await store.load(api: state.api) }
     }
 
     // MARK: - المحتوى القابل للتمرير
@@ -70,22 +65,22 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 greeting
-                    .reveal(order: 0, key: revealKey)
+                    .reveal(order: 0, key: store.revealKey)
 
-                if loadFailed {
+                if store.loadFailed {
                     SandyNotice(lang.s("home.loadFailed"),
                                 kind: .gentleWarning)
-                        .reveal(order: 1, key: revealKey)
+                        .reveal(order: 1, key: store.revealKey)
                 }
 
                 proactiveCard
-                    .reveal(order: 1, key: revealKey)
+                    .reveal(order: 1, key: store.revealKey)
 
                 glanceSection
-                    .reveal(order: 2, key: revealKey)
+                    .reveal(order: 2, key: store.revealKey)
 
                 talkToSandyCard
-                    .reveal(order: 3, key: revealKey)
+                    .reveal(order: 3, key: store.revealKey)
 
                 // مساحة سفلية حتى ما تغطّي ساندي العائمة آخر بطاقة.
                 Color.clear.frame(height: 96)
@@ -93,7 +88,7 @@ struct HomeView: View {
             .padding(Theme.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
             // حركة لطيفة عند تبدّل اللقطة (الأرقام تتحرّك بنعومة).
-            .animation(.spring(response: 0.5, dampingFraction: 0.85), value: revealKey)
+            .animation(.spring(response: 0.5, dampingFraction: 0.85), value: store.revealKey)
         }
     }
 
@@ -161,10 +156,10 @@ struct HomeView: View {
                 GlanceCard(
                     icon: "checklist",
                     tint: Theme.Colors.accent,
-                    value: loading && snapshot.openTasks == 0 ? "…" : "\(snapshot.todayTasks)",
+                    value: store.loading && store.snapshot.openTasks == 0 ? "…" : "\(store.snapshot.todayTasks)",
                     label: lang.s("home.glance.today.label"),
-                    hint: snapshot.overdueTasks > 0
-                        ? String(format: lang.s("home.glance.today.overdue"), "\(snapshot.overdueTasks)")
+                    hint: store.snapshot.overdueTasks > 0
+                        ? String(format: lang.s("home.glance.today.overdue"), "\(store.snapshot.overdueTasks)")
                         : nil
                 ) { selection = .tasks }
 
@@ -173,8 +168,8 @@ struct HomeView: View {
                     tint: Theme.Colors.success,
                     value: spendingValue,
                     label: lang.s("home.glance.spending.label"),
-                    hint: snapshot.todayExpenseTotal > 0
-                        ? String(format: lang.s("home.glance.spending.today"), amount(snapshot.todayExpenseTotal))
+                    hint: store.snapshot.todayExpenseTotal > 0
+                        ? String(format: lang.s("home.glance.spending.today"), amount(store.snapshot.todayExpenseTotal))
                         : nil
                 ) { selection = .life }
             }
@@ -241,25 +236,6 @@ struct HomeView: View {
     }
 
     /// أوّل تحميل فقط (نتجنّب إعادة الجلب كل ما يرجع التبويب).
-    private func loadIfNeeded() async {
-        guard !didAppear else { return }
-        await load()
-    }
-
-    /// يجيب لقطة الرئيسية (لا يرمي — getHomeSnapshot يتحمّل الفشل داخليًا).
-    private func load() async {
-        loading = true
-        let snap = await state.api.getHomeSnapshot()
-        snapshot = snap
-        // فشل كامل = خطأ + ما في أي بيانات نعرضها.
-        loadFailed = snap.hadError
-            && snap.openTasks == 0
-            && snap.upcomingReminders.isEmpty
-            && snap.weekExpenseTotal == 0
-        loading = false
-        didAppear = true
-        revealKey += 1   // يعيد تشغيل دخول البطاقات المتدرّج.
-    }
 
     // MARK: - التحية (نصوص)
 
@@ -308,25 +284,25 @@ struct HomeView: View {
 
     /// السطر المبادر — يتأقلم مع حالتك الحقيقية، بصيغ متعدّدة حتى يحسّ حيّ.
     private var proactiveLine: String {
-        if loading && !didAppear {
+        if store.loading && !store.didAppear {
             return lang.s("home.proactive.loading")
         }
-        if snapshot.overdueTasks > 0 {
-            let n = snapshot.overdueTasks
+        if store.snapshot.overdueTasks > 0 {
+            let n = store.snapshot.overdueTasks
             return String(format: lang.s("home.proactive.overdue"), "\(n)", pluralTasks(n))
         }
-        if snapshot.todayTasks > 0 {
-            let n = snapshot.todayTasks
+        if store.snapshot.todayTasks > 0 {
+            let n = store.snapshot.todayTasks
             return String(format: lang.s("home.proactive.today"), "\(n)", pluralTasks(n))
         }
-        if !snapshot.nextReminderText.isEmpty {
-            return String(format: lang.s("home.proactive.reminder"), snapshot.nextReminderText, reminderWhenSuffix)
+        if !store.snapshot.nextReminderText.isEmpty {
+            return String(format: lang.s("home.proactive.reminder"), store.snapshot.nextReminderText, reminderWhenSuffix)
         }
         if isWeekSpendingHigh {
-            return String(format: lang.s("home.proactive.spendingHigh"), amount(snapshot.weekExpenseTotal))
+            return String(format: lang.s("home.proactive.spendingHigh"), amount(store.snapshot.weekExpenseTotal))
         }
-        if snapshot.openTasks > 0 {
-            let n = snapshot.openTasks
+        if store.snapshot.openTasks > 0 {
+            let n = store.snapshot.openTasks
             return String(format: lang.s("home.proactive.openTasks"), "\(n)", pluralTasks(n))
         }
         // ما في شي عالق — جملة مشجّعة متبدّلة (حسب اليوم حتى تحسّ حيّة).
@@ -338,16 +314,16 @@ struct HomeView: View {
 
     /// مزاج أفاتار ساندي بالبطاقة المبادرة — ألطف لو في شي متأخّر/مصروف عالي.
     private var proactiveMood: SandyAvatar.Mood {
-        (snapshot.overdueTasks > 0 || isWeekSpendingHigh) ? .soft : .happy
+        (store.snapshot.overdueTasks > 0 || isWeekSpendingHigh) ? .soft : .happy
     }
 
     /// فعل سياقي صغير أسفل نظرة ساندي — يقفز للتبويب الأنسب.
     private var proactiveAction: ProactiveAction? {
-        if loading && !didAppear { return nil }
-        if snapshot.overdueTasks > 0 || snapshot.todayTasks > 0 || snapshot.openTasks > 0 {
+        if store.loading && !store.didAppear { return nil }
+        if store.snapshot.overdueTasks > 0 || store.snapshot.todayTasks > 0 || store.snapshot.openTasks > 0 {
             return ProactiveAction(title: lang.s("home.proactive.action.tasks"), target: .tasks)
         }
-        if !snapshot.nextReminderText.isEmpty {
+        if !store.snapshot.nextReminderText.isEmpty {
             return ProactiveAction(title: lang.s("home.proactive.action.reminders"), target: .reminders)
         }
         if isWeekSpendingHigh {
@@ -359,19 +335,19 @@ struct HomeView: View {
     // MARK: - لمحة سريعة (نصوص)
 
     private var spendingValue: String {
-        if loading && snapshot.weekExpenseTotal == 0 && !didAppear { return "…" }
-        return amount(snapshot.weekExpenseTotal)
+        if store.loading && store.snapshot.weekExpenseTotal == 0 && !store.didAppear { return "…" }
+        return amount(store.snapshot.weekExpenseTotal)
     }
 
     private var reminderTitle: String {
-        snapshot.nextReminderText.isEmpty ? lang.s("home.reminder.none") : snapshot.nextReminderText
+        store.snapshot.nextReminderText.isEmpty ? lang.s("home.reminder.none") : store.snapshot.nextReminderText
     }
 
     private var reminderSubtitle: String {
-        if snapshot.nextReminderText.isEmpty {
+        if store.snapshot.nextReminderText.isEmpty {
             return lang.s("home.reminder.sub.add")
         }
-        let when = Self.relativeTime(snapshot.nextReminderAt)
+        let when = Self.relativeTime(store.snapshot.nextReminderAt)
         return when.isEmpty
             ? lang.s("home.reminder.sub.fallback")
             : String(format: lang.s("home.reminder.sub.relative"), when)
@@ -379,7 +355,7 @@ struct HomeView: View {
 
     /// لاحقة وقت التذكير للسطر المبادر (مثلاً " بعد ساعتين").
     private var reminderWhenSuffix: String {
-        let when = Self.relativeTime(snapshot.nextReminderAt)
+        let when = Self.relativeTime(store.snapshot.nextReminderAt)
         return when.isEmpty ? "" : " \(when)"
     }
 
@@ -387,7 +363,7 @@ struct HomeView: View {
 
     /// مصروف الأسبوع "عالي"؟ — عتبة بسيطة ودّية (مش حُكم صارم).
     private var isWeekSpendingHigh: Bool {
-        snapshot.weekExpenseTotal >= 500
+        store.snapshot.weekExpenseTotal >= 500
     }
 
     /// تنسيق مبلغ بصيغة عربية بسيطة (بدون كسور لو رقم صحيح).
@@ -573,5 +549,50 @@ private extension View {
     /// يطبّق دخولًا متدرّجًا حسب الترتيب، يُعاد تشغيله عند تغيّر `key`.
     func reveal(order: Int, key: Int) -> some View {
         modifier(RevealModifier(order: order, key: key))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: - الستور (مصدر الحقيقة للرئيسية)
+
+/// يملك لقطة الرئيسية والجلب، مستقل عن دورة حياة الشاشة. الجلب بمهمة مملوكة
+/// للستور فالسحب الملغى ما يلغيه. وحارس مهم: بعد أول تحميل ناجح، ما نكتب فوق
+/// بياناتك الجيدة بلقطة فاضية/خطأ عابر — فلوحتك ما بتتصفّر ولا تطلّع "تعثرت".
+@MainActor
+final class HomeStore: ObservableObject {
+    @Published var snapshot = HomeSnapshot()
+    @Published var loading = false
+    @Published var loadFailed = false
+    @Published var didAppear = false
+    @Published var revealKey = 0
+
+    private var loadTask: Task<Void, Never>?
+
+    /// تحميل أوّل فقط (يتحكّم بدخول البطاقات المتدرّج).
+    func loadIfNeeded(api: APIClient) async {
+        guard !didAppear else { return }
+        await load(api: api)
+    }
+
+    func load(api: APIClient) async {
+        loadTask?.cancel()
+        let task = Task { @MainActor in
+            loading = true
+            defer { loading = false }
+            let snap = await api.getHomeSnapshot()
+            let fullFail = snap.hadError
+                && snap.openTasks == 0
+                && snap.upcomingReminders.isEmpty
+                && snap.weekExpenseTotal == 0
+            // ما نمسح لوحة جيدة على خطأ/إلغاء عابر: نحدّث فقط لو نجح أو لسا ما عندنا بيانات.
+            if !snap.hadError || !didAppear {
+                snapshot = snap
+                loadFailed = fullFail
+            }
+            didAppear = true
+            revealKey += 1   // يعيد تشغيل دخول البطاقات المتدرّج.
+        }
+        loadTask = task
+        await task.value
     }
 }
