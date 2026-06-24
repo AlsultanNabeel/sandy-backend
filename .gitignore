@@ -106,3 +106,6 @@ merge_for_ai.py
 .claude/
 # ESP-IDF managed components (downloaded by the component manager)
 firmware/**/managed_components/
+
+# Local AI guide — keep out of the repo (like docs/)
+/CLAUDE.md
