@@ -106,11 +106,13 @@ verified). What exists today in `cloud/`:
 (e.g. `sandy-app`). Migration script moves the owner's data (currently tagged with
 his id, plus any legacy `user_id=None`) into a clean tenant id across all stores:
 tasks, reminders, habits, expenses, scenes, summaries, facts, journal, onboarding.
-  - DONE (script written, not yet run): `cloud/migrations/001_migrate_owner_to_product_tenant.py`.
-    Owner-approved decisions (2026-06-22): clean owner id = his `sandy_users`
-    account uuid (unifies auth + data); migrate everything incl. legacy untagged.
-    Copy-only, idempotent, dry-run by default (`--apply` to write). The run prints
-    the owner tenant id to wire into `/api/auth` in Phase 3. Owner runs it.
+  - DONE + RUN (2026-06-24): the migration script
+    (`cloud/migrations/001_migrate_owner_to_product_tenant.py`) was applied
+    (`sany-db` → `sandy-app`, 1080 docs copied) and then **removed** (one-off, no
+    longer needed; the whole `cloud/migrations/` dir is gone). Clean owner tenant
+    id = `3ab1c7f824c04e2aa3cd8bf0ca2f51d6` (his `sandy_users` account uuid) — wire
+    this into `/api/auth` so the owner token carries it instead of the legacy
+    Telegram id `628544372`. Source `sany-db` untouched (copy-only).
 
 **Phase 2 — Remove Telegram completely.** Delete `telegram_handlers.py`, bot
 registration, Telegram `/webhook` routes, `pyTelegramBotAPI` from requirements, and
