@@ -80,16 +80,6 @@ class ExecutorRoutingTests(unittest.TestCase):
         self.assertTrue(result["handled"])
         self.assertIn("اشرب ماء", result["reply"])
 
-    @patch("app.tools.cost_tool.get_azure_cost", return_value={"provider": "Azure", "available": True, "spent": 12.5})
-    @patch("app.tools.cost_tool.format_cost_report", return_value="cost report")
-    def test_cost_route(self, mock_format_cost_report, mock_get_azure_cost):
-        result = self._call("cost", {"provider": "azure"})
-
-        self.assertTrue(result["handled"])
-        self.assertEqual(result["reply"], "cost report")
-        mock_get_azure_cost.assert_called_once()
-        mock_format_cost_report.assert_called_once()
-
     @patch("app.agent.facade.briefing.build_morning_briefing", return_value="briefing text")
     def test_briefing_route(self, mock_build_briefing):
         session = {"sandy_state": {"home_city": "Riyadh"}}

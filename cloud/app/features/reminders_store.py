@@ -10,18 +10,16 @@ Collection: sandy_reminders
    linked_task_id, send_state ("pending" | "sending" | "sent" | "failed"),
    created_at, sent_at, last_error}
 
-Recurring reminders never reach "sent": after each delivery remind_at advances
-to the next RRULE occurrence and the state returns to "pending".
-
 Return contracts mirror the old google_calendar functions so the executor
 handlers keep working with an import swap:
   add_reminder / update_reminder → {"success": bool, "error": ...}
-  check_due_reminders            → "Sent N reminder(s)" or None
 
-Tenant isolation: the request-path functions use the scoped() layer (tenant from
-context). The minute poller runs as a scheduler job with NO active profile, so
-it can't use scoped() — it acts on behalf of the specific user_chat_id it is
-polling for and scopes the raw collection by that id explicitly (_raw_coll()).
+The frontend polls /api/reminders every minute to surface due reminders, so the
+backend stores and serves them only — there is no server-side push poller.
+
+Tenant isolation is enforced by the scoped() layer: _coll() returns None when
+there's no Mongo handle or no active tenant, so each "coll is None" guard fails
+closed, and user_id is injected on every read/write automatically.
 """
 
 from __future__ import annotations
@@ -65,12 +63,6 @@ def _coll():
     return scoped(_mongo_db, _COLL)
 
 
-def _raw_coll():
-    """Unscoped collection — ONLY for the background poller, which has no active
-    profile and scopes by the user_chat_id it polls for explicitly."""
-    return _mongo_db[_COLL] if _mongo_db is not None else None
-
-
 def _parse_iso(value: str) -> Optional[datetime]:
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -88,36 +80,6 @@ def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
-
-
-def _next_occurrence(rrule_str: str, dtstart: datetime, after: datetime) -> Optional[datetime]:
-    """Next RRULE occurrence strictly after `after`. None when the rule ends."""
-    try:
-        from dateutil.rrule import rrulestr
-
-        rule_body = rrule_str.split("RRULE:", 1)[-1]
-        # rrule wants dtstart and after on the same awareness; keep all UTC.
-        rule = rrulestr(rule_body, dtstart=_to_utc(dtstart))
-        nxt = rule.after(_to_utc(after))
-        return nxt
-    except Exception as e:
-        print(f"[RemindersStore] rrule parse failed ({rrule_str}): {e}")
-        # Pragmatic fallback for the three simple shapes Sandy actually emits.
-        upper = rrule_str.upper()
-        step = None
-        if "FREQ=DAILY" in upper:
-            step = timedelta(days=1)
-        elif "FREQ=WEEKLY" in upper:
-            step = timedelta(weeks=1)
-        elif "FREQ=MONTHLY" in upper:
-            step = timedelta(days=30)
-        if step is None:
-            return None
-        nxt = _to_utc(dtstart)
-        after_utc = _to_utc(after)
-        while nxt <= after_utc:
-            nxt += step
-        return nxt
 
 
 def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -332,112 +294,3 @@ def delete_all_sandy_reminders() -> int:
     except Exception as e:
         print(f"[RemindersStore] delete all failed: {e}")
         return 0
-
-
-# ─── The minute poller ───────────────────────────────────────────────────────
-
-def check_due_reminders(
-    send_message_fn=None,
-    user_chat_id=None,
-    keyboard_builder=None,
-):
-    """Claim each due reminder atomically, deliver it, then finalize.
-
-    keyboard_builder(reminder_dict) → a Telegram reply_markup (snooze/done
-    buttons) or None. Built by the runtime so this module stays free of
-    telebot imports.
-
-    Runs as a scheduler job (no active profile), so it can't use the scoped()
-    layer — it scopes the raw collection by the user_chat_id it's polling for,
-    so only that user's reminders are claimed.
-    """
-    try:
-        coll = _raw_coll()
-        if coll is None or not send_message_fn or not user_chat_id:
-            return None
-
-        uid = str(user_chat_id)
-        now = datetime.now(timezone.utc)
-        window = {
-            "$gte": now - timedelta(minutes=_LOOKBACK_MIN),
-            "$lte": now + timedelta(minutes=1),
-        }
-
-        sent_count = 0
-        while True:
-            # Atomic claim: pending → sending. Two dynos can race; only one wins.
-            doc = coll.find_one_and_update(
-                {"user_id": uid, "send_state": "pending", "remind_at": window},
-                {
-                    "$set": {
-                        "send_state": "sending",
-                        "claimed_at": now,
-                    }
-                },
-            )
-            if doc is None:
-                break
-
-            norm = _normalize(doc)
-            if norm["kind"] == "event_followup":
-                pt = doc.get("parent_summary") or norm["text"]
-                message_text = (
-                    f"📋 متابعة سكرتارية:\n«{pt}»\n"
-                    f"خلص الموعد وتقدري توثّقي؟ (ردّي: خلص / لسه / تأجيل)"
-                )
-            else:
-                message_text = f"🔔 تذكير: {norm['text']}"
-
-            kb = None
-            if keyboard_builder is not None:
-                try:
-                    kb = keyboard_builder(norm)
-                except Exception as e:
-                    print(f"[RemindersStore] keyboard build failed: {e}")
-
-            try:
-                send_message_fn(
-                    int(user_chat_id), message_text, parse_mode=None, reply_markup=kb
-                )
-                print(f"[RemindersStore] sent: {message_text}")
-            except Exception as e:
-                coll.update_one(
-                    {"_id": doc["_id"], "user_id": uid},
-                    {
-                        "$set": {
-                            "send_state": "failed",
-                            "last_error": f"{type(e).__name__}: {e}",
-                        }
-                    },
-                )
-                continue
-
-            recurrence = doc.get("recurrence", "") or ""
-            if recurrence:
-                base = _as_aware_utc(doc.get("remind_at")) or now
-                nxt = _next_occurrence(recurrence, base, max(base, now))
-                if nxt:
-                    coll.update_one(
-                        {"_id": doc["_id"], "user_id": uid},
-                        {
-                            "$set": {
-                                "remind_at": nxt,
-                                "send_state": "pending",
-                                "sent_at": now,
-                            }
-                        },
-                    )
-                    sent_count += 1
-                    continue
-                # Rule exhausted — fall through and close it out.
-
-            coll.update_one(
-                {"_id": doc["_id"], "user_id": uid},
-                {"$set": {"send_state": "sent", "sent_at": now}},
-            )
-            sent_count += 1
-
-        return f"Sent {sent_count} reminder(s)" if sent_count else None
-    except Exception as e:
-        print(f"[RemindersStore] check failed: {e}")
-        return None
