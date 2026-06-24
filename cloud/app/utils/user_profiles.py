@@ -23,6 +23,10 @@ _OWNER_IDS: set = _parse_id_set(os.getenv("OWNER_CHAT_ID", "")) | _parse_id_set(
 # Keep these for any external code that still imports them directly
 OWNER_CHAT_ID = (os.getenv("OWNER_CHAT_ID", "") or "").strip()
 LEGACY_OWNER_CHAT_ID = (os.getenv("SANDY_USER_CHAT_ID", "") or "").strip()
+# The owner's clean product tenant id (his sandy_users uuid after the Phase 1
+# migration). /api/auth now logs him in under THIS id, so the transitional
+# device gates (robot/room) must recognise it as the owner too.
+OWNER_TENANT_ID = (os.getenv("OWNER_TENANT_ID", "") or "").strip()
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "memory"
 USER_PROFILES_FILE = DATA_DIR / "user_profiles.json"
@@ -67,7 +71,9 @@ def is_owner_chat_id(chat_id: Any) -> bool:
     if not chat_key:
         return False
     return chat_key in (
-        _parse_id_set(OWNER_CHAT_ID) | _parse_id_set(LEGACY_OWNER_CHAT_ID)
+        _parse_id_set(OWNER_CHAT_ID)
+        | _parse_id_set(LEGACY_OWNER_CHAT_ID)
+        | _parse_id_set(OWNER_TENANT_ID)
     )
 
 

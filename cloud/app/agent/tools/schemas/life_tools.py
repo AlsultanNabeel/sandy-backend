@@ -447,15 +447,20 @@ def scene_apply(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     if not r.get("ok"):
         return {"handled": True, "reply": "ما عرفت هاد المشهد — جرّب: دراسة، قراءة، عصف ذهني، راحة، فيلم، نوم، صباح، إطفاء."}
 
-    # فعّل المشهد فعليًا على الروم-نود عبر MQTT (نشر فقط؛ تجاهل لطيف لو غير متصل).
+    # فعّل المشهد فعليًا على الروم-نود عبر MQTT — للمالك فقط (غرفته الفيزيائية).
+    # غير المالك يحفظ/يعرض مشاهده هو، بس ما يتحكّم بغرفة المالك. انتقالي حتى
+    # تجي أدوات التحكّم لكل مستأجر (المرحلة الخامسة).
     sent_to_room = False
     try:
-        from app.integrations.room_device import get_room_device_client
+        from app.utils.user_profiles import current_user_id, is_owner_chat_id
 
-        sc = get_scene(name) or {}
-        actions = sc.get("actions") or []
-        res = get_room_device_client().apply_actions(actions)
-        sent_to_room = bool(res.get("available")) and bool(res.get("sent"))
+        if is_owner_chat_id(current_user_id()):
+            from app.integrations.room_device import get_room_device_client
+
+            sc = get_scene(name) or {}
+            actions = sc.get("actions") or []
+            res = get_room_device_client().apply_actions(actions)
+            sent_to_room = bool(res.get("available")) and bool(res.get("sent"))
     except Exception:
         pass
 

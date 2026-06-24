@@ -11,7 +11,12 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
-from app.utils.user_profiles import active_user_profile_context, build_user_profile
+from app.utils.user_profiles import (
+    active_user_profile_context,
+    build_user_profile,
+    current_user_id,
+    is_owner_chat_id,
+)
 
 _DEMO = {
     "shopping": [
@@ -481,10 +486,11 @@ def register_life_api(app, mongo_db=None):
         with active_user_profile_context(build_user_profile(claims)):
             name = (body.get("name") or "").strip()
             r = apply_scene(name)
-            # فعّل المشهد فعليًا على الروم-نود عبر MQTT (نشر فقط؛ تجاهل لطيف لو
-            # غير متصل). نفس مسار الشات (scene_apply) حتى زر الويب/التطبيق يشتغل.
+            # فعّل المشهد فعليًا على الروم-نود عبر MQTT — للمالك فقط (غرفته
+            # الفيزيائية). غير المالك يحفظ/يعرض مشاهده هو بس بدون تحكّم بغرفة
+            # المالك. انتقالي حتى تجي أدوات التحكّم لكل مستأجر (المرحلة الخامسة).
             online = False
-            if r.get("ok"):
+            if r.get("ok") and is_owner_chat_id(current_user_id()):
                 try:
                     from app.integrations.room_device import get_room_device_client
 
