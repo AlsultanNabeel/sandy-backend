@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
-from app.bootstrap import bootstrap
+from app.bootstrap import bootstrap  # noqa: E402  (env must load before app imports)
 
 # Import the runtime *module* explicitly: the facade package re-exports an
 # ``agent`` instance, so ``from app.agent.facade import agent`` would shadow the
