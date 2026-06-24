@@ -1,11 +1,9 @@
 """OpenAI / Azure OpenAI chat completion client with circuit breaker."""
 
 import os
-import time
 from typing import Any, Callable, Dict, List, Optional
 
 from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
-from app.utils import metrics as metrics
 
 _cb = CircuitBreaker(name="openai", failure_threshold=5, recovery_timeout=60.0)
 
@@ -71,31 +69,12 @@ def create_chat_completion(
         kwargs["stream"] = True
 
     try:
-        started = time.perf_counter()
-        success = False
         if stream:
             # Return stream directly — circuit breaker wraps only the initial call
-            result = _cb.call(client.chat.completions.create, **kwargs)
-            success = True
-            return result
-        result = _cb.call(client.chat.completions.create, **kwargs)
-        success = True
-        return result
+            return _cb.call(client.chat.completions.create, **kwargs)
+        return _cb.call(client.chat.completions.create, **kwargs)
     except CircuitOpenError:
         raise RuntimeError("[OpenAI] Circuit OPEN — AI service temporarily unavailable")
-    finally:
-        try:
-            # On the stream path `started→here` is just the time to OPEN the
-            # stream, not the full completion — recording it would skew the
-            # latency metric, so only observe duration for non-stream calls.
-            if not stream:
-                metrics.observe_llm_completion(time.perf_counter() - started)
-            if success:
-                metrics.inc_llm_completion_success()
-            else:
-                metrics.inc_llm_completion_failure()
-        except Exception:
-            pass
 
 
 def make_chat_completion_fn(

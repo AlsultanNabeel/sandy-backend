@@ -341,57 +341,34 @@ def run_graph(
     t_total = time.perf_counter()
 
     try:
-        from app.integrations.langfuse_client import trace_span as _trace_span
-        _pipeline_ctx = _trace_span(
-            name="sandy.pipeline",
-            input_data={"message": str(message)[:500]},
-            metadata={
-                "session_id": str(state.get("chat_id") or ""),
-                "user_id": str(state.get("user_id") or ""),
-            },
-        )
-    except Exception:
-        import contextlib as _ctxlib
-        _pipeline_ctx = _ctxlib.nullcontext(None)
+        # Start soul MongoDB queries in parallel with routing (~1.5s savings)
+        try:
+            from app.agent.nodes.soul import start_soul_prefetch
+            _prefetch = start_soul_prefetch(state["chat_id"], state["user_id"], message)
+            state = merge_state(state, {"soul_prefetch": _prefetch})
+        except Exception:
+            pass
 
-    try:
-        with _pipeline_ctx:
-            # Start soul MongoDB queries in parallel with routing (~1.5s savings)
-            try:
-                from app.agent.nodes.soul import start_soul_prefetch
-                _prefetch = start_soul_prefetch(state["chat_id"], state["user_id"], message)
-                state = merge_state(state, {"soul_prefetch": _prefetch})
-            except Exception:
-                pass
+        # توجيه: نداء FC واحد على كامل الكتالوج
+        state = _route_intent(state)
 
-            # توجيه: نداء FC واحد على كامل الكتالوج
-            state = _route_intent(state)
+        state = soul_node(state)
+        state = router_node(state)
+        next_node = route_after_router(state)
 
-            state = soul_node(state)
-            state = router_node(state)
-            next_node = route_after_router(state)
+        if next_node == "pending_node":
+            state = pending_node(state)
+        elif next_node == "clarify_node":
+            state = clarify_node(state)
+        else:
+            state = execute_node(state)
 
-            if next_node == "pending_node":
-                state = pending_node(state)
-            elif next_node == "clarify_node":
-                state = clarify_node(state)
-            else:
-                state = execute_node(state)
-
-            state = response_node(state)
+        state = response_node(state)
 
     except Exception as exc:
         logger.error(
             f"[{rid}] pipeline failed ({(time.perf_counter()-t_total)*1000:.0f}ms): {exc}"
         )
-        try:
-            from app.integrations.sentry_config import capture_exception
-
-            capture_exception(
-                exc, context={"graph": "run_graph", "message": message[:100]}
-            )
-        except Exception:
-            pass
         state = merge_state(
             state,
             {

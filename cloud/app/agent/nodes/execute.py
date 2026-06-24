@@ -363,11 +363,6 @@ def execute_node(state: SandyState) -> SandyState:
                 logger.error(f"[execute_node] FC dispatch failed: {exc}")
                 print(f"[execute_node] ERROR tool={tool_name}: {type(exc).__name__}: {exc}", flush=True)
                 print(traceback.format_exc(), flush=True)
-                try:
-                    from app.integrations.sentry_config import capture_exception
-                    capture_exception(exc, context={"node": "execute_node", "tool": tool_name})
-                except Exception:
-                    pass
                 result = {"handled": False, "reply": "حصل خطأ، حاول مرة ثانية."}
 
             handled = result.get("handled", False)
@@ -449,12 +444,6 @@ def execute_node(state: SandyState) -> SandyState:
         result = {"handled": bool(reply), "reply": reply or "وينك؟ 😄"}
     except Exception as exc:
         logger.error(f"[execute_node] fallback chat failed: {exc}")
-        try:
-            from app.integrations.sentry_config import capture_exception
-
-            capture_exception(exc, context={"node": "execute_node", "intent": intent})
-        except Exception:
-            pass
         result = {"handled": False, "reply": "حصل خطأ، حاول مرة ثانية."}
 
     handled = result.get("handled", False)

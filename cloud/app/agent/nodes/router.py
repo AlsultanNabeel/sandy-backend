@@ -87,10 +87,4 @@ def router_node(state: SandyState) -> SandyState:
         return merge_state(state, updates)
     except Exception as exc:
         logger.error(f"[router_node] failed: {exc}")
-        try:
-            from app.integrations.sentry_config import capture_exception
-
-            capture_exception(exc, context={"node": "router_node"})
-        except Exception:
-            pass
         return state

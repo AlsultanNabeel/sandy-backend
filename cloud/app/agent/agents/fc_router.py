@@ -423,12 +423,6 @@ def route_with_fc(
         tool_catalog = _build_tool_catalog(declarations)
         system = _FC_SYSTEM_TEMPLATE.format(tool_catalog=tool_catalog)
         system += "\n\n" + address_instruction()
-        try:
-            from app.utils.feature_flags import get_active_flags
-            ff_tags = get_active_flags()
-        except ImportError:
-            ff_tags = []
-        pipeline = "multi_agent"
         _t_gemini = time.perf_counter()
         # Fast routing: when SANDY_ROUTER_MODEL is set, decide the route on a
         # lighter/faster model; the reply itself is generated downstream by the
@@ -439,17 +433,6 @@ def route_with_fc(
                 user_prompt,
                 response_mime_type="application/json",
                 system_instruction=system,
-                langfuse_name=f"{agent_name}.intent_routing",
-                langfuse_user_id=str(state.get("user_id") or ""),
-                langfuse_session_id=str(state.get("chat_id") or ""),
-                langfuse_tags=[agent_name, "fc-routing", f"pipeline:{pipeline}"] + ff_tags,
-                langfuse_metadata={
-                    "node": agent_name,
-                    "pipeline": pipeline,
-                    "has_pending": bool(state.get("pending_state")),
-                    "has_image_state": bool(state.get("image_state")),
-                    "tool_catalog_size": len(declarations),
-                },
             )
         logger.info(f"[fc_router] gemini_routing: {(time.perf_counter()-_t_gemini)*1000:.0f}ms")
         parsed = _parse_fc_response(raw)
@@ -465,11 +448,6 @@ def route_with_fc(
 
     except Exception as exc:
         logger.error(f"[fc_router] Azure intent failed: {exc}")
-        try:
-            from app.integrations.sentry_config import capture_exception
-            capture_exception(exc, context={"node": "route_with_fc", "agent": agent_name, "message": state.get("message", "")[:100]})
-        except Exception:
-            pass
 
         # Try GPT routing before giving up to the safe default.
         try:

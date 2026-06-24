@@ -135,12 +135,6 @@ def pending_node(state: SandyState) -> SandyState:
 
     except Exception as exc:
         logger.error(f"[pending_node] execute_pending_action failed: {exc}")
-        try:
-            from app.integrations.sentry_config import capture_exception
-
-            capture_exception(exc, context={"node": "pending_node"})
-        except Exception:
-            pass
         result = {"handled": False, "reply": "حصل خطأ، حاول مرة ثانية."}
 
     handled = result.get("handled", False)

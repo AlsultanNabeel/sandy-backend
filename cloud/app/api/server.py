@@ -5,11 +5,7 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from app.utils import metrics as metrics
-from app.utils import metrics_push as metrics_push
-
 from app.agent.semantic_memory import semantic_memory_stats
-from app.utils.error_tracking import log_unhandled_exception
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +29,6 @@ def create_app(
 
     app = Flask(__name__)
     CORS(app, resources={r"/api/*": {"origins": os.getenv("FRONTEND_URL", "*")}})
-
-    # Start the Grafana Cloud metrics pusher. It's a no-op if the env vars
-    # aren't set, and the thread is daemonized so it dies with the dyno.
-    try:
-        metrics_push.start_metrics_pusher()
-    except Exception as _exc:
-        # Pushing metrics is best-effort, don't let it fail startup.
-        print(f"[metrics_push] start failed: {_exc}")
 
     @app.route("/health", methods=["GET"])
     def health():
@@ -73,14 +61,6 @@ def create_app(
             }
         ), (200 if overall_ok else 503)
 
-    @app.route("/metrics", methods=["GET"])
-    def metrics_endpoint():
-        data, content_type = metrics.metrics_wsgi()
-        return (data, 200, {
-            "Content-Type": content_type,
-            "Cache-Control": "no-store",
-        })
-
     from app.api.voice_ws import register_voice_ws
     register_voice_ws(app)
 
@@ -104,60 +84,6 @@ def create_app(
 
     from app.api.social_auth_api import register_social_auth_api
     register_social_auth_api(app)
-
-    # Langfuse stats for the /status frontend page.
-    @app.route("/api/langfuse-stats", methods=["GET"])
-    def langfuse_stats():
-        import requests as _req
-        from flask import jsonify as _json
-
-        pub  = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
-        sec  = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
-        host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com").strip()
-
-        if not pub or not sec:
-            return _json({"configured": False}), 200
-
-        auth = (pub, sec)
-        base = host.rstrip("/")
-
-        try:
-            # Daily metrics: token counts and cost.
-            daily = _req.get(
-                f"{base}/api/public/metrics/daily",
-                params={"days": 1},
-                auth=auth, timeout=6,
-            )
-            daily_data = daily.json() if daily.ok else {}
-
-            # Recent traces: count and average latency.
-            traces_r = _req.get(
-                f"{base}/api/public/traces",
-                params={"limit": 50, "page": 1},
-                auth=auth, timeout=6,
-            )
-            traces_data = traces_r.json() if traces_r.ok else {}
-
-        except Exception as exc:
-            return _json({"configured": True, "error": str(exc)}), 200
-
-        traces = traces_data.get("data", [])
-        latencies = [
-            t.get("latency") for t in traces if t.get("latency") is not None
-        ]
-        avg_latency = round(sum(latencies) / len(latencies)) if latencies else None
-
-        # daily_data shape: {"data": [{"date":"...", "countTraces":N, "totalCost":F, ...}]}
-        today = (daily_data.get("data") or [{}])[0]
-
-        return _json({
-            "configured": True,
-            "traces_today":  today.get("countTraces", 0),
-            "tokens_today":  today.get("totalTokens") or today.get("inputTokens", 0),
-            "cost_today_usd": today.get("totalCost", 0),
-            "avg_latency_ms": avg_latency,
-            "total_traces":  traces_data.get("meta", {}).get("totalItems", len(traces)),
-        }), 200
 
     # Auth endpoints
     @app.route("/api/auth", methods=["POST"])
@@ -311,9 +237,8 @@ def create_app(
                         "role": role,
                     }), 200
                 return jsonify({"reply": text, "role": role}), 200
-            except Exception as exc:
+            except Exception:
                 logger.exception("[web_agent] user pipeline failed")
-                log_unhandled_exception(mongo_db, exc, source="web_agent")
                 return jsonify({"error": "internal_error"}), 500
 
         # Guest path: rate-limit check, then a friendly basic chat.
@@ -356,9 +281,8 @@ def create_app(
             # the same circuit breaker + timeouts as the rest of the pipeline.
             resp = create_chat_completion(messages=messages, max_tokens=300)
             return jsonify({"reply": resp.choices[0].message.content, "role": "guest"}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("[web_agent] guest chat failed")
-            log_unhandled_exception(mongo_db, exc, source="web_agent_guest")
             return jsonify({"error": "internal_error"}), 500
 
     @app.route("/api/image", methods=["POST"])
@@ -397,9 +321,8 @@ def create_app(
                 b64 = base64.b64encode(img_bytes).decode()
                 return jsonify({"url": f"data:image/png;base64,{b64}"}), 200
             return jsonify({"error": "تعذّر توليد الصورة"}), 500
-        except Exception as exc:
+        except Exception:
             logger.exception("[web_image] image generation failed")
-            log_unhandled_exception(mongo_db, exc, source="web_image")
             return jsonify({"error": "internal_error"}), 500
 
     @app.route("/api/guest-usage/status", methods=["GET"])
@@ -461,9 +384,8 @@ def create_app(
                 img_bytes, question, create_chat_completion_fn=create_chat_completion
             )
             return jsonify({"reply": reply or "تعذّر تحليل الصورة"}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("[web_analyze_image] image analysis failed")
-            log_unhandled_exception(mongo_db, exc, source="web_analyze_image")
             return jsonify({"error": "internal_error"}), 500
 
     @app.route('/')

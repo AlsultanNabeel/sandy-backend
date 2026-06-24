@@ -111,12 +111,6 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     write_google_credentials()
     ensure_data_dirs()
 
-    try:
-        from app.integrations.sentry_config import init_sentry
-
-        init_sentry(app_env=app_env, app=app)
-    except Exception as exc:
-        logger.warning("[Bootstrap] Sentry init failed: %s", exc)
 
     try:
         from app.agent.tools.setup import register_all_tools

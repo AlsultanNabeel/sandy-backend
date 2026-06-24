@@ -25,29 +25,14 @@ _CACHED_CLIENT_KEY: tuple = ()
 
 
 def _get_azure_client(api_key: str, api_version: str, endpoint: str) -> Any:
-    """يعيد client مُخزّن أو يبنيه أول مرة.
-
-    لو مفاتيح Langfuse متوفّرة → نستورد من `langfuse.openai` بحيث الـ SDK
-    يعمل auto-instrumentation لكل chat.completions.create. هاي الطريقة
-    الرسمية من Langfuse وأكثر مرونة عبر نسخ الـ SDK.
-    """
+    """يعيد client مُخزّن أو يبنيه أول مرة."""
     global _CACHED_AZURE_CLIENT, _CACHED_CLIENT_KEY
     key = (api_key, api_version, endpoint)
     if _CACHED_AZURE_CLIENT is not None and _CACHED_CLIENT_KEY == key:
         return _CACHED_AZURE_CLIENT
 
-    AzureOpenAICls = None
-    if os.getenv("LANGFUSE_PUBLIC_KEY", "").strip():
-        try:
-            from langfuse.openai import AzureOpenAI as LangfuseAzureOpenAI  # type: ignore
-            AzureOpenAICls = LangfuseAzureOpenAI
-            print("[Azure] using langfuse.openai for auto-tracing", flush=True)
-        except ImportError:
-            pass
-
-    if AzureOpenAICls is None:
-        from openai import AzureOpenAI
-        AzureOpenAICls = AzureOpenAI
+    from openai import AzureOpenAI
+    AzureOpenAICls = AzureOpenAI
 
     _CACHED_AZURE_CLIENT = AzureOpenAICls(
         api_key=api_key,
@@ -96,11 +81,6 @@ class AzureIntentClient:
         system_instruction: str | None = None,
         temperature: float | None = None,
         response_schema: dict | None = None,
-        langfuse_name: str | None = None,
-        langfuse_metadata: dict | None = None,
-        langfuse_user_id: str | None = None,
-        langfuse_session_id: str | None = None,
-        langfuse_tags: list | None = None,
     ) -> str:
         """يولّد ردّ من Azure OpenAI — اسم الميثود مُحتفظ به للتوافق الخلفي.
 
@@ -142,31 +122,6 @@ class AzureIntentClient:
         if (response_mime_type or "application/json") == "application/json":
             kwargs["response_format"] = {"type": "json_object"}
         response = client.chat.completions.create(**kwargs)
-        if os.getenv("LANGFUSE_PUBLIC_KEY", "").strip() and (
-            langfuse_name or langfuse_metadata or langfuse_user_id
-            or langfuse_session_id or langfuse_tags
-        ):
-            try:
-                from langfuse import get_client  # type: ignore
-                lf = get_client()
-                upd = getattr(lf, "update_current_generation", None)
-                if callable(upd):
-                    enrich: Dict[str, Any] = {}
-                    if langfuse_name:
-                        enrich["name"] = langfuse_name
-                    meta = dict(langfuse_metadata or {})
-                    if langfuse_user_id:
-                        meta["user_id"] = langfuse_user_id
-                    if langfuse_session_id:
-                        meta["session_id"] = langfuse_session_id
-                    if langfuse_tags:
-                        meta["tags"] = langfuse_tags
-                    if meta:
-                        enrich["metadata"] = meta
-                    if enrich:
-                        upd(**enrich)
-            except Exception:
-                pass  # never break LLM flow on trace enrichment failure
 
         # log الـ usage بدون نص الرسالة أو الرد — للمراقبة فقط (يبقى للـ Heroku logs)
         usage = getattr(response, "usage", None)

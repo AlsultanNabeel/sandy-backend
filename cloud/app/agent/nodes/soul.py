@@ -356,11 +356,6 @@ def soul_node(state: SandyState) -> SandyState:
 
     except Exception as exc:
         logger.error(f"[soul_node] Soul Vault failed: {exc}")
-        try:
-            from app.integrations.sentry_config import capture_exception
-            capture_exception(exc, context={"node": "soul_node"})
-        except Exception:
-            pass
         return merge_state(state, {
             "persona_intensity": "minimal",
             "persona_snippet": _DEFAULT_MINIMAL_PERSONA or None,
