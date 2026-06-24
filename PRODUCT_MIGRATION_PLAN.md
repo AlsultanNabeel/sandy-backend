@@ -18,6 +18,14 @@ Order of attack: **Phase 1 (product DB) → Phase 2 (kill Telegram) → Phase 3 
 tenant / de-owner) → deploy the new backend to Heroku.** Frontends and feature
 parity come after the new backend is live and clean.
 
+> ✅ **DONE (2026-06-25): the clean backend is LIVE.** Phases 1–3b finished, the
+> Phase 1 migration was run, and the clean product backend is deployed to Heroku
+> (it took over the old `sandy-robot` app, now serving DB `sandy-app` via
+> `gunicorn`). The web frontend moved to GitHub Pages (free) and the iOS app
+> points at the live backend — both verified end-to-end (owner login → real data).
+> The remaining work is feature parity (port the web-only tools to iOS) and the
+> deeper isolation polish (Phase 4: per-tenant facts/persona/memory).
+
 ## 1. What we decided (the vision)
 
 Sandy is becoming a **public, paid, multi-user product** — NOT the owner's personal
@@ -106,13 +114,11 @@ verified). What exists today in `cloud/`:
 (e.g. `sandy-app`). Migration script moves the owner's data (currently tagged with
 his id, plus any legacy `user_id=None`) into a clean tenant id across all stores:
 tasks, reminders, habits, expenses, scenes, summaries, facts, journal, onboarding.
-  - DONE + RUN (2026-06-24): the migration script
-    (`cloud/migrations/001_migrate_owner_to_product_tenant.py`) was applied
-    (`sany-db` → `sandy-app`, 1080 docs copied) and then **removed** (one-off, no
-    longer needed; the whole `cloud/migrations/` dir is gone). Clean owner tenant
-    id = `3ab1c7f824c04e2aa3cd8bf0ca2f51d6` (his `sandy_users` account uuid) — wire
-    this into `/api/auth` so the owner token carries it instead of the legacy
-    Telegram id `628544372`. Source `sany-db` untouched (copy-only).
+  - DONE (script written, not yet run): `cloud/migrations/001_migrate_owner_to_product_tenant.py`.
+    Owner-approved decisions (2026-06-22): clean owner id = his `sandy_users`
+    account uuid (unifies auth + data); migrate everything incl. legacy untagged.
+    Copy-only, idempotent, dry-run by default (`--apply` to write). The run prints
+    the owner tenant id to wire into `/api/auth` in Phase 3. Owner runs it.
 
 **Phase 2 — Remove Telegram completely.** Delete `telegram_handlers.py`, bot
 registration, Telegram `/webhook` routes, `pyTelegramBotAPI` from requirements, and
@@ -282,12 +288,34 @@ shared global, kept owner-scoped transitionally at the end of Phase 3.
 **Phase 5 — Unify routes.** life/productivity APIs serve any tenant (no owner-only,
 no demo payloads). Robot/room actuation gated to the owner tenant only.
 
-**Phase 6 — Frontends.** One backend serving iOS (done) + Web (`sandy-web`
-repointed) → then Android / Mac / Windows.
+**Phase 6 — Frontends.** One backend serving iOS + Web → then Android / Mac / Windows.
+  DONE (2026-06-25):
+  - **Backend deployed to Heroku** — the clean `Sandy-App` repo (GitHub:
+    `AlsultanNabeel/sandy-backend`) now runs on the existing `sandy-robot` Heroku
+    app (so the URL `sandy-robot-3da0693d32f7.herokuapp.com` is unchanged for the
+    clients). Served by `gunicorn` (concurrent) instead of the werkzeug dev server;
+    a single werkzeug worker was dropping bursty pull-to-refresh calls (Heroku
+    H27). Entry point: `cloud/wsgi.py`. Python pinned to `3.11` (`.python-version`).
+  - **Web → GitHub Pages** (free): `sandy-web` now builds + deploys via a GitHub
+    Actions workflow to `alsultannabeel.github.io/sandy-web`; the old web Heroku
+    dyno was deleted (freed a slot + saved money). `FRONTEND_URL` Config Var set to
+    the Pages origin so CORS allows it.
+  - **iOS pointed at the live backend** (`AppState.swift` baseURL). Verified: owner
+    login returns the clean tenant id, real data shows.
+  - **iOS data layer rebuilt to per-feature stores** (single source of truth):
+    `TasksStore / RemindersStore / HabitsStore / ExpensesStore / JournalStore /
+    HomeStore`. The fetch runs in a store-owned `Task`, so a pull-to-refresh or tab
+    switch that ends the view gesture no longer cancels it (new data always lands).
+    Home additionally keeps last-good data on a transient/failed snapshot
+    (stale-while-revalidate) so the dashboard never blanks to zeros.
+
+**Phase 6b — App ⇄ web feature parity (port the web-only tools to iOS).** See §7
+  for the live checklist. Active next step after the deploy.
 
 **Phase 7 — Progressive onboarding + real hosting + subscriptions.** In-app nudge →
 optional survey feeding the evolving persona. Move off the laptop dev server to
-proper hosting. RevenueCat subscriptions (already scaffolded).
+proper hosting (gunicorn on Heroku is the interim). RevenueCat subscriptions
+(already scaffolded).
 
 ## 4b. Repos & deployment (the correct multi-platform layout)
 
@@ -343,13 +371,16 @@ Current `.env.example` is the old single-user shape. For the clean product:
 
 Note: per-tenant config (persona, integrations) lives in the DB, NOT in env.
 
-## 5. Open decisions (need owner input)
+## 5. Open decisions — RESOLVED (2026-06-25)
 
-- Tenant id scheme for the owner (keep `628544372`, or a fresh clean id?).
-- Whether to copy the owner's data into the product DB or start the product clean
-  and re-seed only what he wants.
-- When to physically shut down the Telegram bot / personal Heroku app.
-- Hosting target for the product backend.
+- ~~Tenant id scheme~~ → fresh clean id = the owner's `sandy_users` uuid
+  `3ab1c7f824c04e2aa3cd8bf0ca2f51d6` (legacy `628544372` kept only as the auth
+  `provider_sub` for lookup + `OWNER_TENANT_ID` for the transitional device gates).
+- ~~Copy vs clean DB~~ → copied (Phase 1 migration ran: 1080 docs into `sandy-app`).
+- ~~When to shut down the old personal app~~ → the `sandy-robot` Heroku app was
+  REPURPOSED to run the new backend (not shut down); the old `sany-db` is kept as a
+  read-only backup until the owner is confident (a few weeks).
+- ~~Hosting target~~ → Heroku for now (`gunicorn`); proper hosting is Phase 7.
 
 ## 6. Notes / gotchas
 
@@ -365,9 +396,25 @@ Note: per-tenant config (persona, integrations) lives in the DB, NOT in env.
 - Owner constraints: never `git push` / deploy (owner does that); removals must be
   complete (no dead code); docs in English, chat in Arabic.
 
-## 7. Status of app-vs-web parity (separate, smaller track)
+## 7. App ⇄ web feature parity (Phase 6b) — live checklist
 
-Done this session: habit undo, completed-tasks filter, reminder delete, Focus tab
-(pomodoro + room scenes control), scrollable tab bar, Gemini Live voice.
-Remaining web tabs to port: **Robot**, **Emails**, **Search/Images** chat modes.
-These can proceed in parallel but are lower priority than the migration above.
+The iOS app and the web (`sandy-web`) share one backend but expose different
+surfaces. Already in BOTH: chat, tasks, reminders, habits/expenses/journal, Focus
+(pomodoro + room scenes), Gemini Live voice.
+
+**Web-only tools to PORT to iOS** (owner-requested 2026-06-25 — add all six):
+  1. **Search** — web-research chat mode (`EXA`). Backend supported.
+  2. **Images** — image-generation chat mode (Azure image). Backend supported.
+  3. **Memory** — view/manage what Sandy remembers about you. **MUST be real data
+     (no demo/fake payloads); surface anything any feature saves to memory in a
+     proper, browsable way.** EXCLUDE the "Sandy system / منظومة" internals section.
+  4. **Timeline** — your activity log.
+  5. **Projects / Brainstorm** — plans/brainstorm tool.
+  6. **Robot** — owner device control tab (room/robot over MQTT; owner-gated).
+
+**Web tabs that are DEAD (backend removed — do NOT port; clean them off the web):**
+  - **Emails** — the in-app Gmail feature was removed in Phase 3.
+  - **GitHub issues** inside the web Projects tab — ops tooling removed in Phase 3.
+
+Note: this parity work depends on Phase 4 for Memory to be truly per-tenant +
+non-global; until then Memory reads the owner-scoped store.
