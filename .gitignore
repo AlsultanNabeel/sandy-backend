@@ -109,3 +109,7 @@ firmware/**/managed_components/
 
 # Local AI guide — keep out of the repo (like docs/)
 /CLAUDE.md
+
+# Internal strategy docs — local only (not product code, kept off GitHub/Heroku)
+/PRODUCT_MIGRATION_PLAN.md
+/PRODUCT_VISION.md
