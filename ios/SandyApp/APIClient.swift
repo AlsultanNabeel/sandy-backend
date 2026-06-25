@@ -136,6 +136,16 @@ final class APIClient {
         }
     }
 
+    // POST /api/memory {text} → {"ok":true,"id"} — احفظ معلومة جديدة عنك.
+    func addMemory(text: String) async throws {
+        _ = try await request("/api/memory", method: "POST", body: ["text": text])
+    }
+
+    // PATCH /api/memory/<id> {text} → {"ok":bool} — عدّل نص معلومة.
+    func updateMemory(id: String, text: String) async throws {
+        _ = try await request("/api/memory/\(id)", method: "PATCH", body: ["text": text])
+    }
+
     // DELETE /api/memory/<id>
     func deleteMemory(id: String) async throws {
         _ = try await request("/api/memory/\(id)", method: "DELETE")

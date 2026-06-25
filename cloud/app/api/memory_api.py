@@ -7,14 +7,20 @@ internal plumbing, not user-facing facts. Real data only; no demo payloads.
 
 Scoped to the caller's own user_id (isolated); guests get nothing.
 
+User facts are stored plainly (no embedding — only the rolling
+`conversation_summary` docs are vector-indexed), so add/edit are a simple
+insert/update mirroring the `memory_store` tool's shape.
+
 Endpoints:
   GET    /api/memory            this user's saved facts
+  POST   /api/memory            remember a new fact
+  PATCH  /api/memory/<fact_id>  edit one fact's text
   DELETE /api/memory/<fact_id>  forget one fact
 """
 
 from __future__ import annotations
 
-from flask import jsonify
+from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
 from app.utils.user_profiles import (
@@ -54,6 +60,55 @@ def register_memory_api(app, mongo_db=None):
                     "type": d.get("label", "user_fact"),
                 })
         return jsonify({"items": items}), 200
+
+    @app.route("/api/memory", methods=["POST"])
+    @require_auth
+    def add_memory(claims):
+        if mongo_db is None:
+            return jsonify({"ok": False}), 200
+        text = ((request.get_json(silent=True) or {}).get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "text_required"}), 400
+        from datetime import datetime, timezone
+
+        with active_user_profile_context(build_user_profile(claims)):
+            uid = current_user_id()
+            if not uid:
+                return jsonify({"ok": False}), 403
+            # Same shape the memory_store tool writes (plain user_fact, no embedding).
+            res = mongo_db["sandy_memories"].insert_one({
+                "chat_id": uid,
+                "label": "user_fact",
+                "content": text,
+                "created_at": datetime.now(timezone.utc),
+            })
+        return jsonify({"ok": True, "id": str(res.inserted_id)}), 200
+
+    @app.route("/api/memory/<fact_id>", methods=["PATCH"])
+    @require_auth
+    def update_memory(claims, fact_id):
+        if mongo_db is None:
+            return jsonify({"ok": False}), 200
+        from bson import ObjectId
+        from bson.errors import InvalidId
+
+        text = ((request.get_json(silent=True) or {}).get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "text_required"}), 400
+        try:
+            oid = ObjectId(fact_id)
+        except (InvalidId, TypeError):
+            return jsonify({"ok": False}), 200
+        with active_user_profile_context(build_user_profile(claims)):
+            uid = current_user_id()
+            if not uid:
+                return jsonify({"ok": False}), 403
+            # Scoped + never edits an auto summary by id.
+            res = mongo_db["sandy_memories"].update_one(
+                {"_id": oid, "chat_id": uid, "label": {"$ne": "conversation_summary"}},
+                {"$set": {"content": text}},
+            )
+        return jsonify({"ok": res.matched_count > 0}), (200 if res.matched_count else 400)
 
     @app.route("/api/memory/<fact_id>", methods=["DELETE"])
     @require_auth
