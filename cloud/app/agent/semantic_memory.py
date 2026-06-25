@@ -52,12 +52,14 @@ def _current_chat_id() -> Optional[str]:
 
 
 def _can_write_memory() -> bool:
-    """Owner and Family may write. Guest and unauthenticated may not."""
+    """Any authenticated user may read/write their OWN memory (isolated by
+    chat_id). Only guests / unauthenticated are blocked. Multi-tenant product:
+    every user gets a memory that learns from them, not just the owner."""
     profile = get_active_user_profile()
     if not profile:
         return False
     relation = str(profile.get("relation", "guest") or "guest").strip().lower()
-    return relation in {"owner", "family"}
+    return relation in {"owner", "family", "user"}
 
 
 def _can_read_memory() -> bool:
