@@ -32,6 +32,18 @@ struct MemoryFact: Identifiable {
     let type: String
 }
 
+// ── الخط الزمني (سجل النشاط الموحّد) — تطابق /api/timeline ──────────────────
+
+/// حدث بالخط الزمني — يحمل نوعه ومعرّفه ليقدر التطبيق يحذفه من مصدره.
+struct TimelineEvent: Identifiable {
+    let id: String
+    let type: String      // task | reminder | expense | journal
+    let title: String
+    let subtitle: String
+    let ts: String        // ISO
+    let done: Bool
+}
+
 struct OnboardingData {
     var done: Bool = false
     var preferredName: String = ""

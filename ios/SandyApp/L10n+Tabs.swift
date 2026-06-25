@@ -20,6 +20,7 @@ enum L10nTabs {
             "search":    .text("البحث"),
             "images":    .text("الصور"),
             "memory":    .text("الذاكرة"),
+            "timeline":  .text("الخط الزمني"),
             "emails":    .text("الإيميلات"),
         ],
         en: [
@@ -34,6 +35,7 @@ enum L10nTabs {
             "search":    .text("Search"),
             "images":    .text("Images"),
             "memory":    .text("Memory"),
+            "timeline":  .text("Timeline"),
             "emails":    .text("Emails"),
         ]
     )

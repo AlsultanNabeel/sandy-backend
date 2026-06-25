@@ -135,6 +135,34 @@ final class APIClient {
         _ = try await request("/api/memory/\(id)", method: "DELETE")
     }
 
+    // MARK: - الخط الزمني (سجل النشاط الموحّد)
+
+    // GET /api/timeline → {"items":[{type,id,title,subtitle,ts,done}]}
+    func getTimeline() async throws -> [TimelineEvent] {
+        let r = try await request("/api/timeline")
+        return (r["items"] as? [[String: Any]] ?? []).map {
+            TimelineEvent(id: $0["id"] as? String ?? "",
+                          type: $0["type"] as? String ?? "",
+                          title: $0["title"] as? String ?? "",
+                          subtitle: $0["subtitle"] as? String ?? "",
+                          ts: $0["ts"] as? String ?? "",
+                          done: $0["done"] as? Bool ?? false)
+        }
+    }
+
+    // حذف عنصر من مصدره الأصلي (حسب نوعه) — حرية الحذف من الخط الزمني.
+    func deleteTask(id: String) async throws {
+        _ = try await request("/api/tasks/\(id)", method: "DELETE")
+    }
+
+    func deleteExpense(id: String) async throws {
+        _ = try await request("/api/life/expenses/\(id)", method: "DELETE")
+    }
+
+    func deleteJournalEntry(id: String) async throws {
+        _ = try await request("/api/life/journal/\(id)", method: "DELETE")
+    }
+
     /// يجيب صوت ساندي الطبيعي (WAV من جيميني) لنصّ معيّن — للتشغيل ومزامنة الفم.
     /// نطلب JSON خام (مش عبر `request` لأنه يفكّ JSON؛ هون الناتج بايتات صوت).
     func synthesizeVoice(text: String, mood: String = "neutral") async throws -> Data {
