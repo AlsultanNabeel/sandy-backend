@@ -28,6 +28,12 @@ enum L10nHome {
             // Nav / toolbar
             "title":            .text("ساندي"),
             "profile":          .text("حسابي"),
+            "reorder":          .text("إعادة ترتيب العناصر"),
+            "reorderTitle":     .text("ترتيب الرئيسية"),
+            "reorderHint":      .text("اسحب العناصر لترتيبها كيف ما يناسبك."),
+            "block.proactive":  .text("نظرة ساندي"),
+            "block.glance":     .text("لمحة سريعة"),
+            "block.talk":       .text("احكي مع ساندي"),
 
             // Greeting — time-of-day lines (+ name suffix, a format key)
             "greeting.morning":     .text("صباح الخير"),
@@ -107,6 +113,12 @@ enum L10nHome {
             // Nav / toolbar
             "title":            .text("Sandy"),
             "profile":          .text("My account"),
+            "reorder":          .text("Reorder items"),
+            "reorderTitle":     .text("Arrange home"),
+            "reorderHint":      .text("Drag the items to order them however suits you."),
+            "block.proactive":  .text("Sandy's take"),
+            "block.glance":     .text("Quick glance"),
+            "block.talk":       .text("Talk to Sandy"),
 
             // Greeting — time-of-day lines (+ name suffix, a format key)
             "greeting.morning":     .text("Good morning"),

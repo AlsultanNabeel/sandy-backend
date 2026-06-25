@@ -30,6 +30,8 @@ struct HomeView: View {
     @StateObject private var store = HomeStore()
     /// يفتح حساب المستخدم (ProfileView) كـ sheet — الحساب مش تبويب.
     @State private var showProfile = false
+    /// يفتح ورقة إعادة ترتيب عناصر الرئيسية.
+    @State private var showReorder = false
 
     var body: some View {
         ZStack {
@@ -39,7 +41,16 @@ struct HomeView: View {
         .navigationTitle(lang.s("home.title"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // أعلى-أمام: زر أفاتار ساندي يفتح حسابك (مش تبويب).
+            // أعلى-بداية: زر إعادة ترتيب عناصر الرئيسية.
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showReorder = true
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                .accessibilityLabel(lang.s("home.reorder"))
+            }
+            // أعلى-نهاية: زر أفاتار ساندي يفتح حسابك (مش تبويب).
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showProfile = true
@@ -54,6 +65,9 @@ struct HomeView: View {
             // ProfileView يعتمد على EnvironmentObject، ولها NavigationStack خاص
             // حتى يظهر عنوانها وأزرار التعديل/الخروج صح داخل الـ sheet.
             NavigationStack { ProfileView() }
+        }
+        .sheet(isPresented: $showReorder) {
+            HomeReorderSheet(store: store)
         }
         .task { await store.loadIfNeeded(api: state.api) }
         .refreshable { await store.load(api: state.api) }
@@ -73,14 +87,11 @@ struct HomeView: View {
                         .reveal(order: 1, key: store.revealKey)
                 }
 
-                proactiveCard
-                    .reveal(order: 1, key: store.revealKey)
-
-                glanceSection
-                    .reveal(order: 2, key: store.revealKey)
-
-                talkToSandyCard
-                    .reveal(order: 3, key: store.revealKey)
+                // العناصر بالترتيب الذي اختاره المستخدم (يُعاد ترتيبه من ورقة الترتيب).
+                ForEach(Array(store.order.enumerated()), id: \.element.id) { idx, block in
+                    blockView(block)
+                        .reveal(order: idx + 1, key: store.revealKey)
+                }
 
                 // مساحة سفلية حتى ما تغطّي ساندي العائمة آخر بطاقة.
                 Color.clear.frame(height: 96)
@@ -89,6 +100,16 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             // حركة لطيفة عند تبدّل اللقطة (الأرقام تتحرّك بنعومة).
             .animation(.spring(response: 0.5, dampingFraction: 0.85), value: store.revealKey)
+        }
+    }
+
+    /// يبني العنصر المطلوب حسب نوعه — يخلّي ترتيب العرض مدفوعًا بـ `store.order`.
+    @ViewBuilder
+    private func blockView(_ block: HomeBlock) -> some View {
+        switch block {
+        case .proactive: proactiveCard
+        case .glance:    glanceSection
+        case .talk:      talkToSandyCard
         }
     }
 
@@ -558,6 +579,78 @@ private extension View {
 /// يملك لقطة الرئيسية والجلب، مستقل عن دورة حياة الشاشة. الجلب بمهمة مملوكة
 /// للستور فالسحب الملغى ما يلغيه. وحارس مهم: بعد أول تحميل ناجح، ما نكتب فوق
 /// بياناتك الجيدة بلقطة فاضية/خطأ عابر — فلوحتك ما بتتصفّر ولا تطلّع "تعثرت".
+// MARK: - ورقة إعادة الترتيب
+
+/// ورقة بسيطة لإعادة ترتيب عناصر الرئيسية بالجر: قائمة بوضع تحرير دائم وأيدي جر.
+/// كل نقلة تُحفظ فورًا، والرئيسية تعكسها مباشرة لأنها تقرأ نفس `store.order`.
+private struct HomeReorderSheet: View {
+    @ObservedObject var store: HomeStore
+    @EnvironmentObject var lang: LanguageManager
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SandyBackground()
+                List {
+                    Section {
+                        ForEach(store.order) { block in
+                            HStack(spacing: Theme.Spacing.md) {
+                                Image(systemName: block.icon)
+                                    .foregroundColor(Theme.Colors.accent)
+                                    .frame(width: 26)
+                                Text(lang.s(block.titleKey))
+                                    .font(Theme.Typography.body)
+                                    .foregroundColor(Theme.Colors.primaryText)
+                                Spacer(minLength: 0)
+                            }
+                            .listRowBackground(Color.clear)
+                        }
+                        .onMove { store.move(from: $0, to: $1) }
+                    } header: {
+                        Text(lang.s("home.reorderHint"))
+                            .font(Theme.Typography.caption)
+                            .foregroundColor(Theme.Colors.secondaryText)
+                            .textCase(nil)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.editMode, .constant(.active))
+            }
+            .navigationTitle(lang.s("home.reorderTitle"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(lang.s("common.done")) { dismiss() }
+                }
+            }
+        }
+        .environment(\.layoutDirection, .rightToLeft)
+    }
+}
+
+/// عناصر الرئيسية القابلة لإعادة الترتيب (التحية تبقى ترويسة ثابتة فوق). كل عنصر
+/// له مفتاح عنوان وأيقونة لعرضه بورقة إعادة الترتيب.
+enum HomeBlock: String, CaseIterable, Identifiable {
+    case proactive, glance, talk
+    var id: String { rawValue }
+    var titleKey: String {
+        switch self {
+        case .proactive: return "home.block.proactive"
+        case .glance:    return "home.block.glance"
+        case .talk:      return "home.block.talk"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .proactive: return "sparkles"
+        case .glance:    return "square.grid.2x2.fill"
+        case .talk:      return "bubble.left.and.bubble.right.fill"
+        }
+    }
+}
+
 @MainActor
 final class HomeStore: ObservableObject {
     @Published var snapshot = HomeSnapshot()
@@ -565,8 +658,27 @@ final class HomeStore: ObservableObject {
     @Published var loadFailed = false
     @Published var didAppear = false
     @Published var revealKey = 0
+    /// ترتيب عناصر الرئيسية الذي اختاره المستخدم (محفوظ محليًا).
+    @Published var order: [HomeBlock] = HomeBlock.allCases
 
     private var loadTask: Task<Void, Never>?
+    private let orderKey = "sandy_home_order"
+
+    init() { loadOrder() }
+
+    /// يقرأ الترتيب المحفوظ ويُلحق أي عنصر جديد ما كان موجود (هجرة آمنة).
+    func loadOrder() {
+        let saved = UserDefaults.standard.stringArray(forKey: orderKey) ?? []
+        var result = saved.compactMap { HomeBlock(rawValue: $0) }
+        for b in HomeBlock.allCases where !result.contains(b) { result.append(b) }
+        order = result
+    }
+
+    /// إعادة ترتيب عنصر (من ورقة الترتيب) ثم حفظ فوري.
+    func move(from offsets: IndexSet, to destination: Int) {
+        order.move(fromOffsets: offsets, toOffset: destination)
+        UserDefaults.standard.set(order.map(\.rawValue), forKey: orderKey)
+    }
 
     /// تحميل أوّل فقط (يتحكّم بدخول البطاقات المتدرّج).
     func loadIfNeeded(api: APIClient) async {
