@@ -42,9 +42,85 @@ def _now() -> str:
 
 
 def _title_from(text: str) -> str:
-    """A short title from the first user message (Phase B upgrades to an LLM call)."""
+    """A short fallback title from the first user message (used until the LLM
+    title lands, and if the LLM is unavailable)."""
     t = " ".join((text or "").split())
     return t[:40] if t else "محادثة جديدة"
+
+
+def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
+    """Generate a short smart title from the first exchange and store it. Runs in
+    a background thread (a small LLM call) so it never slows the message append."""
+    try:
+        from app.config import (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
+                                 AZURE_OPENAI_API_VERSION, AZURE_OPENAI_CHAT_DEPLOYMENT)
+        from openai import AzureOpenAI
+
+        if not AZURE_OPENAI_API_KEY:
+            return
+        client = AzureOpenAI(
+            api_key=AZURE_OPENAI_API_KEY,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_version=AZURE_OPENAI_API_VERSION,
+        )
+        resp = client.chat.completions.create(
+            model=AZURE_OPENAI_CHAT_DEPLOYMENT,
+            messages=[
+                {"role": "system", "content": (
+                    "اكتب عنوانًا قصيرًا جدًا (كلمتين لأربع كلمات) يلخّص موضوع المحادثة. "
+                    "بنفس لغة المستخدم، بدون علامات اقتباس وبدون نقطة في الآخر."
+                )},
+                {"role": "user", "content": f"المستخدم: {user_msg}\nساندي: {reply}"},
+            ],
+            max_tokens=20,
+        )
+        title = (resp.choices[0].message.content or "").strip().strip('"').strip("«»").strip()
+        if title:
+            coll.update_one({"_id": cid, "user_id": uid},
+                            {"$set": {"title": title[:60], "title_generated": True}})
+    except Exception:  # noqa: BLE001 — العنوان تحسين، فشله يترك عنوان أول رسالة
+        pass
+
+
+def _generate_title_async(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
+    import threading
+    threading.Thread(
+        target=_generate_title, args=(coll, cid, uid, user_msg, reply), daemon=True
+    ).start()
+
+
+def _semantic_hits(mongo_db, query: str, limit: int = 30):
+    """Conversation ids whose rolling summary is semantically close to the query —
+    reuses the agent's vector-indexed LTM (`sandy_memories`, label
+    `conversation_summary`, keyed by chat_id == conversation_id). Returns
+    [(conversation_id, summary)]; ownership is enforced by the caller's lookup in
+    `conversations`. Best-effort: any failure (no embeddings / no vector index)
+    yields [] and the text search alone still answers.
+    """
+    if mongo_db is None:
+        return []
+    try:
+        from app.agent.semantic_memory import _embed
+        vec = _embed(query)
+        if not vec:
+            return []
+        pipeline = [
+            {"$vectorSearch": {
+                "index": "sandy_vector_index",
+                "path": "embedding",
+                "queryVector": vec,
+                "numCandidates": 80,
+                "limit": limit,
+                "filter": {"label": {"$eq": "conversation_summary"}},
+            }},
+            {"$project": {"chat_id": 1, "summary": 1}},
+        ]
+        return [
+            (str(d.get("chat_id", "")), d.get("summary", ""))
+            for d in mongo_db["sandy_memories"].aggregate(pipeline)
+        ]
+    except Exception:  # noqa: BLE001 — semantic is additive; text search is the floor
+        return []
 
 
 def register_conversations_api(app, mongo_db=None):
@@ -85,6 +161,7 @@ def register_conversations_api(app, mongo_db=None):
             "_id": cid,
             "user_id": uid,
             "title": (body.get("title") or "").strip(),
+            "title_generated": False,
             "created_at": now,
             "updated_at": now,
             "messages": [],
@@ -144,7 +221,10 @@ def register_conversations_api(app, mongo_db=None):
         if role not in ("user", "sandy") or not text:
             return jsonify({"error": "bad_message"}), 400
 
-        d = coll.find_one({"_id": cid, "user_id": uid}, {"title": 1})
+        d = coll.find_one(
+            {"_id": cid, "user_id": uid},
+            {"title": 1, "title_generated": 1, "messages": {"$slice": -1}},
+        )
         if not d:
             return jsonify({"error": "not_found"}), 404
 
@@ -152,10 +232,16 @@ def register_conversations_api(app, mongo_db=None):
             "$push": {"messages": {"role": role, "text": text, "ts": _now()}},
             "$set": {"updated_at": _now()},
         }
-        # First user message becomes the title until renamed.
+        # First user message becomes the fallback title until the smart one lands.
         if role == "user" and not (d.get("title") or "").strip():
             update["$set"]["title"] = _title_from(text)
         coll.update_one({"_id": cid, "user_id": uid}, update)
+
+        # On the first Sandy reply, generate a smart title from the first exchange.
+        if role == "sandy" and not d.get("title_generated"):
+            last = (d.get("messages") or [])
+            last_user = last[-1].get("text", "") if last and last[-1].get("role") == "user" else ""
+            _generate_title_async(coll, cid, uid, last_user, text)
         return jsonify({"ok": True}), 200
 
     @app.route("/api/conversations/search", methods=["GET"])
@@ -168,6 +254,8 @@ def register_conversations_api(app, mongo_db=None):
             return jsonify({"items": []}), 200
         ql = q.lower()
         items = []
+        seen = set()
+        # 1) Text match over titles + messages (covers every conversation).
         for d in coll.find({"user_id": uid}).sort("updated_at", -1).limit(300):
             title = d.get("title", "") or ""
             snippet = ""
@@ -186,6 +274,23 @@ def register_conversations_api(app, mongo_db=None):
                 "snippet": snippet[:120],
                 "updated_at": d.get("updated_at", ""),
             })
+            seen.add(str(d["_id"]))
             if len(items) >= 50:
                 break
+
+        # 2) Semantic match over rolling summaries (finds it by meaning, not words).
+        #    Ownership enforced here: we only surface the caller's own conversations.
+        for cid, summary in _semantic_hits(mongo_db, q):
+            if not cid or cid in seen or len(items) >= 50:
+                continue
+            c = coll.find_one({"_id": cid, "user_id": uid}, {"title": 1, "updated_at": 1})
+            if not c:
+                continue
+            items.append({
+                "id": cid,
+                "title": c.get("title", "") or "محادثة",
+                "snippet": (summary or "")[:120],
+                "updated_at": c.get("updated_at", ""),
+            })
+            seen.add(cid)
         return jsonify({"items": items}), 200
