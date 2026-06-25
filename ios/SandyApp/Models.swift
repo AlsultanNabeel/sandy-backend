@@ -143,6 +143,31 @@ struct FocusSession: Identifiable {
     let startedAt: String
 }
 
+// ── البحث الخارجي (الويب/الأماكن) — تطابق GET /api/research ─────────────────
+
+/// نتيجة بحث ويب — تطابق عناصر kind=web: title, url, text, published_date.
+struct WebResult: Identifiable {
+    let id = UUID()
+    let title: String
+    let url: String
+    let text: String
+    let publishedDate: String
+}
+
+/// نتيجة مكان — تطابق عناصر kind=places من Google Places.
+struct PlaceResult: Identifiable {
+    let id = UUID()
+    let name: String
+    let address: String
+    let rating: Double
+    let reviewsCount: Int
+    let phone: String
+    let website: String
+    let priceLevel: String
+    let openNow: String
+    let mapsUrl: String
+}
+
 struct APIError: LocalizedError {
     let message: String
     var errorDescription: String? { message }

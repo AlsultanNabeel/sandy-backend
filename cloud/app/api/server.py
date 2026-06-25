@@ -73,6 +73,9 @@ def create_app(
     from app.api.studio_api import register_studio_api
     register_studio_api(app, mongo_db=mongo_db)
 
+    from app.api.research_api import register_research_api
+    register_research_api(app)
+
     from app.api.life_api import register_life_api
     register_life_api(app, mongo_db=mongo_db)
 

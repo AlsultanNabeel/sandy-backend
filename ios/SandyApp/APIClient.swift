@@ -299,6 +299,41 @@ final class APIClient {
                               body: ["name": name])
     }
 
+    // MARK: - البحث الخارجي (الويب/الأماكن)
+
+    private func enc(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+    }
+
+    // GET /api/research?q=&kind=web → {"kind","items":[{title,url,text,published_date}],"demo"}
+    func researchWeb(q: String) async throws -> ListResult<WebResult> {
+        let r = try await request("/api/research?kind=web&q=\(enc(q))")
+        let items = (r["items"] as? [[String: Any]] ?? []).map { row in
+            WebResult(title: row["title"] as? String ?? "",
+                      url: row["url"] as? String ?? "",
+                      text: row["text"] as? String ?? "",
+                      publishedDate: row["published_date"] as? String ?? "")
+        }
+        return ListResult(items: items, demo: r["demo"] as? Bool ?? false)
+    }
+
+    // GET /api/research?q=&kind=places → {"kind","items":[{name,address,rating,...}],"demo"}
+    func researchPlaces(q: String) async throws -> ListResult<PlaceResult> {
+        let r = try await request("/api/research?kind=places&q=\(enc(q))")
+        let items = (r["items"] as? [[String: Any]] ?? []).map { row in
+            PlaceResult(name: row["name"] as? String ?? "",
+                        address: row["address"] as? String ?? "",
+                        rating: (row["rating"] as? NSNumber)?.doubleValue ?? 0,
+                        reviewsCount: (row["reviews_count"] as? NSNumber)?.intValue ?? 0,
+                        phone: row["phone"] as? String ?? "",
+                        website: row["website"] as? String ?? "",
+                        priceLevel: row["price_level"] as? String ?? "",
+                        openNow: row["open_now"] as? String ?? "",
+                        mapsUrl: row["maps_url"] as? String ?? "")
+        }
+        return ListResult(items: items, demo: r["demo"] as? Bool ?? false)
+    }
+
     // ── المصاريف ────────────────────────────────────────────────────────
     // GET /api/life/expenses → {"items":[{id,amount,note,category,at}],
     //                           "summary":{total,count,...}, "demo":bool}
