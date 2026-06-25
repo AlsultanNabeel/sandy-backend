@@ -11,6 +11,8 @@ struct TasksView: View {
     @StateObject private var store = TasksStore()
 
     @State private var showAddSheet = false
+    /// المهمة الجاري تعديلها (nil = ما في ورقة تعديل مفتوحة).
+    @State private var editingTask: TaskItem?
     /// false = النشطة، true = المكتملة.
     @State private var showCompleted = false
 
@@ -44,8 +46,13 @@ struct TasksView: View {
         .task { await store.load(api: state.api, completed: showCompleted) }
         .refreshable { await store.load(api: state.api, completed: showCompleted) }
         .sheet(isPresented: $showAddSheet) {
-            AddTaskSheet { text, due, note, priority in
+            TaskSheet { text, due, note, priority in
                 await submit(text: text, due: due, note: note, priority: priority)
+            }
+        }
+        .sheet(item: $editingTask) { task in
+            TaskSheet(existing: task) { text, due, note, priority in
+                await submitEdit(task: task, text: text, due: due, note: note, priority: priority)
             }
         }
     }
@@ -74,20 +81,37 @@ struct TasksView: View {
         } else if store.tasks.isEmpty {
             emptyState
         } else {
-            ScrollView {
-                VStack(spacing: Theme.Spacing.sm) {
-                    ForEach(store.tasks) { task in
-                        TaskRow(task: task) { store.toggle(api: state.api, task: task) }
-                            .transition(
-                                .asymmetric(
-                                    insertion: .scale(scale: 0.92).combined(with: .opacity),
-                                    removal: .opacity.combined(with: .move(edge: .leading))
-                                )
-                            )
+            // قائمة أصلية: تعطينا إيماءات السحب القياسية (الأكثر متانة) مع إبقاء
+            // بطاقات ساندي — خلفية وفواصل مخفية وحواف مخصّصة تحاكي الشكل السابق.
+            List {
+                ForEach(store.tasks) { task in
+                    TaskRow(
+                        task: task,
+                        onToggle: { store.toggle(api: state.api, task: task) },
+                        onTap: { editingTask = task },
+                        onDelete: { store.delete(api: state.api, task: task) },
+                        onPriority: { store.setPriority(api: state.api, task: task, priority: $0) }
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.md,
+                                              bottom: Theme.Spacing.xs, trailing: Theme.Spacing.md))
+                    // السحب لليسار (حافة لاحقة) = حذف سريع؛ لليمين (حافة سابقة) = تعديل.
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            store.delete(api: state.api, task: task)
+                        } label: { Label(lang.s("tasks.delete"), systemImage: "trash") }
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button { editingTask = task } label: {
+                            Label(lang.s("tasks.edit"), systemImage: "pencil")
+                        }
+                        .tint(Theme.Colors.accent)
                     }
                 }
-                .padding(Theme.Spacing.md)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         }
     }
 
@@ -156,6 +180,21 @@ struct TasksView: View {
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         return await store.add(api: state.api, text: trimmed, due: dueISO,
                                note: trimmedNote.isEmpty ? nil : trimmedNote, priority: priority)
+    }
+
+    /// إرسال تعديل مهمة قائمة — نفس تنسيق الموعد؛ المنطق بالستور. يرجّع نجاح/فشل.
+    /// نمرّر `completed: showCompleted` حتى تُعيد إعادة الجلب القائمة الصحيحة.
+    private func submitEdit(task: TaskItem,
+                           text: String,
+                           due: Date?,
+                           note: String,
+                           priority: String) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let dueISO = due.map { Self.iso.string(from: $0) } ?? ""
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return await store.update(api: state.api, id: task.id, text: trimmed, due: dueISO,
+                                  note: trimmedNote, priority: priority, completed: showCompleted)
     }
 
     // مُنسّق ISO8601 موحّد للموعد المُرسَل للباك-إند.
@@ -228,14 +267,63 @@ final class TasksStore: ObservableObject {
             }
         }
     }
+
+    /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
+    func delete(api: APIClient, task: TaskItem) {
+        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        let removed = tasks.remove(at: idx)
+        Task { @MainActor in
+            do {
+                try await api.deleteTask(id: task.id)
+            } catch {
+                tasks.insert(removed, at: min(idx, tasks.count))
+                notice = LanguageManager.shared.s("tasks.errorDelete")
+            }
+        }
+    }
+
+    /// تعديل شامل (نص/موعد/ملاحظة/أولوية) ثم إعادة جلب. يرجّع نجاح/فشل لتقرّر الورقة.
+    func update(api: APIClient, id: String, text: String, due: String,
+                note: String?, priority: String, completed: Bool) async -> Bool {
+        do {
+            try await api.updateTask(id: id, text: text, note: note ?? "",
+                                     priority: priority, due: due)
+            notice = ""
+            await load(api: api, completed: completed)
+            return true
+        } catch {
+            notice = LanguageManager.shared.s("tasks.errorEdit")
+            return false
+        }
+    }
+
+    /// تغيير الأولوية سريعًا (من القائمة السياقية) بتحديث متفائل.
+    func setPriority(api: APIClient, task: TaskItem, priority: String) {
+        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        let old = tasks[idx].priority
+        tasks[idx].priority = priority
+        Task { @MainActor in
+            do {
+                try await api.updateTask(id: task.id, priority: priority)
+            } catch {
+                if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i].priority = old }
+                notice = LanguageManager.shared.s("tasks.errorEdit")
+            }
+        }
+    }
 }
 
 // MARK: - صف المهمة
 
-/// صف مهمة واحد: زر تعليم بنقرة (مع حركة check مُرضية)، النص، الأولوية، الموعد.
+/// صف مهمة واحد: زر تعليم بنقرة، نقر الصف يفتح التعديل، وضغط مطوّل يفتح قائمة
+/// سياقية (تعليم/تعديل/أولوية/حذف). نفس نمط الروبوت.
 private struct TaskRow: View {
+    @EnvironmentObject var lang: LanguageManager
     let task: TaskItem
     let onToggle: () -> Void
+    let onTap: () -> Void
+    let onDelete: () -> Void
+    let onPriority: (String) -> Void
 
     var body: some View {
         SandyCard {
@@ -277,6 +365,23 @@ private struct TaskRow: View {
             }
         }
         .opacity(task.done ? 0.7 : 1.0)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+        .contextMenu {
+            Button { onToggle() } label: {
+                Label(lang.s(task.done ? "tasks.markUndone" : "tasks.markDone"),
+                      systemImage: task.done ? "arrow.uturn.left" : "checkmark.circle")
+            }
+            Button { onTap() } label: { Label(lang.s("tasks.edit"), systemImage: "pencil") }
+            Menu {
+                Button { onPriority("high") } label: { Label(lang.s("tasks.priorityHigh"), systemImage: "flag.fill") }
+                Button { onPriority("normal") } label: { Label(lang.s("tasks.priorityNormal"), systemImage: "flag") }
+                Button { onPriority("low") } label: { Label(lang.s("tasks.priorityLow"), systemImage: "flag") }
+            } label: { Label(lang.s("tasks.priority"), systemImage: "flag") }
+            Button(role: .destructive) { onDelete() } label: {
+                Label(lang.s("tasks.delete"), systemImage: "trash")
+            }
+        }
     }
 
     /// تنسيق الموعد القادم من الباك-إند (ISO أو بدون منطقة) لعرض عربي لطيف.
@@ -365,21 +470,38 @@ private struct PulsingSandy: View {
 
 // MARK: - ورقة إضافة مهمة (تفصيلية)
 
-/// ورقة الإضافة: عنوان (إلزامي) + موعد اختياري (تاريخ ووقت) + أولوية (شرائح)
-/// + ملاحظة اختيارية (متعدّد أسطر). تُرسل عبر closure غير متزامن يرجّع نجاح/فشل.
-private struct AddTaskSheet: View {
+/// ورقة المهمة (إضافة أو تعديل): عنوان (إلزامي) + موعد اختياري (تاريخ ووقت) +
+/// أولوية (شرائح) + ملاحظة اختيارية. `existing` غير nil ⇒ وضع تعديل (تعبئة مسبقة).
+/// تُرسل عبر closure غير متزامن يرجّع نجاح/فشل.
+private struct TaskSheet: View {
+    /// المهمة القائمة عند التعديل (nil = إضافة جديدة).
+    let existing: TaskItem?
     /// closure الإرسال: يرجّع true عند النجاح حتى نقفل الورقة.
     let onSubmit: (_ text: String, _ due: Date?, _ note: String, _ priority: String) async -> Bool
 
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 
-    @State private var text = ""
-    @State private var hasDue = false
-    @State private var due = Date().addingTimeInterval(3600)
-    @State private var priority = "normal"
-    @State private var note = ""
+    @State private var text: String
+    @State private var hasDue: Bool
+    @State private var due: Date
+    @State private var priority: String
+    @State private var note: String
     @State private var submitting = false
+
+    init(existing: TaskItem? = nil,
+         onSubmit: @escaping (_ text: String, _ due: Date?, _ note: String, _ priority: String) async -> Bool) {
+        self.existing = existing
+        self.onSubmit = onSubmit
+        _text = State(initialValue: existing?.text ?? "")
+        _note = State(initialValue: existing?.note ?? "")
+        _priority = State(initialValue: existing?.priority ?? "normal")
+        let parsed = existing.flatMap { TaskSheet.parseDue($0.dueAt) }
+        _hasDue = State(initialValue: parsed != nil)
+        _due = State(initialValue: parsed ?? Date().addingTimeInterval(3600))
+    }
+
+    private var isEditing: Bool { existing != nil }
 
     private var canSave: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -397,7 +519,7 @@ private struct AddTaskSheet: View {
                         dueSection
                         noteSection
 
-                        SandyButton(title: lang.s("tasks.saveTask"),
+                        SandyButton(title: lang.s(isEditing ? "tasks.saveEdit" : "tasks.saveTask"),
                                     systemImage: "checkmark.circle.fill",
                                     isLoading: submitting,
                                     fillWidth: true) {
@@ -409,7 +531,7 @@ private struct AddTaskSheet: View {
                     .padding(Theme.Spacing.md)
                 }
             }
-            .navigationTitle(lang.s("tasks.newTask"))
+            .navigationTitle(lang.s(isEditing ? "tasks.editTask" : "tasks.newTask"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -491,5 +613,21 @@ private struct AddTaskSheet: View {
             submitting = false
             if ok { dismiss() }
         }
+    }
+
+    /// يفكّ موعد ISO (مع/بدون كسور ثواني/بدون منطقة) لتعبئة المنتقي عند التعديل.
+    private static func parseDue(_ iso: String) -> Date? {
+        guard !iso.isEmpty else { return nil }
+        let full = ISO8601DateFormatter()
+        full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = full.date(from: iso) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        if let d = plain.date(from: iso) { return d }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone.current
+        df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return df.date(from: iso)
     }
 }

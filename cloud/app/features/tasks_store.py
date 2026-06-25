@@ -216,6 +216,27 @@ def complete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
         return False
 
 
+def set_task_due(task_id: str, due_iso: str = "", mongo_db=None) -> bool:
+    """Set or clear a task's due date/time (edit). Empty due_iso clears it. Unlike
+    create, editing allows any time (the user may reschedule freely)."""
+    try:
+        coll = _coll(mongo_db)
+        if coll is None or not task_id:
+            return False
+        if due_iso:
+            due_dt = _parse_iso(due_iso)
+            if due_dt is None:
+                return False
+            updates: Dict[str, Any] = {"due_date": due_dt.date().isoformat(), "due_at": due_dt}
+        else:
+            updates = {"due_date": "", "due_at": None}
+        r = coll.update_one({"_id": task_id}, {"$set": updates})
+        return r.matched_count > 0
+    except Exception as e:
+        print(f"[TasksStore] set_due failed: {e}")
+        return False
+
+
 def uncomplete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
     try:
         coll = _coll(mongo_db)

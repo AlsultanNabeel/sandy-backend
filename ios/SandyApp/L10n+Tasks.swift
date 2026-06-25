@@ -30,15 +30,25 @@ enum L10nTasks {
             "errorLoad":   .text("معلش، ما قدرت أجيب مهامك — جرّب تسحب للتحديث كمان مرة."),
             "errorAdd":    .text("معلش، ما قدرت أضيف المهمة — جرّب كمان مرة."),
             "errorToggle": .text("معلش، ما زبطت أحدّث المهمة — جرّب كمان مرة."),
+            "errorDelete": .text("معلش، ما قدرت أحذف المهمة — جرّب كمان مرة."),
+            "errorEdit":   .text("معلش، ما قدرت أعدّل المهمة — جرّب كمان مرة."),
+
+            // القائمة السياقية وإيماءات السحب
+            "markDone":   .text("تعليم كمنجزة"),
+            "markUndone": .text("رجّعها غير منجزة"),
+            "edit":       .text("تعديل"),
+            "delete":     .text("حذف"),
 
             // شارات الأولوية (التسميات المرئية فقط)
             "priorityHigh":   .text("عالية"),
             "priorityNormal": .text("عادية"),
             "priorityLow":    .text("منخفضة"),
 
-            // ورقة الإضافة
+            // ورقة الإضافة/التعديل
             "newTask":         .text("مهمة جديدة"),
+            "editTask":        .text("تعديل المهمة"),
             "saveTask":        .text("حفظ المهمة"),
+            "saveEdit":        .text("حفظ التعديل"),
             "titleQuestion":   .text("شو المهمة؟"),
             "titlePlaceholder": .text("مثلاً: أكمّل تقرير المشروع"),
             "priority":        .text("الأولوية"),
@@ -68,15 +78,25 @@ enum L10nTasks {
             "errorLoad":   .text("Sorry, I couldn't load your tasks — pull to refresh and try again."),
             "errorAdd":    .text("Sorry, I couldn't add the task — give it another try."),
             "errorToggle": .text("Sorry, I couldn't update the task — give it another try."),
+            "errorDelete": .text("Sorry, I couldn't delete the task — give it another try."),
+            "errorEdit":   .text("Sorry, I couldn't update the task — give it another try."),
+
+            // context menu & swipe actions
+            "markDone":   .text("Mark done"),
+            "markUndone": .text("Mark not done"),
+            "edit":       .text("Edit"),
+            "delete":     .text("Delete"),
 
             // priority badges (visible labels only)
             "priorityHigh":   .text("High"),
             "priorityNormal": .text("Normal"),
             "priorityLow":    .text("Low"),
 
-            // add sheet
+            // add/edit sheet
             "newTask":         .text("New task"),
+            "editTask":        .text("Edit task"),
             "saveTask":        .text("Save task"),
+            "saveEdit":        .text("Save changes"),
             "titleQuestion":   .text("What's the task?"),
             "titlePlaceholder": .text("e.g. Finish the project report"),
             "priority":        .text("Priority"),

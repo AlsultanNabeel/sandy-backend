@@ -172,7 +172,7 @@ def register_productivity_api(app, mongo_db=None):
         body = request.get_json(silent=True) or {}
         from app.features.tasks_store import (
             rename_task, complete_task, uncomplete_task,
-            replace_task_note, set_task_priority,
+            replace_task_note, set_task_priority, set_task_due,
         )
         ok = True
         with active_user_profile_context(build_user_profile(claims)):
@@ -185,6 +185,8 @@ def register_productivity_api(app, mongo_db=None):
             if "priority" in body:
                 priority = _clean_priority(body.get("priority"))
                 ok = set_task_priority(task_id, priority, mongo_db=mongo_db) and ok
+            if "due" in body:
+                ok = set_task_due(task_id, (body.get("due") or "").strip(), mongo_db=mongo_db) and ok
             if "done" in body:
                 if body.get("done"):
                     ok = complete_task(task_id, mongo_db=mongo_db) and ok

@@ -225,15 +225,19 @@ final class APIClient {
                     text: String? = nil,
                     done: Bool? = nil,
                     note: String? = nil,
-                    priority: String? = nil) async throws {
+                    priority: String? = nil,
+                    due: String? = nil) async throws {
         var body: [String: Any] = [:]
         if let text { body["text"] = text }
         if let done { body["done"] = done }
         if let note { body["note"] = note }
         if let priority { body["priority"] = priority }
+        if let due { body["due"] = due }   // "" يمسح الموعد
         guard !body.isEmpty else { return }
         _ = try await request("/api/tasks/\(id)", method: "PATCH", body: body)
     }
+
+    // DELETE /api/tasks/<id> — deleteTask معرّف بقسم الخط الزمني.
 
     // ── التذكيرات ───────────────────────────────────────────────────────
     // GET /api/reminders → {"items":[{id,text,remind_at,is_recurring,note?}], "demo":bool}
