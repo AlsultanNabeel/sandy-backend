@@ -105,6 +105,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nReminders.ns:  L10nReminders.table,
     L10nLife.ns:       L10nLife.table,
     L10nFocus.ns:      L10nFocus.table,
+    L10nRobot.ns:      L10nRobot.table,
     L10nProfile.ns:    L10nProfile.table,
 ]
 

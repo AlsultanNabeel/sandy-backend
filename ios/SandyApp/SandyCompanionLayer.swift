@@ -194,8 +194,8 @@ struct SandyCompanionLayer: View {
         let aboveInputY = size.height - 172
 
         switch tab {
-        case .home:
-            // الرئيسية: ركن أسفل-يمين (مدخل ساندي الدافئ).
+        case .home, .robot:
+            // الرئيسية/الروبوت: ركن أسفل-يمين.
             return CGPoint(x: trailingX, y: bottomY)
         case .chat:
             // الشات: ركن أسفل-يمين فوق حقل الكتابة (مو بنص الشاشة).
@@ -218,8 +218,8 @@ struct SandyCompanionLayer: View {
     /// هل ساندي مبسوطة بهالتبويب؟ (مزاج لكل تبويب).
     private var isHappyTab: Bool {
         switch tab {
-        case .home, .chat, .life:        return true
-        case .tasks, .reminders, .focus: return false   // تركيز/تنظيم — مزاج أهدأ.
+        case .home, .chat, .life, .robot: return true
+        case .tasks, .reminders, .focus:  return false   // تركيز/تنظيم — مزاج أهدأ.
         }
     }
 
@@ -243,6 +243,8 @@ struct SandyCompanionLayer: View {
             return isAR ? "كيف ماشية حياتك؟" : "How's life going?"
         case .focus:
             return isAR ? "وقت التركيز؟ 🎯" : "Focus time? 🎯"
+        case .robot:
+            return isAR ? "أظبّطلك الغرفة؟ 🏠" : "Set the room for you? 🏠"
         }
     }
 
@@ -268,8 +270,8 @@ struct SandyCompanionLayer: View {
     /// تبويبات الجهة المبدئية (يسار بصري في RTL يصير يمين تلقائيًّا).
     private var isLeadingTab: Bool {
         switch tab {
-        case .tasks, .life, .focus: return true
-        case .home, .chat, .reminders: return false
+        case .tasks, .life, .focus:            return true
+        case .home, .chat, .reminders, .robot: return false
         }
     }
 }
