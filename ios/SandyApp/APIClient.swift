@@ -159,8 +159,25 @@ final class APIClient {
         _ = try await request("/api/life/expenses/\(id)", method: "DELETE")
     }
 
+    // PATCH /api/life/expenses/<id> — تعديل: مبلغ/ملاحظة/تصنيف. الغائب = بلا تغيير.
+    func updateExpense(id: String, amount: Double? = nil,
+                       note: String? = nil, category: String? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let amount { body["amount"] = amount }
+        if let note { body["note"] = note }
+        if let category { body["category"] = category }
+        guard !body.isEmpty else { return }
+        _ = try await request("/api/life/expenses/\(id)", method: "PATCH", body: body)
+    }
+
     func deleteJournalEntry(id: String) async throws {
         _ = try await request("/api/life/journal/\(id)", method: "DELETE")
+    }
+
+    // PATCH /api/life/journal/<id> body {"text"} — تعديل نص التدوينة (إلزامي).
+    func updateJournalEntry(id: String, text: String) async throws {
+        _ = try await request("/api/life/journal/\(id)", method: "PATCH",
+                              body: ["text": text])
     }
 
     /// يجيب صوت ساندي الطبيعي (WAV من جيميني) لنصّ معيّن — للتشغيل ومزامنة الفم.
@@ -303,6 +320,17 @@ final class APIClient {
     func addHabit(name: String) async throws {
         _ = try await request("/api/life/habits", method: "POST",
                               body: ["name": name])
+    }
+
+    // PATCH /api/life/habits/<id> body {"name"} → {"ok":bool} — إعادة تسمية العادة.
+    func renameHabit(id: String, name: String) async throws {
+        _ = try await request("/api/life/habits/\(id)", method: "PATCH",
+                              body: ["name": name])
+    }
+
+    // DELETE /api/life/habits/<id> → {"ok":bool} — حذف العادة.
+    func deleteHabit(id: String) async throws {
+        _ = try await request("/api/life/habits/\(id)", method: "DELETE")
     }
 
     // POST /api/life/habits/checkin body {"name"} → {"ok":bool} (للمالك فقط)

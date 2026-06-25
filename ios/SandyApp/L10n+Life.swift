@@ -44,6 +44,10 @@ enum L10nLife {
             "habits.freq.weekly":        .text("كل أسبوع"),
             "habits.sheet.weeklySuffix": .text("(أسبوعي)"),
             "habits.saveError":          .text("ما قدرت أحفظ العادة. جرّب كمان مرة 🙏"),
+            "habits.edit":               .text("تعديل"),
+            "habits.delete":             .text("حذف"),
+            "habits.editTitle":          .text("تعديل العادة"),
+            "habits.deleteError":        .text("ما قدرت أحذف العادة. جرّب كمان مرة 🙏"),
 
             // Expenses screen
             "expenses.add":            .text("أضف مصروف"),
@@ -61,8 +65,12 @@ enum L10nLife {
             "expenses.sheet.noteSection":    .text("ملاحظة (اختياري)"),
             "expenses.sheet.notePlaceholder": .text("مثلاً: غدا مع الشباب"),
             "expenses.sheet.title":          .text("مصروف جديد"),
+            "expenses.sheet.editTitle":      .text("تعديل المصروف"),
             "expenses.amountError":          .text("اكتب مبلغ أكبر من صفر أوّل 🙂"),
             "expenses.saveError":            .text("ما قدرت أحفظ المصروف. جرّب كمان مرة 🙏"),
+            "expenses.edit":                 .text("تعديل"),
+            "expenses.delete":               .text("حذف"),
+            "expenses.deleteError":          .text("ما قدرت أحذف المصروف. جرّب كمان مرة 🙏"),
 
             // Expense categories — labels for display only (canonical = Arabic value)
             "cat.food":      .text("أكل"),
@@ -82,7 +90,11 @@ enum L10nLife {
             "journal.sheet.placeholder":  .text("اكتب خاطرتك… خذ راحتك"),
             "journal.sheet.charCount":    .text("%@ حرف"),
             "journal.sheet.title":        .text("خاطرة جديدة"),
+            "journal.sheet.editTitle":    .text("تعديل الخاطرة"),
             "journal.saveError":          .text("ما قدرت أحفظ الخاطرة. جرّب كمان مرة 🙏"),
+            "journal.edit":               .text("تعديل"),
+            "journal.delete":             .text("حذف"),
+            "journal.deleteError":        .text("ما قدرت أحذف الخاطرة. جرّب كمان مرة 🙏"),
         ],
         en: [
             // Hub
@@ -111,6 +123,10 @@ enum L10nLife {
             "habits.freq.weekly":        .text("Every week"),
             "habits.sheet.weeklySuffix": .text("(weekly)"),
             "habits.saveError":          .text("Couldn't save the habit. Try once more 🙏"),
+            "habits.edit":               .text("Edit"),
+            "habits.delete":             .text("Delete"),
+            "habits.editTitle":          .text("Edit habit"),
+            "habits.deleteError":        .text("Couldn't delete the habit. Try once more 🙏"),
 
             // Expenses screen
             "expenses.add":            .text("Add expense"),
@@ -128,8 +144,12 @@ enum L10nLife {
             "expenses.sheet.noteSection":    .text("Note (optional)"),
             "expenses.sheet.notePlaceholder": .text("e.g. Lunch with friends"),
             "expenses.sheet.title":          .text("New expense"),
+            "expenses.sheet.editTitle":      .text("Edit expense"),
             "expenses.amountError":          .text("Enter an amount above zero first 🙂"),
             "expenses.saveError":            .text("Couldn't save the expense. Try once more 🙏"),
+            "expenses.edit":                 .text("Edit"),
+            "expenses.delete":               .text("Delete"),
+            "expenses.deleteError":          .text("Couldn't delete the expense. Try once more 🙏"),
 
             // Expense categories — labels for display only (canonical = Arabic value)
             "cat.food":      .text("Food"),
@@ -149,7 +169,11 @@ enum L10nLife {
             "journal.sheet.placeholder":  .text("Write your entry… take your time"),
             "journal.sheet.charCount":    .text("%@ chars"),
             "journal.sheet.title":        .text("New entry"),
+            "journal.sheet.editTitle":    .text("Edit entry"),
             "journal.saveError":          .text("Couldn't save the entry. Try once more 🙏"),
+            "journal.edit":               .text("Edit"),
+            "journal.delete":             .text("Delete"),
+            "journal.deleteError":        .text("Couldn't delete the entry. Try once more 🙏"),
         ]
     )
 }

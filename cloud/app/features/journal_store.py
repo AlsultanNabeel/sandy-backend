@@ -100,3 +100,14 @@ def delete_entry(entry_id: str) -> bool:
     if coll is None or not entry_id:
         return False
     return coll.delete_one({"_id": entry_id}).deleted_count > 0
+
+
+def update_entry(entry_id: str, text: str) -> bool:
+    """Edit a journal entry's text. Empty text is rejected."""
+    coll = _coll()
+    if coll is None or not entry_id:
+        return False
+    text = str(text or "").strip()
+    if not text:
+        return False
+    return coll.update_one({"_id": entry_id}, {"$set": {"text": text}}).matched_count > 0

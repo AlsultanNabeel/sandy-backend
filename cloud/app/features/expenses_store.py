@@ -90,6 +90,29 @@ def delete_expense(expense_id: str) -> bool:
     return coll.delete_one({"_id": expense_id}).deleted_count > 0
 
 
+def update_expense(expense_id: str, amount=None, note=None, category=None) -> bool:
+    """Edit an existing expense. None = leave that field unchanged."""
+    coll = _coll()
+    if coll is None or not expense_id:
+        return False
+    updates: Dict[str, Any] = {}
+    if amount is not None:
+        try:
+            amt = float(amount)
+        except Exception:
+            return False
+        if amt <= 0:
+            return False
+        updates["amount"] = amt
+    if note is not None:
+        updates["note"] = str(note or "").strip()
+    if category is not None:
+        updates["category"] = str(category or "").strip()
+    if not updates:
+        return False
+    return coll.update_one({"_id": expense_id}, {"$set": updates}).matched_count > 0
+
+
 def month_summary(days: int = 30) -> Dict[str, Any]:
     """{total, count, by_category: {cat: total}, top: [(note, amount)]}"""
     items = list_expenses(days=days, limit=1000)
