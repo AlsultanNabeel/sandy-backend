@@ -9,6 +9,8 @@ struct TimelineTabView: View {
     @EnvironmentObject var lang: LanguageManager
 
     @StateObject private var store = TimelineStore()
+    /// الحدث المفتوح بلوحة التفاصيل (nil = مغلقة).
+    @State private var detail: TimelineEvent?
 
     var body: some View {
         ZStack {
@@ -28,6 +30,16 @@ struct TimelineTabView: View {
         .animation(.easeInOut(duration: 0.25), value: store.notice)
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
+        .sheet(item: $detail) { ev in
+            TimelineDetailSheet(
+                event: ev,
+                typeLabel: typeLabel(ev.type),
+                icon: icon(ev),
+                tint: tint(ev),
+                onToggleDone: { store.toggleTask(api: state.api, event: ev); detail = nil },
+                onDelete: { store.delete(api: state.api, event: ev); detail = nil }
+            )
+        }
     }
 
     @ViewBuilder
@@ -41,10 +53,40 @@ struct TimelineTabView: View {
                         ForEach(events) { ev in
                             row(ev)
                                 .listRowBackground(Color.clear)
-                                .swipeActions {
+                                .contentShape(Rectangle())
+                                .onTapGesture { detail = ev }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
                                         store.delete(api: state.api, event: ev)
-                                    } label: { Image(systemName: "trash") }
+                                    } label: { Label(lang.s("timeline.delete"), systemImage: "trash") }
+                                }
+                                .swipeActions(edge: .leading) {
+                                    // أداة سريعة حسب النوع: المهمة تنعلّم منجزة بالسحب لليمين.
+                                    if ev.type == "task" {
+                                        Button {
+                                            store.toggleTask(api: state.api, event: ev)
+                                        } label: {
+                                            Label(lang.s(ev.done ? "timeline.markUndone" : "timeline.markDone"),
+                                                  systemImage: ev.done ? "arrow.uturn.left" : "checkmark.circle")
+                                        }
+                                        .tint(Theme.Colors.success)
+                                    }
+                                }
+                                .contextMenu {
+                                    Button { detail = ev } label: {
+                                        Label(lang.s("timeline.detailsAction"), systemImage: "info.circle")
+                                    }
+                                    if ev.type == "task" {
+                                        Button {
+                                            store.toggleTask(api: state.api, event: ev)
+                                        } label: {
+                                            Label(lang.s(ev.done ? "timeline.markUndone" : "timeline.markDone"),
+                                                  systemImage: ev.done ? "arrow.uturn.left" : "checkmark.circle")
+                                        }
+                                    }
+                                    Button(role: .destructive) {
+                                        store.delete(api: state.api, event: ev)
+                                    } label: { Label(lang.s("timeline.delete"), systemImage: "trash") }
                                 }
                         }
                     }
@@ -120,6 +162,117 @@ struct TimelineTabView: View {
     private func typeLabel(_ type: String) -> String { lang.s("timeline.type.\(type)") }
 }
 
+// MARK: - لوحة تفاصيل الحدث
+
+/// لوحة تفاصيل حدث الخط الزمني: العنوان الكامل + النوع + الوقت، مع أدوات سريعة
+/// حسب النوع (المهمة: تعليم منجز) وحذف. التعديل التفصيلي يبقى بتبويب كل ميزة —
+/// فالخط الزمني تجميعي، ونتجنّب تكرار أربع محرّرات (أقل احتمالية للأخطاء).
+private struct TimelineDetailSheet: View {
+    let event: TimelineEvent
+    let typeLabel: String
+    let icon: String
+    let tint: Color
+    let onToggleDone: () -> Void
+    let onDelete: () -> Void
+
+    @EnvironmentObject var lang: LanguageManager
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SandyBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                        // ترويسة: أيقونة النوع + شارة النوع.
+                        HStack(spacing: Theme.Spacing.md) {
+                            Image(systemName: icon)
+                                .font(.title2)
+                                .foregroundColor(tint)
+                            Text(typeLabel)
+                                .font(Theme.Typography.caption)
+                                .foregroundColor(Theme.Colors.secondaryText)
+                                .padding(.vertical, Theme.Spacing.xs)
+                                .padding(.horizontal, Theme.Spacing.sm)
+                                .background(tint.opacity(0.12))
+                                .clipShape(Capsule())
+                            Spacer(minLength: 0)
+                        }
+
+                        SandyCard {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                Text(event.title.isEmpty ? typeLabel : event.title)
+                                    .font(Theme.Typography.headline)
+                                    .foregroundColor(Theme.Colors.primaryText)
+                                    .strikethrough(event.done, color: Theme.Colors.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if !event.subtitle.isEmpty {
+                                    Text(event.subtitle)
+                                        .font(Theme.Typography.body)
+                                        .foregroundColor(Theme.Colors.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                if let when = Self.format(event.ts) {
+                                    Label(when, systemImage: "clock")
+                                        .font(Theme.Typography.caption)
+                                        .foregroundColor(Theme.Colors.secondaryText)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        // أداة سريعة حسب النوع: المهمة تنعلّم منجزة/غير منجزة.
+                        if event.type == "task" {
+                            SandyButton(title: lang.s(event.done ? "timeline.markUndone" : "timeline.markDone"),
+                                        systemImage: event.done ? "arrow.uturn.left" : "checkmark.circle.fill",
+                                        fillWidth: true) {
+                                onToggleDone()
+                            }
+                        }
+
+                        SandyButton(title: lang.s("timeline.delete"),
+                                    systemImage: "trash",
+                                    style: .secondary,
+                                    fillWidth: true) {
+                            onDelete()
+                        }
+
+                        Text(lang.s("timeline.detailHint"))
+                            .font(Theme.Typography.caption)
+                            .foregroundColor(Theme.Colors.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(Theme.Spacing.md)
+                }
+            }
+            .navigationTitle(lang.s("timeline.detailTitle"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(lang.s("common.done")) { dismiss() }
+                }
+            }
+        }
+        .environment(\.layoutDirection, .rightToLeft)
+    }
+
+    /// تنسيق وقت ISO لعرض عربي لطيف.
+    private static func format(_ iso: String) -> String? {
+        guard !iso.isEmpty else { return nil }
+        let full = ISO8601DateFormatter()
+        full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        let date = full.date(from: iso) ?? plain.date(from: iso)
+        guard let d = date else { return nil }
+        let out = DateFormatter()
+        out.locale = Locale(identifier: "ar")
+        out.dateStyle = .medium
+        out.timeStyle = .short
+        return out.string(from: d)
+    }
+}
+
 // MARK: - الستور
 
 @MainActor
@@ -161,6 +314,22 @@ final class TimelineStore: ObservableObject {
             } catch {
                 events.insert(event, at: min(idx, events.count))
                 notice = LanguageManager.shared.s("timeline.errorDelete")
+            }
+        }
+    }
+
+    /// تعليم منجز/غير منجز لمهمة من الخط (تحديث متفائل) — أداة سريعة حسب النوع.
+    func toggleTask(api: APIClient, event: TimelineEvent) {
+        guard event.type == "task",
+              let idx = events.firstIndex(where: { $0.id == event.id }) else { return }
+        let target = !event.done
+        events[idx].done = target
+        Task { @MainActor in
+            do {
+                try await api.setTaskDone(id: event.id, done: target)
+            } catch {
+                if let i = events.firstIndex(where: { $0.id == event.id }) { events[i].done = !target }
+                notice = LanguageManager.shared.s("timeline.errorToggle")
             }
         }
     }

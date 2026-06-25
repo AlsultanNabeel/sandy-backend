@@ -20,6 +20,15 @@ enum L10nTimeline {
             "empty":       .text("لسّا ما في نشاط — كل ما تستعمل ساندي، بينعبّى الخط هون."),
             "errorLoad":   .text("معلش، ما قدرت أجيب الخط الزمني — اسحب للتحديث."),
             "errorDelete": .text("معلش، ما قدرت أحذف — جرّب كمان مرة."),
+            "errorToggle": .text("معلش، ما زبطت أحدّث المهمة — جرّب كمان مرة."),
+
+            // إجراءات وتفاصيل
+            "delete":         .text("حذف"),
+            "markDone":       .text("علّمها منجزة"),
+            "markUndone":     .text("رجّعها غير منجزة"),
+            "detailsAction":  .text("التفاصيل"),
+            "detailTitle":    .text("تفاصيل النشاط"),
+            "detailHint":     .text("للتعديل التفصيلي، افتح العنصر من تبويبه المخصّص."),
         ],
         en: [
             "today":     .text("Today"),
@@ -35,6 +44,15 @@ enum L10nTimeline {
             "empty":       .text("No activity yet — as you use Sandy, it fills up here."),
             "errorLoad":   .text("Sorry, I couldn't load your timeline — pull to refresh."),
             "errorDelete": .text("Sorry, I couldn't delete that — try again."),
+            "errorToggle": .text("Sorry, I couldn't update the task — give it another try."),
+
+            // actions & details
+            "delete":         .text("Delete"),
+            "markDone":       .text("Mark done"),
+            "markUndone":     .text("Mark not done"),
+            "detailsAction":  .text("Details"),
+            "detailTitle":    .text("Activity details"),
+            "detailHint":     .text("For detailed editing, open the item from its own tab."),
         ]
     )
 }

@@ -41,7 +41,7 @@ struct TimelineEvent: Identifiable {
     let title: String
     let subtitle: String
     let ts: String        // ISO
-    let done: Bool
+    var done: Bool        // قابل للتعديل (تعليم منجز متفائل للمهام)
 }
 
 struct OnboardingData {
