@@ -63,6 +63,59 @@ final class APIClient {
         return r["reply"] as? String ?? "…"
     }
 
+    // MARK: - سجل المحادثات (متعدد السيشنات)
+
+    // GET /api/conversations → {"items":[{id,title,updated_at}]}
+    func listConversations() async throws -> [ConversationMeta] {
+        let r = try await request("/api/conversations")
+        return (r["items"] as? [[String: Any]] ?? []).map {
+            ConversationMeta(id: $0["id"] as? String ?? "",
+                             title: $0["title"] as? String ?? "",
+                             updatedAt: $0["updated_at"] as? String ?? "")
+        }
+    }
+
+    // POST /api/conversations → {"id"}
+    func createConversation() async throws -> String {
+        let r = try await request("/api/conversations", method: "POST", body: [:])
+        guard let id = r["id"] as? String, !id.isEmpty else {
+            throw APIError(message: "تعذّر إنشاء المحادثة")
+        }
+        return id
+    }
+
+    // GET /api/conversations/<id> → {"title","messages":[{role,text,ts}]}
+    func getConversation(id: String) async throws -> (title: String, messages: [ChatMessage]) {
+        let r = try await request("/api/conversations/\(id)")
+        let msgs = (r["messages"] as? [[String: Any]] ?? []).compactMap { m -> ChatMessage? in
+            guard let role = m["role"] as? String, let text = m["text"] as? String else { return nil }
+            return ChatMessage(role: role, text: text)
+        }
+        return (r["title"] as? String ?? "", msgs)
+    }
+
+    // POST /api/conversations/<id>/messages {role,text}
+    func appendMessage(cid: String, role: String, text: String) async throws {
+        _ = try await request("/api/conversations/\(cid)/messages", method: "POST",
+                              body: ["role": role, "text": text])
+    }
+
+    // DELETE /api/conversations/<id>
+    func deleteConversation(id: String) async throws {
+        _ = try await request("/api/conversations/\(id)", method: "DELETE")
+    }
+
+    // GET /api/conversations/search?q= → {"items":[{id,title,snippet,updated_at}]}
+    func searchConversations(q: String) async throws -> [ConversationHit] {
+        let r = try await request("/api/conversations/search?q=\(enc(q))")
+        return (r["items"] as? [[String: Any]] ?? []).map {
+            ConversationHit(id: $0["id"] as? String ?? "",
+                            title: $0["title"] as? String ?? "",
+                            snippet: $0["snippet"] as? String ?? "",
+                            updatedAt: $0["updated_at"] as? String ?? "")
+        }
+    }
+
     /// يجيب صوت ساندي الطبيعي (WAV من جيميني) لنصّ معيّن — للتشغيل ومزامنة الفم.
     /// نطلب JSON خام (مش عبر `request` لأنه يفكّ JSON؛ هون الناتج بايتات صوت).
     func synthesizeVoice(text: String, mood: String = "neutral") async throws -> Data {

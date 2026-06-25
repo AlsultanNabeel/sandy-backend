@@ -27,6 +27,11 @@ enum L10nChat {
             "liveSpeaking":   .text("بحكي…"),
             "liveHint":     .text("احكي عادي، وأنا أرد — لمّا تسكت برد عليك"),
             "liveEnd":      .text("إنهاء المكالمة"),
+            "history":      .text("سجل المحادثات"),
+            "new":          .text("محادثة جديدة"),
+            "searchPlaceholder": .text("دوّر بمحادثاتك…"),
+            "historyEmpty": .text("ما في محادثات محفوظة بعد."),
+            "untitled":     .text("محادثة"),
         ],
         en: [
             "title":        .text("Sandy"),
@@ -47,6 +52,11 @@ enum L10nChat {
             "liveSpeaking":   .text("Speaking…"),
             "liveHint":     .text("Just talk — when you pause, I'll reply"),
             "liveEnd":      .text("End call"),
+            "history":      .text("Chat history"),
+            "new":          .text("New chat"),
+            "searchPlaceholder": .text("Search your chats…"),
+            "historyEmpty": .text("No saved chats yet."),
+            "untitled":     .text("Chat"),
         ]
     )
 }

@@ -6,6 +6,23 @@ struct ChatMessage: Identifiable {
     let text: String
 }
 
+// ── سجل المحادثات (متعدد السيشنات) — تطابق /api/conversations ───────────────
+
+/// سطر بقائمة سجل المحادثات.
+struct ConversationMeta: Identifiable {
+    let id: String
+    let title: String
+    let updatedAt: String   // ISO
+}
+
+/// نتيجة بحث بالسجل — عنوان + مقتطف المطابقة.
+struct ConversationHit: Identifiable {
+    let id: String
+    let title: String
+    let snippet: String
+    let updatedAt: String
+}
+
 struct OnboardingData {
     var done: Bool = false
     var preferredName: String = ""
