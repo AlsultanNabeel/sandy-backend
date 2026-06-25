@@ -173,12 +173,12 @@ struct HabitsView: View {
             }
         }
         .navigationTitle(lang.s("life.habits"))
-        .sheet(isPresented: $showAdd) {
+        .fullScreenCover(isPresented: $showAdd) {
             HabitSheet { name in
                 try await store.add(api: state.api, name: name)
             }
         }
-        .sheet(item: $editingHabit) { habit in
+        .fullScreenCover(item: $editingHabit) { habit in
             HabitSheet(existing: habit) { name in
                 try await store.rename(api: state.api, habit: habit, name: name)
             }
@@ -304,14 +304,19 @@ private struct HabitSheet: View {
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section(lang.s("life.habits.sheet.nameSection")) {
-                    TextField(lang.s("life.habits.sheet.namePlaceholder"), text: $name)
+        SandyPopup(title: lang.s(isEditing ? "life.habits.editTitle" : "life.habits.add")) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    SectionHeader(title: lang.s("life.habits.sheet.nameSection"))
+                    SandyCard {
+                        TextField(lang.s("life.habits.sheet.namePlaceholder"), text: $name)
+                            .font(Theme.Typography.body)
+                    }
                 }
                 // التكرار للإضافة فقط — التعديل إعادة تسمية صرفة.
                 if !isEditing {
-                    Section(lang.s("life.habits.sheet.freqSection")) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        SectionHeader(title: lang.s("life.habits.sheet.freqSection"))
                         Picker(lang.s("life.habits.sheet.freqLabel"), selection: $frequency) {
                             ForEach(Frequency.allCases) { f in
                                 Text(lang.s(f.labelKey)).tag(f)
@@ -321,25 +326,20 @@ private struct HabitSheet: View {
                     }
                 }
                 if !error.isEmpty {
-                    Section {
-                        SandyNotice(error, kind: .gentleWarning)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                    }
+                    SandyNotice(error, kind: .gentleWarning)
                 }
+                SandyButton(title: lang.s("common.save"),
+                            systemImage: "checkmark.circle.fill",
+                            isLoading: saving,
+                            fillWidth: true) {
+                    save()
+                }
+                .disabled(trimmedName.isEmpty)
+                .opacity(trimmedName.isEmpty ? 0.5 : 1)
             }
-            .navigationTitle(lang.s(isEditing ? "life.habits.editTitle" : "life.habits.add"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("common.cancel")) { dismiss() }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.s("common.save")) { save() }
-                        .disabled(saving || trimmedName.isEmpty)
-                }
-            }
+            .animation(.easeInOut(duration: 0.25), value: error)
         }
+        .environment(\.layoutDirection, .rightToLeft)
     }
 
     private func save() {
@@ -447,12 +447,12 @@ struct ExpensesView: View {
             }
         }
         .navigationTitle(lang.s("life.expenses"))
-        .sheet(isPresented: $showAdd) {
+        .fullScreenCover(isPresented: $showAdd) {
             ExpenseSheet { amount, note, category in
                 try await store.add(api: state.api, amount: amount, note: note, category: category)
             }
         }
-        .sheet(item: $editingExpense) { item in
+        .fullScreenCover(item: $editingExpense) { item in
             ExpenseSheet(existing: item) { amount, note, category in
                 try await store.update(api: state.api, id: item.id,
                                        amount: amount, note: note, category: category)
@@ -596,49 +596,55 @@ private struct ExpenseSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section(lang.s("life.expenses.sheet.amountSection")) {
-                    HStack {
-                        Image(systemName: "banknote")
-                            .foregroundColor(Theme.Colors.accent)
-                        TextField(lang.s("life.expenses.sheet.amountPlaceholder"), text: $amount)
-                            .keyboardType(.decimalPad)
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    }
-                }
-                Section(lang.s("life.expenses.sheet.categorySection")) {
-                    Picker(lang.s("life.expenses.sheet.categoryLabel"), selection: $category) {
-                        // نختار القيمة القانونية (tag) لكن نعرض label مترجَم.
-                        ForEach(LifeCategories.canonical, id: \.self) { c in
-                            Text(LifeCategories.label(for: c, lang)).tag(c)
+        SandyPopup(title: lang.s(isEditing ? "life.expenses.sheet.editTitle" : "life.expenses.sheet.title")) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    SectionHeader(title: lang.s("life.expenses.sheet.amountSection"))
+                    SandyCard {
+                        HStack {
+                            Image(systemName: "banknote")
+                                .foregroundColor(Theme.Colors.accent)
+                            TextField(lang.s("life.expenses.sheet.amountPlaceholder"), text: $amount)
+                                .keyboardType(.decimalPad)
+                                .font(.system(size: 22, weight: .semibold, design: .rounded))
                         }
                     }
-                    .pickerStyle(.menu)
                 }
-                Section(lang.s("life.expenses.sheet.noteSection")) {
-                    TextField(lang.s("life.expenses.sheet.notePlaceholder"), text: $note)
-                }
-                if !error.isEmpty {
-                    Section {
-                        SandyNotice(error, kind: .gentleWarning)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    SectionHeader(title: lang.s("life.expenses.sheet.categorySection"))
+                    SandyCard {
+                        Picker(lang.s("life.expenses.sheet.categoryLabel"), selection: $category) {
+                            // نختار القيمة القانونية (tag) لكن نعرض label مترجَم.
+                            ForEach(LifeCategories.canonical, id: \.self) { c in
+                                Text(LifeCategories.label(for: c, lang)).tag(c)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-            }
-            .navigationTitle(lang.s(isEditing ? "life.expenses.sheet.editTitle" : "life.expenses.sheet.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("common.cancel")) { dismiss() }
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    SectionHeader(title: lang.s("life.expenses.sheet.noteSection"))
+                    SandyCard {
+                        TextField(lang.s("life.expenses.sheet.notePlaceholder"), text: $note)
+                            .font(Theme.Typography.body)
+                    }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.s("common.save")) { save() }
-                        .disabled(saving || amountValue <= 0)
+                if !error.isEmpty {
+                    SandyNotice(error, kind: .gentleWarning)
                 }
+                SandyButton(title: lang.s("common.save"),
+                            systemImage: "checkmark.circle.fill",
+                            isLoading: saving,
+                            fillWidth: true) {
+                    save()
+                }
+                .disabled(amountValue <= 0)
+                .opacity(amountValue <= 0 ? 0.5 : 1)
             }
+            .animation(.easeInOut(duration: 0.25), value: error)
         }
+        .environment(\.layoutDirection, .rightToLeft)
     }
 
     private func save() {
@@ -739,12 +745,12 @@ struct JournalView: View {
             }
         }
         .navigationTitle(lang.s("life.journal"))
-        .sheet(isPresented: $showAdd) {
+        .fullScreenCover(isPresented: $showAdd) {
             JournalSheet { text in
                 try await store.add(api: state.api, text: text)
             }
         }
-        .sheet(item: $editingEntry) { entry in
+        .fullScreenCover(item: $editingEntry) { entry in
             JournalSheet(existing: entry) { text in
                 try await store.update(api: state.api, id: entry.id, text: text)
             }
@@ -812,42 +818,35 @@ private struct JournalSheet: View {
     private var trimmed: String { text.trimmingCharacters(in: .whitespaces) }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section(lang.s("life.journal.sheet.section")) {
+        SandyPopup(title: lang.s(isEditing ? "life.journal.sheet.editTitle" : "life.journal.sheet.title")) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                SectionHeader(title: lang.s("life.journal.sheet.section"))
+                SandyCard {
                     TextField(lang.s("life.journal.sheet.placeholder"), text: $text, axis: .vertical)
-                        .lineLimit(6...14)
+                        .lineLimit(5...12)
                         .font(.body)
                 }
-                Section {
-                    HStack {
-                        Spacer(minLength: 0)
-                        Text(String(format: lang.s("life.journal.sheet.charCount"), "\(trimmed.count)"))
-                            .font(.caption2)
-                            .foregroundColor(Theme.Colors.secondaryText)
-                    }
-                    .listRowBackground(Color.clear)
+                HStack {
+                    Spacer(minLength: 0)
+                    Text(String(format: lang.s("life.journal.sheet.charCount"), "\(trimmed.count)"))
+                        .font(.caption2)
+                        .foregroundColor(Theme.Colors.secondaryText)
                 }
                 if !error.isEmpty {
-                    Section {
-                        SandyNotice(error, kind: .gentleWarning)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                    }
+                    SandyNotice(error, kind: .gentleWarning)
                 }
+                SandyButton(title: lang.s("common.save"),
+                            systemImage: "checkmark.circle.fill",
+                            isLoading: saving,
+                            fillWidth: true) {
+                    save()
+                }
+                .disabled(trimmed.isEmpty)
+                .opacity(trimmed.isEmpty ? 0.5 : 1)
             }
-            .navigationTitle(lang.s(isEditing ? "life.journal.sheet.editTitle" : "life.journal.sheet.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("common.cancel")) { dismiss() }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.s("common.save")) { save() }
-                        .disabled(saving || trimmed.isEmpty)
-                }
-            }
+            .animation(.easeInOut(duration: 0.25), value: error)
         }
+        .environment(\.layoutDirection, .rightToLeft)
     }
 
     private func save() {

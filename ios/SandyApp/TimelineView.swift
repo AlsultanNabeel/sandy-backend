@@ -30,7 +30,7 @@ struct TimelineTabView: View {
         .animation(.easeInOut(duration: 0.25), value: store.notice)
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
-        .sheet(item: $detail) { ev in
+        .fullScreenCover(item: $detail) { ev in
             TimelineDetailSheet(
                 event: ev,
                 typeLabel: typeLabel(ev.type),
@@ -179,78 +179,65 @@ private struct TimelineDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                SandyBackground()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                        // ترويسة: أيقونة النوع + شارة النوع.
-                        HStack(spacing: Theme.Spacing.md) {
-                            Image(systemName: icon)
-                                .font(.title2)
-                                .foregroundColor(tint)
-                            Text(typeLabel)
+        SandyPopup(title: lang.s("timeline.detailTitle")) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                // ترويسة: أيقونة النوع + شارة النوع.
+                HStack(spacing: Theme.Spacing.md) {
+                    Image(systemName: icon)
+                        .font(.title2)
+                        .foregroundColor(tint)
+                    Text(typeLabel)
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .padding(.vertical, Theme.Spacing.xs)
+                        .padding(.horizontal, Theme.Spacing.sm)
+                        .background(tint.opacity(0.12))
+                        .clipShape(Capsule())
+                    Spacer(minLength: 0)
+                }
+
+                SandyCard {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        Text(event.title.isEmpty ? typeLabel : event.title)
+                            .font(Theme.Typography.headline)
+                            .foregroundColor(Theme.Colors.primaryText)
+                            .strikethrough(event.done, color: Theme.Colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !event.subtitle.isEmpty {
+                            Text(event.subtitle)
+                                .font(Theme.Typography.body)
+                                .foregroundColor(Theme.Colors.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let when = Self.format(event.ts) {
+                            Label(when, systemImage: "clock")
                                 .font(Theme.Typography.caption)
                                 .foregroundColor(Theme.Colors.secondaryText)
-                                .padding(.vertical, Theme.Spacing.xs)
-                                .padding(.horizontal, Theme.Spacing.sm)
-                                .background(tint.opacity(0.12))
-                                .clipShape(Capsule())
-                            Spacer(minLength: 0)
                         }
-
-                        SandyCard {
-                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                                Text(event.title.isEmpty ? typeLabel : event.title)
-                                    .font(Theme.Typography.headline)
-                                    .foregroundColor(Theme.Colors.primaryText)
-                                    .strikethrough(event.done, color: Theme.Colors.secondaryText)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                if !event.subtitle.isEmpty {
-                                    Text(event.subtitle)
-                                        .font(Theme.Typography.body)
-                                        .foregroundColor(Theme.Colors.secondaryText)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                if let when = Self.format(event.ts) {
-                                    Label(when, systemImage: "clock")
-                                        .font(Theme.Typography.caption)
-                                        .foregroundColor(Theme.Colors.secondaryText)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-
-                        // أداة سريعة حسب النوع: المهمة تنعلّم منجزة/غير منجزة.
-                        if event.type == "task" {
-                            SandyButton(title: lang.s(event.done ? "timeline.markUndone" : "timeline.markDone"),
-                                        systemImage: event.done ? "arrow.uturn.left" : "checkmark.circle.fill",
-                                        fillWidth: true) {
-                                onToggleDone()
-                            }
-                        }
-
-                        SandyButton(title: lang.s("timeline.delete"),
-                                    systemImage: "trash",
-                                    style: .secondary,
-                                    fillWidth: true) {
-                            onDelete()
-                        }
-
-                        Text(lang.s("timeline.detailHint"))
-                            .font(Theme.Typography.caption)
-                            .foregroundColor(Theme.Colors.secondaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(Theme.Spacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-            .navigationTitle(lang.s("timeline.detailTitle"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("common.done")) { dismiss() }
+
+                // أداة سريعة حسب النوع: المهمة تنعلّم منجزة/غير منجزة.
+                if event.type == "task" {
+                    SandyButton(title: lang.s(event.done ? "timeline.markUndone" : "timeline.markDone"),
+                                systemImage: event.done ? "arrow.uturn.left" : "checkmark.circle.fill",
+                                fillWidth: true) {
+                        onToggleDone()
+                    }
                 }
+
+                SandyButton(title: lang.s("timeline.delete"),
+                            systemImage: "trash",
+                            style: .secondary,
+                            fillWidth: true) {
+                    onDelete()
+                }
+
+                Text(lang.s("timeline.detailHint"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .environment(\.layoutDirection, .rightToLeft)

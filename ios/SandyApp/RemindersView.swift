@@ -49,12 +49,12 @@ struct RemindersView: View {
             }
         }
         .navigationTitle(lang.s("reminders.title"))
-        .sheet(isPresented: $showAdd) {
+        .fullScreenCover(isPresented: $showAdd) {
             ReminderSheet { text, remindAt, note in
                 try await store.add(api: state.api, text: text, remindAt: remindAt, note: note)
             }
         }
-        .sheet(item: $editingReminder) { reminder in
+        .fullScreenCover(item: $editingReminder) { reminder in
             ReminderSheet(existing: reminder) { text, remindAt, note in
                 try await store.update(api: state.api, id: reminder.id,
                                        text: text, remindAt: remindAt, note: note)
@@ -339,72 +339,62 @@ private struct ReminderSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+        SandyPopup(title: lang.s(isEditing ? "reminders.editTitle" : "reminders.sheetTitle")) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
 
-                    // ترويسة ودّية بصوت ساندي
-                    HStack(spacing: Theme.Spacing.sm) {
-                        SandyAvatar(size: 36, mood: .happy)
-                        Text(lang.s("reminders.sheetHeader"))
-                            .font(Theme.Typography.headline)
-                            .foregroundColor(Theme.Colors.primaryText)
-                        Spacer(minLength: 0)
-                    }
-
-                    // ── نص التذكير (إلزامي) ──
-                    fieldCard(title: lang.s("reminders.textField")) {
-                        TextField(lang.s("reminders.textPlaceholder"), text: $text, axis: .vertical)
-                            .font(Theme.Typography.body)
-                            .lineLimit(1...4)
-                    }
-
-                    // ── الوقت (افتراضيًا الآن + دقيقتين) ──
-                    fieldCard(title: lang.s("reminders.timeField")) {
-                        DatePicker("",
-                                   selection: $date,
-                                   displayedComponents: [.date, .hourAndMinute])
-                            .labelsHidden()
-                            .datePickerStyle(.compact)
-                            .environment(\.locale, Locale(identifier: "ar"))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    // ── ملاحظة اختيارية (متعدّد الأسطر) ──
-                    fieldCard(title: lang.s("reminders.noteField")) {
-                        TextField(lang.s("reminders.notePlaceholder"), text: $note, axis: .vertical)
-                            .font(Theme.Typography.body)
-                            .lineLimit(1...5)
-                    }
-
-                    // ── خطأ بصوت ساندي (مو سطر أحمر) ──
-                    if !notice.isEmpty {
-                        SandyNotice(notice, kind: .gentleWarning)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-
-                    // ── زر الحفظ الجميل ──
-                    SandyButton(title: lang.s(isEditing ? "reminders.saveEdit" : "reminders.submit"),
-                                systemImage: "checkmark.circle.fill",
-                                isLoading: saving,
-                                fillWidth: true) {
-                        save()
-                    }
-                    .disabled(trimmedText.isEmpty)
-                    .opacity(trimmedText.isEmpty ? 0.6 : 1)
+                // ترويسة ودّية بصوت ساندي
+                HStack(spacing: Theme.Spacing.sm) {
+                    SandyAvatar(size: 36, mood: .happy)
+                    Text(lang.s("reminders.sheetHeader"))
+                        .font(Theme.Typography.headline)
+                        .foregroundColor(Theme.Colors.primaryText)
+                    Spacer(minLength: 0)
                 }
-                .padding(Theme.Spacing.lg)
-            }
-            .background(SandyBackground())
-            .navigationTitle(lang.s(isEditing ? "reminders.editTitle" : "reminders.sheetTitle"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("common.cancel")) { dismiss() }
+
+                // ── نص التذكير (إلزامي) ──
+                fieldCard(title: lang.s("reminders.textField")) {
+                    TextField(lang.s("reminders.textPlaceholder"), text: $text, axis: .vertical)
+                        .font(Theme.Typography.body)
+                        .lineLimit(1...4)
                 }
+
+                // ── الوقت (افتراضيًا الآن + دقيقتين) ──
+                fieldCard(title: lang.s("reminders.timeField")) {
+                    DatePicker("",
+                               selection: $date,
+                               displayedComponents: [.date, .hourAndMinute])
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .environment(\.locale, Locale(identifier: "ar"))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // ── ملاحظة اختيارية (متعدّد الأسطر) ──
+                fieldCard(title: lang.s("reminders.noteField")) {
+                    TextField(lang.s("reminders.notePlaceholder"), text: $note, axis: .vertical)
+                        .font(Theme.Typography.body)
+                        .lineLimit(1...5)
+                }
+
+                // ── خطأ بصوت ساندي (مو سطر أحمر) ──
+                if !notice.isEmpty {
+                    SandyNotice(notice, kind: .gentleWarning)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                // ── زر الحفظ الجميل ──
+                SandyButton(title: lang.s(isEditing ? "reminders.saveEdit" : "reminders.submit"),
+                            systemImage: "checkmark.circle.fill",
+                            isLoading: saving,
+                            fillWidth: true) {
+                    save()
+                }
+                .disabled(trimmedText.isEmpty)
+                .opacity(trimmedText.isEmpty ? 0.6 : 1)
             }
             .animation(.easeInOut(duration: 0.25), value: notice)
         }
+        .environment(\.layoutDirection, .rightToLeft)
     }
 
     /// بطاقة حقل صغيرة بعنوان فوقها — توحّد شكل الحقول.

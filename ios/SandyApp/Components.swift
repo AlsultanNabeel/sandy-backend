@@ -138,6 +138,72 @@ struct SandyCard<Content: View>: View {
     }
 }
 
+// MARK: - 2.5) SandyPopup — نافذة منبثقة بالنص
+
+/// نافذة منبثقة مركزية (مش مغطية كل الشاشة): خلفية معتّمة تُغلق بالنقر + بطاقة
+/// بالوسط بعرض محدود وارتفاع يتكيّف (قابلة للتمرير). تُقدَّم عبر `.fullScreenCover`
+/// مع خلفية شفافة فتبان طافية بالنص. تعتمد `@Environment(\.dismiss)` للإغلاق.
+///
+/// الاستعمال:
+///   .fullScreenCover(item: $editing) { item in
+///       SandyPopup(title: "تعديل") { …الحقول + زر الحفظ… }
+///   }
+struct SandyPopup<Content: View>: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    @ViewBuilder var content: () -> Content
+
+    init(title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+    }
+
+    var body: some View {
+        ZStack {
+            // خلفية معتّمة تقفل بالنقر خارج البطاقة.
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+                .onTapGesture { dismiss() }
+
+            VStack(spacing: 0) {
+                // ترويسة: العنوان + زر إغلاق.
+                HStack {
+                    Text(title)
+                        .font(Theme.Typography.headline)
+                        .foregroundColor(Theme.Colors.primaryText)
+                    Spacer(minLength: Theme.Spacing.md)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(Theme.Colors.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(Theme.Spacing.md)
+
+                Divider().overlay(Theme.Colors.surface)
+
+                // المحتوى قابل للتمرير حتى لو طال — يبقى الارتفاع محدودًا.
+                ScrollView {
+                    content()
+                        .padding(Theme.Spacing.md)
+                }
+                .frame(maxHeight: 440)
+            }
+            .frame(maxWidth: 460)
+            .background(Theme.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Theme.Colors.surface, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 12)
+            .padding(.horizontal, Theme.Spacing.lg)
+        }
+        .presentationBackground(.clear)
+    }
+}
+
 // MARK: - 3) SandyNotice
 
 /// تنبيه/خطأ دافئ بصوت ساندي: فقاعة ناعمة فيها أيقونة ساندي صغيرة + نص لطيف.

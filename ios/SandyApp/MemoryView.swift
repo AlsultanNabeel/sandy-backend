@@ -41,10 +41,10 @@ struct MemoryView: View {
         .animation(.easeInOut(duration: 0.25), value: store.notice)
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
-        .sheet(isPresented: $showAdd) {
+        .fullScreenCover(isPresented: $showAdd) {
             MemorySheet { text in await store.add(api: state.api, text: text) }
         }
-        .sheet(item: $editingFact) { fact in
+        .fullScreenCover(item: $editingFact) { fact in
             MemorySheet(existing: fact) { text in
                 await store.update(api: state.api, id: fact.id, text: text)
             }
@@ -163,35 +163,22 @@ private struct MemorySheet: View {
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                SandyBackground()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                        SectionHeader(title: lang.s("memory.sheet.prompt"))
-                        SandyCard {
-                            TextField(lang.s("memory.sheet.placeholder"), text: $text, axis: .vertical)
-                                .font(Theme.Typography.body)
-                                .lineLimit(3...8)
-                        }
-                        SandyButton(title: lang.s(isEditing ? "memory.saveEdit" : "memory.saveNew"),
-                                    systemImage: "checkmark.circle.fill",
-                                    isLoading: submitting,
-                                    fillWidth: true) {
-                            save()
-                        }
-                        .disabled(trimmed.isEmpty)
-                        .opacity(trimmed.isEmpty ? 0.5 : 1)
-                    }
-                    .padding(Theme.Spacing.md)
+        SandyPopup(title: lang.s(isEditing ? "memory.editTitle" : "memory.addTitle")) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                SectionHeader(title: lang.s("memory.sheet.prompt"))
+                SandyCard {
+                    TextField(lang.s("memory.sheet.placeholder"), text: $text, axis: .vertical)
+                        .font(Theme.Typography.body)
+                        .lineLimit(3...8)
                 }
-            }
-            .navigationTitle(lang.s(isEditing ? "memory.editTitle" : "memory.addTitle"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("common.cancel")) { dismiss() }
+                SandyButton(title: lang.s(isEditing ? "memory.saveEdit" : "memory.saveNew"),
+                            systemImage: "checkmark.circle.fill",
+                            isLoading: submitting,
+                            fillWidth: true) {
+                    save()
                 }
+                .disabled(trimmed.isEmpty)
+                .opacity(trimmed.isEmpty ? 0.5 : 1)
             }
         }
         .environment(\.layoutDirection, .rightToLeft)

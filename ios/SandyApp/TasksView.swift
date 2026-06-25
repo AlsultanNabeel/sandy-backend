@@ -45,12 +45,12 @@ struct TasksView: View {
         .animation(.easeInOut(duration: 0.25), value: store.notice)
         .task { await store.load(api: state.api, completed: showCompleted) }
         .refreshable { await store.load(api: state.api, completed: showCompleted) }
-        .sheet(isPresented: $showAddSheet) {
+        .fullScreenCover(isPresented: $showAddSheet) {
             TaskSheet { text, due, note, priority in
                 await submit(text: text, due: due, note: note, priority: priority)
             }
         }
-        .sheet(item: $editingTask) { task in
+        .fullScreenCover(item: $editingTask) { task in
             TaskSheet(existing: task) { text, due, note, priority in
                 await submitEdit(task: task, text: text, due: due, note: note, priority: priority)
             }
@@ -508,36 +508,21 @@ private struct TaskSheet: View {
     }
 
     var body: some View {
-        NavigationView {
-            ZStack {
-                SandyBackground()
+        SandyPopup(title: lang.s(isEditing ? "tasks.editTask" : "tasks.newTask")) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                titleSection
+                prioritySection
+                dueSection
+                noteSection
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                        titleSection
-                        prioritySection
-                        dueSection
-                        noteSection
-
-                        SandyButton(title: lang.s(isEditing ? "tasks.saveEdit" : "tasks.saveTask"),
-                                    systemImage: "checkmark.circle.fill",
-                                    isLoading: submitting,
-                                    fillWidth: true) {
-                            save()
-                        }
-                        .disabled(!canSave)
-                        .opacity(canSave ? 1 : 0.5)
-                    }
-                    .padding(Theme.Spacing.md)
+                SandyButton(title: lang.s(isEditing ? "tasks.saveEdit" : "tasks.saveTask"),
+                            systemImage: "checkmark.circle.fill",
+                            isLoading: submitting,
+                            fillWidth: true) {
+                    save()
                 }
-            }
-            .navigationTitle(lang.s(isEditing ? "tasks.editTask" : "tasks.newTask"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(lang.s("common.cancel")) { dismiss() }
-                        .foregroundColor(Theme.Colors.accentDeep)
-                }
+                .disabled(!canSave)
+                .opacity(canSave ? 1 : 0.5)
             }
         }
         .environment(\.layoutDirection, .rightToLeft)
