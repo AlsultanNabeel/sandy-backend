@@ -392,6 +392,17 @@ final class ChatStore: ObservableObject {
         await loadList(api: api)
     }
 
+    /// إعادة تسمية محادثة (تحديث متفائل للعنوان) ثم مصالحة مع السيرفر.
+    func rename(api: APIClient, id: String, title: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let i = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[i].title = trimmed
+        }
+        try? await api.renameConversation(id: id, title: trimmed)
+        await loadList(api: api)
+    }
+
     /// يرسل، يخزّن السؤال والرد، ويرجّع رد ساندي (ليقرأه الـView بالصوت).
     func send(api: APIClient, text: String) async -> String? {
         sendTask?.cancel()
@@ -441,6 +452,10 @@ private struct ChatHistorySheet: View {
     @State private var query = ""
     @State private var hits: [ConversationHit] = []
     @State private var searchTask: Task<Void, Never>?
+    /// إعادة التسمية عبر تنبيه فيه حقل نص.
+    @State private var renameTarget: ConversationMeta?
+    @State private var renameText = ""
+    @State private var showRename = false
 
     var body: some View {
         NavigationStack {
@@ -466,7 +481,23 @@ private struct ChatHistorySheet: View {
                 }
             }
             .task { await store.loadList(api: state.api) }
+            .alert(lang.s("chat.renameTitle"), isPresented: $showRename) {
+                TextField(lang.s("chat.renamePlaceholder"), text: $renameText)
+                Button(lang.s("common.cancel"), role: .cancel) { renameTarget = nil }
+                Button(lang.s("common.save")) {
+                    if let c = renameTarget {
+                        Task { await store.rename(api: state.api, id: c.id, title: renameText) }
+                    }
+                    renameTarget = nil
+                }
+            }
         }
+    }
+
+    private func beginRename(_ c: ConversationMeta) {
+        renameTarget = c
+        renameText = c.title
+        showRename = true
     }
 
     @ViewBuilder
@@ -480,10 +511,24 @@ private struct ChatHistorySheet: View {
                         Section(lang.s("chat.\(bucket)")) {
                             ForEach(convs) { c in
                                 Button { open(c.id) } label: { row(c.title, sub: "") }
-                                    .swipeActions {
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                         Button(role: .destructive) {
                                             Task { await store.delete(api: state.api, id: c.id) }
-                                        } label: { Image(systemName: "trash") }
+                                        } label: { Label(lang.s("chat.delete"), systemImage: "trash") }
+                                    }
+                                    .swipeActions(edge: .leading) {
+                                        Button { beginRename(c) } label: {
+                                            Label(lang.s("chat.rename"), systemImage: "pencil")
+                                        }
+                                        .tint(Theme.Colors.accent)
+                                    }
+                                    .contextMenu {
+                                        Button { beginRename(c) } label: {
+                                            Label(lang.s("chat.rename"), systemImage: "pencil")
+                                        }
+                                        Button(role: .destructive) {
+                                            Task { await store.delete(api: state.api, id: c.id) }
+                                        } label: { Label(lang.s("chat.delete"), systemImage: "trash") }
                                     }
                             }
                         }

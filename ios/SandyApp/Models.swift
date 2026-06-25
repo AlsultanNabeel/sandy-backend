@@ -11,7 +11,7 @@ struct ChatMessage: Identifiable {
 /// سطر بقائمة سجل المحادثات.
 struct ConversationMeta: Identifiable {
     let id: String
-    let title: String
+    var title: String       // قابل للتعديل (إعادة تسمية متفائلة)
     let updatedAt: String   // ISO
 }
 

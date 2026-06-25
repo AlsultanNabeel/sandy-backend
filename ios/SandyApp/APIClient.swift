@@ -102,6 +102,12 @@ final class APIClient {
                               body: ["role": role, "text": text])
     }
 
+    // PATCH /api/conversations/<id> {title} → {"ok":true} — إعادة تسمية المحادثة.
+    func renameConversation(id: String, title: String) async throws {
+        _ = try await request("/api/conversations/\(id)", method: "PATCH",
+                              body: ["title": title])
+    }
+
     // DELETE /api/conversations/<id>
     func deleteConversation(id: String) async throws {
         _ = try await request("/api/conversations/\(id)", method: "DELETE")
