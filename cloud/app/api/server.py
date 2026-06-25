@@ -79,6 +79,9 @@ def create_app(
     from app.api.conversations_api import register_conversations_api
     register_conversations_api(app, mongo_db=mongo_db)
 
+    from app.api.memory_api import register_memory_api
+    register_memory_api(app)
+
     from app.api.life_api import register_life_api
     register_life_api(app, mongo_db=mongo_db)
 

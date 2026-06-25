@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// ملاحظة: الحساب (ProfileView) مش تبويب — نوصله من زر أفاتار بالرئيسية.
 enum MainTab: Int, Hashable, CaseIterable {
-    case home, chat, search, images, tasks, reminders, life, focus, robot
+    case home, chat, search, images, tasks, reminders, life, focus, robot, memory
 
     var icon: String {
         switch self {
@@ -18,6 +18,7 @@ enum MainTab: Int, Hashable, CaseIterable {
         case .life:      return "heart.text.square.fill"
         case .focus:     return "target"
         case .robot:     return "av.remote.fill"
+        case .memory:    return "brain"
         }
     }
 
@@ -32,6 +33,7 @@ enum MainTab: Int, Hashable, CaseIterable {
         case .life:      return "tabs.life"
         case .focus:     return "tabs.focus"
         case .robot:     return "tabs.robot"
+        case .memory:    return "tabs.memory"
         }
     }
 }
@@ -85,6 +87,10 @@ struct MainTabView: View {
                 NavigationStack { RobotView() }
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.robot)
+
+                NavigationStack { MemoryView() }
+                    .toolbar(.hidden, for: .tabBar)
+                    .tag(MainTab.memory)
             }
             // رفيق ساندي العائم — فوق منطقة المحتوى فقط (مش فوق الفوتر).
             .overlay {

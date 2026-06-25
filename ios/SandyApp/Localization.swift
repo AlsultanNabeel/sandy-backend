@@ -108,6 +108,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nRobot.ns:      L10nRobot.table,
     L10nSearch.ns:     L10nSearch.table,
     L10nImages.ns:     L10nImages.table,
+    L10nMemory.ns:     L10nMemory.table,
     L10nProfile.ns:    L10nProfile.table,
 ]
 

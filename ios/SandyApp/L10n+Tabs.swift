@@ -19,6 +19,7 @@ enum L10nTabs {
             "robot":     .text("الروبوت"),
             "search":    .text("البحث"),
             "images":    .text("الصور"),
+            "memory":    .text("الذاكرة"),
             "emails":    .text("الإيميلات"),
         ],
         en: [
@@ -32,6 +33,7 @@ enum L10nTabs {
             "robot":     .text("Robot"),
             "search":    .text("Search"),
             "images":    .text("Images"),
+            "memory":    .text("Memory"),
             "emails":    .text("Emails"),
         ]
     )

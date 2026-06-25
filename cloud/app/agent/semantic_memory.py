@@ -227,6 +227,37 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
         )
 
 
+def list_user_facts(limit: int = 300) -> List[Dict[str, Any]]:
+    """Every fact this user has stored — for the in-app Memory view. Scoped by the
+    active user's chat_id (isolated), and EXCLUDES the system/automatic memory
+    (conversation summaries live in `sandy_memories`, not here). Any authenticated
+    user sees their own facts; no owner/family gate (this is the user managing
+    their OWN memory, not the agent writing it)."""
+    cid = _current_chat_id()
+    if not cid or _mongo_db is None:
+        return []
+    out: List[Dict[str, Any]] = []
+    for d in _mongo_db["sandy_facts"].find(_user_filter(cid), {"text": 1, "type": 1}):
+        out.append({
+            "id": str(d["_id"]),
+            "text": d.get("text", ""),
+            "type": d.get("type", "general"),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def delete_user_fact(fact_id: str) -> bool:
+    """Delete one of the active user's facts (id must belong to them — scoped)."""
+    cid = _current_chat_id()
+    if not cid or _mongo_db is None:
+        return False
+    return _mongo_db["sandy_facts"].delete_one(
+        {"_id": fact_id, "chat_id": cid}
+    ).deleted_count > 0
+
+
 # Conversations
 
 

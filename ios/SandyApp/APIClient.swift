@@ -118,6 +118,23 @@ final class APIClient {
         }
     }
 
+    // MARK: - الذاكرة (اللي ساندي متذكّراه عنك)
+
+    // GET /api/memory → {"items":[{id,text,type}]}
+    func getMemory() async throws -> [MemoryFact] {
+        let r = try await request("/api/memory")
+        return (r["items"] as? [[String: Any]] ?? []).map {
+            MemoryFact(id: $0["id"] as? String ?? "",
+                       text: $0["text"] as? String ?? "",
+                       type: $0["type"] as? String ?? "general")
+        }
+    }
+
+    // DELETE /api/memory/<id>
+    func deleteMemory(id: String) async throws {
+        _ = try await request("/api/memory/\(id)", method: "DELETE")
+    }
+
     /// يجيب صوت ساندي الطبيعي (WAV من جيميني) لنصّ معيّن — للتشغيل ومزامنة الفم.
     /// نطلب JSON خام (مش عبر `request` لأنه يفكّ JSON؛ هون الناتج بايتات صوت).
     func synthesizeVoice(text: String, mood: String = "neutral") async throws -> Data {

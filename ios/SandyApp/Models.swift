@@ -23,6 +23,15 @@ struct ConversationHit: Identifiable {
     let updatedAt: String
 }
 
+// ── الذاكرة (اللي ساندي متذكّراه عنك) — تطابق /api/memory ───────────────────
+
+/// حقيقة محفوظة عن المستخدم — نص + تصنيف اختياري.
+struct MemoryFact: Identifiable {
+    let id: String
+    let text: String
+    let type: String
+}
+
 struct OnboardingData {
     var done: Bool = false
     var preferredName: String = ""
