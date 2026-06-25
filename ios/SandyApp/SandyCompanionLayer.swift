@@ -203,6 +203,9 @@ struct SandyCompanionLayer: View {
         case .search:
             // البحث: ركن أسفل-يسار (النتائج قائمة بالأعلى).
             return CGPoint(x: leadingX, y: bottomY)
+        case .images:
+            // الصور: ركن أسفل-يمين.
+            return CGPoint(x: trailingX, y: bottomY)
         case .tasks:
             // المهام: ركن أسفل-يسار.
             return CGPoint(x: leadingX, y: bottomY)
@@ -221,8 +224,8 @@ struct SandyCompanionLayer: View {
     /// هل ساندي مبسوطة بهالتبويب؟ (مزاج لكل تبويب).
     private var isHappyTab: Bool {
         switch tab {
-        case .home, .chat, .life, .robot, .search: return true
-        case .tasks, .reminders, .focus:           return false   // تركيز/تنظيم — مزاج أهدأ.
+        case .home, .chat, .life, .robot, .search, .images: return true
+        case .tasks, .reminders, .focus:                    return false   // تركيز/تنظيم — مزاج أهدأ.
         }
     }
 
@@ -250,6 +253,8 @@ struct SandyCompanionLayer: View {
             return isAR ? "أظبّطلك الغرفة؟ 🏠" : "Set the room for you? 🏠"
         case .search:
             return isAR ? "شو بدك أدوّرلك؟ 🔍" : "What should I look up? 🔍"
+        case .images:
+            return isAR ? "نرسم شي حلو؟ 🎨" : "Let's make something? 🎨"
         }
     }
 
@@ -275,8 +280,8 @@ struct SandyCompanionLayer: View {
     /// تبويبات الجهة المبدئية (يسار بصري في RTL يصير يمين تلقائيًّا).
     private var isLeadingTab: Bool {
         switch tab {
-        case .tasks, .life, .focus, .search:   return true
-        case .home, .chat, .reminders, .robot: return false
+        case .tasks, .life, .focus, .search:           return true
+        case .home, .chat, .reminders, .robot, .images: return false
         }
     }
 }

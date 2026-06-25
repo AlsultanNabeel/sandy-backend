@@ -328,6 +328,46 @@ def create_app(
             logger.exception("[web_image] image generation failed")
             return jsonify({"error": "internal_error"}), 500
 
+    @app.route("/api/image/edit", methods=["POST"])
+    @require_auth
+    def web_image_edit(claims):
+        body = request.get_json(silent=True) or {}
+
+        prompt = (body.get("prompt") or "").strip()
+        image_b64 = (body.get("image") or "").strip()
+        if not prompt or not image_b64:
+            return jsonify({"error": "no prompt or image"}), 400
+
+        # Same guest metering as /api/image (authenticated users metered in /api/agent).
+        if claims.get("role") == "guest":
+            from app.agent.guest_usage import check_and_increment, guest_label
+            jti = claims.get("jti", "")
+            guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
+            status, count, limit = check_and_increment(jti, guest_name, "all", mongo_db)
+            if status == "pending":
+                return jsonify({
+                    "error": "limit_reached",
+                    "message": f"وصلت للحد المسموح ({limit}). طلبت الإذن من المسؤول — انتظر الموافقة.",
+                    "count": count, "limit": limit,
+                }), 429
+            if status == "block":
+                return jsonify({
+                    "error": "access_denied",
+                    "message": "تم رفض طلبك من المسؤول.",
+                }), 403
+
+        try:
+            import base64
+            from app.features.vision import edit_image_with_azure
+            img_bytes = edit_image_with_azure(base64.b64decode(image_b64), prompt)
+            if img_bytes:
+                b64 = base64.b64encode(img_bytes).decode()
+                return jsonify({"url": f"data:image/png;base64,{b64}"}), 200
+            return jsonify({"error": "تعذّر تعديل الصورة"}), 500
+        except Exception:
+            logger.exception("[web_image_edit] image edit failed")
+            return jsonify({"error": "internal_error"}), 500
+
     @app.route("/api/guest-usage/status", methods=["GET"])
     @require_auth
     def guest_usage_status(claims):

@@ -334,6 +334,43 @@ final class APIClient {
         return ListResult(items: items, demo: r["demo"] as? Bool ?? false)
     }
 
+    // MARK: - الصور (توليد/تعديل/وصف)
+
+    /// يفك "data:image/png;base64,XXXX" (أو base64 خام) لبايتات الصورة.
+    private func decodeDataURI(_ s: String) -> Data? {
+        if let comma = s.range(of: ",") {
+            return Data(base64Encoded: String(s[comma.upperBound...]))
+        }
+        return Data(base64Encoded: s)
+    }
+
+    // POST /api/image {prompt} → {url:"data:image/png;base64,..."}
+    func generateImage(prompt: String) async throws -> Data {
+        let r = try await request("/api/image", method: "POST", body: ["prompt": prompt])
+        guard let url = r["url"] as? String, let data = decodeDataURI(url) else {
+            throw APIError(message: "تعذّر توليد الصورة")
+        }
+        return data
+    }
+
+    // POST /api/image/edit {prompt, image(b64)} → {url:"data:..."}
+    func editImage(image: Data, prompt: String) async throws -> Data {
+        let r = try await request("/api/image/edit", method: "POST",
+                                  body: ["prompt": prompt, "image": image.base64EncodedString()])
+        guard let url = r["url"] as? String, let data = decodeDataURI(url) else {
+            throw APIError(message: "تعذّر تعديل الصورة")
+        }
+        return data
+    }
+
+    // POST /api/analyze-image {image(b64), question} → {reply}
+    func describeImage(image: Data, question: String = "") async throws -> String {
+        var body: [String: Any] = ["image": image.base64EncodedString()]
+        if !question.isEmpty { body["question"] = question }
+        let r = try await request("/api/analyze-image", method: "POST", body: body)
+        return r["reply"] as? String ?? ""
+    }
+
     // ── المصاريف ────────────────────────────────────────────────────────
     // GET /api/life/expenses → {"items":[{id,amount,note,category,at}],
     //                           "summary":{total,count,...}, "demo":bool}

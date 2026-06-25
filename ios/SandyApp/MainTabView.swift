@@ -5,13 +5,14 @@ import SwiftUI
 ///
 /// ملاحظة: الحساب (ProfileView) مش تبويب — نوصله من زر أفاتار بالرئيسية.
 enum MainTab: Int, Hashable, CaseIterable {
-    case home, chat, search, tasks, reminders, life, focus, robot
+    case home, chat, search, images, tasks, reminders, life, focus, robot
 
     var icon: String {
         switch self {
         case .home:      return "house.fill"
         case .chat:      return "bubble.left.and.bubble.right.fill"
         case .search:    return "magnifyingglass"
+        case .images:    return "photo.artframe"
         case .tasks:     return "checklist"
         case .reminders: return "bell.fill"
         case .life:      return "heart.text.square.fill"
@@ -25,6 +26,7 @@ enum MainTab: Int, Hashable, CaseIterable {
         case .home:      return "tabs.home"
         case .chat:      return "tabs.chat"
         case .search:    return "tabs.search"
+        case .images:    return "tabs.images"
         case .tasks:     return "tabs.tasks"
         case .reminders: return "tabs.reminders"
         case .life:      return "tabs.life"
@@ -59,6 +61,10 @@ struct MainTabView: View {
                 NavigationStack { SearchView() }
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.search)
+
+                NavigationStack { ImagesView() }
+                    .toolbar(.hidden, for: .tabBar)
+                    .tag(MainTab.images)
 
                 NavigationStack { TasksView() }
                     .toolbar(.hidden, for: .tabBar)
