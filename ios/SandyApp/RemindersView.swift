@@ -13,6 +13,8 @@ struct RemindersView: View {
     /// مصدر الحقيقة للتذكيرات (يملك البيانات + الجلب + التعديلات، مستقل عن الشاشة).
     @StateObject private var store = RemindersStore()
     @State private var showAdd = false
+    /// التذكير الجاري تعديله (nil = ما في ورقة تعديل مفتوحة).
+    @State private var editingReminder: ReminderItem?
 
     var body: some View {
         ZStack {
@@ -48,8 +50,14 @@ struct RemindersView: View {
         }
         .navigationTitle(lang.s("reminders.title"))
         .sheet(isPresented: $showAdd) {
-            AddReminderSheet { text, remindAt, note in
+            ReminderSheet { text, remindAt, note in
                 try await store.add(api: state.api, text: text, remindAt: remindAt, note: note)
+            }
+        }
+        .sheet(item: $editingReminder) { reminder in
+            ReminderSheet(existing: reminder) { text, remindAt, note in
+                try await store.update(api: state.api, id: reminder.id,
+                                       text: text, remindAt: remindAt, note: note)
             }
         }
         .task { await store.load(api: state.api) }
@@ -71,18 +79,36 @@ struct RemindersView: View {
             emptyState
             Spacer()
         } else {
-            ScrollView {
-                VStack(spacing: Theme.Spacing.sm) {
-                    ForEach(store.reminders) { reminder in
-                        reminderRow(reminder)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .top).combined(with: .opacity),
-                                removal: .scale(scale: 0.92).combined(with: .opacity)))
-                    }
+            // قائمة أصلية: إيماءات سحب قياسية مع إبقاء بطاقات ساندي (نفس وصفة المهام).
+            List {
+                ForEach(store.reminders) { reminder in
+                    reminderRow(reminder)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.md,
+                                                  bottom: Theme.Spacing.xs, trailing: Theme.Spacing.md))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if !store.demo {
+                                Button(role: .destructive) {
+                                    store.delete(api: state.api, reminder: reminder)
+                                } label: { Label(lang.s("reminders.delete"), systemImage: "trash") }
+                            }
+                        }
+                        .swipeActions(edge: .leading) {
+                            if !store.demo {
+                                Button { editingReminder = reminder } label: {
+                                    Label(lang.s("reminders.edit"), systemImage: "pencil")
+                                }
+                                .tint(Theme.Colors.accent)
+                            }
+                        }
                 }
-                .padding(Theme.Spacing.md)
-                // مساحة تحت حتى ما يغطّي الزرّ العائم آخر صف.
-                .padding(.bottom, Theme.Spacing.xxl + Theme.Spacing.xl)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            // مساحة تحت حتى ما يغطّي الزرّ العائم آخر صف.
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: Theme.Spacing.xxl + Theme.Spacing.xl)
             }
         }
     }
@@ -147,27 +173,27 @@ struct RemindersView: View {
 
                 Spacer(minLength: 0)
 
-                VStack(alignment: .trailing, spacing: Theme.Spacing.sm) {
-                    if reminder.isRecurring {
-                        Text(lang.s("reminders.recurring"))
-                            .font(Theme.Typography.caption)
-                            .foregroundColor(Theme.Colors.accent)
-                            .padding(.vertical, Theme.Spacing.xs)
-                            .padding(.horizontal, Theme.Spacing.sm)
-                            .background(Theme.Colors.accent.opacity(0.12))
-                            .clipShape(Capsule())
-                    }
-                    if !store.demo {
-                        Button {
-                            store.delete(api: state.api, reminder: reminder)
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 15))
-                                .foregroundColor(Theme.Colors.danger)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                if reminder.isRecurring {
+                    Text(lang.s("reminders.recurring"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.accent)
+                        .padding(.vertical, Theme.Spacing.xs)
+                        .padding(.horizontal, Theme.Spacing.sm)
+                        .background(Theme.Colors.accent.opacity(0.12))
+                        .clipShape(Capsule())
                 }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if !store.demo { editingReminder = reminder } }
+        .contextMenu {
+            if !store.demo {
+                Button { editingReminder = reminder } label: {
+                    Label(lang.s("reminders.edit"), systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    store.delete(api: state.api, reminder: reminder)
+                } label: { Label(lang.s("reminders.delete"), systemImage: "trash") }
             }
         }
     }
@@ -250,6 +276,13 @@ final class RemindersStore: ObservableObject {
         await load(api: api)
     }
 
+    /// تعديل تذكير ثم إعادة جلب — يرمي عند الفشل ليتعامل الشيت معه. الملاحظة
+    /// تُرسل دايمًا (حتى الفاضية = مسح)، فنمرّر "" مو nil.
+    func update(api: APIClient, id: String, text: String, remindAt: String, note: String?) async throws {
+        try await api.updateReminder(id: id, text: text, remindAt: remindAt, note: note ?? "")
+        await load(api: api)
+    }
+
     /// حذف تفاؤلي ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, reminder: ReminderItem) {
         reminders.removeAll { $0.id == reminder.id }
@@ -267,22 +300,36 @@ final class RemindersStore: ObservableObject {
 // ─────────────────────────────────────────────────────────────────────────
 // MARK: - شيت إضافة تذكير
 
-/// شيت إضافة تذكير: نص (إلزامي) + وقت (افتراضيًا الآن + دقيقتين) + ملاحظة اختيارية.
-/// الوقت يُرسل بصيغة ISO 8601. الأخطاء تظهر بصوت ساندي والشيت يبقى مفتوح.
-private struct AddReminderSheet: View {
+/// شيت تذكير (إضافة أو تعديل): نص (إلزامي) + وقت + ملاحظة اختيارية. `existing`
+/// غير nil ⇒ وضع تعديل (تعبئة مسبقة). الوقت يُرسل ISO 8601. الأخطاء بصوت ساندي.
+private struct ReminderSheet: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 
+    /// التذكير القائم عند التعديل (nil = إضافة جديدة).
+    let existing: ReminderItem?
     /// يستقبل (النص، الوقت ISO، الملاحظة?) ويرمي عند الفشل.
     let onSave: (String, String, String?) async throws -> Void
 
-    @State private var text = ""
+    @State private var text: String
     /// افتراضيًا الآن + دقيقتين — حتى تذكير التجربة ما يطلع بالماضي
     /// فيتجنّب رفض الباك-إند لـ "تاريخ بالماضي".
-    @State private var date = Date().addingTimeInterval(120)
-    @State private var note = ""
+    @State private var date: Date
+    @State private var note: String
     @State private var saving = false
     @State private var notice = ""          // رسالة ساندي عند فشل الحفظ (فاضي = ما في)
+
+    init(existing: ReminderItem? = nil,
+         onSave: @escaping (String, String, String?) async throws -> Void) {
+        self.existing = existing
+        self.onSave = onSave
+        _text = State(initialValue: existing?.text ?? "")
+        _note = State(initialValue: existing?.note ?? "")
+        let parsed = existing.flatMap { RemindersView.parseISO($0.remindAt) }
+        _date = State(initialValue: parsed ?? Date().addingTimeInterval(120))
+    }
+
+    private var isEditing: Bool { existing != nil }
 
     private var trimmedText: String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -337,7 +384,7 @@ private struct AddReminderSheet: View {
                     }
 
                     // ── زر الحفظ الجميل ──
-                    SandyButton(title: lang.s("reminders.submit"),
+                    SandyButton(title: lang.s(isEditing ? "reminders.saveEdit" : "reminders.submit"),
                                 systemImage: "checkmark.circle.fill",
                                 isLoading: saving,
                                 fillWidth: true) {
@@ -349,7 +396,7 @@ private struct AddReminderSheet: View {
                 .padding(Theme.Spacing.lg)
             }
             .background(SandyBackground())
-            .navigationTitle(lang.s("reminders.sheetTitle"))
+            .navigationTitle(lang.s(isEditing ? "reminders.editTitle" : "reminders.sheetTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

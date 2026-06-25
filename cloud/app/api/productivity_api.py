@@ -100,6 +100,25 @@ def register_productivity_api(app, mongo_db=None):
             return jsonify({"ok": True}), 200
         return jsonify({"error": res.get("error", "failed")}), 400
 
+    @app.route("/api/reminders/<reminder_id>", methods=["PATCH"])
+    @require_auth
+    def api_update_reminder(reminder_id, claims):
+        if _is_guest(claims):
+            return _guest_forbidden()
+        body = request.get_json(silent=True) or {}
+        from app.features.reminders_store import update_reminder
+        # Empty text/remind_at = leave unchanged; note present (any value) = set it.
+        with active_user_profile_context(build_user_profile(claims)):
+            res = update_reminder(
+                reminder_id,
+                title=(body.get("text") or "").strip(),
+                start_iso=(body.get("remind_at") or "").strip(),
+                note=body.get("note") if "note" in body else None,
+            )
+        if res.get("success"):
+            return jsonify({"ok": True}), 200
+        return jsonify({"error": res.get("error", "failed")}), 400
+
     @app.route("/api/reminders/<reminder_id>", methods=["DELETE"])
     @require_auth
     def api_delete_reminder(reminder_id, claims):

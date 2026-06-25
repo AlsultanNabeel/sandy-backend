@@ -181,8 +181,9 @@ def update_reminder(
     title: str = "",
     start_iso: str = "",
     recurrence: Optional[str] = None,
+    note: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Empty title/start_iso means "leave unchanged"; recurrence=None too."""
+    """Empty title/start_iso means "leave unchanged"; recurrence/note=None too."""
     try:
         coll = _coll()
         if coll is None or not reminder_id:
@@ -202,6 +203,8 @@ def update_reminder(
             updates["sent_at"] = None
         if recurrence is not None:
             updates["recurrence"] = str(recurrence).strip()
+        if note is not None:
+            updates["note"] = str(note).strip()
         if not updates:
             return {"success": False, "error": "nothing_to_update"}
 

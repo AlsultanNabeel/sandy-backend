@@ -265,6 +265,20 @@ final class APIClient {
         _ = try await request("/api/reminders", method: "POST", body: body)
     }
 
+    // PATCH /api/reminders/<id> — تعديل: نص/وقت/ملاحظة. الفاضي = بلا تغيير؛
+    // note موجود (أي قيمة) = نضبطه. الباك-إند يرفض وقتًا بالماضي.
+    func updateReminder(id: String,
+                        text: String? = nil,
+                        remindAt: String? = nil,
+                        note: String? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let text { body["text"] = text }
+        if let remindAt { body["remind_at"] = remindAt }
+        if let note { body["note"] = note }
+        guard !body.isEmpty else { return }
+        _ = try await request("/api/reminders/\(id)", method: "PATCH", body: body)
+    }
+
     // DELETE /api/reminders/<id> → {"ok":true} (للمالك فقط)
     func deleteReminder(id: String) async throws {
         _ = try await request("/api/reminders/\(id)", method: "DELETE")

@@ -21,8 +21,13 @@ enum L10nReminders {
             // Row
             "recurring":    .text("يتكرّر"),
 
-            // Add sheet
+            // إجراءات الصف (قائمة سياقية + سحب)
+            "edit":         .text("تعديل"),
+            "delete":       .text("حذف"),
+
+            // Add/edit sheet
             "sheetTitle":   .text("تذكير جديد"),
+            "editTitle":    .text("تعديل التذكير"),
             "sheetHeader":  .text("شو حابب أذكّرك فيه؟"),
             "textField":    .text("التذكير"),
             "textPlaceholder": .text("اكتب التذكير هنا…"),
@@ -30,6 +35,7 @@ enum L10nReminders {
             "noteField":    .text("ملاحظة (اختياري)"),
             "notePlaceholder": .text("أي تفصيل إضافي… (اختياري)"),
             "submit":       .text("تذكّرني"),
+            "saveEdit":     .text("حفظ التعديل"),
 
             // Sandy-voice notices
             "loadFailed":   .text("معلش، ما قدرت أجيب تذكيراتك هلّق. اسحب لتحت تنعش الصفحة وأنا أحاول من جديد."),
@@ -49,8 +55,13 @@ enum L10nReminders {
             // Row
             "recurring":    .text("Repeats"),
 
-            // Add sheet
+            // row actions (context menu + swipe)
+            "edit":         .text("Edit"),
+            "delete":       .text("Delete"),
+
+            // Add/edit sheet
             "sheetTitle":   .text("New reminder"),
+            "editTitle":    .text("Edit reminder"),
             "sheetHeader":  .text("What should I remind you about?"),
             "textField":    .text("Reminder"),
             "textPlaceholder": .text("Type the reminder here…"),
@@ -58,6 +69,7 @@ enum L10nReminders {
             "noteField":    .text("Note (optional)"),
             "notePlaceholder": .text("Any extra detail… (optional)"),
             "submit":       .text("Remind me"),
+            "saveEdit":     .text("Save changes"),
 
             // Sandy-voice notices
             "loadFailed":   .text("Sorry, I couldn't fetch your reminders right now. Pull down to refresh and I'll try again."),
