@@ -223,12 +223,16 @@ def create_app(
                         f"{message}\n\n(Note: I'm on the English interface — please "
                         "reply in English, keeping your usual personality.)"
                     )
+                # سيشن الشات (اختياري): يفصل ذاكرة كل محادثة على حدة. غيابه =
+                # السلوك القديم (خيط واحد لكل مستخدم).
+                conversation_id = (body.get("conversation_id") or "").strip()
                 with active_user_profile_context(_profile):
                     state = run_graph(
                         graph_message,
                         user_id=user_id,
                         chat_id=user_id,
                         source="web",
+                        conversation_id=conversation_id or None,
                     )
                 reply = get_final_reply(state)
                 chunks = reply.get("chunks") or [reply.get("text", "")]

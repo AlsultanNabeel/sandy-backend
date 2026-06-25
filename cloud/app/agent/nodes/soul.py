@@ -242,7 +242,9 @@ def soul_node(state: SandyState) -> SandyState:
             else:
                 try:
                     from app.agent.semantic_memory import search_relevant_summaries, search_relevant_facts
-                    _s2_futs["summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, chat_id)
+                    # ملخّصات هذا الخيط (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
+                    _summ_thread = state.get("conversation_id") or chat_id
+                    _s2_futs["summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, _summ_thread)
                     _s2_futs["sem_facts"] = _SOUL_POOL.submit(search_relevant_facts, message)
                 except Exception:
                     pass
@@ -362,7 +364,8 @@ def soul_node(state: SandyState) -> SandyState:
         })
 
 
-def start_soul_prefetch(chat_id: str, user_id: str, message: str) -> dict:
+def start_soul_prefetch(chat_id: str, user_id: str, message: str,
+                        conversation_id: str = "") -> dict:
     """Eagerly starts the always-needed soul MongoDB queries before maestro runs.
 
     Only the queries needed for EVERY message (comfort + directives) are
@@ -393,7 +396,9 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str) -> dict:
                 search_relevant_facts,
                 search_relevant_summaries,
             )
-            futures["__summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, chat_id)
+            # ملخّصات خيط المحادثة (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
+            _summ_thread = conversation_id or chat_id
+            futures["__summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, _summ_thread)
             futures["__sem_facts"] = _SOUL_POOL.submit(search_relevant_facts, message)
         except Exception:
             pass

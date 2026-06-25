@@ -17,6 +17,9 @@ class SandyState(TypedDict):
     user_id: str
     chat_id: str
     session_id: str
+    # خيط المحادثة (سيشن الشات) — يفصل ذاكرة الرسائل/الملخّصات لكل محادثة على حدة،
+    # بينما تبقى الشخصية/الحقائق لكل-مستخدم (chat_id). فارغ = استخدم chat_id (السلوك القديم).
+    conversation_id: str
 
     # الذاكرة
     conversation_history: List[dict]  # STM: آخر 10 رسائل (MongoDB)
@@ -70,6 +73,7 @@ def create_initial_state(
     source: str = "user",
     pending_state: Optional[dict] = None,
     image_state: Optional[dict] = None,
+    conversation_id: str = "",
 ) -> SandyState:
     """أنشئ SandyState فارغة جاهزة لـ graph.ainvoke().
 
@@ -85,6 +89,7 @@ def create_initial_state(
         user_id=str(user_id),
         chat_id=str(chat_id),
         session_id=str(uuid.uuid4()),
+        conversation_id=str(conversation_id or ""),
         conversation_history=[],
         intent=None,
         confidence=None,

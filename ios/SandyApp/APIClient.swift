@@ -55,11 +55,13 @@ final class APIClient {
                               body: ["preferred_name": preferredName, "interests": interests])
     }
 
-    func sendMessage(_ text: String) async throws -> String {
+    func sendMessage(_ text: String, conversationId: String? = nil) async throws -> String {
         // نرسل لغة المستخدم الحالية (عربي/إنجليزي) حتى ترد ساندي بنفس اللغة.
         let lang = await LanguageManager.shared.lang.rawValue
-        let r = try await request("/api/agent", method: "POST",
-                                  body: ["message": text, "lang": lang])
+        var body: [String: Any] = ["message": text, "lang": lang]
+        // سيشن الشات — تخلّي ساندي تتذكّر هالمحادثة لحالها بلا ما تخلط المواضيع.
+        if let cid = conversationId, !cid.isEmpty { body["conversation_id"] = cid }
+        let r = try await request("/api/agent", method: "POST", body: body)
         return r["reply"] as? String ?? "…"
     }
 

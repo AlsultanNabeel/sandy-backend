@@ -32,6 +32,10 @@ enum L10nChat {
             "searchPlaceholder": .text("دوّر بمحادثاتك…"),
             "historyEmpty": .text("ما في محادثات محفوظة بعد."),
             "untitled":     .text("محادثة"),
+            "today":        .text("اليوم"),
+            "yesterday":    .text("أمس"),
+            "week":         .text("آخر سبعة أيام"),
+            "older":        .text("أقدم"),
         ],
         en: [
             "title":        .text("Sandy"),
@@ -57,6 +61,10 @@ enum L10nChat {
             "searchPlaceholder": .text("Search your chats…"),
             "historyEmpty": .text("No saved chats yet."),
             "untitled":     .text("Chat"),
+            "today":        .text("Today"),
+            "yesterday":    .text("Yesterday"),
+            "week":         .text("Last 7 days"),
+            "older":        .text("Older"),
         ]
     )
 }

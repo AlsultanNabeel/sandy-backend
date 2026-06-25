@@ -305,6 +305,7 @@ def run_graph(
     pending_state: Optional[Dict[str, Any]] = None,
     source: str = "user",
     image_state: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None,
 ) -> SandyState:
     """ينفذ الـ Sandy pipeline كاملاً وتُرجع الـ SandyState النهائية.
 
@@ -318,8 +319,12 @@ def run_graph(
     Returns:
         SandyState مع final_response جاهز للإرسال
     """
-    # 1. حمّل conversation history من MongoDB
-    history = _stm_load(chat_id, user_id)
+    # خيط ذاكرة المحادثة: conversation_id لو موجود (سيشن شات مستقلة) وإلا chat_id
+    # (السلوك القديم تمامًا — تيليجرام/هاردوير/استدعاء بلا سيشن).
+    thread_id = str(conversation_id or chat_id)
+
+    # 1. حمّل conversation history من MongoDB (لهذا الخيط تحديدًا)
+    history = _stm_load(thread_id, user_id)
 
     # 2. ابنِ الـ initial state
     state = create_initial_state(
@@ -329,6 +334,7 @@ def run_graph(
         source=source,
         pending_state=pending_state,
         image_state=image_state,
+        conversation_id=str(conversation_id or ""),
     )
     if history:
         state = merge_state(state, {"conversation_history": history})
@@ -344,7 +350,10 @@ def run_graph(
         # Start soul MongoDB queries in parallel with routing (~1.5s savings)
         try:
             from app.agent.nodes.soul import start_soul_prefetch
-            _prefetch = start_soul_prefetch(state["chat_id"], state["user_id"], message)
+            _prefetch = start_soul_prefetch(
+                state["chat_id"], state["user_id"], message,
+                conversation_id=state.get("conversation_id") or "",
+            )
             state = merge_state(state, {"soul_prefetch": _prefetch})
         except Exception:
             pass
@@ -380,9 +389,10 @@ def run_graph(
     # 4. A1: احفظ لحظة عاطفية مهمة في LTM (background — لا يبطئ الرد)
     _save_emotional_async(state, message)
 
-    # 5. احفظ في STM (MongoDB)
+    # 5. احفظ في STM (MongoDB) — على نفس خيط المحادثة، فالفائض يتلخّص لذاكرة
+    # بعيدة المدى مفهرسة بـ conversation_id (استرجاع دلالي لكل محادثة على حدة).
     final_reply = state.get("final_response") or ""
-    _stm_save(chat_id, user_id, message, final_reply)
+    _stm_save(thread_id, user_id, message, final_reply)
 
     # 6. حدّث الحالة المشتركة عبر المنصات (background)
     _update_session_state_async(state)

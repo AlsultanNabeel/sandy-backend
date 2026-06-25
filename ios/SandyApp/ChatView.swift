@@ -408,7 +408,8 @@ final class ChatStore: ObservableObject {
                 }
                 let cid = currentID ?? ""
                 try? await api.appendMessage(cid: cid, role: "user", text: text)
-                let reply = try await api.sendMessage(text)
+                // نمرّر سيشن المحادثة فتتذكّرها ساندي مستقلة عن باقي محادثاتك.
+                let reply = try await api.sendMessage(text, conversationId: cid)
                 messages.append(ChatMessage(role: "sandy", text: reply))
                 try? await api.appendMessage(cid: cid, role: "sandy", text: reply)
                 await loadList(api: api)
@@ -475,12 +476,17 @@ private struct ChatHistorySheet: View {
                 emptyView
             } else {
                 List {
-                    ForEach(store.conversations) { c in
-                        Button { open(c.id) } label: { row(c.title, sub: relative(c.updatedAt)) }
-                    }
-                    .onDelete { idx in
-                        let ids = idx.map { store.conversations[$0].id }
-                        Task { for id in ids { await store.delete(api: state.api, id: id) } }
+                    ForEach(grouped, id: \.0) { bucket, convs in
+                        Section(lang.s("chat.\(bucket)")) {
+                            ForEach(convs) { c in
+                                Button { open(c.id) } label: { row(c.title, sub: "") }
+                                    .swipeActions {
+                                        Button(role: .destructive) {
+                                            Task { await store.delete(api: state.api, id: c.id) }
+                                        } label: { Image(systemName: "trash") }
+                                    }
+                            }
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -544,9 +550,34 @@ private struct ChatHistorySheet: View {
         }
     }
 
-    /// عرض زمني مبسّط من بادئة الـ ISO (المرحلة (ب) تحسّنه لـ"اليوم/أمس").
-    private func relative(_ iso: String) -> String {
-        String(iso.prefix(10))
+    /// المحادثات مجمّعة زمنيًا (اليوم/أمس/الأسبوع/أقدم)، فاضي تُحذف، والترتيب محفوظ.
+    private var grouped: [(String, [ConversationMeta])] {
+        let order = ["today", "yesterday", "week", "older"]
+        var map: [String: [ConversationMeta]] = [:]
+        for c in store.conversations {
+            map[bucket(c.updatedAt), default: []].append(c)
+        }
+        return order.compactMap { key in
+            guard let convs = map[key], !convs.isEmpty else { return nil }
+            return (key, convs)
+        }
+    }
+
+    private func bucket(_ iso: String) -> String {
+        guard let d = parseISO(iso) else { return "older" }
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return "today" }
+        if cal.isDateInYesterday(d) { return "yesterday" }
+        if let days = cal.dateComponents([.day], from: d, to: Date()).day, days < 7 { return "week" }
+        return "older"
+    }
+
+    private func parseISO(_ iso: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: iso) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: iso)
     }
 }
 
