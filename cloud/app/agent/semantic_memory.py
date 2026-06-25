@@ -52,14 +52,12 @@ def _current_chat_id() -> Optional[str]:
 
 
 def _can_write_memory() -> bool:
-    """Any authenticated user may read/write their OWN memory (isolated by
-    chat_id). Only guests / unauthenticated are blocked. Multi-tenant product:
-    every user gets a memory that learns from them, not just the owner."""
+    """Owner and Family may write. Guest and unauthenticated may not."""
     profile = get_active_user_profile()
     if not profile:
         return False
     relation = str(profile.get("relation", "guest") or "guest").strip().lower()
-    return relation in {"owner", "family", "user"}
+    return relation in {"owner", "family"}
 
 
 def _can_read_memory() -> bool:
@@ -227,37 +225,6 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
         print(
             f"[Memory] indexed {inserted} new facts (chat_id={chat_id})", flush=True
         )
-
-
-def list_user_facts(limit: int = 300) -> List[Dict[str, Any]]:
-    """Every fact this user has stored — for the in-app Memory view. Scoped by the
-    active user's chat_id (isolated), and EXCLUDES the system/automatic memory
-    (conversation summaries live in `sandy_memories`, not here). Any authenticated
-    user sees their own facts; no owner/family gate (this is the user managing
-    their OWN memory, not the agent writing it)."""
-    cid = _current_chat_id()
-    if not cid or _mongo_db is None:
-        return []
-    out: List[Dict[str, Any]] = []
-    for d in _mongo_db["sandy_facts"].find(_user_filter(cid), {"text": 1, "type": 1}):
-        out.append({
-            "id": str(d["_id"]),
-            "text": d.get("text", ""),
-            "type": d.get("type", "general"),
-        })
-        if len(out) >= limit:
-            break
-    return out
-
-
-def delete_user_fact(fact_id: str) -> bool:
-    """Delete one of the active user's facts (id must belong to them — scoped)."""
-    cid = _current_chat_id()
-    if not cid or _mongo_db is None:
-        return False
-    return _mongo_db["sandy_facts"].delete_one(
-        {"_id": fact_id, "chat_id": cid}
-    ).deleted_count > 0
 
 
 # Conversations
