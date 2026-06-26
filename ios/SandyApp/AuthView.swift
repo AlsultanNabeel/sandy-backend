@@ -28,7 +28,13 @@ struct AuthView: View {
 
             Divider().padding(.vertical, 6)
             Text(lang.s("auth.devLogin")).font(.caption).foregroundColor(.secondary)
-            SecureField(lang.s("auth.ownerPassword"), text: $password).textFieldStyle(.roundedBorder)
+            SecureField(lang.s("auth.ownerPassword"), text: $password)
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                // ضغطة الإدخال بالكيبورد تسجّل دخول مباشرة (مش لازم تضغط الزر).
+                .onSubmit { devLogin() }
             Button(action: devLogin) {
                 Text(loading ? "..." : lang.s("auth.login")).frame(maxWidth: .infinity)
             }
@@ -42,6 +48,8 @@ struct AuthView: View {
     }
 
     private func devLogin() {
+        // نتجنّب الإرسال المكرّر (زر + إدخال الكيبورد) أو كلمة سر فاضية.
+        guard !loading, !password.isEmpty else { return }
         loading = true; error = ""
         Task {
             do {
