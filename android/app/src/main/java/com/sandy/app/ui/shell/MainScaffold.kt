@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.sandy.app.i18n.Localization
+import com.sandy.app.ui.SessionViewModel
 import com.sandy.app.ui.daily.DailyScreen
 import com.sandy.app.ui.home.HomeScreen
 import com.sandy.app.ui.life.LifeScreen
@@ -53,7 +54,7 @@ enum class MainTab(val icon: ImageVector, val titleKey: String) {
  * blue pill with its label; the rest stay quiet icons.
  */
 @Composable
-fun MainScaffold() {
+fun MainScaffold(session: SessionViewModel) {
     var selection by remember { mutableStateOf(MainTab.Home) }
 
     Box(Modifier.fillMaxSize()) {
@@ -61,7 +62,7 @@ fun MainScaffold() {
             when (selection) {
                 MainTab.Home -> HomeScreen()
                 MainTab.Sandy -> SandyHubScreen()
-                MainTab.Daily -> DailyScreen()
+                MainTab.Daily -> DailyScreen(session.api)
                 MainTab.Life -> LifeScreen()
             }
         }

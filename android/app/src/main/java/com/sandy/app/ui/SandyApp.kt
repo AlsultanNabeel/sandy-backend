@@ -39,7 +39,7 @@ fun SandyApp() {
                     }
                 SessionViewModel.Stage.Auth -> AuthScreen(session)
                 SessionViewModel.Stage.Onboarding -> OnboardingScreen(session)
-                SessionViewModel.Stage.Chat -> MainScaffold()
+                SessionViewModel.Stage.Chat -> MainScaffold(session)
             }
         }
     }
