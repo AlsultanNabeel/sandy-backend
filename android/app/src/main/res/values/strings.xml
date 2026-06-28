@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- In-app UI strings live in Kotlin (i18n/Localization.kt, ar/en) to mirror
+         the iOS app. This only holds the OS-level app name. -->
+    <string name="app_name">Sandy</string>
+</resources>
