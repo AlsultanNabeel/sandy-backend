@@ -23,6 +23,7 @@ enum L10nProfile {
             "addInterest":       .text("أضف اهتمام…"),
             "interestsHint":     .text("أضِف اهتمام واحد على الأقل ليعرفك ساندي أكتر."),
             "saveFailed":        .text("معلش، ما قدرت أحفظ التعديلات — جرّب كمان مرة بعد شوي."),
+            "archive":           .text("أدوات وأرشيف"),
         ],
         en: [
             "title":             .text("Account"),
@@ -39,6 +40,7 @@ enum L10nProfile {
             "addInterest":       .text("Add an interest…"),
             "interestsHint":     .text("Add at least one interest so Sandy can get to know you better."),
             "saveFailed":        .text("Sorry, I couldn't save your changes — please try again in a bit."),
+            "archive":           .text("Tools & Archive"),
         ]
     )
 }

@@ -20,34 +20,81 @@ struct ProfileView: View {
     private var interests: [String] { state.onboarding.interests }
 
     var body: some View {
-        ZStack {
-            SandyBackground()
+        // NavigationStack حتى صفحات الأرشيف (الذاكرة/الخط الزمني/الروبوت) تنفتح
+        // كدفعات داخل شيت الحساب — هاي مش تبويبات بعد الآن.
+        NavigationStack {
+            ZStack {
+                SandyBackground()
 
-            ScrollView {
-                VStack(spacing: Theme.Spacing.lg) {
-                    header
-                    preferredNameCard
-                    interestsCard
-                    languageCard
-                    editButton
-                    signOutButton
+                ScrollView {
+                    VStack(spacing: Theme.Spacing.lg) {
+                        header
+                        preferredNameCard
+                        interestsCard
+                        languageCard
+                        archiveCard
+                        editButton
+                        signOutButton
+                    }
+                    .padding(Theme.Spacing.md)
                 }
-                .padding(Theme.Spacing.md)
+            }
+            .navigationTitle(lang.s("profile.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .task { await state.refreshOnboarding() }
+            .onAppear {
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.8)) { appeared = true }
+            }
+            .sheet(isPresented: $showEdit) {
+                EditProfileSheet(
+                    preferredName: state.onboarding.preferredName,
+                    interests: state.onboarding.interests
+                ) { name, items in
+                    try await state.saveProfile(preferredName: name, interests: items)
+                }
             }
         }
-        .navigationTitle(lang.s("profile.title"))
-        .task { await state.refreshOnboarding() }
-        .onAppear {
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.8)) { appeared = true }
-        }
-        .sheet(isPresented: $showEdit) {
-            EditProfileSheet(
-                preferredName: state.onboarding.preferredName,
-                interests: state.onboarding.interests
-            ) { name, items in
-                try await state.saveProfile(preferredName: name, interests: items)
+    }
+
+    // MARK: - بطاقة الأدوات والأرشيف
+
+    /// أرشيف ساندي — الذاكرة + الخط الزمني + إعدادات الروبوت. نقلناهن من الشريط
+    /// السفلي لهون حتى يبقى التنقّل أربعة تبويبات نظيفة، وهاي أدوات نوصلها وقت الحاجة.
+    private var archiveCard: some View {
+        SandyCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                SectionHeader(title: lang.s("profile.archive"))
+                archiveRow(icon: "brain", titleKey: "tabs.memory") { MemoryView() }
+                archiveRow(icon: "clock.arrow.circlepath", titleKey: "tabs.timeline") { TimelineTabView() }
+                archiveRow(icon: "av.remote.fill", titleKey: "tabs.robot") { RobotView() }
             }
         }
+    }
+
+    /// صف أرشيف — أيقونة + عنوان + chevron، يفتح وجهته كدفعة.
+    @ViewBuilder
+    private func archiveRow<Destination: View>(
+        icon: String, titleKey: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: Theme.Spacing.md) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(width: 28)
+                Text(lang.s(titleKey))
+                    .font(.headline)
+                    .foregroundColor(Theme.Colors.primaryText)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.left")
+                    .foregroundColor(Theme.Colors.secondaryText)
+            }
+            .padding(.vertical, Theme.Spacing.xs)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - الترويسة الدافئة

@@ -1,7 +1,9 @@
 import Foundation
 
-// Namespace: tabs — the five MainTabView titles. Mirrors the web navbar tab
-// labels (kept flat). FILLED.
+// Namespace: tabs — the four Core-4 navigation titles (الرئيسية/ساندي/يومي/حياتي)
+// plus the titles of the feature screens that are now reached from inside a hub
+// or the profile archive (search/images/memory/timeline/robot/focus) — each of
+// those screens still uses its `tabs.*` key as its own navigationTitle.
 //
 // Usage:  Label(lang.s("tabs.home"), systemImage: "house.fill")
 enum L10nTabs {
@@ -9,34 +11,30 @@ enum L10nTabs {
 
     static let table = L10nTable(
         ar: [
-            "home":      .text("الرئيسية"),
-            "chat":      .text("ساندي"),
-            "tasks":     .text("مهامي"),
-            "reminders": .text("تذكيراتي"),
-            "life":      .text("حياتي"),
-            "focus":     .text("الفوكس"),
-            "room":      .text("الغرفة"),
-            "robot":     .text("الروبوت"),
-            "search":    .text("البحث"),
-            "images":    .text("الصور"),
-            "memory":    .text("الذاكرة"),
-            "timeline":  .text("الخط الزمني"),
-            "emails":    .text("الإيميلات"),
+            // الشريط السفلي — أربعة تبويبات.
+            "home":     .text("الرئيسية"),
+            "sandy":    .text("ساندي"),
+            "daily":    .text("يومي"),
+            "life":     .text("حياتي"),
+            // عناوين شاشات الميزات (تُفتح من جوّا هَب أو من أرشيف البروفايل).
+            "focus":    .text("الفوكس"),
+            "robot":    .text("الروبوت"),
+            "search":   .text("البحث"),
+            "images":   .text("الصور"),
+            "memory":   .text("الذاكرة"),
+            "timeline": .text("الخط الزمني"),
         ],
         en: [
-            "home":      .text("Home"),
-            "chat":      .text("Sandy"),
-            "tasks":     .text("Tasks"),
-            "reminders": .text("Reminders"),
-            "life":      .text("Life"),
-            "focus":     .text("Focus"),
-            "room":      .text("Room"),
-            "robot":     .text("Robot"),
-            "search":    .text("Search"),
-            "images":    .text("Images"),
-            "memory":    .text("Memory"),
-            "timeline":  .text("Timeline"),
-            "emails":    .text("Emails"),
+            "home":     .text("Home"),
+            "sandy":    .text("Sandy"),
+            "daily":    .text("Daily"),
+            "life":     .text("Life"),
+            "focus":    .text("Focus"),
+            "robot":    .text("Robot"),
+            "search":   .text("Search"),
+            "images":   .text("Images"),
+            "memory":   .text("Memory"),
+            "timeline": .text("Timeline"),
         ]
     )
 }

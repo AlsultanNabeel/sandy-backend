@@ -1,46 +1,38 @@
 import SwiftUI
 
-/// تبويبات ساندي الخمسة. الترتيب ثابت ومرتبط بـ `selection` حتى نقدر نبدّل
-/// التبويب برمجيًّا (مثلاً HomeView يقفز لتبويب الشات).
+/// تبويبات ساندي الأربعة (Core-4). الترتيب ثابت ومرتبط بـ `selection` حتى نقدر
+/// نبدّل التبويب برمجيًّا (مثلاً HomeView يقفز لتبويب ساندي).
 ///
-/// ملاحظة: الحساب (ProfileView) مش تبويب — نوصله من زر أفاتار بالرئيسية.
+/// • الرئيسية — مدخل ساندي الحيّ ولوحة المعلومات.
+/// • ساندي    — مركز الذكاء الموحّد (محادثة + بحث + صور بمكان واحد).
+/// • يومي     — التخطيط (المهام + التذكيرات + العادات + الفوكس).
+/// • حياتي    — المعنى والذكريات (اليوميات + المصاريف).
+///
+/// ملاحظة: الحساب (ProfileView) مش تبويب — نوصله من زر أفاتار بالرئيسية،
+/// وفيه أرشيف ساندي (الذاكرة + الخط الزمني + الروبوت).
 enum MainTab: Int, Hashable, CaseIterable {
-    case home, chat, search, images, tasks, reminders, life, focus, robot, memory, timeline
+    case home, sandy, daily, life
 
     var icon: String {
         switch self {
-        case .home:      return "house.fill"
-        case .chat:      return "bubble.left.and.bubble.right.fill"
-        case .search:    return "magnifyingglass"
-        case .images:    return "photo.artframe"
-        case .tasks:     return "checklist"
-        case .reminders: return "bell.fill"
-        case .life:      return "heart.text.square.fill"
-        case .focus:     return "target"
-        case .robot:     return "av.remote.fill"
-        case .memory:    return "brain"
-        case .timeline:  return "clock.arrow.circlepath"
+        case .home:  return "house.fill"
+        case .sandy: return "sparkles"
+        case .daily: return "calendar"
+        case .life:  return "heart.text.square.fill"
         }
     }
 
     var titleKey: String {
         switch self {
-        case .home:      return "tabs.home"
-        case .chat:      return "tabs.chat"
-        case .search:    return "tabs.search"
-        case .images:    return "tabs.images"
-        case .tasks:     return "tabs.tasks"
-        case .reminders: return "tabs.reminders"
-        case .life:      return "tabs.life"
-        case .focus:     return "tabs.focus"
-        case .robot:     return "tabs.robot"
-        case .memory:    return "tabs.memory"
-        case .timeline:  return "tabs.timeline"
+        case .home:  return "tabs.home"
+        case .sandy: return "tabs.sandy"
+        case .daily: return "tabs.daily"
+        case .life:  return "tabs.life"
         }
     }
 }
 
-/// الواجهة الرئيسية بعد الدخول — خمسة تبويبات (الرئيسية مدخل ساندي الحيّ).
+/// الواجهة الرئيسية بعد الدخول — أربعة تبويبات (الرئيسية مدخل ساندي الحيّ).
 /// نخفي شريط آبل المصمت ونستبدله بشريط ساندي الزجاجي الطافي بالأسفل.
 struct MainTabView: View {
     @EnvironmentObject var state: AppState
@@ -58,51 +50,23 @@ struct MainTabView: View {
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.home)
 
-                NavigationStack { ChatView() }
+                NavigationStack { SandyHubView() }
                     .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.chat)
+                    .tag(MainTab.sandy)
 
-                NavigationStack { SearchView() }
+                NavigationStack { DailyView() }
                     .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.search)
-
-                NavigationStack { ImagesView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.images)
-
-                NavigationStack { TasksView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.tasks)
-
-                NavigationStack { RemindersView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.reminders)
+                    .tag(MainTab.daily)
 
                 NavigationStack { LifeView() }
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.life)
-
-                NavigationStack { FocusView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.focus)
-
-                NavigationStack { RobotView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.robot)
-
-                NavigationStack { MemoryView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.memory)
-
-                NavigationStack { TimelineTabView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.timeline)
             }
             // رفيق ساندي العائم — فوق منطقة المحتوى فقط (مش فوق الفوتر).
             .overlay {
                 SandyCompanionLayer(tab: selection) {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                        selection = .chat
+                        selection = .sandy
                     }
                 }
             }
@@ -121,36 +85,27 @@ struct MainTabView: View {
 // MARK: - شريط التبويبات الزجاجي الطافي (ليكويد جلاس)
 
 /// شريط تبويبات يطفو فوق المحتوى — كبسولة زجاجية مموّهة بحافة لمعان وظل يرفعها
-/// عن الشاشة (تحسّها طايفة بالهوا). التبويب المختار يصير كبسولة أزرق فيها أيقونة
-/// + اسم، والباقي أيقونات هادئة. يقابل شريط آبل الطافي الجديد لكن بأزرقنا.
+/// عن الشاشة (تحسّها طايفة بالهوا). مع أربعة تبويبات بس، كلهن ظاهرين دفعة وحدة
+/// بصف ثابت (بلا تمرير) — نقرة وحدة لأي تبويب. المختار يصير كبسولة أزرق فيها
+/// أيقونة + اسم، والباقي أيقونات هادئة.
 struct FloatingTabBar: View {
     @Binding var selection: MainTab
     @EnvironmentObject var lang: LanguageManager
 
     var body: some View {
-        // قابل للتمرير أفقيًا ليستوعب كل التبويبات (زي صف كبسولات الويب).
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Spacing.xs) {
-                    ForEach(MainTab.allCases, id: \.self) { tab in
-                        tabButton(tab).id(tab)
-                    }
-                }
-                .padding(6)
-            }
-            // كبسولة زجاج سائل (نفس معدِّن البطاقات) + ظل رفع قوي ليطفو.
-            .liquidGlass(cornerRadius: Theme.Radius.pill, tint: 0.08)
-            .shadow(color: Theme.Shadow.liftColor,
-                    radius: Theme.Shadow.liftRadius, x: 0, y: Theme.Shadow.liftY)
-            .padding(.horizontal, Theme.Spacing.lg)
-            .padding(.bottom, Theme.Spacing.sm)
-            // التبويب المختار يزحف للوسط حتى يضل ظاهر.
-            .onChange(of: selection) { tab in
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                    proxy.scrollTo(tab, anchor: .center)
-                }
+        HStack(spacing: Theme.Spacing.xs) {
+            ForEach(MainTab.allCases, id: \.self) { tab in
+                tabButton(tab)
+                    .frame(maxWidth: .infinity)
             }
         }
+        .padding(6)
+        // كبسولة زجاج سائل (نفس معدِّن البطاقات) + ظل رفع قوي ليطفو.
+        .liquidGlass(cornerRadius: Theme.Radius.pill, tint: 0.08)
+        .shadow(color: Theme.Shadow.liftColor,
+                radius: Theme.Shadow.liftRadius, x: 0, y: Theme.Shadow.liftY)
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.bottom, Theme.Spacing.sm)
     }
 
     @ViewBuilder

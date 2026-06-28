@@ -352,3 +352,84 @@ struct SandyAvatar: View {
             .accessibilityLabel("ساندي")
     }
 }
+
+// MARK: - HubList (لوحة هَب: صفوف تفتح شاشات فرعية)
+
+/// وصف صف هَب — أيقونة/مفتاح عنوان/مفتاح وصف/لون. نخزّن مفاتيح l10n لا النص
+/// نفسه حتى تتبدّل اللغة بدون إعادة بناء المصفوفة.
+struct HubRowSpec: Identifiable {
+    let id = UUID()
+    let icon: String
+    let titleKey: String
+    let subtitleKey: String
+    let tint: Color
+}
+
+/// لوحة هَب — قائمة بطاقات، كل بطاقة NavigationLink لشاشة فرعية، بدخول متدرّج
+/// لطيف. هاد نمط "يومي/حياتي": تبويب يجمّع شاشات بدل زحمة تبويبات. تمرّر مصفوفة
+/// الأوصاف + باني الوجهة حسب الترتيب.
+struct HubList<Destination: View>: View {
+    let rows: [HubRowSpec]
+    @ViewBuilder let destination: (Int) -> Destination
+
+    /// نتحكّم بظهور البطاقات لعمل دخول متدرّج لطيف عند فتح اللوحة.
+    @State private var appeared = false
+
+    var body: some View {
+        ZStack {
+            SandyBackground()
+
+            ScrollView {
+                VStack(spacing: Theme.Spacing.md) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, spec in
+                        NavigationLink {
+                            destination(index)
+                        } label: {
+                            HubRowCard(spec: spec)
+                        }
+                        .buttonStyle(.plain)
+                        // دخول متدرّج: كل بطاقة تطلع بنعومة بتأخير بسيط حسب ترتيبها.
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 16)
+                        .animation(.spring(response: 0.5, dampingFraction: 0.8)
+                                    .delay(Double(index) * 0.08),
+                                   value: appeared)
+                    }
+                }
+                .padding(Theme.Spacing.md)
+            }
+        }
+        .onAppear { appeared = true }
+    }
+}
+
+/// بطاقة صف هَب — أيقونة داخل دائرة ملوّنة خفيفة + عنوان + وصف + chevron.
+private struct HubRowCard: View {
+    @EnvironmentObject private var lang: LanguageManager
+    let spec: HubRowSpec
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            ZStack {
+                Circle()
+                    .fill(spec.tint.opacity(0.14))
+                    .frame(width: 44, height: 44)
+                Image(systemName: spec.icon)
+                    .font(.title3)
+                    .foregroundColor(spec.tint)
+            }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(lang.s(spec.titleKey))
+                    .font(.headline)
+                    .foregroundColor(Theme.Colors.primaryText)
+                Text(lang.s(spec.subtitleKey))
+                    .font(.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.left")
+                .foregroundColor(Theme.Colors.secondaryText)
+        }
+        .sandyCard()
+    }
+}

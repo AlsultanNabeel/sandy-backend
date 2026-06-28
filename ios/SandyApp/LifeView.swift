@@ -1,19 +1,12 @@
 import SwiftUI
 
-/// تبويب حياتي — لوحة فيها روابط لـ العادات/المصاريف/اليوميات (بدل زحمة التبويبات).
-/// مُحدّثة: بطاقات حيّة (دخول متدرّج)، أزرار إضافة لطيفة بأسماء وأيقونات،
-/// شيتات إضافة أغنى، أخطاء بصوت ساندي (SandyNotice)، وحالات فاضية ودودة.
+/// تبويب حياتي — لوحة فيها روابط لـ المصاريف/اليوميات (بدل زحمة التبويبات).
+/// العادات انتقلت لتبويب يومي. تستعمل نمط الهَب المشترك (HubList) — تنضاف لها
+/// الهدايا الرقمية والألبومات لاحقاً.
 struct LifeView: View {
     @EnvironmentObject var lang: LanguageManager
 
-    /// نتحكّم بظهور البطاقات لعمل دخول متدرّج لطيف عند فتح اللوحة.
-    @State private var appeared = false
-
-    /// أوصاف صفوف اللوحة — نلفّها بمصفوفة لنعطي كل صف تأخير دخول مختلف.
-    /// العناوين/الأوصاف تُترجَم عند العرض عبر مفاتيح l10n (نخزّن المفاتيح لا النص).
     private let rows: [HubRowSpec] = [
-        HubRowSpec(icon: "flame.fill", titleKey: "life.habits",
-                   subtitleKey: "life.habits.subtitle", tint: Theme.Colors.accent),
         HubRowSpec(icon: "creditcard.fill", titleKey: "life.expenses",
                    subtitleKey: "life.expenses.subtitle", tint: Theme.Colors.success),
         HubRowSpec(icon: "book.closed.fill", titleKey: "life.journal",
@@ -21,78 +14,14 @@ struct LifeView: View {
     ]
 
     var body: some View {
-        ZStack {
-            SandyBackground()
-
-            ScrollView {
-                VStack(spacing: Theme.Spacing.md) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, spec in
-                        NavigationLink {
-                            destination(for: index)
-                        } label: {
-                            hubRow(spec)
-                        }
-                        .buttonStyle(.plain)
-                        // دخول متدرّج: كل بطاقة تطلع بنعومة بتأخير بسيط حسب ترتيبها.
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 16)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.8)
-                                    .delay(Double(index) * 0.08),
-                                   value: appeared)
-                    }
-                }
-                .padding(Theme.Spacing.md)
+        HubList(rows: rows) { index in
+            switch index {
+            case 0:  ExpensesView()
+            default: JournalView()
             }
         }
         .navigationTitle(lang.s("life.title"))
-        .onAppear { appeared = true }
     }
-
-    @ViewBuilder
-    private func destination(for index: Int) -> some View {
-        switch index {
-        case 0: HabitsView()
-        case 1: ExpensesView()
-        default: JournalView()
-        }
-    }
-
-    @ViewBuilder
-    private func hubRow(_ spec: HubRowSpec) -> some View {
-        HStack(spacing: Theme.Spacing.md) {
-            // أيقونة داخل دائرة ملوّنة خفيفة — أدفأ من أيقونة عارية.
-            ZStack {
-                Circle()
-                    .fill(spec.tint.opacity(0.14))
-                    .frame(width: 44, height: 44)
-                Image(systemName: spec.icon)
-                    .font(.title3)
-                    .foregroundColor(spec.tint)
-            }
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Text(lang.s(spec.titleKey))
-                    .font(.headline)
-                    .foregroundColor(Theme.Colors.primaryText)
-                Text(lang.s(spec.subtitleKey))
-                    .font(.caption)
-                    .foregroundColor(Theme.Colors.secondaryText)
-            }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.left")
-                .foregroundColor(Theme.Colors.secondaryText)
-        }
-        .sandyCard()
-    }
-}
-
-/// وصف صف لوحة (أيقونة/مفتاح عنوان/مفتاح وصف/لون) — يسهّل عمل الدخول المتدرّج بـ ForEach.
-/// نخزّن مفاتيح l10n لا النص نفسه حتى تتبدّل اللغة بدون إعادة بناء المصفوفة.
-private struct HubRowSpec: Identifiable {
-    let id = UUID()
-    let icon: String
-    let titleKey: String
-    let subtitleKey: String
-    let tint: Color
 }
 
 // MARK: - العادات

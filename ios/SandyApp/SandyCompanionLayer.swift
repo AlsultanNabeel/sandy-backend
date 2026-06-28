@@ -188,41 +188,21 @@ struct SandyCompanionLayer: View {
         let trailingX = size.width - half - Theme.Spacing.md
         // ركن أسفل مريح فوق شريط التبويبات (ما يغطّي محتوى ولا يمنع نقراته).
         let bottomY = size.height - 150
-        // أعلى شوي — تجلس فوق زر الإضافة العريض مباشرة (التذكيرات).
-        let aboveAddButtonY = size.height - 200
         // فوق حقل الكتابة بالشات (مو بنص الشاشة ولا فوق الحقل).
         let aboveInputY = size.height - 172
 
         switch tab {
-        case .home, .robot:
-            // الرئيسية/الروبوت: ركن أسفل-يمين.
+        case .home:
+            // الرئيسية: ركن أسفل-يمين.
             return CGPoint(x: trailingX, y: bottomY)
-        case .chat:
-            // الشات: ركن أسفل-يمين فوق حقل الكتابة (مو بنص الشاشة).
+        case .sandy:
+            // ساندي: ركن أسفل-يمين فوق حقل الكتابة (الشات سطحها الأساسي).
             return CGPoint(x: trailingX, y: aboveInputY)
-        case .search:
-            // البحث: ركن أسفل-يسار (النتائج قائمة بالأعلى).
+        case .daily:
+            // يومي: ركن أسفل-يسار (القوائم بالأعلى).
             return CGPoint(x: leadingX, y: bottomY)
-        case .images:
-            // الصور: ركن أسفل-يمين.
-            return CGPoint(x: trailingX, y: bottomY)
-        case .memory:
-            // الذاكرة: ركن أسفل-يمين.
-            return CGPoint(x: trailingX, y: bottomY)
-        case .timeline:
-            // الخط الزمني: ركن أسفل-يسار (القائمة بالأعلى).
-            return CGPoint(x: leadingX, y: bottomY)
-        case .tasks:
-            // المهام: ركن أسفل-يسار.
-            return CGPoint(x: leadingX, y: bottomY)
-        case .reminders:
-            // التذكيرات: ركن أسفل-يمين، فوق زر الإضافة مباشرة.
-            return CGPoint(x: trailingX, y: aboveAddButtonY)
         case .life:
             // حياتي: ركن أسفل-يسار.
-            return CGPoint(x: leadingX, y: bottomY)
-        case .focus:
-            // الفوكس: ركن أسفل-يسار (المؤقّت بأعلى الشاشة).
             return CGPoint(x: leadingX, y: bottomY)
         }
     }
@@ -230,8 +210,8 @@ struct SandyCompanionLayer: View {
     /// هل ساندي مبسوطة بهالتبويب؟ (مزاج لكل تبويب).
     private var isHappyTab: Bool {
         switch tab {
-        case .home, .chat, .life, .robot, .search, .images, .memory: return true
-        case .tasks, .reminders, .focus, .timeline:                 return false   // تركيز/تنظيم — مزاج أهدأ.
+        case .home, .sandy, .life: return true
+        case .daily:               return false   // تخطيط/تنظيم — مزاج أهدأ.
         }
     }
 
@@ -245,26 +225,12 @@ struct SandyCompanionLayer: View {
         switch tab {
         case .home:
             return isAR ? "أهلين فيك! 👋" : "Hey there! 👋"
-        case .chat:
+        case .sandy:
             return isAR ? "احكيني، أنا سامعة." : "Talk to me, I'm listening."
-        case .tasks:
-            return isAR ? "نظّمهن سوا؟" : "Sort them out together?"
-        case .reminders:
-            return isAR ? "بذكّرك بكل شي." : "I'll remind you."
+        case .daily:
+            return isAR ? "نظّم يومك سوا؟ 🎯" : "Plan your day together? 🎯"
         case .life:
             return isAR ? "كيف ماشية حياتك؟" : "How's life going?"
-        case .focus:
-            return isAR ? "وقت التركيز؟ 🎯" : "Focus time? 🎯"
-        case .robot:
-            return isAR ? "أظبّطلك الغرفة؟ 🏠" : "Set the room for you? 🏠"
-        case .search:
-            return isAR ? "شو بدك أدوّرلك؟ 🔍" : "What should I look up? 🔍"
-        case .images:
-            return isAR ? "نرسم شي حلو؟ 🎨" : "Let's make something? 🎨"
-        case .memory:
-            return isAR ? "هاد اللي متذكّراه عنك 🧠" : "Here's what I remember 🧠"
-        case .timeline:
-            return isAR ? "هاد كل اللي عملته 🕐" : "Everything you've done 🕐"
         }
     }
 
@@ -290,8 +256,8 @@ struct SandyCompanionLayer: View {
     /// تبويبات الجهة المبدئية (يسار بصري في RTL يصير يمين تلقائيًّا).
     private var isLeadingTab: Bool {
         switch tab {
-        case .tasks, .life, .focus, .search, .timeline:         return true
-        case .home, .chat, .reminders, .robot, .images, .memory: return false
+        case .daily, .life: return true
+        case .home, .sandy: return false
         }
     }
 }

@@ -182,7 +182,7 @@ struct HomeView: View {
                     hint: store.snapshot.overdueTasks > 0
                         ? String(format: lang.s("home.glance.today.overdue"), "\(store.snapshot.overdueTasks)")
                         : nil
-                ) { selection = .tasks }
+                ) { selection = .daily }
 
                 GlanceCard(
                     icon: "creditcard",
@@ -201,7 +201,7 @@ struct HomeView: View {
                 tint: Theme.Colors.warn,
                 title: reminderTitle,
                 subtitle: reminderSubtitle
-            ) { selection = .reminders }
+            ) { selection = .daily }
         }
     }
 
@@ -244,9 +244,9 @@ struct HomeView: View {
 
     // MARK: - الأفعال
 
-    /// يبدّل لتبويب ساندي (الشات).
+    /// يبدّل لتبويب ساندي (المحادثة سطحها الأساسي).
     private func goToChat() {
-        goToTab(.chat)
+        goToTab(.sandy)
     }
 
     /// يبدّل لأي تبويب بحركة لطيفة.
