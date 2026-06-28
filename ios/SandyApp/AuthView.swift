@@ -1,6 +1,10 @@
 import SwiftUI
 import AuthenticationServices
 
+/// شاشة الدخول — مبنيّة بالكامل على نظام تصميم ساندي (خلفية أوبسيديان + بطاقة
+/// زجاجية + أزرار/تنبيهات ساندي) بدل أدوات النظام المصمتة. الهيكل بسيط ومتدفّق
+/// داخل `ScrollView` فيتصرّف سليم بكل المقاسات ومع ظهور الكيبورد (ما في عناصر
+/// تتداخل ولا Spacers تطفو بلا اتزان).
 struct AuthView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
@@ -9,42 +13,92 @@ struct AuthView: View {
     @State private var loading = false
 
     var body: some View {
-        VStack(spacing: 18) {
-            HStack { Spacer(); LanguageToggle().frame(width: 120) }
-            Spacer()
-            Text(lang.s("auth.title")).font(.largeTitle).bold()
-            Text(lang.s("auth.tagline")).foregroundColor(.secondary)
+        ZStack {
+            SandyBackground()
 
-            TextField(lang.s("auth.serverUrl"), text: $state.baseURL)
-                .textFieldStyle(.roundedBorder)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            ScrollView {
+                VStack(spacing: Theme.Spacing.lg) {
+                    // أعلى الشاشة: مبدّل اللغة على الحافة الخلفية.
+                    HStack {
+                        Spacer()
+                        LanguageToggle().frame(width: 120)
+                    }
 
-            SignInWithAppleButton(.signIn,
-                onRequest: { $0.requestedScopes = [.fullName, .email] },
-                onCompletion: handleApple)
-                .frame(height: 48)
-                .signInWithAppleButtonStyle(.black)
+                    // الهوية: روبوت ساندي + الاسم + الشعار النصي.
+                    VStack(spacing: Theme.Spacing.sm) {
+                        SandyAvatar(size: 92, mood: .happy)
+                        Text(lang.s("auth.title"))
+                            .font(Theme.Typography.largeTitle)
+                            .foregroundColor(Theme.Colors.primaryText)
+                        Text(lang.s("auth.tagline"))
+                            .font(Theme.Typography.subheadline)
+                            .foregroundColor(Theme.Colors.secondaryText)
+                    }
+                    .padding(.top, Theme.Spacing.xl)
 
-            Divider().padding(.vertical, 6)
-            Text(lang.s("auth.devLogin")).font(.caption).foregroundColor(.secondary)
-            SecureField(lang.s("auth.ownerPassword"), text: $password)
-                .textFieldStyle(.roundedBorder)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.go)
-                // ضغطة الإدخال بالكيبورد تسجّل دخول مباشرة (مش لازم تضغط الزر).
-                .onSubmit { devLogin() }
-            Button(action: devLogin) {
-                Text(loading ? "..." : lang.s("auth.login")).frame(maxWidth: .infinity)
+                    // بطاقة الدخول: عنوان الخادم + دخول آبل + دخول المطوّر.
+                    SandyCard {
+                        VStack(spacing: Theme.Spacing.md) {
+                            TextField(lang.s("auth.serverUrl"), text: $state.baseURL)
+                                .textFieldStyle(.plain)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.URL)
+                                .modifier(SandyField())
+
+                            SignInWithAppleButton(.signIn,
+                                onRequest: { $0.requestedScopes = [.fullName, .email] },
+                                onCompletion: handleApple)
+                                .frame(height: 50)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control,
+                                                            style: .continuous))
+                                .signInWithAppleButtonStyle(.white)
+
+                            // فاصل "أو دخول المطوّر" — خطّان رفيعان حول النص.
+                            HStack(spacing: Theme.Spacing.sm) {
+                                hairline
+                                Text(lang.s("auth.devLogin"))
+                                    .font(Theme.Typography.caption)
+                                    .foregroundColor(Theme.Colors.secondaryText)
+                                    .fixedSize()
+                                hairline
+                            }
+
+                            SecureField(lang.s("auth.ownerPassword"), text: $password)
+                                .textFieldStyle(.plain)
+                                .textContentType(.password)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .submitLabel(.go)
+                                // ضغطة الإدخال بالكيبورد تسجّل دخول مباشرة.
+                                .onSubmit { devLogin() }
+                                .modifier(SandyField())
+
+                            SandyButton(title: lang.s("auth.login"),
+                                        systemImage: "arrow.right.circle.fill",
+                                        isLoading: loading,
+                                        fillWidth: true) { devLogin() }
+
+                            // الخطأ بصوت ساندي الدافئ بدل سطر أحمر صارخ.
+                            if !error.isEmpty {
+                                SandyNotice(error, kind: .gentleWarning)
+                            }
+                        }
+                    }
+                }
+                .padding(Theme.Spacing.lg)
+                // عمود محدود العرض موسّط — يتّزن على الآيباد والشاشات العريضة.
+                .frame(maxWidth: 460)
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(loading)
-
-            if !error.isEmpty { Text(error).foregroundColor(.red).font(.caption) }
-            Spacer()
         }
-        .padding()
+    }
+
+    /// خطّ شعري رفيع لفاصل "أو دخول المطوّر".
+    private var hairline: some View {
+        Rectangle()
+            .fill(Theme.Colors.border)
+            .frame(height: 1)
     }
 
     private func devLogin() {
@@ -76,5 +130,24 @@ struct AuthView: View {
                 state.routeAfterAuth(onboardingDone: done)
             } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+// MARK: - حقل إدخال بنمط ساندي
+
+/// خلفية/حدّ موحّد لحقول الإدخال (يقابل سطح الحقول بباقي الواجهات): سطح داكن +
+/// حدّ كهربائي خفيف + حواف ناعمة. يُستعمل مع `.textFieldStyle(.plain)`.
+private struct SandyField: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .foregroundColor(Theme.Colors.primaryText)
+            .padding(.vertical, Theme.Spacing.md)
+            .padding(.horizontal, Theme.Spacing.md)
+            .background(Theme.Colors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .stroke(Theme.Colors.border, lineWidth: 1)
+            )
     }
 }

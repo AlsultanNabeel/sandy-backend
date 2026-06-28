@@ -34,10 +34,8 @@ struct HomeView: View {
     @State private var showReorder = false
 
     var body: some View {
-        ZStack {
-            SandyBackground()
-            scrollContent
-        }
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها بكل تبويب (طبقة مهدورة).
+        scrollContent
         .navigationTitle(lang.s("home.title"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

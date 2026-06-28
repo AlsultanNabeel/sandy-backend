@@ -30,7 +30,7 @@ struct SandyHubView: View {
             case .images: ImagesView()
             }
         }
-        .background(SandyBackground())
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         .sheet(isPresented: $showTools) { SandyToolsSheet() }
     }
 

@@ -376,28 +376,25 @@ struct HubList<Destination: View>: View {
     @State private var appeared = false
 
     var body: some View {
-        ZStack {
-            SandyBackground()
-
-            ScrollView {
-                VStack(spacing: Theme.Spacing.md) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, spec in
-                        NavigationLink {
-                            destination(index)
-                        } label: {
-                            HubRowCard(spec: spec)
-                        }
-                        .buttonStyle(.plain)
-                        // دخول متدرّج: كل بطاقة تطلع بنعومة بتأخير بسيط حسب ترتيبها.
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 16)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.8)
-                                    .delay(Double(index) * 0.08),
-                                   value: appeared)
+        // الخلفية موحّدة على مستوى MainTabView — الهَب شفّاف يبيّنها (لا تكرار).
+        ScrollView {
+            VStack(spacing: Theme.Spacing.md) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, spec in
+                    NavigationLink {
+                        destination(index)
+                    } label: {
+                        HubRowCard(spec: spec)
                     }
+                    .buttonStyle(.plain)
+                    // دخول متدرّج: كل بطاقة تطلع بنعومة بتأخير بسيط حسب ترتيبها.
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 16)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.8)
+                                .delay(Double(index) * 0.08),
+                               value: appeared)
                 }
-                .padding(Theme.Spacing.md)
             }
+            .padding(Theme.Spacing.md)
         }
         .onAppear { appeared = true }
     }
