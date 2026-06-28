@@ -27,13 +27,24 @@ enum IntentAPI {
     static func iso(_ date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
     }
+
+    /// هل لغة الجهاز عربي؟ — لاختيار لغة ردّ سيري.
+    static var isArabic: Bool {
+        Locale.current.language.languageCode?.identifier == "ar"
+    }
+
+    /// يختار النص حسب لغة الجهاز.
+    static func say(_ ar: String, _ en: String) -> LocalizedStringResource {
+        LocalizedStringResource(stringLiteral: isArabic ? ar : en)
+    }
 }
 
 enum SandyIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notSignedIn
     var localizedStringResource: LocalizedStringResource {
         switch self {
-        case .notSignedIn: return "افتح ساندي وسجّل دخول أول."
+        case .notSignedIn: return IntentAPI.say("افتح ساندي وسجّل دخول أول.",
+                                               "Open Sandy and sign in first.")
         }
     }
 }
@@ -41,83 +52,83 @@ enum SandyIntentError: Error, CustomLocalizedStringResourceConvertible {
 // MARK: - النوايا
 
 struct AddTaskIntent: AppIntent {
-    static var title: LocalizedStringResource = "إضافة مهمة"
-    static var description = IntentDescription("أضف مهمة جديدة لساندي.")
+    static var title: LocalizedStringResource = "Add Task"
+    static var description = IntentDescription("Add a new task to Sandy.")
 
-    @Parameter(title: "المهمة") var text: String
+    @Parameter(title: "Task") var text: String
 
-    static var parameterSummary: some ParameterSummary { Summary("أضف مهمة \(\.$text)") }
+    static var parameterSummary: some ParameterSummary { Summary("Add task \(\.$text)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addTask(text: text)
-        return .result(dialog: "ضفت المهمة: \(text)")
+        return .result(dialog: IntentAPI.say("ضفت المهمة: \(text)", "Added task: \(text)"))
     }
 }
 
 struct AddReminderIntent: AppIntent {
-    static var title: LocalizedStringResource = "إضافة تذكير"
-    static var description = IntentDescription("أضف تذكير بموعد لساندي.")
+    static var title: LocalizedStringResource = "Add Reminder"
+    static var description = IntentDescription("Add a timed reminder to Sandy.")
 
-    @Parameter(title: "التذكير") var text: String
-    @Parameter(title: "الموعد") var date: Date
+    @Parameter(title: "Reminder") var text: String
+    @Parameter(title: "Date") var date: Date
 
     static var parameterSummary: some ParameterSummary {
-        Summary("ذكّرني بـ \(\.$text) يوم \(\.$date)")
+        Summary("Remind me to \(\.$text) on \(\.$date)")
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addReminder(text: text, remindAt: IntentAPI.iso(date), note: nil)
-        return .result(dialog: "ضفت التذكير: \(text)")
+        return .result(dialog: IntentAPI.say("ضفت التذكير: \(text)", "Added reminder: \(text)"))
     }
 }
 
 struct AddHabitIntent: AppIntent {
-    static var title: LocalizedStringResource = "إضافة عادة"
-    static var description = IntentDescription("أضف عادة جديدة لساندي.")
+    static var title: LocalizedStringResource = "Add Habit"
+    static var description = IntentDescription("Add a new habit to Sandy.")
 
-    @Parameter(title: "العادة") var name: String
+    @Parameter(title: "Habit") var name: String
 
-    static var parameterSummary: some ParameterSummary { Summary("أضف عادة \(\.$name)") }
+    static var parameterSummary: some ParameterSummary { Summary("Add habit \(\.$name)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addHabit(name: name)
-        return .result(dialog: "ضفت العادة: \(name)")
+        return .result(dialog: IntentAPI.say("ضفت العادة: \(name)", "Added habit: \(name)"))
     }
 }
 
 struct AddExpenseIntent: AppIntent {
-    static var title: LocalizedStringResource = "إضافة مصروف"
-    static var description = IntentDescription("سجّل مصروف بمبلغ لساندي.")
+    static var title: LocalizedStringResource = "Add Expense"
+    static var description = IntentDescription("Log an expense in Sandy.")
 
-    @Parameter(title: "المبلغ") var amount: Double
-    @Parameter(title: "الملاحظة") var note: String?
+    @Parameter(title: "Amount") var amount: Double
+    @Parameter(title: "Note") var note: String?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("سجّل مصروف \(\.$amount)")
+        Summary("Log expense \(\.$amount)")
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addExpense(amount: amount, note: note ?? "", category: "")
-        return .result(dialog: "سجّلت مصروف بمبلغ \(amount)")
+        return .result(dialog: IntentAPI.say("سجّلت مصروف بمبلغ \(amount)", "Logged expense: \(amount)"))
     }
 }
 
 struct AddJournalIntent: AppIntent {
-    static var title: LocalizedStringResource = "إضافة يومية"
-    static var description = IntentDescription("أضف خاطرة لدفتر يومياتك بساندي.")
+    static var title: LocalizedStringResource = "Add Journal Note"
+    static var description = IntentDescription("Add a note to your Sandy journal.")
 
-    @Parameter(title: "الخاطرة") var text: String
+    @Parameter(title: "Journal note") var text: String
 
-    static var parameterSummary: some ParameterSummary { Summary("أضف خاطرة \(\.$text)") }
+    static var parameterSummary: some ParameterSummary { Summary("Add journal note \(\.$text)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addJournalEntry(text: text)
-        return .result(dialog: "ضفت الخاطرة بدفترك.")
+        return .result(dialog: IntentAPI.say("ضفت الخاطرة بدفترك.", "Added to your journal."))
     }
 }
 
@@ -128,22 +139,22 @@ struct SandyShortcuts: AppShortcutsProvider {
         AppShortcut(intent: AddTaskIntent(),
                     phrases: ["أضف مهمة في \(.applicationName)",
                               "Add a task in \(.applicationName)"],
-                    shortTitle: "إضافة مهمة", systemImageName: "checklist")
+                    shortTitle: "Add Task", systemImageName: "checklist")
         AppShortcut(intent: AddReminderIntent(),
                     phrases: ["أضف تذكير في \(.applicationName)",
                               "Add a reminder in \(.applicationName)"],
-                    shortTitle: "إضافة تذكير", systemImageName: "bell.fill")
+                    shortTitle: "Add Reminder", systemImageName: "bell.fill")
         AppShortcut(intent: AddHabitIntent(),
                     phrases: ["أضف عادة في \(.applicationName)",
                               "Add a habit in \(.applicationName)"],
-                    shortTitle: "إضافة عادة", systemImageName: "flame.fill")
+                    shortTitle: "Add Habit", systemImageName: "flame.fill")
         AppShortcut(intent: AddExpenseIntent(),
                     phrases: ["سجّل مصروف في \(.applicationName)",
                               "Log an expense in \(.applicationName)"],
-                    shortTitle: "إضافة مصروف", systemImageName: "creditcard.fill")
+                    shortTitle: "Add Expense", systemImageName: "creditcard.fill")
         AppShortcut(intent: AddJournalIntent(),
                     phrases: ["أضف خاطرة في \(.applicationName)",
                               "Add a journal note in \(.applicationName)"],
-                    shortTitle: "إضافة يومية", systemImageName: "book.closed.fill")
+                    shortTitle: "Add Journal Note", systemImageName: "book.closed.fill")
     }
 }
