@@ -240,6 +240,9 @@ final class TasksStore: ObservableObject {
             return NotificationItem(id: t.id, title: title, body: t.text, date: date)
         }
         NotificationManager.shared.sync(prefix: "task.", items: items)
+
+        // لقطة الويدجت: عدد المهام النشطة.
+        WidgetData.setActiveTasks(count: tasks.filter { !$0.done }.count)
     }
 
     /// يبدأ جلباً مملوكاً للستور وينتظره — يصلح للـ `.task` و`.refreshable` معاً.

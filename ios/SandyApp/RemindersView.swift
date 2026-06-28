@@ -265,6 +265,16 @@ final class RemindersStore: ObservableObject {
             return NotificationItem(id: r.id, title: title, body: r.text, date: date)
         }
         NotificationManager.shared.sync(prefix: "reminder.", items: items)
+
+        // لقطة الويدجت: أقرب تذكير قادم.
+        let now = Date()
+        let next = reminders
+            .compactMap { r -> (String, Date)? in
+                guard let d = NotificationManager.parseISO(r.remindAt), d > now else { return nil }
+                return (r.text, d)
+            }
+            .min(by: { $0.1 < $1.1 })
+        WidgetData.setNextReminder(text: next?.0, date: next?.1)
     }
 
     func load(api: APIClient) async {
