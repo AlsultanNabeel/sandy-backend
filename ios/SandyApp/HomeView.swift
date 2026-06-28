@@ -342,15 +342,15 @@ struct HomeView: View {
     private var proactiveAction: ProactiveAction? {
         if store.loading && !store.didAppear { return nil }
         if store.snapshot.overdueTasks > 0 || store.snapshot.todayTasks > 0 || store.snapshot.openTasks > 0 {
-            return ProactiveAction(title: lang.s("home.proactive.action.tasks"), target: .tasks)
+            return ProactiveAction(title: lang.s("home.proactive.action.tasks"), target: .daily)
         }
         if !store.snapshot.nextReminderText.isEmpty {
-            return ProactiveAction(title: lang.s("home.proactive.action.reminders"), target: .reminders)
+            return ProactiveAction(title: lang.s("home.proactive.action.reminders"), target: .daily)
         }
         if isWeekSpendingHigh {
             return ProactiveAction(title: lang.s("home.proactive.action.life"), target: .life)
         }
-        return ProactiveAction(title: lang.s("home.proactive.action.chat"), target: .chat)
+        return ProactiveAction(title: lang.s("home.proactive.action.chat"), target: .sandy)
     }
 
     // MARK: - لمحة سريعة (نصوص)
