@@ -32,6 +32,8 @@ struct HomeView: View {
     @State private var showProfile = false
     /// يفتح ورقة إعادة ترتيب عناصر الرئيسية.
     @State private var showReorder = false
+    /// يفتح نافذة الإضافة السريعة (مهمة/تذكير/عادة/… بنقرة، بلا حكي).
+    @State private var showQuickAdd = false
 
     var body: some View {
         // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها بكل تبويب (طبقة مهدورة).
@@ -67,6 +69,12 @@ struct HomeView: View {
         .sheet(isPresented: $showReorder) {
             HomeReorderSheet(store: store)
         }
+        // نافذة الإضافة السريعة — تطفو بالنص (SandyPopup بخلفية شفافة).
+        .fullScreenCover(isPresented: $showQuickAdd) {
+            QuickAddSheet()
+                .environmentObject(state)
+                .environmentObject(lang)
+        }
         .task { await store.loadIfNeeded(api: state.api) }
         .refreshable { await store.load(api: state.api) }
     }
@@ -75,9 +83,13 @@ struct HomeView: View {
 
     private var scrollContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 greeting
                     .reveal(order: 0, key: store.revealKey)
+
+                // العنصر الأساسي بالرئيسية: إضافة سريعة (بدّلت بطاقة "احكي مع ساندي").
+                quickAddCard
+                    .reveal(order: 1, key: store.revealKey)
 
                 // بطاقة الطقس — عنصر ثابت بلوحة المعلومات (مش ضمن العناصر القابلة
                 // لإعادة الترتيب). تجلب طقسها بنفسها، والنقر يفتح الشاشة الكاملة.
@@ -113,7 +125,6 @@ struct HomeView: View {
         switch block {
         case .proactive: proactiveCard
         case .glance:    glanceSection
-        case .talk:      talkToSandyCard
         }
     }
 
@@ -138,7 +149,10 @@ struct HomeView: View {
     private var proactiveCard: some View {
         SandyCard {
             HStack(alignment: .top, spacing: Theme.Spacing.md) {
-                SandyAvatar(size: 44, mood: proactiveMood)
+                Image(systemName: "sparkles")
+                    .font(.system(size: Theme.Icon.lg, weight: .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(lang.s("home.proactive.title"))
                         .font(Theme.Typography.caption)
@@ -158,7 +172,7 @@ struct HomeView: View {
                                 Text(action.title)
                                     .font(Theme.Typography.callout)
                                 Image(systemName: "chevron.backward")
-                                    .font(.system(size: 11, weight: .bold))
+                                    .font(.system(size: Theme.Icon.sm, weight: .bold))
                             }
                             .foregroundColor(Theme.Colors.accent)
                         }
@@ -209,26 +223,28 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - بطاقة "احكي مع ساندي" البارزة
+    // MARK: - بطاقة الإضافة السريعة (العنصر الأساسي بالرئيسية)
 
-    private var talkToSandyCard: some View {
+    /// بطاقة بارزة تفتح نافذة الإضافة السريعة — مهمة/تذكير/عادة/مصروف… بنقرة،
+    /// بطريقة غير الحكي مع ساندي. هي العنصر المهيمن الواحد بالرئيسية.
+    private var quickAddCard: some View {
         Button {
-            goToChat()
+            showQuickAdd = true
         } label: {
             HStack(alignment: .center, spacing: Theme.Spacing.md) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text(lang.s("home.talk.title"))
+                    Text(quickAddTitle)
                         .font(Theme.Typography.title)
                         .foregroundColor(Theme.Colors.onAccent)
-                    Text(lang.s("home.talk.body"))
+                    Text(quickAddBody)
                         .font(Theme.Typography.subheadline)
                         .foregroundColor(Theme.Colors.onAccent.opacity(0.92))
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: Theme.Spacing.sm)
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 30, weight: .semibold))
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: Theme.Icon.lg, weight: .semibold))
                     .foregroundColor(Theme.Colors.onAccent)
             }
             .padding(Theme.Spacing.lg)
@@ -239,28 +255,32 @@ struct HomeView: View {
                     startPoint: .topLeading, endPoint: .bottomTrailing)
             )
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            .shadow(color: Theme.Shadow.glowColor,
-                    radius: Theme.Shadow.glowRadius, x: 0, y: 6)
+            .sandyGlow()
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(lang.s("home.talk.title"))
+        .liquidGlassPress()
+        .accessibilityLabel(quickAddTitle)
+    }
+
+    // عنوان/وصف الإضافة السريعة (نص inline ثنائي اللغة — تفادي مفتاح l10n جديد).
+    private var quickAddTitle: String {
+        lang.lang == .ar ? "إضافة سريعة" : "Quick Add"
+    }
+    private var quickAddBody: String {
+        lang.lang == .ar
+            ? "مهمة، تذكير، عادة، مصروف… بنقرة وحدة"
+            : "Task, reminder, habit, expense… in one tap"
     }
 
     // MARK: - الأفعال
 
-    /// يبدّل لتبويب ساندي (المحادثة سطحها الأساسي).
-    private func goToChat() {
-        goToTab(.sandy)
-    }
-
-    /// يبدّل لأي تبويب بحركة لطيفة.
+    /// يبدّل لأي تبويب بحركة لطيفة (تستعمله البطاقة المبادرة).
     private func goToTab(_ tab: MainTab) {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             selection = tab
         }
     }
 
-    /// أوّل تحميل فقط (نتجنّب إعادة الجلب كل ما يرجع التبويب).
+    // MARK: - أوّل تحميل فقط (نتجنّب إعادة الجلب كل ما يرجع التبويب).
 
     // MARK: - التحية (نصوص)
 
@@ -464,7 +484,7 @@ private struct GlanceCard: View {
             SandyCard {
                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     Image(systemName: icon)
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: Theme.Icon.md, weight: .semibold))
                         .foregroundColor(tint)
                         .frame(width: 38, height: 38)
                         .background(tint.opacity(0.14))
@@ -510,7 +530,7 @@ private struct GlanceWideCard: View {
             SandyCard {
                 HStack(alignment: .center, spacing: Theme.Spacing.md) {
                     Image(systemName: icon)
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: Theme.Icon.md, weight: .semibold))
                         .foregroundColor(tint)
                         .frame(width: 38, height: 38)
                         .background(tint.opacity(0.14))
@@ -528,8 +548,8 @@ private struct GlanceWideCard: View {
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.backward")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Theme.Colors.secondaryText.opacity(0.6))
+                        .font(.system(size: Theme.Icon.sm, weight: .bold))
+                        .foregroundColor(Theme.Colors.tertiaryText)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

@@ -41,6 +41,11 @@ struct MainTabView: View {
     /// التبويب المختار — مصدر الحقيقة للتبديل البرمجي.
     @State private var selection: MainTab = .home
 
+    /// هل الكيبورد طالع؟ لما يطلع نخفي شريط التبويبات والرفيق العائم حتى ما
+    /// يزدحموا فوق الكيبورد (يبقى حقل الكتابة وحده فوقه). نرصده عبر إشعارات
+    /// النظام (iOS 16-safe، بدون أي API أحدث).
+    @State private var keyboardUp = false
+
     var body: some View {
         // فوتر حقيقي: التبويبات بصف فوق، وشريط ساندي بصف تحت — فما في إشي
         // (حقل كتابة، أزرار) بيجي وراه. الشريط نفسه كبسولة زجاجية بهوامش فتحسّها طايفة.
@@ -62,23 +67,38 @@ struct MainTabView: View {
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.life)
             }
-            // رفيق ساندي العائم — فوق منطقة المحتوى فقط (مش فوق الفوتر).
+            // رفيق ساندي العائم — فوق منطقة المحتوى فقط (مش فوق الفوتر). نخفيه مع
+            // الكيبورد حتى ما يزاحم حقل الكتابة.
             .overlay {
-                SandyCompanionLayer(tab: selection) {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                        selection = .sandy
+                if !keyboardUp {
+                    SandyCompanionLayer(tab: selection) {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            selection = .sandy
+                        }
                     }
+                    .transition(.opacity)
                 }
             }
 
-            // الفوتر يتجاهل الكيبورد (يغطّيه الكيبورد بدل ما يرتفع فوقه)، وحقل
-            // الكتابة جوّا التبويبات بيطلع فوق الكيبورد عادي.
-            FloatingTabBar(selection: $selection)
-                .ignoresSafeArea(.keyboard, edges: .bottom)
+            // الفوتر: لما يطلع الكيبورد نخفيه تمامًا (ينزل من الشاشة) فيبقى حقل
+            // الكتابة وحده فوق الكيبورد بلا ازدحام. لما يختفي الكيبورد يرجع.
+            if !keyboardUp {
+                FloatingTabBar(selection: $selection)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         // خلفية ساندي تحت الفوتر وهوامشه.
         .background(SandyBackground())
         .task { await state.refreshOnboarding() }
+        // رصد الكيبورد — نبدّل `keyboardUp` بنعومة فيختفي/يرجع الشريط والرفيق.
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { keyboardUp = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { keyboardUp = false }
+        }
     }
 }
 
@@ -138,7 +158,8 @@ struct FloatingTabBar: View {
             }
             .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        // نبضة الزجاج المائي عند اللمس (تغوص وترتدّ كقطرة ماء).
+        .liquidGlassPress()
         .accessibilityLabel(lang.s(tab.titleKey))
     }
 }

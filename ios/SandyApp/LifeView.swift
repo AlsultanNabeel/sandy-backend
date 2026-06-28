@@ -42,9 +42,8 @@ struct HabitsView: View {
     @State private var celebratingID: String? = nil
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
 
@@ -143,15 +142,15 @@ struct HabitsView: View {
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(habit.name)
-                    .font(.headline)
+                    .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 HStack(spacing: Theme.Spacing.xs) {
                     Text(String(format: lang.s("life.habits.streak"), "\(habit.streak)"))
-                        .font(.caption)
+                        .font(Theme.Typography.caption)
                         .foregroundColor(habit.streak > 0 ? Theme.Colors.accentDeep : Theme.Colors.secondaryText)
                     if habit.doneToday {
                         Text(lang.s("life.habits.doneToday"))
-                            .font(.caption2)
+                            .font(Theme.Typography.caption)
                             .foregroundColor(Theme.Colors.success)
                     }
                 }
@@ -167,9 +166,7 @@ struct HabitsView: View {
             }
         }
         .sandyCard()
-        // توهّج خفيف حول البطاقة لحظة الاحتفال.
-        .shadow(color: isCelebrating ? Theme.Shadow.glowColor : .clear,
-                radius: isCelebrating ? Theme.Shadow.glowRadius : 0)
+        // وميض الاحتفال يبقى عبر النبضة/الـ sparkles فقط — بلا توهّج بطاقة إضافي.
         .scaleEffect(isCelebrating ? 1.02 : 1.0)
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isCelebrating)
         .contentShape(Rectangle())
@@ -200,7 +197,7 @@ struct HabitsView: View {
 /// شيت إضافة عادة: اسم + تكرار (يومي/أسبوعي) للمساعدة على وضوح النية.
 /// ملاحظة: الباك-إند يستقبل الاسم فقط (addHabit(name:))، فالتكرار يُدمج بالاسم
 /// كلاحقة وصفية بسيطة حتى ما نضيف حقولًا غير مدعومة — تفصيل بدون كسر العقد.
-private struct HabitSheet: View {
+struct HabitSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     /// العادة القائمة عند التعديل (nil = إضافة). بالتعديل = إعادة تسمية فقط.
@@ -310,9 +307,8 @@ struct ExpensesView: View {
     @State private var animatedTotal: Double = 0
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
 
@@ -403,25 +399,26 @@ struct ExpensesView: View {
         HStack {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(lang.s("life.expenses.summaryTitle"))
-                    .font(.caption)
+                    .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondaryText)
                 Text(String(format: "%.0f", animatedTotal))
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(Theme.Typography.largeTitle)
                     .foregroundColor(Theme.Colors.accentDeep)
                     .monospacedDigit()
                     .contentTransition(.numericText())
             }
             Spacer(minLength: 0)
             // شارة عدد الحركات.
-            VStack(spacing: 2) {
+            VStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "list.bullet.rectangle")
                     .foregroundColor(Theme.Colors.accent)
                 Text(String(format: lang.s("life.expenses.count"), "\(store.summary.count)"))
-                    .font(.caption2)
-                    .foregroundColor(Theme.Colors.secondaryText)
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.tertiaryText)
             }
         }
-        .sandyCard()
+        .sandyCard(.primary)
+        .sandyGlow()
     }
 
     @ViewBuilder
@@ -430,10 +427,11 @@ struct ExpensesView: View {
             // أيقونة تصنيف ملوّنة خفيفة.
             ZStack {
                 Circle()
-                    .fill(Theme.Colors.accent.opacity(0.12))
-                    .frame(width: 40, height: 40)
+                    .fill(Theme.Colors.secondary.opacity(0.12))
+                    .frame(width: Theme.Icon.xl, height: Theme.Icon.xl)
                 Image(systemName: categoryIcon(item.category))
-                    .foregroundColor(Theme.Colors.accent)
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .foregroundColor(Theme.Colors.secondary)
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 // العنوان: الملاحظة إن وُجدت، وإلا اسم التصنيف المترجَم (للعرض فقط)،
@@ -443,18 +441,18 @@ struct ExpensesView: View {
                         ? lang.s("life.expenses.fallbackTitle")
                         : LifeCategories.label(for: item.category, lang))
                      : item.note)
-                    .font(.headline)
+                    .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 if !item.category.isEmpty && !item.note.isEmpty {
                     Text(LifeCategories.label(for: item.category, lang))
-                        .font(.caption)
-                        .foregroundColor(Theme.Colors.secondaryText)
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.tertiaryText)
                 }
             }
             Spacer(minLength: 0)
             Text(String(format: "%.0f", item.amount))
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundColor(Theme.Colors.accent)
+                .font(Theme.Typography.headline)
+                .foregroundColor(Theme.Colors.primaryText)
                 .monospacedDigit()
         }
         .sandyCard()
@@ -488,7 +486,7 @@ struct ExpensesView: View {
 
 /// شيت مصروف (إضافة أو تعديل): مبلغ (رقمي) + تصنيف (Picker بتصنيفات عربية شائعة)
 /// + ملاحظة. `existing` غير nil ⇒ تعديل (تعبئة مسبقة).
-private struct ExpenseSheet: View {
+struct ExpenseSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     /// المصروف القائم عند التعديل (nil = إضافة جديدة).
@@ -615,9 +613,8 @@ struct JournalView: View {
     @State private var editingEntry: JournalEntry?
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
 
@@ -696,17 +693,17 @@ struct JournalView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "quote.opening")
-                    .font(.caption)
-                    .foregroundColor(Theme.Colors.accent.opacity(0.6))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondary)
                 if !entry.date.isEmpty {
                     Text(entry.date)
-                        .font(.caption)
-                        .foregroundColor(Theme.Colors.secondaryText)
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.tertiaryText)
                 }
                 Spacer(minLength: 0)
             }
             Text(entry.text)
-                .font(.body)
+                .font(Theme.Typography.body)
                 .foregroundColor(Theme.Colors.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -728,7 +725,7 @@ struct JournalView: View {
 }
 
 /// شيت خاطرة (إضافة أو تعديل): محرّر متعدّد الأسطر مريح + عدّاد أحرف خفيف.
-private struct JournalSheet: View {
+struct JournalSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     /// الخاطرة القائمة عند التعديل (nil = إضافة جديدة).

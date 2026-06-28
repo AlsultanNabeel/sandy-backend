@@ -100,7 +100,7 @@ struct TimelineTabView: View {
     private func row(_ ev: TimelineEvent) -> some View {
         HStack(spacing: Theme.Spacing.md) {
             Image(systemName: icon(ev))
-                .font(.callout)
+                .font(.system(size: Theme.Icon.md, weight: .semibold))
                 .foregroundColor(tint(ev))
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 2) {
@@ -128,7 +128,7 @@ struct TimelineTabView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "clock.badge.checkmark")
-                .font(.system(size: 44))
+                .font(.system(size: Theme.Icon.xl))
                 .foregroundColor(Theme.Colors.accent.opacity(0.5))
             Text(lang.s("timeline.empty"))
                 .font(Theme.Typography.subheadline)
@@ -184,7 +184,7 @@ private struct TimelineDetailSheet: View {
                 // ترويسة: أيقونة النوع + شارة النوع.
                 HStack(spacing: Theme.Spacing.md) {
                     Image(systemName: icon)
-                        .font(.title2)
+                        .font(.system(size: Theme.Icon.lg, weight: .semibold))
                         .foregroundColor(tint)
                     Text(typeLabel)
                         .font(Theme.Typography.caption)

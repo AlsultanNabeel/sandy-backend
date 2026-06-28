@@ -19,9 +19,8 @@ struct ImagesView: View {
     @State private var sourceImage: UIImage?
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 modePicker
 
@@ -55,7 +54,7 @@ struct ImagesView: View {
     @ViewBuilder
     private var content: some View {
         ScrollView {
-            VStack(spacing: Theme.Spacing.md) {
+            VStack(spacing: Theme.Spacing.lg) {
                 switch mode {
                 case .generate: generateSection
                 case .edit:     editSection
@@ -123,9 +122,15 @@ struct ImagesView: View {
 
     private func promptField(_ placeholder: String, _ value: Binding<String>) -> some View {
         TextField(placeholder, text: value, axis: .vertical)
+            .font(Theme.Typography.body)
             .lineLimit(1...4)
-            .padding(Theme.Spacing.sm)
+            .padding(.vertical, Theme.Spacing.sm)
+            .padding(.horizontal, Theme.Spacing.md)
             .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(.ultraThinMaterial))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.control)
+                    .stroke(Theme.Colors.border, lineWidth: 1)
+            )
     }
 
     private var pickerButton: some View {
@@ -133,11 +138,11 @@ struct ImagesView: View {
             Label(sourceImage == nil ? lang.s("images.pick") : lang.s("images.pickAgain"),
                   systemImage: "photo.on.rectangle")
                 .font(Theme.Typography.button)
-                .foregroundColor(Theme.Colors.accent)
+                .foregroundColor(Theme.Colors.secondaryText)
                 .frame(maxWidth: .infinity)
                 .padding(Theme.Spacing.sm)
                 .background(RoundedRectangle(cornerRadius: Theme.Radius.control)
-                    .stroke(Theme.Colors.accent.opacity(0.4), lineWidth: 1))
+                    .stroke(Theme.Colors.border, lineWidth: 1))
         }
     }
 

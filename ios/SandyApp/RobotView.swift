@@ -89,17 +89,18 @@ struct RobotView: View {
                 Button {
                     Task { await store.apply(api: state.api, scene: scene) }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Theme.Spacing.xs) {
                         if store.applying == scene.name {
                             ProgressView().tint(Theme.Colors.onAccent)
                         } else {
                             Image(systemName: "play.fill")
+                                .font(.system(size: Theme.Icon.sm, weight: .semibold))
                         }
                         Text(lang.s("robot.apply"))
                     }
                     .font(Theme.Typography.button)
                     .foregroundColor(Theme.Colors.onAccent)
-                    .padding(.vertical, 8).padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.sm).padding(.horizontal, Theme.Spacing.md)
                     .background(Capsule().fill(
                         LinearGradient(colors: [Theme.Colors.accent, Theme.Colors.accentDeep],
                                        startPoint: .topLeading, endPoint: .bottomTrailing)))

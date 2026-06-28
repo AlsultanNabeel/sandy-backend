@@ -127,9 +127,8 @@ struct WeatherView: View {
     @State private var showCityEditor = false
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if !store.notice.isEmpty {
                     SandyNotice(store.notice, kind: .gentleWarning)
@@ -177,6 +176,7 @@ struct WeatherView: View {
                     detailsGrid(snap)
                 }
                 .padding(Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.section)
             }
         } else if store.loading {
             ProgressView()
@@ -188,30 +188,30 @@ struct WeatherView: View {
     }
 
     private func heroCard(_ snap: WeatherSnapshot) -> some View {
-        SandyCard {
-            VStack(spacing: Theme.Spacing.sm) {
-                Image(systemName: snap.symbol)
-                    .font(.system(size: 64))
-                    .symbolRenderingMode(.multicolor)
-                    .foregroundColor(Theme.Colors.accent)
-                Text(snap.tempDisplay)
-                    .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .foregroundColor(Theme.Colors.primaryText)
-                Text(snap.description)
-                    .font(Theme.Typography.headline)
-                    .foregroundColor(Theme.Colors.primaryText)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: Theme.Spacing.xs) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.caption)
-                    Text(snap.city)
-                        .font(Theme.Typography.callout)
-                }
-                .foregroundColor(Theme.Colors.secondaryText)
+        VStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: snap.symbol)
+                .font(.system(size: Theme.Icon.xl + 24))
+                .symbolRenderingMode(.multicolor)
+                .foregroundColor(Theme.Colors.accent)
+            Text(snap.tempDisplay)
+                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .foregroundColor(Theme.Colors.primaryText)
+            Text(snap.description)
+                .font(Theme.Typography.headline)
+                .foregroundColor(Theme.Colors.primaryText)
+                .multilineTextAlignment(.center)
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(Theme.Typography.caption)
+                Text(snap.city)
+                    .font(Theme.Typography.callout)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.sm)
+            .foregroundColor(Theme.Colors.secondaryText)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Spacing.sm)
+        .sandyCard(.primary)
+        .sandyGlow()
     }
 
     private func detailsGrid(_ snap: WeatherSnapshot) -> some View {
@@ -234,30 +234,29 @@ struct WeatherView: View {
     }
 
     private func detailCell(icon: String, title: String, value: String) -> some View {
-        SandyCard {
-            HStack(spacing: Theme.Spacing.md) {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundColor(Theme.Colors.accent)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(Theme.Typography.caption)
-                        .foregroundColor(Theme.Colors.secondaryText)
-                    Text(value)
-                        .font(Theme.Typography.headline)
-                        .foregroundColor(Theme.Colors.primaryText)
-                }
-                Spacer(minLength: 0)
+        HStack(spacing: Theme.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .foregroundColor(Theme.Colors.secondary)
+                .frame(width: Theme.Icon.lg)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(title)
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.tertiaryText)
+                Text(value)
+                    .font(Theme.Typography.headline)
+                    .foregroundColor(Theme.Colors.primaryText)
             }
+            Spacer(minLength: 0)
         }
+        .sandyCard(.info)
     }
 
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "cloud.sun.fill")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.Colors.accent.opacity(0.5))
+                .font(.system(size: Theme.Icon.xl))
+                .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("weather.empty"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)
@@ -368,10 +367,10 @@ struct WeatherCard: View {
     private func loaded(_ snap: WeatherSnapshot) -> some View {
         HStack(spacing: Theme.Spacing.md) {
             Image(systemName: snap.symbol)
-                .font(.system(size: 36))
+                .font(.system(size: Theme.Icon.xl))
                 .symbolRenderingMode(.multicolor)
                 .foregroundColor(Theme.Colors.accent)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(snap.tempDisplay)
                     .font(Theme.Typography.title)
                     .foregroundColor(Theme.Colors.primaryText)

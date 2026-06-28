@@ -17,9 +17,8 @@ struct RemindersView: View {
     @State private var editingReminder: ReminderItem?
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
 
@@ -136,7 +135,7 @@ struct RemindersView: View {
         SandyCard {
             HStack(alignment: .top, spacing: Theme.Spacing.md) {
                 Image(systemName: reminder.isRecurring ? "repeat.circle.fill" : "bell.fill")
-                    .font(.title3)
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
                     .foregroundColor(Theme.Colors.accent)
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -155,7 +154,7 @@ struct RemindersView: View {
                     if let parsed = Self.parseISO(reminder.remindAt) {
                         HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: "clock")
-                                .font(.system(size: 11))
+                                .font(.system(size: Theme.Icon.sm, weight: .semibold))
                             Text(Self.relativeLabel(parsed))
                                 .fontWeight(.semibold)
                             Text("•")
@@ -302,7 +301,7 @@ final class RemindersStore: ObservableObject {
 
 /// شيت تذكير (إضافة أو تعديل): نص (إلزامي) + وقت + ملاحظة اختيارية. `existing`
 /// غير nil ⇒ وضع تعديل (تعبئة مسبقة). الوقت يُرسل ISO 8601. الأخطاء بصوت ساندي.
-private struct ReminderSheet: View {
+struct ReminderSheet: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 

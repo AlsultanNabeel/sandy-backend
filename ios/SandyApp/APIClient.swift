@@ -7,7 +7,9 @@ final class APIClient {
 
     init(baseURL: String) { self.baseURL = baseURL }
 
-    private func request(_ path: String,
+    // داخلي (مش private) حتى توصله امتدادات APIClient الموزّعة على ملفات تانية
+    // (الطقس/الكتب/الهدايا/المحتوى…). private بسويفت محصور بنفس الملف.
+    func request(_ path: String,
                          method: String = "GET",
                          body: [String: Any]? = nil,
                          auth: Bool = true) async throws -> [String: Any] {

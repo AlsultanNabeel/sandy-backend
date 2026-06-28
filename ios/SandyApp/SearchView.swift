@@ -16,9 +16,8 @@ struct SearchView: View {
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
 
@@ -60,6 +59,10 @@ struct SearchView: View {
         }
         .padding(Theme.Spacing.sm)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(.ultraThinMaterial))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.control)
+                .stroke(Theme.Colors.border, lineWidth: 1)
+        )
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.top, Theme.Spacing.sm)
     }
@@ -105,16 +108,16 @@ struct SearchView: View {
     }
 
     private var hintView: some View {
-        VStack(spacing: Theme.Spacing.md) {
+        VStack(spacing: Theme.Spacing.lg) {
             Image(systemName: "globe.middle.east.fill")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.Colors.accent.opacity(0.6))
+                .font(.system(size: Theme.Icon.xl))
+                .foregroundColor(Theme.Colors.tertiaryText)
             Text(lang.s("search.hint"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)
                 .multilineTextAlignment(.center)
         }
-        .padding(.top, Theme.Spacing.xxl)
+        .padding(.top, Theme.Spacing.section)
         .padding(.horizontal, Theme.Spacing.lg)
     }
 
@@ -181,7 +184,7 @@ private struct WebRow: View {
 
     var body: some View {
         SandyCard {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 Text(result.title.isEmpty ? result.url : result.title)
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
@@ -189,14 +192,14 @@ private struct WebRow: View {
 
                 if !result.text.isEmpty {
                     Text(result.text)
-                        .font(Theme.Typography.caption)
+                        .font(Theme.Typography.subheadline)
                         .foregroundColor(Theme.Colors.secondaryText)
                         .lineLimit(3)
                 }
 
                 if let url = URL(string: result.url), !result.url.isEmpty {
                     Link(destination: url) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: "link")
                             Text(prettyHost(result.url)).lineLimit(1)
                         }
@@ -223,7 +226,7 @@ private struct PlaceRow: View {
 
     var body: some View {
         SandyCard {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack {
                     Text(result.name)
                         .font(Theme.Typography.headline)
@@ -231,8 +234,8 @@ private struct PlaceRow: View {
                         .lineLimit(2)
                     Spacer(minLength: 0)
                     if result.rating > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "star.fill").font(.caption2)
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Image(systemName: "star.fill")
                             Text(String(format: "%.1f", result.rating)).monospacedDigit()
                         }
                         .font(Theme.Typography.caption)

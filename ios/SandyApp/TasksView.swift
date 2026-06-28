@@ -17,9 +17,8 @@ struct TasksView: View {
     @State private var showCompleted = false
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
 
@@ -330,7 +329,7 @@ private struct TaskRow: View {
             HStack(alignment: .top, spacing: Theme.Spacing.md) {
                 Button(action: onToggle) {
                     Image(systemName: task.done ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
+                        .font(.system(size: Theme.Icon.lg, weight: .semibold))
                         .foregroundColor(task.done ? Theme.Colors.success : Theme.Colors.secondaryText)
                         // حركة check مُرضية: تكبر لحظة عند الإنجاز.
                         .scaleEffect(task.done ? 1.18 : 1.0)
@@ -423,12 +422,12 @@ private struct PriorityBadge: View {
         HStack(spacing: Theme.Spacing.xs) {
             Circle()
                 .fill(color)
-                .frame(width: 8, height: 8)
+                .frame(width: Theme.Spacing.sm, height: Theme.Spacing.sm)
             Text(label)
                 .font(Theme.Typography.caption)
                 .foregroundColor(color)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, Theme.Spacing.xs)
         .padding(.horizontal, Theme.Spacing.sm)
         .background(color.opacity(0.12))
         .clipShape(Capsule())
@@ -473,7 +472,7 @@ private struct PulsingSandy: View {
 /// ورقة المهمة (إضافة أو تعديل): عنوان (إلزامي) + موعد اختياري (تاريخ ووقت) +
 /// أولوية (شرائح) + ملاحظة اختيارية. `existing` غير nil ⇒ وضع تعديل (تعبئة مسبقة).
 /// تُرسل عبر closure غير متزامن يرجّع نجاح/فشل.
-private struct TaskSheet: View {
+struct TaskSheet: View {
     /// المهمة القائمة عند التعديل (nil = إضافة جديدة).
     let existing: TaskItem?
     /// closure الإرسال: يرجّع true عند النجاح حتى نقفل الورقة.

@@ -53,7 +53,7 @@ struct ChatView: View {
             messageList
             inputBar
         }
-        .background(SandyBackground())
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         .navigationTitle(lang.s("chat.title"))
         .navigationBarTitleDisplayMode(.inline)
         // إصلاح (1): شريط فوق الكيبورد فيه زر "تم" لإخفائها يدويًا.
@@ -181,9 +181,9 @@ struct ChatView: View {
                 .padding(.vertical, Theme.Spacing.sm)
                 .padding(.horizontal, Theme.Spacing.md)
                 .background(Theme.Colors.surface)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.bubble, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.Radius.bubble, style: .continuous)
                         .stroke(Theme.Colors.border, lineWidth: 1)
                 )
                 // إصلاح (2): Return (submit) ما يضيف سطر فاضي ولا يرسل لو النص فاضي —
@@ -217,8 +217,8 @@ struct ChatView: View {
                     .overlay(Circle().stroke(Theme.Colors.border, lineWidth: 1))
 
                 Image(systemName: "waveform")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Theme.Colors.accent)
+                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .foregroundColor(Theme.Colors.secondaryText)
             }
         }
         .buttonStyle(.plain)
@@ -231,15 +231,11 @@ struct ChatView: View {
                 Circle()
                     .fill(
                         canSend
-                            ? AnyShapeStyle(
-                                LinearGradient(
-                                    colors: [Theme.Colors.accent, Theme.Colors.accentDeep],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                            ? AnyShapeStyle(Theme.Colors.accent)
                             : AnyShapeStyle(Theme.Colors.accent.opacity(0.18))
                     )
                     .frame(width: 40, height: 40)
-                    .shadow(color: canSend ? Theme.Shadow.glowColor : .clear,
-                            radius: 8, x: 0, y: 3)
+                    .sandyGlow(canSend)
 
                 if store.sending {
                     ProgressView()
@@ -247,7 +243,7 @@ struct ChatView: View {
                         .tint(Theme.Colors.onAccent)
                 } else {
                     Image(systemName: "paperplane.fill")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: Theme.Icon.sm, weight: .semibold))
                         .foregroundColor(canSend ? Theme.Colors.onAccent : Theme.Colors.accentDeep.opacity(0.5))
                 }
             }
@@ -549,9 +545,10 @@ private struct ChatHistorySheet: View {
     }
 
     private var emptyView: some View {
-        VStack(spacing: Theme.Spacing.md) {
+        VStack(spacing: Theme.Spacing.lg) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 40)).foregroundColor(Theme.Colors.accent.opacity(0.5))
+                .font(.system(size: Theme.Icon.xl))
+                .foregroundColor(Theme.Colors.tertiaryText)
             Text(lang.s("chat.historyEmpty"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)
@@ -560,7 +557,7 @@ private struct ChatHistorySheet: View {
     }
 
     private func row(_ title: String, sub: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Text(title.isEmpty ? lang.s("chat.untitled") : title)
                 .font(Theme.Typography.body)
                 .foregroundColor(Theme.Colors.primaryText)

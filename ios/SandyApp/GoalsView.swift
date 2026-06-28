@@ -14,9 +14,8 @@ struct GoalsView: View {
     @State private var editingGoal: GoalItem?
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if !store.notice.isEmpty {
                     SandyNotice(store.notice, kind: .gentleWarning)
@@ -115,9 +114,9 @@ struct GoalsView: View {
         SandyCard {
             HStack(alignment: .top, spacing: Theme.Spacing.md) {
                 Image(systemName: goal.isDone ? "checkmark.circle.fill" : "target")
-                    .font(.body)
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
                     .foregroundColor(goal.isDone ? Theme.Colors.success : Theme.Colors.accent)
-                    .padding(.top, 1)
+                    .padding(.top, Theme.Spacing.xs)
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(goal.text)
                         .font(Theme.Typography.body)
@@ -152,8 +151,8 @@ struct GoalsView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "target")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.Colors.accent.opacity(0.5))
+                .font(.system(size: Theme.Icon.xl, weight: .semibold))
+                .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("goals.empty"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)

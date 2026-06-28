@@ -18,9 +18,8 @@ struct BooksView: View {
     @State private var showGoal = false
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
 
@@ -160,84 +159,83 @@ struct BooksView: View {
     }
 
     private var statsCard: some View {
-        SandyCard {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                HStack(spacing: Theme.Spacing.xs) {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.caption)
-                        .foregroundColor(Theme.Colors.accent)
-                    Text(lang.s("books.stats.title"))
-                        .font(.caption)
-                        .foregroundColor(Theme.Colors.secondaryText)
-                    Spacer(minLength: 0)
-                    if store.stats.streakDays > 0 {
-                        Text(String(format: lang.s("books.stats.streakDays"), "\(store.stats.streakDays)"))
-                            .font(.caption2)
-                            .foregroundColor(Theme.Colors.accentDeep)
-                    }
-                }
-                HStack(spacing: Theme.Spacing.lg) {
-                    statPill(value: store.stats.sessions, label: lang.s("books.stats.sessions"))
-                    statPill(value: store.stats.pages, label: lang.s("books.stats.pages"))
-                    statPill(value: store.stats.minutes, label: lang.s("books.stats.minutes"))
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "chart.bar.fill")
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.accent)
+                Text(lang.s("books.stats.title"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                Spacer(minLength: 0)
+                if store.stats.streakDays > 0 {
+                    Text(String(format: lang.s("books.stats.streakDays"), "\(store.stats.streakDays)"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.accentDeep)
                 }
             }
+            HStack(spacing: Theme.Spacing.lg) {
+                statPill(value: store.stats.sessions, label: lang.s("books.stats.sessions"))
+                statPill(value: store.stats.pages, label: lang.s("books.stats.pages"))
+                statPill(value: store.stats.minutes, label: lang.s("books.stats.minutes"))
+            }
         }
+        .sandyCard(.primary)
+        .sandyGlow()
     }
 
     private func statPill(value: Int, label: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: Theme.Spacing.xs) {
             Text("\(value)")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .font(Theme.Typography.title)
                 .foregroundColor(Theme.Colors.accent)
                 .monospacedDigit()
             Text(label)
-                .font(.caption2)
-                .foregroundColor(Theme.Colors.secondaryText)
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.tertiaryText)
         }
         .frame(maxWidth: .infinity)
     }
 
     private var goalCard: some View {
-        SandyCard {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                HStack(spacing: Theme.Spacing.xs) {
-                    Image(systemName: "target")
-                        .font(.caption)
-                        .foregroundColor(Theme.Colors.accent)
-                    Text(lang.s("books.goal.title"))
-                        .font(.caption)
-                        .foregroundColor(Theme.Colors.secondaryText)
-                    Spacer(minLength: 0)
-                    if !store.demo {
-                        Button {
-                            store.notice = ""
-                            showGoal = true
-                        } label: {
-                            Text(lang.s(store.goal.hasTarget ? "books.goal.edit" : "books.goal.set"))
-                                .font(.caption)
-                                .foregroundColor(Theme.Colors.accentDeep)
-                        }
-                        .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "target")
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondary)
+                Text(lang.s("books.goal.title"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                Spacer(minLength: 0)
+                if !store.demo {
+                    Button {
+                        store.notice = ""
+                        showGoal = true
+                    } label: {
+                        Text(lang.s(store.goal.hasTarget ? "books.goal.edit" : "books.goal.set"))
+                            .font(Theme.Typography.caption)
+                            .foregroundColor(Theme.Colors.accentDeep)
                     }
-                }
-                if store.goal.hasTarget {
-                    if store.goal.booksYear > 0 {
-                        goalLine(format: lang.s("books.goal.books"),
-                                 done: store.goal.booksDone, target: store.goal.booksYear)
-                    }
-                    if store.goal.pagesYear > 0 {
-                        goalLine(format: lang.s("books.goal.pages"),
-                                 done: store.goal.pagesRead, target: store.goal.pagesYear)
-                    }
-                } else {
-                    Text(lang.s("books.goal.none"))
-                        .font(Theme.Typography.subheadline)
-                        .foregroundColor(Theme.Colors.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .buttonStyle(.plain)
                 }
             }
+            if store.goal.hasTarget {
+                if store.goal.booksYear > 0 {
+                    goalLine(format: lang.s("books.goal.books"),
+                             done: store.goal.booksDone, target: store.goal.booksYear)
+                }
+                if store.goal.pagesYear > 0 {
+                    goalLine(format: lang.s("books.goal.pages"),
+                             done: store.goal.pagesRead, target: store.goal.pagesYear)
+                }
+            } else {
+                Text(lang.s("books.goal.none"))
+                    .font(Theme.Typography.subheadline)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .sandyCard(.info)
     }
 
     private func goalLine(format: String, done: Int, target: Int) -> some View {
@@ -256,18 +254,18 @@ struct BooksView: View {
                 cover(book)
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(book.title)
-                        .font(.headline)
+                        .font(Theme.Typography.headline)
                         .foregroundColor(Theme.Colors.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     if !book.author.isEmpty {
                         Text(String(format: lang.s("books.card.by"), book.author))
-                            .font(.caption)
+                            .font(Theme.Typography.caption)
                             .foregroundColor(Theme.Colors.secondaryText)
                     }
                     if book.totalPages > 0 {
                         Text(String(format: lang.s("books.card.progress"),
                                     "\(book.currentPage)", "\(book.totalPages)"))
-                            .font(.caption)
+                            .font(Theme.Typography.caption)
                             .foregroundColor(Theme.Colors.accentDeep)
                         ProgressView(value: Double(min(book.currentPage, book.totalPages)),
                                      total: Double(max(book.totalPages, 1)))
@@ -363,8 +361,8 @@ struct BooksView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "books.vertical.fill")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.Colors.accent.opacity(0.5))
+                .font(.system(size: Theme.Icon.xl))
+                .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("books.empty"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)

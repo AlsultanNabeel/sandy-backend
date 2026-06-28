@@ -162,7 +162,7 @@ struct ShareContentView: View {
                         } label: {
                             Label(lang.s("shareContent.remove"), systemImage: "trash")
                                 .font(Theme.Typography.caption)
-                                .foregroundColor(Theme.Colors.warn)
+                                .foregroundColor(Theme.Colors.danger)
                         }
                         .buttonStyle(.plain)
                     } else {
@@ -188,7 +188,7 @@ struct ShareContentView: View {
     private func emptyState(icon: String, text: String) -> some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 44))
+                .font(.system(size: Theme.Icon.xl))
                 .foregroundColor(Theme.Colors.accent.opacity(0.5))
             Text(text)
                 .font(Theme.Typography.subheadline)

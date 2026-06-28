@@ -86,7 +86,7 @@ struct SandyButton: View {
                     .stroke(borderColor, lineWidth: style == .secondary ? 1.5 : 0)
             )
             .shadow(color: style == .primary ? Theme.Shadow.glowColor : .clear,
-                    radius: style == .primary ? 8 : 0, x: 0, y: 3)
+                    radius: style == .primary ? 6 : 0, x: 0, y: 3)
         }
         .buttonStyle(.plain)
         .disabled(isLoading)
@@ -412,20 +412,21 @@ private struct HubRowCard: View {
                     .fill(spec.tint.opacity(0.14))
                     .frame(width: 44, height: 44)
                 Image(systemName: spec.icon)
-                    .font(.title3)
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
                     .foregroundColor(spec.tint)
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(lang.s(spec.titleKey))
-                    .font(.headline)
+                    .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 Text(lang.s(spec.subtitleKey))
-                    .font(.caption)
-                    .foregroundColor(Theme.Colors.secondaryText)
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.tertiaryText)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.left")
-                .foregroundColor(Theme.Colors.secondaryText)
+                .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                .foregroundColor(Theme.Colors.tertiaryText)
         }
         .sandyCard()
     }

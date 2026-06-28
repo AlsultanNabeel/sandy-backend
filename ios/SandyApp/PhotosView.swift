@@ -144,7 +144,7 @@ struct PhotosView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 44))
+                .font(.system(size: Theme.Icon.xl))
                 .foregroundColor(Theme.Colors.accent.opacity(0.5))
             Text(lang.s("photos.empty"))
                 .font(Theme.Typography.subheadline)

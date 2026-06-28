@@ -12,12 +12,16 @@ enum Theme {
 
     // ── الألوان ─────────────────────────────────────────────────────────
     enum Colors {
-        /// اللمسة الأساسية: الأزرق الكهربائي (#00D4FF).
+        /// اللمسة الأساسية (Primary): الأزرق الكهربائي (#00D4FF) — تُستعمل للعنصر
+        /// المهيمن الواحد بكل شاشة فقط (سي تي أيه/بطاقة أساسية)، مش لكل إشي.
         static let accent = Color(red: 0.0, green: 0.831, blue: 1.0)         // #00D4FF
         /// تدرّج أفتح من الأساسي (لأزرار/توهج) — سماوي فاتح.
         static let accentSoft = Color(red: 0.373, green: 0.890, blue: 1.0)   // ~#5FE3FF
         /// نسخة أعمق من الأساسي (#0096FF) — حدود/نهاية التدرّج.
         static let accentDeep = Color(red: 0.0, green: 0.588, blue: 1.0)     // #0096FF
+        /// اللمسة الثانوية (Secondary): سماوي/سيان أهدأ — لإشارات ثانوية محدودة
+        /// (أيقونات أقسام، شارات) حتى ما ينافس الأزرق الأساسي. استعمال مقتصد.
+        static let secondary = Color(red: 0.224, green: 0.776, blue: 0.886)  // ~#39C6E2
 
         /// لمسة "ساندي" الكهربائية (#00D4FF) — نفس الأكسنت، استعمال محدود.
         static let spark = Color(red: 0.0, green: 0.831, blue: 1.0)          // #00D4FF
@@ -36,8 +40,10 @@ enum Theme {
 
         /// النص الأساسي (#F0FAFF) — صريح عشان يبقى فاتح على الخلفية الداكنة.
         static let primaryText = Color(red: 0.941, green: 0.980, blue: 1.0)  // #F0FAFF
-        /// النص الثانوي (~#8AA0B5) — رمادي-أزرق مكتوم.
-        static let secondaryText = Color(red: 0.541, green: 0.627, blue: 0.710) // ~#8AA0B5
+        /// النص الثانوي (~#9DB2C6) — رمادي-أزرق، رُفع تبايُنه شوي لقراءة أوضح.
+        static let secondaryText = Color(red: 0.616, green: 0.698, blue: 0.776) // ~#9DB2C6
+        /// النص الثالثي (الأقل أهمية) — تسميات/تلميحات خافتة بتراتب أدنى.
+        static let tertiaryText = Color(red: 0.439, green: 0.514, blue: 0.592)  // ~#70838F
         /// نص فوق التعبئة الكهربائية (الأزرق الساطع) — داكن قريب من الأسود.
         static let onAccent = Color(red: 0.008, green: 0.071, blue: 0.110)   // ~#02121C
 
@@ -76,6 +82,18 @@ enum Theme {
         static let lg: CGFloat = 20
         static let xl: CGFloat = 28
         static let xxl: CGFloat = 40
+        /// مسافة التنفّس بين أقسام الشاشة (white space) — استعملها بين المجموعات
+        /// الكبيرة حتى يصير اللي‌أوت أقل ضغطًا.
+        static let section: CGFloat = 24
+    }
+
+    // ── أحجام الأيقونات ───────────────────────────────────────────────────
+    /// مقياس موحّد لأحجام الأيقونات (نقطة) — لا تستعمل أرقامًا حرّة بالشاشات.
+    enum Icon {
+        static let sm: CGFloat = 15   // داخل الأزرار/التسميات
+        static let md: CGFloat = 18   // أيقونات الصفوف/التولبار
+        static let lg: CGFloat = 24   // أيقونات بارزة
+        static let xl: CGFloat = 40   // الحالة الفاضية/التتويج
     }
 
     // ── الحواف ──────────────────────────────────────────────────────────
@@ -99,9 +117,10 @@ enum Theme {
         static let liftRadius: CGFloat = 18
         static let liftY: CGFloat = 8
 
-        /// توهج أزرق كهربائي حول العناصر المميزة (يقابل blue glow بالويب).
-        static let glowColor = Theme.Colors.accent.opacity(0.55)
-        static let glowRadius: CGFloat = 18
+        /// توهج أزرق كهربائي حول العنصر المميّز الواحد — مخفّف ~٣٨٪ لتقليل الضجيج
+        /// البصري (كان ٠٫٥٥). يُستعمل بحذر: للعنصر المهيمن بكل شاشة فقط.
+        static let glowColor = Theme.Colors.accent.opacity(0.34)
+        static let glowRadius: CGFloat = 14
     }
 }
 
@@ -112,8 +131,10 @@ enum Theme {
 /// بهويتنا الكهربائية. متوافق iOS 16 (الـ Material متاح من iOS 15).
 struct LiquidGlass: ViewModifier {
     var cornerRadius: CGFloat = Theme.Radius.card
-    /// قوة لمسة الأزرق فوق الزجاج (0 = زجاج صافٍ).
-    var tint: Double = 0.10
+    /// قوة لمسة الأزرق فوق الزجاج (0 = زجاج صافٍ). خُفّضت الافتراضية لتقليل الضجيج.
+    var tint: Double = 0.06
+    /// قوة لمعان الحافة (0 = بلا لمعان). خُفّضت ~٤٠٪ حتى ما تتنافس كل البطاقات.
+    var shine: Double = 0.24
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -130,24 +151,55 @@ struct LiquidGlass: ViewModifier {
                 }
             }
             .clipShape(shape)
-            // حافة اللمعان — السمة المميزة للزجاج السائل.
+            // حافة اللمعان — مخفّفة لتقليل الضجيج (السمة باقية بس أهدأ).
             .overlay {
                 shape.stroke(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.40),
-                                 Theme.Colors.accent.opacity(0.22),
-                                 Color.white.opacity(0.04)],
+                        colors: [Color.white.opacity(shine),
+                                 Theme.Colors.accent.opacity(shine * 0.55),
+                                 Color.white.opacity(shine * 0.1)],
                         startPoint: .topLeading, endPoint: .bottomTrailing),
                     lineWidth: 1)
             }
-            .shadow(color: Theme.Shadow.cardColor, radius: 12, x: 0, y: 5)
+            // ظل أنعم وأقرب (كان radius 12/y 5) — عمق أهدأ بضجيج أقل.
+            .shadow(color: Theme.Shadow.cardColor, radius: 9, x: 0, y: 4)
     }
 }
 
 extension View {
     /// يكسي أي عرض بزجاج ساندي السائل (نفس الزرقة).
-    func liquidGlass(cornerRadius: CGFloat = Theme.Radius.card, tint: Double = 0.10) -> some View {
-        modifier(LiquidGlass(cornerRadius: cornerRadius, tint: tint))
+    func liquidGlass(cornerRadius: CGFloat = Theme.Radius.card,
+                     tint: Double = 0.06, shine: Double = 0.24) -> some View {
+        modifier(LiquidGlass(cornerRadius: cornerRadius, tint: tint, shine: shine))
+    }
+
+    /// توهّج ساندي الموحّد — استعمله للعنصر المهيمن الواحد بكل شاشة فقط (مش لكل
+    /// بطاقة). مخفّف مركزيًّا عبر `Theme.Shadow.glow*`.
+    func sandyGlow(_ on: Bool = true) -> some View {
+        shadow(color: on ? Theme.Shadow.glowColor : .clear,
+               radius: on ? Theme.Shadow.glowRadius : 0)
+    }
+
+    /// إحساس آبل التفاعلي بلا أدوات iOS 26: الزجاج "يغوص" بنعومة عند اللمس
+    /// ويرتدّ بنبضة زنبركية مرنة كأنه قطرة ماء. للعناصر القابلة للنقر فقط (مو
+    /// القوائم القابلة للتمرير حتى ما يتعارض مع السحب).
+    func liquidGlassPress() -> some View {
+        buttonStyle(LiquidGlassButtonStyle())
+    }
+}
+
+// MARK: - زر زجاجي تفاعلي (تقليد الزجاج السائل التفاعلي بلا iOS 26)
+
+/// نمط زر يقلّد الزجاج السائل التفاعلي تاع آبل: عند الضغط ينكمش بنعومة ويسطع
+/// خفيف، وعند الإفلات يرتدّ بزنبرك مرن (تخميد منخفض) فتحسّه "يهتز كقطرة ماء".
+/// متوافق iOS 16 — مبني على ButtonStyle القياسي فقط.
+struct LiquidGlassButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .brightness(configuration.isPressed ? 0.06 : 0)
+            .animation(.spring(response: 0.32, dampingFraction: 0.55),
+                       value: configuration.isPressed)
     }
 }
 
@@ -159,12 +211,13 @@ struct SandyBackground: View {
     var body: some View {
         ZStack {
             Theme.Colors.background
+            // توهّجان خلفيّان مخفّفان (كانا ٠٫١٦ و٠٫١٣) — عمق أهدأ، ضجيج أقل.
             RadialGradient(
-                colors: [Theme.Colors.accent.opacity(0.16), .clear],
-                center: .topLeading, startRadius: 0, endRadius: 420)
+                colors: [Theme.Colors.accent.opacity(0.10), .clear],
+                center: .topLeading, startRadius: 0, endRadius: 440)
             RadialGradient(
-                colors: [Theme.Colors.accentDeep.opacity(0.13), .clear],
-                center: .bottomTrailing, startRadius: 0, endRadius: 460)
+                colors: [Theme.Colors.accentDeep.opacity(0.08), .clear],
+                center: .bottomTrailing, startRadius: 0, endRadius: 480)
         }
         .ignoresSafeArea()
     }
@@ -172,19 +225,50 @@ struct SandyBackground: View {
 
 // MARK: - أنماط قابلة لإعادة الاستخدام
 
-/// نمط بطاقة ساندي — صار زجاج سائل (مموّه + لمعان أزرق).
+/// مستوى أهمية البطاقة — يقود وزنها البصري حتى يصير تراتب واضح بكل شاشة:
+/// عنصر أساسي واحد بارز، وبقية البطاقات أخفّ تدريجيًّا.
+enum CardEmphasis {
+    /// العنصر المهيمن (واحد بالشاشة): زجاج + حدّ أوضح + توهّج خفيف موحّد.
+    case primary
+    /// الافتراضي: زجاج هادئ بلا توهّج.
+    case secondary
+    /// الأخفّ (معلومة/ثانوي جدًّا): سطح مسطّح خفيف بلا مادة ولا توهّج — أقل ضجيج.
+    case info
+}
+
+/// نمط بطاقة ساندي — زجاج سائل بوزن بصري حسب الأهمية.
 struct CardStyle: ViewModifier {
+    var emphasis: CardEmphasis = .secondary
+
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        let base = content
             .padding(Theme.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlass(cornerRadius: Theme.Radius.card)
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+
+        switch emphasis {
+        case .primary:
+            base
+                .liquidGlass(cornerRadius: Theme.Radius.card, tint: 0.10, shine: 0.30)
+                .overlay(shape.stroke(Theme.Colors.accent.opacity(0.28), lineWidth: 1))
+                .sandyGlow()
+        case .secondary:
+            base
+                .liquidGlass(cornerRadius: Theme.Radius.card)
+        case .info:
+            base
+                .background(shape.fill(Theme.Colors.surface.opacity(0.45)))
+                .overlay(shape.stroke(Color.white.opacity(0.05), lineWidth: 1))
+        }
     }
 }
 
 extension View {
-    /// يحوّل أي عرض لبطاقة بنمط ساندي (زجاج سائل).
-    func sandyCard() -> some View { modifier(CardStyle()) }
+    /// بطاقة ساندي بالوزن الافتراضي (ثانوي) — متوافقة مع كل الاستعمالات الحالية.
+    func sandyCard() -> some View { modifier(CardStyle(emphasis: .secondary)) }
+    /// بطاقة بوزن بصري صريح (أساسي/ثانوي/معلومة) — لبناء التراتب.
+    func sandyCard(_ emphasis: CardEmphasis) -> some View { modifier(CardStyle(emphasis: emphasis)) }
 }
 
 /// عنوان قسم صغير (لاستعماله أعلى القوائم).

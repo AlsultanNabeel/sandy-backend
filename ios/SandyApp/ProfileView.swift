@@ -82,15 +82,16 @@ struct ProfileView: View {
         } label: {
             HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: icon)
-                    .font(.title3)
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
                     .foregroundColor(Theme.Colors.accent)
                     .frame(width: 28)
                 Text(lang.s(titleKey))
-                    .font(.headline)
+                    .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.left")
-                    .foregroundColor(Theme.Colors.secondaryText)
+                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .foregroundColor(Theme.Colors.tertiaryText)
             }
             .padding(.vertical, Theme.Spacing.xs)
         }
@@ -101,11 +102,6 @@ struct ProfileView: View {
 
     private var header: some View {
         VStack(spacing: Theme.Spacing.md) {
-            SandyAvatar(size: 96, mood: .happy)
-                .scaleEffect(appeared ? 1 : 0.85)
-                .opacity(appeared ? 1 : 0)
-                .animation(.spring(response: 0.6, dampingFraction: 0.7), value: appeared)
-
             VStack(spacing: Theme.Spacing.xs) {
                 Text(displayName)
                     .font(Theme.Typography.largeTitle)
@@ -373,8 +369,8 @@ private struct EditProfileSheet: View {
                         addInterest()
                     } label: {
                         Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(canAdd ? Theme.Colors.accent : Theme.Colors.secondaryText.opacity(0.4))
+                            .font(.system(size: Theme.Icon.lg))
+                            .foregroundColor(canAdd ? Theme.Colors.accent : Theme.Colors.tertiaryText)
                     }
                     .buttonStyle(.plain)
                     .disabled(!canAdd || saving)
@@ -437,7 +433,7 @@ private struct EditableChip: View {
                 .foregroundColor(Theme.Colors.accentDeep)
             Button(action: onDelete) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
+                    .font(.system(size: Theme.Icon.sm))
                     .foregroundColor(Theme.Colors.accentDeep.opacity(0.6))
             }
             .buttonStyle(.plain)

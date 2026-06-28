@@ -12,9 +12,8 @@ struct GiftsView: View {
     @State private var showAdd = false
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if !store.notice.isEmpty {
                     SandyNotice(store.notice, kind: .gentleWarning)
@@ -88,21 +87,21 @@ struct GiftsView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: gift.kind.icon)
-                        .font(.headline)
-                        .foregroundColor(Theme.Colors.accent)
+                        .font(Theme.Typography.headline)
+                        .foregroundColor(Theme.Colors.secondary)
                     Text(lang.s(gift.kind.titleKey))
-                        .font(.headline)
+                        .font(Theme.Typography.headline)
                         .foregroundColor(Theme.Colors.primaryText)
                     Spacer(minLength: 0)
                     Text(scheduleLabel(gift))
-                        .font(.caption2)
+                        .font(Theme.Typography.caption)
                         .foregroundColor(gift.scheduledAt.isEmpty
-                                         ? Theme.Colors.secondaryText
+                                         ? Theme.Colors.tertiaryText
                                          : Theme.Colors.accentDeep)
                 }
                 // لمين + المناسبة.
                 Text("\(gift.recipient) · \(gift.occasion)")
-                    .font(.caption)
+                    .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondaryText)
                 if !gift.content.isEmpty {
                     Text(gift.content)
@@ -130,8 +129,8 @@ struct GiftsView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "gift")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.Colors.accent.opacity(0.5))
+                .font(.system(size: Theme.Icon.xl))
+                .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("gifts.empty"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)
@@ -239,7 +238,6 @@ private struct GiftSheet: View {
                     save()
                 }
                 .disabled(!canSave)
-                .opacity(canSave ? 0.5 : 1)
                 .opacity(canSave ? 1 : 0.5)
             }
             .animation(.easeInOut(duration: 0.25), value: error)

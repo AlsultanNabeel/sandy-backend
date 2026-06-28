@@ -16,9 +16,8 @@ struct ShoppingView: View {
     @State private var buyingItem: ShoppingItem?
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if !store.notice.isEmpty {
                     SandyNotice(store.notice, kind: .gentleWarning)
@@ -45,14 +44,14 @@ struct ShoppingView: View {
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
         .fullScreenCover(isPresented: $showAdd) {
-            ShoppingSheet { text, category, _, _ in
+            ShoppingSheet { text, category in
                 await store.add(api: state.api, text: text, category: category)
             }
         }
         .fullScreenCover(item: $editingItem) { item in
-            ShoppingSheet(existing: item) { text, category, qty, price in
+            ShoppingSheet(existing: item) { text, category in
                 await store.update(api: state.api, item: item, text: text,
-                                   category: category, qty: qty, price: price)
+                                   category: category)
             }
         }
         .fullScreenCover(item: $buyingItem) { item in
@@ -154,8 +153,8 @@ struct ShoppingView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "cart")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.Colors.accent.opacity(0.5))
+                .font(.system(size: Theme.Icon.xl))
+                .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("shopping.empty"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)
@@ -175,7 +174,7 @@ struct ShoppingView: View {
 
 /// ورقة بسيطة: اسم الغرض + تصنيف اختياري + (للموجود) كمية وسعر للوحدة. `existing`
 /// غير nil ⇒ تعديل (تعبئة مسبقة). تُرسل عبر closure غير متزامن يرجّع نجاح/فشل.
-private struct ShoppingSheet: View {
+struct ShoppingSheet: View {
     let existing: ShoppingItem?
     let onSubmit: (_ text: String, _ category: String) async -> Bool
 
@@ -419,7 +418,8 @@ struct ShoppingItem: Identifiable {
     let unit: String
 
     /// سطر وصفي ثانوي: التصنيف + الكمية + السعر/الإجمالي التقديري (لو متوفّرة).
-    func metaLine(_ lang: LanguageManager) -> String {
+    /// معزولة بالـmain actor لأنها تنادي `LanguageManager.s` وتُستعمل بجسم العرض فقط.
+    @MainActor func metaLine(_ lang: LanguageManager) -> String {
         var parts: [String] = []
         if done {
             parts.append(lang.s("shopping.bought"))

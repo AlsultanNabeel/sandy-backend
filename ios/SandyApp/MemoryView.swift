@@ -98,7 +98,7 @@ struct MemoryView: View {
         SandyCard {
             HStack(alignment: .top, spacing: Theme.Spacing.md) {
                 Image(systemName: "sparkle")
-                    .font(.caption)
+                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
                     .foregroundColor(Theme.Colors.accent)
                     .padding(.top, 3)
                 Text(fact.text)
@@ -122,7 +122,7 @@ struct MemoryView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "brain.head.profile")
-                .font(.system(size: 44))
+                .font(.system(size: Theme.Icon.xl))
                 .foregroundColor(Theme.Colors.accent.opacity(0.5))
             Text(lang.s("memory.empty"))
                 .font(Theme.Typography.subheadline)

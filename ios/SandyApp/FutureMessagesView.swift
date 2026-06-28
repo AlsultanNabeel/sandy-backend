@@ -12,9 +12,8 @@ struct FutureMessagesView: View {
     @State private var showCompose = false
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
-
             VStack(spacing: 0) {
                 if !store.notice.isEmpty {
                     SandyNotice(store.notice, kind: .gentleWarning)
@@ -88,9 +87,9 @@ struct FutureMessagesView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack(alignment: .top, spacing: Theme.Spacing.md) {
                     Image(systemName: "envelope.fill")
-                        .font(.caption)
+                        .font(.system(size: Theme.Icon.md, weight: .semibold))
                         .foregroundColor(Theme.Colors.accent)
-                        .padding(.top, 3)
+                        .padding(.top, Theme.Spacing.xs)
                     Text(msg.text)
                         .font(Theme.Typography.body)
                         .foregroundColor(Theme.Colors.primaryText)
@@ -114,8 +113,8 @@ struct FutureMessagesView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "paperplane.fill")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.Colors.accent.opacity(0.5))
+                .font(.system(size: Theme.Icon.xl, weight: .semibold))
+                .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("futureMessages.empty"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)
@@ -135,7 +134,7 @@ struct FutureMessagesView: View {
 
 /// ورقة بسيطة: محرّر نص + منتقي تاريخ/وقت لموعد التسليم. تُرسل عبر closure غير
 /// متزامن يرجّع نجاح/فشل لتقرّر الورقة إذا بتتقفل. الموعد افتراضياً بعد سنة من الآن.
-private struct FutureMessageSheet: View {
+struct FutureMessageSheet: View {
     let onSubmit: (_ text: String, _ deliverAt: Date) async -> Bool
 
     @EnvironmentObject var lang: LanguageManager
@@ -225,7 +224,9 @@ struct FutureMessage: Identifiable {
     let deliverAt: String   // ISO
 
     /// تسمية موعد لطيفة (مطلقة بالعربية) — أو nil لو الموعد ما انفهم.
-    var deliverLabel: String? {
+    /// معزولة بالـmain actor لأنها تنادي `LanguageManager.s` (المعزولة)، وتُستعمل
+    /// فقط داخل جسم العرض (main actor) فما في تعارض.
+    @MainActor var deliverLabel: String? {
         guard let date = FutureMessage.parseISO(deliverAt) else { return nil }
         let prefix = LanguageManager.shared.s("futureMessages.deliverPrefix")
         return "\(prefix) \(FutureMessage.absoluteLabel(date))"

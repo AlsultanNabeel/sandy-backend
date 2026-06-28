@@ -14,8 +14,8 @@ struct FocusView: View {
     @StateObject private var robot = RobotStore()
 
     var body: some View {
+        // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
-            SandyBackground()
             VStack(spacing: 0) {
                 subPicker
                 ScrollView {
@@ -93,8 +93,7 @@ private struct TimerSection: View {
 
     // ── جلسة شغّالة: حلقة عدّ تنازلي + الطور + الدورة + أزرار الإنهاء ──────
     private var runningCard: some View {
-        SandyCard {
-            VStack(spacing: Theme.Spacing.md) {
+        VStack(spacing: Theme.Spacing.md) {
                 ZStack {
                     Circle()
                         .stroke(Theme.Colors.border, lineWidth: 10)
@@ -106,7 +105,7 @@ private struct TimerSection: View {
                             style: StrokeStyle(lineWidth: 10, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .animation(.linear(duration: 0.5), value: progress)
-                    VStack(spacing: 2) {
+                    VStack(spacing: Theme.Spacing.xs) {
                         Text(clock(status.remainingSec))
                             .font(.system(size: 40, weight: .bold, design: .rounded))
                             .foregroundColor(Theme.Colors.primaryText)
@@ -138,9 +137,9 @@ private struct TimerSection: View {
                         Task { await stop(cancel: true) }
                     }
                 }
-            }
-            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity)
+        .sandyCard(.primary)
     }
 
     // ── إعداد جلسة جديدة ─────────────────────────────────────────────────
@@ -171,7 +170,7 @@ private struct TimerSection: View {
     }
 
     private func numField(_ title: String, _ value: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Text(title)
                 .font(Theme.Typography.caption)
                 .foregroundColor(Theme.Colors.secondaryText)
@@ -268,7 +267,7 @@ private struct StatsSection: View {
                     HStack(spacing: Theme.Spacing.md) {
                         Image(systemName: h.completed ? "checkmark.circle.fill" : "stop.circle")
                             .foregroundColor(h.completed ? Theme.Colors.success : Theme.Colors.secondaryText)
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                             Text(h.label.isEmpty ? lang.s("focus.timer.phaseFocus") : h.label)
                                 .font(Theme.Typography.body)
                                 .foregroundColor(Theme.Colors.primaryText)

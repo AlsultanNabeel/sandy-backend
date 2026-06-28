@@ -46,7 +46,7 @@ struct SandyHubView: View {
     private var toolsButton: some View {
         Button { showTools = true } label: {
             Image(systemName: "square.grid.2x2.fill")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: Theme.Icon.md, weight: .semibold))
                 .foregroundColor(Theme.Colors.accent)
         }
         .accessibilityLabel(lang.s("sandy.tools"))
@@ -72,7 +72,7 @@ private struct SandyToolsSheet: View {
                         toolRow(icon: "photo.stack.fill", titleKey: "sandy.photos") { PhotosView() }
                         toolRow(icon: "sparkles", titleKey: "sandy.share") { ShareContentView() }
                     }
-                    .padding(Theme.Spacing.md)
+                    .padding(Theme.Spacing.lg)
                 }
             }
             .navigationTitle(lang.s("sandy.tools"))
@@ -95,15 +95,16 @@ private struct SandyToolsSheet: View {
         } label: {
             HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: icon)
-                    .font(.title3)
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
                     .foregroundColor(Theme.Colors.accent)
-                    .frame(width: 30)
+                    .frame(width: Theme.Icon.lg)
                 Text(lang.s(titleKey))
-                    .font(.headline)
+                    .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.left")
-                    .foregroundColor(Theme.Colors.secondaryText)
+                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .foregroundColor(Theme.Colors.tertiaryText)
             }
             .sandyCard()
         }
