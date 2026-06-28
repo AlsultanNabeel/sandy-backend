@@ -573,7 +573,7 @@ private struct RevealModifier: ViewModifier {
             .opacity(shown ? 1 : 0)
             .offset(y: shown ? 0 : 14)
             .onAppear { animateIn() }
-            .onChange(of: key) { _ in
+            .onChange(of: key) {
                 // إعادة التشغيل عند تحديث اللقطة.
                 shown = false
                 animateIn()

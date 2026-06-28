@@ -147,10 +147,10 @@ struct ChatView: View {
             // إصلاح (1): نقر بأي مكان بالخلفية/القائمة يخفي الكيبورد.
             .contentShape(Rectangle())
             .onTapGesture { dismissKeyboard() }
-            .onChange(of: store.messages.count) { _ in
+            .onChange(of: store.messages.count) {
                 scrollToBottom(proxy)
             }
-            .onChange(of: store.sending) { isSending in
+            .onChange(of: store.sending) { _, isSending in
                 // ننزل لمؤشّر الكتابة لما يظهر.
                 if isSending { scrollToBottom(proxy) }
             }
@@ -462,7 +462,7 @@ private struct ChatHistorySheet: View {
             .navigationTitle(lang.s("chat.history"))
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: lang.s("chat.searchPlaceholder"))
-            .onChange(of: query) { _ in scheduleSearch() }
+            .onChange(of: query) { scheduleSearch() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(lang.s("common.done")) { dismiss() }

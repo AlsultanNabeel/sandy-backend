@@ -389,8 +389,7 @@ struct ExpensesView: View {
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
         // عدّاد المجموع المتحرّك: كل ما تتغيّر القيمة الحقيقية، ننزلق إليها بنعومة.
-        // نستعمل صيغة onChange ذات الباراميتر الواحد (iOS 16) كما ببقية المشروع.
-        .onChange(of: store.summary.total) { newValue in
+        .onChange(of: store.summary.total) { _, newValue in
             withAnimation(.easeOut(duration: 0.6)) { animatedTotal = newValue }
         }
     }

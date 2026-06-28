@@ -76,7 +76,7 @@ struct SearchView: View {
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.top, Theme.Spacing.sm)
         // تبديل النوع يعيد البحث بنفس الاستعلام لو في استعلام.
-        .onChange(of: kind) { _ in runSearch(keepKeyboard: true) }
+        .onChange(of: kind) { runSearch(keepKeyboard: true) }
     }
 
     // MARK: - النتائج

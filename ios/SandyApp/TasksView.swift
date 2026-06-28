@@ -66,7 +66,7 @@ struct TasksView: View {
         .pickerStyle(.segmented)
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.top, Theme.Spacing.sm)
-        .onChange(of: showCompleted) { _ in
+        .onChange(of: showCompleted) {
             Task { await store.load(api: state.api, completed: showCompleted) }
         }
     }

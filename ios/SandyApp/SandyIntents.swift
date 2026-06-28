@@ -33,9 +33,14 @@ enum IntentAPI {
         Locale.current.language.languageCode?.identifier == "ar"
     }
 
-    /// يختار النص حسب لغة الجهاز.
+    /// يختار النص حسب لغة الجهاز (لرسائل الأخطاء).
     static func say(_ ar: String, _ en: String) -> LocalizedStringResource {
         LocalizedStringResource(stringLiteral: isArabic ? ar : en)
+    }
+
+    /// نفس الفكرة بس يرجّع حوار سيري (لردود النوايا).
+    static func dialog(_ ar: String, _ en: String) -> IntentDialog {
+        IntentDialog(stringLiteral: isArabic ? ar : en)
     }
 }
 
@@ -62,7 +67,7 @@ struct AddTaskIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addTask(text: text)
-        return .result(dialog: IntentAPI.say("ضفت المهمة: \(text)", "Added task: \(text)"))
+        return .result(dialog: IntentAPI.dialog("ضفت المهمة: \(text)", "Added task: \(text)"))
     }
 }
 
@@ -80,7 +85,7 @@ struct AddReminderIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addReminder(text: text, remindAt: IntentAPI.iso(date), note: nil)
-        return .result(dialog: IntentAPI.say("ضفت التذكير: \(text)", "Added reminder: \(text)"))
+        return .result(dialog: IntentAPI.dialog("ضفت التذكير: \(text)", "Added reminder: \(text)"))
     }
 }
 
@@ -95,7 +100,7 @@ struct AddHabitIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addHabit(name: name)
-        return .result(dialog: IntentAPI.say("ضفت العادة: \(name)", "Added habit: \(name)"))
+        return .result(dialog: IntentAPI.dialog("ضفت العادة: \(name)", "Added habit: \(name)"))
     }
 }
 
@@ -113,7 +118,7 @@ struct AddExpenseIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addExpense(amount: amount, note: note ?? "", category: "")
-        return .result(dialog: IntentAPI.say("سجّلت مصروف بمبلغ \(amount)", "Logged expense: \(amount)"))
+        return .result(dialog: IntentAPI.dialog("سجّلت مصروف بمبلغ \(amount)", "Logged expense: \(amount)"))
     }
 }
 
@@ -128,7 +133,7 @@ struct AddJournalIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
         try await api.addJournalEntry(text: text)
-        return .result(dialog: IntentAPI.say("ضفت الخاطرة بدفترك.", "Added to your journal."))
+        return .result(dialog: IntentAPI.dialog("ضفت الخاطرة بدفترك.", "Added to your journal."))
     }
 }
 

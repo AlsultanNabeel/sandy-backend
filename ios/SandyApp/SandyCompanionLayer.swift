@@ -56,7 +56,7 @@ struct SandyCompanionLayer: View {
         .allowsHitTesting(true)
         .ignoresSafeArea(.keyboard)
         .onAppear { startIdleLoops() }
-        .onChange(of: tab) { _ in announceTab() }
+        .onChange(of: tab) { announceTab() }
         .onAppear { announceTab() }
     }
 

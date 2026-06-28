@@ -245,7 +245,7 @@ private struct PhotoAddSheet: View {
             }
         }
         .environment(\.layoutDirection, .rightToLeft)
-        .onChange(of: pickedItem) { item in loadPicked(item) }
+        .onChange(of: pickedItem) { _, item in loadPicked(item) }
     }
 
     private func field(prompt: String, placeholder: String, text: Binding<String>) -> some View {

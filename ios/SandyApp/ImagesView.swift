@@ -36,8 +36,8 @@ struct ImagesView: View {
         }
         .navigationTitle(lang.s("tabs.images"))
         .animation(.easeInOut(duration: 0.25), value: store.notice)
-        .onChange(of: mode) { _ in store.reset() }
-        .onChange(of: pickedItem) { item in loadPicked(item) }
+        .onChange(of: mode) { store.reset() }
+        .onChange(of: pickedItem) { _, item in loadPicked(item) }
     }
 
     private var modePicker: some View {
@@ -245,7 +245,7 @@ final class ImagesStore: ObservableObject {
 
     /// يلفّ العملية بمهمة يملكها الستور (محصّنة ضد إلغاء الإيماءة) وينتظرها، مع
     /// معالجة خطأ موحّدة.
-    private func run(_ op: @escaping () async throws -> Void) async {
+    private func run(_ op: @escaping @MainActor () async throws -> Void) async {
         task?.cancel()
         let t = Task { @MainActor in
             loading = true; notice = ""

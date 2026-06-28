@@ -25,7 +25,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     func start(baseURL: String, token: String) {
         stopped = false
         errorText = ""
-        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+        AVAudioApplication.requestRecordPermission { [weak self] granted in
             Task { @MainActor in
                 guard let self, !self.stopped else { return }
                 if !granted { self.permissionDenied = true; return }
