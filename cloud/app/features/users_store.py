@@ -131,6 +131,49 @@ def upsert_from_oauth(
     return doc
 
 
+def get_email_user(email: str) -> Optional[Dict[str, Any]]:
+    """Find an email/password user by (normalized) email, or None."""
+    coll = _coll()
+    e = (email or "").strip().lower()
+    if coll is None or not e:
+        return None
+    return coll.find_one({"provider": "email", "provider_sub": e})
+
+
+def create_email_user(
+    email: str, password_hash: str, name: str = ""
+) -> Optional[Dict[str, Any]]:
+    """Create a new email/password user (same doc shape as OAuth users, plus
+    ``password_hash``). Returns the doc, or None if the email is already taken
+    or the store is down. The normalized email is the stable ``provider_sub``."""
+    coll = _coll()
+    e = (email or "").strip().lower()
+    if coll is None or not e or not password_hash:
+        return None
+    if coll.find_one({"provider": "email", "provider_sub": e}):
+        return None  # already exists
+
+    now = _now()
+    user_id = uuid.uuid4().hex
+    doc: Dict[str, Any] = {
+        "_id": user_id,
+        "provider": "email",
+        "provider_sub": e,
+        "email": e,
+        "name": name,
+        "picture": "",
+        "locale": "ar",
+        "password_hash": password_hash,
+        "onboarding": {"done": False, "preferred_name": "", "interests": [], "notes": ""},
+        "subscription": {"status": "none", "plan": "", "trial_ends_at": None,
+                         "current_period_end": None, "source": ""},
+        "created_at": now,
+        "last_seen_at": now,
+    }
+    coll.insert_one(doc)
+    return doc
+
+
 def get_or_create_owner(name: str = "") -> Optional[str]:
     """The owner is user #1 — a stable account keyed by provider='owner'.
 

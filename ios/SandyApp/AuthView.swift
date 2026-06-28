@@ -11,6 +11,10 @@ struct AuthView: View {
     @State private var password = ""
     @State private var error = ""
     @State private var loading = false
+    // دخول/تسجيل بالإيميل.
+    @State private var email = ""
+    @State private var emailPassword = ""
+    @State private var emailLoading = false
 
     var body: some View {
         ZStack {
@@ -53,6 +57,37 @@ struct AuthView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control,
                                                             style: .continuous))
                                 .signInWithAppleButtonStyle(.white)
+
+                            // فاصل "أو بالإيميل".
+                            dividerLabel(lang.lang == .ar ? "أو بالإيميل" : "or with email")
+
+                            TextField(lang.lang == .ar ? "الإيميل" : "Email", text: $email)
+                                .textFieldStyle(.plain)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.emailAddress)
+                                .textContentType(.emailAddress)
+                                .modifier(SandyField())
+
+                            SecureField(lang.lang == .ar ? "كلمة السر" : "Password",
+                                        text: $emailPassword)
+                                .textFieldStyle(.plain)
+                                .textContentType(.password)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .submitLabel(.go)
+                                .onSubmit { emailAuth(isSignUp: false) }
+                                .modifier(SandyField())
+
+                            HStack(spacing: Theme.Spacing.sm) {
+                                SandyButton(title: lang.lang == .ar ? "دخول" : "Sign in",
+                                            systemImage: "arrow.right.circle.fill",
+                                            isLoading: emailLoading,
+                                            fillWidth: true) { emailAuth(isSignUp: false) }
+                                SandyButton(title: lang.lang == .ar ? "حساب جديد" : "Sign up",
+                                            style: .secondary,
+                                            fillWidth: true) { emailAuth(isSignUp: true) }
+                            }
 
                             // فاصل "أو دخول المطوّر" — خطّان رفيعان حول النص.
                             HStack(spacing: Theme.Spacing.sm) {
@@ -99,6 +134,50 @@ struct AuthView: View {
         Rectangle()
             .fill(Theme.Colors.border)
             .frame(height: 1)
+    }
+
+    /// فاصل نصّي بخطّين رفيعين حوله (يُستعمل لـ "أو بالإيميل" / "أو دخول المطوّر").
+    private func dividerLabel(_ text: String) -> some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            hairline
+            Text(text)
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.secondaryText)
+                .fixedSize()
+            hairline
+        }
+    }
+
+    /// دخول أو إنشاء حساب بالإيميل — نفس الحقول، يقرّرها `isSignUp`.
+    private func emailAuth(isSignUp: Bool) {
+        let mail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !emailLoading, !mail.isEmpty, !emailPassword.isEmpty else { return }
+        emailLoading = true; error = ""
+        Task {
+            do {
+                let done = isSignUp
+                    ? try await state.api.signUpEmail(email: mail, password: emailPassword)
+                    : try await state.api.signInEmail(email: mail, password: emailPassword)
+                state.routeAfterAuth(onboardingDone: done)
+            } catch {
+                self.error = friendlyAuthError(error)
+            }
+            emailLoading = false
+        }
+    }
+
+    /// يترجم رموز خطأ الباك‑إند لرسائل ودّية حسب اللغة.
+    private func friendlyAuthError(_ error: Error) -> String {
+        let ar = lang.lang == .ar
+        let msg = (error as? APIError)?.message ?? error.localizedDescription
+        switch msg {
+        case "email_taken":         return ar ? "هالإيميل مستعمل — جرّب تسجّل دخول." : "Email already in use — try signing in."
+        case "invalid_credentials": return ar ? "الإيميل أو كلمة السر غلط." : "Wrong email or password."
+        case "weak_password":       return ar ? "كلمة السر لازم ثمن خانات على الأقل." : "Password must be at least 8 characters."
+        case "invalid_email":       return ar ? "الإيميل مش صحيح." : "Invalid email."
+        case "auth_unavailable":    return ar ? "تعذّر الاتصال — جرّب بعد شوي." : "Service unavailable — try again."
+        default:                    return msg
+        }
     }
 
     private func devLogin() {

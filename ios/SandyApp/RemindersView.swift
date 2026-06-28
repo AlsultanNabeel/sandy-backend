@@ -245,12 +245,27 @@ struct RemindersView: View {
 /// بمهمة مملوكة للستور، فإلغاء إيماءة السحب ما يلغيه — والجديد يبيّن دايماً.
 @MainActor
 final class RemindersStore: ObservableObject {
-    @Published var reminders: [ReminderItem] = []
+    /// أي تغيير على القائمة (جلب/إضافة/تعديل/حذف) يعيد جدولة الإشعارات المحلية.
+    @Published var reminders: [ReminderItem] = [] {
+        didSet { scheduleNotifications() }
+    }
     @Published var loading = false
     @Published var demo = false
     @Published var notice = ""
 
     private var loadTask: Task<Void, Never>?
+
+    /// نجدول إشعارًا محليًا لكل تذكير إله وقت مستقبلي. عنوان الإشعار حسب لغة
+    /// الجهاز (نتجنّب main actor)، ونصّه نص التذكير نفسه. الماضي يُتجاهل تلقائيًا.
+    private func scheduleNotifications() {
+        let isAR = Locale.current.language.languageCode?.identifier == "ar"
+        let title = isAR ? "تذكير" : "Reminder"
+        let items = reminders.compactMap { r -> NotificationItem? in
+            guard let date = NotificationManager.parseISO(r.remindAt) else { return nil }
+            return NotificationItem(id: r.id, title: title, body: r.text, date: date)
+        }
+        NotificationManager.shared.sync(prefix: "reminder.", items: items)
+    }
 
     func load(api: APIClient) async {
         loadTask?.cancel()

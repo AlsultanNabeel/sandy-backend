@@ -212,13 +212,35 @@ struct TasksView: View {
 /// هاي معمارية "مصدر حقيقة واحد"، نفس نمط التطبيقات الكبيرة.
 @MainActor
 final class TasksStore: ObservableObject {
-    @Published var tasks: [TaskItem] = []
+    @Published var tasks: [TaskItem] = [] {
+        didSet { scheduleNotifications() }
+    }
     @Published var loading = false
     @Published var demo = false
     /// رسالة ودّية بصوت ساندي (فاضية = ما في خطأ).
     @Published var notice = ""
 
     private var loadTask: Task<Void, Never>?
+    /// آخر فلتر مُحمّل — ما نجدول إشعارات إلا للنشطة (عرض المكتملة ما يمسحها).
+    private var showingCompleted = false
+
+    /// إشعار محلي لكل مهمة نشطة إلها موعد. الموعد بلا وقت (منتصف الليل) → التاسعة
+    /// صباحاً بدل منتصفه. المكتملة والماضية تُتجاهل.
+    private func scheduleNotifications() {
+        guard !showingCompleted else { return }
+        let isAR = Locale.current.language.languageCode?.identifier == "ar"
+        let title = isAR ? "مهمة" : "Task"
+        let cal = Calendar.current
+        let items = tasks.compactMap { t -> NotificationItem? in
+            guard !t.done, var date = NotificationManager.parseISO(t.dueAt) else { return nil }
+            let c = cal.dateComponents([.hour, .minute], from: date)
+            if (c.hour ?? 0) == 0 && (c.minute ?? 0) == 0 {
+                date = cal.date(bySettingHour: 9, minute: 0, second: 0, of: date) ?? date
+            }
+            return NotificationItem(id: t.id, title: title, body: t.text, date: date)
+        }
+        NotificationManager.shared.sync(prefix: "task.", items: items)
+    }
 
     /// يبدأ جلباً مملوكاً للستور وينتظره — يصلح للـ `.task` و`.refreshable` معاً.
     /// لو انلغى انتظار الواجهة، المهمة المملوكة بتكمّل وبتحدّث الحالة.
@@ -229,6 +251,7 @@ final class TasksStore: ObservableObject {
             defer { loading = false }
             do {
                 let r = try await api.getTasks(completed: completed)
+                showingCompleted = completed
                 tasks = r.items
                 demo = r.demo
             } catch {

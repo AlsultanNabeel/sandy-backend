@@ -3,9 +3,17 @@ import Foundation
 /// Talks to the Sandy backend (the Python API we built).
 final class APIClient {
     var baseURL: String
-    var token: String?
+    /// توكن الدخول — يُحفظ تلقائياً بالـKeychain عند أي تغيير (وnil = تسجيل خروج).
+    /// فالجلسة تستعيد نفسها عند الإقلاع، والنوايا/الويدجت تقدر تصادق بمعزل.
+    var token: String? {
+        didSet { Keychain.saveToken(token) }
+    }
 
-    init(baseURL: String) { self.baseURL = baseURL }
+    init(baseURL: String) {
+        self.baseURL = baseURL
+        // نحمّل التوكن المحفوظ (لو في) — التعيين بالـinit ما يشغّل didSet فما يعيد الحفظ.
+        self.token = Keychain.loadToken()
+    }
 
     // داخلي (مش private) حتى توصله امتدادات APIClient الموزّعة على ملفات تانية
     // (الطقس/الكتب/الهدايا/المحتوى…). private بسويفت محصور بنفس الملف.
@@ -40,6 +48,24 @@ final class APIClient {
         let r = try await request("/api/auth/apple", method: "POST",
                                   body: ["id_token": idToken, "name": name], auth: false)
         guard let t = r["token"] as? String else { throw APIError(message: "فشل التحقّق") }
+        token = t
+        return r["onboarding_done"] as? Bool ?? false
+    }
+
+    // إنشاء حساب بالإيميل والباسوورد — يرجّع هل التعارف خلص.
+    func signUpEmail(email: String, password: String) async throws -> Bool {
+        let r = try await request("/api/auth/email/register", method: "POST",
+                                  body: ["email": email, "password": password], auth: false)
+        guard let t = r["token"] as? String else { throw APIError(message: "فشل إنشاء الحساب") }
+        token = t
+        return r["onboarding_done"] as? Bool ?? false
+    }
+
+    // تسجيل دخول بالإيميل والباسوورد — يرجّع هل التعارف خلص.
+    func signInEmail(email: String, password: String) async throws -> Bool {
+        let r = try await request("/api/auth/email/login", method: "POST",
+                                  body: ["email": email, "password": password], auth: false)
+        guard let t = r["token"] as? String else { throw APIError(message: "بيانات الدخول غلط") }
         token = t
         return r["onboarding_done"] as? Bool ?? false
     }

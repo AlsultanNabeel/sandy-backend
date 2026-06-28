@@ -262,11 +262,26 @@ struct FutureMessage: Identifiable {
 
 @MainActor
 final class FutureMessagesStore: ObservableObject {
-    @Published var messages: [FutureMessage] = []
+    /// أي تغيير على القائمة يعيد جدولة إشعارات التسليم المحلية تلقائيًا.
+    @Published var messages: [FutureMessage] = [] {
+        didSet { scheduleNotifications() }
+    }
     @Published var loading = false
     @Published var notice = ""
 
     private var loadTask: Task<Void, Never>?
+
+    /// إشعار محلي لكل رسالة مستقبلية بموعد تسليم مستقبلي — ساندي «تسلّمها» إلك
+    /// بوقتها حتى لو التطبيق مسكّر. عنوان حسب لغة الجهاز، والنص نص الرسالة.
+    private func scheduleNotifications() {
+        let isAR = Locale.current.language.languageCode?.identifier == "ar"
+        let title = isAR ? "رسالة من ساندي" : "A message from Sandy"
+        let items = messages.compactMap { m -> NotificationItem? in
+            guard let date = NotificationManager.parseISO(m.deliverAt) else { return nil }
+            return NotificationItem(id: m.id, title: title, body: m.text, date: date)
+        }
+        NotificationManager.shared.sync(prefix: "future.", items: items)
+    }
 
     func load(api: APIClient) async {
         loadTask?.cancel()

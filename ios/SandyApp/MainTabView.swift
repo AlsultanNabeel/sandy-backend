@@ -41,6 +41,9 @@ struct MainTabView: View {
     /// التبويب المختار — مصدر الحقيقة للتبديل البرمجي.
     @State private var selection: MainTab = .home
 
+    /// مدير الإشعارات — نراقب `pendingRoute` حتى يفتح النقر على إشعار شاشته.
+    @ObservedObject private var notifs = NotificationManager.shared
+
     /// هل الكيبورد طالع؟ لما يطلع نخفي شريط التبويبات والرفيق العائم حتى ما
     /// يزدحموا فوق الكيبورد (يبقى حقل الكتابة وحده فوقه). نرصده عبر إشعارات
     /// النظام (iOS 16-safe، بدون أي API أحدث).
@@ -89,7 +92,11 @@ struct MainTabView: View {
         }
         // خلفية ساندي تحت الفوتر وهوامشه.
         .background(SandyBackground())
-        .task { await state.refreshOnboarding() }
+        .task {
+            await state.refreshOnboarding()
+            // نطلب إذن الإشعارات المحلية مرّة عند دخول التطبيق (آمن للتكرار).
+            NotificationManager.shared.requestAuthorization()
+        }
         // رصد الكيبورد — نبدّل `keyboardUp` بنعومة فيختفي/يرجع الشريط والرفيق.
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -98,6 +105,24 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { keyboardUp = false }
+        }
+        // النقر على إشعار يفتح شاشته المحدّدة كورقة (تذكير/مهمة/رسالة مستقبلية).
+        .sheet(item: $notifs.pendingRoute) { route in
+            NavigationStack { routeView(route) }
+                .background(SandyBackground())
+                .environmentObject(state)
+                .environmentObject(lang)
+                .environment(\.layoutDirection, lang.lang.layoutDirection)
+        }
+    }
+
+    /// شاشة الوجهة حسب نوع الإشعار المنقور.
+    @ViewBuilder
+    private func routeView(_ route: NotifRoute) -> some View {
+        switch route {
+        case .reminders: RemindersView()
+        case .tasks:     TasksView()
+        case .future:    FutureMessagesView()
         }
     }
 }

@@ -97,6 +97,9 @@ def create_app(
     from app.api.social_auth_api import register_social_auth_api
     register_social_auth_api(app)
 
+    from app.api.email_auth_api import register_email_auth_api
+    register_email_auth_api(app)
+
     from app.api.goals_api import register_goals_api
     register_goals_api(app, mongo_db=mongo_db)
 

@@ -24,10 +24,30 @@ struct RootView: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        switch state.stage {
-        case .auth:        AuthView()
-        case .onboarding:  OnboardingView()
-        case .chat:        MainTabView()
+        Group {
+            switch state.stage {
+            case .launching:   LaunchView()
+            case .auth:        AuthView()
+            case .onboarding:  OnboardingView()
+            case .chat:        MainTabView()
+            }
+        }
+        // نحاول استعادة الجلسة مرّة عند الإقلاع (توكن محفوظ → رئيسية مباشرة).
+        .task {
+            if state.stage == .launching { await state.restoreSession() }
+        }
+    }
+}
+
+/// شاشة إقلاع قصيرة أثناء استعادة الجلسة — تتفادى وميض شاشة الدخول.
+struct LaunchView: View {
+    var body: some View {
+        ZStack {
+            SandyBackground()
+            VStack(spacing: Theme.Spacing.lg) {
+                SandyRobot(size: 96, happy: true, animated: true)
+                ProgressView().tint(Theme.Colors.accent)
+            }
         }
     }
 }
