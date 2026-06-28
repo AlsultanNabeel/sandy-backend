@@ -52,6 +52,15 @@ final class APIClient {
         return r["onboarding_done"] as? Bool ?? false
     }
 
+    // تسجيل دخول جوجل — نمرّر id token من حزمة GoogleSignIn، يرجّع هل التعارف خلص.
+    func signInGoogle(idToken: String) async throws -> Bool {
+        let r = try await request("/api/auth/google", method: "POST",
+                                  body: ["id_token": idToken], auth: false)
+        guard let t = r["token"] as? String else { throw APIError(message: "فشل التحقّق من جوجل") }
+        token = t
+        return r["onboarding_done"] as? Bool ?? false
+    }
+
     // إنشاء حساب بالإيميل والباسوورد — يرجّع هل التعارف خلص.
     func signUpEmail(email: String, password: String) async throws -> Bool {
         let r = try await request("/api/auth/email/register", method: "POST",

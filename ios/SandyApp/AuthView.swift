@@ -58,6 +58,23 @@ struct AuthView: View {
                                                             style: .continuous))
                                 .signInWithAppleButtonStyle(.white)
 
+                            // الدخول بجوجل.
+                            Button { googleSignIn() } label: {
+                                HStack(spacing: Theme.Spacing.sm) {
+                                    Image(systemName: "g.circle.fill")
+                                        .font(.system(size: Theme.Icon.md, weight: .semibold))
+                                    Text(lang.lang == .ar ? "الدخول بجوجل" : "Sign in with Google")
+                                        .font(Theme.Typography.button)
+                                }
+                                .foregroundColor(.black)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control,
+                                                            style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+
                             // فاصل "أو بالإيميل".
                             dividerLabel(lang.lang == .ar ? "أو بالإيميل" : "or with email")
 
@@ -145,6 +162,20 @@ struct AuthView: View {
                 .foregroundColor(Theme.Colors.secondaryText)
                 .fixedSize()
             hairline
+        }
+    }
+
+    /// الدخول بجوجل — يفتح نافذة جوجل، ياخد id token، ويبعته للباك‑إند.
+    private func googleSignIn() {
+        error = ""
+        Task {
+            do {
+                let idToken = try await GoogleAuth.signIn()
+                let done = try await state.api.signInGoogle(idToken: idToken)
+                state.routeAfterAuth(onboardingDone: done)
+            } catch {
+                self.error = friendlyAuthError(error)
+            }
         }
     }
 

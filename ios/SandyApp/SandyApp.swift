@@ -1,4 +1,5 @@
 import SwiftUI
+import GoogleSignIn
 
 @main
 struct SandyApp: App {
@@ -16,6 +17,8 @@ struct SandyApp: App {
                 // واجهة داكنة دائماً عشان تطابق باليت الويب الأوبسيديان + تتناسق
                 // أدوات النظام (حقول النص/الأزرار بشاشة الدخول) مع الخلفية الداكنة.
                 .preferredColorScheme(.dark)
+                // استقبال رابط رجوع جوجل بعد المصادقة.
+                .onOpenURL { GIDSignIn.sharedInstance.handle($0) }
         }
     }
 }
