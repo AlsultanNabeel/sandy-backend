@@ -11,10 +11,14 @@ struct DailyView: View {
                    subtitleKey: "daily.tasks.subtitle", tint: Theme.Colors.accent),
         HubRowSpec(icon: "bell.fill", titleKey: "daily.reminders",
                    subtitleKey: "daily.reminders.subtitle", tint: Theme.Colors.warn),
+        HubRowSpec(icon: "flag.fill", titleKey: "daily.goals",
+                   subtitleKey: "daily.goals.subtitle", tint: Theme.Colors.accentDeep),
         HubRowSpec(icon: "flame.fill", titleKey: "daily.habits",
                    subtitleKey: "daily.habits.subtitle", tint: Theme.Colors.success),
         HubRowSpec(icon: "target", titleKey: "daily.focus",
-                   subtitleKey: "daily.focus.subtitle", tint: Theme.Colors.accentDeep),
+                   subtitleKey: "daily.focus.subtitle", tint: Theme.Colors.accent),
+        HubRowSpec(icon: "envelope.fill", titleKey: "daily.future",
+                   subtitleKey: "daily.future.subtitle", tint: Theme.Colors.warn),
     ]
 
     var body: some View {
@@ -22,8 +26,10 @@ struct DailyView: View {
             switch index {
             case 0:  TasksView()
             case 1:  RemindersView()
-            case 2:  HabitsView()
-            default: FocusView()
+            case 2:  GoalsView()
+            case 3:  HabitsView()
+            case 4:  FocusView()
+            default: FutureMessagesView()
             }
         }
         .navigationTitle(lang.s("daily.title"))

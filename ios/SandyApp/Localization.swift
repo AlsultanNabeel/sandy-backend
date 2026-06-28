@@ -113,6 +113,15 @@ let L10nRegistry: [String: L10nTable] = [
     L10nMemory.ns:     L10nMemory.table,
     L10nTimeline.ns:   L10nTimeline.table,
     L10nProfile.ns:    L10nProfile.table,
+    // الميزات الثمانية (المرحلة الثانية) — تُركَّب بأماكنها بالهيكلية الجديدة.
+    L10nShopping.ns:      L10nShopping.table,
+    L10nBooks.ns:         L10nBooks.table,
+    L10nGoals.ns:         L10nGoals.table,
+    L10nFutureMessages.ns: L10nFutureMessages.table,
+    L10nPhotos.ns:        L10nPhotos.table,
+    L10nGifts.ns:         L10nGifts.table,
+    L10nShareContent.ns:  L10nShareContent.table,
+    L10nWeather.ns:       L10nWeather.table,
 ]
 
 // MARK: - translate (mirrors web translate(lang, key))

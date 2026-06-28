@@ -11,11 +11,21 @@ enum L10nSandy {
             "mode.chat":   .text("محادثة"),
             "mode.search": .text("بحث"),
             "mode.images": .text("صور"),
+            "tools":       .text("أدوات ساندي"),
+            "shopping":    .text("قائمة التسوّق"),
+            "books":       .text("مكتبتي"),
+            "photos":      .text("الألبوم"),
+            "share":       .text("محتوى يهمّك"),
         ],
         en: [
             "mode.chat":   .text("Chat"),
             "mode.search": .text("Search"),
             "mode.images": .text("Images"),
+            "tools":       .text("Sandy's tools"),
+            "shopping":    .text("Shopping list"),
+            "books":       .text("My library"),
+            "photos":      .text("Album"),
+            "share":       .text("For you"),
         ]
     )
 }

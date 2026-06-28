@@ -81,6 +81,12 @@ struct HomeView: View {
                 greeting
                     .reveal(order: 0, key: store.revealKey)
 
+                // بطاقة الطقس — عنصر ثابت بلوحة المعلومات (مش ضمن العناصر القابلة
+                // لإعادة الترتيب). تجلب طقسها بنفسها، والنقر يفتح الشاشة الكاملة.
+                NavigationLink { WeatherView() } label: { WeatherCard() }
+                    .buttonStyle(.plain)
+                    .reveal(order: 1, key: store.revealKey)
+
                 if store.loadFailed {
                     SandyNotice(lang.s("home.loadFailed"),
                                 kind: .gentleWarning)

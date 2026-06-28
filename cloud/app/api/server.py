@@ -97,6 +97,24 @@ def create_app(
     from app.api.social_auth_api import register_social_auth_api
     register_social_auth_api(app)
 
+    from app.api.goals_api import register_goals_api
+    register_goals_api(app, mongo_db=mongo_db)
+
+    from app.api.future_messages_api import register_future_messages_api
+    register_future_messages_api(app, mongo_db=mongo_db)
+
+    from app.api.photos_api import register_photos_api
+    register_photos_api(app, mongo_db=mongo_db)
+
+    from app.api.gifts_api import register_gifts_api
+    register_gifts_api(app, mongo_db=mongo_db)
+
+    from app.api.share_api import register_share_api
+    register_share_api(app, mongo_db=mongo_db)
+
+    from app.api.weather_api import register_weather_api
+    register_weather_api(app, mongo_db=mongo_db)
+
     # Auth endpoints
     @app.route("/api/auth", methods=["POST"])
     def web_auth():

@@ -23,6 +23,8 @@ enum L10nLife {
             "habits":             .text("العادات"),
             "expenses":           .text("المصاريف"),
             "journal":            .text("اليوميات"),
+            "gifts":              .text("الهدايا الرقمية"),
+            "gifts.subtitle":     .text("هدايا صغيرة لمن تحب"),
             "expenses.subtitle":  .text("سجّل مصاريفك وشوف المجموع"),
             "journal.subtitle":   .text("دوّن يومك"),
 
@@ -101,6 +103,8 @@ enum L10nLife {
             "habits":             .text("Habits"),
             "expenses":           .text("Expenses"),
             "journal":            .text("Journal"),
+            "gifts":              .text("Digital gifts"),
+            "gifts.subtitle":     .text("Little gifts for the ones you love"),
             "expenses.subtitle":  .text("Log spending and see the total"),
             "journal.subtitle":   .text("Write down your day"),
 

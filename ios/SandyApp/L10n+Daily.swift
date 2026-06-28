@@ -17,6 +17,10 @@ enum L10nDaily {
             "habits.subtitle":    .text("سلاسلك اليومية وتقدّمك"),
             "focus":              .text("الفوكس"),
             "focus.subtitle":     .text("مؤقّت تركيز وإحصائياتك"),
+            "goals":              .text("أهدافي"),
+            "goals.subtitle":     .text("أهدافك القصيرة والبعيدة"),
+            "future":             .text("رسالة لمستقبلك"),
+            "future.subtitle":    .text("اكتب كلمة ترجعلك بوقتها"),
         ],
         en: [
             "title":              .text("Daily"),
@@ -28,6 +32,10 @@ enum L10nDaily {
             "habits.subtitle":    .text("Your daily streaks and progress"),
             "focus":              .text("Focus"),
             "focus.subtitle":     .text("Focus timer and your stats"),
+            "goals":              .text("Goals"),
+            "goals.subtitle":     .text("Your short- and long-term goals"),
+            "future":             .text("Message to your future"),
+            "future.subtitle":    .text("Write a note that returns in time"),
         ]
     )
 }

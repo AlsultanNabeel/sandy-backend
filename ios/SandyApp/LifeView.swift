@@ -11,13 +11,16 @@ struct LifeView: View {
                    subtitleKey: "life.expenses.subtitle", tint: Theme.Colors.success),
         HubRowSpec(icon: "book.closed.fill", titleKey: "life.journal",
                    subtitleKey: "life.journal.subtitle", tint: Theme.Colors.warn),
+        HubRowSpec(icon: "gift.fill", titleKey: "life.gifts",
+                   subtitleKey: "life.gifts.subtitle", tint: Theme.Colors.accent),
     ]
 
     var body: some View {
         HubList(rows: rows) { index in
             switch index {
             case 0:  ExpensesView()
-            default: JournalView()
+            case 1:  JournalView()
+            default: GiftsView()
             }
         }
         .navigationTitle(lang.s("life.title"))
