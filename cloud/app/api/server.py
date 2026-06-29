@@ -88,6 +88,9 @@ def create_app(
     from app.api.life_api import register_life_api
     register_life_api(app, mongo_db=mongo_db)
 
+    from app.api.devices_api import register_devices_api
+    register_devices_api(app, mongo_db=mongo_db)
+
     from app.api.onboarding_api import register_onboarding_api
     register_onboarding_api(app)
 

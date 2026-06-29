@@ -31,20 +31,6 @@ def _resolve_device(name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _device_topic(device: Dict[str, Any]) -> Optional[str]:
-    """The MQTT topic to actuate this device, derived from its transport."""
-    t = device.get("transport") or {}
-    kind = str(t.get("kind", "")).strip().lower()
-    if kind == "mqtt":
-        return str(t.get("topic", "")).strip() or None
-    if kind == "node":
-        node_id = str(t.get("node_id", "")).strip()
-        output = str(t.get("output", "")).strip()
-        if node_id and output:
-            return f"sandy/node/{node_id}/{output}"
-    return None
-
-
 def _confirm_text(label: str, action: str, payload: str) -> str:
     """Sandy's natural confirmation for a successful command."""
     a = (action or "").strip().lower()
@@ -63,7 +49,12 @@ def _confirm_text(label: str, action: str, payload: str) -> str:
 
 
 def device_control(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
-    from app.features.device_store import command_payload, list_devices, set_state
+    from app.features.device_store import (
+        command_payload,
+        device_topic,
+        list_devices,
+        set_state,
+    )
 
     raw_name = str(args.get("device", "")).strip()
     device = _resolve_device(raw_name)
@@ -89,7 +80,7 @@ def device_control(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, An
                 "reply": f"ما ينفع هالأمر لـ {label}. المتاح: {allowed}."}
 
     payload = res["payload"]
-    topic = _device_topic(device)
+    topic = device_topic(device)
     if not topic:
         return {"handled": True,
                 "reply": f"{label} مش مربوط بمخرج صحيح — راجع إعداده بالتطبيق."}

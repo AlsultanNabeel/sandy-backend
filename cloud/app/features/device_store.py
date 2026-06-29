@@ -320,6 +320,21 @@ def learn_ir_button(name: str, button: str, code: str) -> Dict[str, Any]:
     return {"ok": True, "name": d["name"], "button": button}
 
 
+def device_topic(device: Dict[str, Any]) -> Optional[str]:
+    """The MQTT topic to actuate a device, derived from its transport. One source
+    of truth shared by the FC tool and the REST API."""
+    t = device.get("transport") or {}
+    kind = str(t.get("kind", "")).strip().lower()
+    if kind == "mqtt":
+        return str(t.get("topic", "")).strip() or None
+    if kind == "node":
+        node_id = str(t.get("node_id", "")).strip()
+        output = str(t.get("output", "")).strip()
+        if node_id and output:
+            return f"sandy/node/{node_id}/{output}"
+    return None
+
+
 def _valid_transport(transport: Any) -> bool:
     if not isinstance(transport, dict):
         return False
