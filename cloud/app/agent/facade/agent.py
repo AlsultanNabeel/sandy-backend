@@ -157,6 +157,10 @@ init_node_store(mongo_db)
 init_users_store(mongo_db)
 init_usage_store(mongo_db)
 
+# Inbound MQTT: listen for node heartbeats + learned IR codes (no-op if MQTT off).
+from app.integrations.mqtt_ingest import start_mqtt_ingest
+start_mqtt_ingest()
+
 
 class SandyAgent:
     def __init__(

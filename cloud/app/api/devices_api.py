@@ -193,6 +193,38 @@ def register_devices_api(app, mongo_db=None):
             return _bad(r.get("error", "rename_failed"), code=404)
         return jsonify(r), 200
 
+    @app.route("/api/nodes/<node_id>/ir/learn", methods=["POST"])
+    @require_auth
+    def api_nodes_ir_learn_start(claims, node_id):
+        """Put a node into IR learn mode: it captures the next remote press and
+        publishes the code, which the ingest listener stores. The app then polls
+        /ir/last and saves it to a device button."""
+        if _is_guest(claims):
+            return _forbidden()
+        from app.integrations.room_device import get_room_device_client
+
+        with active_user_profile_context(build_user_profile(claims)):
+            sent = False
+            try:
+                topic = f"sandy/node/{node_id.strip()}/ir"
+                sent = get_room_device_client().send_to_topic(topic, "learn")
+            except Exception:  # noqa: BLE001
+                sent = False
+        return jsonify({"ok": True, "sent": sent}), 200
+
+    @app.route("/api/nodes/<node_id>/ir/last", methods=["GET"])
+    @require_auth
+    def api_nodes_ir_last(claims, node_id):
+        if _is_guest(claims):
+            return _forbidden()
+        from app.features.node_store import get_last_ir
+
+        with active_user_profile_context(build_user_profile(claims)):
+            r = get_last_ir(node_id)
+        if not r.get("ok"):
+            return _bad(r.get("error", "not_found"), code=404)
+        return jsonify(r), 200
+
     @app.route("/api/nodes/<node_id>", methods=["DELETE"])
     @require_auth
     def api_nodes_unpair(claims, node_id):

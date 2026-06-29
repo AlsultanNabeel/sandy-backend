@@ -204,3 +204,56 @@ def set_node_status(code: str, online: bool = True,
     except Exception as e:  # noqa: BLE001
         logger.debug("[NodeStore] set_node_status failed: %s", e)
         return {"ok": False, "error": "exception"}
+
+
+# ── MQTT ingest (firmware speaks node_id in the topic; runs outside a tenant) ──
+
+def ingest_status(node_id: str, online: bool = True,
+                  capabilities: Optional[List[str]] = None,
+                  outputs: Optional[List[Dict[str, Any]]] = None,
+                  firmware_version: str = "") -> Dict[str, Any]:
+    """Heartbeat update keyed by node_id (the firmware publishes by node_id, not
+    code). Cross-tenant lookup on the raw collection; best-effort, never raises."""
+    if _mongo_db is None:
+        return {"ok": False, "error": "no_store"}
+    try:
+        update: Dict[str, Any] = {"online": bool(online), "last_seen": _now()}
+        if capabilities is not None:
+            update["capabilities"] = _clean_caps(capabilities)
+        if isinstance(outputs, list):
+            update["outputs"] = outputs
+        if firmware_version:
+            update["firmware_version"] = str(firmware_version)[:32]
+        r = _mongo_db[_COLL].update_one({"node_id": (node_id or "").strip()},
+                                        {"$set": update})
+        return {"ok": r.matched_count > 0}
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[NodeStore] ingest_status failed: %s", e)
+        return {"ok": False, "error": "exception"}
+
+
+def set_last_ir(node_id: str, code: str) -> Dict[str, Any]:
+    """Record the most recent IR code a node captured in learn mode, so the app can
+    poll for it and bind it to a button. Keyed by node_id, cross-tenant."""
+    if _mongo_db is None:
+        return {"ok": False, "error": "no_store"}
+    try:
+        r = _mongo_db[_COLL].update_one(
+            {"node_id": (node_id or "").strip()},
+            {"$set": {"last_ir": str(code).strip(), "last_ir_at": _now()}},
+        )
+        return {"ok": r.matched_count > 0}
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[NodeStore] set_last_ir failed: %s", e)
+        return {"ok": False, "error": "exception"}
+
+
+def get_last_ir(node_id: str) -> Dict[str, Any]:
+    """The last captured IR code for a node (tenant-scoped read for the app)."""
+    coll = _coll()
+    if coll is None:
+        return {"ok": False, "error": "no_store"}
+    d = coll.find_one({"node_id": (node_id or "").strip()})
+    if d is None:
+        return {"ok": False, "error": "not_found"}
+    return {"ok": True, "code": d.get("last_ir", ""), "at": _iso(d.get("last_ir_at"))}

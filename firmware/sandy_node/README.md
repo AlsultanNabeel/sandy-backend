@@ -22,15 +22,16 @@ handshake — enter the same code in the app.
 
 Payloads (the backend validates before publishing): see the header in the `.ino`.
 
-## What works now vs pending
-- **App/Sandy → node control works today**: the backend publishes the validated
-  command to the output topic; the node acts (relay/dimmer/servo/cover/buzzer, and
-  IR *send* of a stored code).
-- **Pending (backend MQTT ingest)**: the node *publishes* its heartbeat and the
-  captured IR code, but the backend has no MQTT subscriber yet, so `online`/
-  capabilities and **IR learn** won't reach the app until that ingest path is
-  added (`node_store.set_node_status` + an IR-learn capture route already exist on
-  the data side — they just need an MQTT listener to call them).
+## What works end to end
+- **App/Sandy → node control**: the backend publishes the validated command to the
+  output topic; the node acts (relay/dimmer/servo/cover/buzzer, IR send of a code).
+- **Node → backend ingest** (`integrations/mqtt_ingest.py`): a background subscriber
+  consumes `sandy/node/+/status` (heartbeat → online/capabilities) and
+  `sandy/node/+/ir/learned` (captured code → stored as the node's last IR).
+- **IR learn flow**: app calls `POST /api/nodes/<id>/ir/learn` → node captures the
+  next remote press → ingest stores it → app polls `GET /api/nodes/<id>/ir/last`
+  → app saves it to a device button via `POST /api/devices/<name>/ir-learn`.
+  (The iOS learn UI still needs to be wired to this poll — small follow-up.)
 
 ## Servo-presses-a-switch
 Wire the servo arm over the wall switch. In `OUTPUTS[]` set `kind:"servo"` with
