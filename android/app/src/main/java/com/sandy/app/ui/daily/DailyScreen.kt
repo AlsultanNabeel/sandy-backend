@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.sandy.app.data.ApiClient
 import com.sandy.app.i18n.Localization
+import com.sandy.app.ui.daily.focus.FocusScreen
 import com.sandy.app.ui.daily.habits.HabitsScreen
 import com.sandy.app.ui.daily.reminders.RemindersScreen
 import com.sandy.app.ui.daily.tasks.TasksScreen
@@ -48,13 +49,15 @@ fun DailyScreen(api: ApiClient) {
             SectionChip(0, section, "tasks.title") { section = 0 }
             SectionChip(1, section, "reminders.title") { section = 1 }
             SectionChip(2, section, "habits.title") { section = 2 }
+            SectionChip(3, section, "focus.title") { section = 3 }
         }
 
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when (section) {
                 0 -> TasksScreen(api)
                 1 -> RemindersScreen(api)
-                else -> HabitsScreen(api)
+                2 -> HabitsScreen(api)
+                else -> FocusScreen(api)
             }
         }
     }
