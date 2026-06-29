@@ -63,7 +63,7 @@ fun MainScaffold(session: SessionViewModel) {
                 MainTab.Home -> HomeScreen()
                 MainTab.Sandy -> SandyHubScreen()
                 MainTab.Daily -> DailyScreen(session.api)
-                MainTab.Life -> LifeScreen()
+                MainTab.Life -> LifeScreen(session.api)
             }
         }
         FloatingTabBar(
