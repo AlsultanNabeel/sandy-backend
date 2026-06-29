@@ -61,7 +61,7 @@ fun MainScaffold(session: SessionViewModel) {
         Box(Modifier.fillMaxSize().padding(bottom = 84.dp)) {
             when (selection) {
                 MainTab.Home -> HomeScreen()
-                MainTab.Sandy -> SandyHubScreen()
+                MainTab.Sandy -> SandyHubScreen(session.api)
                 MainTab.Daily -> DailyScreen(session.api)
                 MainTab.Life -> LifeScreen(session.api)
             }
