@@ -225,9 +225,11 @@ Objects شائعة: صورة, task/مهمة, تذكير/reminder, موعد/event
 - 'عندي اجتماع/موعد/لقاء/دكتور + وقت أو تاريخ' → reminder_create (ليس reminder_list)
 - 'شو عندي/مواعيدي/برنامجي' → reminder_list
 - 'ابحث/بحث/وين/شو آخر/أخبار/لوين وصل/شو صار' أو أي سؤال عن أحداث جارية أو معلومات تتغير مع الوقت → research_web (ليس chat_respond)
-- ⚠️ تمييز المشهد عن الجلسة (أخطاء شائعة — انتبه):
-  • 'شغّلي وضع/جو X (دراسة/فيلم/راحة...)' أو 'طفّي/نوّري' كأمر غرفة → scene_apply. ليس focus_stop.
-  • 'خلصت/وقّفي/ألغي الجلسة أو التركيز أو البومودورو' → focus_stop فقط. لا تستدعي focus_stop لأمر غرفة لمجرّد كلمة "طفّي".
+- ⚠️ جهاز مفرد مقابل مشهد مقابل جلسة (أخطاء شائعة — انتبه):
+  • أمر على **جهاز مفرد** ('ضوّي/نوري الضو'، 'طفّي المروحة'، 'افتح الستارة', 'المكيف ٢٢') → device_control. «ضوّي/نوري»=on، «طفّي»=off. device لازم من الأجهزة المسجّلة بالبرومبت؛ ما في جهاز مطابق → استدعِ device_control برضه (بترجّع القائمة وتسأل)، لا تخترع اسم.
+  • 'شغّلي وضع/جو X (دراسة/فيلم/راحة...)' = مشهد كامل متعدّد الأجهزة → scene_apply.
+  • 'خلصت/وقّفي/ألغي الجلسة أو التركيز أو البومودورو' → focus_stop فقط.
+  ❌ ممنوع scene_apply لأمر جهاز مفرد، وممنوع تطبيق مشهد عكس الطلب (إطفاء لمّا يطلب تشغيل).
 - لا يوجد طلب واضح → chat_respond
 - مزاج ضاغط (stressed/frustrated): persona_intensity=empathetic + persona_snippet كسؤال لطيف (مثل "بدك تاخد نفس؟") — لا توجيه مباشر
 - أسئلة فلسفية/وجودية/عن المعنى والحياة والكون → chat_respond + persona_intensity=empathetic
@@ -423,6 +425,16 @@ def route_with_fc(
         tool_catalog = _build_tool_catalog(declarations)
         system = _FC_SYSTEM_TEMPLATE.format(tool_catalog=tool_catalog)
         system += "\n\n" + address_instruction()
+        # Inject the live device list so device_control can only pick a real,
+        # registered device + its real actions (no inventing names/values).
+        try:
+            from app.agent.tools.schemas.device_tools import build_device_catalog
+
+            device_catalog = build_device_catalog()
+            if device_catalog:
+                system += "\n\n" + device_catalog
+        except Exception:  # noqa: BLE001 — never let device lookup break routing
+            pass
         _t_gemini = time.perf_counter()
         # Fast routing: when SANDY_ROUTER_MODEL is set, decide the route on a
         # lighter/faster model; the reply itself is generated downstream by the

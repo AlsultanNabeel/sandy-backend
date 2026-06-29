@@ -139,6 +139,7 @@ from app.features.reading_store import init_reading_store
 from app.features.focus_store import init_focus_store
 from app.features.scene_store import init_scene_store
 from app.features.device_store import init_device_store
+from app.features.node_store import init_node_store
 from app.features.users_store import init_users_store
 from app.features.usage_store import init_usage_store
 
@@ -152,6 +153,7 @@ init_reading_store(mongo_db)
 init_focus_store(mongo_db)
 init_scene_store(mongo_db)
 init_device_store(mongo_db)
+init_node_store(mongo_db)
 init_users_store(mongo_db)
 init_usage_store(mongo_db)
 
