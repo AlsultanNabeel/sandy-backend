@@ -31,7 +31,8 @@ Payloads (the backend validates before publishing): see the header in the `.ino`
 - **IR learn flow**: app calls `POST /api/nodes/<id>/ir/learn` → node captures the
   next remote press → ingest stores it → app polls `GET /api/nodes/<id>/ir/last`
   → app saves it to a device button via `POST /api/devices/<name>/ir-learn`.
-  (The iOS learn UI still needs to be wired to this poll — small follow-up.)
+  (Wired in the iOS Control surface: an IR device shows "علّم زر جديد" which runs
+  this trigger→poll→save flow.)
 
 ## Servo-presses-a-switch
 Wire the servo arm over the wall switch. In `OUTPUTS[]` set `kind:"servo"` with

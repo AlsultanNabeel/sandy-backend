@@ -216,6 +216,9 @@ private struct DeviceCard: View {
 
     /// قيمة شريط الإضاءة المحلّية (نحرّكها بسلاسة قبل ما نرسل عند الإفلات).
     @State private var sliderValue: Double = 0
+    /// تعلّم زر أشعة جديد (الاسم + فتح التنبيه).
+    @State private var showLearn = false
+    @State private var learnButtonName = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -385,23 +388,50 @@ private struct DeviceCard: View {
         }
     }
 
-    // ir — أزرار من meta.buttons (send + اسم الزر).
+    // ir — أزرار من meta.buttons (send + اسم الزر) + تعلّم زر جديد عبر الوحدة.
     @ViewBuilder
     private var irWidget: some View {
-        if device.irButtonNames.isEmpty {
-            Text(lang.s("control.ir.noButtons"))
-                .font(Theme.Typography.caption)
-                .foregroundColor(Theme.Colors.tertiaryText)
-        } else {
-            // شبكة أزرار مرنة.
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: Theme.Spacing.sm)],
-                      spacing: Theme.Spacing.sm) {
-                ForEach(device.irButtonNames, id: \.self) { name in
-                    controlButton(name, "dot.radiowaves.left.and.right") {
-                        store.control(api: state.api, device: device, action: "send", value: name)
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            if device.irButtonNames.isEmpty {
+                Text(lang.s("control.ir.noButtons"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: Theme.Spacing.sm)],
+                          spacing: Theme.Spacing.sm) {
+                    ForEach(device.irButtonNames, id: \.self) { name in
+                        controlButton(name, "dot.radiowaves.left.and.right") {
+                            store.control(api: state.api, device: device, action: "send", value: name)
+                        }
                     }
                 }
             }
+
+            if store.learning {
+                HStack(spacing: Theme.Spacing.sm) {
+                    ProgressView().tint(Theme.Colors.accent)
+                    Text(lang.s("control.ir.learning"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                }
+            } else if !store.demo {
+                Button { showLearn = true } label: {
+                    Label(lang.s("control.ir.learnNew"), systemImage: "plus.circle")
+                        .font(Theme.Typography.callout)
+                        .foregroundColor(Theme.Colors.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .alert(lang.s("control.ir.learnNew"), isPresented: $showLearn) {
+            TextField(lang.s("control.ir.learnPlaceholder"), text: $learnButtonName)
+            Button(lang.s("control.ir.learnStart")) {
+                store.learnIR(api: state.api, device: device, button: learnButtonName)
+                learnButtonName = ""
+            }
+            Button(lang.s("common.cancel"), role: .cancel) { learnButtonName = "" }
+        } message: {
+            Text(lang.s("control.ir.learnAlertHint"))
         }
     }
 
@@ -633,6 +663,42 @@ final class DevicesStore: ObservableObject {
                 notice = LanguageManager.shared.s("control.deleteFailed")
             }
             await load(api: api)
+        }
+    }
+
+    // ── تعلّم زر ريموت فعليًّا: ضع الوحدة بوضع التعلّم، استفتِ آخر كود التُقط،
+    //    ثم اربطه بالزر. يشتغل فقط لجهاز أشعة مربوط بوحدة. ──
+    @Published var learning = false
+
+    func learnIR(api: APIClient, device: DeviceItem, button: String) {
+        let name = button.trimmingCharacters(in: .whitespaces)
+        let nodeId = device.transport.nodeId
+        guard !name.isEmpty else { return }
+        guard !nodeId.isEmpty else {
+            notice = LanguageManager.shared.s("control.ir.needNode")
+            return
+        }
+        guard !learning else { return }
+        learning = true
+        Task { @MainActor in
+            defer { learning = false }
+            do {
+                let baseline = try? await api.nodeIrLast(nodeId: nodeId)
+                try await api.nodeIrLearnStart(nodeId: nodeId)
+                // استفتِ حتى عشر ثوانٍ عن كود جديد (الـ at تغيّر + كود غير فاضي).
+                for _ in 0..<10 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    let last = try await api.nodeIrLast(nodeId: nodeId)
+                    if !last.code.isEmpty && last.at != (baseline?.at ?? "") {
+                        try await api.irLearn(name: device.name, button: name, code: last.code)
+                        await load(api: api)
+                        return
+                    }
+                }
+                notice = LanguageManager.shared.s("control.ir.learnTimeout")
+            } catch {
+                notice = LanguageManager.shared.s("control.ir.learnFailed")
+            }
         }
     }
 }

@@ -846,4 +846,15 @@ final class APIClient {
     func unpairNode(nodeId: String) async throws {
         _ = try await request("/api/nodes/\(enc(nodeId))", method: "DELETE")
     }
+
+    // POST /api/nodes/<node_id>/ir/learn → تضع الوحدة بوضع التعلّم (تلتقط الضغطة القادمة)
+    func nodeIrLearnStart(nodeId: String) async throws {
+        _ = try await request("/api/nodes/\(enc(nodeId))/ir/learn", method: "POST", body: [:])
+    }
+
+    // GET /api/nodes/<node_id>/ir/last → {code, at} — آخر كود أشعة التقطته الوحدة
+    func nodeIrLast(nodeId: String) async throws -> (code: String, at: String) {
+        let r = try await request("/api/nodes/\(enc(nodeId))/ir/last")
+        return (r["code"] as? String ?? "", r["at"] as? String ?? "")
+    }
 }

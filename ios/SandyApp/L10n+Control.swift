@@ -92,6 +92,13 @@ enum L10nControl {
             "ir.learnPlaceholder":.text("اسم الزر (مثلاً: تشغيل)"),
             "ir.learnHint":      .text("اكتب اسم الزر وأنا أحفظه — التقاط الكود بيجي مع تحديث الوحدة لاحقًا."),
             "ir.noButtons":      .text("ما في أزرار محفوظة لسّا."),
+            "ir.learnNew":       .text("علّم زر جديد"),
+            "ir.learnStart":     .text("ابدأ"),
+            "ir.learning":       .text("وجّه الريموت للوحدة واضغط الزر…"),
+            "ir.learnAlertHint": .text("اكتب اسم الزر، وبعد ما تضغط ابدأ وجّه ريموتك للوحدة واضغط الزر المطلوب."),
+            "ir.needNode":       .text("اربط الجهاز بوحدة أول عشان أتعلّم الأشعة."),
+            "ir.learnTimeout":   .text("ما وصلتني إشارة — جرّب ثانية وقرّب الريموت."),
+            "ir.learnFailed":    .text("تعذّر التعلّم، جرّب كمان مرّة."),
 
             // ── Pair / rename / unpair node sheet ──
             "node.pair":         .text("ربط وحدة"),
@@ -191,6 +198,13 @@ enum L10nControl {
             "ir.learnPlaceholder":.text("Button name (e.g. Power)"),
             "ir.learnHint":      .text("Type the button name and I'll save it — code capture comes with a node update later."),
             "ir.noButtons":      .text("No saved buttons yet."),
+            "ir.learnNew":       .text("Learn a new button"),
+            "ir.learnStart":     .text("Start"),
+            "ir.learning":       .text("Point the remote at the node and press the button…"),
+            "ir.learnAlertHint": .text("Name the button, then after you tap Start point your remote at the node and press it."),
+            "ir.needNode":       .text("Bind this device to a node first so I can learn IR."),
+            "ir.learnTimeout":   .text("No signal received — try again, closer."),
+            "ir.learnFailed":    .text("Couldn't learn it, try again."),
 
             // ── Pair / rename / unpair node sheet ──
             "node.pair":         .text("Pair a node"),
