@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +34,6 @@ private enum class LifeSection(val titleKey: String) {
  * The hub owns the large title and the section chips; each sub-screen renders no
  * title of its own and starts with its add row.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LifeScreen(api: ApiClient) {
     var section by remember { mutableStateOf(LifeSection.Expenses) }
