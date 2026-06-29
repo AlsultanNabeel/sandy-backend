@@ -206,6 +206,90 @@ struct PlaceResult: Identifiable {
     let mapsUrl: String
 }
 
+// ── التحكّم بالبيت (الأجهزة + الوحدات) — تطابق /api/devices و /api/nodes ──────
+
+/// طريقة وصل الجهاز — إمّا موضوع MQTT خام، أو مخرج على وحدة ساندي مربوطة.
+/// نحفظ القيم الخام كما يرجّعها/يطلبها الباك-إند تحت مفتاح `transport`.
+struct DeviceTransport: Equatable {
+    let kind: String        // "mqtt" | "node"
+    let topic: String       // عند mqtt
+    let nodeId: String      // عند node
+    let output: String      // عند node
+
+    /// يبني خريطة الـ transport بالشكل اللي يتوقّعه الباك-إند (بلا حقول فاضية).
+    var asDict: [String: Any] {
+        switch kind {
+        case "node":
+            return ["kind": "node", "node_id": nodeId, "output": output]
+        default:
+            return ["kind": "mqtt", "topic": topic]
+        }
+    }
+
+    static func from(_ raw: [String: Any]) -> DeviceTransport {
+        let kind = raw["kind"] as? String ?? "mqtt"
+        return DeviceTransport(kind: kind,
+                               topic: raw["topic"] as? String ?? "",
+                               nodeId: raw["node_id"] as? String ?? "",
+                               output: raw["output"] as? String ?? "")
+    }
+}
+
+/// جهاز قابل للتحكّم — تطابق عناصر GET /api/devices.
+/// `controlType` ∈ switch | dimmer | enum | media | cover | ir.
+/// `meta` نحفظه كقاموس خام (values, min/max, buttons) ونقرأ منه بحذر.
+struct DeviceItem: Identifiable {
+    let name: String                 // المعرّف الثابت (id من الباك-إند)
+    var label: String
+    var room: String
+    var controlType: String
+    var transport: DeviceTransport
+    var meta: [String: Any]
+    var state: String                // الحالة الحالية (on/off/قيمة) إن توفّرت
+    var online: Bool
+    let lastSeen: String             // ISO أو فاضي
+
+    var id: String { name }
+
+    // ── قراءات meta المريحة (بحذر، مع قيم افتراضية) ──
+    /// خيارات نوع enum.
+    var enumValues: [String] {
+        (meta["values"] as? [String]) ?? []
+    }
+    /// حدّا الـ dimmer (افتراضي 0..100).
+    var dimmerMin: Int { (meta["min"] as? NSNumber)?.intValue ?? 0 }
+    var dimmerMax: Int {
+        let m = (meta["max"] as? NSNumber)?.intValue ?? 100
+        return m > dimmerMin ? m : 100
+    }
+    /// أزرار الريموت (اسم → كود).
+    var irButtons: [String: String] {
+        (meta["buttons"] as? [String: String]) ?? [:]
+    }
+    /// أسماء أزرار الريموت مرتّبة (للعرض الثابت).
+    var irButtonNames: [String] { irButtons.keys.sorted() }
+}
+
+/// وحدة ساندي مربوطة — تطابق عناصر GET /api/nodes.
+struct NodeItem: Identifiable {
+    let nodeId: String
+    var label: String
+    let capabilities: [String]
+    let outputs: [String]            // المخارج المتاحة (لربط الأجهزة عليها)
+    let firmwareVersion: String
+    var online: Bool
+    let lastSeen: String             // ISO أو فاضي
+    let pairedAt: String             // ISO أو فاضي
+
+    var id: String { nodeId }
+}
+
+/// نتيجة ربط وحدة — المعرّف + هل كانت مربوطة من قبل.
+struct PairResult {
+    let nodeId: String
+    let already: Bool
+}
+
 struct APIError: LocalizedError {
     let message: String
     var errorDescription: String? { message }

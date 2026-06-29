@@ -122,6 +122,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nGifts.ns:         L10nGifts.table,
     L10nShareContent.ns:  L10nShareContent.table,
     L10nWeather.ns:       L10nWeather.table,
+    L10nControl.ns:       L10nControl.table,
 ]
 
 // MARK: - translate (mirrors web translate(lang, key))

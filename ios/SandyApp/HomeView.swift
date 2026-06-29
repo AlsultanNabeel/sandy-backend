@@ -97,6 +97,12 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                     .reveal(order: 1, key: store.revealKey)
 
+                // التحكّم بالبيت — مدخل لسطح التحكّم بالأجهزة/الوحدات (نظام الإضافات).
+                // عنصر ثابت بلوحة المعلومات (مش ضمن العناصر القابلة لإعادة الترتيب).
+                NavigationLink { ControlView() } label: { homeControlCard }
+                    .buttonStyle(.plain)
+                    .reveal(order: 1, key: store.revealKey)
+
                 if store.loadFailed {
                     SandyNotice(lang.s("home.loadFailed"),
                                 kind: .gentleWarning)
@@ -259,6 +265,39 @@ struct HomeView: View {
         }
         .liquidGlassPress()
         .accessibilityLabel(quickAddTitle)
+    }
+
+    // MARK: - بطاقة التحكّم بالبيت (مدخل لسطح التحكّم)
+
+    /// بطاقة مدخل لشاشة التحكّم بالبيت — أيقونة + عنوان + وصف + chevron.
+    /// تتبع نمط HubRowCard/GlanceWideCard حتى تنسجم مع باقي اللوحة.
+    private var homeControlCard: some View {
+        SandyCard {
+            HStack(alignment: .center, spacing: Theme.Spacing.md) {
+                Image(systemName: "house.fill")
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(width: 38, height: 38)
+                    .background(Theme.Colors.accent.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text(lang.s("control.home.cardTitle"))
+                        .font(Theme.Typography.headline)
+                        .foregroundColor(Theme.Colors.primaryText)
+                    Text(lang.s("control.home.cardBody"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: Theme.Icon.sm, weight: .bold))
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     // عنوان/وصف الإضافة السريعة (نص inline ثنائي اللغة — تفادي مفتاح l10n جديد).
