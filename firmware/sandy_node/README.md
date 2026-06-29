@@ -7,13 +7,18 @@ the customer pairs it in the app and adds/controls devices with no flashing.
 1. Arduino IDE → install ESP32 board support.
 2. Library Manager: **PubSubClient**, **ArduinoJson**, **IRremoteESP8266**, **ESP32Servo**.
 3. Edit the `EDIT THESE PER NODE` block in [sandy_node.ino](sandy_node.ino):
-   WiFi, MQTT (`SANDY_MQTT_*`, same broker the backend uses), `NODE_CODE`, IR pins,
-   and the `OUTPUTS[]` map (id + kind + pin; angles for servo).
+   WiFi, MQTT (`SANDY_MQTT_*`, same broker the backend uses), IR pins, and the
+   `OUTPUTS[]` map (id + kind + pin; angles for servo). Leave `NODE_CODE_OVERRIDE`
+   empty — the **same firmware** flashes to every node.
 4. Upload to the ESP32.
 
-The node derives its MQTT id from `NODE_CODE` exactly like the backend
-(`node_store.code_to_node_id`: lowercase, keep `a-z0-9`). So pairing needs no
-handshake — enter the same code in the app.
+## Pairing code
+With `NODE_CODE_OVERRIDE` empty, each node auto-derives a **unique** code from its
+chip MAC: `sandy-xxxxxx`. It prints on the Serial monitor at first boot — read it
+and put it on the unit's sticker; the customer types it in the app to pair. The
+node derives its MQTT id from this code exactly like the backend
+(`node_store.code_to_node_id`: lowercase, keep `a-z0-9`), so pairing needs no
+handshake.
 
 ## MQTT contract
 - subscribe: `sandy/node/<node_id>/+`  (last segment = output id)

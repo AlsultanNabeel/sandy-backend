@@ -49,8 +49,11 @@ const int   MQTT_PORT = 8883;                          // SANDY_MQTT_PORT (TLS)
 const char* MQTT_USER = "YOUR_MQTT_USER";
 const char* MQTT_PASS = "YOUR_MQTT_PASS";
 
-// The code printed on this node's box. The customer enters it in the app to pair.
-const char* NODE_CODE = "ABCD-1234";
+// Pairing code. Leave EMPTY to auto-derive a unique code from the chip's MAC —
+// then the SAME firmware flashes to every node and each gets its own code. Read it
+// from the Serial monitor on first boot and print it on the box's sticker; the
+// customer types it in the app to pair. Set a value here only to force a code.
+const char* NODE_CODE_OVERRIDE = "";
 
 // IR pins (set when you wire the transmitter/receiver).
 const int IR_SEND_PIN = 4;
@@ -86,7 +89,8 @@ IRrecv irRecv(IR_RECV_PIN, 1024, 50, true);
 Servo servos[8];                 // one Servo per servo/cover output (lazy attach)
 bool irLearnMode = false;
 unsigned long lastHeartbeat = 0;
-String nodeId;                   // derived from NODE_CODE
+String nodeCode;                 // the pairing code (override or MAC-derived)
+String nodeId;                   // derived from nodeCode (matches the backend)
 
 // PWM (LEDC) channel allocation for dimmer outputs.
 int nextLedcChannel = 0;
@@ -255,12 +259,25 @@ void connectMqtt() {
 // ── Arduino lifecycle ───────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-  nodeId = deriveNodeId(NODE_CODE);
+
+  WiFi.mode(WIFI_STA);
+  // Pairing code: the override if set, else a unique "sandy-xxxxxx" from the MAC.
+  if (strlen(NODE_CODE_OVERRIDE) > 0) {
+    nodeCode = String(NODE_CODE_OVERRIDE);
+  } else {
+    String mac = WiFi.macAddress();         // AA:BB:CC:DD:EE:FF
+    mac.replace(":", "");
+    nodeCode = "sandy-" + mac.substring(6); // last 3 bytes -> 6 hex chars
+  }
+  nodeId = deriveNodeId(nodeCode.c_str());
+  Serial.println("=====================================");
+  Serial.println(" Sandy node pairing code: " + nodeCode);
+  Serial.println(" (enter this in the app to pair)");
+  Serial.println("=====================================");
 
   setupOutputs();
   irSend.begin();
 
-  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) { delay(300); }
 
