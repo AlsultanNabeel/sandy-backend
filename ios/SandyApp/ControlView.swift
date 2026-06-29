@@ -1049,12 +1049,18 @@ private struct DeviceSheet: View {
     /// معرّف ثابت من التسمية (يبقى مستقرًّا) — عند التعديل نُبقي معرّف الجهاز القائم.
     private func makeName() -> String {
         if let existing { return existing.name }
-        let base = trimmedLabel.lowercased()
-            .replacingOccurrences(of: " ", with: "-")
-        let cleaned = base.filter { $0.isLetter || $0.isNumber || $0 == "-" }
-        let slug = cleaned.isEmpty ? "device" : cleaned
+        // الباك إند يقبل [a-z0-9_] فقط: أي محرف غير لاتيني/رقمي (مسافة، عربي…)
+        // يصير "_"، ثم نطوي التكرار ونقصّ الأطراف. تسمية عربية تؤول إلى "device".
+        let mapped = String(trimmedLabel.lowercased().map {
+            ($0.isASCII && ($0.isLetter || $0.isNumber)) ? $0 : "_"
+        })
+        var slug = mapped
+        while slug.contains("__") { slug = slug.replacingOccurrences(of: "__", with: "_") }
+        slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        if slug.isEmpty { slug = "device" }
+        slug = String(slug.prefix(30))
         // لاحقة قصيرة تتفادى التصادم.
-        return "\(slug)-\(Int(Date().timeIntervalSince1970) % 100000)"
+        return "\(slug)_\(Int(Date().timeIntervalSince1970) % 100000)"
     }
 
     private func buildTransport() -> DeviceTransport {
