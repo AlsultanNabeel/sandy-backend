@@ -341,6 +341,10 @@ def _valid_transport(transport: Any) -> bool:
     kind = str(transport.get("kind", "")).strip().lower()
     if kind == "mqtt":
         return bool(str(transport.get("topic", "")).strip())
+    if kind == "node":
+        return bool(str(transport.get("node_id", "")).strip()) and bool(
+            str(transport.get("output", "")).strip()
+        )
     if kind == "wifi_api":
         return bool(str(transport.get("url", "")).strip())
     return False
