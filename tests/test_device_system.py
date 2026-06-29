@@ -220,6 +220,20 @@ def test_control_bad_action_refuses_without_actuating(db, mock_actuation):
     assert "topic" not in mock_actuation          # refused, nothing sent
 
 
+def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, monkeypatch):
+    """A scene action on a registered device goes through command_payload +
+    device_topic (the same validated path device_control uses), not the old vocab."""
+    monkeypatch.setattr("app.utils.user_profiles.is_owner_chat_id", lambda x: True)
+    from app.agent.tools.schemas.life_tools import actuate_scene_actions
+
+    with as_tenant("t1"):
+        _add_light()  # dimmer "living_light" -> room/cmd/light
+        sent = actuate_scene_actions([{"device": "living_light", "value": "on"}])
+    assert sent is True
+    assert mock_actuation["topic"] == "room/cmd/light"
+    assert mock_actuation["payload"] == "on"
+
+
 def test_device_catalog_lists_registered_devices_only(db):
     from app.agent.tools.schemas.device_tools import build_device_catalog
 

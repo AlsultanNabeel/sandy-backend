@@ -14,8 +14,6 @@ from app.api.auth_handlers import require_auth
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
-    current_user_id,
-    is_owner_chat_id,
 )
 
 _DEMO = {
@@ -523,14 +521,10 @@ def register_life_api(app, mongo_db=None):
             # الفيزيائية). غير المالك يحفظ/يعرض مشاهده هو بس بدون تحكّم بغرفة
             # المالك. انتقالي حتى تجي أدوات التحكّم لكل مستأجر (المرحلة الخامسة).
             online = False
-            if r.get("ok") and is_owner_chat_id(current_user_id()):
-                try:
-                    from app.integrations.room_device import get_room_device_client
+            if r.get("ok"):
+                from app.agent.tools.schemas.life_tools import actuate_scene_actions
 
-                    res = get_room_device_client().apply_actions(r.get("actions") or [])
-                    online = bool(res.get("available")) and bool(res.get("sent"))
-                except Exception:
-                    online = False
+                online = actuate_scene_actions(r.get("actions") or [])
         r["online"] = online
         return jsonify(r), (200 if r.get("ok") else 404)
 

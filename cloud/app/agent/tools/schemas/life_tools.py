@@ -447,25 +447,46 @@ def scene_apply(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     if not r.get("ok"):
         return {"handled": True, "reply": "ما عرفت هاد المشهد — جرّب: دراسة، قراءة، عصف ذهني، راحة، فيلم، نوم، صباح، إطفاء."}
 
-    # فعّل المشهد فعليًا على الروم-نود عبر MQTT — للمالك فقط (غرفته الفيزيائية).
-    # غير المالك يحفظ/يعرض مشاهده هو، بس ما يتحكّم بغرفة المالك. انتقالي حتى
-    # تجي أدوات التحكّم لكل مستأجر (المرحلة الخامسة).
-    sent_to_room = False
-    try:
-        from app.utils.user_profiles import current_user_id, is_owner_chat_id
-
-        if is_owner_chat_id(current_user_id()):
-            from app.integrations.room_device import get_room_device_client
-
-            sc = get_scene(name) or {}
-            actions = sc.get("actions") or []
-            res = get_room_device_client().apply_actions(actions)
-            sent_to_room = bool(res.get("available")) and bool(res.get("sent"))
-    except Exception:
-        pass
+    # فعّل المشهد فعليًا — للمالك فقط (غرفته الفيزيائية). كل فعل: لو جهازه مسجّل
+    # بالسجلّ نمرّ بنفس المسار المحقَّق (device_topic + command_payload)؛ وإلا نرجع
+    # للمسار القديم للروم-نود (انتقالي حتى تنتقل كل الأجهزة للسجلّ).
+    sc = get_scene(name) or {}
+    sent_to_room = actuate_scene_actions(sc.get("actions") or [])
 
     suffix = " وأرسلتها للغرفة 🏠" if sent_to_room else " (الغرفة مش متّصلة)"
     return {"handled": True, "reply": f"✨ جهّزت مشهد «{r['label']}»{suffix}."}
+
+
+def actuate_scene_actions(actions: list) -> bool:
+    """Apply a scene's actions to hardware (owner only). Registry devices go through
+    the validated path; unknown names fall back to the legacy room-node vocab.
+    Returns True if at least one action reached the broker."""
+    try:
+        from app.utils.user_profiles import current_user_id, is_owner_chat_id
+
+        if not is_owner_chat_id(current_user_id()):
+            return False
+        from app.features.device_store import command_payload, device_topic, get_device
+        from app.integrations.room_device import get_room_device_client
+
+        client = get_room_device_client()
+        sent_any = False
+        for a in actions:
+            dev_name = str(a.get("device", "")).strip().lower()
+            value = str(a.get("value", "")).strip()
+            if not dev_name or not value:
+                continue
+            device = get_device(dev_name)
+            if device is not None:  # registry device — validated path
+                res = command_payload(device, value)
+                topic = device_topic(device)
+                if res.get("ok") and topic and client.send_to_topic(topic, res["payload"]):
+                    sent_any = True
+            elif client.send(dev_name, value):  # legacy room-vocab fallback
+                sent_any = True
+        return sent_any
+    except Exception:  # noqa: BLE001 — actuation must never crash the turn
+        return False
 
 
 def scene_list(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:

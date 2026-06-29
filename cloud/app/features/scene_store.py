@@ -149,24 +149,34 @@ def _clean_actions(actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     An action is {device, value} plus two optional timing fields:
       for_min — run `value` now, then auto-revert after N minutes
-      then    — what to send on revert (default "off"); normalized per device
+      then    — what to send on revert (default "off")
     e.g. {device: music, value: on, for_min: 30}  → music on, off after 30 min.
+
+    `device` may be a **registry device name** (validated at apply time) or a legacy
+    room-vocab device (light/color/music/fan/curtain, normalized here for back-compat).
     """
     out: List[Dict[str, Any]] = []
     for a in actions or []:
         dev = str(a.get("device", "")).strip().lower()
-        payload = normalize_action(dev, a.get("value", ""))
-        if dev not in VALID_DEVICES or payload is None:
+        raw_val = str(a.get("value", "")).strip()
+        if not dev or not raw_val:
             continue
+        if dev in VALID_DEVICES:
+            payload = normalize_action(dev, raw_val)
+            if payload is None:
+                continue
+        else:
+            payload = raw_val  # registry device — validated against the registry on apply
         item: Dict[str, Any] = {"device": dev, "value": payload}
         try:
             for_min = int(a.get("for_min", 0) or 0)
         except (TypeError, ValueError):
             for_min = 0
         if for_min > 0:
-            then = normalize_action(dev, a.get("then", "off")) or "off"
+            raw_then = str(a.get("then", "off")).strip() or "off"
+            then = normalize_action(dev, raw_then) if dev in VALID_DEVICES else raw_then
             item["for_min"] = min(720, for_min)
-            item["then"] = then
+            item["then"] = then or "off"
         out.append(item)
     return out
 
