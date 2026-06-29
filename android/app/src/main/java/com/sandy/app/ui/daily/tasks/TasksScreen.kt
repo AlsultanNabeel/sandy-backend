@@ -39,8 +39,6 @@ import com.sandy.app.data.TaskItem
 import com.sandy.app.i18n.Localization
 import com.sandy.app.ui.components.SandyButton
 import com.sandy.app.ui.components.SandyTextField
-import com.sandy.app.ui.theme.IconSize
-import com.sandy.app.ui.theme.Radius
 import com.sandy.app.ui.theme.SandyColors
 import com.sandy.app.ui.theme.SandyType
 import com.sandy.app.ui.theme.Spacing
@@ -58,15 +56,11 @@ fun TasksScreen(api: ApiClient) {
     val vm: TasksViewModel = viewModel { TasksViewModel(api) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = Spacing.lg)) {
-        Text(
-            Localization.s("tasks.title"),
-            style = SandyType.largeTitle,
-            color = SandyColors.primaryText,
-            modifier = Modifier.padding(top = Spacing.lg, bottom = Spacing.md),
-        )
-
         // Active / completed filter.
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        Row(
+            modifier = Modifier.padding(top = Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
             FilterChip(
                 selected = !vm.showCompleted,
                 onClick = { vm.setShowCompleted(false) },
