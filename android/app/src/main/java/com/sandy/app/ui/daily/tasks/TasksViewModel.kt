@@ -49,7 +49,7 @@ class TasksViewModel(private val api: ApiClient) : ViewModel() {
         }
     }
 
-    fun setShowCompleted(value: Boolean) {
+    fun filterCompleted(value: Boolean) {
         if (value == showCompleted) return
         showCompleted = value
         load()

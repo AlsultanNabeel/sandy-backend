@@ -63,12 +63,12 @@ fun TasksScreen(api: ApiClient) {
         ) {
             FilterChip(
                 selected = !vm.showCompleted,
-                onClick = { vm.setShowCompleted(false) },
+                onClick = { vm.filterCompleted(false) },
                 label = { Text(Localization.s("tasks.active")) },
             )
             FilterChip(
                 selected = vm.showCompleted,
-                onClick = { vm.setShowCompleted(true) },
+                onClick = { vm.filterCompleted(true) },
                 label = { Text(Localization.s("tasks.completed")) },
             )
         }
