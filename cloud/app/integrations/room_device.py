@@ -151,6 +151,21 @@ class RoomDeviceClient:
             logger.warning("[room_device] publish failed (%s): %s", topic, e)
             return False
 
+    def send_to_topic(self, topic: str, payload: str) -> bool:
+        """Publish a pre-validated payload to an arbitrary device topic.
+
+        Used by the device registry, where each device carries its own MQTT topic
+        (the payload is already validated by device_store.command_payload). Gated on
+        ownership like every other actuation path — only the owner drives hardware.
+        """
+        if not _caller_owns_room():
+            logger.warning("[room_device] send_to_topic refused for non-owner caller")
+            return False
+        topic = (topic or "").strip()
+        if not topic:
+            return False
+        return self._publish(topic, str(payload))
+
     def send(self, device: str, value: str) -> bool:
         """Send one normalized command. Returns False if invalid, offline, or the
         caller doesn't own the room (only the owner may drive his hardware)."""
