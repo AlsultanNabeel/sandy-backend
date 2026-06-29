@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import secrets
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -73,6 +73,16 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256((code or "").strip().lower().encode("utf-8")).hexdigest()
 
 
+def code_to_node_id(code: str) -> str:
+    """Deterministic node_id from the printed pairing code: lowercase alphanumerics.
+
+    The node is flashed with its code and derives the SAME id, so it knows its MQTT
+    topic (sandy/node/<node_id>/...) before it is ever paired — no provisioning
+    handshake needed. The firmware must apply this identical transform.
+    """
+    return re.sub(r"[^a-z0-9]", "", (code or "").strip().lower())
+
+
 def _public(d: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "node_id": d.get("node_id", ""),
@@ -112,7 +122,10 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     if existing is not None:
         return {"ok": True, "node_id": existing["node_id"], "already": True}
 
-    node_id = "n_" + secrets.token_hex(6)
+    # node_id = the code itself (slugified) so the firmware's topic is deterministic.
+    node_id = code_to_node_id(code)
+    if not node_id:
+        return {"ok": False, "error": "bad_code"}
     coll.insert_one({
         "node_id": node_id,
         "label": (label or "Sandy node").strip(),
