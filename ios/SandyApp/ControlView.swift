@@ -374,17 +374,25 @@ private struct DeviceCard: View {
         if device.enumValues.isEmpty {
             EmptyView()
         } else {
-            // segmented لو الخيارات قليلة، وإلا قائمة منسدلة.
-            Picker("", selection: Binding(
+            // segmented لو الخيارات قليلة، وإلا قائمة منسدلة. نفصل الفرعين لأن
+            // نمطي الـ Picker نوعان مختلفان لا يتوحّدان بمعامل شرطي واحد.
+            let binding = Binding(
                 get: { device.state.isEmpty ? (device.enumValues.first ?? "") : device.state },
                 set: { store.control(api: state.api, device: device, action: "set", value: $0) }
-            )) {
-                ForEach(device.enumValues, id: \.self) { v in
-                    Text(v).tag(v)
+            )
+            if device.enumValues.count <= 3 {
+                Picker("", selection: binding) {
+                    ForEach(device.enumValues, id: \.self) { v in Text(v).tag(v) }
                 }
+                .pickerStyle(.segmented)
+                .disabled(store.demo)
+            } else {
+                Picker("", selection: binding) {
+                    ForEach(device.enumValues, id: \.self) { v in Text(v).tag(v) }
+                }
+                .pickerStyle(.menu)
+                .disabled(store.demo)
             }
-            .pickerStyle(device.enumValues.count <= 3 ? .segmented : .menu)
-            .disabled(store.demo)
         }
     }
 
