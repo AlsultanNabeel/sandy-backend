@@ -105,9 +105,18 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
         app_env: Runtime environment name ('dev' | 'prod').
         app:     Flask app instance, forwarded to Sentry for FlaskIntegration.
     """
-    from app.config import LOG_LEVEL
+    from app.config import LOG_LEVEL, validate_config
 
     configure_logging(LOG_LEVEL)
+
+    fatal, warnings = validate_config()
+    for msg in warnings:
+        logger.warning("[Bootstrap] config warning: %s", msg)
+    if fatal:
+        for msg in fatal:
+            logger.error("[Bootstrap] config error: %s", msg)
+        raise RuntimeError("Sandy cannot start: " + "; ".join(fatal))
+
     write_google_credentials()
     ensure_data_dirs()
 

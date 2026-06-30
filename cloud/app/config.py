@@ -25,6 +25,12 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 SANDY_USER_CHAT_ID = os.getenv("SANDY_USER_CHAT_ID", "").strip()
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
 
+# Auth secrets (read via os.getenv inside auth_handlers.py today; exposed here as
+# named constants so validate_config can check them. Track 2 migrates the call
+# sites to import these.)
+JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
+OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "").strip()
+
 # AI models
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o").strip()
@@ -115,3 +121,38 @@ SYSTEM_PROMPT_ADDITION: str = os.getenv(
 # The owner writes a short line about himself: "أنا ذكر، استخدمي صياغة المذكر دائماً"
 # or "أنا أنثى، استخدمي صياغة المؤنث", or leaves it empty.
 OWNER_ADDRESS_NOTE: str = os.getenv("SANDY_OWNER_ADDRESS_NOTE", "").strip()
+
+
+def validate_config() -> tuple[list[str], list[str]]:
+    """Check config at boot. Return (fatal, warnings) lists of messages.
+
+    Fatal = the app cannot function (no database, or no brain at all). The
+    caller (bootstrap) should log these and refuse to start. Warnings =
+    security gaps in a prod deploy that should be loud but are not fatal (local
+    dev may legitimately omit them). This function never logs or raises.
+    """
+    fatal: list[str] = []
+    warnings: list[str] = []
+
+    if not MONGODB_URI:
+        fatal.append("MONGODB_URI is not set (no database).")
+
+    has_azure = bool(
+        AZURE_OPENAI_ENDPOINT
+        and AZURE_OPENAI_API_KEY
+        and AZURE_OPENAI_CHAT_DEPLOYMENT
+    )
+    if not has_azure and not OPENAI_API_KEY:
+        fatal.append(
+            "No chat brain configured: set the Azure trio "
+            "(AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, "
+            "AZURE_OPENAI_CHAT_DEPLOYMENT) or OPENAI_API_KEY."
+        )
+
+    if APP_ENV == "prod":
+        if not JWT_SECRET:
+            warnings.append("JWT_SECRET is empty in prod (tokens are insecure).")
+        if not OWNER_PASSWORD:
+            warnings.append("OWNER_PASSWORD is empty in prod (owner login open).")
+
+    return fatal, warnings

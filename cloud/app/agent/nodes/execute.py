@@ -358,11 +358,8 @@ def execute_node(state: SandyState) -> SandyState:
                     create_chat_completion_fn=create_chat_completion_fn,
                 )
                 result = ToolDispatcher().dispatch(tool_name, tool_args, context)
-            except Exception as exc:
-                import traceback
-                logger.error(f"[execute_node] FC dispatch failed: {exc}")
-                print(f"[execute_node] ERROR tool={tool_name}: {type(exc).__name__}: {exc}", flush=True)
-                print(traceback.format_exc(), flush=True)
+            except Exception:
+                logger.exception("[execute_node] FC dispatch failed for tool=%s", tool_name)
                 result = {"handled": False, "reply": "حصل خطأ، حاول مرة ثانية."}
 
             handled = result.get("handled", False)

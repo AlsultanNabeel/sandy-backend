@@ -25,6 +25,12 @@ final class AppState: ObservableObject {
         let saved = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
         baseURL = saved
         api = APIClient(baseURL: saved)   // التوكن يتحمّل من الـKeychain جوّا APIClient
+        // 401 على طلب مُصادَق (جلسة منتهية أثناء الاستخدام) → ارجع لشاشة الدخول.
+        // القفزة لـ @MainActor ضرورية: request قد يعمل خارج الخيط الرئيسي وsignOut
+        // يلمس حالة @Published.
+        api.onUnauthorized = { [weak self] in
+            Task { @MainActor in self?.signOut() }
+        }
     }
 
     /// استعادة الجلسة عند الإقلاع: لو في توكن محفوظ نتحقّق منه ونوجّه؛ وإلا دخول.

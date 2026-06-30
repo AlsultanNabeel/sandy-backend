@@ -18,6 +18,8 @@ import time
 from datetime import timezone
 from typing import Any, Dict, List, Optional
 
+from app.utils.thread_pool import submit_background
+
 from app.agent.graph.state import SandyState, create_initial_state, merge_state
 from app.agent.nodes.soul import soul_node
 from app.agent.nodes.router import router_node, route_after_router
@@ -110,14 +112,35 @@ def _is_duplicate_memory(
         return False
 
 
+# Cached AzureOpenAI client for STM→LTM summarization. Built once (C4) instead of
+# per STM overflow; rebuilt only if the underlying credentials change.
+_summary_client = None
+_summary_client_key: Optional[tuple] = None
+
+
+def _get_summary_client():
+    """Return the cached summarization client, building it once on first use."""
+    global _summary_client, _summary_client_key
+    from app.config import (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
+                            AZURE_OPENAI_API_VERSION)
+    key = (AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_ENDPOINT)
+    if _summary_client is None or _summary_client_key != key:
+        from openai import AzureOpenAI
+        _summary_client = AzureOpenAI(
+            api_key=AZURE_OPENAI_API_KEY,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_version=AZURE_OPENAI_API_VERSION,
+        )
+        _summary_client_key = key
+    return _summary_client
+
+
 def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]) -> None:
     """Summarize overflowing STM messages and save to MongoDB LTM (dedup-protected)."""
     try:
         from datetime import datetime, timezone
-        from app.config import (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
-                                AZURE_OPENAI_API_VERSION, AZURE_OPENAI_CHAT_DEPLOYMENT)
+        from app.config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT
         from app.agent.facade.agent import mongo_db
-        from openai import AzureOpenAI
 
         if mongo_db is None:
             logger.warning("[graph] STM→LTM skipped: mongo_db is None (facade not initialized?)")
@@ -125,15 +148,13 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
         if not AZURE_OPENAI_API_KEY:
             return
 
+        from app.utils.user_profiles import resolve_display_name
+        user_label = resolve_display_name(user_id, default="المستخدم")
         turns = "\n".join(
-            f"{'نبيل' if m['role'] == 'user' else 'Sandy'}: {m['content']}"
+            f"{user_label if m['role'] == 'user' else 'Sandy'}: {m['content']}"
             for m in messages if m.get("content")
         )
-        client = AzureOpenAI(
-            api_key=AZURE_OPENAI_API_KEY,
-            azure_endpoint=AZURE_OPENAI_ENDPOINT,
-            api_version=AZURE_OPENAI_API_VERSION,
-        )
+        client = _get_summary_client()
         resp = client.chat.completions.create(
             model=AZURE_OPENAI_CHAT_DEPLOYMENT,
             messages=[
@@ -175,15 +196,22 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
 
 
 def _summarize_to_ltm_async(chat_id: str, user_id: str, messages: List[Dict[str, Any]]) -> None:
-    import threading
-    threading.Thread(
-        target=_summarize_to_ltm, args=(chat_id, user_id, messages), daemon=True
-    ).start()
+    submit_background(_summarize_to_ltm, chat_id, user_id, messages, _label="stm_summarize")
 
 
-def _stm_save(chat_id: str, user_id: str, user_msg: str, assistant_reply: str) -> None:
+def _stm_save(
+    chat_id: str,
+    user_id: str,
+    user_msg: str,
+    assistant_reply: str,
+    *,
+    prior_history: Optional[List[Dict[str, Any]]] = None,
+) -> None:
     """يحفظ رسالة المستخدم + رد ساندي في MongoDB. عملية قراءة + كتابة واحدة لكل
-    دور؛ الفائض عن MAX_STM_MESSAGES بينلخّص للذاكرة بعيدة المدى."""
+    دور؛ الفائض عن MAX_STM_MESSAGES بينلخّص للذاكرة بعيدة المدى.
+
+    لو ``prior_history`` معطى (نفس الدور حمّله من بداية الـ run) منستخدمه ومنوفّر
+    قراءة ثانية من MongoDB؛ غير هيك منقرأ بـ ``find_one`` كالمعتاد."""
     coll = _stm_collection()
     if coll is None:
         return
@@ -195,8 +223,11 @@ def _stm_save(chat_id: str, user_id: str, user_msg: str, assistant_reply: str) -
         now = datetime.now(timezone.utc)
         ts = now.isoformat()
 
-        doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
-        history: List[Dict[str, Any]] = (doc or {}).get("history", []) or []
+        if prior_history is not None:
+            history: List[Dict[str, Any]] = list(prior_history)
+        else:
+            doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
+            history = (doc or {}).get("history", []) or []
 
         history.append({"role": "user", "content": user_msg, "timestamp": ts})
         if assistant_reply:
@@ -220,55 +251,50 @@ _SIGNIFICANT_MOODS = {"stressed", "frustrated", "sad", "angry", "happy", "excite
 
 
 def _save_emotional_async(state: "SandyState", message: str) -> None:
-    """A1: يحفظ لحظة عاطفية + A3: يحفظ تصحيح أسلوبي — background thread."""
-    import threading
-
+    """A1: يحفظ لحظة عاطفية + A3: يحفظ تصحيح أسلوبي — على الـ pool المشترك."""
     mood = state.get("mood") or ""
     chat_id = state.get("chat_id", "")
     user_id = state.get("user_id", "")
 
     def _do_save():
-        try:
-            from app.agent.facade.agent import mongo_db
+        # submit_background logs any exception (C1); no inner broad swallow here.
+        from app.agent.facade.agent import mongo_db
 
-            if mongo_db is None:
-                logger.warning("[graph] LTM save skipped: mongo_db is None (facade not initialized?)")
-                return
+        if mongo_db is None:
+            logger.warning("[graph] LTM save skipped: mongo_db is None (facade not initialized?)")
+            return
 
-            # A1: ذاكرة عاطفية
-            if mood in _SIGNIFICANT_MOODS:
-                from app.agent.emotional_ltm import save_emotional_moment
-                save_emotional_moment(chat_id, user_id, mood, message[:200], mongo_db)
+        # A1: ذاكرة عاطفية
+        if mood in _SIGNIFICANT_MOODS:
+            from app.agent.emotional_ltm import save_emotional_moment
+            save_emotional_moment(chat_id, user_id, mood, message[:200], mongo_db)
 
-            # A3: تصحيح أسلوبي
-            from app.agent.style_memory import detect_style_correction, save_style_preference
-            if detect_style_correction(message):
-                save_style_preference(chat_id, user_id, message[:300], message, mongo_db)
+        # A3: تصحيح أسلوبي
+        from app.agent.style_memory import detect_style_correction, save_style_preference
+        if detect_style_correction(message):
+            save_style_preference(chat_id, user_id, message[:300], message, mongo_db)
 
-            # #1: تسجيل وقت النشاط للصحة
-            from app.agent.health_monitor import record_activity
-            record_activity(chat_id, user_id, mongo_db)
+        # #1: تسجيل وقت النشاط للصحة
+        from app.agent.health_monitor import record_activity
+        record_activity(chat_id, user_id, mongo_db)
 
-            # B2: استخراج وحفظ العلاقات (أخوي محمد، صديقتي سارة، ...)
-            from app.agent.relationships_memory import save_detected_relationships
-            save_detected_relationships(chat_id, user_id, message, mongo_db)
+        # B2: استخراج وحفظ العلاقات (أخوي محمد، صديقتي سارة، ...)
+        from app.agent.relationships_memory import save_detected_relationships
+        save_detected_relationships(chat_id, user_id, message, mongo_db)
 
-            # D2: استخراج وحفظ الدروس المستفادة
-            from app.agent.lessons_memory import save_detected_lesson
-            save_detected_lesson(chat_id, user_id, message, mongo_db)
+        # D2: استخراج وحفظ الدروس المستفادة
+        from app.agent.lessons_memory import save_detected_lesson
+        save_detected_lesson(chat_id, user_id, message, mongo_db)
 
-            # F7: استخراج وحفظ المعالم المهمة (تخرج، زواج، انتقال، ...)
-            from app.agent.shared_history import save_detected_milestone
-            save_detected_milestone(chat_id, user_id, message, mongo_db)
+        # F7: استخراج وحفظ المعالم المهمة (تخرج، زواج، انتقال، ...)
+        from app.agent.shared_history import save_detected_milestone
+        save_detected_milestone(chat_id, user_id, message, mongo_db)
 
-            # C2: تتبّع الاهتمامات (للمشاركة الذكية لاحقاً)
-            from app.agent.interests_tracker import track_message_interests
-            track_message_interests(chat_id, user_id, message, mongo_db)
+        # C2: تتبّع الاهتمامات (للمشاركة الذكية لاحقاً)
+        from app.agent.interests_tracker import track_message_interests
+        track_message_interests(chat_id, user_id, message, mongo_db)
 
-        except Exception as exc:
-            logger.debug(f"[graph] LTM save skipped: {exc}")
-
-    threading.Thread(target=_do_save, daemon=True).start()
+    submit_background(_do_save, _label="ltm_emotional")
 
 
 # التوجيه
@@ -392,7 +418,9 @@ def run_graph(
     # 5. احفظ في STM (MongoDB) — على نفس خيط المحادثة، فالفائض يتلخّص لذاكرة
     # بعيدة المدى مفهرسة بـ conversation_id (استرجاع دلالي لكل محادثة على حدة).
     final_reply = state.get("final_response") or ""
-    _stm_save(thread_id, user_id, message, final_reply)
+    # Reuse the history loaded in step 1 (same user, same turn) to skip a
+    # redundant MongoDB read inside the save.
+    _stm_save(thread_id, user_id, message, final_reply, prior_history=history)
 
     # 6. حدّث الحالة المشتركة عبر المنصات (background)
     _update_session_state_async(state)
@@ -402,22 +430,18 @@ def run_graph(
 
 def _update_session_state_async(state: "SandyState") -> None:
     """Update cross-session state in background after every SA turn."""
-    import threading
-
     chat_id = state.get("chat_id", "")
     mood = state.get("mood") or ""
     if not chat_id:
         return
 
     def _do():
-        try:
-            from app.agent.facade.agent import mongo_db
-            from app.agent.session_state import update_session_state
-            update_session_state(chat_id, mongo_db, mood=mood, platform="app")
-        except Exception:
-            pass
+        # submit_background logs any exception (C1); no inner broad swallow here.
+        from app.agent.facade.agent import mongo_db
+        from app.agent.session_state import update_session_state
+        update_session_state(chat_id, mongo_db, mood=mood, platform="app")
 
-    threading.Thread(target=_do, daemon=True).start()
+    submit_background(_do, _label="session_state")
 
 
 def get_final_reply(state: SandyState) -> Dict[str, Any]:

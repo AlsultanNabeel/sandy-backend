@@ -6,7 +6,10 @@ import hashlib
 import hmac
 import logging
 import os
+import threading
+import time
 import uuid
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -20,6 +23,26 @@ AUTH_TOKEN_HOURS = 24 * 7    # 7 days — any authenticated user (owner + signed
 GUEST_TOKEN_HOURS = 48        # 2 days — visitors
 _RATE_WINDOW = 900            # 15 minutes
 _RATE_MAX = 5                 # max login attempts per window
+
+# Per-process sliding-window store used as a fail-closed fallback when Mongo is
+# unavailable, so brute-force protection survives a DB outage.
+_ip_hits: dict[str, deque] = {}
+_ip_hits_lock = threading.Lock()
+
+
+def _memory_rate_check(ip: str) -> Tuple[bool, int]:
+    """Per-process sliding-window fallback used when Mongo is unavailable.
+    Bounds brute force even during a DB outage (fail-closed-ish)."""
+    now = time.monotonic()
+    cutoff = now - _RATE_WINDOW
+    with _ip_hits_lock:
+        dq = _ip_hits.setdefault(ip, deque())
+        while dq and dq[0] <= cutoff:
+            dq.popleft()
+        if len(dq) >= _RATE_MAX:
+            return False, 0
+        dq.append(now)
+        return True, max(0, _RATE_MAX - len(dq))
 
 
 def _jwt_secret() -> str:
@@ -122,14 +145,14 @@ def _auth_coll():
 
 
 def check_rate_limit(ip: str) -> Tuple[bool, int]:
-    """Returns (allowed, attempts_remaining). Fails open if Mongo unavailable."""
+    """Returns (allowed, attempts_remaining). Falls back to an in-memory
+    per-process limiter when Mongo is unavailable (fail-closed-ish)."""
     coll = _auth_coll()
     if coll is None:
         logger.warning(
-            "[auth] rate limit failing OPEN: store unavailable; "
-            "login brute-force protection is disabled"
+            "[auth] Mongo unavailable; using in-memory rate limit fallback"
         )
-        return True, _RATE_MAX
+        return _memory_rate_check(ip)
     try:
         from datetime import datetime, timezone, timedelta
         from pymongo import ReturnDocument
@@ -147,11 +170,10 @@ def check_rate_limit(ip: str) -> Tuple[bool, int]:
         return count <= _RATE_MAX, max(0, _RATE_MAX - count)
     except Exception as exc:
         logger.warning(
-            "[auth] rate limit failing OPEN: store error (%s); "
-            "login brute-force protection is disabled",
+            "[auth] Mongo unavailable; using in-memory rate limit fallback (%s)",
             exc,
         )
-        return True, _RATE_MAX
+        return _memory_rate_check(ip)
 
 
 def _areq_key(request_id: str) -> str:

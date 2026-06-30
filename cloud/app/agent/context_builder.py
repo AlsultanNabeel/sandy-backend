@@ -34,6 +34,8 @@ def build_memory_context(
             "session_state":      dict | None,  # cross-platform user state
         }
     """
+    from app.utils.user_profiles import resolve_display_name
+
     ctx: Dict[str, Any] = {
         "stm_turns": [] if durable_only else (stm_history or []),
         "persona_directives": None,
@@ -41,6 +43,9 @@ def build_memory_context(
         "semantic_facts": [],
         "session_state": None,
         "durable_only": durable_only,
+        # Resolved once here (where user_id + mongo_db exist) so the formatter
+        # can label user turns by the real name instead of a hardcoded one.
+        "user_display_name": resolve_display_name(user_id, mongo_db, default="المستخدم"),
     }
 
     if mongo_db is not None and chat_id:
@@ -96,8 +101,9 @@ def format_for_voice(ctx: Dict[str, Any]) -> str:
     turns = [] if durable_only else (ctx.get("stm_turns") or [])
     if turns:
         formatted: List[str] = []
+        user_label = ctx.get("user_display_name") or "المستخدم"
         for m in turns[-10:]:
-            role = "نبيل" if m.get("role") == "user" else "Sandy"
+            role = user_label if m.get("role") == "user" else "Sandy"
             content = m.get("content", "")
             if content:
                 formatted.append(f"{role}: {content}")

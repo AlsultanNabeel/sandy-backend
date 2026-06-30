@@ -28,7 +28,16 @@ def create_app(
     )
 
     app = Flask(__name__)
-    CORS(app, resources={r"/api/*": {"origins": os.getenv("FRONTEND_URL", "*")}})
+    from app.config import APP_ENV  # already defined in config.py
+    _frontend = os.getenv("FRONTEND_URL", "").strip()
+    if _frontend:
+        _cors_origins = _frontend
+    elif APP_ENV != "prod":
+        _cors_origins = "*"            # dev convenience only
+    else:
+        logger.error("[server] FRONTEND_URL not set in prod; CORS restricted to same-origin")
+        _cors_origins = []             # deny cross-origin rather than allow all
+    CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
 
     @app.route("/health", methods=["GET"])
     def health():

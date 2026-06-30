@@ -290,8 +290,11 @@ struct PairResult {
     let already: Bool
 }
 
+enum APIErrorKind { case connection, unauthorized, server, decoding, unknown }
+
 struct APIError: LocalizedError {
     let message: String
+    var kind: APIErrorKind = .unknown          // default keeps old initializers working
     var errorDescription: String? { message }
 }
 

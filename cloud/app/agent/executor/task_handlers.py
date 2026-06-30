@@ -29,6 +29,38 @@ from app.agent.executor.helpers import _has_visible_task_note
 from app.utils.user_profiles import active_profile_is_guest
 
 
+def _format_task_choices(choices) -> str:
+    """'المهمة 1: ...\\nالمهمة 2: ...' — the shared enumerated choice list."""
+    return "\n".join(
+        f"المهمة {i}: {t.get('text', '')}" for i, t in enumerate(choices, 1)
+    )
+
+
+def _ambiguous_choice_reply(
+    result, *, target_action, session, session_file, mongo_db, save_session_fn,
+) -> str:
+    """Build the shared 'multiple matches → pick one' pending + reply.
+    Returns the reply text (identical wording to the previous inline copies)."""
+    choices = [
+        {"id": t.get("id", ""), "text": t.get("text", "")}
+        for t in result.get("matches", [])[:5]
+        if t.get("id")
+    ]
+    session["pending_action"] = create_pending_action({
+        "type": "task",
+        "action": "clarify_task_choice",
+        "target_action": target_action,
+        "choices": choices,
+        "confirmation_status": "clarification",
+    })
+    save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
+    return (
+        "لقيت أكثر من مهمة مطابقة:\n"
+        + _format_task_choices(choices)
+        + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
+    )
+
+
 def _handle_list(
     task_action: str,
     *,
@@ -95,12 +127,9 @@ def _handle_rename(
             }
         )
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
         reply = (
             "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(choices)
             + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
         )
     elif not new_text:
@@ -230,13 +259,9 @@ def _handle_update_due_date(
         )
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
 
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
-
         reply = (
             "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(choices)
             + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
         )
 
@@ -367,12 +392,9 @@ def _handle_append_note(
             }
         )
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
         reply = (
             "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(choices)
             + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
         )
     elif not note_text:
@@ -440,12 +462,9 @@ def _handle_replace_note(
             }
         )
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
         reply = (
             "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(choices)
             + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
         )
     elif not note_text:
@@ -533,13 +552,9 @@ def _handle_update_due_time(
         )
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
 
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
-
         reply = (
             "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(choices)
             + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
         )
 
@@ -699,12 +714,9 @@ def _handle_uncomplete_multi(
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهام ضمن المهام المكتملة. اعرض المهام المكتملة مرة ثانية واختر مهام موجودة."
     elif status == "ambiguous":
-        lines = []
-        for i, task in enumerate(result.get("matches", [])[:5], 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
         reply = (
             "لقيت أكثر من مهمة مكتملة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(result.get("matches", [])[:5])
             + "\nاكتبها بشكل أوضح."
         )
     elif status == "single":
@@ -763,12 +775,9 @@ def _handle_uncomplete(
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام المكتملة. اعرض المهام المكتملة مرة ثانية واختر مهمة موجودة."
     elif status == "ambiguous":
-        lines = []
-        for i, task in enumerate(result.get("matches", [])[:5], 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
         reply = (
             "لقيت أكثر من مهمة مكتملة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(result.get("matches", [])[:5])
             + "\nاكتب اسم المهمة بشكل أوضح."
         )
     elif task_obj:
@@ -825,28 +834,13 @@ def _handle_complete(
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
         reply = "أي مهمة بدك أعلّمها كمكتملة؟ احكي اسمها أو اطلب قائمة المهام."
     elif status == "ambiguous":
-        choices = [
-            {"id": task.get("id", ""), "text": task.get("text", "")}
-            for task in result.get("matches", [])[:5]
-            if task.get("id")
-        ]
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "clarify_task_choice",
-                "target_action": "complete_one",
-                "choices": choices,
-                "confirmation_status": "clarification",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
-        reply = (
-            "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
-            + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
+        reply = _ambiguous_choice_reply(
+            result,
+            target_action="complete_one",
+            session=session,
+            session_file=session_file,
+            mongo_db=mongo_db,
+            save_session_fn=save_session_fn,
         )
     elif status == "single":
         task = tasks[0] if tasks else {}
@@ -913,28 +907,13 @@ def _handle_complete_multi(
         else:
             reply = "حددت مهمة واحدة فقط، بس ما قدرت أجيب معرف المهمة."
     elif status == "ambiguous":
-        choices = [
-            {"id": task.get("id", ""), "text": task.get("text", "")}
-            for task in result.get("matches", [])[:5]
-            if task.get("id")
-        ]
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "clarify_task_choice",
-                "target_action": "complete_one",
-                "choices": choices,
-                "confirmation_status": "clarification",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
-        reply = (
-            "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
-            + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
+        reply = _ambiguous_choice_reply(
+            result,
+            target_action="complete_one",
+            session=session,
+            session_file=session_file,
+            mongo_db=mongo_db,
+            save_session_fn=save_session_fn,
         )
     elif status == "partial":
         missing_refs = result.get("missing_references", [])
@@ -1006,28 +985,13 @@ def _handle_delete(
     if status in {"empty", "missing", "not_found"}:
         reply = "أي مهمة بدك أحذف بالضبط؟ اطلب قائمة المهام أو اكتب اسمها."
     elif status == "ambiguous":
-        choices = [
-            {"id": task.get("id", ""), "text": task.get("text", "")}
-            for task in result.get("matches", [])[:5]
-            if task.get("id")
-        ]
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "clarify_task_choice",
-                "target_action": "delete_one",
-                "choices": choices,
-                "confirmation_status": "clarification",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        lines = []
-        for i, task in enumerate(choices, 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
-        reply = (
-            "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
-            + "\nاختار واحدة: الأولى، الثانية، أو رقم المهمة."
+        reply = _ambiguous_choice_reply(
+            result,
+            target_action="delete_one",
+            session=session,
+            session_file=session_file,
+            mongo_db=mongo_db,
+            save_session_fn=save_session_fn,
         )
     elif task_obj:
         task_id = task_obj.get("id", "")
@@ -1120,12 +1084,9 @@ def _handle_delete_multi(
     elif status == "single":
         reply = "حددت مهمة واحدة فقط. إذا بدك حذف مهمة واحدة استخدم أمر حذف عادي، أو اذكر أكثر من مهمة."
     elif status == "ambiguous":
-        lines = []
-        for i, task in enumerate(result.get("matches", [])[:5], 1):
-            lines.append(f"المهمة {i}: {task.get('text', '')}")
         reply = (
             "لقيت أكثر من مهمة مطابقة:\n"
-            + "\n".join(lines)
+            + _format_task_choices(result.get("matches", [])[:5])
             + "\nاكتب الأسماء بشكل أوضح."
         )
     elif tasks:

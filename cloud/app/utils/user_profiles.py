@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -10,6 +11,8 @@ from contextlib import contextmanager
 from typing import Any, Dict, Optional, Tuple
 
 from app.utils.files import read_json_file, write_json_file
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_id_set(raw: str) -> set:
@@ -367,3 +370,25 @@ def build_user_profile(claims: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "tone": "casual",
         "permissions": "chat-only" if is_guest else "all",
     }
+
+
+def resolve_display_name(user_id: str | None = None, mongo_db=None, default: str = "") -> str:
+    """Best-effort display name for the active/given user.
+
+    Order: onboarding preferred_name (sandy_users) → default.
+    Crash-safe: returns `default` if the store is unavailable or unset.
+    """
+    if not user_id:
+        user_id = current_user_id()
+    if not user_id:
+        return default
+    try:
+        from app.features import users_store
+
+        user = users_store.get_user(user_id)
+        name = str((user or {}).get("onboarding", {}).get("preferred_name", "") or "").strip()
+        return name or default
+    except Exception as exc:
+        # A missing name is expected for guests — log quietly and degrade (C1).
+        logger.debug("[user_profiles] resolve_display_name failed: %s", exc)
+        return default

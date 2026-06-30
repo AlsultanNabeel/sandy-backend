@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import os
@@ -64,13 +65,29 @@ def _parse_iso(value: str) -> Optional[datetime]:
         return None
 
 
+# Split on whitespace and common punctuation so a keyword only matches a whole
+# token, not a substring buried inside an unrelated word.
+_TOKEN_SPLIT_RE = re.compile(r"[\s،,.!؟?؛;:\"'()\[\]/\\-]+")
+
+
+def _keyword_hit(
+    normalized_tokens: List[str], normalized_text: str, keyword: str
+) -> bool:
+    """A keyword matches if it is a whole token, or (for multi-word keywords like
+    "موعد تسليم") appears as a contiguous phrase in the text."""
+    if " " in keyword:
+        return keyword in normalized_text
+    return keyword in normalized_tokens
+
+
 def _detect_category(text: str, *, default: str = "") -> str:
     normalized = str(text or "").strip().lower()
     if not normalized:
         return default
 
+    tokens = [t for t in _TOKEN_SPLIT_RE.split(normalized) if t]
     for category, keywords in _CATEGORY_KEYWORDS.items():
-        if any(word in normalized for word in keywords):
+        if any(_keyword_hit(tokens, normalized, word) for word in keywords):
             return category
     return default
 
@@ -217,8 +234,9 @@ def _format_alert(
     conflict_title: str,
     free_slots: List[Tuple[datetime, datetime]],
 ) -> str:
+    prefix = f"{owner_name}، " if owner_name else ""
     base = (
-        f"{owner_name}، عندك {conflict_title} {day_name} "
+        f"{prefix}عندك {conflict_title} {day_name} "
         f"ولقيت {new_title} نفس اليوم — بعدّل؟"
     )
     if not free_slots:
@@ -237,7 +255,7 @@ def check_conflicts(
     calendar_events: List[Dict[str, Any]],
     exclude_task_id: str = "",
     exclude_event_id: str = "",
-    owner_name: str = "نبيل",
+    owner_name: str = "",
 ) -> Dict[str, Any]:
     start = _parse_iso(str(new_item.get("start_iso", "") or ""))
     if start is None:
@@ -338,8 +356,10 @@ def run_conflict_check_after_task_add(
 
     try:
         from app.features.tasks_store import load_tasks
+        from app.utils.user_profiles import resolve_display_name
 
         tasks = load_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
+        owner_name = resolve_display_name(mongo_db=mongo_db, default="")
         # Calendar events are gone (no external calendar) — conflicts are
         # task-vs-task on the same day now.
         result = check_conflicts(
@@ -353,6 +373,7 @@ def run_conflict_check_after_task_add(
             tasks=tasks,
             calendar_events=[],
             exclude_task_id=task_id,
+            owner_name=owner_name,
         )
         suggestions = [
             {"start_iso": s[0].isoformat(), "end_iso": s[1].isoformat()}

@@ -450,10 +450,15 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     """Read Gemini Live responses, relay audio to the device, handle tool calls."""
     from google.genai import types
 
+    from app.agent.guards import DESTRUCTIVE_TOOLS
+
     loop = asyncio.get_event_loop()
     gate_on = _speaker_gate_enabled()
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
+    # Destructive tools already prompted for spoken confirmation this session;
+    # the model's re-call after the user confirms is allowed through.
+    awaited_confirm: set = set()
 
     async def _handle(response) -> bool:
         """Process one Live response; return True to stop the session.
@@ -534,6 +539,22 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                             )},
                         ))
                         continue
+                # Destructive op → require a spoken confirmation first, regardless
+                # of the speaker gate (mirrors the Track 1.2 text guard). The model
+                # asks for confirmation and only re-calls the tool once the user
+                # confirms; that second call is let through. If the speaker gate
+                # already refused above we've continued, so no double-prompt.
+                if fc.name in DESTRUCTIVE_TOOLS and fc.name not in awaited_confirm:
+                    awaited_confirm.add(fc.name)
+                    fn_responses.append(types.FunctionResponse(
+                        id=fc.id, name=fc.name,
+                        response={"output": (
+                            "عملية تحتاج تأكيد صوتي. لا تنفّذيها الآن — "
+                            "اسألي المستخدم تأكيد صريح بصوته، ونفّذي فقط إذا أكّد."
+                        )},
+                    ))
+                    continue
+                awaited_confirm.discard(fc.name)
                 result = await loop.run_in_executor(
                     None, _dispatch_tool, dispatcher, fc.name, dict(fc.args or {})
                 )
@@ -643,6 +664,13 @@ def _load_stm_context() -> str:
     return ""
 
 
+# Tiny in-process cache for the durable session-start seed. The seed is built
+# with durable_only=True (stable facts only), so reusing it for a few seconds
+# makes reconnects/rapid re-opens effectively instant without staleness risk.
+_VOICE_CTX_TTL_S = float(os.getenv("SANDY_VOICE_CTX_TTL_S", "60"))
+_voice_ctx_cache: dict[str, tuple[float, str]] = {}  # chat_id -> (built_at, text)
+
+
 def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[str]:
     """Shared rich-context builder for the voice helpers.
 
@@ -654,6 +682,15 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
     chat_id = _stm_chat_id()
     if not chat_id:
         return None
+
+    # Only the session-start seed (empty message, no semantic) is cacheable —
+    # per-turn semantic context is query-specific and must never be reused.
+    cacheable = message == "" and not include_semantic
+    if cacheable:
+        cached = _voice_ctx_cache.get(chat_id)
+        if cached and (time.monotonic() - cached[0]) < _VOICE_CTX_TTL_S:
+            return cached[1]
+
     try:
         from app.agent.context_builder import build_memory_context, format_for_voice
         from app.agent.facade.agent import mongo_db
@@ -670,7 +707,10 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
             # native-audio model, which can't be told to ignore them.
             durable_only=True,
         )
-        return format_for_voice(ctx)
+        text = format_for_voice(ctx)
+        if cacheable:
+            _voice_ctx_cache[chat_id] = (time.monotonic(), text)
+        return text
     except Exception as exc:
         logger.debug("[voice_ws] context_builder skipped: %s", exc)
         return None
@@ -737,16 +777,10 @@ def _build_system_instruction() -> str:
         "ردّي فقط على آخر شي بيقوله المستخدم بصوته في هالجلسة."
     )
 
-    # تمييز أوامر بتتشابه كلماتها (نفس اللخبطة اللي بالراوتر النصّي — لازم تكون
-    # هون كمان لأنّ صوت ساندي دماغ مستقل بتعليماته الخاصة).
-    parts.append(
-        "\n"
-        "تمييز الأوامر (مهم — نفّذي مباشرة بدون لخبطة):\n"
-        "• 'شغّلي وضع/جو X' أو 'طفّي/نوّري' كأمر غرفة → scene_apply. "
-        "مش إنهاء جلسة تركيز.\n"
-        "• 'خلصت/وقّفي/ألغي الجلسة أو التركيز أو البومودورو' → focus_stop فقط، "
-        "مش لأمر غرفة لمجرّد كلمة 'طفّي'."
-    )
+    # تمييز أوامر بتتشابه كلماتها — نفس قواعد الراوتر النصّي، مصدر واحد مشترك
+    # (command_rules) عشان دماغ الصوت ودماغ النص ما يختلفوا بنفس الأمر.
+    from app.agent.command_rules import DISAMBIGUATION_RULES_AR
+    parts.append("\n" + DISAMBIGUATION_RULES_AR)
 
     # ردّان مقصودان لكنهما مضبوطان: جملة قصيرة جداً قبل التنفيذ (إقرار فوري يحسّسه
     # إنها سمعت — زي «تمام» بسيري)، وجملة قصيرة بعد ما ترجع نتيجة الأداة (تأكيد).

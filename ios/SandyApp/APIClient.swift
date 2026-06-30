@@ -9,6 +9,9 @@ final class APIClient {
         didSet { Keychain.saveToken(token) }
     }
 
+    /// Called when an authenticated request gets a 401, so the app can route to login.
+    var onUnauthorized: (() -> Void)?
+
     init(baseURL: String) {
         self.baseURL = baseURL
         // نحمّل التوكن المحفوظ (لو في) — التعيين بالـinit ما يشغّل didSet فما يعيد الحفظ.
@@ -24,14 +27,31 @@ final class APIClient {
         guard let url = URL(string: baseURL + path) else { throw APIError(message: "عنوان غير صالح") }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        req.timeoutInterval = 30
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if auth, let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         if let body { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await URLSession.shared.data(for: req)
+        } catch is URLError {
+            // Offline, timed out, or connection dropped — all surface as one
+            // clear "check your internet" error the UI can act on.
+            throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
+        }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        if code >= 400 { throw APIError(message: (json["error"] as? String) ?? "خطأ \(code)") }
+        if code == 401 {
+            // Only an authenticated request hitting 401 means a dead session;
+            // a 401 from a login attempt is just wrong credentials.
+            if auth { onUnauthorized?() }
+            throw APIError(message: "انتهت الجلسة، سجّل دخولك من جديد.", kind: .unauthorized)
+        }
+        if code >= 400 {
+            throw APIError(message: (json["error"] as? String) ?? "خطأ \(code)", kind: .server)
+        }
         return json
     }
 

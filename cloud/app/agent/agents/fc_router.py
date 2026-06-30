@@ -17,7 +17,11 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
+from app.agent.command_rules import DISAMBIGUATION_RULES_AR
 from app.agent.graph.state import SandyState, merge_state
+# Destructive-tool set lives in app.agent.guards so the text router and the voice
+# path (Track 4.2) share one definition (see Track 1.2).
+from app.agent.guards import DESTRUCTIVE_TOOLS as _DESTRUCTIVE_TOOLS
 from app.integrations.azure_intent_client import AzureIntentClient
 from app.utils.user_profiles import address_instruction
 
@@ -68,6 +72,10 @@ _META_TOOL_NAMES = frozenset({
     "pending_reject",
     "pending_select",
 })
+
+# A destructive pick below this confidence is downgraded to a clarifying
+# question instead of being executed (see Track 1.2).
+_DESTRUCTIVE_CONFIDENCE_FLOOR = 0.55
 
 _FC_DEFAULT: Dict[str, Any] = {
     "function_call": {"name": "chat_respond", "args": {"type": "general"}},
@@ -169,8 +177,6 @@ Objects شائعة: صورة, task/مهمة, تذكير/reminder, موعد/event
 - ❌ ممنوع تستخدم STM لاستنتاج "المستخدم يبي يكمل الطلب السابق" من تحية فقط
 
 # 🎯 حالات الالتباس الشائعة (cross-domain)
-- "غيّري الموعد" (object=موعد)         → reminder_update (ليس image_edit)
-- "غيّري الصورة" (object=صورة)         → image_edit (ليس reminder_update)
 - "احذفي المهمة"                       → task_delete (ليس reminder_delete)
 - "احذفي الموعد"                       → reminder_delete (ليس task_delete)
 - "اعملي صورة" (object=صورة)           → image_generate (ليس chat)
@@ -225,11 +231,7 @@ Objects شائعة: صورة, task/مهمة, تذكير/reminder, موعد/event
 - 'عندي اجتماع/موعد/لقاء/دكتور + وقت أو تاريخ' → reminder_create (ليس reminder_list)
 - 'شو عندي/مواعيدي/برنامجي' → reminder_list
 - 'ابحث/بحث/وين/شو آخر/أخبار/لوين وصل/شو صار' أو أي سؤال عن أحداث جارية أو معلومات تتغير مع الوقت → research_web (ليس chat_respond)
-- ⚠️ جهاز مفرد مقابل مشهد مقابل جلسة (أخطاء شائعة — انتبه):
-  • أمر على **جهاز مفرد** ('ضوّي/نوري الضو'، 'طفّي المروحة'، 'افتح الستارة', 'المكيف ٢٢') → device_control. «ضوّي/نوري»=on، «طفّي»=off. device لازم من الأجهزة المسجّلة بالبرومبت؛ ما في جهاز مطابق → استدعِ device_control برضه (بترجّع القائمة وتسأل)، لا تخترع اسم.
-  • 'شغّلي وضع/جو X (دراسة/فيلم/راحة...)' = مشهد كامل متعدّد الأجهزة → scene_apply.
-  • 'خلصت/وقّفي/ألغي الجلسة أو التركيز أو البومودورو' → focus_stop فقط.
-  ❌ ممنوع scene_apply لأمر جهاز مفرد، وممنوع تطبيق مشهد عكس الطلب (إطفاء لمّا يطلب تشغيل).
+{disambiguation_rules}
 - لا يوجد طلب واضح → chat_respond
 - مزاج ضاغط (stressed/frustrated): persona_intensity=empathetic + persona_snippet كسؤال لطيف (مثل "بدك تاخد نفس؟") — لا توجيه مباشر
 - أسئلة فلسفية/وجودية/عن المعنى والحياة والكون → chat_respond + persona_intensity=empathetic
@@ -423,7 +425,10 @@ def route_with_fc(
         client = AzureIntentClient()
         user_prompt = _build_user_prompt(state)
         tool_catalog = _build_tool_catalog(declarations)
-        system = _FC_SYSTEM_TEMPLATE.format(tool_catalog=tool_catalog)
+        system = _FC_SYSTEM_TEMPLATE.format(
+            tool_catalog=tool_catalog,
+            disambiguation_rules=DISAMBIGUATION_RULES_AR,
+        )
         system += "\n\n" + address_instruction()
         # Inject the live device list so device_control can only pick a real,
         # registered device + its real actions (no inventing names/values).
@@ -448,6 +453,33 @@ def route_with_fc(
             )
         logger.info(f"[fc_router] gemini_routing: {(time.perf_counter()-_t_gemini)*1000:.0f}ms")
         parsed = _parse_fc_response(raw)
+
+        # Deterministic backstop: the model must never route to a tool that does
+        # not exist. Validate every picked name against the live registry + the
+        # routing-only meta-tools; an invented name falls back to chat_respond
+        # (always safe — it just talks). See Track 1.1.
+        from app.agent.tools.registry import get_registry
+
+        valid_names = set(get_registry().all_names()) | _META_TOOL_NAMES
+
+        multi_fcs = parsed.get("function_calls")
+        if multi_fcs:
+            kept = [f for f in multi_fcs if f.get("name") in valid_names]
+            if len(kept) >= 2:
+                parsed["function_calls"] = kept
+                parsed["function_call"] = kept[0]
+            else:
+                # Fewer than two valid tools remain — drop the multi path and
+                # keep the (about-to-be-validated) single function_call.
+                parsed["function_calls"] = None
+
+        single_name = parsed["function_call"]["name"]
+        if single_name not in valid_names:
+            logger.warning(
+                "[fc_router] unknown tool from model: %s → chat_respond", single_name
+            )
+            parsed["function_call"] = {"name": "chat_respond", "args": {"type": "general"}}
+
         fc = parsed["function_call"]
         fn_name = fc["name"]
 
@@ -455,6 +487,31 @@ def route_with_fc(
         routing_hint = _fn_to_routing_hint(fn_name)
         requires_clarification = fn_name == "ask_clarification"
         clarification_q = fc["args"].get("question") if requires_clarification else None
+
+        # Track 1.2: confidence floor for irreversible / physical actions. If the
+        # model picked a destructive tool but isn't confident, downgrade to a
+        # neutral confirmation question instead of executing. A missing/non-numeric
+        # confidence counts as 0.0 (ask). Clear any queued tools so the destructive
+        # action is not also dispatched.
+        raw_conf = parsed.get("confidence")
+        conf_val = raw_conf if isinstance(raw_conf, (int, float)) else 0.0
+        already_asking = routing_hint in ("clarify", "pending_confirm")
+        if (
+            fn_name in _DESTRUCTIVE_TOOLS
+            and conf_val < _DESTRUCTIVE_CONFIDENCE_FLOOR
+            and not already_asking
+        ):
+            logger.info(
+                "[fc_router] destructive %s at low confidence %.2f → clarify",
+                fn_name, conf_val,
+            )
+            clarification_q = "تأكيد سريع: متأكد من هالطلب؟"
+            requires_clarification = True
+            routing_hint = "clarify"
+            intent = "clarify.ask"
+            fc = {"name": "ask_clarification", "args": {"question": clarification_q}}
+            parsed["function_call"] = fc
+            parsed["function_calls"] = None
 
         logger.debug(f"[fc_router] FC: {fn_name} → intent={intent}")
 

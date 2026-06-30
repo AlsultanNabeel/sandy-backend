@@ -168,6 +168,10 @@ def _has_visible_task_note(task: Dict[str, Any]) -> bool:
 
 def _is_quick_confirmation(text: str) -> bool:
     """True for a short yes/confirm on an operational decision (not a pending reply)."""
+    # A real confirmation is one or two words; bound it for symmetry with
+    # is_cancellation (does not change behavior for genuine confirmations).
+    if len(text.split()) > 4:
+        return False
     return text.strip().lower() in {
         "اه",
         "أه",
@@ -191,9 +195,17 @@ def is_cancellation(text: str) -> bool:
     import re
 
     normalized = " ".join(text.strip().lower().split())
+    # A genuine cancel reply to a pending confirmation is always short. Bail out
+    # on anything sentence-length so a trigger word buried inside a narrative
+    # ("...وقف الباص فجأة...") can't be read as a cancellation (the "word in a
+    # story" bug).
+    if len(normalized.split()) > 4:
+        return False
     patterns = [
         r"^(لا|لأ|الغ|إلغاء|مش|خلص|لا وقت)$",
         r"^(no|cancel|nope|dont|stop)$",
+        # The two unanchored substring patterns below are safe only because the
+        # length gate above already bounds this to a short (≤4-word) reply.
         r"(لا تحذف|مش الآن|انسى|انسي|وقف|وقفي)",
         r"(الغي|الغيها|الغيهم|لا تضيفيها|لا تضيفها|لا تضيف)",
     ]
