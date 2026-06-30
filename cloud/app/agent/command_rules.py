@@ -1,6 +1,6 @@
 """Shared command-disambiguation rules for Sandy's two understanding brains.
 
-The text path (`agents/fc_router.py`, `_FC_SYSTEM_TEMPLATE`) and the voice path
+The text path (`agents/fc_router.py`, `_ROUTER_SYSTEM`) and the voice path
 (`api/voice_ws.py`, `_build_system_instruction`) are deliberately separate
 brains — voice needs Gemini Live for speed — but the cross-domain
 disambiguation rules must not drift between them. This is the single source for

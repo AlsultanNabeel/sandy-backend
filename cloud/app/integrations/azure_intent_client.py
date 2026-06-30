@@ -9,8 +9,12 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-DEFAULT_AZURE_INTENT_DEPLOYMENT = os.getenv(
-    "AZURE_OPENAI_CHAT_DEPLOYMENT", "sandy-chat"
+# Routing can run on its own fast/cheap deployment (e.g. Azure model-router or a
+# mini model). Falls back to the full chat deployment when unset, so behaviour is
+# unchanged until AZURE_OPENAI_ROUTER_DEPLOYMENT is provided.
+DEFAULT_AZURE_INTENT_DEPLOYMENT = (
+    os.getenv("AZURE_OPENAI_ROUTER_DEPLOYMENT", "").strip()
+    or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "sandy-chat")
 )
 
 # Per-request timeout (seconds) so a hung intent/router call fails fast into the
@@ -41,6 +45,39 @@ def _get_azure_client(api_key: str, api_version: str, endpoint: str) -> Any:
     )
     _CACHED_CLIENT_KEY = key
     return _CACHED_AZURE_CLIENT
+
+
+def _log_azure_usage(response: Any) -> None:
+    """Log token usage + cache hit + est cost (no message text) for Heroku logs.
+
+    R3: Azure auto-caches stable prompt prefixes ≥1024 tokens, billed at half.
+    Keeping the big tool/persona prefix first is what lets cached_tokens stay high.
+    """
+    usage = getattr(response, "usage", None)
+    if not usage:
+        return
+    in_tok = getattr(usage, "prompt_tokens", 0)
+    out_tok = getattr(usage, "completion_tokens", 0)
+    cached = 0
+    details = getattr(usage, "prompt_tokens_details", None)
+    if details is not None:
+        cached = getattr(details, "cached_tokens", 0) or 0
+    non_cached_in = max(in_tok - cached, 0)
+    rate_in = float(os.getenv("AZURE_COST_IN_PER_1M", "0.15"))
+    rate_cached = float(os.getenv("AZURE_COST_CACHED_PER_1M", "0.075"))
+    rate_out = float(os.getenv("AZURE_COST_OUT_PER_1M", "0.60"))
+    cost = (
+        non_cached_in * rate_in + cached * rate_cached + out_tok * rate_out
+    ) / 1_000_000
+    if cached:
+        pct = (cached / in_tok * 100) if in_tok else 0
+        print(
+            f"[Azure] in={in_tok} (cached={cached} {pct:.0f}%) "
+            f"out={out_tok} ~${cost:.5f}",
+            flush=True,
+        )
+    else:
+        print(f"[Azure] in={in_tok} out={out_tok} ~${cost:.5f}", flush=True)
 
 
 class AzureIntentClient:
@@ -123,38 +160,51 @@ class AzureIntentClient:
             kwargs["response_format"] = {"type": "json_object"}
         response = client.chat.completions.create(**kwargs)
 
-        # log الـ usage بدون نص الرسالة أو الرد — للمراقبة فقط (يبقى للـ Heroku logs)
-        usage = getattr(response, "usage", None)
-        if usage:
-            in_tok = getattr(usage, "prompt_tokens", 0)
-            out_tok = getattr(usage, "completion_tokens", 0)
-            # R3: Azure بيعمل prompt caching تلقائياً للـ prompts ≥1024 token.
-            # الـ cached tokens تتحاسب بنص السعر. نقرأها من prompt_tokens_details.
-            cached = 0
-            details = getattr(usage, "prompt_tokens_details", None)
-            if details is not None:
-                cached = getattr(details, "cached_tokens", 0) or 0
-            non_cached_in = max(in_tok - cached, 0)
-            # Rates default to gpt-4o-mini ($/1M); override via env if the
-            # deployment points at another model so the logged estimate stays right.
-            rate_in = float(os.getenv("AZURE_COST_IN_PER_1M", "0.15"))
-            rate_cached = float(os.getenv("AZURE_COST_CACHED_PER_1M", "0.075"))
-            rate_out = float(os.getenv("AZURE_COST_OUT_PER_1M", "0.60"))
-            cost = (
-                non_cached_in * rate_in + cached * rate_cached + out_tok * rate_out
-            ) / 1_000_000
-            if cached:
-                pct = (cached / in_tok * 100) if in_tok else 0
-                print(
-                    f"[Azure] in={in_tok} (cached={cached} {pct:.0f}%) "
-                    f"out={out_tok} ~${cost:.5f}",
-                    flush=True,
-                )
-            else:
-                print(f"[Azure] in={in_tok} out={out_tok} ~${cost:.5f}", flush=True)
+        _log_azure_usage(response)
 
         choice = response.choices[0] if response.choices else None
         if not choice:
             return ""
         content = getattr(choice.message, "content", None)
         return str(content).strip() if content else ""
+
+    def complete_with_tools(
+        self,
+        system: str,
+        user: str,
+        tools: list,
+        *,
+        tool_choice: str = "auto",
+        temperature: float = 0.0,
+        max_tokens: int = 700,
+    ) -> Any:
+        """Native function-calling: the model either calls one/more tools or
+        replies in plain text. Returns the raw message object (``.content`` +
+        ``.tool_calls``), or None on failure.
+
+        ``system`` is the stable prefix (persona + rules) and ``tools`` the stable
+        catalog — both come first so Azure prompt caching keeps biting; only the
+        per-turn ``user`` block varies.
+        """
+        if self._model:  # test mock — no native tool support, signal fallback
+            return None
+        if not (self.api_key and self.endpoint):
+            raise RuntimeError(
+                "Azure OpenAI not configured: AZURE_OPENAI_API_KEY/ENDPOINT missing"
+            )
+        client = _get_azure_client(self.api_key, self.api_version, self.endpoint)
+        response = client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            tools=tools,
+            tool_choice=tool_choice,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=AZURE_INTENT_TIMEOUT_S,
+        )
+        _log_azure_usage(response)
+        choice = response.choices[0] if response.choices else None
+        return choice.message if choice else None
