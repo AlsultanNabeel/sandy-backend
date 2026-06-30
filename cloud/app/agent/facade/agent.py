@@ -55,6 +55,7 @@ from app.config import (
     AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_API_VERSION,
     AZURE_OPENAI_CHAT_DEPLOYMENT,
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
     AZURE_OPENAI_ENDPOINT,
     MEMORY_DIR,
     MONGODB_DB_NAME,
@@ -115,7 +116,12 @@ create_chat_completion = make_chat_completion_fn(
 
 from app.agent.semantic_memory import init_mongo_memory
 
-init_mongo_memory(mongo_db, openai_client=openai_client)
+init_mongo_memory(
+    mongo_db,
+    openai_client=openai_client,
+    azure_client=azure_openai_client,
+    azure_embedding_deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+)
 
 from app.features.speaker_id import init_speaker_store
 

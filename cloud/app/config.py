@@ -47,6 +47,12 @@ AZURE_OPENAI_API_VERSION = os.getenv(
 AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
 AZURE_OPENAI_VISION_DEPLOYMENT = os.getenv("AZURE_OPENAI_VISION_DEPLOYMENT", "").strip()
 AZURE_OPENAI_STT_DEPLOYMENT = os.getenv("AZURE_OPENAI_STT_DEPLOYMENT", "").strip()
+# Deploy text-embedding-3-small under this name to keep the 1536-dim vector
+# index compatible. When set, semantic memory embeds via Azure instead of the
+# direct OpenAI key.
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv(
+    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", ""
+).strip()
 
 
 # Images: Azure FLUX (primary), with a fallback

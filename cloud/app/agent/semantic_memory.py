@@ -17,7 +17,8 @@ Search tries, in order:
   2. $text search (keyword fallback)
   3. sort by usage_count / ts (last resort if there's no text index either)
 
-Call init_mongo_memory(mongo_db, openai_client) once at startup.
+Call init_mongo_memory(...) once at startup. Embeddings prefer Azure when an
+embedding deployment is configured, else fall back to the direct OpenAI key.
 """
 
 import hashlib
@@ -32,7 +33,10 @@ logger = logging.getLogger(__name__)
 _vector_search_warned = False
 
 _mongo_db = None
-_openai_client = None
+# Client used for embeddings (Azure or direct OpenAI) and the model/deployment
+# name to pass it. Set in init_mongo_memory.
+_embed_client = None
+_embed_model = "text-embedding-3-small"
 
 _EMBEDDING_MODEL = "text-embedding-3-small"
 _EMBEDDING_DIMS = 1536
@@ -72,11 +76,27 @@ def _user_filter(chat_id: str) -> Dict:
 # Init
 
 
-def init_mongo_memory(mongo_db, openai_client=None) -> None:
-    """Store the MongoDB and OpenAI handles, build indexes, migrate legacy docs."""
-    global _mongo_db, _openai_client
+def init_mongo_memory(
+    mongo_db,
+    openai_client=None,
+    azure_client=None,
+    azure_embedding_deployment="",
+) -> None:
+    """Store the MongoDB and embedding handles, build indexes, migrate legacy docs.
+
+    Embeddings prefer Azure when ``azure_client`` and ``azure_embedding_deployment``
+    are both given (deploy text-embedding-3-small to keep the 1536-dim index
+    valid); otherwise they fall back to the direct ``openai_client``.
+    """
+    global _mongo_db, _embed_client, _embed_model
     _mongo_db = mongo_db
-    _openai_client = openai_client
+
+    if azure_client is not None and azure_embedding_deployment:
+        _embed_client = azure_client
+        _embed_model = azure_embedding_deployment
+    else:
+        _embed_client = openai_client
+        _embed_model = _EMBEDDING_MODEL
 
     if mongo_db is None:
         print("[Memory] no MongoDB, memory storage disabled", flush=True)
@@ -106,7 +126,7 @@ def init_mongo_memory(mongo_db, openai_client=None) -> None:
     if OWNER_CHAT_ID:
         _migrate_legacy_docs(mongo_db)
 
-    mode = "vector + keyword" if openai_client else "keyword only"
+    mode = "vector + keyword" if _embed_client else "keyword only"
     print(f"[Memory] MongoDB memory ready ({mode})", flush=True)
 
 
@@ -146,11 +166,11 @@ def _importance_score(usage_count: int, created_at=None) -> float:
 
 def _embed(text: str) -> Optional[List[float]]:
     """Embed text, or None if there's no client or the call fails."""
-    if _openai_client is None or not text:
+    if _embed_client is None or not text:
         return None
     try:
-        resp = _openai_client.embeddings.create(
-            model=_EMBEDDING_MODEL,
+        resp = _embed_client.embeddings.create(
+            model=_embed_model,
             input=text,
         )
         return resp.data[0].embedding
@@ -444,7 +464,7 @@ def semantic_memory_stats() -> Dict[str, Any]:
             pass
     return {
         "path": "mongodb",
-        "vector_search": _openai_client is not None,
+        "vector_search": _embed_client is not None,
         "facts": facts_count,
         "conversations": convs_count,
     }
