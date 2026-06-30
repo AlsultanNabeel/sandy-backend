@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, Optional
 
 # Routing can run on its own fast/cheap deployment (e.g. Azure model-router or a
@@ -45,6 +46,42 @@ def _get_azure_client(api_key: str, api_version: str, endpoint: str) -> Any:
     )
     _CACHED_CLIENT_KEY = key
     return _CACHED_AZURE_CLIENT
+
+
+def _rejected_param(exc: Exception) -> Optional[str]:
+    """Pull the offending parameter name out of an Azure 400 error."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        param = (body.get("error") or {}).get("param")
+        if param:
+            return str(param)
+    match = re.search(r"'([A-Za-z_]+)'", str(exc))
+    return match.group(1) if match else None
+
+
+def _create_chat_resilient(client: Any, kwargs: Dict[str, Any]) -> Any:
+    """create() that adapts to per-model parameter quirks.
+
+    gpt-5 / o-series reject ``max_tokens`` (want ``max_completion_tokens``) and a
+    fixed ``temperature``; older models want ``max_tokens``. Try the call, and on
+    an unsupported-parameter 400 remap or drop that one param and retry, so the
+    same code works across deployments without a config flag.
+    """
+    kwargs = dict(kwargs)
+    _protected = {"model", "messages", "tools"}
+    for _ in range(4):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            param = _rejected_param(exc)
+            if param == "max_tokens" and "max_tokens" in kwargs:
+                kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+                continue
+            if param and param in kwargs and param not in _protected:
+                kwargs.pop(param)
+                continue
+            raise
+    return client.chat.completions.create(**kwargs)
 
 
 def _log_azure_usage(response: Any) -> None:
@@ -158,7 +195,7 @@ class AzureIntentClient:
         }
         if (response_mime_type or "application/json") == "application/json":
             kwargs["response_format"] = {"type": "json_object"}
-        response = client.chat.completions.create(**kwargs)
+        response = _create_chat_resilient(client, kwargs)
 
         _log_azure_usage(response)
 
@@ -193,18 +230,18 @@ class AzureIntentClient:
                 "Azure OpenAI not configured: AZURE_OPENAI_API_KEY/ENDPOINT missing"
             )
         client = _get_azure_client(self.api_key, self.api_version, self.endpoint)
-        response = client.chat.completions.create(
-            model=self.model_name,
-            messages=[
+        response = _create_chat_resilient(client, {
+            "model": self.model_name,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            tools=tools,
-            tool_choice=tool_choice,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=AZURE_INTENT_TIMEOUT_S,
-        )
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "timeout": AZURE_INTENT_TIMEOUT_S,
+        })
         _log_azure_usage(response)
         choice = response.choices[0] if response.choices else None
         return choice.message if choice else None
