@@ -52,6 +52,7 @@ def _get_azure_client(api_key: str, api_version: str, endpoint: str) -> Any:
 _TUNABLE_PARAMS = (
     "max_tokens", "max_completion_tokens", "temperature", "top_p",
     "frequency_penalty", "presence_penalty", "logprobs", "tool_choice",
+    "reasoning_effort",
 )
 
 
@@ -255,6 +256,11 @@ class AzureIntentClient:
             "tool_choice": tool_choice,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # gpt-5 / o-series are reasoning models — without this they "think"
+            # for seconds before picking a tool. Routing needs none of that;
+            # minimal effort makes them fast. Non-reasoning models reject this
+            # param and _create_chat_resilient strips it.
+            "reasoning_effort": "minimal",
             "timeout": AZURE_INTENT_TIMEOUT_S,
         })
         _log_azure_usage(response)
