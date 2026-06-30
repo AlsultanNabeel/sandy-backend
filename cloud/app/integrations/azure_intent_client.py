@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import os
-import re
 from typing import Any, Dict, Optional
 
 # Routing can run on its own fast/cheap deployment (e.g. Azure model-router or a
