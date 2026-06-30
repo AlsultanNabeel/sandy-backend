@@ -78,10 +78,11 @@ def memory_recall(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
             limit=20,
         ))
 
-    if not docs:
+    lines = [c for d in docs if (c := str(d.get("content", "")).strip())]
+    if not lines:
         return {"handled": True, "reply": "ما عندي ذكريات محفوظة بعد."}
 
-    return {"handled": True, "reply": "\n".join(f"• {d['content']}" for d in docs)}
+    return {"handled": True, "reply": "\n".join(f"• {c}" for c in lines)}
 
 
 # Fetch adapter — plain requests, no MCP needed.
