@@ -176,6 +176,15 @@ def execute_pending_action(
 
     consume_pending_action(session)
 
+    # Deterministic destructive-action guard (dispatcher side held the tool and
+    # asked): the user confirmed, so re-run the held tool with the guard flag set.
+    if pending_type == "tool_guard" and pending_action == "execute":
+        result = _exec_guarded_tool(
+            pending, mongo_db, create_chat_completion_fn=create_chat_completion_fn,
+        )
+        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
+        return result
+
     # Execution handlers.
     _exec_common = dict(
         pending=pending,
@@ -225,3 +234,36 @@ def execute_pending_action(
         return _exec_reminder_delete_all(**_exec_no_tasks)
 
     return {"handled": False}
+
+
+def _exec_guarded_tool(
+    pending: Dict[str, Any],
+    mongo_db,
+    *,
+    create_chat_completion_fn=None,
+) -> Dict[str, Any]:
+    """Re-dispatch a destructive tool the dispatcher held for confirmation.
+
+    The guard flag is set on this throwaway context so the dispatcher runs the
+    tool instead of asking again. Owner/guest checks already passed on the turn
+    the pending was created, so only an authorized user can reach here.
+    """
+    from app.agent.tools.dispatcher import (
+        DispatchContext,
+        ToolDispatcher,
+        _GUARD_CONFIRMED_FLAG,
+    )
+
+    tool_name = str(pending.get("tool", "")).strip()
+    if not tool_name:
+        return {"handled": True, "reply": "تمام."}
+    args = pending.get("args") or {}
+    context = DispatchContext(
+        user_message="",
+        normalized_message="",
+        session={_GUARD_CONFIRMED_FLAG: True},
+        state={"chat_id": pending.get("chat_id", "")},
+        mongo_db=mongo_db,
+        create_chat_completion_fn=create_chat_completion_fn,
+    )
+    return ToolDispatcher().dispatch(tool_name, args, context)
