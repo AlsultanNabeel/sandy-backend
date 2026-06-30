@@ -48,15 +48,31 @@ def _get_azure_client(api_key: str, api_version: str, endpoint: str) -> Any:
     return _CACHED_AZURE_CLIENT
 
 
+# Params a model may reject; scanned by name so we never mis-read 'error' (the
+# dict key in the error repr) as the offending parameter.
+_TUNABLE_PARAMS = (
+    "max_tokens", "max_completion_tokens", "temperature", "top_p",
+    "frequency_penalty", "presence_penalty", "logprobs", "tool_choice",
+)
+
+
 def _rejected_param(exc: Exception) -> Optional[str]:
     """Pull the offending parameter name out of an Azure 400 error."""
+    param = getattr(exc, "param", None)
+    if param:
+        return str(param)
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
-        param = (body.get("error") or {}).get("param")
+        err = body.get("error")
+        param = (err.get("param") if isinstance(err, dict) else None) or body.get("param")
         if param:
             return str(param)
-    match = re.search(r"'([A-Za-z_]+)'", str(exc))
-    return match.group(1) if match else None
+    # Last resort: scan the message for a known tunable param, not any quoted word.
+    msg = str(exc)
+    for name in _TUNABLE_PARAMS:
+        if f"'{name}'" in msg:
+            return name
+    return None
 
 
 def _create_chat_resilient(client: Any, kwargs: Dict[str, Any]) -> Any:
