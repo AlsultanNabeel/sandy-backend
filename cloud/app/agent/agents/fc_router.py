@@ -272,8 +272,6 @@ def route_with_fc(
     error: Optional[str] = None
 
     try:
-        client = AzureIntentClient()
-
         # Stable prefix (cacheable): persona/rules + per-user address + the shared
         # disambiguation rules. Tools are passed separately and are equally stable.
         system = (
@@ -294,13 +292,25 @@ def route_with_fc(
         except Exception:  # noqa: BLE001 — never let device lookup break routing
             pass
 
-        tools = _build_native_tools(declarations)
+        # Bedrock router (e.g. Qwen3) when configured; Azure otherwise, and also as
+        # the fallback if a Bedrock call fails. Both consume the same tool specs.
+        from app.integrations.bedrock_router import bedrock_enabled, route_with_bedrock
 
-        _t = time.perf_counter()
-        msg = client.complete_with_tools(system, user_prompt, tools)
-        logger.info(f"[fc_router] routing: {(time.perf_counter()-_t)*1000:.0f}ms")
+        all_specs = list(declarations) + _META_TOOL_SPECS
+        calls: Optional[List[Dict[str, Any]]] = None
+        if bedrock_enabled():
+            calls = route_with_bedrock(system, user_prompt, all_specs)
 
-        calls = _parse_tool_message(msg)
+        if calls is None:
+            client = AzureIntentClient()
+            tools = _build_native_tools(declarations)
+            _t = time.perf_counter()
+            msg = client.complete_with_tools(system, user_prompt, tools)
+            logger.info(f"[fc_router] routing: {(time.perf_counter()-_t)*1000:.0f}ms")
+            calls = _parse_tool_message(msg)
+
+        if not calls:
+            calls = [dict(_FC_DEFAULT_CALL)]
 
         # Deterministic backstop: the model must never route to a tool that does
         # not exist. Validate every picked name against the live registry + the

@@ -6,6 +6,7 @@ Flask>=2.2.0
 gunicorn>=21.2.0
 apscheduler==3.11.2
 openai==2.26.0
+boto3>=1.40.0  # Bedrock Converse routing (BEDROCK_ROUTER_MODEL_ID)
 pymongo>=4.6.0
 
 python-dotenv==1.2.2
