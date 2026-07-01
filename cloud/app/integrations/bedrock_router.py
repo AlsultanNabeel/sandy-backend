@@ -42,10 +42,12 @@ def _get_client():
 def _to_tool_config(specs: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Convert our name/description/JSON-Schema specs to Converse toolConfig."""
     tools = []
+    seen = set()
     for d in specs:
         name = d.get("name")
-        if not name:
-            continue
+        if not name or name in seen:
+            continue  # Bedrock rejects duplicate tool names (meta vs registered)
+        seen.add(name)
         params = d.get("parameters") or {"type": "object", "properties": {}}
         tools.append({
             "toolSpec": {

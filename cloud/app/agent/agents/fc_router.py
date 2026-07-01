@@ -137,10 +137,12 @@ def _build_native_tools(declarations: List[Dict[str, Any]]) -> List[Dict[str, An
     """
     specs = list(declarations) + _META_TOOL_SPECS
     tools = []
+    seen = set()
     for d in specs:
         name = d.get("name")
-        if not name:
-            continue
+        if not name or name in seen:
+            continue  # a meta tool may already be registered — keep names unique
+        seen.add(name)
         params = d.get("parameters") or {"type": "object", "properties": {}}
         tools.append({
             "type": "function",
