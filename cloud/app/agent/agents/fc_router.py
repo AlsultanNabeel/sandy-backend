@@ -294,13 +294,17 @@ def route_with_fc(
         except Exception:  # noqa: BLE001 — never let device lookup break routing
             pass
 
-        # Bedrock router (e.g. Qwen3) when configured; Azure otherwise, and also as
-        # the fallback if a Bedrock call fails. Both consume the same tool specs.
+        # Router backend priority: Gemini → Bedrock (e.g. Qwen3) → Azure. Each is
+        # opt-in via its own env var and falls through to the next on failure, so
+        # leaving all three unset keeps the original Azure-only behaviour.
         from app.integrations.bedrock_router import bedrock_enabled, route_with_bedrock
+        from app.integrations.gemini_router import gemini_enabled, route_with_gemini
 
         all_specs = list(declarations) + _META_TOOL_SPECS
         calls: Optional[List[Dict[str, Any]]] = None
-        if bedrock_enabled():
+        if gemini_enabled():
+            calls = route_with_gemini(system, user_prompt, all_specs)
+        if calls is None and bedrock_enabled():
             calls = route_with_bedrock(system, user_prompt, all_specs)
 
         if calls is None:
