@@ -5,9 +5,17 @@ Collections:
   sandy_conversations     recent (user, assistant) turns
   sandy_context_metadata  per-turn topic tracking
 
-Every doc has a chat_id. Reads and writes are scoped to the current user's
-chat_id (from the active thread-local profile). Owner and family read and
-write their own memory; guests and unauthenticated get nothing.
+Every doc has a chat_id. Facts/conversations go through the enforced
+``tenant_db.scoped(..., field="chat_id")`` wrapper — the same isolation-by-
+construction boundary as every other store — so a forgotten filter can't leak
+across tenants. Every authenticated (non-guest) user reads and writes their
+own memory; guests and unauthenticated get nothing.
+
+``$vectorSearch`` is the one exception: Atlas requires it to be pipeline stage
+one, which the wrapper's auto-``$match`` would break, so that path filters
+inside the ``$vectorSearch`` stage itself (sourcing the tenant id from the
+scoped collection's ``.tenant``, not a separately-derived value) and runs
+against the raw collection.
 
 Legacy docs with no chat_id get tagged with OWNER_CHAT_ID on first startup
 so the owner keeps access to them.
@@ -25,6 +33,7 @@ import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
+from app.utils.tenant_db import scoped
 from app.utils.user_profiles import (
     active_profile_is_guest,
     get_active_user_profile,
@@ -50,13 +59,12 @@ _VECTOR_INDEX = "sandy_vector_index"
 # Profile helpers
 
 
-def _current_chat_id() -> Optional[str]:
-    """Return the active user's chat_id, or None if no profile is set."""
-    profile = get_active_user_profile()
-    if not profile:
-        return None
-    cid = str(profile.get("chat_id", "") or "").strip()
-    return cid or None
+def _facts_coll():
+    return scoped(_mongo_db, "sandy_facts", field="chat_id")
+
+
+def _convs_coll():
+    return scoped(_mongo_db, "sandy_conversations", field="chat_id")
 
 
 def _can_write_memory() -> bool:
@@ -76,10 +84,6 @@ def _can_write_memory() -> bool:
 def _can_read_memory() -> bool:
     """Same rule as write: only non-guest (authenticated) tenants read memory."""
     return _can_write_memory()
-
-
-def _user_filter(chat_id: str) -> Dict:
-    return {"chat_id": chat_id}
 
 
 # Init
@@ -215,12 +219,10 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
     """Upsert user facts, embedding the new ones."""
     if not _can_write_memory():
         return
-    if _mongo_db is None or not facts:
+    coll = _facts_coll()
+    if coll is None or not facts:
         return
-    chat_id = _current_chat_id()
-    if not chat_id:
-        return
-    col = _mongo_db["sandy_facts"]
+    chat_id = coll.tenant
     inserted = 0
     for fact in facts:
         text = (fact.get("text") or "").strip()
@@ -228,11 +230,10 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
             continue
         fid = _fact_id(text, chat_id)
         try:
-            if col.count_documents({"_id": fid}) > 0:
+            if coll.count_documents({"_id": fid}) > 0:
                 continue
             doc = {
                 "_id": fid,
-                "chat_id": chat_id,
                 "text": text,
                 "type": fact.get("type", "general"),
                 "usage_count": 0,
@@ -241,7 +242,9 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
             vec = _embed(text)
             if vec:
                 doc["embedding"] = vec
-            result = col.update_one(
+            # chat_id isn't in `doc` — the scoped upsert seeds it from the
+            # filter's equality terms, so it can't drift from the tenant.
+            result = coll.update_one(
                 {"_id": fid},
                 {"$setOnInsert": doc},
                 upsert=True,
@@ -265,12 +268,10 @@ def load_conversations_to_chroma(
     """Upsert recent conversation turns, embedding the new ones."""
     if not _can_write_memory():
         return
-    if _mongo_db is None or not conversations:
+    coll = _convs_coll()
+    if coll is None or not conversations:
         return
-    chat_id = _current_chat_id()
-    if not chat_id:
-        return
-    col = _mongo_db["sandy_conversations"]
+    chat_id = coll.tenant
     recent = conversations[-max_recent:]
     inserted = 0
     for conv in recent:
@@ -283,11 +284,10 @@ def load_conversations_to_chroma(
             combined += f"\nساندي: {asst_text}"
         cid = _conv_id(user_text, asst_text, chat_id)
         try:
-            if col.count_documents({"_id": cid}) > 0:
+            if coll.count_documents({"_id": cid}) > 0:
                 continue
             doc = {
                 "_id": cid,
-                "chat_id": chat_id,
                 "text": combined,
                 "role": "conversation",
                 "ts": conv.get("timestamp", ""),
@@ -295,7 +295,9 @@ def load_conversations_to_chroma(
             vec = _embed(combined)
             if vec:
                 doc["embedding"] = vec
-            result = col.update_one(
+            # chat_id isn't in `doc` — the scoped upsert seeds it from the
+            # filter's equality terms, so it can't drift from the tenant.
+            result = coll.update_one(
                 {"_id": cid},
                 {"$setOnInsert": doc},
                 upsert=True,
@@ -356,24 +358,27 @@ def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
     """Semantic search over the current user's facts."""
     if not _can_read_memory():
         return []
-    if _mongo_db is None:
+    coll = _facts_coll()
+    if coll is None:
         return []
-    chat_id = _current_chat_id()
-    if not chat_id:
-        return []
-    col = _mongo_db["sandy_facts"]
-    fil = _user_filter(chat_id)
+    chat_id = coll.tenant
     try:
-        if col.count_documents(fil) == 0:
+        if coll.count_documents({}) == 0:
             return []
 
-        results = _vector_search(col, query, chat_id, n_results, {"usage_count": 1, "created_at": 1})
+        # $vectorSearch must be pipeline stage one (Atlas requirement), so it
+        # runs against the raw collection with the tenant filter built in —
+        # the wrapper's auto-$match can't be used here.
+        results = _vector_search(
+            _mongo_db["sandy_facts"], query, chat_id, n_results,
+            {"usage_count": 1, "created_at": 1},
+        )
 
         if results is None:
             try:
                 results = list(
-                    col.find(
-                        {**fil, "$text": {"$search": query}},
+                    coll.find(
+                        {"$text": {"$search": query}},
                         {"score": {"$meta": "textScore"}, "text": 1, "usage_count": 1, "created_at": 1},
                     )
                     .sort([("score", {"$meta": "textScore"})])
@@ -381,7 +386,7 @@ def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
                 )
             except Exception:
                 results = list(
-                    col.find(fil, {"text": 1, "usage_count": 1, "created_at": 1})
+                    coll.find({}, {"text": 1, "usage_count": 1, "created_at": 1})
                     .sort("importance_score", -1)
                     .limit(n_results)
                 )
@@ -390,7 +395,7 @@ def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
             for r in results:
                 new_usage = (r.get("usage_count") or 0) + 1
                 score = _importance_score(new_usage, r.get("created_at"))
-                col.update_one(
+                coll.update_one(
                     {"_id": r["_id"]},
                     {"$inc": {"usage_count": 1}, "$set": {"importance_score": score}},
                 )
@@ -404,24 +409,21 @@ def search_relevant_conversations(query: str, n_results: int = 3) -> List[str]:
     """Semantic search over the current user's conversation turns."""
     if not _can_read_memory():
         return []
-    if _mongo_db is None:
+    coll = _convs_coll()
+    if coll is None:
         return []
-    chat_id = _current_chat_id()
-    if not chat_id:
-        return []
-    col = _mongo_db["sandy_conversations"]
-    fil = _user_filter(chat_id)
+    chat_id = coll.tenant
     try:
-        if col.count_documents(fil) == 0:
+        if coll.count_documents({}) == 0:
             return []
 
-        results = _vector_search(col, query, chat_id, n_results, {})
+        results = _vector_search(_mongo_db["sandy_conversations"], query, chat_id, n_results, {})
 
         if results is None:
             try:
                 results = list(
-                    col.find(
-                        {**fil, "$text": {"$search": query}},
+                    coll.find(
+                        {"$text": {"$search": query}},
                         {"score": {"$meta": "textScore"}, "text": 1},
                     )
                     .sort([("score", {"$meta": "textScore"})])
@@ -429,7 +431,7 @@ def search_relevant_conversations(query: str, n_results: int = 3) -> List[str]:
                 )
             except Exception:
                 results = list(
-                    col.find(fil, {"text": 1}).sort("ts", -1).limit(n_results)
+                    coll.find({}, {"text": 1}).sort("ts", -1).limit(n_results)
                 )
 
         return [r["text"] for r in results if r.get("text")]
@@ -458,17 +460,18 @@ def semantic_memory_stats() -> Dict[str, Any]:
     """Return counts for the current user, for health checks and debugging."""
     if not _can_read_memory():
         return {"path": "mongodb", "facts": 0, "conversations": 0}
-    chat_id = _current_chat_id()
     facts_count = 0
     convs_count = 0
-    if _mongo_db is not None and chat_id:
-        fil = _user_filter(chat_id)
+    facts_coll = _facts_coll()
+    if facts_coll is not None:
         try:
-            facts_count = _mongo_db["sandy_facts"].count_documents(fil)
+            facts_count = facts_coll.count_documents({})
         except Exception:
             pass
+    convs_coll = _convs_coll()
+    if convs_coll is not None:
         try:
-            convs_count = _mongo_db["sandy_conversations"].count_documents(fil)
+            convs_count = convs_coll.count_documents({})
         except Exception:
             pass
     return {

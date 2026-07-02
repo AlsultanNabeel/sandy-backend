@@ -44,28 +44,38 @@ class ScopedCollection:
     """A pymongo collection that auto-scopes every operation to one tenant.
 
     Constructed only when a tenant is present (see :func:`scoped`), so
-    ``self._tenant`` is always a non-empty id. Every filter gets ``user_id``
-    forced to that tenant, and every inserted document gets it stamped on — a
-    caller cannot widen the scope or write to another tenant even by passing an
-    explicit ``user_id`` (the tenant value always wins).
+    ``self._tenant`` is always a non-empty id. Every filter gets the scope
+    field (``user_id`` by default; some legacy collections key on ``chat_id``
+    instead — pass ``field=`` to match) forced to that tenant, and every
+    inserted document gets it stamped on — a caller cannot widen the scope or
+    write to another tenant even by passing an explicit value for that field
+    (the tenant value always wins).
     """
 
-    __slots__ = ("_raw", "_tenant")
+    __slots__ = ("_raw", "_tenant", "_field")
 
-    def __init__(self, raw: Any, tenant: str):
+    def __init__(self, raw: Any, tenant: str, field: str = "user_id"):
         self._raw = raw
         self._tenant = tenant
+        self._field = field
+
+    @property
+    def tenant(self) -> str:
+        """The tenant id this collection is scoped to — for the rare caller
+        that needs it directly (e.g. embedding it in a ``$vectorSearch``
+        filter, which must run against the raw collection)."""
+        return self._tenant
 
     def _scope(self, filter: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-        """Force this tenant onto a query filter (overriding any passed user_id)."""
+        """Force this tenant onto a query filter (overriding any passed value)."""
         scoped = dict(filter or {})
-        scoped["user_id"] = self._tenant
+        scoped[self._field] = self._tenant
         return scoped
 
     def _stamp(self, doc: Mapping[str, Any]) -> Dict[str, Any]:
         """Stamp this tenant onto a document being inserted."""
         stamped = dict(doc)
-        stamped["user_id"] = self._tenant
+        stamped[self._field] = self._tenant
         return stamped
 
     # ── reads ────────────────────────────────────────────────────────────────
@@ -83,8 +93,11 @@ class ScopedCollection:
 
     def aggregate(self, pipeline: List[Mapping[str, Any]], *args, **kwargs):
         # Force a tenant $match as the first stage so no later stage can surface
-        # another tenant's documents.
-        scoped_pipeline = [{"$match": {"user_id": self._tenant}}, *(pipeline or [])]
+        # another tenant's documents. NOTE: not usable for a $vectorSearch
+        # pipeline — Atlas requires $vectorSearch to be stage one, so that case
+        # must filter inside the $vectorSearch stage itself and aggregate on
+        # the raw collection (use `.tenant` to source the id consistently).
+        scoped_pipeline = [{"$match": {self._field: self._tenant}}, *(pipeline or [])]
         return self._raw.aggregate(scoped_pipeline, *args, **kwargs)
 
     # ── writes ───────────────────────────────────────────────────────────────
@@ -125,14 +138,18 @@ class ScopedCollection:
         return self._raw.find_one_and_delete(self._scope(filter), *args, **kwargs)
 
 
-def scoped(mongo_db: Any, name: str) -> Optional[ScopedCollection]:
+def scoped(mongo_db: Any, name: str, field: str = "user_id") -> Optional[ScopedCollection]:
     """Return a tenant-scoped view of ``mongo_db[name]``, or ``None`` when there
     is no database handle or no active tenant (fail-closed). Callers already
     guard ``if coll is None`` — that guard now also blocks unauthenticated access.
+
+    ``field`` is the scope field to stamp/filter on. Defaults to ``user_id``;
+    pass ``field="chat_id"`` for the older collections (semantic memory) that
+    predate that naming.
     """
     if mongo_db is None:
         return None
     tenant = current_user_id()
     if not tenant:
         return None
-    return ScopedCollection(mongo_db[name], tenant)
+    return ScopedCollection(mongo_db[name], tenant, field=field)
