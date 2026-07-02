@@ -392,3 +392,57 @@ def resolve_display_name(user_id: str | None = None, mongo_db=None, default: str
         # A missing name is expected for guests — log quietly and degrade (C1).
         logger.debug("[user_profiles] resolve_display_name failed: %s", exc)
         return default
+
+
+def reconcile_owner_identity(mongo_db) -> None:
+    """One-time-per-boot: merge durable memory still tagged with one of the
+    owner's legacy identities (``OWNER_CHAT_ID`` / ``SANDY_USER_CHAT_ID`` / a
+    stale ``OWNER_TENANT_ID``), or with none at all, onto his canonical
+    ``users_store`` uuid — the id every REST/text-chat request resolves via
+    ``current_user_id()``. Idempotent, and only ever touches rows already
+    tagged as the owner's (or untagged pre-isolation docs) — never another
+    tenant's.
+
+    ``api/voice_ws.py`` used to key STM/persona/facts off the legacy env-var
+    ids directly (there's no active profile there to derive the canonical id
+    from), so without this reconciliation his voice and text-chat memories
+    silently lived in different tenants.
+    """
+    if mongo_db is None:
+        return
+    try:
+        from app.features import users_store
+
+        canonical = users_store.get_or_create_owner()
+    except Exception as exc:
+        logger.warning("[user_profiles] owner identity reconcile skipped: %s", exc)
+        return
+    if not canonical:
+        return
+
+    legacy_ids = [
+        i for i in {OWNER_CHAT_ID, LEGACY_OWNER_CHAT_ID, OWNER_TENANT_ID}
+        if i and i != canonical
+    ]
+
+    for coll_name, field in (
+        ("sandy_memories", "chat_id"),
+        ("sandy_facts", "chat_id"),
+        ("sandy_conversations", "chat_id"),
+        ("memory", "user_id"),
+    ):
+        or_terms = [{field: {"$exists": False}}]
+        if legacy_ids:
+            or_terms.append({field: {"$in": legacy_ids}})
+        try:
+            result = mongo_db[coll_name].update_many(
+                {"$or": or_terms},
+                {"$set": {field: canonical}},
+            )
+            if result.modified_count:
+                logger.info(
+                    "[user_profiles] reconciled %d doc(s) in %s onto the owner's tenant id",
+                    result.modified_count, coll_name,
+                )
+        except Exception as exc:
+            logger.warning("[user_profiles] reconcile failed for %s: %s", coll_name, exc)

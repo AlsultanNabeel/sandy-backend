@@ -17,8 +17,9 @@ inside the ``$vectorSearch`` stage itself (sourcing the tenant id from the
 scoped collection's ``.tenant``, not a separately-derived value) and runs
 against the raw collection.
 
-Legacy docs with no chat_id get tagged with OWNER_CHAT_ID on first startup
-so the owner keeps access to them.
+Legacy docs (no chat_id, or tagged with one of the owner's old identities) are
+reconciled onto his canonical tenant id by
+``app.utils.user_profiles.reconcile_owner_identity``, called once at boot.
 
 Search tries, in order:
   1. Atlas $vectorSearch (semantic, needs the vector index)
@@ -34,11 +35,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
-from app.utils.user_profiles import (
-    active_profile_is_guest,
-    get_active_user_profile,
-    OWNER_CHAT_ID,
-)
+from app.utils.user_profiles import active_profile_is_guest, get_active_user_profile
 
 logger = logging.getLogger(__name__)
 
@@ -135,30 +132,8 @@ def init_mongo_memory(
     except Exception as e:
         print(f"[Memory] index setup: {e}", flush=True)
 
-    # tag legacy docs (no chat_id) as the owner's
-    if OWNER_CHAT_ID:
-        _migrate_legacy_docs(mongo_db)
-
     mode = "vector + keyword" if _embed_client else "keyword only"
     print(f"[Memory] MongoDB memory ready ({mode})", flush=True)
-
-
-def _migrate_legacy_docs(mongo_db) -> None:
-    """Tag docs that predate per-user isolation with chat_id=OWNER_CHAT_ID."""
-    for col_name in ("sandy_facts", "sandy_conversations"):
-        try:
-            result = mongo_db[col_name].update_many(
-                {"chat_id": {"$exists": False}},
-                {"$set": {"chat_id": OWNER_CHAT_ID}},
-            )
-            if result.modified_count:
-                print(
-                    f"[Memory] migrated {result.modified_count} legacy docs "
-                    f"in {col_name} to chat_id={OWNER_CHAT_ID}",
-                    flush=True,
-                )
-        except Exception as e:
-            print(f"[Memory] migration failed for {col_name}: {e}", flush=True)
 
 
 # Embeddings

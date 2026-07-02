@@ -61,6 +61,13 @@ mongo_client, mongo_db = init_mongo_connection(
     MONGODB_DB_NAME,
 )
 
+# Users store first — the owner's canonical tenant id (get_or_create_owner())
+# is needed by the legacy-identity reconciliation below, before any other
+# store's boot-time migration runs.
+from app.features.users_store import init_users_store
+
+init_users_store(mongo_db)
+
 
 # Internal architecture glossary — injected into every system prompt so Sandy
 # uses these terms accurately.  Do NOT share or explain these to the user.
@@ -109,9 +116,9 @@ init_mongo_memory(
     azure_embedding_deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
 )
 
-from app.agent.memory import migrate_legacy_memory_doc
+from app.utils.user_profiles import reconcile_owner_identity
 
-migrate_legacy_memory_doc(mongo_db)
+reconcile_owner_identity(mongo_db)
 
 from app.features.speaker_id import init_speaker_store
 
@@ -136,7 +143,6 @@ from app.features.focus_store import init_focus_store
 from app.features.scene_store import init_scene_store
 from app.features.device_store import init_device_store
 from app.features.node_store import init_node_store
-from app.features.users_store import init_users_store
 from app.features.usage_store import init_usage_store
 
 init_tasks_store(mongo_db)
@@ -150,7 +156,6 @@ init_focus_store(mongo_db)
 init_scene_store(mongo_db)
 init_device_store(mongo_db)
 init_node_store(mongo_db)
-init_users_store(mongo_db)
 init_usage_store(mongo_db)
 
 # Inbound MQTT: listen for node heartbeats + learned IR codes (no-op if MQTT off).

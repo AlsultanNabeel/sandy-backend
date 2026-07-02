@@ -5,6 +5,10 @@ owner only. Closed for Phase 4 ("close the globals") via the same enforced
 ``ScopedCollection`` boundary every other store uses (``app.utils.tenant_db``) —
 each authenticated user gets their own doc, stamped and filtered by tenant id
 automatically, so no code path can read or write another tenant's memory.
+
+The pre-isolation legacy doc (and any doc still tagged with one of the owner's
+old identities) is reconciled onto his canonical tenant id by
+``app.utils.user_profiles.reconcile_owner_identity``, called once at boot.
 """
 
 import logging
@@ -12,7 +16,6 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from app.utils.tenant_db import scoped
-from app.utils.user_profiles import OWNER_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -43,21 +46,6 @@ def _default_memory() -> Dict[str, Any]:
             "predicted_intent": "",
         },
     }
-
-
-def migrate_legacy_memory_doc(mongo_db: Optional[Any]) -> None:
-    """One-time: tag the pre-isolation global doc (``_id: "sandy_memory"``, no
-    ``user_id``) with the owner's tenant, so it keeps surfacing for him and can
-    never again be read as an untagged/global doc."""
-    if mongo_db is None or not OWNER_CHAT_ID:
-        return
-    try:
-        mongo_db[_COLLECTION].update_one(
-            {"_id": "sandy_memory", "user_id": {"$exists": False}},
-            {"$set": {"user_id": OWNER_CHAT_ID}},
-        )
-    except Exception as exc:
-        logger.warning("[Memory] legacy doc migration skipped: %s", exc)
 
 
 def load_memory(mongo_db: Optional[Any] = None) -> Dict[str, Any]:

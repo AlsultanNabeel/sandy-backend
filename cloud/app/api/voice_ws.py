@@ -631,6 +631,16 @@ async def _verify_and_inject(session, pcm: bytes) -> None:
 
 
 def _stm_chat_id() -> str:
+    """The owner's canonical tenant id — same one users_store.get_or_create_owner()
+    mints and /api/auth logs him in under, so voice shares one identity/memory
+    space with REST/text-chat instead of keying off a raw legacy env var."""
+    try:
+        from app.features import users_store
+        uid = users_store.get_or_create_owner()
+        if uid:
+            return uid
+    except Exception as exc:
+        logger.debug("[voice_ws] owner tenant lookup failed: %s", exc)
     from app.utils.user_profiles import OWNER_CHAT_ID, LEGACY_OWNER_CHAT_ID
     return OWNER_CHAT_ID or LEGACY_OWNER_CHAT_ID or ""
 
@@ -851,12 +861,18 @@ def _make_dispatcher():
 
 
 def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Sync tool dispatch with owner profile context (called via run_in_executor)."""
+    """Sync tool dispatch with owner profile context (called via run_in_executor).
+
+    ``chat_id`` must be the owner's canonical tenant id (``_stm_chat_id()``),
+    not the raw legacy env var — every store a tool touches (tasks, reminders,
+    habits, ...) scopes to ``current_user_id()``, so a mismatch here means
+    voice-added data lands in a tenant the REST/text-chat owner can't see.
+    """
     from app.agent.tools.dispatcher import DispatchContext
-    from app.utils.user_profiles import active_user_profile_context, OWNER_CHAT_ID
+    from app.utils.user_profiles import active_user_profile_context
 
     owner_profile = {
-        "chat_id": OWNER_CHAT_ID,
+        "chat_id": _stm_chat_id(),
         "relation": "owner",
         "tone": "casual",
         "permissions": "all",
