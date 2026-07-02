@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 
 from app.agent.semantic_memory import semantic_memory_stats
@@ -211,11 +211,65 @@ def create_app(
         return jsonify({"ok": True}), 200
 
     # Web agent endpoint: full SA pipeline, shared memory.
+    def _run_authenticated_agent(claims: dict, body: dict, lang: str) -> dict:
+        """The full per-user LangGraph pipeline for an owner/user request:
+        builds the profile, runs the graph, saves pending state, formats the
+        reply. Synchronous — shared by ``/api/agent`` (calls it directly) and
+        ``/api/agent/stream`` (calls it inside a worker thread, with stream
+        hooks set just before the call in that same thread), so the two
+        routes can't drift on metering/graph logic. Raises on failure; the
+        caller decides how to report it (JSON error vs. an SSE error event).
+        """
+        from app.agent.graph.graph import run_graph, get_final_reply
+        from app.agent.pending_store import load_pending_state, save_pending_state
+        from app.utils.user_profiles import active_user_profile_context, build_user_profile
+
+        user_id = claims.get("user_id") or ""
+        role = claims.get("role", "guest")
+        message = (body.get("message") or "").strip()
+
+        # The active profile scopes data to THIS user via current_user_id().
+        # Every authenticated user (owner included) gets full CRUD on their
+        # own data; isolation is by scope.
+        _profile = build_user_profile(claims)
+        graph_message = message
+        if lang == "en":
+            graph_message = (
+                f"{message}\n\n(Note: I'm on the English interface — please "
+                "reply in English, keeping your usual personality.)"
+            )
+        # سيشن الشات (اختياري): يفصل ذاكرة كل محادثة على حدة. غيابه =
+        # السلوك القديم (خيط واحد لكل مستخدم).
+        conversation_id = (body.get("conversation_id") or "").strip()
+        # نفس مفتاح الخيط اللي run_graph نفسه بيستخدمه (thread_id) —
+        # لازم يتطابق تماماً عشان الـ pending يتحمّل ويترجع لنفس المحادثة.
+        thread_id = conversation_id or user_id
+        loaded_pending = load_pending_state(thread_id, mongo_db)
+        with active_user_profile_context(_profile):
+            state = run_graph(
+                graph_message,
+                user_id=user_id,
+                chat_id=user_id,
+                source="web",
+                conversation_id=conversation_id or None,
+                pending_state=loaded_pending,
+            )
+        save_pending_state(thread_id, user_id, mongo_db, state.get("pending_state"))
+        reply = get_final_reply(state)
+        chunks = reply.get("chunks") or [reply.get("text", "")]
+        text = "\n".join(chunks)
+        result = {"reply": text, "role": role}
+        img_bytes = reply.get("image_bytes")
+        if img_bytes:
+            import base64
+            b64 = base64.b64encode(img_bytes).decode()
+            result["reply"] = reply.get("caption") or text
+            result["image_url"] = f"data:image/png;base64,{b64}"
+        return result
+
     @app.route("/api/agent", methods=["POST"])
     @require_auth
     def web_agent(claims):
-        from app.agent.graph.graph import run_graph, get_final_reply
-
         body = request.get_json(silent=True) or {}
 
         message = (body.get("message") or "").strip()
@@ -250,52 +304,7 @@ def create_app(
         # pipeline; only true guests fall through to the basic demo chat.
         if role in ("owner", "user"):
             try:
-                import base64
-                from app.utils.user_profiles import (
-                    active_user_profile_context,
-                    build_user_profile,
-                )
-                # The active profile scopes data to THIS user via
-                # current_user_id(). Every authenticated user (owner included)
-                # gets full CRUD on their own data; isolation is by scope.
-                _profile = build_user_profile(claims)
-                graph_message = message
-                if lang == "en":
-                    graph_message = (
-                        f"{message}\n\n(Note: I'm on the English interface — please "
-                        "reply in English, keeping your usual personality.)"
-                    )
-                # سيشن الشات (اختياري): يفصل ذاكرة كل محادثة على حدة. غيابه =
-                # السلوك القديم (خيط واحد لكل مستخدم).
-                conversation_id = (body.get("conversation_id") or "").strip()
-                # نفس مفتاح الخيط اللي run_graph نفسه بيستخدمه (thread_id) —
-                # لازم يتطابق تماماً عشان الـ pending يتحمّل ويترجع لنفس المحادثة.
-                thread_id = conversation_id or user_id
-                from app.agent.pending_store import load_pending_state, save_pending_state
-                loaded_pending = load_pending_state(thread_id, mongo_db)
-                with active_user_profile_context(_profile):
-                    state = run_graph(
-                        graph_message,
-                        user_id=user_id,
-                        chat_id=user_id,
-                        source="web",
-                        conversation_id=conversation_id or None,
-                        pending_state=loaded_pending,
-                    )
-                save_pending_state(thread_id, user_id, mongo_db, state.get("pending_state"))
-                reply = get_final_reply(state)
-                chunks = reply.get("chunks") or [reply.get("text", "")]
-                text = "\n".join(chunks)
-                img_bytes = reply.get("image_bytes")
-                if img_bytes:
-                    b64 = base64.b64encode(img_bytes).decode()
-                    caption = reply.get("caption") or text
-                    return jsonify({
-                        "reply": caption,
-                        "image_url": f"data:image/png;base64,{b64}",
-                        "role": role,
-                    }), 200
-                return jsonify({"reply": text, "role": role}), 200
+                return jsonify(_run_authenticated_agent(claims, body, lang)), 200
             except Exception:
                 logger.exception("[web_agent] user pipeline failed")
                 return jsonify({"error": "internal_error"}), 500
@@ -343,6 +352,85 @@ def create_app(
         except Exception:
             logger.exception("[web_agent] guest chat failed")
             return jsonify({"error": "internal_error"}), 500
+
+    @app.route("/api/agent/stream", methods=["POST"])
+    @require_auth
+    def web_agent_stream(claims):
+        """Same pipeline as /api/agent, but streams the chat_respond LLM
+        reply token-by-token over SSE as it's generated, so the app can show
+        text arriving instead of waiting for the full reply. Only helps the
+        plain-chat path (routing + tool actions like adding a task still run
+        to completion before anything streams — there's no partial output to
+        show there). Owner/signed-in users only; guests use plain /api/agent.
+        """
+        import json
+        import queue
+        import threading
+
+        from app.agent.nodes.execute import clear_stream_hooks, set_stream_hooks
+
+        body = request.get_json(silent=True) or {}
+        message = (body.get("message") or "").strip()
+        if not message:
+            return jsonify({"error": "no message"}), 400
+
+        lang = (body.get("lang") or "ar").strip().lower()
+        role = claims.get("role", "guest")
+        user_id = claims.get("user_id") or ""
+
+        if role not in ("owner", "user"):
+            return jsonify({"error": "streaming_requires_account"}), 403
+
+        from app.features import users_store, usage_store
+        if role == "owner" or users_store.is_subscriber(user_id):
+            _daily, _per_min = 5000, 60
+        else:
+            _daily, _per_min = 40, 12
+        _over = usage_store.check_and_record(
+            user_id, daily_limit=_daily, per_min_limit=_per_min
+        )
+        if _over:
+            return jsonify({"error": _over}), 429
+
+        chunk_queue: "queue.Queue" = queue.Queue()
+        outcome: dict = {}
+
+        def _worker():
+            # Hooks + active profile are thread-local — both must be set
+            # HERE, inside the worker thread, not the request thread that
+            # spawned it (they don't cross threads).
+            set_stream_hooks(on_start=lambda: None, on_chunk=chunk_queue.put)
+            try:
+                outcome["result"] = _run_authenticated_agent(claims, body, lang)
+            except Exception:
+                logger.exception("[web_agent_stream] user pipeline failed")
+                outcome["error"] = True
+            finally:
+                clear_stream_hooks()
+                chunk_queue.put(None)  # sentinel: no more chunks
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+        def _generate():
+            while True:
+                item = chunk_queue.get()
+                if item is None:
+                    break
+                yield f"data: {json.dumps({'text': item}, ensure_ascii=False)}\n\n"
+
+            if outcome.get("error"):
+                yield f"data: {json.dumps({'error': 'internal_error'})}\n\n"
+                return
+
+            payload = dict(outcome.get("result") or {})
+            payload["done"] = True
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        return Response(
+            _generate(),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.route("/api/image", methods=["POST"])
     @require_auth

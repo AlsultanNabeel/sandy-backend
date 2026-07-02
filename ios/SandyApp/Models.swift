@@ -3,7 +3,9 @@ import Foundation
 struct ChatMessage: Identifiable {
     let id = UUID()
     let role: String   // "user" | "sandy"
-    let text: String
+    // var (not let): streaming updates a "sandy" bubble's text in place as
+    // chunks arrive, in-array by index, keeping the same id (ChatStore.send).
+    var text: String
 }
 
 // ── سجل المحادثات (متعدد السيشنات) — تطابق /api/conversations ───────────────

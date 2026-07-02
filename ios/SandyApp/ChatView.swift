@@ -417,10 +417,26 @@ final class ChatStore: ObservableObject {
                 // حفظ رسالة المستخدم وتشغيل ساندي مستقلّان — /api/agent بياخد نص
                 // الرسالة من الطلب نفسه، مش من القاعدة، فما داعي ننتظر الحفظ.
                 async let saveUser: () = api.appendMessage(cid: cid, role: "user", text: text)
-                // نمرّر سيشن المحادثة فتتذكّرها ساندي مستقلة عن باقي محادثاتك.
-                let reply = try await api.sendMessage(text, conversationId: cid)
+                // نمرّر سيشن المحادثة فتتذكّرها ساندي مستقلة عن باقي محادثاتك. أول
+                // قطعة توصل تستبدل مؤشّر الكتابة بفقاعة نصّية تكبر تدريجياً — ردود
+                // الأدوات (زي "أضف مهمة") ما فيها قطع، بترجع دفعة وحدة بالنهاية.
+                var sandyIndex: Int?
+                let (reply, _) = try await api.sendMessageStreaming(text, conversationId: cid) { [weak self] partial in
+                    guard let self else { return }
+                    if let idx = sandyIndex {
+                        self.messages[idx].text = partial
+                    } else {
+                        self.sending = false
+                        sandyIndex = self.messages.count
+                        self.messages.append(ChatMessage(role: "sandy", text: partial))
+                    }
+                }
                 _ = try? await saveUser
-                messages.append(ChatMessage(role: "sandy", text: reply))
+                if let idx = sandyIndex {
+                    messages[idx].text = reply
+                } else {
+                    messages.append(ChatMessage(role: "sandy", text: reply))
+                }
                 try? await api.appendMessage(cid: cid, role: "sandy", text: reply)
                 // تحديث قائمة المحادثات لا يوقف ظهور الردّ — يشتغل بالخلفية.
                 Task { await loadList(api: api) }

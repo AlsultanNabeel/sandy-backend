@@ -138,6 +138,70 @@ final class APIClient {
         return r["reply"] as? String ?? "…"
     }
 
+    /// نفس /api/agent بس ستريمنغ (SSE) — ينادي onChunk بالنص التراكمي أول
+    /// بأول (رد الدردشة العادي بس؛ ردود الأدوات زي "أضف مهمة" ما فيها أجزاء
+    /// تتستريم، بترجع دفعة وحدة بآخر حدث). يرجع الرد النهائي + رابط صورة لو في.
+    func sendMessageStreaming(
+        _ text: String,
+        conversationId: String? = nil,
+        onChunk: @MainActor @escaping (String) -> Void
+    ) async throws -> (reply: String, imageURL: String?) {
+        guard let url = URL(string: baseURL + "/api/agent/stream") else {
+            throw APIError(message: "عنوان غير صالح")
+        }
+        let lang = await LanguageManager.shared.lang.rawValue
+        var bodyDict: [String: Any] = ["message": text, "lang": lang]
+        if let cid = conversationId, !cid.isEmpty { bodyDict["conversation_id"] = cid }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 60
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
+
+        let bytes: URLSession.AsyncBytes
+        let resp: URLResponse
+        do {
+            (bytes, resp) = try await URLSession.shared.bytes(for: req)
+        } catch is URLError {
+            throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
+        }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 401 {
+            onUnauthorized?()
+            throw APIError(message: "انتهت الجلسة، سجّل دخولك من جديد.", kind: .unauthorized)
+        }
+        if code >= 400 {
+            // ردود الخطأ ما بتنستريم — نقرأ الجسم الصغير عادي.
+            var data = Data()
+            for try await byte in bytes { data.append(byte) }
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            throw APIError(message: (json["error"] as? String) ?? "خطأ \(code)", kind: .server)
+        }
+
+        var finalReply = ""
+        var imageURL: String?
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: "),
+                  let data = line.dropFirst("data: ".count).data(using: .utf8),
+                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            else { continue }
+            if let err = obj["error"] as? String {
+                throw APIError(message: err == "internal_error" ? "معلش، صار خطأ." : err, kind: .server)
+            }
+            if obj["done"] as? Bool == true {
+                finalReply = obj["reply"] as? String ?? finalReply
+                imageURL = obj["image_url"] as? String
+                break
+            }
+            if let partial = obj["text"] as? String {
+                await onChunk(partial)
+            }
+        }
+        return (finalReply, imageURL)
+    }
+
     // MARK: - سجل المحادثات (متعدد السيشنات)
 
     // GET /api/conversations → {"items":[{id,title,updated_at}]}
