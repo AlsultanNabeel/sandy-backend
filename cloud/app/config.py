@@ -89,7 +89,6 @@ MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "sany-db").strip()
 
 # Paths
 DATA_DIR = BASE_DIR.parent / "data"
-MEMORY_DIR = DATA_DIR / "memory"
 TASKS_DIR = DATA_DIR / "tasks"
 
 # Default personality for guests / new users.

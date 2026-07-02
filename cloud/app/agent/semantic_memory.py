@@ -25,7 +25,11 @@ import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
-from app.utils.user_profiles import get_active_user_profile, OWNER_CHAT_ID
+from app.utils.user_profiles import (
+    active_profile_is_guest,
+    get_active_user_profile,
+    OWNER_CHAT_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,16 +60,21 @@ def _current_chat_id() -> Optional[str]:
 
 
 def _can_write_memory() -> bool:
-    """Owner and Family may write. Guest and unauthenticated may not."""
+    """Any authenticated (non-guest) tenant may write their own memory.
+
+    ``relation`` used to be "owner"/"family" under the old single-household
+    model; ``build_user_profile`` (every REST + agent request today) only ever
+    sets "user"/"guest", so this must key off the same guest check every other
+    store uses, not the stale relation strings.
+    """
     profile = get_active_user_profile()
     if not profile:
         return False
-    relation = str(profile.get("relation", "guest") or "guest").strip().lower()
-    return relation in {"owner", "family"}
+    return not active_profile_is_guest()
 
 
 def _can_read_memory() -> bool:
-    """Same rule as write: only owner and family see their memory."""
+    """Same rule as write: only non-guest (authenticated) tenants read memory."""
     return _can_write_memory()
 
 

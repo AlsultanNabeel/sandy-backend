@@ -50,7 +50,6 @@ from app.config import (
     AZURE_OPENAI_CHAT_DEPLOYMENT,
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
     AZURE_OPENAI_ENDPOINT,
-    MEMORY_DIR,
     MONGODB_DB_NAME,
     MONGODB_URI,
     OPENAI_API_KEY,
@@ -75,9 +74,6 @@ _ARCH_GLOSSARY = """\
 - Memory layer: الحقائق والمحادثات محفوظة في MongoDB (sandy_facts, sandy_conversations) — تستمر عبر إعادة التشغيل.
 - Semantic memory: ذاكرة دلالية على MongoDB Vector Search — تتدهور بشكل صريح وآمن إذا لم يكن الـ index متاحاً.\
 """
-
-MEMORY_FILE = MEMORY_DIR / "sandy_agent_memory.json"
-
 
 # Init: clients + feature stores.
 if not OPENAI_API_KEY:
@@ -112,6 +108,10 @@ init_mongo_memory(
     azure_client=azure_openai_client,
     azure_embedding_deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
 )
+
+from app.agent.memory import migrate_legacy_memory_doc
+
+migrate_legacy_memory_doc(mongo_db)
 
 from app.features.speaker_id import init_speaker_store
 

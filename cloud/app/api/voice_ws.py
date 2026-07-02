@@ -740,11 +740,11 @@ def _build_system_instruction() -> str:
 
     parts: List[str] = [SANDY_PERSONALITY.strip()]
 
-    # File-based memory (legacy, lightweight)
+    # Legacy per-tenant memory doc (lightweight)
     try:
         from app.agent.memory import load_memory
-        from app.agent.facade.agent import MEMORY_FILE, mongo_db
-        memory = load_memory(memory_file=MEMORY_FILE, mongo_db=mongo_db)
+        from app.agent.facade.agent import mongo_db
+        memory = load_memory(mongo_db=mongo_db)
         if memory:
             parts.append(f"\nذاكرتك:\n{json.dumps(memory, ensure_ascii=False, indent=2)}")
     except Exception as exc:

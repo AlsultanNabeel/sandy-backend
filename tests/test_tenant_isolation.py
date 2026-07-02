@@ -196,6 +196,70 @@ def test_memory_tool_isolates_and_fails_closed(db):
     assert "ghost-zzz" not in recall_ghost, "memory: no-tenant write leaked"
 
 
+def test_agent_memory_doc_isolated_and_fail_closed(db):
+    """agent/memory.py: was a single global ``sandy_memory`` doc for everyone
+    (Phase 4 closed it) — now one doc per tenant via the enforced scoping."""
+    from app.agent import memory as agent_memory
+
+    with as_tenant("tenant-A"):
+        agent_memory.save_memory({"facts": ["A-secret-zzz"]}, mongo_db=db)
+    with as_tenant("tenant-B"):
+        agent_memory.save_memory({"facts": ["B-secret-zzz"]}, mongo_db=db)
+
+    with as_tenant("tenant-A"):
+        mem_a = agent_memory.load_memory(mongo_db=db)
+    with as_tenant("tenant-B"):
+        mem_b = agent_memory.load_memory(mongo_db=db)
+
+    assert mem_a["facts"] == ["A-secret-zzz"], "tenant A can't see its own memory doc"
+    assert mem_b["facts"] == ["B-secret-zzz"], "tenant B can't see its own memory doc"
+
+    with no_tenant():
+        agent_memory.save_memory({"facts": ["ghost-zzz"]}, mongo_db=db)
+        ghost = agent_memory.load_memory(mongo_db=db)
+    assert ghost["facts"] == [], "no-tenant write/read must go nowhere"
+
+    with as_tenant("tenant-A"):
+        mem_a_again = agent_memory.load_memory(mongo_db=db)
+    assert mem_a_again["facts"] == ["A-secret-zzz"], "no-tenant write leaked into tenant A"
+
+
+def test_semantic_facts_isolated_and_fail_closed(db):
+    """semantic_memory.search_relevant_facts/load_facts_to_chroma: was gated by
+    a stale relation check ("owner"/"family") that no live profile ever sets
+    anymore, silently blocking every user; fixed to key off the current guest
+    check. Verify it's both working and tenant-isolated."""
+    from app.agent import semantic_memory
+
+    semantic_memory.init_mongo_memory(db)
+    secret_a = "fact-secret-AAA-zzz"
+    secret_b = "fact-secret-BBB-zzz"
+
+    with as_tenant("tenant-A"):
+        semantic_memory.load_facts_to_chroma([{"text": secret_a}])
+    with as_tenant("tenant-B"):
+        semantic_memory.load_facts_to_chroma([{"text": secret_b}])
+
+    with as_tenant("tenant-A"):
+        results_a = semantic_memory.search_relevant_facts(secret_a)
+    with as_tenant("tenant-B"):
+        results_b = semantic_memory.search_relevant_facts(secret_b)
+
+    assert any(secret_a in r for r in results_a), "tenant A can't recall its own fact"
+    assert not any(secret_b in r for r in results_a), "LEAK — tenant B's fact visible to A"
+    assert any(secret_b in r for r in results_b), "tenant B can't recall its own fact"
+    assert not any(secret_a in r for r in results_b), "LEAK — tenant A's fact visible to B"
+
+    with no_tenant():
+        semantic_memory.load_facts_to_chroma([{"text": "ghost-fact-zzz"}])
+        ghost_results = semantic_memory.search_relevant_facts("ghost-fact-zzz")
+    assert ghost_results == [], "no-tenant write/read must go nowhere"
+
+    with as_tenant("tenant-A"):
+        leaked = semantic_memory.search_relevant_facts("ghost-fact-zzz")
+    assert not any("ghost-fact-zzz" in r for r in leaked), "no-tenant write leaked into tenant A"
+
+
 def test_focus_goals_isolated_and_fail_closed(db):
     from app.features import focus_store
 

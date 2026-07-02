@@ -89,9 +89,8 @@ def write_google_credentials() -> None:
 
 def ensure_data_dirs() -> None:
     """Create runtime data directories if they don't exist."""
-    from app.config import MEMORY_DIR, TASKS_DIR
+    from app.config import TASKS_DIR
 
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     logger.debug("[Bootstrap] Data directories ready")
 
