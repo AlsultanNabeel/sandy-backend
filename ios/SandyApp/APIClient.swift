@@ -223,6 +223,66 @@ final class APIClient {
         }
     }
 
+    // MARK: - المشاريع (عصف ذهني: جلسة نشطة + خطط منجزة)
+
+    // GET /api/plans → {"items":[{id,topic,summary,finished_at,plan_text}]}
+    func getPlans() async throws -> [ProjectPlan] {
+        let r = try await request("/api/plans")
+        return (r["items"] as? [[String: Any]] ?? []).map {
+            ProjectPlan(id: $0["id"] as? String ?? "",
+                        topic: $0["topic"] as? String ?? "",
+                        summary: $0["summary"] as? String ?? "",
+                        finishedAt: $0["finished_at"] as? String ?? "",
+                        planText: $0["plan_text"] as? String ?? "")
+        }
+    }
+
+    private func parseActive(_ r: [String: Any]) -> ActiveBrainstorm? {
+        guard let a = r["active"] as? [String: Any] else { return nil }
+        return ActiveBrainstorm(topic: a["topic"] as? String ?? "",
+                                 points: a["points"] as? [String] ?? [],
+                                 startedAt: a["started_at"] as? String ?? "")
+    }
+
+    // GET /api/plans/active → {"active": {topic,points,started_at} | null}
+    func getActiveBrainstorm() async throws -> ActiveBrainstorm? {
+        parseActive(try await request("/api/plans/active"))
+    }
+
+    // POST /api/plans/start {topic} → {"active": {...}}
+    func startBrainstorm(topic: String) async throws -> ActiveBrainstorm? {
+        parseActive(try await request("/api/plans/start", method: "POST", body: ["topic": topic]))
+    }
+
+    // POST /api/plans/active/points {point}
+    func addBrainstormPoint(_ point: String) async throws {
+        _ = try await request("/api/plans/active/points", method: "POST", body: ["point": point])
+    }
+
+    // POST /api/plans/active/finish → {"plan_text","topic"}
+    func finishBrainstorm() async throws -> ProjectPlan {
+        let r = try await request("/api/plans/active/finish", method: "POST")
+        return ProjectPlan(id: "", topic: r["topic"] as? String ?? "",
+                            summary: "", finishedAt: "",
+                            planText: r["plan_text"] as? String ?? "")
+    }
+
+    // POST /api/plans/active/cancel
+    func cancelBrainstorm() async throws {
+        _ = try await request("/api/plans/active/cancel", method: "POST")
+    }
+
+    // PATCH /api/plans/<id> {change} → {"plan_text"}
+    func updatePlan(id: String, change: String) async throws -> String {
+        let r = try await request("/api/plans/\(id)", method: "PATCH", body: ["change": change])
+        return r["plan_text"] as? String ?? ""
+    }
+
+    // DELETE /api/plans/<id>
+    func deletePlan(id: String) async throws {
+        _ = try await request("/api/plans/\(id)", method: "DELETE")
+    }
+
     // حذف عنصر من مصدره الأصلي (حسب نوعه) — حرية الحذف من الخط الزمني.
     func deleteTask(id: String) async throws {
         _ = try await request("/api/tasks/\(id)", method: "DELETE")

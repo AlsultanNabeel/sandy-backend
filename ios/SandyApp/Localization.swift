@@ -112,6 +112,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nImages.ns:     L10nImages.table,
     L10nMemory.ns:     L10nMemory.table,
     L10nTimeline.ns:   L10nTimeline.table,
+    L10nProjects.ns:   L10nProjects.table,
     L10nProfile.ns:    L10nProfile.table,
     // الميزات الثمانية (المرحلة الثانية) — تُركَّب بأماكنها بالهيكلية الجديدة.
     L10nShopping.ns:      L10nShopping.table,

@@ -265,6 +265,34 @@ def update_plan(
     return revised, "", p.get("topic", "")
 
 
+def update_plan_by_id(
+    chat_ids: List[Any], plan_id: Any, change: str, create_chat_completion_fn
+) -> Optional[str]:
+    """نسخة REST من update_plan — تبحث بـ _id بدل نص وصفي.
+
+    ``chat_ids`` بصيغة/معرّفات المستخدم كلها (نص + رقمي legacy) — نفس نطاق
+    الفلترة اللي بتستخدمه بقية مسارات /api/plans. يرجّع الخطة الجديدة أو None.
+    """
+    if not is_available():
+        return None
+    try:
+        p = _mongo_db[_COLL].find_one({"_id": plan_id, "chat_id": {"$in": chat_ids}})
+    except Exception:  # noqa: BLE001
+        return None
+    if not p:
+        return None
+    current = p.get("plan_text", "")
+    if not current:
+        return None
+    revised = _revise_plan(current, change, create_chat_completion_fn)
+    _mongo_db[_COLL].update_one(
+        {"_id": p["_id"]},
+        {"$set": {"plan_text": revised, "summary": _extract_summary(revised),
+                  "updated_at": _now()}},
+    )
+    return revised
+
+
 # الاسترجاع
 def list_plans(chat_id: Any, limit: int = 10) -> List[Dict[str, Any]]:
     if not is_available():

@@ -58,14 +58,15 @@ struct ProfileView: View {
 
     // MARK: - بطاقة الأدوات والأرشيف
 
-    /// أرشيف ساندي — الذاكرة + الخط الزمني + إعدادات الروبوت. نقلناهن من الشريط
-    /// السفلي لهون حتى يبقى التنقّل أربعة تبويبات نظيفة، وهاي أدوات نوصلها وقت الحاجة.
+    /// أرشيف ساندي — الذاكرة + الخط الزمني + المشاريع + إعدادات الروبوت. نقلناهن من
+    /// الشريط السفلي لهون حتى يبقى التنقّل أربعة تبويبات نظيفة، وهاي أدوات نوصلها وقت الحاجة.
     private var archiveCard: some View {
         SandyCard {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 SectionHeader(title: lang.s("profile.archive"))
                 archiveRow(icon: "brain", titleKey: "tabs.memory") { MemoryView() }
                 archiveRow(icon: "clock.arrow.circlepath", titleKey: "tabs.timeline") { TimelineTabView() }
+                archiveRow(icon: "lightbulb.fill", titleKey: "tabs.projects") { ProjectsView() }
                 archiveRow(icon: "av.remote.fill", titleKey: "tabs.robot") { RobotView() }
             }
         }

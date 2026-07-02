@@ -44,6 +44,22 @@ struct TimelineEvent: Identifiable {
     var done: Bool        // قابل للتعديل (تعليم منجز متفائل للمهام)
 }
 
+/// خطة عصف ذهني منجزة (من /api/plans).
+struct ProjectPlan: Identifiable {
+    let id: String
+    let topic: String
+    let summary: String
+    let finishedAt: String   // ISO
+    var planText: String     // النص الكامل بصيغة Markdown — قابل للتعديل بعد المراجعة
+}
+
+/// جلسة عصف ذهني نشطة (من /api/plans/active) — موضوع + نقاط مسجّلة لحد الآن.
+struct ActiveBrainstorm {
+    let topic: String
+    var points: [String]
+    let startedAt: String   // ISO
+}
+
 struct OnboardingData {
     var done: Bool = false
     var preferredName: String = ""

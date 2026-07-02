@@ -2,8 +2,8 @@ import Foundation
 
 // Namespace: tabs — the four Core-4 navigation titles (الرئيسية/ساندي/يومي/حياتي)
 // plus the titles of the feature screens that are now reached from inside a hub
-// or the profile archive (search/images/memory/timeline/robot/focus) — each of
-// those screens still uses its `tabs.*` key as its own navigationTitle.
+// or the profile archive (search/images/memory/timeline/projects/robot/focus) —
+// each of those screens still uses its `tabs.*` key as its own navigationTitle.
 //
 // Usage:  Label(lang.s("tabs.home"), systemImage: "house.fill")
 enum L10nTabs {
@@ -23,6 +23,7 @@ enum L10nTabs {
             "images":   .text("الصور"),
             "memory":   .text("الذاكرة"),
             "timeline": .text("الخط الزمني"),
+            "projects": .text("المشاريع"),
         ],
         en: [
             "home":     .text("Home"),
@@ -35,6 +36,7 @@ enum L10nTabs {
             "images":   .text("Images"),
             "memory":   .text("Memory"),
             "timeline": .text("Timeline"),
+            "projects": .text("Projects"),
         ]
     )
 }
