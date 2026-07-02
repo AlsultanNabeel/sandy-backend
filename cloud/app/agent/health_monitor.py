@@ -109,12 +109,18 @@ def get_sleep_context(
 
 
 def ensure_ttl_index(mongo_db=None, ttl_days: int = 30) -> None:
-    """أنشئ TTL index على sandy_activity عند أول تشغيل."""
+    """أنشئ الفهارس اللازمة على sandy_activity عند أول تشغيل."""
     if mongo_db is None:
         return
     try:
         mongo_db[_COLL].create_index(
             "created_at", expireAfterSeconds=ttl_days * 86400, background=True
+        )
+        # get_late_night_streak و get_avg_activity_hour بيفلتروا بـ chat_id
+        # ويرتّبوا بـ created_at — بدون هالفهرس بيصير مسح كامل للمجموعة
+        # (لاحظنا ثانيتين تأخير وقت الفحوصات الليلية).
+        mongo_db[_COLL].create_index(
+            [("chat_id", 1), ("created_at", -1)], background=True
         )
     except Exception:
         pass
