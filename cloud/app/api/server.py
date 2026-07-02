@@ -265,6 +265,11 @@ def create_app(
                 # سيشن الشات (اختياري): يفصل ذاكرة كل محادثة على حدة. غيابه =
                 # السلوك القديم (خيط واحد لكل مستخدم).
                 conversation_id = (body.get("conversation_id") or "").strip()
+                # نفس مفتاح الخيط اللي run_graph نفسه بيستخدمه (thread_id) —
+                # لازم يتطابق تماماً عشان الـ pending يتحمّل ويترجع لنفس المحادثة.
+                thread_id = conversation_id or user_id
+                from app.agent.pending_store import load_pending_state, save_pending_state
+                loaded_pending = load_pending_state(thread_id, mongo_db)
                 with active_user_profile_context(_profile):
                     state = run_graph(
                         graph_message,
@@ -272,7 +277,9 @@ def create_app(
                         chat_id=user_id,
                         source="web",
                         conversation_id=conversation_id or None,
+                        pending_state=loaded_pending,
                     )
+                save_pending_state(thread_id, user_id, mongo_db, state.get("pending_state"))
                 reply = get_final_reply(state)
                 chunks = reply.get("chunks") or [reply.get("text", "")]
                 text = "\n".join(chunks)

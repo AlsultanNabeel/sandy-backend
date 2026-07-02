@@ -157,6 +157,9 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
                 ("guest_usage.created_at_ttl", lambda: mongo_db.guest_usage.create_index(
                     "created_at", expireAfterSeconds=60 * 60 * 24 * 90, background=True
                 )),
+                ("sandy_pending_state.updated_at_ttl", lambda: mongo_db.sandy_pending_state.create_index(
+                    "updated_at", expireAfterSeconds=60 * 60, background=True
+                )),
             ]
             for label, job in index_jobs:
                 try:

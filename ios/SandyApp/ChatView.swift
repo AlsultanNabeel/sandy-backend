@@ -414,12 +414,16 @@ final class ChatStore: ObservableObject {
                     UserDefaults.standard.set(id, forKey: currentKey)
                 }
                 let cid = currentID ?? ""
-                try? await api.appendMessage(cid: cid, role: "user", text: text)
+                // حفظ رسالة المستخدم وتشغيل ساندي مستقلّان — /api/agent بياخد نص
+                // الرسالة من الطلب نفسه، مش من القاعدة، فما داعي ننتظر الحفظ.
+                async let saveUser: () = api.appendMessage(cid: cid, role: "user", text: text)
                 // نمرّر سيشن المحادثة فتتذكّرها ساندي مستقلة عن باقي محادثاتك.
                 let reply = try await api.sendMessage(text, conversationId: cid)
+                _ = try? await saveUser
                 messages.append(ChatMessage(role: "sandy", text: reply))
                 try? await api.appendMessage(cid: cid, role: "sandy", text: reply)
-                await loadList(api: api)
+                // تحديث قائمة المحادثات لا يوقف ظهور الردّ — يشتغل بالخلفية.
+                Task { await loadList(api: api) }
                 return reply
             } catch {
                 if !error.isCancellation { errorMessage = LanguageManager.shared.s("chat.sendError") }
