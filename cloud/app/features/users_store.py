@@ -13,6 +13,8 @@ Collection: sandy_users
    provider ("google" | "apple"), provider_sub (OAuth subject, stable),
    email, name, picture, locale,
    onboarding: {done: bool, preferred_name: str, interests: [str], notes: str},
+   persona: {dialect: str (app.agent.context_builder.DIALECT_PRESETS key),
+             custom_instructions: str} — absent means the defaults,
    subscription: {status: "none"|"trialing"|"active"|"expired",
                   plan: str, trial_ends_at, current_period_end, source},
    created_at, last_seen_at}
@@ -210,6 +212,44 @@ def set_onboarding(
         sets["onboarding.interests"] = [str(i).strip()[:60] for i in interests if str(i).strip()][:20]
     if notes is not None:
         sets["onboarding.notes"] = notes.strip()[:500]
+    res = coll.update_one({"_id": user_id}, {"$set": sets})
+    return res.matched_count > 0
+
+
+_DEFAULT_PERSONA: Dict[str, Any] = {"dialect": "palestinian", "custom_instructions": ""}
+
+
+def get_persona(user_id: str) -> Dict[str, Any]:
+    """The user's dialect + custom instructions, or the defaults (Palestinian
+    dialect, no override) if unset or the store is unavailable."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return dict(_DEFAULT_PERSONA)
+    user = coll.find_one({"_id": user_id}, {"persona": 1}) or {}
+    persona = user.get("persona") or {}
+    return {
+        "dialect": str(persona.get("dialect") or _DEFAULT_PERSONA["dialect"]),
+        "custom_instructions": str(persona.get("custom_instructions") or ""),
+    }
+
+
+def set_persona(
+    user_id: str,
+    dialect: Optional[str] = None,
+    custom_instructions: Optional[str] = None,
+) -> bool:
+    """Save dialect and/or custom instructions. Pass ``""`` for
+    ``custom_instructions`` to reset to the default persona."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return False
+    sets: Dict[str, Any] = {}
+    if dialect is not None:
+        sets["persona.dialect"] = dialect.strip()[:30]
+    if custom_instructions is not None:
+        sets["persona.custom_instructions"] = custom_instructions.strip()[:2000]
+    if not sets:
+        return True
     res = coll.update_one({"_id": user_id}, {"$set": sets})
     return res.matched_count > 0
 

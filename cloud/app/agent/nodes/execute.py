@@ -164,8 +164,8 @@ _CHAT_BEHAVIOR_RULES = """
 def _handle_chat(state: SandyState, create_chat_completion_fn) -> str:
     """يستدعي Azure LLM لـ chat intents ويرجع الرد كـ string."""
 
-    from app.config import SANDY_PERSONALITY
-    sandy_personality = SANDY_PERSONALITY
+    from app.agent.context_builder import build_effective_persona
+    sandy_personality = build_effective_persona(state.get("user_id") or state.get("chat_id"))
 
     persona_snippet = state.get("persona_snippet") or ""
     time_ctx = _get_current_time_context()

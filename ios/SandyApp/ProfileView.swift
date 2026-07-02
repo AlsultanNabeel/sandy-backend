@@ -68,6 +68,7 @@ struct ProfileView: View {
                 archiveRow(icon: "clock.arrow.circlepath", titleKey: "tabs.timeline") { TimelineTabView() }
                 archiveRow(icon: "lightbulb.fill", titleKey: "tabs.projects") { ProjectsView() }
                 archiveRow(icon: "av.remote.fill", titleKey: "tabs.robot") { RobotView() }
+                archiveRow(icon: "sparkles", titleKey: "persona.title") { PersonaView() }
             }
         }
     }

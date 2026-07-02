@@ -746,9 +746,9 @@ def _save_voice_turn(user_text: str, sandy_text: str) -> None:
 
 def _build_system_instruction() -> str:
     """Build system instruction: Sandy's personality + full memory context + STM."""
-    from app.config import SANDY_PERSONALITY
+    from app.agent.context_builder import build_effective_persona
 
-    parts: List[str] = [SANDY_PERSONALITY.strip()]
+    parts: List[str] = [build_effective_persona(_stm_chat_id() or None).strip()]
 
     # Legacy per-tenant memory doc (lightweight)
     try:

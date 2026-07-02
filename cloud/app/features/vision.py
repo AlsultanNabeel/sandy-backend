@@ -9,11 +9,11 @@ _VISION_CONTEXT = (
 )
 
 
-def _build_sandy_vision_system() -> str:
-    """شخصية ساندي الموحدة (SANDY_PERSONALITY env) + سياق إنها بتشوف الصورة."""
+def _build_sandy_vision_system(user_id: Optional[str] = None) -> str:
+    """ساندي الفعلية (تخصيص المستخدم أو الافتراضية + قفل الهوية) + سياق الصورة."""
     try:
-        from app.config import SANDY_PERSONALITY
-        persona = (SANDY_PERSONALITY or "").strip()
+        from app.agent.context_builder import build_effective_persona
+        persona = (build_effective_persona(user_id) or "").strip()
     except Exception:
         persona = ""
     if persona:
@@ -29,6 +29,7 @@ def analyze_image_with_azure(
     azure_openai_vision_deployment: Optional[str] = None,
     azure_openai_chat_deployment: Optional[str] = None,
     openai_model: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> str:
     """Analyze image bytes via Azure GPT-4o-mini Vision, in Sandy's voice."""
     if not image_bytes:
@@ -45,7 +46,7 @@ def analyze_image_with_azure(
 
         response = create_chat_completion_fn(
             messages=[
-                {"role": "system", "content": _build_sandy_vision_system()},
+                {"role": "system", "content": _build_sandy_vision_system(user_id)},
                 {
                     "role": "user",
                     "content": [

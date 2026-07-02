@@ -103,6 +103,9 @@ def create_app(
     from app.api.onboarding_api import register_onboarding_api
     register_onboarding_api(app)
 
+    from app.api.persona_api import register_persona_api
+    register_persona_api(app)
+
     from app.api.subscriptions_api import register_subscriptions_api
     register_subscriptions_api(app)
 
@@ -477,7 +480,8 @@ def create_app(
             from app.agent.facade.agent import create_chat_completion
             img_bytes = _b64.b64decode(image_b64)
             reply = analyze_image_with_azure(
-                img_bytes, question, create_chat_completion_fn=create_chat_completion
+                img_bytes, question, create_chat_completion_fn=create_chat_completion,
+                user_id=claims.get("user_id") or None,
             )
             return jsonify({"reply": reply or "تعذّر تحليل الصورة"}), 200
         except Exception:

@@ -112,6 +112,22 @@ final class APIClient {
                               body: ["preferred_name": preferredName, "interests": interests])
     }
 
+    func getPersona() async throws -> PersonaData {
+        let r = try await request("/api/persona")
+        let dialects = (r["dialects"] as? [[String: Any]] ?? []).map {
+            DialectOption(key: $0["key"] as? String ?? "", label: $0["label"] as? String ?? "")
+        }
+        return PersonaData(dialect: r["dialect"] as? String ?? "palestinian",
+                           customInstructions: r["custom_instructions"] as? String ?? "",
+                           availableDialects: dialects)
+    }
+
+    /// يحفظ اللهجة و/أو التعليمات المخصّصة. تعليمات فاضية = رجوع للشخصية الافتراضية.
+    func savePersona(dialect: String, customInstructions: String) async throws {
+        _ = try await request("/api/persona", method: "POST",
+                              body: ["dialect": dialect, "custom_instructions": customInstructions])
+    }
+
     func sendMessage(_ text: String, conversationId: String? = nil) async throws -> String {
         // نرسل لغة المستخدم الحالية (عربي/إنجليزي) حتى ترد ساندي بنفس اللغة.
         let lang = await LanguageManager.shared.lang.rawValue

@@ -119,8 +119,11 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
 تذكيرات اليوم:
 {chr(10).join(cal_lines) if cal_lines else "لا توجد تذكيرات"}"""
 
-    from app.config import SANDY_PERSONALITY
-    prompt = f"""{SANDY_PERSONALITY}
+    from app.agent.context_builder import build_effective_persona
+    # Not yet threaded to a specific tenant (this module has no user_id concept
+    # today, it's the owner-only proactive briefing) — resolves to the default
+    # persona (identity lock included) rather than silently dropping it.
+    prompt = f"""{build_effective_persona(None)}
 
 اكتبي ملخص صباحي مختصر وطبيعي لنبيل (ذكر) بناءً على البيانات أدناه فقط.
 

@@ -67,6 +67,21 @@ struct OnboardingData {
     var name: String = ""
 }
 
+/// خيار لهجة متاح (من GET /api/persona) — المفتاح التقني + التسمية بالعربي.
+struct DialectOption: Identifiable {
+    var id: String { key }
+    let key: String
+    let label: String
+}
+
+/// شخصية ساندي المخصّصة لهذا المستخدم: لهجة + تعليمات مخصّصة (فاضية = الافتراضي
+/// اللطيف العام). هويتها الفلسطينية ثابتة دايماً وما بتنعرض هون لأنها غير قابلة للتغيير.
+struct PersonaData {
+    var dialect: String = "palestinian"
+    var customInstructions: String = ""
+    var availableDialects: [DialectOption] = []
+}
+
 // مهمة — تطابق مفاتيح GET /api/tasks: id, text, done, due_at, note, priority
 // note و priority إضافيان واختياريان من الباك-إند — نعطيهما قيمًا افتراضية لو غابا.
 struct TaskItem: Identifiable {
