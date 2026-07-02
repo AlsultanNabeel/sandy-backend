@@ -86,15 +86,21 @@ _ARCH_GLOSSARY = """\
 if not OPENAI_API_KEY:
     print("[WARNING] OPENAI_API_KEY missing - OpenAI fallback will not work")
 
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+openai_client = OpenAI(api_key=OPENAI_API_KEY, max_retries=0) if OPENAI_API_KEY else None
 
 azure_openai_client = None
 if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY:
     try:
+        # max_retries=0: openai_client.py sets an explicit per-call timeout
+        # ("fail fast into the existing fallbacks") — the SDK's default
+        # retry-on-timeout would silently multiply that by ~3x, which is
+        # exactly the gap that let a slow Azure call blow past Heroku's
+        # (non-negotiable) 30s router timeout and return nothing to the app.
         azure_openai_client = AzureOpenAI(
             api_key=AZURE_OPENAI_API_KEY,
             api_version=AZURE_OPENAI_API_VERSION,
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            max_retries=0,
         )
         print("[Azure OpenAI] ✅ Connected")
     except Exception as e:

@@ -105,9 +105,10 @@ def _get_chat_completion_fn():
             azure_endpoint=azure_endpoint,
             api_key=azure_key,
             api_version=azure_version,
+            max_retries=0,  # fail fast — the SDK's default retries silently triple any timeout
         )
 
-    openai_client = OpenAI(api_key=openai_key) if openai_key else None
+    openai_client = OpenAI(api_key=openai_key, max_retries=0) if openai_key else None
 
     if not openai_client and not azure_client:
         raise RuntimeError("[execute_node] No OpenAI/Azure credentials configured")

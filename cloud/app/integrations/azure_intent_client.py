@@ -42,6 +42,12 @@ def _get_azure_client(api_key: str, api_version: str, endpoint: str) -> Any:
         api_key=api_key,
         api_version=api_version,
         azure_endpoint=endpoint,
+        # The SDK retries transient errors (incl. timeouts) twice by default,
+        # silently tripling our explicit per-call timeout — exactly what
+        # AZURE_INTENT_TIMEOUT_S's "fail fast" comment above says NOT to do.
+        # We already have our own fallback chain (Azure → OpenAI → template),
+        # so let it fail fast and fall through instead of retrying here.
+        max_retries=0,
     )
     _CACHED_CLIENT_KEY = key
     return _CACHED_AZURE_CLIENT

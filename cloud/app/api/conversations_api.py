@@ -62,6 +62,7 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
             api_key=AZURE_OPENAI_API_KEY,
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_version=AZURE_OPENAI_API_VERSION,
+            max_retries=0,  # fail fast — the SDK's default retries silently triple any timeout
         )
         resp = client.chat.completions.create(
             model=AZURE_OPENAI_CHAT_DEPLOYMENT,

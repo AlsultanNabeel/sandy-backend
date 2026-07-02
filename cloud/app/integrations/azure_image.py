@@ -36,6 +36,7 @@ def _client():
             api_key=api_key,
             api_version=api_version,
             azure_endpoint=endpoint,
+            max_retries=0,  # fail fast — image calls are already slow; don't triple that
         )
     except Exception as e:
         logger.warning("[azure_image] AzureOpenAI client init failed: %s", e)

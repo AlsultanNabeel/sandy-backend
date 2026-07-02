@@ -26,7 +26,10 @@ def _get_openai_direct_client() -> Optional[Any]:
         if not openai_key:
             return None
         from openai import OpenAI
-        _openai_direct_client = OpenAI(api_key=openai_key)
+        # max_retries=0: this is itself a fallback step (Azure already failed);
+        # the SDK's default retry-on-timeout would silently multiply how long
+        # we wait before falling through to the next (persona_snippet) step.
+        _openai_direct_client = OpenAI(api_key=openai_key, max_retries=0)
     return _openai_direct_client
 
 

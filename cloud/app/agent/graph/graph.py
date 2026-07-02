@@ -130,6 +130,7 @@ def _get_summary_client():
             api_key=AZURE_OPENAI_API_KEY,
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_version=AZURE_OPENAI_API_VERSION,
+            max_retries=0,  # fail fast — the SDK's default retries silently triple any timeout
         )
         _summary_client_key = key
     return _summary_client
