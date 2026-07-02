@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 # ruff: noqa: E402
-"""Sandy agent runtime: wires up clients, the feature stores, and the shared
-agent instance. The HTTP server is built separately in app.api.server."""
+"""Sandy agent runtime: wires up clients and the feature stores. The HTTP
+server is built separately in app.api.server."""
 
 import logging
 import sys
-import threading
-from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -17,13 +15,8 @@ if str(CURRENT_DIR) not in sys.path:
 
 from openai import OpenAI, AzureOpenAI
 
-from app.agent.memory import (
-    load_memory,
-    load_session,
-)
 from app.integrations.openai_client import make_chat_completion_fn
 from app.integrations.mongodb_store import init_mongo_connection
-from app.agent.facade.briefing import build_morning_briefing
 
 # Try to import Azure Speech SDK for text-to-speech
 try:
@@ -62,7 +55,6 @@ from app.config import (
     MONGODB_URI,
     OPENAI_API_KEY,
     OPENAI_MODEL,
-    TASKS_DIR,
 )
 
 mongo_client, mongo_db = init_mongo_connection(
@@ -85,8 +77,6 @@ _ARCH_GLOSSARY = """\
 """
 
 MEMORY_FILE = MEMORY_DIR / "sandy_agent_memory.json"
-SESSION_FILE = MEMORY_DIR / "sandy_session_memory.json"
-TASKS_FILE = TASKS_DIR / "daily_plan.json"
 
 
 # Init: clients + feature stores.
@@ -166,52 +156,3 @@ init_usage_store(mongo_db)
 # Inbound MQTT: listen for node heartbeats + learned IR codes (no-op if MQTT off).
 from app.integrations.mqtt_ingest import start_mqtt_ingest
 start_mqtt_ingest()
-
-
-class SandyAgent:
-    def __init__(
-        self,
-        *,
-        memory_file,
-        session_file,
-        mongo_db,
-        tasks_file,
-    ):
-        self.memory_file = memory_file
-        self.session_file = session_file
-        self.mongo_db = mongo_db
-        self.tasks_file = tasks_file
-
-        self.memory = load_memory(memory_file=self.memory_file, mongo_db=self.mongo_db)
-        self.memory.setdefault("conversations", [])
-        self.memory.setdefault("facts", [])
-        self.memory.setdefault("sandy_state", {})
-        self.session = load_session(
-            session_file=self.session_file, mongo_db=self.mongo_db
-        )
-        self.session.setdefault("pending_action", None)
-        self.is_speaking = False
-        self.last_activity = datetime.now()
-        self.last_briefing_date = self.memory.get("sandy_state", {}).get(
-            "last_briefing_date", ""
-        )
-        # Protects concurrent writes to self.memory["sandy_state"] from background threads
-        self._memory_lock = threading.Lock()
-
-    def _build_morning_briefing(self) -> str:
-        return build_morning_briefing(
-            memory=self.memory,
-            mongo_db=self.mongo_db,
-            tasks_file=self.tasks_file,
-        )
-
-
-
-# The shared agent instance, used by the HTTP API (serve_api.py) and the
-# agent pipeline. The app's Flask server is built by app.api.server.create_app.
-agent = SandyAgent(
-    memory_file=MEMORY_FILE,
-    session_file=SESSION_FILE,
-    mongo_db=mongo_db,
-    tasks_file=TASKS_FILE,
-)

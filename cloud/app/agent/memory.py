@@ -47,10 +47,6 @@ def _default_memory() -> Dict[str, Any]:
     }
 
 
-def _default_session() -> Dict[str, Any]:
-    return {"messages": [], "audit_trace": []}
-
-
 # Load and save (sync)
 
 
@@ -124,89 +120,5 @@ def save_memory(
 
     if write_json_file(memory_file, memory):
         logger.info("[Memory] saved to JSON file")
-
-
-def load_session(
-    session_file: Optional[Path] = None, mongo_db: Optional[Any] = None
-) -> Dict[str, Any]:
-    """Load session memory from MongoDB (preferred) or disk JSON."""
-    default_session = _default_session()
-
-    if not _is_owner_context():
-        return default_session
-
-    if mongo_db is not None:
-        try:
-            session_doc = mongo_db["sessions"].find_one({"_id": "current_session"})
-            if session_doc:
-                session_doc.pop("_id", None)
-                logger.info("[Session] loaded from MongoDB")
-                return session_doc
-
-            json_session = read_json_file(session_file, None)
-            if isinstance(json_session, dict):
-                mongo_db["sessions"].replace_one(
-                    {"_id": "current_session"},
-                    {**json_session, "_id": "current_session"},
-                    upsert=True,
-                )
-                logger.info("[Session] migrated JSON to MongoDB")
-                return json_session
-
-            logger.info("[Session] MongoDB is source of truth (new session)")
-            return default_session
-
-        except Exception as e:
-            logger.warning(f"[Session] MongoDB error: {e}, falling back to JSON")
-
-    session_json = read_json_file(session_file, None)
-    if isinstance(session_json, dict):
-        logger.info("[Session] loaded from JSON file")
-        return session_json
-
-    return default_session
-
-
-def save_session(
-    session: Dict[str, Any],
-    session_file: Optional[Path] = None,
-    mongo_db: Optional[Any] = None,
-) -> None:
-    """Save session memory to MongoDB (preferred) or disk JSON."""
-    if not _is_owner_context():
-        return
-
-    if mongo_db is not None:
-        try:
-            # Trim into the saved copy only; don't mutate the caller's session.
-            messages = session.get("messages")
-            messages = messages[-20:] if isinstance(messages, list) else []
-
-            session_to_save = {
-                "messages": messages,
-                "pending_action": session.get("pending_action"),
-                "task_aliases": session.get("task_aliases", {}),
-                "completed_task_aliases": session.get("completed_task_aliases", {}),
-                "image_state": session.get("image_state", {}),
-                "last_search_results": session.get("last_search_results"),
-                "last_action_context": session.get("last_action_context"),
-                "audit_trace": (
-                    session.get("audit_trace", [])[-50:]
-                    if isinstance(session.get("audit_trace"), list)
-                    else []
-                ),
-                "_last_created_task_id": session.get("_last_created_task_id", ""),
-                "_last_created_task_text": session.get("_last_created_task_text", ""),
-                "_id": "current_session",
-            }
-            mongo_db["sessions"].replace_one(
-                {"_id": "current_session"}, session_to_save, upsert=True
-            )
-            return
-        except Exception as e:
-            logger.warning(f"[Session] MongoDB save error: {e}, falling back to JSON")
-
-    if write_json_file(session_file, session):
-        logger.info("[Session] saved to JSON file")
 
 

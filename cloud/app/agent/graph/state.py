@@ -52,7 +52,7 @@ class SandyState(TypedDict):
     final_response: Optional[str]
 
     # تمرير من الـ session
-    image_state: Optional[dict]  # image bytes + history من agent.session
+    image_state: Optional[dict]  # image bytes + history
 
     # تحسين النداء الواحد
     chat_reply: Optional[str]      # رد دردشة inline من maestro (يوفر نداء LLM ثاني)

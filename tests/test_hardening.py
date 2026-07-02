@@ -91,12 +91,6 @@ class PredictionThreadSafetyTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIn("predicted_intent", state)
 
-    def test_sandy_agent_has_memory_lock(self):
-        """SandyAgent.__init__ must initialise _memory_lock."""
-        import pathlib
-        src = pathlib.Path("cloud/app/agent/facade/agent.py").read_text()
-        self.assertIn("_memory_lock = threading.Lock()", src)
-
 
 # ── Glossary injection tests ──────────────────────────────────────────────────
 
