@@ -30,13 +30,14 @@ _ip_hits: dict[str, deque] = {}
 _ip_hits_lock = threading.Lock()
 
 
-def _memory_rate_check(ip: str) -> Tuple[bool, int]:
+def _memory_rate_check(ip: str, scope: str = "login") -> Tuple[bool, int]:
     """Per-process sliding-window fallback used when Mongo is unavailable.
     Bounds brute force even during a DB outage (fail-closed-ish)."""
     now = time.monotonic()
     cutoff = now - _RATE_WINDOW
+    key = f"{scope}:{ip}"
     with _ip_hits_lock:
-        dq = _ip_hits.setdefault(ip, deque())
+        dq = _ip_hits.setdefault(key, deque())
         while dq and dq[0] <= cutoff:
             dq.popleft()
         if len(dq) >= _RATE_MAX:
@@ -144,21 +145,25 @@ def _auth_coll():
         return None
 
 
-def check_rate_limit(ip: str) -> Tuple[bool, int]:
+def check_rate_limit(ip: str, scope: str = "login") -> Tuple[bool, int]:
     """Returns (allowed, attempts_remaining). Falls back to an in-memory
-    per-process limiter when Mongo is unavailable (fail-closed-ish)."""
+    per-process limiter when Mongo is unavailable (fail-closed-ish).
+
+    ``scope`` separates independent limiters (e.g. "login" vs "access" vs
+    "email") so spamming one endpoint can't consume another's budget.
+    """
     coll = _auth_coll()
     if coll is None:
         logger.warning(
             "[auth] Mongo unavailable; using in-memory rate limit fallback"
         )
-        return _memory_rate_check(ip)
+        return _memory_rate_check(ip, scope)
     try:
         from datetime import datetime, timezone, timedelta
         from pymongo import ReturnDocument
         now = datetime.now(timezone.utc)
         doc = coll.find_one_and_update(
-            {"_id": f"rate:{ip}"},
+            {"_id": f"rate:{scope}:{ip}"},
             {
                 "$inc": {"count": 1},
                 "$setOnInsert": {"expire_at": now + timedelta(seconds=_RATE_WINDOW)},
@@ -173,7 +178,7 @@ def check_rate_limit(ip: str) -> Tuple[bool, int]:
             "[auth] Mongo unavailable; using in-memory rate limit fallback (%s)",
             exc,
         )
-        return _memory_rate_check(ip)
+        return _memory_rate_check(ip, scope)
 
 
 def _areq_key(request_id: str) -> str:

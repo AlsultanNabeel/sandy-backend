@@ -9,6 +9,10 @@ from app.agent.semantic_memory import semantic_memory_stats
 
 logger = logging.getLogger(__name__)
 
+# سقف طول الرسالة النصية قبل أي استدعاء نموذج — يمنع انفجار التوكنات/الكلفة.
+# (حجم جسم الطلب ككل مسقوف بـ MAX_CONTENT_LENGTH داخل create_app.)
+_MAX_MESSAGE_CHARS = 6000
+
 
 def create_app(
     *,
@@ -28,6 +32,9 @@ def create_app(
     )
 
     app = Flask(__name__)
+    # سقف حجم جسم الطلب (١٦ ميغابايت): يسمح بصور base64 المعقولة ويرفض
+    # الأجسام الضخمة مبكراً (413) قبل ما تُقرأ للذاكرة — حاجز إغراق.
+    app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
     from app.config import APP_ENV  # already defined in config.py
     _frontend = os.getenv("FRONTEND_URL", "").strip()
     if _frontend:
@@ -159,6 +166,11 @@ def create_app(
 
     @app.route("/api/access/request", methods=["POST"])
     def web_access_request():
+        # حدّ معدّل بالأيبي: يمنع إغراق المالك بطلبات وصول وهمية وملء sandy_auth.
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+        allowed, _ = check_rate_limit(ip, scope="access")
+        if not allowed:
+            return jsonify({"error": "too_many_attempts"}), 429
         body = request.get_json(silent=True) or {}
         name = (body.get("name") or "زاير").strip()[:50]
         reason = (body.get("reason") or "").strip()[:200]
@@ -226,7 +238,7 @@ def create_app(
 
         user_id = claims.get("user_id") or ""
         role = claims.get("role", "guest")
-        message = (body.get("message") or "").strip()
+        message = (body.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
 
         # The active profile scopes data to THIS user via current_user_id().
         # Every authenticated user (owner included) gets full CRUD on their
@@ -272,7 +284,7 @@ def create_app(
     def web_agent(claims):
         body = request.get_json(silent=True) or {}
 
-        message = (body.get("message") or "").strip()
+        message = (body.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
         if not message:
             return jsonify({"error": "no message"}), 400
 
@@ -370,7 +382,7 @@ def create_app(
         from app.agent.nodes.execute import clear_stream_hooks, set_stream_hooks
 
         body = request.get_json(silent=True) or {}
-        message = (body.get("message") or "").strip()
+        message = (body.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
         if not message:
             return jsonify({"error": "no message"}), 400
 

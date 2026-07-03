@@ -6,10 +6,16 @@ memory_store/recall تحفظ في MongoDB فتنجو من إعادة التشغ�
 
 from __future__ import annotations
 
+import ipaddress
+import logging
+import socket
 from typing import TYPE_CHECKING, Any, Dict
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from app.agent.tools.dispatcher import DispatchContext
+
+logger = logging.getLogger(__name__)
 
 
 # Memory adapters — stored in MongoDB so they survive restarts.
@@ -108,6 +114,39 @@ def _html_to_text(html: str, max_length: int = 4000) -> str:
 
 
 _SUMMARIZE_THRESHOLD = 1500  # حروف — فوقها نلخص بالـ AI
+_MAX_FETCH_BYTES = 2_000_000  # سقف حجم الرد (٢ ميغابايت) — يمنع قنبلة الذاكرة
+
+
+def _is_safe_public_url(url: str) -> bool:
+    """True فقط لرابط http/https على عنوان عام — حاجز SSRF.
+
+    يحلّ اسم المضيف ويرفض لو أي عنوان مُحلّل خاص/محلّي/محجوز (معدن السحابة
+    169.254، الحلقة المحلية 127، الشبكات الخاصة 10/172/192...). يبقى خطر
+    DNS-rebinding نظري (اسم يتغيّر بين الفحص والاتصال)؛ مقبول لهذا المسار
+    مع منع التحويلات وسقف الحجم أدناه.
+    """
+    try:
+        p = urlparse(url)
+    except Exception:  # noqa: BLE001
+        return False
+    if p.scheme not in ("http", "https") or not p.hostname:
+        return False
+    try:
+        port = p.port or (443 if p.scheme == "https" else 80)
+        infos = socket.getaddrinfo(p.hostname, port, proto=socket.IPPROTO_TCP)
+    except Exception:  # noqa: BLE001 — تعذّر الحلّ = نرفض
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (
+            ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+        ):
+            return False
+    return bool(infos)
 
 
 def _ai_summarize(text: str, url: str, fn) -> str:
@@ -138,11 +177,23 @@ def fetch_url(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     url = str(args.get("url", "")).strip()
     if not url:
         return {"handled": True, "reply": "أعطيني الرابط."}
+    if not _is_safe_public_url(url):
+        # عنوان داخلي/غير مدعوم — نرفض بدل ما نجلب أسرار الشبكة الداخلية (SSRF).
+        return {"handled": True, "reply": "ما بقدر أجلب هذا الرابط."}
 
     try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "Sandy-Bot/1.0"})
+        # allow_redirects=False: تحويل من رابط مسموح لعنوان داخلي = تجاوز الفحص.
+        # stream + قراءة محدودة: يمنع سحب رد ضخم كامل للذاكرة.
+        resp = requests.get(
+            url, timeout=10, allow_redirects=False, stream=True,
+            headers={"User-Agent": "Sandy-Bot/1.0"},
+        )
+        if resp.is_redirect or resp.is_permanent_redirect:
+            return {"handled": True, "reply": "الرابط بيحوّل لمكان ثاني، ما قدرت أجلبه."}
         resp.raise_for_status()
-        text = _html_to_text(resp.text, max_length=8000)
+        raw = resp.raw.read(_MAX_FETCH_BYTES + 1, decode_content=True) or b""
+        html = raw[:_MAX_FETCH_BYTES].decode(resp.encoding or "utf-8", errors="ignore")
+        text = _html_to_text(html, max_length=8000)
         if not text:
             return {"handled": True, "reply": "الصفحة فارغة أو ما فيها نص."}
 
@@ -151,8 +202,10 @@ def fetch_url(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
             return {"handled": True, "reply": summary}
 
         return {"handled": True, "reply": text[:4000] + ("\n…" if len(text) > 4000 else "")}
-    except Exception as exc:
-        return {"handled": True, "reply": f"ما قدرت أجلب الصفحة: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        # رسالة عامة للمستخدم؛ التفاصيل تبقى بالسجلّ (لا تسريب طوبولوجيا داخلية).
+        logger.warning("[fetch_url] fetch failed for %s: %s", url, exc)
+        return {"handled": True, "reply": "ما قدرت أجلب الصفحة."}
 
 
 # Schemas
