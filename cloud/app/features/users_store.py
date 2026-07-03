@@ -216,6 +216,30 @@ def set_onboarding(
     return res.matched_count > 0
 
 
+def get_nudge_answers(user_id: str) -> Dict[str, Any]:
+    """The user's stored daily-nudge question answers ({qid: answer}) — used to
+    pick the next unanswered get-to-know-you question."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return {}
+    doc = coll.find_one({"_id": user_id}, {"onboarding.nudge_answers": 1}) or {}
+    return ((doc.get("onboarding") or {}).get("nudge_answers")) or {}
+
+
+def record_nudge_answer(user_id: str, qid: str, answer: str) -> bool:
+    """Save one daily-nudge question answer (feeds the evolving profile)."""
+    coll = _coll()
+    qid = (qid or "").strip()
+    answer = (answer or "").strip()[:300]
+    if coll is None or not user_id or not qid or not answer:
+        return False
+    res = coll.update_one(
+        {"_id": user_id},
+        {"$set": {f"onboarding.nudge_answers.{qid}": answer, "last_seen_at": _now()}},
+    )
+    return res.matched_count > 0
+
+
 _DEFAULT_PERSONA: Dict[str, Any] = {"dialect": "palestinian", "custom_instructions": ""}
 
 
