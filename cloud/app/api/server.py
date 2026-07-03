@@ -113,6 +113,9 @@ def create_app(
     from app.api.daily_nudge_api import register_daily_nudge_api
     register_daily_nudge_api(app, mongo_db=mongo_db)
 
+    from app.api.push_api import register_push_api
+    register_push_api(app)
+
     from app.api.persona_api import register_persona_api
     register_persona_api(app)
 

@@ -164,6 +164,9 @@ init_device_store(mongo_db)
 init_node_store(mongo_db)
 init_usage_store(mongo_db)
 
+from app.features.push_tokens_store import init_push_tokens_store
+init_push_tokens_store(mongo_db)
+
 # Inbound MQTT: listen for node heartbeats + learned IR codes (no-op if MQTT off).
 from app.integrations.mqtt_ingest import start_mqtt_ingest
 start_mqtt_ingest()

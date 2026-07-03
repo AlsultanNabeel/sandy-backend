@@ -156,6 +156,39 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
     )
 
 
+def get_daily_nudge(mongo_db, uid: str) -> Dict[str, Any]:
+    """Today's nudge for one user, generated once and cached for the day.
+
+    Assumes the user's profile context is already active (so the load summary and
+    persona read tenant-scoped). Shared by the GET endpoint and the push
+    scheduler so the "question vs agenda" logic lives in exactly one place.
+    """
+    coll = mongo_db[_COLL] if mongo_db is not None else None
+    key = f"{uid}:{_today()}"
+    if coll is not None:
+        cached = coll.find_one({"_id": key})
+        if cached and cached.get("nudge"):
+            return cached["nudge"]
+
+    q = _next_question(uid) if _is_question_day() else None
+    if q is not None:
+        nudge: Dict[str, Any] = {"kind": "question", "qid": q["id"], "text": q["text"]}
+    else:
+        nudge = {"kind": "agenda", "text": _generate_agenda(uid, _load_summary(mongo_db, uid))}
+
+    if coll is not None:
+        try:
+            coll.update_one(
+                {"_id": key},
+                {"$set": {"user_id": uid, "nudge": nudge,
+                          "created_at": datetime.now(timezone.utc)}},
+                upsert=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[daily_nudge] cache write failed: %s", exc)
+    return nudge
+
+
 def register_daily_nudge_api(app, mongo_db=None):
     if mongo_db is not None:
         try:
@@ -164,9 +197,6 @@ def register_daily_nudge_api(app, mongo_db=None):
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("[daily_nudge] index skipped: %s", exc)
-
-    def _coll():
-        return mongo_db[_COLL] if mongo_db is not None else None
 
     @app.route("/api/daily-nudge", methods=["GET"])
     @require_auth
@@ -178,36 +208,7 @@ def register_daily_nudge_api(app, mongo_db=None):
             uid = current_user_id()
             if not uid:
                 return jsonify({"kind": "none"}), 200
-
-            coll = _coll()
-            key = f"{uid}:{_today()}"
-            if coll is not None:
-                cached = coll.find_one({"_id": key})
-                if cached and cached.get("nudge"):
-                    return jsonify(cached["nudge"]), 200
-
-            q = _next_question(uid) if _is_question_day() else None
-            if q is not None:
-                nudge: Dict[str, Any] = {
-                    "kind": "question", "qid": q["id"], "text": q["text"],
-                }
-            else:
-                nudge = {
-                    "kind": "agenda",
-                    "text": _generate_agenda(uid, _load_summary(mongo_db, uid)),
-                }
-
-            if coll is not None:
-                try:
-                    coll.update_one(
-                        {"_id": key},
-                        {"$set": {"user_id": uid, "nudge": nudge,
-                                  "created_at": datetime.now(timezone.utc)}},
-                        upsert=True,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("[daily_nudge] cache write failed: %s", exc)
-            return jsonify(nudge), 200
+            return jsonify(get_daily_nudge(mongo_db, uid)), 200
 
     @app.route("/api/daily-nudge/answer", methods=["POST"])
     @require_auth
