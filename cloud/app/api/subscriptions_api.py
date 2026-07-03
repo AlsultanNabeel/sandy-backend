@@ -79,12 +79,17 @@ def register_subscriptions_api(app):
     @app.route("/webhook/revenuecat", methods=["POST"])
     def revenuecat_webhook():
         # Shared-secret auth (RevenueCat sends it in the Authorization header).
+        # Fail CLOSED when the secret is unset: without it we can't tell
+        # RevenueCat from an attacker POSTing a fake INITIAL_PURCHASE to grant
+        # themselves (or anyone) a free subscription. Same posture as JWT_SECRET.
         expected = os.getenv("REVENUECAT_WEBHOOK_AUTH", "")
-        if expected:
-            provided = request.headers.get("Authorization", "")
-            if not hmac.compare_digest(provided, expected):
-                logger.warning("[revenuecat] webhook auth failed")
-                return jsonify({"error": "unauthorized"}), 401
+        if not expected:
+            logger.error("[revenuecat] REVENUECAT_WEBHOOK_AUTH not set; refusing webhook")
+            return jsonify({"error": "webhook_not_configured"}), 503
+        provided = request.headers.get("Authorization", "")
+        if not hmac.compare_digest(provided, expected):
+            logger.warning("[revenuecat] webhook auth failed")
+            return jsonify({"error": "unauthorized"}), 401
 
         # From here on, never raise: RevenueCat retries non-2xx aggressively, so
         # we swallow anything malformed and still answer 200.
