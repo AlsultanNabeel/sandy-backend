@@ -27,7 +27,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov bandit ruff
+          pip install pytest pytest-cov pytest-subtests mongomock bandit ruff
 
       - name: Run tests with coverage
         run: |
