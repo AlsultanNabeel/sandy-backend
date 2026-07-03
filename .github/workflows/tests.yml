@@ -29,13 +29,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov bandit ruff
 
-      - name: Run tests with coverage (temporarily disabled)
+      - name: Run tests with coverage
         run: |
-          echo "pytest disabled temporarily while executor compatibility is restored"
-
-      - name: Conflict resolution regression suite (temporarily disabled)
-        run: |
-          echo "regression suite disabled temporarily while executor compatibility is restored"
+          pytest tests/ -q --cov=cloud/app --cov-report=xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
