@@ -18,12 +18,28 @@ import re
 from flask import jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app.api.auth_handlers import make_token
+from app.api.auth_handlers import check_rate_limit, make_token
 from app.features import users_store
 
 # تحقّق إيميل بسيط (شكل عام) — التحقّق الحقيقي يصير عند الاستعمال.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _MIN_PASSWORD = 8
+
+
+def _client_ip() -> str:
+    return request.headers.get(
+        "X-Forwarded-For", request.remote_addr or "unknown"
+    ).split(",")[0].strip()
+
+
+def _rate_blocked(*checks) -> bool:
+    """True لو أي (key, scope) تجاوز الحدّ — يمنع تخمين الباسوردات وسبام التسجيل.
+    نفحص بالأيبي (حشو اعتماد) وبالإيميل (تخمين موجّه من عناوين متغيّرة)."""
+    for key, scope in checks:
+        allowed, _ = check_rate_limit(key, scope=scope)
+        if not allowed:
+            return True
+    return False
 
 
 def _result_for(user):
@@ -45,6 +61,8 @@ def _result_for(user):
 def register_email_auth_api(app):
     @app.route("/api/auth/email/register", methods=["POST"])
     def api_email_register():
+        if _rate_blocked((_client_ip(), "email_register")):
+            return jsonify({"error": "too_many_attempts"}), 429
         body = request.get_json(silent=True) or {}
         email = str(body.get("email") or "").strip().lower()
         password = str(body.get("password") or "")
@@ -66,6 +84,13 @@ def register_email_auth_api(app):
         body = request.get_json(silent=True) or {}
         email = str(body.get("email") or "").strip().lower()
         password = str(body.get("password") or "")
+
+        # حدّ بالأيبي وبالإيميل معاً قبل أي فحص باسورد (منع التخمين/الحشو).
+        if _rate_blocked(
+            (_client_ip(), "email_login"),
+            (email or "unknown", "email_login_acct"),
+        ):
+            return jsonify({"error": "too_many_attempts"}), 429
 
         user = users_store.get_email_user(email)
         if not user or not check_password_hash(user.get("password_hash") or "", password):

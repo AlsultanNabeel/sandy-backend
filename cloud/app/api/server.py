@@ -256,7 +256,7 @@ def create_app(
         # نفس مفتاح الخيط اللي run_graph نفسه بيستخدمه (thread_id) —
         # لازم يتطابق تماماً عشان الـ pending يتحمّل ويترجع لنفس المحادثة.
         thread_id = conversation_id or user_id
-        loaded_pending = load_pending_state(thread_id, mongo_db)
+        loaded_pending = load_pending_state(thread_id, user_id, mongo_db)
         with active_user_profile_context(_profile):
             state = run_graph(
                 graph_message,

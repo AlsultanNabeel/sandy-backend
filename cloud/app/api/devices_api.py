@@ -201,9 +201,14 @@ def register_devices_api(app, mongo_db=None):
         /ir/last and saves it to a device button."""
         if _is_guest(claims):
             return _forbidden()
+        from app.features.node_store import get_node
         from app.integrations.room_device import get_room_device_client
 
         with active_user_profile_context(build_user_profile(claims)):
+            # Ownership: only put a node THIS tenant paired into learn mode,
+            # else any user could drive any node's IR by guessing its id.
+            if get_node(node_id.strip()) is None:
+                return _bad("not_found", code=404)
             sent = False
             try:
                 topic = f"sandy/node/{node_id.strip()}/ir"

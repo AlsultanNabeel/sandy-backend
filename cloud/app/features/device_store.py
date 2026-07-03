@@ -212,6 +212,8 @@ def add_device(name: str, label: str, control_type: str,
                 "allowed": sorted(CONTROL_TYPES)}
     if not _valid_transport(transport):
         return {"ok": False, "error": "bad_transport"}
+    if not _transport_owned(transport):
+        return {"ok": False, "error": "node_not_paired"}
     if coll.find_one({"name": name}):
         return {"ok": False, "error": "exists"}
     coll.insert_one({
@@ -248,6 +250,8 @@ def update_device(name: str, **fields: Any) -> Dict[str, Any]:
     if "transport" in fields:
         if not _valid_transport(fields["transport"]):
             return {"ok": False, "error": "bad_transport"}
+        if not _transport_owned(fields["transport"]):
+            return {"ok": False, "error": "node_not_paired"}
         update["transport"] = fields["transport"]
     if "meta" in fields and isinstance(fields["meta"], dict):
         update["meta"] = fields["meta"]
@@ -340,7 +344,11 @@ def _valid_transport(transport: Any) -> bool:
         return False
     kind = str(transport.get("kind", "")).strip().lower()
     if kind == "mqtt":
-        return bool(str(transport.get("topic", "")).strip())
+        topic = str(transport.get("topic", "")).strip()
+        # The sandy/node/... namespace is reserved for the ownership-checked
+        # "node" transport. A raw mqtt topic must NOT target it, else a tenant
+        # could aim a device at another tenant's node via a free-form topic.
+        return bool(topic) and not topic.startswith("sandy/node/")
     if kind == "node":
         return bool(str(transport.get("node_id", "")).strip()) and bool(
             str(transport.get("output", "")).strip()
@@ -348,3 +356,23 @@ def _valid_transport(transport: Any) -> bool:
     if kind == "wifi_api":
         return bool(str(transport.get("url", "")).strip())
     return False
+
+
+def _transport_owned(transport: Any) -> bool:
+    """For a ``node`` transport, the node_id must be one THIS tenant paired.
+
+    Runs inside the caller's tenant context, so the scoped node lookup only sees
+    the caller's own nodes — pointing a device at another tenant's node_id is
+    refused. Non-node transports have nothing to own here (True)."""
+    t = transport if isinstance(transport, dict) else {}
+    if str(t.get("kind", "")).strip().lower() != "node":
+        return True
+    node_id = str(t.get("node_id", "")).strip()
+    if not node_id:
+        return False
+    try:
+        from app.features import node_store
+        return node_store.get_node(node_id) is not None
+    except Exception as e:  # noqa: BLE001 — treat a lookup failure as not-owned
+        logger.warning("[DeviceStore] node ownership check failed: %s", e)
+        return False

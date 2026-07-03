@@ -50,3 +50,15 @@ jobs:
       - name: Code quality (ruff)
         run: |
           ruff check cloud/ scripts/
+
+      - name: Secret scan (no committed keys)
+        run: |
+          leaks=$(git ls-files \
+            | grep -iE '(^|/)\.env($|\.)|.*(gcloud|service[-_]account).*key.*\.json$|.*\.(pem|p12|pfx|key)$' \
+            | grep -vE '\.env\.example$' || true)
+          if [ -n "$leaks" ]; then
+            echo "❌ Secret-looking file(s) tracked by git — remove and rotate the key:"
+            echo "$leaks"
+            exit 1
+          fi
+          echo "✅ no committed secrets"
