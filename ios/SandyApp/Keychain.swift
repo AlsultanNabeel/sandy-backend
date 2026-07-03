@@ -5,7 +5,8 @@ import Security
 //  Keychain — مخزن آمن بسيط لتوكن الدخول.
 //
 //  نحفظ التوكن بالـKeychain (مش UserDefaults) لأنه سرّ. الإتاحة
-//  `AfterFirstUnlock` حتى تقدر النوايا/الويدجت تقرأه بالخلفية بعد أول فتح للجهاز.
+//  `AfterFirstUnlockThisDeviceOnly`: النوايا/الويدجت تقرأه بالخلفية بعد أول فتح،
+//  و`ThisDeviceOnly` تمنعه من الرجوع لجهاز ثاني عبر نسخة احتياطية مشفّرة.
 //
 //  لاحقًا لمشاركته مع تارجت الويدجت: نضيف `kSecAttrAccessGroup` (مجموعة تطبيقات).
 // ─────────────────────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ enum Keychain {
         guard let value, let data = value.data(using: .utf8) else { return }
         var add = base
         add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }
 

@@ -102,6 +102,24 @@ def _clean_caps(caps: Any) -> List[str]:
     return [c for c in (str(x).strip().lower() for x in caps) if c in KNOWN_CAPABILITIES]
 
 
+def _clean_outputs(outputs: Any) -> List[Dict[str, Any]]:
+    """Validate node-reported outputs before storing them — a heartbeat is an
+    untrusted, cross-tenant input (see mqtt_ingest), so a malformed/hostile
+    payload can't inject arbitrary output definitions into the registry. Keep
+    only well-formed {id, kind} entries with a known kind, and cap the count."""
+    if not isinstance(outputs, list):
+        return []
+    clean: List[Dict[str, Any]] = []
+    for o in outputs[:32]:
+        if not isinstance(o, dict):
+            continue
+        oid = str(o.get("id", "")).strip()[:32]
+        kind = str(o.get("kind", "")).strip().lower()
+        if oid and kind in KNOWN_CAPABILITIES:
+            clean.append({"id": oid, "kind": kind})
+    return clean
+
+
 # ── Pairing ─────────────────────────────────────────────────────────────────
 
 def pair_node(code: str, label: str = "") -> Dict[str, Any]:
@@ -192,7 +210,7 @@ def set_node_status(code: str, online: bool = True,
         if capabilities is not None:
             update["capabilities"] = _clean_caps(capabilities)
         if isinstance(outputs, list):
-            update["outputs"] = outputs
+            update["outputs"] = _clean_outputs(outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
         r = _mongo_db[_COLL].update_one(
@@ -221,7 +239,7 @@ def ingest_status(node_id: str, online: bool = True,
         if capabilities is not None:
             update["capabilities"] = _clean_caps(capabilities)
         if isinstance(outputs, list):
-            update["outputs"] = outputs
+            update["outputs"] = _clean_outputs(outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
         r = _mongo_db[_COLL].update_one({"node_id": (node_id or "").strip()},

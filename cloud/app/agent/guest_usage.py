@@ -86,13 +86,26 @@ def check_and_increment(
         if state == "rejected":
             return "block", count, limit
 
-        # Still within the granted budget → consume one use.
+        # Still within the granted budget → consume one use ATOMICALLY. The
+        # count==count guard means only one of N concurrent requests wins the
+        # increment, so a guest can't slip past the limit with a burst (the
+        # read-then-write TOCTOU race). The loser falls through to the pending
+        # path below (asked at most one use early — harmless).
         if count < limit:
-            col.update_one(
-                {"jti": jti, "chat_type": chat_type},
+            from pymongo import ReturnDocument
+            updated = col.find_one_and_update(
+                {"jti": jti, "chat_type": chat_type, "count": count},
                 {"$inc": {"count": 1}, "$set": {"last_request_at": now}},
+                return_document=ReturnDocument.AFTER,
             )
-            return "allow", count + 1, limit
+            if updated is not None:
+                return "allow", updated.get("count", count + 1), limit
+            doc = col.find_one({"jti": jti, "chat_type": chat_type}) or doc
+            count = doc.get("count", count)
+            limit = doc.get("limit", limit)
+            state = doc.get("approval_state", state)
+            if state == "rejected":
+                return "block", count, limit
 
         # Budget used up (count >= limit), so don't consume.
         if state == "pending":
