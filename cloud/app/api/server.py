@@ -425,7 +425,14 @@ def create_app(
 
         def _generate():
             while True:
-                item = chunk_queue.get()
+                try:
+                    item = chunk_queue.get(timeout=10)
+                except queue.Empty:
+                    # No chunk yet (routing/tool call still running). Emit an SSE
+                    # comment so Heroku's router sees the request is alive and
+                    # doesn't kill a slow-but-working turn (H12 at ~30s of silence).
+                    yield ": keep-alive\n\n"
+                    continue
                 if item is None:
                     break
                 yield f"data: {json.dumps({'text': item}, ensure_ascii=False)}\n\n"
