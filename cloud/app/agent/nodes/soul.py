@@ -15,11 +15,24 @@ from app.agent.soul_vault import (
 from app.agent.emotional_ltm import get_emotional_context
 from app.agent.anomaly_detector import get_wellness_context
 from app.agent.context_builder import get_persona_directives
+from app.utils.user_profiles import active_user_profile_context, get_active_user_profile
 
 logger = logging.getLogger(__name__)
 
 # Shared executor reused across every turn — avoids per-request thread churn.
 _SOUL_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="soul")
+
+
+def _run_in_profile(profile, fn, *args, **kwargs):
+    """Re-apply the caller's tenant profile inside a pool worker thread.
+
+    The active profile lives in ``threading.local`` (user_profiles) and does NOT
+    propagate into _SOUL_POOL threads, so a scoped() store called there (e.g.
+    semantic-fact search) sees no tenant and silently returns nothing. Capture
+    the profile at submit time in the request thread, re-enter its context here.
+    """
+    with active_user_profile_context(profile):
+        return fn(*args, **kwargs)
 
 _COMPLETION_TOOLS = frozenset({"task_complete", "goal_done", "task_delete"})
 _CHAT_TOOLS = frozenset({"chat_respond", "chat_emotional", "chat_general"})
@@ -244,8 +257,13 @@ def soul_node(state: SandyState) -> SandyState:
                     from app.agent.semantic_memory import search_relevant_summaries, search_relevant_facts
                     # ملخّصات هذا الخيط (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
                     _summ_thread = state.get("conversation_id") or chat_id
+                    _profile = get_active_user_profile()
                     _s2_futs["summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, _summ_thread)
-                    _s2_futs["sem_facts"] = _SOUL_POOL.submit(search_relevant_facts, message)
+                    # facts search is scoped()→current_user_id(): must carry the
+                    # tenant profile into the pool thread, else it returns [].
+                    _s2_futs["sem_facts"] = _SOUL_POOL.submit(
+                        _run_in_profile, _profile, search_relevant_facts, message
+                    )
                 except Exception:
                     pass
 
@@ -398,8 +416,12 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
             )
             # ملخّصات خيط المحادثة (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
             _summ_thread = conversation_id or chat_id
+            _profile = get_active_user_profile()
             futures["__summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, _summ_thread)
-            futures["__sem_facts"] = _SOUL_POOL.submit(search_relevant_facts, message)
+            # carry the tenant profile into the pool thread (scoped facts search).
+            futures["__sem_facts"] = _SOUL_POOL.submit(
+                _run_in_profile, _profile, search_relevant_facts, message
+            )
         except Exception:
             pass
 

@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import Any, Dict
 
@@ -11,6 +10,7 @@ from app.agent.pending import (
 from app.agent.executor.helpers import (
     _handle_modify_response,
     _is_quick_confirmation,
+    is_cancellation,
 )
 from app.agent.executor.pending.task_pending import (
     _handle_clarify_task_choice,
@@ -38,12 +38,13 @@ from app.agent.executor.pending.reminder_pending import (
 
 
 def classify_response_to_pending(user_message: str, pending_type: str) -> str:
-    """Fallback used only when no intent_hint is passed (old pipeline)."""
-    text = (user_message or "").strip().lower()
-    if re.search(r"^(اه|أه|نعم|ايوه|تمام|اكيد|ok|yes|sure)$", text):
-        return "confirm"
-    if re.search(r"^(لا|لأ|الغ|إلغاء|no|cancel)$", text):
+    """Confirm / reject / ignore using the SAME normalized matchers as the router
+    (helpers), so the two can never disagree. Cancellation is checked first, so a
+    mixed reply like "اه بس لا" resolves to reject rather than confirm."""
+    if is_cancellation(user_message):
         return "reject"
+    if _is_quick_confirmation(user_message):
+        return "confirm"
     return "ignore"
 
 

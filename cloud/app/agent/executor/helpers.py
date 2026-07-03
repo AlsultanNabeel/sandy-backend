@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict
 
 
@@ -166,50 +167,80 @@ def _has_visible_task_note(task: Dict[str, Any]) -> bool:
     return bool(visible_lines)
 
 
+# ── Confirmation / cancellation ──────────────────────────────────────────────
+# ONE normalized resolver, shared by the router (routing a reply to pending_node)
+# AND the pending dispatcher (deciding confirm/reject). The two used to keep
+# separate, divergent word lists that didn't normalize Arabic — so a reply like
+# "اه صح" / "آه" / "اه 👍" matched neither, the pending was dropped, and the
+# plain-chat fallback hallucinated "حذفت" without deleting. Keeping the matching
+# here, normalized and in one place, is the fix.
+
+# Broad set for an exact single-word reply.
+_AFFIRM_EXACT = {
+    "اه", "ايه", "اي", "نعم", "ايوه", "ايوا", "اكيد", "تمام", "تمم", "ماشي",
+    "اوك", "اوكي", "حسنا", "صح", "احذف", "احذفها", "احذفهم", "نفذ", "اعمل",
+    "yes", "ok", "okay", "sure", "yep", "yup", "confirmed", "y",
+}
+# Conservative leads allowed to head a short multi-word affirmative ("اه صح",
+# "اه احذفها") — ambiguous tokens like "اي"/"ايه" are NOT here, so they can only
+# confirm as a bare single word, never as the head of a phrase.
+_AFFIRM_LEAD = {
+    "اه", "نعم", "ايوه", "ايوا", "اكيد", "تمام", "ماشي", "اوك", "اوكي",
+    "yes", "ok", "okay", "sure", "confirmed",
+}
+_CANCEL_EXACT = {
+    "لا", "لاء", "الغ", "الغاء", "مش", "خلص", "بطل", "بلاش",
+    "no", "cancel", "nope", "dont", "stop", "nah", "n",
+}
+_CANCEL_SUB = (
+    "لا تحذف", "مش الان", "انسي", "وقف", "وقفي",
+    "الغي", "الغيها", "الغيهم", "لا تضيف",
+)
+
+
+def _norm_confirm(text: str) -> str:
+    """Aggressive normalization for yes/no matching: fold digits, punctuation,
+    tatweel, emoji, and Arabic letter variants (alef/hamza/ta-marbuta/alef-
+    maqsura) so 'آه'، 'اه.'، 'اه 👍'، 'اه صح' reduce to comparable tokens."""
+    v = normalize_user_message(str(text or "")).lower()
+    for a, b in (
+        ("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ٱ", "ا"),
+        ("ة", "ه"), ("ى", "ي"), ("ؤ", "و"), ("ئ", "ي"),
+    ):
+        v = v.replace(a, b)
+    v = re.sub(r"[^\w\s]", " ", v)  # drop remaining punctuation/symbols
+    return " ".join(v.split())
+
+
 def _is_quick_confirmation(text: str) -> bool:
-    """True for a short yes/confirm on an operational decision (not a pending reply)."""
-    # A real confirmation is one or two words; bound it for symmetry with
-    # is_cancellation (does not change behavior for genuine confirmations).
-    if len(text.split()) > 4:
+    """True for a short affirmative reply to a pending confirmation — a bare
+    'اه/نعم/تمام/ok', an emoji-tailed 'اه 👍', or a short multi-word affirmative
+    whose first word is an unambiguous yes ('اه صح', 'اه احذفها')."""
+    v = _norm_confirm(text)
+    if not v:
         return False
-    return text.strip().lower() in {
-        "اه",
-        "أه",
-        "نعم",
-        "ايوه",
-        "أيوا",
-        "اكيد",
-        "أكيد",
-        "yes",
-        "ok",
-        "okay",
-        "تمام",
-        "احذف",
-        "احذفهم",
-        "confirmed",
-    }
+    words = v.split()
+    if len(words) > 4:
+        return False
+    if v in _AFFIRM_EXACT:
+        return True
+    return len(words) >= 2 and words[0] in _AFFIRM_LEAD
 
 
 def is_cancellation(text: str) -> bool:
-    """Returns True when the user wants to cancel/reject a pending action."""
-    import re
-
-    normalized = " ".join(text.strip().lower().split())
-    # A genuine cancel reply to a pending confirmation is always short. Bail out
-    # on anything sentence-length so a trigger word buried inside a narrative
-    # ("...وقف الباص فجأة...") can't be read as a cancellation (the "word in a
-    # story" bug).
-    if len(normalized.split()) > 4:
+    """True when the user wants to cancel/reject a pending action. Same
+    normalization as _is_quick_confirmation, and callers check this FIRST so a
+    reply like 'اه بس لا' resolves to cancel, not confirm. Bounded to short
+    replies so a trigger word buried in a narrative can't read as a cancel."""
+    v = _norm_confirm(text)
+    if not v or len(v.split()) > 4:
         return False
-    patterns = [
-        r"^(لا|لأ|الغ|إلغاء|مش|خلص|لا وقت)$",
-        r"^(no|cancel|nope|dont|stop)$",
-        # The two unanchored substring patterns below are safe only because the
-        # length gate above already bounds this to a short (≤4-word) reply.
-        r"(لا تحذف|مش الآن|انسى|انسي|وقف|وقفي)",
-        r"(الغي|الغيها|الغيهم|لا تضيفيها|لا تضيفها|لا تضيف)",
-    ]
-    return any(re.search(p, normalized) for p in patterns)
+    # Any standalone negation token (not substring — so it won't fire inside a
+    # word) wins; erring toward "cancel" on a mixed reply is the safe bias for a
+    # destructive pending. Token match keeps it precise.
+    if any(w in _CANCEL_EXACT for w in v.split()):
+        return True
+    return any(s in v for s in _CANCEL_SUB)
 
 
 def _handle_modify_response(
