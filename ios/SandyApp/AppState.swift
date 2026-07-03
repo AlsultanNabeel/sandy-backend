@@ -41,6 +41,7 @@ final class AppState: ObservableObject {
             let ob = try await api.getOnboarding()
             onboarding = ob
             stage = ob.done ? .chat : .onboarding
+            setupPush()
         } catch {
             api.token = nil
             stage = .auth
@@ -50,6 +51,17 @@ final class AppState: ObservableObject {
     /// After a successful sign-in, go to onboarding (first time) or chat.
     func routeAfterAuth(onboardingDone: Bool) {
         stage = onboardingDone ? .chat : .onboarding
+        setupPush()
+    }
+
+    /// بعد أي دخول ناجح: نطلب إذن الإشعارات ونربط رفع توكن جهاز APNs للباك-إند
+    /// (الطلبان مُصادَقان فلازم يجوا بعد ما يجهز التوكن). idempotent وآمن للتكرار.
+    private func setupPush() {
+        NotificationManager.shared.bindDeviceToken { [weak self] deviceToken in
+            guard let self else { return }
+            Task { try? await self.api.registerPushToken(deviceToken) }
+        }
+        NotificationManager.shared.requestAuthorization()
     }
 
     /// يجيب بيانات التعارف ويخزّنها (لتبويب حسابي). يتجاهل الأخطاء بصمت.
@@ -67,7 +79,14 @@ final class AppState: ObservableObject {
     }
 
     /// تسجيل خروج: يمسح التوكن (ومن الـKeychain تلقائياً) ويرجّع لشاشة الدخول.
+    /// نلغي توكن دفع هالجهاز أولاً (بينما التوكن لسّا صالح) حتى ما يوصله دفع
+    /// المستخدم القديم — أفضل جهد، والباك-إند بينظّف التوكن الميت تلقائيًا كمان.
     func signOut() {
+        if let deviceToken = NotificationManager.shared.lastDeviceToken {
+            let apiRef = api
+            Task { try? await apiRef.unregisterPushToken(deviceToken) }
+        }
+        NotificationManager.shared.onDeviceToken = nil
         api.token = nil
         onboarding = OnboardingData()
         stage = .auth

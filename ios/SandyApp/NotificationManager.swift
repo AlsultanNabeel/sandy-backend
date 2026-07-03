@@ -1,5 +1,8 @@
 import Foundation
 import UserNotifications
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────
 //  NotificationManager — مدير الإشعارات المحلية المركزي.
@@ -26,7 +29,7 @@ struct NotificationItem {
 
 /// وجهة النقر على الإشعار — الشاشة اللي نفتحها حسب نوع الإشعار.
 enum NotifRoute: String, Identifiable {
-    case reminders, tasks, future
+    case reminders, tasks, future, dailyNudge
     var id: String { rawValue }
 }
 
@@ -37,15 +40,43 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// تُضبط عند النقر على إشعار → الواجهة تفتح شاشتها. تُصفّر بعد الفتح.
     @Published var pendingRoute: NotifRoute?
 
+    /// يُستدعى بتوكن جهاز APNs (نص hex) عند نجاح التسجيل للدفع البعيد — يضبطه
+    /// AppState حتى يرفعه للباك-إند (`/api/push/register`). نخزّن آخر توكن حتى لو
+    /// وصل قبل ما يُضبط المستمع، فنقدر نرفعه أول ما يجهز.
+    var onDeviceToken: ((String) -> Void)?
+    private(set) var lastDeviceToken: String?
+
     private override init() {
         super.init()
         // مندوب المركز — حتى يطلع الإشعار كبانر والتطبيق مفتوح، ونمسك النقر للتوجيه.
         center.delegate = self
     }
 
-    /// نطلب الإذن (تنبيه/صوت/شارة). آمن للنداء المتكرّر — النظام يعرضه مرّة.
+    /// نطلب الإذن (تنبيه/صوت/شارة)، وعند الموافقة نسجّل الجهاز للدفع البعيد (APNs).
+    /// آمن للنداء المتكرّر — النظام يعرض الطلب مرّة، والتسجيل idempotent.
     func requestAuthorization() {
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+            #if canImport(UIKit)
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+            #endif
+        }
+    }
+
+    /// يستقبله AppDelegate عند نجاح التسجيل: نحوّل بايتات التوكن لـ hex ونمرّرها
+    /// للمستمع (لرفعها للباك-إند). لو ما في مستمع بعد، نحتفظ فيه لآخر.
+    func handleDeviceToken(_ deviceToken: Data) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        lastDeviceToken = hex
+        onDeviceToken?(hex)
+    }
+
+    /// يربط المستمع ويرفع أي توكن وصل مسبقًا (لو التسجيل سبق ضبط المستمع).
+    func bindDeviceToken(_ handler: @escaping (String) -> Void) {
+        onDeviceToken = handler
+        if let t = lastDeviceToken { handler(t) }
     }
 
     /// التطبيق مفتوح: نعرض الإشعار كبانر + صوت + ضمن قائمة الإشعارات.
@@ -61,10 +92,14 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let id = response.notification.request.identifier
+        // الدفع البعيد للتنبيه اليومي يحمل "kind" بالحمولة (agenda/question) — نوجّهه
+        // للرئيسية حيث تظهر بطاقة التنبيه. المحلّي يُعرف ببادئة هويته.
+        let userInfo = response.notification.request.content.userInfo
         let route: NotifRoute? =
-            id.hasPrefix("reminder.") ? .reminders :
-            id.hasPrefix("task.")     ? .tasks :
-            id.hasPrefix("future.")   ? .future : nil
+            (userInfo["kind"] != nil)  ? .dailyNudge :
+            id.hasPrefix("reminder.")  ? .reminders :
+            id.hasPrefix("task.")      ? .tasks :
+            id.hasPrefix("future.")    ? .future : nil
         if let route {
             DispatchQueue.main.async { self.pendingRoute = route }
         }

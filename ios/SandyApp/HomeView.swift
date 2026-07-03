@@ -28,6 +28,8 @@ struct HomeView: View {
     /// مصدر الحقيقة للرئيسية (يملك اللقطة + الجلب، مستقل عن الشاشة) — فالسحب
     /// الملغى ما يمسح لوحتك بأصفار.
     @StateObject private var store = HomeStore()
+    /// تنبيه اليوم من ساندي (سؤال تعارف أو جملة مهام بشخصيتها) — المرحلة السابعة.
+    @StateObject private var nudgeStore = DailyNudgeStore()
     /// يفتح حساب المستخدم (ProfileView) كـ sheet — الحساب مش تبويب.
     @State private var showProfile = false
     /// يفتح ورقة إعادة ترتيب عناصر الرئيسية.
@@ -76,6 +78,7 @@ struct HomeView: View {
                 .environmentObject(lang)
         }
         .task { await store.loadIfNeeded(api: state.api) }
+        .task { await nudgeStore.loadIfNeeded(api: state.api) }
         .refreshable { await store.load(api: state.api) }
     }
 
@@ -86,6 +89,10 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 greeting
                     .reveal(order: 0, key: store.revealKey)
+
+                // تنبيه اليوم — مبادرة ساندي (يخفي نفسه لو ما في محتوى/أُجيب/أُغلق).
+                DailyNudgeCard(store: nudgeStore)
+                    .reveal(order: 1, key: store.revealKey)
 
                 // العنصر الأساسي بالرئيسية: إضافة سريعة (بدّلت بطاقة "احكي مع ساندي").
                 quickAddCard

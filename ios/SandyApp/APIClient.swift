@@ -99,6 +99,44 @@ final class APIClient {
         return r["onboarding_done"] as? Bool ?? false
     }
 
+    // ── التنبيه اليومي + الدفع (المرحلة السابعة) ─────────────────────────────
+
+    // GET /api/daily-nudge → {kind:"question",qid,text} | {kind:"agenda",text} | {kind:"none"}
+    func getDailyNudge() async throws -> DailyNudge {
+        let r = try await request("/api/daily-nudge")
+        let kind = DailyNudge.Kind(rawValue: r["kind"] as? String ?? "none") ?? .none
+        return DailyNudge(kind: kind,
+                          qid: r["qid"] as? String ?? "",
+                          text: r["text"] as? String ?? "")
+    }
+
+    // POST /api/daily-nudge/answer {qid,answer} → {ok:true}
+    func answerDailyNudge(qid: String, answer: String) async throws {
+        _ = try await request("/api/daily-nudge/answer", method: "POST",
+                              body: ["qid": qid, "answer": answer])
+    }
+
+    // POST /api/push/register {token,platform} — نربط توكن جهاز APNs بالمستخدم
+    // حتى يقدر الباك-إند يبعتله الدفع البعيد. آمن للنداء المتكرّر (upsert).
+    func registerPushToken(_ token: String) async throws {
+        _ = try await request("/api/push/register", method: "POST",
+                              body: ["token": token, "platform": "ios"])
+    }
+
+    // POST /api/push/unregister {token} — عند تسجيل الخروج نلغي توكن هالجهاز.
+    func unregisterPushToken(_ token: String) async throws {
+        _ = try await request("/api/push/unregister", method: "POST",
+                              body: ["token": token])
+    }
+
+    // GET /api/subscription → {status,plan,is_subscriber}
+    func getSubscription() async throws -> SubscriptionStatus {
+        let r = try await request("/api/subscription")
+        return SubscriptionStatus(status: r["status"] as? String ?? "none",
+                                  plan: r["plan"] as? String ?? "",
+                                  isSubscriber: r["is_subscriber"] as? Bool ?? false)
+    }
+
     func getOnboarding() async throws -> OnboardingData {
         let r = try await request("/api/onboarding")
         return OnboardingData(done: r["done"] as? Bool ?? false,

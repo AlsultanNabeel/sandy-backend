@@ -102,6 +102,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nAuth.ns:       L10nAuth.table,
     L10nOnboarding.ns: L10nOnboarding.table,
     L10nHome.ns:       L10nHome.table,
+    L10nNudge.ns:      L10nNudge.table,
     L10nChat.ns:       L10nChat.table,
     L10nTasks.ns:      L10nTasks.table,
     L10nReminders.ns:  L10nReminders.table,

@@ -323,6 +323,25 @@ struct PairResult {
     let already: Bool
 }
 
+/// التنبيه اليومي (المرحلة السابعة): إمّا سؤال تعارف (`question` + `qid`)، أو جملة
+/// مهام مولّدة بشخصية ساندي (`agenda`)، أو لا شيء (`none` — ضيف/بلا محتوى اليوم).
+struct DailyNudge {
+    enum Kind: String { case question, agenda, none }
+    let kind: Kind
+    let qid: String     // للأسئلة فقط — نرجّعه مع الجواب
+    let text: String
+
+    var isQuestion: Bool { kind == .question }
+    var hasContent: Bool { kind != .none && !text.isEmpty }
+}
+
+/// حالة اشتراك المستخدم كما يراها الباك-إند (مصدره RevenueCat عبر الويبهوك).
+struct SubscriptionStatus {
+    let status: String        // none | trialing | active | expired
+    let plan: String
+    let isSubscriber: Bool
+}
+
 enum APIErrorKind { case connection, unauthorized, server, decoding, unknown }
 
 struct APIError: LocalizedError {

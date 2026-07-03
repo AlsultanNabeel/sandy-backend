@@ -114,15 +114,24 @@ struct MainTabView: View {
                 .environmentObject(lang)
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
         }
+        // التنبيه اليومي مش ورقة — بطاقته عالرئيسية، فنبدّل للرئيسية ونصفّر المسار
+        // (قبل ما تُعرض ورقة). بيتعامل معه هون بدل routeView.
+        .onChange(of: notifs.pendingRoute) { route in
+            if route == .dailyNudge {
+                selection = .home
+                notifs.pendingRoute = nil
+            }
+        }
     }
 
-    /// شاشة الوجهة حسب نوع الإشعار المنقور.
+    /// شاشة الوجهة حسب نوع الإشعار المنقور (الأنواع اللي تُفتح كورقة فقط).
     @ViewBuilder
     private func routeView(_ route: NotifRoute) -> some View {
         switch route {
-        case .reminders: RemindersView()
-        case .tasks:     TasksView()
-        case .future:    FutureMessagesView()
+        case .reminders:  RemindersView()
+        case .tasks:      TasksView()
+        case .future:     FutureMessagesView()
+        case .dailyNudge: EmptyView()   // يُعالَج بـ onChange (تبديل تبويب، لا ورقة)
         }
     }
 }

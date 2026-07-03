@@ -1,8 +1,26 @@
 import SwiftUI
+import UIKit
 import GoogleSignIn
+
+/// مندوب التطبيق — نحتاجه فقط لمسك توكن جهاز APNs عند التسجيل للدفع البعيد
+/// ونمرّره لـ NotificationManager (اللي بدوره يرفعه للباك-إند). بدون مفاتيح آبل
+/// بالسيرفر هالمسار حميد: التسجيل بينجح والتوكن بينحفظ، بس ما بيوصل دفع لحد ما
+/// تُضاف المفاتيح.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationManager.shared.handleDeviceToken(deviceToken)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("APNs registration failed: \(error.localizedDescription)")
+    }
+}
 
 @main
 struct SandyApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var state = AppState()
     /// مدير اللغة المشترك — يقود اتجاه الواجهة (RTL/LTR) لكل التطبيق ويزوّد الترجمة.
     @StateObject private var lang = LanguageManager.shared
