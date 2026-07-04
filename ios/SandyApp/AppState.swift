@@ -17,6 +17,8 @@ final class AppState: ObservableObject {
     }
     /// بيانات التعارف (الاسم المفضّل + الاهتمامات) — تُعرض بتبويب حسابي.
     @Published var onboarding = OnboardingData()
+    /// الميزات اللي أخفاها المالك مركزياً (طبقة السيرفر) — كل شبكة تبويب تحترمها.
+    @Published var serverHiddenFeatures: Set<String> = []
     let api: APIClient
     /// حالة الاشتراك + الشراء (RevenueCat عند توفّره، وحالة الباك-إند دائمًا).
     let subscriptions = SubscriptionManager()
@@ -69,6 +71,9 @@ final class AppState: ObservableObject {
         // ونعكس حالة الباك-إند. حميد بدونهما — يبقى المستخدم مجّاني.
         subscriptions.configure(userId: api.currentUserId)
         Task { await subscriptions.refresh(api: api) }
+
+        // طبقة السيرفر لإخفاء الميزات (يضبطها المالك من هيروكو).
+        Task { serverHiddenFeatures = (try? await api.getFeatures()) ?? [] }
     }
 
     /// يجيب بيانات التعارف ويخزّنها (لتبويب حسابي). يتجاهل الأخطاء بصمت.

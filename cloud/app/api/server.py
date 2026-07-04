@@ -116,6 +116,9 @@ def create_app(
     from app.api.push_api import register_push_api
     register_push_api(app)
 
+    from app.api.features_api import register_features_api
+    register_features_api(app)
+
     from app.api.persona_api import register_persona_api
     register_persona_api(app)
 

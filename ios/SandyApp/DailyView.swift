@@ -1,37 +1,33 @@
 import SwiftUI
 
-/// تبويب يومي — لوحة التخطيط: روابط لشاشات المهام/التذكيرات/العادات/الفوكس
-/// (بدل زحمة التبويبات). تنضاف لها الأهداف والرسائل المجدولة لنفسك لاحقاً.
-/// تستعمل نفس نمط الهَب المشترك (HubList) مثل تبويب حياتي.
+/// تبويب يومي — صار شبكة ويدجت قابلة للتخصيص (ترتيب/إخفاء/تكبير) بدل قائمة ثابتة.
+/// كل ميزة ويدجت؛ الكود كله موجود، والشبكة بس بتقرّر الشكل. المالك يقدر يخفي أي
+/// ميزة مركزياً من السيرفر (state.serverHiddenFeatures).
 struct DailyView: View {
     @EnvironmentObject var lang: LanguageManager
+    @EnvironmentObject var state: AppState
+    @StateObject private var store = DashboardStore(id: "daily", catalog: DailyView.catalog)
 
-    private let rows: [HubRowSpec] = [
-        HubRowSpec(icon: "checklist", titleKey: "daily.tasks",
-                   subtitleKey: "daily.tasks.subtitle", tint: Theme.Colors.accent),
-        HubRowSpec(icon: "bell.fill", titleKey: "daily.reminders",
-                   subtitleKey: "daily.reminders.subtitle", tint: Theme.Colors.warn),
-        HubRowSpec(icon: "flag.fill", titleKey: "daily.goals",
-                   subtitleKey: "daily.goals.subtitle", tint: Theme.Colors.accentDeep),
-        HubRowSpec(icon: "flame.fill", titleKey: "daily.habits",
-                   subtitleKey: "daily.habits.subtitle", tint: Theme.Colors.success),
-        HubRowSpec(icon: "target", titleKey: "daily.focus",
-                   subtitleKey: "daily.focus.subtitle", tint: Theme.Colors.accent),
-        HubRowSpec(icon: "envelope.fill", titleKey: "daily.future",
-                   subtitleKey: "daily.future.subtitle", tint: Theme.Colors.warn),
+    /// كتالوج ميزات يومي — المفتاح ثابت (يطابق مفتاح الإخفاء بالسيرفر)، مع وجهته.
+    static let catalog: [WidgetSpec] = [
+        WidgetSpec(key: "tasks", icon: "checklist", titleKey: "daily.tasks",
+                   tint: Theme.Colors.accent) { AnyView(TasksView()) },
+        WidgetSpec(key: "reminders", icon: "bell.fill", titleKey: "daily.reminders",
+                   tint: Theme.Colors.warn) { AnyView(RemindersView()) },
+        WidgetSpec(key: "goals", icon: "flag.fill", titleKey: "daily.goals",
+                   tint: Theme.Colors.accentDeep) { AnyView(GoalsView()) },
+        WidgetSpec(key: "habits", icon: "flame.fill", titleKey: "daily.habits",
+                   tint: Theme.Colors.success) { AnyView(HabitsView()) },
+        WidgetSpec(key: "focus", icon: "target", titleKey: "daily.focus",
+                   tint: Theme.Colors.accent) { AnyView(FocusView()) },
+        WidgetSpec(key: "future", icon: "envelope.fill", titleKey: "daily.future",
+                   tint: Theme.Colors.warn) { AnyView(FutureMessagesView()) },
     ]
 
     var body: some View {
-        HubList(rows: rows) { index in
-            switch index {
-            case 0:  TasksView()
-            case 1:  RemindersView()
-            case 2:  GoalsView()
-            case 3:  HabitsView()
-            case 4:  FocusView()
-            default: FutureMessagesView()
-            }
-        }
-        .navigationTitle(lang.s("daily.title"))
+        WidgetDashboard(store: store)
+            .navigationTitle(lang.s("daily.title"))
+            .onAppear { store.applyServerHidden(state.serverHiddenFeatures) }
+            .onChange(of: state.serverHiddenFeatures) { store.applyServerHidden($0) }
     }
 }

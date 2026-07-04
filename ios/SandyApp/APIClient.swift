@@ -145,6 +145,12 @@ final class APIClient {
                               body: ["token": token])
     }
 
+    // GET /api/features → {hidden:[...]} — الميزات اللي أخفاها المالك مركزياً.
+    func getFeatures() async throws -> Set<String> {
+        let r = try await request("/api/features")
+        return Set((r["hidden"] as? [String]) ?? [])
+    }
+
     // GET /api/subscription → {status,plan,is_subscriber}
     func getSubscription() async throws -> SubscriptionStatus {
         let r = try await request("/api/subscription")
