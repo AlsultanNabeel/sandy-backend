@@ -4,35 +4,31 @@ import UIKit
 import UniformTypeIdentifiers
 
 // ─────────────────────────────────────────────────────────────────────────
-//  WidgetDashboard — a per-tab board that behaves like the iPhone Home Screen.
+//  WidgetDashboard — a per-tab board that behaves like the iPhone (iOS 26).
 //
-//  Faithful to iOS (researched, not guessed):
+//  Faithful to the current iPhone (researched):
 //    • Long-press an empty spot → edit mode (tiles jiggle).
-//    • A + button opens the WIDGET GALLERY of everything not on the board;
-//      pick one and a FIXED size (small 1×1 · medium 2×1 · large 2×2) to add.
-//    • A − badge removes a tile (it goes back to the gallery).
+//    • A + button opens the WIDGET GALLERY of everything off the board; tap to add.
+//    • A − badge removes a tile (back to the gallery).
 //    • Drag a tile to reorder; the rest reflow.
-//    • Tap a jiggling tile to select it, then choose its size from the bottom
-//      bar (iOS changes size by re-adding; a size bar is the friendly equivalent).
-//  Bigger sizes show denser LIVE content. Layout persists per tab on device.
-//  The OWNER can force-hide any feature centrally (it never reaches the gallery).
-//  No feature code is removed — this only decides presentation.
+//    • GRAB THE BOTTOM-RIGHT CORNER and drag to resize in real time — grow or
+//      shrink — without removing it (iOS 26 behaviour). Width 1–2 cols, height
+//      1–4 rows. Bigger tiles show denser LIVE, interactive content.
+//  Layout persists per tab on device. The OWNER can force-hide any feature
+//  centrally (it never reaches the gallery). No feature code is removed.
 // ─────────────────────────────────────────────────────────────────────────
 
-enum WidgetSize: String, Codable, CaseIterable {
-    case small, medium, large
-    var cols: Int { self == .small ? 1 : 2 }
-    var rows: Int { self == .large ? 2 : 1 }
-    var labelKey: String { "widgets.size.\(rawValue)" }
-}
+private let kMaxCols = 2
+private let kMaxRows = 4
 
 /// Persisted per-tile state (array order = layout order). `hidden` == in gallery.
 struct DashboardItem: Identifiable, Codable, Equatable {
     let key: String
-    var size: WidgetSize = .small
+    var cols: Int = 1
+    var rows: Int = 1
     var hidden: Bool = false
     var id: String { key }
-    var isBig: Bool { size != .small }
+    var isBig: Bool { cols > 1 || rows > 1 }
 }
 
 /// Static catalog entry — how a feature looks, where it goes, and (optionally)
@@ -72,33 +68,32 @@ final class DashboardStore: ObservableObject {
     func spec(_ key: String) -> WidgetSpec? { catalog.first { $0.key == key } }
     func applyServerHidden(_ hidden: Set<String>) { serverHidden = hidden }
 
-    /// On the board: owner-allowed and not sent to the gallery.
     var shown: [DashboardItem] {
         items.filter { !serverHidden.contains($0.key) && !$0.hidden }
     }
-    /// In the + gallery: owner-allowed but currently removed.
     var gallery: [DashboardItem] {
         items.filter { !serverHidden.contains($0.key) && $0.hidden }
     }
 
     // ── mutations (persist) ──────────────────────────────────────────────
-    func remove(_ key: String) { setHidden(key, true) }
+    func remove(_ key: String) {
+        guard let i = items.firstIndex(where: { $0.key == key }) else { return }
+        items[i].hidden = true; persist()
+    }
 
-    func add(_ key: String, size: WidgetSize = .medium) {
+    func add(_ key: String, cols: Int = 2, rows: Int = 1) {
         guard let i = items.firstIndex(where: { $0.key == key }) else { return }
         items[i].hidden = false
-        items[i].size = size
+        items[i].cols = min(max(cols, 1), kMaxCols)
+        items[i].rows = min(max(rows, 1), kMaxRows)
         persist()
     }
 
-    private func setHidden(_ key: String, _ hidden: Bool) {
+    /// Real-time resize, clamped to the grid (cols 1–2, rows 1–4).
+    func setSize(_ key: String, cols: Int, rows: Int) {
         guard let i = items.firstIndex(where: { $0.key == key }) else { return }
-        items[i].hidden = hidden; persist()
-    }
-
-    func setSize(_ key: String, _ size: WidgetSize) {
-        guard let i = items.firstIndex(where: { $0.key == key }) else { return }
-        if items[i].size != size { items[i].size = size; persist() }
+        let c = min(max(cols, 1), kMaxCols), r = min(max(rows, 1), kMaxRows)
+        if items[i].cols != c || items[i].rows != r { items[i].cols = c; items[i].rows = r }
     }
 
     func relocate(_ dragged: String, before target: String) {
@@ -126,12 +121,12 @@ final class DashboardStore: ObservableObject {
         items = merged
     }
 
-    /// First-fit placement into a 2-column grid; medium spans 2 cols, large 2×2.
+    /// First-fit placement into a 2-column grid; tiles span cols/rows.
     func placed(_ list: [DashboardItem]) -> (cells: [(item: DashboardItem, row: Int, col: Int)], rows: Int) {
         var occupied = Set<[Int]>()
         func free(_ r: Int, _ c: Int, _ w: Int, _ h: Int) -> Bool {
             for dr in 0..<h { for dc in 0..<w {
-                if c + dc >= 2 { return false }
+                if c + dc >= kMaxCols { return false }
                 if occupied.contains([r + dr, c + dc]) { return false }
             } }
             return true
@@ -139,11 +134,11 @@ final class DashboardStore: ObservableObject {
         var cells: [(DashboardItem, Int, Int)] = []
         var maxRow = 0
         for it in list {
-            let w = it.size.cols, h = it.size.rows
+            let w = min(it.cols, kMaxCols), h = min(it.rows, kMaxRows)
             var r = 0
             while true {
                 var done = false
-                for c in 0...(2 - w) where free(r, c, w, h) {
+                for c in 0...(kMaxCols - w) where free(r, c, w, h) {
                     for dr in 0..<h { for dc in 0..<w { occupied.insert([r + dr, c + dc]) } }
                     cells.append((it, r, c)); maxRow = max(maxRow, r + h); done = true; break
                 }
@@ -161,7 +156,7 @@ struct WidgetDashboard: View {
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: DashboardStore
     @State private var dragging: String?
-    @State private var selected: String?
+    @State private var resizeStart: (key: String, cols: Int, rows: Int)?
     @State private var showGallery = false
 
     private let gap = Theme.Spacing.md
@@ -178,12 +173,12 @@ struct WidgetDashboard: View {
                 Color.clear
                     .frame(width: cell * 2 + gap, height: contentH)
                     .contentShape(Rectangle())
-                    .onLongPressGesture(minimumDuration: 0.5) { enterEdit() }
+                    .onLongPressGesture(minimumDuration: 0.5) { withAnimation { store.editing = true } }
 
                 ForEach(layout.cells, id: \.item.id) { entry in
                     tile(entry.item)
-                        .frame(width: span(entry.item.size.cols),
-                               height: span(entry.item.size.rows))
+                        .frame(width: span(min(entry.item.cols, kMaxCols)),
+                               height: span(min(entry.item.rows, kMaxRows)))
                         .offset(x: CGFloat(entry.col) * (cell + gap),
                                 y: CGFloat(entry.row) * (cell + gap))
                 }
@@ -198,39 +193,11 @@ struct WidgetDashboard: View {
                     Button { showGallery = true } label: { Image(systemName: "plus") }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(lang.s("common.done")) { exitEdit() }
+                    Button(lang.s("common.done")) { withAnimation { store.editing = false }; store.persist() }
                 }
             }
         }
-        .overlay(alignment: .bottom) { if store.editing, let key = selected { sizeBar(key) } }
-        .sheet(isPresented: $showGallery) {
-            WidgetGallery(store: store).environmentObject(lang)
-        }
-    }
-
-    private func enterEdit() { withAnimation { store.editing = true } }
-    private func exitEdit() { withAnimation { store.editing = false }; selected = nil; store.persist() }
-
-    // Bottom size selector for the selected tile (iOS-style size choice).
-    private func sizeBar(_ key: String) -> some View {
-        let current = store.items.first { $0.key == key }?.size ?? .small
-        return HStack(spacing: Theme.Spacing.sm) {
-            ForEach(WidgetSize.allCases, id: \.self) { size in
-                Button { store.setSize(key, size) } label: {
-                    Text(lang.s(size.labelKey))
-                        .font(Theme.Typography.subheadline)
-                        .foregroundColor(current == size ? Theme.Colors.onAccent : Theme.Colors.primaryText)
-                        .padding(.horizontal, Theme.Spacing.md)
-                        .padding(.vertical, Theme.Spacing.sm)
-                        .background(current == size ? Theme.Colors.accent : Color.clear,
-                                    in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(Theme.Spacing.xs)
-        .background(.ultraThinMaterial, in: Capsule())
-        .padding(.bottom, Theme.Spacing.lg)
+        .sheet(isPresented: $showGallery) { WidgetGallery(store: store).environmentObject(lang) }
     }
 
     @ViewBuilder
@@ -245,11 +212,9 @@ struct WidgetDashboard: View {
                     }
                 }
                 .overlay(alignment: .topLeading) { removeBadge(item) }
-                .overlay(selected == item.key ? RoundedRectangle(cornerRadius: Theme.Radius.card)
-                    .stroke(Theme.Colors.accent, lineWidth: 2) : nil)
+                .overlay(alignment: .bottomTrailing) { resizeGrip(item) }
                 .rotationEffect(.degrees(1))
                 .animation(.easeInOut(duration: 0.14).repeatForever(autoreverses: true), value: store.editing)
-                .onTapGesture { selected = (selected == item.key) ? nil : item.key }
                 .onDrag { dragging = item.key; return NSItemProvider(object: item.key as NSString) }
                 .onDrop(of: [UTType.text],
                         delegate: WidgetDropDelegate(target: item.key, store: store, dragging: $dragging))
@@ -268,8 +233,7 @@ struct WidgetDashboard: View {
                              interactive: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             if interactive {
-                NavigationLink { spec.destination() } label: { contentHeader(spec) }
-                    .buttonStyle(.plain)
+                NavigationLink { spec.destination() } label: { contentHeader(spec) }.buttonStyle(.plain)
             } else {
                 contentHeader(spec)
             }
@@ -284,28 +248,49 @@ struct WidgetDashboard: View {
 
     private func contentHeader(_ spec: WidgetSpec) -> some View {
         HStack(spacing: Theme.Spacing.sm) {
-            Image(systemName: spec.icon)
-                .font(.system(size: 16, weight: .semibold)).foregroundColor(spec.tint)
-            Text(lang.s(spec.titleKey))
-                .font(Theme.Typography.headline).foregroundColor(Theme.Colors.primaryText)
+            Image(systemName: spec.icon).font(.system(size: 16, weight: .semibold)).foregroundColor(spec.tint)
+            Text(lang.s(spec.titleKey)).font(Theme.Typography.headline).foregroundColor(Theme.Colors.primaryText)
             Spacer(minLength: 0)
-            Image(systemName: "chevron.left")
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.Colors.tertiaryText)
+            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.Colors.tertiaryText)
         }
     }
 
     private func removeBadge(_ item: DashboardItem) -> some View {
-        Button { store.remove(item.key); if selected == item.key { selected = nil } } label: {
+        Button { store.remove(item.key) } label: {
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 22)).foregroundColor(Theme.Colors.warn)
                 .background(Circle().fill(Theme.Colors.card))
         }
-        .buttonStyle(.plain)
-        .offset(x: -6, y: -6)
+        .buttonStyle(.plain).offset(x: -6, y: -6)
+    }
+
+    // The iOS 26 move: grab the bottom-right corner, drag to resize in real time.
+    // New size is read from the corner's absolute position (base size + drag).
+    private func resizeGrip(_ item: DashboardItem) -> some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundColor(Theme.Colors.onAccent)
+            .frame(width: 30, height: 30)
+            .background(Circle().fill(Theme.Colors.accent))
+            .contentShape(Circle())
+            .offset(x: 10, y: 10)
+            .gesture(
+                DragGesture()
+                    .onChanged { v in
+                        if resizeStart?.key != item.key { resizeStart = (item.key, item.cols, item.rows) }
+                        guard let b = resizeStart else { return }
+                        let newW = span(b.cols) + v.translation.width
+                        let newH = span(b.rows) + v.translation.height
+                        let nc = Int(((newW + gap) / (cell + gap)).rounded())
+                        let nr = Int(((newH + gap) / (cell + gap)).rounded())
+                        store.setSize(item.key, cols: nc, rows: nr)
+                    }
+                    .onEnded { _ in resizeStart = nil; store.persist() }
+            )
     }
 }
 
-/// Compact tile face — icon + title (1×1 tiles and while editing small ones).
+/// Compact tile face — icon + title (1×1 tiles / small tiles while editing).
 private struct WidgetCard: View {
     let spec: WidgetSpec
     let big: Bool
@@ -348,8 +333,7 @@ private struct WidgetGallery: View {
                                 Button { store.add(item.key); dismiss() } label: {
                                     HStack(spacing: Theme.Spacing.md) {
                                         Image(systemName: spec.icon).foregroundColor(spec.tint).frame(width: 28)
-                                        Text(lang.s(spec.titleKey))
-                                            .font(Theme.Typography.headline)
+                                        Text(lang.s(spec.titleKey)).font(Theme.Typography.headline)
                                             .foregroundColor(Theme.Colors.primaryText)
                                         Spacer(minLength: 0)
                                         Image(systemName: "plus.circle.fill").foregroundColor(Theme.Colors.accent)
