@@ -116,6 +116,20 @@ def test_read_only():
         check(name, ok, f"status={st}")
 
 
+def test_security():
+    section("الأمان (لازم يُرفض)")
+    # A protected endpoint with no token must never return data.
+    st, _ = call("GET", "/api/tasks", auth=False)
+    check("طلب بلا توكن مرفوض", st in (401, 403), f"status={st}")
+    # …and a forged token must be rejected too.
+    global TOKEN
+    good = TOKEN
+    TOKEN = "forged.jwt.value"
+    st2, _ = call("GET", "/api/tasks")
+    TOKEN = good
+    check("توكن مزيّف مرفوض", st2 in (401, 403), f"status={st2}")
+
+
 def test_daily_nudge():
     section("التنبيه اليومي")
     st, j = call("GET", "/api/daily-nudge")
@@ -225,6 +239,7 @@ def main():
         sys.exit(1)
 
     test_read_only()
+    test_security()
     test_daily_nudge()
     test_push()
     test_tasks()
