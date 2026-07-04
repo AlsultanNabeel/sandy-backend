@@ -1,17 +1,23 @@
 import Foundation
 
-// Namespace: widgets — the customizable per-tab widget grid (WidgetDashboard).
+// Namespace: widgets — the iPhone-style customizable widget board (WidgetDashboard).
 enum L10nWidgets {
     static let ns = "widgets"
 
     static let table = L10nTable(
         ar: [
-            "edit":  .text("ترتيب"),
-            "hint":  .text("اسحب لترتيب، − لإخفاء، ⤢ لتكبير"),
+            "size.small":     .text("صغير"),
+            "size.medium":    .text("وسط"),
+            "size.large":     .text("كبير"),
+            "gallery.title":  .text("إضافة ويدجت"),
+            "gallery.empty":  .text("كل الويدجتات مضافة"),
         ],
         en: [
-            "edit":  .text("Edit"),
-            "hint":  .text("Drag to reorder, − to hide, ⤢ to resize"),
+            "size.small":     .text("Small"),
+            "size.medium":    .text("Medium"),
+            "size.large":     .text("Large"),
+            "gallery.title":  .text("Add Widget"),
+            "gallery.empty":  .text("All widgets are added"),
         ]
     )
 }

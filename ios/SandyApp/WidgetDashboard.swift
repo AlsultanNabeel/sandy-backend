@@ -4,30 +4,35 @@ import UIKit
 import UniformTypeIdentifiers
 
 // ─────────────────────────────────────────────────────────────────────────
-//  WidgetDashboard — a per-tab, iPhone-widget-style customizable canvas.
+//  WidgetDashboard — a per-tab board that behaves like the iPhone Home Screen.
 //
-//  Two-column grid. Every tile has a FREE size: width 1–2 columns, height 1–4
-//  rows — so you can make it square, wide, tall, or as big as you want.
-//  Enter edit by LONG-PRESSING an empty spot. Then:
-//    • drag a tile to reorder (it reflows),
-//    • grab the bottom-corner grip and drag out/in to grow/shrink,
-//    • tap the − badge to hide it.
-//  Enlarged tiles show LIVE, interactive feature content that fills the space.
-//  Layout persists per tab on device; the OWNER can force-hide any feature
-//  centrally. No feature code is removed — this only decides presentation.
+//  Faithful to iOS (researched, not guessed):
+//    • Long-press an empty spot → edit mode (tiles jiggle).
+//    • A + button opens the WIDGET GALLERY of everything not on the board;
+//      pick one and a FIXED size (small 1×1 · medium 2×1 · large 2×2) to add.
+//    • A − badge removes a tile (it goes back to the gallery).
+//    • Drag a tile to reorder; the rest reflow.
+//    • Tap a jiggling tile to select it, then choose its size from the bottom
+//      bar (iOS changes size by re-adding; a size bar is the friendly equivalent).
+//  Bigger sizes show denser LIVE content. Layout persists per tab on device.
+//  The OWNER can force-hide any feature centrally (it never reaches the gallery).
+//  No feature code is removed — this only decides presentation.
 // ─────────────────────────────────────────────────────────────────────────
 
-private let kMaxCols = 2
-private let kMaxRows = 4
+enum WidgetSize: String, Codable, CaseIterable {
+    case small, medium, large
+    var cols: Int { self == .small ? 1 : 2 }
+    var rows: Int { self == .large ? 2 : 1 }
+    var labelKey: String { "widgets.size.\(rawValue)" }
+}
 
-/// Persisted per-tile state (array order = layout order).
+/// Persisted per-tile state (array order = layout order). `hidden` == in gallery.
 struct DashboardItem: Identifiable, Codable, Equatable {
     let key: String
-    var cols: Int = 1
-    var rows: Int = 1
-    var hidden: Bool = false          // hidden BY THE USER
+    var size: WidgetSize = .small
+    var hidden: Bool = false
     var id: String { key }
-    var isBig: Bool { cols > 1 || rows > 1 }
+    var isBig: Bool { size != .small }
 }
 
 /// Static catalog entry — how a feature looks, where it goes, and (optionally)
@@ -38,8 +43,6 @@ struct WidgetSpec: Identifiable {
     let titleKey: String
     let tint: Color
     let destination: () -> AnyView
-    /// Interactive preview for enlarged tiles (nil = just a bigger icon+title).
-    /// It self-measures and fills whatever space the tile gives it.
     var content: (() -> AnyView)?
 
     init(key: String, icon: String, titleKey: String, tint: Color,
@@ -69,27 +72,33 @@ final class DashboardStore: ObservableObject {
     func spec(_ key: String) -> WidgetSpec? { catalog.first { $0.key == key } }
     func applyServerHidden(_ hidden: Set<String>) { serverHidden = hidden }
 
+    /// On the board: owner-allowed and not sent to the gallery.
     var shown: [DashboardItem] {
         items.filter { !serverHidden.contains($0.key) && !$0.hidden }
     }
-    var editable: [DashboardItem] {
-        items.filter { !serverHidden.contains($0.key) }
+    /// In the + gallery: owner-allowed but currently removed.
+    var gallery: [DashboardItem] {
+        items.filter { !serverHidden.contains($0.key) && $0.hidden }
     }
 
     // ── mutations (persist) ──────────────────────────────────────────────
-    func toggleHidden(_ key: String) {
+    func remove(_ key: String) { setHidden(key, true) }
+
+    func add(_ key: String, size: WidgetSize = .medium) {
         guard let i = items.firstIndex(where: { $0.key == key }) else { return }
-        items[i].hidden.toggle(); persist()
+        items[i].hidden = false
+        items[i].size = size
+        persist()
     }
 
-    /// Grow/shrink freely, clamped to the grid (cols 1–2, rows 1–4).
-    func setSize(_ key: String, cols: Int, rows: Int) {
+    private func setHidden(_ key: String, _ hidden: Bool) {
         guard let i = items.firstIndex(where: { $0.key == key }) else { return }
-        let c = min(max(cols, 1), kMaxCols)
-        let r = min(max(rows, 1), kMaxRows)
-        if items[i].cols != c || items[i].rows != r {
-            items[i].cols = c; items[i].rows = r
-        }
+        items[i].hidden = hidden; persist()
+    }
+
+    func setSize(_ key: String, _ size: WidgetSize) {
+        guard let i = items.firstIndex(where: { $0.key == key }) else { return }
+        if items[i].size != size { items[i].size = size; persist() }
     }
 
     func relocate(_ dragged: String, before target: String) {
@@ -117,12 +126,12 @@ final class DashboardStore: ObservableObject {
         items = merged
     }
 
-    /// First-fit placement into a 2-column grid; tiles may span rows/cols.
+    /// First-fit placement into a 2-column grid; medium spans 2 cols, large 2×2.
     func placed(_ list: [DashboardItem]) -> (cells: [(item: DashboardItem, row: Int, col: Int)], rows: Int) {
         var occupied = Set<[Int]>()
         func free(_ r: Int, _ c: Int, _ w: Int, _ h: Int) -> Bool {
             for dr in 0..<h { for dc in 0..<w {
-                if c + dc >= kMaxCols { return false }
+                if c + dc >= 2 { return false }
                 if occupied.contains([r + dr, c + dc]) { return false }
             } }
             return true
@@ -130,11 +139,11 @@ final class DashboardStore: ObservableObject {
         var cells: [(DashboardItem, Int, Int)] = []
         var maxRow = 0
         for it in list {
-            let w = min(it.cols, kMaxCols), h = min(it.rows, kMaxRows)
+            let w = it.size.cols, h = it.size.rows
             var r = 0
             while true {
                 var done = false
-                for c in 0...(kMaxCols - w) where free(r, c, w, h) {
+                for c in 0...(2 - w) where free(r, c, w, h) {
                     for dr in 0..<h { for dc in 0..<w { occupied.insert([r + dr, c + dc]) } }
                     cells.append((it, r, c)); maxRow = max(maxRow, r + h); done = true; break
                 }
@@ -146,21 +155,21 @@ final class DashboardStore: ObservableObject {
     }
 }
 
-// MARK: - The canvas
+// MARK: - The board
 
 struct WidgetDashboard: View {
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: DashboardStore
     @State private var dragging: String?
-    @State private var resizeStart: (key: String, cols: Int, rows: Int)?
+    @State private var selected: String?
+    @State private var showGallery = false
 
     private let gap = Theme.Spacing.md
     private var cell: CGFloat { (UIScreen.main.bounds.width - gap * 3) / 2 }
     private func span(_ n: Int) -> CGFloat { CGFloat(n) * cell + CGFloat(n - 1) * gap }
 
     var body: some View {
-        let list = store.editing ? store.editable : store.shown
-        let layout = store.placed(list)
+        let layout = store.placed(store.shown)
         let contentH = layout.rows > 0
             ? CGFloat(layout.rows) * cell + CGFloat(layout.rows - 1) * gap : cell
 
@@ -169,15 +178,12 @@ struct WidgetDashboard: View {
                 Color.clear
                     .frame(width: cell * 2 + gap, height: contentH)
                     .contentShape(Rectangle())
-                    .onLongPressGesture(minimumDuration: 0.5) {
-                        withAnimation { store.editing.toggle() }
-                        if !store.editing { store.persist() }
-                    }
+                    .onLongPressGesture(minimumDuration: 0.5) { enterEdit() }
 
                 ForEach(layout.cells, id: \.item.id) { entry in
                     tile(entry.item)
-                        .frame(width: span(min(entry.item.cols, kMaxCols)),
-                               height: span(min(entry.item.rows, kMaxRows)))
+                        .frame(width: span(entry.item.size.cols),
+                               height: span(entry.item.size.rows))
                         .offset(x: CGFloat(entry.col) * (cell + gap),
                                 y: CGFloat(entry.row) * (cell + gap))
                 }
@@ -188,55 +194,67 @@ struct WidgetDashboard: View {
         }
         .toolbar {
             if store.editing {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { showGallery = true } label: { Image(systemName: "plus") }
+                }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(lang.s("common.done")) {
-                        withAnimation { store.editing = false }
-                        store.persist()
-                    }
+                    Button(lang.s("common.done")) { exitEdit() }
                 }
             }
         }
-        .overlay(alignment: .bottom) { if store.editing { hintBar } }
+        .overlay(alignment: .bottom) { if store.editing, let key = selected { sizeBar(key) } }
+        .sheet(isPresented: $showGallery) {
+            WidgetGallery(store: store).environmentObject(lang)
+        }
     }
 
-    private var hintBar: some View {
-        Text(lang.s("widgets.hint"))
-            .font(Theme.Typography.caption)
-            .foregroundColor(Theme.Colors.secondaryText)
-            .padding(.horizontal, Theme.Spacing.md)
-            .padding(.vertical, Theme.Spacing.sm)
-            .background(.ultraThinMaterial, in: Capsule())
-            .padding(.bottom, Theme.Spacing.lg)
+    private func enterEdit() { withAnimation { store.editing = true } }
+    private func exitEdit() { withAnimation { store.editing = false }; selected = nil; store.persist() }
+
+    // Bottom size selector for the selected tile (iOS-style size choice).
+    private func sizeBar(_ key: String) -> some View {
+        let current = store.items.first { $0.key == key }?.size ?? .small
+        return HStack(spacing: Theme.Spacing.sm) {
+            ForEach(WidgetSize.allCases, id: \.self) { size in
+                Button { store.setSize(key, size) } label: {
+                    Text(lang.s(size.labelKey))
+                        .font(Theme.Typography.subheadline)
+                        .foregroundColor(current == size ? Theme.Colors.onAccent : Theme.Colors.primaryText)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.sm)
+                        .background(current == size ? Theme.Colors.accent : Color.clear,
+                                    in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(Theme.Spacing.xs)
+        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.bottom, Theme.Spacing.lg)
     }
 
     @ViewBuilder
     private func tile(_ item: DashboardItem) -> some View {
         if let spec = store.spec(item.key) {
             if store.editing {
-                WidgetCard(spec: spec, big: item.isBig, lang: lang)
-                    .opacity(item.hidden ? 0.35 : 1)
-                    .overlay(alignment: .topLeading) { hideBadge(item) }
-                    .overlay(alignment: .bottomTrailing) { resizeGrip(item) }
-                    .rotationEffect(.degrees(1))
-                    .animation(.easeInOut(duration: 0.14).repeatForever(autoreverses: true),
-                               value: store.editing)
-                    .onDrag {
-                        dragging = item.key
-                        return NSItemProvider(object: item.key as NSString)
+                Group {
+                    if item.isBig, let content = spec.content {
+                        contentTile(spec, content: content, interactive: false)
+                    } else {
+                        WidgetCard(spec: spec, big: item.isBig, lang: lang)
                     }
-                    .onDrop(of: [UTType.text],
-                            delegate: WidgetDropDelegate(target: item.key, store: store,
-                                                         dragging: $dragging))
-            } else if item.isBig, let content = spec.content {
-                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                    NavigationLink { spec.destination() } label: { contentHeader(spec) }
-                        .buttonStyle(.plain)
-                    content()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
-                .padding(Theme.Spacing.md)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .liquidGlass(cornerRadius: Theme.Radius.card)
+                .overlay(alignment: .topLeading) { removeBadge(item) }
+                .overlay(selected == item.key ? RoundedRectangle(cornerRadius: Theme.Radius.card)
+                    .stroke(Theme.Colors.accent, lineWidth: 2) : nil)
+                .rotationEffect(.degrees(1))
+                .animation(.easeInOut(duration: 0.14).repeatForever(autoreverses: true), value: store.editing)
+                .onTapGesture { selected = (selected == item.key) ? nil : item.key }
+                .onDrag { dragging = item.key; return NSItemProvider(object: item.key as NSString) }
+                .onDrop(of: [UTType.text],
+                        delegate: WidgetDropDelegate(target: item.key, store: store, dragging: $dragging))
+            } else if item.isBig, let content = spec.content {
+                contentTile(spec, content: content, interactive: true)
             } else {
                 NavigationLink { spec.destination() } label: {
                     WidgetCard(spec: spec, big: item.isBig, lang: lang)
@@ -246,58 +264,48 @@ struct WidgetDashboard: View {
         }
     }
 
+    private func contentTile(_ spec: WidgetSpec, content: @escaping () -> AnyView,
+                             interactive: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            if interactive {
+                NavigationLink { spec.destination() } label: { contentHeader(spec) }
+                    .buttonStyle(.plain)
+            } else {
+                contentHeader(spec)
+            }
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(interactive)
+        }
+        .padding(Theme.Spacing.md)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .liquidGlass(cornerRadius: Theme.Radius.card)
+    }
+
     private func contentHeader(_ spec: WidgetSpec) -> some View {
         HStack(spacing: Theme.Spacing.sm) {
             Image(systemName: spec.icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(spec.tint)
+                .font(.system(size: 16, weight: .semibold)).foregroundColor(spec.tint)
             Text(lang.s(spec.titleKey))
-                .font(Theme.Typography.headline)
-                .foregroundColor(Theme.Colors.primaryText)
+                .font(Theme.Typography.headline).foregroundColor(Theme.Colors.primaryText)
             Spacer(minLength: 0)
             Image(systemName: "chevron.left")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Theme.Colors.tertiaryText)
+                .font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.Colors.tertiaryText)
         }
     }
 
-    private func hideBadge(_ item: DashboardItem) -> some View {
-        Button { store.toggleHidden(item.key) } label: {
-            Image(systemName: item.hidden ? "plus.circle.fill" : "minus.circle.fill")
-                .font(.system(size: 22))
-                .foregroundColor(item.hidden ? Theme.Colors.success : Theme.Colors.warn)
+    private func removeBadge(_ item: DashboardItem) -> some View {
+        Button { store.remove(item.key); if selected == item.key { selected = nil } } label: {
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 22)).foregroundColor(Theme.Colors.warn)
                 .background(Circle().fill(Theme.Colors.card))
         }
         .buttonStyle(.plain)
         .offset(x: -6, y: -6)
     }
-
-    // A real corner grip: drag out to grow, in to shrink (both axes), relative to
-    // the size the drag started on so it doesn't compound.
-    private func resizeGrip(_ item: DashboardItem) -> some View {
-        Image(systemName: "arrow.down.right")
-            .font(.system(size: 12, weight: .heavy))
-            .foregroundColor(Theme.Colors.onAccent)
-            .frame(width: 28, height: 28)
-            .background(Circle().fill(Theme.Colors.accent))
-            .offset(x: 8, y: 8)
-            .gesture(
-                DragGesture()
-                    .onChanged { v in
-                        if resizeStart?.key != item.key {
-                            resizeStart = (item.key, item.cols, item.rows)
-                        }
-                        guard let base = resizeStart else { return }
-                        let dc = Int((v.translation.width / (cell * 0.5)).rounded())
-                        let dr = Int((v.translation.height / (cell * 0.5)).rounded())
-                        store.setSize(item.key, cols: base.cols + dc, rows: base.rows + dr)
-                    }
-                    .onEnded { _ in resizeStart = nil; store.persist() }
-            )
-    }
 }
 
-/// Compact tile face — icon + title, used for 1×1 tiles and while editing.
+/// Compact tile face — icon + title (1×1 tiles and while editing small ones).
 private struct WidgetCard: View {
     let spec: WidgetSpec
     let big: Bool
@@ -306,17 +314,64 @@ private struct WidgetCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Image(systemName: spec.icon)
-                .font(.system(size: big ? 28 : 22, weight: .semibold))
-                .foregroundColor(spec.tint)
+                .font(.system(size: big ? 28 : 22, weight: .semibold)).foregroundColor(spec.tint)
             Spacer(minLength: 0)
             Text(lang.s(spec.titleKey))
-                .font(Theme.Typography.headline)
-                .foregroundColor(Theme.Colors.primaryText)
-                .lineLimit(2)
+                .font(Theme.Typography.headline).foregroundColor(Theme.Colors.primaryText).lineLimit(2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(Theme.Spacing.md)
         .liquidGlass(cornerRadius: Theme.Radius.card)
+    }
+}
+
+/// The + gallery: everything currently off the board, tap to add.
+private struct WidgetGallery: View {
+    @EnvironmentObject var lang: LanguageManager
+    @ObservedObject var store: DashboardStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SandyBackground()
+                ScrollView {
+                    VStack(spacing: Theme.Spacing.md) {
+                        if store.gallery.isEmpty {
+                            Text(lang.s("widgets.gallery.empty"))
+                                .font(Theme.Typography.subheadline)
+                                .foregroundColor(Theme.Colors.secondaryText)
+                                .padding(.top, Theme.Spacing.xl)
+                        }
+                        ForEach(store.gallery) { item in
+                            if let spec = store.spec(item.key) {
+                                Button { store.add(item.key); dismiss() } label: {
+                                    HStack(spacing: Theme.Spacing.md) {
+                                        Image(systemName: spec.icon).foregroundColor(spec.tint).frame(width: 28)
+                                        Text(lang.s(spec.titleKey))
+                                            .font(Theme.Typography.headline)
+                                            .foregroundColor(Theme.Colors.primaryText)
+                                        Spacer(minLength: 0)
+                                        Image(systemName: "plus.circle.fill").foregroundColor(Theme.Colors.accent)
+                                    }
+                                    .padding(Theme.Spacing.md)
+                                    .liquidGlass(cornerRadius: Theme.Radius.card)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(Theme.Spacing.md)
+                }
+            }
+            .navigationTitle(lang.s("widgets.gallery.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(lang.s("common.done")) { dismiss() }
+                }
+            }
+        }
     }
 }
 
@@ -333,7 +388,5 @@ private struct WidgetDropDelegate: DropDelegate {
         }
     }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
-    func performDrop(info: DropInfo) -> Bool {
-        dragging = nil; store.persist(); return true
-    }
+    func performDrop(info: DropInfo) -> Bool { dragging = nil; store.persist(); return true }
 }
