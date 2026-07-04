@@ -18,6 +18,8 @@ final class AppState: ObservableObject {
     /// بيانات التعارف (الاسم المفضّل + الاهتمامات) — تُعرض بتبويب حسابي.
     @Published var onboarding = OnboardingData()
     let api: APIClient
+    /// حالة الاشتراك + الشراء (RevenueCat عند توفّره، وحالة الباك-إند دائمًا).
+    let subscriptions = SubscriptionManager()
 
     init() {
         // عنوان الخادم المحفوظ (لو غيّره المستخدم) وإلا الافتراضي. التعيين بالـinit
@@ -62,6 +64,11 @@ final class AppState: ObservableObject {
             Task { try? await self.api.registerPushToken(deviceToken) }
         }
         NotificationManager.shared.requestAuthorization()
+
+        // الاشتراك: نعرّف RevenueCat بهوية المستخدم (لو الحزمة+المفتاح جاهزين)
+        // ونعكس حالة الباك-إند. حميد بدونهما — يبقى المستخدم مجّاني.
+        subscriptions.configure(userId: api.currentUserId)
+        Task { await subscriptions.refresh(api: api) }
     }
 
     /// يجيب بيانات التعارف ويخزّنها (لتبويب حسابي). يتجاهل الأخطاء بصمت.

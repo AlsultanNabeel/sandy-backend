@@ -6,6 +6,8 @@ struct ProfileView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @State private var showEdit = false
+    /// يفتح شاشة الاشتراك (ساندي بريميوم) كورقة.
+    @State private var showPaywall = false
     /// لإظهار الشارات بحركة لطيفة عند الدخول.
     @State private var appeared = false
 
@@ -29,6 +31,7 @@ struct ProfileView: View {
                 ScrollView {
                     VStack(spacing: Theme.Spacing.lg) {
                         header
+                        premiumCard
                         preferredNameCard
                         interestsCard
                         languageCard
@@ -53,7 +56,35 @@ struct ProfileView: View {
                     try await state.saveProfile(preferredName: name, interests: items)
                 }
             }
+            .sheet(isPresented: $showPaywall) {
+                NavigationStack { PaywallView(subs: state.subscriptions) }
+            }
         }
+    }
+
+    // MARK: - بطاقة الاشتراك (ساندي بريميوم)
+
+    /// مدخل الاشتراك — يفتح شاشة الدفع. صف واحد بارز فوق الأرشيف.
+    private var premiumCard: some View {
+        Button { showPaywall = true } label: {
+            HStack(spacing: Theme.Spacing.md) {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(width: 28)
+                Text(lang.s("paywall.title"))
+                    .font(Theme.Typography.headline)
+                    .foregroundColor(Theme.Colors.primaryText)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.left")
+                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            }
+            .padding(Theme.Spacing.md)
+            .frame(maxWidth: .infinity)
+            .liquidGlass(cornerRadius: Theme.Radius.card)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - بطاقة الأدوات والأرشيف

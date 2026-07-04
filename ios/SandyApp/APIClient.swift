@@ -12,6 +12,22 @@ final class APIClient {
     /// Called when an authenticated request gets a 401, so the app can route to login.
     var onUnauthorized: (() -> Void)?
 
+    /// هوية المستخدم مفكوكة من حمولة الـJWT (بدون تحقّق — للعرض/الربط فقط، مثل
+    /// تمريرها لـRevenueCat كـ app_user_id حتى يطابق حسابه بالباك-إند). nil لو ما
+    /// في توكن أو تعذّر الفك.
+    var currentUserId: String? {
+        guard let t = token else { return nil }
+        let parts = t.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var b64 = String(parts[1]).replacingOccurrences(of: "-", with: "+")
+                                   .replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }   // JWT يحذف الحشو
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj["user_id"] as? String
+    }
+
     init(baseURL: String) {
         self.baseURL = baseURL
         // نحمّل التوكن المحفوظ (لو في) — التعيين بالـinit ما يشغّل didSet فما يعيد الحفظ.
