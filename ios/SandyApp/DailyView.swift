@@ -11,7 +11,8 @@ struct DailyView: View {
     /// كتالوج ميزات يومي — المفتاح ثابت (يطابق مفتاح الإخفاء بالسيرفر)، مع وجهته.
     static let catalog: [WidgetSpec] = [
         WidgetSpec(key: "tasks", icon: "checklist", titleKey: "daily.tasks",
-                   tint: Theme.Colors.accent) { AnyView(TasksView()) },
+                   tint: Theme.Colors.accent,
+                   content: { shape in AnyView(TasksWidget(shape: shape)) }) { AnyView(TasksView()) },
         WidgetSpec(key: "reminders", icon: "bell.fill", titleKey: "daily.reminders",
                    tint: Theme.Colors.warn) { AnyView(RemindersView()) },
         WidgetSpec(key: "goals", icon: "flag.fill", titleKey: "daily.goals",
