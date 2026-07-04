@@ -6,37 +6,28 @@ import UniformTypeIdentifiers
 // ─────────────────────────────────────────────────────────────────────────
 //  WidgetDashboard — a per-tab, iPhone-widget-style customizable canvas.
 //
-//  Two-column grid; every tile has a SHAPE with full control:
-//    مربّع (1×1) · عريض (2×1) · طويل (1×2) · كبير (2×2)
-//  Enter edit by LONG-PRESSING an empty spot (no prominent button). Then:
+//  Two-column grid. Every tile has a FREE size: width 1–2 columns, height 1–4
+//  rows — so you can make it square, wide, tall, or as big as you want.
+//  Enter edit by LONG-PRESSING an empty spot. Then:
 //    • drag a tile to reorder (it reflows),
-//    • drag the corner handle to resize through the shapes,
+//    • grab the bottom-corner grip and drag out/in to grow/shrink,
 //    • tap the − badge to hide it.
-//  Layout (order + shape + hidden) persists per tab on device. The OWNER can
-//  force-hide any feature centrally (server layer); those never appear.
-//  No feature code is removed — this only decides presentation.
+//  Enlarged tiles show LIVE, interactive feature content that fills the space.
+//  Layout persists per tab on device; the OWNER can force-hide any feature
+//  centrally. No feature code is removed — this only decides presentation.
 // ─────────────────────────────────────────────────────────────────────────
 
-enum WidgetShape: String, Codable, CaseIterable {
-    case square, wide, tall, big
-    var cols: Int { (self == .wide || self == .big) ? 2 : 1 }
-    var rows: Int { (self == .tall || self == .big) ? 2 : 1 }
-    static func from(cols: Int, rows: Int) -> WidgetShape {
-        switch (min(max(cols, 1), 2), min(max(rows, 1), 2)) {
-        case (2, 2): return .big
-        case (2, 1): return .wide
-        case (1, 2): return .tall
-        default:     return .square
-        }
-    }
-}
+private let kMaxCols = 2
+private let kMaxRows = 4
 
 /// Persisted per-tile state (array order = layout order).
 struct DashboardItem: Identifiable, Codable, Equatable {
     let key: String
-    var shape: WidgetShape = .square
+    var cols: Int = 1
+    var rows: Int = 1
     var hidden: Bool = false          // hidden BY THE USER
     var id: String { key }
+    var isBig: Bool { cols > 1 || rows > 1 }
 }
 
 /// Static catalog entry — how a feature looks, where it goes, and (optionally)
@@ -47,12 +38,12 @@ struct WidgetSpec: Identifiable {
     let titleKey: String
     let tint: Color
     let destination: () -> AnyView
-    /// Interactive preview for bigger shapes (nil = enlarged tile just scales the
-    /// icon+title). Gets the current shape so it can show more when there's room.
-    var content: ((WidgetShape) -> AnyView)?
+    /// Interactive preview for enlarged tiles (nil = just a bigger icon+title).
+    /// It self-measures and fills whatever space the tile gives it.
+    var content: (() -> AnyView)?
 
     init(key: String, icon: String, titleKey: String, tint: Color,
-         content: ((WidgetShape) -> AnyView)? = nil,
+         content: (() -> AnyView)? = nil,
          destination: @escaping () -> AnyView) {
         self.key = key; self.icon = icon; self.titleKey = titleKey
         self.tint = tint; self.content = content; self.destination = destination
@@ -76,14 +67,11 @@ final class DashboardStore: ObservableObject {
     }
 
     func spec(_ key: String) -> WidgetSpec? { catalog.first { $0.key == key } }
-
     func applyServerHidden(_ hidden: Set<String>) { serverHidden = hidden }
 
-    /// Normal view: user order, minus owner-hidden and user-hidden.
     var shown: [DashboardItem] {
         items.filter { !serverHidden.contains($0.key) && !$0.hidden }
     }
-    /// Edit view: everything the owner allows (user-hidden shown dimmed).
     var editable: [DashboardItem] {
         items.filter { !serverHidden.contains($0.key) }
     }
@@ -94,13 +82,16 @@ final class DashboardStore: ObservableObject {
         items[i].hidden.toggle(); persist()
     }
 
-    func setShape(_ key: String, cols: Int, rows: Int) {
+    /// Grow/shrink freely, clamped to the grid (cols 1–2, rows 1–4).
+    func setSize(_ key: String, cols: Int, rows: Int) {
         guard let i = items.firstIndex(where: { $0.key == key }) else { return }
-        let s = WidgetShape.from(cols: cols, rows: rows)
-        if items[i].shape != s { items[i].shape = s }
+        let c = min(max(cols, 1), kMaxCols)
+        let r = min(max(rows, 1), kMaxRows)
+        if items[i].cols != c || items[i].rows != r {
+            items[i].cols = c; items[i].rows = r
+        }
     }
 
-    /// Move the dragged key to sit before `target` (live reflow while dragging).
     func relocate(_ dragged: String, before target: String) {
         guard dragged != target,
               let from = items.firstIndex(where: { $0.key == dragged }) else { return }
@@ -126,13 +117,12 @@ final class DashboardStore: ObservableObject {
         items = merged
     }
 
-    /// First-fit placement into a 2-column grid; tiles may span 2 rows.
-    /// Returns each item with its (row, col) and the total row count.
+    /// First-fit placement into a 2-column grid; tiles may span rows/cols.
     func placed(_ list: [DashboardItem]) -> (cells: [(item: DashboardItem, row: Int, col: Int)], rows: Int) {
         var occupied = Set<[Int]>()
         func free(_ r: Int, _ c: Int, _ w: Int, _ h: Int) -> Bool {
             for dr in 0..<h { for dc in 0..<w {
-                if c + dc >= 2 { return false }
+                if c + dc >= kMaxCols { return false }
                 if occupied.contains([r + dr, c + dc]) { return false }
             } }
             return true
@@ -140,18 +130,15 @@ final class DashboardStore: ObservableObject {
         var cells: [(DashboardItem, Int, Int)] = []
         var maxRow = 0
         for it in list {
-            let w = it.shape.cols, h = it.shape.rows
+            let w = min(it.cols, kMaxCols), h = min(it.rows, kMaxRows)
             var r = 0
             while true {
-                var placedHere = false
-                for c in 0...(2 - w) where free(r, c, w, h) {
+                var done = false
+                for c in 0...(kMaxCols - w) where free(r, c, w, h) {
                     for dr in 0..<h { for dc in 0..<w { occupied.insert([r + dr, c + dc]) } }
-                    cells.append((it, r, c))
-                    maxRow = max(maxRow, r + h)
-                    placedHere = true
-                    break
+                    cells.append((it, r, c)); maxRow = max(maxRow, r + h); done = true; break
                 }
-                if placedHere { break }
+                if done { break }
                 r += 1
             }
         }
@@ -168,11 +155,8 @@ struct WidgetDashboard: View {
     @State private var resizeStart: (key: String, cols: Int, rows: Int)?
 
     private let gap = Theme.Spacing.md
-
-    /// Cell side from the screen width — two columns with one gap, page padding.
-    private var cell: CGFloat {
-        (UIScreen.main.bounds.width - gap * 3) / 2
-    }
+    private var cell: CGFloat { (UIScreen.main.bounds.width - gap * 3) / 2 }
+    private func span(_ n: Int) -> CGFloat { CGFloat(n) * cell + CGFloat(n - 1) * gap }
 
     var body: some View {
         let list = store.editing ? store.editable : store.shown
@@ -182,7 +166,6 @@ struct WidgetDashboard: View {
 
         ScrollView {
             ZStack(alignment: .topLeading) {
-                // Empty backdrop: long-press to toggle edit mode (no loud button).
                 Color.clear
                     .frame(width: cell * 2 + gap, height: contentH)
                     .contentShape(Rectangle())
@@ -193,8 +176,8 @@ struct WidgetDashboard: View {
 
                 ForEach(layout.cells, id: \.item.id) { entry in
                     tile(entry.item)
-                        .frame(width: span(entry.item.shape.cols),
-                               height: span(entry.item.shape.rows))
+                        .frame(width: span(min(entry.item.cols, kMaxCols)),
+                               height: span(min(entry.item.rows, kMaxRows)))
                         .offset(x: CGFloat(entry.col) * (cell + gap),
                                 y: CGFloat(entry.row) * (cell + gap))
                 }
@@ -213,29 +196,27 @@ struct WidgetDashboard: View {
                 }
             }
         }
-        .overlay(alignment: .bottom) {
-            if store.editing {
-                Text(lang.s("widgets.hint"))
-                    .font(Theme.Typography.caption)
-                    .foregroundColor(Theme.Colors.secondaryText)
-                    .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.vertical, Theme.Spacing.sm)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.bottom, Theme.Spacing.lg)
-            }
-        }
+        .overlay(alignment: .bottom) { if store.editing { hintBar } }
     }
 
-    private func span(_ n: Int) -> CGFloat { CGFloat(n) * cell + CGFloat(n - 1) * gap }
+    private var hintBar: some View {
+        Text(lang.s("widgets.hint"))
+            .font(Theme.Typography.caption)
+            .foregroundColor(Theme.Colors.secondaryText)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.sm)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(.bottom, Theme.Spacing.lg)
+    }
 
     @ViewBuilder
     private func tile(_ item: DashboardItem) -> some View {
         if let spec = store.spec(item.key) {
             if store.editing {
-                WidgetCard(spec: spec, shape: item.shape, lang: lang)
+                WidgetCard(spec: spec, big: item.isBig, lang: lang)
                     .opacity(item.hidden ? 0.35 : 1)
                     .overlay(alignment: .topLeading) { hideBadge(item) }
-                    .overlay(alignment: .bottomTrailing) { resizeHandle(item) }
+                    .overlay(alignment: .bottomTrailing) { resizeGrip(item) }
                     .rotationEffect(.degrees(1))
                     .animation(.easeInOut(duration: 0.14).repeatForever(autoreverses: true),
                                value: store.editing)
@@ -246,21 +227,19 @@ struct WidgetDashboard: View {
                     .onDrop(of: [UTType.text],
                             delegate: WidgetDropDelegate(target: item.key, store: store,
                                                          dragging: $dragging))
-            } else if item.shape != .square, let content = spec.content {
-                // Enlarged + has live content: a header that opens the full
-                // screen, then the interactive mini-view you can act on in place.
+            } else if item.isBig, let content = spec.content {
                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     NavigationLink { spec.destination() } label: { contentHeader(spec) }
                         .buttonStyle(.plain)
-                    content(item.shape)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    content()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 .padding(Theme.Spacing.md)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .liquidGlass(cornerRadius: Theme.Radius.card)
             } else {
                 NavigationLink { spec.destination() } label: {
-                    WidgetCard(spec: spec, shape: item.shape, lang: lang)
+                    WidgetCard(spec: spec, big: item.isBig, lang: lang)
                 }
                 .buttonStyle(.plain)
             }
@@ -293,43 +272,41 @@ struct WidgetDashboard: View {
         .offset(x: -6, y: -6)
     }
 
-    // Drag the corner to resize through the shapes (relative to the shape the
-    // gesture started on, so it doesn't compound).
-    private func resizeHandle(_ item: DashboardItem) -> some View {
-        Image(systemName: "arrow.up.left.and.arrow.down.right.circle.fill")
-            .font(.system(size: 22))
-            .foregroundColor(Theme.Colors.accent)
-            .background(Circle().fill(Theme.Colors.card))
-            .offset(x: 6, y: 6)
+    // A real corner grip: drag out to grow, in to shrink (both axes), relative to
+    // the size the drag started on so it doesn't compound.
+    private func resizeGrip(_ item: DashboardItem) -> some View {
+        Image(systemName: "arrow.down.right")
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundColor(Theme.Colors.onAccent)
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(Theme.Colors.accent))
+            .offset(x: 8, y: 8)
             .gesture(
                 DragGesture()
                     .onChanged { v in
                         if resizeStart?.key != item.key {
-                            resizeStart = (item.key, item.shape.cols, item.shape.rows)
+                            resizeStart = (item.key, item.cols, item.rows)
                         }
                         guard let base = resizeStart else { return }
-                        let stepW = Int((v.translation.width / (cell * 0.55)).rounded())
-                        let stepH = Int((v.translation.height / (cell * 0.55)).rounded())
-                        store.setShape(item.key, cols: base.cols + stepW, rows: base.rows + stepH)
+                        let dc = Int((v.translation.width / (cell * 0.5)).rounded())
+                        let dr = Int((v.translation.height / (cell * 0.5)).rounded())
+                        store.setSize(item.key, cols: base.cols + dc, rows: base.rows + dr)
                     }
-                    .onEnded { _ in
-                        resizeStart = nil
-                        store.persist()
-                    }
+                    .onEnded { _ in resizeStart = nil; store.persist() }
             )
     }
 }
 
-/// One tile's face — icon + title, sized to its shape. Larger shapes show more.
+/// Compact tile face — icon + title, used for 1×1 tiles and while editing.
 private struct WidgetCard: View {
     let spec: WidgetSpec
-    let shape: WidgetShape
+    let big: Bool
     let lang: LanguageManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Image(systemName: spec.icon)
-                .font(.system(size: shape.rows == 2 ? 30 : 22, weight: .semibold))
+                .font(.system(size: big ? 28 : 22, weight: .semibold))
                 .foregroundColor(spec.tint)
             Spacer(minLength: 0)
             Text(lang.s(spec.titleKey))
@@ -357,8 +334,6 @@ private struct WidgetDropDelegate: DropDelegate {
     }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
     func performDrop(info: DropInfo) -> Bool {
-        dragging = nil
-        store.persist()
-        return true
+        dragging = nil; store.persist(); return true
     }
 }

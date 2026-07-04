@@ -12,7 +12,7 @@ struct DailyView: View {
     static let catalog: [WidgetSpec] = [
         WidgetSpec(key: "tasks", icon: "checklist", titleKey: "daily.tasks",
                    tint: Theme.Colors.accent,
-                   content: { shape in AnyView(TasksWidget(shape: shape)) }) { AnyView(TasksView()) },
+                   content: { AnyView(TasksWidget()) }) { AnyView(TasksView()) },
         WidgetSpec(key: "reminders", icon: "bell.fill", titleKey: "daily.reminders",
                    tint: Theme.Colors.warn) { AnyView(RemindersView()) },
         WidgetSpec(key: "goals", icon: "flag.fill", titleKey: "daily.goals",

@@ -6,39 +6,42 @@ import SwiftUI
 // the rest of the catalog gets its own here next.
 
 /// Tasks widget: shows your open tasks and lets you check them off in place.
-/// The bigger the shape, the more rows fit.
+/// It measures its own height and fills it — the bigger the tile, the more rows.
 struct TasksWidget: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    let shape: WidgetShape
 
     @State private var tasks: [TaskItem] = []
     @State private var loading = true
     @State private var busyId: String?
 
-    /// Rows that fit: a tall/big tile shows more than a wide (single-row) one.
-    private var maxRows: Int { shape.rows == 2 ? 6 : 2 }
+    private let rowHeight: CGFloat = 30
     private var open: [TaskItem] { tasks.filter { !$0.done } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            if loading {
-                ProgressView().tint(Theme.Colors.accent)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else if open.isEmpty {
-                Text(lang.s("tasks.empty"))
-                    .font(Theme.Typography.subheadline)
-                    .foregroundColor(Theme.Colors.secondaryText)
-            } else {
-                ForEach(open.prefix(maxRows)) { t in row(t) }
-                if open.count > maxRows {
-                    Text("+\(open.count - maxRows)")
-                        .font(Theme.Typography.caption)
-                        .foregroundColor(Theme.Colors.tertiaryText)
+        GeometryReader { geo in
+            // How many rows actually fit in the space this tile gives us.
+            let capacity = max(1, Int(geo.size.height / rowHeight))
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                if loading {
+                    ProgressView().tint(Theme.Colors.accent)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else if open.isEmpty {
+                    Text(lang.s("tasks.empty"))
+                        .font(Theme.Typography.subheadline)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                } else {
+                    ForEach(open.prefix(capacity)) { t in row(t) }
+                    if open.count > capacity {
+                        Text("+\(open.count - capacity)")
+                            .font(Theme.Typography.caption)
+                            .foregroundColor(Theme.Colors.tertiaryText)
+                    }
                 }
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .task { await load() }
     }
 
