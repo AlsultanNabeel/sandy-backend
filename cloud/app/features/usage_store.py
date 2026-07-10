@@ -19,16 +19,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _DAILY = "sandy_usage_daily"
 _RL = "sandy_usage_rl"
-_mongo_db = None
 
 
 def init_usage_store(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع."""
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -36,9 +38,9 @@ def init_usage_store(mongo_db) -> None:
             "updated_at", expireAfterSeconds=60 * 60 * 24 * 40, background=True
         )
         mongo_db[_RL].create_index("expire_at", expireAfterSeconds=0, background=True)
-        print("[UsageStore] ready")
+        logger.info("[UsageStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[UsageStore] index skipped: {e}")
+        logger.warning(f"[UsageStore] index skipped: {e}")
 
 
 def _now() -> datetime:
@@ -46,17 +48,17 @@ def _now() -> datetime:
 
 
 def requests_today(user_id: str) -> int:
-    if _mongo_db is None or not user_id:
+    if get_db() is None or not user_id:
         return 0
     key = f"{user_id}:{_now():%Y-%m-%d}"
-    doc = _mongo_db[_DAILY].find_one({"_id": key})
+    doc = get_db()[_DAILY].find_one({"_id": key})
     return int((doc or {}).get("count", 0))
 
 
 def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> Optional[str]:
     """Count one request and return a rejection reason if the user is over a
     limit, else None. A limit of 0 disables that limit. Fails open on errors."""
-    if _mongo_db is None or not user_id:
+    if get_db() is None or not user_id:
         return None
     from pymongo import ReturnDocument
 
@@ -64,7 +66,7 @@ def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> O
     # Per-minute burst window.
     try:
         rl_key = f"{user_id}:{int(now.timestamp() // 60)}"
-        rl = _mongo_db[_RL].find_one_and_update(
+        rl = get_db()[_RL].find_one_and_update(
             {"_id": rl_key},
             {"$inc": {"count": 1},
              "$setOnInsert": {"user_id": user_id, "expire_at": now + timedelta(seconds=120)}},
@@ -77,7 +79,7 @@ def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> O
     # Daily quota.
     try:
         d_key = f"{user_id}:{now:%Y-%m-%d}"
-        d = _mongo_db[_DAILY].find_one_and_update(
+        d = get_db()[_DAILY].find_one_and_update(
             {"_id": d_key},
             {"$inc": {"count": 1},
              "$set": {"updated_at": now},

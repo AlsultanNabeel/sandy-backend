@@ -31,15 +31,15 @@ class ChromaHashStabilityTests(unittest.TestCase):
             def __getitem__(self, name):
                 return FakeCollection()
 
-        import app.agent.semantic_memory as cm
-        orig_db = cm._mongo_db
-        cm._mongo_db = FakeDb()
+        from app import db as _db
+        orig_db = _db.get_db()
+        _db.configure(FakeDb())
         set_active_user_profile({"relation": "owner", "permissions": "all", "chat_id": chat_id})
         try:
             from app.agent.semantic_memory import load_facts_to_chroma
             load_facts_to_chroma([{"text": text, "type": "owner_name"}])
         finally:
-            cm._mongo_db = orig_db
+            _db.configure(orig_db)
             set_active_user_profile(None)
 
         self.assertIn("id", captured, "update_one() was never called")

@@ -30,9 +30,12 @@ from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _COLL = "sandy_reminders"
-_mongo_db = None
 
 # How far back the due-check looks. A dyno restart can skip a minute-cron tick
 # or two; anything older than this window is stale enough to drop silently.
@@ -41,26 +44,25 @@ _LOOKBACK_MIN = 15
 
 def init_reminders_store(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع."""
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
         mongo_db[_COLL].create_index(
             [("user_id", 1), ("send_state", 1), ("remind_at", 1)], background=True
         )
-        print("[RemindersStore] ready")
+        logger.info("[RemindersStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[RemindersStore] index skipped: {e}")
+        logger.warning(f"[RemindersStore] index skipped: {e}")
 
 
 def is_available() -> bool:
-    return _mongo_db is not None
+    return get_db() is not None
 
 
 def _coll():
     """Tenant-scoped collection (request path). None when no db / no tenant."""
-    return scoped(_mongo_db, _COLL)
+    return scoped(get_db(), _COLL)
 
 
 def _parse_iso(value: str) -> Optional[datetime]:
@@ -119,7 +121,7 @@ def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
         )
         return [_normalize(d) for d in docs]
     except Exception as e:
-        print(f"[RemindersStore] load failed: {e}")
+        logger.warning(f"[RemindersStore] load failed: {e}")
         return []
 
 
@@ -169,10 +171,10 @@ def add_reminder(
             "last_error": "",
         }
         coll.insert_one(doc)
-        print(f"[RemindersStore] reminder created: {text} @ {remind_at_iso}")
+        logger.info(f"[RemindersStore] reminder created: {text} @ {remind_at_iso}")
         return {"success": True, "id": doc["_id"]}
     except Exception as e:
-        print(f"[RemindersStore] create failed: {e}")
+        logger.warning(f"[RemindersStore] create failed: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -213,7 +215,7 @@ def update_reminder(
             return {"success": False, "error": "not_found"}
         return {"success": True}
     except Exception as e:
-        print(f"[RemindersStore] update failed: {e}")
+        logger.warning(f"[RemindersStore] update failed: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -238,7 +240,7 @@ def snooze_reminder(reminder_id: str, minutes: int = 30) -> Dict[str, Any]:
             return {"success": False, "error": "not_found"}
         return {"success": True, "new_iso": new_dt.isoformat()}
     except Exception as e:
-        print(f"[RemindersStore] snooze failed: {e}")
+        logger.warning(f"[RemindersStore] snooze failed: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -260,7 +262,7 @@ def complete_reminder(reminder_id: str) -> bool:
         )
         return r.matched_count > 0
     except Exception as e:
-        print(f"[RemindersStore] complete failed: {e}")
+        logger.warning(f"[RemindersStore] complete failed: {e}")
         return False
 
 
@@ -271,7 +273,7 @@ def delete_reminder(reminder_id: str) -> bool:
             return False
         return coll.delete_one({"_id": reminder_id}).deleted_count > 0
     except Exception as e:
-        print(f"[RemindersStore] delete failed: {e}")
+        logger.warning(f"[RemindersStore] delete failed: {e}")
         return False
 
 
@@ -282,7 +284,7 @@ def delete_sandy_reminder_by_task_id(task_id: str) -> int:
             return 0
         return coll.delete_many({"linked_task_id": task_id}).deleted_count
     except Exception as e:
-        print(f"[RemindersStore] delete by task failed: {e}")
+        logger.warning(f"[RemindersStore] delete by task failed: {e}")
         return 0
 
 
@@ -292,8 +294,8 @@ def delete_all_sandy_reminders() -> int:
         if coll is None:
             return 0
         r = coll.delete_many({})
-        print(f"[RemindersStore] deleted all reminders: {r.deleted_count}")
+        logger.info(f"[RemindersStore] deleted all reminders: {r.deleted_count}")
         return r.deleted_count
     except Exception as e:
-        print(f"[RemindersStore] delete all failed: {e}")
+        logger.warning(f"[RemindersStore] delete all failed: {e}")
         return 0

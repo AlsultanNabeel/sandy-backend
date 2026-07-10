@@ -120,8 +120,8 @@ class ExecutorRoutingTests(unittest.TestCase):
         self.assertFalse(result["handled"])
         self.assertEqual(result["reply"], "")
 
-    @patch("app.agent.executor.task_handlers.load_tasks")
-    @patch("app.agent.executor.task_handlers.parse_reminder_time_ai")
+    @patch("app.agent.executor.task_handlers.due_date.load_tasks")
+    @patch("app.agent.executor.task_handlers.due_date.parse_reminder_time_ai")
     def test_bulk_update_due_date_sets_pending(self, mock_parse_time, mock_load_tasks):
         future = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT00:00:00+02:00")
         past   = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00+02:00")
@@ -155,8 +155,8 @@ class ExecutorRoutingTests(unittest.TestCase):
         self.assertNotIn("اجتماع مختلف", task_texts)
         self.assertIn("بدي أؤجل 2 مهام", result["reply"])
 
-    @patch("app.agent.executor.task_handlers.load_tasks")
-    @patch("app.agent.executor.task_handlers.parse_reminder_time_ai")
+    @patch("app.agent.executor.task_handlers.due_date.load_tasks")
+    @patch("app.agent.executor.task_handlers.due_date.parse_reminder_time_ai")
     def test_bulk_update_due_date_no_matching_tasks(self, mock_parse_time, mock_load_tasks):
         future = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT00:00:00+02:00")
         past   = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00+02:00")

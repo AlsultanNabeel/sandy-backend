@@ -23,21 +23,23 @@ guard fails closed, and user_id is injected on every read/write automatically.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.db import configure, get_db
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 
+logger = logging.getLogger(__name__)
+
 _COLL = "sandy_tasks"
-_mongo_db = None
 
 
 def init_tasks_store(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع."""
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -47,17 +49,17 @@ def init_tasks_store(mongo_db) -> None:
         mongo_db[_COLL].create_index(
             [("user_id", 1), ("done", 1), ("completed_at", -1)], background=True
         )
-        print("[TasksStore] ready")
+        logger.info("[TasksStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[TasksStore] index skipped: {e}")
+        logger.warning(f"[TasksStore] index skipped: {e}")
 
 
 def is_available() -> bool:
-    return _mongo_db is not None
+    return get_db() is not None
 
 
 def _db(mongo_db=None):
-    return mongo_db if mongo_db is not None else _mongo_db
+    return mongo_db if mongo_db is not None else get_db()
 
 
 def _coll(mongo_db=None):
@@ -111,7 +113,7 @@ def load_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
         docs = list(coll.find({"done": False}).sort("created_at", 1))
         return [_normalize(d) for d in docs]
     except Exception as e:
-        print(f"[TasksStore] load failed: {e}")
+        logger.warning(f"[TasksStore] load failed: {e}")
         return []
 
 
@@ -127,7 +129,7 @@ def load_completed_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]
         )
         return [_normalize(d) for d in docs]
     except Exception as e:
-        print(f"[TasksStore] load completed failed: {e}")
+        logger.warning(f"[TasksStore] load completed failed: {e}")
         return []
 
 
@@ -148,7 +150,7 @@ def load_overdue_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
                 overdue.append(task)
         return overdue
     except Exception as e:
-        print(f"[TasksStore] load overdue failed: {e}")
+        logger.warning(f"[TasksStore] load overdue failed: {e}")
         return []
 
 
@@ -194,10 +196,10 @@ def add_task(
             doc["due_at"] = due_dt
 
         coll.insert_one(doc)
-        print(f"[TasksStore] task created: {doc['text']}")
+        logger.info(f"[TasksStore] task created: {doc['text']}")
         return doc["_id"]
     except Exception as e:
-        print(f"[TasksStore] create failed: {e}")
+        logger.warning(f"[TasksStore] create failed: {e}")
         return ""
 
 
@@ -212,7 +214,7 @@ def complete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
         )
         return r.matched_count > 0
     except Exception as e:
-        print(f"[TasksStore] complete failed: {e}")
+        logger.warning(f"[TasksStore] complete failed: {e}")
         return False
 
 
@@ -233,7 +235,7 @@ def set_task_due(task_id: str, due_iso: str = "", mongo_db=None) -> bool:
         r = coll.update_one({"_id": task_id}, {"$set": updates})
         return r.matched_count > 0
     except Exception as e:
-        print(f"[TasksStore] set_due failed: {e}")
+        logger.warning(f"[TasksStore] set_due failed: {e}")
         return False
 
 
@@ -248,7 +250,7 @@ def uncomplete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
         )
         return r.matched_count > 0
     except Exception as e:
-        print(f"[TasksStore] uncomplete failed: {e}")
+        logger.warning(f"[TasksStore] uncomplete failed: {e}")
         return False
 
 
@@ -281,7 +283,7 @@ def update_task_due_date(
         )
         return {"ok": True, "due_date": due_dt.date().isoformat()}
     except Exception as e:
-        print(f"[TasksStore] update due date failed: {e}")
+        logger.warning(f"[TasksStore] update due date failed: {e}")
         return {"ok": False, "reason": "error"}
 
 
@@ -309,7 +311,7 @@ def update_task_due_time(
             return {"ok": False, "reason": "missing"}
         return {"ok": True, "due_at": due_dt.isoformat()}
     except Exception as e:
-        print(f"[TasksStore] update due time failed: {e}")
+        logger.warning(f"[TasksStore] update due time failed: {e}")
         return {"ok": False, "reason": "error"}
 
 
@@ -321,7 +323,7 @@ def delete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
         r = coll.delete_one({"_id": task_id})
         return r.deleted_count > 0
     except Exception as e:
-        print(f"[TasksStore] delete failed: {e}")
+        logger.warning(f"[TasksStore] delete failed: {e}")
         return False
 
 
@@ -335,7 +337,7 @@ def rename_task(task_id: str, new_title: str, mongo_db=None, tasks_file=None) ->
         r = coll.update_one({"_id": task_id}, {"$set": {"text": new_title}})
         return r.matched_count > 0
     except Exception as e:
-        print(f"[TasksStore] rename failed: {e}")
+        logger.warning(f"[TasksStore] rename failed: {e}")
         return False
 
 
@@ -356,7 +358,7 @@ def append_task_note(
         coll.update_one({"_id": task_id}, {"$set": {"notes": new_notes}})
         return True
     except Exception as e:
-        print(f"[TasksStore] append note failed: {e}")
+        logger.warning(f"[TasksStore] append note failed: {e}")
         return False
 
 
@@ -374,7 +376,7 @@ def replace_task_note(
         )
         return r.matched_count > 0
     except Exception as e:
-        print(f"[TasksStore] replace note failed: {e}")
+        logger.warning(f"[TasksStore] replace note failed: {e}")
         return False
 
 
@@ -389,7 +391,7 @@ def set_task_priority(task_id: str, priority: str, mongo_db=None) -> bool:
         r = coll.update_one({"_id": task_id}, {"$set": {"priority": clean}})
         return r.matched_count > 0
     except Exception as e:
-        print(f"[TasksStore] set priority failed: {e}")
+        logger.warning(f"[TasksStore] set priority failed: {e}")
         return False
 
 
@@ -404,7 +406,7 @@ def set_task_project(task_id: str, project: str, mongo_db=None) -> bool:
         )
         return r.matched_count > 0
     except Exception as e:
-        print(f"[TasksStore] set project failed: {e}")
+        logger.warning(f"[TasksStore] set project failed: {e}")
         return False
 
 
@@ -419,10 +421,10 @@ def complete_all_tasks(mongo_db=None, tasks_file=None) -> int:
             {"done": False},
             {"$set": {"done": True, "completed_at": datetime.now(timezone.utc)}},
         )
-        print(f"[TasksStore] completed {r.modified_count} tasks")
+        logger.info(f"[TasksStore] completed {r.modified_count} tasks")
         return r.modified_count
     except Exception as e:
-        print(f"[TasksStore] complete_all failed: {e}")
+        logger.warning(f"[TasksStore] complete_all failed: {e}")
         return 0
 
 
@@ -432,10 +434,10 @@ def delete_active_tasks(mongo_db=None, tasks_file=None) -> int:
         if coll is None:
             return 0
         r = coll.delete_many({"done": False})
-        print(f"[TasksStore] deleted {r.deleted_count} active tasks")
+        logger.info(f"[TasksStore] deleted {r.deleted_count} active tasks")
         return r.deleted_count
     except Exception as e:
-        print(f"[TasksStore] delete active failed: {e}")
+        logger.warning(f"[TasksStore] delete active failed: {e}")
         return 0
 
 
@@ -445,10 +447,10 @@ def delete_completed_tasks(mongo_db=None, tasks_file=None) -> int:
         if coll is None:
             return 0
         r = coll.delete_many({"done": True})
-        print(f"[TasksStore] deleted {r.deleted_count} completed tasks")
+        logger.info(f"[TasksStore] deleted {r.deleted_count} completed tasks")
         return r.deleted_count
     except Exception as e:
-        print(f"[TasksStore] delete completed failed: {e}")
+        logger.warning(f"[TasksStore] delete completed failed: {e}")
         return 0
 
 
@@ -460,10 +462,10 @@ def clear_all_tasks(mongo_db=None) -> int:
         if coll is None:
             return 0
         r = coll.delete_many({})
-        print(f"[TasksStore] cleared all tasks: {r.deleted_count}")
+        logger.info(f"[TasksStore] cleared all tasks: {r.deleted_count}")
         return r.deleted_count
     except Exception as e:
-        print(f"[TasksStore] clear-all failed: {e}")
+        logger.warning(f"[TasksStore] clear-all failed: {e}")
         return 0
 
 
@@ -472,7 +474,7 @@ def save_tasks(tasks: List[Dict[str, Any]], mongo_db=None, tasks_file=None):
     list) is supported, and it just delegates to clear_all_tasks(); a non-empty
     list is ignored (partial sync was never supported)."""
     if tasks != []:
-        print("[TasksStore] save_tasks ignored (partial sync unsupported)")
+        logger.warning("[TasksStore] save_tasks ignored (partial sync unsupported)")
         return
     clear_all_tasks(mongo_db)
 

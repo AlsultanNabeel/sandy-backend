@@ -16,6 +16,9 @@ from app.features.reminders_store import (
     update_reminder,
 )
 from app.utils.user_profiles import active_profile_is_guest
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_snooze_minutes(time_text: str) -> int:
@@ -75,7 +78,7 @@ def handle_reminder_action(
             normalized_user_message or user_message, default_hour=9
         )
         if _det:
-            print(f"[Reminder] day-name override: {_det}", flush=True)
+            logger.info(f"[Reminder] day-name override: {_det}")
             remind_at_iso = _det
 
     recurrence = recurrence.strip().upper()
@@ -84,7 +87,7 @@ def handle_reminder_action(
         recurrence = f"RRULE:{recurrence}"
 
     if recurrence and not recurrence.startswith("RRULE:FREQ="):
-        print(f"[Reminder] ignoring invalid recurrence: {recurrence}")
+        logger.warning(f"[Reminder] ignoring invalid recurrence: {recurrence}")
         recurrence = ""
 
     if (

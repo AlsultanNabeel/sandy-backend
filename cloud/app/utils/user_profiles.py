@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import os
 import re
-import threading
 from pathlib import Path
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, Optional, Tuple
 
 from app.utils.files import read_json_file, write_json_file
@@ -33,7 +33,16 @@ OWNER_TENANT_ID = (os.getenv("OWNER_TENANT_ID", "") or "").strip()
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "memory"
 USER_PROFILES_FILE = DATA_DIR / "user_profiles.json"
-_ACTIVE_PROFILE_STATE = threading.local()
+
+# The active tenant profile for the current request/task. A ContextVar (not
+# threading.local) so the identity propagates correctly across asyncio tasks and
+# any executor that copies the context, while still isolating per-thread by
+# default: a pool thread that never enters active_user_profile_context reads the
+# default (None) — exactly as the old thread-local did — so background work still
+# fails closed (current_user_id() is None → stores read/write nothing).
+_ACTIVE_PROFILE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "sandy_active_user_profile", default=None
+)
 
 DEFAULT_TONE_BY_RELATION = {
     "owner": "casual",
@@ -81,11 +90,11 @@ def is_owner_chat_id(chat_id: Any) -> bool:
 
 
 def set_active_user_profile(profile: Optional[Dict[str, Any]]) -> None:
-    _ACTIVE_PROFILE_STATE.profile = profile
+    _ACTIVE_PROFILE.set(profile)
 
 
 def get_active_user_profile() -> Optional[Dict[str, Any]]:
-    profile = getattr(_ACTIVE_PROFILE_STATE, "profile", None)
+    profile = _ACTIVE_PROFILE.get()
     return profile if isinstance(profile, dict) else None
 
 
@@ -105,12 +114,13 @@ def current_user_id() -> Optional[str]:
 
 @contextmanager
 def active_user_profile_context(profile: Optional[Dict[str, Any]]):
-    previous = get_active_user_profile()
-    set_active_user_profile(profile)
+    # Token-based reset restores the exact prior value (correct under nesting), and
+    # ContextVar keeps that restore scoped to this task/thread.
+    token = _ACTIVE_PROFILE.set(profile)
     try:
         yield
     finally:
-        set_active_user_profile(previous)
+        _ACTIVE_PROFILE.reset(token)
 
 
 def address_instruction(profile: Optional[Dict[str, Any]] = None) -> str:

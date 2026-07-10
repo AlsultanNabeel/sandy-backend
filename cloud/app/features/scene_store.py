@@ -25,6 +25,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Scene action vocabulary (data only — nothing here drives hardware).
 VALID_DEVICES = frozenset({"light", "color", "music", "fan", "curtain", "scene"})
@@ -64,7 +68,6 @@ def normalize_action(device: str, value: str) -> Optional[str]:
 
 _COLL = "sandy_scenes"
 _TIMERS = "sandy_scene_timers"   # timed reverts: {fire_at, device, value}
-_mongo_db = None
 
 # name → (label, icon, default actions). Seeded once; the owner can edit freely.
 _BUILTIN: Dict[str, Dict[str, Any]] = {
@@ -97,8 +100,7 @@ _BUILTIN: Dict[str, Dict[str, Any]] = {
 
 
 def init_scene_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -108,19 +110,19 @@ def init_scene_store(mongo_db) -> None:
         mongo_db[_TIMERS].create_index(
             [("user_id", 1), ("fire_at", 1)], background=True
         )
-        print("[SceneStore] ready")
+        logger.info("[SceneStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[SceneStore] index skipped: {e}")
+        logger.warning(f"[SceneStore] index skipped: {e}")
 
 
 def _coll():
     """Tenant-scoped scenes collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _COLL)
+    return scoped(get_db(), _COLL)
 
 
 def _timers():
     """Tenant-scoped scene-timers collection, or None when no db / no tenant."""
-    return scoped(_mongo_db, _TIMERS)
+    return scoped(get_db(), _TIMERS)
 
 
 def _now():

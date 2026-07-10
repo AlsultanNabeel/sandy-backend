@@ -7,6 +7,9 @@ import os
 
 from app.utils.arabic_days import WEEKDAY_TO_AR_NAME
 from app.utils.time import USER_TZ
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Active day window for free-slot search (overridable per user/deployment).
 _DAY_START_HOUR = int(os.getenv("SANDY_DAY_START_HOUR", "8"))
@@ -385,5 +388,5 @@ def run_conflict_check_after_task_add(
             "suggestions": suggestions,
         }
     except Exception as exc:
-        print(f"[ConflictResolution] task conflict check failed: {exc}")
+        logger.warning(f"[ConflictResolution] task conflict check failed: {exc}")
         return {"has_conflict": False, "alert_text": "", "suggestions": []}

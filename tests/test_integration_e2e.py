@@ -49,7 +49,7 @@ class TaskActionsTests(unittest.TestCase):
     def tearDown(self):
         set_active_user_profile(None)
 
-    @patch("app.agent.executor.task_handlers.resolve_task_references_for_write", return_value=_SINGLE)
+    @patch("app.agent.executor.task_handlers.completion.resolve_task_references_for_write", return_value=_SINGLE)
     def test_complete_single_sets_pending(self, _):
         session = {}
         r = _call("task", {"action": "complete", "reference": "شراء حليب"}, session)
@@ -57,7 +57,7 @@ class TaskActionsTests(unittest.TestCase):
         self.assertEqual(session["pending_action"]["action"], "complete")
         self.assertEqual(session["pending_action"]["task_id"], "task-001")
 
-    @patch("app.agent.executor.task_handlers.resolve_task_references_for_write", return_value=_NOT_FOUND)
+    @patch("app.agent.executor.task_handlers.completion.resolve_task_references_for_write", return_value=_NOT_FOUND)
     def test_complete_not_found_asks_clarification(self, _):
         session = {}
         r = _call("task", {"action": "complete", "reference": "مهمة وهمية"}, session)
@@ -65,7 +65,7 @@ class TaskActionsTests(unittest.TestCase):
         self.assertIn("pending_action", session)
         self.assertEqual(session["pending_action"]["action"], "clarify_task_write")
 
-    @patch("app.agent.executor.task_handlers.resolve_task_reference_for_write",
+    @patch("app.agent.executor.task_handlers.deletion.resolve_task_reference_for_write",
            return_value={"status": "single", "task": _TASK})
     def test_delete_single_sets_pending(self, _):
         session = {}
@@ -74,26 +74,26 @@ class TaskActionsTests(unittest.TestCase):
         self.assertEqual(session["pending_action"]["action"], "delete_one")
         self.assertEqual(session["pending_action"]["task_id"], "task-001")
 
-    @patch("app.agent.executor.task_handlers.load_tasks", return_value=[_TASK])
-    @patch("app.agent.executor.task_handlers.add_task", return_value="task-002")
+    @patch("app.features.tasks_store.load_tasks", return_value=[_TASK])
+    @patch("app.agent.executor.task_handlers.creation.add_task", return_value="task-002")
     def test_create_task_returns_reply(self, mock_add, _):
         r = _call("task", {"action": "create", "text": "مهمة جديدة"})
         self.assertTrue(r["handled"])
         mock_add.assert_called_once()
 
     @patch("app.features.tasks_store.load_tasks", return_value=[_TASK])
-    @patch("app.agent.executor.task_handlers.resolve_task_references_for_write", return_value=_SINGLE)
+    @patch("app.features.tasks_store.resolve_task_references_for_write", return_value=_SINGLE)
     def test_append_note_success(self, _, __):
         r = _call("task", {"action": "append_note", "reference": "حليب", "notes": "من السوبر ماركت"})
         self.assertTrue(r["handled"])
 
     @patch("app.features.tasks_store.load_tasks", return_value=[_TASK])
-    @patch("app.agent.executor.task_handlers.resolve_task_references_for_write", return_value=_SINGLE)
+    @patch("app.features.tasks_store.resolve_task_references_for_write", return_value=_SINGLE)
     def test_replace_note_success(self, _, __):
         r = _call("task", {"action": "replace_note", "reference": "حليب", "notes": "ملاحظة جديدة"})
         self.assertTrue(r["handled"])
 
-    @patch("app.agent.executor.task_handlers.resolve_task_references_for_write",
+    @patch("app.agent.executor.task_handlers.completion.resolve_task_references_for_write",
            return_value={"status": "ambiguous", "matches": [_TASK, {"id": "task-002", "text": "شراء خبز"}]})
     def test_complete_ambiguous_asks_choice(self, _):
         session = {}
@@ -107,7 +107,7 @@ class TaskActionsTests(unittest.TestCase):
         self.assertTrue(r["handled"])
         self.assertIn("غير صالح", r["reply"])
 
-    @patch("app.agent.executor.task_handlers.build_task_display", return_value=("📋 لا توجد مهام", {}))
+    @patch("app.agent.executor.task_handlers.listing.build_task_display", return_value=("📋 لا توجد مهام", {}))
     def test_list_returns_reply(self, _):
         r = _call("task", {"action": "list"})
         self.assertTrue(r["handled"])

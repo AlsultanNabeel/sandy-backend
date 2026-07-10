@@ -26,10 +26,11 @@ _SOUL_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="soul")
 def _run_in_profile(profile, fn, *args, **kwargs):
     """Re-apply the caller's tenant profile inside a pool worker thread.
 
-    The active profile lives in ``threading.local`` (user_profiles) and does NOT
-    propagate into _SOUL_POOL threads, so a scoped() store called there (e.g.
-    semantic-fact search) sees no tenant and silently returns nothing. Capture
-    the profile at submit time in the request thread, re-enter its context here.
+    The active profile lives in a ``ContextVar`` (user_profiles) and does NOT
+    propagate into _SOUL_POOL threads (the pool submits without copy_context), so a
+    scoped() store called there (e.g. semantic-fact search) sees no tenant and
+    silently returns nothing. Capture the profile at submit time in the request
+    thread, re-enter its context here.
     """
     with active_user_profile_context(profile):
         return fn(*args, **kwargs)
@@ -65,8 +66,8 @@ _HUMOR_SIGNALS = (
 
 def _get_mongo_db():
     try:
-        from app.agent.facade.agent import mongo_db
-        return mongo_db
+        from app.db import get_db
+        return get_db()
     except Exception:
         return None
 
@@ -95,7 +96,8 @@ def _log_retrieval_eval_async(chat_id: str, query: str, summaries: list, facts: 
     def _save():
         try:
             from datetime import datetime, timezone
-            from app.agent.facade.agent import mongo_db
+            from app.db import get_db
+            mongo_db = get_db()
             if mongo_db is None:
                 return
             mongo_db["sandy_evals"].insert_one({

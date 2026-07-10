@@ -29,7 +29,7 @@ import os
 
 from flask import jsonify, request
 
-from app.api.auth_handlers import require_auth
+from app.api.auth_handlers import require_auth, require_tenant
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
@@ -113,10 +113,8 @@ def register_share_api(app, mongo_db=None):
         return jsonify({"items": items}), 200
 
     @app.route("/api/share/saved", methods=["POST"])
-    @require_auth
+    @require_tenant
     def api_share_save(claims):
-        if _is_guest(claims):
-            return jsonify({"error": "forbidden"}), 403
         if mongo_db is None:
             return jsonify({"ok": False}), 200
         body = request.get_json(silent=True) or {}
@@ -126,25 +124,22 @@ def register_share_api(app, mongo_db=None):
             return jsonify({"error": "title_or_url_required"}), 400
         from datetime import datetime, timezone
 
-        with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
-                return jsonify({"ok": False}), 403
-            res = mongo_db[_COLL].insert_one({
-                "chat_id": uid,
-                "title": title,
-                "url": url,
-                "text": (body.get("text") or "").strip(),
-                "topic": (body.get("topic") or "").strip(),
-                "created_at": datetime.now(timezone.utc),
-            })
+        uid = current_user_id()
+        if not uid:
+            return jsonify({"ok": False}), 403
+        res = mongo_db[_COLL].insert_one({
+            "chat_id": uid,
+            "title": title,
+            "url": url,
+            "text": (body.get("text") or "").strip(),
+            "topic": (body.get("topic") or "").strip(),
+            "created_at": datetime.now(timezone.utc),
+        })
         return jsonify({"ok": True, "id": str(res.inserted_id)}), 200
 
     @app.route("/api/share/saved/<item_id>", methods=["DELETE"])
-    @require_auth
+    @require_tenant
     def api_share_delete(claims, item_id):
-        if _is_guest(claims):
-            return jsonify({"error": "forbidden"}), 403
         if mongo_db is None:
             return jsonify({"ok": False}), 200
         from bson import ObjectId
@@ -154,9 +149,8 @@ def register_share_api(app, mongo_db=None):
             oid = ObjectId(item_id)
         except (InvalidId, TypeError):
             return jsonify({"ok": False}), 200
-        with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
-                return jsonify({"ok": False}), 403
-            res = mongo_db[_COLL].delete_one({"_id": oid, "chat_id": uid})
+        uid = current_user_id()
+        if not uid:
+            return jsonify({"ok": False}), 403
+        res = mongo_db[_COLL].delete_one({"_id": oid, "chat_id": uid})
         return jsonify({"ok": res.deleted_count > 0}), 200

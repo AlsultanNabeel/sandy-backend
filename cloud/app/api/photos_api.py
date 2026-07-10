@@ -36,7 +36,7 @@ import threading
 
 from flask import Response, jsonify, request
 
-from app.api.auth_handlers import require_auth
+from app.api.auth_handlers import require_auth, require_tenant
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
@@ -161,12 +161,10 @@ def register_photos_api(app, mongo_db=None):
         return Response(data, mimetype="image/jpeg")
 
     @app.route("/api/photos", methods=["POST"])
-    @require_auth
+    @require_tenant
     def add_photo(claims):
         """Add a photo from the app: base64 image bytes + optional name/album.
         Smart caption/tags are generated in the background (don't block the add)."""
-        if _is_guest(claims):
-            return jsonify({"error": "forbidden"}), 403
         body = request.get_json(silent=True) or {}
         image_b64 = (body.get("image") or "").strip()
         if not image_b64:
@@ -184,13 +182,12 @@ def register_photos_api(app, mongo_db=None):
         name = (body.get("name") or "").strip() or None
         album = (body.get("album") or "").strip()
 
-        with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
-                return jsonify({"error": "forbidden"}), 403
-            saved = photo_album.save_photo(
-                uid, image_bytes, name=name, user_caption=name or ""
-            )
+        uid = current_user_id()
+        if not uid:
+            return jsonify({"error": "forbidden"}), 403
+        saved = photo_album.save_photo(
+            uid, image_bytes, name=name, user_caption=name or ""
+        )
         if not saved:
             return jsonify({"error": "save_failed"}), 500
 

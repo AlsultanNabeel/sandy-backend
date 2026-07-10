@@ -15,7 +15,6 @@ worker thread, which the threaded worker handles fine.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 # Load .env before importing the app — some modules read env at import time.
@@ -24,12 +23,13 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 from app.bootstrap import bootstrap  # noqa: E402  (env must load before app imports)
+from app.agent.facade.agent import init_runtime  # noqa: E402
 from app.api.server import create_app  # noqa: E402
 from app.config import APP_ENV  # noqa: E402
+from app.db import get_db  # noqa: E402
 
-# The facade module holds the shared mongo client (re-exported as a submodule so
-# the package's ``agent`` instance doesn't shadow it).
-_facade = importlib.import_module("app.agent.facade.agent")
-
-app = create_app(mongo_db=_facade.mongo_db)
+# Explicit runtime init (no import-time side effects): connect Mongo, register the
+# shared handle on app.db, initialize the feature stores, start ingest.
+init_runtime()
+app = create_app(mongo_db=get_db())
 bootstrap(app_env=APP_ENV, app=app)

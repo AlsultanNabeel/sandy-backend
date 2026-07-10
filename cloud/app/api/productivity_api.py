@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from flask import jsonify, request
 
-from app.api.auth_handlers import require_auth
+from app.api.auth_handlers import require_auth, require_tenant
 from app.utils.user_profiles import active_user_profile_context, build_user_profile
 
 # Allowed task priorities; anything else falls back to "normal".
@@ -29,11 +29,6 @@ def _clean_priority(value) -> str:
 
 def _is_guest(claims) -> bool:
     return claims.get("role") == "guest"
-
-
-def _guest_forbidden():
-    """Guests get read-only demo tabs — block every mutating endpoint."""
-    return jsonify({"error": "forbidden"}), 403
 
 
 # Fake data so a visitor's tab mirrors the owner's layout without leaking the
@@ -78,10 +73,8 @@ def register_productivity_api(app, mongo_db=None):
         return jsonify({"items": slim, "demo": False}), 200
 
     @app.route("/api/reminders", methods=["POST"])
-    @require_auth
+    @require_tenant
     def api_add_reminder(claims):
-        if _is_guest(claims):
-            return _guest_forbidden()
         body = request.get_json(silent=True) or {}
         text = (body.get("text") or "").strip()
         remind_at = (body.get("remind_at") or "").strip()
@@ -89,44 +82,37 @@ def register_productivity_api(app, mongo_db=None):
         if not text or not remind_at:
             return jsonify({"error": "text_and_remind_at_required"}), 400
         from app.features.reminders_store import add_reminder
-        with active_user_profile_context(build_user_profile(claims)):
-            res = add_reminder(
-                text=text,
-                remind_at_iso=remind_at,
-                recurrence=(body.get("recurrence") or "").strip(),
-                note=note,
-            )
+        res = add_reminder(
+            text=text,
+            remind_at_iso=remind_at,
+            recurrence=(body.get("recurrence") or "").strip(),
+            note=note,
+        )
         if res.get("success"):
             return jsonify({"ok": True}), 200
         return jsonify({"error": res.get("error", "failed")}), 400
 
     @app.route("/api/reminders/<reminder_id>", methods=["PATCH"])
-    @require_auth
+    @require_tenant
     def api_update_reminder(reminder_id, claims):
-        if _is_guest(claims):
-            return _guest_forbidden()
         body = request.get_json(silent=True) or {}
         from app.features.reminders_store import update_reminder
         # Empty text/remind_at = leave unchanged; note present (any value) = set it.
-        with active_user_profile_context(build_user_profile(claims)):
-            res = update_reminder(
-                reminder_id,
-                title=(body.get("text") or "").strip(),
-                start_iso=(body.get("remind_at") or "").strip(),
-                note=body.get("note") if "note" in body else None,
-            )
+        res = update_reminder(
+            reminder_id,
+            title=(body.get("text") or "").strip(),
+            start_iso=(body.get("remind_at") or "").strip(),
+            note=body.get("note") if "note" in body else None,
+        )
         if res.get("success"):
             return jsonify({"ok": True}), 200
         return jsonify({"error": res.get("error", "failed")}), 400
 
     @app.route("/api/reminders/<reminder_id>", methods=["DELETE"])
-    @require_auth
+    @require_tenant
     def api_delete_reminder(reminder_id, claims):
-        if _is_guest(claims):
-            return _guest_forbidden()
         from app.features.reminders_store import delete_reminder
-        with active_user_profile_context(build_user_profile(claims)):
-            ok = delete_reminder(reminder_id)
+        ok = delete_reminder(reminder_id)
         return jsonify({"ok": bool(ok)}), (200 if ok else 400)
 
     # Tasks (native store)
@@ -159,10 +145,8 @@ def register_productivity_api(app, mongo_db=None):
         return jsonify({"items": slim, "demo": False}), 200
 
     @app.route("/api/tasks", methods=["POST"])
-    @require_auth
+    @require_tenant
     def api_add_task(claims):
-        if _is_guest(claims):
-            return _guest_forbidden()
         body = request.get_json(silent=True) or {}
         text = (body.get("text") or "").strip()
         due = (body.get("due") or "").strip()
@@ -171,54 +155,47 @@ def register_productivity_api(app, mongo_db=None):
         if not text:
             return jsonify({"error": "text_required"}), 400
         from app.features.tasks_store import add_task
-        with active_user_profile_context(build_user_profile(claims)):
-            tid = add_task(
-                text,
-                due_iso=due,
-                notes=note,
-                priority=priority,
-                mongo_db=mongo_db,
-            )
+        tid = add_task(
+            text,
+            due_iso=due,
+            notes=note,
+            priority=priority,
+            mongo_db=mongo_db,
+        )
         if tid:
             return jsonify({"ok": True, "id": tid}), 200
         return jsonify({"error": "failed"}), 400
 
     @app.route("/api/tasks/<task_id>", methods=["PATCH"])
-    @require_auth
+    @require_tenant
     def api_update_task(task_id, claims):
-        if _is_guest(claims):
-            return _guest_forbidden()
         body = request.get_json(silent=True) or {}
         from app.features.tasks_store import (
             rename_task, complete_task, uncomplete_task,
             replace_task_note, set_task_priority, set_task_due,
         )
         ok = True
-        with active_user_profile_context(build_user_profile(claims)):
-            new_text = (body.get("text") or "").strip()
-            if new_text:
-                ok = rename_task(task_id, new_text, mongo_db=mongo_db) and ok
-            if "note" in body:
-                note = (body.get("note") or "").strip()
-                ok = replace_task_note(task_id, note, mongo_db=mongo_db) and ok
-            if "priority" in body:
-                priority = _clean_priority(body.get("priority"))
-                ok = set_task_priority(task_id, priority, mongo_db=mongo_db) and ok
-            if "due" in body:
-                ok = set_task_due(task_id, (body.get("due") or "").strip(), mongo_db=mongo_db) and ok
-            if "done" in body:
-                if body.get("done"):
-                    ok = complete_task(task_id, mongo_db=mongo_db) and ok
-                else:
-                    ok = uncomplete_task(task_id, mongo_db=mongo_db) and ok
+        new_text = (body.get("text") or "").strip()
+        if new_text:
+            ok = rename_task(task_id, new_text, mongo_db=mongo_db) and ok
+        if "note" in body:
+            note = (body.get("note") or "").strip()
+            ok = replace_task_note(task_id, note, mongo_db=mongo_db) and ok
+        if "priority" in body:
+            priority = _clean_priority(body.get("priority"))
+            ok = set_task_priority(task_id, priority, mongo_db=mongo_db) and ok
+        if "due" in body:
+            ok = set_task_due(task_id, (body.get("due") or "").strip(), mongo_db=mongo_db) and ok
+        if "done" in body:
+            if body.get("done"):
+                ok = complete_task(task_id, mongo_db=mongo_db) and ok
+            else:
+                ok = uncomplete_task(task_id, mongo_db=mongo_db) and ok
         return jsonify({"ok": bool(ok)}), (200 if ok else 400)
 
     @app.route("/api/tasks/<task_id>", methods=["DELETE"])
-    @require_auth
+    @require_tenant
     def api_delete_task(task_id, claims):
-        if _is_guest(claims):
-            return _guest_forbidden()
         from app.features.tasks_store import delete_task
-        with active_user_profile_context(build_user_profile(claims)):
-            ok = delete_task(task_id, mongo_db=mongo_db)
+        ok = delete_task(task_id, mongo_db=mongo_db)
         return jsonify({"ok": bool(ok)}), (200 if ok else 400)

@@ -21,13 +21,15 @@ from typing import Optional
 
 import requests
 
+from app.config import AZURE_OPENAI_API_VERSION
+
 logger = logging.getLogger(__name__)
 
 
 def _client():
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
     api_key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview").strip()
+    api_version = AZURE_OPENAI_API_VERSION
     if not endpoint or not api_key:
         return None
     try:

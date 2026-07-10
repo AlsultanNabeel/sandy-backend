@@ -11,6 +11,9 @@ import re
 from typing import Any, Dict, Optional
 
 from app.features.image_agent import ensure_image_state, _recent_image_history_text
+import logging
+
+logger = logging.getLogger(__name__)
 
 _DIRECT_COMMAND_RE = re.compile(r"^(?:/image|/img)\s*", flags=re.IGNORECASE)
 
@@ -143,7 +146,7 @@ def plan_image_action_with_ai(
         )
         payload = _safe_json_loads(response.choices[0].message.content or "{}")
     except Exception as e:
-        print(f"[ImagePlanner] planner failed: {e}")
+        logger.warning(f"[ImagePlanner] planner failed: {e}")
         return {"handled": False}
 
     handled = bool(payload.get("handled", False))

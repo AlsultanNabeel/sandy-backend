@@ -9,6 +9,11 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
+from app.config import AZURE_OPENAI_API_VERSION
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Routing can run on its own fast/cheap deployment (e.g. Azure model-router or a
 # mini model). Falls back to the full chat deployment when unset, so behaviour is
 # unchanged until AZURE_OPENAI_ROUTER_DEPLOYMENT is provided.
@@ -130,13 +135,13 @@ def _log_azure_usage(response: Any) -> None:
     ) / 1_000_000
     if cached:
         pct = (cached / in_tok * 100) if in_tok else 0
-        print(
+        logger.info(
             f"[Azure] in={in_tok} (cached={cached} {pct:.0f}%) "
             f"out={out_tok} ~${cost:.5f}",
             flush=True,
         )
     else:
-        print(f"[Azure] in={in_tok} out={out_tok} ~${cost:.5f}", flush=True)
+        logger.info(f"[Azure] in={in_tok} out={out_tok} ~${cost:.5f}")
 
 
 class AzureIntentClient:
@@ -157,7 +162,7 @@ class AzureIntentClient:
             api_key if api_key is not None else os.getenv("AZURE_OPENAI_API_KEY", "")
         ).strip()
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
-        self.api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview").strip()
+        self.api_version = AZURE_OPENAI_API_VERSION
         self.model_name = (
             model_name if model_name is not None else DEFAULT_AZURE_INTENT_DEPLOYMENT
         ).strip()

@@ -1,5 +1,8 @@
 import requests
 from typing import Any, Dict, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 PLACES_API_URL = "https://places.googleapis.com/v1/places:searchText"
 
@@ -68,13 +71,13 @@ def search_places(
                 }
             )
 
-        print(f"[Places] found {len(results)} places for: {query}")
+        logger.info(f"[Places] found {len(results)} places for: {query}")
         return results
 
     except Exception as e:
         import traceback
 
-        print(f"[Places] failed: {e}")
+        logger.warning(f"[Places] failed: {e}")
         traceback.print_exc()
         return []
 

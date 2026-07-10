@@ -18,21 +18,21 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
 
 _META = "sandy_photos"
 _FILES_COLLECTION = "sandy_photo_files"
 
-_mongo_db = None
 _gridfs = None
 
 
 # إعداد المخزن
 def init_photo_album(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع (زي init_speaker_store)."""
-    global _mongo_db, _gridfs
-    _mongo_db = mongo_db
+    global _gridfs
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -47,7 +47,7 @@ def init_photo_album(mongo_db) -> None:
 
 
 def is_available() -> bool:
-    return _mongo_db is not None and _gridfs is not None
+    return get_db() is not None and _gridfs is not None
 
 
 # الحفظ
@@ -70,7 +70,7 @@ def save_photo(
 
     # تجاهل لو نفس الصورة محفوظة (نفس المستخدم)
     if file_unique_id:
-        existing = _mongo_db[_META].find_one(
+        existing = get_db()[_META].find_one(
             {"chat_id": cid, "file_unique_id": file_unique_id}
         )
         if existing:
@@ -93,7 +93,7 @@ def save_photo(
         "tags": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    res = _mongo_db[_META].insert_one(doc)
+    res = get_db()[_META].insert_one(doc)
     doc["_id"] = res.inserted_id
     return doc
 
@@ -116,7 +116,7 @@ def set_ai_metadata(photo_id: Any, caption: str, tags: List[str]) -> None:
     if not update:
         return
     try:
-        _mongo_db[_META].update_one({"_id": photo_id}, {"$set": update})
+        get_db()[_META].update_one({"_id": photo_id}, {"$set": update})
     except Exception as e:  # noqa: BLE001
         logger.debug("[photo_album] set_ai_metadata failed: %s", e)
 
@@ -187,7 +187,7 @@ def find_photos(
     if tag:
         mongo_filter["tags"] = tag.strip()
     try:
-        cursor = _mongo_db[_META].find(mongo_filter).sort("created_at", -1)
+        cursor = get_db()[_META].find(mongo_filter).sort("created_at", -1)
         docs = list(cursor.limit(500))
     except Exception as e:  # noqa: BLE001
         logger.warning("[photo_album] find failed: %s", e)
@@ -215,7 +215,7 @@ def count_photos(chat_id: Any) -> int:
     if not is_available():
         return 0
     try:
-        return _mongo_db[_META].count_documents({"chat_id": str(chat_id)})
+        return get_db()[_META].count_documents({"chat_id": str(chat_id)})
     except Exception:  # noqa: BLE001
         return 0
 
@@ -230,7 +230,7 @@ def delete_photo(chat_id: Any, query: str) -> Tuple[bool, str]:
         _gridfs.delete(doc["grid_id"])
     except Exception as e:  # noqa: BLE001
         logger.debug("[photo_album] gridfs delete: %s", e)
-    _mongo_db[_META].delete_one({"_id": doc["_id"]})
+    get_db()[_META].delete_one({"_id": doc["_id"]})
     return True, str(doc.get("name", "الصورة"))
 
 
@@ -243,5 +243,5 @@ def rename_photo(chat_id: Any, query: str, new_name: str) -> Tuple[bool, str]:
     if not matches:
         return False, "ما لقيت صورة بهالوصف."
     doc = matches[0]
-    _mongo_db[_META].update_one({"_id": doc["_id"]}, {"$set": {"name": new_name}})
+    get_db()[_META].update_one({"_id": doc["_id"]}, {"$set": {"name": new_name}})
     return True, new_name

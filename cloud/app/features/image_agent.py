@@ -4,6 +4,9 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from app.utils.user_profiles import address_instruction
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _lazy_plan_image_action(user_message, *, session, create_chat_completion_fn):
@@ -159,7 +162,7 @@ def render_image_reply_with_ai(
         ).strip()
         return text or fallback_text
     except Exception as e:
-        print(f"[ImageReply] AI reply render failed: {e}")
+        logger.warning(f"[ImageReply] AI reply render failed: {e}")
         return fallback_text
 
 

@@ -23,6 +23,9 @@ from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
 from app.utils.user_profiles import active_user_profile_context, build_user_profile
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _is_guest(claims) -> bool:
@@ -85,7 +88,7 @@ def register_studio_api(app, mongo_db=None):
                         }
                     )
         except Exception as e:  # noqa: BLE001
-            print(f"[StudioAPI] plans list failed: {e}")
+            logger.warning(f"[StudioAPI] plans list failed: {e}")
         return jsonify({"items": items, "demo": False}), 200
 
     def _active_payload(active: dict) -> dict:
@@ -231,7 +234,7 @@ def register_studio_api(app, mongo_db=None):
                             {"id": t["id"], "text": t["text"], "done": t["done"]}
                         )
             except Exception as e:  # noqa: BLE001
-                print(f"[StudioAPI] search tasks failed: {e}")
+                logger.warning(f"[StudioAPI] search tasks failed: {e}")
 
             try:
                 from app.features.reminders_store import load_reminders
@@ -242,7 +245,7 @@ def register_studio_api(app, mongo_db=None):
                             {"id": r["id"], "text": r["text"], "remind_at": r["remind_at"]}
                         )
             except Exception as e:  # noqa: BLE001
-                print(f"[StudioAPI] search reminders failed: {e}")
+                logger.warning(f"[StudioAPI] search reminders failed: {e}")
 
             try:
                 if mongo_db is not None:
@@ -256,6 +259,6 @@ def register_studio_api(app, mongo_db=None):
                                 {"topic": d.get("topic", ""), "summary": d.get("summary", "")}
                             )
             except Exception as e:  # noqa: BLE001
-                print(f"[StudioAPI] search plans failed: {e}")
+                logger.warning(f"[StudioAPI] search plans failed: {e}")
 
         return jsonify(out), 200

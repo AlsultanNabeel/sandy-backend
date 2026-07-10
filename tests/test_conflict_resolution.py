@@ -98,8 +98,8 @@ def test_check_conflicts_detects_overlapping_meetings_same_time():
     assert "اجتماع المنتج" in result["alert_text"]
 
 
-@patch("app.agent.executor.task_handlers.run_conflict_check_after_task_add")
-@patch("app.agent.executor.task_handlers.add_task")
+@patch("app.agent.executor.task_handlers.creation.run_conflict_check_after_task_add")
+@patch("app.agent.executor.task_handlers.creation.add_task")
 def test_task_create_appends_conflict_alert(mock_add_task, mock_conflict):
     set_active_user_profile(_OWNER_PROFILE)
     mock_add_task.return_value = "task_new_1"

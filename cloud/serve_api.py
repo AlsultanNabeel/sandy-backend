@@ -14,7 +14,6 @@ out of the real database.
 
 from __future__ import annotations
 
-import importlib
 import os
 from pathlib import Path
 
@@ -27,17 +26,17 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 from app.bootstrap import bootstrap  # noqa: E402  (env must load before app imports)
 
-# Import the runtime *module* explicitly: the facade package re-exports an
-# ``agent`` instance, so ``from app.agent.facade import agent`` would shadow the
-# submodule. importlib gives us the module that holds ``mongo_db``/``APP_ENV``.
-facade = importlib.import_module("app.agent.facade.agent")
-
 
 def main() -> None:
+    from app.agent.facade.agent import init_runtime
     from app.api.server import create_app
     from app.config import APP_ENV
+    from app.db import get_db
 
-    app = create_app(mongo_db=facade.mongo_db)
+    # Explicit runtime init (no import-time side effects): connect Mongo, register
+    # the shared handle on app.db, initialize the feature stores, start ingest.
+    init_runtime()
+    app = create_app(mongo_db=get_db())
     bootstrap(app_env=APP_ENV, app=app)
     port = int(os.getenv("PORT", "8080"))
     print("=" * 60)

@@ -17,28 +17,30 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from app.utils.tenant_db import scoped
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _COLL = "sandy_shopping"
-_mongo_db = None
 
 
 def init_shopping_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
         mongo_db[_COLL].create_index(
             [("user_id", 1), ("done", 1), ("created_at", 1)], background=True
         )
-        print("[ShoppingStore] ready")
+        logger.info("[ShoppingStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[ShoppingStore] index skipped: {e}")
+        logger.warning(f"[ShoppingStore] index skipped: {e}")
 
 
 def _coll():
     """Tenant-scoped shopping collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _COLL)
+    return scoped(get_db(), _COLL)
 
 
 def add_item(text: str, category: str = "") -> bool:
@@ -174,7 +176,7 @@ def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
                 category=d.get("category", ""),
             )
         except Exception as e:  # noqa: BLE001
-            print(f"[ShoppingStore] expense link failed: {e}")
+            logger.warning(f"[ShoppingStore] expense link failed: {e}")
     return {"ok": True, "expense_added": expense_added}
 
 

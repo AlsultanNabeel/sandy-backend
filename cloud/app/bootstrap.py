@@ -128,8 +128,9 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
         logger.warning("[Bootstrap] Tools registration failed: %s", exc)
 
     try:
-        from app.agent.facade.agent import mongo_db
+        from app.db import get_db
         from app.agent.health_monitor import ensure_ttl_index
+        mongo_db = get_db()
         try:
             ensure_ttl_index(mongo_db)
         except Exception as exc:
@@ -170,9 +171,9 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
 
     # Daily push nudge — stays idle until APNs is configured (paid Apple keys).
     try:
-        from app.agent.facade.agent import mongo_db as _mdb
+        from app.db import get_db
         from app.services.nudge_scheduler import start_nudge_scheduler
-        start_nudge_scheduler(_mdb)
+        start_nudge_scheduler(get_db())
     except Exception as exc:
         logger.warning("[Bootstrap] nudge scheduler start failed: %s", exc)
 

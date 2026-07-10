@@ -38,11 +38,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
+from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_devices"
-_mongo_db = None
 
 # ── Control types ───────────────────────────────────────────────────────────
 # Each control_type defines the actions it accepts. Validation is centralized in
@@ -67,8 +67,7 @@ _NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 
 
 def init_device_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -82,7 +81,7 @@ def init_device_store(mongo_db) -> None:
 
 def _coll():
     """Tenant-scoped devices collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _COLL)
+    return scoped(get_db(), _COLL)
 
 
 def _now() -> datetime:

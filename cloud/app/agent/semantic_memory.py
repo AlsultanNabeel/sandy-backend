@@ -34,6 +34,7 @@ import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
+from app.db import configure, get_db
 from app.utils.tenant_db import scoped
 from app.utils.user_profiles import active_profile_is_guest, get_active_user_profile
 
@@ -42,7 +43,6 @@ logger = logging.getLogger(__name__)
 # Warn only once per process when vector search degrades to keyword sort.
 _vector_search_warned = False
 
-_mongo_db = None
 # Client used for embeddings (Azure or direct OpenAI) and the model/deployment
 # name to pass it. Set in init_mongo_memory.
 _embed_client = None
@@ -57,11 +57,11 @@ _VECTOR_INDEX = "sandy_vector_index"
 
 
 def _facts_coll():
-    return scoped(_mongo_db, "sandy_facts", field="chat_id")
+    return scoped(get_db(), "sandy_facts", field="chat_id")
 
 
 def _convs_coll():
-    return scoped(_mongo_db, "sandy_conversations", field="chat_id")
+    return scoped(get_db(), "sandy_conversations", field="chat_id")
 
 
 def _can_write_memory() -> bool:
@@ -98,8 +98,8 @@ def init_mongo_memory(
     are both given (deploy text-embedding-3-small to keep the 1536-dim index
     valid); otherwise they fall back to the direct ``openai_client``.
     """
-    global _mongo_db, _embed_client, _embed_model
-    _mongo_db = mongo_db
+    global _embed_client, _embed_model
+    configure(mongo_db)
 
     if azure_client is not None and azure_embedding_deployment:
         _embed_client = azure_client
@@ -109,7 +109,7 @@ def init_mongo_memory(
         _embed_model = _EMBEDDING_MODEL
 
     if mongo_db is None:
-        print("[Memory] no MongoDB, memory storage disabled", flush=True)
+        logger.warning("[Memory] no MongoDB, memory storage disabled")
         return
 
     try:
@@ -130,10 +130,10 @@ def init_mongo_memory(
             background=True,
         )
     except Exception as e:
-        print(f"[Memory] index setup: {e}", flush=True)
+        logger.warning(f"[Memory] index setup: {e}")
 
     mode = "vector + keyword" if _embed_client else "keyword only"
-    print(f"[Memory] MongoDB memory ready ({mode})", flush=True)
+    logger.info(f"[Memory] MongoDB memory ready ({mode})")
 
 
 # Embeddings
@@ -163,7 +163,7 @@ def _embed(text: str) -> Optional[List[float]]:
         )
         return resp.data[0].embedding
     except Exception as e:
-        print(f"[Memory] embedding failed: {e}", flush=True)
+        logger.warning(f"[Memory] embedding failed: {e}")
         return None
 
 
@@ -227,9 +227,9 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
             if result.upserted_id is not None:
                 inserted += 1
         except Exception as e:
-            print(f"[Memory] load_facts: {e}", flush=True)
+            logger.warning(f"[Memory] load_facts: {e}")
     if inserted:
-        print(
+        logger.info(
             f"[Memory] indexed {inserted} new facts (chat_id={chat_id})", flush=True
         )
 
@@ -280,9 +280,9 @@ def load_conversations_to_chroma(
             if result.upserted_id is not None:
                 inserted += 1
         except Exception as e:
-            print(f"[Memory] load_conversations: {e}", flush=True)
+            logger.warning(f"[Memory] load_conversations: {e}")
     if inserted:
-        print(
+        logger.info(
             f"[Memory] indexed {inserted} new conversation turns (chat_id={chat_id})",
             flush=True,
         )
@@ -345,7 +345,7 @@ def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
         # runs against the raw collection with the tenant filter built in —
         # the wrapper's auto-$match can't be used here.
         results = _vector_search(
-            _mongo_db["sandy_facts"], query, chat_id, n_results,
+            get_db()["sandy_facts"], query, chat_id, n_results,
             {"usage_count": 1, "created_at": 1},
         )
 
@@ -376,7 +376,7 @@ def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
                 )
         return [r["text"] for r in results if r.get("text")]
     except Exception as e:
-        print(f"[Memory] search_relevant_facts: {e}", flush=True)
+        logger.warning(f"[Memory] search_relevant_facts: {e}")
         return []
 
 
@@ -392,7 +392,7 @@ def search_relevant_conversations(query: str, n_results: int = 3) -> List[str]:
         if coll.count_documents({}) == 0:
             return []
 
-        results = _vector_search(_mongo_db["sandy_conversations"], query, chat_id, n_results, {})
+        results = _vector_search(get_db()["sandy_conversations"], query, chat_id, n_results, {})
 
         if results is None:
             try:
@@ -411,15 +411,15 @@ def search_relevant_conversations(query: str, n_results: int = 3) -> List[str]:
 
         return [r["text"] for r in results if r.get("text")]
     except Exception as e:
-        print(f"[Memory] search_relevant_conversations: {e}", flush=True)
+        logger.warning(f"[Memory] search_relevant_conversations: {e}")
         return []
 
 
 def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3) -> List[str]:
     """Semantic search over conversation summaries in sandy_memories."""
-    if _mongo_db is None or not chat_id:
+    if get_db() is None or not chat_id:
         return []
-    col = _mongo_db["sandy_memories"]
+    col = get_db()["sandy_memories"]
     fil = {"chat_id": str(chat_id), "label": "conversation_summary"}
     try:
         results = _vector_search(col, query, chat_id, n_results, {})
@@ -427,7 +427,7 @@ def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3) -> L
             results = list(col.find(fil, {"summary": 1}).sort("created_at", -1).limit(n_results))
         return [r["summary"] for r in results if r.get("summary")]
     except Exception as exc:
-        print(f"[chroma] search_relevant_summaries failed: {exc}", flush=True)
+        logger.warning(f"[chroma] search_relevant_summaries failed: {exc}")
         return []
 
 

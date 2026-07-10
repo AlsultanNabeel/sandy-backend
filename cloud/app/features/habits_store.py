@@ -16,34 +16,36 @@ from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _HABITS = "sandy_habits"
 _LOG = "sandy_habit_log"
-_mongo_db = None
 
 
 def init_habits_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
         mongo_db[_LOG].create_index(
             [("user_id", 1), ("habit_id", 1), ("date", -1)], background=True
         )
-        print("[HabitsStore] ready")
+        logger.info("[HabitsStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[HabitsStore] index skipped: {e}")
+        logger.warning(f"[HabitsStore] index skipped: {e}")
 
 
 def _habits():
     """Tenant-scoped habits collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _HABITS)
+    return scoped(get_db(), _HABITS)
 
 
 def _log():
     """Tenant-scoped habit-log collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _LOG)
+    return scoped(get_db(), _LOG)
 
 
 def _today() -> str:

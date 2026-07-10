@@ -16,12 +16,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_brainstorms"
 _PENDING = "sandy_bs_pending"
-_mongo_db = None
 
 
 def _extract_summary(plan_text: str) -> str:
@@ -54,8 +54,7 @@ def _extract_summary(plan_text: str) -> str:
 
 def init_brainstorm(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع."""
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -67,7 +66,7 @@ def init_brainstorm(mongo_db) -> None:
 
 
 def is_available() -> bool:
-    return _mongo_db is not None
+    return get_db() is not None
 
 
 def _now() -> str:
@@ -79,7 +78,7 @@ def get_active(chat_id: Any) -> Optional[Dict[str, Any]]:
     if not is_available():
         return None
     try:
-        return _mongo_db[_COLL].find_one({"chat_id": str(chat_id), "status": "active"})
+        return get_db()[_COLL].find_one({"chat_id": str(chat_id), "status": "active"})
     except Exception:  # noqa: BLE001
         return None
 
@@ -90,7 +89,7 @@ def start_session(chat_id: Any, topic: str) -> Optional[Dict[str, Any]]:
         return None
     cid = str(chat_id)
     # أي جلسة نشطة سابقة → ملغاة
-    _mongo_db[_COLL].update_many(
+    get_db()[_COLL].update_many(
         {"chat_id": cid, "status": "active"},
         {"$set": {"status": "abandoned", "finished_at": _now()}},
     )
@@ -103,7 +102,7 @@ def start_session(chat_id: Any, topic: str) -> Optional[Dict[str, Any]]:
         "started_at": _now(),
         "finished_at": "",
     }
-    res = _mongo_db[_COLL].insert_one(doc)
+    res = get_db()[_COLL].insert_one(doc)
     doc["_id"] = res.inserted_id
     return doc
 
@@ -114,7 +113,7 @@ def add_point(chat_id: Any, point: str) -> int:
     active = get_active(chat_id)
     if not active or not point:
         return 0
-    _mongo_db[_COLL].update_one(
+    get_db()[_COLL].update_one(
         {"_id": active["_id"]},
         {"$push": {"points": {"text": point, "at": _now()}}},
     )
@@ -125,7 +124,7 @@ def cancel_session(chat_id: Any) -> bool:
     active = get_active(chat_id)
     if not active:
         return False
-    _mongo_db[_COLL].update_one(
+    get_db()[_COLL].update_one(
         {"_id": active["_id"]},
         {"$set": {"status": "abandoned", "finished_at": _now()}},
     )
@@ -200,7 +199,7 @@ def finish_session(
 
     plan_text = _synthesize_plan(topic, points, create_chat_completion_fn, conversation)
 
-    _mongo_db[_COLL].update_one(
+    get_db()[_COLL].update_one(
         {"_id": active["_id"]},
         {"$set": {
             "status": "done",
@@ -257,7 +256,7 @@ def update_plan(
         return None
     revised = _revise_plan(current, change, create_chat_completion_fn)
 
-    _mongo_db[_COLL].update_one(
+    get_db()[_COLL].update_one(
         {"_id": p["_id"]},
         {"$set": {"plan_text": revised, "summary": _extract_summary(revised),
                   "updated_at": _now()}},
@@ -276,7 +275,7 @@ def update_plan_by_id(
     if not is_available():
         return None
     try:
-        p = _mongo_db[_COLL].find_one({"_id": plan_id, "chat_id": {"$in": chat_ids}})
+        p = get_db()[_COLL].find_one({"_id": plan_id, "chat_id": {"$in": chat_ids}})
     except Exception:  # noqa: BLE001
         return None
     if not p:
@@ -285,7 +284,7 @@ def update_plan_by_id(
     if not current:
         return None
     revised = _revise_plan(current, change, create_chat_completion_fn)
-    _mongo_db[_COLL].update_one(
+    get_db()[_COLL].update_one(
         {"_id": p["_id"]},
         {"$set": {"plan_text": revised, "summary": _extract_summary(revised),
                   "updated_at": _now()}},
@@ -298,7 +297,7 @@ def list_plans(chat_id: Any, limit: int = 10) -> List[Dict[str, Any]]:
     if not is_available():
         return []
     try:
-        cur = _mongo_db[_COLL].find(
+        cur = get_db()[_COLL].find(
             {"chat_id": str(chat_id), "status": "done"}
         ).sort("finished_at", -1).limit(limit)
         return list(cur)
@@ -311,7 +310,7 @@ def delete_plan(chat_id: Any, query: str) -> Tuple[bool, str]:
     p = get_plan(chat_id, query)
     if not p:
         return False, "ما لقيت خطة بهالوصف."
-    _mongo_db[_COLL].delete_one({"_id": p["_id"]})
+    get_db()[_COLL].delete_one({"_id": p["_id"]})
     return True, str(p.get("topic", "الخطة"))
 
 
@@ -334,7 +333,7 @@ def _norm(text: str) -> str:
 def _set_pending(chat_id: Any, op: str, plan_id: Any, change: str = "") -> None:
     if not is_available():
         return
-    _mongo_db[_PENDING].replace_one(
+    get_db()[_PENDING].replace_one(
         {"_id": str(chat_id)},
         {"_id": str(chat_id), "op": op, "plan_id": plan_id, "change": change, "at": _now()},
         upsert=True,
@@ -345,14 +344,14 @@ def get_pending(chat_id: Any) -> Optional[Dict[str, Any]]:
     if not is_available():
         return None
     try:
-        return _mongo_db[_PENDING].find_one({"_id": str(chat_id)})
+        return get_db()[_PENDING].find_one({"_id": str(chat_id)})
     except Exception:  # noqa: BLE001
         return None
 
 
 def _clear_pending(chat_id: Any) -> None:
     if is_available():
-        _mongo_db[_PENDING].delete_one({"_id": str(chat_id)})
+        get_db()[_PENDING].delete_one({"_id": str(chat_id)})
 
 
 def propose_action(
@@ -375,19 +374,19 @@ def confirm_pending(
         return None
     _clear_pending(chat_id)
     try:
-        doc = _mongo_db[_COLL].find_one({"_id": pend["plan_id"]})
+        doc = get_db()[_COLL].find_one({"_id": pend["plan_id"]})
     except Exception:  # noqa: BLE001
         doc = None
     if not doc:
         return pend.get("op", ""), {"ok": False, "topic": ""}
     topic = doc.get("topic", "الخطة")
     if pend["op"] == "delete":
-        _mongo_db[_COLL].delete_one({"_id": doc["_id"]})
+        get_db()[_COLL].delete_one({"_id": doc["_id"]})
         return "delete", {"ok": True, "topic": topic}
     if pend["op"] == "edit":
         revised = _revise_plan(doc.get("plan_text", ""), pend.get("change", ""),
                                create_chat_completion_fn)
-        _mongo_db[_COLL].update_one(
+        get_db()[_COLL].update_one(
             {"_id": doc["_id"]},
             {"$set": {"plan_text": revised, "summary": _extract_summary(revised),
                       "updated_at": _now()}},

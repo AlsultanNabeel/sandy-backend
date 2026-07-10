@@ -27,15 +27,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _COLL = "sandy_users"
-_mongo_db = None
 
 
 def init_users_store(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع."""
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -43,17 +45,17 @@ def init_users_store(mongo_db) -> None:
             [("provider", 1), ("provider_sub", 1)], unique=True, background=True
         )
         mongo_db[_COLL].create_index([("email", 1)], background=True)
-        print("[UsersStore] ready")
+        logger.info("[UsersStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[UsersStore] index skipped: {e}")
+        logger.warning(f"[UsersStore] index skipped: {e}")
 
 
 def is_available() -> bool:
-    return _mongo_db is not None
+    return get_db() is not None
 
 
 def _coll():
-    return _mongo_db[_COLL] if _mongo_db is not None else None
+    return get_db()[_COLL] if get_db() is not None else None
 
 
 def _now() -> datetime:

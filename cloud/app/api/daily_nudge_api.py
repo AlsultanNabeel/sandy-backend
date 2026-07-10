@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from flask import jsonify, request
 
-from app.api.auth_handlers import require_auth
+from app.api.auth_handlers import require_auth, require_tenant
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import (
     active_user_profile_context,
@@ -211,17 +211,14 @@ def register_daily_nudge_api(app, mongo_db=None):
             return jsonify(get_daily_nudge(mongo_db, uid)), 200
 
     @app.route("/api/daily-nudge/answer", methods=["POST"])
-    @require_auth
+    @require_tenant
     def api_daily_nudge_answer(claims):
-        if claims.get("role") == "guest":
-            return jsonify({"error": "forbidden"}), 403
         body = request.get_json(silent=True) or {}
         qid = str(body.get("qid") or "").strip()
         answer = str(body.get("answer") or "").strip()
         if not qid or not answer:
             return jsonify({"error": "bad_request"}), 400
-        with active_user_profile_context(build_user_profile(claims)):
-            from app.features import users_store
-            uid = current_user_id()
-            ok = users_store.record_nudge_answer(uid, qid, answer) if uid else False
+        from app.features import users_store
+        uid = current_user_id()
+        ok = users_store.record_nudge_answer(uid, qid, answer) if uid else False
         return (jsonify({"ok": True}), 200) if ok else (jsonify({"error": "save_failed"}), 400)

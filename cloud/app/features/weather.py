@@ -4,6 +4,9 @@ from typing import Any, Dict, Optional
 from urllib.parse import quote
 
 from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
+import logging
+
+logger = logging.getLogger(__name__)
 
 _cb = CircuitBreaker(name="weather", failure_threshold=5, recovery_timeout=60.0)
 _RETRY_ATTEMPTS = 2
@@ -25,14 +28,14 @@ def get_weather(city: str = "October City", **kwargs) -> Optional[Dict[str, Any]
             data = _cb.call(_fetch_weather, url)
             break
         except CircuitOpenError:
-            print("[Weather] circuit open, skipping weather fetch")
+            logger.warning("[Weather] circuit open, skipping weather fetch")
             return None
         except Exception as e:
             last_error = e
             if attempt < _RETRY_ATTEMPTS:
                 time.sleep(_RETRY_DELAY)
     else:
-        print(f"[Weather] failed after {_RETRY_ATTEMPTS} attempts: {last_error}")
+        logger.warning(f"[Weather] failed after {_RETRY_ATTEMPTS} attempts: {last_error}")
         return None
 
     try:
@@ -51,7 +54,7 @@ def get_weather(city: str = "October City", **kwargs) -> Optional[Dict[str, Any]
             "city": city,
         }
     except Exception as e:
-        print(f"[Weather] parse failed: {e}")
+        logger.warning(f"[Weather] parse failed: {e}")
         return None
 
 

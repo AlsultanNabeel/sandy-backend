@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any, Dict
 
+from app.errors import ConfigError
 from app.agent.graph.state import SandyState, merge_state
 from app.agent.tools.schemas.meta_tools import META_TOOLS as _META_TOOLS
 from app.utils.session import build_session_from_state as _build_session_from_state
@@ -111,7 +112,7 @@ def _get_chat_completion_fn():
     openai_client = OpenAI(api_key=openai_key, max_retries=0) if openai_key else None
 
     if not openai_client and not azure_client:
-        raise RuntimeError("[execute_node] No OpenAI/Azure credentials configured")
+        raise ConfigError("[execute_node] No OpenAI/Azure credentials configured")
 
     _chat_completion_fn = make_chat_completion_fn(
         openai_client=openai_client or azure_client,
@@ -223,10 +224,10 @@ def _handle_chat(state: SandyState, create_chat_completion_fn) -> str:
 
 
 def _get_mongo_db():
-    """Lazy mongo_db getter."""
+    """Lazy mongo_db getter (single source of truth: app.db)."""
     try:
-        from app.agent.facade.agent import mongo_db
-        return mongo_db
+        from app.db import get_db
+        return get_db()
     except Exception:
         return None
 

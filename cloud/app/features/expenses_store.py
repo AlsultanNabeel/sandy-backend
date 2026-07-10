@@ -15,26 +15,28 @@ from typing import Any, Dict, List
 
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _COLL = "sandy_expenses"
-_mongo_db = None
 
 
 def init_expenses_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
         mongo_db[_COLL].create_index([("user_id", 1), ("at", -1)], background=True)
-        print("[ExpensesStore] ready")
+        logger.info("[ExpensesStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[ExpensesStore] index skipped: {e}")
+        logger.warning(f"[ExpensesStore] index skipped: {e}")
 
 
 def _coll():
     """Tenant-scoped expenses collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _COLL)
+    return scoped(get_db(), _COLL)
 
 
 def add_expense(amount: float, note: str = "", category: str = "") -> bool:

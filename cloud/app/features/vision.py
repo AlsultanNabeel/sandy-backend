@@ -1,5 +1,8 @@
 import base64
 from typing import Any, Callable, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 _VISION_CONTEXT = (
@@ -65,7 +68,7 @@ def analyze_image_with_azure(
             or "[think] تم التحليل لكن ما في وصف واضح."
         ).strip()
     except Exception as e:
-        print(f"[Azure Vision] analysis failed: {e}")
+        logger.warning(f"[Azure Vision] analysis failed: {e}")
         return "[think] صار خلل أثناء تحليل الصورة. جرب مرة ثانية."
 
 
@@ -85,11 +88,11 @@ def generate_image_with_azure(
     if img is not None:
         return img
 
-    print("[Image] Azure FLUX generation failed, falling back to Azure DALL-E")
+    logger.warning("[Image] Azure FLUX generation failed, falling back to Azure DALL-E")
     from app.integrations.azure_image import generate_image_with_azure_dalle
     img = generate_image_with_azure_dalle(prompt, size=size)
     if img is None:
-        print("[Image] all image generation methods failed")
+        logger.warning("[Image] all image generation methods failed")
     return img
 
 
@@ -109,9 +112,9 @@ def edit_image_with_azure(
     if edited is not None:
         return edited
 
-    print("[Image Edit] Azure FLUX edit failed, falling back to Azure DALL-E")
+    logger.warning("[Image Edit] Azure FLUX edit failed, falling back to Azure DALL-E")
     from app.integrations.azure_image import edit_image_with_azure_gptimg
     edited = edit_image_with_azure_gptimg(image_bytes, prompt, size=size)
     if edited is None:
-        print("[Image Edit] all image edit methods failed")
+        logger.warning("[Image Edit] all image edit methods failed")
     return edited

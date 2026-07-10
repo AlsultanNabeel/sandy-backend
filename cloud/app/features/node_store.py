@@ -30,19 +30,18 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
+from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_nodes"
-_mongo_db = None
 
 # Capabilities a node may advertise. Validated so a bad heartbeat can't inject junk.
 KNOWN_CAPABILITIES = frozenset({"relay", "pwm", "servo", "buzzer", "ir", "audio"})
 
 
 def init_node_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -58,7 +57,7 @@ def init_node_store(mongo_db) -> None:
 
 def _coll():
     """Tenant-scoped nodes collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _COLL)
+    return scoped(get_db(), _COLL)
 
 
 def _now() -> datetime:
@@ -203,7 +202,7 @@ def set_node_status(code: str, online: bool = True,
                     firmware_version: str = "") -> Dict[str, Any]:
     """Update a node's heartbeat by its pairing code (firmware speaks code, not
     node_id). Looked up across tenants by code hash. Best-effort; never raises."""
-    if _mongo_db is None:
+    if get_db() is None:
         return {"ok": False, "error": "no_store"}
     try:
         update: Dict[str, Any] = {"online": bool(online), "last_seen": _now()}
@@ -213,7 +212,7 @@ def set_node_status(code: str, online: bool = True,
             update["outputs"] = _clean_outputs(outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
-        r = _mongo_db[_COLL].update_one(
+        r = get_db()[_COLL].update_one(
             {"code_hash": _hash_code(code)}, {"$set": update}
         )
         if r.matched_count == 0:
@@ -232,7 +231,7 @@ def ingest_status(node_id: str, online: bool = True,
                   firmware_version: str = "") -> Dict[str, Any]:
     """Heartbeat update keyed by node_id (the firmware publishes by node_id, not
     code). Cross-tenant lookup on the raw collection; best-effort, never raises."""
-    if _mongo_db is None:
+    if get_db() is None:
         return {"ok": False, "error": "no_store"}
     try:
         update: Dict[str, Any] = {"online": bool(online), "last_seen": _now()}
@@ -242,7 +241,7 @@ def ingest_status(node_id: str, online: bool = True,
             update["outputs"] = _clean_outputs(outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
-        r = _mongo_db[_COLL].update_one({"node_id": (node_id or "").strip()},
+        r = get_db()[_COLL].update_one({"node_id": (node_id or "").strip()},
                                         {"$set": update})
         return {"ok": r.matched_count > 0}
     except Exception as e:  # noqa: BLE001
@@ -253,10 +252,10 @@ def ingest_status(node_id: str, online: bool = True,
 def set_last_ir(node_id: str, code: str) -> Dict[str, Any]:
     """Record the most recent IR code a node captured in learn mode, so the app can
     poll for it and bind it to a button. Keyed by node_id, cross-tenant."""
-    if _mongo_db is None:
+    if get_db() is None:
         return {"ok": False, "error": "no_store"}
     try:
-        r = _mongo_db[_COLL].update_one(
+        r = get_db()[_COLL].update_one(
             {"node_id": (node_id or "").strip()},
             {"$set": {"last_ir": str(code).strip(), "last_ir_at": _now()}},
         )

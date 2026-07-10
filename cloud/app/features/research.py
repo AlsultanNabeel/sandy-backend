@@ -33,6 +33,9 @@ from app.features.research_pipeline import (  # noqa: F401
 from app.features.research_formatter import (  # noqa: F401
     summarize_research_results,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _research_context_items_from_exa(
@@ -153,7 +156,7 @@ def execute_web_research(
                 query, places_api_key, max_results=max(1, min(requested_count, 8))
             )
         except Exception as e:
-            print(f"[Research] places call raised: {e}", flush=True)
+            logger.warning(f"[Research] places call raised: {e}")
             return f"ما قدرت أجد أماكن عن '{query}' الآن.", []
 
         if not places:
@@ -186,7 +189,7 @@ def execute_web_research(
         try:
             results = search_exa_fn(query, exa_api_key=exa_api_key, num_results=8)
         except Exception as e:
-            print(f"[Research] Exa call raised: {e}", flush=True)
+            logger.warning(f"[Research] Exa call raised: {e}")
             return f"ما قدرت أجد نتائج عن '{query}' — خطأ في الاتصال بخدمة البحث.", []
 
         ctx_items = _research_context_items_from_exa(results, max(requested_count, 8))
@@ -248,7 +251,7 @@ def execute_web_research(
             )
             reply = (response.choices[0].message.content or "").strip()
         except Exception as e:
-            print(f"[Research] AI summary failed: {e}", flush=True)
+            logger.warning(f"[Research] AI summary failed: {e}")
             reply = ""
 
         base = reply if reply else "\n".join(snippets[:requested_count])
@@ -266,7 +269,7 @@ def execute_web_research(
             exa_api_key=exa_api_key,
         )
     except Exception as e:
-        print(f"[Research] pipeline failed: {e}", flush=True)
+        logger.warning(f"[Research] pipeline failed: {e}")
         return f"ما قدرت أجد نتائج عن '{query}' — حدث خطأ غير متوقع.", []
 
     if not results:

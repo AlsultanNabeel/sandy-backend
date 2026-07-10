@@ -18,6 +18,9 @@ from flask import jsonify
 
 from app.api.auth_handlers import require_auth
 from app.utils.user_profiles import active_user_profile_context, build_user_profile
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _iso(v) -> str:
@@ -45,7 +48,7 @@ def register_timeline_api(app):
                         "ts": ts, "done": done,
                     })
             except Exception as e:  # noqa: BLE001
-                print(f"[Timeline] tasks failed: {e}")
+                logger.warning(f"[Timeline] tasks failed: {e}")
 
             # Reminders.
             try:
@@ -58,7 +61,7 @@ def register_timeline_api(app):
                         "done": False,
                     })
             except Exception as e:  # noqa: BLE001
-                print(f"[Timeline] reminders failed: {e}")
+                logger.warning(f"[Timeline] reminders failed: {e}")
 
             # Expenses.
             try:
@@ -73,7 +76,7 @@ def register_timeline_api(app):
                         "ts": _iso(x.get("at")), "done": False,
                     })
             except Exception as e:  # noqa: BLE001
-                print(f"[Timeline] expenses failed: {e}")
+                logger.warning(f"[Timeline] expenses failed: {e}")
 
             # Journal.
             try:
@@ -85,7 +88,7 @@ def register_timeline_api(app):
                         "ts": _iso(j.get("at") or j.get("date")), "done": False,
                     })
             except Exception as e:  # noqa: BLE001
-                print(f"[Timeline] journal failed: {e}")
+                logger.warning(f"[Timeline] journal failed: {e}")
 
         events = [e for e in events if e["ts"]]
         events.sort(key=lambda e: e["ts"], reverse=True)

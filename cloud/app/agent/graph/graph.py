@@ -53,7 +53,8 @@ def _stm_collection():
     if Mongo isn't wired up yet."""
     global _stm_index_ready
     try:
-        from app.agent.facade.agent import mongo_db
+        from app.db import get_db
+        mongo_db = get_db()
         if mongo_db is None:
             return None
         coll = mongo_db[_STM_COLL]
@@ -141,8 +142,9 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
     try:
         from datetime import datetime, timezone
         from app.config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT
-        from app.agent.facade.agent import mongo_db
+        from app.db import get_db
 
+        mongo_db = get_db()
         if mongo_db is None:
             logger.warning("[graph] STM→LTM skipped: mongo_db is None (facade not initialized?)")
             return
@@ -259,8 +261,9 @@ def _save_emotional_async(state: "SandyState", message: str) -> None:
 
     def _do_save():
         # submit_background logs any exception (C1); no inner broad swallow here.
-        from app.agent.facade.agent import mongo_db
+        from app.db import get_db
 
+        mongo_db = get_db()
         if mongo_db is None:
             logger.warning("[graph] LTM save skipped: mongo_db is None (facade not initialized?)")
             return
@@ -438,9 +441,9 @@ def _update_session_state_async(state: "SandyState") -> None:
 
     def _do():
         # submit_background logs any exception (C1); no inner broad swallow here.
-        from app.agent.facade.agent import mongo_db
+        from app.db import get_db
         from app.agent.session_state import update_session_state
-        update_session_state(chat_id, mongo_db, mood=mood, platform="app")
+        update_session_state(chat_id, get_db(), mood=mood, platform="app")
 
     submit_background(_do, _label="session_state")
 

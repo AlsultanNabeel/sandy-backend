@@ -21,17 +21,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import List
+from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_push_tokens"
-_mongo_db = None
 
 
 def init_push_tokens_store(mongo_db) -> None:
     """Called once at boot (same pattern as the other stores)."""
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -42,7 +41,7 @@ def init_push_tokens_store(mongo_db) -> None:
 
 
 def _coll():
-    return _mongo_db[_COLL] if _mongo_db is not None else None
+    return get_db()[_COLL] if get_db() is not None else None
 
 
 def register_token(user_id: str, token: str, platform: str = "ios") -> bool:

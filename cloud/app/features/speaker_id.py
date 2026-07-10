@@ -25,6 +25,7 @@ import os
 import threading
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
+from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,6 @@ _DEFAULT_MODEL_URL = (
 )
 _DEFAULT_MODEL_PATH = "/tmp/sandy_speaker_campplus.onnx"  # nosec B108
 
-_mongo_db = None
 _fernet = None
 _fernet_init = False
 _extractor = None
@@ -54,8 +54,7 @@ _model_lock = threading.Lock()
 # إعداد المخزن
 def init_speaker_store(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع (زي init_mongo_memory)."""
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is not None:
         try:
             mongo_db[_COLLECTION].create_index([("chat_id", 1)], background=True)
@@ -257,7 +256,7 @@ def _decode_profile(stored: str) -> Optional[bytes]:
 
 
 def _save_profile(chat_id: int, vector_bytes: bytes, n_samples: int) -> None:
-    if _mongo_db is None:
+    if get_db() is None:
         logger.warning("[speaker_id] Mongo غير متاح — لم تُحفظ البصمة")
         return
     doc = {
@@ -267,15 +266,15 @@ def _save_profile(chat_id: int, vector_bytes: bytes, n_samples: int) -> None:
         "n_samples": n_samples,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    _mongo_db[_COLLECTION].replace_one({"_id": str(chat_id)}, doc, upsert=True)
+    get_db()[_COLLECTION].replace_one({"_id": str(chat_id)}, doc, upsert=True)
 
 
 def get_profile_vector(chat_id: int):
     """يرجّع بصمة المالك كمتّجه numpy مُطبَّع، أو None."""
-    if _mongo_db is None:
+    if get_db() is None:
         return None
     try:
-        doc = _mongo_db[_COLLECTION].find_one({"_id": str(chat_id)})
+        doc = get_db()[_COLLECTION].find_one({"_id": str(chat_id)})
     except Exception as e:  # noqa: BLE001
         logger.warning("[speaker_id] Mongo find failed: %s", e)
         return None
@@ -293,10 +292,10 @@ def has_profile(chat_id: int) -> bool:
 
 
 def delete_profile(chat_id: int) -> bool:
-    if _mongo_db is None:
+    if get_db() is None:
         return False
     try:
-        res = _mongo_db[_COLLECTION].delete_one({"_id": str(chat_id)})
+        res = get_db()[_COLLECTION].delete_one({"_id": str(chat_id)})
         return res.deleted_count > 0
     except Exception as e:  # noqa: BLE001
         logger.warning("[speaker_id] Mongo delete failed: %s", e)

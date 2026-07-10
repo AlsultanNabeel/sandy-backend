@@ -30,17 +30,19 @@ from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
 from app.utils.user_profiles import current_user_id
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _BOOKS = "sandy_books"
 _SESS = "sandy_reading_sessions"
 _META = "sandy_reading_meta"
 _FORMATS = {"paper", "ebook", "audio"}
-_mongo_db = None
 
 
 def init_reading_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is None:
         return
     try:
@@ -50,24 +52,24 @@ def init_reading_store(mongo_db) -> None:
         mongo_db[_BOOKS].create_index(
             [("user_id", 1), ("status", 1), ("created_at", -1)], background=True
         )
-        print("[ReadingStore] ready")
+        logger.info("[ReadingStore] ready")
     except Exception as e:  # noqa: BLE001
-        print(f"[ReadingStore] index skipped: {e}")
+        logger.warning(f"[ReadingStore] index skipped: {e}")
 
 
 def _books():
     """Tenant-scoped books collection, or None when no db / no active tenant."""
-    return scoped(_mongo_db, _BOOKS)
+    return scoped(get_db(), _BOOKS)
 
 
 def _sess():
     """Tenant-scoped reading-sessions collection, or None when no db / no tenant."""
-    return scoped(_mongo_db, _SESS)
+    return scoped(get_db(), _SESS)
 
 
 def _meta():
     """Tenant-scoped reading-meta collection, or None when no db / no tenant."""
-    return scoped(_mongo_db, _META)
+    return scoped(get_db(), _META)
 
 
 def _now():

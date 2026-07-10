@@ -1,0 +1,340 @@
+import SwiftUI
+
+
+/// بطاقة جهاز واحد: ترويسة (اسم + غرفة + حالة الاتصال) + أداة التحكّم المناسبة
+/// لنوعه. النقر المطوّل/القائمة السياقية تفتح التعديل أو الحذف.
+private struct DeviceCard: View {
+    @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
+    let device: DeviceItem
+    @ObservedObject var store: DevicesStore
+    let onEdit: () -> Void
+
+    /// قيمة شريط الإضاءة المحلّية (نحرّكها بسلاسة قبل ما نرسل عند الإفلات).
+    @State private var sliderValue: Double = 0
+    /// تعلّم زر أشعة جديد (الاسم + فتح التنبيه).
+    @State private var showLearn = false
+    @State private var learnButtonName = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            header
+            controlWidget
+        }
+        .sandyCard()
+        .contextMenu {
+            if !store.demo {
+                Button { onEdit() } label: {
+                    Label(lang.s("control.device.edit"), systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    store.delete(api: state.api, device: device)
+                } label: { Label(lang.s("control.device.delete"), systemImage: "trash") }
+            }
+        }
+        .onAppear { sliderValue = Double(Int(device.state) ?? device.dimmerMin) }
+    }
+
+    private var header: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Image(systemName: iconForType(device.controlType))
+                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .foregroundColor(Theme.Colors.accent)
+                .frame(width: 38, height: 38)
+                .background(Theme.Colors.accent.opacity(0.14))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(device.label)
+                    .font(Theme.Typography.headline)
+                    .foregroundColor(Theme.Colors.primaryText)
+                onlineLabel
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var onlineLabel: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Circle()
+                .fill(device.online ? Theme.Colors.success : Theme.Colors.tertiaryText)
+                .frame(width: 7, height: 7)
+            Text(device.online ? lang.s("control.online") : lang.s("control.offline"))
+                .font(Theme.Typography.caption)
+                .foregroundColor(device.online ? Theme.Colors.success : Theme.Colors.tertiaryText)
+        }
+    }
+
+    // ── أداة التحكّم حسب النوع ──
+    @ViewBuilder
+    private var controlWidget: some View {
+        switch device.controlType {
+        case "switch":  switchWidget
+        case "dimmer":  dimmerWidget
+        case "cover":   coverWidget
+        case "media":   mediaWidget
+        case "enum":    enumWidget
+        case "ir":      irWidget
+        default:        switchWidget
+        }
+    }
+
+    // switch — تبديل on/off.
+    private var switchWidget: some View {
+        let isOn = device.state == "on"
+        return Toggle(isOn: Binding(
+            get: { isOn },
+            set: { store.control(api: state.api, device: device, action: $0 ? "on" : "off") }
+        )) {
+            Text(isOn ? lang.s("control.action.on") : lang.s("control.action.off"))
+                .font(Theme.Typography.callout)
+                .foregroundColor(Theme.Colors.secondaryText)
+        }
+        .tint(Theme.Colors.accent)
+        .disabled(store.demo)
+    }
+
+    // dimmer — تبديل on/off + شريط قيمة (يُرسل set عند الإفلات).
+    private var dimmerWidget: some View {
+        let isOn = device.state != "off" && device.state != "0" && !device.state.isEmpty
+        return VStack(spacing: Theme.Spacing.sm) {
+            Toggle(isOn: Binding(
+                get: { isOn },
+                set: { store.control(api: state.api, device: device, action: $0 ? "on" : "off") }
+            )) {
+                Text(isOn ? lang.s("control.action.on") : lang.s("control.action.off"))
+                    .font(Theme.Typography.callout)
+                    .foregroundColor(Theme.Colors.secondaryText)
+            }
+            .tint(Theme.Colors.accent)
+            .disabled(store.demo)
+
+            HStack(spacing: Theme.Spacing.sm) {
+                Text(lang.s("control.dimmer.level"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.tertiaryText)
+                Slider(value: $sliderValue,
+                       in: Double(device.dimmerMin)...Double(device.dimmerMax),
+                       step: 1,
+                       onEditingChanged: { editing in
+                           // نرسل فقط عند انتهاء السحب — تفادي وابل طلبات.
+                           if !editing {
+                               store.control(api: state.api, device: device,
+                                             action: "set", value: String(Int(sliderValue)))
+                           }
+                       })
+                    .tint(Theme.Colors.accent)
+                    .disabled(store.demo)
+                Text("\(Int(sliderValue))")
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                    .monospacedDigit()
+                    .frame(width: 34, alignment: .trailing)
+            }
+        }
+    }
+
+    // cover — افتح/سكّر/وقّف.
+    private var coverWidget: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            controlButton(lang.s("control.action.open"), "arrow.up.to.line") {
+                store.control(api: state.api, device: device, action: "open")
+            }
+            controlButton(lang.s("control.action.stop"), "stop.fill") {
+                store.control(api: state.api, device: device, action: "stop")
+            }
+            controlButton(lang.s("control.action.close"), "arrow.down.to.line") {
+                store.control(api: state.api, device: device, action: "close")
+            }
+        }
+    }
+
+    // media — شغّل/ثبّت/طفّي.
+    private var mediaWidget: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            controlButton(lang.s("control.action.play"), "play.fill") {
+                store.control(api: state.api, device: device, action: "on")
+            }
+            controlButton(lang.s("control.action.pause"), "pause.fill") {
+                store.control(api: state.api, device: device, action: "pause")
+            }
+            controlButton(lang.s("control.action.off"), "power") {
+                store.control(api: state.api, device: device, action: "off")
+            }
+        }
+    }
+
+    // enum — قائمة بخيارات meta.values (set + القيمة).
+    @ViewBuilder
+    private var enumWidget: some View {
+        if device.enumValues.isEmpty {
+            EmptyView()
+        } else {
+            // segmented لو الخيارات قليلة، وإلا قائمة منسدلة. نفصل الفرعين لأن
+            // نمطي الـ Picker نوعان مختلفان لا يتوحّدان بمعامل شرطي واحد.
+            let binding = Binding(
+                get: { device.state.isEmpty ? (device.enumValues.first ?? "") : device.state },
+                set: { store.control(api: state.api, device: device, action: "set", value: $0) }
+            )
+            if device.enumValues.count <= 3 {
+                Picker("", selection: binding) {
+                    ForEach(device.enumValues, id: \.self) { v in Text(v).tag(v) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(store.demo)
+            } else {
+                Picker("", selection: binding) {
+                    ForEach(device.enumValues, id: \.self) { v in Text(v).tag(v) }
+                }
+                .pickerStyle(.menu)
+                .disabled(store.demo)
+            }
+        }
+    }
+
+    // ir — أزرار من meta.buttons (send + اسم الزر) + تعلّم زر جديد عبر الوحدة.
+    @ViewBuilder
+    private var irWidget: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            if device.irButtonNames.isEmpty {
+                Text(lang.s("control.ir.noButtons"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: Theme.Spacing.sm)],
+                          spacing: Theme.Spacing.sm) {
+                    ForEach(device.irButtonNames, id: \.self) { name in
+                        controlButton(name, "dot.radiowaves.left.and.right") {
+                            store.control(api: state.api, device: device, action: "send", value: name)
+                        }
+                    }
+                }
+            }
+
+            if store.learning {
+                HStack(spacing: Theme.Spacing.sm) {
+                    ProgressView().tint(Theme.Colors.accent)
+                    Text(lang.s("control.ir.learning"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                }
+            } else if !store.demo {
+                Button { showLearn = true } label: {
+                    Label(lang.s("control.ir.learnNew"), systemImage: "plus.circle")
+                        .font(Theme.Typography.callout)
+                        .foregroundColor(Theme.Colors.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .alert(lang.s("control.ir.learnNew"), isPresented: $showLearn) {
+            TextField(lang.s("control.ir.learnPlaceholder"), text: $learnButtonName)
+            Button(lang.s("control.ir.learnStart")) {
+                store.learnIR(api: state.api, device: device, button: learnButtonName)
+                learnButtonName = ""
+            }
+            Button(lang.s("common.cancel"), role: .cancel) { learnButtonName = "" }
+        } message: {
+            Text(lang.s("control.ir.learnAlertHint"))
+        }
+    }
+
+    // زر تحكّم موحّد صغير (ثانوي).
+    @ViewBuilder
+    private func controlButton(_ title: String, _ icon: String,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                Text(title)
+                    .font(Theme.Typography.caption)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundColor(Theme.Colors.accentDeep)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Spacing.sm)
+            .background {
+                let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                ZStack {
+                    shape.fill(.ultraThinMaterial)
+                    shape.fill(Theme.Colors.accent.opacity(0.08))
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .stroke(Theme.Colors.accent.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(store.demo)
+    }
+
+    private func iconForType(_ type: String) -> String {
+        switch type {
+        case "switch": return "power"
+        case "dimmer": return "lightbulb.fill"
+        case "cover":  return "blinds.horizontal.closed"
+        case "media":  return "music.note"
+        case "enum":   return "slider.horizontal.3"
+        case "ir":     return "dot.radiowaves.left.and.right"
+        default:        return "switch.2"
+        }
+    }
+}
+
+
+/// بطاقة وحدة مربوطة: نقطة اتصال + اسم + عدد المخارج + الإصدار. القائمة السياقية
+/// تعيد التسمية أو تفكّ الربط.
+private struct NodeCard: View {
+    @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
+    let node: NodeItem
+    @ObservedObject var store: DevicesStore
+    let onRename: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.secondary.opacity(0.14))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .foregroundColor(Theme.Colors.secondary)
+            }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(node.label)
+                    .font(Theme.Typography.headline)
+                    .foregroundColor(Theme.Colors.primaryText)
+                HStack(spacing: Theme.Spacing.sm) {
+                    Circle()
+                        .fill(node.online ? Theme.Colors.success : Theme.Colors.tertiaryText)
+                        .frame(width: 7, height: 7)
+                    Text(node.online ? lang.s("control.online") : lang.s("control.offline"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(node.online ? Theme.Colors.success : Theme.Colors.tertiaryText)
+                    Text("•")
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.tertiaryText)
+                    Text(String(format: lang.s("control.node.outputs"), "\(node.outputs.count)"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.tertiaryText)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .sandyCard()
+        .contextMenu {
+            if !store.demo {
+                Button { onRename() } label: {
+                    Label(lang.s("control.node.rename"), systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    store.unpair(api: state.api, node: node)
+                } label: { Label(lang.s("control.node.unpair"), systemImage: "minus.circle") }
+            }
+        }
+    }
+}

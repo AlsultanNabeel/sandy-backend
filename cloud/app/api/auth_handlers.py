@@ -109,6 +109,36 @@ def require_auth(view):
     return _wrapped
 
 
+def require_tenant(view):
+    """Auth + tenant scoping for a *mutating* endpoint (the common write path).
+
+    Composes on top of :func:`require_auth`: an unauthenticated request is
+    rejected with 401, a guest with 403 (guests get read-only demo tabs, never
+    writes), and the view then runs inside
+    ``active_user_profile_context(build_user_profile(claims))`` so every store
+    call resolves ``current_user_id()`` to THIS caller and stays tenant-scoped.
+    The view still receives ``claims=`` exactly as under :func:`require_auth`.
+
+    This replaces the per-endpoint boilerplate — ``if _is_guest(claims): return
+    403`` followed by ``with active_user_profile_context(build_user_profile(
+    claims)):`` — that was copied across every write handler, where one omission
+    was a guest-write hole or an unscoped (cross-tenant) call.
+    """
+
+    @functools.wraps(view)
+    def _inner(*args, claims, **kwargs):
+        if claims.get("role") == "guest":
+            return jsonify({"error": "forbidden"}), 403
+        from app.utils.user_profiles import (
+            active_user_profile_context,
+            build_user_profile,
+        )
+        with active_user_profile_context(build_user_profile(claims)):
+            return view(*args, claims=claims, **kwargs)
+
+    return require_auth(_inner)
+
+
 def check_owner_password(password: str) -> bool:
     owner_pass = os.getenv("OWNER_PASSWORD", "")
     if not owner_pass:
@@ -130,7 +160,8 @@ def _auth_coll():
     """MongoDB collection for auth state, or None if Mongo isn't wired up."""
     global _auth_index_ready
     try:
-        from app.agent.facade.agent import mongo_db
+        from app.db import get_db
+        mongo_db = get_db()
         if mongo_db is None:
             return None
         coll = mongo_db[_AUTH_COLL]

@@ -46,6 +46,18 @@ def create_app(
         _cors_origins = []             # deny cross-origin rather than allow all
     CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
 
+    # Typed application errors (app.errors.SandyError) become a consistent
+    # {"error": <code>} response with the right status, so handlers can raise
+    # intent (ValidationError, ForbiddenError, ConfigError, ...) instead of
+    # hand-rolling a jsonify+status per site. Server-side (5xx) causes are logged.
+    from app.errors import SandyError
+
+    @app.errorhandler(SandyError)
+    def _handle_sandy_error(err: SandyError):
+        if err.http_status >= 500:
+            logger.error("[api] %s: %s", err.code, err)
+        return jsonify({"error": err.code}), err.http_status
+
     @app.route("/health", methods=["GET"])
     def health():
         mongo_status = {"ok": False, "available": mongo_db is not None}

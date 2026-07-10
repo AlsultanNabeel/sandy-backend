@@ -21,30 +21,32 @@ from typing import Any, Dict, List, Optional
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import current_user_id
+from app.db import configure, get_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 _COLL = "sandy_focus"
 _META = "sandy_focus_meta"   # {_id: "sounds", start, break, end}  أصوات قابلة للتغيير
-_mongo_db = None
 
 # الأصوات الافتراضية لكل حدث — مخزّنة كبيانات فقط (تستهلكها الواجهة/التطبيق).
 _DEFAULT_SOUNDS = {"start": "focus_start", "break": "focus_break", "end": "focus_end"}
 
 
 def init_focus_store(mongo_db) -> None:
-    global _mongo_db
-    _mongo_db = mongo_db
+    configure(mongo_db)
     if mongo_db is not None:
-        print("[FocusStore] ready")
+        logger.info("[FocusStore] ready")
 
 
 def _coll():
     """Tenant-scoped focus-session collection, or None when no db / no tenant."""
-    return scoped(_mongo_db, _COLL)
+    return scoped(get_db(), _COLL)
 
 
 def _meta():
     """Tenant-scoped focus-meta collection, or None when no db / no tenant."""
-    return scoped(_mongo_db, _META)
+    return scoped(get_db(), _META)
 
 
 def get_focus_sounds() -> Dict[str, str]:
@@ -121,7 +123,7 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
             from app.features.scene_store import apply_scene
             scene_result = apply_scene(scene)
         except Exception as e:  # noqa: BLE001
-            print(f"[FocusStore] scene apply failed: {e}")
+            logger.warning(f"[FocusStore] scene apply failed: {e}")
 
     doc = {
         "_id": uuid.uuid4().hex,

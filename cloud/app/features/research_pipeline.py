@@ -12,6 +12,9 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
+import logging
+
+logger = logging.getLogger(__name__)
 
 # URL and name normalisation
 
@@ -209,7 +212,7 @@ def extract_structured_page_data(
     instruction = prompts.get(effective_type, prompts["general"])
 
     if create_chat_completion_fn is None:
-        print("[Research] create_chat_completion_fn missing")
+        logger.warning("[Research] create_chat_completion_fn missing")
         return {
             "title": page_title,
             "official_link": page_url,
@@ -232,7 +235,7 @@ def extract_structured_page_data(
         )
         return json.loads(response.choices[0].message.content or "{}")
     except Exception as e:
-        print(f"[Research] structured extraction failed for {page_url}: {e}")
+        logger.warning(f"[Research] structured extraction failed for {page_url}: {e}")
         return {
             "title": page_title,
             "official_link": page_url,
@@ -354,10 +357,10 @@ def run_research_pipeline(
     exa_api_key: str = "",
     web_research_max_candidates: int = 30,
 ) -> List[Dict[str, Any]]:
-    print(f"[Research] starting {research_type} research for: {user_query}")
+    logger.info(f"[Research] starting {research_type} research for: {user_query}")
 
     if search_exa_fn is None or get_exa_page_content_fn is None:
-        print("[Research] missing Exa dependencies")
+        logger.warning("[Research] missing Exa dependencies")
         return []
 
     exa_results = search_exa_fn(
@@ -374,7 +377,7 @@ def run_research_pipeline(
     ]
 
     if not candidates:
-        print("[Research] no official-looking candidates found after filtering")
+        logger.warning("[Research] no official-looking candidates found after filtering")
         soft_blocked = [
             "educations.com",
             "educations.es",
@@ -408,7 +411,7 @@ def run_research_pipeline(
         )
         if research_type == "education":
             page_data = normalize_education_page_data(page_data, source_url=url)
-        print(
+        logger.info(
             f"[Research] Parsed keys for {url}: {list(page_data.keys()) if isinstance(page_data, dict) else 'N/A'}"
         )
         extracted.append(
@@ -422,5 +425,5 @@ def run_research_pipeline(
         )
 
     deduped = deduplicate_research_results(extracted)
-    print(f"[Research] {len(extracted)} extracted, {len(deduped)} unique")
+    logger.info(f"[Research] {len(extracted)} extracted, {len(deduped)} unique")
     return deduped

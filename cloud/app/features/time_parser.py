@@ -9,6 +9,9 @@ from datetime import datetime
 from app.utils.arabic_days import resolve_day_name_to_iso, parse_date_from_text
 from app.utils.nlp_normalizer import normalize_user_message
 from app.utils.time import USER_TZ
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def parse_reminder_time_ai(
@@ -56,7 +59,7 @@ def parse_reminder_time_ai(
         try:
             det_dt = datetime.fromisoformat(det_iso)
             if det_dt > now_check:
-                print(f"[ParseAI] deterministic day parse -> {det_iso}", flush=True)
+                logger.info(f"[ParseAI] deterministic day parse -> {det_iso}")
                 if return_json:
                     return {
                         "success": True,
@@ -106,7 +109,7 @@ def parse_reminder_time_ai(
         original_text = str(payload.get("original_text") or user_message)
 
         if not success or not iso_value:
-            print(f"[ParseAI] could not parse time: {reason_val or 'unknown'}")
+            logger.warning(f"[ParseAI] could not parse time: {reason_val or 'unknown'}")
             suggested = parse_date_from_text(normalized_text)
             if return_json:
                 return {
@@ -128,11 +131,11 @@ def parse_reminder_time_ai(
             dt_value = dt_value.astimezone(cairo_tz)
 
         if dt_value < now:
-            print(f"[ParseAI] parsed time is in the past: {dt_value.isoformat()}")
+            logger.warning(f"[ParseAI] parsed time is in the past: {dt_value.isoformat()}")
             return None
 
         final_iso = dt_value.isoformat()
-        print(f"[ParseAI] parsed by AI: {final_iso}")
+        logger.info(f"[ParseAI] parsed by AI: {final_iso}")
         if return_json:
             return {
                 "success": True,
@@ -144,7 +147,7 @@ def parse_reminder_time_ai(
         return final_iso
 
     except Exception as e:
-        print(f"[ParseAI] fallback parser failed: {e}")
+        logger.warning(f"[ParseAI] fallback parser failed: {e}")
         if return_json:
             return {
                 "success": False,

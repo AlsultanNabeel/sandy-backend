@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Optional
 
 from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
+import logging
+
+logger = logging.getLogger(__name__)
 
 _stt_cb = CircuitBreaker(name="azure_stt", failure_threshold=5, recovery_timeout=60.0)
 _tts_cb = CircuitBreaker(name="azure_tts", failure_threshold=5, recovery_timeout=60.0)
@@ -101,9 +104,9 @@ def _convert_audio_to_pcm(audio_bytes: bytes) -> Optional[bytes]:
             if proc.returncode == 0 and proc.stdout:
                 return proc.stdout
             err = (proc.stderr or b"").decode("utf-8", "replace").strip()
-            print(f"[Azure STT] ffmpeg pipe attempt {attempt} failed: {err[:200]}")
+            logger.warning(f"[Azure STT] ffmpeg pipe attempt {attempt} failed: {err[:200]}")
         except Exception as e:
-            print(f"[Azure STT] ffmpeg pipe attempt {attempt} error: {e}")
+            logger.warning(f"[Azure STT] ffmpeg pipe attempt {attempt} error: {e}")
     return None
 
 
@@ -132,7 +135,7 @@ def _convert_audio_to_wav(input_path: str, output_path: str) -> bool:
             )  # nosec B603
             return True
         except subprocess.CalledProcessError as e:
-            print(f"[Azure STT] ffmpeg attempt {attempt} failed: {e}")
+            logger.warning(f"[Azure STT] ffmpeg attempt {attempt} failed: {e}")
     return False
 
 
@@ -183,27 +186,27 @@ def _do_transcribe(
             future = executor.submit(lambda: recognizer.recognize_once_async().get())
             result = future.result(timeout=_STT_TIMEOUT_SEC)
     except concurrent.futures.TimeoutError:
-        print(f"[Azure STT] recognition timed out after {_STT_TIMEOUT_SEC}s")
+        logger.warning(f"[Azure STT] recognition timed out after {_STT_TIMEOUT_SEC}s")
         return None
 
     if result.reason == speechsdk.ResultReason.RecognizedSpeech:
         transcript = (result.text or "").strip()
         if transcript:
-            print(f"[Azure STT] transcript: {transcript[:80]}")
+            logger.info(f"[Azure STT] transcript: {transcript[:80]}")
             return transcript
 
     if result.reason == speechsdk.ResultReason.NoMatch:
-        print("[Azure STT] no speech recognized")
+        logger.warning("[Azure STT] no speech recognized")
         return None
 
     if result.reason == speechsdk.ResultReason.Canceled:
         details = speechsdk.CancellationDetails(result)
-        print(
+        logger.warning(
             f"[Azure STT] canceled: reason={details.reason}, details={details.error_details}"
         )
         return None
 
-    print(f"[Azure STT] unexpected result: {result.reason}")
+    logger.warning(f"[Azure STT] unexpected result: {result.reason}")
     return None
 
 
@@ -219,13 +222,13 @@ def transcribe_audio_with_azure(
     if not audio_bytes:
         return None
     if not azure_speech_available or not azure_speech_key or not azure_speech_region:
-        print("[Azure STT] Speech SDK/key/region not configured")
+        logger.warning("[Azure STT] Speech SDK/key/region not configured")
         return None
 
     try:
         import azure.cognitiveservices.speech  # noqa: F401
     except ImportError:
-        print("[Azure STT] Azure Speech SDK not installed")
+        logger.warning("[Azure STT] Azure Speech SDK not installed")
         return None
 
     suffix = Path(file_name).suffix or ".ogg"
@@ -240,7 +243,7 @@ def transcribe_audio_with_azure(
         if pcm_bytes is None:
             # Safe fallback: original temp-file ffmpeg + file-based AudioConfig, in
             # case in-memory piping is unreliable on this platform/clip.
-            print("[Azure STT] PCM pipe unavailable, falling back to temp files")
+            logger.warning("[Azure STT] PCM pipe unavailable, falling back to temp files")
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(audio_bytes)
                 temp_input = tmp.name
@@ -249,7 +252,7 @@ def transcribe_audio_with_azure(
                 temp_wav = tmp_wav.name
 
             if not _convert_audio_to_wav(temp_input, temp_wav):
-                print("[Azure STT] ffmpeg conversion failed after retries")
+                logger.warning("[Azure STT] ffmpeg conversion failed after retries")
                 return None
 
         try:
@@ -262,11 +265,11 @@ def transcribe_audio_with_azure(
                 temp_wav,
             )
         except CircuitOpenError:
-            print("[Azure STT] circuit open, skipping transcription")
+            logger.warning("[Azure STT] circuit open, skipping transcription")
             return None
 
     except Exception as e:
-        print(f"[Azure STT] transcription failed: {e}")
+        logger.warning(f"[Azure STT] transcription failed: {e}")
         return None
 
     finally:
@@ -302,7 +305,7 @@ def _do_synthesize(
             future = executor.submit(lambda: synthesizer.speak_text_async(text).get())
             result = future.result(timeout=_TTS_TIMEOUT_SEC)
     except concurrent.futures.TimeoutError:
-        print(f"[Azure TTS] synthesis timed out after {_TTS_TIMEOUT_SEC}s")
+        logger.warning(f"[Azure TTS] synthesis timed out after {_TTS_TIMEOUT_SEC}s")
         return None
 
     if (
@@ -312,7 +315,7 @@ def _do_synthesize(
         with open(temp_path, "rb") as f:
             return f.read()
 
-    print(f"[Azure TTS] synthesis failed: {result.reason}")
+    logger.warning(f"[Azure TTS] synthesis failed: {result.reason}")
     return None
 
 
@@ -327,13 +330,13 @@ def synthesize_voice_with_azure(
     if not text:
         return None
     if not azure_speech_available or not azure_speech_key or not azure_speech_region:
-        print("[Azure TTS] Speech SDK/key/region not configured")
+        logger.warning("[Azure TTS] Speech SDK/key/region not configured")
         return None
 
     try:
         import azure.cognitiveservices.speech  # noqa: F401
     except ImportError:
-        print("[Azure TTS] Azure Speech SDK not installed")
+        logger.warning("[Azure TTS] Azure Speech SDK not installed")
         return None
 
     temp_path = None
@@ -351,15 +354,15 @@ def synthesize_voice_with_azure(
                 azure_speech_voice,
             )
         except CircuitOpenError:
-            print("[Azure TTS] circuit open, skipping TTS")
+            logger.warning("[Azure TTS] circuit open, skipping TTS")
             return None
 
         if result:
-            print("[Azure TTS] voice generated")
+            logger.info("[Azure TTS] voice generated")
         return result
 
     except Exception as e:
-        print(f"[Azure TTS] error: {e}")
+        logger.warning(f"[Azure TTS] error: {e}")
         return None
 
     finally:
