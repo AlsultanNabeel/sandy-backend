@@ -23,6 +23,7 @@ Endpoints:
 """
 
 from __future__ import annotations
+import logging
 
 import uuid
 from datetime import datetime, timezone
@@ -80,7 +81,7 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
             coll.update_one({"_id": cid, "user_id": uid},
                             {"$set": {"title": title[:60], "title_generated": True}})
     except Exception:  # noqa: BLE001 — العنوان تحسين، فشله يترك عنوان أول رسالة
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
 
 def _generate_title_async(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:

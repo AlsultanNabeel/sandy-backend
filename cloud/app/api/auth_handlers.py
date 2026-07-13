@@ -169,7 +169,7 @@ def _auth_coll():
             try:
                 coll.create_index("expire_at", expireAfterSeconds=0, background=True)
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)
             _auth_index_ready = True
         return coll
     except Exception:

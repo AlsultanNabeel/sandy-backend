@@ -110,7 +110,7 @@ def _log_retrieval_eval_async(chat_id: str, query: str, summaries: list, facts: 
                 "created_at": datetime.now(timezone.utc),
             })
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     threading.Thread(target=_save, daemon=True).start()
 
@@ -144,7 +144,7 @@ def soul_node(state: SandyState) -> SandyState:
             try:
                 from app.agent.proactive_comfort import get_proactive_comfort as _get_proactive_comfort
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)
 
             _s1_futs = {}
             if _get_proactive_comfort:
@@ -168,15 +168,15 @@ def soul_node(state: SandyState) -> SandyState:
             try:
                 from app.agent.dreams_engine import get_dreams_context as _get_dreams_ctx
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)
             try:
                 from app.agent.shared_history import get_anniversary_context as _get_anniv_ctx
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)
             try:
                 from app.agent.future_messages import get_future_messages_context as _get_future_ctx
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)
 
             _chat_futs = {}
             if _get_dreams_ctx:
@@ -191,7 +191,7 @@ def soul_node(state: SandyState) -> SandyState:
                     get_goals_followup_context, chat_id, user_id, mongo_db
                 )
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)
 
             for k, fut in _chat_futs.items():
                 try:
@@ -267,7 +267,7 @@ def soul_node(state: SandyState) -> SandyState:
                         _run_in_profile, _profile, search_relevant_facts, message
                     )
                 except Exception:
-                    pass
+                    logger.debug("ignoring non-critical error", exc_info=True)
 
         _s2 = {}
         for k, fut in _s2_futs.items():
@@ -315,7 +315,7 @@ def soul_node(state: SandyState) -> SandyState:
                 if ss_parts:
                     snippet = _join(snippet, "[حالة المستخدم: " + " | ".join(ss_parts) + "]")
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
         # وضع العصف الذهني نشط: سلوك شريكة التفكير طول الجلسة
         try:
@@ -337,7 +337,7 @@ def soul_node(state: SandyState) -> SandyState:
                     "• «لخّصي/خلصنا» → brainstorm_finish · «ألغي/بطّلي» → brainstorm_cancel.]",
                 )
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
         if _is_philosophical(message):
             snippet = _join(snippet, "[نبرة: تعمّقي في النقاش، شاركي رأيك الحقيقي، لا تكتفي بالإجابات السطحية]")
@@ -403,7 +403,7 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
         from app.agent.proactive_comfort import get_proactive_comfort as _gpc
         futures["comfort"] = _SOUL_POOL.submit(_gpc, chat_id, user_id, mongo_db, message=message)
     except Exception:
-        pass
+        logger.debug("ignoring non-critical error", exc_info=True)
 
     futures["directives"] = _SOUL_POOL.submit(get_persona_directives, chat_id, user_id, mongo_db)
 
@@ -425,6 +425,6 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
                 _run_in_profile, _profile, search_relevant_facts, message
             )
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     return futures

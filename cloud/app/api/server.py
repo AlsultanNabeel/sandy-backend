@@ -1,6 +1,10 @@
+import base64
+import json
 import logging
 import os
-from datetime import datetime, timezone
+import queue
+import threading
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
@@ -12,6 +16,19 @@ logger = logging.getLogger(__name__)
 # سقف طول الرسالة النصية قبل أي استدعاء نموذج — يمنع انفجار التوكنات/الكلفة.
 # (حجم جسم الطلب ككل مسقوف بـ MAX_CONTENT_LENGTH داخل create_app.)
 _MAX_MESSAGE_CHARS = 6000
+
+# سقف حجم جسم الطلب (١٦ ميغابايت): يسمح بصور base64 المعقولة ويرفض الأجسام
+# الضخمة مبكراً (413) قبل قراءتها للذاكرة — حاجز إغراق.
+_MAX_CONTENT_LENGTH = 16 * 1024 * 1024
+
+# حصص الاستهلاك للمستخدم المصادَق (يومي, بالدقيقة). المالك والمشترك على الطبقة
+# العليا؛ المجاني على طبقة متواضعة. مصدر واحد يمنع انحراف المسارين
+# (/api/agent و /api/agent/stream) عن بعض.
+_SUBSCRIBER_DAILY, _SUBSCRIBER_PER_MIN = 5000, 60
+_FREE_DAILY, _FREE_PER_MIN = 40, 12
+
+# مدة بقاء سجل شات الزائر قبل انتهائه (ساعة).
+_GUEST_CHAT_TTL = timedelta(hours=48)
 
 
 def create_app(
@@ -32,9 +49,7 @@ def create_app(
     )
 
     app = Flask(__name__)
-    # سقف حجم جسم الطلب (١٦ ميغابايت): يسمح بصور base64 المعقولة ويرفض
-    # الأجسام الضخمة مبكراً (413) قبل ما تُقرأ للذاكرة — حاجز إغراق.
-    app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+    app.config["MAX_CONTENT_LENGTH"] = _MAX_CONTENT_LENGTH
     from app.config import APP_ENV  # already defined in config.py
     _frontend = os.getenv("FRONTEND_URL", "").strip()
     if _frontend:
@@ -209,6 +224,46 @@ def create_app(
             resp["role"] = "guest"
         return jsonify(resp), 200
 
+    def _meter_or_error(role, user_id):
+        """Record one authenticated request against the user's tier quota.
+        Returns an error code string if the user is over their limit, else None.
+        Shared by /api/agent and /api/agent/stream so the two can't drift."""
+        from app.features import usage_store, users_store
+
+        if role == "owner" or users_store.is_subscriber(user_id):
+            daily, per_min = _SUBSCRIBER_DAILY, _SUBSCRIBER_PER_MIN
+        else:
+            daily, per_min = _FREE_DAILY, _FREE_PER_MIN
+        return usage_store.check_and_record(
+            user_id, daily_limit=daily, per_min_limit=per_min
+        )
+
+    def _guest_media_gate(claims):
+        """Meter one shared guest unit for the image/vision endpoints and, if the
+        guest is over-limit or blocked, return a ready ``(body, status)`` tuple;
+        otherwise None. No-op for authenticated users (metered in /api/agent).
+        Centralizes the visitor-approval boilerplate the media endpoints repeated."""
+        if claims.get("role") != "guest":
+            return None
+        from app.agent.guest_usage import check_and_increment, guest_label
+
+        jti = claims.get("jti", "")
+        guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
+        status, count, limit = check_and_increment(jti, guest_name, "all", mongo_db)
+        if status == "pending":
+            return {
+                "error": "limit_reached",
+                "message": f"وصلت للحد المسموح ({limit}). طلبت الإذن من المسؤول — انتظر الموافقة.",
+                "count": count,
+                "limit": limit,
+            }, 429
+        if status == "block":
+            return {
+                "error": "access_denied",
+                "message": "تم رفض طلبك من المسؤول.",
+            }, 403
+        return None
+
     # Web chat history (MongoDB)
     def _chat_history_key(claims):
         # Authenticated users (owner + signed-in) key history by their stable
@@ -229,14 +284,13 @@ def create_app(
     @app.route("/api/chat/history", methods=["PUT"])
     @require_auth
     def put_chat_history(claims):
-        from datetime import timedelta
         if mongo_db is None:
             return jsonify({"ok": True}), 200
         body = request.get_json(silent=True) or {}
         messages = body.get("messages", [])
         key = _chat_history_key(claims)
         expire_at = None if claims.get("role") != "guest" else \
-            datetime.now(timezone.utc) + timedelta(hours=48)
+            datetime.now(timezone.utc) + _GUEST_CHAT_TTL
         doc = {"_id": key, "messages": messages, "updated_at": datetime.now(timezone.utc)}
         if expire_at:
             doc["expire_at"] = expire_at
@@ -294,7 +348,6 @@ def create_app(
         result = {"reply": text, "role": role}
         img_bytes = reply.get("image_bytes")
         if img_bytes:
-            import base64
             b64 = base64.b64encode(img_bytes).decode()
             result["reply"] = reply.get("caption") or text
             result["image_url"] = f"data:image/png;base64,{b64}"
@@ -322,14 +375,7 @@ def create_app(
         # tenant #1 / operator, so he shares the top (subscriber) tier; free
         # users get a modest quota. Guests use demo data — skip.
         if role != "guest":
-            from app.features import users_store, usage_store
-            if role == "owner" or users_store.is_subscriber(user_id):
-                _daily, _per_min = 5000, 60
-            else:
-                _daily, _per_min = 40, 12
-            _over = usage_store.check_and_record(
-                user_id, daily_limit=_daily, per_min_limit=_per_min
-            )
+            _over = _meter_or_error(role, user_id)
             if _over:
                 return jsonify({"error": _over}), 429
 
@@ -396,10 +442,6 @@ def create_app(
         to completion before anything streams — there's no partial output to
         show there). Owner/signed-in users only; guests use plain /api/agent.
         """
-        import json
-        import queue
-        import threading
-
         from app.agent.nodes.execute import clear_stream_hooks, set_stream_hooks
 
         body = request.get_json(silent=True) or {}
@@ -414,14 +456,7 @@ def create_app(
         if role not in ("owner", "user"):
             return jsonify({"error": "streaming_requires_account"}), 403
 
-        from app.features import users_store, usage_store
-        if role == "owner" or users_store.is_subscriber(user_id):
-            _daily, _per_min = 5000, 60
-        else:
-            _daily, _per_min = 40, 12
-        _over = usage_store.check_and_record(
-            user_id, daily_limit=_daily, per_min_limit=_per_min
-        )
+        _over = _meter_or_error(role, user_id)
         if _over:
             return jsonify({"error": _over}), 429
 
@@ -483,25 +518,12 @@ def create_app(
 
         # Rate-limit guests on image generation (authenticated users are metered
         # in /api/agent instead, not via the visitor-approval flow).
-        if claims.get("role") == "guest":
-            from app.agent.guest_usage import check_and_increment, guest_label
-            jti = claims.get("jti", "")
-            guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
-            status, count, limit = check_and_increment(jti, guest_name, "all", mongo_db)
-            if status == "pending":
-                return jsonify({
-                    "error": "limit_reached",
-                    "message": f"وصلت للحد المسموح ({limit}). طلبت الإذن من المسؤول — انتظر الموافقة.",
-                    "count": count, "limit": limit,
-                }), 429
-            if status == "block":
-                return jsonify({
-                    "error": "access_denied",
-                    "message": "تم رفض طلبك من المسؤول.",
-                }), 403
+        gate = _guest_media_gate(claims)
+        if gate is not None:
+            err_body, code = gate
+            return jsonify(err_body), code
 
         try:
-            import base64
             from app.features.vision import generate_image_with_azure
             img_bytes = generate_image_with_azure(prompt)
             if img_bytes:
@@ -523,25 +545,12 @@ def create_app(
             return jsonify({"error": "no prompt or image"}), 400
 
         # Same guest metering as /api/image (authenticated users metered in /api/agent).
-        if claims.get("role") == "guest":
-            from app.agent.guest_usage import check_and_increment, guest_label
-            jti = claims.get("jti", "")
-            guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
-            status, count, limit = check_and_increment(jti, guest_name, "all", mongo_db)
-            if status == "pending":
-                return jsonify({
-                    "error": "limit_reached",
-                    "message": f"وصلت للحد المسموح ({limit}). طلبت الإذن من المسؤول — انتظر الموافقة.",
-                    "count": count, "limit": limit,
-                }), 429
-            if status == "block":
-                return jsonify({
-                    "error": "access_denied",
-                    "message": "تم رفض طلبك من المسؤول.",
-                }), 403
+        gate = _guest_media_gate(claims)
+        if gate is not None:
+            err_body, code = gate
+            return jsonify(err_body), code
 
         try:
-            import base64
             from app.features.vision import edit_image_with_azure
             img_bytes = edit_image_with_azure(base64.b64decode(image_b64), prompt)
             if img_bytes:
@@ -584,29 +593,19 @@ def create_app(
 
         # Rate-limit guests (shared unified budget). Authenticated users are
         # metered in /api/agent, not via the visitor-approval flow.
-        if claims.get("role") == "guest":
-            from app.agent.guest_usage import check_and_increment, guest_label
-            jti = claims.get("jti", "")
-            guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
-            status, count, limit = check_and_increment(jti, guest_name, "all", mongo_db)
-            if status == "pending":
-                return jsonify({
-                    "error": "limit_reached",
-                    "message": f"وصلت للحد المسموح ({limit}). طُلب الإذن من المسؤول.",
-                    "count": count, "limit": limit,
-                }), 429
-            if status == "block":
-                return jsonify({"error": "access_denied", "message": "تم رفض طلبك."}), 403
+        gate = _guest_media_gate(claims)
+        if gate is not None:
+            err_body, code = gate
+            return jsonify(err_body), code
 
         try:
-            import base64 as _b64
             from app.features.vision import analyze_image_with_azure
             # analyze_image_with_azure needs the bound chat-completion fn (the
             # one with the Azure/OpenAI clients and circuit breaker) that the
             # Telegram pipeline uses. Without it the call raised TypeError and
             # every web image analysis failed.
             from app.agent.facade.agent import create_chat_completion
-            img_bytes = _b64.b64decode(image_b64)
+            img_bytes = base64.b64decode(image_b64)
             reply = analyze_image_with_azure(
                 img_bytes, question, create_chat_completion_fn=create_chat_completion,
                 user_id=claims.get("user_id") or None,

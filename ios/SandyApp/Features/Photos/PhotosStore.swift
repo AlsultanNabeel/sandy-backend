@@ -22,7 +22,7 @@ final class PhotosStore: LoadableStore {
                 photos = try await photosRes
                 albums = try await albumsRes
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("photos.errorLoad") }
+                if !error.isCancellation { notify("photos.errorLoad") }
             }
         }
         loadTask = task
@@ -50,15 +50,15 @@ final class PhotosStore: LoadableStore {
     /// إضافة صورة (JPEG) ثم إعادة جلب. يرجّع نجاح/فشل لتقرّر الورقة تتقفل.
     func add(api: APIClient, image: UIImage, name: String, album: String) async -> Bool {
         guard let data = image.jpegData(compressionQuality: 0.85) else {
-            notice = LanguageManager.shared.s("photos.errorAdd"); return false
+            notify("photos.errorAdd"); return false
         }
         do {
             try await api.photosAdd(image: data, name: name, album: album)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("photos.errorAdd")
+            notify("photos.errorAdd")
             return false
         }
     }
@@ -66,14 +66,11 @@ final class PhotosStore: LoadableStore {
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, photo: AlbumPhoto) {
         guard let idx = photos.firstIndex(where: { $0.id == photo.id }) else { return }
-        photos.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.photosDelete(id: photo.id)
-            } catch {
-                photos.insert(photo, at: min(idx, photos.count))
-                notice = LanguageManager.shared.s("photos.errorDelete")
-            }
-        }
+        optimistic(
+            "photos.errorDelete",
+            apply: { self.photos.remove(at: idx) },
+            rollback: { self.photos.insert(photo, at: min(idx, self.photos.count)) },
+            call: { try await api.photosDelete(id: photo.id) }
+        )
     }
 }

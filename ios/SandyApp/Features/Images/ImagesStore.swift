@@ -12,31 +12,31 @@ final class ImagesStore: LoadableStore {
     func reset() {
         resultImage = nil
         caption = ""
-        notice = ""
+        clearNotice()
     }
 
     func generate(api: APIClient, prompt: String) async {
         await run {
             let data = try await api.generateImage(prompt: prompt)
             self.resultImage = UIImage(data: data)
-            if self.resultImage == nil { self.notice = LanguageManager.shared.s("images.error") }
+            if self.resultImage == nil { self.notify("images.error") }
         }
     }
 
     func edit(api: APIClient, image: UIImage, prompt: String) async {
         guard let data = image.jpegData(compressionQuality: 0.9) else {
-            notice = LanguageManager.shared.s("images.error"); return
+            notify("images.error"); return
         }
         await run {
             let out = try await api.editImage(image: data, prompt: prompt)
             self.resultImage = UIImage(data: out)
-            if self.resultImage == nil { self.notice = LanguageManager.shared.s("images.error") }
+            if self.resultImage == nil { self.notify("images.error") }
         }
     }
 
     func describe(api: APIClient, image: UIImage, question: String) async {
         guard let data = image.jpegData(compressionQuality: 0.9) else {
-            notice = LanguageManager.shared.s("images.error"); return
+            notify("images.error"); return
         }
         await run {
             self.caption = try await api.describeImage(image: data, question: question)
@@ -48,11 +48,11 @@ final class ImagesStore: LoadableStore {
     private func run(_ op: @escaping @MainActor () async throws -> Void) async {
         task?.cancel()
         let t = Task { @MainActor in
-            loading = true; notice = ""
+            loading = true; clearNotice()
             defer { loading = false }
             do { try await op() }
             catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("images.error") }
+                if !error.isCancellation { notify("images.error") }
             }
         }
         task = t

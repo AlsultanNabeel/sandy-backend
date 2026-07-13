@@ -3,6 +3,7 @@
 Public API:
   summarize_research_results(results, requested_count) -> str
 """
+import logging
 
 import json
 from typing import Any, Dict, List
@@ -35,7 +36,7 @@ def _localize_value(value: Any, field_type: str = "") -> str:
                 ]
                 return " | ".join(parts) if parts else "غير مذكور بوضوح"
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     unknown_values = {
         "unknown",

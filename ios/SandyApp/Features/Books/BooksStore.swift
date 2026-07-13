@@ -20,7 +20,7 @@ final class BooksStore: LoadableStore {
                 goal = r.goal
                 demo = r.demo
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("books.errorLoad") }
+                if !error.isCancellation { notify("books.errorLoad") }
             }
         }
         loadTask = task
@@ -33,11 +33,11 @@ final class BooksStore: LoadableStore {
         do {
             try await api.booksAdd(title: title, status: status, author: author,
                                    category: category, totalPages: totalPages)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("books.errorAdd")
+            notify("books.errorAdd")
             return false
         }
     }
@@ -45,11 +45,11 @@ final class BooksStore: LoadableStore {
     func setStatus(api: APIClient, book: BookItem, status: String) async -> Bool {
         do {
             try await api.booksSetStatus(title: book.title, status: status)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("books.errorStatus")
+            notify("books.errorStatus")
             return false
         }
     }
@@ -59,11 +59,11 @@ final class BooksStore: LoadableStore {
         do {
             try await api.booksSetMeta(title: book.title, author: author, category: category,
                                        totalPages: totalPages, coverURL: coverURL)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("books.errorMeta")
+            notify("books.errorMeta")
             return false
         }
     }
@@ -71,11 +71,11 @@ final class BooksStore: LoadableStore {
     func addNote(api: APIClient, book: BookItem, text: String) async -> Bool {
         do {
             try await api.booksAddNote(title: book.title, text: text)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("books.errorNote")
+            notify("books.errorNote")
             return false
         }
     }
@@ -83,11 +83,11 @@ final class BooksStore: LoadableStore {
     func addQuote(api: APIClient, book: BookItem, text: String, page: Int) async -> Bool {
         do {
             try await api.booksAddQuote(title: book.title, text: text, page: page)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("books.errorQuote")
+            notify("books.errorQuote")
             return false
         }
     }
@@ -95,11 +95,11 @@ final class BooksStore: LoadableStore {
     func setGoal(api: APIClient, booksYear: Int, pagesYear: Int) async -> Bool {
         do {
             try await api.booksSetGoal(booksYear: booksYear, pagesYear: pagesYear)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("books.errorGoal")
+            notify("books.errorGoal")
             return false
         }
     }

@@ -27,7 +27,7 @@ def share_interesting_content(args: Dict[str, Any], ctx: "DispatchContext") -> D
             if tops:
                 topic = tops[0]
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     if not topic:
         return {

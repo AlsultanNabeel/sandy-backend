@@ -127,7 +127,7 @@ def build_memory_context(
             from app.agent.session_state import get_session_state
             ctx["session_state"] = get_session_state(chat_id, mongo_db)
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     if include_semantic and message and chat_id:
         try:

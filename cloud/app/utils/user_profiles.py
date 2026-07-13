@@ -226,7 +226,7 @@ def find_user_profile(chat_id: Any, mongo_db: Any = None) -> Optional[Dict[str, 
                 doc.pop("_id", None)
                 return _normalize_profile(chat_key, doc)
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     profiles = _read_json_profiles()
     profile = profiles.get(chat_key)
@@ -250,7 +250,7 @@ def save_user_profile(
             )
             return normalized
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     profiles = _read_json_profiles()
     profiles[chat_key] = normalized

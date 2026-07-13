@@ -1,13 +1,12 @@
 import SwiftUI
 
 @MainActor
-final class ShareContentStore: ObservableObject {
+final class ShareContentStore: LoadableStore {
     @Published var suggested: [SharedContentItem] = []
     @Published var saved: [SharedContentItem] = []
     @Published var topic = ""
     @Published var loadingSuggested = false
     @Published var loadingSaved = false
-    @Published var notice = ""
 
     private var suggestTask: Task<Void, Never>?
     private var savedTask: Task<Void, Never>?
@@ -28,7 +27,7 @@ final class ShareContentStore: ObservableObject {
                 topic = r.topic
                 suggested = r.items
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("shareContent.error") }
+                if !error.isCancellation { notify("shareContent.error") }
             }
         }
         suggestTask = task
@@ -43,7 +42,7 @@ final class ShareContentStore: ObservableObject {
             do {
                 saved = try await api.shareContentSaved()
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("shareContent.error") }
+                if !error.isCancellation { notify("shareContent.error") }
             }
         }
         savedTask = task
@@ -57,21 +56,18 @@ final class ShareContentStore: ObservableObject {
             try await api.shareContentSave(item: item, topic: topic)
             await loadSaved(api: api)
         } catch {
-            notice = LanguageManager.shared.s("shareContent.error")
+            notify("shareContent.error")
         }
     }
 
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func remove(api: APIClient, item: SharedContentItem) {
         guard let idx = saved.firstIndex(where: { $0.id == item.id }) else { return }
-        saved.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.shareContentDelete(id: item.id)
-            } catch {
-                saved.insert(item, at: min(idx, saved.count))
-                notice = LanguageManager.shared.s("shareContent.error")
-            }
-        }
+        optimistic(
+            "shareContent.error",
+            apply: { self.saved.remove(at: idx) },
+            rollback: { self.saved.insert(item, at: min(idx, self.saved.count)) },
+            call: { try await api.shareContentDelete(id: item.id) }
+        )
     }
 }

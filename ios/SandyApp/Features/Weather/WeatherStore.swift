@@ -22,10 +22,10 @@ final class WeatherStore: LoadableStore {
             defer { loading = false }
             do {
                 snapshot = try await api.weatherNow(city: city)
-                notice = ""
+                clearNotice()
             } catch {
                 if !error.isCancellation {
-                    notice = LanguageManager.shared.s("weather.errorLoad")
+                    notify("weather.errorLoad")
                 }
             }
         }

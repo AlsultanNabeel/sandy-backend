@@ -1,6 +1,7 @@
 """Urgent and overdue task hints for the system prompt. No auto-actions."""
 
 from __future__ import annotations
+import logging
 
 from collections import Counter
 from datetime import datetime, timedelta
@@ -135,7 +136,7 @@ def build_urgent_tasks_hint_for_prompt(
         if should_stay_silent():
             return None
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     # Cap noise for the model
     lines = urgent[:3]
@@ -170,7 +171,7 @@ def build_proactive_need_hint(
         for item, count in _collect_repeated_patterns(docs, min_count=min_count):
             candidates.append((item, count, "ltm"))
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     try:
         goal_docs = list(mongo_db[_GOALS_COLLECTION].find(
@@ -194,7 +195,7 @@ def build_proactive_need_hint(
             if count >= min_count:
                 candidates.append((goal_display[key], count, "goal"))
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     if not candidates:
         return None

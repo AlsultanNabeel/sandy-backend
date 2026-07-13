@@ -5,6 +5,7 @@
 """
 
 from __future__ import annotations
+import logging
 
 from datetime import datetime, timezone
 from typing import Optional
@@ -51,7 +52,7 @@ def save_emotional_moment(
             "created_at": datetime.now(timezone.utc),
         })
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
 
 def get_emotional_context(

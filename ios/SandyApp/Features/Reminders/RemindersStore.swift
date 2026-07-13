@@ -43,7 +43,7 @@ final class RemindersStore: LoadableStore {
                 reminders = r.items
                 demo = r.demo
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("reminders.loadFailed") }
+                if !error.isCancellation { notify("reminders.loadFailed") }
             }
         }
         loadTask = task
@@ -70,7 +70,7 @@ final class RemindersStore: LoadableStore {
             do {
                 try await api.deleteReminder(id: reminder.id)
             } catch {
-                notice = LanguageManager.shared.s("reminders.loadFailed")
+                notify("reminders.loadFailed")
                 await load(api: api)
             }
         }

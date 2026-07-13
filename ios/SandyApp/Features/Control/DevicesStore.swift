@@ -38,7 +38,7 @@ final class DevicesStore: LoadableStore {
                 demo = dev.demo || nod.demo
             } catch {
                 if !error.isCancellation {
-                    notice = LanguageManager.shared.s("control.loadFailed")
+                    notify("control.loadFailed")
                 }
             }
         }
@@ -65,7 +65,7 @@ final class DevicesStore: LoadableStore {
                 await load(api: api)   // مصالحة مع الحالة الحقيقية من الباك-إند
             } catch {
                 if !error.isCancellation {
-                    notice = LanguageManager.shared.s("control.controlFailed")
+                    notify("control.controlFailed")
                 }
                 await load(api: api)
             }
@@ -93,7 +93,7 @@ final class DevicesStore: LoadableStore {
             do {
                 try await api.deleteDevice(name: device.name)
             } catch {
-                notice = LanguageManager.shared.s("control.deleteFailed")
+                notify("control.deleteFailed")
                 await load(api: api)
             }
         }
@@ -102,7 +102,7 @@ final class DevicesStore: LoadableStore {
     // ── الوحدات: ربط/تسمية/فكّ ──
     func pair(api: APIClient, code: String, label: String?) async throws {
         let res = try await api.pairNode(code: code, label: label)
-        if res.already { notice = LanguageManager.shared.s("control.node.already") }
+        if res.already { notify("control.node.already") }
         await load(api: api)
     }
 
@@ -117,7 +117,7 @@ final class DevicesStore: LoadableStore {
             do {
                 try await api.unpairNode(nodeId: node.nodeId)
             } catch {
-                notice = LanguageManager.shared.s("control.deleteFailed")
+                notify("control.deleteFailed")
             }
             await load(api: api)
         }
@@ -132,7 +132,7 @@ final class DevicesStore: LoadableStore {
         let nodeId = device.transport.nodeId
         guard !name.isEmpty else { return }
         guard !nodeId.isEmpty else {
-            notice = LanguageManager.shared.s("control.ir.needNode")
+            notify("control.ir.needNode")
             return
         }
         guard !learning else { return }
@@ -152,9 +152,9 @@ final class DevicesStore: LoadableStore {
                         return
                     }
                 }
-                notice = LanguageManager.shared.s("control.ir.learnTimeout")
+                notify("control.ir.learnTimeout")
             } catch {
-                notice = LanguageManager.shared.s("control.ir.learnFailed")
+                notify("control.ir.learnFailed")
             }
         }
     }

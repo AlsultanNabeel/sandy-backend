@@ -292,7 +292,7 @@ def route_with_fc(
             if device_catalog:
                 user_prompt += "\n\n" + device_catalog
         except Exception:  # noqa: BLE001 — never let device lookup break routing
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
         # Router backend priority: Gemini → Bedrock (e.g. Qwen3) → Azure. Each is
         # opt-in via its own env var and falls through to the next on failure, so
@@ -361,7 +361,7 @@ def route_with_fc(
                 fn_name = "reminder_create"
                 fc = {"name": "reminder_create", "args": {}}
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     face_mood = _derive_face_mood(fn_name)
     persona_intensity = face_mood["persona_intensity"]

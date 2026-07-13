@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 import app.agent.executor.deps as deps
 
+from app.utils.arabic_days import DATE_HINT_TOKENS
 from app.utils.nlp_normalizer import normalize_user_message
 from app.utils.time import USER_TZ
 from app.agent.pending import create_pending_action, clear_pending_action
@@ -277,30 +278,7 @@ def _handle_clarify_task_choice(
                     continue
 
             has_date_hint = any(
-                hint in time_source.lower()
-                for hint in (
-                    "اليوم",
-                    "بكرة",
-                    "بكره",
-                    "غدا",
-                    "غداً",
-                    "بعد",
-                    "الأحد",
-                    "الاحد",
-                    "الاثنين",
-                    "الثلاثاء",
-                    "الأربعاء",
-                    "الاربعاء",
-                    "الخميس",
-                    "الجمعة",
-                    "الجمعه",
-                    "السبت",
-                    "today",
-                    "tomorrow",
-                    "next",
-                    "/",
-                    "-",
-                )
+                hint in time_source.lower() for hint in DATE_HINT_TOKENS
             )
 
             if base_date and not has_date_hint:

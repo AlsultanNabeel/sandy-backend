@@ -123,7 +123,7 @@ def ensure_ttl_index(mongo_db=None, ttl_days: int = 30) -> None:
             [("chat_id", 1), ("created_at", -1)], background=True
         )
     except Exception:
-        pass
+        logger.debug("ignoring non-critical error", exc_info=True)
 
 
 def get_avg_activity_hour(

@@ -14,7 +14,7 @@ final class ShoppingStore: LoadableStore {
             do {
                 items = try await api.getShopping()
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("shopping.errorLoad") }
+                if !error.isCancellation { notify("shopping.errorLoad") }
             }
         }
         loadTask = task
@@ -25,11 +25,11 @@ final class ShoppingStore: LoadableStore {
     func add(api: APIClient, text: String, category: String) async -> Bool {
         do {
             try await api.addShopping(text: text, category: category)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("shopping.errorAdd")
+            notify("shopping.errorAdd")
             return false
         }
     }
@@ -40,11 +40,11 @@ final class ShoppingStore: LoadableStore {
         do {
             try await api.addShopping(text: text, category: category)
             try await api.deleteShopping(id: item.id)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("shopping.errorEdit")
+            notify("shopping.errorEdit")
             return false
         }
     }
@@ -53,11 +53,11 @@ final class ShoppingStore: LoadableStore {
     func buy(api: APIClient, item: ShoppingItem, price: Double) async -> Bool {
         do {
             try await api.checkShopping(id: item.id, price: price)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("shopping.errorBuy")
+            notify("shopping.errorBuy")
             return false
         }
     }
@@ -65,14 +65,11 @@ final class ShoppingStore: LoadableStore {
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, item: ShoppingItem) {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
-        items.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.deleteShopping(id: item.id)
-            } catch {
-                items.insert(item, at: min(idx, items.count))
-                notice = LanguageManager.shared.s("shopping.errorDelete")
-            }
-        }
+        optimistic(
+            "shopping.errorDelete",
+            apply: { self.items.remove(at: idx) },
+            rollback: { self.items.insert(item, at: min(idx, self.items.count)) },
+            call: { try await api.deleteShopping(id: item.id) }
+        )
     }
 }

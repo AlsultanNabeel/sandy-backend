@@ -115,12 +115,12 @@ def pending_node(state: SandyState) -> SandyState:
 
             mongo_db = getattr(deps, "mongo_db", None)
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
         try:
             from app.agent.nodes.execute import _get_chat_completion_fn
             create_chat_completion_fn = _get_chat_completion_fn()
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
         result = execute_pending_action(
             user_message=state["message"],

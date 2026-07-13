@@ -442,13 +442,13 @@ def semantic_memory_stats() -> Dict[str, Any]:
         try:
             facts_count = facts_coll.count_documents({})
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
     convs_coll = _convs_coll()
     if convs_coll is not None:
         try:
             convs_count = convs_coll.count_documents({})
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
     return {
         "path": "mongodb",
         "vector_search": _embed_client is not None,

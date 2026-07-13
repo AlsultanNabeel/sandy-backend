@@ -278,7 +278,7 @@ def transcribe_audio_with_azure(
                 try:
                     Path(p).unlink()
                 except Exception:
-                    pass
+                    logger.debug("ignoring non-critical error", exc_info=True)
 
 
 def _do_synthesize(
@@ -370,4 +370,4 @@ def synthesize_voice_with_azure(
             try:
                 Path(temp_path).unlink()
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)

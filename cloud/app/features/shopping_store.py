@@ -153,13 +153,13 @@ def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
             eff_price = float(price)
             set_fields["price"] = eff_price
         except (TypeError, ValueError):
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
     if qty is not None:
         try:
             eff_qty = max(1, int(qty))
             set_fields["qty"] = eff_qty
         except (TypeError, ValueError):
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
     coll.update_one({"_id": item_id}, {"$set": set_fields})
 
     expense_added = False
@@ -190,12 +190,12 @@ def set_item_purchase(item_id: str, price=None, qty=None, unit=None) -> bool:
         try:
             set_fields["price"] = float(price)
         except (TypeError, ValueError):
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
     if qty is not None:
         try:
             set_fields["qty"] = max(1, int(qty))
         except (TypeError, ValueError):
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
     if unit is not None:
         set_fields["unit"] = str(unit or "").strip()
     if not set_fields:

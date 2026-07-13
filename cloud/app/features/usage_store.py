@@ -75,7 +75,7 @@ def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> O
         if per_min_limit and int((rl or {}).get("count", 0)) > per_min_limit:
             return "rate_limited"
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug("ignoring non-critical error", exc_info=True)
     # Daily quota.
     try:
         d_key = f"{user_id}:{now:%Y-%m-%d}"
@@ -89,5 +89,5 @@ def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> O
         if daily_limit and int((d or {}).get("count", 0)) > daily_limit:
             return "daily_quota_exceeded"
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug("ignoring non-critical error", exc_info=True)
     return None

@@ -49,7 +49,7 @@ final class TasksStore: LoadableStore {
                 tasks = r.items
                 demo = r.demo
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("tasks.errorLoad") }
+                if !error.isCancellation { notify("tasks.errorLoad") }
             }
         }
         loadTask = task
@@ -60,11 +60,11 @@ final class TasksStore: LoadableStore {
     func add(api: APIClient, text: String, due: String, note: String?, priority: String) async -> Bool {
         do {
             try await api.addTask(text: text, due: due, note: note, priority: priority)
-            notice = ""
+            clearNotice()
             await load(api: api, completed: false)
             return true
         } catch {
-            notice = LanguageManager.shared.s("tasks.errorAdd")
+            notify("tasks.errorAdd")
             return false
         }
     }
@@ -73,29 +73,26 @@ final class TasksStore: LoadableStore {
     func toggle(api: APIClient, task: TaskItem) {
         guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
         let target = !task.done
-        tasks[idx].done = target
-        Task { @MainActor in
-            do {
-                try await api.setTaskDone(id: task.id, done: target)
-            } catch {
-                if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i].done = !target }
-                notice = LanguageManager.shared.s("tasks.errorToggle")
-            }
-        }
+        optimistic(
+            "tasks.errorToggle",
+            apply: { self.tasks[idx].done = target },
+            rollback: {
+                if let i = self.tasks.firstIndex(where: { $0.id == task.id }) { self.tasks[i].done = !target }
+            },
+            call: { try await api.setTaskDone(id: task.id, done: target) }
+        )
     }
 
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, task: TaskItem) {
         guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        let removed = tasks.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.deleteTask(id: task.id)
-            } catch {
-                tasks.insert(removed, at: min(idx, tasks.count))
-                notice = LanguageManager.shared.s("tasks.errorDelete")
-            }
-        }
+        let removed = tasks[idx]
+        optimistic(
+            "tasks.errorDelete",
+            apply: { self.tasks.remove(at: idx) },
+            rollback: { self.tasks.insert(removed, at: min(idx, self.tasks.count)) },
+            call: { try await api.deleteTask(id: task.id) }
+        )
     }
 
     /// تعديل شامل (نص/موعد/ملاحظة/أولوية) ثم إعادة جلب. يرجّع نجاح/فشل لتقرّر الورقة.
@@ -104,11 +101,11 @@ final class TasksStore: LoadableStore {
         do {
             try await api.updateTask(id: id, text: text, note: note ?? "",
                                      priority: priority, due: due)
-            notice = ""
+            clearNotice()
             await load(api: api, completed: completed)
             return true
         } catch {
-            notice = LanguageManager.shared.s("tasks.errorEdit")
+            notify("tasks.errorEdit")
             return false
         }
     }
@@ -117,14 +114,13 @@ final class TasksStore: LoadableStore {
     func setPriority(api: APIClient, task: TaskItem, priority: String) {
         guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
         let old = tasks[idx].priority
-        tasks[idx].priority = priority
-        Task { @MainActor in
-            do {
-                try await api.updateTask(id: task.id, priority: priority)
-            } catch {
-                if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i].priority = old }
-                notice = LanguageManager.shared.s("tasks.errorEdit")
-            }
-        }
+        optimistic(
+            "tasks.errorEdit",
+            apply: { self.tasks[idx].priority = priority },
+            rollback: {
+                if let i = self.tasks.firstIndex(where: { $0.id == task.id }) { self.tasks[i].priority = old }
+            },
+            call: { try await api.updateTask(id: task.id, priority: priority) }
+        )
     }
 }

@@ -1,6 +1,7 @@
 """Briefing helpers for Sandy facade."""
 
 from __future__ import annotations
+import logging
 
 import re
 from datetime import datetime
@@ -95,7 +96,7 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
                 dt = datetime.fromisoformat(raw_due.replace("Z", "+00:00")).astimezone(USER_TZ)
                 due_label = f" (موعد: {dt.strftime('%a %d/%m %I:%M %p')})"
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
         tasks_lines.append(f"- {text}{due_label}")
 
     cal_lines = []
@@ -106,7 +107,7 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
             dt = datetime.fromisoformat(r.get("remind_at", "")).astimezone(USER_TZ)
             label = dt.strftime("%I:%M %p")
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
         prefix = "🔁 " if r.get("is_recurring") else ""
         cal_lines.append(
             f"- {prefix}{text or 'تذكير'} @ {label}" if label else f"- {prefix}{text or 'تذكير'}"
@@ -153,7 +154,7 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
         if result:
             return result
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     # Fallback when the model call fails: plain structured text.
     tasks_block = "\n".join(tasks_lines[:6]) if tasks_lines else "ما في مهام"
@@ -189,7 +190,7 @@ def build_evening_summary(*, mongo_db, tasks_file) -> str:
             except Exception:
                 continue
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     due_tomorrow: List[str] = []
     try:
@@ -203,7 +204,7 @@ def build_evening_summary(*, mongo_db, tasks_file) -> str:
             except Exception:
                 continue
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     rem_tomorrow: List[str] = []
     try:
@@ -215,7 +216,7 @@ def build_evening_summary(*, mongo_db, tasks_file) -> str:
             except Exception:
                 continue
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     if not done_today and not due_tomorrow and not rem_tomorrow:
         return ""
@@ -253,7 +254,7 @@ def build_weekly_stats(*, mongo_db, tasks_file) -> str:
             except Exception:
                 continue
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     active = overdue = 0
     try:
@@ -265,7 +266,7 @@ def build_weekly_stats(*, mongo_db, tasks_file) -> str:
             if raw and raw < today:
                 overdue += 1
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     if done_week == 0 and active == 0:
         return ""

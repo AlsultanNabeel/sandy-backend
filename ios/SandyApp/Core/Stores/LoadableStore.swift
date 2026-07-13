@@ -25,4 +25,26 @@ class LoadableStore: ObservableObject {
 
     /// Clear any standing notice.
     func clearNotice() { notice = "" }
+
+    /// Run an optimistic mutation: `apply` updates local state immediately for a
+    /// snappy UI, `call` reconciles with the backend in the background, and on
+    /// failure `rollback` restores the previous state and a localized `noticeKey`
+    /// is shown. Removes the `Task { do/catch { rollback; notify } }` scaffolding
+    /// every fire-and-forget mutation (delete / toggle / reorder) was repeating.
+    func optimistic(
+        _ noticeKey: String,
+        apply: () -> Void,
+        rollback: @escaping () -> Void,
+        call: @escaping () async throws -> Void
+    ) {
+        apply()
+        Task { @MainActor in
+            do {
+                try await call()
+            } catch {
+                rollback()
+                self.notify(noticeKey)
+            }
+        }
+    }
 }

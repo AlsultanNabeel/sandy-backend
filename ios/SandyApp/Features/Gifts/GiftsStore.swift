@@ -14,7 +14,7 @@ final class GiftsStore: LoadableStore {
             do {
                 gifts = try await api.getGifts()
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("gifts.errorLoad") }
+                if !error.isCancellation { notify("gifts.errorLoad") }
             }
         }
         loadTask = task
@@ -29,11 +29,11 @@ final class GiftsStore: LoadableStore {
                                   occasion: draft.occasion,
                                   content: draft.content,
                                   scheduledAt: draft.scheduledAt)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("gifts.errorAdd")
+            notify("gifts.errorAdd")
             return false
         }
     }
@@ -41,14 +41,11 @@ final class GiftsStore: LoadableStore {
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, gift: DigitalGift) {
         guard let idx = gifts.firstIndex(where: { $0.id == gift.id }) else { return }
-        gifts.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.deleteGift(id: gift.id)
-            } catch {
-                gifts.insert(gift, at: min(idx, gifts.count))
-                notice = LanguageManager.shared.s("gifts.errorDelete")
-            }
-        }
+        optimistic(
+            "gifts.errorDelete",
+            apply: { self.gifts.remove(at: idx) },
+            rollback: { self.gifts.insert(gift, at: min(idx, self.gifts.count)) },
+            call: { try await api.deleteGift(id: gift.id) }
+        )
     }
 }

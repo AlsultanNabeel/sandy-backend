@@ -14,7 +14,7 @@ final class TimelineStore: LoadableStore {
             do {
                 events = try await api.getTimeline()
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("timeline.errorLoad") }
+                if !error.isCancellation { notify("timeline.errorLoad") }
             }
         }
         loadTask = task
@@ -24,9 +24,11 @@ final class TimelineStore: LoadableStore {
     /// حذف متفائل فوري من الخط، ثم حذف المصدر حسب النوع؛ يرجع العنصر عند الفشل.
     func delete(api: APIClient, event: TimelineEvent) {
         guard let idx = events.firstIndex(where: { $0.id == event.id }) else { return }
-        events.remove(at: idx)
-        Task { @MainActor in
-            do {
+        optimistic(
+            "timeline.errorDelete",
+            apply: { self.events.remove(at: idx) },
+            rollback: { self.events.insert(event, at: min(idx, self.events.count)) },
+            call: {
                 switch event.type {
                 case "task":     try await api.deleteTask(id: event.id)
                 case "reminder": try await api.deleteReminder(id: event.id)
@@ -34,11 +36,8 @@ final class TimelineStore: LoadableStore {
                 case "journal":  try await api.deleteJournalEntry(id: event.id)
                 default: break
                 }
-            } catch {
-                events.insert(event, at: min(idx, events.count))
-                notice = LanguageManager.shared.s("timeline.errorDelete")
             }
-        }
+        )
     }
 
     /// تعليم منجز/غير منجز لمهمة من الخط (تحديث متفائل) — أداة سريعة حسب النوع.
@@ -46,15 +45,14 @@ final class TimelineStore: LoadableStore {
         guard event.type == "task",
               let idx = events.firstIndex(where: { $0.id == event.id }) else { return }
         let target = !event.done
-        events[idx].done = target
-        Task { @MainActor in
-            do {
-                try await api.setTaskDone(id: event.id, done: target)
-            } catch {
-                if let i = events.firstIndex(where: { $0.id == event.id }) { events[i].done = !target }
-                notice = LanguageManager.shared.s("timeline.errorToggle")
-            }
-        }
+        optimistic(
+            "timeline.errorToggle",
+            apply: { self.events[idx].done = target },
+            rollback: {
+                if let i = self.events.firstIndex(where: { $0.id == event.id }) { self.events[i].done = !target }
+            },
+            call: { try await api.setTaskDone(id: event.id, done: target) }
+        )
     }
 
     /// الأحداث مجمّعة زمنيًا (اليوم/أمس/الأسبوع/أقدم)، فاضي تُحذف، والترتيب محفوظ.

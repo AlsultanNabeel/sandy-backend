@@ -25,7 +25,7 @@ def _safe_json_loads(text: str) -> Dict[str, Any]:
     try:
         return json.loads(text)
     except Exception:
-        pass
+        logger.debug("ignoring non-critical error", exc_info=True)
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if match:
         try:

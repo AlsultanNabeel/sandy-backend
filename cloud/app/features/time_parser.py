@@ -70,7 +70,7 @@ def parse_reminder_time_ai(
                     }
                 return det_iso
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     now = datetime.now(USER_TZ)
     now_iso = now.isoformat()

@@ -6,6 +6,7 @@ Public API:
   is_research_request(message) -> bool
   is_research_followup_request(message) -> bool
 """
+import logging
 
 import re
 
@@ -172,7 +173,7 @@ def extract_requested_result_count(message: str, default: int = 5) -> int:
         try:
             return max(1, min(int(match.group(1)), 20))
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
 
     for word, value in arabic_number_words.items():
         if word in text:

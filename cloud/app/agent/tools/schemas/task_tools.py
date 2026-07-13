@@ -4,6 +4,7 @@
 """
 
 from __future__ import annotations
+import logging
 
 from typing import TYPE_CHECKING, Any, Dict, List
 
@@ -19,7 +20,7 @@ def _persona_intensity(ctx: "DispatchContext") -> str:
         if ctx.state:
             return ctx.state.get("persona_intensity") or "standard"
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
     return "standard"
 
 

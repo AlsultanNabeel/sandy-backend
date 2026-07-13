@@ -319,7 +319,7 @@ def build_result_dedup_key(item: Dict[str, Any]) -> str:
         source_domain = parsed.netloc.replace("www.", "").strip().lower()
         source_path = parsed.path.strip().lower()
     except Exception:
-        pass
+        logger.debug("ignoring non-critical error", exc_info=True)
 
     if institution and program:
         return f"{institution}::{program}"

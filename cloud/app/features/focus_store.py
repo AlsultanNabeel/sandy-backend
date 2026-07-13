@@ -193,7 +193,7 @@ def stop_focus(completed: bool = True) -> Dict[str, Any]:
             from app.features.scene_store import apply_scene
             apply_scene(s["end_scene"])
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
     return {
         "ok": True,
@@ -256,7 +256,7 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
             from app.features.scene_store import apply_scene
             apply_scene(s["scene"])
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
     return {"event": "focus", "cycle_idx": cycle_idx, "cycles": cycles,
             "focus_min": focus_min, "label": label}
 

@@ -133,7 +133,7 @@ class ToolDispatcher:
                     tool_name, ok=False, latency_ms=elapsed_ms, error=str(exc),
                 )
             except Exception:
-                pass
+                logger.debug("ignoring non-critical error", exc_info=True)
             return {"handled": False, "reply": f"خطأ في تنفيذ {tool_name}."}
 
         # handled=True يعتبر نجاح
@@ -147,5 +147,5 @@ class ToolDispatcher:
                 error=error_for_health or (None if ok else "handled=False"),
             )
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
         return result

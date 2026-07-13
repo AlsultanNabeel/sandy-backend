@@ -14,7 +14,7 @@ final class MemoryStore: LoadableStore {
             do {
                 facts = try await api.getMemory()
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("memory.errorLoad") }
+                if !error.isCancellation { notify("memory.errorLoad") }
             }
         }
         loadTask = task
@@ -25,11 +25,11 @@ final class MemoryStore: LoadableStore {
     func add(api: APIClient, text: String) async -> Bool {
         do {
             try await api.addMemory(text: text)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("memory.errorAdd")
+            notify("memory.errorAdd")
             return false
         }
     }
@@ -38,11 +38,11 @@ final class MemoryStore: LoadableStore {
     func update(api: APIClient, id: String, text: String) async -> Bool {
         do {
             try await api.updateMemory(id: id, text: text)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("memory.errorEdit")
+            notify("memory.errorEdit")
             return false
         }
     }
@@ -50,14 +50,11 @@ final class MemoryStore: LoadableStore {
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, fact: MemoryFact) {
         guard let idx = facts.firstIndex(where: { $0.id == fact.id }) else { return }
-        facts.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.deleteMemory(id: fact.id)
-            } catch {
-                facts.insert(fact, at: min(idx, facts.count))
-                notice = LanguageManager.shared.s("memory.errorDelete")
-            }
-        }
+        optimistic(
+            "memory.errorDelete",
+            apply: { self.facts.remove(at: idx) },
+            rollback: { self.facts.insert(fact, at: min(idx, self.facts.count)) },
+            call: { try await api.deleteMemory(id: fact.id) }
+        )
     }
 }

@@ -19,7 +19,7 @@ final class ProjectsStore: LoadableStore {
                 plans = try await plansCall
                 active = try await activeCall
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("projects.errorLoad") }
+                if !error.isCancellation { notify("projects.errorLoad") }
             }
         }
         loadTask = task
@@ -29,10 +29,10 @@ final class ProjectsStore: LoadableStore {
     func start(api: APIClient, topic: String) async -> Bool {
         do {
             active = try await api.startBrainstorm(topic: topic)
-            notice = ""
+            clearNotice()
             return true
         } catch {
-            notice = LanguageManager.shared.s("projects.errorStart")
+            notify("projects.errorStart")
             return false
         }
     }
@@ -45,7 +45,7 @@ final class ProjectsStore: LoadableStore {
                 try await api.addBrainstormPoint(point)
             } catch {
                 if let idx = active?.points.lastIndex(of: point) { active?.points.remove(at: idx) }
-                notice = LanguageManager.shared.s("projects.errorAdd")
+                notify("projects.errorAdd")
             }
         }
     }
@@ -58,10 +58,10 @@ final class ProjectsStore: LoadableStore {
             do {
                 _ = try await api.finishBrainstorm()
                 active = nil
-                notice = ""
+                clearNotice()
                 await load(api: api)
             } catch {
-                notice = LanguageManager.shared.s("projects.errorFinish")
+                notify("projects.errorFinish")
             }
         }
     }
@@ -74,7 +74,7 @@ final class ProjectsStore: LoadableStore {
                 try await api.cancelBrainstorm()
             } catch {
                 active = previous
-                notice = LanguageManager.shared.s("projects.errorCancel")
+                notify("projects.errorCancel")
             }
         }
     }
@@ -86,10 +86,10 @@ final class ProjectsStore: LoadableStore {
             if let idx = plans.firstIndex(where: { $0.id == id }) {
                 plans[idx].planText = revised
             }
-            notice = ""
+            clearNotice()
             return true
         } catch {
-            notice = LanguageManager.shared.s("projects.errorUpdate")
+            notify("projects.errorUpdate")
             return false
         }
     }
@@ -97,14 +97,11 @@ final class ProjectsStore: LoadableStore {
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, plan: ProjectPlan) {
         guard let idx = plans.firstIndex(where: { $0.id == plan.id }) else { return }
-        plans.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.deletePlan(id: plan.id)
-            } catch {
-                plans.insert(plan, at: min(idx, plans.count))
-                notice = LanguageManager.shared.s("projects.errorDelete")
-            }
-        }
+        optimistic(
+            "projects.errorDelete",
+            apply: { self.plans.remove(at: idx) },
+            rollback: { self.plans.insert(plan, at: min(idx, self.plans.count)) },
+            call: { try await api.deletePlan(id: plan.id) }
+        )
     }
 }

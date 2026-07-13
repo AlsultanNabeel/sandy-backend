@@ -176,7 +176,7 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
             from app.agent.semantic_memory import _embed
             vec = _embed(summary)
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
         if _is_duplicate_memory(mongo_db, chat_id, vec):
             logger.info(f"[graph] STM→LTM duplicate skipped for {chat_id}")
@@ -386,7 +386,7 @@ def run_graph(
             )
             state = merge_state(state, {"soul_prefetch": _prefetch})
         except Exception:
-            pass
+            logger.debug("ignoring non-critical error", exc_info=True)
 
         # توجيه: نداء FC واحد على كامل الكتالوج
         state = _route_intent(state)

@@ -13,6 +13,7 @@ from typing import Any, Dict
 from app.errors import ConfigError
 from app.agent.graph.state import SandyState, merge_state
 from app.agent.tools.schemas.meta_tools import META_TOOLS as _META_TOOLS
+from app.utils.arabic_days import WEEKDAY_TO_AR_NAME
 from app.utils.session import build_session_from_state as _build_session_from_state
 
 logger = logging.getLogger(__name__)
@@ -136,16 +137,7 @@ def _get_current_time_context() -> str:
         from app.utils.time import USER_TZ
 
         now = datetime.now(USER_TZ)
-        day_names = {
-            0: "الاثنين",
-            1: "الثلاثاء",
-            2: "الأربعاء",
-            3: "الخميس",
-            4: "الجمعة",
-            5: "السبت",
-            6: "الأحد",
-        }
-        day_ar = day_names.get(now.weekday(), "")
+        day_ar = WEEKDAY_TO_AR_NAME.get(now.weekday(), "")
         return (
             f"[الوقت الحالي: {now.strftime('%I:%M %p').replace('AM', 'ص').replace('PM', 'م')} | "
             f"التاريخ: {now.strftime('%d/%m/%Y')} ({day_ar})]"

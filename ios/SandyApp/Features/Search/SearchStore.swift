@@ -19,7 +19,7 @@ final class SearchStore: LoadableStore {
         searchTask?.cancel()
         let task = Task { @MainActor in
             loading = true
-            notice = ""
+            clearNotice()
             defer { loading = false }
             do {
                 switch kind {
@@ -32,7 +32,7 @@ final class SearchStore: LoadableStore {
                 }
                 hasSearched = true
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("search.error") }
+                if !error.isCancellation { notify("search.error") }
             }
         }
         searchTask = task

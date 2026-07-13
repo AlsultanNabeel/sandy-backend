@@ -5,6 +5,7 @@ All callers should import from here — do not duplicate day-name lists.
 """
 
 from __future__ import annotations
+import logging
 
 import re
 from datetime import date, datetime, timedelta
@@ -73,6 +74,34 @@ WEEKDAY_TO_AR_NAME: dict[int, str] = {
     5: "السبت",
     6: "الأحد",
 }
+
+# Tokens that hint a free-text due/reminder string carries an explicit day or
+# date reference (day names + relative words + separators). Used to decide
+# whether a value is worth parsing as a date. Kept here so callers share one
+# list instead of re-declaring it.
+DATE_HINT_TOKENS: tuple[str, ...] = (
+    "اليوم",
+    "بكرة",
+    "بكره",
+    "غدا",
+    "غداً",
+    "بعد",
+    "الأحد",
+    "الاحد",
+    "الاثنين",
+    "الثلاثاء",
+    "الأربعاء",
+    "الاربعاء",
+    "الخميس",
+    "الجمعة",
+    "الجمعه",
+    "السبت",
+    "today",
+    "tomorrow",
+    "next",
+    "/",
+    "-",
+)
 
 # Words that indicate an explicit time was given — used to decide whether to
 # apply a default reminder time when only a day name is present.
@@ -190,7 +219,7 @@ def parse_numeric_date(
             dt = datetime(y, mo, d, default_hour, 0, 0, tzinfo=USER_TZ)
             return dt.isoformat()
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
         # fallback try DDMMYYYY
         d, mo, y = int(v[0:2]), int(v[2:4]), int(v[4:8])
         try:

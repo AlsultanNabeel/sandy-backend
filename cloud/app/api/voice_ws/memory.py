@@ -1,5 +1,6 @@
 """voice_ws memory."""
 from __future__ import annotations
+import logging
 
 import time
 from typing import Any, Dict, List, Optional
@@ -121,4 +122,4 @@ def _save_voice_turn(user_text: str, sandy_text: str) -> None:
         from app.agent.session_state import update_session_state
         update_session_state(chat_id, get_db(), platform="voice")
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)

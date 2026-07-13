@@ -22,7 +22,7 @@ final class RobotStore: LoadableStore {
                 scenes = r.items
                 demo = r.demo
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("robot.loadError") }
+                if !error.isCancellation { notify("robot.loadError") }
             }
         }
         loadTask = task
@@ -31,12 +31,12 @@ final class RobotStore: LoadableStore {
 
     /// يطبّق مشهداً وينشر نتيجته (متّصل/غير متّصل/خطأ) كإشعار ودّي.
     func apply(api: APIClient, scene: RoomScene) async {
-        applying = scene.name; notice = ""
+        applying = scene.name; clearNotice()
         do {
             let r = try await api.applyScene(name: scene.name)
-            notice = LanguageManager.shared.s(r.online ? "robot.applied" : "robot.appliedOffline")
+            notify(r.online ? "robot.applied" : "robot.appliedOffline")
         } catch {
-            notice = LanguageManager.shared.s("robot.applyError")
+            notify("robot.applyError")
         }
         applying = ""
     }
@@ -46,11 +46,11 @@ final class RobotStore: LoadableStore {
              actions: [SceneAction]) async -> Bool {
         do {
             try await api.addScene(name: name, label: label, icon: icon, actions: actions)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s(error.localizedDescription == "exists"
+            notify(error.localizedDescription == "exists"
                                               ? "robot.nameExists" : "robot.saveError")
             return false
         }
@@ -60,11 +60,11 @@ final class RobotStore: LoadableStore {
     func update(api: APIClient, scene: RoomScene, actions: [SceneAction]) async -> Bool {
         do {
             try await api.setSceneActions(name: scene.name, actions: actions)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("robot.saveError")
+            notify("robot.saveError")
             return false
         }
     }
@@ -75,7 +75,7 @@ final class RobotStore: LoadableStore {
             try await api.deleteScene(name: scene.name)
             await load(api: api)
         } catch {
-            notice = LanguageManager.shared.s(error.localizedDescription == "builtin"
+            notify(error.localizedDescription == "builtin"
                                               ? "robot.builtinDel" : "robot.saveError")
         }
     }

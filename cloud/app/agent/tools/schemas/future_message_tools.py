@@ -26,7 +26,7 @@ def _parse_when(when_str: str) -> datetime | None:
         if re.match(r"\d{4}-\d{2}-\d{2}", when_str):
             return datetime.fromisoformat(when_str.replace("Z", ""))
     except Exception:
-        pass
+        logger.debug("ignoring non-critical error", exc_info=True)
 
     m = re.search(r"بعد\s+(\d+)\s+(يوم|اسبوع|أسبوع|شهر|شهور|سنة|سنوات)", when_str)
     if m:

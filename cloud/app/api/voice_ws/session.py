@@ -1,5 +1,6 @@
 """voice_ws session."""
 from __future__ import annotations
+import logging
 
 import asyncio
 import hashlib
@@ -297,7 +298,7 @@ async def _live_session(ws, remote: str) -> None:
                 try:
                     await t
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                    pass
+                    logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
             # Retrieve exceptions from the finished side too, or asyncio logs a
             # noisy "Task exception was never retrieved" after every disconnect.
             for t in done:
@@ -545,4 +546,4 @@ def _send_json(ws, payload: Dict[str, Any]) -> None:
     try:
         ws.send(json.dumps(payload, ensure_ascii=False))
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)

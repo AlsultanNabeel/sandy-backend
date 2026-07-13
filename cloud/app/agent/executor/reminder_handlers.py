@@ -301,7 +301,7 @@ def handle_reminder_action(
                         )
                         parts.append(f"الوقت: {disp_dt.strftime('%I:%M %p')}")
                     except Exception:
-                        pass
+                        logger.debug("ignoring non-critical error", exc_info=True)
                 if new_recurrence:
                     parts.append("التكرار محدّث")
                 reply = f"✅ عدّلت تذكير '{current_text}'" + (

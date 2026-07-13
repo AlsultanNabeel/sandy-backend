@@ -29,7 +29,7 @@ final class FutureMessagesStore: LoadableStore {
             do {
                 messages = try await api.futureMessagesList()
             } catch {
-                if !error.isCancellation { notice = LanguageManager.shared.s("futureMessages.errorLoad") }
+                if !error.isCancellation { notify("futureMessages.errorLoad") }
             }
         }
         loadTask = task
@@ -41,11 +41,11 @@ final class FutureMessagesStore: LoadableStore {
         do {
             let iso = ISO8601DateFormatter().string(from: deliverAt)
             try await api.futureMessagesCreate(text: text, deliverAt: iso)
-            notice = ""
+            clearNotice()
             await load(api: api)
             return true
         } catch {
-            notice = LanguageManager.shared.s("futureMessages.errorAdd")
+            notify("futureMessages.errorAdd")
             return false
         }
     }
@@ -53,14 +53,11 @@ final class FutureMessagesStore: LoadableStore {
     /// حذف متفائل فوري ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, message: FutureMessage) {
         guard let idx = messages.firstIndex(where: { $0.id == message.id }) else { return }
-        messages.remove(at: idx)
-        Task { @MainActor in
-            do {
-                try await api.futureMessagesDelete(id: message.id)
-            } catch {
-                messages.insert(message, at: min(idx, messages.count))
-                notice = LanguageManager.shared.s("futureMessages.errorDelete")
-            }
-        }
+        optimistic(
+            "futureMessages.errorDelete",
+            apply: { self.messages.remove(at: idx) },
+            rollback: { self.messages.insert(message, at: min(idx, self.messages.count)) },
+            call: { try await api.futureMessagesDelete(id: message.id) }
+        )
     }
 }
