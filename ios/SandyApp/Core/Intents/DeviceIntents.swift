@@ -21,13 +21,12 @@ struct DeviceEntity: AppEntity {
     let controlType: String
     let state: String
 
-    static var typeDisplayRepresentation: TypeDisplayRepresentation {
-        TypeDisplayRepresentation(name: IntentAPI.say("جهاز", "Device"))
-    }
+    // مُولّد بيانات النوايا بيقرأ هالنصوص وقت البناء، فلازم تكون حرفية — ما بيقبل
+    // قيمة مبنية من دالة. الترجمة بتصير عبر كتالوج نصوص النظام، مش بالكود.
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Device")
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(label)",
-                              subtitle: room.isEmpty ? nil : "\(room)")
+        DisplayRepresentation(title: "\(label)", subtitle: "\(room)")
     }
 
     static var defaultQuery = DeviceQuery()
@@ -78,17 +77,15 @@ struct DeviceQuery: EntityStringQuery {
 enum DeviceCommand: String, AppEnum {
     case on, off, open, close, stop, pause
 
-    static var typeDisplayRepresentation: TypeDisplayRepresentation {
-        TypeDisplayRepresentation(name: IntentAPI.say("أمر", "Command"))
-    }
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Command")
 
     static var caseDisplayRepresentations: [DeviceCommand: DisplayRepresentation] = [
-        .on: DisplayRepresentation(title: IntentAPI.say("شغّل", "Turn on")),
-        .off: DisplayRepresentation(title: IntentAPI.say("طفّي", "Turn off")),
-        .open: DisplayRepresentation(title: IntentAPI.say("افتح", "Open")),
-        .close: DisplayRepresentation(title: IntentAPI.say("سكّر", "Close")),
-        .stop: DisplayRepresentation(title: IntentAPI.say("وقّف", "Stop")),
-        .pause: DisplayRepresentation(title: IntentAPI.say("علّق", "Pause")),
+        .on: DisplayRepresentation(title: "Turn on"),
+        .off: DisplayRepresentation(title: "Turn off"),
+        .open: DisplayRepresentation(title: "Open"),
+        .close: DisplayRepresentation(title: "Close"),
+        .stop: DisplayRepresentation(title: "Stop"),
+        .pause: DisplayRepresentation(title: "Pause"),
     ]
 
     /// جملة التأكيد اللي سيري بتقولها بعد ما ينفّذ الأمر.
