@@ -3,7 +3,7 @@ import SwiftUI
 
 /// ورقة إضافة كتاب جديد: العنوان (إلزامي) + الحالة + تفاصيل اختيارية
 /// (مؤلّف/تصنيف/صفحات). تُرسل عبر closure غير متزامن يرجّع نجاح/فشل ليتقرّر الإغلاق.
-private struct BookAddSheet: View {
+struct BookAddSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     let onSubmit: (_ title: String, _ status: String, _ author: String,
@@ -82,7 +82,7 @@ private struct BookAddSheet: View {
 
 
 /// ورقة تغيير حالة كتاب — منتقي بين الحالات الثلاث.
-private struct BookStatusSheet: View {
+struct BookStatusSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     let current: String
@@ -132,7 +132,7 @@ private struct BookStatusSheet: View {
 
 /// ورقة تعديل ميتاداتا الكتاب: مؤلّف/تصنيف/عدد صفحات/رابط غلاف. كل حقل اختياري —
 /// نرسل فقط الحقول اللي تغيّرت عن قيمتها الأصلية (تطابق additive meta بالباك-إند).
-private struct BookMetaSheet: View {
+struct BookMetaSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     let book: BookItem
@@ -213,7 +213,7 @@ private struct BookMetaSheet: View {
 
 
 /// ورقة إضافة ملاحظة حرة على كتاب — محرّر متعدّد الأسطر.
-private struct BookNoteSheet: View {
+struct BookNoteSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     let onSubmit: (_ text: String) async -> Bool
@@ -258,7 +258,7 @@ private struct BookNoteSheet: View {
 
 
 /// ورقة إضافة اقتباس من كتاب — نص الاقتباس + رقم صفحة اختياري.
-private struct BookQuoteSheet: View {
+struct BookQuoteSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     let onSubmit: (_ text: String, _ page: Int) async -> Bool
@@ -314,7 +314,7 @@ private struct BookQuoteSheet: View {
 
 
 /// ورقة هدف القراءة السنوي — عدد كتب (إلزامي للمعنى) + عدد صفحات اختياري.
-private struct BookGoalSheet: View {
+struct BookGoalSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var lang: LanguageManager
     let goal: BookGoal

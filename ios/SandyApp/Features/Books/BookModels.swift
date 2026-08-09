@@ -2,7 +2,7 @@ import SwiftUI
 
 
 /// تعريف لأي ورقة تخصّ كتابًا محدّدًا (لتمريرها لـ `.fullScreenCover(item:)`).
-private struct BookSheet: Identifiable {
+struct BookSheet: Identifiable {
     enum Kind { case status, meta, note, quote }
     let id = UUID()
     let kind: Kind

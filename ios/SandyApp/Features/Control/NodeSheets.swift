@@ -2,7 +2,7 @@ import SwiftUI
 
 
 /// شيت الربط: كود الوحدة (إلزامي) + اسم اختياري. الأخطاء بصوت ساندي.
-private struct NodePairSheet: View {
+struct NodePairSheet: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 
@@ -90,7 +90,7 @@ private struct NodePairSheet: View {
 
 
 /// شيت بسيط لإعادة تسمية وحدة مربوطة.
-private struct NodeRenameSheet: View {
+struct NodeRenameSheet: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 

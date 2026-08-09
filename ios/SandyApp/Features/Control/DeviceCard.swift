@@ -3,7 +3,7 @@ import SwiftUI
 
 /// بطاقة جهاز واحد: ترويسة (اسم + غرفة + حالة الاتصال) + أداة التحكّم المناسبة
 /// لنوعه. النقر المطوّل/القائمة السياقية تفتح التعديل أو الحذف.
-private struct DeviceCard: View {
+struct DeviceCard: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     let device: DeviceItem
@@ -287,7 +287,7 @@ private struct DeviceCard: View {
 
 /// بطاقة وحدة مربوطة: نقطة اتصال + اسم + عدد المخارج + الإصدار. القائمة السياقية
 /// تعيد التسمية أو تفكّ الربط.
-private struct NodeCard: View {
+struct NodeCard: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     let node: NodeItem

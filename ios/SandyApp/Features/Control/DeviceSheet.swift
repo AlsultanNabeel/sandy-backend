@@ -4,7 +4,7 @@ import SwiftUI
 /// شيت جهاز (إضافة أو تعديل): اسم + غرفة + نوع تحكّم + طريقة وصل (وحدة/مخرج أو
 /// موضوع MQTT خام) + ميتا حسب النوع (خيارات enum، حدّا dimmer) + صف تعليم زر
 /// للريموت. `existing` غير nil ⇒ وضع تعديل. الأخطاء بصوت ساندي.
-private struct DeviceSheet: View {
+struct DeviceSheet: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss

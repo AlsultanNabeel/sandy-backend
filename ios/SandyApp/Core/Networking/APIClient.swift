@@ -57,7 +57,12 @@ final class APIClient: APIClientProtocol {
         let resp: URLResponse
         do {
             (data, resp) = try await URLSession.shared.data(for: req)
-        } catch is URLError {
+        } catch let urlError as URLError {
+            // A cancelled request (e.g. a refresh superseded by a newer tap)
+            // must keep its cancellation identity so callers' isCancellation
+            // checks can suppress it — don't collapse it into a generic
+            // connection error (that showed a spurious "couldn't load" notice).
+            if urlError.code == .cancelled { throw urlError }
             // Offline, timed out, or connection dropped — all surface as one
             // clear "check your internet" error the UI can act on.
             throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)

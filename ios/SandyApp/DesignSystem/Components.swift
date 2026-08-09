@@ -401,7 +401,7 @@ struct HubList<Destination: View>: View {
 }
 
 /// بطاقة صف هَب — أيقونة داخل دائرة ملوّنة خفيفة + عنوان + وصف + chevron.
-private struct HubRowCard: View {
+struct HubRowCard: View {
     @EnvironmentObject private var lang: LanguageManager
     let spec: HubRowSpec
 

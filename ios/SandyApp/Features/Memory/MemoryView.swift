@@ -143,7 +143,7 @@ struct MemoryView: View {
 
 /// ورقة بسيطة: محرّر نص متعدّد الأسطر لمعلومة يتذكّرها ساندي عنك. `existing` غير
 /// nil ⇒ تعديل (تعبئة مسبقة). تُرسل عبر closure غير متزامن يرجّع نجاح/فشل.
-private struct MemorySheet: View {
+struct MemorySheet: View {
     let existing: MemoryFact?
     let onSubmit: (_ text: String) async -> Bool
 

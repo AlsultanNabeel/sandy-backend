@@ -12,7 +12,10 @@ final class HomeStore: LoadableStore {
     private var loadTask: Task<Void, Never>?
     private let orderKey = "sandy_home_order"
 
-    init() { loadOrder() }
+    override init() {
+        super.init()
+        loadOrder()
+    }
 
     /// يقرأ الترتيب المحفوظ ويُلحق أي عنصر جديد ما كان موجود (هجرة آمنة).
     func loadOrder() {

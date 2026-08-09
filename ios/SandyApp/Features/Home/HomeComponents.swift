@@ -3,7 +3,7 @@ import SwiftUI
 
 /// بطاقة لمحة صغيرة: أيقونة ملوّنة + رقم بارز + وصف + تلميح اختياري.
 /// النقر يبدّل للتبويب المناسب عبر closure.
-private struct GlanceCard: View {
+struct GlanceCard: View {
     let icon: String
     let tint: Color
     let value: String
@@ -49,7 +49,7 @@ private struct GlanceCard: View {
 
 
 /// بطاقة عريضة لأقرب تذكير: أيقونة + عنوان + وصف، قابلة للنقر.
-private struct GlanceWideCard: View {
+struct GlanceWideCard: View {
     let icon: String
     let tint: Color
     let title: String
@@ -121,8 +121,8 @@ private struct RevealModifier: ViewModifier {
 }
 
 
-private extension View {
-    /// يطبّق دخولًا متدرّجًا حسب الترتيب، يُعاد تشغيله عند تغيّر `key`.
+extension View {
+    /// يطبّق دخولًا متدرّجًا حسب الترتيب, يُعاد تشغيله عند تغيّر `key`.
     func reveal(order: Int, key: Int) -> some View {
         modifier(RevealModifier(order: order, key: key))
     }
@@ -131,7 +131,7 @@ private extension View {
 
 /// ورقة بسيطة لإعادة ترتيب عناصر الرئيسية بالجر: قائمة بوضع تحرير دائم وأيدي جر.
 /// كل نقلة تُحفظ فورًا، والرئيسية تعكسها مباشرة لأنها تقرأ نفس `store.order`.
-private struct HomeReorderSheet: View {
+struct HomeReorderSheet: View {
     @ObservedObject var store: HomeStore
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss

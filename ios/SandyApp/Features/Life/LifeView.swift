@@ -43,7 +43,7 @@ struct LifeView: View {
 
 /// حالة فاضية ودودة: أفاتار ساندي + سطر تشجيع عربي — بدل أيقونة باهتة.
 /// تطفو بنعومة لتعطي إحساس بالحياة.
-private struct LivelyEmptyState: View {
+struct LivelyEmptyState: View {
     let line: String
     var mood: SandyAvatar.Mood = .happy
 

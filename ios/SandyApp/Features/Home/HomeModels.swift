@@ -2,7 +2,7 @@ import SwiftUI
 
 
 /// يحمل عنوان الزر + التبويب الهدف للفعل السياقي.
-private struct ProactiveAction {
+struct ProactiveAction {
     let title: String
     let target: MainTab
 }

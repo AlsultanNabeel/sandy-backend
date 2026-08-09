@@ -1,5 +1,61 @@
 import Foundation
 
+/// رد قائمة الوحدات: عناصر الوحدة + علم البيانات التجريبية.
+private struct NodeListResponse: Decodable {
+    let items: [Row]?
+    let demo: Bool?
+
+    struct Row: Decodable {
+        let nodeId: String?
+        let label: String?
+        let capabilities: [String]?
+        let outputs: [String]?
+        let firmwareVersion: String?
+        let online: Bool?
+        let lastSeen: String?
+        let pairedAt: String?
+
+        enum CodingKeys: String, CodingKey {
+            case label, capabilities, outputs, online
+            case nodeId = "node_id"
+            case firmwareVersion = "firmware_version"
+            case lastSeen = "last_seen"
+            case pairedAt = "paired_at"
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            nodeId = try c.decodeIfPresent(String.self, forKey: .nodeId)
+            label = try c.decodeIfPresent(String.self, forKey: .label)
+            capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities)
+            firmwareVersion = try c.decodeIfPresent(String.self, forKey: .firmwareVersion)
+            online = try c.decodeIfPresent(Bool.self, forKey: .online)
+            lastSeen = try c.decodeIfPresent(String.self, forKey: .lastSeen)
+            pairedAt = try c.decodeIfPresent(String.self, forKey: .pairedAt)
+            // الباك يرسل outputs كمصفوفة كائنات {id, kind}، مش نصوص. نتساهل فنرجّع
+            // فاضي بدل ما نرمي — نفس سلوك (as? [String] ?? []) قبل التطبيع.
+            outputs = (try? c.decode([String].self, forKey: .outputs)) ?? []
+        }
+    }
+}
+
+/// رد ربط وحدة: المعرّف + هل كانت مربوطة سابقاً.
+private struct PairNodeResponse: Decodable {
+    let nodeId: String?
+    let already: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case already
+        case nodeId = "node_id"
+    }
+}
+
+/// رد آخر كود أشعة التقطته الوحدة.
+private struct NodeIrLastResponse: Decodable {
+    let code: String?
+    let at: String?
+}
+
 extension APIClient {
     func getDevices() async throws -> ListResult<DeviceItem> {
         let r = try await request("/api/devices")
@@ -70,74 +126,73 @@ extension APIClient {
 
     // DELETE /api/devices/<name> → {ok}
     func deleteDevice(name: String) async throws {
-        _ = try await request("/api/devices/\(enc(name))", method: "DELETE")
+        try await send("/api/devices/\(enc(name))", method: "DELETE")
     }
 
     // POST /api/devices/<name>/control {action,value?} → {ok,sent,payload}
     // أفعال حسب النوع: switch on|off؛ dimmer on|off أو set+قيمة رقمية؛
     // cover open|close|stop؛ media on|off|pause؛ enum set+قيمة؛ ir send+اسم زر.
     func controlDevice(name: String, action: String, value: String? = nil) async throws {
-        var body: [String: Any] = ["action": action]
+        var body: [String: String] = ["action": action]
         if let value, !value.isEmpty { body["value"] = value }
-        _ = try await request("/api/devices/\(enc(name))/control", method: "POST", body: body)
+        try await send("/api/devices/\(enc(name))/control", method: "POST", body: body)
     }
 
     // POST /api/devices/<name>/ir-learn {button,code} → {ok}
     // التقاط الكود الحقيقي يجي مع تحديث الوحدة لاحقًا — هلّق نحفظ اسم الزر (وكود إن توفّر).
     func irLearn(name: String, button: String, code: String = "") async throws {
-        _ = try await request("/api/devices/\(enc(name))/ir-learn", method: "POST",
-                              body: ["button": button, "code": code])
+        try await send("/api/devices/\(enc(name))/ir-learn", method: "POST",
+                       body: ["button": button, "code": code])
     }
 
     // ── التحكّم بالبيت: وحدات ساندي (الربط) ──────────────────────────────────
     // GET /api/nodes → {"items":[{node_id,label,capabilities,outputs,
     //                            firmware_version,online,last_seen,paired_at}], "demo":bool}
     func getNodes() async throws -> ListResult<NodeItem> {
-        let r = try await request("/api/nodes")
-        let items = r["items"] as? [[String: Any]] ?? []
-        let parsed: [NodeItem] = items.compactMap { row in
-            guard let id = row["node_id"] as? String, !id.isEmpty else { return nil }
+        let r: NodeListResponse = try await fetch("/api/nodes")
+        let parsed: [NodeItem] = (r.items ?? []).compactMap { row in
+            guard let id = row.nodeId, !id.isEmpty else { return nil }
             return NodeItem(nodeId: id,
-                            label: row["label"] as? String ?? id,
-                            capabilities: row["capabilities"] as? [String] ?? [],
-                            outputs: row["outputs"] as? [String] ?? [],
-                            firmwareVersion: row["firmware_version"] as? String ?? "",
-                            online: row["online"] as? Bool ?? false,
-                            lastSeen: row["last_seen"] as? String ?? "",
-                            pairedAt: row["paired_at"] as? String ?? "")
+                            label: row.label ?? id,
+                            capabilities: row.capabilities ?? [],
+                            outputs: row.outputs ?? [],
+                            firmwareVersion: row.firmwareVersion ?? "",
+                            online: row.online ?? false,
+                            lastSeen: row.lastSeen ?? "",
+                            pairedAt: row.pairedAt ?? "")
         }
-        return ListResult(items: parsed, demo: r["demo"] as? Bool ?? false)
+        return ListResult(items: parsed, demo: r.demo ?? false)
     }
 
     // POST /api/nodes/pair {code,label?} → {ok,node_id,already}
     @discardableResult
     func pairNode(code: String, label: String? = nil) async throws -> PairResult {
-        var body: [String: Any] = ["code": code]
+        var body: [String: String] = ["code": code]
         if let label, !label.isEmpty { body["label"] = label }
-        let r = try await request("/api/nodes/pair", method: "POST", body: body)
-        return PairResult(nodeId: r["node_id"] as? String ?? "",
-                          already: r["already"] as? Bool ?? false)
+        let r: PairNodeResponse = try await fetch("/api/nodes/pair", method: "POST", body: body)
+        return PairResult(nodeId: r.nodeId ?? "",
+                          already: r.already ?? false)
     }
 
     // PATCH /api/nodes/<node_id> {label} → {ok}
     func renameNode(nodeId: String, label: String) async throws {
-        _ = try await request("/api/nodes/\(enc(nodeId))", method: "PATCH",
-                              body: ["label": label])
+        try await send("/api/nodes/\(enc(nodeId))", method: "PATCH",
+                       body: ["label": label])
     }
 
     // DELETE /api/nodes/<node_id> → {ok}
     func unpairNode(nodeId: String) async throws {
-        _ = try await request("/api/nodes/\(enc(nodeId))", method: "DELETE")
+        try await send("/api/nodes/\(enc(nodeId))", method: "DELETE")
     }
 
     // POST /api/nodes/<node_id>/ir/learn → تضع الوحدة بوضع التعلّم (تلتقط الضغطة القادمة)
     func nodeIrLearnStart(nodeId: String) async throws {
-        _ = try await request("/api/nodes/\(enc(nodeId))/ir/learn", method: "POST", body: [:])
+        try await send("/api/nodes/\(enc(nodeId))/ir/learn", method: "POST", body: [String: String]())
     }
 
     // GET /api/nodes/<node_id>/ir/last → {code, at} — آخر كود أشعة التقطته الوحدة
     func nodeIrLast(nodeId: String) async throws -> (code: String, at: String) {
-        let r = try await request("/api/nodes/\(enc(nodeId))/ir/last")
-        return (r["code"] as? String ?? "", r["at"] as? String ?? "")
+        let r: NodeIrLastResponse = try await fetch("/api/nodes/\(enc(nodeId))/ir/last")
+        return (r.code ?? "", r.at ?? "")
     }
 }

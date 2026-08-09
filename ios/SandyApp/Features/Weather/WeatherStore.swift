@@ -10,7 +10,7 @@ final class WeatherStore: LoadableStore {
 
     private var loadTask: Task<Void, Never>?
 
-    init() {
+    override init() {
         city = UserDefaults.standard.string(forKey: Self.cityKey) ?? ""
     }
 
