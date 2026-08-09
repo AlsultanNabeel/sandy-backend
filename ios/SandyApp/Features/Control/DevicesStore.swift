@@ -124,7 +124,7 @@ final class DevicesStore: LoadableStore {
     /// تنبيه سيري إنّ قائمة الأجهزة تغيّرت حتى تعيد سحبها بدل ما تضل على
     /// النسخة المخزّنة (بدونها الجهاز الجديد بيتأخّر يظهر بالأوامر الصوتية).
     private func refreshSiriDevices() {
-        AppShortcuts.updateAppShortcutParameters()
+        SandyShortcuts.updateAppShortcutParameters()
     }
 
     // ── الوحدات: ربط/تسمية/فكّ ──
