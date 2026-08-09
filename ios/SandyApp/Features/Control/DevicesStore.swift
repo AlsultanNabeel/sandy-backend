@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 
 /// يملك الأجهزة + الوحدات والجلب والتحكّم والتعديلات، مستقل عن دورة حياة الشاشة.
@@ -8,6 +9,12 @@ final class DevicesStore: LoadableStore {
     @Published var nodes: [NodeItem] = []
 
     private var loadTask: Task<Void, Never>?
+    /// ذيل طابور أوامر التحكّم التسلسلي — كل أمر ينتظره قبل ما ينفّذ، فالأوامر
+    /// المتتابعة توصل العتاد بالترتيب بلا تسابق ولا إلغاء.
+    private var commandChain: Task<Void, Never>?
+    /// جيل آخر ضغطة تحكّم — نصالح (نعيد الجلب) مرة وحدة بعد آخر ضغطة بالدفعة
+    /// فقط، بدل إعادة جلب لكل ضغطة (كانت تسبّب عاصفة إعادات ورسائل خطأ عابرة).
+    private var controlGeneration = 0
 
     /// تجميع الأجهزة حسب الغرفة (الفاضية تتجمّع تحت "بدون غرفة")، مرتّبة بالاسم.
     struct RoomGroup { let room: String; let devices: [DeviceItem] }
@@ -47,6 +54,8 @@ final class DevicesStore: LoadableStore {
     }
 
     // ── التحكّم (متفائل: نعكس الحالة فورًا ثم نصالح بإعادة الجلب) ──
+    // الأوامر تُنفَّذ بطابور تسلسلي (FIFO): كل ضغطة تنتظر اللي قبلها تخلص، فعشر
+    // ضغطات سريعة توصل العتاد بالترتيب بلا تسابق — ولا يُلغى أي أمر.
     func control(api: APIClient, device: DeviceItem, action: String, value: String? = nil) {
         guard !demo else { return }
         // تحديث متفائل للحالة المعروضة.
@@ -59,16 +68,26 @@ final class DevicesStore: LoadableStore {
             default:              break
             }
         }
-        Task { @MainActor in
+        // اربط الأمر بذيل الطابور: ينتظر السابق ثم ينفّذ. فشل أمر ما يوقف الطابور.
+        controlGeneration &+= 1
+        let myGeneration = controlGeneration
+        let previous = commandChain
+        let command = Task { @MainActor in
+            await previous?.value
             do {
                 try await api.controlDevice(name: device.name, action: action, value: value)
-                await load(api: api)   // مصالحة مع الحالة الحقيقية من الباك-إند
             } catch {
                 if !error.isCancellation {
                     notify("control.controlFailed")
                 }
-                await load(api: api)
             }
+        }
+        commandChain = command
+        // مصالحة واحدة للدفعة كلها: آخر ضغطة بس تعيد الجلب بعد ما يفضى الطابور.
+        Task { @MainActor in
+            await command.value
+            guard myGeneration == controlGeneration else { return }
+            await load(api: api)
         }
     }
 
@@ -78,6 +97,7 @@ final class DevicesStore: LoadableStore {
                                 controlType: draft.controlType, transport: draft.transport,
                                 room: draft.room, meta: draft.meta)
         await load(api: api)
+        refreshSiriDevices()
     }
 
     func update(api: APIClient, device: DeviceItem, draft: DeviceDraft) async throws {
@@ -85,6 +105,7 @@ final class DevicesStore: LoadableStore {
                                    controlType: draft.controlType, transport: draft.transport,
                                    meta: draft.meta)
         await load(api: api)
+        refreshSiriDevices()
     }
 
     func delete(api: APIClient, device: DeviceItem) {
@@ -92,11 +113,18 @@ final class DevicesStore: LoadableStore {
         Task { @MainActor in
             do {
                 try await api.deleteDevice(name: device.name)
+                refreshSiriDevices()
             } catch {
                 notify("control.deleteFailed")
                 await load(api: api)
             }
         }
+    }
+
+    /// تنبيه سيري إنّ قائمة الأجهزة تغيّرت حتى تعيد سحبها بدل ما تضل على
+    /// النسخة المخزّنة (بدونها الجهاز الجديد بيتأخّر يظهر بالأوامر الصوتية).
+    private func refreshSiriDevices() {
+        AppShortcuts.updateAppShortcutParameters()
     }
 
     // ── الوحدات: ربط/تسمية/فكّ ──

@@ -46,10 +46,22 @@ enum IntentAPI {
 
 enum SandyIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notSignedIn
+    /// الأمر ما بيناسب نوع الجهاز (مثلاً إطفاء ستارة).
+    case commandNotSupported(String)
+    /// زر ريموت ما تعلّمته الوحدة بعد.
+    case buttonNotLearned(String, String)
+
     var localizedStringResource: LocalizedStringResource {
         switch self {
-        case .notSignedIn: return IntentAPI.say("افتح ساندي وسجّل دخول أول.",
-                                               "Open Sandy and sign in first.")
+        case .notSignedIn:
+            return IntentAPI.say("افتح ساندي وسجّل دخول أول.",
+                                 "Open Sandy and sign in first.")
+        case .commandNotSupported(let device):
+            return IntentAPI.say("\(device) ما بيقبل هالأمر.",
+                                 "\(device) doesn't support that command.")
+        case .buttonNotLearned(let button, let device):
+            return IntentAPI.say("زر \(button) مش متعلّم على \(device) بعد.",
+                                 "The \(button) button isn't learned on \(device) yet.")
         }
     }
 }
@@ -161,5 +173,22 @@ struct SandyShortcuts: AppShortcutsProvider {
                     phrases: ["أضف خاطرة في \(.applicationName)",
                               "Add a journal note in \(.applicationName)"],
                     shortTitle: "Add Journal Note", systemImageName: "book.closed.fill")
+        // أجهزة البيت — الجهاز بارامتر كيان، فسيري بتكمّل أي جهاز مضاف بالتطبيق.
+        AppShortcut(intent: ControlDeviceIntent(command: .on),
+                    phrases: ["شغّل \(\.$device) في \(.applicationName)",
+                              "Turn on \(\.$device) in \(.applicationName)"],
+                    shortTitle: "Turn On", systemImageName: "power")
+        AppShortcut(intent: ControlDeviceIntent(command: .off),
+                    phrases: ["طفّي \(\.$device) في \(.applicationName)",
+                              "Turn off \(\.$device) in \(.applicationName)"],
+                    shortTitle: "Turn Off", systemImageName: "power.circle")
+        AppShortcut(intent: ControlDeviceIntent(command: .open),
+                    phrases: ["افتح \(\.$device) في \(.applicationName)",
+                              "Open \(\.$device) in \(.applicationName)"],
+                    shortTitle: "Open", systemImageName: "curtains.open")
+        AppShortcut(intent: ControlDeviceIntent(command: .close),
+                    phrases: ["سكّر \(\.$device) في \(.applicationName)",
+                              "Close \(\.$device) in \(.applicationName)"],
+                    shortTitle: "Close", systemImageName: "curtains.closed")
     }
 }
