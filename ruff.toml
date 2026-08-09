@@ -1,0 +1,13 @@
+# Pin the lint rule set explicitly.
+#
+# Without this file ruff falls back to whatever its current default is, and that
+# default widens between releases — CI installs the newest ruff, so a green
+# checkout starts failing on thousands of style findings without a line of our
+# code changing. Listing the rules here keeps local and CI runs identical.
+#
+# E4/E7/E9 = pycodestyle errors that matter, F = pyflakes (real bugs: unused
+# names, undefined names, bad f-strings). Add prefixes deliberately, not by
+# upgrading the tool.
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
