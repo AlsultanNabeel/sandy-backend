@@ -244,3 +244,48 @@ def test_device_catalog_lists_registered_devices_only(db):
     assert "on|off" in catalog
     with as_tenant("t2"):
         assert build_device_catalog() == ""       # other tenant sees nothing
+
+
+# ── Per-tenant actuation ownership (replaces the old owner-only gate) ────────
+#
+# The actuation boundary used to ask "is the caller the owner?", which is the
+# right question for one person's house and the wrong one for a product other
+# people buy: a second tenant could register a device and then not be allowed to
+# switch it on. It now asks "does this topic belong to a device in the CALLING
+# tenant's registry?" — so everyone drives their own hardware, and nobody
+# reaches anyone else's.
+
+def test_tenant_owns_only_its_own_device_topic(db):
+    with as_tenant("tenant-a"):
+        _add_light(name="a_light")
+        assert device_store.tenant_owns_topic("room/cmd/light") is True
+
+    # Same topic string, different tenant, no device registered -> refused.
+    with as_tenant("tenant-b"):
+        assert device_store.tenant_owns_topic("room/cmd/light") is False
+
+
+def test_unknown_topic_is_refused_even_for_a_tenant_with_devices(db):
+    with as_tenant("tenant-a"):
+        _add_light(name="a_light")
+        assert device_store.tenant_owns_topic("room/cmd/curtain") is False
+        assert device_store.tenant_owns_topic("") is False
+
+
+def test_ownership_fails_closed_without_a_tenant(db):
+    # No active profile => no tenant => the scoped read returns nothing.
+    assert device_store.tenant_owns_topic("room/cmd/light") is False
+
+
+def test_node_transport_topic_is_owned_by_the_pairing_tenant(db):
+    with as_tenant("tenant-a"):
+        node_store.pair_node("sandybrain01", "عقل ساندي")
+        device_store.add_device(
+            name="face", label="وش ساندي", control_type="enum",
+            transport={"kind": "node", "node_id": "sandybrain01", "output": "mood"},
+            meta={"values": ["happy", "sad", "curious", "alert"]},
+        )
+        assert device_store.tenant_owns_topic("sandy/node/sandybrain01/mood") is True
+
+    with as_tenant("tenant-b"):
+        assert device_store.tenant_owns_topic("sandy/node/sandybrain01/mood") is False

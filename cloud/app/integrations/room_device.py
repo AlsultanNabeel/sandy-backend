@@ -58,10 +58,17 @@ _VALID_COLOR = {"warm", "cool", "white", "red", "green", "blue", "purple", "ambe
 
 
 def _caller_owns_room() -> bool:
-    """The room node is the owner's physical hardware. Actuation is enforced at
-    THIS boundary — not at call sites — so no path can drive the owner's room
-    without being the owner. Transitional until per-tenant device ownership lands
-    (Phase 5); then this becomes ``tenant_owns_device(current_tenant, "room")``.
+    """Gate for the LEGACY fixed ``room/cmd/*`` topics only.
+
+    Those topics carry no device identity: every room node ever flashed listens
+    on the same six strings, so one tenant's "lights off" would land in every
+    other tenant's room. Until the room node moves onto the per-node namespace
+    (``sandy/node/<node_id>/...``, the same one the robot brain uses), the only
+    safe answer here is "owner only".
+
+    This is NOT the gate for registered devices — those carry their own topic and
+    are checked by :func:`device_store.tenant_owns_topic`, which lets every tenant
+    drive their own hardware. See :meth:`RoomDeviceClient.send_to_topic`.
     """
     from app.utils.user_profiles import current_user_id, is_owner_chat_id
 
@@ -155,14 +162,21 @@ class RoomDeviceClient:
         """Publish a pre-validated payload to an arbitrary device topic.
 
         Used by the device registry, where each device carries its own MQTT topic
-        (the payload is already validated by device_store.command_payload). Gated on
-        ownership like every other actuation path — only the owner drives hardware.
+        (the payload is already validated by device_store.command_payload).
+
+        Ownership is enforced HERE, at the boundary, not at the call sites: the
+        topic must belong to a device registered to the **calling tenant**. That
+        check is a tenant-scoped read, so it is every tenant's own hardware that
+        opens up — and another tenant's topic that stays shut, even if a caller
+        upstream forgot to look. A tenant with no such device gets False.
         """
-        if not _caller_owns_room():
-            logger.warning("[room_device] send_to_topic refused for non-owner caller")
-            return False
         topic = (topic or "").strip()
         if not topic:
+            return False
+        from app.features.device_store import tenant_owns_topic
+
+        if not tenant_owns_topic(topic):
+            logger.warning("[room_device] send_to_topic refused: topic not owned by caller")
             return False
         return self._publish(topic, str(payload))
 

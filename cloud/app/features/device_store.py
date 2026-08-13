@@ -338,6 +338,29 @@ def device_topic(device: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def tenant_owns_topic(topic: str) -> bool:
+    """True when ``topic`` actuates a device registered to the CURRENT tenant.
+
+    The actuation boundary calls this instead of asking "is the caller the
+    owner?" — that older question had exactly one right answer and it was the
+    wrong shape for a product other people buy. Here the tenant-scoped read *is*
+    the enforcement: a topic that belongs to somebody else's device is simply not
+    in this tenant's collection, so it comes back False. No tenant, no database,
+    or no matching device all fail closed the same way.
+    """
+    coll = _coll()
+    if coll is None:
+        return False
+    topic = (topic or "").strip()
+    if not topic:
+        return False
+    try:
+        return any(device_topic(d) == topic for d in coll.find({}))
+    except Exception as e:  # noqa: BLE001 — a lookup failure must not actuate
+        logger.warning("[DeviceStore] ownership check failed for %s: %s", topic, e)
+        return False
+
+
 def _valid_transport(transport: Any) -> bool:
     if not isinstance(transport, dict):
         return False

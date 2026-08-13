@@ -26,14 +26,18 @@ def scene_apply(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
 
 
 def actuate_scene_actions(actions: list) -> bool:
-    """Apply a scene's actions to hardware (owner only). Registry devices go through
-    the validated path; unknown names fall back to the legacy room-node vocab.
-    Returns True if at least one action reached the broker."""
-    try:
-        from app.utils.user_profiles import current_user_id, is_owner_chat_id
+    """Apply a scene's actions to hardware. Registry devices go through the
+    validated path; unknown names fall back to the legacy room-node vocab.
+    Returns True if at least one action reached the broker.
 
-        if not is_owner_chat_id(current_user_id()):
-            return False
+    No owner check here any more. Scenes are a per-tenant feature, so gating the
+    whole function on "are you the owner" meant nobody else's scene could ever
+    move anything. Each path now carries its own, narrower gate: registry devices
+    are checked against the calling tenant's own registry inside
+    ``send_to_topic``, and the legacy fixed ``room/cmd/*`` vocab stays owner-only
+    inside ``client.send`` because those topics carry no device identity.
+    """
+    try:
         from app.features.device_store import command_payload, device_topic, get_device
         from app.integrations.room_device import get_room_device_client
 
