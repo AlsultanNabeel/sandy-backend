@@ -24,7 +24,13 @@ _GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts")
 _GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Aoede")
 
 # Request timeout (ms) so a hung synthesis fails fast instead of blocking voice.
-_GEMINI_TTS_TIMEOUT_MS = int(os.getenv("GEMINI_TTS_TIMEOUT_MS", "8000"))
+# Floor of 10s: Gemini rejects anything shorter outright with "Manually set
+# deadline 8s is too short", so the old 8s default made every single synthesis
+# fail with a 400 and the app lost its voice completely.
+_GEMINI_TTS_MIN_TIMEOUT_MS = 10000
+_GEMINI_TTS_TIMEOUT_MS = max(
+    int(os.getenv("GEMINI_TTS_TIMEOUT_MS", "12000")), _GEMINI_TTS_MIN_TIMEOUT_MS
+)
 
 # Module-level cached client (lazy singleton) — building genai.Client per call
 # redoes TLS/handshake setup. Cached on first use and reused, keyed by api_key.

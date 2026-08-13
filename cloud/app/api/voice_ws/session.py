@@ -8,7 +8,7 @@ import hmac as _hmac
 import json
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from app.api.voice_ws._config import (
     logger,
     _HMAC_KEY,
@@ -212,6 +212,71 @@ def _authenticate(ws, remote: str) -> bool:
 
 # Gemini Live session
 
+class _DeviceReader:
+    """Drains the device socket from the moment the session starts.
+
+    The robot streams audio the instant it is authenticated, but opening the Live
+    session first has to build the system instruction, pull memory and hand-shake
+    with Gemini — several seconds during which nothing was reading the socket. Its
+    frames piled up, the robot's own write blocked past its one-second timeout,
+    and it tore the call down before a single word got through. So reading starts
+    here, immediately, and the buffered audio is handed over once Live is up.
+
+    The buffer is bounded and drops the OLDEST frame when full: if setup runs long
+    the recent words matter, stale ones don't.
+    """
+
+    _FRAME_MS = 20  # the robot sends ~20ms of PCM per frame
+
+    def __init__(self, ws, buffer_ms: int = 8000):
+        self._ws = ws
+        self._q: asyncio.Queue = asyncio.Queue(maxsize=buffer_ms // self._FRAME_MS)
+        self._task: Optional[asyncio.Task] = None
+        self.dropped = 0
+
+    def start(self) -> "_DeviceReader":
+        self._task = asyncio.create_task(self._run())
+        return self
+
+    async def _run(self) -> None:
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                chunk = await loop.run_in_executor(None, self._ws.receive)
+            except Exception:  # device closed mid-session (ConnectionClosed)
+                break
+            if chunk is None:
+                break
+            if not isinstance(chunk, (bytes, bytearray)):
+                continue
+            if self._q.full():
+                try:
+                    self._q.get_nowait()
+                    self.dropped += 1
+                except asyncio.QueueEmpty:
+                    pass
+            self._q.put_nowait(bytes(chunk))
+        # Wake whoever is waiting so the bridge ends instead of hanging.
+        if self._q.full():
+            try:
+                self._q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        self._q.put_nowait(None)
+
+    async def frames(self):
+        """Yield PCM frames, oldest buffered first, until the device goes away."""
+        while True:
+            chunk = await self._q.get()
+            if chunk is None:
+                return
+            yield chunk
+
+    def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+
+
 async def _live_session(ws, remote: str) -> None:
     """Open a Gemini Live speech-to-speech session and bridge it to the device WS."""
     try:
@@ -221,6 +286,9 @@ async def _live_session(ws, remote: str) -> None:
         logger.error("[voice_ws] google-genai not installed")
         _send_json(ws, {"type": "error", "msg": "server_error"})
         return
+
+    # Start listening BEFORE the slow setup below — see _DeviceReader.
+    reader = _DeviceReader(ws).start()
 
     from app.config import GEMINI_API_KEY, GEMINI_TTS_VOICE
 
@@ -282,11 +350,17 @@ async def _live_session(ws, remote: str) -> None:
                 "[voice_ws] Gemini Live session opened for %s (gate=%s)", remote, gate_on
             )
 
+            if reader.dropped:
+                logger.warning(
+                    "[voice_ws] setup took long enough to drop %d buffered frames",
+                    reader.dropped,
+                )
+
             recent = _RecentAudio()
             if gate_on:
-                t_in = asyncio.create_task(_device_to_live(ws, session, recent))
+                t_in = asyncio.create_task(_device_to_live(reader, session, recent))
             else:
-                t_in = asyncio.create_task(_device_to_live_fast(ws, session))
+                t_in = asyncio.create_task(_device_to_live_fast(reader, session))
             t_out = asyncio.create_task(_live_to_device(ws, session, dispatcher, recent))
 
             done, pending = await asyncio.wait(
@@ -299,40 +373,43 @@ async def _live_session(ws, remote: str) -> None:
                     await t
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
-            # Retrieve exceptions from the finished side too, or asyncio logs a
-            # noisy "Task exception was never retrieved" after every disconnect.
+            # Name which side ended and why. Without this a silent clean exit on
+            # either bridge looked identical to a crash: the only thing in the log
+            # was the CancelledError of the OTHER task, which is a symptom, never
+            # the cause.
             for t in done:
-                if not t.cancelled() and t.exception():
-                    logger.info("[voice_ws] bridge task ended: %s", t.exception())
+                side = "device→live" if t is t_in else "live→device"
+                if t.cancelled():
+                    logger.info("[voice_ws] %s cancelled", side)
+                elif t.exception():
+                    logger.error(
+                        "[voice_ws] %s failed: %r", side, t.exception(),
+                        exc_info=t.exception(),
+                    )
+                else:
+                    logger.info("[voice_ws] %s ended cleanly, closing session", side)
 
     except Exception as exc:
         logger.error("[voice_ws] Live session error (%s): %s", remote, exc)
         _send_json(ws, {"type": "error", "msg": "live_error"})
+    finally:
+        reader.stop()
 
 
-async def _device_to_live_fast(ws, session) -> None:
+async def _device_to_live_fast(reader: "_DeviceReader", session) -> None:
     """تمرير مباشر للصوت — Gemini يكشف الدور تلقائياً (أسرع، يُستعمل لما التحقّق مطفّى).
 
     بلا VAD عندنا، بلا إشارات يدوية، بلا تحقّق — أقل تأخير ممكن للرد.
     """
     from google.genai import types
 
-    loop = asyncio.get_event_loop()
-    while True:
-        try:
-            chunk = await loop.run_in_executor(None, ws.receive)
-        except Exception:  # device closed mid-session (ConnectionClosed)
-            break
-        if chunk is None:
-            break
-        if not isinstance(chunk, (bytes, bytearray)):
-            continue
+    async for chunk in reader.frames():
         await session.send_realtime_input(
-            audio=types.Blob(data=bytes(chunk), mime_type="audio/pcm;rate=16000")
+            audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
         )
 
 
-async def _device_to_live(ws, session, recent: "_RecentAudio") -> None:
+async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio") -> None:
     """Read PCM frames from the device and stream to Live with manual turn control.
 
     We run our own VAD: on speech we open an activity, and on about 700ms of
@@ -343,7 +420,6 @@ async def _device_to_live(ws, session, recent: "_RecentAudio") -> None:
     from google.genai import types
     import numpy as np
 
-    loop = asyncio.get_event_loop()
     speaking = False
     silence_ms = 0.0
     utter_ms = 0.0
@@ -353,16 +429,7 @@ async def _device_to_live(ws, session, recent: "_RecentAudio") -> None:
             audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
         )
 
-    while True:
-        try:
-            chunk = await loop.run_in_executor(None, ws.receive)
-        except Exception:  # device closed mid-session (ConnectionClosed)
-            break
-        if chunk is None:
-            break
-        if not isinstance(chunk, (bytes, bytearray)):
-            continue
-        chunk = bytes(chunk)
+    async for chunk in reader.frames():
         samples = np.frombuffer(chunk, dtype="<i2")
         if samples.size == 0:
             continue
