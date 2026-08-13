@@ -1,315 +1,178 @@
 # Sandy
 
-Sandy is an AI companion that lives inside a small robot. She hears your voice,
-sees images, remembers your life, reads your mood, keeps your tasks and reminders,
-does web research, writes code, and controls her own body (face, head, camera).
-She runs on LangGraph with multi-agent function calling over Azure GPT-4o-mini,
-and she stays online 24/7 on Heroku.
+Sandy is a voice-first personal assistant. She lives in a small desktop robot and
+in companion apps for iPhone and Android. You talk, she answers in her own voice,
+she remembers you across sessions, and her personality can be tuned per user.
 
-> Goal number one: a fast voice robot. You talk, Sandy understands, Sandy talks
-> back, with almost no delay. Every decision in this project is measured against
-> that goal.
+> **Goal number one: low-latency voice.** You speak, Sandy understands, Sandy
+> answers back, with almost no delay. Every decision in this project is measured
+> against that goal.
 
----
-
-## Two ways to reach Sandy
-
-Same personality, same backend, same memory. Only the transport changes:
-
-| Way | Status | How it reaches you |
-|---|---|---|
-| Telegram | Live (and we leave it as is) | Text and voice notes in the Telegram app |
-| The robot | In progress | The ESP32-S3 streams audio over WebSocket, Sandy processes it and replies with voice from the device speaker, with almost no delay |
-
-Why two: a Telegram voice note is a file (record, upload, download), so it can
-never be real-time no matter how fast the backend is. The robot streams audio
-live instead of sending files.
+This repository holds the whole system: the backend, both mobile apps, and the
+firmware for every board.
 
 ---
 
-## What Sandy can do
+## How you reach her
 
-| Feature | Details |
+| Surface | What it is |
 |---|---|
-| Conversation | Text and voice, changing mood, short-term and long-term memory (MongoDB) |
-| Voice | STT with Azure Speech. TTS with Gemini 3.1 Flash TTS first, then Google or Azure as fallback. Tone follows her mood |
-| Tasks | Add, edit, complete, delete, priorities and projects. Stored in MongoDB, with a confirmation before anything destructive |
-| Reminders | Create, edit, snooze, delete. Recurring (daily/weekly/monthly), linked to tasks, snooze buttons in Telegram |
-| Life tracking | Shopping list (categories, price/qty memory, auto-linked to expenses), habits with streaks, expenses, journal, Bookly-style reading (author/category/star rating/format, notes & quotes, annual goal, streak & pages/day), and a Pomodoro focus mode bound to room scenes |
-| Room scenes | Saved scenes (study, read, brainstorm, relax, movie, sleep, morning, off) drive a room node over MQTT — lights, color, music, fan, curtain — with optional timed reverts per action |
-| Email (Gmail) | Read the inbox, send, reply, watch for important mail. Web inbox with actions: archive, turn into a task, Arabic summary, drafted replies |
-| Research | News, places, and deep web research with Exa |
-| Images | Generate and edit with Azure FLUX (DALL·E / gpt-image as fallback), plus image description with Vision |
-| Documents | Read and analyze TXT, PDF, DOCX, CSV, XLSX, JSON |
-| Memory | MongoDB plus an encrypted emotional long-term memory (Fernet) |
-| GitHub | Read commits, issues, PRs, and files over MCP |
-| Hardware | Control the face (25 moods), head, buzzer (6 melodies), and camera over MQTT, plus a separate room node (lights/color/music/fan/curtain) |
-| Reports | Cost reports for Heroku, Azure, AWS, and Google Cloud |
-| Project Builder | Build a whole feature or project in another repo after the owner approves (runs on the worker dyno) |
+| The robot | ESP32-S3 with a mic, speaker, display face, servo and sensors. Streams audio live to the backend over a WebSocket. |
+| iPhone app | SwiftUI client — chat, voice, and the control surface for the robot and room devices. |
+| Android app | Kotlin + Compose client against the same backend. Foundation stage. |
 
----
-
-## Web app (React)
-
-A bilingual (Arabic / English) React + Vite site. Same Sandy, same backend, in
-the browser. It lives in its own git repo under `frontend/`.
-
-- Pages: Home (an owner dashboard — quick-add, today's tasks/reminders/emails, plus reading/habits/spending/focus widgets and shortcuts; guests see a light welcome and the marketing lives on "Meet Sandy"), Studio (chat, search, and images, plus tabs for tasks, reminders, emails, focus, projects, my life, and the robot dashboard), Meet Sandy (voice, memory, timeline), Projects, Status, Privacy, Terms.
-- Focus tab: start a Pomodoro (focus/break/cycles bound to a room scene), watch the live phase/cycle/time-left, edit room scenes (per-action device/value plus timed reverts), and pick the robot's melody for each focus event. My Life tab: shopping, habits, expenses, journal, and the Bookly-style reading view with per-book detail, notes, quotes, and the annual goal.
-- Bilingual: an AR/EN toggle flips every string, the page direction (RTL/LTR), and the font (Cairo/Inter). Sandy answers in the active language. The site sends `lang` to `/api/agent` and `/api/analyze-image`, and she replies in that language with the same personality.
-- Owner vs guest: the owner logs in for full access (real tasks, reminders, emails, and life data, plus the full pipeline). Guests see demo data in the productivity tabs and get a rate-limited Sandy with in-chat owner approval.
-- Projects list: the Projects page reads the owner's GitHub repos and shows the ones tagged with the `sandy` topic that have Pages enabled, each as a live `iframe` preview. Projects that Sandy builds (repo plus `sandy` topic plus Pages, README stamped "Created by Sandy") show up here on their own.
+Same personality, same backend, same memory. Only the transport changes.
 
 ---
 
 ## Voice pipeline
 
-### Today (over Telegram)
-```
-voice note → download → Azure Speech STT → run_graph (LLM) → text right away
-                                                           → TTS in the background: Gemini → Google → Azure → voice note
-```
-- `SANDY_VOICE_ENABLED=0` turns voice off (text only).
-- The text reaches you right away. The audio follows on a separate thread, so the text is never held back.
+Real-time, not file-based. The robot streams raw audio and gets audio back:
 
-### The road to low latency
-1. Quick wins, keeping Telegram: cache the Gemini client and add timeouts, drop the extra summarization LLM call, fold routing from two LLM calls into one, stream STT instead of going through ffmpeg.
-2. Real-time, the robot: ESP32-S3 to WebSocket (WSS) streaming plus a streaming speech-to-speech engine.
-   - Recommended engine: Google Gemini Live API. Best Arabic and Levantine support, least friction (the project already uses `google-genai` and has a `GEMINI_API_KEY`), with built-in barge-in and tool calling.
-   - OpenAI Realtime API is the documented fallback. Amazon Nova Sonic is not recommended (weak Arabic).
+```
+mic (I2S)  →  firmware  →  wss://…/voice   (HMAC handshake, anti-replay)
+                              ↓
+                       voice_ws session
+                         ├─ speaker verification (local CAM++ via sherpa-onnx)
+                         ├─ voice activity detection
+                         ├─ tool dispatch (same tools as the text path)
+                         └─ memory write-back
+                              ↓
+                       Gemini Live  →  audio back  →  speaker + lip-sync
+```
 
-> Note: the old Nova attempt (`aws_nova_realtime.py`) was a broken placeholder, so it was deleted.
+The apps additionally fetch `POST /api/voice/tts` for Sandy's synthesized voice.
 
 ---
 
-## Tech stack
+## The agent
+
+One function-calling pass over the real tool schemas, then a fixed graph:
 
 ```
-Python 3.11              the backend
-Azure GPT-4o-mini        core brain: routing, intent, chat, Vision
-OpenAI (direct)          backup brain (fallback)
-Anthropic Claude Sonnet  self-coding only (via AWS Bedrock / Google Vertex)
-Azure FLUX + DALL·E      image generation and editing
-Gemini 3.1 Flash TTS     primary voice (plus Google/Azure fallback)
-Azure Speech             STT (hearing)
-LangGraph pipeline       RouterAgent → Specialist(FC) → soul → router → execute → response
-ToolRegistry/Dispatcher  FC system: 50+ tools (Python or MCP)
-MCPHub (Node.js)         GitHub MCP over JSON-RPC stdio
-MongoDB                  short-term + persistent + emotional memory, and the worker queue
-Fernet (cryptography)    encrypts the emotional memory
-Telegram Bot API         current user interface
-Exa                      web search
-Sentry / Langfuse        error monitoring plus LLM tracing
-Prometheus / Grafana     metrics plus dashboards
-ESP32 + MQTT             the physical hardware
-Heroku                   cloud deploy (web and worker dynos)
+fc_router  →  soul  →  router  →  ┬ pending  ┐
+                                  ├ execute  ├→  response
+                                  └ clarify  ┘
 ```
 
----
+- **fc_router** — a single model call sees all registered tools and either calls
+  one (or several) or replies in plain text.
+- **soul** — injects the persona, emotional context and wellness signals.
+- **execute** — runs the tool through the dispatcher.
+- **response** — shapes the final reply.
 
-## Architecture
+State flows through a single typed `SandyState`. No globals. Adding a capability
+means registering a tool, not editing the router.
 
-```
-User message (Telegram: text or voice)
-         ↓
-api/webhook.py (Flask) or polling: dedup, instant 200 OK, hand off to a thread
-         ↓
-api/telegram_handlers.py: voice? → download → STT (Azure)
-         ↓ text
-┌──────────────────────────────────────────────────────┐
-│                  agent/graph: run_graph()              │
-│                                                        │
-│  RouterAgent    classify category (chat/core/...)      │  (LLM call #1)
-│  Specialist+FC  fc_router → function_call + mood       │  (LLM call #2)
-│  soul_node      persona snippet + prefetch             │
-│  router_node    pending? clarify? execute?             │
-│      → execute / pending / clarify                     │  ToolDispatcher → Python or MCP
-│  response_node  template + persona → final reply       │
-└──────────────────────────────────────────────────────┘
-         ↓ text
-features/voice.py: text now, then TTS in the background (Gemini → Google → Azure)
-         ↓
-reply to user (text + voice)
+## Memory
 
-  Web dyno ──(Mongo queue)── Worker dyno (Project Builder)
-```
-
-FC mode: every action is a tool registered in `ToolRegistry` (through
-`setup.register_all_tools`) and run by `ToolDispatcher`. Adding a capability
-means adding a tool, not editing the router.
-
----
-
-## Humanization layer
-
-| System | Role |
+| Layer | Backing store |
 |---|---|
-| Emotional LTM | Encrypted (Fernet) emotional memory. Remembers feelings and situations |
-| Soul Vault | Persona snippets that change with mood (standard, empathetic, playful, formal) |
-| Dreams Engine | Thoughts and notes that build up in the background |
-| Interests / Style / Lessons / Relationships memory | Tracks interests, learns writing style, saves lessons and relationships |
-| Health Monitor + Anomaly Detector | Tracks sleep and activity patterns and notices odd changes |
+| Short-term conversation | MongoDB, TTL-expired, one document per chat |
+| Facts | MongoDB |
+| Semantic recall | MongoDB Vector Search, degrades safely without the index |
+| Emotional long-term | Encrypted (Fernet) |
 
-### Proactive features
-- Proactive Comfort: reassurance on its own when a hard mood shows up.
-- Proactive Context: daily notes plus accumulated context.
-- Briefings: morning briefing, evening summary, and weekly stats land in Telegram on a schedule.
-- Smart Silence: checks `SANDY_QUIET_HOURS` (default 23-7) before any proactive message.
-- Multi-Tool Chain: "add a task for tomorrow and remind me at 10" runs `task_add` then `reminder_create` from one message.
+Plus per-user tracking of interests, style, lessons, relationships and shared
+history — all of it feeding the persona.
 
----
+## Multi-tenancy
 
-## Project Builder (runs on the worker)
-
-The sanctioned way to build a whole feature or project in another repo after the
-owner approves:
-
-```
-Owner request → PLAN (Sonnet) → owner approval → build groups → PR
-```
-
-- 3 phases: PLAN (Sonnet writes structured JSON), Build (per-file content plus a strict validator), Finalize (wait_for_ci, then PR).
-- Safety limits: 3 attempts per task, up to 200 KB per file, up to 30 files, up to 8 groups, an isolated branch.
-- Graceful shutdown: if a Heroku redeploy lands mid-task, it checkpoints in MongoDB and the new worker picks up from the same point.
+Every data operation goes through `ScopedCollection` (`app/utils/tenant_db.py`),
+which stamps the caller's tenant onto every query and every insert. A caller
+cannot widen its own scope. With no database *or* no authenticated tenant it
+returns `None`, and every store treats that as "read nothing, write nothing".
 
 ---
 
-## Run locally
+## Features
+
+| Area | What it does |
+|---|---|
+| Conversation | Text and voice, mood-aware, short- and long-term memory |
+| Tasks & reminders | Create, edit, complete, delete; recurrence; confirmation before anything destructive |
+| Life tracking | Shopping, habits with streaks, expenses, journal, reading log, Pomodoro focus |
+| Room control | Saved scenes driving a room node over MQTT — lights, colour, music, fan, curtain |
+| Research | Web research and places lookup |
+| Images | Generation, editing and description |
+| Documents | TXT, PDF, DOCX, CSV, XLSX, JSON |
+| Push | APNs delivery for reminders and the daily nudge |
+
+---
+
+## Stack
+
+```
+Python 3.11 · Flask + gunicorn      backend
+MongoDB                             all memory and feature stores
+Azure OpenAI                        primary brain (routing, chat, vision)
+Gemini                              Live voice, TTS, and a routing fallback
+OpenAI · AWS Bedrock                further fallbacks
+Azure Speech                        speech to text
+Exa                                 web research
+ESP-IDF / Arduino · MQTT            firmware and device transport
+SwiftUI · Kotlin Compose            iPhone and Android clients
+Heroku                              deployment
+```
+
+---
+
+## Repository layout
+
+```
+cloud/            backend
+  app/agent/        graph · nodes · tools · executor · memory layers
+  app/api/          HTTP routes and the /voice WebSocket
+  app/features/     feature stores (tasks, reminders, life, devices …)
+  app/integrations/ external clients
+  app/utils/        tenancy, rate limiting, circuit breaker, profiles
+firmware/         ESP32-S3 robot brain (ESP-IDF, C)
+vision-core/      ESP32-CAM
+sandy/            classic ESP32 node
+room-node/        room controller (Arduino)
+ios/  android/    mobile clients
+tests/  scripts/
+```
+
+---
+
+## Running it
 
 ```bash
-git clone <repo> && cd Sandy
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# create .env at the repo root. Minimum to boot:
-#   TELEGRAM_BOT_TOKEN · OWNER_CHAT_ID · AZURE_OPENAI_ENDPOINT · AZURE_OPENAI_API_KEY · AZURE_OPENAI_CHAT_DEPLOYMENT
-#   (everything else is optional. A missing key only disables its own feature.)
+# create .env at the repo root — see .env.example for the full list.
+# Minimum to boot: AZURE_OPENAI_ENDPOINT · AZURE_OPENAI_API_KEY
+#                  AZURE_OPENAI_CHAT_DEPLOYMENT · MONGODB_URI · JWT_SECRET
+# Every other key is optional; a missing one only disables its own feature.
 
-# the web process (the assistant you chat with). Use polling locally:
-RUN_MODE=polling python cloud/sandy_agent.py
-
-# the worker (optional, needs MONGO_URI + GITHUB_TOKEN + GITHUB_DEFAULT_REPO):
-python cloud/sandy_worker.py
-```
-- The GitHub MCP server runs on Node 20.x (`@modelcontextprotocol/server-github`).
-
----
-
-## Deploy to Heroku
-
-```bash
-heroku git:remote -a sandy-robot
-heroku ps:scale web=1 worker=1 -a sandy-robot      # the worker needs Basic+ (Eco dynos sleep)
-heroku config:set TELEGRAM_BOT_TOKEN=... OWNER_CHAT_ID=... AZURE_OPENAI_ENDPOINT=... -a sandy-robot
-heroku config:set GOOGLE_CREDENTIALS_JSON="$(cat sandy-gcloud-key.json)" -a sandy-robot   # written to a file at boot
-git push heroku main
-```
-- `Procfile`: `web: python cloud/sandy_agent.py` · `worker: python cloud/sandy_worker.py`
-- Health: `GET /health`. Metrics: `GET /metrics` (Prometheus).
-- In webhook mode: set `RUN_MODE=webhook` plus `APP_URL` / `HEROKU_APP_DEFAULT_DOMAIN_NAME`.
-
----
-
-## Environment variables (the essentials)
-
-### Required
-```env
-TELEGRAM_BOT_TOKEN=          # bot token
-OWNER_CHAT_ID=              # owner chat (privileged)
-AZURE_OPENAI_ENDPOINT=      # core brain
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_CHAT_DEPLOYMENT=   # gpt-4o-mini
-MONGODB_URI=                # all memory (STM + persistent) + the worker queue
+python cloud/serve_api.py            # local dev server
 ```
 
-### Voice
-```env
-SANDY_VOICE_ENABLED=1
-GEMINI_API_KEY=                 # Gemini TTS (primary)
-GEMINI_TTS_MODEL=gemini-3.1-flash-tts
-GEMINI_TTS_VOICE=Aoede
-GOOGLE_TTS_VOICE=ar-XA-Chirp3-HD-Sulafat     # fallback
-AZURE_SPEECH_KEY=  AZURE_SPEECH_REGION=  AZURE_SPEECH_VOICE=ar-LB-LaylaNeural   # STT + fallback
-# per-mood tone: SANDY_TTS_STYLE_BASE / _HAPPY / _SAD / _PLAYFUL / _EMPATHETIC ...
+Production runs under gunicorn:
+
+```
+web: gunicorn --chdir cloud wsgi:app --workers 2 --threads 8 --timeout 120
 ```
 
-### Images and research
-```env
-AZURE_FLUX_ENDPOINT=  AZURE_FLUX_DEPLOYMENT=sandy-flux        # image generation
-AZURE_OPENAI_IMAGE_DEPLOYMENT=  AZURE_OPENAI_IMAGE_EDIT_DEPLOYMENT=   # DALL·E/gpt-image fallback
-EXA_API_KEY=  WEB_RESEARCH_PROVIDER=exa  GOOGLE_PLACES_API_KEY=
-```
-
-### Google / GitHub / Claude (optional)
-```env
-GOOGLE_CREDENTIALS_JSON=
-GITHUB_TOKEN=  GITHUB_DEFAULT_REPO=owner/repo  GITHUB_WEBHOOK_SECRET=
-AWS_ACCESS_KEY_ID=  AWS_SECRET_ACCESS_KEY=  AWS_REGION=us-east-1     # Claude/project builder
-CLAUDE_VERTEX_MODEL=claude-sonnet-4-5@20250929  VERTEX_REGION=us-east5
-```
-
-### Persona / hardware / monitoring (optional)
-```env
-SANDY_PERSONALITY=  SYSTEM_PROMPT_ADDITION=  SANDY_QUIET_HOURS=23-7  SANDY_LTM_KEY=
-SANDY_IP=192.168.1.100  CAM_IP=192.168.1.150  SANDY_MQTT_HOST=  SANDY_MQTT_USER=  SANDY_MQTT_PASS=
-SENTRY_DSN=  LANGFUSE_PUBLIC_KEY=  LANGFUSE_SECRET_KEY=  GRAFANA_CLOUD_REMOTE_WRITE_URL=
-```
-
-> Sandy runs without any optional service. A missing one only disables its own feature.
-
----
+Health check: `GET /health`.
 
 ## Tests
 
 ```bash
-python -m pytest tests/ -q                                 # all tests (~40 files, ~560 tests)
+python -m pytest tests/ -q
 python -m pytest tests/ --cov=cloud/app --cov-report=term-missing
-ruff check <changed files> && python -m py_compile <changed files>
-```
-> Note: the voice pipeline (voice, STT, TTS) has no automated tests yet. Contributions welcome.
-
----
-
-## Hardware
-
-| Device | IP | Description |
-|---|---|---|
-| Main ESP32 | 192.168.1.100 | current controller |
-| ESP32-CAM | 192.168.1.150 | camera |
-
-Components: TFT ST7789 240×240 display (face), SG90 servo (head), HC-SR04 distance
-sensor, buzzer, 18650 (2S) batteries plus Mini360.
-On the way (ordered): ESP32-S3 N16R8 (new brain, wake word), INMP441 microphone,
-MAX98357 amplifier plus speaker.
-Firmware lives in `sandy/` and `esp32cam_Camera/` (Arduino C++).
-
----
-
-## Project structure
-
-```
-Sandy/
-├── cloud/                      # the backend (Python)
-│   ├── sandy_agent.py          # web dyno entrypoint
-│   ├── sandy_worker.py         # worker dyno entrypoint (self-coding queue)
-│   └── app/
-│       ├── config.py  bootstrap.py
-│       ├── agent/              # graph/ · nodes/ · agents/ · tools/ · executor/ · facade/ · project_builder/ + humanization
-│       ├── api/                # webhook.py · telegram_handlers.py · telegram_runtime.py
-│       ├── features/           # voice · vision · images · research · gmail · email_watch · life stores (tasks/reminders/shopping/habits/expenses/journal/reading/focus/scene) · weather
-│       ├── integrations/       # azure · gemini_tts · google_tts · azure_speech · mongodb · mcp · exa · github · sandy_device(MQTT robot) · room_device(MQTT room node)
-│       ├── tools/              # heroku_tool · cost_tool
-│       └── utils/              # stm_config · rate_limiter · circuit_breaker · metrics · text · time ...
-├── sandy/  esp32cam_Camera/    # ESP32 firmware (Arduino C++)
-├── tests/                      # backend tests
-├── monitoring/                 # Prometheus + Grafana
-├── Procfile  requirements.txt  package.json
+ruff check cloud/ scripts/
 ```
 
----
+CI runs the suite plus `ruff`, `bandit`, and a guard that fails the build if a
+secret-looking file is ever committed.
 
-## The vision
+## Conventions
 
-Sandy is a small Jarvis. She understands you, remembers you, hears you, answers
-in her own voice, sees images, does research, keeps your life in order, and moves
-in the real world. Fast enough to feel like a conversation, not a command line.
+Code style and error-handling rules live in [CONVENTIONS.md](CONVENTIONS.md).
+Board wiring is documented in
+[firmware/brain-core/WIRING.md](firmware/brain-core/WIRING.md); build steps for
+the clients are in [ios/README_RUN.md](ios/README_RUN.md) and
+[android/README.md](android/README.md).
