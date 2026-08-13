@@ -24,6 +24,20 @@
 
 static const char *TAG = "main";
 
+// A part that fails to come up must not take the robot with it. ESP_ERROR_CHECK
+// around these turned a loose display ribbon, a clashing LEDC timer or an
+// unplugged sensor into an abort — i.e. a boot loop with no face, no wake word
+// and no log of what actually went wrong. Same principle as buzzer_play going
+// quiet when the buzzer isn't fitted, one level up: log it, skip it, keep going.
+#define TRY_INIT(name, call)                                                   \
+    do {                                                                       \
+        esp_err_t _e = (call);                                                 \
+        if (_e != ESP_OK) {                                                    \
+            ESP_LOGE(TAG, "%s init failed (%s) — running without it",          \
+                     (name), esp_err_to_name(_e));                             \
+        }                                                                      \
+    } while (0)
+
 // Global mood state — written by MQTT/touch/mic, read by face/buzzer
 volatile sandy_mood_t g_current_mood = MOOD_IDLE;
 
@@ -72,12 +86,13 @@ void app_main(void) {
     ESP_LOGI(TAG, "Sandy Brain S3 — booting (reset_reason=%d)", (int)esp_reset_reason());
 
     // ── Core services ─────────────────────────────────────────────────────────
-    ESP_ERROR_CHECK(nvs_sandy_init());
+    // NVS only holds the saved neck angle here; losing it costs a default pose.
+    TRY_INIT("nvs", nvs_sandy_init());
 #if ENABLE_WIFI
-    ESP_ERROR_CHECK(wifi_sandy_start());
+    TRY_INIT("wifi", wifi_sandy_start());
 #endif
 #if ENABLE_REMOTE
-    ESP_ERROR_CHECK(remote_init());   // OTA + remote log over WiFi
+    TRY_INIT("remote", remote_init());   // OTA + remote log over WiFi
     // Repeat the reset reason now that the remote log buffer exists — the
     // line at the top of app_main is UART-only (printed before the buffer).
     ESP_LOGI(TAG, "reset_reason=%d (9=brownout 4=panic 1=power-on)", (int)esp_reset_reason());
@@ -85,37 +100,37 @@ void app_main(void) {
 
     // ── Peripherals ───────────────────────────────────────────────────────────
 #if ENABLE_FACE
-    ESP_ERROR_CHECK(face_init());
+    TRY_INIT("face", face_init());
 #endif
 #if ENABLE_LED
-    led_init();   // non-fatal: a dead status LED shouldn't stop the robot
+    led_init();   // already non-fatal: a dead status LED shouldn't stop the robot
 #endif
 #if ENABLE_SERVO
-    ESP_ERROR_CHECK(servo_init());
+    TRY_INIT("servo", servo_init());
 #endif
 #if ENABLE_BUZZER
-    ESP_ERROR_CHECK(buzzer_init());
+    TRY_INIT("buzzer", buzzer_init());
 #endif
 #if ENABLE_SENSOR
-    ESP_ERROR_CHECK(sensor_init());
+    TRY_INIT("sensor", sensor_init());
 #endif
 #if ENABLE_MOTORS
-    ESP_ERROR_CHECK(motors_init());
+    TRY_INIT("motors", motors_init());
 #endif
 #if ENABLE_TOUCH
-    ESP_ERROR_CHECK(touch_init());
+    TRY_INIT("touch", touch_init());
 #endif
 #if ENABLE_MIC
-    ESP_ERROR_CHECK(mic_init());
+    TRY_INIT("mic", mic_init());
 #endif
 #if ENABLE_EARS
-    ESP_ERROR_CHECK(ears_init());
+    TRY_INIT("ears", ears_init());
 #endif
 #if ENABLE_SPK_TEST
-    ESP_ERROR_CHECK(spktest_init());
+    TRY_INIT("spk_test", spktest_init());
 #endif
 #if ENABLE_OTA
-    ESP_ERROR_CHECK(ota_init());
+    TRY_INIT("ota", ota_init());
 #endif
 
     // ── Network ───────────────────────────────────────────────────────────────
@@ -125,7 +140,7 @@ void app_main(void) {
 
     // ── Voice link (waits for Wi-Fi, then connects to /voice) ───────────────────
 #if ENABLE_VOICE
-    ESP_ERROR_CHECK(voice_init());
+    TRY_INIT("voice", voice_init());
 #endif
 
     ESP_LOGI(TAG, "all systems go");

@@ -253,13 +253,28 @@ static int build_hello(char *out, size_t out_len) {
 }
 
 
+// Every step is checked and reported instead of asserted: voice_task already
+// has a "voice disabled, carry on" path for a failed audio bring-up, and
+// ESP_ERROR_CHECK in here made that path unreachable — a mis-wired mic aborted
+// the board instead of leaving the display and the room commands working.
+#define I2S_TRY(what, call)                                                    \
+    do {                                                                       \
+        err = (call);                                                          \
+        if (err != ESP_OK) {                                                   \
+            ESP_LOGE(TAG, "i2s %s: %s", (what), esp_err_to_name(err));         \
+            goto fail;                                                         \
+        }                                                                      \
+    } while (0)
+
 static esp_err_t i2s_start(void) {
+    esp_err_t err;
+
     // Mic: two INMP441 on I2S_NUM_0, RX only, 32-bit STEREO (one mic per slot).
     // We read both slots — same as the proven sound-direction path — then mix
     // them down to mono for the cloud. Mono mode here read the wrong/empty slot
     // and only picked up a constant noise floor.
     i2s_chan_config_t rx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&rx_cfg, NULL, &s_rx_chan));
+    I2S_TRY("mic channel", i2s_new_channel(&rx_cfg, NULL, &s_rx_chan));
     i2s_std_config_t rx_std = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(VOICE_IN_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,
@@ -273,8 +288,8 @@ static esp_err_t i2s_start(void) {
             .invert_flags = {0},
         },
     };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_rx_chan, &rx_std));
-    ESP_ERROR_CHECK(i2s_channel_enable(s_rx_chan));
+    I2S_TRY("mic std mode", i2s_channel_init_std_mode(s_rx_chan, &rx_std));
+    I2S_TRY("mic enable", i2s_channel_enable(s_rx_chan));
 
     // Speaker: MAX98357 on I2S_NUM_1, TX only, 16-bit at 24 kHz (Gemini output).
     i2s_chan_config_t tx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
@@ -288,7 +303,7 @@ static esp_err_t i2s_start(void) {
     // what the adaptive filter can absorb (and makes barge-in cut faster).
     // Delivery jitter is the big PSRAM buffer's job, not the DMA's.
     tx_cfg.dma_frame_num = 240;
-    ESP_ERROR_CHECK(i2s_new_channel(&tx_cfg, &s_tx_chan, NULL));
+    I2S_TRY("amp channel", i2s_new_channel(&tx_cfg, &s_tx_chan, NULL));
     i2s_std_config_t tx_std = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(VOICE_OUT_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
@@ -302,7 +317,7 @@ static esp_err_t i2s_start(void) {
             .invert_flags = {0},
         },
     };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_tx_chan, &tx_std));
+    I2S_TRY("amp std mode", i2s_channel_init_std_mode(s_tx_chan, &tx_std));
     // Preload silence so the first DMA cycle doesn't blast whatever happened
     // to be in those buffers — the static heard at the first reply after a
     // power-on.
@@ -314,9 +329,26 @@ static esp_err_t i2s_start(void) {
         }
         (void)loaded;
     }
-    ESP_ERROR_CHECK(i2s_channel_enable(s_tx_chan));
+    I2S_TRY("amp enable", i2s_channel_enable(s_tx_chan));
     return ESP_OK;
+
+fail:
+    // Hand both channels back so a later retry (or another owner of the bus)
+    // isn't blocked by a half-built one. disable() may complain that a channel
+    // was never enabled — harmless, and we're already on the failure path.
+    if (s_tx_chan) {
+        i2s_channel_disable(s_tx_chan);
+        i2s_del_channel(s_tx_chan);
+        s_tx_chan = NULL;
+    }
+    if (s_rx_chan) {
+        i2s_channel_disable(s_rx_chan);
+        i2s_del_channel(s_rx_chan);
+        s_rx_chan = NULL;
+    }
+    return err;
 }
+#undef I2S_TRY
 
 
 // Plain substring check is enough for the small fixed control frames.
@@ -1071,7 +1103,11 @@ static void ws_close(void) {
 }
 
 static void voice_task(void *arg) {
-    while (!wifi_sandy_is_connected()) {
+    // Say so while waiting. Boot no longer blocks on Wi-Fi, so with the router
+    // down this task is the only thing still waiting — silently, until now, it
+    // looked exactly like a robot that had crashed.
+    for (int i = 0; !wifi_sandy_is_connected(); i++) {
+        if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
         vTaskDelay(pdMS_TO_TICKS(500));
     }
     sync_clock();
