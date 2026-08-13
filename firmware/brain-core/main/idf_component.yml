@@ -1,0 +1,8 @@
+dependencies:
+  espressif/esp-sr: "*"   # WakeNet on-device wake word engine
+  lvgl/lvgl: "~8.3.0"
+  espressif/esp_lcd_ili9341: "*"
+  espressif/esp_websocket_client: "^1.2.0"
+  # esp-mqtt moved out of core IDF into the registry in IDF 6.0.
+  espressif/mqtt: "*"
+  espressif/led_strip: "^3.0.0"   # on-board WS2812 status LED
