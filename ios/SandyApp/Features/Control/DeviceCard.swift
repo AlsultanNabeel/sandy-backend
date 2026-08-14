@@ -324,6 +324,19 @@ struct NodeCard: View {
                 }
             }
             Spacer(minLength: 0)
+
+            // فحص الجسم — بمكان بيّن ع البطاقة نفسها، مش مدفون بقائمة ضغطة
+            // طويلة. لو ما حدا لاقاه، ما إله قيمة.
+            if !store.demo {
+                NavigationLink {
+                    RobotTestView(store: store, node: node)
+                } label: {
+                    Image(systemName: "waveform.badge.magnifyingglass")
+                        .font(.system(size: Theme.Icon.md, weight: .semibold))
+                        .foregroundColor(Theme.Colors.accent)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .sandyCard()
         .contextMenu {

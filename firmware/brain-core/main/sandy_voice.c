@@ -1255,7 +1255,14 @@ static void voice_task(void *arg) {
     for (int i = 0; !wifi_sandy_is_connected(); i++) {
         // Say it on her face, not just here: "waiting for wifi" in a log nobody
         // is reading is indistinguishable from a robot that has crashed.
-        status_set(SANDY_ST_NO_WIFI);
+        //
+        // But not straight away. Associating and then waiting on DHCP takes a
+        // couple of seconds on an ordinary boot, and announcing "NO WI-FI" in
+        // that window is simply false — it put the banner on her face every
+        // single time she started, which teaches the owner to ignore it. Ten
+        // half-second passes is five seconds: far longer than a healthy boot,
+        // far shorter than a person's patience.
+        if (i >= 10) status_set(SANDY_ST_NO_WIFI);
         if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
         vTaskDelay(pdMS_TO_TICKS(500));
     }
@@ -1348,7 +1355,11 @@ static void voice_task(void *arg) {
     // Priority 6: below the audio pair (8/9) so capture and playback always win,
     // above the websocket's own task (7) is NOT wanted — this one is allowed to
     // wait, that is its entire job.
-    if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 4096, NULL, 6, NULL, 1) != pdPASS ||
+    // 3072, not 4096: task stacks come out of internal RAM, and internal RAM is
+    // the scarce thing on this board — it is what the TLS task needs to open a
+    // voice session at all. This task does one stream read and one send call; it
+    // does not go deep.
+    if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 3072, NULL, 6, NULL, 1) != pdPASS ||
         xTaskCreatePinnedToCore(spk_task, "voice_spk", 4096, NULL, 9, NULL, 1) != pdPASS ||
         xTaskCreatePinnedToCore(mic_task, "voice_mic", 5120, NULL, 8, NULL, 1) != pdPASS) {
         ESP_LOGE(TAG, "audio task create FAILED (heap_int free=%u largest=%u)",

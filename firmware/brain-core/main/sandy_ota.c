@@ -78,9 +78,16 @@ void ota_start_health_watch(void) {
         return;
     }
     if (st != ESP_OTA_IMG_PENDING_VERIFY) {
-        // An ordinary boot of an already-confirmed image, or a build without
-        // rollback enabled. Nothing is watching, nothing to prove.
+        // An ordinary boot of an already-confirmed image, a wired flash (which
+        // writes the app directly and leaves nothing pending), or a build with
+        // rollback off. Nothing is watching, nothing to prove.
+        //
+        // Logged rather than returning in silence: "did rollback arm?" is a
+        // question worth being able to answer from a boot log, and the answer
+        // after a cable flash is legitimately "not yet — it arms on the first
+        // over-the-air update".
         s_confirmed = true;
+        ESP_LOGI(TAG, "image state %d — nothing pending, rollback idle", (int)st);
         return;
     }
 

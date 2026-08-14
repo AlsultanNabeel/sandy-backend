@@ -313,8 +313,41 @@ struct NodeItem: Identifiable {
     var online: Bool
     let lastSeen: String             // ISO أو فاضي
     let pairedAt: String             // ISO أو فاضي
+    /// قراءات حيّة من آخر نبضة — مستوى كل مايك، والمكسب، والصوت.
+    /// فاضية للوحدات اللي ما بتبعث تليمتري (عقدة الغرفة مثلًا).
+    let telemetry: NodeTelemetry?
 
     var id: String { nodeId }
+}
+
+/// قراءات لحظية من اللوح. كلها اختيارية: النبضة بتكبر مع نسخ الفيرموير،
+/// والتطبيق لازم يشتغل مع لوح أقدم منه بلا ما يفشل.
+struct NodeTelemetry {
+    let micLeft: Int?          // ٠..١٠٠ — المستوى اللحظي
+    let micRight: Int?
+    let micLeftGain: Int?      // ٠..٣٠٠ — مية يعني بلا تغيير
+    let micRightGain: Int?
+    let micLeftMuted: Bool?
+    let micRightMuted: Bool?
+    let volume: Int?           // ٠..١٠٠
+    let noise: Int?            // ٠ مطفي، ١ خفيف، ٢ متوسط، ٣ قوي
+
+    /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
+    var hasMicReadings: Bool { micLeft != nil || micRight != nil }
+
+    init?(_ dict: [String: Any]?) {
+        guard let d = dict, !d.isEmpty else { return nil }
+        func i(_ k: String) -> Int? { (d[k] as? NSNumber)?.intValue }
+        func b(_ k: String) -> Bool? { d[k] as? Bool }
+        micLeft       = i("mic_l")
+        micRight      = i("mic_r")
+        micLeftGain   = i("mic_l_gain")
+        micRightGain  = i("mic_r_gain")
+        micLeftMuted  = b("mic_l_muted")
+        micRightMuted = b("mic_r_muted")
+        volume        = i("volume")
+        noise         = i("noise")
+    }
 }
 
 /// نتيجة ربط وحدة — المعرّف + هل كانت مربوطة من قبل.

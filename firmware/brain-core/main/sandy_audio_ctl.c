@@ -25,6 +25,13 @@ static volatile bool s_muted[MIC_COUNT] = { false, false };
 static volatile int  s_level[MIC_COUNT] = { 0, 0 };
 static volatile int  s_volume = 100;
 
+// Declared up here with the rest of the state, not down in the noise-suppression
+// section where they are used: audio_ctl_init() touches them and it is defined
+// before that section.
+static ns_handle_t       s_ns;
+static sandy_ns_level_t  s_ns_level = NS_OFF;
+static SemaphoreHandle_t s_ns_lock;   // rebuild vs. process
+
 static int clamp_gain(int v)
 {
     if (v < AUDIO_GAIN_MIN) return AUDIO_GAIN_MIN;
@@ -137,10 +144,6 @@ void mic_report_levels(int rms_l, int rms_r)
 }
 
 // ── Noise suppression ────────────────────────────────────────────────────────
-
-static ns_handle_t      s_ns;
-static sandy_ns_level_t s_ns_level = NS_OFF;
-static SemaphoreHandle_t s_ns_lock;   // rebuild vs. process
 
 // ns_pro_create's mode: 0 mild, 1 medium, 2 aggressive.
 static int ns_mode_for(sandy_ns_level_t l)

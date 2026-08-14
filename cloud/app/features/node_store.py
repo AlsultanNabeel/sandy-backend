@@ -92,7 +92,37 @@ def _public(d: Dict[str, Any]) -> Dict[str, Any]:
         "online": bool(d.get("online", False)),
         "last_seen": _iso(d.get("last_seen")),
         "paired_at": _iso(d.get("paired_at")),
+        # Live readings from the last heartbeat — mic levels, current gains,
+        # volume. A control screen needs these to draw a meter, and polling the
+        # node list it already polls beats inventing a second endpoint.
+        "telemetry": d.get("telemetry", {}),
     }
+
+
+# What a heartbeat is allowed to report about itself. An allowlist, not a
+# passthrough: the payload arrives over a shared broker from a device nobody has
+# authenticated, so it may not write arbitrary keys into the node document.
+_TELEMETRY_KEYS = {
+    "mic_l": int, "mic_r": int,
+    "mic_l_gain": int, "mic_r_gain": int,
+    "mic_l_muted": bool, "mic_r_muted": bool,
+    "volume": int, "noise": int,
+    "uptime": int, "heap": int, "distance": int, "mood": int,
+}
+
+
+def _clean_telemetry(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key, kind in _TELEMETRY_KEYS.items():
+        if key not in data:
+            continue
+        try:
+            out[key] = bool(data[key]) if kind is bool else int(data[key])
+        except (TypeError, ValueError):
+            continue   # a garbled field drops out; the rest still lands
+    return out
 
 
 def _clean_caps(caps: Any) -> List[str]:
@@ -250,7 +280,8 @@ def set_node_status(code: str, online: bool = True,
 def ingest_status(node_id: str, online: bool = True,
                   capabilities: Optional[List[str]] = None,
                   outputs: Optional[List[Dict[str, Any]]] = None,
-                  firmware_version: str = "") -> Dict[str, Any]:
+                  firmware_version: str = "",
+                  telemetry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Heartbeat update keyed by node_id (the firmware publishes by node_id, not
     code). Cross-tenant lookup on the raw collection; best-effort, never raises."""
     if get_db() is None:
@@ -263,6 +294,8 @@ def ingest_status(node_id: str, online: bool = True,
             update["outputs"] = _clean_outputs(outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
+        if telemetry is not None:
+            update["telemetry"] = _clean_telemetry(telemetry)
         node_id = (node_id or "").strip()
         r = get_db()[_COLL].update_one({"node_id": node_id}, {"$set": update})
         if r.matched_count == 0:

@@ -79,6 +79,10 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
             capabilities=data.get("capabilities"),
             outputs=data.get("outputs"),
             firmware_version=str(data.get("firmware_version", "")),
+            # The whole payload — node_store keeps only the fields it recognises.
+            # Filtering there rather than here keeps the allowlist next to the
+            # document it protects.
+            telemetry=data,
         )
     except Exception as e:  # noqa: BLE001 — ingest must never crash the loop
         logger.debug("[mqtt_ingest] message handling failed: %s", e)

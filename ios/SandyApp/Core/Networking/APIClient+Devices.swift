@@ -14,9 +14,10 @@ private struct NodeListResponse: Decodable {
         let online: Bool?
         let lastSeen: String?
         let pairedAt: String?
+        let telemetry: [String: Any]?
 
         enum CodingKeys: String, CodingKey {
-            case label, capabilities, outputs, online
+            case label, capabilities, outputs, online, telemetry
             case nodeId = "node_id"
             case firmwareVersion = "firmware_version"
             case lastSeen = "last_seen"
@@ -35,7 +36,35 @@ private struct NodeListResponse: Decodable {
             // الباك يرسل outputs كمصفوفة كائنات {id, kind}، مش نصوص. نتساهل فنرجّع
             // فاضي بدل ما نرمي — نفس سلوك (as? [String] ?? []) قبل التطبيع.
             outputs = (try? c.decode([String].self, forKey: .outputs)) ?? []
+            // قاموس أرقام وبوليان مختلطين — Decodable ما بيهضمه مباشرة، فبنفكّه
+            // يدويًا. غيابه مش خطأ: عقدة الغرفة ما بتبعث تليمتري أصلًا.
+            if let raw = try? c.decode([String: TelemetryValue].self, forKey: .telemetry) {
+                telemetry = raw.mapValues { $0.any }
+            } else {
+                telemetry = nil
+            }
         }
+    }
+}
+
+/// قيمة تليمتري وحدة — رقم أو بوليان. لازمنا وسيط لأن Swift ما بيفكّ
+/// قاموسًا مختلط الأنواع لحاله.
+private enum TelemetryValue: Decodable {
+    case int(Int), bool(Bool)
+
+    var any: Any {
+        switch self {
+        case .int(let v):  return NSNumber(value: v)
+        case .bool(let v): return v
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        // البوليان أولًا: بلغة سويفت، true بينفكّ كـ Int(1) لو جرّبنا الرقم قبله.
+        if let b = try? c.decode(Bool.self) { self = .bool(b); return }
+        if let i = try? c.decode(Int.self)  { self = .int(i);  return }
+        throw DecodingError.dataCorruptedError(in: c, debugDescription: "قيمة تليمتري غير مدعومة")
     }
 }
 
@@ -159,7 +188,8 @@ extension APIClient {
                             firmwareVersion: row.firmwareVersion ?? "",
                             online: row.online ?? false,
                             lastSeen: row.lastSeen ?? "",
-                            pairedAt: row.pairedAt ?? "")
+                            pairedAt: row.pairedAt ?? "",
+                            telemetry: NodeTelemetry(row.telemetry))
         }
         return ListResult(items: parsed, demo: r.demo ?? false)
     }

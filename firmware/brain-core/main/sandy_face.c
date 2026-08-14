@@ -342,6 +342,22 @@ static void mood_timer_cb(lv_timer_t *t) {
 // session is live; off → keep it hidden (normal face). Runs in the LVGL task —
 // face_set_focus (MQTT task) only updates the volatiles read here. The ring
 // counts down locally between cloud updates so it stays smooth.
+// Lives up here with the other timer callbacks, not down beside face_set_banner
+// where it belongs by topic: build_face() registers it, and build_face is defined
+// before that section.
+static void banner_timer_cb(lv_timer_t *t) {
+    (void)t;
+    if (!s_banner_dirty || s_banner == NULL) return;
+    s_banner_dirty = false;
+    if (s_banner_text[0] == '\0') {
+        lv_obj_add_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(s_banner, s_banner_text);
+    lv_obj_clear_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
+}
+
+
 static void focus_timer_cb(lv_timer_t *t) {
     int phase = s_focus_phase;
     bool hidden = lv_obj_has_flag(s_focus_panel, LV_OBJ_FLAG_HIDDEN);
@@ -674,19 +690,6 @@ void face_set_banner(const char *text) {
     strncpy(s_banner_text, text, sizeof(s_banner_text) - 1);
     s_banner_text[sizeof(s_banner_text) - 1] = '\0';
     s_banner_dirty = true;
-}
-
-
-static void banner_timer_cb(lv_timer_t *t) {
-    (void)t;
-    if (!s_banner_dirty || s_banner == NULL) return;
-    s_banner_dirty = false;
-    if (s_banner_text[0] == '\0') {
-        lv_obj_add_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-    lv_label_set_text(s_banner, s_banner_text);
-    lv_obj_clear_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
 }
 
 
