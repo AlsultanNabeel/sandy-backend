@@ -66,5 +66,6 @@ __MACOSX/
 # 📄 ملفات محلية فقط (دليل الـ AI + خطط داخلية)
 # ══════════════════════════════════════════════════════════════════════════════
 /CLAUDE.md
+/ARCHITECTURE_MAP.md
 /PRODUCT_MIGRATION_PLAN.md
 /PRODUCT_VISION.md
