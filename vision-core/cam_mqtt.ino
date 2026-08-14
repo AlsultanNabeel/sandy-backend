@@ -15,6 +15,33 @@ static unsigned long g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;
 #define SNAPSHOT_MIN_GAP_MS  1500
 static unsigned long g_lastSnapshotAtMs = 0;
 
+// ===== هوية العقدة =====
+// المواضيع بتنبنى مرة وحدة عند الإقلاع من كود الاقتران، بنفس التحويل تبع
+// الخادم (node_store.code_to_node_id): حروف صغيرة، وأرقام وحروف بس.
+static String g_topicRequest, g_topicCommand, g_topicSnapshot,
+              g_topicStatus,  g_topicEvent;
+
+static String camNodeId() {
+  String out;
+  const char* src = SANDY_PAIR_CODE;
+  for (size_t i = 0; src[i]; i++) {
+    char c = src[i];
+    if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) out += c;
+  }
+  return out;
+}
+
+static void camBuildTopics() {
+  String base = String(SANDY_TOPIC_ROOT) + camNodeId();
+  g_topicRequest  = base + TOPIC_SUFFIX_REQUEST;
+  g_topicCommand  = base + TOPIC_SUFFIX_COMMAND;
+  g_topicSnapshot = base + TOPIC_SUFFIX_SNAPSHOT;
+  g_topicStatus   = base + TOPIC_SUFFIX_STATUS;
+  g_topicEvent    = base + TOPIC_SUFFIX_EVENT;
+  g_log.printf("[MQTT] node id = %s\n", camNodeId().c_str());
+}
+
 static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String value;
   value.reserve(length);
@@ -24,12 +51,12 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String t(topic);
 
   // قناة الأوامر: كل قدرات الكاميرا (فلاش، إعدادات، بث، سلسلة لقطات)
-  if (t == TOPIC_CAM_COMMAND) {
+  if (t == g_topicCommand) {
     handleCamCommand(value);
     return;
   }
 
-  if (t == TOPIC_CAM_REQUEST) {
+  if (t == g_topicRequest) {
     g_log.println("[CB] matched cam/request");
     unsigned long now = millis();
     if (g_snapshotPending) {
@@ -63,6 +90,9 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void setupMQTT() {
+  // قبل أي اشتراك أو نشر: بلا مواضيع، كل رسالة بتروح ع "sandy/node//cam/..."
+  // وما في حدا سامع، والكاميرا بتبيّن شغّالة وهي فعليًا معزولة.
+  camBuildTopics();
   g_mqttTcp.setInsecure();
   g_mqtt.setServer(SANDY_MQTT_HOST, SANDY_MQTT_PORT);
   g_mqtt.setCallback(mqttCallback);
@@ -99,8 +129,8 @@ static bool mqttReconnect() {
                heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   if (g_mqtt.connect(clientId.c_str(), SANDY_MQTT_USER, SANDY_MQTT_PASS)) {
     g_log.println("[MQTT] connected");
-    g_mqtt.subscribe(TOPIC_CAM_REQUEST, 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
-    g_mqtt.subscribe(TOPIC_CAM_COMMAND, 0);
+    g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
+    g_mqtt.subscribe(g_topicCommand.c_str(), 0);
     g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;   // نجحنا → رجّع الانتظار لأصله
     publishFullStatus();                     // أول ما نتصل: عرّف عن حالك كاملة
     return true;
@@ -131,7 +161,7 @@ static void publishCamStatus() {
            g_cameraReady ? "true" : "false",
            flashIsOn() ? "true" : "false",
            camHttpRunning() ? "true" : "false");
-  g_mqtt.publish(TOPIC_CAM_STATUS, buf, false);
+  g_mqtt.publish(g_topicStatus.c_str(), buf, false);
 
   // heartbeat واضح ع التيلنت — يأكد إنو الـ loop شغّال
   g_log.printf("[HB] up=%lus rssi=%d heap=%u cam=%s mqtt=ok\n",
@@ -157,16 +187,16 @@ void updateMQTT() {
 // تُستخدم من cam_capture.ino لنشر chunk
 bool mqttPublishChunk(const char* payload, unsigned int len) {
   if (!g_mqtt.connected()) return false;
-  return g_mqtt.publish(TOPIC_CAM_SNAPSHOT, (const uint8_t*)payload, len, false);
+  return g_mqtt.publish(g_topicSnapshot.c_str(), (const uint8_t*)payload, len, false);
 }
 
 void mqttPublishEvent(const char* json) {
   if (!g_mqtt.connected()) return;
-  g_mqtt.publish(TOPIC_CAM_EVENT, json, false);
+  g_mqtt.publish(g_topicEvent.c_str(), json, false);
 }
 
 // حالة كاملة (كل الإعدادات) — أطول من الحالة الدورية، فبتنشر عند الطلب فقط
 bool mqttPublishStatusJson(const char* json) {
   if (!g_mqtt.connected()) return false;
-  return g_mqtt.publish(TOPIC_CAM_STATUS, json, false);
+  return g_mqtt.publish(g_topicStatus.c_str(), json, false);
 }

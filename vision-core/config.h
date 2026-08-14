@@ -79,11 +79,24 @@
 #define SANDY_OTA_HOSTNAME "sandy-esp32cam"
 
 // ===== Topics =====
-#define TOPIC_CAM_REQUEST   "sandy/cam/request"
-#define TOPIC_CAM_COMMAND   "sandy/cam/command"
-#define TOPIC_CAM_SNAPSHOT  "sandy/cam/snapshot"
-#define TOPIC_CAM_STATUS    "sandy/cam/status"
-#define TOPIC_CAM_EVENT     "sandy/cam/event"
+// المواضيع صارت تحت اسم الروبوت مش عامة: sandy/node/<كود>/cam/...
+//
+// كانت "sandy/cam/snapshot" وأخواتها — بتشتغل تمام طول ما في روبوت واحد بالعالم.
+// تنين ع نفس الوسيط، وكل كاميرا بترد ع طلب صاحب التاني. وهاي مش علة بتلاقيها
+// بالتجريب، هاي علة بيلاقيها تاني زبون.
+//
+// كرت الكاميرا بيجي بنفس علبة الروبوت وبينحرق بنفس كود الاقتران، فبيطلّع نفس
+// المعرّف. يعني روبوت واحد = عقدة وحدة، والكاميرا مخارج زيادة عليها — مش إشي
+// تاني لازم الزبون يقرنه لحاله.
+//
+// الاشتقاق لازم يطابق node_store.code_to_node_id بالخادم: حروف صغيرة، وأرقام
+// وحروف بس. لو اختلف طرف عن التاني، الكاميرا بتسكت وما في إشي بيقول ليش.
+#define SANDY_TOPIC_ROOT    "sandy/node/"
+#define TOPIC_SUFFIX_REQUEST   "/cam/request"
+#define TOPIC_SUFFIX_COMMAND   "/cam/command"
+#define TOPIC_SUFFIX_SNAPSHOT  "/cam/snapshot"
+#define TOPIC_SUFFIX_STATUS    "/cam/status"
+#define TOPIC_SUFFIX_EVENT     "/cam/event"
 
 // ===== Flash LED (AI-Thinker on-board white LED) =====
 // اللمبة البيضا اللي على ظهر اللوحة. قوية جداً، فمنشغّلها بنبضة عرض (PWM)
