@@ -22,6 +22,7 @@
 #include "sandy_remote.h"
 #include "sandy_led.h"
 #include "sandy_status.h"
+#include "sandy_audio_ctl.h"
 
 static const char *TAG = "main";
 
@@ -109,6 +110,9 @@ void app_main(void) {
     // After the face and the LED, because it drives both: from here on every
     // failure in any subsystem has somewhere to show itself.
     status_init();
+    // Before the mic and voice tasks start reading the gains, and before MQTT
+    // can be told to change them.
+    audio_ctl_init();
 #if ENABLE_SERVO
     TRY_INIT("servo", servo_init());
 #endif

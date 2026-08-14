@@ -55,6 +55,8 @@
 
 #include "sandy_wifi.h"
 #include "sandy_status.h"
+#include "sandy_audio_ctl.h"
+#include <math.h>   // sqrt for the per-mic level meters
 #if ENABLE_BUZZER
 #include "sandy_buzzer.h"
 #endif
@@ -542,6 +544,16 @@ static void spk_task(void *arg) {
                 s[i] = (int16_t)(((int32_t)s[i] * SPK_VOL_MUL) >> SPK_VOL_SHIFT);
             }
 #endif
+            // Runtime volume, on top of the compile-time trim above. Applied
+            // BEFORE the echo reference is taken, so the canceller sees what the
+            // amp will actually play — take it after and every volume change
+            // silently breaks echo cancellation.
+            {
+                int16_t *v = (int16_t *)buf;
+                for (int i = 0; i < (int)(n / sizeof(int16_t)); i++) {
+                    v[i] = spk_apply(v[i]);
+                }
+            }
 #if VOICE_AEC_ENABLE
             // Echo reference: exactly what the amp will play (post-volume),
             // downsampled 24k -> 16k (2 out of every 3 samples) to match the
@@ -915,9 +927,25 @@ static void mic_task(void *arg) {
 #if ENABLE_SERVO
         int64_t sum_dl = 0, sum_dr = 0;
 #endif
+        // Snapshot the per-mic controls once per frame, not once per sample: a
+        // setting that changes mid-frame would split one 100 ms block between two
+        // gains and click. Reading them here also keeps the inner loop branch-free
+        // on anything another task can write.
+        const int  gain_l  = mic_get_gain(MIC_LEFT);
+        const int  gain_r  = mic_get_gain(MIC_RIGHT);
+        const bool mute_l  = mic_is_muted(MIC_LEFT);
+        const bool mute_r  = mic_is_muted(MIC_RIGHT);
+        // Both channels feed the mix; a muted one contributes nothing, so the
+        // divisor has to follow or muting one mic would halve the volume of the
+        // other instead of isolating it.
+        const int  live    = (mute_l ? 0 : 1) + (mute_r ? 0 : 1);
+        int64_t sum_sq_l = 0, sum_sq_r = 0;   // per-mic level, for the meters
+
         for (int i = 0; i < frames; i++) {
-            int32_t l = raw[2 * i]     >> 16;
-            int32_t r = raw[2 * i + 1] >> 16;
+            int32_t l = mic_apply(raw[2 * i]     >> 16, gain_l, mute_l);
+            int32_t r = mic_apply(raw[2 * i + 1] >> 16, gain_r, mute_r);
+            sum_sq_l += (int64_t)l * l;
+            sum_sq_r += (int64_t)r * r;
 #if ENABLE_SERVO
             // Ears keep the old higher-gain view: they only matter for the wake
             // utterance (she's silent then, no clipping) and the extra bits
@@ -929,7 +957,7 @@ static void mic_task(void *arg) {
             ear_prev_l = le;
             ear_prev_r = re;
 #endif
-            int32_t x = (l + r) / 2;
+            int32_t x = live ? (l + r) / live : 0;
 
             int32_t y = x - dc_x1 + (dc_y1 - (dc_y1 >> 6));  // R ≈ 0.984
             dc_x1 = x;
@@ -943,6 +971,22 @@ static void mic_task(void *arg) {
         ear_l = (ear_l * 3 + (int)(sum_dl / (frames ? frames : 1))) / 4;
         ear_r = (ear_r * 3 + (int)(sum_dr / (frames ? frames : 1))) / 4;
 #endif
+        // Strip steady background noise — the fan, the AC — from the mixed mono
+        // before anything downstream sees it, so the wake word, the VAD and the
+        // cloud all get the same cleaned signal. MIC_FRAME_SAMPLES is 1600, an
+        // exact multiple of the suppressor's 160-sample block, so nothing is
+        // left over. No-op while the level is off.
+        ns_clean(pcm, frames);
+
+        // Per-mic RMS, post-gain and post-mute — so the meter shows what the mix
+        // is actually getting, not what the hardware captured. That is the whole
+        // point when you are testing one mic at a time: mute the left, speak, and
+        // only the right meter should move. If both move, they are cross-wired;
+        // if neither does, that mic is dead.
+        if (frames > 0) {
+            mic_report_levels((int)sqrt((double)(sum_sq_l / frames)),
+                              (int)sqrt((double)(sum_sq_r / frames)));
+        }
 
         bool sandy_talking = s_playing ||
                              (now_ms() - s_last_rx_audio_ms) < VOICE_HALF_DUPLEX_TAIL_MS;
@@ -1192,6 +1236,17 @@ static void ws_close(void) {
     }
     xSemaphoreGive(s_ws_mutex);
 }
+
+bool voice_play_local_pcm(const int16_t *pcm, size_t bytes) {
+    // Straight into the buffer spk_task already drains, so a locally generated
+    // sound travels the identical path as her cloud voice: same buffer, same
+    // volume, same amp. A test that used its own channel could pass while the
+    // real path was broken, which would make it worse than no test.
+    if (!s_spk_stream || !pcm || bytes == 0) return false;
+    if (xStreamBufferSpacesAvailable(s_spk_stream) < bytes) return false;
+    return xStreamBufferSend(s_spk_stream, pcm, bytes, pdMS_TO_TICKS(200)) == bytes;
+}
+
 
 static void voice_task(void *arg) {
     // Say so while waiting. Boot no longer blocks on Wi-Fi, so with the router

@@ -16,3 +16,10 @@
 #define SANDY_VOICE_WS_URI  "wss://YOUR_APP.herokuapp.com/voice"
 #define SANDY_WS_HMAC_KEY   "YOUR_WS_HMAC_KEY"
 #define SANDY_DEVICE_ID     "sandy-brain-s3"
+
+// The pairing code printed on this robot's box — the one its owner types into
+// the app once. The firmware derives its MQTT topics from it (lowercase,
+// alphanumerics only), so every robot answers only on its own tree:
+//   sandy/node/<derived>/mood, /servo, /volume, …
+// Unique per unit. Two robots sharing a code would obey each other's owner.
+#define SANDY_PAIR_CODE     "SANDY-0001"

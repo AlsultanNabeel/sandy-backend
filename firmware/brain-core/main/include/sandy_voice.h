@@ -18,3 +18,10 @@ bool voice_is_connected(void);
 // session not yet idle-closed). Other subsystems should leave the face and
 // neck alone while this is true.
 bool voice_session_is_active(void);
+
+// Play locally generated PCM (16 kHz, 16-bit, mono) through the speaker by
+// pushing it into the same buffer the cloud audio uses. Returns false if the
+// buffer is full. Used by the speaker test tone: going through this path rather
+// than opening a second I2S channel means a successful beep proves the real
+// output path — buffer, volume and amp — not a parallel one that happens to work.
+bool voice_play_local_pcm(const int16_t *pcm, size_t bytes);
