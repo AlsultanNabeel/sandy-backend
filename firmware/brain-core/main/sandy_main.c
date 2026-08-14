@@ -100,6 +100,17 @@ void app_main(void) {
     ESP_LOGI(TAG, "reset_reason=%d (9=brownout 4=panic 1=power-on)", (int)esp_reset_reason());
 #endif
 
+    // Outside the ENABLE_REMOTE guard on purpose. The bootloader marks a fresh
+    // image PENDING_VERIFY whether or not this build has an update server, so an
+    // image that never runs this call would roll back on every single reboot,
+    // forever — turning a config flag into a brick. The function itself decides
+    // what "healthy" can mean in this build.
+    //
+    // Here and not later: it only has to prove the board can still be *reached*,
+    // and Wi-Fi plus the update server are up by now. Tying it to the peripherals
+    // would let a dead servo roll back firmware you could otherwise fix remotely.
+    ota_start_health_watch();
+
     // ── Peripherals ───────────────────────────────────────────────────────────
 #if ENABLE_FACE
     TRY_INIT("face", face_init());
