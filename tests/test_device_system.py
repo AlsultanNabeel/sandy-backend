@@ -289,3 +289,89 @@ def test_node_transport_topic_is_owned_by_the_pairing_tenant(db):
 
     with as_tenant("tenant-b"):
         assert device_store.tenant_owns_topic("sandy/node/sandybrain01/mood") is False
+
+
+# ── The robot arrives with its own parts ─────────────────────────────────────
+#
+# Someone buys the robot, pairs it, opens the Control tab. Her face, her neck and
+# her mics have to be there already — they came in the box. But nothing may be
+# seeded from code: a board that does not report a servo must not show a neck.
+# So the hardware declares its outputs and the backend provisions what it hears.
+
+ROBOT_OUTPUTS = [
+    {"id": "mood", "kind": "pwm"},
+    {"id": "servo", "kind": "servo"},
+    {"id": "mic_l", "kind": "audio"},
+    {"id": "mic_r", "kind": "audio"},
+    {"id": "volume", "kind": "audio"},
+]
+
+
+def test_pairing_a_robot_gives_the_owner_its_parts(db):
+    from app.features import node_provision
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        # The board comes online and declares what it has.
+        node_store.ingest_status("sandybrain01", True, ["servo", "audio"],
+                                 ROBOT_OUTPUTS, "0.4.0")
+
+        names = {d["name"] for d in device_store.list_devices()}
+        assert "sandy_face" in names
+        assert "sandy_head" in names
+        assert "sandy_mic_left" in names and "sandy_mic_right" in names
+        assert "sandy_volume" in names
+        assert node_provision.PART_CATALOGUE["mood"]["control_type"] == "enum"
+
+
+def test_a_part_the_board_never_reported_does_not_appear(db):
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        # This unit has no neck and no buzzer.
+        node_store.ingest_status("sandybrain01", True, ["audio"],
+                                 [{"id": "mic_l", "kind": "audio"}], "0.4.0")
+
+        names = {d["name"] for d in device_store.list_devices()}
+        assert "sandy_mic_left" in names
+        assert "sandy_head" not in names
+        assert "sandy_buzzer" not in names
+
+
+def test_provisioned_parts_are_driveable_by_their_owner_only(db):
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, ["servo"],
+                                 ROBOT_OUTPUTS, "0.4.0")
+        face = device_store.get_device("sandy_face")
+        topic = device_store.device_topic(face)
+        assert topic == "sandy/node/sandybrain01/mood"
+        assert device_store.tenant_owns_topic(topic) is True
+
+    # Somebody else's robot is not theirs to drive.
+    with as_tenant("stranger"):
+        assert device_store.tenant_owns_topic("sandy/node/sandybrain01/mood") is False
+
+
+def test_provisioning_is_idempotent_and_keeps_owner_edits(db):
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [], ROBOT_OUTPUTS, "0.4.0")
+        device_store.update_device("sandy_head", label="رقبتها")
+
+        # A second heartbeat, and a firmware upgrade that adds a part.
+        node_store.ingest_status("sandybrain01", True, [],
+                                 ROBOT_OUTPUTS + [{"id": "noise", "kind": "audio"}],
+                                 "0.5.0")
+
+        devices = device_store.list_devices()
+        assert len([d for d in devices if d["name"] == "sandy_head"]) == 1
+        assert device_store.get_device("sandy_head")["label"] == "رقبتها"
+        assert "sandy_noise" in {d["name"] for d in devices}
+
+
+def test_an_unpaired_board_provisions_nothing(db):
+    # It is powered on and shouting into the broker before anyone typed its code.
+    res = node_store.ingest_status("nobodysnode", True, [], ROBOT_OUTPUTS, "0.4.0")
+    assert res["ok"] is False
+    with as_tenant("owner"):
+        assert device_store.list_devices() == []

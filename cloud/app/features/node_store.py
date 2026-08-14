@@ -121,6 +121,23 @@ def _clean_outputs(outputs: Any) -> List[Dict[str, Any]]:
 
 # ── Pairing ─────────────────────────────────────────────────────────────────
 
+def _provision(node_id: str, outputs: Any, label: str = "") -> None:
+    """Create the devices for a node's declared outputs, in the current tenant.
+
+    Best-effort and never raises: pairing must succeed even if provisioning does
+    not. A robot that paired but has no devices yet is recoverable — the next
+    heartbeat provisions it. A pairing that failed because provisioning threw
+    would leave the customer with a robot the app does not know about at all.
+    """
+    if not isinstance(outputs, list) or not outputs:
+        return
+    try:
+        from app.features.node_provision import provision_from_outputs
+        provision_from_outputs(node_id, outputs, label)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[NodeStore] provisioning %s failed: %s", node_id, e)
+
+
 def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     """Bind a factory pairing code to the current tenant.
 
@@ -137,6 +154,11 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
 
     existing = coll.find_one({"code_hash": code_hash})
     if existing is not None:
+        # Already ours. Still provision: the first pairing may have happened
+        # before the board ever sent a heartbeat, so this is where a robot that
+        # was paired offline finally gets its parts.
+        _provision(existing["node_id"], existing.get("outputs"),
+                   existing.get("label", ""))
         return {"ok": True, "node_id": existing["node_id"], "already": True}
 
     # node_id = the code itself (slugified) so the firmware's topic is deterministic.
@@ -241,9 +263,26 @@ def ingest_status(node_id: str, online: bool = True,
             update["outputs"] = _clean_outputs(outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
-        r = get_db()[_COLL].update_one({"node_id": (node_id or "").strip()},
-                                        {"$set": update})
-        return {"ok": r.matched_count > 0}
+        node_id = (node_id or "").strip()
+        r = get_db()[_COLL].update_one({"node_id": node_id}, {"$set": update})
+        if r.matched_count == 0:
+            # A heartbeat from a board nobody has paired yet. Normal: the robot
+            # is powered on and shouting its node_id into the broker, waiting for
+            # someone to type its code. Nothing to do until then.
+            return {"ok": False}
+
+        # Newly declared outputs become devices its owner can drive. Doing it
+        # here — rather than only at pairing — is what makes a firmware upgrade
+        # that adds a part show up in the app on its own, with nobody re-pairing
+        # anything.
+        if update.get("outputs"):
+            doc = get_db()[_COLL].find_one({"node_id": node_id},
+                                           {"user_id": 1, "label": 1})
+            if doc and doc.get("user_id"):
+                from app.features.node_provision import provision_for_owner
+                provision_for_owner(node_id, str(doc["user_id"]),
+                                    update["outputs"], str(doc.get("label", "")))
+        return {"ok": True}
     except Exception as e:  # noqa: BLE001
         logger.debug("[NodeStore] ingest_status failed: %s", e)
         return {"ok": False, "error": "exception"}
