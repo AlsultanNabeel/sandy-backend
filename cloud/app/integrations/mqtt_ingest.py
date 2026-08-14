@@ -30,6 +30,8 @@ except ImportError:
 
 _STATUS_SUB = "sandy/node/+/status"
 _IR_SUB = "sandy/node/+/ir/learned"
+# Photos come back split across many messages; camera_client holds the pieces.
+_CAM_SUB = "sandy/node/+/cam/snapshot"
 
 _started = False
 _lock = threading.Lock()
@@ -57,6 +59,13 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
                 set_last_ir(node_id, payload)
             return
 
+        if msg.topic.endswith("/cam/snapshot"):
+            # Straight through, unparsed and unstored: a photo belongs to
+            # whoever asked for it, and nobody may be waiting at all.
+            from app.integrations.camera_client import on_chunk
+            on_chunk(node_id, payload)
+            return
+
         # status (retained JSON heartbeat)
         data = {}
         if payload:
@@ -77,8 +86,11 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
 
 def _on_connect(client, userdata, flags, reason_code, properties=None) -> None:  # noqa: ANN001
     try:
-        client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1)])
-        logger.info("[mqtt_ingest] subscribed to node status + IR")
+        # QoS 0 for camera chunks on purpose: a photo is dozens of messages and
+        # QoS 1 would double the round trips on a link the robot already shares
+        # with live audio. A lost chunk means one retaken photo, not a lost one.
+        client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1), (_CAM_SUB, 0)])
+        logger.info("[mqtt_ingest] subscribed to node status + IR + camera")
     except Exception as e:  # noqa: BLE001
         logger.warning("[mqtt_ingest] subscribe failed: %s", e)
 
