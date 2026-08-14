@@ -21,6 +21,7 @@
 #include "sandy_spktest.h"
 #include "sandy_remote.h"
 #include "sandy_led.h"
+#include "sandy_status.h"
 
 static const char *TAG = "main";
 
@@ -105,6 +106,9 @@ void app_main(void) {
 #if ENABLE_LED
     led_init();   // already non-fatal: a dead status LED shouldn't stop the robot
 #endif
+    // After the face and the LED, because it drives both: from here on every
+    // failure in any subsystem has somewhere to show itself.
+    status_init();
 #if ENABLE_SERVO
     TRY_INIT("servo", servo_init());
 #endif

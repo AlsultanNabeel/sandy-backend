@@ -10,6 +10,12 @@ void      face_set_mood(sandy_mood_t mood);
 // The gaze holds briefly then drifts back to idle on its own.
 void      face_look(int pan);
 
+// A short status line across the bottom of the face — "NO WI-FI", "SLOW NET".
+// Pass "" to clear it. Latin only: Montserrat is the sole font in this build and
+// it carries no Arabic glyphs. Called from any task (Wi-Fi events, the websocket
+// callback); it only stores the string, the LVGL task draws it.
+void      face_set_banner(const char *text);
+
 // Focus-session countdown ring. phase: 0 = off, 1 = focus, 2 = break.
 // Called from the MQTT task — it only stores state; the LVGL task draws the
 // ring, alternating it with the normal face (≈5 s on / 5 s off).

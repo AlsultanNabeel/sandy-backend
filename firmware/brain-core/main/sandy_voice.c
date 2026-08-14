@@ -54,6 +54,7 @@
 #endif
 
 #include "sandy_wifi.h"
+#include "sandy_status.h"
 #if ENABLE_BUZZER
 #include "sandy_buzzer.h"
 #endif
@@ -86,6 +87,8 @@ static SemaphoreHandle_t s_ws_mutex;  // guards s_client create/send/destroy
 static i2s_chan_handle_t s_rx_chan;   // INMP441 mic
 static i2s_chan_handle_t s_tx_chan;   // MAX98357 amp
 static StreamBufferHandle_t s_spk_stream;   // server audio waiting to play
+static StreamBufferHandle_t s_tx_stream;    // mic audio waiting to go up
+static volatile uint32_t s_tx_drop_bytes;   // captured but the uplink was too far behind
 static volatile bool s_authed;
 static volatile int64_t s_last_rx_audio_ms;  // last time we got Sandy's audio
 static volatile bool s_playing;              // true only while actively playing audio
@@ -175,6 +178,22 @@ static const bool s_session_active = true;    // no gate: always streaming
 
 // ~100 ms frames at 16 kHz keep WebSocket overhead low without adding latency.
 #define MIC_FRAME_SAMPLES   1600
+
+// One contiguous internal block, roughly what esp_websocket_client needs for its
+// TLS task before it can start. Below this, "ws open failed" means out of RAM,
+// not off the network — and she should say so rather than blame the router.
+#define WS_TASK_MIN_BLOCK   20000
+
+// Uplink buffer. 128 KB of PSRAM ≈ 4 seconds of 16 kHz 16-bit mono, which is
+// how long a stall may last before audio starts being dropped. Sized from the
+// observed failures: the link stalls for about a second at a time here.
+#define TX_STREAM_BYTES        (128 * 1024)
+#define TX_CHUNK_BYTES         4096
+// Generous on purpose — this runs on its own task, so waiting costs nothing that
+// has to stay real-time, and riding out a stall keeps the call alive.
+#define TX_SEND_TIMEOUT_MS     4000
+// Half the buffer still queued means we are losing the race with real time.
+#define TX_BACKLOG_WARN_BYTES  (TX_STREAM_BYTES / 2)
 #define SPK_CHUNK_BYTES     1920    // ~40 ms at 24 kHz / 16-bit
 // Jitter buffer: hold this much before starting playback so uneven WiFi
 // delivery doesn't underrun the I2S and make Sandy's voice stutter.
@@ -377,6 +396,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
             if (text_has(ev->data_ptr, ev->data_len, "auth_ok")) {
                 s_authed = true;
                 s_link_lost_ms = 0;         // back on the air, drop the grace timer
+                status_set(SANDY_ST_OK);    // clears any banner from a past failure
                 VOICE_FACE(MOOD_FOCUSED);   // she's listening now
                 VOICE_LED(LED_STATE_LISTENING);
                 ESP_LOGI(TAG, "auth ok, streaming");
@@ -390,6 +410,15 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
             } else if (text_has(ev->data_ptr, ev->data_len, "end_turn")) {
                 s_squelch_until_ms = 0;   // stale turn fully drained server-side
                 ESP_LOGD(TAG, "end of Sandy's turn");
+            } else if (text_has(ev->data_ptr, ev->data_len, "auth_fail") ||
+                       text_has(ev->data_ptr, ev->data_len, "auth_not_configured") ||
+                       text_has(ev->data_ptr, ev->data_len, "bad_handshake") ||
+                       text_has(ev->data_ptr, ev->data_len, "replay")) {
+                // A configuration problem, not a network one: retrying will not
+                // fix a wrong key or a clock outside the replay window, so say
+                // so on her face instead of reconnecting forever in silence.
+                status_set(SANDY_ST_AUTH_FAILED);
+                ESP_LOGE(TAG, "server refused this device — check the key and the clock");
             } else if (text_has(ev->data_ptr, ev->data_len, "error")) {
                 ESP_LOGW(TAG, "server error frame");
             }
@@ -430,6 +459,11 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         // The client reconnects and re-sends hello on its own; note when we lost
         // it so the session manager waits for that instead of hanging up.
         if (s_session_active && !s_link_lost_ms) s_link_lost_ms = now_ms();
+        // Two different stories wear the same event. Mid-conversation it is a
+        // dropped link and she should say the call died; before ever getting
+        // authed it is a server we cannot reach at all. Telling them apart is
+        // the difference between "the net cut out" and "check your internet".
+        status_set(s_session_active ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
         ESP_LOGW(TAG, "disconnected");
         break;
     default:
@@ -755,16 +789,65 @@ static bool commands_feed(const int16_t *pcm, int n) {
 }
 #endif  // ENABLE_COMMANDS
 
-// Ship one chunk of mic audio up the WS. Drops it instead of blocking when the
-// session manager is mid-teardown — the mic loop must never stall, or the
-// wake-word listener stalls with it.
+// Queue one chunk of mic audio for the uplink. Never blocks and never touches
+// the socket.
+//
+// It used to write straight to the websocket from the mic loop with a one-second
+// patience, and that is what killed conversations on a weak link: the moment the
+// uplink stalled for longer than a second, esp_websocket_client declared the
+// transport dead ("transport_poll_write(0)"), tore the whole connection down and
+// waited five seconds to reconnect — longer than her eight-second listening
+// window, so the call was over before it came back. A one-second network hiccup
+// should cost a few milliseconds of audio, not the conversation.
+//
+// So the mic hands audio to a buffer and walks away. ws_tx_task drains it with a
+// patience the mic loop could never afford. When the buffer fills — a stall
+// longer than the buffer is deep — we drop the NEWEST audio and keep what is
+// already queued, because playing her the first half of a sentence in order
+// beats a jumbled second half.
 static void mic_send(const void *pcm, size_t bytes) {
-    if (xSemaphoreTake(s_ws_mutex, 0) != pdTRUE) return;
-    if (s_client && s_authed) {
-        esp_websocket_client_send_bin(s_client, (const char *)pcm, bytes,
-                                      pdMS_TO_TICKS(1000));
+    if (!s_tx_stream || !s_authed) return;
+    size_t room = xStreamBufferSpacesAvailable(s_tx_stream);
+    if (room < bytes) {
+        s_tx_drop_bytes += bytes;
+        return;
     }
-    xSemaphoreGive(s_ws_mutex);
+    xStreamBufferSend(s_tx_stream, pcm, bytes, 0);
+}
+
+
+// Drains the uplink buffer onto the socket. Its own task, so a slow write blocks
+// nothing that has to stay real-time — not the mic, not the wake word, not her
+// face.
+static void ws_tx_task(void *arg) {
+    (void)arg;
+    uint8_t *chunk = heap_caps_malloc(TX_CHUNK_BYTES, MALLOC_CAP_SPIRAM);
+    if (!chunk) {
+        ESP_LOGE(TAG, "uplink buffer alloc failed");
+        vTaskDelete(NULL);
+        return;
+    }
+    for (;;) {
+        size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES,
+                                        pdMS_TO_TICKS(100));
+        if (n == 0) continue;
+        if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(50)) != pdTRUE) continue;
+        if (s_client && s_authed) {
+            esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
+                                          pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
+        }
+        xSemaphoreGive(s_ws_mutex);
+
+        // A buffer that stays deep means the link cannot keep up with real-time
+        // audio. Say so — "slow net" is a different problem from "no net" and
+        // the person standing in front of her can act on it.
+        size_t queued = xStreamBufferBytesAvailable(s_tx_stream);
+        if (queued > TX_BACKLOG_WARN_BYTES) {
+            status_set(SANDY_ST_NET_SLOW);
+        } else if (s_authed && status_get() == SANDY_ST_NET_SLOW) {
+            status_set(SANDY_ST_OK);
+        }
+    }
 }
 
 #if ENABLE_WAKEWORD
@@ -1099,6 +1182,14 @@ static void ws_close(void) {
     // stop() is mid-flight and flip the flag back on for good (seen live:
     // authed=1 with no session, for minutes).
     s_authed = false;
+    // Whatever is still queued belongs to the call that just ended. Sending it
+    // into the next one would open the conversation with the tail of the last.
+    if (s_tx_stream) xStreamBufferReset(s_tx_stream);
+    if (s_tx_drop_bytes) {
+        ESP_LOGW(TAG, "uplink dropped %u bytes this session (link too slow)",
+                 (unsigned)s_tx_drop_bytes);
+        s_tx_drop_bytes = 0;
+    }
     xSemaphoreGive(s_ws_mutex);
 }
 
@@ -1107,9 +1198,16 @@ static void voice_task(void *arg) {
     // down this task is the only thing still waiting — silently, until now, it
     // looked exactly like a robot that had crashed.
     for (int i = 0; !wifi_sandy_is_connected(); i++) {
+        // Say it on her face, not just here: "waiting for wifi" in a log nobody
+        // is reading is indistinguishable from a robot that has crashed.
+        status_set(SANDY_ST_NO_WIFI);
         if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+    // Wi-Fi is up. Clear the banner now rather than waiting for a successful
+    // call: leaving "NO WI-FI" on screen after the router came back is its own
+    // kind of lie.
+    status_set(SANDY_ST_OK);
     sync_clock();
 
     if (i2s_start() != ESP_OK) {
@@ -1123,6 +1221,7 @@ static void voice_task(void *arg) {
     // than realtime, and the old 192 KB (~4 s) overflowed on them — the
     // overflow drops chopped whole pieces out of her sentences.
     s_spk_stream = xStreamBufferCreateWithCaps(1024 * 1024, 1, MALLOC_CAP_SPIRAM);
+    s_tx_stream  = xStreamBufferCreateWithCaps(TX_STREAM_BYTES, 1, MALLOC_CAP_SPIRAM);
 #if ENABLE_WAKEWORD
     s_preroll = xStreamBufferCreateWithCaps(PREROLL_BYTES, 1, MALLOC_CAP_SPIRAM);
 #endif
@@ -1191,7 +1290,11 @@ static void voice_task(void *arg) {
     // the higher priority so Sandy's voice never gets starved → no stutter.
     // Stacks live in internal RAM — if it's exhausted these fail SILENTLY and
     // voice just never answers, so check and shout.
-    if (xTaskCreatePinnedToCore(spk_task, "voice_spk", 4096, NULL, 9, NULL, 1) != pdPASS ||
+    // Priority 6: below the audio pair (8/9) so capture and playback always win,
+    // above the websocket's own task (7) is NOT wanted — this one is allowed to
+    // wait, that is its entire job.
+    if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 4096, NULL, 6, NULL, 1) != pdPASS ||
+        xTaskCreatePinnedToCore(spk_task, "voice_spk", 4096, NULL, 9, NULL, 1) != pdPASS ||
         xTaskCreatePinnedToCore(mic_task, "voice_mic", 5120, NULL, 8, NULL, 1) != pdPASS) {
         ESP_LOGE(TAG, "audio task create FAILED (heap_int free=%u largest=%u)",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -1231,13 +1334,34 @@ static void voice_task(void *arg) {
                     s_session_voice_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;
-                }
+                } else {
+                    // The silent freeze lived here. The wake word had already
+                    // put MOOD_CURIOUS on her face, and the only code that ever
+                    // clears it sits in the close branch below — which needs a
+                    // session that opened. So a failed open left her staring,
+                    // awake-looking and deaf, until someone power-cycled her.
+                    // Now she says which failure it was and goes back to idle.
+                    unsigned largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+                    ESP_LOGE(TAG, "ws open failed (int free=%u largest=%u)",
+                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                             largest);
+                    if (!wifi_sandy_is_connected()) {
+                        status_set(SANDY_ST_NO_WIFI);
+                    } else if (largest < WS_TASK_MIN_BLOCK) {
+                        // The websocket's TLS task needs one contiguous block;
+                        // total free being fine while the largest block is not
+                        // is exactly how this fails, so report the real reason.
+                        status_set(SANDY_ST_LOW_MEMORY);
+                    } else {
+                        status_set(SANDY_ST_NO_SERVER);
+                    }
 #if ENABLE_COMMANDS
-                // Open failed (WiFi blip mid-open): nothing to clean up, ws_open
-                // destroyed it all — but take the model back so the offline
-                // command words keep working until the next wake word.
-                else s_mn_want = true;
+                    // Nothing to clean up — ws_open destroyed it all — but take
+                    // the model back so the offline command words keep working
+                    // until the next wake word.
+                    s_mn_want = true;
 #endif
+                }
             }
         } else if (s_link_lost_ms && !s_authed) {
             // Link down mid-call. The mic can't refresh the activity timer while

@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 #include "esp_random.h"
 #include <stdio.h>
+#include <string.h>   // strncpy for the status banner
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -82,6 +83,12 @@ static lv_obj_t *s_focus_panel;    // full-screen cover that holds the ring
 static lv_obj_t *s_focus_ring;     // the countdown arc
 static lv_obj_t *s_focus_time;     // mm:ss in the middle
 static lv_obj_t *s_focus_status;   // "FOCUS" / "BREAK"
+
+// Status banner — the line that tells you WHY she is not answering. Written
+// from any task, drawn by the LVGL one, same split as the focus ring.
+static lv_obj_t *s_banner;
+static char      s_banner_text[24];
+static bool      s_banner_dirty;
 static volatile int     s_focus_phase = 0;       // 0 off, 1 focus, 2 break
 static volatile int     s_focus_remaining = 0;   // seconds, as last told by the cloud
 static volatile int     s_focus_total = 0;       // seconds in the current phase
@@ -551,6 +558,18 @@ static void build_face(void) {
     lv_label_set_text(s_focus_status, "FOCUS");
     lv_obj_align(s_focus_status, LV_ALIGN_CENTER, 0, -52);
 
+    // Status banner: bottom strip, above the face so a failure is never hidden
+    // behind an expression. Amber on black — readable across a room, which is
+    // the whole point of putting it on the robot instead of in a log.
+    s_banner = lv_label_create(lv_scr_act());
+    lv_obj_set_style_text_color(s_banner, lv_color_hex(0xFF8C00), 0);
+    lv_obj_set_style_bg_color(s_banner, C_BG, 0);
+    lv_obj_set_style_bg_opa(s_banner, LV_OPA_70, 0);
+    lv_obj_set_style_pad_all(s_banner, 4, 0);
+    lv_label_set_text(s_banner, "");
+    lv_obj_align(s_banner, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_add_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
+
     apply_look(MOOD_IDLE);
 
     // Animations: periodic blink + idle eye drift + dozing off when ignored.
@@ -559,6 +578,7 @@ static void build_face(void) {
     lv_timer_create(mood_timer_cb, 60, NULL);
     lv_timer_create(sleep_timer_cb, 10000, NULL);
     lv_timer_create(focus_timer_cb, 250, NULL);
+    lv_timer_create(banner_timer_cb, 200, NULL);
 #if FACE_DEMO
     lv_timer_create(demo_timer_cb, 5000, NULL);   // cycle all moods, 5 s each
 #endif
@@ -646,6 +666,29 @@ void face_set_mood(sandy_mood_t mood) {
         }
     }
 }
+
+void face_set_banner(const char *text) {
+    // strncpy + explicit terminator: this is called from the Wi-Fi and websocket
+    // event handlers, which must not block and must not fault on a long string.
+    if (text == NULL) text = "";
+    strncpy(s_banner_text, text, sizeof(s_banner_text) - 1);
+    s_banner_text[sizeof(s_banner_text) - 1] = '\0';
+    s_banner_dirty = true;
+}
+
+
+static void banner_timer_cb(lv_timer_t *t) {
+    (void)t;
+    if (!s_banner_dirty || s_banner == NULL) return;
+    s_banner_dirty = false;
+    if (s_banner_text[0] == '\0') {
+        lv_obj_add_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(s_banner, s_banner_text);
+    lv_obj_clear_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
+}
+
 
 void face_set_focus(int phase, int remaining_sec, int total_sec) {
     s_focus_phase     = phase;
