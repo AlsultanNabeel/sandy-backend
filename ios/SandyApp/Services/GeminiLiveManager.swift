@@ -159,7 +159,7 @@ private final class LiveAudioBridge {
         }
         return fmt
     }
-    private let playFormat = GeminiLiveManager.makePlayFormat()
+    private let playFormat = LiveAudioBridge.makePlayFormat()
 
     private let lock = NSLock()
     private var speaking = false
