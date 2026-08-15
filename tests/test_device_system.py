@@ -369,6 +369,53 @@ def test_provisioning_is_idempotent_and_keeps_owner_edits(db):
         assert "sandy_noise" in {d["name"] for d in devices}
 
 
+def test_a_firmware_upgrade_widens_an_existing_device_vocabulary(db):
+    """A part that learns new tricks must not stay stuck on the old menu.
+
+    This is a real regression. The speaker was provisioned when it had one sound;
+    firmware later gave it six, but provisioning skipped every device that already
+    existed, so the app kept offering the single sound it was born with and the
+    five new ones were unreachable. The upgrade looked like it had failed.
+
+    The owner's label stays theirs — only the accepted values follow the firmware,
+    because that list is the firmware's vocabulary, not a preference.
+    """
+    from app.features import node_provision
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [],
+                                 [{"id": "speaker_test", "kind": "audio"}], "0.5.0")
+        # Roll it back to the one-sound state a board provisioned before the
+        # upgrade would be sitting in.
+        device_store.update_device("sandy_speaker_test",
+                                   label="سماعتها", meta={"values": ["beep"]})
+
+        node_store.ingest_status("sandybrain01", True, [],
+                                 [{"id": "speaker_test", "kind": "audio"}], "0.6.0")
+
+        dev = device_store.get_device("sandy_speaker_test")
+        assert dev["meta"]["values"] == \
+            node_provision.PART_CATALOGUE["speaker_test"]["meta"]["values"]
+        assert len(dev["meta"]["values"]) > 1
+        assert dev["label"] == "سماعتها"   # still the owner's
+
+
+def test_a_settled_vocabulary_is_not_rewritten_every_heartbeat(db):
+    """A heartbeat lands every five seconds. If provisioning wrote on each one,
+    the refresh above would be a busy loop wearing on the database forever."""
+    from app.features.node_provision import provision_from_outputs
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        outs = [{"id": "speaker_test", "kind": "audio"}]
+        node_store.ingest_status("sandybrain01", True, [], outs, "0.6.0")
+
+        res = provision_from_outputs("sandybrain01", outs)
+        assert res["added"] == []
+        assert res["refreshed"] == []
+
+
 def test_an_unpaired_board_provisions_nothing(db):
     # It is powered on and shouting into the broker before anyone typed its code.
     res = node_store.ingest_status("nobodysnode", True, [], ROBOT_OUTPUTS, "0.4.0")

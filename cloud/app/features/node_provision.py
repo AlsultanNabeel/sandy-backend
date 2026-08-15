@@ -22,6 +22,15 @@ firmware to declare it and adding one row here.
 Provisioning is idempotent and additive: it never renames, reconfigures or
 deletes a device the owner has since customised, and re-running it after a
 firmware upgrade only fills in outputs that are new.
+
+With one deliberate exception, which cost an evening to find: the **vocabulary**
+of an enum is refreshed. A device's list of accepted values is not a preference
+the owner set, it is the set of things the firmware will answer to — and once a
+device row was created, the original code never touched it again. So a board
+upgraded from one speaker sound to six kept offering the single sound it was
+provisioned with, and the five new ones existed on the robot with no way to reach
+them. The upgrade looked like it had failed. Labels, rooms and control types stay
+the owner's; the value list follows the firmware.
 """
 
 from __future__ import annotations
@@ -136,6 +145,7 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
         return {"ok": False, "error": "bad_input"}
 
     added: List[str] = []
+    refreshed: List[str] = []
     skipped: List[str] = []
 
     for out in outputs:
@@ -151,8 +161,11 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
             continue
 
         name = spec["name"]
-        if get_device(name) is not None:
-            continue   # already provisioned, or the owner renamed/kept it
+        existing = get_device(name)
+        if existing is not None:
+            if _refresh_vocabulary(name, existing, spec):
+                refreshed.append(name)
+            continue   # already provisioned; the owner keeps their label and room
 
         res = add_device(
             name=name,
@@ -171,7 +184,39 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
 
     if added:
         logger.info("[provision] node %s: added %s", node_id, ", ".join(added))
-    return {"ok": True, "added": added, "unknown_outputs": skipped}
+    if refreshed:
+        logger.info("[provision] node %s: refreshed %s", node_id, ", ".join(refreshed))
+    return {"ok": True, "added": added, "refreshed": refreshed,
+            "unknown_outputs": skipped}
+
+
+def _refresh_vocabulary(name: str, existing: Dict[str, Any],
+                        spec: Dict[str, Any]) -> bool:
+    """Bring an existing device's accepted values in line with the catalogue.
+
+    Only the keys the catalogue owns are touched, and only when they actually
+    differ — a heartbeat arrives every five seconds, and a write per heartbeat
+    per device would be a busy loop disguised as provisioning. Anything else in
+    meta belongs to the owner and is carried across untouched.
+    """
+    from app.features.device_store import update_device
+
+    catalogue_meta = spec.get("meta") or {}
+    if not catalogue_meta:
+        return False
+    current = existing.get("meta") or {}
+    if not isinstance(current, dict):
+        current = {}
+
+    if all(current.get(k) == v for k, v in catalogue_meta.items()):
+        return False
+
+    merged = {**current, **catalogue_meta}
+    res = update_device(name, meta=merged)
+    if not res.get("ok"):
+        logger.warning("[provision] refresh %s failed: %s", name, res.get("error"))
+        return False
+    return True
 
 
 def provision_for_owner(node_id: str, owner_id: str,

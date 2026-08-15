@@ -32,6 +32,8 @@ struct RobotTestView: View {
         static let noise        = "sandy_noise"
         static let face         = "sandy_face"
         static let head         = "sandy_head"
+        static let gesture      = "sandy_gesture"
+        static let buzzer       = "sandy_buzzer"
     }
 
     /// نقرا الوحدة من الستور بكل رسمة، مش من النسخة اللي انمررت عند الفتح —
@@ -158,7 +160,15 @@ struct RobotTestView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader(title: lang.s("robot.test.body"))
             deviceRow(Part.face)
+            // الرقبة: الخط بيوصلها لزاوية، والحركات بتخليها تعني إشي. التنين
+            // فوق بعض قصدًا — «لف الراس ٦٠ درجة» و«أومي» تنين طلبين ع نفس
+            // القطعة، وفصلهم بشاشة بيخلي واحد منهم يضيع.
             deviceRow(Part.head)
+            deviceRow(Part.gesture)
+            Text(lang.s("robot.test.gesture.hint"))
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.secondaryText)
+            deviceRow(Part.buzzer)
         }
     }
 

@@ -39,8 +39,9 @@ enum L10nRobot {
             "test.mic.mutedValue":   .text("مكتوم"),
             "test.mic.right":        .text("المايك اليمين"),
             "test.speaker":          .text("السماعة"),
-            "test.speaker.hint":     .text("شغّل نغمة الفحص. بتمشي بنفس طريق صوتها الحقيقي، فلو سمعتها معناها المسار كله سليم."),
+            "test.speaker.hint":     .text("اختر صوت وشغّله. بيمشي بنفس طريق صوتها الحقيقي، فلو سمعته معناها المسار كله سليم. جرّب «المسح» بالذات — سماعة بمشغّل ميت بتنجح بنغمة وحدة وبتفشل بالمسح."),
             "test.body":             .text("الوش والرقبة"),
+            "test.gesture.hint":     .text("الخط فوق بيلف الرقبة لزاوية محدّدة. الحركات بتخليها تعني إشي — بتومي، بتهزّ، بتترنّح، وبترجع لمحلها لحالها."),
             "test.offline":          .text("الروبوت مش متّصل هلّق. رح تشوف آخر قراءة وصلتني، بس الأوامر ما رح توصله."),
         ],
         en: [
@@ -72,8 +73,9 @@ enum L10nRobot {
             "test.mic.mutedValue":   .text("muted"),
             "test.mic.right":        .text("Right microphone"),
             "test.speaker":          .text("Speaker"),
-            "test.speaker.hint":     .text("Play the test tone. It travels the same path as her real voice, so hearing it means the whole output path works."),
+            "test.speaker.hint":     .text("Pick a sound and play it. It travels the same path as her real voice, so hearing it means the whole output path works. Try the sweep especially — a speaker with a dead driver passes a single tone and fails a sweep."),
             "test.body":             .text("Face and neck"),
+            "test.gesture.hint":     .text("The slider above turns her neck to an angle. The gestures make it mean something — she nods, shakes, tilts, and returns home on her own."),
             "test.offline":          .text("The robot is offline right now. You'll see the last readings I got, but commands won't reach it."),
         ]
     )
