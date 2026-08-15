@@ -99,6 +99,29 @@ static int16_t  s_eye_l_x0, s_eye_r_x0;   // resting eye positions
 static int64_t  s_look_until_ms;          // hold gaze toward a sound until this time
 static volatile int64_t s_last_active_ms; // last interaction, for the sleep timer
 
+// ── The stuck-face watchdog ──────────────────────────────────────────────────
+//
+// See the note on face_set_session_active() in the header for why this exists.
+// Short version: an expression that outlives its session is a bug that has
+// already happened once, and telling each new code path to remember to clean up
+// is not a fix — it is the same bug waiting for the next author.
+//
+// A transient expression is one that only makes sense while a conversation is
+// happening: curious (she just heard her name), focused (listening), happy
+// (talking). Anything else — idle, worried, the error faces — is allowed to
+// stay, because those are states in their own right.
+static volatile int64_t s_mood_set_ms;    // when the current expression started
+static volatile bool    s_session_live;   // a voice session is genuinely open
+
+// Generous on purpose: the normal gap between hearing the wake word and the
+// session opening is a second or two, and a slow network can stretch it. Six
+// seconds is far beyond any healthy case and far under a person's patience.
+#define FACE_STUCK_AFTER_MS 6000
+
+static bool mood_is_transient(sandy_mood_t m) {
+    return m == MOOD_CURIOUS || m == MOOD_FOCUSED || m == MOOD_HAPPY;
+}
+
 // ─── Mood → look ──────────────────────────────────────────────────────────────
 typedef enum { MO_NEUTRAL, MO_SMILE, MO_BIG_SMILE, MO_FROWN, MO_OPEN, MO_FLAT, MO_SMIRK } mouth_t;
 
@@ -345,6 +368,28 @@ static void mood_timer_cb(lv_timer_t *t) {
 // Lives up here with the other timer callbacks, not down beside face_set_banner
 // where it belongs by topic: build_face() registers it, and build_face is defined
 // before that section.
+// Runs every half second and asks one question: is she wearing a face that only
+// makes sense during a conversation, while no conversation is happening?
+//
+// It does not know or care *why*. That is the design. The previous freeze was a
+// failed socket open on a path that forgot to reset the face; the next one will
+// be something nobody has thought of yet, and this catches that one too.
+static void stuck_face_timer_cb(lv_timer_t *t) {
+    (void)t;
+    if (s_session_live) return;
+    if (!mood_is_transient(s_mood)) return;
+
+    int64_t now = esp_timer_get_time() / 1000;
+    if (s_mood_set_ms == 0 || now - s_mood_set_ms < FACE_STUCK_AFTER_MS) return;
+
+    // Logged as a warning, not silently corrected: this firing means something
+    // upstream failed without saying so, and that is worth finding.
+    ESP_LOGW(TAG, "expression %d stuck %lldms with no session — back to idle",
+             (int)s_mood, now - s_mood_set_ms);
+    face_set_mood(MOOD_IDLE);
+}
+
+
 static void banner_timer_cb(lv_timer_t *t) {
     (void)t;
     if (!s_banner_dirty || s_banner == NULL) return;
@@ -595,6 +640,7 @@ static void build_face(void) {
     lv_timer_create(sleep_timer_cb, 10000, NULL);
     lv_timer_create(focus_timer_cb, 250, NULL);
     lv_timer_create(banner_timer_cb, 200, NULL);
+    lv_timer_create(stuck_face_timer_cb, 500, NULL);
 #if FACE_DEMO
     lv_timer_create(demo_timer_cb, 5000, NULL);   // cycle all moods, 5 s each
 #endif
@@ -680,7 +726,14 @@ void face_set_mood(sandy_mood_t mood) {
         if (mood != MOOD_IDLE && mood != MOOD_SLEEPY) {
             s_last_active_ms = esp_timer_get_time() / 1000;
         }
+        // When did this expression start? The watchdog needs it to tell an
+        // expression that is doing its job from one that got stuck.
+        s_mood_set_ms = esp_timer_get_time() / 1000;
     }
+}
+
+void face_set_session_active(bool active) {
+    s_session_live = active;
 }
 
 void face_set_banner(const char *text) {

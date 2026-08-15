@@ -71,8 +71,12 @@
 // listening while the session is open, happy while she speaks, idle after.
 #if ENABLE_FACE
 #define VOICE_FACE(mood) face_set_mood(mood)
+// تخبير الوش إذا في جلسة فعلًا. الحارس عنده بيستعمله يقرر إذا تعبير عابر
+// (فضول/تركيز/كلام) قاعد أطول من عمره — وساعتها بيرجّعه لحاله.
+#define VOICE_SESSION(on) face_set_session_active(on)
 #else
 #define VOICE_FACE(mood) do {} while (0)
+#define VOICE_SESSION(on) do {} while (0)
 #endif
 
 #if ENABLE_LED
@@ -1400,6 +1404,7 @@ static void voice_task(void *arg) {
                     s_session_voice_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;
+                    VOICE_SESSION(true);
                 } else {
                     // The silent freeze lived here. The wake word had already
                     // put MOOD_CURIOUS on her face, and the only code that ever
@@ -1445,6 +1450,7 @@ static void voice_task(void *arg) {
         } else if ((now_ms() - s_session_voice_ms) > VOICE_SESSION_IDLE_MS && !s_playing) {
             ESP_LOGI(TAG, "session idle, closing");
             s_session_active = false;
+            VOICE_SESSION(false);
             s_link_lost_ms = 0;
             ws_close();
 #if ENABLE_COMMANDS
