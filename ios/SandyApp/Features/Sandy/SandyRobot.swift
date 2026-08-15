@@ -103,10 +103,10 @@ struct SandyRobot: View {
             startRadius: 0, endRadius: 34))
 
         // ── الذراعان (مستطيلات مدوّرة) ────────────────────────────────
-        drawRoundedRect(&ctx, x: 2,  y: 108, w: 16, h: 35, r: 8,
-                        fill: cyan(0.04), stroke: cyan(0.36), lineWidth: 1.5)
-        drawRoundedRect(&ctx, x: 92, y: 108, w: 16, h: 35, r: 8,
-                        fill: cyan(0.04), stroke: cyan(0.36), lineWidth: 1.5)
+        drawRoundedRect(&ctx, in: CGRect(x: 2,  y: 108, width: 16, height: 35),
+                        radius: 8, fill: cyan(0.04), edge: Edge(color: cyan(0.36)))
+        drawRoundedRect(&ctx, in: CGRect(x: 92, y: 108, width: 16, height: 35),
+                        radius: 8, fill: cyan(0.04), edge: Edge(color: cyan(0.36)))
 
         // ── الهوائي (خط + ✦ متوهّجة) ──────────────────────────────────
         var antenna = Path()
@@ -124,14 +124,16 @@ struct SandyRobot: View {
         ctx.draw(spark, at: CGPoint(x: 55, y: 8), anchor: .center)
 
         // ── الرأس (مستطيل مدوّر r=22) ─────────────────────────────────
-        drawRoundedRect(&ctx, x: 10, y: 24, w: 90, h: 76, r: 22,
+        drawRoundedRect(&ctx, in: CGRect(x: 10, y: 24, width: 90, height: 76), radius: 22,
                         fill: Color(red: 0, green: 8/255, blue: 20/255).opacity(0.55),
-                        stroke: cyan(0.5), lineWidth: 1.5)
+                        edge: Edge(color: cyan(0.5)))
 
         // ── حاجبان ────────────────────────────────────────────────────
         let brow = Color(red: 200/255, green: 240/255, blue: 1.0).opacity(0.65)
-        drawRoundedRect(&ctx, x: 18, y: 33, w: 26, h: 3, r: 1.5, fill: brow, stroke: nil, lineWidth: 0)
-        drawRoundedRect(&ctx, x: 66, y: 33, w: 26, h: 3, r: 1.5, fill: brow, stroke: nil, lineWidth: 0)
+        drawRoundedRect(&ctx, in: CGRect(x: 18, y: 33, width: 26, height: 3),
+                        radius: 1.5, fill: brow, edge: nil)
+        drawRoundedRect(&ctx, in: CGRect(x: 66, y: 33, width: 26, height: 3),
+                        radius: 1.5, fill: brow, edge: nil)
 
         // ── محجرا العينين ─────────────────────────────────────────────
         drawEyeSocket(&ctx, cx: LX, cy: LY)
@@ -164,8 +166,8 @@ struct SandyRobot: View {
             ctx.stroke(mouth, with: .color(cyan(0.55)),
                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
         } else {
-            drawRoundedRect(&ctx, x: 40, y: 88, w: 30, h: 3, r: 1.5,
-                            fill: cyan(0.35), stroke: nil, lineWidth: 0)
+            drawRoundedRect(&ctx, in: CGRect(x: 40, y: 88, width: 30, height: 3),
+                            radius: 1.5, fill: cyan(0.35), edge: nil)
         }
 
         // ── الجسم ─────────────────────────────────────────────────────
@@ -198,25 +200,35 @@ struct SandyRobot: View {
         ctx.stroke(underline, with: .color(cyan(0.12)), style: StrokeStyle(lineWidth: 0.8))
 
         // ── الساقان ───────────────────────────────────────────────────
-        drawRoundedRect(&ctx, x: 28, y: 157, w: 23, h: 14, r: 7,
-                        fill: cyan(0.025), stroke: cyan(0.36), lineWidth: 1.5)
-        drawRoundedRect(&ctx, x: 59, y: 157, w: 23, h: 14, r: 7,
-                        fill: cyan(0.025), stroke: cyan(0.36), lineWidth: 1.5)
+        drawRoundedRect(&ctx, in: CGRect(x: 28, y: 157, width: 23, height: 14),
+                        radius: 7, fill: cyan(0.025), edge: Edge(color: cyan(0.36)))
+        drawRoundedRect(&ctx, in: CGRect(x: 59, y: 157, width: 23, height: 14),
+                        radius: 7, fill: cyan(0.025), edge: Edge(color: cyan(0.36)))
     }
 
     // MARK: مساعدات الرسم
 
+    /// حدّ: لون وعرض معًا. كانوا معاملين منفصلين، وكل نداء بلا حدّ كان لازم
+    /// يمرّر `stroke: nil, lineWidth: 0` — عرض لشي مش موجود. صاروا قيمة وحدة
+    /// بتغيب كلها أو بتحضر كلها، فـ`nil` وحدها بتعني «بلا حدّ».
+    private struct Edge {
+        let color: Color
+        var width: CGFloat = 1.5
+    }
+
     /// مستطيل مدوّر بتعبئة و/أو حدّ (إحداثيات viewBox).
-    private func drawRoundedRect(_ ctx: inout GraphicsContext,
-                                 x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, r: CGFloat,
-                                 fill: Color?, stroke: Color?, lineWidth: CGFloat) {
-        let path = Path(roundedRect: CGRect(x: x, y: y, width: w, height: h),
-                        cornerRadius: r, style: .continuous)
+    ///
+    /// بياخد `CGRect` بدل أربع أرقام سايبة. `x: 28, y: 157, w: 23, h: 14` أربع
+    /// خانات بترتيب لازم تحفظه، ومستطيل واحد اسمه بيقول شو هو.
+    private func drawRoundedRect(_ ctx: inout GraphicsContext, in rect: CGRect,
+                                 radius: CGFloat, fill: Color?, edge: Edge?) {
+        let path = Path(roundedRect: rect, cornerRadius: radius, style: .continuous)
         if let fill {
             ctx.fill(path, with: .color(fill))
         }
-        if let stroke {
-            ctx.stroke(path, with: .color(stroke), style: StrokeStyle(lineWidth: lineWidth))
+        if let edge {
+            ctx.stroke(path, with: .color(edge.color),
+                       style: StrokeStyle(lineWidth: edge.width))
         }
     }
 
