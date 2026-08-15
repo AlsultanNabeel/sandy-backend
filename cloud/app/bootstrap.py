@@ -119,6 +119,15 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     write_google_credentials()
     ensure_data_dirs()
 
+    # Before anything that can fail, so the first thing that breaks is reported
+    # rather than swallowed. A no-op when SENTRY_DSN is unset.
+    try:
+        from app.integrations.error_tracking import init_error_tracking
+
+        init_error_tracking()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Bootstrap] error tracking failed to start: %s", exc)
+
 
     try:
         from app.agent.tools.setup import register_all_tools

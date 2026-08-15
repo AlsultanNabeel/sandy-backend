@@ -130,6 +130,13 @@ struct RobotTestView: View {
             .frame(height: 10)
             .animation(.easeOut(duration: 0.25), value: level)
         }
+        // شريط بلا وصف = «صورة» بصوت القارئ، والمقياس هو كل معنى هاي الشاشة.
+        // بنجمّع السطر كله بعنصر واحد بقيمة منطوقة، فالأعمى بيقدر يعمل نفس
+        // الفحص: يكتم واحد، يحكي، ويسمع الرقم التاني بيتغيّر.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(muted ? lang.s("robot.test.mic.mutedValue")
+                                  : "\(min(100, max(0, level)))٪")
     }
 
     // ── السماعة ──────────────────────────────────────────────────────────────

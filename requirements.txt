@@ -34,3 +34,8 @@ flask-cors>=4.0.0
 PyJWT>=2.8.0
 paho-mqtt>=2.0  # room-node control (publish room/cmd/* scenes over MQTT)
 # pyaudio>=0.2.13  # LOCAL TESTING ONLY: pip install pyaudio (requires portaudio system lib)
+
+# Error reporting. Optional at runtime: with no SENTRY_DSN the integration is a
+# no-op, so this being installed never changes behaviour on its own. Pinned to
+# the 2.x line — 3.x changed the init signature.
+sentry-sdk[flask]>=2.20.0,<3

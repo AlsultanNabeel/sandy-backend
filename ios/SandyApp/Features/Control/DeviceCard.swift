@@ -336,6 +336,7 @@ struct NodeCard: View {
                         .foregroundColor(Theme.Colors.accent)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(lang.s("robot.test.title"))
             }
         }
         .sandyCard()

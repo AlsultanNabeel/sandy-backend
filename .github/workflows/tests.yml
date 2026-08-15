@@ -58,3 +58,68 @@ jobs:
             exit 1
           fi
           echo "✅ no committed secrets"
+  # ── Firmware ────────────────────────────────────────────────────────────────
+  #
+  # Yesterday the firmware broke the build twice and nobody knew until the owner
+  # ran the flash script by hand, cable in one hand, at the point where he wanted
+  # a working robot. A compiler is cheap and it never forgets; this is the gate
+  # that should have caught both.
+  #
+  # It only builds. Flashing needs the board, and the board is on a desk.
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Provide placeholder secrets.h
+        # secrets.h is gitignored (it holds the Wi-Fi password, the broker
+        # credentials and the voice HMAC key). The compiler only needs the
+        # symbols to exist, so CI writes a dummy — a build failure here is a
+        # code failure, never a missing credential.
+        run: |
+          for f in firmware/brain-core/main vision-core; do
+            [ -d "$f" ] || continue
+            [ -f "$f/secrets.h" ] || cp "$f/secrets.example.h" "$f/secrets.h"
+          done
+
+      - name: Build the robot brain (ESP-IDF)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3
+          target: esp32s3
+          path: firmware/brain-core
+
+  # ── iPhone app ──────────────────────────────────────────────────────────────
+  #
+  # Twenty-one thousand lines of Swift with no build gate at all. This does not
+  # run the app or take screenshots — it answers the one question that matters
+  # before a merge: does it still compile?
+  #
+  # macOS runners are billed at ten times the Linux rate, so this stays a build
+  # and a lint rather than a full test matrix.
+  ios:
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Lint (SwiftLint)
+        run: |
+          brew install swiftlint
+          swiftlint --strict --config .swiftlint.yml
+
+      - name: Type-check the app sources
+        # There is no .xcodeproj in the repo — the Xcode project lives in the
+        # owner's build copy and the sources are synced into it. So this drives
+        # the Swift compiler over the sources directly: it catches the errors
+        # that actually happen here (a renamed symbol, a wrong type, a missing
+        # argument) without a project file to maintain in two places.
+        run: |
+          find ios/SandyApp -name '*.swift' -not -path '*/ 2/*' > /tmp/sources.txt
+          echo "$(wc -l < /tmp/sources.txt) Swift files"
+          xcrun swiftc -typecheck \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -target arm64-apple-ios18.0 \
+            -swift-version 5 \
+            @/tmp/sources.txt

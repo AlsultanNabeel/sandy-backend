@@ -22,7 +22,14 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 # Frozen count of broad `except Exception` in app/. Broad catches are fine at
 # true edges (optional integrations, background jobs, index creation); this only
 # stops the count from *growing*. Lower it as sites adopt typed exceptions.
-BROAD_EXCEPT_BASELINE = 405
+#
+# 405 -> 407 on 15 Aug 2026: error_tracking.py added two, both at the edge this
+# baseline exists to allow. One wraps the scrubber, where anything that throws
+# must drop the event rather than send it unscrubbed; the other wraps the SDK's
+# own startup, because error reporting may never be the reason the app is down.
+# Raising a ratchet should always cost a sentence explaining why — that is the
+# difference between a considered exception and quiet drift.
+BROAD_EXCEPT_BASELINE = 407
 
 
 def test_subtypes_have_expected_status_and_code():

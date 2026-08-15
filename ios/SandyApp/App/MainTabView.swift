@@ -195,5 +195,8 @@ struct FloatingTabBar: View {
         // نبضة الزجاج المائي عند اللمس (تغوص وترتدّ كقطرة ماء).
         .liquidGlassPress()
         .accessibilityLabel(lang.s(tab.titleKey))
+        // بلا هاد، قارئ الشاشة بيقرا التبويبات الأربعة بنفس الطريقة وما بيقول
+        // أي واحد انت واقف عليه — يعني المستخدم الأعمى بيضيع بين الشاشات.
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }

@@ -110,7 +110,7 @@
 // Reported in every heartbeat. Bump it with each flash: without it, "did that
 // fix actually reach the board?" is a question nobody can answer from the app,
 // and today that question cost an afternoon.
-#define SANDY_FW_VERSION "0.4.0"
+#define SANDY_FW_VERSION "0.5.0"
 #define MQTT_RECONNECT_MS       5000
 
 // ─── Voice: I2S digital mic (INMP441) ──────────────────────────────────────────

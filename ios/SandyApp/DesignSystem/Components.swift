@@ -221,7 +221,10 @@ struct SandyNotice: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+            // زينة بحتة: بتعطي دفا بصريًا وما بتضيف معلومة. بلا إخفائها، قارئ
+            // الشاشة بيعلن «صورة» قبل كل رسالة.
             SandyAvatar(size: 28, mood: kind == .gentleWarning ? .soft : .happy)
+                .accessibilityHidden(true)
             Text(message)
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.primaryText)

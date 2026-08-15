@@ -31,6 +31,14 @@ OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "").strip()
 
+# ── Error reporting (optional) ────────────────────────────────────────────────
+# Empty DSN = reporting off and the app behaves exactly as before. The release
+# tag comes from the platform so a report says which build produced it — on a
+# host that redeploys on every push, "which version broke?" is asked often.
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+SENTRY_TRACES_RATE = os.getenv("SENTRY_TRACES_RATE", "0.1").strip()
+RELEASE_COMMIT = os.getenv("HEROKU_SLUG_COMMIT", "").strip()[:12]
+
 # AI models
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o").strip()
