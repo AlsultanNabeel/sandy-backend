@@ -13,6 +13,7 @@ from app.agent.semantic_memory import semantic_memory_stats
 
 logger = logging.getLogger(__name__)
 
+
 # سقف طول الرسالة النصية قبل أي استدعاء نموذج — يمنع انفجار التوكنات/الكلفة.
 # (حجم جسم الطلب ككل مسقوف بـ MAX_CONTENT_LENGTH داخل create_app.)
 _MAX_MESSAGE_CHARS = 6000
@@ -50,7 +51,7 @@ def create_app(
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = _MAX_CONTENT_LENGTH
-    from app.config import APP_ENV  # already defined in config.py
+    from app.config import APP_ENV, RELEASE_ID  # already defined in config.py
     _frontend = os.getenv("FRONTEND_URL", "").strip()
     if _frontend:
         _cors_origins = _frontend
@@ -99,6 +100,12 @@ def create_app(
         return jsonify(
             {
                 "ok": bool(overall_ok),
+                # Which build is actually serving. Without it, "did my fix reach
+                # production?" is unanswerable from outside — the same question
+                # the firmware version field exists to answer for the board, and
+                # for the same reason: a deploy that silently did not happen
+                # looks exactly like a fix that did not work.
+                "release": RELEASE_ID,
                 "mongo": mongo_status,
                 "chroma": chroma_status,
             }

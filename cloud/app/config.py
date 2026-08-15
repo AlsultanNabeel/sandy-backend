@@ -186,3 +186,40 @@ def validate_config() -> tuple[list[str], list[str]]:
             warnings.append("OWNER_PASSWORD is empty in prod (owner login open).")
 
     return fatal, warnings
+
+
+# ── Which build is running ───────────────────────────────────────────────────
+#
+# Served on /health. Without it, "did my fix reach production?" cannot be
+# answered from outside the server — and a deploy that silently did not happen
+# looks exactly like a fix that did not work. That is the same question the
+# firmware version field answers for the board, and it cost an afternoon there
+# before the field existed.
+#
+# Resolved once at import: the answer cannot change while the process lives, and
+# running git on every health check would be a subprocess per uptime ping.
+def _resolve_release() -> str:
+    """Heroku's own markers first, then git, then an honest "unknown".
+
+    Never invents a version. A wrong release id is worse than none, because it
+    makes a stale deploy look current — which is precisely the failure this is
+    meant to expose.
+    """
+    for var in ("HEROKU_SLUG_COMMIT", "SOURCE_VERSION", "GIT_COMMIT"):
+        val = os.getenv(var, "").strip()
+        if val:
+            return val[:7]
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
+RELEASE_ID = _resolve_release()
