@@ -7,7 +7,7 @@
 #define ENABLE_WIFI     1
 #define ENABLE_FACE     1   // ST7789 display
 #define ENABLE_SERVO    1
-#define ENABLE_BUZZER   0
+#define ENABLE_BUZZER   1   // بيزو سلبي بمخرجين: GPIO 17 + GND
 #define ENABLE_SENSOR   0
 #define ENABLE_MOTORS   0
 #define ENABLE_TOUCH    0
@@ -110,7 +110,7 @@
 // Reported in every heartbeat. Bump it with each flash: without it, "did that
 // fix actually reach the board?" is a question nobody can answer from the app,
 // and today that question cost an afternoon.
-#define SANDY_FW_VERSION "0.5.2"
+#define SANDY_FW_VERSION "0.6.0"
 
 // Which board this is. Three ESP boards share the house network and take three
 // different binaries that are not interchangeable:

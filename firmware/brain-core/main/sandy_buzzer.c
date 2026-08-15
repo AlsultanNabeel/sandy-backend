@@ -8,6 +8,8 @@
 
 static const char *TAG = "buzzer";
 
+#define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
+
 typedef struct { uint32_t freq; uint32_t ms; } note_t;
 
 // Melody definitions (freq=0 → rest)
@@ -23,6 +25,19 @@ static const note_t FOC_START[] = {{523,90},{659,90},{784,90},{988,220}};
 static const note_t FOC_BREAK[] = {{784,120},{0,60},{587,160}};
 static const note_t FOC_END[]   = {{988,120},{784,120},{659,120},{523,260}};
 
+// ── نغمات إضافية ──
+// نوتات سُلَّم مزاجي: الصاعد بيحسّ إيجابي، والهابط بيحسّ ختام أو رفض. الفواصل
+// (freq=0) بتعمل الفرق بين «نغمة» و«زقزقة» — بلاها كل شي بيسمع زي بعض.
+static const note_t HELLO[]     = {{659,90},{784,90},{988,160}};
+static const note_t BYE[]       = {{988,110},{784,110},{523,240}};
+static const note_t YES[]       = {{784,80},{1047,160}};
+static const note_t NO[]        = {{523,110},{392,200}};
+static const note_t THINKING[]  = {{659,60},{0,90},{659,60},{0,90},{659,60}};
+static const note_t CELEBRATE[] = {{523,90},{659,90},{784,90},{1047,110},{0,60},
+                                   {1047,90},{1319,260}};
+static const note_t NOTIFY[]    = {{880,90},{0,60},{1047,140}};
+static const note_t LOWBATT[]   = {{440,180},{0,80},{392,180},{0,80},{330,300}};
+
 typedef struct { const note_t *notes; size_t count; } melody_def_t;
 static const melody_def_t s_defs[MELODY_COUNT] = {
     [MELODY_NONE]    = {NULL,  0},
@@ -35,6 +50,16 @@ static const melody_def_t s_defs[MELODY_COUNT] = {
     [MELODY_FOCUS_START] = {FOC_START, 4},
     [MELODY_FOCUS_BREAK] = {FOC_BREAK, 3},
     [MELODY_FOCUS_END]   = {FOC_END,   4},
+    // ARRAY_LEN بدل رقم مكتوب: العدد الغلط هون بيقرا خارج المصفوفة، وهاد عطل
+    // بيظهر كنغمة فيها ضجيج مش كخطأ — يعني بتدوّر عليه بالمكان الغلط.
+    [MELODY_HELLO]     = {HELLO,     ARRAY_LEN(HELLO)},
+    [MELODY_BYE]       = {BYE,       ARRAY_LEN(BYE)},
+    [MELODY_YES]       = {YES,       ARRAY_LEN(YES)},
+    [MELODY_NO]        = {NO,        ARRAY_LEN(NO)},
+    [MELODY_THINKING]  = {THINKING,  ARRAY_LEN(THINKING)},
+    [MELODY_CELEBRATE] = {CELEBRATE, ARRAY_LEN(CELEBRATE)},
+    [MELODY_NOTIFY]    = {NOTIFY,    ARRAY_LEN(NOTIFY)},
+    [MELODY_LOWBATT]   = {LOWBATT,   ARRAY_LEN(LOWBATT)},
 };
 
 static QueueHandle_t s_q;

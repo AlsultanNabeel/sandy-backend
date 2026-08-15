@@ -105,6 +105,26 @@ static void _handle_servo(const char *val) {
     if (angle >= 0 && angle <= 180) servo_set_angle((uint8_t)angle);
 }
 
+// حركات الرقبة — أسماء نصية زي باقي الأوامر، فالخادم بيتحقق منها بجدول
+// device_store وما بيوصلنا إلا اسم صالح.
+static const struct { const char *name; sandy_gesture_t g; } GESTURE_MAP[] = {
+    {"nod", GESTURE_NOD},         {"shake", GESTURE_SHAKE},
+    {"tilt", GESTURE_TILT},       {"scan", GESTURE_SCAN},
+    {"dance", GESTURE_DANCE},     {"wake", GESTURE_WAKE},
+    {"sleep", GESTURE_SLEEP},     {"look_left", GESTURE_LOOK_LEFT},
+    {"look_right", GESTURE_LOOK_RIGHT}, {"center", GESTURE_CENTER},
+};
+
+static void _handle_gesture(const char *val) {
+    for (size_t i = 0; i < sizeof(GESTURE_MAP)/sizeof(GESTURE_MAP[0]); i++) {
+        if (!strcmp(val, GESTURE_MAP[i].name)) {
+            servo_gesture(GESTURE_MAP[i].g);
+            return;
+        }
+    }
+    ESP_LOGW(TAG, "unknown gesture: %s", val);
+}
+
 static void _handle_buzzer(const char *val) {
     if      (!strcmp(val, "boot"))    buzzer_play(MELODY_BOOT);
     else if (!strcmp(val, "happy"))   buzzer_play(MELODY_HAPPY);
@@ -115,6 +135,14 @@ static void _handle_buzzer(const char *val) {
     else if (!strcmp(val, "focus_start")) buzzer_play(MELODY_FOCUS_START);
     else if (!strcmp(val, "focus_break")) buzzer_play(MELODY_FOCUS_BREAK);
     else if (!strcmp(val, "focus_end"))   buzzer_play(MELODY_FOCUS_END);
+    else if (!strcmp(val, "hello"))       buzzer_play(MELODY_HELLO);
+    else if (!strcmp(val, "bye"))         buzzer_play(MELODY_BYE);
+    else if (!strcmp(val, "yes"))         buzzer_play(MELODY_YES);
+    else if (!strcmp(val, "no"))          buzzer_play(MELODY_NO);
+    else if (!strcmp(val, "thinking"))    buzzer_play(MELODY_THINKING);
+    else if (!strcmp(val, "celebrate"))   buzzer_play(MELODY_CELEBRATE);
+    else if (!strcmp(val, "notify"))      buzzer_play(MELODY_NOTIFY);
+    else if (!strcmp(val, "lowbatt"))     buzzer_play(MELODY_LOWBATT);
     else ESP_LOGW(TAG, "unknown melody: %s", val);
 }
 
@@ -162,8 +190,13 @@ static void _handle_volume(const char *val) {
 }
 
 static void _handle_speaker_test(const char *val) {
-    (void)val;
-    spk_test_tone();
+    if      (!strcmp(val, "beep"))  spk_play(SPK_BEEP);
+    else if (!strcmp(val, "chime")) spk_play(SPK_CHIME);
+    else if (!strcmp(val, "alert")) spk_play(SPK_ALERT);
+    else if (!strcmp(val, "sweep")) spk_play(SPK_SWEEP);
+    else if (!strcmp(val, "soft"))  spk_play(SPK_SOFT);
+    else if (!strcmp(val, "happy")) spk_play(SPK_HAPPY);
+    else spk_play(SPK_BEEP);   // مجهول = الفحص العادي، مش صمت محيّر
 }
 
 static void _handle_ns(const char *val) {
@@ -226,6 +259,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
 
             if      (!strcmp(out, "mood"))         _handle_mood(val);
             else if (!strcmp(out, "servo"))        _handle_servo(val);
+            else if (!strcmp(out, "gesture"))      _handle_gesture(val);
             else if (!strcmp(out, "buzzer"))       _handle_buzzer(val);
             else if (!strcmp(out, "base"))         _handle_base(val);
             else if (!strcmp(out, "focus"))        _handle_focus(val);
@@ -276,6 +310,7 @@ static const char *OUTPUTS_JSON =
     "["
       "{\"id\":\"mood\",\"kind\":\"pwm\"},"
       "{\"id\":\"servo\",\"kind\":\"servo\"},"
+      "{\"id\":\"gesture\",\"kind\":\"servo\"},"
       "{\"id\":\"led\",\"kind\":\"pwm\"},"
       "{\"id\":\"buzzer\",\"kind\":\"buzzer\"},"
       "{\"id\":\"mic_l\",\"kind\":\"audio\"},"
@@ -312,7 +347,9 @@ void mqtt_publish_status(void) {
     // state it already polls — speak, watch which one moves, and you know which
     // mic is which without touching a wire.
     snprintf(buf, sizeof(buf),
-        "{\"uptime\":%lld,\"heap\":%lu,\"mood\":%d,\"distance\":%lu,"
+        // ما في distance: الحسّاس ملغي ومش مركّب (ENABLE_SENSOR=0). حقل بيرسل
+        // صفر للأبد بيوهم إنه في قياس.
+        "{\"uptime\":%lld,\"heap\":%lu,\"mood\":%d,"
         "\"mic_l\":%d,\"mic_r\":%d,"
         "\"mic_l_gain\":%d,\"mic_r_gain\":%d,"
         "\"mic_l_muted\":%s,\"mic_r_muted\":%s,"
@@ -327,7 +364,6 @@ void mqtt_publish_status(void) {
         esp_timer_get_time() / 1000000LL,
         (unsigned long)esp_get_free_heap_size(),
         (int)g_current_mood,
-        (unsigned long)sensor_get_distance_cm(),
         mic_get_level(MIC_LEFT), mic_get_level(MIC_RIGHT),
         mic_get_gain(MIC_LEFT),  mic_get_gain(MIC_RIGHT),
         mic_is_muted(MIC_LEFT)  ? "true" : "false",

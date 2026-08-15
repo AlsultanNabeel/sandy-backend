@@ -107,7 +107,10 @@ _TELEMETRY_KEYS = {
     "mic_l_gain": int, "mic_r_gain": int,
     "mic_l_muted": bool, "mic_r_muted": bool,
     "volume": int, "noise": int,
-    "uptime": int, "heap": int, "distance": int, "mood": int,
+    "uptime": int, "heap": int, "mood": int,
+    # ما في "distance": حسّاس المسافة ملغي بقرار المالك ومش مركّب. قراءة
+    # لجهاز غير موجود بتضل صفر للأبد، وبعد شهر حدا بيسأل ليش الروبوت لازق
+    # بالحيط — فحذف الحقل أصدق من تركه.
     # نصوص قصيرة: عنوان اللوح ع الشبكة المحلية، واسم اللوح. العنوان بيتغيّر كل
     # ما الراوتر يعيد التوزيع، وبلا ما اللوح يقوله، إيجاده بيصير مسح وتخمين.
     "ip": str, "board": str,

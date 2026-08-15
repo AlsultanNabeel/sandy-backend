@@ -42,6 +42,17 @@ typedef enum {
     MELODY_FOCUS_START,
     MELODY_FOCUS_BREAK,
     MELODY_FOCUS_END,
+    // ── نغمات تانية للمزاج والتفاعل ──
+    // الجرس بيزو سلبي: بيعزف أي تردد، فالنغمة قائمة نوتات مش صوت مسجّل.
+    // إضافة وحدة = سطر هون + مصفوفة بـ sandy_buzzer.c + اسم بجدول MQTT.
+    MELODY_HELLO,       // ترحيب قصير لما تناديها
+    MELODY_BYE,         // وداع هابط
+    MELODY_YES,         // تأكيد صاعد نوتتين
+    MELODY_NO,          // رفض هابط نوتتين
+    MELODY_THINKING,    // نقرات خفيفة وهي بتفكّر
+    MELODY_CELEBRATE,   // فانفير قصير للإنجاز
+    MELODY_NOTIFY,      // تنبيه لطيف
+    MELODY_LOWBATT,     // بطارية واطية — هابط بطيء
     MELODY_COUNT
 } sandy_melody_t;
 

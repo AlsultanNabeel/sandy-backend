@@ -234,28 +234,75 @@ int16_t spk_apply(int16_t sample)
     return (int16_t)(((int32_t)sample * v) / 100);
 }
 
-void spk_test_tone(void)
+// One tone into the speaker buffer. freq=0 is a rest, which is what turns a
+// row of beeps into something with rhythm.
+static bool spk_tone(int freq, int ms, int amp)
 {
-    // 600 ms of 880 Hz at a third of full scale, generated here and pushed into
-    // the same buffer her voice uses — so a successful beep proves the whole
-    // output path, volume included, and not just that a second I2S channel can
-    // be opened.
-    const int SR = 16000, HZ = 880, MS = 600, AMP = 10000;
-    const int total = SR * MS / 1000;
-    const int CH = 320;                   // 20 ms at a time
+    const int SR = 16000, CH = 320;          // 20 ms blocks
+    const int total = SR * ms / 1000;
     int16_t buf[CH];
-    float phase = 0.0f, inc = 2.0f * (float)M_PI * HZ / SR;
+    static float phase;                       // continuous across calls, so two
+                                              // touching tones do not click
+    float inc = 2.0f * (float)M_PI * (float)freq / SR;
 
     for (int sent = 0; sent < total; sent += CH) {
         for (int i = 0; i < CH; i++) {
-            buf[i] = (int16_t)(AMP * sinf(phase));
-            phase += inc;
-            if (phase > 2.0f * (float)M_PI) phase -= 2.0f * (float)M_PI;
+            if (freq <= 0) {
+                buf[i] = 0;
+            } else {
+                buf[i] = (int16_t)(amp * sinf(phase));
+                phase += inc;
+                if (phase > 2.0f * (float)M_PI) phase -= 2.0f * (float)M_PI;
+            }
         }
-        if (!voice_play_local_pcm(buf, sizeof(buf))) {
-            ESP_LOGW(TAG, "test tone: speaker buffer full, stopping early");
-            return;
-        }
+        if (!voice_play_local_pcm(buf, sizeof(buf))) return false;
     }
-    ESP_LOGI(TAG, "test tone played at volume %d%%", s_volume);
+    return true;
+}
+
+// A rising sweep exercises the whole range rather than one frequency — a
+// speaker with a dead driver can still pass a single 880 Hz beep.
+static void spk_sweep(int from_hz, int to_hz, int ms, int amp)
+{
+    const int STEP_MS = 25;
+    const int steps = ms / STEP_MS;
+    for (int i = 0; i < steps; i++) {
+        int f = from_hz + (to_hz - from_hz) * i / (steps > 1 ? steps - 1 : 1);
+        if (!spk_tone(f, STEP_MS, amp)) return;
+    }
+}
+
+void spk_play(sandy_spk_sound_t sound)
+{
+    // Amplitudes stay well under full scale: this is a small speaker a few
+    // centimetres from two microphones, and a sound loud enough to clip is also
+    // loud enough to deafen the echo canceller for the next second.
+    switch (sound) {
+    case SPK_CHIME:
+        spk_tone(880, 140, 9000); spk_tone(1175, 260, 9000);
+        break;
+    case SPK_ALERT:
+        for (int i = 0; i < 3; i++) { spk_tone(1400, 110, 12000); spk_tone(0, 80, 0); }
+        break;
+    case SPK_SWEEP:
+        spk_sweep(220, 3000, 900, 9000);
+        break;
+    case SPK_SOFT:
+        spk_tone(392, 220, 4000); spk_tone(330, 320, 3500);
+        break;
+    case SPK_HAPPY:
+        spk_tone(523, 110, 9000); spk_tone(659, 110, 9000);
+        spk_tone(784, 110, 9000); spk_tone(1047, 240, 9000);
+        break;
+    case SPK_BEEP:
+    default:
+        spk_tone(880, 600, 10000);
+        break;
+    }
+    ESP_LOGI(TAG, "played sound %d at volume %d%%", (int)sound, s_volume);
+}
+
+void spk_test_tone(void)
+{
+    spk_play(SPK_BEEP);
 }

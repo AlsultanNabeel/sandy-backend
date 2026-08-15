@@ -45,6 +45,16 @@ ROBOT_MOODS = [
 ROBOT_MELODIES = [
     "boot", "happy", "curious", "sad", "alert", "error",
     "focus_start", "focus_break", "focus_end",
+    # نغمات التفاعل. الجرس بيزو سلبي بيعزف أي تردد، فكل وحدة قائمة نوتات
+    # مش صوت مسجّل — يعني إضافة نغمة بتكلّف سطر مش ملف.
+    "hello", "bye", "yes", "no", "thinking", "celebrate", "notify", "lowbatt",
+]
+
+# حركات الرقبة. رقبة بتروح لزاوية بس هي «مُموضِع»؛ رقبة بتومي وتهزّ وتترنّح
+# بتصير وش إله جسم — والفرق تلاتين سطر لأن التنعيم موجود أصلًا.
+ROBOT_GESTURES = [
+    "nod", "shake", "tilt", "scan", "dance",
+    "wake", "sleep", "look_left", "look_right", "center",
 ]
 
 # output id -> how to present it. `name` is the device slug, unique per tenant.
@@ -52,6 +62,10 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "mood": {
         "name": "sandy_face", "label": "وش ساندي", "control_type": "enum",
         "meta": {"values": ROBOT_MOODS},
+    },
+    "gesture": {
+        "name": "sandy_gesture", "label": "حركات ساندي", "control_type": "enum",
+        "meta": {"values": ROBOT_GESTURES},
     },
     "servo": {
         "name": "sandy_head", "label": "رقبة ساندي", "control_type": "dimmer",
@@ -89,8 +103,11 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
         "meta": {"min": 0, "max": 100},
     },
     "speaker_test": {
-        "name": "sandy_speaker_test", "label": "فحص السماعة", "control_type": "enum",
-        "meta": {"values": ["beep"]},
+        "name": "sandy_speaker_test", "label": "أصوات السماعة", "control_type": "enum",
+        # مش بيب واحد. الجرس بيزو صغير وصوته زي اللعبة؛ هاد المكبّر الحقيقي،
+        # فبيقدر يعمل تدرّج ترددي ونغمة ناعمة تنفع بالليل. والمسح الترددي
+        # بيفحص المدى كله — سماعة بمشغّل ميت بتنجح بنغمة وحدة وبتفشل بالمسح.
+        "meta": {"values": ["beep", "chime", "alert", "sweep", "soft", "happy"]},
     },
     "noise": {
         "name": "sandy_noise", "label": "عزل الضجّة", "control_type": "enum",

@@ -26,7 +26,7 @@ Only the parts whose `ENABLE_*` flag is `1` are actually wired right now.
 | | DIN | 11 | |
 | | SD (shutdown) | leave floating / pull to VIN | |
 | SG90 servo (neck) | signal | 16 | **5V** |
-| Buzzer | signal | 17 | 3V3 |
+| Passive piezo buzzer | one leg | 17 | other leg → **GND** |
 | HC-SR04 distance | TRIG | 15 | **5V** |
 | | ECHO | 13 | see warning |
 | WS2812 RGB LED | — | 48 | on-board, nothing to wire |
@@ -70,3 +70,17 @@ hundred millivolts and nothing boots.
 
 The servo and the amp are the two current spikes on the 5V rail. If boots get
 flaky, a 1000µF electrolytic across 5V/GND (stripe leg to GND) absorbs them.
+
+### Buzzer — two legs, not three
+
+The part here is a **passive piezo**: two legs, one to GPIO 17 and one to GND.
+There is no VCC pin and it does not want one.
+
+That distinction decides what she can do with it. A three-pin *active* buzzer
+module has its own oscillator and answers every command with the same one note,
+however you drive it. A passive piezo has no oscillator, so the pitch is whatever
+frequency you feed it — which is why the driver here uses LEDC PWM and can play
+actual melodies rather than beep.
+
+If a note sounds thin, a 100 Ω resistor in series tames the current without
+changing the pitch. Not required.

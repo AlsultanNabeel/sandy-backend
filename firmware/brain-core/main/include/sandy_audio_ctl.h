@@ -105,7 +105,29 @@ int      spk_get_volume(void);
 // Scale one output sample by the current volume.
 int16_t  spk_apply(int16_t sample);
 
-// Play a locally generated test tone through the amp — proof the speaker path
-// works without needing the cloud, a voice session, or a network at all. This is
-// the other half of "record from the mic and hear it back": the speaker end.
+// ── Speaker sounds ───────────────────────────────────────────────────────────
+//
+// Generated on the board, played through the same buffer her cloud voice uses.
+// That routing is the point: a sound that arrives means the whole output path
+// works — buffer, volume, amp, speaker — not that a second channel could be
+// opened alongside a broken one.
+//
+// These are the speaker's answer to the buzzer's melodies. The buzzer is a piezo
+// on one pin and sounds like a toy; this is the real amplifier, so it can do
+// chords, sweeps and something soft enough to use at night.
+typedef enum {
+    SPK_BEEP = 0,   // the plain confidence check
+    SPK_CHIME,      // two-note, gentle — an "I heard you"
+    SPK_ALERT,      // three sharp pulses, meant to interrupt
+    SPK_SWEEP,      // rising sweep — proves the whole frequency range, not one tone
+    SPK_SOFT,       // low and quiet, for night
+    SPK_HAPPY,      // a small rising arpeggio
+    SPK_SOUND_COUNT
+} sandy_spk_sound_t;
+
+// Play one. Blocks for its duration on the caller's task, so call it from a
+// command handler and not from anything real-time.
+void     spk_play(sandy_spk_sound_t sound);
+
+// Kept for the existing call sites: the plain beep.
 void     spk_test_tone(void);
