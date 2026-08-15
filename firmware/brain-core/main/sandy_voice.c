@@ -1396,9 +1396,33 @@ static void voice_task(void *arg) {
                 // open failed ("Error create websocket task"), the session
                 // never went active, and the model was never handed over.
                 s_mn_want = false;
-                for (int i = 0; i < 50 && s_mn_loaded; i++) vTaskDelay(pdMS_TO_TICKS(10));
-                ESP_LOGI(TAG, "internal free before open: %u",
-                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                // Wait for the model to actually go, and wait long enough.
+                //
+                // This used to give up after 500 ms and open anyway. When the
+                // unload had not finished, the socket opened against a heap that
+                // was still ~70 KB short and failed — and 70 KB is not a margin
+                // anything else can make up. The board reported LOW MEMORY on its
+                // face, which was true, and pointed at the wrong cause.
+                //
+                // Three seconds is far beyond how long the release takes when it
+                // works, and still shorter than the pause before she answers.
+                for (int i = 0; i < 300 && s_mn_loaded; i++) vTaskDelay(pdMS_TO_TICKS(10));
+                if (s_mn_loaded) {
+                    // Still holding it. Opening now is a guaranteed failure with a
+                    // misleading label, so say what actually happened instead.
+                    ESP_LOGE(TAG, "command model did not release in 3s — "
+                                  "skipping this session rather than failing blind");
+                    status_set(SANDY_ST_LOW_MEMORY);
+                    s_mn_want = true;
+                    continue;
+                }
+                // Largest contiguous block, not just total free: the TLS task
+                // needs one unbroken allocation, and a heap with plenty free and
+                // no big block left fails in a way the total never explains.
+                ESP_LOGI(TAG, "before open: internal free=%u largest=%u psram=%u",
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
                 if (ws_open()) {
                     s_session_voice_ms = now_ms();

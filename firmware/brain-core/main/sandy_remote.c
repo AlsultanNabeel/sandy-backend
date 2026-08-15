@@ -203,7 +203,11 @@ esp_err_t remote_init(void) {
     // On its own task, because start_http() now waits for an address and this
     // runs on the boot path — blocking here would hold up the face, the voice
     // link and everything after them for as long as the router takes.
-    xTaskCreate(http_task, "http_up", 4096, NULL, 4, NULL);
+    // 2560: it waits in a loop then calls httpd_start once and deletes itself.
+    // Every byte here is internal RAM, and internal RAM is what the voice
+    // session needs to open at all — this task must not be holding any of it
+    // by the time the first wake word lands.
+    xTaskCreate(http_task, "http_up", 2560, NULL, 4, NULL);
     ESP_LOGI(TAG, "remote ready — OTA: http://<ip>/update   logs: nc <ip> %d", LOG_PORT);
     return ESP_OK;
 }
