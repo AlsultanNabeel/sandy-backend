@@ -108,6 +108,9 @@ _TELEMETRY_KEYS = {
     "mic_l_muted": bool, "mic_r_muted": bool,
     "volume": int, "noise": int,
     "uptime": int, "heap": int, "distance": int, "mood": int,
+    # نصوص قصيرة: عنوان اللوح ع الشبكة المحلية، واسم اللوح. العنوان بيتغيّر كل
+    # ما الراوتر يعيد التوزيع، وبلا ما اللوح يقوله، إيجاده بيصير مسح وتخمين.
+    "ip": str, "board": str,
 }
 
 
@@ -119,7 +122,13 @@ def _clean_telemetry(data: Any) -> Dict[str, Any]:
         if key not in data:
             continue
         try:
-            out[key] = bool(data[key]) if kind is bool else int(data[key])
+            if kind is bool:
+                out[key] = bool(data[key])
+            elif kind is str:
+                # مقصوص: النبضة بتيجي من وسيط مشترك، فما منخزّن نص طويل بلا حد.
+                out[key] = str(data[key])[:32]
+            else:
+                out[key] = int(data[key])
         except (TypeError, ValueError):
             continue   # a garbled field drops out; the rest still lands
     return out

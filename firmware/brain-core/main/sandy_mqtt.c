@@ -8,6 +8,7 @@
 #include "sandy_ota.h"
 #include "sandy_led.h"
 #include "sandy_audio_ctl.h"
+#include "sandy_wifi.h"
 #include "config.h"
 #include "secrets.h"
 #include "mqtt_client.h"
@@ -307,6 +308,7 @@ void mqtt_publish_status(void) {
         // spellings and silently ignores anything else. A heartbeat that looks
         // right and registers nothing is the failure mode to avoid here.
         "\"capabilities\":[\"servo\",\"pwm\",\"buzzer\",\"audio\"],"
+        "\"ip\":\"%s\",\"board\":\"" SANDY_BOARD_ID "\","
         "\"firmware_version\":\"%s\",\"outputs\":%s}",
         esp_timer_get_time() / 1000000LL,
         (unsigned long)esp_get_free_heap_size(),
@@ -317,6 +319,7 @@ void mqtt_publish_status(void) {
         mic_is_muted(MIC_LEFT)  ? "true" : "false",
         mic_is_muted(MIC_RIGHT) ? "true" : "false",
         spk_get_volume(), (int)ns_get_level(),
+        wifi_sandy_ip(),
         SANDY_FW_VERSION, OUTPUTS_JSON);
     esp_mqtt_client_publish(s_client, s_topic_status, buf, 0, 0, 0);
 }

@@ -14,6 +14,8 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
+#include "sandy_wifi.h"
+#include "config.h"
 #include "lwip/sockets.h"
 
 static const char *TAG = "remote";
@@ -98,10 +100,21 @@ static void log_server_task(void *arg) {
 
 // ─── OTA upload (HTTP) ──────────────────────────────────────────────────────
 static esp_err_t root_get(httpd_req_t *req) {
-    static const char *page =
-        "<h3>Sandy — OTA</h3>"
-        "<p>Flash from the terminal:</p>"
-        "<pre>curl --data-binary @build/sandy-brain-s3.bin http://DEVICE_IP/update</pre>";
+    // The board says which board it is, in a string nothing else in this project
+    // serves. Three ESP boards live on the same network — the S3 brain, the
+    // classic ESP32 room node, and the ESP32-CAM — and they take three different
+    // binaries. Pushing brain firmware at the wrong one is not a mistake you
+    // notice until the board stops booting, so the flash script matches this
+    // exact marker before it sends anything.
+    //
+    // Keep SANDY_BOARD_ID in step with the script if it ever changes.
+    static char page[240];
+    snprintf(page, sizeof(page),
+             "<h3>Sandy brain-core &middot; ESP32-S3</h3>"
+             "<p>board-id: " SANDY_BOARD_ID "</p>"
+             "<p>firmware: " SANDY_FW_VERSION "</p>"
+             "<p>Flash: curl --data-binary @build/sandy-brain-s3.bin "
+             "http://DEVICE_IP/update</p>");
     httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
@@ -146,6 +159,25 @@ static esp_err_t update_post(httpd_req_t *req) {
 }
 
 static void start_http(void) {
+    // Wait for an address before binding.
+    //
+    // wifi_sandy_start() returns as soon as the radio is up — associating
+    // happens in the background — so this used to bind while the interface had
+    // no address at all. The server reported itself started and then answered
+    // nothing, which is the worst way to fail: "remote ready" in the log, and a
+    // flash script that cannot find the board it is looking straight at.
+    //
+    // Cost of waiting: nothing. Anyone flashing over the network needs the
+    // network anyway.
+    for (int i = 0; i < 120 && !wifi_sandy_is_connected(); i++) {
+        if (i % 20 == 0) ESP_LOGW(TAG, "http: waiting for an IP before binding");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    if (!wifi_sandy_is_connected()) {
+        ESP_LOGE(TAG, "http: no IP after 60s — remote flashing unavailable");
+        return;
+    }
+
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 20;
@@ -157,11 +189,21 @@ static void start_http(void) {
     httpd_register_uri_handler(srv, &upd);
 }
 
+static void http_task(void *arg) {
+    (void)arg;
+    start_http();
+    vTaskDelete(NULL);
+}
+
+
 esp_err_t remote_init(void) {
     s_logbuf = xStreamBufferCreate(LOG_BUF_BYTES, 1);
     s_old_vprintf = esp_log_set_vprintf(log_vprintf);
     xTaskCreate(log_server_task, "logsrv", 4096, NULL, 4, NULL);
-    start_http();
+    // On its own task, because start_http() now waits for an address and this
+    // runs on the boot path — blocking here would hold up the face, the voice
+    // link and everything after them for as long as the router takes.
+    xTaskCreate(http_task, "http_up", 4096, NULL, 4, NULL);
     ESP_LOGI(TAG, "remote ready — OTA: http://<ip>/update   logs: nc <ip> %d", LOG_PORT);
     return ESP_OK;
 }

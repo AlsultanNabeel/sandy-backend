@@ -375,3 +375,34 @@ def test_an_unpaired_board_provisions_nothing(db):
     assert res["ok"] is False
     with as_tenant("owner"):
         assert device_store.list_devices() == []
+
+
+def test_the_board_reports_its_own_address(db):
+    """The robot's IP changes whenever the router reassigns it, and without the
+    board saying so, finding it means scanning the network and guessing — which
+    is exactly what stalled a flash once."""
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status(
+            "sandybrain01", True, [], ROBOT_OUTPUTS, "0.5.0",
+            telemetry={"ip": "192.168.1.102", "board": "sandy-brain-s3", "volume": 80},
+        )
+        node = node_store.get_node("sandybrain01")
+        assert node["telemetry"]["ip"] == "192.168.1.102"
+        assert node["telemetry"]["board"] == "sandy-brain-s3"
+        assert node["telemetry"]["volume"] == 80
+
+
+def test_a_hostile_heartbeat_cannot_stuff_the_node_document(db):
+    """The payload arrives over a shared broker from a device nobody
+    authenticated. Long strings get truncated and unknown keys are dropped."""
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status(
+            "sandybrain01", True, [], ROBOT_OUTPUTS, "0.5.0",
+            telemetry={"ip": "x" * 500, "evil": "drop me", "volume": "not a number"},
+        )
+        tele = node_store.get_node("sandybrain01")["telemetry"]
+        assert len(tele["ip"]) == 32          # truncated, not stored whole
+        assert "evil" not in tele             # not on the allowlist
+        assert "volume" not in tele           # unparseable, dropped, rest survives

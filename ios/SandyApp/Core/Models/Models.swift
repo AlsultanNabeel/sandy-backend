@@ -331,6 +331,12 @@ struct NodeTelemetry {
     let micRightMuted: Bool?
     let volume: Int?           // ٠..١٠٠
     let noise: Int?            // ٠ مطفي، ١ خفيف، ٢ متوسط، ٣ قوي
+    /// عنوان اللوح ع الشبكة المحلية — بيقوله اللوح بكل نبضة.
+    /// بيتغيّر كل ما الراوتر يعيد التوزيع، فبلاه إيجاده بيصير مسح شبكة.
+    let ip: String?
+    /// أي لوح: `sandy-brain-s3` أو الكاميرا أو عقدة الغرفة. تلات ألواح ع نفس
+    /// الشبكة وتلات ملفات ما بتتبادل — واللبس بينهم بيحرق لوح.
+    let board: String?
 
     /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
     var hasMicReadings: Bool { micLeft != nil || micRight != nil }
@@ -347,6 +353,8 @@ struct NodeTelemetry {
         micRightMuted = b("mic_r_muted")
         volume        = i("volume")
         noise         = i("noise")
+        ip            = d["ip"] as? String
+        board         = d["board"] as? String
     }
 }
 

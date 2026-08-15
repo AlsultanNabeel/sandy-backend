@@ -3,12 +3,14 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "secrets.h"
 
 static const char *TAG = "wifi";
+static char s_ip[16] = "";   // آخر عنوان أخذناه، للنبضة
 
 #define WIFI_CONNECTED_BIT  BIT0
 
@@ -32,6 +34,9 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "IP: " IPSTR, IP2STR(&ev->ip_info.ip));
+        // نحفظه عشان النبضة تحمله. العنوان بيوزّعه الراوتر وبيتغيّر، وبلاه
+        // إيجاد اللوح ع الشبكة بيصير مسح وتخمين — وهاد بالضبط اللي وقّفنا مرة.
+        snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ev->ip_info.ip));
         xEventGroupSetBits(s_eg, WIFI_CONNECTED_BIT);
     }
 }
@@ -111,6 +116,10 @@ esp_err_t wifi_sandy_start(void) {
     return ESP_OK;
 }
 #undef WIFI_TRY
+
+const char *wifi_sandy_ip(void) {
+    return s_ip;
+}
 
 bool wifi_sandy_is_connected(void) {
     if (!s_eg) return false;

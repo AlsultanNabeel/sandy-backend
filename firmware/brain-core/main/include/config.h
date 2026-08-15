@@ -111,6 +111,18 @@
 // fix actually reach the board?" is a question nobody can answer from the app,
 // and today that question cost an afternoon.
 #define SANDY_FW_VERSION "0.5.0"
+
+// Which board this is. Three ESP boards share the house network and take three
+// different binaries that are not interchangeable:
+//
+//   sandy-brain-s3   ESP32-S3    this project (ESP-IDF)   — voice, face, servo
+//   sandy-room-node  ESP32       sandy/ (Arduino)         — lights, fan, IR
+//   sandy-cam        ESP32-CAM   vision-core/ (Arduino)   — the camera
+//
+// The flash script requires this exact string from the board's own page before
+// it sends a binary. Sending the wrong image is not a mistake anyone notices
+// until the board stops booting.
+#define SANDY_BOARD_ID "sandy-brain-s3"
 #define MQTT_RECONNECT_MS       5000
 
 // ─── Voice: I2S digital mic (INMP441) ──────────────────────────────────────────

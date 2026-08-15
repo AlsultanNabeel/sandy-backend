@@ -50,20 +50,22 @@ private struct NodeListResponse: Decodable {
 /// قيمة تليمتري وحدة — رقم أو بوليان. لازمنا وسيط لأن Swift ما بيفكّ
 /// قاموسًا مختلط الأنواع لحاله.
 private enum TelemetryValue: Decodable {
-    case int(Int), bool(Bool)
+    case int(Int), bool(Bool), string(String)
 
     var any: Any {
         switch self {
-        case .int(let v):  return NSNumber(value: v)
-        case .bool(let v): return v
+        case .int(let v):    return NSNumber(value: v)
+        case .bool(let v):   return v
+        case .string(let v): return v
         }
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         // البوليان أولًا: بلغة سويفت، true بينفكّ كـ Int(1) لو جرّبنا الرقم قبله.
-        if let b = try? c.decode(Bool.self) { self = .bool(b); return }
-        if let i = try? c.decode(Int.self)  { self = .int(i);  return }
+        if let b = try? c.decode(Bool.self)   { self = .bool(b);   return }
+        if let i = try? c.decode(Int.self)    { self = .int(i);    return }
+        if let s = try? c.decode(String.self) { self = .string(s); return }
         throw DecodingError.dataCorruptedError(in: c, debugDescription: "قيمة تليمتري غير مدعومة")
     }
 }
