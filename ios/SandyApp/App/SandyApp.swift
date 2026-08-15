@@ -1,7 +1,9 @@
 import OSLog
 import SwiftUI
 import UIKit
+#if canImport(GoogleSignIn)
 import GoogleSignIn
+#endif
 
 /// مندوب التطبيق — نحتاجه فقط لمسك توكن جهاز APNs عند التسجيل للدفع البعيد
 /// ونمرّره لـ NotificationManager (اللي بدوره يرفعه للباك-إند). بدون مفاتيح آبل
@@ -40,7 +42,11 @@ struct SandyApp: App {
                 // أدوات النظام (حقول النص/الأزرار بشاشة الدخول) مع الخلفية الداكنة.
                 .preferredColorScheme(.dark)
                 // استقبال رابط رجوع جوجل بعد المصادقة.
-                .onOpenURL { GIDSignIn.sharedInstance.handle($0) }
+                .onOpenURL { url in
+                    #if canImport(GoogleSignIn)
+                    GIDSignIn.sharedInstance.handle(url)
+                    #endif
+                }
         }
     }
 }
