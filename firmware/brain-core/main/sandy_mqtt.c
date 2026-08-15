@@ -18,6 +18,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -288,11 +289,24 @@ static const char *OUTPUTS_JSON =
 
 void mqtt_publish_status(void) {
     if (!s_client) return;
-    // 896, not 640: a full heartbeat with every output declared measures 621
-    // bytes, and snprintf truncates silently — a heartbeat cut mid-JSON parses
-    // as nothing and the robot's parts quietly stop registering. Leave room for
-    // the next output someone adds.
-    char buf[896];
+    // static, not on the stack.
+    //
+    // This buffer grew from 256 to 896 bytes when the heartbeat started carrying
+    // the outputs, the mic levels and the address — and the task that calls this
+    // has a 3 KB stack. 896 bytes of it, plus snprintf's own frame, overflowed
+    // it and panicked the board mid-conversation. FreeRTOS caught it and said so
+    // exactly, which is the only reason this took minutes to find rather than
+    // days.
+    //
+    // A static buffer costs no stack at all. Two tasks can reach this — the
+    // status timer and the MQTT event handler on connect — so the mutex below is
+    // what makes sharing it safe. Without it, a connect landing mid-publish
+    // would interleave two JSON documents into one and the backend would parse
+    // neither.
+    static char buf[896];
+    static SemaphoreHandle_t buf_lock;
+    if (!buf_lock) buf_lock = xSemaphoreCreateMutex();
+    if (buf_lock && xSemaphoreTake(buf_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
     // mic_l / mic_r are live input levels, 0..100. They are in the heartbeat and
     // not on a topic of their own so a control screen gets meters by reading the
     // state it already polls — speak, watch which one moves, and you know which
@@ -322,6 +336,7 @@ void mqtt_publish_status(void) {
         wifi_sandy_ip(),
         SANDY_FW_VERSION, OUTPUTS_JSON);
     esp_mqtt_client_publish(s_client, s_topic_status, buf, 0, 0, 0);
+    if (buf_lock) xSemaphoreGive(buf_lock);
 }
 
 // Raw publish for local command words (room node lives on the same broker).

@@ -185,10 +185,20 @@ static const bool s_session_active = true;    // no gate: always streaming
 // ~100 ms frames at 16 kHz keep WebSocket overhead low without adding latency.
 #define MIC_FRAME_SAMPLES   1600
 
-// One contiguous internal block, roughly what esp_websocket_client needs for its
-// TLS task before it can start. Below this, "ws open failed" means out of RAM,
-// not off the network — and she should say so rather than blame the router.
-#define WS_TASK_MIN_BLOCK   20000
+// Below this much contiguous internal RAM, a failed open is out of memory rather
+// than off the network — the difference decides what her face says.
+//
+// 20000 was a guess and it was wrong: a session opened cleanly with the largest
+// free block at 6144, which means the TLS task takes its buffers from PSRAM
+// (CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC) and needs far less contiguous internal
+// memory than assumed. A threshold set above what actually works turns a network
+// problem into a memory accusation, and sends whoever reads it looking in the
+// wrong place — which is precisely what it did.
+//
+// 4096 is under every observed success and still catches a genuinely exhausted
+// heap. Measured, not guessed: the "before open" log line prints this number on
+// every session, so raising or lowering it is an observation away.
+#define WS_TASK_MIN_BLOCK   4096
 
 // Uplink buffer. 128 KB of PSRAM ≈ 4 seconds of 16 kHz 16-bit mono, which is
 // how long a stall may last before audio starts being dropped. Sized from the
