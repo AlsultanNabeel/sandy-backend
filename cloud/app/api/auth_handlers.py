@@ -1,4 +1,15 @@
-"""Sandy web auth: JWT access control with a Telegram approval flow."""
+"""Auth for the apps: JWT access control.
+
+Owner tokens last a week, guest tokens two days. Logins are rate limited per IP,
+with an in-process sliding window as the fallback so brute-force protection
+survives a database outage. ``JWT_SECRET`` has no default — an empty secret would
+let anyone forge a token, so this refuses to issue rather than degrade.
+
+There is no visitor-approval flow any more. It used to run over Telegram, and
+when that channel was removed the approve/deny functions were left behind with
+nothing calling them: a visitor could request access that nobody could ever
+grant. People sign in with email or a social account instead.
+"""
 from __future__ import annotations
 
 import functools

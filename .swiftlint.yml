@@ -1,0 +1,52 @@
+# Swift already has ruff's counterpart on the Python side; this is the Swift half.
+# Run: swiftlint  (brew install swiftlint)
+
+included:
+  - ios/SandyApp
+  - ios/SandyAppTests
+
+excluded:
+  - ios/SandyApp/Localization   # long single-line strings by design
+
+disabled_rules:
+  - todo                        # tracked in the map, not by the linter
+  - trailing_comma
+
+opt_in_rules:
+  - empty_count
+  - force_unwrapping            # the codebase has none — keep it that way
+  - implicitly_unwrapped_optional
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - unused_import
+  - vertical_whitespace_closing_braces
+
+line_length:
+  warning: 120
+  error: 160
+  ignores_comments: true
+
+# SwiftUI views are legitimately long. These thresholds flag the ones that have
+# stopped being one view and become three.
+type_body_length:
+  warning: 400
+  error: 600
+
+file_length:
+  warning: 500
+  error: 800
+
+function_body_length:
+  warning: 80
+  error: 150
+
+cyclomatic_complexity:
+  warning: 12
+  error: 20
+
+identifier_name:
+  min_length: 2
+  excluded: [i, j, k, x, y, r, g, b, id, ar, en, ns, to]
+
+nesting:
+  type_level: 2

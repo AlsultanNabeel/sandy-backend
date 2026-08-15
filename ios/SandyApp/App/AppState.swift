@@ -5,14 +5,12 @@ enum Stage { case launching, auth, onboarding, chat }
 
 @MainActor
 final class AppState: ObservableObject {
-    private static let defaultBaseURL = "https://sandy-robot-3da0693d32f7.herokuapp.com"
-    private static let baseURLKey = "sandy_base_url"
 
     @Published var stage: Stage = .launching
     @Published var baseURL: String {
         didSet {
             api.baseURL = baseURL
-            UserDefaults.standard.set(baseURL, forKey: Self.baseURLKey)
+            UserDefaults.standard.set(baseURL, forKey: Backend.urlDefaultsKey)
         }
     }
     /// بيانات التعارف (الاسم المفضّل + الاهتمامات) — تُعرض بتبويب حسابي.
@@ -26,7 +24,7 @@ final class AppState: ObservableObject {
     init() {
         // عنوان الخادم المحفوظ (لو غيّره المستخدم) وإلا الافتراضي. التعيين بالـinit
         // ما يشغّل didSet فما في حفظ زائد.
-        let saved = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
+        let saved = Backend.currentURL
         baseURL = saved
         api = APIClient(baseURL: saved)   // التوكن يتحمّل من الـKeychain جوّا APIClient
         // 401 على طلب مُصادَق (جلسة منتهية أثناء الاستخدام) → ارجع لشاشة الدخول.

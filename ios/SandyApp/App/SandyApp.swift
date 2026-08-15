@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import UIKit
 import GoogleSignIn
@@ -14,7 +15,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("APNs registration failed: \(error.localizedDescription)")
+        // os.Logger مش print: بينضم لسجل النظام مع وسم وتصنيف، فبينقرا من
+        // Console ع جهاز حقيقي — وprint ما بتطلع أصلًا ببناء الإصدار.
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "SandyApp", category: "push")
+            .error("APNs registration failed: \(error.localizedDescription, privacy: .public)")
     }
 }
 

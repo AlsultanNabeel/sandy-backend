@@ -1,16 +1,23 @@
-"""Feature flags بسيطة لإطلاق آمن للتغييرات الكبيرة (R6 light).
+"""Feature flags — turn a risky change on or off without a deploy.
 
-الفلسفة (بناءً على مراجعة senior):
-- ساندي عائلية (3-4 users) → A/B testing بـ chi-square = صفر دلالة إحصائية
-- بدل ذلك: feature flags بسيطة + manual review عبر eval suite + Langfuse compare
-- Heroku Config Vars توفّر مكان مركزي لتفعيل/إطفاء flag → restart → done في < 5 دقايق
+A flag is an env var on the host, so flipping one is a config change and a
+restart rather than a release. That is the whole value: a change that turns out
+badly is reverted in a minute by whoever noticed, not by whoever can build.
 
-الـ flags المعرّفة:
-    SANDY_USE_PROMPT_CACHING    → تفعيل Anthropic prompt caching على Claude calls
-    SANDY_USE_DSPY_PROMPTS      → استخدام DSPy-compiled prompts بدل handcrafted
-    SANDY_USE_FEEDBACK_BUTTONS  → إضافة 👍/👎 لكل رد في تيليغرام
+Flags are for changes big enough to want an escape hatch. A flag that has been
+on (or off) for months is not a flag any more — it is dead branching, and it
+should be deleted along with the path nobody takes.
 
-كل الـ flags default `False`.
+Every flag defaults to `False`: a build with no configuration behaves like the
+build before the flag existed.
+
+`KNOWN_FLAGS` below is currently empty, and that is the correct state. It used to
+list three flags for subsystems this repo does not contain — Anthropic prompt
+caching (the SDK is not even a dependency here), DSPy-compiled prompts, and
+Telegram feedback buttons — carried over from the older single-owner project.
+The docstring also described Sandy as a 3–4 user family app, which contradicts
+what this is. Stale entries here are worse than none: they describe a system to
+anyone reading, and the description was wrong.
 """
 
 from __future__ import annotations
@@ -22,11 +29,9 @@ _TRUTHY = frozenset({"1", "true", "yes", "on", "enabled", "y"})
 _FALSY = frozenset({"0", "false", "no", "off", "disabled", "n", ""})
 
 # Catalog من الـ flags المعروفة — مفيد للـ tagging والـ /flags command لاحقاً
-KNOWN_FLAGS: tuple[str, ...] = (
-    "USE_PROMPT_CACHING",
-    "USE_DSPY_PROMPTS",
-    "USE_FEEDBACK_BUTTONS",
-)
+# Empty on purpose — see the module docstring. Add a name here when you add a
+# flag, and take it out when the change it guarded stops being risky.
+KNOWN_FLAGS: tuple[str, ...] = ()
 
 
 def _env_name(flag: str) -> str:

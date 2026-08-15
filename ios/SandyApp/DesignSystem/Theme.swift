@@ -284,10 +284,15 @@ struct SectionHeader: View {
 
 /// شريط صغير غير مزعج يبيّن إن البيانات تجريبية (للزائر/غير المالك).
 struct DemoBanner: View {
+    // النص من ملفات الترجمة زي أي نص تاني بالتطبيق. كان مكتوب حرفيًا هون —
+    // النص الوحيد بكل التطبيق اللي هيك — يعني بالإنجليزي كان بيضل عربي.
+    @EnvironmentObject var lang: LanguageManager
+
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
             Image(systemName: "info.circle.fill")
-            Text("بيانات تجربة")
+                .accessibilityHidden(true)
+            Text(lang.s("common.demoData"))
                 .font(.caption).bold()
             Spacer(minLength: 0)
         }

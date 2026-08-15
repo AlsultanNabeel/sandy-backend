@@ -1,4 +1,4 @@
-"""Extract plain text from uploaded Telegram documents.
+"""Extract plain text from an uploaded document — TXT, PDF, DOCX, CSV, XLSX, JSON.
 
 Supported: TXT, MD, PDF, DOCX, CSV, JSON, XLSX, and source-code files.
 Returns (text, error_message) — error_message is None on success.

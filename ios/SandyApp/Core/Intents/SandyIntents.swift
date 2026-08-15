@@ -14,11 +14,10 @@ import Foundation
 
 /// أدوات مشتركة للنوايا — بناء عميل مصادَق + حارس الدخول.
 enum IntentAPI {
-    private static let defaultBaseURL = "https://sandy-robot-3da0693d32f7.herokuapp.com"
-
     static func make() throws -> APIClient {
-        let base = UserDefaults.standard.string(forKey: "sandy_base_url") ?? defaultBaseURL
-        let api = APIClient(baseURL: base)   // التوكن يتحمّل من الـKeychain بالـinit
+        // نفس المصدر اللي بيقرا منه التطبيق — لو غيّر المستخدم الخادم من
+        // الإعدادات، الاختصارات بتمشي معه بلا ما نتذكّر نحدّث مكان تاني.
+        let api = APIClient(baseURL: Backend.currentURL)   // التوكن يتحمّل من الـKeychain بالـinit
         guard api.token != nil else { throw SandyIntentError.notSignedIn }
         return api
     }
