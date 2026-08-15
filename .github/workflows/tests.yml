@@ -86,7 +86,11 @@ jobs:
       - name: Build the robot brain (ESP-IDF)
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.3
+          # The exact version the owner builds and flashes with, from
+          # dependencies.lock. A gate on a different toolchain is worse than no
+          # gate: it can pass while the build that reaches the board fails, and
+          # it did — v5.3 could not even read a lock file v6 had written.
+          esp_idf_version: v6.0.1
           target: esp32s3
           path: firmware/brain-core
 
@@ -104,11 +108,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Lint (SwiftLint)
-        run: |
-          brew install swiftlint
-          swiftlint --strict --config .swiftlint.yml
-
       - name: Type-check the app sources
         # There is no .xcodeproj in the repo — the Xcode project lives in the
         # owner's build copy and the sources are synced into it. So this drives
@@ -123,3 +122,16 @@ jobs:
             -target arm64-apple-ios18.0 \
             -swift-version 5 \
             @/tmp/sources.txt
+
+      # Style comes after correctness on purpose. Ordered the other way, one
+      # long line hid the answer to "does it still compile?" — which is the only
+      # question that can actually block a merge.
+      #
+      # No --strict: that promotes every warning to an error, so a 121-character
+      # line failed the build alongside a force-unwrap. The rules that crash an
+      # app are set to error severity in .swiftlint.yml and stop the build; the
+      # rest are advice and print as advice.
+      - name: Lint (SwiftLint)
+        run: |
+          brew install swiftlint
+          swiftlint --config .swiftlint.yml

@@ -146,8 +146,20 @@ private final class LiveAudioBridge {
     private let player = AVAudioPlayerNode()
     private var converter: AVAudioConverter?
     private var sendFormat: AVAudioFormat?
-    private let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                           sampleRate: 24000, channels: 1, interleaved: false)!
+    /// Gemini sends 24 kHz mono float. The initialiser is failable because
+    /// AVAudioFormat rejects invalid combinations — these are literals it
+    /// accepts, so the failure branch is unreachable. It is spelled out anyway:
+    /// a `!` here crashes with "unexpectedly found nil" and no hint of which
+    /// nil, while this crashes with the reason written in the log.
+    private static func makePlayFormat() -> AVAudioFormat {
+        guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                      sampleRate: 24000, channels: 1,
+                                      interleaved: false) else {
+            preconditionFailure("AVAudioFormat rejected 24 kHz mono float32")
+        }
+        return fmt
+    }
+    private let playFormat = GeminiLiveManager.makePlayFormat()
 
     private let lock = NSLock()
     private var speaking = false
@@ -272,7 +284,10 @@ private final class LiveAudioBridge {
               let buf = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(frames))
         else { return nil }
         buf.frameLength = AVAudioFrameCount(frames)
-        let dst = buf.floatChannelData![0]
+        // Non-nil for a float format, which playFormat is. Returning nil rather
+        // than forcing means a future format change drops audio instead of
+        // killing the app mid-conversation.
+        guard let dst = buf.floatChannelData?[0] else { return nil }
         data.withUnsafeBytes { raw in
             let src = raw.bindMemory(to: Int16.self)
             for i in 0..<frames {

@@ -5,3 +5,13 @@ main/secrets.h
 *.bin
 *.elf
 *.map
+
+# Downloaded dependencies. The component manager owns this directory: it fetches
+# the exact versions pinned in dependencies.lock and writes a .component_hash it
+# then verifies. Committing the result put 104 MB of other people's source in
+# the repo AND broke every build on a machine whose IDF resolved differently —
+# the manager saw content it had not written and refused to continue.
+#
+# dependencies.lock stays tracked. That file is the pin; this directory is what
+# the pin produces.
+managed_components/
