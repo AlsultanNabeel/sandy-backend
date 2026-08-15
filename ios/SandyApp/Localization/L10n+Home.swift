@@ -47,7 +47,7 @@ enum L10nHome {
             "greeting.sub.night":     .text("آخر لمسة قبل ما ترتاح."),
 
             // Load failure notice
-            "loadFailed": .text("معلش، تعثّرت وأنا أجمعلك يومك — اسحب لتحت تحدّث وأنا أعيد المحاولة 🌷"),
+            "loadFailed": .text("تعذّر تحميل يومك. اسحب للتحديث."),
 
             // Proactive card ("نظرة ساندي")
             "proactive.title":       .text("نظرة ساندي"),
@@ -132,7 +132,7 @@ enum L10nHome {
             "greeting.sub.night":     .text("One last touch before you rest."),
 
             // Load failure notice
-            "loadFailed": .text("Sorry, I stumbled while pulling your day together — pull down to refresh and I'll try again 🌷"),
+            "loadFailed": .text("Couldn't load your day. Pull to refresh."),
 
             // Proactive card ("نظرة ساندي")
             "proactive.title":       .text("Sandy's take"),

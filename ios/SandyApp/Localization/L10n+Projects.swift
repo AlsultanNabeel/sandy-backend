@@ -9,16 +9,16 @@ enum L10nProjects {
     static let table = L10nTable(
         ar: [
             "intro": .text("خطط العصف الذهني اللي خلّصتها ساندي — والجلسة الحالية إذا في وحدة شغّالة."),
-            "empty": .text("لسّا ما في خطط محفوظة. ابدأ عصف ذهني جديد لأي فكرة."),
+            "empty": .text("لا توجد خطط محفوظة. ابدأ جلسة عصف ذهني جديدة."),
             "untitled": .text("بلا عنوان"),
 
-            "errorLoad":   .text("معلش، ما قدرت أجيب المشاريع — اسحب للتحديث."),
-            "errorStart":  .text("معلش، ما قدرت أبدأ الجلسة — جرّب كمان مرة."),
-            "errorAdd":    .text("معلش، ما قدرت أضيف الفكرة — جرّب كمان مرة."),
-            "errorFinish": .text("معلش، ما قدرت أخلّص الخطة — جرّب كمان مرة."),
-            "errorCancel": .text("معلش، ما قدرت ألغي الجلسة — جرّب كمان مرة."),
-            "errorUpdate": .text("معلش، ما قدرت أعدّل الخطة — جرّب كمان مرة."),
-            "errorDelete": .text("معلش، ما قدرت أحذف الخطة — جرّب كمان مرة."),
+            "errorLoad":   .text("تعذّر تحميل المشاريع. اسحب للتحديث."),
+            "errorStart":  .text("تعذّر بدء الجلسة. أعد المحاولة."),
+            "errorAdd":    .text("تعذّرت إضافة الفكرة. أعد المحاولة."),
+            "errorFinish": .text("تعذّر إنهاء الخطة. أعد المحاولة."),
+            "errorCancel": .text("تعذّر إلغاء الجلسة. أعد المحاولة."),
+            "errorUpdate": .text("تعذّر تعديل الخطة. أعد المحاولة."),
+            "errorDelete": .text("تعذّر حذف الخطة. أعد المحاولة."),
 
             // بدء جلسة جديدة
             "start":         .text("عصف ذهني جديد"),
@@ -28,7 +28,7 @@ enum L10nProjects {
 
             // الجلسة النشطة
             "activeTitle":   .text("جلسة شغّالة"),
-            "pointsEmpty":   .text("لسّا ما ضفت أفكار — اكتب أول وحدة تحت."),
+            "pointsEmpty":   .text("لم تُضِف أفكارًا بعد — اكتب أول فكرة في الأسفل."),
             "addPointPlaceholder": .text("أضف فكرة…"),
             "add":           .text("ضيف"),
             "finish":        .text("خلّص الخطة"),
@@ -47,16 +47,16 @@ enum L10nProjects {
         ],
         en: [
             "intro": .text("Brainstorm plans Sandy finished — plus your active session, if you have one."),
-            "empty": .text("No saved plans yet. Start a new brainstorm for any idea."),
+            "empty": .text("No saved plans. Start a new brainstorm."),
             "untitled": .text("Untitled"),
 
-            "errorLoad":   .text("Sorry, I couldn't load your projects — pull to refresh."),
-            "errorStart":  .text("Sorry, I couldn't start the session — try again."),
-            "errorAdd":    .text("Sorry, I couldn't add that idea — try again."),
-            "errorFinish": .text("Sorry, I couldn't finish the plan — try again."),
-            "errorCancel": .text("Sorry, I couldn't cancel the session — try again."),
-            "errorUpdate": .text("Sorry, I couldn't update the plan — try again."),
-            "errorDelete": .text("Sorry, I couldn't delete the plan — try again."),
+            "errorLoad":   .text("Couldn't load your projects. Pull to refresh."),
+            "errorStart":  .text("Couldn't start the session. Try again."),
+            "errorAdd":    .text("Couldn't add the idea. Try again."),
+            "errorFinish": .text("Couldn't finish the plan. Try again."),
+            "errorCancel": .text("Couldn't cancel the session. Try again."),
+            "errorUpdate": .text("Couldn't update the plan. Try again."),
+            "errorDelete": .text("Couldn't delete the plan. Try again."),
 
             "start":         .text("New brainstorm"),
             "startTitle":    .text("What's the session about?"),
@@ -64,7 +64,7 @@ enum L10nProjects {
             "startAction":   .text("Start"),
 
             "activeTitle":   .text("Active session"),
-            "pointsEmpty":   .text("No ideas yet — type the first one below."),
+            "pointsEmpty":   .text("No ideas yet — write your first one below."),
             "addPointPlaceholder": .text("Add an idea…"),
             "add":           .text("Add"),
             "finish":        .text("Finish plan"),

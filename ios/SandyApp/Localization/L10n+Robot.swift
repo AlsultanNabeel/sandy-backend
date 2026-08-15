@@ -12,7 +12,7 @@ enum L10nRobot {
             "apply":          .text("شغّل"),
             "applied":        .text("تمام — أرسلتها للغرفة 🏠"),
             "appliedOffline": .text("حفظت المشهد، بس الغرفة مش متّصلة."),
-            "applyError":     .text("معلش، ما قدرت أطبّق المشهد."),
+            "applyError":     .text("تعذّر تطبيق المشهد."),
             "add":            .text("مشهد جديد"),
             "delete":         .text("حذف"),
             "edit":           .text("تعديل"),
@@ -21,11 +21,11 @@ enum L10nRobot {
             "addAction":      .text("إضافة جهاز"),
             "namePlaceholder":  .text("اسم مختصر (إنجليزي)"),
             "labelPlaceholder": .text("الاسم الظاهر"),
-            "empty":          .text("ما في مشاهد بعد — أضف وحدة."),
+            "empty":          .text("لا توجد مشاهد بعد — أضف مشهدًا."),
             "nameExists":     .text("في مشهد بنفس الاسم."),
             "builtinDel":     .text("هاد مشهد جاهز ما بينحذف."),
-            "saveError":      .text("معلش، ما قدرت أحفظ المشهد."),
-            "loadError":      .text("معلش، ما قدرت أجيب المشاهد — اسحب للتحديث."),
+            "saveError":      .text("تعذّر حفظ المشهد."),
+            "loadError":      .text("تعذّر تحميل المشاهد. اسحب للتحديث."),
 
             // ── فحص الجسم (RobotTestView) ──
             // شاشة الفحص من بطاقة الوحدة بصفحة التحكّم. النص بيشرح **الطريقة**
@@ -46,7 +46,7 @@ enum L10nRobot {
             "apply":          .text("Run"),
             "applied":        .text("Done — sent to the room 🏠"),
             "appliedOffline": .text("Saved the scene, but the room is offline."),
-            "applyError":     .text("Sorry, I couldn't apply the scene."),
+            "applyError":     .text("Couldn't apply the scene."),
             "add":            .text("New scene"),
             "delete":         .text("Delete"),
             "edit":           .text("Edit"),
@@ -58,8 +58,8 @@ enum L10nRobot {
             "empty":          .text("No scenes yet — add one."),
             "nameExists":     .text("A scene with that name exists."),
             "builtinDel":     .text("This is a built-in scene; it can't be deleted."),
-            "saveError":      .text("Sorry, I couldn't save the scene."),
-            "loadError":      .text("Sorry, I couldn't load scenes — pull to refresh."),
+            "saveError":      .text("Couldn't save the scene."),
+            "loadError":      .text("Couldn't load your scenes. Pull to refresh."),
 
             // ── Body test (RobotTestView) ──
             // Reached from the node card on the Control page.

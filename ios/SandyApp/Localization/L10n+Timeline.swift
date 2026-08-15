@@ -17,10 +17,10 @@ enum L10nTimeline {
             "type.expense":  .text("مصروف"),
             "type.journal":  .text("يومية"),
 
-            "empty":       .text("لسّا ما في نشاط — كل ما تستعمل ساندي، بينعبّى الخط هون."),
-            "errorLoad":   .text("معلش، ما قدرت أجيب الخط الزمني — اسحب للتحديث."),
-            "errorDelete": .text("معلش، ما قدرت أحذف — جرّب كمان مرة."),
-            "errorToggle": .text("معلش، ما زبطت أحدّث المهمة — جرّب كمان مرة."),
+            "empty":       .text("لا يوجد نشاط بعد — كلما استخدمت ساندي، امتلأ هذا الخط."),
+            "errorLoad":   .text("تعذّر تحميل الخط الزمني. اسحب للتحديث."),
+            "errorDelete": .text("تعذّر الحذف. أعد المحاولة."),
+            "errorToggle": .text("تعذّر تحديث المهمة. أعد المحاولة."),
 
             // إجراءات وتفاصيل
             "delete":         .text("حذف"),
@@ -41,10 +41,10 @@ enum L10nTimeline {
             "type.expense":  .text("Expense"),
             "type.journal":  .text("Journal"),
 
-            "empty":       .text("No activity yet — as you use Sandy, it fills up here."),
-            "errorLoad":   .text("Sorry, I couldn't load your timeline — pull to refresh."),
-            "errorDelete": .text("Sorry, I couldn't delete that — try again."),
-            "errorToggle": .text("Sorry, I couldn't update the task — give it another try."),
+            "empty":       .text("No activity yet — this fills up as you use Sandy."),
+            "errorLoad":   .text("Couldn't load your timeline. Pull to refresh."),
+            "errorDelete": .text("Couldn't delete. Try again."),
+            "errorToggle": .text("Couldn't update the task. Try again."),
 
             // actions & details
             "delete":         .text("Delete"),

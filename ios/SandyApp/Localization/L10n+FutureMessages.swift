@@ -9,7 +9,7 @@ enum L10nFutureMessages {
     static let table = L10nTable(
         ar: [
             "intro":            .text("اكتب كلمة لنفسك بالمستقبل — وأنا بحفظها وبرجّعها إلك يوم موعدها 💌"),
-            "empty":            .text("ما في رسائل مجدولة بعد — اكتب أول كلمة لنفسك المستقبلي."),
+            "empty":            .text("لا توجد رسائل مجدولة بعد — اكتب أول رسالة لنفسك في المستقبل."),
             "add":              .text("رسالة جديدة"),
             "addTitle":         .text("رسالة لنفسك المستقبلي"),
             "delete":           .text("احذف"),
@@ -19,9 +19,9 @@ enum L10nFutureMessages {
             "save":             .text("احفظها لي"),
             "deliverPrefix":    .text("بتوصلك"),
             "pastGuard":        .text("اختار وقت بالمستقبل — هاي رسالة لبكرة مش لليوم 🙂"),
-            "errorLoad":        .text("معلش، ما قدرت أجيب رسائلك المجدولة — جرّب كمان مرة."),
-            "errorAdd":         .text("معلش، ما قدرت أحفظ الرسالة — جرّب كمان مرة."),
-            "errorDelete":      .text("معلش، ما قدرت أحذف الرسالة — جرّب كمان مرة."),
+            "errorLoad":        .text("تعذّر تحميل رسائلك المجدولة. أعد المحاولة."),
+            "errorAdd":         .text("تعذّر حفظ الرسالة. أعد المحاولة."),
+            "errorDelete":      .text("تعذّر حذف الرسالة. أعد المحاولة."),
         ],
         en: [
             "intro":            .text("Write a note to your future self — I'll keep it and bring it back to you on the day 💌"),
@@ -35,9 +35,9 @@ enum L10nFutureMessages {
             "save":             .text("Keep it for me"),
             "deliverPrefix":    .text("Arrives"),
             "pastGuard":        .text("Pick a time in the future — this is a note for later, not today 🙂"),
-            "errorLoad":        .text("Sorry, I couldn't load your scheduled messages — try again."),
-            "errorAdd":         .text("Sorry, I couldn't save the message — try again."),
-            "errorDelete":      .text("Sorry, I couldn't delete the message — try again."),
+            "errorLoad":        .text("Couldn't load your scheduled messages. Try again."),
+            "errorAdd":         .text("Couldn't save the message. Try again."),
+            "errorDelete":      .text("Couldn't delete the message. Try again."),
         ]
     )
 }

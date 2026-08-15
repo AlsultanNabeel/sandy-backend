@@ -25,20 +25,20 @@ enum L10nControl {
             "section.nodes":    .text("وحدات ساندي"),
 
             // ── Loading / empty / offline ──
-            "loading":          .text("لحظة، بجيبلك أجهزتك…"),
-            "devices.empty.title": .text("ما في أجهزة لسّا"),
-            "devices.empty.hint":  .text("اربط وحدة ساندي وضيف أوّل جهاز، وأنا أتحكّم فيه إلك."),
-            "nodes.empty.title":   .text("ما في وحدات مربوطة"),
-            "nodes.empty.hint":    .text("اربط وحدة ساندي بالكود المطبوع عليها وأنا أبدأ أشتغل."),
+            "loading":          .text("جارٍ تحميل أجهزتك…"),
+            "devices.empty.title": .text("لا توجد أجهزة بعد"),
+            "devices.empty.hint":  .text("اقترن بوحدة ساندي وأضف أول جهاز."),
+            "nodes.empty.title":   .text("لا توجد وحدات مقترنة"),
+            "nodes.empty.hint":    .text("أدخل الكود المطبوع على الوحدة لاقترانها."),
             "offline":          .text("مفصولة"),
             "online":           .text("متّصلة"),
             "noRoom":           .text("بدون غرفة"),
 
             // ── Generic notices (Sandy voice) ──
-            "loadFailed":   .text("معلش، ما قدرت أجيب أجهزتك هلّق. اسحب لتحت تنعش الصفحة وأنا أحاول من جديد."),
-            "controlFailed":.text("معلش، ما زبط الأمر هلّق. جرّب كمان مرة بعد لحظة وأنا معك."),
-            "saveFailed":   .text("معلش، ما زبط الحفظ هلّق. جرّب كمان مرة بعد لحظة وأنا معك."),
-            "deleteFailed": .text("معلش، ما قدرت أحذفه هلّق. جرّب كمان مرة وأنا معك."),
+            "loadFailed":   .text("تعذّر تحميل أجهزتك. اسحب للتحديث."),
+            "controlFailed":.text("تعذّر تنفيذ الأمر. أعد المحاولة بعد قليل."),
+            "saveFailed":   .text("تعذّر الحفظ. أعد المحاولة بعد قليل."),
+            "deleteFailed": .text("تعذّر الحذف. أعد المحاولة."),
 
             // ── Control widget labels ──
             "action.on":     .text("شغّل"),
@@ -91,14 +91,14 @@ enum L10nControl {
             "ir.buttons":        .text("أزرار الريموت"),
             "ir.learnPlaceholder":.text("اسم الزر (مثلاً: تشغيل)"),
             "ir.learnHint":      .text("اكتب اسم الزر وأنا أحفظه — التقاط الكود بيجي مع تحديث الوحدة لاحقًا."),
-            "ir.noButtons":      .text("ما في أزرار محفوظة لسّا."),
+            "ir.noButtons":      .text("لا توجد أزرار محفوظة."),
             "ir.learnNew":       .text("علّم زر جديد"),
             "ir.learnStart":     .text("ابدأ"),
             "ir.learning":       .text("وجّه الريموت للوحدة واضغط الزر…"),
             "ir.learnAlertHint": .text("اكتب اسم الزر، وبعد ما تضغط ابدأ وجّه ريموتك للوحدة واضغط الزر المطلوب."),
             "ir.needNode":       .text("اربط الجهاز بوحدة أول عشان أتعلّم الأشعة."),
             "ir.learnTimeout":   .text("ما وصلتني إشارة — جرّب ثانية وقرّب الريموت."),
-            "ir.learnFailed":    .text("تعذّر التعلّم، جرّب كمان مرّة."),
+            "ir.learnFailed":    .text("تعذّر التعلّم. أعد المحاولة."),
 
             // ── Pair / rename / unpair node sheet ──
             "node.pair":         .text("ربط وحدة"),
@@ -110,7 +110,7 @@ enum L10nControl {
             "node.labelPlaceholder":.text("مثلاً: وحدة الصالة"),
             "node.pairSubmit":   .text("اربط"),
             "node.already":      .text("الوحدة مربوطة عندك من قبل — حدّثتلك بياناتها."),
-            "node.pairFailed":   .text("الكود ما زبط. تأكّد منه وجرّب كمان مرة وأنا معك."),
+            "node.pairFailed":   .text("الكود غير صحيح. تحقّق منه وأعد المحاولة."),
             "node.rename":       .text("إعادة تسمية"),
             "node.renameTitle":  .text("تعديل اسم الوحدة"),
             "node.unpair":       .text("فكّ الربط"),
@@ -131,20 +131,20 @@ enum L10nControl {
             "section.nodes":    .text("Sandy nodes"),
 
             // ── Loading / empty / offline ──
-            "loading":          .text("One sec, fetching your devices…"),
+            "loading":          .text("Loading your devices…"),
             "devices.empty.title": .text("No devices yet"),
-            "devices.empty.hint":  .text("Pair a Sandy node and add your first device, and I'll control it for you."),
+            "devices.empty.hint":  .text("Pair a Sandy node and add your first device."),
             "nodes.empty.title":   .text("No paired nodes"),
-            "nodes.empty.hint":    .text("Pair a Sandy node with the code printed on it and I'll get to work."),
+            "nodes.empty.hint":    .text("Enter the code printed on the node to pair it."),
             "offline":          .text("Offline"),
             "online":           .text("Online"),
             "noRoom":           .text("No room"),
 
             // ── Generic notices (Sandy voice) ──
-            "loadFailed":   .text("Sorry, I couldn't fetch your devices right now. Pull down to refresh and I'll try again."),
-            "controlFailed":.text("Sorry, that command didn't go through. Give it another try in a moment — I'm with you."),
-            "saveFailed":   .text("Sorry, that didn't save just now. Give it another try in a moment — I'm with you."),
-            "deleteFailed": .text("Sorry, I couldn't delete it just now. Give it another try — I'm with you."),
+            "loadFailed":   .text("Couldn't load your devices. Pull to refresh."),
+            "controlFailed":.text("The command didn't go through. Try again in a moment."),
+            "saveFailed":   .text("Couldn't save. Try again in a moment."),
+            "deleteFailed": .text("Couldn't delete. Try again."),
 
             // ── Control widget labels ──
             "action.on":     .text("On"),
@@ -197,14 +197,14 @@ enum L10nControl {
             "ir.buttons":        .text("Remote buttons"),
             "ir.learnPlaceholder":.text("Button name (e.g. Power)"),
             "ir.learnHint":      .text("Type the button name and I'll save it — code capture comes with a node update later."),
-            "ir.noButtons":      .text("No saved buttons yet."),
+            "ir.noButtons":      .text("No saved buttons."),
             "ir.learnNew":       .text("Learn a new button"),
             "ir.learnStart":     .text("Start"),
             "ir.learning":       .text("Point the remote at the node and press the button…"),
             "ir.learnAlertHint": .text("Name the button, then after you tap Start point your remote at the node and press it."),
             "ir.needNode":       .text("Bind this device to a node first so I can learn IR."),
             "ir.learnTimeout":   .text("No signal received — try again, closer."),
-            "ir.learnFailed":    .text("Couldn't learn it, try again."),
+            "ir.learnFailed":    .text("Couldn't learn it. Try again."),
 
             // ── Pair / rename / unpair node sheet ──
             "node.pair":         .text("Pair a node"),
@@ -216,7 +216,7 @@ enum L10nControl {
             "node.labelPlaceholder":.text("e.g. Living room node"),
             "node.pairSubmit":   .text("Pair"),
             "node.already":      .text("This node was already paired — I refreshed its details for you."),
-            "node.pairFailed":   .text("That code didn't work. Double-check it and try again — I'm with you."),
+            "node.pairFailed":   .text("That code isn't valid. Check it and try again."),
             "node.rename":       .text("Rename"),
             "node.renameTitle":  .text("Edit node name"),
             "node.unpair":       .text("Unpair"),

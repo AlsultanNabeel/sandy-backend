@@ -20,7 +20,7 @@ enum L10nWeather {
             "low":            .text("الصغرى"),
             "sunset":         .text("الغروب"),
             "empty":          .text("اكتب اسم مدينة وبجيبلك حالة الجو فيها."),
-            "errorLoad":      .text("معلش، ما قدرت أجيب الطقس هلأ — جرّب كمان مرة."),
+            "errorLoad":      .text("تعذّر تحميل الطقس. أعد المحاولة."),
             "retry":          .text("جرّب كمان مرة"),
         ],
         en: [
@@ -36,7 +36,7 @@ enum L10nWeather {
             "low":            .text("Low"),
             "sunset":         .text("Sunset"),
             "empty":          .text("Type a city and I'll bring you its weather."),
-            "errorLoad":      .text("Sorry, I couldn't get the weather right now — try again."),
+            "errorLoad":      .text("Couldn't load the weather. Try again."),
             "retry":          .text("Try again"),
         ]
     )

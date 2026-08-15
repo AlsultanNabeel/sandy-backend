@@ -30,11 +30,11 @@ enum L10nLife {
 
             // Habits screen
             "habits.add":         .text("عادة جديدة"),
-            "habits.empty":       .text("ما في عادات لسّا.\nخلّينا نبدأ عادة حلوة سوا!"),
+            "habits.empty":       .text("لا توجد عادات بعد.\nابدأ عادة جديدة."),
             "habits.streak":      .text("🔥 %@ يوم"),
             "habits.doneToday":   .text("تمّت اليوم ✓"),
-            "habits.loadError":   .text("معلش، ما قدرت أجيب العادات هلأ. جرّب كمان شوي."),
-            "habits.checkinError": .text("ما زبطت أسجّل الحضور. جرّب كمان مرة 🙏"),
+            "habits.loadError":   .text("تعذّر تحميل العادات. أعد المحاولة بعد قليل."),
+            "habits.checkinError": .text("تعذّر تسجيل الحضور. أعد المحاولة."),
 
             // Add-habit sheet
             "habits.sheet.nameSection":  .text("شو العادة؟"),
@@ -44,19 +44,19 @@ enum L10nLife {
             "habits.freq.daily":         .text("كل يوم"),
             "habits.freq.weekly":        .text("كل أسبوع"),
             "habits.sheet.weeklySuffix": .text("(أسبوعي)"),
-            "habits.saveError":          .text("ما قدرت أحفظ العادة. جرّب كمان مرة 🙏"),
+            "habits.saveError":          .text("تعذّر حفظ العادة. أعد المحاولة."),
             "habits.edit":               .text("تعديل"),
             "habits.delete":             .text("حذف"),
             "habits.editTitle":          .text("تعديل العادة"),
-            "habits.deleteError":        .text("ما قدرت أحذف العادة. جرّب كمان مرة 🙏"),
+            "habits.deleteError":        .text("تعذّر حذف العادة. أعد المحاولة."),
 
             // Expenses screen
             "expenses.add":            .text("أضف مصروف"),
-            "expenses.empty":          .text("ما في مصاريف مسجّلة.\nسجّل أول مصروف وخلّينا نتابع سوا!"),
+            "expenses.empty":          .text("لا توجد مصاريف مسجّلة.\nسجّل أول مصروف."),
             "expenses.summaryTitle":   .text("مصاريف آخر ٣٠ يوم"),
             "expenses.count":          .text("%@ حركة"),
             "expenses.fallbackTitle":  .text("مصروف"),
-            "expenses.loadError":      .text("معلش، ما قدرت أجيب المصاريف هلأ. جرّب كمان شوي."),
+            "expenses.loadError":      .text("تعذّر تحميل المصاريف. أعد المحاولة بعد قليل."),
 
             // Add-expense sheet
             "expenses.sheet.amountSection":  .text("المبلغ"),
@@ -68,10 +68,10 @@ enum L10nLife {
             "expenses.sheet.title":          .text("مصروف جديد"),
             "expenses.sheet.editTitle":      .text("تعديل المصروف"),
             "expenses.amountError":          .text("اكتب مبلغ أكبر من صفر أوّل 🙂"),
-            "expenses.saveError":            .text("ما قدرت أحفظ المصروف. جرّب كمان مرة 🙏"),
+            "expenses.saveError":            .text("تعذّر حفظ المصروف. أعد المحاولة."),
             "expenses.edit":                 .text("تعديل"),
             "expenses.delete":               .text("حذف"),
-            "expenses.deleteError":          .text("ما قدرت أحذف المصروف. جرّب كمان مرة 🙏"),
+            "expenses.deleteError":          .text("تعذّر حذف المصروف. أعد المحاولة."),
 
             // Expense categories — labels for display only (canonical = Arabic value)
             "cat.food":      .text("أكل"),
@@ -83,8 +83,8 @@ enum L10nLife {
 
             // Journal screen
             "journal.add":        .text("خاطرة جديدة"),
-            "journal.empty":      .text("ما في خواطر لسّا.\nاحكيلي شو صار بيومك ✍️"),
-            "journal.loadError":  .text("معلش، ما قدرت أجيب اليوميات هلأ. جرّب كمان شوي."),
+            "journal.empty":      .text("لا توجد خواطر بعد.\nاكتب أول خاطرة."),
+            "journal.loadError":  .text("تعذّر تحميل اليوميات. أعد المحاولة بعد قليل."),
 
             // Add-journal sheet
             "journal.sheet.section":      .text("شو صار اليوم؟"),
@@ -92,10 +92,10 @@ enum L10nLife {
             "journal.sheet.charCount":    .text("%@ حرف"),
             "journal.sheet.title":        .text("خاطرة جديدة"),
             "journal.sheet.editTitle":    .text("تعديل الخاطرة"),
-            "journal.saveError":          .text("ما قدرت أحفظ الخاطرة. جرّب كمان مرة 🙏"),
+            "journal.saveError":          .text("تعذّر حفظ الخاطرة. أعد المحاولة."),
             "journal.edit":               .text("تعديل"),
             "journal.delete":             .text("حذف"),
-            "journal.deleteError":        .text("ما قدرت أحذف الخاطرة. جرّب كمان مرة 🙏"),
+            "journal.deleteError":        .text("تعذّر حذف الخاطرة. أعد المحاولة."),
         ],
         en: [
             // Hub
@@ -110,11 +110,11 @@ enum L10nLife {
 
             // Habits screen
             "habits.add":         .text("New habit"),
-            "habits.empty":       .text("No habits yet.\nLet's start a nice one together!"),
+            "habits.empty":       .text("No habits yet.\nStart a new one."),
             "habits.streak":      .text("🔥 %@ days"),
             "habits.doneToday":   .text("Done today ✓"),
-            "habits.loadError":   .text("Sorry, couldn't load your habits right now. Try again in a bit."),
-            "habits.checkinError": .text("Couldn't log the check-in. Try once more 🙏"),
+            "habits.loadError":   .text("Couldn't load your habits. Try again shortly."),
+            "habits.checkinError": .text("Couldn't log the check-in. Try again."),
 
             // Add-habit sheet
             "habits.sheet.nameSection":  .text("What's the habit?"),
@@ -124,19 +124,19 @@ enum L10nLife {
             "habits.freq.daily":         .text("Every day"),
             "habits.freq.weekly":        .text("Every week"),
             "habits.sheet.weeklySuffix": .text("(weekly)"),
-            "habits.saveError":          .text("Couldn't save the habit. Try once more 🙏"),
+            "habits.saveError":          .text("Couldn't save the habit. Try again."),
             "habits.edit":               .text("Edit"),
             "habits.delete":             .text("Delete"),
             "habits.editTitle":          .text("Edit habit"),
-            "habits.deleteError":        .text("Couldn't delete the habit. Try once more 🙏"),
+            "habits.deleteError":        .text("Couldn't delete the habit. Try again."),
 
             // Expenses screen
             "expenses.add":            .text("Add expense"),
-            "expenses.empty":          .text("No expenses logged.\nAdd your first one and let's track together!"),
+            "expenses.empty":          .text("No expenses recorded.\nAdd your first one."),
             "expenses.summaryTitle":   .text("Last 30 days"),
             "expenses.count":          .text("%@ entries"),
             "expenses.fallbackTitle":  .text("Expense"),
-            "expenses.loadError":      .text("Sorry, couldn't load your expenses right now. Try again in a bit."),
+            "expenses.loadError":      .text("Couldn't load your expenses. Try again shortly."),
 
             // Add-expense sheet
             "expenses.sheet.amountSection":  .text("Amount"),
@@ -148,10 +148,10 @@ enum L10nLife {
             "expenses.sheet.title":          .text("New expense"),
             "expenses.sheet.editTitle":      .text("Edit expense"),
             "expenses.amountError":          .text("Enter an amount above zero first 🙂"),
-            "expenses.saveError":            .text("Couldn't save the expense. Try once more 🙏"),
+            "expenses.saveError":            .text("Couldn't save the expense. Try again."),
             "expenses.edit":                 .text("Edit"),
             "expenses.delete":               .text("Delete"),
-            "expenses.deleteError":          .text("Couldn't delete the expense. Try once more 🙏"),
+            "expenses.deleteError":          .text("Couldn't delete the expense. Try again."),
 
             // Expense categories — labels for display only (canonical = Arabic value)
             "cat.food":      .text("Food"),
@@ -163,8 +163,8 @@ enum L10nLife {
 
             // Journal screen
             "journal.add":        .text("New entry"),
-            "journal.empty":      .text("No entries yet.\nTell me how your day went ✍️"),
-            "journal.loadError":  .text("Sorry, couldn't load your journal right now. Try again in a bit."),
+            "journal.empty":      .text("No entries yet.\nWrite your first one."),
+            "journal.loadError":  .text("Couldn't load your journal. Try again shortly."),
 
             // Add-journal sheet
             "journal.sheet.section":      .text("How was your day?"),
@@ -172,10 +172,10 @@ enum L10nLife {
             "journal.sheet.charCount":    .text("%@ chars"),
             "journal.sheet.title":        .text("New entry"),
             "journal.sheet.editTitle":    .text("Edit entry"),
-            "journal.saveError":          .text("Couldn't save the entry. Try once more 🙏"),
+            "journal.saveError":          .text("Couldn't save the entry. Try again."),
             "journal.edit":               .text("Edit"),
             "journal.delete":             .text("Delete"),
-            "journal.deleteError":        .text("Couldn't delete the entry. Try once more 🙏"),
+            "journal.deleteError":        .text("Couldn't delete the entry. Try again."),
         ]
     )
 }

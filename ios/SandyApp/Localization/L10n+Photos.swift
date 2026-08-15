@@ -10,10 +10,10 @@ enum L10nPhotos {
         ar: [
             "title":        .text("الألبوم"),
             "intro":        .text("صورك المحفوظة عند ساندي — بتوصفها وبتوسمها لحالها عشان تلاقيها بسهولة."),
-            "empty":        .text("لسّا ما في صور محفوظة — أضف أول صورة وأنا بظبّطلك الوصف والوسوم."),
-            "errorLoad":    .text("معلش، ما قدرت أجيب الصور — اسحب للتحديث."),
-            "errorAdd":     .text("معلش، ما قدرت أحفظ الصورة — جرّب كمان مرة."),
-            "errorDelete":  .text("معلش، ما قدرت أحذف الصورة — جرّب كمان مرة."),
+            "empty":        .text("لا توجد صور محفوظة بعد — أضف أول صورة."),
+            "errorLoad":    .text("تعذّر تحميل الصور. اسحب للتحديث."),
+            "errorAdd":     .text("تعذّر حفظ الصورة. أعد المحاولة."),
+            "errorDelete":  .text("تعذّر حذف الصورة. أعد المحاولة."),
 
             // أزرار وإجراءات
             "add":          .text("إضافة صورة"),
@@ -34,10 +34,10 @@ enum L10nPhotos {
         en: [
             "title":        .text("Album"),
             "intro":        .text("Your photos saved with Sandy — she captions and tags them so you find them easily."),
-            "empty":        .text("No saved photos yet — add your first one and I'll sort out the caption and tags."),
-            "errorLoad":    .text("Sorry, I couldn't load your photos — pull to refresh."),
-            "errorAdd":     .text("Sorry, I couldn't save that photo — give it another try."),
-            "errorDelete":  .text("Sorry, I couldn't delete that photo — try again."),
+            "empty":        .text("No saved photos yet — add your first one."),
+            "errorLoad":    .text("Couldn't load your photos. Pull to refresh."),
+            "errorAdd":     .text("Couldn't save the photo. Try again."),
+            "errorDelete":  .text("Couldn't delete the photo. Try again."),
 
             // buttons & actions
             "add":          .text("Add photo"),

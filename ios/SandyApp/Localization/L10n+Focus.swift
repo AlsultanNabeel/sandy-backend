@@ -29,8 +29,8 @@ enum L10nFocus {
             "timer.phaseBreak":  .text("راحة"),
             "timer.cycle":       .text("دورة"),
             "timer.alreadyActive": .text("في جلسة شغّالة هلأ."),
-            "timer.startError":  .text("معلش، ما قدرت أبدأ الجلسة — جرّب كمان مرة."),
-            "timer.stopError":   .text("معلش، ما قدرت أوقّف الجلسة."),
+            "timer.startError":  .text("تعذّر بدء الجلسة. أعد المحاولة."),
+            "timer.stopError":   .text("تعذّر إيقاف الجلسة."),
 
             // إحصائيات
             "stats.historyTitle": .text("آخر الجلسات"),
@@ -38,7 +38,7 @@ enum L10nFocus {
             "stats.min":          .text("دقيقة"),
             "stats.cancelled":    .text("ملغاة"),
 
-            "loadError": .text("معلش، ما قدرت أجيب الفوكس — اسحب للتحديث."),
+            "loadError": .text("تعذّر تحميل جلسات التركيز. اسحب للتحديث."),
         ],
         en: [
             "sub.timer":  .text("Timer"),
@@ -59,15 +59,15 @@ enum L10nFocus {
             "timer.phaseBreak":  .text("Break"),
             "timer.cycle":       .text("Cycle"),
             "timer.alreadyActive": .text("A session is already running."),
-            "timer.startError":  .text("Sorry, I couldn't start the session — try again."),
-            "timer.stopError":   .text("Sorry, I couldn't stop the session."),
+            "timer.startError":  .text("Couldn't start the session. Try again."),
+            "timer.stopError":   .text("Couldn't stop the session."),
 
             "stats.historyTitle": .text("Recent sessions"),
             "stats.noHistory":    .text("No sessions yet."),
             "stats.min":          .text("min"),
             "stats.cancelled":    .text("cancelled"),
 
-            "loadError": .text("Sorry, I couldn't load Focus — pull to refresh."),
+            "loadError": .text("Couldn't load your focus sessions. Pull to refresh."),
         ]
     )
 }

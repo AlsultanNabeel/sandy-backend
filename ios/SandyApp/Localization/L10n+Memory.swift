@@ -8,11 +8,11 @@ enum L10nMemory {
     static let table = L10nTable(
         ar: [
             "intro":       .text("هاي المعلومات اللي ساندي متذكّراها عنك — تقدر تضيف أو تعدّل أو تحذف أي وحدة."),
-            "empty":       .text("لسّا ما ساندي حفظت إشي عنك — كل ما تحكوا أكثر، بتعرفك أكثر."),
-            "errorLoad":   .text("معلش، ما قدرت أجيب الذاكرة — اسحب للتحديث."),
-            "errorDelete": .text("معلش، ما قدرت أحذف — جرّب كمان مرة."),
-            "errorAdd":    .text("معلش، ما قدرت أحفظ المعلومة — جرّب كمان مرة."),
-            "errorEdit":   .text("معلش، ما قدرت أعدّل المعلومة — جرّب كمان مرة."),
+            "empty":       .text("لم تُحفظ أي معلومات عنك بعد — كلما تحدّثتما أكثر، عرفتك أكثر."),
+            "errorLoad":   .text("تعذّر تحميل الذاكرة. اسحب للتحديث."),
+            "errorDelete": .text("تعذّر الحذف. أعد المحاولة."),
+            "errorAdd":    .text("تعذّر حفظ المعلومة. أعد المحاولة."),
+            "errorEdit":   .text("تعذّر تعديل المعلومة. أعد المحاولة."),
 
             // إجراءات الصف
             "add":         .text("إضافة معلومة"),
@@ -29,11 +29,11 @@ enum L10nMemory {
         ],
         en: [
             "intro":       .text("Here's what Sandy remembers about you — add, edit, or delete anything."),
-            "empty":       .text("Sandy hasn't saved anything about you yet — the more you chat, the better she knows you."),
-            "errorLoad":   .text("Sorry, I couldn't load your memory — pull to refresh."),
-            "errorDelete": .text("Sorry, I couldn't delete that — try again."),
-            "errorAdd":    .text("Sorry, I couldn't save that — give it another try."),
-            "errorEdit":   .text("Sorry, I couldn't update that — give it another try."),
+            "empty":       .text("Nothing saved about you yet — the more you talk, the more she knows."),
+            "errorLoad":   .text("Couldn't load memory. Pull to refresh."),
+            "errorDelete": .text("Couldn't delete. Try again."),
+            "errorAdd":    .text("Couldn't save. Try again."),
+            "errorEdit":   .text("Couldn't edit. Try again."),
 
             // row actions
             "add":         .text("Add memory"),

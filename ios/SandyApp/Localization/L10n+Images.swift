@@ -23,7 +23,7 @@ enum L10nImages {
             "pickAgain": .text("اختر صورة ثانية"),
             "share":     .text("مشاركة"),
 
-            "error": .text("معلش، ما قدرت أكمّل — جرّب كمان مرة."),
+            "error": .text("تعذّر إكمال العملية. أعد المحاولة."),
         ],
         en: [
             "mode.generate": .text("Generate"),
@@ -42,7 +42,7 @@ enum L10nImages {
             "pickAgain": .text("Pick another"),
             "share":     .text("Share"),
 
-            "error": .text("Sorry, I couldn't finish — try again."),
+            "error": .text("Couldn't finish. Try again."),
         ]
     )
 }

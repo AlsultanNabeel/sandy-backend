@@ -9,11 +9,11 @@ enum L10nGifts {
     static let table = L10nTable(
         ar: [
             "intro":        .text("هاي الهدايا الصغيرة اللي ساندي جهّزتها — لإلك أو لحدا بتحبّه، تقدر تضيف أو تحذف أي وحدة."),
-            "empty":        .text("لسّا ما في هدايا — خلّيني أكتبلك إشي صغير يفرّح حدا بتحبّه."),
-            "errorLoad":    .text("معلش، ما قدرت أجيب الهدايا — اسحب للتحديث."),
-            "errorAdd":     .text("معلش، ما قدرت أحفظ الهدية — جرّب كمان مرة."),
-            "errorDelete":  .text("معلش، ما قدرت أحذف الهدية — جرّب كمان مرة."),
-            "errorGenerate": .text("معلش، ما قدرت أكتبها هلّأ — جرّب كمان مرة."),
+            "empty":        .text("لا توجد هدايا بعد."),
+            "errorLoad":    .text("تعذّر تحميل الهدايا. اسحب للتحديث."),
+            "errorAdd":     .text("تعذّر حفظ الهدية. أعد المحاولة."),
+            "errorDelete":  .text("تعذّر حذف الهدية. أعد المحاولة."),
+            "errorGenerate": .text("تعذّر إنشاء الهدية. أعد المحاولة."),
 
             // إجراءات الصف + الزر
             "add":          .text("هدية جديدة"),
@@ -47,11 +47,11 @@ enum L10nGifts {
         ],
         en: [
             "intro":        .text("Little gifts Sandy put together — for you or someone you love. Add or delete any."),
-            "empty":        .text("No gifts yet — let me write something small to make someone you love smile."),
-            "errorLoad":    .text("Sorry, I couldn't load your gifts — pull to refresh."),
-            "errorAdd":     .text("Sorry, I couldn't save that gift — give it another try."),
-            "errorDelete":  .text("Sorry, I couldn't delete that gift — give it another try."),
-            "errorGenerate": .text("Sorry, I couldn't write it just now — give it another try."),
+            "empty":        .text("No gifts yet."),
+            "errorLoad":    .text("Couldn't load your gifts. Pull to refresh."),
+            "errorAdd":     .text("Couldn't save the gift. Try again."),
+            "errorDelete":  .text("Couldn't delete the gift. Try again."),
+            "errorGenerate": .text("Couldn't generate the gift. Try again."),
 
             // row actions + button
             "add":          .text("New gift"),

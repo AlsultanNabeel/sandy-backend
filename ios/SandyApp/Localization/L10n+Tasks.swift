@@ -12,7 +12,7 @@ enum L10nTasks {
         ar: [
             "title": .text("مهامي"),
             "add":   .text("إضافة مهمة"),
-            "empty": .text("ما في مهام بعد"),
+            "empty": .text("لا توجد مهام بعد"),
 
             // فلتر نشطة/مكتملة
             "filterActive":    .text("نشطة"),
@@ -24,14 +24,14 @@ enum L10nTasks {
 
             // حالة فاضية (تشجيعية)
             "emptyTitle":    .text("صفحة بيضا!"),
-            "emptySubtitle": .text("ما في مهام لسّا — خلّينا نبدأ بوحدة صغيرة."),
+            "emptySubtitle": .text("لا توجد مهام بعد — ابدأ بمهمة صغيرة."),
 
             // تنبيهات ودّية (أخطاء)
-            "errorLoad":   .text("معلش، ما قدرت أجيب مهامك — جرّب تسحب للتحديث كمان مرة."),
-            "errorAdd":    .text("معلش، ما قدرت أضيف المهمة — جرّب كمان مرة."),
-            "errorToggle": .text("معلش، ما زبطت أحدّث المهمة — جرّب كمان مرة."),
-            "errorDelete": .text("معلش، ما قدرت أحذف المهمة — جرّب كمان مرة."),
-            "errorEdit":   .text("معلش، ما قدرت أعدّل المهمة — جرّب كمان مرة."),
+            "errorLoad":   .text("تعذّر تحميل مهامك. اسحب للتحديث."),
+            "errorAdd":    .text("تعذّرت إضافة المهمة. أعد المحاولة."),
+            "errorToggle": .text("تعذّر تحديث المهمة. أعد المحاولة."),
+            "errorDelete": .text("تعذّر حذف المهمة. أعد المحاولة."),
+            "errorEdit":   .text("تعذّر تعديل المهمة. أعد المحاولة."),
 
             // القائمة السياقية وإيماءات السحب
             "markDone":   .text("تعليم كمنجزة"),
@@ -72,14 +72,14 @@ enum L10nTasks {
 
             // empty state (encouraging)
             "emptyTitle":    .text("Clean slate!"),
-            "emptySubtitle": .text("No tasks yet — let's start with one small thing."),
+            "emptySubtitle": .text("No tasks yet — start with a small one."),
 
             // friendly error notices
-            "errorLoad":   .text("Sorry, I couldn't load your tasks — pull to refresh and try again."),
-            "errorAdd":    .text("Sorry, I couldn't add the task — give it another try."),
-            "errorToggle": .text("Sorry, I couldn't update the task — give it another try."),
-            "errorDelete": .text("Sorry, I couldn't delete the task — give it another try."),
-            "errorEdit":   .text("Sorry, I couldn't update the task — give it another try."),
+            "errorLoad":   .text("Couldn't load your tasks. Pull to refresh."),
+            "errorAdd":    .text("Couldn't add the task. Try again."),
+            "errorToggle": .text("Couldn't update the task. Try again."),
+            "errorDelete": .text("Couldn't delete the task. Try again."),
+            "errorEdit":   .text("Couldn't edit the task. Try again."),
 
             // context menu & swipe actions
             "markDone":   .text("Mark done"),

@@ -17,8 +17,8 @@ enum L10nPersona {
             "save":               .text("حفظ"),
             "reset":              .text("رجوع للشخصية الافتراضية"),
             "saved":              .text("تم الحفظ ✅"),
-            "saveError":          .text("معلش، ما قدرت أحفظ — جرّب كمان مرة."),
-            "loadError":          .text("معلش، ما قدرت أجيب إعدادات الشخصية."),
+            "saveError":          .text("تعذّر الحفظ. أعد المحاولة."),
+            "loadError":          .text("تعذّر تحميل إعدادات الشخصية."),
         ],
         en: [
             "title":              .text("Sandy's Personality"),
@@ -30,8 +30,8 @@ enum L10nPersona {
             "save":               .text("Save"),
             "reset":              .text("Reset to default personality"),
             "saved":              .text("Saved ✅"),
-            "saveError":          .text("Sorry, couldn't save — try again."),
-            "loadError":          .text("Sorry, couldn't load personality settings."),
+            "saveError":          .text("Couldn't save. Try again."),
+            "loadError":          .text("Couldn't load personality settings."),
         ]
     )
 }

@@ -17,10 +17,10 @@ enum L10nShareContent {
             "remove":       .text("شيلها"),
             "open":         .text("افتح"),
             "refresh":      .text("جدّدلي"),
-            "empty.hint":   .text("لسا ما عرفت اهتماماتك — احكيلي عن إشي بتحبّه وبجيبلك محتوى عنه."),
-            "empty.results": .text("ما لقيت إشي هلق — جرّبني كمان شوي."),
+            "empty.hint":   .text("لم أتعرّف على اهتماماتك بعد — أخبرني بما تحبّه."),
+            "empty.results": .text("لا توجد نتائج حاليًا. جرّب لاحقًا."),
             "empty.saved":  .text("ما حفظت إشي بعد — أي بطاقة بتعجبك احفظها وبتلاقيها هون."),
-            "error":        .text("معلش، ما قدرت أجيب المحتوى — جرّب كمان مرة."),
+            "error":        .text("تعذّر تحميل المحتوى. أعد المحاولة."),
         ],
         en: [
             "intro":        .text("From what you tell me about, I gathered some good reads for you."),
@@ -32,10 +32,10 @@ enum L10nShareContent {
             "remove":       .text("Remove"),
             "open":         .text("Open"),
             "refresh":      .text("Refresh"),
-            "empty.hint":   .text("I don't know your interests yet — tell me about something you like and I'll bring content on it."),
-            "empty.results": .text("Nothing right now — try me again in a bit."),
+            "empty.hint":   .text("I don't know your interests yet — tell me what you like."),
+            "empty.results": .text("No results right now. Try later."),
             "empty.saved":  .text("Nothing saved yet — save any card you like and find it here."),
-            "error":        .text("Sorry, I couldn't fetch the content — try again."),
+            "error":        .text("Couldn't load content. Try again."),
         ]
     )
 }

@@ -39,11 +39,11 @@ enum L10nShopping {
             "pricePrompt":      .text("قدّيش دفعت؟ بسجّله بمصاريفك تلقائياً."),
             "priceSave":        .text("سجّل واشطب"),
 
-            "errorLoad":        .text("معلش، ما قدرت أجيب القائمة — جرّب كمان مرة."),
-            "errorAdd":         .text("ما زبط أضيف الغرض — يمكن موجود من قبل، جرّب كمان مرة."),
-            "errorEdit":        .text("ما قدرت أحفظ التعديل — جرّب كمان مرة."),
-            "errorDelete":      .text("ما قدرت أحذف الغرض — جرّب كمان مرة."),
-            "errorBuy":         .text("ما قدرت أشطب الغرض — جرّب كمان مرة."),
+            "errorLoad":        .text("تعذّر تحميل القائمة. أعد المحاولة."),
+            "errorAdd":         .text("تعذّرت إضافة العنصر. قد يكون موجودًا — أعد المحاولة."),
+            "errorEdit":        .text("تعذّر حفظ التعديل. أعد المحاولة."),
+            "errorDelete":      .text("تعذّر حذف العنصر. أعد المحاولة."),
+            "errorBuy":         .text("تعذّر شطب العنصر. أعد المحاولة."),
         ],
         en: [
             "title":            .text("Shopping list"),
@@ -76,11 +76,11 @@ enum L10nShopping {
             "pricePrompt":      .text("How much did you pay? I'll log it to your expenses automatically."),
             "priceSave":        .text("Log & check off"),
 
-            "errorLoad":        .text("Sorry, I couldn't load the list — try again."),
-            "errorAdd":         .text("Couldn't add the item — it may already be there, try again."),
-            "errorEdit":        .text("Couldn't save the change — try again."),
-            "errorDelete":      .text("Couldn't delete the item — try again."),
-            "errorBuy":         .text("Couldn't check off the item — try again."),
+            "errorLoad":        .text("Couldn't load your list. Try again."),
+            "errorAdd":         .text("Couldn't add the item. It may already be there — try again."),
+            "errorEdit":        .text("Couldn't save the change. Try again."),
+            "errorDelete":      .text("Couldn't delete the item. Try again."),
+            "errorBuy":         .text("Couldn't check off the item. Try again."),
         ]
     )
 }
