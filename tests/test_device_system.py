@@ -543,3 +543,30 @@ def test_the_camera_reports_its_address_the_same_way_the_brain_does(db):
         node = node_store.get_node("sandycam01")
         assert node["telemetry"]["ip"] == "192.168.1.117"
         assert node["telemetry"]["board"] == "sandy-cam"
+
+
+def test_all_three_boards_name_themselves_distinctly():
+    """Three boards, three incompatible binaries, three distinct names.
+
+    An IP alone does not say which board you found, and pushing brain firmware
+    at the camera is not a mistake anyone notices until it stops booting. The
+    names are declared in three separate files that no compiler checks against
+    each other, so this is where a copy-paste collision gets caught.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    sources = {
+        "brain":  root / "firmware/brain-core/main/include/config.h",
+        "camera": root / "vision-core/config.h",
+        "room":   root / "room-node/room-node.ino",
+    }
+    names = {}
+    for board, path in sources.items():
+        m = re.search(r'#define\s+SANDY\w*BOARD_ID\s+"([^"]+)"',
+                      path.read_text(encoding="utf-8"))
+        assert m, f"{board}: no board id in {path.name} — it cannot identify itself"
+        names[board] = m.group(1)
+
+    assert len(set(names.values())) == 3, f"two boards share a name: {names}"

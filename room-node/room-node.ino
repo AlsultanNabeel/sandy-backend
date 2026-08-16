@@ -33,6 +33,10 @@
 #define LIGHT_OFF_ANGLE  160     // كبسة أسفل القلّاب = إطفاء (ميلان ٤٠° تحت النص — شوط أوسع للكبس الأوثق)
 #define PRESS_HOLD_MS    400     // مدة الكبسة قبل فصل السيرفو
 #define OTA_HOSTNAME     "sandy-room"
+// اسم اللوح ونسخته — بيروحوا بكل نبضة. تلات ألواح إسبريسيف ع نفس الشبكة
+// وتلات ملفات ما بتتبادل؛ العنوان لحاله ما بيقول أي لوح لقيت.
+#define SANDY_ROOM_BOARD_ID   "sandy-room-node"
+#define SANDY_ROOM_FW_VERSION "0.3.0"
 
 // DFPlayer Mini (مشغّل الموسيقى) — تسلسلي 9600 على UART2
 #define DF_PIN_ESP_RX     26     // ESP RX  ← وصّل DF TX
@@ -201,10 +205,15 @@ static void publishStatus() {
   if (now - g_lastStatusPubMs < STATUS_POST_INTERVAL_MS) return;
   g_lastStatusPubMs = now;
 
-  char buf[160];
+  // العنوان والاسم بالنبضة — نفس الحقلين تبع الدماغ والكاميرا بالضبط، فالخادم
+  // بيقراهم بنفس المسار. بلاهم، «وين عقدة الغرفة؟» ما إله جواب بكل النظام:
+  // الراوتر بيغيّر العنوان، واللوح ما بيقوله لحدا.
+  char buf[240];
   snprintf(buf, sizeof(buf),
-           "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"light\":\"%s\"}",
-           now / 1000, WiFi.RSSI(), ESP.getFreeHeap(), g_lightState.c_str());
+           "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"light\":\"%s\","
+           "\"ip\":\"%s\",\"board\":\"%s\"}",
+           now / 1000, WiFi.RSSI(), ESP.getFreeHeap(), g_lightState.c_str(),
+           WiFi.localIP().toString().c_str(), SANDY_ROOM_BOARD_ID);
   g_mqtt.publish("room/status", buf, false);
 }
 
