@@ -13,33 +13,6 @@ static const char *TAG      = "nvs";
 static const char *NVS_NS   = "sandy";
 static const char *KEY_SERVO = "servo_pos";
 
-esp_err_t nvs_sandy_init(void) {
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "partition truncated — erasing");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    if (err == ESP_OK) {
-        s_slots_lock = xSemaphoreCreateMutex();
-        // 3072: it sleeps, compares integers, and calls nvs_commit. Priority 1 —
-        // below everything that matters. A setting arriving a second late costs
-        // nothing; a setting written during a wake word cost six months.
-        xTaskCreate(defer_task, "nvs_defer", 3072, NULL, 1, NULL);
-    }
-    return err;
-}
-
-esp_err_t nvs_load_servo_angle(uint8_t *out_angle) {
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READONLY, &h);
-    if (err != ESP_OK) return err;
-    err = nvs_get_u8(h, KEY_SERVO, out_angle);
-    nvs_close(h);
-    return err;
-}
-
-
 // ── Deferred writes ──────────────────────────────────────────────────────────
 // Rationale in sandy_nvs.h. In short: an NVS commit stops both CPUs for as long
 // as the erase takes, and doing that on every neck movement is what has been
@@ -148,4 +121,31 @@ void nvs_flush_deferred(void) {
         xSemaphoreGive(s_slots_lock);
         if (due) flush_slot(&copy);
     }
+}
+
+
+esp_err_t nvs_sandy_init(void) {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "partition truncated — erasing");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    if (err == ESP_OK) {
+        s_slots_lock = xSemaphoreCreateMutex();
+        // 3072: it sleeps, compares integers, and calls nvs_commit. Priority 1 —
+        // below everything that matters. A setting arriving a second late costs
+        // nothing; a setting written during a wake word cost six months.
+        xTaskCreate(defer_task, "nvs_defer", 3072, NULL, 1, NULL);
+    }
+    return err;
+}
+
+esp_err_t nvs_load_servo_angle(uint8_t *out_angle) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_get_u8(h, KEY_SERVO, out_angle);
+    nvs_close(h);
+    return err;
 }

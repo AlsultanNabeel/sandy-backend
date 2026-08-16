@@ -83,6 +83,13 @@ jobs:
             [ -f "$f/secrets.h" ] || cp "$f/secrets.example.h" "$f/secrets.h"
           done
 
+      - name: Declaration order (C)
+        # Runs before the compiler because it is instant and because the same
+        # mistake has broken three builds: an identifier used above the line
+        # that declares it. The compiler catches it too — five minutes and a
+        # Docker pull later.
+        run: python3 scripts/check_c_decl_order.py
+
       - name: Build the robot brain (ESP-IDF)
         uses: espressif/esp-idf-ci-action@v1
         with:
