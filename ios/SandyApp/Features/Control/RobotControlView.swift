@@ -70,10 +70,7 @@ struct RobotControlView: View {
                                     Part.micLeft, Part.micRight,
                                     Part.micLeftGain, Part.micRightGain, Part.noise])
 
-                    section("robot.control.camera",
-                            hint: "robot.control.camera.hint",
-                            parts: [Part.camSnapshot, Part.camStream, Part.camFlash,
-                                    Part.camFlashLvl, Part.camFlashMode, Part.camFrameSize])
+                    cameraSection
 
                     leftovers
                 }
@@ -85,6 +82,59 @@ struct RobotControlView: View {
         }
         .navigationTitle(lang.s("robot.control.title"))
         .refreshable { await store.load(api: state.api) }
+    }
+
+    // ── الكاميرا: مدخل للنظر، وبعده الإعدادات ───────────────────────────────
+    //
+    // «التقط صورة» كزرّ بقائمة إعدادات كان بيشتغل مضبوط وما بيوريك إشي — الأمر
+    // بيوصل والصورة بترجع وبتنرمى. فالمدخل للعرض صار أول إشي بالقسم، والإعدادات
+    // (فلاش، دقّة) تحته: بتفتح الكاميرا عشان تشوف، مش عشان تظبّط.
+    @ViewBuilder
+    private var cameraSection: some View {
+        let settings = [Part.camFlash, Part.camFlashLvl,
+                        Part.camFlashMode, Part.camFrameSize]
+            .compactMap { name in store.robotDevices.first { $0.name == name } }
+        let hasCamera = !settings.isEmpty
+            || store.robotDevices.contains { $0.name == Part.camSnapshot }
+
+        if hasCamera, let node = store.nodes.first {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                SectionHeader(title: lang.s("robot.control.camera"))
+                Text(lang.s("robot.control.camera.hint"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+
+                NavigationLink {
+                    CameraView(node: node)
+                        .environmentObject(state)
+                        .environmentObject(lang)
+                } label: {
+                    HStack(spacing: Theme.Spacing.md) {
+                        Image(systemName: "eye.circle.fill")
+                            .font(.system(size: Theme.Icon.lg))
+                            .foregroundColor(Theme.Colors.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(lang.s("robot.control.camera.open"))
+                                .font(Theme.Typography.headline)
+                                .foregroundColor(Theme.Colors.primaryText)
+                            Text(lang.s("robot.control.camera.open.hint"))
+                                .font(Theme.Typography.caption)
+                                .foregroundColor(Theme.Colors.secondaryText)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.forward")
+                            .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                            .foregroundColor(Theme.Colors.tertiaryText)
+                    }
+                    .sandyCard()
+                }
+                .buttonStyle(.plain)
+
+                ForEach(settings) { device in
+                    DeviceCard(device: device, store: store, onEdit: {})
+                }
+            }
+        }
     }
 
     // ── الشاشة: نص + صورة ────────────────────────────────────────────────────

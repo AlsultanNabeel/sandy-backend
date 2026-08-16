@@ -41,14 +41,28 @@ final class APIClient: APIClientProtocol {
     // النقل الأساسي: يبني الطلب، يرسله، يترجم رمز الحالة لأخطاء APIError، ويرجّع الجسم
     // الخام. تبني عليه الأسطح الثلاثة تحت (غير المطبوع + المطبوعان) فمنطق الشبكة
     // والأخطاء مكتوب مرة واحدة.
+    /// نداء بيرجّع البايتات زي ما هي — للردود اللي مش JSON، زي صورة.
+    ///
+    /// موجودة هون مش بملف الأجهزة عشان تشارك `perform`: العنوان الأساسي
+    /// والتوكن ومعالجة انتهاء الجلسة كلها بمكان واحد. أي نداء بيبني طلبه
+    /// بإيده بيصير لازم يتذكّر التلاتة، وبينسى وحدة منهن.
+    func rawPost(_ path: String, timeout: TimeInterval = 30) async throws -> Data {
+        let data = try await perform(path, method: "POST",
+                                     bodyData: Data("{}".utf8),
+                                     auth: true, timeout: timeout)
+        guard !data.isEmpty else { throw APIError(message: "رد فاضي") }
+        return data
+    }
+
     private func perform(_ path: String,
                          method: String,
                          bodyData: Data?,
-                         auth: Bool) async throws -> Data {
+                         auth: Bool,
+                         timeout: TimeInterval = 30) async throws -> Data {
         guard let url = URL(string: baseURL + path) else { throw APIError(message: "عنوان غير صالح") }
         var req = URLRequest(url: url)
         req.httpMethod = method
-        req.timeoutInterval = 30
+        req.timeoutInterval = timeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if auth, let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.httpBody = bodyData

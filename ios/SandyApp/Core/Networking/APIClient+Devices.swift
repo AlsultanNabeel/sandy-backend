@@ -180,6 +180,18 @@ extension APIClient {
                        body: ["image_base64": jpegData.base64EncodedString()])
     }
 
+    // POST /api/nodes/<id>/snapshot → JPEG bytes (مش JSON)
+    //
+    // بتستعمل `perform` نفسها اللي بيستعملها كل نداء تاني: نفس العنوان الأساسي،
+    // نفس التوكن، نفس معالجة الـ401 وانتهاء الجلسة. اللي بيختلف إنها بترجّع
+    // البايتات زي ما هي بدل ما تفكّها JSON — الرد صورة.
+    //
+    // والمهلة أطول من العادة بالقصد: الخادم بيستنى الكاميرا تصوّر والقطع توصل
+    // عبر الوسيط. ثواني، مش عطل شبكة.
+    func cameraSnapshot(nodeId: String) async throws -> Data {
+        try await rawPost("/api/nodes/\(enc(nodeId))/snapshot", timeout: 25)
+    }
+
     // POST /api/devices/<name>/ir-learn {button,code} → {ok}
     // التقاط الكود الحقيقي يجي مع تحديث الوحدة لاحقًا — هلّق نحفظ اسم الزر (وكود إن توفّر).
     func irLearn(name: String, button: String, code: String = "") async throws {

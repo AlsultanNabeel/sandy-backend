@@ -19,7 +19,7 @@ Endpoints:
 
 from __future__ import annotations
 
-from flask import jsonify, request
+from flask import Response, jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
 from app.utils.user_profiles import (
@@ -173,6 +173,40 @@ def register_devices_api(app, mongo_db=None):
         if not res.get("ok"):
             return _bad(res.get("error", "send_failed"), res)
         return jsonify(res), 200
+
+    @app.route("/api/nodes/<node_id>/snapshot", methods=["POST"])
+    @require_tenant
+    def api_node_snapshot(claims, node_id):
+        """Ask the camera for one photo and hand it back as JPEG.
+
+        This exists because a "take a photo" button with nowhere to look is not
+        a feature. The command half was built first and the picture came back
+        over MQTT chunks into a pending slot that nobody was waiting on, and was
+        swept away — a button that worked perfectly and showed nothing.
+
+        Blocks for up to fifteen seconds, which is a lot for a request thread
+        and is why the timeout is short and the camera rate-limits itself: the
+        alternative is polling, and polling for a photo somebody just asked for
+        is more machinery than the wait is worth.
+        """
+        from app.features.node_store import get_node
+        from app.integrations.camera_client import request_snapshot
+
+        if get_node(node_id) is None:
+            return _bad("not_found", code=404)
+
+        body = request.get_json(silent=True) or {}
+        jpeg = request_snapshot(
+            node_id,
+            settle_ms=int(body.get("settle_ms", 0) or 0),
+            flash=str(body.get("flash", "auto")),
+        )
+        if not jpeg:
+            # Three different failures look the same from here — camera offline,
+            # command not delivered, chunks never completed — and the camera logs
+            # which. Saying "no photo arrived" is honest; inventing a cause is not.
+            return _bad("no_photo", code=504)
+        return Response(jpeg, mimetype="image/jpeg")
 
     @app.route("/api/devices/<name>/ir-learn", methods=["POST"])
     @require_tenant
