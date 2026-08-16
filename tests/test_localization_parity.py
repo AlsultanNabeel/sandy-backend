@@ -124,3 +124,46 @@ def test_the_app_has_no_arabic_left_in_swift_views() -> None:
     assert not offenders, (
         f"literal Arabic in a view — it will not translate: {offenders}"
     )
+
+
+def test_every_key_the_app_asks_for_actually_exists():
+    """A key with no string renders as the key itself, on screen, to the user.
+
+    The existing tests compare the two languages against each other, so a key
+    missing from BOTH passes them happily and ships as `tabs.shareContent` in
+    the middle of the interface. This compares the other direction: what the
+    views ask for against what the tables define.
+
+    One note on reading this, learned the hard way: values are declared as
+    `.text(...)` for a string and `.items(...)` for an array. A check that knows
+    only about `.text` reports fourteen perfectly good keys as missing and sends
+    somebody off to "fix" them. Both forms count.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "ios" / "SandyApp"
+
+    defined = set()
+    for path in (root / "Localization").glob("L10n+*.swift"):
+        src = path.read_text(encoding="utf-8")
+        ns = re.search(r'static let ns = "(\w+)"', src)
+        if not ns:
+            continue
+        for key in re.findall(r'"([\w.]+)":\s*\.(?:text|items|list)\(', src):
+            defined.add(f"{ns.group(1)}.{key}")
+
+    used = {}
+    for path in root.rglob("*.swift"):
+        if "Localization" in path.parts:
+            continue
+        src = path.read_text(encoding="utf-8")
+        for key in re.findall(r'lang\.(?:s|list)\("([\w.]+)"\)', src):
+            used.setdefault(key, path.name)
+
+    missing = {k: v for k, v in used.items() if k not in defined}
+    assert not missing, (
+        "keys asked for by the app with no string behind them — these render as "
+        "the raw key on screen: " +
+        ", ".join(f"{k} ({v})" for k, v in sorted(missing.items()))
+    )

@@ -16,6 +16,7 @@
 #include "esp_random.h"
 #include <stdio.h>
 #include <string.h>   // strncpy for the status banner
+#include "sandy_screen.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -390,6 +391,11 @@ static void stuck_face_timer_cb(lv_timer_t *t) {
 }
 
 
+static void screen_timer_cb(lv_timer_t *t) {
+    (void)t;
+    screen_lvgl_tick();
+}
+
 static void banner_timer_cb(lv_timer_t *t) {
     (void)t;
     if (!s_banner_dirty || s_banner == NULL) return;
@@ -640,6 +646,13 @@ static void build_face(void) {
     lv_timer_create(sleep_timer_cb, 10000, NULL);
     lv_timer_create(focus_timer_cb, 250, NULL);
     lv_timer_create(banner_timer_cb, 200, NULL);
+
+    // The owner's text/picture panel. Built here, as a sibling of the face and
+    // on top of it, and ticked from this same timer loop — so every LVGL call
+    // on this board happens on one task and there is one rule to remember
+    // instead of two.
+    screen_lvgl_build(lv_scr_act());
+    lv_timer_create(screen_timer_cb, 100, NULL);
     lv_timer_create(stuck_face_timer_cb, 500, NULL);
 #if FACE_DEMO
     lv_timer_create(demo_timer_cb, 5000, NULL);   // cycle all moods, 5 s each

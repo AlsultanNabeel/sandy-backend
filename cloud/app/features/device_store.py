@@ -14,7 +14,7 @@ Collection: sandy_devices (tenant-scoped via scoped())
     name,          # stable slug, unique per tenant ("living_light")
     label,         # human label ("ضوء الصالة")
     room,          # optional grouping ("salon")
-    control_type,  # switch | dimmer | enum | media | cover | ir  (see CONTROL_TYPES)
+    control_type,  # switch | dimmer | enum | media | cover | ir | text
     transport,     # how to reach it: {"kind": "mqtt", "topic": "room/cmd/light"}
     meta,          # type-specific: {values:[...]} for enum, {min,max} for dimmer,
                    #                 {buttons:{name: code}} for ir
@@ -59,7 +59,7 @@ MAX_DEVICES = 500
 #   media   — on | off | pause
 #   cover   — open | close | stop
 #   ir      — send a learned button in meta.buttons (learn flow adds buttons)
-CONTROL_TYPES = frozenset({"switch", "dimmer", "enum", "media", "cover", "ir"})
+CONTROL_TYPES = frozenset({"switch", "dimmer", "enum", "media", "cover", "ir", "text"})
 
 _MEDIA_ACTIONS = {"on", "off", "pause"}
 _COVER_ACTIONS = {"open", "close", "stop"}
@@ -148,6 +148,25 @@ def command_payload(device: Dict[str, Any], action: str,
         if chosen in _COVER_ACTIONS:
             return {"ok": True, "payload": chosen}
         return {"ok": False, "error": "bad_action", "allowed": sorted(_COVER_ACTIONS)}
+
+    if ctype == "text":
+        # Free text, because what goes on her face is whatever the owner types.
+        # Not lower-cased and not matched against a list — those are exactly the
+        # transformations that would ruin a sentence.
+        text = str(value if value not in (None, "") else action)
+        text = text.strip()
+        if text.lower() in ("dismiss", "clear", ""):
+            return {"ok": True, "payload": "dismiss"}
+        # Measured in bytes, not characters: Arabic is multi-byte in UTF-8, and
+        # the firmware's buffer is 256 bytes. Refusing here beats the board
+        # cutting a word in half.
+        limit = _coerce_int(meta.get("max_bytes", 255)) or 255
+        if len(text.encode("utf-8")) > limit:
+            return {"ok": False, "error": "too_long", "allowed": [f"<= {limit} bytes"]}
+        # Newlines would break the single-line MQTT payload; a space reads the
+        # same on a 240-pixel display.
+        text = text.replace("\n", " ").replace("\r", " ")
+        return {"ok": True, "payload": "text:" + text}
 
     if ctype == "enum":
         values = [str(v).strip().lower() for v in (meta.get("values") or [])]

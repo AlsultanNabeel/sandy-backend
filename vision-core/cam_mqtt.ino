@@ -42,6 +42,41 @@ static void camBuildTopics() {
   g_log.printf("[MQTT] node id = %s\n", camNodeId().c_str());
 }
 
+// ── المخرجات البسيطة ─────────────────────────────────────────────────────────
+//
+// التطبيق بيتعامل مع كل الأجهزة بنفس الشكل: قيمة نصّية بسيطة ع موضوع لكل مخرج.
+// الكاميرا كانت الوحيدة اللي بدها JSON، فما كانت بتظهر بصفحة التحكّم زي غيرها.
+//
+// هاد بيترجم القيمة البسيطة لنفس أمر الـ JSON اللي `handleCamCommand` بيفهمه —
+// مسار تنفيذ واحد، مش تنين لازم يضلّوا متطابقين.
+static bool handleSimpleOutput(const String& out, const String& value) {
+  if (out == "flash") {
+    handleCamCommand(String("{\"cmd\":\"flash\",\"state\":\"") + value + "\"}");
+    return true;
+  }
+  if (out == "flash_level") {
+    handleCamCommand(String("{\"cmd\":\"flash\",\"state\":\"on\",\"level\":") + value + "}");
+    return true;
+  }
+  if (out == "flash_mode") {
+    handleCamCommand(String("{\"cmd\":\"flash_mode\",\"mode\":\"") + value + "\"}");
+    return true;
+  }
+  if (out == "snapshot") {
+    handleCamCommand(String("{\"cmd\":\"snapshot\",\"id\":\"") + String(millis()) + "\"}");
+    return true;
+  }
+  if (out == "stream") {
+    handleCamCommand(String("{\"cmd\":\"stream\",\"state\":\"") + value + "\"}");
+    return true;
+  }
+  if (out == "framesize") {
+    handleCamCommand(String("{\"cmd\":\"set\",\"framesize\":\"") + value + "\"}");
+    return true;
+  }
+  return false;
+}
+
 static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String value;
   value.reserve(length);
@@ -85,6 +120,12 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     g_snapshotPending = true;
     g_log.printf("[CAM] snapshot requested id=%s\n", id.c_str());
   } else {
+    // آخر مقطع من الموضوع هو اسم المخرج. النبضة تبعتنا بترجع علينا بنفس
+    // الشجرة، فلازم تُتجاهل صراحة وإلا فُسّرت كأمر.
+    int slash = t.lastIndexOf('/');
+    String out = slash >= 0 ? t.substring(slash + 1) : String();
+    if (out == "status" || out == "snapshot_data" || out == "event") return;
+    if (handleSimpleOutput(out, value)) return;
     g_log.printf("[CB] unhandled topic '%s'\n", t.c_str());
   }
 }
@@ -131,6 +172,11 @@ static bool mqttReconnect() {
     g_log.println("[MQTT] connected");
     g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
     g_mqtt.subscribe(g_topicCommand.c_str(), 0);
+    // وشجرة الوحدة كاملة، عشان التطبيق يوصلها بنفس طريقة أي جهاز تاني:
+    // قيمة بسيطة ع sandy/node/<id>/<مخرج>. الأوامر الغنية بالـ JSON ضلّت
+    // مكانها ع cam/command — هاي إضافة مش استبدال.
+    String simple = String(SANDY_TOPIC_ROOT) + camNodeId() + "/+";
+    g_mqtt.subscribe(simple.c_str(), 0);
     g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;   // نجحنا → رجّع الانتظار لأصله
     publishFullStatus();                     // أول ما نتصل: عرّف عن حالك كاملة
     return true;
@@ -158,11 +204,17 @@ static void publishCamStatus() {
   //
   // نفس الحقلين اللي عند الدماغ بالضبط (ip, board)، فالخادم بيقراهم بنفس
   // المسار بلا ولا سطر جديد عنده.
-  char buf[320];
+  char buf[560];
   snprintf(buf, sizeof(buf),
            "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"psram\":%u,"
            "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s,"
-           "\"ip\":\"%s\",\"board\":\"%s\"}",
+           "\"ip\":\"%s\",\"board\":\"%s\","
+           "\"outputs\":[{\"id\":\"flash\",\"kind\":\"relay\"},"
+           "{\"id\":\"flash_level\",\"kind\":\"pwm\"},"
+           "{\"id\":\"flash_mode\",\"kind\":\"pwm\"},"
+           "{\"id\":\"snapshot\",\"kind\":\"pwm\"},"
+           "{\"id\":\"stream\",\"kind\":\"relay\"},"
+           "{\"id\":\"framesize\",\"kind\":\"pwm\"}]}",
            now / 1000,
            WiFi.RSSI(),
            ESP.getFreeHeap(),

@@ -19,6 +19,7 @@ idf_component_register(
         "sandy_led.c"
         "sandy_status.c"
         "sandy_audio_ctl.c"
+        "sandy_screen.c"
     INCLUDE_DIRS
         "include"
         "."

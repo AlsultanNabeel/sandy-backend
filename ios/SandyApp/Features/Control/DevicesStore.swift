@@ -18,8 +18,33 @@ final class DevicesStore: LoadableStore {
 
     /// تجميع الأجهزة حسب الغرفة (الفاضية تتجمّع تحت "بدون غرفة")، مرتّبة بالاسم.
     struct RoomGroup { let room: String; let devices: [DeviceItem] }
-    var roomGroups: [RoomGroup] {
-        let grouped = Dictionary(grouping: devices) { $0.room }
+    /// أجزاء الروبوت نفسه — بيتزرعوا بأسماء ثابتة من `node_provision.PART_CATALOGUE`.
+    ///
+    /// السبب إنه هاد الفرز موجود: صفحة التحكّم كانت بتحطّ رقبة ساندي ووشها
+    /// ومايكاتها بنفس القائمة مع لمبة الصالة والمروحة. هدول إشيان مختلفان —
+    /// الأول جسمها، والتاني بيتك — والخلط بينهن بيعمل قائمة طويلة ما إلها
+    /// موضوع واحد.
+    ///
+    /// البادئة هي المعيار لأنها هي اللي بيكتبها الخادم: `sandy_` للروبوت،
+    /// و`cam_` للكاميرا. جهاز أضافه المالك بإيده ما بيبلّش فيهن، فبيضل بالبيت
+    /// وين مكانه.
+    static let robotPrefixes = ["sandy_", "cam_"]
+
+    private func isRobotPart(_ device: DeviceItem) -> Bool {
+        Self.robotPrefixes.contains { device.name.hasPrefix($0) }
+    }
+
+    /// أجهزة البيت وبس — بلا أجزاء الروبوت.
+    var homeDevices: [DeviceItem] { devices.filter { !isRobotPart($0) } }
+
+    /// أجزاء الروبوت وبس.
+    var robotDevices: [DeviceItem] { devices.filter { isRobotPart($0) } }
+
+    /// أجهزة البيت مجموعة حسب الغرفة. الروبوت إله صفحته.
+    var roomGroups: [RoomGroup] { groups(of: homeDevices) }
+
+    private func groups(of list: [DeviceItem]) -> [RoomGroup] {
+        let grouped = Dictionary(grouping: list) { $0.room }
         return grouped
             .map { RoomGroup(room: $0.key, devices: $0.value) }
             .sorted { a, b in

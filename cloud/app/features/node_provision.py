@@ -66,6 +66,21 @@ ROBOT_GESTURES = [
     "wake", "sleep", "look_left", "look_right", "center",
 ]
 
+# مهرجانات الإضاءة. أول أربعة هنّ مؤشّر الخصوصية — الأبيض معناه الصوت طالع من
+# الغرفة، وهاد مش زينة. الباقي مؤثرات، واللوح بيرفضها وقت الجلسة الحيّة عشان
+# ما إشي يلوّن فوق المؤشّر (sandy_led.h).
+ROBOT_LED = [
+    "off", "idle", "listening", "talking",
+    "rainbow", "breathe", "pulse", "blink", "fire",
+    "police", "party", "sunrise", "ocean", "candle", "solid",
+]
+
+# أحجام صورة الكاميرا، بنفس أسماء الفيرموير حرفيًا (kFrameSizes بـ cam_control).
+CAM_FRAME_SIZES = [
+    "96X96", "QQVGA", "QCIF", "HQVGA", "240X240", "QVGA", "CIF",
+    "HVGA", "VGA", "SVGA", "XGA", "HD", "SXGA", "UXGA",
+]
+
 # output id -> how to present it. `name` is the device slug, unique per tenant.
 PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "mood": {
@@ -84,7 +99,13 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     },
     "led": {
         "name": "sandy_led", "label": "إضاءة ساندي", "control_type": "enum",
-        "meta": {"values": ["off", "idle", "listening", "talking"]},
+        "meta": {"values": ROBOT_LED},
+    },
+    "screen": {
+        "name": "sandy_screen", "label": "شاشة ساندي", "control_type": "text",
+        # نص حر مش قائمة: اللي بينكتب ع وشها بيكتبه المالك ساعتها. القيمة
+        # `dismiss` بتشيله وبترجّع الوش.
+        "meta": {"placeholder": "اكتب اللي بدك يظهر ع وشها", "max_bytes": 255},
     },
     "buzzer": {
         "name": "sandy_buzzer", "label": "جرس ساندي", "control_type": "enum",
@@ -121,6 +142,34 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "noise": {
         "name": "sandy_noise", "label": "عزل الضجّة", "control_type": "enum",
         "meta": {"values": ["off", "mild", "medium", "aggressive"]},
+    },
+
+    # ── الكاميرا ─────────────────────────────────────────────────────────────
+    # لوح تاني (esp32-cam) بيتكلّم نفس اللغة: بيعلن مخرجاته بالنبضة، والكتالوج
+    # بيقرّر شكلها بالتطبيق. ولا سطر خاص بالكاميرا بمنطق التزويد.
+    "flash": {
+        "name": "cam_flash", "label": "فلاش الكاميرا", "control_type": "switch",
+    },
+    "flash_level": {
+        "name": "cam_flash_level", "label": "قوة الفلاش", "control_type": "dimmer",
+        # صفر لـ ٢٥٥ مش مئوية: هاي القيمة اللي الفيرموير بيكتبها ع الطرف مباشرة،
+        # وتحويلها لنسبة بيخلي «نص القوة» رقم اعتباطي.
+        "meta": {"min": 0, "max": 255},
+    },
+    "flash_mode": {
+        "name": "cam_flash_mode", "label": "وضع الفلاش", "control_type": "enum",
+        "meta": {"values": ["off", "on", "auto"]},
+    },
+    "snapshot": {
+        "name": "cam_snapshot", "label": "التقاط صورة", "control_type": "enum",
+        "meta": {"values": ["take"]},
+    },
+    "stream": {
+        "name": "cam_stream", "label": "بث مباشر", "control_type": "switch",
+    },
+    "framesize": {
+        "name": "cam_framesize", "label": "دقة الصورة", "control_type": "enum",
+        "meta": {"values": CAM_FRAME_SIZES},
     },
 }
 

@@ -7,6 +7,9 @@
 #include "sandy_face.h"
 #include "sandy_ota.h"
 #include "sandy_led.h"
+#include "sandy_screen.h"
+#include "mbedtls/base64.h"
+#include "esp_heap_caps.h"
 #include "sandy_audio_ctl.h"
 #include "sandy_wifi.h"
 #include "config.h"
@@ -207,13 +210,95 @@ static void _handle_ns(const char *val) {
     else ESP_LOGW(TAG, "unknown noise level: %s", val);
 }
 
+// The light has two layers and this routes between them. The four state names
+// are the privacy indicator and always win; everything else is an effect, which
+// the LED module refuses while a session is live. See sandy_led.h.
+//
+// An effect may carry a colour and a speed: "breathe:ff0044:7". Both optional,
+// because "breathe" alone should work.
 static void _handle_led(const char *val) {
-    if      (!strcmp(val, "off"))       led_set_state(LED_STATE_OFF);
-    else if (!strcmp(val, "idle"))      led_set_state(LED_STATE_IDLE);
-    else if (!strcmp(val, "listening")) led_set_state(LED_STATE_LISTENING);
-    else if (!strcmp(val, "talking"))   led_set_state(LED_STATE_TALKING);
-    else ESP_LOGW(TAG, "unknown led state: %s", val);
+    if      (!strcmp(val, "idle"))      { led_set_state(LED_STATE_IDLE);      return; }
+    else if (!strcmp(val, "listening")) { led_set_state(LED_STATE_LISTENING); return; }
+    else if (!strcmp(val, "talking"))   { led_set_state(LED_STATE_TALKING);   return; }
+
+    char name[16] = {0};
+    uint32_t rgb = 0x00A0FF;
+    int speed = 5;
+
+    const char *c1 = strchr(val, ':');
+    size_t nlen = c1 ? (size_t)(c1 - val) : strlen(val);
+    if (nlen >= sizeof(name)) nlen = sizeof(name) - 1;
+    memcpy(name, val, nlen);
+
+    if (c1) {
+        rgb = (uint32_t)strtoul(c1 + 1, NULL, 16);
+        const char *c2 = strchr(c1 + 1, ':');
+        if (c2) speed = atoi(c2 + 1);
+    }
+
+    sandy_led_fx_t fx = led_fx_from_name(name);
+    if (fx == LED_FX_COUNT) { ESP_LOGW(TAG, "unknown led value: %s", val); return; }
+    // "off" is the one name in both layers: it means darkness AND hands the
+    // light back to the indicator, so it goes through led_set_state.
+    if (fx == LED_FX_OFF) { led_set_state(LED_STATE_OFF); return; }
+    led_set_effect(fx, rgb, speed);
 }
+
+// ── The display ──────────────────────────────────────────────────────────────
+//
+// "text:..." puts a line up, "dismiss" takes it down. Anything else is an image
+// chunk, which arrives as "img:<seq>:<total>:<base64>" — see sandy_screen.h for
+// why a picture is chunked and pre-converted rather than decoded here.
+static void _handle_screen(const char *val) {
+#if ENABLE_FACE
+    if (!strncmp(val, "text:", 5))     { screen_show_text(val + 5); return; }
+    if (!strcmp(val, "dismiss"))       { screen_dismiss();          return; }
+    if (!strcmp(val, "clear"))         { screen_dismiss();          return; }
+    ESP_LOGW(TAG, "unknown screen command: %.24s", val);
+#else
+    (void)val;
+#endif
+}
+
+#if ENABLE_FACE
+// One piece of a picture: "img:<seq>:<total>:<base64>".
+//
+// seq 0 starts the transfer and seq total-1 finishes it, so the app sends one
+// kind of message and the board needs no separate begin/end commands to get out
+// of step with.
+static void _handle_screen_img(const char *val) {
+    int seq = 0, total = 0, consumed = 0;
+    if (sscanf(val, "%d:%d:%n", &seq, &total, &consumed) != 2 || consumed <= 0) {
+        ESP_LOGW(TAG, "malformed image chunk header");
+        return;
+    }
+    const char *b64 = val + consumed;
+    size_t b64_len = strlen(b64);
+    if (b64_len == 0) return;
+
+    if (seq == 0 && !screen_image_begin(total)) return;
+
+    // Decoded into PSRAM: a chunk is a few kilobytes and internal RAM is what
+    // the voice session needs.
+    size_t out_len = 0;
+    mbedtls_base64_decode(NULL, 0, &out_len, (const unsigned char *)b64, b64_len);
+    if (out_len == 0 || out_len > 16384) {
+        ESP_LOGW(TAG, "image chunk %d: bad size %u", seq, (unsigned)out_len);
+        return;
+    }
+    uint8_t *raw = heap_caps_malloc(out_len, MALLOC_CAP_SPIRAM);
+    if (!raw) { ESP_LOGW(TAG, "no PSRAM for image chunk"); return; }
+
+    if (mbedtls_base64_decode(raw, out_len, &out_len,
+                              (const unsigned char *)b64, b64_len) == 0) {
+        screen_image_chunk(seq, raw, out_len);
+        if (seq == total - 1) screen_image_end();
+    } else {
+        ESP_LOGW(TAG, "image chunk %d: base64 decode failed", seq);
+    }
+    free(raw);
+}
+#endif
 
 // ─── MQTT event handler ───────────────────────────────────────────────────────
 
@@ -271,6 +356,10 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             else if (!strcmp(out, "volume"))       _handle_volume(val);
             else if (!strcmp(out, "speaker_test")) _handle_speaker_test(val);
             else if (!strcmp(out, "noise"))        _handle_ns(val);
+            else if (!strcmp(out, "screen"))       _handle_screen(val);
+#if ENABLE_FACE
+            else if (!strcmp(out, "screen_img"))   _handle_screen_img(val);
+#endif
             else if (!strcmp(out, "autonomous"))
                 ESP_LOGI(TAG, "autonomous=%s (TODO)", val);
             else if (!strcmp(out, "ota"))
@@ -319,7 +408,8 @@ static const char *OUTPUTS_JSON =
       "{\"id\":\"mic_r_gain\",\"kind\":\"audio\"},"
       "{\"id\":\"volume\",\"kind\":\"audio\"},"
       "{\"id\":\"speaker_test\",\"kind\":\"audio\"},"
-      "{\"id\":\"noise\",\"kind\":\"audio\"}"
+      "{\"id\":\"noise\",\"kind\":\"audio\"},"
+      "{\"id\":\"screen\",\"kind\":\"pwm\"}"
     "]";
 
 void mqtt_publish_status(void) {

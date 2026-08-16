@@ -43,6 +43,23 @@ enum L10nRobot {
             "test.body":             .text("الوش والرقبة"),
             "test.gesture.hint":     .text("الخط فوق بيلف الرقبة لزاوية محدّدة. الحركات بتخليها تعني إشي — بتومي، بتهزّ، بتترنّح، وبترجع لمحلها لحالها."),
             "test.offline":          .text("الروبوت مش متّصل هلّق. رح تشوف آخر قراءة وصلتني، بس الأوامر ما رح توصله."),
+
+            // ── صفحة الروبوت (RobotControlView) ──
+            "control.title":            .text("جسم ساندي"),
+            "control.count":            .text("%d جزء"),
+            "control.expression":       .text("الوش والحركة"),
+            "control.expression.hint":  .text("المزاج بيغيّر ملامحها. الخط بيلفّ رقبتها لزاوية، والحركات بتخليها تعني إشي وبترجع لمحلها لحالها."),
+            "control.screen":           .text("الشاشة"),
+            "control.screen.hint":      .text("اكتب اللي بدك يظهر ع وشها. بيضل ظاهر لحد ما تشيله — رسالة بتختفي لحالها مش رسالة. اكتب dismiss لترجع الوش."),
+            "control.light":            .text("الإضاءة"),
+            "control.light.hint":       .text("الأبيض معناه الصوت طالع من الغرفة، وهاد مؤشّر مش زينة — فالمؤثّرات بترفض تشتغل وهي بتحكي."),
+            "control.sound":            .text("الصوت"),
+            "control.sound.hint":       .text("اكتم مايك واحكي وشوف التاني بيتحرّك. المسح بأصوات السماعة بيفحص المدى كله — سماعة بمشغّل ميت بتنجح بنغمة وحدة وبتفشل بالمسح."),
+            "control.camera":           .text("الكاميرا"),
+            "control.camera.hint":      .text("لوح تاني، بيظهر لما يوصل الشبكة ويعرّف عن حاله."),
+            "control.other":            .text("أجزاء تانية"),
+            "control.empty.title":      .text("ما وصلتني أجزاء بعد"),
+            "control.empty.hint":       .text("الأجزاء بتظهر لحالها أول ما اللوح يبعت نبضته — كل خمس ثواني. لو ضلّت فاضية، اللوح مش متّصل."),
         ],
         en: [
             "apply":          .text("Run"),
@@ -77,6 +94,23 @@ enum L10nRobot {
             "test.body":             .text("Face and neck"),
             "test.gesture.hint":     .text("The slider above turns her neck to an angle. The gestures make it mean something — she nods, shakes, tilts, and returns home on her own."),
             "test.offline":          .text("The robot is offline right now. You'll see the last readings I got, but commands won't reach it."),
+
+            // ── Robot page (RobotControlView) ──
+            "control.title":            .text("Sandy's body"),
+            "control.count":            .text("%d parts"),
+            "control.expression":       .text("Face and movement"),
+            "control.expression.hint":  .text("Mood changes her features. The slider turns her neck to an angle; the gestures make it mean something and return home on their own."),
+            "control.screen":           .text("Display"),
+            "control.screen.hint":      .text("Type what you want on her face. It stays until you take it down — a note that vanishes on its own is not a note. Send dismiss to bring her face back."),
+            "control.light":            .text("Light"),
+            "control.light.hint":       .text("White means audio is leaving the room. That is an indicator, not decoration, so effects are refused while she is talking."),
+            "control.sound":            .text("Sound"),
+            "control.sound.hint":       .text("Mute one microphone, speak, and watch the other move. The speaker's sweep tests the whole range — a speaker with a dead driver passes a single tone and fails a sweep."),
+            "control.camera":           .text("Camera"),
+            "control.camera.hint":      .text("A separate board. It appears once it reaches the network and introduces itself."),
+            "control.other":            .text("Other parts"),
+            "control.empty.title":      .text("No parts have arrived yet"),
+            "control.empty.hint":       .text("Parts appear on their own with the board's first heartbeat — every five seconds. If this stays empty, the board is not connected."),
         ]
     )
 }

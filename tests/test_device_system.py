@@ -7,6 +7,7 @@ device with a VALIDATED action; an unknown device or a wrong action is REFUSED
 (Sandy asks) — it never guesses and never applies the opposite ("on" -> "off").
 """
 
+import io
 import os
 
 import mongomock
@@ -570,3 +571,150 @@ def test_all_three_boards_name_themselves_distinctly():
         names[board] = m.group(1)
 
     assert len(set(names.values())) == 3, f"two boards share a name: {names}"
+
+
+# ── The display: free text, and a picture that must not be trusted ───────────
+
+def test_the_display_takes_a_sentence_not_a_menu(db):
+    """What goes on her face is whatever the owner typed.
+
+    A `text` control is the one place the registry must NOT lower-case, must not
+    match against a list of allowed values, and must not reformat — those are
+    exactly the transformations that ruin a sentence. This pins that.
+    """
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [],
+                                 [{"id": "screen", "kind": "pwm"}], "0.8.0")
+        dev = device_store.get_device("sandy_screen")
+        assert dev is not None, "the display was declared and did not appear"
+
+        res = device_store.command_payload(dev, "set", "Back in 10 Minutes")
+        assert res["ok"] and res["payload"] == "text:Back in 10 Minutes", res
+
+        res = device_store.command_payload(dev, "set", "برجع بعد عشر دقايق")
+        assert res["ok"] and res["payload"] == "text:برجع بعد عشر دقايق", res
+
+        # Dismissing is a word, not a special endpoint.
+        assert device_store.command_payload(dev, "set", "dismiss")["payload"] == "dismiss"
+
+        # Newlines would split the single-line MQTT payload in two.
+        res = device_store.command_payload(dev, "set", "one\ntwo")
+        assert "\n" not in res["payload"], res
+
+
+def test_the_display_refuses_arabic_that_would_be_cut_in_half(db):
+    """The board's buffer is 256 bytes and Arabic is multi-byte in UTF-8.
+
+    Counting characters would let a 200-character Arabic line through, and the
+    firmware would truncate it mid-letter — a sentence that ends in a broken
+    glyph, on the device that is hardest to debug. Counting bytes refuses it
+    here, where the app can say so.
+    """
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [],
+                                 [{"id": "screen", "kind": "pwm"}], "0.8.0")
+        dev = device_store.get_device("sandy_screen")
+
+        long_ar = "س" * 200          # 200 characters, 400 bytes
+        assert len(long_ar) < 256 and len(long_ar.encode("utf-8")) > 256
+        res = device_store.command_payload(dev, "set", long_ar)
+        assert res["ok"] is False and res["error"] == "too_long", res
+
+        fits = "س" * 100             # 200 bytes
+        assert device_store.command_payload(dev, "set", fits)["ok"] is True
+
+
+def test_a_picture_becomes_exactly_what_the_panel_draws():
+    """Resized, converted, byte-ordered — and the byte order is not a detail.
+
+    The display runs with LV_COLOR_16_SWAP, so pixels go out big-endian. Wrong,
+    and the picture appears in convincing but entirely wrong colours, which
+    looks like a style choice rather than a bug and survives for weeks.
+    """
+    from PIL import Image
+    from app.features.screen_sender import IMG_BYTES, SCREEN_H, SCREEN_W, to_rgb565
+
+    src = io.BytesIO()
+    Image.new("RGB", (640, 480), (255, 0, 0)).save(src, format="PNG")
+    raw = to_rgb565(src.getvalue())
+
+    assert len(raw) == IMG_BYTES == SCREEN_W * SCREEN_H * 2
+    # Pure red in RGB565 is 0xF800; big-endian that is F8 then 00.
+    assert raw[0] == 0xF8 and raw[1] == 0x00, (raw[0], raw[1])
+
+
+def test_a_wide_photo_is_cropped_not_squashed():
+    """A face stretched to fit is worse than a face with less background."""
+    from PIL import Image
+    from app.features.screen_sender import SCREEN_H, SCREEN_W, to_rgb565
+
+    src = io.BytesIO()
+    img = Image.new("RGB", (900, 300), (0, 0, 0))
+    # A blue band down the exact middle survives a centre crop; it would be
+    # displaced by a squash.
+    for x in range(440, 460):
+        for y in range(300):
+            img.putpixel((x, y), (0, 0, 255))
+    img.save(src, format="PNG")
+
+    raw = to_rgb565(src.getvalue())
+    mid = (SCREEN_H // 2) * SCREEN_W * 2 + (SCREEN_W // 2) * 2
+    pixel = (raw[mid] << 8) | raw[mid + 1]
+    assert (pixel & 0x001F) > 20, f"centre is not blue: {pixel:04x}"
+
+
+def test_the_camera_appears_in_the_app_like_any_other_board(db):
+    """It is a different board and it needs no special case anywhere.
+
+    It declares its outputs in a heartbeat, the catalogue says how to draw them,
+    and provisioning does the rest — the same path the brain uses. The moment
+    the camera needs its own branch in the provisioning logic, that logic has
+    stopped being a rule and become a list.
+    """
+    CAM_OUTPUTS = [
+        {"id": "flash", "kind": "relay"},
+        {"id": "flash_level", "kind": "pwm"},
+        {"id": "flash_mode", "kind": "pwm"},
+        {"id": "snapshot", "kind": "pwm"},
+        {"id": "stream", "kind": "relay"},
+        {"id": "framesize", "kind": "pwm"},
+    ]
+    with as_tenant("owner"):
+        node_store.pair_node("sandycam01", "الكاميرا")
+        node_store.ingest_status("sandycam01", True, [], CAM_OUTPUTS, "0.2.0",
+                                 telemetry={"ip": "192.168.1.117", "board": "sandy-cam"})
+
+        names = {d["name"] for d in device_store.list_devices()}
+        assert {"cam_flash", "cam_flash_level", "cam_flash_mode",
+                "cam_snapshot", "cam_stream", "cam_framesize"} <= names
+
+        flash = device_store.get_device("cam_flash")
+        assert device_store.command_payload(flash, "on")["payload"] == "on"
+
+        size = device_store.get_device("cam_framesize")
+        assert device_store.command_payload(size, "set", "VGA")["ok"] is True
+        assert device_store.command_payload(size, "set", "8K")["ok"] is False
+
+
+def test_the_light_offers_effects_and_still_says_when_audio_is_leaving(db):
+    """The privacy states must never be dropped in favour of the pretty ones.
+
+    White means audio is leaving this room, and somebody standing in front of
+    her is entitled to read that without opening an app. Adding eleven effects
+    must not quietly remove the four that mean something.
+    """
+    from app.features.node_provision import ROBOT_LED
+
+    assert {"off", "idle", "listening", "talking"} <= set(ROBOT_LED)
+    assert len(ROBOT_LED) > 10, "the effects did not land"
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [],
+                                 [{"id": "led", "kind": "pwm"}], "0.8.0")
+        led = device_store.get_device("sandy_led")
+        for value in ("listening", "rainbow", "candle", "police"):
+            assert device_store.command_payload(led, "set", value)["ok"] is True, value
+        assert device_store.command_payload(led, "set", "disco")["ok"] is False

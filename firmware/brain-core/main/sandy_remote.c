@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
+#include "esp_heap_caps.h"
 #include "sandy_wifi.h"
 #include "sandy_nvs.h"
 #include "config.h"
@@ -134,21 +135,39 @@ static esp_err_t update_post(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Static, not on the stack. The default httpd task gets 4 KB, and a 1460-byte
-    // frame inside a handler on a 4 KB stack is the exact shape that panicked
-    // mqtt_status a few days ago — 896 bytes on 3 KB. It survived here only
-    // because nobody had completed an upload since. One handler at a time (the
-    // server is single-threaded by default and an OTA reboots the board anyway),
-    // so a shared buffer is safe; the stack was not.
-    static char buf[1460];
+    // PSRAM, taken for the upload and given back after.
+    //
+    // It was on the stack (a 1460-byte frame on a 4 KB task — the shape that
+    // panicked mqtt_status). Moving it to `static` fixed the stack and created a
+    // worse problem: 1460 bytes of INTERNAL RAM held forever, for something used
+    // once. Internal RAM is the scarce one here — it is what the voice session's
+    // TLS needs, and starving it stopped her talking.
+    //
+    // So: PSRAM (plentiful, eight megabytes), allocated when an upload starts and
+    // freed when it ends. Not on the stack, not permanent, not internal.
+    char *buf = heap_caps_malloc(1460, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        esp_ota_abort(h);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no buffer");
+        return ESP_FAIL;
+    }
     int remaining = req->content_len;
     while (remaining > 0) {
-        int r = httpd_req_recv(req, buf, MIN(remaining, (int)sizeof(buf)));
+        int r = httpd_req_recv(req, buf, MIN(remaining, 1460));
         if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
-        if (r <= 0) { esp_ota_abort(h); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv error"); return ESP_FAIL; }
-        if (esp_ota_write(h, buf, r) != ESP_OK) { esp_ota_abort(h); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "ota_write failed"); return ESP_FAIL; }
+        if (r <= 0) {
+            free(buf); esp_ota_abort(h);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv error");
+            return ESP_FAIL;
+        }
+        if (esp_ota_write(h, buf, r) != ESP_OK) {
+            free(buf); esp_ota_abort(h);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "ota_write failed");
+            return ESP_FAIL;
+        }
         remaining -= r;
     }
+    free(buf);
 
     if (esp_ota_end(h) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "image invalid");
@@ -193,11 +212,10 @@ static void start_http(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 20;
-    // The default is 4 KB, and every ESP_LOG from a handler now costs 200 bytes
-    // of it plus whatever vsnprintf wants (the remote-log tee runs on the
-    // caller's stack). Receiving a firmware image is the one thing on this board
-    // that must not run out of room.
-    cfg.stack_size = 6144;
+    // Left at the default 4 KB. It was raised to 6 KB when the upload buffer
+    // lived on this stack; the buffer is in PSRAM now, so the extra 2 KB of
+    // internal RAM was pure cost — and internal RAM is exactly what the voice
+    // session ran out of.
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     httpd_uri_t root = { .uri = "/",       .method = HTTP_GET,  .handler = root_get };
@@ -214,7 +232,15 @@ static void http_task(void *arg) {
 
 
 esp_err_t remote_init(void) {
-    s_logbuf = xStreamBufferCreate(LOG_BUF_BYTES, 1);
+    // PSRAM. Eight kilobytes of internal RAM for a development convenience is a
+    // bad trade on a board where internal RAM is what the voice session's TLS
+    // needs — and where it running out is what stops her talking. The voice path
+    // already puts its megabyte buffers here for the same reason.
+    //
+    // Safe: this is written from esp_log, which is not callable from an ISR or
+    // with the cache disabled, so the buffer is never touched at a moment when
+    // PSRAM is unreachable.
+    s_logbuf = xStreamBufferCreateWithCaps(LOG_BUF_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_old_vprintf = esp_log_set_vprintf(log_vprintf);
     xTaskCreate(log_server_task, "logsrv", 4096, NULL, 4, NULL);
     // On its own task, because start_http() now waits for an address and this

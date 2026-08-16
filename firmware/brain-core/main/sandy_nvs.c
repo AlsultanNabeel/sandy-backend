@@ -133,10 +133,16 @@ esp_err_t nvs_sandy_init(void) {
     }
     if (err == ESP_OK) {
         s_slots_lock = xSemaphoreCreateMutex();
-        // 3072: it sleeps, compares integers, and calls nvs_commit. Priority 1 —
-        // below everything that matters. A setting arriving a second late costs
-        // nothing; a setting written during a wake word cost six months.
-        xTaskCreate(defer_task, "nvs_defer", 3072, NULL, 1, NULL);
+        // 2560, and every byte is internal RAM — the scarce kind, the kind the
+        // voice session's TLS needs. This task sleeps, compares integers and
+        // calls nvs_commit; it holds no buffers of its own. The stack cannot go
+        // in PSRAM: nvs_commit runs with the cache disabled, and a task whose
+        // stack lives in PSRAM cannot execute at that moment.
+        //
+        // Priority 1, below everything that matters. A setting arriving a second
+        // late costs nothing; a setting written during a wake word cost six
+        // months.
+        xTaskCreate(defer_task, "nvs_defer", 2560, NULL, 1, NULL);
     }
     return err;
 }
