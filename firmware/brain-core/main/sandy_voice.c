@@ -209,7 +209,24 @@ static const bool s_session_active = true;    // no gate: always streaming
 // has to stay real-time, and riding out a stall keeps the call alive.
 #define TX_SEND_TIMEOUT_MS     4000
 // Half the buffer still queued means we are losing the race with real time.
+// Uplink backlog that means the link is not keeping up with real-time audio.
+// 64 KB is two seconds of 16 kHz mono — a genuinely stalled link, not a blip.
 #define TX_BACKLOG_WARN_BYTES  (TX_STREAM_BYTES / 2)
+// ...and the level it has to fall back to before we say it recovered. Without a
+// gap between the two, a link hovering at the threshold flips the status every
+// couple of seconds: in one captured call "slow net" was announced and withdrawn
+// six times while the person was mid-sentence. Her face changed each time.
+//
+// A status that flaps is not information, it is flicker — the reader learns to
+// ignore it, which is the opposite of the point. So it has to fall to a quarter
+// of the buffer to clear, and it has to hold there.
+#define TX_BACKLOG_CLEAR_BYTES (TX_STREAM_BYTES / 8)
+// And it must stay bad this long before she says anything at all. A two-second
+// backlog that drains by itself needed no announcement.
+#define TX_BACKLOG_WARN_MS     3000
+// Once said, it stands at least this long. Otherwise the recovery message
+// arrives before the person has finished reading the warning.
+#define TX_BACKLOG_HOLD_MS     5000
 #define SPK_CHUNK_BYTES     1920    // ~40 ms at 24 kHz / 16-bit
 // Jitter buffer: hold this much before starting playback so uneven WiFi
 // delivery doesn't underrun the I2S and make Sandy's voice stutter.
@@ -781,7 +798,22 @@ static bool commands_dispatch(int id) {
 // the call ends. Runs in mic_task only, so no lock is needed around s_mn.
 static void commands_unload(void) {
     if (!s_mn) return;
+    // esp_mn_commands_free() prints an ERROR here every single time, and the
+    // error is expected. multinet's set_speech_commands() takes ownership of the
+    // phrase list and frees it once it has applied the phrases to the model —
+    // confirmed, not assumed: `nm libmultinet.a` shows the library importing
+    // esp_mn_commands_free. So by the time we get here the list is already gone
+    // and clear() reports "not initialized". Freeing NULL is safe (the library
+    // null-checks), so the call stays: it is correct whether or not a future
+    // version keeps taking ownership, and dropping it to silence a log would
+    // trade a cosmetic problem for a real one.
+    //
+    // Silenced rather than tolerated because a red ERROR that appears on every
+    // wake word teaches you to skim past red ERRORs.
+    esp_log_level_t prev = esp_log_level_get("MN_COMMAND");
+    esp_log_level_set("MN_COMMAND", ESP_LOG_NONE);
     esp_mn_commands_free();
+    esp_log_level_set("MN_COMMAND", prev);
     if (s_mn_data) s_mn->destroy(s_mn_data);
     if (s_mn_buf) free(s_mn_buf);
     s_mn = NULL; s_mn_data = NULL; s_mn_buf = NULL; s_mn_fill = 0;
@@ -868,13 +900,56 @@ static void ws_tx_task(void *arg) {
         // audio. Say so — "slow net" is a different problem from "no net" and
         // the person standing in front of her can act on it.
         size_t queued = xStreamBufferBytesAvailable(s_tx_stream);
+        const int64_t t = now_ms();
+        static int64_t s_backlog_since;   // when the queue first went deep
+        static int64_t s_warned_at;       // when we last announced it
+
         if (queued > TX_BACKLOG_WARN_BYTES) {
-            status_set(SANDY_ST_NET_SLOW);
-        } else if (s_authed && status_get() == SANDY_ST_NET_SLOW) {
-            status_set(SANDY_ST_OK);
+            if (s_backlog_since == 0) s_backlog_since = t;
+            if (t - s_backlog_since > TX_BACKLOG_WARN_MS &&
+                status_get() != SANDY_ST_NET_SLOW) {
+                status_set(SANDY_ST_NET_SLOW);
+                s_warned_at = t;
+            }
+        } else if (queued < TX_BACKLOG_CLEAR_BYTES) {
+            s_backlog_since = 0;
+            if (s_authed && status_get() == SANDY_ST_NET_SLOW &&
+                t - s_warned_at > TX_BACKLOG_HOLD_MS) {
+                status_set(SANDY_ST_OK);
+            }
         }
+        // Between the two thresholds: leave it exactly as it is. That gap is the
+        // whole mechanism — neither raising nor clearing while the link is
+        // merely wobbling is what stops the flicker.
     }
 }
+
+#if ENABLE_WAKEWORD
+// Internal SRAM at the end of every call, next to the same number from the
+// first call. One line that answers "is this leaking?" instead of a log you
+// have to read with a calculator.
+//
+// It exists because two sessions in one capture ended 1004 bytes apart at the
+// same point in the cycle, which is the shape of a leak and also the shape of
+// ordinary fragmentation — and two points cannot tell them apart. A leak keeps
+// falling; fragmentation settles. Ten calls make that obvious at a glance.
+//
+// Internal SRAM specifically: PSRAM is plentiful, and it is the ~30 KB of
+// internal RAM that decides whether the next call can open at all.
+static void session_heap_report(void) {
+    static uint32_t s_first_free;
+    static uint32_t s_sessions;
+
+    uint32_t freeb = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    uint32_t large = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    s_sessions++;
+    if (s_first_free == 0) s_first_free = freeb;
+
+    ESP_LOGI(TAG, "session %u done: internal free=%u largest=%u  (%+d since first)",
+             (unsigned)s_sessions, (unsigned)freeb, (unsigned)large,
+             (int)freeb - (int)s_first_free);
+}
+#endif
 
 #if ENABLE_WAKEWORD
 // Send whatever was captured while the session was still connecting, before
@@ -1483,6 +1558,7 @@ static void voice_task(void *arg) {
             }
         } else if ((now_ms() - s_session_voice_ms) > VOICE_SESSION_IDLE_MS && !s_playing) {
             ESP_LOGI(TAG, "session idle, closing");
+            session_heap_report();
             s_session_active = false;
             VOICE_SESSION(false);
             s_link_lost_ms = 0;
