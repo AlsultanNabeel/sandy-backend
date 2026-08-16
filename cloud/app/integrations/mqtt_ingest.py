@@ -32,6 +32,13 @@ _STATUS_SUB = "sandy/node/+/status"
 _IR_SUB = "sandy/node/+/ir/learned"
 # Photos come back split across many messages; camera_client holds the pieces.
 _CAM_SUB = "sandy/node/+/cam/snapshot"
+# نبضة الكاميرا. موضوع منفصل بمستويين لأنها لوح تاني بيشارك نفس معرّف الوحدة —
+# الكاميرا جزء من ساندي، مش وحدة تانية. و`+` بتطابق مستوى واحد بس، فاشتراك
+# الحالة العادي `sandy/node/+/status` **ما بيلتقطها أبدًا**.
+#
+# بدون هاد الاشتراك، الكاميرا بتبعت مخرجاتها لمكان ما حدا بيسمعه وما بتظهر
+# بالتطبيق ولا مرّة — وهاد بالضبط اللي كان بيصير.
+_CAM_STATUS_SUB = "sandy/node/+/cam/status"
 
 _started = False
 _lock = threading.Lock()
@@ -57,6 +64,10 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
         if msg.topic.endswith("/ir/learned"):
             if payload:
                 set_last_ir(node_id, payload)
+            return
+
+        if msg.topic.endswith("/cam/status"):
+            _ingest_cam_status(node_id, payload)
             return
 
         if msg.topic.endswith("/cam/snapshot"):
@@ -88,12 +99,63 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
         logger.debug("[mqtt_ingest] message handling failed: %s", e)
 
 
+def _ingest_cam_status(node_id: str, payload: str) -> None:
+    """The camera's heartbeat, merged into the node it shares an id with.
+
+    The camera is part of Sandy, not a separate box: same pairing code, same
+    node id, its own `cam/` branch of the topic tree. So its outputs have to be
+    ADDED to whatever the brain declared, never written over them — two
+    heartbeats arriving five seconds apart would otherwise take turns wiping
+    each other out, and the app would flicker between a robot with a neck and a
+    robot with a flash.
+
+    Its outputs are namespaced `cam/...` for the same reason the topics are:
+    both boards answer under one node id, and `flash` sitting beside `servo` in
+    one list is a collision waiting for the day somebody adds a flash to the
+    brain.
+    """
+    from app.features.node_store import get_node_any_tenant, ingest_status
+
+    data = {}
+    if payload:
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, ValueError):
+            return
+
+    cam_outputs = data.get("outputs")
+    if not isinstance(cam_outputs, list):
+        return
+
+    namespaced = [
+        {"id": f"cam/{o.get('id')}", "kind": o.get("kind")}
+        for o in cam_outputs
+        if isinstance(o, dict) and o.get("id")
+    ]
+
+    # Keep the brain's. A camera heartbeat says what the camera has; it says
+    # nothing at all about the neck.
+    existing = get_node_any_tenant(node_id) or {}
+    kept = [o for o in (existing.get("outputs") or [])
+            if isinstance(o, dict) and not str(o.get("id", "")).startswith("cam/")]
+
+    ingest_status(
+        node_id,
+        online=True,
+        capabilities=None,
+        outputs=kept + namespaced,
+        firmware_version="",
+        telemetry={k: v for k, v in data.items() if k in ("ip", "board")},
+    )
+
+
 def _on_connect(client, userdata, flags, reason_code, properties=None) -> None:  # noqa: ANN001
     try:
         # QoS 0 for camera chunks on purpose: a photo is dozens of messages and
         # QoS 1 would double the round trips on a link the robot already shares
         # with live audio. A lost chunk means one retaken photo, not a lost one.
-        client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1), (_CAM_SUB, 0)])
+        client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1),
+                          (_CAM_SUB, 0), (_CAM_STATUS_SUB, 1)])
         logger.info("[mqtt_ingest] subscribed to node status + IR + camera")
     except Exception as e:  # noqa: BLE001
         logger.warning("[mqtt_ingest] subscribe failed: %s", e)

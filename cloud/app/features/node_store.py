@@ -294,6 +294,22 @@ def set_node_status(code: str, online: bool = True,
 
 # ── MQTT ingest (firmware speaks node_id in the topic; runs outside a tenant) ──
 
+def get_node_any_tenant(node_id: str) -> Optional[Dict[str, Any]]:
+    """One node by id, from the raw collection, ignoring tenant scope.
+
+    Only for the ingest path, which runs on the MQTT thread with no tenant
+    context — the same reason ingest_status reads raw. Never expose this to a
+    request handler: it can see every tenant's nodes, and that is exactly what
+    the scoped reads exist to prevent.
+    """
+    if get_db() is None:
+        return None
+    try:
+        return get_db()[_COLL].find_one({"node_id": (node_id or "").strip()})
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def ingest_status(node_id: str, online: bool = True,
                   capabilities: Optional[List[str]] = None,
                   outputs: Optional[List[Dict[str, Any]]] = None,

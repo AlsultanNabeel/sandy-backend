@@ -65,7 +65,7 @@ CASES = {
                  | {"idle", "listening", "talking", "off"}),
         12,
     ),
-    "framesize": (
+    "cam/framesize": (
         lambda: set(re.findall(r'\{"([\w\d]+)",\s*FRAMESIZE_\w+\}', _read(CAM_CONTROL))),
         10,
     ),
@@ -89,6 +89,40 @@ def test_the_app_never_offers_a_value_the_board_will_ignore(output):
         f"the app offers {sorted(unknown)} for '{output}' and no board accepts "
         "them — they appear as working controls that do nothing"
     )
+
+
+def test_the_camera_outputs_the_app_offers_are_ones_the_camera_answers_to():
+    """The camera shares a node id with the brain, so its outputs are `cam/`-
+    prefixed and its topics are too. Those two facts have to stay in step.
+
+    They are set in different languages in different files: the catalogue keys
+    here, the simple-output router in the camera's Arduino sketch there. A
+    mismatch is a control in the app that publishes to a topic nobody is
+    subscribed to — no error anywhere, just a button that does nothing.
+    """
+    cam = _read("vision-core/cam_mqtt.ino")
+    handled = set(re.findall(r'out == "(\w+)"', cam))
+    assert len(handled) >= 6, "the camera's simple-output router stopped matching"
+
+    offered = {k.split("/", 1)[1] for k in PART_CATALOGUE if k.startswith("cam/")}
+    unknown = offered - handled
+    assert not unknown, (
+        f"the app offers cam/{sorted(unknown)} and the camera routes nothing for "
+        "them — they publish into silence"
+    )
+
+
+def test_the_camera_subscribes_under_its_own_branch_not_the_whole_node():
+    """A wildcard over the whole node would hand the camera the brain's commands.
+
+    Both boards answer under one node id. Subscribing to `<id>/+` — which an
+    earlier version of this did — meant the camera received `servo`, `mood` and
+    `led` as well as its own. Harmless today because it ignores them; a bug the
+    first time a name appears on both boards.
+    """
+    cam = _read("vision-core/cam_mqtt.ino")
+    assert '"/cam/+"' in cam or "/cam/+" in cam, "the camera's subscription is not scoped to cam/"
+    assert 'camNodeId() + "/+"' not in cam, "the camera subscribes to the whole node tree"
 
 
 def test_every_output_the_brain_declares_has_somewhere_to_appear():

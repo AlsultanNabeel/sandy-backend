@@ -342,6 +342,12 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // not be parsed as a command.
             if (!strcmp(out, "status")) break;
 
+            // فرع الكاميرا. اللوحين بيشاركوا معرّف الوحدة — الكاميرا جزء من
+            // ساندي مش صندوق تاني — واشتراكنا `#` بيوصّلنا كل شي تحته. أي
+            // موضوع فيه شرطة مش إلنا، فبنتجاهله بصمت بدل ما نحذّر منه: تحذير
+            // بيتكرر كل خمس ثواني بيعلّمك تتخطّى التحذيرات.
+            if (strchr(out, '/')) break;
+
             if      (!strcmp(out, "mood"))         _handle_mood(val);
             else if (!strcmp(out, "servo"))        _handle_servo(val);
             else if (!strcmp(out, "gesture"))      _handle_gesture(val);

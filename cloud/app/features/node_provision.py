@@ -145,29 +145,35 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     },
 
     # ── الكاميرا ─────────────────────────────────────────────────────────────
-    # لوح تاني (esp32-cam) بيتكلّم نفس اللغة: بيعلن مخرجاته بالنبضة، والكتالوج
-    # بيقرّر شكلها بالتطبيق. ولا سطر خاص بالكاميرا بمنطق التزويد.
-    "flash": {
+    #
+    # المفاتيح ببادئة `cam/` لأن الكاميرا **بتشارك نفس معرّف الوحدة** مع الدماغ
+    # — هي جزء من ساندي مش صندوق تاني. بلا البادئة، `flash` بيقعد جنب `servo`
+    # بقائمة وحدة، وأول ما حدا يضيف فلاش للدماغ بيصير تصادم صامت.
+    #
+    # والبادئة بتوصل الموضوع لحالها: device_topic بيركّب
+    # `sandy/node/<id>/<المخرج>`، فـ `cam/flash` بيطلع
+    # `sandy/node/<id>/cam/flash` — وهاد بالضبط وين الكاميرا بتسمع.
+    "cam/flash": {
         "name": "cam_flash", "label": "فلاش الكاميرا", "control_type": "switch",
     },
-    "flash_level": {
+    "cam/flash_level": {
         "name": "cam_flash_level", "label": "قوة الفلاش", "control_type": "dimmer",
         # صفر لـ ٢٥٥ مش مئوية: هاي القيمة اللي الفيرموير بيكتبها ع الطرف مباشرة،
         # وتحويلها لنسبة بيخلي «نص القوة» رقم اعتباطي.
         "meta": {"min": 0, "max": 255},
     },
-    "flash_mode": {
+    "cam/flash_mode": {
         "name": "cam_flash_mode", "label": "وضع الفلاش", "control_type": "enum",
         "meta": {"values": ["off", "on", "auto"]},
     },
-    "snapshot": {
+    "cam/snapshot": {
         "name": "cam_snapshot", "label": "التقاط صورة", "control_type": "enum",
         "meta": {"values": ["take"]},
     },
-    "stream": {
+    "cam/stream": {
         "name": "cam_stream", "label": "بث مباشر", "control_type": "switch",
     },
-    "framesize": {
+    "cam/framesize": {
         "name": "cam_framesize", "label": "دقة الصورة", "control_type": "enum",
         "meta": {"values": CAM_FRAME_SIZES},
     },

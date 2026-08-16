@@ -673,13 +673,18 @@ def test_the_camera_appears_in_the_app_like_any_other_board(db):
     the camera needs its own branch in the provisioning logic, that logic has
     stopped being a rule and become a list.
     """
+    # `cam/`-prefixed, because the camera shares a node id with the brain: it is
+    # part of Sandy, not a second box. The prefix is what stops `flash` from
+    # sitting beside `servo` in one list and colliding the day somebody puts a
+    # flash on the brain — and it carries straight through to the topic, since
+    # device_topic joins node id and output id with a slash.
     CAM_OUTPUTS = [
-        {"id": "flash", "kind": "relay"},
-        {"id": "flash_level", "kind": "pwm"},
-        {"id": "flash_mode", "kind": "pwm"},
-        {"id": "snapshot", "kind": "pwm"},
-        {"id": "stream", "kind": "relay"},
-        {"id": "framesize", "kind": "pwm"},
+        {"id": "cam/flash", "kind": "relay"},
+        {"id": "cam/flash_level", "kind": "pwm"},
+        {"id": "cam/flash_mode", "kind": "pwm"},
+        {"id": "cam/snapshot", "kind": "pwm"},
+        {"id": "cam/stream", "kind": "relay"},
+        {"id": "cam/framesize", "kind": "pwm"},
     ]
     with as_tenant("owner"):
         node_store.pair_node("sandycam01", "الكاميرا")
@@ -692,6 +697,8 @@ def test_the_camera_appears_in_the_app_like_any_other_board(db):
 
         flash = device_store.get_device("cam_flash")
         assert device_store.command_payload(flash, "on")["payload"] == "on"
+        # And the topic lands in the camera's branch, which is where it listens.
+        assert device_store.device_topic(flash) == "sandy/node/sandycam01/cam/flash"
 
         size = device_store.get_device("cam_framesize")
         assert device_store.command_payload(size, "set", "VGA")["ok"] is True
@@ -772,3 +779,49 @@ def test_the_display_device_is_reachable_end_to_end(db):
         topic = device_store.device_topic(dev)
         assert topic == "sandy/node/sandybrain01/screen"
         assert device_store.tenant_owns_topic(topic) is True
+
+
+def test_two_boards_under_one_node_id_do_not_erase_each_other(db):
+    """The brain and the camera share a node id, and both send a heartbeat.
+
+    That is deliberate — the camera is part of Sandy, not a second box — but it
+    means two different heartbeats arrive five seconds apart claiming to
+    describe the same node. If the camera's simply replaced `outputs`, the app
+    would flicker between a robot with a neck and a robot with a flash, twice
+    every ten seconds, and nobody would be able to describe the bug.
+
+    So a camera heartbeat replaces only the `cam/` entries and leaves the rest
+    alone. This runs them in both orders, because "works if the brain goes
+    first" is not a property anybody can rely on over a network.
+    """
+    from app.integrations.mqtt_ingest import _ingest_cam_status
+
+    BRAIN = [{"id": "servo", "kind": "servo"}, {"id": "screen", "kind": "pwm"}]
+    CAM_JSON = ('{"outputs":[{"id":"flash","kind":"relay"},'
+                '{"id":"snapshot","kind":"pwm"}],"ip":"192.168.1.117",'
+                '"board":"sandy-cam"}')
+
+    def outputs_now():
+        return {o["id"] for o in node_store.get_node("sandy0001")["outputs"]}
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandy0001", "ساندي")
+
+        # brain first, then camera
+        node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.0")
+        _ingest_cam_status("sandy0001", CAM_JSON)
+        assert outputs_now() == {"servo", "screen", "cam/flash", "cam/snapshot"}
+
+        # ...and a brain heartbeat afterwards must not wipe the camera's half
+        node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.0")
+        after = outputs_now()
+        assert {"servo", "screen"} <= after
+
+        # camera first on a fresh node
+        node_store.pair_node("sandy0002", "ساندي التانية")
+        _ingest_cam_status("sandy0002", CAM_JSON)
+        cam_only = {o["id"] for o in node_store.get_node("sandy0002")["outputs"]}
+        assert cam_only == {"cam/flash", "cam/snapshot"}
+
+        # and its address landed, which is how anyone finds the camera at all
+        assert node_store.get_node("sandy0002")["telemetry"]["ip"] == "192.168.1.117"

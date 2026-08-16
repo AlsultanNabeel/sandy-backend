@@ -127,7 +127,7 @@
 // Reported in every heartbeat. Bump it with each flash: without it, "did that
 // fix actually reach the board?" is a question nobody can answer from the app,
 // and today that question cost an afternoon.
-#define SANDY_FW_VERSION "0.9.0"
+#define SANDY_FW_VERSION "0.9.1"
 
 // Which board this is. Three ESP boards share the house network and take three
 // different binaries that are not interchangeable:

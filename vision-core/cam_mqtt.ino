@@ -124,7 +124,9 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // الشجرة، فلازم تُتجاهل صراحة وإلا فُسّرت كأمر.
     int slash = t.lastIndexOf('/');
     String out = slash >= 0 ? t.substring(slash + 1) : String();
-    if (out == "status" || out == "snapshot_data" || out == "event") return;
+    // مواضيعنا نحنا راجعة علينا — لازم تُتجاهل صراحة وإلا انفسّرت كأوامر.
+    if (out == "status" || out == "snapshot" || out == "event" ||
+        out == "request" || out == "command") return;
     if (handleSimpleOutput(out, value)) return;
     g_log.printf("[CB] unhandled topic '%s'\n", t.c_str());
   }
@@ -172,10 +174,12 @@ static bool mqttReconnect() {
     g_log.println("[MQTT] connected");
     g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
     g_mqtt.subscribe(g_topicCommand.c_str(), 0);
-    // وشجرة الوحدة كاملة، عشان التطبيق يوصلها بنفس طريقة أي جهاز تاني:
-    // قيمة بسيطة ع sandy/node/<id>/<مخرج>. الأوامر الغنية بالـ JSON ضلّت
-    // مكانها ع cam/command — هاي إضافة مش استبدال.
-    String simple = String(SANDY_TOPIC_ROOT) + camNodeId() + "/+";
+    // وفرع الكاميرا من شجرة الوحدة: sandy/node/<id>/cam/<مخرج>.
+    //
+    // `cam/` مش زينة: الدماغ بيشارك نفس معرّف الوحدة، فاشتراك ع `<id>/+` كان
+    // بيخلّي الكاميرا تستقبل أوامر الرقبة والوش والإضاءة كمان. البادئة بتفصل
+    // اللوحين بلا ما نغيّر معرّف الوحدة — وهي مقصودة، الكاميرا جزء من ساندي.
+    String simple = String(SANDY_TOPIC_ROOT) + camNodeId() + "/cam/+";
     g_mqtt.subscribe(simple.c_str(), 0);
     g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;   // نجحنا → رجّع الانتظار لأصله
     publishFullStatus();                     // أول ما نتصل: عرّف عن حالك كاملة

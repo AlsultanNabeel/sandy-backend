@@ -117,7 +117,7 @@
 // تلات ألواح إسبريسيف ع نفس الشبكة وتلات ملفات مختلفة ما بتتبادل. بلا اسم صريح
 // بالنبضة، «وين الكاميرا؟» بينجاوب بمسح الشبكة وتخمين — وهاد صار فعلًا.
 #define SANDY_CAM_BOARD_ID        "sandy-cam"
-#define SANDY_CAM_FW_VERSION      "0.2.0"
+#define SANDY_CAM_FW_VERSION      "0.3.0"
 
 #define CAM_HTTP_PORT             80
 #ifndef CAM_HTTP_TOKEN
