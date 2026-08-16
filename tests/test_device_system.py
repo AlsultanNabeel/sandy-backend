@@ -519,3 +519,27 @@ def test_a_topic_from_another_account_is_still_refused(db):
         assert device_store.tenant_owns_topic("sandy/node/sandybrain01") is False
         assert device_store.tenant_owns_topic("sandy/node//servo") is False
         assert device_store.tenant_owns_topic("") is False
+
+
+def test_the_camera_reports_its_address_the_same_way_the_brain_does(db):
+    """One heartbeat shape for every board, so one code path reads them all.
+
+    "What is the camera's IP?" had no answer anywhere in the system: the router
+    hands out an address that changes, and the camera told nobody. A simple
+    question ended in scanning 254 addresses and guessing which board replied.
+
+    The camera now sends `ip` and `board` — the same two fields the brain sends,
+    landing in the same telemetry allowlist, needing no new server code. This
+    test is what keeps that true: if either board renames a field, it fails here
+    rather than showing an empty row in the app.
+    """
+    with as_tenant("owner"):
+        node_store.pair_node("sandycam01", "الكاميرا")
+        node_store.ingest_status(
+            "sandycam01", True, [], [], "0.2.0",
+            telemetry={"ip": "192.168.1.117", "board": "sandy-cam",
+                       "uptime": 900, "heap": 120000},
+        )
+        node = node_store.get_node("sandycam01")
+        assert node["telemetry"]["ip"] == "192.168.1.117"
+        assert node["telemetry"]["board"] == "sandy-cam"

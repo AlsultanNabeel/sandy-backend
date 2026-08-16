@@ -150,17 +150,28 @@ static void publishCamStatus() {
   if (now - g_lastStatusPubMs < STATUS_POST_INTERVAL_MS) return;
   g_lastStatusPubMs = now;
 
-  char buf[260];
+  // العنوان والاسم بالنبضة.
+  //
+  // بلاهم، «شو عنوان الكاميرا؟» ما إله جواب بكل النظام: الراوتر بيوزّع عنوان
+  // بيتغيّر، والكاميرا ما بتقوله لحدا. سؤال بسيط بينتهي بمسح ٢٥٤ عنوان
+  // وتخمين أي لوح ردّ — وهاد صار.
+  //
+  // نفس الحقلين اللي عند الدماغ بالضبط (ip, board)، فالخادم بيقراهم بنفس
+  // المسار بلا ولا سطر جديد عنده.
+  char buf[320];
   snprintf(buf, sizeof(buf),
            "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"psram\":%u,"
-           "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s}",
+           "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s,"
+           "\"ip\":\"%s\",\"board\":\"%s\"}",
            now / 1000,
            WiFi.RSSI(),
            ESP.getFreeHeap(),
            ESP.getFreePsram(),
            g_cameraReady ? "true" : "false",
            flashIsOn() ? "true" : "false",
-           camHttpRunning() ? "true" : "false");
+           camHttpRunning() ? "true" : "false",
+           WiFi.localIP().toString().c_str(),
+           SANDY_CAM_BOARD_ID);
   g_mqtt.publish(g_topicStatus.c_str(), buf, false);
 
   // heartbeat واضح ع التيلنت — يأكد إنو الـ loop شغّال
