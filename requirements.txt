@@ -1,5 +1,4 @@
 # Text-to-Speech and utilities
-azure-cognitiveservices-speech>=1.41.1
 emoji>=2.0.0
 requests==2.33.0
 Flask>=2.2.0

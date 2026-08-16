@@ -27,19 +27,6 @@ from openai import OpenAI, AzureOpenAI
 from app.integrations.openai_client import make_chat_completion_fn
 from app.integrations.mongodb_store import init_mongo_connection
 
-# Try to import Azure Speech SDK for text-to-speech
-try:
-    import azure.cognitiveservices.speech as speechsdk
-
-    AZURE_SPEECH_AVAILABLE = True
-except ImportError:
-    speechsdk = None
-    AZURE_SPEECH_AVAILABLE = False
-    logger.warning(
-        "[Warning] Azure Speech SDK not available. To enable: pip install azure-cognitiveservices-speech"
-    )
-
-
 # Try to import Google Cloud Text-to-Speech
 try:
     from google.cloud import texttospeech

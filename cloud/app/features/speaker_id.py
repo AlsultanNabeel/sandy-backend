@@ -126,7 +126,12 @@ def _get_extractor():
 
 # أدوات الصوت والمتّجهات
 def _pcm_to_float(pcm_bytes: bytes):
-    """PCM 16-bit little-endian (من ffmpeg) → numpy float32 في [-1, 1]."""
+    """PCM 16-bit little-endian → numpy float32 في [-1, 1].
+
+    البايتس بتيجي جاهزة من وصلة الصوت: اللوح بيبعت PCM بستّاشر كيلوهرتز
+    مباشرة، فما في تحويل ولا ffmpeg بالطريق. الوصف القديم كان بيقول «من ffmpeg»
+    وهاد ضل صحيح لحد ما راح تيليجرام — وبعدها ضل مكتوب سنة.
+    """
     import numpy as np
     if len(pcm_bytes) % 2:
         pcm_bytes = pcm_bytes[:-1]
