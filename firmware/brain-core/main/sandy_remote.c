@@ -133,7 +133,13 @@ static esp_err_t update_post(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    char buf[1460];
+    // Static, not on the stack. The default httpd task gets 4 KB, and a 1460-byte
+    // frame inside a handler on a 4 KB stack is the exact shape that panicked
+    // mqtt_status a few days ago — 896 bytes on 3 KB. It survived here only
+    // because nobody had completed an upload since. One handler at a time (the
+    // server is single-threaded by default and an OTA reboots the board anyway),
+    // so a shared buffer is safe; the stack was not.
+    static char buf[1460];
     int remaining = req->content_len;
     while (remaining > 0) {
         int r = httpd_req_recv(req, buf, MIN(remaining, (int)sizeof(buf)));
@@ -181,6 +187,11 @@ static void start_http(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 20;
+    // The default is 4 KB, and every ESP_LOG from a handler now costs 200 bytes
+    // of it plus whatever vsnprintf wants (the remote-log tee runs on the
+    // caller's stack). Receiving a firmware image is the one thing on this board
+    // that must not run out of room.
+    cfg.stack_size = 6144;
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     httpd_uri_t root = { .uri = "/",       .method = HTTP_GET,  .handler = root_get };
