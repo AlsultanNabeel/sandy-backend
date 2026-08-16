@@ -17,7 +17,24 @@
 #define ENABLE_MQTT     1   // needs WIFI — cloud body control (mood/servo/buzzer/base)
 #define ENABLE_VOICE    1   // needs WIFI
 #define ENABLE_WAKEWORD 1   // local WakeNet gate for the voice session (needs VOICE)
-#define ENABLE_COMMANDS 1   // local MultiNet "Sandy ..." command words (needs WAKEWORD)
+// نموذج الأوامر المحلية (MultiNet) — مطفي بقرار، والسبب يستاهل يتكتب.
+//
+// كان بياخد حوالي ٥٨ كيلو من الرام الداخلية. والداخلية ٢٢٧ كيلو كلها، وبتنزل
+// لـ ٢٦ بعد ما الواي فاي وكلمة الإيقاظ ياخدوا نصيبهم — فالنموذج لحاله كان
+// بياكل أكتر من نصف اللي بيضل. ولما التشفير طلب بضع مئات بايت بنص مكالمة، ما
+// لقي: `esp-aes: Failed to allocate memory`.
+//
+// وعشان ما بيسع مع وصلة الصوت، كان لازم ينفرّغ كل مكالمة ويترجّع بعدها. هاد
+// أخّر فتح كل جلسة، وطبع خطأ أحمر كل مرّة.
+//
+// واللي كان بيشتريه بهاد الثمن: خمستعش عبارة إنجليزية ثابتة زي
+// "SANDY TURN ON THE LIGHT". المالك بيحكي عربي، والتطبيق بيعمل نفس الإشي بضغطة.
+//
+// كلمة الإيقاظ نموذج تاني وأصغر بكتير، وضلّت شغّالة — الفرق إنه بعد ما تصحيها
+// بتحكي معها بدل ما تقول عبارة محفوظة.
+//
+// الكود كله محروس بهاي الراية ومكانه، فرجعتها لواحد بترجّع الميزة كاملة.
+#define ENABLE_COMMANDS 0   // local MultiNet "Sandy ..." command words (needs WAKEWORD)
 #define ENABLE_SPK_TEST 0   // temporary: triple-beep to verify amp + speaker
 #define ENABLE_REMOTE   1   // cable-free dev: OTA upload + serial log over WiFi (needs WIFI)
 #define ENABLE_LED      1   // on-board WS2812: idle blue / listening white / talking amber
@@ -110,7 +127,7 @@
 // Reported in every heartbeat. Bump it with each flash: without it, "did that
 // fix actually reach the board?" is a question nobody can answer from the app,
 // and today that question cost an afternoon.
-#define SANDY_FW_VERSION "0.8.1"
+#define SANDY_FW_VERSION "0.9.0"
 
 // Which board this is. Three ESP boards share the house network and take three
 // different binaries that are not interchangeable:
