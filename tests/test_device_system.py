@@ -475,3 +475,47 @@ def test_the_hardware_document_matches_the_hardware():
         "The firmware or the catalogue changed and the document did not. "
         "Run: python3 scripts/gen_hardware_doc.py"
     )
+
+
+def test_the_ownership_check_finds_exactly_what_it_used_to_scan_for(db):
+    """`_topic_query` is `device_topic` run backwards. Pin the two together.
+
+    The check runs on every actuation and used to read every device the tenant
+    owned, deriving each one's topic in Python. Now it is a single lookup, which
+    is only safe while the two directions agree — so this builds devices of every
+    transport shape, derives each topic the forward way, and asserts the backward
+    query finds it.
+    """
+    from app.features.device_store import _topic_query, device_topic
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [], ROBOT_OUTPUTS, "0.6.0")
+        device_store.add_device(
+            name="lamp", label="لمبة", control_type="switch",
+            transport={"kind": "mqtt", "topic": "room/cmd/light"}, room="صالة",
+        )
+
+        for dev in device_store.list_devices():
+            raw = device_store.get_device(dev["name"])
+            topic = device_topic(raw)
+            if topic is None:
+                continue
+            assert device_store.tenant_owns_topic(topic), (
+                f"{dev['name']}: derived {topic}, and the reverse query missed it"
+            )
+            # ...and the query is specific, not a match-anything.
+            assert "$exists" not in str(_topic_query(topic))
+
+
+def test_a_topic_from_another_account_is_still_refused(db):
+    """The scan-to-lookup change must not widen what counts as owned."""
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [], ROBOT_OUTPUTS, "0.6.0")
+
+    with as_tenant("stranger"):
+        assert device_store.tenant_owns_topic("sandy/node/sandybrain01/servo") is False
+        assert device_store.tenant_owns_topic("sandy/node/sandybrain01") is False
+        assert device_store.tenant_owns_topic("sandy/node//servo") is False
+        assert device_store.tenant_owns_topic("") is False

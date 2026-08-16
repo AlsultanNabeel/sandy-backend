@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_nodes"
 
+# سقف أمان، مش حد منتج — ما حدا بيوصله بالاستعمال العادي. موجود عشان
+# خلل بالكتابة أو حساب دخل عليه إشي غريب ما يتحوّل لنداء بيسحب المجموعة
+# كلها ويوقّع الطلب.
+MAX_NODES = 100
+
 # Capabilities a node may advertise. Validated so a bad heartbeat can't inject junk.
 KNOWN_CAPABILITIES = frozenset({"relay", "pwm", "servo", "buzzer", "ir", "audio"})
 
@@ -224,7 +229,7 @@ def list_nodes() -> List[Dict[str, Any]]:
     coll = _coll()
     if coll is None:
         return []
-    return [_public(d) for d in coll.find({}).sort("paired_at", 1)]
+    return [_public(d) for d in coll.find({}).sort("paired_at", 1).limit(MAX_NODES)]
 
 
 def get_node(node_id: str) -> Optional[Dict[str, Any]]:

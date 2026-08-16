@@ -79,13 +79,18 @@ def unregister_token(token: str) -> bool:
         return False
 
 
+# أجهزة الشخص الواحد. رقم كبير ع الواقع — عشان يمسك خلل بالتسجيل، مش يحدّ حدا.
+MAX_TOKENS_PER_USER = 50
+
+
 def tokens_for_user(user_id: str) -> List[str]:
     """All device tokens currently registered to a user."""
     coll = _coll()
     if coll is None or not user_id:
         return []
     try:
-        return [d["_id"] for d in coll.find({"user_id": str(user_id)}, {"_id": 1})]
+        return [d["_id"] for d in
+                coll.find({"user_id": str(user_id)}, {"_id": 1}).limit(MAX_TOKENS_PER_USER)]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[PushTokens] tokens_for_user failed: %s", exc)
         return []

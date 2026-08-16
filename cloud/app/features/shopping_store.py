@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from app.utils.tenant_db import scoped
+from app.utils.text_query import contains, equals
 from app.db import configure, get_db
 import logging
 
@@ -51,11 +52,8 @@ def add_item(text: str, category: str = "") -> bool:
     text = str(text or "").strip()
     if not text:
         return False
-    existing = {
-        (d.get("text", "") or "").strip().lower()
-        for d in coll.find({"done": False}, {"text": 1})
-    }
-    if text.lower() in existing:
+    # منع التكرار: نسأل القاعدة عن تطابق كامل بدل ما نسحب القائمة كلها ونقارن.
+    if coll.find_one({"done": False, **equals("text", text)}) is not None:
         return False
     coll.insert_one(
         {
@@ -99,13 +97,10 @@ def list_items(include_bought: bool = False) -> List[Dict[str, Any]]:
 
 def _match(coll, text: str):
     """أقرب عنصر نشط لنص معطى (احتواء، غير حساس لحالة الأحرف)."""
-    tl = str(text or "").strip().lower()
+    tl = str(text or "").strip()
     if not tl:
         return None
-    for d in coll.find({"done": False}):
-        if tl in (d.get("text", "") or "").lower():
-            return d
-    return None
+    return coll.find_one({"done": False, **contains("text", tl)})
 
 
 def check_item(text: str) -> str:

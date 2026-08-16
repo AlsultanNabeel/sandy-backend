@@ -187,8 +187,11 @@ def find_photos(
     if tag:
         mongo_filter["tags"] = tag.strip()
     try:
-        cursor = get_db()[_META].find(mongo_filter).sort("created_at", -1)
-        docs = list(cursor.limit(500))
+        # السقف بنفس السلسلة مش ع متغيّر بعدين: بيقرا أوضح، وفحص «كل قراءة
+        # قائمة إلها سقف» بيمشي ع التعبير نفسه فما بيشوف سقف بمتغيّر تاني.
+        docs = list(
+            get_db()[_META].find(mongo_filter).sort("created_at", -1).limit(500)
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning("[photo_album] find failed: %s", e)
         return []

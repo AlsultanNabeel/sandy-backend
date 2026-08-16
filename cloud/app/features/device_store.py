@@ -44,6 +44,11 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_devices"
 
+# سقف أمان، مش حد منتج — ما حدا بيوصله بالاستعمال العادي. موجود عشان
+# خلل بالكتابة أو حساب دخل عليه إشي غريب ما يتحوّل لنداء بيسحب المجموعة
+# كلها ويوقّع الطلب.
+MAX_DEVICES = 500
+
 # ── Control types ───────────────────────────────────────────────────────────
 # Each control_type defines the actions it accepts. Validation is centralized in
 # command_payload() so no caller can invent an action/value.
@@ -184,7 +189,7 @@ def list_devices() -> List[Dict[str, Any]]:
     coll = _coll()
     if coll is None:
         return []
-    return [_public(d) for d in coll.find({}).sort("name", 1)]
+    return [_public(d) for d in coll.find({}).sort("name", 1).limit(MAX_DEVICES)]
 
 
 def get_device(name: str) -> Optional[Dict[str, Any]]:
@@ -338,6 +343,31 @@ def device_topic(device: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _topic_query(topic: str) -> Dict[str, Any]:
+    """The transport that would produce ``topic`` — device_topic() run backwards.
+
+    This exists so the ownership check is a lookup and not a scan. It runs on
+    every actuation, and the version before it read every device the tenant owned
+    and derived each one's topic in Python to see if any matched. Correct, and
+    linear in the size of the account: somebody with forty devices paid forty
+    documents to press one button.
+
+    If the two ever disagree, this returns nothing and the actuation is refused.
+    That direction matters: a mismatch costs a button that does not work, not a
+    tenant reaching somebody else's hardware. The equivalence is pinned by a
+    test that builds a device, derives its topic, and asserts this finds it.
+    """
+    if topic.startswith("sandy/node/"):
+        rest = topic[len("sandy/node/"):]
+        node_id, _, output = rest.partition("/")
+        if not node_id or not output:
+            return {"_id": {"$exists": False}}   # can match nothing
+        return {"transport.kind": "node",
+                "transport.node_id": node_id,
+                "transport.output": output}
+    return {"transport.kind": "mqtt", "transport.topic": topic}
+
+
 def tenant_owns_topic(topic: str) -> bool:
     """True when ``topic`` actuates a device registered to the CURRENT tenant.
 
@@ -355,7 +385,7 @@ def tenant_owns_topic(topic: str) -> bool:
     if not topic:
         return False
     try:
-        return any(device_topic(d) == topic for d in coll.find({}))
+        return coll.find_one(_topic_query(topic), {"_id": 1}) is not None
     except Exception as e:  # noqa: BLE001 — a lookup failure must not actuate
         logger.warning("[DeviceStore] ownership check failed for %s: %s", topic, e)
         return False

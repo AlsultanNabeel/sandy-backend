@@ -105,12 +105,17 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 # ─── Reads ────────────────────────────────────────────────────────────────────
 
+# سقف المهام المفتوحة اللي بترجع بنداء واحد. المنجزة عندها سقف مية من زمان؛
+# المفتوحة كانت بلا سقف، وهي بالضبط اللي بتتراكم.
+MAX_OPEN_TASKS = 500
+
+
 def load_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
     try:
         coll = _coll(mongo_db)
         if coll is None:
             return []
-        docs = list(coll.find({"done": False}).sort("created_at", 1))
+        docs = list(coll.find({"done": False}).sort("created_at", 1).limit(MAX_OPEN_TASKS))
         return [_normalize(d) for d in docs]
     except Exception as e:
         logger.warning(f"[TasksStore] load failed: {e}")

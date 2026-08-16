@@ -67,6 +67,12 @@ def normalize_action(device: str, value: str) -> Optional[str]:
     return None
 
 _COLL = "sandy_scenes"
+
+# سقف أمان، مش حد منتج — ما حدا بيوصله بالاستعمال العادي. موجود عشان
+# خلل بالكتابة أو حساب دخل عليه إشي غريب ما يتحوّل لنداء بيسحب المجموعة
+# كلها ويوقّع الطلب.
+MAX_SCENES = 200
+MAX_DUE_TIMERS = 100
 _TIMERS = "sandy_scene_timers"   # timed reverts: {fire_at, device, value}
 
 # name → (label, icon, default actions). Seeded once; the owner can edit freely.
@@ -198,7 +204,7 @@ def list_scenes() -> List[Dict[str, Any]]:
     if coll is None:
         return []
     _seed_builtins()   # ensure this user has the default set
-    return [_public(d) for d in coll.find({}).sort("builtin", -1)]
+    return [_public(d) for d in coll.find({}).sort("builtin", -1).limit(MAX_SCENES)]
 
 
 def get_scene(name: str) -> Optional[Dict[str, Any]]:
@@ -312,7 +318,9 @@ def run_due_timers() -> List[Dict[str, str]]:
     if tcoll is None:
         return []
     due: List[Dict[str, str]] = []
-    for t in list(tcoll.find({"fire_at": {"$lte": _now()}})):
+    # سقف لكل دورة: المؤقتات المستحقة بتنمسح وقت ما بتنقرا، فاللي فوق السقف
+    # بيوصل بالدورة الجاي بدل ما ينضاع.
+    for t in list(tcoll.find({"fire_at": {"$lte": _now()}}).limit(MAX_DUE_TIMERS)):
         due.append({"device": t.get("device", ""), "value": t.get("value", "")})
         tcoll.delete_one({"_id": t["_id"]})
     return due

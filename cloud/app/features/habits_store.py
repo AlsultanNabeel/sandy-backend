@@ -10,11 +10,13 @@ Collections:
 
 from __future__ import annotations
 
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
+from app.utils.text_query import contains
 from app.utils.time import USER_TZ
 from app.db import configure, get_db
 import logging
@@ -38,6 +40,11 @@ def init_habits_store(mongo_db) -> None:
         logger.warning(f"[HabitsStore] index skipped: {e}")
 
 
+# سقف لأطول قائمة ممكن نرجّعها. مش حد منتج — حد أمان: بلاه، صف واحد بايظ
+# بيتحوّل لنداء بيسحب كل شي.
+MAX_HABITS = 200
+
+
 def _habits():
     """Tenant-scoped habits collection, or None when no db / no active tenant."""
     return scoped(get_db(), _HABITS)
@@ -53,14 +60,12 @@ def _today() -> str:
 
 
 def _find_habit(name: str) -> Optional[Dict[str, Any]]:
-    nl = str(name or "").strip().lower()
+    """أقرب عادة نشطة لاسم معطى. البحث بيصير بالقاعدة — انظر _contains."""
+    nl = str(name or "").strip()
     coll = _habits()
     if not nl or coll is None:
         return None
-    for d in coll.find({"archived": {"$ne": True}}):
-        if nl in (d.get("name", "") or "").lower():
-            return d
-    return None
+    return coll.find_one({"archived": {"$ne": True}, **contains("name", nl)})
 
 
 def _find_by_id(habit_id: str) -> Optional[Dict[str, Any]]:
@@ -142,14 +147,18 @@ def _streak(habit_id: str) -> int:
 
 
 def list_habits() -> List[Dict[str, Any]]:
-    """كل العادات النشطة مع سلسلة كل وحدة وهل انعملت اليوم."""
+    """العادات النشطة مع سلسلة كل وحدة وهل انعملت اليوم.
+
+    محدودة بـ MAX_HABITS. حد ما بينوصلّه بالاستعمال العادي، بس بيمنع نداء واحد
+    يسحب المجموعة كلها لو صار خلل بالكتابة أو حساب دخل عليه إشي غريب.
+    """
     habits = _habits()
     log = _log()
     if habits is None or log is None:
         return []
     today = _today()
     out = []
-    for h in habits.find({"archived": {"$ne": True}}).sort("created_at", 1):
+    for h in habits.find({"archived": {"$ne": True}}).sort("created_at", 1).limit(MAX_HABITS):
         done_today = log.find_one({"_id": f"{h['_id']}:{today}"}) is not None
         out.append(
             {

@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
+from app.utils.text_query import contains, equals
 from app.utils.user_profiles import current_user_id
 from app.db import configure, get_db
 import logging
@@ -83,18 +84,15 @@ def _aware(dt):
 
 
 def _find_book(title: str) -> Optional[Dict[str, Any]]:
-    tl = str(title or "").strip().lower()
+    tl = str(title or "").strip()
     coll = _books()
     if not tl or coll is None:
         return None
-    # تطابق كامل أول، بعدين احتواء
-    for d in coll.find({}):
-        if (d.get("title", "") or "").strip().lower() == tl:
-            return d
-    for d in coll.find({}):
-        if tl in (d.get("title", "") or "").lower():
-            return d
-    return None
+    # تطابق كامل أول، بعدين احتواء — والتنين بالقاعدة، انظر text_query.
+    exact = coll.find_one(equals("title", tl))
+    if exact is not None:
+        return exact
+    return coll.find_one(contains("title", tl))
 
 
 # ─── الكتب ───────────────────────────────────────────────────────────────────
@@ -464,6 +462,9 @@ def reading_stats(days: int = 30) -> Dict[str, Any]:
     since = _now() - timedelta(days=max(1, days))
     sessions = pages = minutes = 0
     active_dates = set()
+    # بلا .limit() بالقصد. هون منجمع مش منعرض: سقف ع مجموع بيرجّع رقم أصغر
+    # من الحقيقة وبيبيّن صح، وهاد أسوأ من قراءة بطيئة. المدى محدود بالتاريخ
+    # (آخر `days` يوم) وبحساب واحد، فهو مقيّد أصلًا بالإشي اللي بيهم.
     for s in sess.find({"state": "done", "ended_at": {"$gte": since}}):
         sessions += 1
         sp, ep = int(s.get("start_page", 0) or 0), int(s.get("end_page", 0) or 0)
@@ -495,6 +496,7 @@ def _reading_streak() -> int:
 
     since = _now() - timedelta(days=400)
     days_set = set()
+    # بلا سقف: عدّ أيام، وسقف بينقّص العدد بصمت. محدود بأربعمية يوم.
     for s in sess.find(
         {"state": "done", "ended_at": {"$gte": since}}, {"ended_at": 1}
     ):
@@ -548,6 +550,7 @@ def goal_progress() -> Dict[str, Any]:
         {"status": "done", "finished_at": {"$gte": year_start}}
     )
     pages_read = 0
+    # بلا سقف: مجموع صفحات السنة. محدود بالسنة.
     for s in sess.find({"state": "done", "ended_at": {"$gte": year_start}}):
         pages_read += max(0, int(s.get("end_page", 0) or 0) - int(s.get("start_page", 0) or 0))
     return {
