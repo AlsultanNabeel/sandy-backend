@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 /// تعريف لأي ورقة تخصّ كتابًا محدّدًا (لتمريرها لـ `.fullScreenCover(item:)`).
 struct BookSheet: Identifiable {
     enum Kind { case status, meta, note, quote }
@@ -8,7 +7,6 @@ struct BookSheet: Identifiable {
     let kind: Kind
     let book: BookItem
 }
-
 
 /// حالات الكتاب الثلاث — تطابق قيم الباك-إند الحرفية، وترتيب العرض بالرفّ.
 enum BookStatus: String, CaseIterable, Identifiable {
@@ -25,7 +23,6 @@ enum BookStatus: String, CaseIterable, Identifiable {
     /// مفتاح l10n لاسم الحالة (بالمنتقيات).
     var labelKey: String { "books.status.\(rawValue)" }
 }
-
 
 /// سطر كتاب بالرفّ — تطابق عناصر GET /api/life/books items[].
 /// المعرّف بالواجهة هو العنوان (title) لأنه مفتاح كل عمليات التعديل بالباك-إند،
@@ -46,7 +43,6 @@ struct BookItem: Identifiable {
     var id: String { title }
 }
 
-
 /// إحصائيات القراءة لآخر فترة — تطابق كائن stats من GET /api/life/books.
 struct BookStats {
     var sessions: Int = 0
@@ -55,7 +51,6 @@ struct BookStats {
     var pagesPerDay: Int = 0
     var streakDays: Int = 0
 }
-
 
 /// تقدّم هدف القراءة السنوي — تطابق كائن goal من GET /api/life/books.
 struct BookGoal {
@@ -67,7 +62,6 @@ struct BookGoal {
     /// في هدف محدّد لو على الأقل أحد الهدفين موجب.
     var hasTarget: Bool { booksYear > 0 || pagesYear > 0 }
 }
-
 
 /// نتيجة جلب الرفّ كاملة: العناصر + الإحصائيات + الهدف + علامة التجربة.
 struct BooksResult {

@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 /// شيت الربط: كود الوحدة (إلزامي) + اسم اختياري. الأخطاء بصوت ساندي.
 struct NodePairSheet: View {
     @EnvironmentObject var lang: LanguageManager
@@ -87,7 +86,6 @@ struct NodePairSheet: View {
         }
     }
 }
-
 
 /// شيت بسيط لإعادة تسمية وحدة مربوطة.
 struct NodeRenameSheet: View {

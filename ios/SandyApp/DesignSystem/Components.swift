@@ -291,7 +291,11 @@ struct FloatingSandy: View {
 
             // الأفاتار العائم — يطفو لأعلى/أسفل، قابل للنقر
             Button {
-                if message != nil { withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { showBubble.toggle() } }
+                if message != nil {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                        showBubble.toggle()
+                    }
+                }
                 onTap?()
             } label: {
                 // الشخصية = روبوت ساندي الكامل (SandyRobot) — يطفو ويغمز.

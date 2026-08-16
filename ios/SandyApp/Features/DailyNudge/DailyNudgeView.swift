@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 struct DailyNudgeCard: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager

@@ -17,7 +17,9 @@ final class JournalStore: LoadableStore {
                 withAnimation { entries = r.items }
                 demo = r.demo
             } catch {
-                if !error.isCancellation { withAnimation { self.error = LanguageManager.shared.s("life.journal.loadError") } }
+                if !error.isCancellation {
+                    withAnimation { self.error = LanguageManager.shared.s("life.journal.loadError") }
+                }
             }
         }
         loadTask = task

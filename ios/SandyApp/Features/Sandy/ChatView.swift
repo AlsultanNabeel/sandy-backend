@@ -334,7 +334,6 @@ struct ChatView: View {
 
 // MARK: - ستور المحادثة (مصدر الحقيقة + الحفظ التلقائي + السجل)
 
-
 // MARK: - ورقة سجل المحادثات (قائمة + بحث + جديد)
 
 private struct ChatHistorySheet: View {

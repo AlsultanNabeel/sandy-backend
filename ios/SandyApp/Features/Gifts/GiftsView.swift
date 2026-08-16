@@ -352,7 +352,6 @@ private struct GiftSheet: View {
 
 // MARK: - الستور
 
-
 // MARK: - النموذج
 
 /// هدية رقمية محفوظة (`sandy_gifts`). `DigitalGift` تفاديًا لأي تعارض أسماء.

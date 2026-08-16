@@ -248,5 +248,4 @@ struct GoalItem: Identifiable, Equatable {
 
 // MARK: - الستور
 
-
 // MARK: - نداءات الباك-إند (أهداف)

@@ -129,7 +129,8 @@ struct BooksView: View {
                                     .swipeActions(edge: .leading) {
                                         if !store.demo {
                                             Button { open(.status, book) } label: {
-                                                Label(lang.s("books.card.changeStatus"), systemImage: "arrow.left.arrow.right")
+                                                Label(lang.s("books.card.changeStatus"),
+                                                      systemImage: "arrow.left.arrow.right")
                                             }
                                             .tint(Theme.Colors.accent)
                                         }
@@ -387,35 +388,22 @@ struct BooksView: View {
 
 // MARK: - أنواع الورقة لكتاب معيّن
 
-
 // MARK: - حالات الكتاب
-
 
 // MARK: - شيت إضافة كتاب
 
-
 // MARK: - شيت تغيير الحالة
-
 
 // MARK: - شيت تعديل التفاصيل (الميتاداتا)
 
-
 // MARK: - شيت إضافة ملاحظة
-
 
 // MARK: - شيت إضافة اقتباس
 
-
 // MARK: - شيت الهدف السنوي
-
 
 // MARK: - الستور
 
-
 // MARK: - النماذج (تطابق JSON الباك-إند بالضبط)
-
-
-
-
 
 // MARK: - نداءات الباك-إند (نمدّد APIClient هون بلا ما نلمس ملفه)

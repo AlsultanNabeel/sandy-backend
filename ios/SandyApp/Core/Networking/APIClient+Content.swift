@@ -91,7 +91,9 @@ extension APIClient {
     func setSceneActions(name: String, actions: [SceneAction]) async throws {
         try await send("/api/life/scenes/actions", method: "POST",
                        body: SceneActionsBody(name: name,
-                                              actions: actions.map { SceneActionBody(device: $0.device, value: $0.value) }))
+                                              actions: actions.map {
+                                                  SceneActionBody(device: $0.device, value: $0.value)
+                                              }))
     }
 
     // POST /api/life/scenes/delete body {"name"} (للمالك فقط)

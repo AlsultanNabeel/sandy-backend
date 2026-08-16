@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 extension APIClient {
     /// Fields optional so a missing key decodes to nil (matches the old
     /// `as? T ?? default` leniency); a row without an id is dropped.

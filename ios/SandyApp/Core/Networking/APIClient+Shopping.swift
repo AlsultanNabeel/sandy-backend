@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 extension APIClient {
     private struct ShoppingResponse: Decodable {
         let items: [Row]?

@@ -102,7 +102,7 @@ def current_user_id() -> Optional[str]:
     """The authenticated user's stable id for the current request/context.
 
     Backed by the active profile's identity (its ``chat_id`` is the user_id on
-    web, or the chat id on Telegram). Returns None when no profile is active.
+    web). Returns None when no profile is active.
     Stores scope every read/write to this id so each user only sees their data.
     """
     profile = get_active_user_profile()

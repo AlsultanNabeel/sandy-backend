@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 /// شاشة اليوميات — تعرض التدوينات مع شيت إضافة مريح (محرّر متعدّد الأسطر).
 struct JournalView: View {
     @EnvironmentObject var state: AppState
@@ -120,9 +119,7 @@ struct JournalView: View {
             }
         }
     }
-
 }
-
 
 /// شيت خاطرة (إضافة أو تعديل): محرّر متعدّد الأسطر مريح + عدّاد أحرف خفيف.
 struct JournalSheet: View {

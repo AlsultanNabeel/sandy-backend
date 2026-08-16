@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 /// قيم الجهاز الجاهزة للإرسال — الشيت يبنيها ويسلّمها للستور.
 struct DeviceDraft {
     let name: String           // معرّف ثابت (يُولَّد من التسمية عند الإضافة)
@@ -11,7 +10,6 @@ struct DeviceDraft {
     let meta: [String: Any]
 }
 
-
 /// أنواع التحكّم المدعومة — يطابق قيم control_type بالباك-إند. للعرض نترجم
 /// التسمية عبر مفتاح l10n، لكن القيمة المُرسلة (rawValue) تبقى قانونية ثابتة.
 enum ControlType: String, CaseIterable, Identifiable {
@@ -19,7 +17,6 @@ enum ControlType: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var labelKey: String { "control.type.\(rawValue)" }
 }
-
 
 /// طريقة الوصل بالواجهة — وحدة ساندي (مخرج) أو إم كيو تي تي خام.
 enum TransportKind: String, CaseIterable, Identifiable {

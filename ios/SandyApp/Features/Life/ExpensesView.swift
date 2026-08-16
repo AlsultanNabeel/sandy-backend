@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 /// شاشة المصاريف — ملخّص حيّ بمجموع متحرّك + قائمة + شيت إضافة أغنى (مبلغ/تصنيف/ملاحظة).
 struct ExpensesView: View {
     @EnvironmentObject var state: AppState
@@ -187,9 +186,7 @@ struct ExpensesView: View {
         default:          return "creditcard.fill"
         }
     }
-
 }
-
 
 /// شيت مصروف (إضافة أو تعديل): مبلغ (رقمي) + تصنيف (Picker بتصنيفات عربية شائعة)
 /// + ملاحظة. `existing` غير nil ⇒ تعديل (تعبئة مسبقة).

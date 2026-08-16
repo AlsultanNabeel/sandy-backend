@@ -325,7 +325,6 @@ private struct ShoppingBuySheet: View {
 
 // MARK: - الستور
 
-
 // MARK: - النموذج
 
 /// غرض بقائمة التسوّق — يطابق عناصر GET /api/life/shopping:

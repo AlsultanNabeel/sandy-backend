@@ -302,5 +302,4 @@ struct PhotoAlbum: Identifiable {
 
 // MARK: - الستور
 
-
 // MARK: - نداءات الباك-إند (الألبوم)

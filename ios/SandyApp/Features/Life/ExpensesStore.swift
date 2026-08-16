@@ -19,7 +19,9 @@ final class ExpensesStore: LoadableStore {
                 summary = r.summary
                 demo = r.demo
             } catch {
-                if !error.isCancellation { withAnimation { self.error = LanguageManager.shared.s("life.expenses.loadError") } }
+                if !error.isCancellation {
+                    withAnimation { self.error = LanguageManager.shared.s("life.expenses.loadError") }
+                }
             }
         }
         loadTask = task

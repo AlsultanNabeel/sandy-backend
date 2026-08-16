@@ -251,7 +251,9 @@ struct WidgetDashboard: View {
             Image(systemName: spec.icon).font(.system(size: 16, weight: .semibold)).foregroundColor(spec.tint)
             Text(lang.s(spec.titleKey)).font(Theme.Typography.headline).foregroundColor(Theme.Colors.primaryText)
             Spacer(minLength: 0)
-            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.Colors.tertiaryText)
+            Image(systemName: "chevron.left")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Theme.Colors.tertiaryText)
         }
     }
 

@@ -453,3 +453,25 @@ def test_a_hostile_heartbeat_cannot_stuff_the_node_document(db):
         assert len(tele["ip"]) == 32          # truncated, not stored whole
         assert "evil" not in tele             # not on the allowlist
         assert "volume" not in tele           # unparseable, dropped, rest survives
+
+
+def test_the_hardware_document_matches_the_hardware():
+    """The inventory is generated, and this fails the build when it drifts.
+
+    Its hand-written predecessor was wrong in five places within a month — the
+    mood count, the microphone gain, the buzzer's flag — and it was quoted as a
+    source in a readiness report while wrong. A second copy of the truth always
+    drifts; the only fix that holds is to derive it and to notice immediately.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "gen_hardware_doc.py"
+    result = subprocess.run([sys.executable, str(script), "--check"],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, (
+        f"{result.stdout.strip()}\n"
+        "The firmware or the catalogue changed and the document did not. "
+        "Run: python3 scripts/gen_hardware_doc.py"
+    )

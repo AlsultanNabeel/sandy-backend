@@ -1,7 +1,6 @@
 import SwiftUI
 import PhotosUI
 
-
 extension APIClient {
     /// GET /api/photos[?album=&q=] → {"items":[{id,name,caption,tags,created_at}]}
     func photosList(album: String? = nil) async throws -> [AlbumPhoto] {

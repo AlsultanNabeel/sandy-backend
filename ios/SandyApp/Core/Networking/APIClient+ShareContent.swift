@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 extension APIClient {
     private struct ShareSuggestResponse: Decodable {
         let topic: String?

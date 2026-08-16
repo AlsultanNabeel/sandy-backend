@@ -202,9 +202,13 @@ struct AuthView: View {
         let ar = lang.lang == .ar
         let msg = (error as? APIError)?.message ?? error.localizedDescription
         switch msg {
-        case "email_taken":         return ar ? "هالإيميل مستعمل — جرّب تسجّل دخول." : "Email already in use — try signing in."
+        case "email_taken":
+            return ar ? "هالإيميل مستعمل — جرّب تسجّل دخول."
+                      : "Email already in use — try signing in."
         case "invalid_credentials": return ar ? "الإيميل أو كلمة السر غلط." : "Wrong email or password."
-        case "weak_password":       return ar ? "كلمة السر لازم ثمن خانات على الأقل." : "Password must be at least 8 characters."
+        case "weak_password":
+            return ar ? "كلمة السر لازم ثمن خانات على الأقل."
+                      : "Password must be at least 8 characters."
         case "invalid_email":       return ar ? "الإيميل مش صحيح." : "Invalid email."
         case "auth_unavailable":    return ar ? "تعذّر الاتصال — جرّب بعد شوي." : "Service unavailable — try again."
         default:                    return msg

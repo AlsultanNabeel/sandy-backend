@@ -1,8 +1,18 @@
-"""Guest rate limiting: per-resource usage tracking with a Telegram approval flow.
+"""Guest rate limiting: per-resource usage tracking.
 
-Each guest JWT (keyed by JTI) gets a usage doc per resource type. When the
-count hits the limit, the owner gets a Telegram message with inline
-approve/reject buttons. Approve adds more uses; reject blocks further use.
+Each guest JWT (keyed by JTI) gets a usage doc per resource type. When the count
+hits the limit the guest is refused, and the request is marked ``pending`` on
+that doc.
+
+Read the word "pending" carefully: nothing acts on it. The approval channel it
+was written for ran over Telegram and left with it, and the in-app replacement
+is not built. So a guest who hits the limit stays refused, and the pending mark
+is a record that they asked — not a request waiting in anyone's queue.
+
+That is written here rather than left for the next reader to work out, because
+the original docstring described approve/reject buttons that had not existed for
+months, and a docstring describing a feature that is gone is worse than no
+docstring: it is believed.
 """
 
 from __future__ import annotations

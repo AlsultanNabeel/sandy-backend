@@ -1,6 +1,6 @@
 """Cross-session user state: mood, platform, recent topics, shared across channels.
 
-So Telegram, web and voice all know the user's last state and Sandy stays
+So the app and the voice channel both know the user's last state and Sandy stays
 consistent when the user switches channel.
 """
 

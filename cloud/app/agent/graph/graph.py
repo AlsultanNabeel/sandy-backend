@@ -341,7 +341,7 @@ def run_graph(
 
     Args:
         message: رسالة المستخدم
-        user_id: معرف المستخدم في Telegram
+        user_id: معرف المستخدم
         chat_id: معرف المحادثة
         pending_state: pending action نشط (اختياري)
         source: مصدر الرسالة (user / proactive / hardware)

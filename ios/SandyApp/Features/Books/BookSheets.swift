@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 /// ورقة إضافة كتاب جديد: العنوان (إلزامي) + الحالة + تفاصيل اختيارية
 /// (مؤلّف/تصنيف/صفحات). تُرسل عبر closure غير متزامن يرجّع نجاح/فشل ليتقرّر الإغلاق.
 struct BookAddSheet: View {
@@ -80,7 +79,6 @@ struct BookAddSheet: View {
     }
 }
 
-
 /// ورقة تغيير حالة كتاب — منتقي بين الحالات الثلاث.
 struct BookStatusSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -128,7 +126,6 @@ struct BookStatusSheet: View {
         }
     }
 }
-
 
 /// ورقة تعديل ميتاداتا الكتاب: مؤلّف/تصنيف/عدد صفحات/رابط غلاف. كل حقل اختياري —
 /// نرسل فقط الحقول اللي تغيّرت عن قيمتها الأصلية (تطابق additive meta بالباك-إند).
@@ -211,7 +208,6 @@ struct BookMetaSheet: View {
     }
 }
 
-
 /// ورقة إضافة ملاحظة حرة على كتاب — محرّر متعدّد الأسطر.
 struct BookNoteSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -255,7 +251,6 @@ struct BookNoteSheet: View {
         }
     }
 }
-
 
 /// ورقة إضافة اقتباس من كتاب — نص الاقتباس + رقم صفحة اختياري.
 struct BookQuoteSheet: View {
@@ -311,7 +306,6 @@ struct BookQuoteSheet: View {
         }
     }
 }
-
 
 /// ورقة هدف القراءة السنوي — عدد كتب (إلزامي للمعنى) + عدد صفحات اختياري.
 struct BookGoalSheet: View {

@@ -19,7 +19,8 @@ struct OnboardingView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(lang.s("onboarding.interestsLabel"))
-                TextField(lang.s("onboarding.interestsPlaceholder"), text: $interestsText).textFieldStyle(.roundedBorder)
+                TextField(lang.s("onboarding.interestsPlaceholder"), text: $interestsText)
+                    .textFieldStyle(.roundedBorder)
             }
 
             Button(action: save) {

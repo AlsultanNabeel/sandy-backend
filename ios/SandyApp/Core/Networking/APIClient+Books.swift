@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 extension APIClient {
     /// All fields optional so a missing key (e.g. the guest payload omits `goal`)
     /// decodes to nil and falls back to the same defaults the old dictionary reads used.

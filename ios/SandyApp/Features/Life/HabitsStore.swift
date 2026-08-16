@@ -17,7 +17,9 @@ final class HabitsStore: LoadableStore {
                 withAnimation { habits = r.items }
                 demo = r.demo
             } catch {
-                if !error.isCancellation { withAnimation { self.error = LanguageManager.shared.s("life.habits.loadError") } }
+                if !error.isCancellation {
+                    withAnimation { self.error = LanguageManager.shared.s("life.habits.loadError") }
+                }
             }
         }
         loadTask = task

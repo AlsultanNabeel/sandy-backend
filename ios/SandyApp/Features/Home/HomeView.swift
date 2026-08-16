@@ -387,7 +387,8 @@ struct HomeView: View {
             return String(format: lang.s("home.proactive.today"), "\(n)", pluralTasks(n))
         }
         if !store.snapshot.nextReminderText.isEmpty {
-            return String(format: lang.s("home.proactive.reminder"), store.snapshot.nextReminderText, reminderWhenSuffix)
+            return String(format: lang.s("home.proactive.reminder"),
+                          store.snapshot.nextReminderText, reminderWhenSuffix)
         }
         if isWeekSpendingHigh {
             return String(format: lang.s("home.proactive.spendingHigh"), amount(store.snapshot.weekExpenseTotal))
@@ -507,16 +508,11 @@ struct HomeView: View {
 
 // MARK: - فعل سياقي صغير (نظرة ساندي)
 
-
 // MARK: - بطاقة لمحة (مربّعة، قابلة للنقر)
-
 
 // MARK: - بطاقة لمحة عريضة (سطر تذكير)
 
-
 // MARK: - دخول متدرّج (حركة حيوية)
-
-
 
 // ─────────────────────────────────────────────────────────────────────────
 // MARK: - الستور (مصدر الحقيقة للرئيسية)

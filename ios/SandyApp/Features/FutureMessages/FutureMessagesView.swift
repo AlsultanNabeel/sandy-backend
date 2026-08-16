@@ -260,5 +260,4 @@ struct FutureMessage: Identifiable {
 
 // MARK: - الستور
 
-
 // MARK: - نداءات الباك-إند (/api/future-messages)

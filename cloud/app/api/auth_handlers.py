@@ -5,10 +5,13 @@ with an in-process sliding window as the fallback so brute-force protection
 survives a database outage. ``JWT_SECRET`` has no default — an empty secret would
 let anyone forge a token, so this refuses to issue rather than degrade.
 
-There is no visitor-approval flow any more. It used to run over Telegram, and
-when that channel was removed the approve/deny functions were left behind with
-nothing calling them: a visitor could request access that nobody could ever
-grant. People sign in with email or a social account instead.
+There is no visitor-approval flow, and the code for one is gone rather than
+dormant. It used to run over Telegram; when that channel was removed, the store
+and status halves survived and the approve/deny halves were left with nothing
+calling them. What that left behind was worse than dead code — a visitor could
+file a request and poll a status endpoint forever, because no path existed that
+could ever change the answer. A feature that cannot succeed should not be
+reachable. People sign in with email or a social account instead.
 """
 from __future__ import annotations
 
@@ -223,86 +226,3 @@ def check_rate_limit(ip: str, scope: str = "login") -> Tuple[bool, int]:
         return _memory_rate_check(ip, scope)
 
 
-def _areq_key(request_id: str) -> str:
-    return f"areq:{request_id}"
-
-
-def store_access_request(name: str, reason: str = "") -> str:
-    """Store a pending web access request, return its request_id."""
-    request_id = uuid.uuid4().hex
-    coll = _auth_coll()
-    if coll is not None:
-        try:
-            from datetime import datetime, timezone, timedelta
-            coll.update_one(
-                {"_id": _areq_key(request_id)},
-                {"$set": {
-                    "name": name, "reason": reason, "status": "pending", "token": None,
-                    "expire_at": datetime.now(timezone.utc) + timedelta(seconds=3600),
-                }},
-                upsert=True,
-            )
-        except Exception as exc:
-            logger.warning("[auth] store_access_request failed: %s", exc)
-    return request_id
-
-
-def get_access_request(request_id: str) -> Optional[dict]:
-    coll = _auth_coll()
-    if coll is None:
-        return None
-    try:
-        return coll.find_one(
-            {"_id": _areq_key(request_id)}, {"_id": 0, "expire_at": 0}
-        )
-    except Exception:
-        return None
-
-
-def approve_access_request(request_id: str) -> Optional[str]:
-    """Approve the request, mint a guest token, and return it."""
-    coll = _auth_coll()
-    if coll is None:
-        return None
-    key = _areq_key(request_id)
-    try:
-        if not coll.find_one({"_id": key}, {"_id": 1}):
-            return None
-        try:
-            token = make_token("guest")
-        except RuntimeError:
-            return None
-        from datetime import datetime, timezone, timedelta
-        coll.update_one(
-            {"_id": key},
-            {"$set": {
-                "status": "approved", "token": token,
-                "expire_at": datetime.now(timezone.utc) + timedelta(seconds=3600),
-            }},
-        )
-        return token
-    except Exception as exc:
-        logger.warning("[auth] approve_access_request failed: %s", exc)
-        return None
-
-
-def deny_access_request(request_id: str) -> bool:
-    coll = _auth_coll()
-    if coll is None:
-        return False
-    key = _areq_key(request_id)
-    try:
-        if not coll.find_one({"_id": key}, {"_id": 1}):
-            return False
-        from datetime import datetime, timezone, timedelta
-        coll.update_one(
-            {"_id": key},
-            {"$set": {
-                "status": "denied",
-                "expire_at": datetime.now(timezone.utc) + timedelta(seconds=300),
-            }},
-        )
-        return True
-    except Exception as exc:
-        logger.warning("[auth] deny_access_request failed: %s", exc)
-        return False

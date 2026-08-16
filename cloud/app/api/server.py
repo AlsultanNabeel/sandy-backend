@@ -43,10 +43,8 @@ def create_app(
     from app.api.auth_handlers import (
         check_owner_password,
         check_rate_limit,
-        get_access_request,
         make_token,
         require_auth,
-        store_access_request,
     )
 
     app = Flask(__name__)
@@ -206,30 +204,6 @@ def create_app(
         except RuntimeError:
             return jsonify({"error": "auth_not_configured"}), 503
         return jsonify({"token": token, "role": "owner", "user_id": owner_uid}), 200
-
-    @app.route("/api/access/request", methods=["POST"])
-    def web_access_request():
-        # حدّ معدّل بالأيبي: يمنع إغراق المالك بطلبات وصول وهمية وملء sandy_auth.
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
-        allowed, _ = check_rate_limit(ip, scope="access")
-        if not allowed:
-            return jsonify({"error": "too_many_attempts"}), 429
-        body = request.get_json(silent=True) or {}
-        name = (body.get("name") or "زاير").strip()[:50]
-        reason = (body.get("reason") or "").strip()[:200]
-        request_id = store_access_request(name, reason)
-        return jsonify({"request_id": request_id}), 200
-
-    @app.route("/api/access/status/<request_id>", methods=["GET"])
-    def web_access_status(request_id):
-        data = get_access_request(request_id)
-        if not data:
-            return jsonify({"status": "expired"}), 404
-        resp = {"status": data["status"]}
-        if data["status"] == "approved":
-            resp["token"] = data["token"]
-            resp["role"] = "guest"
-        return jsonify(resp), 200
 
     def _meter_or_error(role, user_id):
         """Record one authenticated request against the user's tier quota.

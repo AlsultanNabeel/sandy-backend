@@ -1,7 +1,7 @@
 """response_node: يبني الرد النهائي.
 
 آخر node بالـ graph. يجمع execution_result.reply مع persona_snippet
-و response_template، ويطلّع final_response جاهز للإرسال عبر Telegram.
+و response_template، ويطلّع final_response جاهز للإرسال للتطبيق.
 """
 
 from __future__ import annotations

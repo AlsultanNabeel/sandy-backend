@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 /// بطاقة لمحة صغيرة: أيقونة ملوّنة + رقم بارز + وصف + تلميح اختياري.
 /// النقر يبدّل للتبويب المناسب عبر closure.
 struct GlanceCard: View {
@@ -47,7 +46,6 @@ struct GlanceCard: View {
     }
 }
 
-
 /// بطاقة عريضة لأقرب تذكير: أيقونة + عنوان + وصف، قابلة للنقر.
 struct GlanceWideCard: View {
     let icon: String
@@ -89,7 +87,6 @@ struct GlanceWideCard: View {
     }
 }
 
-
 /// مُعدِّل دخول لطيف: البطاقة تنزل قليلًا + تتلاشى للداخل، مع تأخير متدرّج
 /// حسب ترتيبها — يعطي إحساس إن الشاشة "تتفتّح" حيّة. `key` يعيد التشغيل عند
 /// كل تحميل/تحديث.
@@ -120,14 +117,12 @@ private struct RevealModifier: ViewModifier {
     }
 }
 
-
 extension View {
     /// يطبّق دخولًا متدرّجًا حسب الترتيب, يُعاد تشغيله عند تغيّر `key`.
     func reveal(order: Int, key: Int) -> some View {
         modifier(RevealModifier(order: order, key: key))
     }
 }
-
 
 /// ورقة بسيطة لإعادة ترتيب عناصر الرئيسية بالجر: قائمة بوضع تحرير دائم وأيدي جر.
 /// كل نقلة تُحفظ فورًا، والرئيسية تعكسها مباشرة لأنها تقرأ نفس `store.order`.

@@ -70,15 +70,7 @@ def get_state() -> dict:
     return {f.lower(): is_enabled(f) for f in KNOWN_FLAGS}
 
 
-# Convenience accessors — أسرع وأوضح في الكود
-def use_prompt_caching() -> bool:
-    # default False — فعّله عبر SANDY_USE_PROMPT_CACHING=true على Heroku
-    return is_enabled("USE_PROMPT_CACHING", default=False)
-
-
-def use_dspy_prompts() -> bool:
-    return is_enabled("USE_DSPY_PROMPTS")
-
-
-def use_feedback_buttons() -> bool:
-    return is_enabled("USE_FEEDBACK_BUTTONS")
+# ما في مُيسِّرات جاهزة هون. كان فيها تلاتة — تخزين موجّهات أنثروبيك، ودي إس
+# باي، وأزرار تقييم بتيليجرام — لأنظمة المستودع ما بيحتويها، وولا وحدة منهن
+# انندهت من أي مكان. دالة اسمها `use_prompt_caching()` بتقول لأي حدا بيقرا إنه
+# في تخزين موجّهات هون؛ ما كان في. ضيف مُيسِّر لما تضيف راية فعلية.

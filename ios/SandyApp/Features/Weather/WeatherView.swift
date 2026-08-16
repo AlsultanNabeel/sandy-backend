@@ -48,9 +48,7 @@ extension WeatherSnapshot {
 
 // MARK: - APIClient (نداء الطقس)
 
-
 // MARK: - الستور
-
 
 // MARK: - الشاشة الكاملة
 

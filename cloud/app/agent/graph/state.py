@@ -79,8 +79,8 @@ def create_initial_state(
 
     Args:
         message: نص رسالة المستخدم
-        user_id: معرف المستخدم في Telegram
-        chat_id: معرف المحادثة في Telegram
+        user_id: معرف المستخدم
+        chat_id: معرف المحادثة
         source: مصدر الرسالة (user / proactive / hardware)
         pending_state: حالة pending موجودة مسبقاً (اختياري)
     """
