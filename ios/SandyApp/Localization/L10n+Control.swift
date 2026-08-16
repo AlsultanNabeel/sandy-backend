@@ -119,6 +119,9 @@ enum L10nControl {
 
             // common
             "save":     .text("حفظ"),
+            "text.send": .text("إرسال"),
+            "text.dismiss": .text("شيله عن الشاشة"),
+            "unknownType": .text("نوع تحكّم (%@) ما بيعرفه هاد الإصدار من التطبيق. حدّثه."),
         ],
         en: [
             // ── Entry point + screen ──
@@ -225,6 +228,9 @@ enum L10nControl {
 
             // common
             "save":     .text("Save"),
+            "text.send": .text("Send"),
+            "text.dismiss": .text("Take it off the screen"),
+            "unknownType": .text("A control type (%@) this version of the app does not know. Update it."),
         ]
     )
 }

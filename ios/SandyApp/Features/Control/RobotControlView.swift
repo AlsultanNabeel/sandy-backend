@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// صفحة الروبوت — جسم ساندي، منفصل عن أجهزة البيت.
@@ -17,6 +18,10 @@ struct RobotControlView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: DevicesStore
+
+    @State private var pickedImage: PhotosPickerItem?
+    @State private var sendingImage = false
+    @State private var imageNotice = ""
 
     /// أسماء الأجهزة اللي بيزرعها الخادم (node_provision.PART_CATALOGUE).
     /// مكتوبة هون مرّة وحدة بدل ما تتناثر نصوص بكل الملف.
@@ -53,9 +58,7 @@ struct RobotControlView: View {
                             hint: "robot.control.expression.hint",
                             parts: [Part.face, Part.head, Part.gesture])
 
-                    section("robot.control.screen",
-                            hint: "robot.control.screen.hint",
-                            parts: [Part.screen])
+                    screenSection
 
                     section("robot.control.light",
                             hint: "robot.control.light.hint",
@@ -82,6 +85,67 @@ struct RobotControlView: View {
         }
         .navigationTitle(lang.s("robot.control.title"))
         .refreshable { await store.load(api: state.api) }
+    }
+
+    // ── الشاشة: نص + صورة ────────────────────────────────────────────────────
+    //
+    // الصورة مش بطاقة جهاز لأنها مش أمر: بتختار من ألبومك، وبيروح رفع، والخادم
+    // بيصغّرها ويحوّلها لبكسلات الشاشة قبل ما توصل اللوح. فحطّيتها جنب حقل
+    // النص — نفس القسم، لأنه التنين بيروحوا ع نفس المكان: وشها.
+    @ViewBuilder
+    private var screenSection: some View {
+        if let screen = store.robotDevices.first(where: { $0.name == Part.screen }) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                SectionHeader(title: lang.s("robot.control.screen"))
+                Text(lang.s("robot.control.screen.hint"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+
+                DeviceCard(device: screen, store: store, onEdit: {})
+
+                PhotosPicker(selection: $pickedImage, matching: .images) {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Image(systemName: sendingImage
+                              ? "arrow.triangle.2.circlepath" : "photo.on.rectangle")
+                            .font(.system(size: Theme.Icon.md, weight: .semibold))
+                        Text(lang.s(sendingImage ? "robot.control.image.sending"
+                                                 : "robot.control.image.pick"))
+                            .font(Theme.Typography.button)
+                    }
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.md)
+                    .background(Theme.Colors.surface)
+                    .cornerRadius(Theme.Radius.card)
+                }
+                .disabled(store.demo || sendingImage)
+
+                if !imageNotice.isEmpty {
+                    SandyNotice(imageNotice, kind: .gentleWarning)
+                }
+            }
+            .onChange(of: pickedImage) { _, item in
+                Task { await upload(item, to: screen) }
+            }
+        }
+    }
+
+    private func upload(_ item: PhotosPickerItem?, to device: DeviceItem) async {
+        guard let item else { return }
+        sendingImage = true
+        imageNotice = ""
+        defer { sendingImage = false; pickedImage = nil }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                imageNotice = lang.s("robot.control.image.unreadable")
+                return
+            }
+            try await state.api.sendDeviceImage(name: device.name, jpegData: data)
+        } catch {
+            // الصورة بتمشي ع عشرين رسالة، فالفشل بنصّها وارد. نقولها بدل ما
+            // نسكت — «ما ظهرت» و«انقطعت بالنص» مشكلتان مختلفتان.
+            imageNotice = lang.s("robot.control.image.failed")
+        }
     }
 
     // ── أقسام ────────────────────────────────────────────────────────────────

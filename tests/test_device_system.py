@@ -718,3 +718,57 @@ def test_the_light_offers_effects_and_still_says_when_audio_is_leaving(db):
         for value in ("listening", "rainbow", "candle", "police"):
             assert device_store.command_payload(led, "set", value)["ok"] is True, value
         assert device_store.command_payload(led, "set", "disco")["ok"] is False
+
+
+def test_the_app_can_draw_every_control_type_the_backend_can_create(db):
+    """A control type the app has never heard of used to render as a switch.
+
+    That is exactly what happened with the display: the backend created it as
+    `text`, DeviceCard's `default:` branch drew an on/off toggle, and every tap
+    sprang back because the board does not understand "on". A switch that lies
+    is worse than a line admitting the app is out of date — so the fallback now
+    says so, and this makes sure the list of types the app draws keeps up with
+    the list the backend can produce.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    card = (root / "ios/SandyApp/Features/Control/DeviceCard.swift").read_text(encoding="utf-8")
+
+    block = card[card.index("switch device.controlType"):]
+    block = block[: block.index("}")]
+    drawn = set(re.findall(r'case\s+"(\w+)":', block))
+    assert len(drawn) >= 6, "the DeviceCard switch pattern stopped matching"
+
+    from app.features.device_store import CONTROL_TYPES
+    missing = set(CONTROL_TYPES) - drawn
+    assert not missing, (
+        f"the backend can create {sorted(missing)} and the app has no widget for "
+        "them — they fall through to the default branch"
+    )
+
+
+def test_the_display_device_is_reachable_end_to_end(db):
+    """From what the app sends to what leaves for the board.
+
+    Three pieces have to agree and none of them compile together: the catalogue
+    calls it `text`, device_store turns free text into a `text:` payload, and the
+    firmware parses that prefix. This walks the whole path once.
+    """
+    from app.features.screen_sender import TEXT_MAX_BYTES
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        node_store.ingest_status("sandybrain01", True, [],
+                                 [{"id": "screen", "kind": "pwm"}], "0.9.0")
+        dev = device_store.get_device("sandy_screen")
+        assert dev["control_type"] == "text"
+        assert dev["meta"]["max_bytes"] == TEXT_MAX_BYTES
+
+        payload = device_store.command_payload(dev, "set", "hello")["payload"]
+        assert payload.startswith("text:")
+
+        topic = device_store.device_topic(dev)
+        assert topic == "sandy/node/sandybrain01/screen"
+        assert device_store.tenant_owns_topic(topic) is True

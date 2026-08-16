@@ -169,6 +169,17 @@ extension APIClient {
         try await send("/api/devices/\(enc(name))/control", method: "POST", body: body)
     }
 
+    // POST /api/devices/<name>/image {image_base64} → {ok,chunks,bytes}
+    //
+    // منفصل عن /control لأنه الصورة مش أمر: التحكّم بياخد نص قصير وبينشره،
+    // وهاد بياخد صورة، بيصغّرها ع ٢٤٠×٢٤٠، بيحوّلها لصيغة بكسلات الشاشة
+    // بالضبط، وبينشرها ع عشرين رسالة. كل هاد بيصير ع الخادم — اللوح ما بيفك
+    // ولا صيغة، لأن فاكّ الصور بياكل رام داخلية هي اللي بتخلّيها تحكي.
+    func sendDeviceImage(name: String, jpegData: Data) async throws {
+        try await send("/api/devices/\(enc(name))/image", method: "POST",
+                       body: ["image_base64": jpegData.base64EncodedString()])
+    }
+
     // POST /api/devices/<name>/ir-learn {button,code} → {ok}
     // التقاط الكود الحقيقي يجي مع تحديث الوحدة لاحقًا — هلّق نحفظ اسم الزر (وكود إن توفّر).
     func irLearn(name: String, button: String, code: String = "") async throws {

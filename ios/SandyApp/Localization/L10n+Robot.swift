@@ -60,6 +60,10 @@ enum L10nRobot {
             "control.other":            .text("أجزاء تانية"),
             "control.empty.title":      .text("ما وصلتني أجزاء بعد"),
             "control.empty.hint":       .text("الأجزاء بتظهر لحالها أول ما اللوح يبعت نبضته — كل خمس ثواني. لو ضلّت فاضية، اللوح مش متّصل."),
+            "control.image.pick": .text("اختر صورة تظهر ع وشها"),
+            "control.image.sending": .text("عم تنبعت…"),
+            "control.image.failed": .text("الصورة ما وصلت كاملة. جرّب كمان مرّة — بتنبعت ع عشرين قطعة، وقطعة ضايعة بتلغيها كلها."),
+            "control.image.unreadable": .text("ما قدرت أقرا الصورة."),
         ],
         en: [
             "apply":          .text("Run"),
@@ -111,6 +115,10 @@ enum L10nRobot {
             "control.other":            .text("Other parts"),
             "control.empty.title":      .text("No parts have arrived yet"),
             "control.empty.hint":       .text("Parts appear on their own with the board's first heartbeat — every five seconds. If this stays empty, the board is not connected."),
+            "control.image.pick": .text("Pick a picture for her face"),
+            "control.image.sending": .text("Sending…"),
+            "control.image.failed": .text("The picture did not arrive whole. Try again — it travels in twenty pieces, and one lost piece cancels all of it."),
+            "control.image.unreadable": .text("I couldn't read that image."),
         ]
     )
 }

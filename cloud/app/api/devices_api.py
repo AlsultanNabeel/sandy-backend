@@ -124,6 +124,56 @@ def register_devices_api(app, mongo_db=None):
             set_state(name, payload)
         return jsonify({"ok": True, "sent": sent, "payload": payload}), 200
 
+    @app.route("/api/devices/<name>/image", methods=["POST"])
+    @require_tenant
+    def api_devices_image(claims, name):
+        """Send a picture to a display device.
+
+        Separate from /control because a picture is not a command. Control takes
+        a short string and publishes it; this takes an upload, resizes it,
+        converts it to the panel's exact pixel format and publishes it across
+        twenty MQTT messages. Forcing that through the same endpoint would mean
+        one route that sometimes accepts JSON and sometimes a file.
+
+        Base64 in the JSON body rather than multipart: the app already speaks
+        JSON to every other endpoint, and a photo at this size is small enough
+        that the 33% overhead costs less than a second code path would.
+        """
+        import base64 as _b64
+
+        from app.features.device_store import get_device
+        from app.features.screen_sender import send_image
+
+        device = get_device(name)
+        if device is None:
+            return _bad("not_found", code=404)
+
+        transport = device.get("transport") or {}
+        if str(transport.get("kind", "")) != "node":
+            return _bad("not_a_node_device")
+        node_id = str(transport.get("node_id", "")).strip()
+        if not node_id:
+            return _bad("bad_transport")
+
+        body = request.get_json(silent=True) or {}
+        raw_b64 = body.get("image_base64") or ""
+        if not raw_b64:
+            return _bad("no_image")
+        # 8 MB of base64 before decoding. A phone photo is well under this; the
+        # cap is here so a malformed or hostile body cannot make the server
+        # allocate without bound before it has looked at anything.
+        if len(raw_b64) > 8 * 1024 * 1024:
+            return _bad("too_large")
+        try:
+            image_bytes = _b64.b64decode(raw_b64, validate=True)
+        except Exception:  # noqa: BLE001 — a bad upload is input, not a fault
+            return _bad("bad_base64")
+
+        res = send_image(node_id, image_bytes)
+        if not res.get("ok"):
+            return _bad(res.get("error", "send_failed"), res)
+        return jsonify(res), 200
+
     @app.route("/api/devices/<name>/ir-learn", methods=["POST"])
     @require_tenant
     def api_devices_ir_learn(claims, name):

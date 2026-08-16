@@ -301,6 +301,16 @@ struct DeviceItem: Identifiable {
     }
     /// أسماء أزرار الريموت مرتّبة (للعرض الثابت).
     var irButtonNames: [String] { irButtons.keys.sorted() }
+
+    // ── نوع text (الشاشة) ──
+    /// النص الباهت جوا الحقل قبل ما تكتب.
+    var textPlaceholder: String { (meta["placeholder"] as? String) ?? "" }
+    /// الحدّ الأقصى **بالبايتات**، مش بالحروف.
+    ///
+    /// العربي متعدّد البايتات بيونيكود: مية حرف عربي = مئتين بايت. ومخزن اللوح
+    /// ٢٥٦ بايت. عدّ الحروف بيخلي الحقل يوهم إنه في مساحة، واللوح بيقصّ الجملة
+    /// بنص حرف — فالعدّ بالبايتات هو الوحيد اللي بيقول الصح.
+    var textMaxBytes: Int { (meta["max_bytes"] as? NSNumber)?.intValue ?? 255 }
 }
 
 /// وحدة ساندي مربوطة — تطابق عناصر GET /api/nodes.

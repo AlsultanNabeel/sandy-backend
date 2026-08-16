@@ -7,6 +7,7 @@ struct DeviceCard: View {
     @EnvironmentObject var lang: LanguageManager
     let device: DeviceItem
     @ObservedObject var store: DevicesStore
+    @State private var draftText = ""
     let onEdit: () -> Void
 
     /// قيمة شريط الإضاءة المحلّية (نحرّكها بسلاسة قبل ما نرسل عند الإفلات).
@@ -74,7 +75,8 @@ struct DeviceCard: View {
         case "media":   mediaWidget
         case "enum":    enumWidget
         case "ir":      irWidget
-        default:        switchWidget
+        case "text":    textWidget
+        default:        unknownWidget
         }
     }
 
@@ -189,6 +191,72 @@ struct DeviceCard: View {
                 .disabled(store.demo)
             }
         }
+    }
+
+    // text — حقل حرّ + إرسال + إخفاء. للشاشة: اللي بتكتبه بيظهر ع وشها.
+    //
+    // مش قائمة خيارات لأنه اللي بينكتب ع وشها بتقرّره ساعتها إنت. وزرّ «شيله»
+    // موجود بيّن جنبه لأنه الرسالة بتضل لحد ما تشيلها — وهاد مقصود: ملاحظة
+    // بتختفي لحالها مش ملاحظة.
+    @ViewBuilder
+    private var textWidget: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.sm) {
+                TextField(device.textPlaceholder, text: $draftText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...3)
+                    .disabled(store.demo)
+                    .submitLabel(.send)
+                    .onSubmit { sendText() }
+
+                Button { sendText() } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: Theme.Icon.md, weight: .semibold))
+                        .foregroundColor(draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                         ? Theme.Colors.tertiaryText : Theme.Colors.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(store.demo || draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel(lang.s("control.text.send"))
+            }
+
+            HStack(spacing: Theme.Spacing.md) {
+                Button(lang.s("control.text.dismiss")) {
+                    draftText = ""
+                    store.control(api: state.api, device: device,
+                                  action: "set", value: "dismiss")
+                }
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.secondaryText)
+                .disabled(store.demo)
+
+                Spacer(minLength: 0)
+
+                // العدّ بالبايتات مش بالحروف: العربي متعدّد البايتات، والحدّ ع
+                // اللوح ٢٥٥ بايت. عدّ الحروف بيوهم إنه في مساحة وما فيش.
+                Text("\(draftText.utf8.count)/\(device.textMaxBytes)")
+                    .font(Theme.Typography.caption.monospacedDigit())
+                    .foregroundColor(draftText.utf8.count > device.textMaxBytes
+                                     ? Theme.Colors.danger : Theme.Colors.tertiaryText)
+            }
+        }
+    }
+
+    private func sendText() {
+        let text = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.utf8.count <= device.textMaxBytes else { return }
+        store.control(api: state.api, device: device, action: "set", value: text)
+    }
+
+    // نوع ما بيعرفه هاد الإصدار من التطبيق.
+    //
+    // كان `default: switchWidget` — يعني أي نوع جديد بيرسم مفتاح تشغيل/إطفاء.
+    // وهاد بالضبط اللي صار مع الشاشة: ظهرت كمفتاح، وكل ضغطة بترجع لحالها لأن
+    // اللوح ما بيفهم «on». مفتاح بيكذب أسوأ من سطر بيقول ما بعرف.
+    private var unknownWidget: some View {
+        Text(String(format: lang.s("control.unknownType"), device.controlType))
+            .font(Theme.Typography.caption)
+            .foregroundColor(Theme.Colors.secondaryText)
     }
 
     // ir — أزرار من meta.buttons (send + اسم الزر) + تعلّم زر جديد عبر الوحدة.
