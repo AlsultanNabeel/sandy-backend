@@ -167,3 +167,52 @@ def test_every_key_the_app_asks_for_actually_exists():
         "the raw key on screen: " +
         ", ".join(f"{k} ({v})" for k, v in sorted(missing.items()))
     )
+
+
+def test_no_translation_key_leaked_into_a_system_icon_name():
+    """Renaming keys with find-and-replace ate an SF Symbol once. Not again.
+
+    Namespacing `camera.*` to `robot.control.camera.*` also rewrote
+    `systemImage: "camera.fill"` into `"robot.control.camera.fill"` — a symbol
+    that does not exist, so the button renders with no icon and nothing anywhere
+    reports it. Same class of accident as the Arabic strings a substitution
+    mangled earlier here: a pattern right for one kind of string, wrong for the
+    one beside it.
+
+    Matching on namespace prefixes alone is too blunt — `books.vertical.fill` is
+    a real SF Symbol and a first version of this flagged it. So the comparison
+    is against the actual translation keys: an icon whose name starts with a
+    real key is a key that leaked, and `books.vertical` is not one.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "ios" / "SandyApp"
+
+    keys = set()
+    for path in (root / "Localization").glob("L10n+*.swift"):
+        src = path.read_text(encoding="utf-8")
+        ns = re.search(r'static let ns = "(\w+)"', src)
+        if not ns:
+            continue
+        for key in re.findall(r'"([\w.]+)":\s*\.(?:text|items|list)\(', src):
+            keys.add(f"{ns.group(1)}.{key}")
+
+    assert len(keys) > 100, "the key pattern stopped matching — this checks nothing"
+
+    offenders = []
+    for path in root.rglob("*.swift"):
+        if "Localization" in path.parts:
+            continue
+        src = path.read_text(encoding="utf-8")
+        for match in re.finditer(r'(?:systemImage|systemName):\s*"([^"]+)"', src):
+            name = match.group(1)
+            hit = next((k for k in keys if name == k or name.startswith(k + ".")), None)
+            if hit:
+                line = src[: match.start()].count("\n") + 1
+                offenders.append(f"{path.name}:{line} -> {name} (key '{hit}')")
+
+    assert not offenders, (
+        "a translation key ended up in an icon name — the symbol will not "
+        "resolve and nothing will report it: " + ", ".join(offenders)
+    )

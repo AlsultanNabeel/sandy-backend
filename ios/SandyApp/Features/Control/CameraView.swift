@@ -74,7 +74,7 @@ struct CameraView: View {
                 }
             }
 
-            SandyButton(title: lang.s(taking ? "camera.taking" : "camera.take"),
+            SandyButton(title: lang.s(taking ? "robot.control.camera.taking" : "robot.control.camera.take"),
                         systemImage: "camera.fill",
                         fillWidth: true) {
                 Task { await take() }
