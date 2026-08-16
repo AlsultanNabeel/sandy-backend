@@ -1,6 +1,7 @@
 // Runtime mic/speaker control. Contract and reasoning: include/sandy_audio_ctl.h
 
 #include "sandy_audio_ctl.h"
+#include "sandy_nvs.h"
 #include "sandy_voice.h"
 
 #include <math.h>
@@ -39,13 +40,12 @@ static int clamp_gain(int v)
     return v;
 }
 
+// Queued, not written. A slider dragged across its range used to be one flash
+// commit per pixel — dozens of erases in a second, each stopping both CPUs.
+// Now it is one write, of wherever the finger stopped. See sandy_nvs.h.
 static void save_i32(const char *key, int32_t v)
 {
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_i32(h, key, v);
-    nvs_commit(h);
-    nvs_close(h);
+    nvs_save_deferred(NVS_NS, key, NVS_VAL_I32, v);
 }
 
 static int32_t load_i32(const char *key, int32_t fallback)

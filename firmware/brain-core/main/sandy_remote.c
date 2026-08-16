@@ -15,6 +15,7 @@
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
 #include "sandy_wifi.h"
+#include "sandy_nvs.h"
 #include "config.h"
 #include "lwip/sockets.h"
 
@@ -158,6 +159,11 @@ static esp_err_t update_post(httpd_req_t *req) {
         return ESP_FAIL;
     }
     httpd_resp_sendstr(req, "OK — rebooting into new firmware\n");
+    // Settings wait a few seconds of stillness before they touch flash (see
+    // sandy_nvs.h). A deliberate restart is the one moment we know that wait
+    // will never finish, so anything queued goes out now — otherwise flashing
+    // silently discards a volume the owner set a moment earlier.
+    nvs_flush_deferred();
     ESP_LOGI(TAG, "OTA done — rebooting");
     vTaskDelay(pdMS_TO_TICKS(400));
     esp_restart();

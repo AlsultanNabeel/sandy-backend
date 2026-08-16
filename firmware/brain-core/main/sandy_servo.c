@@ -67,7 +67,10 @@ void servo_set_angle(uint8_t angle) {
     }
 
     s_angle = angle;
-    nvs_save_servo_angle(angle);
+    // Queued, not written. The neck moves on every wake word and on every step
+    // of a gesture; writing flash on each one is what has been resetting the
+    // board (see sandy_nvs.h). What lands is where the head came to rest.
+    nvs_save_deferred("sandy", "servo_pos", NVS_VAL_U8, angle);
     ESP_LOGI(TAG, "angle=%d", angle);
 }
 
