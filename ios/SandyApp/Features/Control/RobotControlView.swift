@@ -18,7 +18,6 @@ struct RobotControlView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: DevicesStore
-    @StateObject private var board = DashboardStore(id: "robot", catalog: [])
 
     @State private var pickedImage: PhotosPickerItem?
     @State private var sendingImage = false
@@ -54,86 +53,49 @@ struct RobotControlView: View {
             if store.robotDevices.isEmpty {
                 ScrollView { emptyState.padding(Theme.Spacing.md) }
             } else {
-                WidgetDashboard(store: board)
+                board
             }
         }
         .navigationTitle(lang.s("robot.control.title"))
         .refreshable { await store.load(api: state.api) }
-        // الكتالوج بيتبنى من القطع اللي اللوح أعلنها فعليًا، فبيوصل بعد
-        // التحميل مش وقت الإنشاء — ولوح بلا كاميرا ما بيوريك قسم كاميرا فاضي.
-        .onAppear { board.updateCatalog(catalog) }
-        // بنراقب الأسماء مش الكائنات: `DeviceItem` مش `Equatable`، وكمان
-        // الكتالوج بيتغيّر لمّا تظهر قطعة أو تختفي — مش لمّا تتغيّر قيمتها.
-        // مراقبة القيم كانت بتعيد بناء الكتالوج كل ما تحرّك مقبض صوت.
-        .onChange(of: store.robotDevices.map(\.name)) { _, _ in
-            board.updateCatalog(catalog)
-        }
     }
 
-    /// أقسام الروبوت كودجات، والموجود منها بس.
+    /// أقسامها كبطاقات — الموجود منها بس، وكل وحدة بأي حجم وبأي ترتيب.
     ///
     /// الترتيب اللي كان — بتشوفه، بتسمعه، بتصوّر — تخمين معقول عن أغلب الناس
     /// ومش معرفة عن أي حدا. اللي بيحرّك الرقبة كل يوم وبيلمس الصوت مرّة بالشهر
-    /// بده العكس، وهو أدرى مني.
-    private var catalog: [WidgetSpec] {
-        var out: [WidgetSpec] = []
-        func has(_ names: [String]) -> Bool {
-            store.robotDevices.contains { names.contains($0.name) }
+    /// بده العكس، وهو أدرى.
+    ///
+    /// و`designHeight` مقدّر ع عدد القطع بكل قسم: القسم بينرسم بهاد الارتفاع
+    /// وبعدين بينصغّر متناسبًا، فما بينكسر ولا بيركب ع اللي تحته مهما صغّرته.
+    @ViewBuilder
+    private var board: some View {
+        let names = Set(store.robotDevices.map(\.name))
+        CardBoard("robot") {
+            if !names.isDisjoint(with: [Part.face, Part.head, Part.gesture]) {
+                BoardCard("expression", titleKey: "robot.control.expression",
+                          icon: "face.smiling", designHeight: 300) { expressionSection }
+            }
+            if names.contains(Part.screen) {
+                BoardCard("screen", titleKey: "robot.control.screen",
+                          icon: "textformat", designHeight: 300) { screenSection }
+            }
+            if names.contains(Part.led) {
+                BoardCard("light", titleKey: "robot.control.light",
+                          icon: "lightbulb.fill", designHeight: 180) { lightSection }
+            }
+            if !names.isDisjoint(with: [Part.volume, Part.speakerTest, Part.buzzer,
+                                        Part.micLeft, Part.micRight]) {
+                BoardCard("sound", titleKey: "robot.control.sound",
+                          icon: "speaker.wave.2.fill", designHeight: 620) { soundSection }
+            }
+            if !names.isDisjoint(with: [Part.camFlash, Part.camSnapshot, Part.camFrameSize]) {
+                BoardCard("camera", titleKey: "robot.control.camera",
+                          icon: "camera.fill", designHeight: 340) { cameraSection }
+            }
+            BoardCard("other", titleKey: "robot.control.other",
+                      icon: "ellipsis.circle", designHeight: 200) { leftovers }
         }
-
-        if has([Part.face, Part.head, Part.gesture]) {
-            out.append(WidgetSpec(key: "expression", icon: "face.smiling",
-                                  titleKey: "robot.control.expression",
-                                  tint: Theme.Colors.accent,
-                                  defaultCols: 2, defaultRows: 2,
-                                  content: { AnyView(expressionSection) }) {
-                AnyView(expressionSection)
-            })
-        }
-        if has([Part.screen]) {
-            out.append(WidgetSpec(key: "screen", icon: "textformat",
-                                  titleKey: "robot.control.screen",
-                                  tint: Theme.Colors.accentDeep,
-                                  defaultCols: 2, defaultRows: 2,
-                                  content: { AnyView(screenSection) }) {
-                AnyView(screenSection)
-            })
-        }
-        if has([Part.led]) {
-            out.append(WidgetSpec(key: "light", icon: "lightbulb.fill",
-                                  titleKey: "robot.control.light",
-                                  tint: Theme.Colors.warn,
-                                  defaultCols: 2, defaultRows: 2,
-                                  content: { AnyView(lightSection) }) {
-                AnyView(lightSection)
-            })
-        }
-        if has([Part.volume, Part.speakerTest, Part.buzzer, Part.micLeft, Part.micRight]) {
-            out.append(WidgetSpec(key: "sound", icon: "speaker.wave.2.fill",
-                                  titleKey: "robot.control.sound",
-                                  tint: Theme.Colors.success,
-                                  defaultCols: 2, defaultRows: 3,
-                                  content: { AnyView(soundSection) }) {
-                AnyView(soundSection)
-            })
-        }
-        if has([Part.camFlash, Part.camSnapshot, Part.camFrameSize]) {
-            out.append(WidgetSpec(key: "camera", icon: "camera.fill",
-                                  titleKey: "robot.control.camera",
-                                  tint: Theme.Colors.accent,
-                                  defaultCols: 2, defaultRows: 2,
-                                  content: { AnyView(cameraSection) }) {
-                AnyView(cameraSection)
-            })
-        }
-        out.append(WidgetSpec(key: "other", icon: "ellipsis.circle",
-                              titleKey: "robot.control.other",
-                              tint: Theme.Colors.secondaryText,
-                              defaultCols: 2,
-                              content: { AnyView(leftovers) }) {
-            AnyView(leftovers)
-        })
-        return out
     }
 
     private var expressionSection: some View {

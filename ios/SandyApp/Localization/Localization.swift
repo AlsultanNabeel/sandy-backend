@@ -104,7 +104,6 @@ let L10nRegistry: [String: L10nTable] = [
     L10nHome.ns:       L10nHome.table,
     L10nNudge.ns:      L10nNudge.table,
     L10nPaywall.ns:    L10nPaywall.table,
-    L10nWidgets.ns:    L10nWidgets.table,
     L10nChat.ns:       L10nChat.table,
     L10nTasks.ns:      L10nTasks.table,
     L10nReminders.ns:  L10nReminders.table,
@@ -126,6 +125,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nPhotos.ns:        L10nPhotos.table,
     L10nGifts.ns:         L10nGifts.table,
     L10nShareContent.ns:  L10nShareContent.table,
+    L10nBoard.ns:         L10nBoard.table,
     L10nWeather.ns:       L10nWeather.table,
     L10nControl.ns:       L10nControl.table,
 ]

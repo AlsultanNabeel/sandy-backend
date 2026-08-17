@@ -8,7 +8,6 @@ struct ControlView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @StateObject private var store = DevicesStore()
-    @StateObject private var board = DashboardStore(id: "control", catalog: [])
 
     @State private var showAddDevice = false
     @State private var editingDevice: DeviceItem?
@@ -88,44 +87,38 @@ struct ControlView: View {
         if store.loading && store.devices.isEmpty && store.nodes.isEmpty {
             loadingState
         } else if store.devices.isEmpty {
-            // ما في إشي يترتّب بعد — الحالة الفاضية بتشرح شو الخطوة الجاية.
+            // ما في إشي يترتّب بعد — الحالة الفاضية بتشرح الخطوة الجاية.
             devicesSection
             nodesSection
         } else {
-            WidgetDashboard(store: board)
-                .onAppear { board.updateCatalog(catalog) }
-                .onChange(of: store.roomGroups.map(\.room)) { _, _ in
-                    board.updateCatalog(catalog)
-                }
+            board
         }
     }
 
-    /// كل غرفة ودجة.
+    /// كل غرفة بطاقة.
     ///
     /// الغرفة هي الوحدة اللي الناس بتفكّر فيها — «ورّيني الصالة»، مش «ورّيني
-    /// الجهاز رقم سبعة». فالترتيب والحجم بيشتغلوا ع الغرف: غرفة النوم فوق
-    /// وكبيرة، والمخزن تحت ومربّع.
+    /// الجهاز رقم سبعة».
+    ///
+    /// والارتفاع بينحسب من عدد الأجهزة فيها، فغرفة بلمبة وحدة ما بتاخد مساحة
+    /// غرفة بعشرة. رقم ثابت للكل كان بيترك فراغ تحت الصغيرة ويقصّ الكبيرة.
     ///
     /// والمفتاح اسم الغرفة: ثابت طول ما الاسم ثابت. غيّرت الاسم؟ بترجع لمكانها
     /// الطبيعي — وهاد أوضح من إنها تضل مكانها باسم جديد وما حدا يعرف ليش.
-    private var catalog: [WidgetSpec] {
-        store.roomGroups.map { group in
-            let title = group.room.isEmpty ? lang.s("control.noRoom") : group.room
-            return WidgetSpec(key: "room/\(group.room)",
-                              icon: "square.grid.2x2.fill",
-                              titleKey: title,
-                              tint: Theme.Colors.accent,
-                              defaultCols: 2, defaultRows: 2,
-                              content: { AnyView(roomBody(group)) }) {
-                AnyView(roomBody(group))
+    @ViewBuilder
+    private var board: some View {
+        CardBoard("control") {
+            store.roomGroups.map { group in
+                BoardCard("room/\(group.room)",
+                          titleKey: group.room.isEmpty ? "control.noRoom" : group.room,
+                          icon: "square.grid.2x2.fill",
+                          designHeight: 44 + CGFloat(group.devices.count) * 78) {
+                    roomBody(group)
+                }
             }
-        } + [
-            WidgetSpec(key: "nodes", icon: "cpu.fill",
-                       titleKey: "control.section.nodes",
-                       tint: Theme.Colors.accentDeep,
-                       defaultCols: 2,
-                       content: { AnyView(nodesSection) }) { AnyView(nodesSection) },
-        ]
+            BoardCard("nodes", titleKey: "control.section.nodes",
+                      icon: "cpu.fill", designHeight: 200) { nodesSection }
+        }
     }
 
     private func roomBody(_ group: DevicesStore.RoomGroup) -> some View {

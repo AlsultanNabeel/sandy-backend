@@ -264,7 +264,7 @@ def test_every_swift_file_is_reachable_from_a_view_that_exists():
     )
 
 
-def test_every_widget_points_at_a_view_that_exists():
+def test_every_board_card_points_at_a_view_that_exists():
     """A widget catalogue naming a type nobody wrote does not compile — but the
     error lands in Xcode, on the owner's machine, minutes after he pressed Run.
 
@@ -288,32 +288,32 @@ def test_every_widget_points_at_a_view_that_exists():
     for path, text in source.items():
         # Only inside a WidgetSpec: AnyView(Foo()) elsewhere is ordinary code
         # that the compiler checks in the same file anyway.
-        for spec in re.findall(r'WidgetSpec\((?:[^()]|\([^()]*\))*\)[^\n]*', text):
-            for name in re.findall(r'AnyView\((\w+)\(\)\)', spec):
-                if name not in declared:
-                    missing.append(f"{name} ({path.name})")
+        for name in re.findall(r'AnyView\(([A-Z]\w+)\(\)\)', text):
+            # الأسماء الكبيرة بس: `AnyView(content())` بتستدعي مُغلِقة مُمرَّرة،
+            # مش نوع — والأنواع بسويفت بتبدأ بحرف كبير بالاتفاق.
+            if name not in declared:
+                missing.append(f"{name} ({path.name})")
 
     assert not missing, (
-        "widget catalogues naming views that do not exist — these fail the "
+        "board cards naming views that do not exist — these fail the "
         f"build, not the test suite: {sorted(set(missing))}")
 
 
 def test_no_two_layout_systems():
     """One way to arrange a screen, not two.
 
-    `WidgetDashboard` already existed — drag to reorder, corner-drag resize, a
-    gallery, per-tab persistence — and was wired to a single tab. I did not look,
-    and built a second system beside it: a different store, different gestures,
-    a different vocabulary for the same four sizes.
+    This app went through three layout systems in one afternoon. The grid-based
+    `WidgetDashboard` is gone: its sizes were four fixed steps, and the owner
+    wanted every size. `CardBoard` replaced it everywhere, including the one tab
+    the old board owned.
 
     Two systems for one job do not stay equivalent. They drift, each grows a fix
     the other lacks, and the app develops two personalities on adjacent screens.
-    The second one was deleted. This keeps it deleted.
     """
     root = Path(__file__).resolve().parent.parent / "ios" / "SandyApp"
     rivals = [p.name for p in root.rglob("*.swift")
               if p.name in {"ArrangeableStack.swift", "LayoutStore.swift",
-                            "PanelSize.swift"}]
+                            "PanelSize.swift", "WidgetDashboard.swift"}]
     assert not rivals, (
-        "a second layout system is back alongside WidgetDashboard — pick one: "
+        "a second layout system is back alongside CardBoard — pick one: "
         f"{rivals}")

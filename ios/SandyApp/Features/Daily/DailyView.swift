@@ -6,30 +6,65 @@ import SwiftUI
 struct DailyView: View {
     @EnvironmentObject var lang: LanguageManager
     @EnvironmentObject var state: AppState
-    @StateObject private var store = DashboardStore(id: "daily", catalog: DailyView.catalog)
 
-    /// كتالوج ميزات يومي — المفتاح ثابت (يطابق مفتاح الإخفاء بالسيرفر)، مع وجهته.
-    static let catalog: [WidgetSpec] = [
-        WidgetSpec(key: "tasks", icon: "checklist", titleKey: "daily.tasks",
-                   tint: Theme.Colors.accent,
-                   defaultCols: 2, defaultRows: 2,
-                   content: { AnyView(TasksWidget()) }) { AnyView(TasksView()) },
-        WidgetSpec(key: "reminders", icon: "bell.fill", titleKey: "daily.reminders",
-                   tint: Theme.Colors.warn) { AnyView(RemindersView()) },
-        WidgetSpec(key: "goals", icon: "flag.fill", titleKey: "daily.goals",
-                   tint: Theme.Colors.accentDeep) { AnyView(GoalsView()) },
-        WidgetSpec(key: "habits", icon: "flame.fill", titleKey: "daily.habits",
-                   tint: Theme.Colors.success) { AnyView(HabitsView()) },
-        WidgetSpec(key: "focus", icon: "target", titleKey: "daily.focus",
-                   tint: Theme.Colors.accent) { AnyView(FocusView()) },
-        WidgetSpec(key: "future", icon: "envelope.fill", titleKey: "daily.future",
-                   tint: Theme.Colors.warn) { AnyView(FutureMessagesView()) },
-    ]
+    /// ميزات يومي. المفتاح ثابت ويطابق مفتاح الإخفاء بالسيرفر — المالك بيقدر
+    /// يخفي أي ميزة مركزيًا، وساعتها ما بتوصل اللوح أصلًا.
+    private struct Feature {
+        let key: String, icon: String, titleKey: String
+        let tint: Color, height: CGFloat
+        let destination: () -> AnyView
+        var preview: (() -> AnyView)?
+    }
+
+    private var features: [Feature] {
+        [
+            Feature(key: "tasks", icon: "checklist", titleKey: "daily.tasks",
+                    tint: Theme.Colors.accent, height: 230,
+                    destination: { AnyView(TasksView()) },
+                    preview: { AnyView(TasksWidget()) }),
+            Feature(key: "reminders", icon: "bell.fill", titleKey: "daily.reminders",
+                    tint: Theme.Colors.warn, height: 96,
+                    destination: { AnyView(RemindersView()) }),
+            Feature(key: "goals", icon: "flag.fill", titleKey: "daily.goals",
+                    tint: Theme.Colors.accentDeep, height: 96,
+                    destination: { AnyView(GoalsView()) }),
+            Feature(key: "habits", icon: "flame.fill", titleKey: "daily.habits",
+                    tint: Theme.Colors.success, height: 96,
+                    destination: { AnyView(HabitsView()) }),
+            Feature(key: "focus", icon: "target", titleKey: "daily.focus",
+                    tint: Theme.Colors.accent, height: 96,
+                    destination: { AnyView(FocusView()) }),
+            Feature(key: "future", icon: "envelope.fill", titleKey: "daily.future",
+                    tint: Theme.Colors.warn, height: 96,
+                    destination: { AnyView(FutureMessagesView()) }),
+        ].filter { !state.serverHiddenFeatures.contains($0.key) }
+    }
 
     var body: some View {
-        WidgetDashboard(store: store)
-            .navigationTitle(lang.s("daily.title"))
-            .onAppear { store.applyServerHidden(state.serverHiddenFeatures) }
-            .onChange(of: state.serverHiddenFeatures) { store.applyServerHidden($0) }
+        CardBoard("daily") {
+            features.map { f in
+                BoardCard(f.key, titleKey: f.titleKey, icon: f.icon,
+                          designHeight: f.height) {
+                    NavigationLink { f.destination() } label: {
+                        if let preview = f.preview {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                HubRowCard(spec: HubRowSpec(icon: f.icon,
+                                                            titleKey: f.titleKey,
+                                                            subtitleKey: f.titleKey + ".subtitle",
+                                                            tint: f.tint))
+                                preview()
+                            }
+                        } else {
+                            HubRowCard(spec: HubRowSpec(icon: f.icon,
+                                                        titleKey: f.titleKey,
+                                                        subtitleKey: f.titleKey + ".subtitle",
+                                                        tint: f.tint))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle(lang.s("daily.title"))
     }
 }

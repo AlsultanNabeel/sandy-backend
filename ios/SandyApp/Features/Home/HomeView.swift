@@ -28,7 +28,6 @@ struct HomeView: View {
     /// مصدر الحقيقة للرئيسية (يملك اللقطة + الجلب، مستقل عن الشاشة) — فالسحب
     /// الملغى ما يمسح لوحتك بأصفار.
     @StateObject private var store = HomeStore()
-    @StateObject private var board = DashboardStore(id: "home", catalog: [])
     /// تنبيه اليوم من ساندي (سؤال تعارف أو جملة مهام بشخصيتها) — المرحلة السابعة.
     @StateObject private var nudgeStore = DailyNudgeStore()
     /// يفتح حساب المستخدم (ProfileView) كـ sheet — الحساب مش تبويب.
@@ -82,62 +81,41 @@ struct HomeView: View {
             greeting
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
-            WidgetDashboard(store: board)
+
+            CardBoard("home") {
+                BoardCard("nudge", titleKey: "home.block.nudge",
+                          icon: "sparkles", designHeight: 150) {
+                    DailyNudgeCard(store: nudgeStore)
+                }
+                BoardCard("quickAdd", titleKey: "home.block.quickAdd",
+                          icon: "plus.circle.fill", designHeight: 130) { quickAddCard }
+                BoardCard("weather", titleKey: "home.block.weather",
+                          icon: "cloud.sun.fill", designHeight: 200) {
+                    NavigationLink { WeatherView() } label: { WeatherCard() }
+                        .buttonStyle(.plain)
+                }
+                BoardCard("robotBody", titleKey: "home.block.robotBody",
+                          icon: "figure.wave", designHeight: 120) {
+                    NavigationLink { RobotHomeEntry() } label: { robotBodyCard }
+                        .buttonStyle(.plain)
+                }
+                BoardCard("homeControl", titleKey: "home.block.homeControl",
+                          icon: "house.fill", designHeight: 120) {
+                    NavigationLink { ControlView() } label: { homeControlCard }
+                        .buttonStyle(.plain)
+                }
+                BoardCard("proactive", titleKey: "home.block.proactive",
+                          icon: "sparkles", designHeight: 150) { proactiveCard }
+                BoardCard("glance", titleKey: "home.block.glance",
+                          icon: "square.grid.2x2.fill", designHeight: 250) { glanceSection }
+                if store.loadFailed {
+                    BoardCard("loadFailed", titleKey: "home.block.loadFailed",
+                              icon: "exclamationmark.triangle", designHeight: 90) {
+                        SandyNotice(lang.s("home.loadFailed"), kind: .gentleWarning)
+                    }
+                }
+            }
         }
-        // الكتالوج بيشاور ع بطاقات هالشاشة، فما بينبنى وقت الإنشاء — `self`
-        // لسا ما وُجدت ساعتها.
-        .onAppear { board.updateCatalog(catalog) }
-    }
-
-    /// كتالوج الرئيسية.
-    ///
-    /// **بطاقاتك هي المحتوى، مش أيقونات مكانها.** أول محاولة حطّيت أيقونة
-    /// وعنوان بكل مربّع وخلّيت الضغط يفتح الشاشة — وهاد كان بيرمي البطاقات
-    /// المصمّمة كلها ويرجّع الرئيسية قائمة اختصارات. الودجة بتعرض البطاقة نفسها،
-    /// والضغط ع ترويستها بيفتح الشاشة الكاملة.
-    ///
-    /// والأحجام الابتدائية هي شكل الصفحة اللي كانت عليه — عرض كامل. اللي ما
-    /// بيلمس إشي بيلاقي صفحته زي ما تركها. تحديث بيعيد ترتيب صفحة حدا بلا ما
-    /// يطلبه بيبيّن كأنه عطل مش كأنه ميزة.
-    private var catalog: [WidgetSpec] {
-        [
-            WidgetSpec(key: "quickAdd", icon: "plus.circle.fill",
-                       titleKey: "home.block.quickAdd",
-                       tint: Theme.Colors.accent, defaultCols: 2,
-                       content: { AnyView(quickAddCard) }) { AnyView(QuickAddSheet()) },
-
-            WidgetSpec(key: "nudge", icon: "sparkles",
-                       titleKey: "home.block.nudge",
-                       tint: Theme.Colors.warn, defaultCols: 2,
-                       content: { AnyView(DailyNudgeCard(store: nudgeStore)) }) {
-                AnyView(DailyNudgeCard(store: nudgeStore))
-            },
-
-            WidgetSpec(key: "weather", icon: "cloud.sun.fill",
-                       titleKey: "home.block.weather",
-                       tint: Theme.Colors.accentDeep, defaultCols: 2, defaultRows: 2,
-                       content: { AnyView(WeatherCard()) }) { AnyView(WeatherView()) },
-
-            WidgetSpec(key: "robotBody", icon: "figure.wave",
-                       titleKey: "home.block.robotBody",
-                       tint: Theme.Colors.accent, defaultCols: 2,
-                       content: { AnyView(robotBodyCard) }) { AnyView(RobotHomeEntry()) },
-
-            WidgetSpec(key: "homeControl", icon: "house.fill",
-                       titleKey: "home.block.homeControl",
-                       tint: Theme.Colors.success, defaultCols: 2,
-                       content: { AnyView(homeControlCard) }) { AnyView(ControlView()) },
-
-            WidgetSpec(key: "proactive", icon: "sparkles",
-                       titleKey: "home.block.proactive",
-                       tint: Theme.Colors.accentDeep, defaultCols: 2,
-                       content: { AnyView(proactiveCard) }) { AnyView(proactiveCard) },
-
-            WidgetSpec(key: "glance", icon: "square.grid.2x2.fill",
-                       titleKey: "home.block.glance",
-                       tint: Theme.Colors.warn, defaultCols: 2, defaultRows: 2,
-                       content: { AnyView(glanceSection) }) { AnyView(TimelineTabView()) },
-        ]
     }
 
     // MARK: - التحية (حسب الوقت + الاسم)

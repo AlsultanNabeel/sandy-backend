@@ -4,25 +4,37 @@ import SwiftUI
 /// العادات انتقلت لتبويب يومي.
 struct LifeView: View {
     @EnvironmentObject var lang: LanguageManager
-    @StateObject private var store = DashboardStore(id: "life", catalog: LifeView.catalog)
 
-    /// ميزات «حياتي» كودجات — نفس لوح «يومي».
-    ///
-    /// كانت قائمة ثابتة بثلاث صفوف بنفس الحجم بنفس الترتيب للكل. اللي بيسجّل
-    /// مصاريفه كل يوم واليوميات مرّة بالشهر بده الأولى كبيرة والتانية مربّع —
-    /// والترتيب اللي اخترته أنا تخمين عن الناس، مش معرفة عنه هو.
-    static let catalog: [WidgetSpec] = [
-        WidgetSpec(key: "expenses", icon: "creditcard.fill", titleKey: "life.expenses",
-                   tint: Theme.Colors.success, defaultCols: 2) { AnyView(ExpensesView()) },
-        WidgetSpec(key: "journal", icon: "book.closed.fill", titleKey: "life.journal",
-                   tint: Theme.Colors.warn, defaultCols: 2) { AnyView(JournalView()) },
-        WidgetSpec(key: "gifts", icon: "gift.fill", titleKey: "life.gifts",
-                   tint: Theme.Colors.accent, defaultCols: 2) { AnyView(GiftsView()) },
+    private let rows: [HubRowSpec] = [
+        HubRowSpec(icon: "creditcard.fill", titleKey: "life.expenses",
+                   subtitleKey: "life.expenses.subtitle", tint: Theme.Colors.success),
+        HubRowSpec(icon: "book.closed.fill", titleKey: "life.journal",
+                   subtitleKey: "life.journal.subtitle", tint: Theme.Colors.warn),
+        HubRowSpec(icon: "gift.fill", titleKey: "life.gifts",
+                   subtitleKey: "life.gifts.subtitle", tint: Theme.Colors.accent),
     ]
 
     var body: some View {
-        WidgetDashboard(store: store)
-            .navigationTitle(lang.s("life.title"))
+        CardBoard("life") {
+            rows.enumerated().map { index, spec in
+                // المفتاح `titleKey` مش الموقع: الموقع بيتزحلق أول ما حدا يضيف
+                // صف، وساعتها ترتيب كل مستخدم بيتغيّر لحاله.
+                BoardCard(spec.titleKey, titleKey: spec.titleKey,
+                          icon: spec.icon, designHeight: 96) {
+                    NavigationLink {
+                        switch index {
+                        case 0:  ExpensesView()
+                        case 1:  JournalView()
+                        default: GiftsView()
+                        }
+                    } label: {
+                        HubRowCard(spec: spec)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle(lang.s("life.title"))
     }
 }
 
