@@ -92,6 +92,12 @@ final class BoardStore: ObservableObject {
 
     func setOrder(_ ids: [String]) { order = ids; save() }
 
+    /// ترتيب أثناء السحب — بلا حفظ.
+    ///
+    /// السحب بيعيد الترتيب عشرات المرّات بالثانية وإنت ماسك، وكتابة القرص مع
+    /// كل وحدة بتخلّي الإصبع تتعتّر. الحفظ بيصير مرّة لما ترفع إيدك.
+    func setOrderLive(_ ids: [String]) { order = ids }
+
     func reset() { scales = [:]; order = []; save() }
 
     func save() {
