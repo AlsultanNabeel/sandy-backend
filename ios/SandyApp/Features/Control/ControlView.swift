@@ -100,8 +100,8 @@ struct ControlView: View {
     /// الغرفة هي الوحدة اللي الناس بتفكّر فيها — «ورّيني الصالة»، مش «ورّيني
     /// الجهاز رقم سبعة».
     ///
-    /// والارتفاع بينحسب من عدد الأجهزة فيها، فغرفة بلمبة وحدة ما بتاخد مساحة
-    /// غرفة بعشرة. رقم ثابت للكل كان بيترك فراغ تحت الصغيرة ويقصّ الكبيرة.
+    /// وغرفة بجهاز واحد بتبدأ مربّع، والأكبر منها بعرض كامل — عشان صفحة فيها
+    /// خمس غرف ما تصير خمس بطاقات فاضية بنص كل وحدة.
     ///
     /// والمفتاح اسم الغرفة: ثابت طول ما الاسم ثابت. غيّرت الاسم؟ بترجع لمكانها
     /// الطبيعي — وهاد أوضح من إنها تضل مكانها باسم جديد وما حدا يعرف ليش.
@@ -112,12 +112,12 @@ struct ControlView: View {
                 BoardCard("room/\(group.room)",
                           titleKey: group.room.isEmpty ? "control.noRoom" : group.room,
                           icon: "square.grid.2x2.fill",
-                          designHeight: 44 + CGFloat(group.devices.count) * 78) {
+                          defaultSize: group.devices.count <= 1 ? .small : .medium) {
                     roomBody(group)
                 }
             }
             BoardCard("nodes", titleKey: "control.section.nodes",
-                      icon: "cpu.fill", designHeight: 200) { nodesSection }
+                      icon: "cpu.fill", defaultSize: .medium) { nodesSection }
         }
     }
 

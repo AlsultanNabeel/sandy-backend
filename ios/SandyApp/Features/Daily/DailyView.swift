@@ -11,7 +11,7 @@ struct DailyView: View {
     /// يخفي أي ميزة مركزيًا، وساعتها ما بتوصل اللوح أصلًا.
     private struct Feature {
         let key: String, icon: String, titleKey: String
-        let tint: Color, height: CGFloat
+        let tint: Color, size: CardSize
         let destination: () -> AnyView
         var preview: (() -> AnyView)?
     }
@@ -19,23 +19,23 @@ struct DailyView: View {
     private var features: [Feature] {
         [
             Feature(key: "tasks", icon: "checklist", titleKey: "daily.tasks",
-                    tint: Theme.Colors.accent, height: 230,
+                    tint: Theme.Colors.accent, size: .large,
                     destination: { AnyView(TasksView()) },
                     preview: { AnyView(TasksWidget()) }),
             Feature(key: "reminders", icon: "bell.fill", titleKey: "daily.reminders",
-                    tint: Theme.Colors.warn, height: 96,
+                    tint: Theme.Colors.warn, size: .small,
                     destination: { AnyView(RemindersView()) }),
             Feature(key: "goals", icon: "flag.fill", titleKey: "daily.goals",
-                    tint: Theme.Colors.accentDeep, height: 96,
+                    tint: Theme.Colors.accentDeep, size: .small,
                     destination: { AnyView(GoalsView()) }),
             Feature(key: "habits", icon: "flame.fill", titleKey: "daily.habits",
-                    tint: Theme.Colors.success, height: 96,
+                    tint: Theme.Colors.success, size: .small,
                     destination: { AnyView(HabitsView()) }),
             Feature(key: "focus", icon: "target", titleKey: "daily.focus",
-                    tint: Theme.Colors.accent, height: 96,
+                    tint: Theme.Colors.accent, size: .small,
                     destination: { AnyView(FocusView()) }),
             Feature(key: "future", icon: "envelope.fill", titleKey: "daily.future",
-                    tint: Theme.Colors.warn, height: 96,
+                    tint: Theme.Colors.warn, size: .small,
                     destination: { AnyView(FutureMessagesView()) }),
         ].filter { !state.serverHiddenFeatures.contains($0.key) }
     }
@@ -44,7 +44,7 @@ struct DailyView: View {
         CardBoard("daily") {
             features.map { f in
                 BoardCard(f.key, titleKey: f.titleKey, icon: f.icon,
-                          designHeight: f.height) {
+                          defaultSize: f.size) {
                     NavigationLink { f.destination() } label: {
                         if let preview = f.preview {
                             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {

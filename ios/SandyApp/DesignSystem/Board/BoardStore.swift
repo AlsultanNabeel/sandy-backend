@@ -1,27 +1,12 @@
 import SwiftUI
 
-/// حجم بطاقة وترتيبها، لكل صفحة على حدة.
+/// مقاس بطاقة وترتيبها، لكل صفحة على حدة.
 ///
-/// **الحجم رقم واحد مش رقمين.** البطاقة بتنرسم مرّة بعرض اللوح، وبعدين بتنصغّر
-/// بمعامل واحد — فالعرض والطول بينزلوا سوا وبتضل النِّسَب صح. تصغير العرض لحاله
-/// كان بيخلّي النصوص تنكسر لسطور وترتفع البطاقة وهي بتصغر، وهاد اللي بيبيّن
-/// «مركوب» ع الشاشة.
-///
-/// وكونه معامل واحد هو سبب السلاسة كمان: التغيير بيصير تحويلًا رسوميًا خالصًا،
-/// بلا ما SwiftUI تعيد ترتيب أي إشي جوّا البطاقة. بتقدر تسحب الزاوية والمحتوى
-/// كله بيتحرّك بستّين إطار بالثانية، لأنه ما في شغل غير الرسم.
-///
-/// **والمعامل نسبة مش نقاط.** الآيفون والآيباد بعرضين مختلفين، والدوران بيغيّر
-/// العرض؛ نسبة من عرض اللوح بتضل صح بالحالتين، والنقاط بتضبط ع جهاز وبتخرب ع
-/// التاني.
+/// المقاس `CardSize` — صغير أو وسط أو كبير — مش رقم حرّ. المحتوى بيتبنى لكل
+/// مقاس، فما في معنى لمقاس ما إله تصميم.
 @MainActor
 final class BoardStore: ObservableObject {
-    /// أصغر وأكبر مقاس. الأصغر ثُمن العرض — أصغر من هيك بتصير البطاقة نقطة
-    /// ملوّنة ما بتقول إشي، وحرّية بتوصّل لنتيجة ما إلها معنى مش حرّية.
-    static let minScale = 0.125
-    static let maxScale = 1.0
-
-    @Published private(set) var scales: [String: Double] = [:]
+    @Published private(set) var sizes: [String: CardSize] = [:]
     @Published private(set) var order: [String] = []
     @Published var editing = false
 
@@ -34,8 +19,8 @@ final class BoardStore: ObservableObject {
 
     // ── قراءة ────────────────────────────────────────────────────────────────
 
-    func scale(_ id: String, default def: Double) -> Double {
-        scales[id] ?? def
+    func size(_ id: String, default def: CardSize) -> CardSize {
+        sizes[id] ?? def
     }
 
     /// البطاقات بترتيب المستخدم.
@@ -78,22 +63,16 @@ final class BoardStore: ObservableObject {
         }
     }
 
-    var isCustomised: Bool { !order.isEmpty || !scales.isEmpty }
+    var isCustomised: Bool { !order.isEmpty || !sizes.isEmpty }
 
     // ── كتابة ────────────────────────────────────────────────────────────────
 
-    /// الحجم بينحفظ لحظة ما يتغيّر.
+    /// المقاس بينحفظ لحظة ما يتغيّر.
     ///
-    /// كان بينحفظ لما ترفع إيدك وبس، «عشان ما نكتب ع القرص كل إطار». وهاد كان
-    /// غلط من جهتين. `UserDefaults.set` كتابة بالذاكرة — النظام بيكبّها ع القرص
-    /// لحاله وقت ما يناسبه — فما في كلفة نتجنّبها أصلًا. والأهم: أي إيماءة
-    /// بتنقطع قبل ما تنتهي كانت بتضيّع الحجم الجديد، وأول ما يعيد المخزن
-    /// القراءة بترجع البطاقة لحجمها القديم. المالك وصفها بالحرف: «بصغّر شوية
-    /// وبرجع بكبر، بثبتش».
-    ///
-    /// الحفظ الفوري بيخلّي النتيجة تثبت حتى لو انقطعت الإيماءة بنصّها.
-    func setScale(_ v: Double, for id: String) {
-        scales[id] = min(max(v, Self.minScale), Self.maxScale)
+    /// كان بينحفظ لما ترفع إيدك من إيماءة، وأي إيماءة بتنقطع كانت بتضيّع
+    /// النتيجة. مقاس بينختار بزرّ ما إله «نهاية إيماءة» أصلًا، وبينحفظ فورًا.
+    func setSize(_ v: CardSize, for id: String) {
+        sizes[id] = v
         save()
     }
 
@@ -105,17 +84,19 @@ final class BoardStore: ObservableObject {
     /// كل وحدة بتخلّي الإصبع تتعتّر. الحفظ بيصير مرّة لما ترفع إيدك.
     func setOrderLive(_ ids: [String]) { order = ids }
 
-    func reset() { scales = [:]; order = []; save() }
+    func reset() { sizes = [:]; order = []; save() }
 
     func save() {
         let d = UserDefaults.standard
-        d.set(scales, forKey: "\(key).scales")
+        d.set(sizes.mapValues(\.rawValue), forKey: "\(key).sizes")
         d.set(order, forKey: "\(key).order")
     }
 
     private func load() {
         let d = UserDefaults.standard
-        scales = (d.dictionary(forKey: "\(key).scales") as? [String: Double]) ?? [:]
+        let raw: [String: String] =
+            (d.dictionary(forKey: "\(key).sizes") as? [String: String]) ?? [:]
+        sizes = raw.compactMapValues(CardSize.init(rawValue:))
         order = d.stringArray(forKey: "\(key).order") ?? []
     }
 }

@@ -20,7 +20,7 @@ struct LifeView: View {
                 // المفتاح `titleKey` مش الموقع: الموقع بيتزحلق أول ما حدا يضيف
                 // صف، وساعتها ترتيب كل مستخدم بيتغيّر لحاله.
                 BoardCard(spec.titleKey, titleKey: spec.titleKey,
-                          icon: spec.icon, designHeight: 96) {
+                          icon: spec.icon, defaultSize: .small) {
                     NavigationLink {
                         switch index {
                         case 0:  ExpensesView()

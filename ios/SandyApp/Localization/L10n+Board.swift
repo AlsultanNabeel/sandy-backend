@@ -9,15 +9,21 @@ enum L10nBoard {
             "edit":    .text("ظبّط الصفحة"),
             "done":    .text("خلصت"),
             "reset":   .text("رجّع الأصلي"),
-            "resize":  .text("اسحب لتغيير الحجم"),
-            "hint":    .text("اسحب البطاقة لمكانها · − و + للحجم · أو اقرص بإصبعين"),
+            "resize":     .text("غيّر الحجم"),
+            "size.small":  .text("مربّع"),
+            "size.medium": .text("عريض"),
+            "size.large":  .text("كبير"),
+            "hint":    .text("اسحب البطاقة لمكانها · − و + للحجم"),
         ],
         en: [
             "edit":    .text("Arrange"),
             "done":    .text("Done"),
             "reset":   .text("Reset"),
-            "resize":  .text("Drag to resize"),
-            "hint":    .text("Drag a card to move it · − and + to resize · or pinch"),
+            "resize":     .text("Resize"),
+            "size.small":  .text("Square"),
+            "size.medium": .text("Wide"),
+            "size.large":  .text("Large"),
+            "hint":    .text("Drag a card to move it · − and + to resize"),
         ]
     )
 }

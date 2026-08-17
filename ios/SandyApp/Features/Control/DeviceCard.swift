@@ -16,10 +16,19 @@ struct DeviceCard: View {
     @State private var showLearn = false
     @State private var learnButtonName = ""
 
+    /// قدّيش مساحة أعطاها المالك لهاي البطاقة (لما تكون جوّا لوح).
+    @Environment(\.cardMetrics) private var metrics
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            header
-            controlWidget
+        Group {
+            if metrics.isCompact {
+                compactBody
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    header
+                    controlWidget
+                }
+            }
         }
         .sandyCard()
         .contextMenu {
@@ -33,6 +42,40 @@ struct DeviceCard: View {
             }
         }
         .onAppear { sliderValue = Double(Int(device.state) ?? device.dimmerMin) }
+    }
+
+    /// الشكل المربّع: الاسم كبير فوق، والتحكّم تحته — وبس.
+    ///
+    /// **هاد اللي طلبه المالك بالحرف**: بطاقة فيها مفتاح، لما تصغر، بتصير
+    /// «مفتاح وفوقه اسمه، بس مفتاح واسم كبير».
+    ///
+    /// فالصفّ الأفقي بينكسر لعمود، وحالة الاتصال بتنشال — بمربّع، نقطة صغيرة
+    /// وكلمة «متصل» بتاكل نص المساحة وما بتضيف إشي إنت مش شايفه أصلًا من كون
+    /// التحكّم بيستجيب أو لأ. والاسم بيكبر مش بيصغر، لأنه بهالمقاس هو الإشي
+    /// الوحيد اللي بيقولك شو هاد.
+    private var compactBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: iconForType(device.controlType))
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+                Spacer(minLength: 0)
+                Circle()
+                    .fill(device.online ? Theme.Colors.success : Theme.Colors.tertiaryText)
+                    .frame(width: 7, height: 7)
+            }
+
+            Text(device.label)
+                .font(Theme.Typography.title)
+                .foregroundColor(Theme.Colors.primaryText)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+
+            Spacer(minLength: 0)
+
+            controlWidget
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {

@@ -84,33 +84,33 @@ struct HomeView: View {
 
             CardBoard("home") {
                 BoardCard("nudge", titleKey: "home.block.nudge",
-                          icon: "sparkles", designHeight: 150) {
+                          icon: "sparkles", defaultSize: .medium) {
                     DailyNudgeCard(store: nudgeStore)
                 }
                 BoardCard("quickAdd", titleKey: "home.block.quickAdd",
-                          icon: "plus.circle.fill", designHeight: 130) { quickAddCard }
+                          icon: "plus.circle.fill", defaultSize: .medium) { quickAddCard }
                 BoardCard("weather", titleKey: "home.block.weather",
-                          icon: "cloud.sun.fill", designHeight: 200) {
+                          icon: "cloud.sun.fill", defaultSize: .medium) {
                     NavigationLink { WeatherView() } label: { WeatherCard() }
                         .buttonStyle(.plain)
                 }
                 BoardCard("robotBody", titleKey: "home.block.robotBody",
-                          icon: "figure.wave", designHeight: 120) {
+                          icon: "figure.wave", defaultSize: .small) {
                     NavigationLink { RobotHomeEntry() } label: { robotBodyCard }
                         .buttonStyle(.plain)
                 }
                 BoardCard("homeControl", titleKey: "home.block.homeControl",
-                          icon: "house.fill", designHeight: 120) {
+                          icon: "house.fill", defaultSize: .small) {
                     NavigationLink { ControlView() } label: { homeControlCard }
                         .buttonStyle(.plain)
                 }
                 BoardCard("proactive", titleKey: "home.block.proactive",
-                          icon: "sparkles", designHeight: 150) { proactiveCard }
+                          icon: "sparkles", defaultSize: .medium) { proactiveCard }
                 BoardCard("glance", titleKey: "home.block.glance",
-                          icon: "square.grid.2x2.fill", designHeight: 250) { glanceSection }
+                          icon: "square.grid.2x2.fill", defaultSize: .large) { glanceSection }
                 if store.loadFailed {
                     BoardCard("loadFailed", titleKey: "home.block.loadFailed",
-                              icon: "exclamationmark.triangle", designHeight: 90) {
+                              icon: "exclamationmark.triangle", defaultSize: .medium) {
                         SandyNotice(lang.s("home.loadFailed"), kind: .gentleWarning)
                     }
                 }

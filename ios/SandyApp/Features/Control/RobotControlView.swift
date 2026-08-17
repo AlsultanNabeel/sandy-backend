@@ -66,35 +66,35 @@ struct RobotControlView: View {
     /// ومش معرفة عن أي حدا. اللي بيحرّك الرقبة كل يوم وبيلمس الصوت مرّة بالشهر
     /// بده العكس، وهو أدرى.
     ///
-    /// و`designHeight` مقدّر ع عدد القطع بكل قسم: القسم بينرسم بهاد الارتفاع
-    /// وبعدين بينصغّر متناسبًا، فما بينكسر ولا بيركب ع اللي تحته مهما صغّرته.
+    /// والمقاسات الابتدائية: الأقسام اللي فيها قطع كتير بتبدأ كبيرة، والباقي
+    /// وسط. وكلها بتقدر تصير مربّع — والقطع جواها بتعرف تتكيّف لحالها.
     @ViewBuilder
     private var board: some View {
         let names = Set(store.robotDevices.map(\.name))
         CardBoard("robot") {
             if !names.isDisjoint(with: [Part.face, Part.head, Part.gesture]) {
                 BoardCard("expression", titleKey: "robot.control.expression",
-                          icon: "face.smiling", designHeight: 300) { expressionSection }
+                          icon: "face.smiling", defaultSize: .large) { expressionSection }
             }
             if names.contains(Part.screen) {
                 BoardCard("screen", titleKey: "robot.control.screen",
-                          icon: "textformat", designHeight: 300) { screenSection }
+                          icon: "textformat", defaultSize: .large) { screenSection }
             }
             if names.contains(Part.led) {
                 BoardCard("light", titleKey: "robot.control.light",
-                          icon: "lightbulb.fill", designHeight: 180) { lightSection }
+                          icon: "lightbulb.fill", defaultSize: .medium) { lightSection }
             }
             if !names.isDisjoint(with: [Part.volume, Part.speakerTest, Part.buzzer,
                                         Part.micLeft, Part.micRight]) {
                 BoardCard("sound", titleKey: "robot.control.sound",
-                          icon: "speaker.wave.2.fill", designHeight: 620) { soundSection }
+                          icon: "speaker.wave.2.fill", defaultSize: .large) { soundSection }
             }
             if !names.isDisjoint(with: [Part.camFlash, Part.camSnapshot, Part.camFrameSize]) {
                 BoardCard("camera", titleKey: "robot.control.camera",
-                          icon: "camera.fill", designHeight: 340) { cameraSection }
+                          icon: "camera.fill", defaultSize: .large) { cameraSection }
             }
             BoardCard("other", titleKey: "robot.control.other",
-                      icon: "ellipsis.circle", designHeight: 200) { leftovers }
+                      icon: "ellipsis.circle", defaultSize: .medium) { leftovers }
         }
     }
 
