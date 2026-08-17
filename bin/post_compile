@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Record which commit produced this slug, at build time.
+#
+# Heroku sets SOURCE_VERSION during the build and NOT at runtime, and the slug
+# has no .git directory — so a server asked "which build are you?" after the
+# fact genuinely cannot answer. HEROKU_SLUG_COMMIT would tell it, but only with
+# the dyno-metadata lab switched on, which is an account setting nobody
+# remembers and which was off here.
+#
+# That gap cost hours. "Did the deploy land?" was unanswerable from outside, so
+# every symptom had two possible causes — a bug, or an old server — and no way
+# to tell them apart. Writing the SHA into the slug closes it for good, with no
+# Heroku configuration at all.
+set -e
+echo "${SOURCE_VERSION:-unknown}" > cloud/app/_release.txt
+echo "-----> Recorded release ${SOURCE_VERSION:-unknown}"

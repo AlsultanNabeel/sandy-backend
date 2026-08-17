@@ -124,6 +124,68 @@ def register_devices_api(app, mongo_db=None):
             set_state(name, payload)
         return jsonify({"ok": True, "sent": sent, "payload": payload}), 200
 
+    @app.route("/api/diagnose", methods=["GET"])
+    @require_tenant
+    def api_diagnose(claims):
+        """One request that answers "why is this not showing up?".
+
+        Built after an afternoon of guessing. Every symptom — no text field, no
+        camera, no address — had the same three possible causes, and from
+        outside there was no way to tell which: the board never declared the
+        part, the server has an old catalogue, or the app is stale. Each fix was
+        a guess, and a wrong guess costs a deploy, a flash and a rebuild.
+
+        So this reports all three layers at once, in the order they have to
+        succeed. Read it top to bottom and the first line that disagrees with
+        the next one is the answer.
+        """
+        from app.config import RELEASE_ID
+        from app.features.device_store import list_devices
+        from app.features.node_provision import PART_CATALOGUE
+        from app.features.node_store import list_nodes
+
+        nodes = list_nodes()
+        devices = list_devices()
+
+        report = {
+            "server_release": RELEASE_ID,
+            "catalogue_knows": sorted(PART_CATALOGUE),
+            "nodes": [
+                {
+                    "node_id": n.get("node_id"),
+                    "online": n.get("online"),
+                    "firmware": n.get("firmware_version"),
+                    "last_seen": n.get("last_seen"),
+                    # What the hardware itself says it has. If a part is missing
+                    # here, no amount of server or app work will show it.
+                    "declared_outputs": [o.get("id") for o in (n.get("outputs") or [])],
+                    "telemetry_keys": sorted((n.get("telemetry") or {}).keys()),
+                    "ip": (n.get("telemetry") or {}).get("ip"),
+                    "board": (n.get("telemetry") or {}).get("board"),
+                }
+                for n in nodes
+            ],
+            "devices": [
+                {"name": d.get("name"), "type": d.get("control_type")}
+                for d in devices
+            ],
+        }
+
+        # The three questions worth answering before anyone opens the app.
+        declared = {o for n in nodes for o in
+                    [x.get("id") for x in (n.get("outputs") or [])]}
+        provisioned = {d.get("name") for d in devices}
+        report["checks"] = {
+            "declared_but_no_catalogue_entry":
+                sorted(declared - set(PART_CATALOGUE)),
+            "catalogue_has_but_board_never_declared":
+                sorted(set(PART_CATALOGUE) - declared),
+            "screen_device_exists": "sandy_screen" in provisioned,
+            "camera_devices_exist":
+                sorted(n for n in provisioned if n.startswith("cam_")),
+        }
+        return jsonify(report), 200
+
     @app.route("/api/devices/<name>/image", methods=["POST"])
     @require_tenant
     def api_devices_image(claims, name):

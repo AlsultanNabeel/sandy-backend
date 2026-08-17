@@ -205,6 +205,19 @@ def _resolve_release() -> str:
     makes a stale deploy look current — which is precisely the failure this is
     meant to expose.
     """
+    # Written into the slug at build time by bin/post_compile. This is the one
+    # source that works with no Heroku configuration: SOURCE_VERSION exists
+    # during the build and not at runtime, and the slug carries no .git — so
+    # unless the build writes it down, a running server genuinely cannot say
+    # which commit it is.
+    stamp = Path(__file__).resolve().parent / "_release.txt"
+    try:
+        val = stamp.read_text(encoding="utf-8").strip()
+        if val and val != "unknown":
+            return val[:7]
+    except OSError:
+        pass
+
     for var in ("HEROKU_SLUG_COMMIT", "SOURCE_VERSION", "GIT_COMMIT"):
         val = os.getenv(var, "").strip()
         if val:
