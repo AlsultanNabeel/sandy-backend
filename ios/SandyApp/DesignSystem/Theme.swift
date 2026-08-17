@@ -306,21 +306,3 @@ struct DemoBanner: View {
     }
 }
 
-/// حالة فاضية لطيفة (لما القائمة فاضية).
-struct EmptyStateView: View {
-    let icon: String
-    let message: String
-    var body: some View {
-        VStack(spacing: Theme.Spacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 40))
-                .foregroundColor(Theme.Colors.secondaryText)
-            Text(message)
-                .font(Theme.Typography.subheadline)
-                .foregroundColor(Theme.Colors.secondaryText)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.xl)
-    }
-}

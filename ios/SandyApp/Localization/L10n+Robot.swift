@@ -79,6 +79,7 @@ enum L10nRobot {
             "control.camera.stream.stop": .text("أوقف البث"),
             "control.camera.stream.address": .text("من %@"),
             "control.camera.stream.noAddress": .text("ما وصلني عنوان الكاميرا بعد. بيجي مع نبضتها — لو ضل فاضي، هي مش متّصلة."),
+            "control.card.body": .text("وشها ورقبتها وشاشتها وإضاءتها وكاميرتها"),
         ],
         en: [
             "apply":          .text("Run"),
@@ -149,6 +150,7 @@ enum L10nRobot {
             "control.camera.stream.stop": .text("Stop"),
             "control.camera.stream.address": .text("From %@"),
             "control.camera.stream.noAddress": .text("No address from the camera yet. It arrives with its heartbeat — if this stays empty, it is not connected."),
+            "control.card.body": .text("Her face, neck, screen, light and camera"),
         ]
     )
 }

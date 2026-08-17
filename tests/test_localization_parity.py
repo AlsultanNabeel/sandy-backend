@@ -216,3 +216,49 @@ def test_no_translation_key_leaked_into_a_system_icon_name():
         "a translation key ended up in an icon name — the symbol will not "
         "resolve and nothing will report it: " + ", ".join(offenders)
     )
+
+
+def test_every_swift_file_is_reachable_from_a_view_that_exists():
+    """A new .swift file that nothing references is a feature nobody can open.
+
+    This was the actual fault behind an afternoon of "I built it and it isn't
+    there": two new screens existed in the repository and had never reached the
+    Xcode build copy, which is a separate folder fed by scripts/sync_ios.sh. The
+    app compiled, ran, and simply did not contain them.
+
+    A test here cannot see the build copy — it is outside the repository. What it
+    can do is catch the other half of the same mistake: a view defined and never
+    navigated to. If a `struct X: View` is never mentioned anywhere else, either
+    it is dead or somebody forgot to wire it up, and both are worth knowing.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "ios" / "SandyApp"
+    sources = {p: p.read_text(encoding="utf-8") for p in root.rglob("*.swift")}
+    assert len(sources) > 50, "the Swift sources moved"
+
+    # Entry points that are referenced by the framework rather than by our code.
+    exempt = {"SandyApp", "MainTabView", "WidgetDashboard"}
+
+    orphans = []
+    for path, src in sources.items():
+        for match in re.finditer(r'^(?:private\s+)?struct\s+(\w+)\s*:\s*View\b', src, re.M):
+            name = match.group(1)
+            if name in exempt or name.endswith("Preview"):
+                continue
+            if re.match(r'^private\s', match.group(0)):
+                continue          # private helpers are used in their own file
+            # Count every mention anywhere, including this file, minus the
+            # definition itself. Requiring the use to be in ANOTHER file was
+            # wrong: RootView and FloatingTabBar are used only by their own
+            # neighbours, which is exactly how a root view is supposed to look.
+            mentions = sum(len(re.findall(r'\b' + name + r'\b', text))
+                           for text in sources.values())
+            if mentions <= 1:
+                orphans.append(f"{name} ({path.name})")
+
+    assert not orphans, (
+        "views defined and never opened from anywhere — dead, or forgotten "
+        "wiring: " + ", ".join(sorted(orphans))
+    )

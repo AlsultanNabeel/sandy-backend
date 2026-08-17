@@ -104,11 +104,22 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                     .reveal(order: 1, key: store.revealKey)
 
-                // التحكّم بالبيت — مدخل لسطح التحكّم بالأجهزة/الوحدات (نظام الإضافات).
-                // عنصر ثابت بلوحة المعلومات (مش ضمن العناصر القابلة لإعادة الترتيب).
-                NavigationLink { ControlView() } label: { homeControlCard }
+                // جسم ساندي — مدخل مستقل ع الرئيسية، مش مدفون جوا «التحكّم بالبيت».
+                //
+                // كان جوا صفحة البيت، وهاد بالضبط الخلط اللي فصلنا المحتوى عشان
+                // نفكّه: رقبتها ووشها مش أجهزة بيت. فصلنا القوائم وتركنا المدخل
+                // بالمكان الغلط، فحدا بيدوّر ع الروبوت بيفتح «البيت» ومنطقيًا
+                // ما بيفتحها.
+                //
+                // فوق التحكّم بالبيت: هي اللي بتلمسها كل يوم.
+                NavigationLink { RobotHomeEntry() } label: { robotBodyCard }
                     .buttonStyle(.plain)
                     .reveal(order: 1, key: store.revealKey)
+
+                // التحكّم بالبيت — الأجهزة اللي إنت ضفتها: لمبات، مراوح، ريموتات.
+                NavigationLink { ControlView() } label: { homeControlCard }
+                    .buttonStyle(.plain)
+                    .reveal(order: 2, key: store.revealKey)
 
                 if store.loadFailed {
                     SandyNotice(lang.s("home.loadFailed"),
@@ -278,6 +289,34 @@ struct HomeView: View {
 
     /// بطاقة مدخل لشاشة التحكّم بالبيت — أيقونة + عنوان + وصف + chevron.
     /// تتبع نمط HubRowCard/GlanceWideCard حتى تنسجم مع باقي اللوحة.
+    /// بطاقة جسم ساندي ع الرئيسية.
+    private var robotBodyCard: some View {
+        SandyCard {
+            HStack(alignment: .center, spacing: Theme.Spacing.md) {
+                Image(systemName: "figure.wave")
+                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(width: 38, height: 38)
+                    .background(Theme.Colors.accent.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control,
+                                                style: .continuous))
+
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text(lang.s("robot.control.title"))
+                        .font(Theme.Typography.headline)
+                        .foregroundColor(Theme.Colors.primaryText)
+                    Text(lang.s("robot.control.card.body"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.forward")
+                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            }
+        }
+    }
+
     private var homeControlCard: some View {
         SandyCard {
             HStack(alignment: .center, spacing: Theme.Spacing.md) {

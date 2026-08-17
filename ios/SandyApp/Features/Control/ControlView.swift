@@ -87,7 +87,6 @@ struct ControlView: View {
         if store.loading && store.devices.isEmpty && store.nodes.isEmpty {
             loadingState
         } else {
-            robotLink
             devicesSection
             nodesSection
         }
@@ -102,45 +101,6 @@ struct ControlView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Spacing.xxl)
-    }
-
-    // MARK: - مدخل صفحة الروبوت
-
-    /// جسم ساندي إله صفحته. هون بس المدخل.
-    ///
-    /// كان كل شي بقائمة وحدة: رقبتها ووشها ومايكاتها بين لمبة الصالة والمروحة.
-    /// هدول إشيان مختلفان — الأول جسمها والتاني بيتك — وبطاقة وحدة بتوصلك
-    /// للأول بتخلّي هاي الصفحة عن البيت فعلًا.
-    @ViewBuilder
-    private var robotLink: some View {
-        if !store.robotDevices.isEmpty {
-            NavigationLink {
-                RobotControlView(store: store)
-                    .environmentObject(state)
-                    .environmentObject(lang)
-            } label: {
-                HStack(spacing: Theme.Spacing.md) {
-                    Image(systemName: "figure.wave.circle.fill")
-                        .font(.system(size: Theme.Icon.lg))
-                        .foregroundColor(Theme.Colors.accent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(lang.s("robot.control.title"))
-                            .font(Theme.Typography.headline)
-                            .foregroundColor(Theme.Colors.primaryText)
-                        Text(String(format: lang.s("robot.control.count"),
-                                    store.robotDevices.count))
-                            .font(Theme.Typography.caption)
-                            .foregroundColor(Theme.Colors.secondaryText)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.forward")
-                        .font(.system(size: Theme.Icon.sm, weight: .semibold))
-                        .foregroundColor(Theme.Colors.tertiaryText)
-                }
-                .sandyCard()
-            }
-            .buttonStyle(.plain)
-        }
     }
 
     // MARK: - قسم الأجهزة (مجموعة حسب الغرفة)
