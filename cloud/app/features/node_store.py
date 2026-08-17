@@ -278,7 +278,15 @@ def set_node_status(code: str, online: bool = True,
         if capabilities is not None:
             update["capabilities"] = _clean_caps(capabilities)
         if isinstance(outputs, list):
-            update["outputs"] = _clean_outputs(outputs)
+            # This path is keyed by pairing code, not node id, so the merge needs
+            # the id looked up first — the same two-boards-one-node rule applies
+            # here as on the heartbeat path, and having one of them replace while
+            # the other merges is exactly the kind of split that produces a bug
+            # nobody can reproduce.
+            existing = get_db()[_COLL].find_one({"code_hash": _hash_code(code)},
+                                                {"node_id": 1})
+            update["outputs"] = _merge_outputs(
+                str((existing or {}).get("node_id", "")), outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
         r = get_db()[_COLL].update_one(
@@ -293,6 +301,55 @@ def set_node_status(code: str, online: bool = True,
 
 
 # ── MQTT ingest (firmware speaks node_id in the topic; runs outside a tenant) ──
+
+# ── Two boards, one node ─────────────────────────────────────────────────────
+#
+# The brain and the camera share a node id: the camera is part of Sandy, not a
+# second box. So two different heartbeats arrive five seconds apart, each
+# describing a different half of the same robot.
+#
+# Replacing on write made them erase each other in a loop. The brain's heartbeat
+# wiped every `cam/` output; the camera's wiped the microphone levels and the
+# brain's address; five seconds later the brain wiped the camera's. Whatever you
+# asked for was there roughly half the time, and which half depended on when you
+# looked — so "the camera has no address" and "the address is fine" were both
+# true, minutes apart, with nothing changed in between.
+#
+# So both merge. A heartbeat now says what its own board has and stays silent
+# about the other's, which is all it ever knew anyway.
+
+def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Replace only the namespace this heartbeat speaks for.
+
+    The camera's outputs are `cam/`-prefixed and the brain's are not, so the
+    prefix is the boundary: a list containing `cam/` entries owns the `cam/`
+    entries, and a list without them owns the rest.
+    """
+    fresh = _clean_outputs(incoming)
+    is_camera = any(str(o.get("id", "")).startswith("cam/") for o in fresh)
+
+    existing = (get_node_any_tenant(node_id) or {}).get("outputs") or []
+    kept = [
+        o for o in existing
+        if isinstance(o, dict)
+        and str(o.get("id", "")).startswith("cam/") != is_camera
+    ]
+    return kept + fresh
+
+
+def _merge_telemetry(node_id: str, incoming: Dict[str, Any]) -> Dict[str, Any]:
+    """Update the keys this heartbeat carries; leave the others alone.
+
+    A camera heartbeat has no opinion about the microphone levels, and a brain
+    heartbeat has none about the camera. Overwriting with silence is not a
+    correction — it is forgetting.
+    """
+    fresh = _clean_telemetry(incoming)
+    existing = (get_node_any_tenant(node_id) or {}).get("telemetry") or {}
+    if not isinstance(existing, dict):
+        existing = {}
+    return {**existing, **fresh}
+
 
 def get_node_any_tenant(node_id: str) -> Optional[Dict[str, Any]]:
     """One node by id, from the raw collection, ignoring tenant scope.
@@ -324,11 +381,11 @@ def ingest_status(node_id: str, online: bool = True,
         if capabilities is not None:
             update["capabilities"] = _clean_caps(capabilities)
         if isinstance(outputs, list):
-            update["outputs"] = _clean_outputs(outputs)
+            update["outputs"] = _merge_outputs(node_id, outputs)
         if firmware_version:
             update["firmware_version"] = str(firmware_version)[:32]
         if telemetry is not None:
-            update["telemetry"] = _clean_telemetry(telemetry)
+            update["telemetry"] = _merge_telemetry(node_id, telemetry)
         node_id = (node_id or "").strip()
         r = get_db()[_COLL].update_one({"node_id": node_id}, {"$set": update})
         if r.matched_count == 0:

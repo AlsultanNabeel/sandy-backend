@@ -180,6 +180,26 @@ class RoomDeviceClient:
             return False
         return self._publish(topic, str(payload))
 
+    def publish_service(self, topic: str, payload: str) -> bool:
+        """Publish on a node's service channel (camera commands, and only that).
+
+        Separate from `send_to_topic` because the two authorise differently and
+        conflating them is what broke the camera. `send_to_topic` asks "is there
+        a device whose transport builds this topic?" — right for a control, and
+        wrong for `cam/command`, which is a channel rather than a device, so
+        every publish was refused with no error anyone could see.
+
+        The ownership check for this one lives at the call site, where the thing
+        being checked is the node. Keeping it there rather than duplicating a
+        second rule here means there is exactly one place per channel that
+        decides, instead of two that can disagree.
+        """
+        topic = (topic or "").strip()
+        if not topic.startswith("sandy/node/") or "/cam/" not in topic:
+            logger.warning("[room_device] publish_service refused: %s", topic)
+            return False
+        return self._publish(topic, str(payload))
+
     def send(self, device: str, value: str) -> bool:
         """Send one normalized command. Returns False if invalid, offline, or the
         caller doesn't own the room (only the owner may drive his hardware)."""

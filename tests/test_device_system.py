@@ -825,3 +825,73 @@ def test_two_boards_under_one_node_id_do_not_erase_each_other(db):
 
         # and its address landed, which is how anyone finds the camera at all
         assert node_store.get_node("sandy0002")["telemetry"]["ip"] == "192.168.1.117"
+
+
+def test_the_two_boards_stop_erasing_each_other(db):
+    """Brain and camera share a node id; each heartbeat must speak only for itself.
+
+    This is the bug behind "the camera has no address" and "the address is fine"
+    both being true minutes apart with nothing changed. Every write replaced the
+    whole field, so the brain's heartbeat wiped the camera's outputs and address,
+    the camera's wiped the microphone levels, and five seconds later it swapped
+    back. Whatever you looked for was there about half the time.
+
+    Ten alternating heartbeats: if the merge is wrong, one side is gone by the
+    end. A single round trip would pass either way, which is why this runs ten.
+    """
+    from app.integrations.mqtt_ingest import _ingest_cam_status
+
+    BRAIN = [{"id": "servo", "kind": "servo"}, {"id": "screen", "kind": "pwm"}]
+    BRAIN_TELEMETRY = {"mic_l": 40, "mic_r": 44, "volume": 80, "ip": "192.168.1.102"}
+    CAM_JSON = ('{"outputs":[{"id":"flash","kind":"relay"}],'
+                '"ip":"192.168.1.117","board":"sandy-cam"}')
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandy0001", "ساندي")
+
+        for _ in range(5):
+            node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.1",
+                                     telemetry=BRAIN_TELEMETRY)
+            _ingest_cam_status("sandy0001", CAM_JSON)
+
+        node = node_store.get_node("sandy0001")
+        outputs = {o["id"] for o in node["outputs"]}
+        assert {"servo", "screen", "cam/flash"} <= outputs, outputs
+
+        tele = node["telemetry"]
+        # The camera's address is the last one written, and the brain's readings
+        # survived it — that is the whole point.
+        assert tele.get("ip") == "192.168.1.117"
+        assert tele.get("board") == "sandy-cam"
+        assert tele.get("mic_l") == 40 and tele.get("volume") == 80
+
+        # ...and the other order ends with the brain's address, camera intact.
+        node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.1",
+                                 telemetry=BRAIN_TELEMETRY)
+        node = node_store.get_node("sandy0001")
+        assert node["telemetry"]["ip"] == "192.168.1.102"
+        assert node["telemetry"]["board"] == "sandy-cam"
+        assert "cam/flash" in {o["id"] for o in node["outputs"]}
+
+
+def test_the_cameras_command_channel_is_not_mistaken_for_a_device(db):
+    """`cam/command` is a channel, not a control, and authorising it as one
+    silently refused every photo.
+
+    send_to_topic authorises by finding a device whose transport builds the
+    topic. No device produces `cam/command` — it is the camera's service channel
+    — so every snapshot request was dropped at the boundary and the app reported
+    that the camera might be off. Nothing had left the server.
+    """
+    from app.features.device_store import tenant_owns_topic
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandy0001", "ساندي")
+        node_store.ingest_status("sandy0001", True, [],
+                                 [{"id": "cam/flash", "kind": "relay"}], "0.3.0")
+
+        # Still false — and correctly so. The point is that nothing routes a
+        # camera command through this check any more.
+        assert tenant_owns_topic("sandy/node/sandy0001/cam/command") is False
+        # A real control still authorises the normal way.
+        assert tenant_owns_topic("sandy/node/sandy0001/cam/flash") is True

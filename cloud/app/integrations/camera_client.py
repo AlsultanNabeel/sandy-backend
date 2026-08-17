@@ -117,11 +117,30 @@ def on_chunk(node_id: str, payload: str) -> None:
 
 
 def _send(node_id: str, command: Dict[str, Any]) -> bool:
+    """Publish on the camera's command channel.
+
+    `send_to_topic` is not usable here and the reason is worth stating, because
+    the symptom was maddening: it authorises by finding a DEVICE whose transport
+    produces the topic, and `cam/command` is not a device. It is the camera's
+    service channel — the same one snapshots and bursts have always used. So
+    every publish was refused, and "take a photo" reported that the camera might
+    be off or the command had not arrived. The command had never left the server.
+
+    Ownership is still enforced, on the thing that actually has an owner: the
+    node. A tenant-scoped lookup means another tenant's camera is simply not
+    found, which is the same guarantee by a more honest route.
+    """
+    from app.features.node_store import get_node
     from app.integrations.room_device import get_room_device_client
+
+    node_id = (node_id or "").strip()
+    if not node_id or get_node(node_id) is None:
+        logger.warning("[camera] refused: %s is not a node this caller owns", node_id)
+        return False
 
     topic = f"sandy/node/{node_id}/cam/command"
     try:
-        return get_room_device_client().send_to_topic(topic, json.dumps(command))
+        return get_room_device_client().publish_service(topic, json.dumps(command))
     except Exception as e:  # noqa: BLE001
         logger.warning("[camera] publish failed: %s", e)
         return False
