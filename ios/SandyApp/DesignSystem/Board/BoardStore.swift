@@ -42,21 +42,39 @@ final class BoardStore: ObservableObject {
     ///
     /// أي بطاقة جديدة — أضفناها بتحديث — بتقعد بمكانها الطبيعي من الكود، مش
     /// بالآخر. بطاقة جديدة نازلة تحت آخر إشي رتّبته بتبيّن كأنها غلط.
+    /// الرُّتَب مبنيّة بخطوة مستقلة، والمقارنة بتقرا منها وبس.
+    ///
+    /// كانت المقارنة سطر واحد فيه قاموسان و`map` وتحويل نوع ومعامِلا `??` —
+    /// والمترجم وقف عاجز عن حلّه («unable to type-check in reasonable time»).
+    /// المشكلة مش الحجم، المشكلة إنه كل جزء من التعبير إله أنواع محتملة متعددة،
+    /// فالاحتمالات بتتضاعف. الأنواع الصريحة هون بتقطع الشجرة قبل ما تكبر.
     func arrange<T: BoardIdentifiable>(_ cards: [T]) -> [T] {
         guard !order.isEmpty else { return cards }
-        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-        var inherited: [String: Double] = [:]
-        var last = -1.0
-        var run = 0
-        for c in cards {
-            if let r = rank[c.boardID] { last = Double(r); run = 0 } else {
+
+        var rank: [String: Double] = [:]
+        for (i, id) in order.enumerated() {
+            rank[id] = Double(i)
+        }
+
+        // البطاقة اللي ما إلها ترتيب محفوظ بتقعد جنب اللي قبلها بالكود، مش
+        // بالآخر — بطاقة جديدة نازلة تحت آخر إشي رتّبته بتبيّن كأنها غلط.
+        var last: Double = -1
+        var run: Double = 0
+        for card in cards {
+            let id: String = card.boardID
+            if let r = rank[id] {
+                last = r
+                run = 0
+            } else {
                 run += 1
-                inherited[c.boardID] = last + Double(run) / 1000
+                rank[id] = last + run / 1000
             }
         }
-        return cards.sorted {
-            (rank[$0.boardID].map(Double.init) ?? inherited[$0.boardID] ?? 0)
-                < (rank[$1.boardID].map(Double.init) ?? inherited[$1.boardID] ?? 0)
+
+        return cards.sorted { (a: T, b: T) -> Bool in
+            let ra: Double = rank[a.boardID] ?? 0
+            let rb: Double = rank[b.boardID] ?? 0
+            return ra < rb
         }
     }
 

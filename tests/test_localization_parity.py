@@ -317,3 +317,44 @@ def test_no_two_layout_systems():
     assert not rivals, (
         "a second layout system is back alongside CardBoard — pick one: "
         f"{rivals}")
+
+
+def test_no_expression_the_swift_compiler_will_refuse_to_solve():
+    """Swift gives up on some expressions, and the failure lands in the build.
+
+    Written after shipping one: a sort closure with a generic element type, two
+    dictionary lookups, a `.map(Double.init)` and two `??` — all on one line and
+    all with types left to inference. The compiler answered "unable to type-check
+    this expression in reasonable time" and the owner's build stopped.
+
+    The trap is that it is not about length. Each piece of that line had several
+    possible types, and the combinations multiply; naming the types anywhere in
+    the chain collapses it instantly. Which is why the rule below is narrow: a
+    closure with inferred parameters, doing arithmetic or chained optional
+    fallbacks, inside a generic function. Plain `a ?? "" ` on a concrete type is
+    fine and there is a lot of it in this app.
+    """
+    import re
+
+    root = Path(__file__).resolve().parent.parent / "ios" / "SandyApp"
+    offenders = []
+
+    for path in root.rglob("*.swift"):
+        text = path.read_text(encoding="utf-8")
+        # Only inside generic functions — that is where inference explodes.
+        for m in re.finditer(r'func\s+\w+\s*<[^>]+>\s*\(', text):
+            body = text[m.end():m.end() + 2000]
+            for num, line in enumerate(body.splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("//"):
+                    continue
+                inferred_closure = "{ $" in stripped or re.search(r'\{\s*\$0', stripped)
+                fallbacks = stripped.count("??")
+                converts = ".map(" in stripped or "Double(" in stripped or "Int(" in stripped
+                if fallbacks >= 2 and converts:
+                    line_no = text[:m.end()].count("\n") + num
+                    offenders.append(f"{path.name}:{line_no}  {stripped[:70]}")
+
+    assert not offenders, (
+        "expressions Swift may refuse to type-check — name the types or split "
+        f"them up before this reaches a build: {offenders}")
