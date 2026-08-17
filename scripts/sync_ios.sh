@@ -63,3 +63,46 @@ if [ -d "$TEST_SRC" ]; then
   done
   echo "iOS tests synced -> $TEST_DST"
 fi
+
+# 4) verify, out loud.
+#
+# The whole point of this script is that Xcode compiles what the repo contains,
+# and for a while nobody could tell whether it had. Twice a change was described
+# as shipped when the build copy still held the old file — once because the
+# script had simply not been run, once because a brand new directory existed only
+# in the repo. Both times the owner rebuilt, saw no difference, and reasonably
+# concluded the fix did not work.
+#
+# So the script now proves it instead of claiming it: every .swift in the repo
+# must exist in the build copy with identical contents, and nothing may be left
+# behind. If that is not true it says which files and exits non-zero.
+echo ""
+echo "── verifying the build copy matches the repo"
+BAD=0
+while IFS= read -r rel; do
+  rel="${rel#./}"
+  if [ ! -f "$DST$rel" ]; then
+    echo "  MISSING in build copy: $rel"; BAD=1
+  elif ! cmp -s "$SRC$rel" "$DST$rel"; then
+    echo "  DIFFERS in build copy: $rel"; BAD=1
+  fi
+done < <( cd "$SRC" && find . -name '*.swift' -print )
+
+# Empty directories left by an earlier copy are harmless, but a stray *file*
+# is not: the Xcode target uses synchronised folders, so anything sitting in
+# there gets compiled — including a duplicate of a type that already exists.
+while IFS= read -r rel; do
+  rel="${rel#./}"
+  if [ ! -f "$SRC$rel" ]; then
+    echo "  EXTRA in build copy (will be compiled): $rel"; BAD=1
+  fi
+done < <( cd "$DST" && find . -name '*.swift' -print )
+
+if [ "$BAD" -ne 0 ]; then
+  echo ""
+  echo "❌ the build copy does NOT match. Xcode would compile something else."
+  exit 1
+fi
+
+COUNT=$( cd "$SRC" && find . -name '*.swift' | wc -l | tr -d ' ' )
+echo "✅ build copy matches the repo — $COUNT Swift files, byte for byte"
