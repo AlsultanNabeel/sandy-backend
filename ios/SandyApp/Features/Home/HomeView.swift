@@ -28,12 +28,12 @@ struct HomeView: View {
     /// مصدر الحقيقة للرئيسية (يملك اللقطة + الجلب، مستقل عن الشاشة) — فالسحب
     /// الملغى ما يمسح لوحتك بأصفار.
     @StateObject private var store = HomeStore()
+    @StateObject private var board = DashboardStore(id: "home", catalog: [])
     /// تنبيه اليوم من ساندي (سؤال تعارف أو جملة مهام بشخصيتها) — المرحلة السابعة.
     @StateObject private var nudgeStore = DailyNudgeStore()
     /// يفتح حساب المستخدم (ProfileView) كـ sheet — الحساب مش تبويب.
     @State private var showProfile = false
     /// يفتح ورقة إعادة ترتيب عناصر الرئيسية.
-    @State private var showReorder = false
     /// يفتح نافذة الإضافة السريعة (مهمة/تذكير/عادة/… بنقرة، بلا حكي).
     @State private var showQuickAdd = false
 
@@ -43,15 +43,6 @@ struct HomeView: View {
         .navigationTitle(lang.s("home.title"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // أعلى-بداية: زر إعادة ترتيب عناصر الرئيسية.
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showReorder = true
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
-                }
-                .accessibilityLabel(lang.s("home.reorder"))
-            }
             // أعلى-نهاية: زر أفاتار ساندي يفتح حسابك (مش تبويب).
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -68,9 +59,6 @@ struct HomeView: View {
             // حتى يظهر عنوانها وأزرار التعديل/الخروج صح داخل الـ sheet.
             NavigationStack { ProfileView() }
         }
-        .sheet(isPresented: $showReorder) {
-            HomeReorderSheet(store: store)
-        }
         // نافذة الإضافة السريعة — تطفو بالنص (SandyPopup بخلفية شفافة).
         .fullScreenCover(isPresented: $showQuickAdd) {
             QuickAddSheet()
@@ -84,72 +72,72 @@ struct HomeView: View {
 
     // MARK: - المحتوى القابل للتمرير
 
+    /// التحية ترويسة ثابتة، وتحتها لوح ودجات زي «يومي» و«حياتي».
+    ///
+    /// التحية مش ودجة: هي بتقول لك مين إنت وأي وقت الآن، وما إلها معنى مربّع
+    /// جنب الطقس ولا معنى محذوفة. الباقي كله إلك — ترتيبه وحجمه وإذا بدك
+    /// تشيله أصلًا.
     private var scrollContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
-                greeting
-                    .reveal(order: 0, key: store.revealKey)
-
-                // تنبيه اليوم — مبادرة ساندي (يخفي نفسه لو ما في محتوى/أُجيب/أُغلق).
-                DailyNudgeCard(store: nudgeStore)
-                    .reveal(order: 1, key: store.revealKey)
-
-                // العنصر الأساسي بالرئيسية: إضافة سريعة (بدّلت بطاقة "احكي مع ساندي").
-                quickAddCard
-                    .reveal(order: 1, key: store.revealKey)
-
-                // بطاقة الطقس — عنصر ثابت بلوحة المعلومات (مش ضمن العناصر القابلة
-                // لإعادة الترتيب). تجلب طقسها بنفسها، والنقر يفتح الشاشة الكاملة.
-                NavigationLink { WeatherView() } label: { WeatherCard() }
-                    .buttonStyle(.plain)
-                    .reveal(order: 1, key: store.revealKey)
-
-                // جسم ساندي — مدخل مستقل ع الرئيسية، مش مدفون جوا «التحكّم بالبيت».
-                //
-                // كان جوا صفحة البيت، وهاد بالضبط الخلط اللي فصلنا المحتوى عشان
-                // نفكّه: رقبتها ووشها مش أجهزة بيت. فصلنا القوائم وتركنا المدخل
-                // بالمكان الغلط، فحدا بيدوّر ع الروبوت بيفتح «البيت» ومنطقيًا
-                // ما بيفتحها.
-                //
-                // فوق التحكّم بالبيت: هي اللي بتلمسها كل يوم.
-                NavigationLink { RobotHomeEntry() } label: { robotBodyCard }
-                    .buttonStyle(.plain)
-                    .reveal(order: 1, key: store.revealKey)
-
-                // التحكّم بالبيت — الأجهزة اللي إنت ضفتها: لمبات، مراوح، ريموتات.
-                NavigationLink { ControlView() } label: { homeControlCard }
-                    .buttonStyle(.plain)
-                    .reveal(order: 2, key: store.revealKey)
-
-                if store.loadFailed {
-                    SandyNotice(lang.s("home.loadFailed"),
-                                kind: .gentleWarning)
-                        .reveal(order: 1, key: store.revealKey)
-                }
-
-                // العناصر بالترتيب الذي اختاره المستخدم (يُعاد ترتيبه من ورقة الترتيب).
-                ForEach(Array(store.order.enumerated()), id: \.element.id) { idx, block in
-                    blockView(block)
-                        .reveal(order: idx + 1, key: store.revealKey)
-                }
-
-                // مساحة سفلية حتى ما تغطّي ساندي العائمة آخر بطاقة.
-                Color.clear.frame(height: 96)
-            }
-            .padding(Theme.Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // حركة لطيفة عند تبدّل اللقطة (الأرقام تتحرّك بنعومة).
-            .animation(.spring(response: 0.5, dampingFraction: 0.85), value: store.revealKey)
+        VStack(spacing: 0) {
+            greeting
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.top, Theme.Spacing.sm)
+            WidgetDashboard(store: board)
         }
+        // الكتالوج بيشاور ع بطاقات هالشاشة، فما بينبنى وقت الإنشاء — `self`
+        // لسا ما وُجدت ساعتها.
+        .onAppear { board.updateCatalog(catalog) }
     }
 
-    /// يبني العنصر المطلوب حسب نوعه — يخلّي ترتيب العرض مدفوعًا بـ `store.order`.
-    @ViewBuilder
-    private func blockView(_ block: HomeBlock) -> some View {
-        switch block {
-        case .proactive: proactiveCard
-        case .glance:    glanceSection
-        }
+    /// كتالوج الرئيسية.
+    ///
+    /// **بطاقاتك هي المحتوى، مش أيقونات مكانها.** أول محاولة حطّيت أيقونة
+    /// وعنوان بكل مربّع وخلّيت الضغط يفتح الشاشة — وهاد كان بيرمي البطاقات
+    /// المصمّمة كلها ويرجّع الرئيسية قائمة اختصارات. الودجة بتعرض البطاقة نفسها،
+    /// والضغط ع ترويستها بيفتح الشاشة الكاملة.
+    ///
+    /// والأحجام الابتدائية هي شكل الصفحة اللي كانت عليه — عرض كامل. اللي ما
+    /// بيلمس إشي بيلاقي صفحته زي ما تركها. تحديث بيعيد ترتيب صفحة حدا بلا ما
+    /// يطلبه بيبيّن كأنه عطل مش كأنه ميزة.
+    private var catalog: [WidgetSpec] {
+        [
+            WidgetSpec(key: "quickAdd", icon: "plus.circle.fill",
+                       titleKey: "home.block.quickAdd",
+                       tint: Theme.Colors.accent, defaultCols: 2,
+                       content: { AnyView(quickAddCard) }) { AnyView(QuickAddSheet()) },
+
+            WidgetSpec(key: "nudge", icon: "sparkles",
+                       titleKey: "home.block.nudge",
+                       tint: Theme.Colors.warn, defaultCols: 2,
+                       content: { AnyView(DailyNudgeCard(store: nudgeStore)) }) {
+                AnyView(DailyNudgeCard(store: nudgeStore))
+            },
+
+            WidgetSpec(key: "weather", icon: "cloud.sun.fill",
+                       titleKey: "home.block.weather",
+                       tint: Theme.Colors.accentDeep, defaultCols: 2, defaultRows: 2,
+                       content: { AnyView(WeatherCard()) }) { AnyView(WeatherView()) },
+
+            WidgetSpec(key: "robotBody", icon: "figure.wave",
+                       titleKey: "home.block.robotBody",
+                       tint: Theme.Colors.accent, defaultCols: 2,
+                       content: { AnyView(robotBodyCard) }) { AnyView(RobotHomeEntry()) },
+
+            WidgetSpec(key: "homeControl", icon: "house.fill",
+                       titleKey: "home.block.homeControl",
+                       tint: Theme.Colors.success, defaultCols: 2,
+                       content: { AnyView(homeControlCard) }) { AnyView(ControlView()) },
+
+            WidgetSpec(key: "proactive", icon: "sparkles",
+                       titleKey: "home.block.proactive",
+                       tint: Theme.Colors.accentDeep, defaultCols: 2,
+                       content: { AnyView(proactiveCard) }) { AnyView(proactiveCard) },
+
+            WidgetSpec(key: "glance", icon: "square.grid.2x2.fill",
+                       titleKey: "home.block.glance",
+                       tint: Theme.Colors.warn, defaultCols: 2, defaultRows: 2,
+                       content: { AnyView(glanceSection) }) { AnyView(TimelineTabView()) },
+        ]
     }
 
     // MARK: - التحية (حسب الوقت + الاسم)

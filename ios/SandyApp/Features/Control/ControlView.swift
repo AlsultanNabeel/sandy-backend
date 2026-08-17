@@ -8,6 +8,7 @@ struct ControlView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @StateObject private var store = DevicesStore()
+    @StateObject private var board = DashboardStore(id: "control", catalog: [])
 
     @State private var showAddDevice = false
     @State private var editingDevice: DeviceItem?
@@ -86,9 +87,53 @@ struct ControlView: View {
     private var content: some View {
         if store.loading && store.devices.isEmpty && store.nodes.isEmpty {
             loadingState
-        } else {
+        } else if store.devices.isEmpty {
+            // ما في إشي يترتّب بعد — الحالة الفاضية بتشرح شو الخطوة الجاية.
             devicesSection
             nodesSection
+        } else {
+            WidgetDashboard(store: board)
+                .onAppear { board.updateCatalog(catalog) }
+                .onChange(of: store.roomGroups.map(\.room)) { _, _ in
+                    board.updateCatalog(catalog)
+                }
+        }
+    }
+
+    /// كل غرفة ودجة.
+    ///
+    /// الغرفة هي الوحدة اللي الناس بتفكّر فيها — «ورّيني الصالة»، مش «ورّيني
+    /// الجهاز رقم سبعة». فالترتيب والحجم بيشتغلوا ع الغرف: غرفة النوم فوق
+    /// وكبيرة، والمخزن تحت ومربّع.
+    ///
+    /// والمفتاح اسم الغرفة: ثابت طول ما الاسم ثابت. غيّرت الاسم؟ بترجع لمكانها
+    /// الطبيعي — وهاد أوضح من إنها تضل مكانها باسم جديد وما حدا يعرف ليش.
+    private var catalog: [WidgetSpec] {
+        store.roomGroups.map { group in
+            let title = group.room.isEmpty ? lang.s("control.noRoom") : group.room
+            return WidgetSpec(key: "room/\(group.room)",
+                              icon: "square.grid.2x2.fill",
+                              titleKey: title,
+                              tint: Theme.Colors.accent,
+                              defaultCols: 2, defaultRows: 2,
+                              content: { AnyView(roomBody(group)) }) {
+                AnyView(roomBody(group))
+            }
+        } + [
+            WidgetSpec(key: "nodes", icon: "cpu.fill",
+                       titleKey: "control.section.nodes",
+                       tint: Theme.Colors.accentDeep,
+                       defaultCols: 2,
+                       content: { AnyView(nodesSection) }) { AnyView(nodesSection) },
+        ]
+    }
+
+    private func roomBody(_ group: DevicesStore.RoomGroup) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            ForEach(group.devices) { device in
+                DeviceCard(device: device, store: store,
+                           onEdit: { editingDevice = device })
+            }
         }
     }
 

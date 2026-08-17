@@ -40,12 +40,22 @@ struct WidgetSpec: Identifiable {
     let tint: Color
     let destination: () -> AnyView
     var content: (() -> AnyView)?
+    /// الحجم اللي بتبدأ فيه قبل ما المستخدم يلمسها.
+    ///
+    /// كان الكل بيبدأ مربّع واحد بواحد. هاد صح للوح ميزات — أيقونات بتفتح
+    /// شاشات — وغلط لصفحة بطاقاتها هي المحتوى: التحية والطقس بمربّع بينقصّوا،
+    /// والمستخدم لازم يكبّر ست بطاقات بإيده قبل ما تصير صفحته مفيدة. الافتراضي
+    /// لازم يكون شكلها الطبيعي، والتصغير قراره هو.
+    var defaultCols: Int = 1
+    var defaultRows: Int = 1
 
     init(key: String, icon: String, titleKey: String, tint: Color,
+         defaultCols: Int = 1, defaultRows: Int = 1,
          content: (() -> AnyView)? = nil,
          destination: @escaping () -> AnyView) {
         self.key = key; self.icon = icon; self.titleKey = titleKey
         self.tint = tint; self.content = content; self.destination = destination
+        self.defaultCols = defaultCols; self.defaultRows = defaultRows
     }
     var id: String { key }
 }
@@ -57,12 +67,40 @@ final class DashboardStore: ObservableObject {
     @Published var serverHidden: Set<String> = []
 
     private let storageKey: String
-    let catalog: [WidgetSpec]
+    private(set) var catalog: [WidgetSpec]
 
     init(id: String, catalog: [WidgetSpec]) {
         self.storageKey = "dashboard.\(id)"
         self.catalog = catalog
         load()
+    }
+
+    /// كتالوج بيتغيّر مع البيانات — غرف البيت، أقسام الروبوت، أي إشي مصدره
+    /// الخادم مش الكود.
+    ///
+    /// الكتالوج كان ثابت وقت الإنشاء، وهاد بيمشي للتبويبات اللي ميزاتها مكتوبة
+    /// بالكود. بس غرف البيت بتوصل بعد التحميل، وواحدة جديدة كانت بتنضاف
+    /// للكتالوج بعد ما الشبكة بنَت حالها — يعني ما بتظهر لحدّ ما تسكّر التبويب
+    /// وتفتحه. غرفة ضفتها من دقيقة وما بتبيّن بتبيّن كأنها ما انحفظت.
+    ///
+    /// الترتيب والأحجام المحفوظة بتضل: الدمج بالمفتاح، فالغرفة اللي إلها مكان
+    /// بتقعد فيه، والجديدة بتنضاف بالآخر، واللي انحذفت بتختفي بلا ما تترك مطرح
+    /// فاضي.
+    func updateCatalog(_ new: [WidgetSpec]) {
+        let newKeys = new.map(\.key)
+        guard newKeys != catalog.map(\.key) else { return }
+        catalog = new
+
+        var merged = items.filter { newKeys.contains($0.key) }
+        let present = Set(merged.map(\.key))
+        for k in newKeys where !present.contains(k) {
+            let s = new.first { $0.key == k }
+            merged.append(DashboardItem(key: k,
+                                        cols: s?.defaultCols ?? 1,
+                                        rows: s?.defaultRows ?? 1))
+        }
+        items = merged
+        persist()
     }
 
     func spec(_ key: String) -> WidgetSpec? { catalog.first { $0.key == key } }
@@ -116,7 +154,7 @@ final class DashboardStore: ObservableObject {
         var merged = saved.filter { spec($0.key) != nil }
         let present = Set(merged.map(\.key))
         for s in catalog where !present.contains(s.key) {
-            merged.append(DashboardItem(key: s.key))
+            merged.append(DashboardItem(key: s.key, cols: s.defaultCols, rows: s.defaultRows))
         }
         items = merged
     }

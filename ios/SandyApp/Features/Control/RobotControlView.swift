@@ -18,6 +18,7 @@ struct RobotControlView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: DevicesStore
+    @StateObject private var board = DashboardStore(id: "robot", catalog: [])
 
     @State private var pickedImage: PhotosPickerItem?
     @State private var sendingImage = false
@@ -49,39 +50,107 @@ struct RobotControlView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
-                if store.robotDevices.isEmpty {
-                    emptyState
-                } else {
-                    section("robot.control.expression",
-                            hint: "robot.control.expression.hint",
-                            parts: [Part.face, Part.head, Part.gesture])
-
-                    screenSection
-
-                    section("robot.control.light",
-                            hint: "robot.control.light.hint",
-                            parts: [Part.led])
-
-                    section("robot.control.sound",
-                            hint: "robot.control.sound.hint",
-                            parts: [Part.volume, Part.speakerTest, Part.buzzer,
-                                    Part.micLeft, Part.micRight,
-                                    Part.micLeftGain, Part.micRightGain, Part.noise])
-
-                    cameraSection
-
-                    leftovers
-                }
-
-                Color.clear.frame(height: Theme.Spacing.xl)
+        Group {
+            if store.robotDevices.isEmpty {
+                ScrollView { emptyState.padding(Theme.Spacing.md) }
+            } else {
+                WidgetDashboard(store: board)
             }
-            .padding(Theme.Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(lang.s("robot.control.title"))
         .refreshable { await store.load(api: state.api) }
+        // الكتالوج بيتبنى من القطع اللي اللوح أعلنها فعليًا، فبيوصل بعد
+        // التحميل مش وقت الإنشاء — ولوح بلا كاميرا ما بيوريك قسم كاميرا فاضي.
+        .onAppear { board.updateCatalog(catalog) }
+        // بنراقب الأسماء مش الكائنات: `DeviceItem` مش `Equatable`، وكمان
+        // الكتالوج بيتغيّر لمّا تظهر قطعة أو تختفي — مش لمّا تتغيّر قيمتها.
+        // مراقبة القيم كانت بتعيد بناء الكتالوج كل ما تحرّك مقبض صوت.
+        .onChange(of: store.robotDevices.map(\.name)) { _, _ in
+            board.updateCatalog(catalog)
+        }
+    }
+
+    /// أقسام الروبوت كودجات، والموجود منها بس.
+    ///
+    /// الترتيب اللي كان — بتشوفه، بتسمعه، بتصوّر — تخمين معقول عن أغلب الناس
+    /// ومش معرفة عن أي حدا. اللي بيحرّك الرقبة كل يوم وبيلمس الصوت مرّة بالشهر
+    /// بده العكس، وهو أدرى مني.
+    private var catalog: [WidgetSpec] {
+        var out: [WidgetSpec] = []
+        func has(_ names: [String]) -> Bool {
+            store.robotDevices.contains { names.contains($0.name) }
+        }
+
+        if has([Part.face, Part.head, Part.gesture]) {
+            out.append(WidgetSpec(key: "expression", icon: "face.smiling",
+                                  titleKey: "robot.control.expression",
+                                  tint: Theme.Colors.accent,
+                                  defaultCols: 2, defaultRows: 2,
+                                  content: { AnyView(expressionSection) }) {
+                AnyView(expressionSection)
+            })
+        }
+        if has([Part.screen]) {
+            out.append(WidgetSpec(key: "screen", icon: "textformat",
+                                  titleKey: "robot.control.screen",
+                                  tint: Theme.Colors.accentDeep,
+                                  defaultCols: 2, defaultRows: 2,
+                                  content: { AnyView(screenSection) }) {
+                AnyView(screenSection)
+            })
+        }
+        if has([Part.led]) {
+            out.append(WidgetSpec(key: "light", icon: "lightbulb.fill",
+                                  titleKey: "robot.control.light",
+                                  tint: Theme.Colors.warn,
+                                  defaultCols: 2, defaultRows: 2,
+                                  content: { AnyView(lightSection) }) {
+                AnyView(lightSection)
+            })
+        }
+        if has([Part.volume, Part.speakerTest, Part.buzzer, Part.micLeft, Part.micRight]) {
+            out.append(WidgetSpec(key: "sound", icon: "speaker.wave.2.fill",
+                                  titleKey: "robot.control.sound",
+                                  tint: Theme.Colors.success,
+                                  defaultCols: 2, defaultRows: 3,
+                                  content: { AnyView(soundSection) }) {
+                AnyView(soundSection)
+            })
+        }
+        if has([Part.camFlash, Part.camSnapshot, Part.camFrameSize]) {
+            out.append(WidgetSpec(key: "camera", icon: "camera.fill",
+                                  titleKey: "robot.control.camera",
+                                  tint: Theme.Colors.accent,
+                                  defaultCols: 2, defaultRows: 2,
+                                  content: { AnyView(cameraSection) }) {
+                AnyView(cameraSection)
+            })
+        }
+        out.append(WidgetSpec(key: "other", icon: "ellipsis.circle",
+                              titleKey: "robot.control.other",
+                              tint: Theme.Colors.secondaryText,
+                              defaultCols: 2,
+                              content: { AnyView(leftovers) }) {
+            AnyView(leftovers)
+        })
+        return out
+    }
+
+    private var expressionSection: some View {
+        section("robot.control.expression", hint: "robot.control.expression.hint",
+                parts: [Part.face, Part.head, Part.gesture])
+    }
+
+    private var lightSection: some View {
+        section("robot.control.light", hint: "robot.control.light.hint",
+                parts: [Part.led])
+    }
+
+    private var soundSection: some View {
+        section("robot.control.sound", hint: "robot.control.sound.hint",
+                parts: [Part.volume, Part.speakerTest, Part.buzzer,
+                        Part.micLeft, Part.micRight,
+                        Part.micLeftGain, Part.micRightGain, Part.noise])
     }
 
     // ── الكاميرا: مدخل للنظر، وبعده الإعدادات ───────────────────────────────
