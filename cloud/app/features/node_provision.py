@@ -218,7 +218,7 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
         name = spec["name"]
         existing = get_device(name)
         if existing is not None:
-            if _refresh_vocabulary(name, existing, spec):
+            if _refresh_from_catalogue(name, existing, spec):
                 refreshed.append(name)
             continue   # already provisioned; the owner keeps their label and room
 
@@ -245,32 +245,58 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
             "unknown_outputs": skipped}
 
 
-def _refresh_vocabulary(name: str, existing: Dict[str, Any],
+def _refresh_from_catalogue(name: str, existing: Dict[str, Any],
                         spec: Dict[str, Any]) -> bool:
-    """Bring an existing device's accepted values in line with the catalogue.
+    """Bring an existing device in line with the catalogue.
 
-    Only the keys the catalogue owns are touched, and only when they actually
-    differ — a heartbeat arrives every five seconds, and a write per heartbeat
-    per device would be a busy loop disguised as provisioning. Anything else in
-    meta belongs to the owner and is carried across untouched.
+    **Control type is a fact about the hardware, not a user preference, and it
+    has to be allowed to change.** This function used to refresh only `meta`,
+    which meant a part provisioned once kept its original widget for ever. The
+    display was created as an on/off switch before it could take text; the
+    catalogue was later corrected to `text`, and the device stayed a switch —
+    because it already existed, so provisioning skipped it. The owner typed
+    nothing, saw a toggle, flipped it, and watched it flip back. Three separate
+    "the text field never appeared" reports were all this one line.
+
+    A widget that does not match the hardware is worse than a missing one: it
+    invites you to use it and then lies about the result.
+
+    Label and room are deliberately *not* touched — those the owner chose, and
+    the catalogue has no business overwriting them.
+
+    Only genuine differences are written. A heartbeat arrives every five seconds
+    and a write per heartbeat per device would be a busy loop wearing
+    provisioning's clothes.
     """
     from app.features.device_store import update_device
 
+    patch: Dict[str, Any] = {}
+
+    # The widget the part needs. Owned by the catalogue, so a correction here
+    # reaches devices that already exist.
+    want_type = spec.get("control_type")
+    if want_type and existing.get("control_type") != want_type:
+        patch["control_type"] = want_type
+
+    # Accepted values, placeholders, limits. Merged rather than replaced:
+    # anything else in meta is the owner's.
     catalogue_meta = spec.get("meta") or {}
-    if not catalogue_meta:
-        return False
-    current = existing.get("meta") or {}
-    if not isinstance(current, dict):
-        current = {}
+    if catalogue_meta:
+        current = existing.get("meta") or {}
+        if not isinstance(current, dict):
+            current = {}
+        if not all(current.get(k) == v for k, v in catalogue_meta.items()):
+            patch["meta"] = {**current, **catalogue_meta}
 
-    if all(current.get(k) == v for k, v in catalogue_meta.items()):
+    if not patch:
         return False
 
-    merged = {**current, **catalogue_meta}
-    res = update_device(name, meta=merged)
+    res = update_device(name, **patch)
     if not res.get("ok"):
         logger.warning("[provision] refresh %s failed: %s", name, res.get("error"))
         return False
+    logger.info("[provision] %s brought in line with the catalogue: %s",
+                name, ", ".join(sorted(patch)))
     return True
 
 

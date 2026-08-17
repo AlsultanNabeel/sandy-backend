@@ -895,3 +895,55 @@ def test_the_cameras_command_channel_is_not_mistaken_for_a_device(db):
         assert tenant_owns_topic("sandy/node/sandy0001/cam/command") is False
         # A real control still authorises the normal way.
         assert tenant_owns_topic("sandy/node/sandy0001/cam/flash") is True
+
+
+def test_the_catalogue_can_correct_a_part_after_it_exists(db):
+    """A part provisioned once must not keep the wrong widget for ever.
+
+    This is the bug behind three identical reports — "the text field never
+    appeared". The display was provisioned as an on/off switch before it could
+    take text. The catalogue was later corrected to `text`; the device already
+    existed, so provisioning skipped it and it stayed a switch. Typing was
+    impossible, and the toggle that *was* there flipped straight back.
+
+    A widget that does not match the hardware is worse than a missing one: it
+    invites you to use it and then lies about what happened.
+    """
+    from app.features.node_provision import provision_from_outputs
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        # A display from before the catalogue knew that this part takes text.
+        device_store.add_device(
+            name="sandy_screen", label="شاشة ساندي", control_type="switch",
+            transport={"kind": "node", "node_id": "sandybrain01",
+                       "output": "screen"},
+            room="ساندي")
+        assert device_store.get_device("sandy_screen")["control_type"] == "switch"
+
+        provision_from_outputs("sandybrain01", [{"id": "screen", "kind": "pwm"}])
+
+        after = device_store.get_device("sandy_screen")
+        assert after["control_type"] == "text", (
+            "the catalogue says this part takes text; the device kept the "
+            "switch it was created with, so nothing could ever be typed")
+
+
+def test_correcting_the_widget_leaves_the_owners_own_words_alone(db):
+    """The catalogue owns what a part *is*. The owner owns what it is called."""
+    from app.features.node_provision import provision_from_outputs
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        device_store.add_device(
+            name="sandy_screen", label="وش ساندي الحلو", control_type="switch",
+            transport={"kind": "node", "node_id": "sandybrain01",
+                       "output": "screen"},
+            room="غرفتي")
+
+        provision_from_outputs("sandybrain01", [{"id": "screen", "kind": "pwm"}])
+
+        after = device_store.get_device("sandy_screen")
+        assert after["control_type"] == "text"
+        assert after["label"] == "وش ساندي الحلو"
+        assert after["room"] == "غرفتي"
