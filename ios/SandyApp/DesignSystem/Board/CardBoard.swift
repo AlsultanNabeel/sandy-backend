@@ -108,11 +108,20 @@ struct CardBoard: View {
 
                     Color.clear.frame(height: 96)   // مساحة تحت ساندي العائمة
                 }
-                // وإنت ماسك بطاقة، إصبعك بتحرّكها هي مش الصفحة. التمرير بيصير
-                // من الأطراف تلقائيًا — لو ضلّ شغّال كمان، التنين بيتحرّكوا سوا
-                // والنتيجة إنك بتفقد البطاقة.
-                .scrollDisabled(dragID != nil || resizeID != nil)
-                .onPreferenceChange(CardFrames.self) { frames = $0 }
+                // **بيتبدّل بدخول وضع التعديل وبس — أبدًا بنص إيماءة.**
+                //
+                // كان مربوط بـ `dragID`/`resizeID`، يعني أول ما تمسك المقبض
+                // بتتغيّر إعدادات الـ ScrollView، وسويفت‌يو‌آي بتعيد بناءها
+                // **وبتلغي الإيماءة اللي ماسكها**. فكنت تشدّ، بتصغر شوي، وبتنقطع
+                // — وهاد بالضبط «بصغّر شوية وبرجع».
+                //
+                // بوضع التعديل التمرير بيصير من الأطراف وقت السحب، وهاد كافي.
+                .scrollDisabled(store.editing)
+                // بلا تحديث وقت التحجيم: إطار البطاقة بيتغيّر كل لحظة وإنت
+                // بتشدّ، وكل تحديث بيعيد الرسم وبيهزّ الإيماءة.
+                .onPreferenceChange(CardFrames.self) { newFrames in
+                    if resizeID == nil { frames = newFrames }
+                }
                 .onChange(of: dragID) { _, id in
                     if id == nil { stopEdgeScroll() }
                 }
@@ -164,10 +173,11 @@ struct CardBoard: View {
             .offset(held ? dragDelta : .zero)
             .zIndex(held ? 1 : 0)
             .contentShape(Rectangle())
-            // `.gesture(cond ? g : nil)` ما بتترجم — النوعان مختلفان. الشرط
-            // بيروح جوّا الإيماءة نفسها كـ `isEnabled`.
-            .gesture(reorderGesture(card),
-                     isEnabled: store.editing && resizeID == nil)
+            // الشرط `store.editing` وبس. أي شرط بيتغيّر أثناء الإيماءة —
+            // زي `resizeID == nil` — بيعيد تركيب الإيماءات وبيلغي اللي شغّالة.
+            // المقبض إيماءته `highPriorityGesture`، فهي بتغلب هاي لحالها بلا
+            // ما نطفّيها.
+            .gesture(reorderGesture(card), isEnabled: store.editing)
             .animation(.spring(response: 0.28, dampingFraction: 0.8), value: ordered.map(\.id))
     }
 
@@ -260,11 +270,19 @@ struct CardBoard: View {
     /// أبوه — فالمقبض كان بينرسم وما بينمسك، والتحجيم كان شكله ميزة موجودة
     /// وما بتشتغل.
     private func grip(_ card: BoardCard, boardWidth: CGFloat) -> some View {
-        CornerGrip()
-            .padding(4)
-            // مساحة اللمس أوسع من الشكل: زاوية بعشرين نقطة صعب تمسكها بالإصبع،
-            // خصوصًا ع بطاقة صغيرة. الشكل صغير والهدف كبير.
-            .contentShape(Rectangle().inset(by: -12))
+        // هدف اللمس أربعة وأربعين نقطة — أقل مقاس بتوصي فيه أبل للإصبع —
+        // **وكله جوّا البطاقة**.
+        //
+        // النسخة اللي قبل استعملت `inset(by: -12)` عشان توسّع الهدف، وهاد
+        // بيوسّعه لبرّا حدود البطاقة، ونصّه بيقع بمكان ما بيوصله اللمس أصلًا.
+        // يعني كرّرت نفس غلطة الـ `offset` بشكل تاني: الهدف بيبيّن أكبر ومش
+        // أكبر. الشكل ستّة وعشرين نقطة بالنص، والمساحة حواليه جوّا الإطار.
+        ZStack {
+            Color.clear
+            CornerGrip()
+        }
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
             // أولوية عالية: البطاقة كلها عليها إيماءة سحب للترتيب، وبلا هاد
             // السحب من الزاوية بيرتّب بدل ما يحجّم.
             .highPriorityGesture(
