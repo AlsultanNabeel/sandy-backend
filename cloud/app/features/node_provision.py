@@ -101,6 +101,13 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
         "name": "sandy_led", "label": "إضاءة ساندي", "control_type": "enum",
         "meta": {"values": ROBOT_LED},
     },
+    "screen_size": {
+        "name": "sandy_screen_size", "label": "حجم الكتابة",
+        "control_type": "enum",
+        # ثلاث مقاسات، وكلها خطوط حقيقية موجودة باللوح. مقاس بيغيّر الرقم وما
+        # بيغيّر الحروف أسوأ من غياب الخيار — بيبيّن إنه اشتغل.
+        "meta": {"values": ["small", "medium", "large"]},
+    },
     "screen": {
         "name": "sandy_screen", "label": "شاشة ساندي", "control_type": "text",
         # نص حر مش قائمة: اللي بينكتب ع وشها بيكتبه المالك ساعتها. القيمة

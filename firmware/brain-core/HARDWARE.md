@@ -51,6 +51,7 @@ Every row here was declared by the board itself in a heartbeat and matched to a 
 | `speaker_test` | audio | أصوات السماعة | enum | `beep`, `chime`, `alert`, `sweep`, `soft`, `happy` |
 | `noise` | audio | عزل الضجّة | enum | `off`, `mild`, `medium`, `aggressive` |
 | `screen` | pwm | شاشة ساندي | text | on / off |
+| `screen_size` | pwm | حجم الكتابة | enum | `small`, `medium`, `large` |
 
 ### Presented but not declared
 

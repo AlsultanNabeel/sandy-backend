@@ -35,7 +35,23 @@
 
 // A line of text. NULL or empty takes the message down. Arabic and English both
 // render; the font and the right-to-left handling are set in sdkconfig.
+// حجم الكتابة. ثلاث مقاسات، وكلها موجودة فعليًا كخطوط — لفچل عندها خط عربي
+// واحد مدمج بمقاس واحد، والباقي مولّد من نفس الخط (main/fonts).
+typedef enum {
+    SCREEN_SIZE_SMALL = 0,
+    SCREEN_SIZE_MEDIUM,
+    SCREEN_SIZE_LARGE,
+} sandy_screen_size_t;
+
 void screen_show_text(const char *text);
+
+// Set the size for this and every later line. Takes effect at once if
+// something is already showing.
+void screen_set_size(sandy_screen_size_t size);
+
+// Look up a size by the name the app sends: small / medium / large.
+// Falls back to medium on anything else.
+sandy_screen_size_t screen_size_from_name(const char *name);
 
 // ── Image transfer ───────────────────────────────────────────────────────────
 

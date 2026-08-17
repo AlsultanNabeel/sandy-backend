@@ -266,6 +266,10 @@ static void _handle_screen(const char *val) {
 // seq 0 starts the transfer and seq total-1 finishes it, so the app sends one
 // kind of message and the board needs no separate begin/end commands to get out
 // of step with.
+static void _handle_screen_size(const char *val) {
+    screen_set_size(screen_size_from_name(val));
+}
+
 static void _handle_screen_img(const char *val) {
     int seq = 0, total = 0, consumed = 0;
     if (sscanf(val, "%d:%d:%n", &seq, &total, &consumed) != 2 || consumed <= 0) {
@@ -300,6 +304,72 @@ static void _handle_screen_img(const char *val) {
 }
 #endif
 
+// ─── Dispatch ─────────────────────────────────────────────────────────────────
+
+// One command, fully assembled. Separated from the event handler because a
+// large payload arrives in pieces and must be dispatched exactly once, when the
+// last piece lands — not once per piece.
+static void _dispatch(const char *out, const char *val) {
+    if      (!strcmp(out, "mood"))         _handle_mood(val);
+    else if (!strcmp(out, "servo"))        _handle_servo(val);
+    else if (!strcmp(out, "gesture"))      _handle_gesture(val);
+    else if (!strcmp(out, "buzzer"))       _handle_buzzer(val);
+    else if (!strcmp(out, "base"))         _handle_base(val);
+    else if (!strcmp(out, "focus"))        _handle_focus(val);
+    else if (!strcmp(out, "led"))          _handle_led(val);
+    else if (!strcmp(out, "mic_l"))        _handle_mic_mute(MIC_LEFT,  val);
+    else if (!strcmp(out, "mic_r"))        _handle_mic_mute(MIC_RIGHT, val);
+    else if (!strcmp(out, "mic_l_gain"))   _handle_mic_gain(MIC_LEFT,  val);
+    else if (!strcmp(out, "mic_r_gain"))   _handle_mic_gain(MIC_RIGHT, val);
+    else if (!strcmp(out, "volume"))       _handle_volume(val);
+    else if (!strcmp(out, "speaker_test")) _handle_speaker_test(val);
+    else if (!strcmp(out, "noise"))        _handle_ns(val);
+    else if (!strcmp(out, "screen"))       _handle_screen(val);
+#if ENABLE_FACE
+    else if (!strcmp(out, "screen_size"))  _handle_screen_size(val);
+    else if (!strcmp(out, "screen_img"))   _handle_screen_img(val);
+#endif
+    else if (!strcmp(out, "autonomous"))
+        ESP_LOGI(TAG, "autonomous=%s (TODO)", val);
+    else if (!strcmp(out, "ota"))
+        ota_trigger(val);
+    else
+        ESP_LOGW(TAG, "unknown output: %s", out);
+}
+
+// ─── Reassembly ───────────────────────────────────────────────────────────────
+//
+// A payload larger than CONFIG_MQTT_BUFFER_SIZE (1 KB here) does not arrive as
+// one event. esp-mqtt delivers it as a run of MQTT_EVENT_DATA events, each
+// carrying `data_len` bytes at `current_data_offset` of a `total_data_len`
+// whole — and the topic is present **only on the first one**.
+//
+// This code did not know that. It copied 255 bytes out of whichever event it
+// saw and dispatched. For every short command that was right, and so it looked
+// right for months. For a picture it was catastrophic: a 6 KB chunk becomes 8 KB
+// of base64, arrives in eight events, and about 190 bytes of the first one got
+// decoded — three per cent of a chunk. The board reported the picture as
+// incomplete because it genuinely was, and said so correctly every time.
+//
+// Raising the MQTT buffer instead would have been the smaller diff and the
+// worse fix: that buffer is internal RAM, the one memory that is actually
+// scarce, and it would have to be sized for the largest message anyone ever
+// sends. Reassembling into PSRAM costs no internal RAM and has no ceiling worth
+// worrying about.
+#define ASM_MAX (32 * 1024)     // an image chunk is 8 KB; this is room to spare
+
+static char  *s_asm;            // PSRAM, allocated per message
+static size_t s_asm_len;
+static size_t s_asm_total;
+static char   s_asm_out[64];    // the output name, kept from the first event
+
+static void _asm_reset(void) {
+    if (s_asm) free(s_asm);
+    s_asm = NULL;
+    s_asm_len = s_asm_total = 0;
+    s_asm_out[0] = '\0';
+}
+
 // ─── MQTT event handler ───────────────────────────────────────────────────────
 
 static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -325,14 +395,40 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             break;
 
         case MQTT_EVENT_DATA: {
-            if (!ev->topic || !ev->data) break;
-            char topic[64]  = {0};
-            char val[256]   = {0};
-            int  tlen = ev->topic_len  < 63  ? ev->topic_len  : 63;
-            int  dlen = ev->data_len   < 255 ? ev->data_len   : 255;
+            if (!ev->data) break;
+
+            // ── A continuation of a message already in progress ──────────────
+            // No topic on these events, so the output name is the one kept from
+            // the first.
+            if (ev->current_data_offset > 0) {
+                if (!s_asm) break;                 // not one of ours; ignore
+                if (ev->current_data_offset != s_asm_len) {
+                    // Out of order or a piece lost. Half a picture is worse than
+                    // none, so abandon the whole message rather than draw it.
+                    ESP_LOGW(TAG, "%s: piece out of order (%d, expected %u)",
+                             s_asm_out, (int)ev->current_data_offset,
+                             (unsigned)s_asm_len);
+                    _asm_reset();
+                    break;
+                }
+                if (s_asm_len + ev->data_len > s_asm_total) { _asm_reset(); break; }
+                memcpy(s_asm + s_asm_len, ev->data, ev->data_len);
+                s_asm_len += ev->data_len;
+                if (s_asm_len < s_asm_total) break;      // still more to come
+
+                s_asm[s_asm_len] = '\0';
+                _dispatch(s_asm_out, s_asm);
+                _asm_reset();
+                break;
+            }
+
+            // ── The first (or only) event of a message ───────────────────────
+            if (!ev->topic) break;
+            _asm_reset();                          // drop any abandoned message
+
+            char topic[64] = {0};
+            int  tlen = ev->topic_len < 63 ? ev->topic_len : 63;
             memcpy(topic, ev->topic, tlen);
-            memcpy(val,   ev->data,  dlen);
-            ESP_LOGD(TAG, "%s = %s", topic, val);
 
             const char *out = topic_suffix(topic);
             if (!out) {           // the wildcard can only deliver our own tree,
@@ -348,30 +444,37 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // بيتكرر كل خمس ثواني بيعلّمك تتخطّى التحذيرات.
             if (strchr(out, '/')) break;
 
-            if      (!strcmp(out, "mood"))         _handle_mood(val);
-            else if (!strcmp(out, "servo"))        _handle_servo(val);
-            else if (!strcmp(out, "gesture"))      _handle_gesture(val);
-            else if (!strcmp(out, "buzzer"))       _handle_buzzer(val);
-            else if (!strcmp(out, "base"))         _handle_base(val);
-            else if (!strcmp(out, "focus"))        _handle_focus(val);
-            else if (!strcmp(out, "led"))          _handle_led(val);
-            else if (!strcmp(out, "mic_l"))        _handle_mic_mute(MIC_LEFT,  val);
-            else if (!strcmp(out, "mic_r"))        _handle_mic_mute(MIC_RIGHT, val);
-            else if (!strcmp(out, "mic_l_gain"))   _handle_mic_gain(MIC_LEFT,  val);
-            else if (!strcmp(out, "mic_r_gain"))   _handle_mic_gain(MIC_RIGHT, val);
-            else if (!strcmp(out, "volume"))       _handle_volume(val);
-            else if (!strcmp(out, "speaker_test")) _handle_speaker_test(val);
-            else if (!strcmp(out, "noise"))        _handle_ns(val);
-            else if (!strcmp(out, "screen"))       _handle_screen(val);
-#if ENABLE_FACE
-            else if (!strcmp(out, "screen_img"))   _handle_screen_img(val);
-#endif
-            else if (!strcmp(out, "autonomous"))
-                ESP_LOGI(TAG, "autonomous=%s (TODO)", val);
-            else if (!strcmp(out, "ota"))
-                ota_trigger(val);
-            else
-                ESP_LOGW(TAG, "unknown output: %s", out);
+            // Arrived whole and short: the common case, and it stays on the
+            // stack. 512 rather than 256 because a full-length display line is
+            // 255 bytes *plus* the "text:" prefix, and the old buffer clipped
+            // the last few letters off a long Arabic sentence.
+            if ((size_t)ev->total_data_len == (size_t)ev->data_len
+                && ev->data_len < 512) {
+                char val[512] = {0};
+                memcpy(val, ev->data, ev->data_len);
+                ESP_LOGD(TAG, "%s = %s", topic, val);
+                _dispatch(out, val);
+                break;
+            }
+
+            // Long: reassemble in PSRAM across the events still to come.
+            if (ev->total_data_len <= 0 || ev->total_data_len > ASM_MAX) {
+                ESP_LOGW(TAG, "%s: %d bytes is more than we accept",
+                         out, (int)ev->total_data_len);
+                break;
+            }
+            s_asm = heap_caps_malloc(ev->total_data_len + 1, MALLOC_CAP_SPIRAM);
+            if (!s_asm) { ESP_LOGW(TAG, "no PSRAM to assemble %s", out); break; }
+            memcpy(s_asm, ev->data, ev->data_len);
+            s_asm_len   = ev->data_len;
+            s_asm_total = ev->total_data_len;
+            snprintf(s_asm_out, sizeof(s_asm_out), "%s", out);
+
+            if (s_asm_len >= s_asm_total) {        // single oversized event
+                s_asm[s_asm_len] = '\0';
+                _dispatch(s_asm_out, s_asm);
+                _asm_reset();
+            }
             break;
         }
 
@@ -415,7 +518,8 @@ static const char *OUTPUTS_JSON =
       "{\"id\":\"volume\",\"kind\":\"audio\"},"
       "{\"id\":\"speaker_test\",\"kind\":\"audio\"},"
       "{\"id\":\"noise\",\"kind\":\"audio\"},"
-      "{\"id\":\"screen\",\"kind\":\"pwm\"}"
+      "{\"id\":\"screen\",\"kind\":\"pwm\"},"
+      "{\"id\":\"screen_size\",\"kind\":\"pwm\"}"
     "]";
 
 void mqtt_publish_status(void) {

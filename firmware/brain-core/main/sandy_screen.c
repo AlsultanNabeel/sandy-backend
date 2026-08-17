@@ -37,6 +37,37 @@ static bool     s_want_dismiss;
 static bool     s_dirty;
 static bool     s_showing;
 
+// ── Text size ────────────────────────────────────────────────────────────────
+//
+// LVGL ships exactly one font with Arabic glyphs, at sixteen pixels. So the
+// other two are generated from the same typeface at build time and live in
+// main/fonts — see the README there for how and why.
+//
+// This mattered more than it looks. A "size" control that changed a number and
+// not the letters would be worse than no control at all: it would appear to
+// work. Three sizes that are visibly three sizes is the whole feature.
+LV_FONT_DECLARE(sandy_font_ar_24);
+LV_FONT_DECLARE(sandy_font_ar_32);
+
+static sandy_screen_size_t s_size = SCREEN_SIZE_MEDIUM;
+
+static const lv_font_t *font_for(sandy_screen_size_t size) {
+    switch (size) {
+    case SCREEN_SIZE_LARGE:  return &sandy_font_ar_32;
+    case SCREEN_SIZE_MEDIUM: return &sandy_font_ar_24;
+    case SCREEN_SIZE_SMALL:
+    default:
+#if LV_FONT_DEJAVU_16_PERSIAN_HEBREW
+        // The built-in. With LV_USE_BIDI and LV_USE_ARABIC_PERSIAN_CHARS on,
+        // LVGL joins the letters and lays the line out right to left — which is
+        // what separates readable Arabic from a row of disconnected shapes.
+        return &lv_font_dejavu_16_persian_hebrew;
+#else
+        return &sandy_font_ar_24;
+#endif
+    }
+}
+
 // The image buffer, PSRAM. Allocated on the first transfer and kept: taking and
 // returning 115 KB per picture would fragment PSRAM for no gain, and this board
 // has eight megabytes of it.
@@ -94,17 +125,29 @@ void screen_lvgl_build(lv_obj_t *parent) {
     lv_label_set_long_mode(s_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(s_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_label, lv_color_white(), 0);
-#if LV_FONT_DEJAVU_16_PERSIAN_HEBREW
-    // Arabic needs a font that has the glyphs; Montserrat does not. With
-    // LV_USE_BIDI and LV_USE_ARABIC_PERSIAN_CHARS on, LVGL also joins the
-    // letters and lays the line out right-to-left, which is what separates
-    // readable Arabic from a row of disconnected shapes.
-    lv_obj_set_style_text_font(s_label, &lv_font_dejavu_16_persian_hebrew, 0);
-#endif
+    lv_obj_set_style_text_font(s_label, font_for(s_size), 0);
     lv_obj_center(s_label);
     lv_obj_add_flag(s_label, LV_OBJ_FLAG_HIDDEN);
 
     ESP_LOGI(TAG, "ready");
+}
+
+void screen_set_size(sandy_screen_size_t size) {
+    if (size < SCREEN_SIZE_SMALL || size > SCREEN_SIZE_LARGE) return;
+    if (!lock()) return;
+    s_size = size;
+    // Redraw only if a line is actually up. Changing the size while the face is
+    // showing must not yank the face away to prove the setting took.
+    if (s_showing) { s_want_text = true; s_dirty = true; }
+    unlock();
+    ESP_LOGI(TAG, "text size = %d", (int)size);
+}
+
+sandy_screen_size_t screen_size_from_name(const char *name) {
+    if (!name) return SCREEN_SIZE_MEDIUM;
+    if (!strcmp(name, "small"))  return SCREEN_SIZE_SMALL;
+    if (!strcmp(name, "large"))  return SCREEN_SIZE_LARGE;
+    return SCREEN_SIZE_MEDIUM;
 }
 
 void screen_lvgl_tick(void) {
@@ -128,6 +171,7 @@ void screen_lvgl_tick(void) {
     }
 
     if (want_text) {
+        lv_obj_set_style_text_font(s_label, font_for(s_size), 0);
         lv_label_set_text(s_label, s_text);
         lv_obj_center(s_label);
         lv_obj_clear_flag(s_label, LV_OBJ_FLAG_HIDDEN);
