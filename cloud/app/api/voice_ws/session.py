@@ -561,7 +561,6 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     """Read Gemini Live responses, relay audio to the device, handle tool calls."""
     from google.genai import types
 
-    from app.agent.guards import DESTRUCTIVE_TOOLS
 
     loop = asyncio.get_event_loop()
     gate_on = _speaker_gate_enabled()
@@ -584,6 +583,16 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     # One worker gives strict FIFO by construction and cannot be starved.
     tx = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-tx")
 
+    # وتنفيذ الأدوات كمان بمجمعه.
+    #
+    # «شغّلي الكشاف» بيروح للوسيط وبيستنى، و«شو الطقس» بيروح للإنترنت. هدول
+    # كانوا ع المجمع المشترك، فكل أداة بتنتظر مكان جنب القراءات والإرسال —
+    # وأبطأ أداة كانت بتأخّر الصوت اللي بعدها.
+    #
+    # اتنين مش واحد: ساندي بتقدر تستدعي أداتين بنفس الدور (طفّي الضو وشغّل
+    # المروحة)، ووحدة بتصير تستنى التانية بلا سبب.
+    tools_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="voice-tool")
+
     async def send_bytes(data: bytes) -> None:
         await loop.run_in_executor(tx, ws.send, data)
 
@@ -592,9 +601,6 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
 
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
-    # Destructive tools already prompted for spoken confirmation this session;
-    # the model's re-call after the user confirms is allowed through.
-    awaited_confirm: set = set()
 
     async def _handle(response) -> bool:
         """Process one Live response; return True to stop the session.
@@ -684,24 +690,23 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                             )},
                         ))
                         continue
-                # Destructive op → require a spoken confirmation first, regardless
-                # of the speaker gate (mirrors the Track 1.2 text guard). The model
-                # asks for confirmation and only re-calls the tool once the user
-                # confirms; that second call is let through. If the speaker gate
-                # already refused above we've continued, so no double-prompt.
-                if fc.name in DESTRUCTIVE_TOOLS and fc.name not in awaited_confirm:
-                    awaited_confirm.add(fc.name)
-                    fn_responses.append(types.FunctionResponse(
-                        id=fc.id, name=fc.name,
-                        response={"output": (
-                            "عملية تحتاج تأكيد صوتي. لا تنفّذيها الآن — "
-                            "اسألي المستخدم تأكيد صريح بصوته، ونفّذي فقط إذا أكّد."
-                        )},
-                    ))
-                    continue
-                awaited_confirm.discard(fc.name)
+                # No spoken confirmation step. Owner's decision, and it was the
+                # right one.
+                #
+                # Every gated call cost a full extra round trip — the model had
+                # to ask, wait for an answer, and call again — so a sentence that
+                # should light a lamp in under a second took several and ended in
+                # "are you sure?". For an assistant you talk to, that is the
+                # difference between a device and a nuisance.
+                #
+                # Most of what was gated was never destructive anyway; that list
+                # has been cut back to real, irreversible data loss (see
+                # agent/guards.py). Deletes now happen when asked, immediately.
+                # The speaker gate above still stands where it is enabled: it
+                # answers "is this the owner", which is a different question and
+                # the one actually worth asking.
                 result = await loop.run_in_executor(
-                    None, _dispatch_tool, dispatcher, fc.name, dict(fc.args or {})
+                    tools_pool, _dispatch_tool, dispatcher, fc.name, dict(fc.args or {})
                 )
                 fn_responses.append(
                     types.FunctionResponse(
@@ -742,6 +747,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                 break
     finally:
         tx.shutdown(wait=False)
+        tools_pool.shutdown(wait=False)
 
 
 # Helpers

@@ -348,7 +348,6 @@ def test_no_expression_the_swift_compiler_will_refuse_to_solve():
                 stripped = line.strip()
                 if stripped.startswith("//"):
                     continue
-                inferred_closure = "{ $" in stripped or re.search(r'\{\s*\$0', stripped)
                 fallbacks = stripped.count("??")
                 converts = ".map(" in stripped or "Double(" in stripped or "Int(" in stripped
                 if fallbacks >= 2 and converts:

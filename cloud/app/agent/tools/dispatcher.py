@@ -26,12 +26,11 @@ _GUARDED_DESTRUCTIVE = frozenset(DESTRUCTIVE_TOOLS) - _SELF_CONFIRMING_TOOLS
 _GUARD_CONFIRMED_FLAG = "_destructive_confirmed"
 
 # Short Arabic action phrase per guarded tool, for the confirmation prompt.
+# بس اللي لسا محروس. تشغيل جهاز وتطبيق مشهد وشيل عنصر من قائمة التسوّق
+# انشالوا من الحراسة — مش تدمير، وكل واحد فيهن بينعكس بجملة.
 _GUARD_SUMMARY = {
-    "device_control": "تتحكم بالجهاز",
-    "scene_apply": "تطبّق المشهد",
     "delete_photo": "تحذف الصورة",
     "brainstorm_delete": "تحذف جلسة العصف الذهني",
-    "shopping_remove": "تشيل العنصر من قائمة التسوّق",
 }
 
 

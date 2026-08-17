@@ -198,5 +198,50 @@ def test_saving_the_turn_does_not_stall_the_audio():
     assert "loop.run_in_executor(None, _save_voice_turn" in src
 
 
+def test_voice_does_not_stop_to_ask_are_you_sure():
+    """Speaking to her must not cost an extra round trip.
+
+    Every gated call made the model ask, wait for an answer and call again —
+    so "turn on the flash" took several seconds and ended in a question. The
+    owner asked why, and there was no good answer: most of what was gated was
+    never destructive. A lamp is un-turned-on by saying the opposite.
+    """
+    src = (Path(__file__).resolve().parent.parent
+           / "cloud/app/api/voice_ws/session.py").read_text(encoding="utf-8")
+
+    assert "تأكيد صوتي" not in src, "the spoken confirmation step is back"
+    assert "awaited_confirm" not in src
+    assert "DESTRUCTIVE_TOOLS" not in src, (
+        "the voice path is gating tools again — that guard belongs to the text "
+        "router, where there is no conversation waiting on it")
+
+
+def test_switching_a_device_on_is_not_treated_as_destruction():
+    from app.agent.guards import DESTRUCTIVE_TOOLS
+
+    for tool in ("device_control", "scene_apply", "shopping_remove"):
+        assert tool not in DESTRUCTIVE_TOOLS, (
+            f"{tool} is reversible by saying the opposite — guarding it buys "
+            "nothing and costs a round trip on every command")
+
+    # ...and the ones that really do lose something are still guarded.
+    assert {"delete_photo", "brainstorm_delete"} <= DESTRUCTIVE_TOOLS
+
+
+def test_tools_do_not_run_on_the_shared_thread_pool():
+    """A slow tool must not delay the audio behind it.
+
+    "Turn on the flash" waits on the broker; "what's the weather" waits on the
+    internet. Both used the shared executor, so every tool call queued next to
+    the socket reads and writes and the slowest one held up her voice.
+    """
+    src = (Path(__file__).resolve().parent.parent
+           / "cloud/app/api/voice_ws/session.py").read_text(encoding="utf-8")
+
+    assert 'thread_name_prefix="voice-tool"' in src
+    assert "run_in_executor(\n                    None, _dispatch_tool" not in src
+    assert "tools_pool.shutdown(wait=False)" in src
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
