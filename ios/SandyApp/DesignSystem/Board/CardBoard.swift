@@ -43,7 +43,6 @@ enum BoardBuilder {
     static func buildArray(_ c: [[BoardCard]]) -> [BoardCard] { c.flatMap { $0 } }
 }
 
-/// أين استقرّت كل بطاقة على اللوح — لازم عشان نعرف فوق مين إيدك.
 private struct CardFrames: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
@@ -51,34 +50,45 @@ private struct CardFrames: PreferenceKey {
     }
 }
 
+private struct BoardWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// لوح بطاقات — كل بطاقة بأي حجم، وبأي ترتيب.
 ///
-/// **الطريقة اللي بيشتغل فيها الآيفون، مش `onDrag`.** أول نسخة استعملت
-/// `onDrag`/`onDrop`، وهاي آلية النقل بين التطبيقات: بدها ضغطة طويلة، بتعمل
-/// صورة شبح، وبتتخانق مع التمرير — فالبطاقة ما كانت تنمسك، والصفحة كانت تمرق
-/// تحت الإصبع. الشاشة الرئيسية بالآيفون ما بتستعمل شي من هاد: البطاقة بتمشي مع
-/// إصبعك مباشرة، والباقي بيفتح لها مكان وهي جاية.
+/// **البطاقة واجهة مستقلة، وهاد السبب الوحيد إنه السحب بيشتغل.**
 ///
-/// فهون: إيماءة سحب عادية بتحرّك البطاقة، وموقع إصبعك بيتقارن بمواقع الباقي
-/// (`CardFrames`) وبيعيد الترتيب وقتها — بتشوف النتيجة قبل ما تفلت.
+/// أول نسختين حطّوا حالة السحب والتحجيم ع اللوح نفسه. اللوح جوّاه
+/// `ScrollViewReader` وكان جوّاه `GeometryReader`، فكل حركة إصبع كانت تحدّث حالة
+/// اللوح، واللوح يعيد بناء الشجرة كلها — **بما فيها الواجهة اللي ماسكة
+/// الإيماءة**. سويفت‌يو‌آي بتلغي الإيماءة لما تنبني واجهتها من جديد، فكانت
+/// البطاقة تصغّر شوي وتنقطع وترجع. المالك وصفها بالحرف: «بصغّر شوييية وبرجع
+/// بكبر، بثبتش».
 ///
-/// **والتمرير التلقائي جزء من السحب مش إضافة عليه.** لمّا توصل لطرف الشاشة
-/// وإنت ماسك، الصفحة بتمشي معك؛ بلاه ما بتقدر تنقل بطاقة لمكان مش ظاهر، وهاد
-/// بيخلي الترتيب شغّال ع الصفحات القصيرة وبس.
+/// هلق البطاقة بتملك حجمها وهي بإيدك (`live`) وما بتحكي مع المخزن إلا لما ترفع
+/// إيدك. يعني إعادة الرسم محصورة ببطاقة وحدة، واللوح ما بينهزّ، والإيماءة بتعيش.
+///
+/// **والترتيب زي شاشة الآيفون مش زي `onDrag`.** `onDrag`/`onDrop` آلية نقل بين
+/// التطبيقات: بدها ضغطة طويلة، بتعمل صورة شبح، وبتتخانق مع التمرير. هون:
+/// البطاقة بتمشي مع إصبعك، وموقعك بيتقارن بمواقع الباقي فبيتغيّر الترتيب وإنت
+/// لسا ماسك.
 struct CardBoard: View {
     @EnvironmentObject var lang: LanguageManager
     @StateObject private var store: BoardStore
 
     private let cards: [BoardCard]
 
+    // بيبدأ بعرض الشاشة مش صفر: التفضيل بيوصل بعد أول رسمة، وبطاقات بعرض صفر
+    // بأول إطار بتومض ومرّات بتخلّي الرصف يبدأ غلط.
+    @State private var boardWidth: CGFloat =
+        UIScreen.main.bounds.width - Theme.Spacing.md * 2
     @State private var frames: [String: CGRect] = [:]
     @State private var dragID: String?
-    @State private var dragDelta: CGSize = .zero
     @State private var edgeTimer: Timer?
     @State private var scroll: ScrollViewProxy?
-
-    @State private var resizeID: String?
-    @State private var resizeBase: Double = 1
 
     init(_ screen: String, @BoardBuilder cards: () -> [BoardCard]) {
         _store = StateObject(wrappedValue: BoardStore(screen))
@@ -86,162 +96,88 @@ struct CardBoard: View {
     }
 
     private let gap = Theme.Spacing.md
-
-    /// كم قريب من الطرف لازم توصل حتى تبدأ الصفحة تمشي معك.
-    private let edgeZone: CGFloat = 90
+    /// كم قريب من طرف الشاشة لازم توصل حتى تمشي معك.
+    private let edgeZone: CGFloat = 110
 
     private var ordered: [BoardCard] { store.arrange(cards) }
 
     var body: some View {
-        GeometryReader { geo in
-            let boardWidth = geo.size.width - gap * 2
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    FlowLayout(gap: gap) {
-                        ForEach(ordered) { card in
-                            cell(card, boardWidth: boardWidth)
-                                .id(card.id)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView {
+                FlowLayout(gap: gap) {
+                    ForEach(ordered) { card in
+                        CardCell(card: card,
+                                 boardWidth: boardWidth,
+                                 store: store,
+                                 isHeld: dragID == card.id,
+                                 onPick: { dragID = card.id },
+                                 onMove: { p in
+                                     hover(p, held: card.id)
+                                     edgeScroll(at: p, held: card.id)
+                                 },
+                                 onDrop: {
+                                     dragID = nil
+                                     stopEdge()
+                                     store.setOrder(ordered.map(\.id))
+                                 })
+                            .id(card.id)
                     }
-                    .padding(gap)
+                }
+                .padding(gap)
 
-                    Color.clear.frame(height: 96)   // مساحة تحت ساندي العائمة
-                }
-                // **بيتبدّل بدخول وضع التعديل وبس — أبدًا بنص إيماءة.**
-                //
-                // كان مربوط بـ `dragID`/`resizeID`، يعني أول ما تمسك المقبض
-                // بتتغيّر إعدادات الـ ScrollView، وسويفت‌يو‌آي بتعيد بناءها
-                // **وبتلغي الإيماءة اللي ماسكها**. فكنت تشدّ، بتصغر شوي، وبتنقطع
-                // — وهاد بالضبط «بصغّر شوية وبرجع».
-                //
-                // بوضع التعديل التمرير بيصير من الأطراف وقت السحب، وهاد كافي.
-                .scrollDisabled(store.editing)
-                // بلا تحديث وقت التحجيم: إطار البطاقة بيتغيّر كل لحظة وإنت
-                // بتشدّ، وكل تحديث بيعيد الرسم وبيهزّ الإيماءة.
-                .onPreferenceChange(CardFrames.self) { newFrames in
-                    if resizeID == nil { frames = newFrames }
-                }
-                .onChange(of: dragID) { _, id in
-                    if id == nil { stopEdgeScroll() }
-                }
-                .onAppear { scroll = proxy }
+                Color.clear.frame(height: 96)   // مساحة تحت ساندي العائمة
             }
+            // العرض بينقرا مرّة عبر تفضيل، مش بـ GeometryReader بيلفّ كل شي:
+            // اللافّة كانت تعيد بناء الـ ScrollView مع كل تغيير حالة.
+            .background(
+                GeometryReader { g in
+                    Color.clear.preference(key: BoardWidthKey.self, value: g.size.width)
+                }
+            )
+            .onPreferenceChange(BoardWidthKey.self) { w in
+                let next: CGFloat = w - gap * 2
+                if abs(next - boardWidth) > 0.5 { boardWidth = next }
+            }
+            // بيتبدّل بدخول وضع التعديل وبس — أبدًا بنص إيماءة. أي تغيير
+            // بإعدادات الـ ScrollView وإيدك نازلة بيلغي الإيماءة.
+            .scrollDisabled(store.editing)
+            .onPreferenceChange(CardFrames.self) { frames = $0 }
+            .onAppear { scroll = proxy }
+            .onDisappear { stopEdge() }
         }
         .toolbar { ToolbarItem(placement: .topBarTrailing) { editButton } }
     }
 
-    // ── البطاقة ──────────────────────────────────────────────────────────────
+    // ── الترتيب ──────────────────────────────────────────────────────────────
 
-    private func cell(_ card: BoardCard, boardWidth: CGFloat) -> some View {
-        let s: Double = store.scale(card.id, default: card.defaultScale)
-        let w: CGFloat = boardWidth * s
-        let h: CGFloat = card.designHeight * s
-        let held: Bool = dragID == card.id
-
-        return card.content
-            .frame(width: boardWidth, height: card.designHeight, alignment: .topLeading)
-            .clipped()
-            .scaleEffect(s, anchor: .topLeading)
-            .frame(width: w, height: h, alignment: .topLeading)
-            .allowsHitTesting(!store.editing)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.card)
-                    .fill(store.editing ? Theme.Colors.surface.opacity(0.35) : .clear)
-            )
-            .overlay(alignment: .topLeading) { if store.editing { nameTag(card) } }
-            .overlay(alignment: .bottomTrailing) {
-                if store.editing { grip(card, boardWidth: boardWidth) }
-            }
-            .overlay {
-                if store.editing {
-                    RoundedRectangle(cornerRadius: Theme.Radius.card)
-                        .strokeBorder(Theme.Colors.accent.opacity(0.55),
-                                      style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                }
-            }
-            // مواقع البطاقات — منها منعرف فوق مين إيدك وقت السحب.
-            .background(
-                GeometryReader { g in
-                    Color.clear.preference(
-                        key: CardFrames.self,
-                        value: [card.id: g.frame(in: .global)])
-                }
-            )
-            .scaleEffect(held ? 1.06 : 1)          // بترتفع تحت الإصبع
-            .shadow(color: .black.opacity(held ? 0.28 : 0), radius: held ? 14 : 0, y: 6)
-            .offset(held ? dragDelta : .zero)
-            .zIndex(held ? 1 : 0)
-            .contentShape(Rectangle())
-            // الشرط `store.editing` وبس. أي شرط بيتغيّر أثناء الإيماءة —
-            // زي `resizeID == nil` — بيعيد تركيب الإيماءات وبيلغي اللي شغّالة.
-            // المقبض إيماءته `highPriorityGesture`، فهي بتغلب هاي لحالها بلا
-            // ما نطفّيها.
-            .gesture(reorderGesture(card), isEnabled: store.editing)
-            .animation(.spring(response: 0.28, dampingFraction: 0.8), value: ordered.map(\.id))
-    }
-
-    // ── السحب لإعادة الترتيب ─────────────────────────────────────────────────
-
-    private func reorderGesture(_ card: BoardCard) -> some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .global)
-            .onChanged { g in
-                if dragID != card.id {
-                    dragID = card.id
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
-                dragDelta = g.translation
-                moveIfHovering(over: g.location, held: card.id)
-                edgeScrollIfNeeded(at: g.location)
-            }
-            .onEnded { _ in
-                dragID = nil
-                dragDelta = .zero
-                stopEdgeScroll()
-                store.setOrder(ordered.map(\.id))
-            }
-    }
-
-    /// البطاقة اللي تحت إصبعك بتفسح، وقت ما تمرق فوقها.
-    ///
-    /// الترتيب بيصير وقت المرور مش وقت الإفلات: بتشوف المكان الجديد وإنت لسا
-    /// ماسك، فما بتحتاج تفلت وتشوف وين وقعت وتعيد.
-    private func moveIfHovering(over point: CGPoint, held: String) {
-        guard let targetID = frames.first(where: { $0.value.contains(point) })?.key,
-              targetID != held else { return }
+    /// البطاقة اللي تحت إصبعك بتفسح، وقت ما تمرق فوقها — مش وقت ما تفلت.
+    private func hover(_ point: CGPoint, held: String) {
+        guard let target = frames.first(where: { $0.value.contains(point) })?.key,
+              target != held else { return }
         var ids: [String] = ordered.map(\.id)
         guard let from = ids.firstIndex(of: held),
-              let to = ids.firstIndex(of: targetID) else { return }
+              let to = ids.firstIndex(of: target) else { return }
         ids.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
-        // بلا حفظ: السحب بيولّد عشرات النداءات بالثانية، وكتابة القرص مع كل
-        // وحدة بتخلّي الإصبع تتعتّر. الحفظ لما ترفع إيدك.
-        store.setOrderLive(ids)
+        store.setOrderLive(ids)      // الحفظ لما ترفع إيدك
     }
 
     // ── التمرير من الأطراف ───────────────────────────────────────────────────
 
-    private func edgeScrollIfNeeded(at point: CGPoint) {
-        guard let held = dragID else { return }
-        // الإحداثيات عالمية (إحداثيات الشاشة)، فالمقارنة مباشرة بلا تخمين.
-        // أول نسخة حاولت تحسب كم مرقنا من مواقع البطاقات — تقدير، وبيغلط أول ما
-        // يتغيّر أي إشي بالتخطيط.
+    private func edgeScroll(at point: CGPoint, held: String) {
         let screenH: CGFloat = UIScreen.main.bounds.height
-        let goingUp: Bool = point.y < edgeZone + 60      // تحت شريط العنوان
-        let goingDown: Bool = point.y > screenH - edgeZone
-
-        if goingUp || goingDown {
-            startEdgeScroll(up: goingUp, held: held)
+        let up: Bool = point.y < edgeZone
+        let down: Bool = point.y > screenH - edgeZone
+        if up || down {
+            startEdge(up: up, held: held)
         } else {
-            stopEdgeScroll()
+            stopEdge()
         }
     }
 
-    private func startEdgeScroll(up: Bool, held: String) {
+    private func startEdge(up: Bool, held: String) {
         guard edgeTimer == nil else { return }
-        edgeTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { _ in
-            Task { @MainActor in
-                step(up: up, held: held)
-            }
+        edgeTimer = Timer.scheduledTimer(withTimeInterval: 0.14, repeats: true) { _ in
+            Task { @MainActor in step(up: up, held: held) }
         }
     }
 
@@ -250,75 +186,18 @@ struct CardBoard: View {
         let ids: [String] = ordered.map(\.id)
         guard let i = ids.firstIndex(of: held) else { return }
         let next: Int = up ? max(0, i - 1) : min(ids.count - 1, i + 1)
-        guard next != i else { return }
-        withAnimation(.easeInOut(duration: 0.15)) {
-            scroll?.scrollTo(ids[next], anchor: up ? .top : .bottom)
+        guard next != i, let proxy = scroll else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            proxy.scrollTo(ids[next], anchor: up ? .top : .bottom)
         }
     }
 
-    private func stopEdgeScroll() {
+    private func stopEdge() {
         edgeTimer?.invalidate()
         edgeTimer = nil
     }
 
-    // ── التحجيم ──────────────────────────────────────────────────────────────
-
-    /// مقبض الزاوية.
-    ///
-    /// **جوّا البطاقة، مش برّاها.** أول نسخة دفشته `offset(x: 8, y: 8)` عشان
-    /// يطلع ع الزاوية، وسويفت‌يو‌آي ما بتوصّل اللمس لأي إشي واقع برّا إطار
-    /// أبوه — فالمقبض كان بينرسم وما بينمسك، والتحجيم كان شكله ميزة موجودة
-    /// وما بتشتغل.
-    private func grip(_ card: BoardCard, boardWidth: CGFloat) -> some View {
-        // هدف اللمس أربعة وأربعين نقطة — أقل مقاس بتوصي فيه أبل للإصبع —
-        // **وكله جوّا البطاقة**.
-        //
-        // النسخة اللي قبل استعملت `inset(by: -12)` عشان توسّع الهدف، وهاد
-        // بيوسّعه لبرّا حدود البطاقة، ونصّه بيقع بمكان ما بيوصله اللمس أصلًا.
-        // يعني كرّرت نفس غلطة الـ `offset` بشكل تاني: الهدف بيبيّن أكبر ومش
-        // أكبر. الشكل ستّة وعشرين نقطة بالنص، والمساحة حواليه جوّا الإطار.
-        ZStack {
-            Color.clear
-            CornerGrip()
-        }
-        .frame(width: 44, height: 44)
-        .contentShape(Rectangle())
-            // أولوية عالية: البطاقة كلها عليها إيماءة سحب للترتيب، وبلا هاد
-            // السحب من الزاوية بيرتّب بدل ما يحجّم.
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { g in
-                        if resizeID != card.id {
-                            resizeID = card.id
-                            resizeBase = store.scale(card.id, default: card.defaultScale)
-                        }
-                        // القطر: بتقدر تسحب لبرّا أو لتحت أو للاتنين. ربطه
-                        // بالعرض لحاله بيخلّي السحب لتحت ما يعمل إشي، وهاد
-                        // بيبيّن عطل.
-                        let d: CGFloat = (g.translation.width + g.translation.height) / 2
-                        store.setScale(resizeBase + Double(d / boardWidth), for: card.id)
-                    }
-                    .onEnded { _ in
-                        resizeID = nil
-                        store.save()      // الحفظ لما ترفع إيدك، مش كل إطار
-                    }
-            )
-            .accessibilityLabel(lang.s("board.resize"))
-    }
-
-    // ── الاسم وزر التعديل ────────────────────────────────────────────────────
-
-    private func nameTag(_ card: BoardCard) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: card.icon).font(.system(size: 10, weight: .semibold))
-            Text(lang.s(card.titleKey)).font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
-        }
-        .foregroundColor(Theme.Colors.onAccent)
-        .padding(.horizontal, 7).padding(.vertical, 4)
-        .background(Capsule().fill(Theme.Colors.accent))
-        .padding(5)
-    }
+    // ── زر التعديل ───────────────────────────────────────────────────────────
 
     private var editButton: some View {
         HStack(spacing: Theme.Spacing.sm) {
@@ -331,7 +210,6 @@ struct CardBoard: View {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     store.editing.toggle()
                 }
-                if !store.editing { store.save() }
             } label: {
                 Image(systemName: store.editing
                       ? "checkmark.circle.fill" : "slider.horizontal.3")
@@ -342,11 +220,184 @@ struct CardBoard: View {
     }
 }
 
-/// رصف البطاقات بسطور — بطاقة جنب بطاقة لحدّ ما يمتلي السطر.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// بطاقة وحدة على اللوح.
 ///
-/// `Layout` مش VStack من HStackات: الأعراض بتتحسب مرّة وحدة من مقاسات معروفة
-/// مسبقًا، بلا قياس ولا تمريرة تانية. هاد اللي بيخلّي السحب سلس — كل إطار
-/// بيحرّك مواقع محسوبة، مش بيعيد بناء شجرة.
+/// بتملك حجمها وموقعها وهي بإيدك. هاد مش تنظيم — هاد شرط عمل: لو الحالة ع
+/// اللوح، كل حركة إصبع بتعيد بناء اللوح كله وبتلغي الإيماءة اللي بإيدك.
+private struct CardCell: View {
+    @EnvironmentObject var lang: LanguageManager
+
+    let card: BoardCard
+    let boardWidth: CGFloat
+    @ObservedObject var store: BoardStore
+    let isHeld: Bool
+    let onPick: () -> Void
+    let onMove: (CGPoint) -> Void
+    let onDrop: () -> Void
+
+    /// الحجم وهو بإيدك. `nil` يعني «خُذه من المخزن».
+    @State private var live: Double?
+    @State private var base: Double = 1
+    @State private var offset: CGSize = .zero
+
+    private var scale: Double {
+        live ?? store.scale(card.id, default: card.defaultScale)
+    }
+
+    var body: some View {
+        let w: CGFloat = boardWidth * scale
+        let h: CGFloat = card.designHeight * scale
+
+        card.content
+            .frame(width: max(boardWidth, 1), height: card.designHeight,
+                   alignment: .topLeading)
+            .clipped()
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(width: max(w, 1), height: max(h, 1), alignment: .topLeading)
+            .allowsHitTesting(!store.editing)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.card)
+                    .fill(store.editing ? Theme.Colors.surface.opacity(0.35) : .clear)
+            )
+            .overlay(alignment: .topLeading) { if store.editing { nameTag } }
+            .overlay(alignment: .bottomTrailing) { if store.editing { grip } }
+            .overlay {
+                if store.editing {
+                    RoundedRectangle(cornerRadius: Theme.Radius.card)
+                        .strokeBorder(Theme.Colors.accent.opacity(0.55),
+                                      style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                }
+            }
+            .background(
+                GeometryReader { g in
+                    Color.clear.preference(key: CardFrames.self,
+                                           value: [card.id: g.frame(in: .global)])
+                }
+            )
+            .scaleEffect(isHeld ? 1.05 : 1)
+            .shadow(color: .black.opacity(isHeld ? 0.28 : 0),
+                    radius: isHeld ? 14 : 0, y: 6)
+            .offset(isHeld ? offset : .zero)
+            .zIndex(isHeld ? 1 : 0)
+            .contentShape(Rectangle())
+            .gesture(reorder, isEnabled: store.editing)
+    }
+
+    // ── السحب لإعادة الترتيب ─────────────────────────────────────────────────
+
+    private var reorder: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .onChanged { g in
+                if !isHeld {
+                    onPick()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+                offset = g.translation
+                onMove(g.location)
+            }
+            .onEnded { _ in
+                offset = .zero
+                onDrop()
+            }
+    }
+
+    // ── التحجيم ──────────────────────────────────────────────────────────────
+
+    /// مقبض الزاوية — زاوية غامقة، جوّا حدود البطاقة.
+    ///
+    /// جوّا الحدود لأنه سويفت‌يو‌آي ما بتوصّل اللمس لأي إشي مرسوم برّا إطار
+    /// أبوه. نسختين قبل حاولوا يطلّعوه ع الزاوية — وحدة بـ `offset` ووحدة
+    /// بـ `contentShape(inset: -12)` — والتنتين خلّوه يبيّن وما ينمسك.
+    private var grip: some View {
+        ZStack {
+            Color.clear
+            CornerGrip()
+        }
+        // أربعة وأربعين نقطة: أقل هدف لمس بتوصي فيه أبل، وكله جوّا الإطار.
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        // أولوية عالية: البطاقة كلها عليها إيماءة ترتيب، وبلا هاد السحب من
+        // الزاوية بيرتّب بدل ما يحجّم.
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { g in
+                    if live == nil {
+                        base = store.scale(card.id, default: card.defaultScale)
+                    }
+                    // القطر: اسحب لبرّا أو لتحت أو للاتنين. ربطه بالعرض لحاله
+                    // بيخلّي السحب لتحت ما يعمل إشي، وهاد بيبيّن عطل.
+                    let d: CGFloat = (g.translation.width + g.translation.height) / 2
+                    let want: Double = base + Double(d / max(boardWidth, 1))
+                    live = min(max(want, BoardStore.minScale), BoardStore.maxScale)
+                }
+                .onEnded { _ in
+                    if let v = live { store.setScale(v, for: card.id) }
+                    live = nil
+                }
+        )
+        .accessibilityLabel(lang.s("board.resize"))
+    }
+
+    private var nameTag: some View {
+        HStack(spacing: 4) {
+            Image(systemName: card.icon).font(.system(size: 10, weight: .semibold))
+            Text(lang.s(card.titleKey)).font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundColor(Theme.Colors.onAccent)
+        .padding(.horizontal, 7).padding(.vertical, 4)
+        .background(Capsule().fill(Theme.Colors.accent))
+        .padding(5)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// مقبض التحجيم — زاوية غامقة، زي نظام أبل.
+///
+/// كان سهمًا داخل دائرة ملوّنة. السهم بيقول «اسحبني» بالكلام، والزاوية بتقولها
+/// بالشكل: هي حرفيًا زاوية البطاقة. وغامق مش ملوّن عن قصد — اللون بيسحب العين
+/// لعنصر تحكّم المفروض يستنّى دورك.
+private struct CornerGrip: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.black.opacity(0.45))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(.white.opacity(0.35), lineWidth: 0.5)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            CornerBracket()
+                .stroke(.white.opacity(0.95),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round,
+                                           lineJoin: .round))
+                .frame(width: 11, height: 11)
+        }
+        .frame(width: 26, height: 26)
+        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+    }
+}
+
+/// زاوية «⌟» — ضلعان بيلتقوا تحت-يمين.
+private struct CornerBracket: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        return p
+    }
+}
+
+/// رصف البطاقات بسطور — بطاقة جنب بطاقة لحدّ ما يمتلي السطر.
 private struct FlowLayout: Layout {
     let gap: CGFloat
 
@@ -385,51 +436,5 @@ private struct FlowLayout: Layout {
             x += s.width + gap
             rowH = max(rowH, s.height)
         }
-    }
-}
-
-/// مقبض التحجيم — زاوية غامقة، زي نظام أبل.
-///
-/// كان سهمًا داخل دائرة ملوّنة. السهم بيقول «اسحبني» بالكلام، والزاوية بتقولها
-/// بالشكل: هي حرفيًا زاوية البطاقة، فبتعرف إنك بتشدّ الزاوية بلا ما حدا يشرحلك.
-/// وهاد اللي بيخلّي عنصر تحكّم يبيّن جزء من النظام مش ملصق فوقه.
-///
-/// غامق مش ملوّن عن قصد: اللون بيسحب العين لعنصر تحكّم المفروض يستنّى دورك.
-/// وبيقعد فوق أي محتوى — صورة فاتحة أو بطاقة غامقة — لأنه إله خلفيته وحدّه
-/// الفاتح الرفيع.
-private struct CornerGrip: View {
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.black.opacity(0.55))
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(.white.opacity(0.35), lineWidth: 0.5)
-                )
-
-            CornerBracket()
-                .stroke(.white.opacity(0.95),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round,
-                                           lineJoin: .round))
-                .frame(width: 11, height: 11)
-        }
-        .frame(width: 26, height: 26)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-    }
-}
-
-/// زاوية «⌟» — ضلعان بيلتقوا تحت-يمين.
-private struct CornerBracket: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        return p
     }
 }
