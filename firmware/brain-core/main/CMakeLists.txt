@@ -20,6 +20,12 @@ idf_component_register(
         "sandy_status.c"
         "sandy_audio_ctl.c"
         "sandy_screen.c"
+        # Generated Arabic fonts — see fonts/README.md. Listed explicitly rather
+        # than globbed: a glob hides the fact that these are build artefacts,
+        # and this project has already been bitten once by a .c that existed,
+        # compiled clean, and was never in the build.
+        "fonts/sandy_font_ar_24.c"
+        "fonts/sandy_font_ar_32.c"
     INCLUDE_DIRS
         "include"
         "."

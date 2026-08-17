@@ -149,3 +149,4 @@ def test_snapshot_command_shape(monkeypatch):
     assert cmd["cmd"] == "snapshot"
     assert cmd["settle_ms"] == 3000        # clamped, not passed through
     assert cmd["flash"] == "auto"          # unknown value falls back, never sent raw
+

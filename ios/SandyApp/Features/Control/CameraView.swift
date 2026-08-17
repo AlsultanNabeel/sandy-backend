@@ -25,8 +25,12 @@ struct CameraView: View {
     @State private var notice = ""
     @State private var streaming = false
 
-    /// عنوان الكاميرا ع الشبكة المحلية، من نبضتها.
-    private var localIP: String { node.telemetry?.ip ?? "" }
+    /// عنوان الكاميرا ع الشبكة المحلية، من نبضتها هي.
+    ///
+    /// `camIP` مش `ip`: اللوحين بيشاركوا معرّف الوحدة، و`ip` كان بينقلب بينهم
+    /// كل خمس ثواني — فالبثّ كان بيوجّه ع الدماغ نص الوقت، والدماغ ما عنده
+    /// خادم صور. فشل مرّة من كل مرّتين بلا سبب ظاهر.
+    private var localIP: String { node.telemetry?.camIP ?? "" }
 
     var body: some View {
         ScrollView {

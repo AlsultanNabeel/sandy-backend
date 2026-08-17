@@ -347,6 +347,12 @@ struct NodeTelemetry {
     /// أي لوح: `sandy-brain-s3` أو الكاميرا أو عقدة الغرفة. تلات ألواح ع نفس
     /// الشبكة وتلات ملفات ما بتتبادل — واللبس بينهم بيحرق لوح.
     let board: String?
+    /// عنوان الكاميرا هي — مفتاح مستقل عن `ip`.
+    ///
+    /// اللوحين تحت معرّف وحدة واحد، فحقل عنوان واحد بينقلب بينهم كل خمس
+    /// ثواني. البثّ بيروح مباشرة من الكاميرا، فلازم عنوانها هي بالذات.
+    let camIP: String?
+    let camBoard: String?
 
     /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
     var hasMicReadings: Bool { micLeft != nil || micRight != nil }
@@ -365,6 +371,8 @@ struct NodeTelemetry {
         noise         = i("noise")
         ip            = d["ip"] as? String
         board         = d["board"] as? String
+        camIP         = d["cam_ip"] as? String
+        camBoard      = d["cam_board"] as? String
     }
 }
 

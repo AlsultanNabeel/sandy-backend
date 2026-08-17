@@ -145,7 +145,18 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
         capabilities=None,
         outputs=kept + namespaced,
         firmware_version="",
-        telemetry={k: v for k, v in data.items() if k in ("ip", "board")},
+        # `cam_` مش `ip`.
+        #
+        # اللوحين بيشاركوا معرّف الوحدة، والتليمتري بتندمج بالمفتاح — فلوّ
+        # الكاميرا بعتت `ip` كانت بتدهس عنوان الدماغ، وبعد خمس ثواني الدماغ
+        # بيدهس عنوانها. الحقل الواحد كان بينقلب بين لوحين للأبد، وشاشة البثّ
+        # بتوجّه ع الدماغ نص الوقت — والدماغ ما عنده `/stream`، فالبثّ بيفشل
+        # مرّة من كل مرّتين بلا أي نمط يبيّن السبب.
+        #
+        # نفس درس المخارج بالضبط، بحقل تاني: لوحين تحت معرّف واحد لازم كل
+        # واحد يكتب بمساحته.
+        telemetry={f"cam_{k}": v for k, v in data.items()
+                   if k in ("ip", "board")},
     )
 
 

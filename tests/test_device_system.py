@@ -823,8 +823,11 @@ def test_two_boards_under_one_node_id_do_not_erase_each_other(db):
         cam_only = {o["id"] for o in node_store.get_node("sandy0002")["outputs"]}
         assert cam_only == {"cam/flash", "cam/snapshot"}
 
-        # and its address landed, which is how anyone finds the camera at all
-        assert node_store.get_node("sandy0002")["telemetry"]["ip"] == "192.168.1.117"
+        # and its address landed under its own key, which is how anyone finds
+        # the camera at all. `cam_ip`, not `ip`: the brain owns `ip`, and a
+        # single shared field flips between two boards every five seconds.
+        assert node_store.get_node("sandy0002")["telemetry"]["cam_ip"] \
+            == "192.168.1.117"
 
 
 def test_the_two_boards_stop_erasing_each_other(db):
@@ -842,7 +845,10 @@ def test_the_two_boards_stop_erasing_each_other(db):
     from app.integrations.mqtt_ingest import _ingest_cam_status
 
     BRAIN = [{"id": "servo", "kind": "servo"}, {"id": "screen", "kind": "pwm"}]
-    BRAIN_TELEMETRY = {"mic_l": 40, "mic_r": 44, "volume": 80, "ip": "192.168.1.102"}
+    # `board` included because the real brain sends it — and the point of this
+    # test is that the two boards' names stop overwriting each other too.
+    BRAIN_TELEMETRY = {"mic_l": 40, "mic_r": 44, "volume": 80,
+                       "ip": "192.168.1.102", "board": "sandy-brain-s3"}
     CAM_JSON = ('{"outputs":[{"id":"flash","kind":"relay"}],'
                 '"ip":"192.168.1.117","board":"sandy-cam"}')
 
@@ -859,18 +865,26 @@ def test_the_two_boards_stop_erasing_each_other(db):
         assert {"servo", "screen", "cam/flash"} <= outputs, outputs
 
         tele = node["telemetry"]
-        # The camera's address is the last one written, and the brain's readings
-        # survived it — that is the whole point.
-        assert tele.get("ip") == "192.168.1.117"
-        assert tele.get("board") == "sandy-cam"
+        # Each board's address under its own key, and the brain's readings
+        # survived — that is the whole point.
+        #
+        # This assertion used to read `tele["ip"] == <the camera>` with a
+        # comment calling it "the last one written". That was the bug written
+        # down as though it were the design: one field, two boards, flipping
+        # every five seconds. The live view read it and pointed at the brain
+        # half the time, and the brain serves no video.
+        assert tele.get("ip") == "192.168.1.102"          # the brain's, kept
+        assert tele.get("cam_ip") == "192.168.1.117"      # the camera's, its own
+        assert tele.get("board") == "sandy-brain-s3"
+        assert tele.get("cam_board") == "sandy-cam"
         assert tele.get("mic_l") == 40 and tele.get("volume") == 80
 
-        # ...and the other order ends with the brain's address, camera intact.
+        # ...and in the other order neither address moves.
         node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.1",
                                  telemetry=BRAIN_TELEMETRY)
         node = node_store.get_node("sandy0001")
         assert node["telemetry"]["ip"] == "192.168.1.102"
-        assert node["telemetry"]["board"] == "sandy-cam"
+        assert node["telemetry"]["cam_ip"] == "192.168.1.117"
         assert "cam/flash" in {o["id"] for o in node["outputs"]}
 
 
@@ -947,3 +961,39 @@ def test_correcting_the_widget_leaves_the_owners_own_words_alone(db):
         assert after["control_type"] == "text"
         assert after["label"] == "وش ساندي الحلو"
         assert after["room"] == "غرفتي"
+
+
+def test_the_two_boards_do_not_overwrite_each_others_address(db):
+    """One node id, two boards, one `ip` field — the live view's real bug.
+
+    The brain and the camera share a node id by design, and telemetry merges by
+    key. Both were sending `ip`, so the single field flipped between the two
+    boards every five seconds. The stream view read it and pointed at the brain
+    half the time — and the brain serves no video — so the live view failed
+    roughly every other attempt with nothing in the pattern to explain it.
+
+    The camera's address now lives under `cam_ip`, the same way its outputs live
+    under `cam/`. Two boards under one id each write in their own space.
+    """
+    import json
+
+    from app.integrations import mqtt_ingest
+
+    with as_tenant("owner"):
+        node_store.pair_node("sandybrain01", "ساندي")
+        # The brain says where it is.
+        node_store.ingest_status(
+            "sandybrain01", True, [], [{"id": "servo", "kind": "servo"}],
+            "0.9.1", telemetry={"ip": "192.168.1.50", "board": "sandy-brain-s3"})
+
+    # Then the camera's heartbeat lands.
+    mqtt_ingest._ingest_cam_status("sandybrain01", json.dumps({
+        "ip": "192.168.1.77", "board": "sandy-cam",
+        "outputs": [{"id": "flash", "kind": "relay"}],
+    }))
+
+    with as_tenant("owner"):
+        tele = node_store.get_node("sandybrain01")["telemetry"]
+
+    assert tele["ip"] == "192.168.1.50", "the camera overwrote the brain's address"
+    assert tele["cam_ip"] == "192.168.1.77", "the camera's own address was lost"
