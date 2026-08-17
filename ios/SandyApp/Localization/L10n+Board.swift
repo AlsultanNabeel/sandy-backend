@@ -10,14 +10,14 @@ enum L10nBoard {
             "done":    .text("خلصت"),
             "reset":   .text("رجّع الأصلي"),
             "resize":  .text("اسحب لتغيير الحجم"),
-            "hint":    .text("اسحب البطاقة لمكانها، واسحب زاويتها لأي حجم بدك."),
+            "hint":    .text("اسحب البطاقة لمكانها · − و + للحجم · أو اقرص بإصبعين"),
         ],
         en: [
             "edit":    .text("Arrange"),
             "done":    .text("Done"),
             "reset":   .text("Reset"),
             "resize":  .text("Drag to resize"),
-            "hint":    .text("Drag a card where you want it, drag its corner to any size."),
+            "hint":    .text("Drag a card to move it · − and + to resize · or pinch"),
         ]
     )
 }

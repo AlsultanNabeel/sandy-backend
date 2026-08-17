@@ -104,6 +104,21 @@ struct CardBoard: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                // شريط إرشاد بوضع التعديل.
+                //
+                // ميزة ما حدا بيعرف كيف يستعملها هي ميزة مش موجودة. المالك كان
+                // بيدوّر ع طريقة يمسك فيها البطاقة وما لقي، والشاشة ما كانت
+                // بتقول إشي — فبدا شكله عطل.
+                if store.editing {
+                    Text(lang.s("board.hint"))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, gap)
+                        .padding(.top, Theme.Spacing.sm)
+                }
+
                 FlowLayout(gap: gap) {
                     ForEach(ordered) { card in
                         CardCell(card: card,
@@ -262,7 +277,8 @@ private struct CardCell: View {
                     .fill(store.editing ? Theme.Colors.surface.opacity(0.35) : .clear)
             )
             .overlay(alignment: .topLeading) { if store.editing { nameTag } }
-            .overlay(alignment: .bottomTrailing) { if store.editing { grip } }
+            .overlay(alignment: .bottomLeading) { if store.editing { sizeControls } }
+            .overlay(alignment: .bottomTrailing) { if store.editing { cornerHandle } }
             .overlay {
                 if store.editing {
                     RoundedRectangle(cornerRadius: Theme.Radius.card)
@@ -283,6 +299,9 @@ private struct CardCell: View {
             .zIndex(isHeld ? 1 : 0)
             .contentShape(Rectangle())
             .gesture(reorder, isEnabled: store.editing)
+            // القرص بإصبعين — إيماءة ما بتزاحم التمرير أصلًا لأنها بإصبعين،
+            // فهي أضمن إيماءة تحجيم موجودة. زيادة ع الزرّين، مش بدلهم.
+            .gesture(pinch, isEnabled: store.editing)
     }
 
     // ── السحب لإعادة الترتيب ─────────────────────────────────────────────────
@@ -305,29 +324,81 @@ private struct CardCell: View {
 
     // ── التحجيم ──────────────────────────────────────────────────────────────
 
-    /// مقبض الزاوية — زاوية غامقة، جوّا حدود البطاقة.
+    private var pinch: some Gesture {
+        MagnifyGesture()
+            .onChanged { g in
+                if live == nil {
+                    base = store.scale(card.id, default: card.defaultScale)
+                }
+                let want: Double = base * g.magnification
+                live = min(max(want, BoardStore.minScale), BoardStore.maxScale)
+            }
+            .onEnded { _ in
+                if let v = live { store.setScale(v, for: card.id) }
+                live = nil
+            }
+    }
+
+    /// أدوات الحجم — زرّان وزاوية.
     ///
-    /// جوّا الحدود لأنه سويفت‌يو‌آي ما بتوصّل اللمس لأي إشي مرسوم برّا إطار
-    /// أبوه. نسختين قبل حاولوا يطلّعوه ع الزاوية — وحدة بـ `offset` ووحدة
-    /// بـ `contentShape(inset: -12)` — والتنتين خلّوه يبيّن وما ينمسك.
-    private var grip: some View {
+    /// **الزرّان أساس، مش احتياط.**
+    ///
+    /// أربع نسخ متتالية اعتمدت ع إيماءة سحب وحدها، وكل مرّة كانت تنلغي لسبب
+    /// مختلف — إعادة بناء الشجرة، تبديل إعداد بالتمرير، هدف لمس برّا الإطار.
+    /// وكل مرّة كنت بشيل سبب واحد وبيطلع غيره، لأني بحلّل سلوك ما بقدر أشوفه.
+    ///
+    /// الزرّ ما بينلغى. ما إله إحداثيات ولا مساحة لمس ولا منافسة مع إيماءة تانية:
+    /// بتدوس، بيصير. فالتحكّم الأكيد صار زرّين، والسحب من الزاوية والقرص ضلّوا
+    /// فوقهم للي بيحبّهم — الميزة ما بتوقف عليهم.
+    ///
+    /// وخطوة عشرة بالمية: صغيرة كفاية تظبّط، وكبيرة كفاية تحسّها من ضغطة وحدة.
+    private var sizeControls: some View {
+        HStack(spacing: 2) {
+            stepButton("minus", by: -0.10)
+            stepButton("plus", by: 0.10)
+        }
+        .padding(4)
+    }
+
+    private func stepButton(_ icon: String, by delta: Double) -> some View {
+        Button {
+            let now: Double = store.scale(card.id, default: card.defaultScale)
+            store.setScale(now + delta, for: card.id)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(.black.opacity(0.6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(.white.opacity(0.3), lineWidth: 0.5))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// الزاوية الغامقة — شكل أبل، وبتسحب كمان.
+    ///
+    /// موجودة لأنها الشكل اللي بيقول «هاي البطاقة بتتحجّم» بلا كلام: هي حرفيًا
+    /// زاوية البطاقة. والسحب منها بيشتغل، بس مش هو الضمان — الضمان الزرّان
+    /// جنبها. لو انلغت الإيماءة لأي سبب، الميزة بتضل شغّالة.
+    private var cornerHandle: some View {
         ZStack {
             Color.clear
             CornerGrip()
         }
-        // أربعة وأربعين نقطة: أقل هدف لمس بتوصي فيه أبل، وكله جوّا الإطار.
-        .frame(width: 44, height: 44)
+        .frame(width: 44, height: 44)      // أقل هدف لمس بتوصي فيه أبل
         .contentShape(Rectangle())
-        // أولوية عالية: البطاقة كلها عليها إيماءة ترتيب، وبلا هاد السحب من
-        // الزاوية بيرتّب بدل ما يحجّم.
         .highPriorityGesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { g in
                     if live == nil {
                         base = store.scale(card.id, default: card.defaultScale)
                     }
-                    // القطر: اسحب لبرّا أو لتحت أو للاتنين. ربطه بالعرض لحاله
-                    // بيخلّي السحب لتحت ما يعمل إشي، وهاد بيبيّن عطل.
                     let d: CGFloat = (g.translation.width + g.translation.height) / 2
                     let want: Double = base + Double(d / max(boardWidth, 1))
                     live = min(max(want, BoardStore.minScale), BoardStore.maxScale)
