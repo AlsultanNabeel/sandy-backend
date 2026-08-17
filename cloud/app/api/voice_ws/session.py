@@ -8,6 +8,7 @@ import hmac as _hmac
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 from app.api.voice_ws._config import (
     logger,
@@ -36,6 +37,15 @@ from app.api.voice_ws.tools import (
     _dispatch_tool,
     _make_dispatcher,
 )
+
+
+# How long a reply may keep going after the robot stops sending audio.
+#
+# This is the gap between "she finished the question" and "she finished the
+# answer", and it is normal — Gemini streams the reply while the device is
+# silent. Twenty seconds covers any real answer; past that the stream is stuck
+# and holding the session open only delays the next question.
+_REPLY_DRAIN_S = 20
 
 
 def register_voice_ws(app) -> None:
@@ -228,25 +238,73 @@ class _DeviceReader:
 
     _FRAME_MS = 20  # the robot sends ~20ms of PCM per frame
 
+    # How long one blocking read is allowed to wait before coming up for air.
+    #
+    # **This number is why sessions stopped hanging.** The read used to have no
+    # deadline at all, and a read with no deadline returns only when the device
+    # sends something or the socket breaks. A robot that has finished speaking
+    # and is waiting for an answer sends nothing — so the read sat there, and
+    # the worker thread behind it sat there with it.
+    #
+    # asyncio.run() is what turned that into an outage. On the way out it calls
+    # loop.shutdown_default_executor(), which waits for every executor thread to
+    # finish. Measured: a session whose work ended in 0.2s did not return for a
+    # full 6s, purely waiting on that one parked thread. In production the wait
+    # is not six seconds — it is until the robot speaks again or TCP gives up.
+    #
+    # gunicorn runs 2 workers x 8 threads. Every hung session holds one of the
+    # sixteen. Enough of them and a new voice connection has nowhere to land:
+    # the robot connects, waits, gets nothing, and reboots itself. That is
+    # exactly "it answers once and then ignores me twice".
+    #
+    # A quarter second is short enough that a stopped reader is gone before
+    # anyone notices, and long enough that idle polling costs nothing.
+    _POLL_S = 0.25
+
+    # Returned by the read helper when the socket is gone, so a real close is
+    # never confused with a quiet quarter second. simple_websocket returns None
+    # on timeout and raises ConnectionClosed on close — two very different
+    # things that the old code, having no timeout, could treat as one.
+    _CLOSED = object()
+
     def __init__(self, ws, buffer_ms: int = 8000):
         self._ws = ws
         self._q: asyncio.Queue = asyncio.Queue(maxsize=buffer_ms // self._FRAME_MS)
         self._task: Optional[asyncio.Task] = None
+        self._stop = False
+        # Its own thread, not the shared default executor.
+        #
+        # Two reasons. asyncio.run() only waits for the *default* executor, so a
+        # reader on its own pool can never stall shutdown again even if this
+        # code grows a new way to block. And audio going out to the device also
+        # needs a thread — sharing one pool meant every outbound chunk queued
+        # behind however many readers were parked, which is what made her voice
+        # arrive in pieces.
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-rx")
         self.dropped = 0
 
     def start(self) -> "_DeviceReader":
         self._task = asyncio.create_task(self._run())
         return self
 
+    def _receive_once(self):
+        """One bounded blocking read. `_CLOSED` when the socket is finished."""
+        try:
+            return self._ws.receive(timeout=self._POLL_S)
+        except Exception:      # ConnectionClosed, or the socket died under us
+            return self._CLOSED
+
     async def _run(self) -> None:
         loop = asyncio.get_event_loop()
-        while True:
+        while not self._stop:
             try:
-                chunk = await loop.run_in_executor(None, self._ws.receive)
-            except Exception:  # device closed mid-session (ConnectionClosed)
+                chunk = await loop.run_in_executor(self._pool, self._receive_once)
+            except Exception:  # noqa: BLE001 — pool shut down under us; we are done
+                break
+            if chunk is self._CLOSED:
                 break
             if chunk is None:
-                break
+                continue       # quiet quarter second — the device is just silent
             if not isinstance(chunk, (bytes, bytearray)):
                 continue
             if self._q.full():
@@ -273,8 +331,13 @@ class _DeviceReader:
             yield chunk
 
     def stop(self) -> None:
+        self._stop = True
         if self._task:
             self._task.cancel()
+        # wait=False on purpose: the reader thread notices `_stop` within
+        # _POLL_S and exits by itself. Blocking here would put back the very
+        # stall this class was rewritten to remove.
+        self._pool.shutdown(wait=False)
 
 
 async def _live_session(ws, remote: str) -> None:
@@ -367,6 +430,37 @@ async def _live_session(ws, remote: str) -> None:
                 [t_in, t_out],
                 return_when=asyncio.FIRST_COMPLETED,
             )
+
+            # The two directions are not equals, and treating them as equals is
+            # what cut her off mid-sentence.
+            #
+            # device→live ending means the robot stopped sending audio. That is
+            # the *normal* end of a question — and Gemini is very often still
+            # speaking the answer when it happens. Cancelling the other side
+            # right there threw away a reply that was already on its way, which
+            # the owner heard as her starting a sentence and vanishing. The log
+            # line for it read "device→live ended cleanly, closing session",
+            # which sounded like success.
+            #
+            # So when the input side finishes we let the output side finish
+            # too, up to a bounded wait. A reply longer than this is a stuck
+            # stream, not a long answer.
+            #
+            # live→device ending is the opposite: Gemini is done or has failed,
+            # and there is nothing left to wait for.
+            if t_in in done and t_out in pending:
+                try:
+                    await asyncio.wait_for(t_out, timeout=_REPLY_DRAIN_S)
+                    logger.info("[voice_ws] device stopped sending; reply finished")
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[voice_ws] reply still running %ds after the device went "
+                        "quiet — cutting it", _REPLY_DRAIN_S)
+                except Exception:  # noqa: BLE001
+                    logger.debug("reply drain ended with an error", exc_info=True)
+                done = {t_in, t_out}
+                pending = set()
+
             for t in pending:
                 t.cancel()
                 try:
@@ -471,6 +565,31 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
 
     loop = asyncio.get_event_loop()
     gate_on = _speaker_gate_enabled()
+
+    # One thread, ours, for everything written to the device.
+    #
+    # Two things were wrong with using the shared default executor here.
+    #
+    # It was contended: the same pool held the parked reader threads, so every
+    # audio chunk queued behind them. Her voice arrived in bursts and gaps, and
+    # the more sessions had been left hanging, the worse it got — which is why
+    # the choppiness came and went with no pattern anyone could see.
+    #
+    # And it was not ordered. A pool with several threads gives no guarantee
+    # about which write lands first. It happens to work today only because each
+    # send is awaited before the next is queued; that is one refactor away from
+    # shuffling audio frames, and shuffled audio does not sound broken, it
+    # sounds like a bad connection.
+    #
+    # One worker gives strict FIFO by construction and cannot be starved.
+    tx = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-tx")
+
+    async def send_bytes(data: bytes) -> None:
+        await loop.run_in_executor(tx, ws.send, data)
+
+    async def send_msg(obj: Dict[str, Any]) -> None:
+        await loop.run_in_executor(tx, _send_json, ws, obj)
+
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
     # Destructive tools already prompted for spoken confirmation this session;
@@ -502,19 +621,19 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
         # generating — tell the device to dump its buffered audio so she
         # actually goes quiet instead of finishing the stale reply.
         if response.server_content and response.server_content.interrupted:
-            await loop.run_in_executor(None, _send_json, ws, {"type": "interrupted"})
+            await send_msg({"type": "interrupted"})
 
         # Audio plus text response: relay the audio, capture the text.
         if response.server_content and response.server_content.model_turn:
             for part in response.server_content.model_turn.parts:
                 if part.inline_data and part.inline_data.data:
-                    await loop.run_in_executor(None, ws.send, part.inline_data.data)
+                    await send_bytes(part.inline_data.data)
                 if part.text:
                     _sandy_buf.append(part.text)
 
         # Turn complete: persist the turn for cross-platform memory only.
         if response.server_content and response.server_content.turn_complete:
-            await loop.run_in_executor(None, _send_json, ws, {"type": "end_turn"})
+            await send_msg({"type": "end_turn"})
             user_text = " ".join(_user_buf).strip()
             sandy_text = " ".join(_sandy_buf).strip()
 
@@ -533,7 +652,16 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
             logger.info("[voice_ws] turn done: heard=%r replied=%d chars",
                         user_text[:120], len(sandy_text))
             if user_text and sandy_text:
-                await loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text)
+                # مش `await`.
+                #
+                # هاد كتابة ع قاعدة البيانات، وكان موقوف عليه بنص حلقة الردّ —
+                # يعني كل نهاية دور بتوقف بثّ الصوت لحدّ ما تخلص الكتابة. لو
+                # القاعدة تأخّرت لحظة، بتسمعها سكتة بآخر كل جملة، وما في إشي
+                # ع الشاشة بيربط السكتة بالحفظ.
+                #
+                # الذاكرة مش ع المسار الحرج: فشلها بيخسّر سطر بالسجل، وتأخيرها
+                # ما بيجوز يخسّر مقطع صوت. بنطلقها وبنكمّل.
+                loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text)
 
             _user_buf.clear()
             _sandy_buf.clear()
@@ -593,18 +721,27 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     # session.receive() yields one turn then ends, so we loop to keep the
     # conversation going across turns (the session itself stays open). We exit
     # on go_away, an error, or the device closing.
-    while True:
-        try:
-            stop = False
-            async for response in session.receive():
-                if await _handle(response):
-                    stop = True
+    #
+    # try/finally, not a bare loop: this task gets cancelled whenever the other
+    # side finishes first, and a cancelled task still has to give its thread
+    # back. A pool leaked once per session is the same failure this file was
+    # just rewritten to remove — one thread each, quietly, until the worker runs
+    # out and the robot stops being answered.
+    try:
+        while True:
+            try:
+                stop = False
+                async for response in session.receive():
+                    if await _handle(response):
+                        stop = True
+                        break
+                if stop:
                     break
-            if stop:
+            except Exception as exc:
+                logger.info("[voice_ws] Live receive loop ended: %s", exc)
                 break
-        except Exception as exc:
-            logger.info("[voice_ws] Live receive loop ended: %s", exc)
-            break
+    finally:
+        tx.shutdown(wait=False)
 
 
 # Helpers
