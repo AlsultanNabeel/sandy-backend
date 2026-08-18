@@ -122,6 +122,22 @@ def test_a_handler_that_throws_is_not_hidden_at_debug_level():
     assert 'logger.debug("[mqtt_ingest] message handling failed' not in _SRC
 
 
+def test_the_failure_line_carries_its_own_diagnosis():
+    """The owner should not have to go and fetch the reason.
+
+    `0/? chunks` named the symptom and stopped. Getting from there to a cause
+    meant a second tool and a login he does not have — for numbers that were in
+    memory at the moment of failure. Anything that costs a round trip to learn
+    should be on the line that reports the problem.
+    """
+    assert "ingest(" in _CAM, "the timeout line no longer carries ingest state"
+    assert "cam_snapshot=" in _CAM and "cam_status=" in _CAM, (
+        "without both counts side by side, 'the link is down' and 'this one "
+        "topic never arrives' still look the same")
+    assert "logger.warning(" in _CAM, (
+        "a failure logged below WARNING disappears at production log levels")
+
+
 def test_the_camera_chunk_subscription_still_matches_the_board_topic():
     """`+` matches exactly one level.
 

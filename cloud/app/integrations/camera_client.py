@@ -192,11 +192,30 @@ def request_snapshot(node_id: str, timeout_s: float = 15.0,
 
         if not p.event.wait(timeout_s):
             got, want = len(p.chunks), p.total or "?"
-            # The pid pairs this with the "nobody waiting" line above. Same pid on
-            # both means the chunks are genuinely not arriving; different pids
-            # means they arrived and the waiter was somewhere else.
-            logger.info("[camera] %s: worker %d timed out with %s/%s chunks",
-                        node_id, os.getpid(), got, want)
+            # **The evidence goes on the failure line itself.**
+            #
+            # This used to say `0/? chunks` and stop, which named the symptom and
+            # nothing else. Answering "why" then meant a second tool, a login the
+            # owner does not have, and another round trip — while the failure had
+            # already happened and the numbers that explain it were sitting in
+            # memory a function call away.
+            #
+            # Read it as: is this worker's listener connected, did the broker
+            # grant all four subscriptions (128 = refused), and is it hearing
+            # heartbeats but not chunks? Those are the three causes, and this one
+            # line separates them without asking anybody for anything.
+            try:
+                from app.integrations.mqtt_ingest import get_ingest_stats
+                st = get_ingest_stats()
+                detail = (f"connected={st['connected']} granted={st['granted_qos']} "
+                          f"status={st['status']} cam_status={st['cam_status']} "
+                          f"cam_snapshot={st['cam_snapshot']} "
+                          f"drops={st['disconnects']} errors={st['errors']}")
+            except Exception as e:  # noqa: BLE001 — diagnosis must not mask the failure
+                detail = f"ingest stats unavailable: {e}"
+            logger.warning(
+                "[camera] %s: worker %d timed out with %s/%s chunks — ingest(%s)",
+                node_id, os.getpid(), got, want, detail)
             return None
         if not p.complete():
             return None
