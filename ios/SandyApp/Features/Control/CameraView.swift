@@ -24,6 +24,7 @@ struct CameraView: View {
     @State private var taking = false
     @State private var notice = ""
     @State private var streaming = false
+    @State private var starting = false
 
     /// عنوان الكاميرا ع الشبكة المحلية، من نبضتها هي.
     ///
@@ -127,18 +128,53 @@ struct CameraView: View {
                     .cornerRadius(Theme.Radius.card)
                 SandyButton(title: lang.s("robot.control.camera.stream.stop"),
                             systemImage: "stop.fill", fillWidth: true) {
-                    streaming = false
+                    Task { await stopStream() }
                 }
             } else {
-                SandyButton(title: lang.s("robot.control.camera.stream.start"),
+                SandyButton(title: lang.s(starting ? "robot.control.camera.stream.starting"
+                                                   : "robot.control.camera.stream.start"),
                             systemImage: "play.fill", fillWidth: true) {
-                    streaming = true
+                    Task { await startStream() }
                 }
+                .disabled(starting)
                 Text(String(format: lang.s("robot.control.camera.stream.address"), localIP))
                     .font(Theme.Typography.caption.monospacedDigit())
                     .foregroundColor(Theme.Colors.tertiaryText)
             }
         }
+    }
+
+    /// **يقول للّوح يشغّل خادمه، وبعدين بس بيفتح العارض.**
+    ///
+    /// الزرّ كان بيعمل `streaming = true` وبس. والكاميرا ما بتشغّل خادم الـ HTTP
+    /// إلا لمّا ينطلب منها — نبضتها كانت بتقول `stream:false` بكل مرّة. فالعارض
+    /// كان بيفتح ع عنوان ما في حدا سامع عليه، والويب-فيو بيعرض علامة استفهام:
+    /// مربّع مكسور، بيبيّن كأنّ الشبكة غلط أو الجهاز بعيد.
+    ///
+    /// وهاي أسوأ صيغة للعطل — العرض بيتّهم شغلة سليمة (الشبكة) عن شغلة ما
+    /// انعملت أصلًا (الأمر). المالك بيروح يفحص راوتره وهو مضبوط.
+    private func startStream() async {
+        starting = true
+        notice = ""
+        defer { starting = false }
+        do {
+            try await state.api.controlDevice(name: "cam_stream", action: "on")
+            // اللوح بده لحظة يرفع الخادم. فتح العارض بنفس الثانية بيعطي نفس
+            // المربّع المكسور، والمستخدم ما بيفرّق بين «لسا» و«ما زبط».
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            streaming = true
+        } catch {
+            notice = lang.s("robot.control.camera.stream.failed")
+        }
+    }
+
+    /// وإطفاؤه لمّا نخلص — مش تجميل.
+    ///
+    /// خادم الـ HTTP بيضل شغّال ع اللوح لحدّ ما ينطلب يوقف. لوح صغير ببث دائم
+    /// بيسخن وبياكل كهربا وبيبطّئ كل إشي تاني عليه — ومنها الالتقاط.
+    private func stopStream() async {
+        streaming = false
+        try? await state.api.controlDevice(name: "cam_stream", action: "off")
     }
 }
 

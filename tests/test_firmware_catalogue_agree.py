@@ -112,17 +112,42 @@ def test_the_camera_outputs_the_app_offers_are_ones_the_camera_answers_to():
     )
 
 
-def test_the_camera_subscribes_under_its_own_branch_not_the_whole_node():
-    """A wildcard over the whole node would hand the camera the brain's commands.
+def test_the_camera_never_subscribes_to_a_topic_it_publishes_on():
+    """No wildcards on the camera's own branch — it publishes there.
 
-    Both boards answer under one node id. Subscribing to `<id>/+` — which an
-    earlier version of this did — meant the camera received `servo`, `mood` and
-    `led` as well as its own. Harmless today because it ignores them; a bug the
-    first time a name appears on both boards.
+    This test used to *require* `<id>/cam/+`, as the narrower alternative to a
+    wildcard over the whole node. Narrower, but still wrong in the way that
+    mattered: the board publishes under `cam/` too, so the broker handed every
+    chunk straight back to it.
+
+    It was never a logic error — there is an explicit ignore-list for the echoed
+    names, and it works. It was a **cost** error, and that is what broke the
+    camera. Eight chunks per photo, roughly eleven kilobytes, decrypted, copied
+    into a String and printed in full over the log, all before `g_mqtt.loop()`
+    reached the next request. The first photo after boot came back in 1.3
+    seconds; the next found the board still chewing on the echo of the last one
+    and took fourteen — past the server's timeout, every time.
+
+    So the rule is not "scope the wildcard". It is: subscribe by name, and never
+    to a name you publish on.
     """
     cam = _read("vision-core/cam_mqtt.ino")
-    assert '"/cam/+"' in cam or "/cam/+" in cam, "the camera's subscription is not scoped to cam/"
     assert 'camNodeId() + "/+"' not in cam, "the camera subscribes to the whole node tree"
+    assert "/cam/+" not in cam, (
+        "the camera subscribes to a wildcard over its own branch again — every "
+        "chunk it publishes comes straight back to it, and the board spends the "
+        "next photo's time reading its own last one")
+
+    # The three it publishes on. Any subscription to these is pure echo.
+    for published in ('"/snapshot"', '"/status"', '"/event"'):
+        assert f"subscribe({published}" not in cam
+
+    # And the ones it must still hear, or the app's buttons go nowhere.
+    for needed in ("g_topicCommand", "g_topicWifi", "g_topicRequest"):
+        assert f"subscribe({needed}" in cam, f"the camera stopped listening on {needed}"
+    assert "kSimpleOutputs" in cam, (
+        "the per-output subscriptions are gone — flash, stream and framesize "
+        "are published by the app and now nobody is listening")
 
 
 def test_every_output_the_brain_declares_has_somewhere_to_appear():
