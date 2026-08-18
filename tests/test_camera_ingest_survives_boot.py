@@ -67,19 +67,34 @@ def test_a_dropped_connection_is_not_silent():
         "a drop leaves no trace, and silence is indistinguishable from working")
 
 
-def test_a_chunk_with_no_waiter_says_so():
-    """The line that tells two opposite bugs apart.
+def test_a_chunk_with_no_waiter_is_kept_not_dropped():
+    """This test used to demand a *log line* about the dropped chunk. Dropping
+    was the bug.
 
-    `0/? chunks` meant both "nothing was delivered" and "delivered to the wrong
-    worker". Same message, opposite fixes. Logging the arrival — with the pid on
-    both sides — decides it from the log alone, without another night of
-    guessing.
+    The reasoning at the time was sound and still is, in isolation: a chunk with
+    no pending request is either late or unasked-for, and buffering photos nobody
+    wants is how a memory leak starts. What it missed is that "nobody here wants
+    it" is not the same as "nobody wants it". gunicorn runs two workers, the
+    broker delivers to both, and only one holds the waiter — so every capture was
+    thrown away by the other one on principle.
+
+    Then the board got slow, the waiter timed out first, and its own copy went
+    too. A complete, correct photo destroyed twice per press, for two different
+    good reasons.
+
+    Now whoever receives the chunks assembles them and writes the result to the
+    inbox, and the request reads from there. The bound moved from "only if
+    someone is waiting" to "at most eight at a time, thirty seconds each" — which
+    protects the memory without deciding whose photo it is.
     """
-    assert "nobody waiting" in _CAM, (
-        "chunks with no pending request are dropped silently again")
+    assert "_unclaimed" in _CAM, (
+        "chunks with no local waiter are dropped again — the other worker's "
+        "request will never see them")
+    assert "_MAX_UNCLAIMED" in _CAM, "unbounded assembly of unrequested photos"
+    assert "_inbox_put" in _CAM and "_inbox_get" in _CAM, (
+        "the photo is no longer written where a different worker can read it")
     assert "os.getpid()" in _CAM, (
-        "without the pid the two log lines cannot be matched to workers, which "
-        "is the entire point of logging them")
+        "without the pid the log lines cannot be matched to workers")
 
 
 def test_the_broker_is_asked_whether_it_granted_the_subscription():

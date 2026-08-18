@@ -37,6 +37,8 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from pymongo.errors import PyMongoError
+
 logger = logging.getLogger(__name__)
 
 # A photo that has not finished arriving within this long is not coming.
@@ -98,12 +100,9 @@ _INBOX_TTL_S = 120
 
 
 def _inbox():
-    try:
-        from app.db import get_db
-        db = get_db()
-        return None if db is None else db[_INBOX]
-    except Exception:  # noqa: BLE001 — no database is not a reason to lose the photo path
-        return None
+    from app.db import get_db
+    db = get_db()
+    return None if db is None else db[_INBOX]
 
 
 def _inbox_put(node_id: str, req_id: str, jpeg: bytes) -> None:
@@ -120,7 +119,7 @@ def _inbox_put(node_id: str, req_id: str, jpeg: bytes) -> None:
         # is by taking more of them, so the arrival of one is exactly when the
         # old ones stop being worth keeping.
         col.delete_many({"at": {"$lt": time.time() - _INBOX_TTL_S}})
-    except Exception as e:  # noqa: BLE001
+    except PyMongoError as e:
         logger.warning("[camera] could not store photo %s: %s", req_id, e)
 
 
@@ -130,7 +129,7 @@ def _inbox_get(node_id: str, req_id: str) -> Optional[bytes]:
         return None
     try:
         doc = col.find_one({"_id": f"{node_id}:{req_id}"})
-    except Exception as e:  # noqa: BLE001
+    except PyMongoError as e:
         logger.warning("[camera] could not read the inbox: %s", e)
         return None
     if not doc or time.time() - float(doc.get("at", 0)) > _INBOX_TTL_S:
