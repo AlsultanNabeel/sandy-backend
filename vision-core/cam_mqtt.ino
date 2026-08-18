@@ -90,7 +90,14 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String value;
   value.reserve(length);
   for (unsigned int i = 0; i < length; i++) value += (char)payload[i];
-  g_log.printf("[MQTT] %s = %s\n", topic, value.c_str());
+  // مقصوص عند مئة وعشرين حرفًا. سطر السجل نفسه كان جزءًا من البطء: حمولة
+  // القطعة حوالي ألف وأربعمية حرف، وطباعتها كاملة عبر التسلسلي/التلنت بتوقف
+  // الحلقة الرئيسية. وما بتضيف معلومة — أول مئة حرف بتقول أي رسالة هي.
+  if (length > 120) {
+    g_log.printf("[MQTT] %s = %.120s… (%u بايت)\n", topic, value.c_str(), length);
+  } else {
+    g_log.printf("[MQTT] %s = %s\n", topic, value.c_str());
+  }
 
   String t(topic);
 
@@ -196,13 +203,28 @@ static bool mqttReconnect() {
     g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
     g_mqtt.subscribe(g_topicCommand.c_str(), 0);
     g_mqtt.subscribe(g_topicWifi.c_str(), 0);
-    // وفرع الكاميرا من شجرة الوحدة: sandy/node/<id>/cam/<مخرج>.
+    // مخارج الكاميرا البسيطة — **بالاسم، مش `cam/+`**.
     //
-    // `cam/` مش زينة: الدماغ بيشارك نفس معرّف الوحدة، فاشتراك ع `<id>/+` كان
-    // بيخلّي الكاميرا تستقبل أوامر الرقبة والوش والإضاءة كمان. البادئة بتفصل
-    // اللوحين بلا ما نغيّر معرّف الوحدة — وهي مقصودة، الكاميرا جزء من ساندي.
-    String simple = String(SANDY_TOPIC_ROOT) + camNodeId() + "/cam/+";
-    g_mqtt.subscribe(simple.c_str(), 0);
+    // الشجرة وحدة: اللوح بينشر تحت `cam/` وبيسمع تحت `cam/`. فاشتراك بنجمة
+    // بيرجّعله كل إشي بينشره. وهاد ما كان خطأ منطقيًّا — في سطر تحت بيتجاهل
+    // مواضيعنا صراحة — بس كان **خطأ كلفة**، وهي اللي كسرت الالتقاط:
+    //
+    // كل صورة تمان قطع. الوسيط بيرجّعهن كلهن للّوح: حوالي أحد عشر كيلوبايت
+    // بتنفكّ من التشفير، بتنسخ لسلسلة، وبتنطبع كاملة ع السجل — قبل ما
+    // `g_mqtt.loop()` يفضى للطلب اللي بعده. أول صورة بعد الإقلاع رجعت بثانية
+    // وتلث؛ اللي بعدها لقيت اللوح مشغول بصدى اللي قبلها، فصار الردّ أربعتعش
+    // ثانية، والخادم بيستنّى خمستعش. وكل إعادة محاولة بتضيف تمن قطع صدى تانية،
+    // فالتأخير بيكبر مع كل ضغطة.
+    //
+    // ولاحظ: `snapshot` مش هون. اللوح بينشر القطع عليه، فالاشتراك عليه صدى
+    // محض — وكان متجاهلًا أصلًا، يعني ما اشتغل ولا مرّة كزرّ.
+    static const char* kSimpleOutputs[] = {
+      "flash", "flash_level", "flash_mode", "stream", "framesize"
+    };
+    String base = String(SANDY_TOPIC_ROOT) + camNodeId() + "/cam/";
+    for (const char* out : kSimpleOutputs) {
+      g_mqtt.subscribe((base + out).c_str(), 0);
+    }
     g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;   // نجحنا → رجّع الانتظار لأصله
     publishFullStatus();                     // أول ما نتصل: عرّف عن حالك كاملة
     return true;

@@ -190,12 +190,23 @@ def request_snapshot(node_id: str, timeout_s: float = 15.0,
     if not node_id:
         return None
 
-    jpeg, heard_anything = _attempt(node_id, timeout_s / 2, settle_ms, flash)
+    # **The first ask gets most of the clock, not half of it.**
+    #
+    # Splitting the budget evenly was a mistake that made things worse, and the
+    # log showed it plainly: the board's answers were arriving at fourteen
+    # seconds, so a seven-second first window guaranteed a miss, and the retry
+    # then queued a second capture behind the first — which pushed the next
+    # answer out further still. Each press made the board slower.
+    #
+    # A retry is only insurance against a lost burst. It must not be able to
+    # turn a slow answer into a failed one, so it gets what is left over.
+    first_s = timeout_s * 0.7
+    jpeg, heard_anything = _attempt(node_id, first_s, settle_ms, flash)
     if jpeg is not None or heard_anything:
         return jpeg
-    logger.info("[camera] %s: nothing heard on the first ask — asking once more",
-                node_id)
-    return _attempt(node_id, timeout_s / 2, settle_ms, flash)[0]
+    logger.info("[camera] %s: nothing heard in %.0fs — asking once more",
+                node_id, first_s)
+    return _attempt(node_id, timeout_s - first_s, settle_ms, flash)[0]
 
 
 def _attempt(node_id: str, timeout_s: float, settle_ms: int,

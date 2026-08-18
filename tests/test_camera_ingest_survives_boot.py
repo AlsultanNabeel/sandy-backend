@@ -161,6 +161,12 @@ def test_a_photo_is_asked_for_twice_when_nothing_comes_back():
     assert "heard_anything" in src, (
         "the retry no longer distinguishes silence from a partial answer — "
         "retrying a half-arrived photo races two captures into one buffer")
+    assert "timeout_s / 2" not in src, (
+        "the budget is split evenly again. Measured: answers arrive at ~14s "
+        "when the board is loaded, so half of fifteen guarantees a miss — and "
+        "the retry then queues a second capture that delays the next answer "
+        "further. Every press made it slower. The retry is insurance against a "
+        "lost burst; it must never shorten the window below a real answer.")
 
     sig = inspect.signature(camera_client._attempt)
     assert len(sig.parameters) == 4, "attempt signature changed"
