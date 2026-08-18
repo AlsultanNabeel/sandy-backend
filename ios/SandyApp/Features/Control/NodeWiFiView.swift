@@ -128,6 +128,29 @@ struct NodeWiFiView: View {
         }
     }
 
+    /// السبب اللي رجّعه الخادم، بجملة مفهومة.
+    ///
+    /// الأكواد بتيجي زي ما هي من `wifi_switch.py`. أي كود مش معروف بينعرض زي ما
+    /// هو بدل ما ينستبدل بجملة عامة: كود غريب ع الشاشة بتقدر تبعتلي إياه، وجملة
+    /// عامة بتخفيه.
+    private func reason(from error: Error) -> String {
+        guard let api = error as? APIError else { return lang.s("wifi.sendFailed") }
+        switch api.kind {
+        case .connection:  return lang.s("wifi.err.offline")
+        case .unauthorized: return lang.s("wifi.err.session")
+        default: break
+        }
+        switch api.message {
+        case "not_yours": return lang.s("wifi.err.notYours")
+        case "not_sent":  return lang.s("wifi.err.notSent")
+        case "no_node":   return lang.s("wifi.err.noNode")
+        case "bad_board": return lang.s("wifi.err.badBoard")
+        case "too_long":  return lang.s("wifi.err.tooLong")
+        case "bad_chars": return lang.s("wifi.err.badChars")
+        default:          return api.message
+        }
+    }
+
     private var safetyNote: some View {
         // مكتوبة قبل الزرّ مش بعده: القارئ لازم يعرف إنه في رجوع تلقائي وهو
         // بيقرّر، مش وهو بيستنى.
@@ -144,7 +167,13 @@ struct NodeWiFiView: View {
             window = try await state.api.switchNodeWiFi(
                 nodeId: node.nodeId, ssid: target, password: password, board: board)
         } catch {
-            notice = lang.s("wifi.sendFailed")
+            // **بنعرض سبب الخادم، مش تخمين.**
+            //
+            // كانت هون رسالة وحدة: «تأكّد إنك متصل». والخادم بيرجّع سببًا
+            // محدّدًا — الوحدة مش إلك، الوسيط ما استقبل، اللوح مش معروف — فكنّا
+            // نرميه ونحطّ مكانه اتهامًا للنت. المالك بيروح يفحص راوتره وهو
+            // شغّال، والسبب الحقيقي مكتوب وانرمى.
+            notice = reason(from: error)
             return
         }
 
