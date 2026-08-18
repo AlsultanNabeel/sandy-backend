@@ -228,11 +228,33 @@ static const bool s_session_active = true;    // no gate: always streaming
 // arrives before the person has finished reading the warning.
 #define TX_BACKLOG_HOLD_MS     5000
 #define SPK_CHUNK_BYTES     1920    // ~40 ms at 24 kHz / 16-bit
-// Jitter buffer: hold this much before starting playback so uneven WiFi
-// delivery doesn't underrun the I2S and make Sandy's voice stutter.
-// 24 kHz · 16-bit = 48000 B/s, so 14400 B ≈ 300 ms — a bigger cushion against
-// WiFi delivery jitter keeps playback from underrunning (less stutter).
-#define SPK_PREBUF_BYTES    14400
+// Jitter buffer — **adaptive, because one number cannot serve both jobs.**
+//
+// This is how much audio to hold before starting playback. Hold too little and
+// a slow moment underruns the I2S and her voice breaks up. Hold too much and
+// every reply starts late, on every network, forever.
+//
+// It was fixed at 300 ms, chosen for the worst case. So a good link paid 300 ms
+// on every single reply to insure against a bad one — and the owner's link is a
+// weak one, where 300 ms was sometimes not enough anyway. A fixed cushion is
+// wrong twice: too slow when the network is fine, too small when it is not.
+//
+// So it starts short and earns its size. Every audible gap raises it by a step;
+// a run of clean replies lowers it. On a good link it settles near the floor and
+// she answers fast; on a bad one it climbs until she stops stuttering and stays
+// there.
+//
+// 24 kHz · 16-bit = 48000 B/s, so the numbers below are 120 ms, 480 ms and steps
+// of 90 ms.
+#define SPK_PREBUF_MIN      5760
+#define SPK_PREBUF_MAX      23040
+#define SPK_PREBUF_STEP     4320
+// كم ردّ نظيف بالصف قبل ما ننزل درجة. النزول أبطأ من الطلوع بقصد: كلفة الطلوع
+// تأخير بتحسّه مرّة، وكلفة النزول بدري تقطيع بتحسّه بنص الجملة.
+#define SPK_CALM_REPLIES    4
+
+static size_t s_prebuf = SPK_PREBUF_MIN;
+static int    s_calm_replies;
 // Output volume = sample × MUL >> SHIFT. 3>>3 = 0.375 of full scale — a notch
 // below half: loud enough across the room, no longer harsh up close.
 #define SPK_VOL_MUL         3
@@ -543,7 +565,7 @@ static void spk_task(void *arg) {
             // Start once we have a cushion — or after 250ms even if it's a short
             // reply, so a small chunk never gets stuck unplayed (which would
             // keep the mic muted forever via half-duplex).
-            if (avail >= SPK_PREBUF_BYTES || (now_ms() - first_seen) > 250) {
+            if (avail >= s_prebuf || (now_ms() - first_seen) > 250) {
                 playing = true;
                 s_playing = true;
                 VOICE_FACE(MOOD_HAPPY);     // talking face
@@ -560,7 +582,26 @@ static void spk_task(void *arg) {
                 }
 #endif
                 // Restarting right after a stop = an audible mid-reply gap.
-                if (last_stop && (now_ms() - last_stop) < 2000) s_spk_gaps++;
+                if (last_stop && (now_ms() - last_stop) < 2000) {
+                    s_spk_gaps++;
+                    // انقطعت بنص الرد — المخزن صغير ع هالشبكة. بنكبّره فورًا،
+                    // مش بعد ما نجمع إحصاء: التقطيع اللي بتسمعه مرّة بتسمعه
+                    // كل رد لحد ما نتصرّف.
+                    s_calm_replies = 0;
+                    if (s_prebuf < SPK_PREBUF_MAX) {
+                        s_prebuf += SPK_PREBUF_STEP;
+                        if (s_prebuf > SPK_PREBUF_MAX) s_prebuf = SPK_PREBUF_MAX;
+                        ESP_LOGI(TAG, "jitter buffer up to %u ms",
+                                 (unsigned)(s_prebuf / 48));
+                    }
+                } else if (s_prebuf > SPK_PREBUF_MIN
+                           && ++s_calm_replies >= SPK_CALM_REPLIES) {
+                    s_calm_replies = 0;
+                    s_prebuf -= SPK_PREBUF_STEP;
+                    if (s_prebuf < SPK_PREBUF_MIN) s_prebuf = SPK_PREBUF_MIN;
+                    ESP_LOGI(TAG, "jitter buffer down to %u ms",
+                             (unsigned)(s_prebuf / 48));
+                }
             } else {
                 vTaskDelay(pdMS_TO_TICKS(20));  // same zero-tick trap as above
                 continue;
@@ -1513,6 +1554,14 @@ static void voice_task(void *arg) {
                     s_session_voice_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;
+                    // المخزن بيرجع لأصغر قيمة مع كل مكالمة.
+                    //
+                    // بلا هاد، دقيقة شبكة سيئة بتخلّي كل رد بعدها بطيء لحدّ ما
+                    // تنطفي — والشبكة بتتغيّر بين مكالمة وتانية أكتر ما بتتغيّر
+                    // بنص وحدة. البداية من الأدنى بتخلّيه يقيس الوضع الحالي مش
+                    // وضع الأمس.
+                    s_prebuf = SPK_PREBUF_MIN;
+                    s_calm_replies = 0;
                     VOICE_SESSION(true);
                 } else {
                     // The silent freeze lived here. The wake word had already

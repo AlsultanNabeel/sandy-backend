@@ -126,6 +126,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nGifts.ns:         L10nGifts.table,
     L10nShareContent.ns:  L10nShareContent.table,
     L10nBoard.ns:         L10nBoard.table,
+    L10nWiFi.ns:          L10nWiFi.table,
     L10nWeather.ns:       L10nWeather.table,
     L10nControl.ns:       L10nControl.table,
 ]

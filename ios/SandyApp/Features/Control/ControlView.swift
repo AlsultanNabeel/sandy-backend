@@ -210,8 +210,40 @@ struct ControlView: View {
                 nodeEmptyState
             } else {
                 ForEach(store.nodes) { node in
-                    NodeCard(node: node, store: store,
-                             onRename: { renamingNode = node })
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        NodeCard(node: node, store: store,
+                                 onRename: { renamingNode = node })
+                        // مدخل تغيير الشبكة تحت كل وحدة.
+                        //
+                        // هون مش بالإعدادات العامة: الشبكة خاصّة بلوح، ولوحين
+                        // ع شبكتين مختلفتين حالة عادية وقت ما تنقل واحد. مدخل
+                        // عام كان بيخلّي «أي لوح؟» سؤال لازم تجاوبه بكل مرّة.
+                        NavigationLink {
+                            NodeWiFiView(node: node,
+                                         onFinished: { await store.load(api: state.api) })
+                                .environmentObject(state)
+                                .environmentObject(lang)
+                        } label: {
+                            HStack(spacing: Theme.Spacing.sm) {
+                                Image(systemName: "wifi")
+                                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                                Text(lang.s("wifi.title"))
+                                    .font(Theme.Typography.caption)
+                                Spacer(minLength: 0)
+                                Text(node.telemetry?.ssid ?? "")
+                                    .font(Theme.Typography.caption)
+                                    .foregroundColor(Theme.Colors.tertiaryText)
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                                    .foregroundColor(Theme.Colors.tertiaryText)
+                            }
+                            .foregroundColor(Theme.Colors.accent)
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, Theme.Spacing.sm)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(store.demo)
+                    }
                 }
             }
         }

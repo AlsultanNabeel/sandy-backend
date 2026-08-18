@@ -353,6 +353,11 @@ struct NodeTelemetry {
     /// ثواني. البثّ بيروح مباشرة من الكاميرا، فلازم عنوانها هي بالذات.
     let camIP: String?
     let camBoard: String?
+    /// اسم الشبكة اللي اللوح عليها الآن — بيجي بالنبضة.
+    ///
+    /// بيروح للتطبيق عشان تشوف الوضع قبل ما تغيّره، وعشان تعرف بعد التغيير إذا
+    /// نجح: اللوح اللي انتقل بيقول الاسم الجديد، واللي رجع لحاله بيقول القديم.
+    let ssid: String?
 
     /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
     var hasMicReadings: Bool { micLeft != nil || micRight != nil }
@@ -373,6 +378,7 @@ struct NodeTelemetry {
         board         = d["board"] as? String
         camIP         = d["cam_ip"] as? String
         camBoard      = d["cam_board"] as? String
+        ssid          = d["ssid"] as? String
     }
 }
 

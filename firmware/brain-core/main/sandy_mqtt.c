@@ -266,6 +266,44 @@ static void _handle_screen(const char *val) {
 // seq 0 starts the transfer and seq total-1 finishes it, so the app sends one
 // kind of message and the board needs no separate begin/end commands to get out
 // of step with.
+// تغيير الشبكة. الحمولة: "<اسم>\n<كلمة السر>"
+//
+// سطر جديد فاصلًا مش فاصلة: أسماء الشبكات وكلمات السر فيها فواصل ونقطتين
+// وكل علامة ترقيم بتخطر ع بالك، والسطر الجديد هو الحرف الوحيد اللي ما بيقدر
+// يكون جوّاهن.
+//
+// **هالنداء بيحجز لحدّ خمسة وعشرين ثانية** — بيجرّب الشبكة وبيرجع للقديمة لو
+// فشلت. عشان هيك بيتنفّذ ع مهمّة لحاله: معالج أحداث MQTT ما بيجوز ينام، وإذا
+// نام بتتكدّس الرسائل ويسقط الاتصال.
+typedef struct { char ssid[33]; char pass[65]; } wifi_req_t;
+
+static void _wifi_switch_task(void *arg) {
+    wifi_req_t *req = (wifi_req_t *)arg;
+    wifi_switch_result_t r = wifi_sandy_switch(req->ssid, req->pass);
+    free(req);
+    // النتيجة بتوصل بالنبضة الجاية — لو الشبكة الجديدة اشتغلت، النبضة بتطلع
+    // منها وباسمها. ولو فشلت، بتطلع من القديمة، والتطبيق بيشوف إنه الاسم ما
+    // تغيّر. مش لازم رسالة خاصة: الحقيقة موجودة بالنبضة أصلًا.
+    ESP_LOGI(TAG, "wifi switch result=%d", (int)r);
+    vTaskDelete(NULL);
+}
+
+static void _handle_wifi(const char *val) {
+    const char *nl = strchr(val, '\n');
+    if (!nl) { ESP_LOGW(TAG, "wifi: no password line"); return; }
+
+    wifi_req_t *req = calloc(1, sizeof(wifi_req_t));
+    if (!req) return;
+    size_t slen = (size_t)(nl - val);
+    if (slen >= sizeof(req->ssid)) { free(req); return; }
+    memcpy(req->ssid, val, slen);
+    snprintf(req->pass, sizeof(req->pass), "%s", nl + 1);
+
+    if (xTaskCreate(_wifi_switch_task, "wifi_switch", 4096, req, 5, NULL) != pdPASS) {
+        free(req);
+    }
+}
+
 static void _handle_screen_size(const char *val) {
     screen_set_size(screen_size_from_name(val));
 }
@@ -331,6 +369,7 @@ static void _dispatch(const char *out, const char *val) {
 #endif
     else if (!strcmp(out, "autonomous"))
         ESP_LOGI(TAG, "autonomous=%s (TODO)", val);
+    else if (!strcmp(out, "wifi"))         _handle_wifi(val);
     else if (!strcmp(out, "ota"))
         ota_trigger(val);
     else
@@ -559,7 +598,7 @@ void mqtt_publish_status(void) {
         // spellings and silently ignores anything else. A heartbeat that looks
         // right and registers nothing is the failure mode to avoid here.
         "\"capabilities\":[\"servo\",\"pwm\",\"buzzer\",\"audio\"],"
-        "\"ip\":\"%s\",\"board\":\"" SANDY_BOARD_ID "\","
+        "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"" SANDY_BOARD_ID "\","
         "\"firmware_version\":\"%s\",\"outputs\":%s}",
         esp_timer_get_time() / 1000000LL,
         (unsigned long)esp_get_free_heap_size(),
@@ -569,7 +608,7 @@ void mqtt_publish_status(void) {
         mic_is_muted(MIC_LEFT)  ? "true" : "false",
         mic_is_muted(MIC_RIGHT) ? "true" : "false",
         spk_get_volume(), (int)ns_get_level(),
-        wifi_sandy_ip(),
+        wifi_sandy_ip(), wifi_sandy_ssid(),
         SANDY_FW_VERSION, OUTPUTS_JSON);
     esp_mqtt_client_publish(s_client, s_topic_status, buf, 0, 0, 0);
     if (buf_lock) xSemaphoreGive(buf_lock);

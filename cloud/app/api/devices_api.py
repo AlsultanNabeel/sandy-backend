@@ -124,6 +124,24 @@ def register_devices_api(app, mongo_db=None):
             set_state(name, payload)
         return jsonify({"ok": True, "sent": sent, "payload": payload}), 200
 
+    @app.route("/api/nodes/<node_id>/wifi", methods=["POST"])
+    @require_tenant
+    def api_node_wifi(claims, node_id):
+        """Move one board onto a different network.
+
+        Returns as soon as the request is sent, not when it succeeds — the board
+        needs up to twenty-five seconds to try and, if it must, come back. The
+        answer arrives in its next heartbeat, where `ssid` says which network
+        actually answered.
+        """
+        from app.features.wifi_switch import switch_network
+
+        body = request.get_json(silent=True) or {}
+        res = switch_network(node_id,
+                             str(body.get("ssid", "")),
+                             str(body.get("password", "")))
+        return jsonify(res), (200 if res.get("ok") else 400)
+
     @app.route("/api/diagnose", methods=["GET"])
     @require_tenant
     def api_diagnose(claims):

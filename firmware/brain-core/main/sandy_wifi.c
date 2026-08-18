@@ -1,5 +1,6 @@
 #include "sandy_wifi.h"
 #include "esp_wifi.h"
+#include "nvs.h"
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
@@ -72,6 +73,130 @@ static void _retry_task(void *arg) {
         }                                                                      \
     } while (0)
 
+// ── بيانات الشبكة ────────────────────────────────────────────────────────────
+
+#define WIFI_NS   "sandy_wifi"
+#define K_SSID    "ssid"
+#define K_PASS    "pass"
+#define K_TRYING  "trying"
+
+static char s_ssid[33];
+static char s_pass[65];
+
+const char *wifi_sandy_ssid(void) { return s_ssid; }
+
+static void _nvs_get_str(nvs_handle_t h, const char *key, char *out, size_t cap) {
+    size_t len = cap;
+    if (nvs_get_str(h, key, out, &len) != ESP_OK) out[0] = '\0';
+}
+
+static void _load_creds(void) {
+    snprintf(s_ssid, sizeof(s_ssid), "%s", WIFI_SSID);
+    snprintf(s_pass, sizeof(s_pass), "%s", WIFI_PASS);
+
+    nvs_handle_t h;
+    if (nvs_open(WIFI_NS, NVS_READWRITE, &h) != ESP_OK) return;
+
+    // حارس الإقلاع.
+    //
+    // لو انقطعت الكهربا بنص تجربة شبكة جديدة، بتضل «قيد التجربة» محفوظة —
+    // ومن غير هالسطر اللوح بيقلع عليها للأبد ع شبكة ما ثبت إنها بتشتغل. مسحها
+    // هون بيضمن إنه أي إقلاع بيصير ع شبكة نجحت فعلًا.
+    uint8_t trying = 0;
+    if (nvs_get_u8(h, K_TRYING, &trying) == ESP_OK && trying) {
+        ESP_LOGW(TAG, "a network switch was interrupted — falling back");
+        nvs_erase_key(h, K_TRYING);
+        nvs_commit(h);
+    } else {
+        char ssid[33], pass[65];
+        _nvs_get_str(h, K_SSID, ssid, sizeof(ssid));
+        _nvs_get_str(h, K_PASS, pass, sizeof(pass));
+        if (ssid[0]) {
+            snprintf(s_ssid, sizeof(s_ssid), "%s", ssid);
+            snprintf(s_pass, sizeof(s_pass), "%s", pass);
+            ESP_LOGI(TAG, "using saved network '%s'", s_ssid);
+        }
+    }
+    nvs_close(h);
+}
+
+static volatile bool s_switching;
+
+wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
+    if (!ssid || !*ssid || strlen(ssid) > 32 || (pass && strlen(pass) > 64)) {
+        return WIFI_SWITCH_BAD_ARGS;
+    }
+    if (s_switching) return WIFI_SWITCH_BUSY;
+    s_switching = true;
+
+    char old_ssid[33], old_pass[65];
+    snprintf(old_ssid, sizeof(old_ssid), "%s", s_ssid);
+    snprintf(old_pass, sizeof(old_pass), "%s", s_pass);
+
+    // «قيد التجربة» بينكتب قبل ما نلمس الراديو: إذا وقعت الكهربا من هون لجاي،
+    // الإقلاع الجاي بيمسحها وبيرجع ع القديمة.
+    nvs_handle_t h;
+    if (nvs_open(WIFI_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, K_TRYING, 1);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+
+    ESP_LOGW(TAG, "trying network '%s' (%d s, then back to '%s')",
+             ssid, WIFI_TRY_WINDOW_MS / 1000, old_ssid);
+
+    wifi_config_t cfg = { 0 };
+    snprintf((char *)cfg.sta.ssid, sizeof(cfg.sta.ssid), "%s", ssid);
+    snprintf((char *)cfg.sta.password, sizeof(cfg.sta.password), "%s", pass ? pass : "");
+    cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    cfg.sta.pmf_cfg.capable = true;
+
+    esp_wifi_disconnect();
+    esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    esp_wifi_connect();
+
+    // بننتظر عنوان، مش «اتصال»: الاتصال بيصير قبل ما يجي العنوان، ولوح إله
+    // اتصال وبلا عنوان ما بيقدر يوصل الخادم — يعني مقطوع، بس شكله متصل.
+    const int step_ms = 250;
+    int waited = 0;
+    bool ok = false;
+    while (waited < WIFI_TRY_WINDOW_MS) {
+        vTaskDelay(pdMS_TO_TICKS(step_ms));
+        waited += step_ms;
+        if (wifi_sandy_is_connected() && wifi_sandy_ip()[0]) { ok = true; break; }
+    }
+
+    if (nvs_open(WIFI_NS, NVS_READWRITE, &h) == ESP_OK) {
+        if (ok) {
+            nvs_set_str(h, K_SSID, ssid);
+            nvs_set_str(h, K_PASS, pass ? pass : "");
+        }
+        nvs_erase_key(h, K_TRYING);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+
+    if (ok) {
+        snprintf(s_ssid, sizeof(s_ssid), "%s", ssid);
+        snprintf(s_pass, sizeof(s_pass), "%s", pass ? pass : "");
+        ESP_LOGI(TAG, "switched to '%s' — saved", s_ssid);
+        s_switching = false;
+        return WIFI_SWITCH_OK;
+    }
+
+    ESP_LOGW(TAG, "'%s' did not come up — going back to '%s'", ssid, old_ssid);
+    wifi_config_t back = { 0 };
+    snprintf((char *)back.sta.ssid, sizeof(back.sta.ssid), "%s", old_ssid);
+    snprintf((char *)back.sta.password, sizeof(back.sta.password), "%s", old_pass);
+    back.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    back.sta.pmf_cfg.capable = true;
+    esp_wifi_disconnect();
+    esp_wifi_set_config(WIFI_IF_STA, &back);
+    esp_wifi_connect();
+    s_switching = false;
+    return WIFI_SWITCH_FAILED;
+}
+
 esp_err_t wifi_sandy_start(void) {
     s_eg = xEventGroupCreate();
     if (!s_eg) return ESP_ERR_NO_MEM;
@@ -88,14 +213,17 @@ esp_err_t wifi_sandy_start(void) {
     WIFI_TRY("ip events", esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, _handler, NULL, NULL));
 
-    wifi_config_t wifi_cfg = {
-        .sta = {
-            .ssid               = WIFI_SSID,
-            .password           = WIFI_PASS,
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-            .pmf_cfg            = { .capable = true, .required = false },
-        },
-    };
+    // الشبكة المحفوظة تغلب المكتوبة بالكود.
+    //
+    // المكتوبة بالكود ضلّت كخطّ رجعة: لوح انحرق ولسا ما حدا غيّر شبكته بيشتغل
+    // زي ما كان، ومسح الذاكرة بيرجّعه لنقطة معروفة بدل ما يخلّيه بلا شبكة خالص.
+    _load_creds();
+    wifi_config_t wifi_cfg = { 0 };
+    snprintf((char *)wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), "%s", s_ssid);
+    snprintf((char *)wifi_cfg.sta.password, sizeof(wifi_cfg.sta.password), "%s", s_pass);
+    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_cfg.sta.pmf_cfg.capable = true;
+    wifi_cfg.sta.pmf_cfg.required = false;
     WIFI_TRY("set mode", esp_wifi_set_mode(WIFI_MODE_STA));
     WIFI_TRY("set config", esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
     WIFI_TRY("wifi start", esp_wifi_start());
@@ -112,7 +240,7 @@ esp_err_t wifi_sandy_start(void) {
     // meant an endless reboot loop with no face and no wake word. Everything
     // that actually needs the link already waits for it: voice_task polls
     // wifi_sandy_is_connected(), and the MQTT client retries on its own.
-    ESP_LOGI(TAG, "radio up — associating with '%s' in the background", WIFI_SSID);
+    ESP_LOGI(TAG, "radio up — associating with '%s' in the background", s_ssid);
     return ESP_OK;
 }
 #undef WIFI_TRY

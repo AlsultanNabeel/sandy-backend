@@ -180,8 +180,15 @@ class RoomDeviceClient:
             return False
         return self._publish(topic, str(payload))
 
+    # القنوات الخدمية المسموحة، بالاسم.
+    #
+    # قائمة صريحة مش نمط: «أي إشي تحت sandy/node/» بيسمح لأي خطأ إملائي يوصل
+    # للوح، و«أي إشي فيه cam/» بيمنع أي قناة جديدة بصمت. الاسم الصريح بيخلّي
+    # إضافة قناة قرارًا مكتوبًا، وبيخلّي المنع مقروءًا.
+    _SERVICE_CHANNELS = ("/cam/", "/wifi")
+
     def publish_service(self, topic: str, payload: str) -> bool:
-        """Publish on a node's service channel (camera commands, and only that).
+        """Publish on a node's service channel (camera, network — not devices).
 
         Separate from `send_to_topic` because the two authorise differently and
         conflating them is what broke the camera. `send_to_topic` asks "is there
@@ -195,7 +202,8 @@ class RoomDeviceClient:
         decides, instead of two that can disagree.
         """
         topic = (topic or "").strip()
-        if not topic.startswith("sandy/node/") or "/cam/" not in topic:
+        if not topic.startswith("sandy/node/") or not any(
+                c in topic for c in self._SERVICE_CHANNELS):
             logger.warning("[room_device] publish_service refused: %s", topic)
             return False
         return self._publish(topic, str(payload))
