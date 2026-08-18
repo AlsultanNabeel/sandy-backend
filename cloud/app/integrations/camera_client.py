@@ -375,18 +375,19 @@ def _attempt(node_id: str, timeout_s: float, settle_ms: int,
         # not chunks? Those are the causes, and this one line separates them
         # without asking anybody for anything.
         got, want = len(p.chunks), p.total or "?"
-        try:
-            from app.integrations.mqtt_ingest import get_ingest_stats
-            st = get_ingest_stats()
-            silent = (f"{time.time() - st['last_message_at']:.0f}s"
-                      if st.get("last_message_at") else "never")
-            detail = (f"connected={st['connected']} granted={st['granted_qos']} "
-                      f"status={st['status']} cam_status={st['cam_status']} "
-                      f"cam_snapshot={st['cam_snapshot']} "
-                      f"drops={st['disconnects']} errors={st['errors']} "
-                      f"rebuilds={st.get('rebuilds', 0)} silent_for={silent}")
-        except Exception as e:  # noqa: BLE001 — diagnosis must not mask the failure
-            detail = f"ingest stats unavailable: {e}"
+        # Read with .get() and no guard: `get_ingest_stats` copies a dict of
+        # counters and asks the client whether it is connected. Wrapping that in
+        # a catch would only be superstition, and a broad catch around code this
+        # simple hides a typo in the very line meant to explain a failure.
+        from app.integrations.mqtt_ingest import get_ingest_stats
+        st = get_ingest_stats()
+        silent = (f"{time.time() - st['last_message_at']:.0f}s"
+                  if st.get("last_message_at") else "never")
+        detail = (f"connected={st.get('connected')} granted={st.get('granted_qos')} "
+                  f"status={st.get('status')} cam_status={st.get('cam_status')} "
+                  f"cam_snapshot={st.get('cam_snapshot')} "
+                  f"drops={st.get('disconnects')} errors={st.get('errors')} "
+                  f"rebuilds={st.get('rebuilds', 0)} silent_for={silent}")
         logger.warning(
             "[camera] %s: worker %d gave up with %s/%s chunks and an empty "
             "inbox — ingest(%s)", node_id, os.getpid(), got, want, detail)
