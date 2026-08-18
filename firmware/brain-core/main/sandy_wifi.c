@@ -120,6 +120,22 @@ static void _load_creds(void) {
     nvs_close(h);
 }
 
+// حقول 802.11 مصفوفات بايتات بطول ثابت، مش سلاسل نصية — الاسم لحدّ اثنين
+// وثلاثين بايت وما بده صفرًا بالآخر، وكذلك كلمة السر لحدّ أربعة وستين.
+//
+// `snprintf` هون كانت غلط من جهتين. المترجم رفضها لأنها **ممكن** تقصّ (مخزننا
+// أكبر بواحد عشان الصفر)، وهاد صحيح. والأهم إنها بتكتب صفرًا جوّا الحقل، فاسم
+// بطول اثنين وثلاثين بالضبط كان بيوصل ناقص حرف — وشبكة اسمها طويل كانت بتفشل
+// بلا سبب ظاهر.
+//
+// النسخ بطول محسوب بيحلّ الاتنين: بيملا اللي بيسع وبس، وبلا صفر مقحوم.
+static void set_wifi_field(uint8_t *dst, size_t cap, const char *src) {
+    size_t n = src ? strlen(src) : 0;
+    if (n > cap) n = cap;
+    memset(dst, 0, cap);
+    if (n) memcpy(dst, src, n);
+}
+
 static volatile bool s_switching;
 
 wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
@@ -146,8 +162,8 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
              ssid, WIFI_TRY_WINDOW_MS / 1000, old_ssid);
 
     wifi_config_t cfg = { 0 };
-    snprintf((char *)cfg.sta.ssid, sizeof(cfg.sta.ssid), "%s", ssid);
-    snprintf((char *)cfg.sta.password, sizeof(cfg.sta.password), "%s", pass ? pass : "");
+    set_wifi_field(cfg.sta.ssid, sizeof(cfg.sta.ssid), ssid);
+    set_wifi_field(cfg.sta.password, sizeof(cfg.sta.password), pass ? pass : "");
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     cfg.sta.pmf_cfg.capable = true;
 
@@ -186,8 +202,8 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
 
     ESP_LOGW(TAG, "'%s' did not come up — going back to '%s'", ssid, old_ssid);
     wifi_config_t back = { 0 };
-    snprintf((char *)back.sta.ssid, sizeof(back.sta.ssid), "%s", old_ssid);
-    snprintf((char *)back.sta.password, sizeof(back.sta.password), "%s", old_pass);
+    set_wifi_field(back.sta.ssid, sizeof(back.sta.ssid), old_ssid);
+    set_wifi_field(back.sta.password, sizeof(back.sta.password), old_pass);
     back.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     back.sta.pmf_cfg.capable = true;
     esp_wifi_disconnect();
@@ -219,8 +235,8 @@ esp_err_t wifi_sandy_start(void) {
     // زي ما كان، ومسح الذاكرة بيرجّعه لنقطة معروفة بدل ما يخلّيه بلا شبكة خالص.
     _load_creds();
     wifi_config_t wifi_cfg = { 0 };
-    snprintf((char *)wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), "%s", s_ssid);
-    snprintf((char *)wifi_cfg.sta.password, sizeof(wifi_cfg.sta.password), "%s", s_pass);
+    set_wifi_field(wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), s_ssid);
+    set_wifi_field(wifi_cfg.sta.password, sizeof(wifi_cfg.sta.password), s_pass);
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     wifi_cfg.sta.pmf_cfg.capable = true;
     wifi_cfg.sta.pmf_cfg.required = false;
