@@ -18,6 +18,7 @@ import logging
 import os
 import ssl
 import threading
+import time
 import uuid
 from typing import Any, Optional
 
@@ -72,6 +73,7 @@ _stats = {
     "cam_status": 0,
     "cam_snapshot": 0,
     "errors": 0,
+    "rebuilds": 0,
     "last_message_at": None,
 }
 
@@ -97,8 +99,7 @@ def _node_id_from_topic(topic: str) -> str:
 
 
 def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
-    import time as _time
-    _stats["last_message_at"] = _time.time()
+    _stats["last_message_at"] = time.time()
     try:
         from app.features.node_store import ingest_status, set_last_ir
 
@@ -241,7 +242,21 @@ def _on_subscribe(client, userdata, mid, reason_codes, properties=None) -> None:
     looked, which left "we are subscribed" as an assumption in the one place the
     whole camera path depends on it.
     """
-    codes = [int(r) for r in reason_codes] if reason_codes else []
+    # **Nothing in here may raise.** paho runs callbacks on the network thread,
+    # and an exception escaping one can take that thread down — after which the
+    # client still reports `connected=True`, still fires no disconnect, and
+    # simply never delivers another message. That failure is invisible from
+    # every angle except a message counter stuck at zero.
+    #
+    # `reason_codes` is a list of ReasonCode objects here, not ints, and calling
+    # int() on one is exactly the kind of small assumption that kills a thread.
+    try:
+        codes = [getattr(r, "value", r) for r in (reason_codes or [])]
+        codes = [int(c) for c in codes]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[mqtt_ingest] could not read SUBACK: %s", e)
+        _stats["granted_qos"] = "unreadable"
+        return
     _stats["granted_qos"] = codes
     if any(c >= 128 for c in codes):
         logger.error(
@@ -324,7 +339,79 @@ def start_mqtt_ingest() -> None:
             c.loop_start()
             _client = c
             _started = True
+            _stats["last_message_at"] = time.time()  # start the watchdog's clock
             logger.info("[mqtt_ingest] worker %d connecting to %s:%d",
                         os.getpid(), host, port)
+            threading.Thread(target=_watchdog, args=(host, port, user, password),
+                             name="mqtt-ingest-watchdog", daemon=True).start()
         except Exception as e:  # noqa: BLE001
             logger.warning("[mqtt_ingest] start failed: %s", e)
+
+
+# ── Watchdog ─────────────────────────────────────────────────────────────────
+#
+# The robot heartbeats every five seconds and the camera every ten. **Silence is
+# therefore not ambiguous here** — it is not a quiet period, it is a fault. That
+# makes a watchdog trivial to get right, and it covers a class of failure rather
+# than one cause.
+#
+# It exists because of a failure that reported itself as healthy from every
+# angle: `connected=True`, no disconnect, no error, and zero messages received in
+# four minutes. paho sets the connected flag on CONNACK and clears it in the
+# network loop — so if that thread dies, the flag stays true forever and the
+# client lies politely for the life of the dyno. Requests routed to that worker
+# waited fifteen seconds for an answer that could not arrive.
+#
+# Ninety seconds is eighteen missed heartbeats. Nothing survivable looks like
+# that, and nothing healthy does either.
+_WATCHDOG_SILENCE_S = 90
+_WATCHDOG_PERIOD_S = 30
+
+
+def _watchdog(host: str, port: int, user: str, password: str) -> None:
+    global _client
+    while True:
+        time.sleep(_WATCHDOG_PERIOD_S)
+        try:
+            c = _client
+            last = _stats.get("last_message_at")
+            if c is None or last is None:
+                continue
+            silent_for = time.time() - last
+            if silent_for < _WATCHDOG_SILENCE_S:
+                continue
+
+            logger.error(
+                "[mqtt_ingest] worker %d heard nothing for %.0fs (connected=%s) "
+                "— rebuilding the listener",
+                os.getpid(), silent_for, c.is_connected())
+
+            # Rebuilt, not reconnected. If the network thread is gone, there is
+            # nothing left to ask to try again — `reconnect()` would be handed to
+            # a corpse and return without error, which is how this hid for so
+            # long. A fresh client brings a fresh thread.
+            try:
+                c.loop_stop()
+                c.disconnect()
+            except Exception:  # noqa: BLE001 — it is already broken
+                pass
+
+            n = mqtt.Client(
+                mqtt.CallbackAPIVersion.VERSION2,
+                client_id=f"sandy-ingest-{os.getpid()}-{uuid.uuid4().hex[:8]}",
+                clean_session=True,
+            )
+            n.username_pw_set(user, password)
+            n.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+            n.on_connect = _on_connect
+            n.on_message = _on_message
+            n.on_disconnect = _on_disconnect
+            n.on_subscribe = _on_subscribe
+            n.reconnect_delay_set(min_delay=1, max_delay=30)
+            n.connect_async(host, port, keepalive=60)
+            n.loop_start()
+            _client = n
+            _stats["last_message_at"] = time.time()
+            _stats["rebuilds"] = _stats.get("rebuilds", 0) + 1
+        except Exception as e:  # noqa: BLE001 — the watchdog must outlive anything
+            logger.warning("[mqtt_ingest] watchdog error: %s", e)

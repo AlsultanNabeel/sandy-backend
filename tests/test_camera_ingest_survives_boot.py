@@ -181,6 +181,43 @@ def test_the_retry_state_is_not_shared_between_callers():
         "each other's decision to retry")
 
 
+def test_a_listener_that_hears_nothing_is_rebuilt():
+    """The failure that reported itself as healthy from every angle.
+
+    Measured in production: `connected=True`, `drops=0`, `errors=0`, and
+    `status=0 cam_status=0 cam_snapshot=0` — not one message in four minutes,
+    while the robot heartbeat every five seconds. paho sets the connected flag on
+    CONNACK and clears it from the network loop, so a dead loop thread leaves the
+    flag true forever. The client lied politely for the life of the dyno.
+
+    Silence is unambiguous here: the hardware never stops talking. Ninety seconds
+    is eighteen missed heartbeats, which nothing healthy resembles.
+
+    It rebuilds rather than reconnects, because `reconnect()` on a client whose
+    thread is gone is handed to a corpse and returns without error — which is
+    precisely how this stayed hidden.
+    """
+    assert "_watchdog" in _SRC, "nothing notices a listener that stops listening"
+    assert "loop_stop()" in _SRC and "loop_start()" in _SRC, (
+        "the watchdog reconnects instead of rebuilding, which cannot revive a "
+        "dead network thread")
+    assert "_WATCHDOG_SILENCE_S" in _SRC
+
+
+def test_reading_the_suback_cannot_kill_the_network_thread():
+    """A callback that raises takes the thread with it.
+
+    `reason_codes` holds ReasonCode objects, not ints. `int(r)` on one is a small
+    assumption, and small assumptions inside paho callbacks do not raise errors
+    you can see — they stop delivery permanently and leave `connected=True`.
+    """
+    assert "getattr(r, \"value\", r)" in _SRC, (
+        "SUBACK parsing assumes a type again")
+    assert "could not read SUBACK" in _SRC, (
+        "no guard around SUBACK parsing — an exception here silently ends "
+        "message delivery for the whole worker")
+
+
 def test_the_camera_chunk_subscription_still_matches_the_board_topic():
     """`+` matches exactly one level.
 

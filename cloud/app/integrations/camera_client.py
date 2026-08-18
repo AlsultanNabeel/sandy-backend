@@ -244,10 +244,13 @@ def _attempt(node_id: str, timeout_s: float, settle_ms: int,
             try:
                 from app.integrations.mqtt_ingest import get_ingest_stats
                 st = get_ingest_stats()
+                silent = (f"{time.time() - st['last_message_at']:.0f}s"
+                          if st.get("last_message_at") else "never")
                 detail = (f"connected={st['connected']} granted={st['granted_qos']} "
                           f"status={st['status']} cam_status={st['cam_status']} "
                           f"cam_snapshot={st['cam_snapshot']} "
-                          f"drops={st['disconnects']} errors={st['errors']}")
+                          f"drops={st['disconnects']} errors={st['errors']} "
+                          f"rebuilds={st.get('rebuilds', 0)} silent_for={silent}")
             except Exception as e:  # noqa: BLE001 — diagnosis must not mask the failure
                 detail = f"ingest stats unavailable: {e}"
             logger.warning(
