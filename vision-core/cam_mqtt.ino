@@ -19,7 +19,15 @@ static unsigned long g_lastSnapshotAtMs = 0;
 // المواضيع بتنبنى مرة وحدة عند الإقلاع من كود الاقتران، بنفس التحويل تبع
 // الخادم (node_store.code_to_node_id): حروف صغيرة، وأرقام وحروف بس.
 static String g_topicRequest, g_topicCommand, g_topicSnapshot,
-              g_topicStatus,  g_topicEvent;
+              g_topicStatus,  g_topicEvent,   g_topicWifi;
+
+// طلب تغيير شبكة، مستنّي الحلقة الرئيسية.
+//
+// **ما بينفّذ برد نداء MQTT**: التبديل بيحجز لخمسة وعشرين ثانية، ورد النداء ما
+// بيجوز ينام — لو نام بتتكدّس الرسائل وبيسقط الاتصال، فبتخسر اللوح وإنت
+// بتحاول تنقله. فبنسجّل الطلب هون وبتنفّذه `camLoop`.
+static bool   g_wifiPending = false;
+static String g_wifiSsid, g_wifiPass;
 
 static String camNodeId() {
   String out;
@@ -39,6 +47,7 @@ static void camBuildTopics() {
   g_topicSnapshot = base + TOPIC_SUFFIX_SNAPSHOT;
   g_topicStatus   = base + TOPIC_SUFFIX_STATUS;
   g_topicEvent    = base + TOPIC_SUFFIX_EVENT;
+  g_topicWifi     = base + TOPIC_SUFFIX_WIFI;
   g_log.printf("[MQTT] node id = %s\n", camNodeId().c_str());
 }
 
@@ -86,6 +95,18 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String t(topic);
 
   // قناة الأوامر: كل قدرات الكاميرا (فلاش، إعدادات، بث، سلسلة لقطات)
+  if (t == g_topicWifi) {
+    // الحمولة: "<اسم>\n<كلمة السر>". سطر جديد فاصلًا لأنه الحرف الوحيد اللي
+    // ما بيقدر يكون جوّا اسم شبكة ولا كلمة سر.
+    int nl = value.indexOf('\n');
+    if (nl < 0) { g_log.println("[WIFI] no password line"); return; }
+    g_wifiSsid = value.substring(0, nl);
+    g_wifiPass = value.substring(nl + 1);
+    g_wifiPending = true;
+    g_log.printf("[WIFI] switch queued -> '%s'\n", g_wifiSsid.c_str());
+    return;
+  }
+
   if (t == g_topicCommand) {
     handleCamCommand(value);
     return;
@@ -174,6 +195,7 @@ static bool mqttReconnect() {
     g_log.println("[MQTT] connected");
     g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
     g_mqtt.subscribe(g_topicCommand.c_str(), 0);
+    g_mqtt.subscribe(g_topicWifi.c_str(), 0);
     // وفرع الكاميرا من شجرة الوحدة: sandy/node/<id>/cam/<مخرج>.
     //
     // `cam/` مش زينة: الدماغ بيشارك نفس معرّف الوحدة، فاشتراك ع `<id>/+` كان
@@ -194,6 +216,19 @@ static bool mqttReconnect() {
   return false;
 }
 
+// بينفّذ طلب تغيير الشبكة، من الحلقة الرئيسية.
+//
+// هون مش برد النداء: التبديل بيحجز خمسة وعشرين ثانية، ورد نداء MQTT اللي بينام
+// بيوقّف قراءة المقبس وبيسقّط الاتصال — يعني بتخسر اللوح وإنت بتحاول تنقله.
+void camWifiTick() {
+  if (!g_wifiPending) return;
+  g_wifiPending = false;
+  bool ok = camSwitchNetwork(g_wifiSsid, g_wifiPass);
+  // ما في رسالة «نجح». النبضة الجاية بتقول اسم الشبكة اللي الكاميرا عليها
+  // فعلًا — واللي رجعت بتقول القديم. مصدر واحد للحقيقة بدل قناتين بيفترقوا.
+  g_log.printf("[WIFI] switch %s\n", ok ? "ok" : "rolled back");
+}
+
 static void publishCamStatus() {
   if (!g_mqtt.connected()) return;
   unsigned long now = millis();
@@ -212,7 +247,7 @@ static void publishCamStatus() {
   snprintf(buf, sizeof(buf),
            "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"psram\":%u,"
            "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s,"
-           "\"ip\":\"%s\",\"board\":\"%s\","
+           "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"%s\","
            "\"outputs\":[{\"id\":\"flash\",\"kind\":\"relay\"},"
            "{\"id\":\"flash_level\",\"kind\":\"pwm\"},"
            "{\"id\":\"flash_mode\",\"kind\":\"pwm\"},"
@@ -226,7 +261,7 @@ static void publishCamStatus() {
            g_cameraReady ? "true" : "false",
            flashIsOn() ? "true" : "false",
            camHttpRunning() ? "true" : "false",
-           WiFi.localIP().toString().c_str(),
+           WiFi.localIP().toString().c_str(), camSsid(),
            SANDY_CAM_BOARD_ID);
   g_mqtt.publish(g_topicStatus.c_str(), buf, false);
 

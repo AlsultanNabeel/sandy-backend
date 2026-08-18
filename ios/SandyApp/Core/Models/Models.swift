@@ -358,6 +358,8 @@ struct NodeTelemetry {
     /// بيروح للتطبيق عشان تشوف الوضع قبل ما تغيّره، وعشان تعرف بعد التغيير إذا
     /// نجح: اللوح اللي انتقل بيقول الاسم الجديد، واللي رجع لحاله بيقول القديم.
     let ssid: String?
+    /// شبكة الكاميرا — مفتاح مستقل، زي عنوانها.
+    let camSSID: String?
 
     /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
     var hasMicReadings: Bool { micLeft != nil || micRight != nil }
@@ -379,6 +381,7 @@ struct NodeTelemetry {
         camIP         = d["cam_ip"] as? String
         camBoard      = d["cam_board"] as? String
         ssid          = d["ssid"] as? String
+        camSSID       = d["cam_ssid"] as? String
     }
 }
 

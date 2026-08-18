@@ -32,7 +32,19 @@ SSID_MAX = 32
 PASS_MAX = 64
 
 
-def switch_network(node_id: str, ssid: str, password: str) -> Dict[str, Any]:
+# القنوات: أي لوح تحت نفس معرّف الوحدة إله فرعه.
+#
+# الدماغ والكاميرا بيشاركوا معرّف الوحدة بالتصميم — الكاميرا جزء من ساندي مش
+# صندوق تاني — فالمقصود مش «أي وحدة» بل «أي لوح جوّا الوحدة». وهاد لازم يكون
+# صريح: «انقل ساندي» جملة ناقصة لمّا يكون فيها لوحان ع شبكتين.
+BOARDS = {
+    "brain": "wifi",
+    "camera": "cam/wifi",
+}
+
+
+def switch_network(node_id: str, ssid: str, password: str,
+                   board: str = "brain") -> Dict[str, Any]:
     """Ask one board to move to `ssid`. Returns immediately."""
     from app.features.node_store import get_node
     from app.integrations.room_device import get_room_device_client
@@ -43,6 +55,8 @@ def switch_network(node_id: str, ssid: str, password: str) -> Dict[str, Any]:
 
     if not node_id:
         return {"ok": False, "error": "no_node"}
+    if board not in BOARDS:
+        return {"ok": False, "error": "bad_board"}
     if not ssid:
         return {"ok": False, "error": "no_ssid"}
     if len(ssid) > SSID_MAX or len(password) > PASS_MAX:
@@ -59,10 +73,10 @@ def switch_network(node_id: str, ssid: str, password: str) -> Dict[str, Any]:
         logger.warning("[wifi] refused: %s is not a node this caller owns", node_id)
         return {"ok": False, "error": "not_yours"}
 
-    topic = f"sandy/node/{node_id}/wifi"
+    topic = f"sandy/node/{node_id}/{BOARDS[board]}"
     ok = get_room_device_client().publish_service(topic, f"{ssid}\n{password}")
     if not ok:
         return {"ok": False, "error": "not_sent"}
 
-    logger.info("[wifi] asked %s to try '%s'", node_id, ssid)
-    return {"ok": True, "window_s": SWITCH_WINDOW_S, "ssid": ssid}
+    logger.info("[wifi] asked %s/%s to try '%s'", node_id, board, ssid)
+    return {"ok": True, "window_s": SWITCH_WINDOW_S, "ssid": ssid, "board": board}

@@ -22,6 +22,13 @@ struct NodeWiFiView: View {
     /// بيتنده لما نبغى نعيد قراءة الوحدات بعد المحاولة.
     var onFinished: () async -> Void = {}
 
+    /// أي لوح — الدماغ ولا الكاميرا.
+    ///
+    /// اللوحان تحت معرّف وحدة واحد بالتصميم، فـ«انقل ساندي» جملة ناقصة لمّا
+    /// يكونوا ع شبكتين. والاختيار صريح مش مخفي: نقل الاتنين سوا معناه إنه غلطة
+    /// وحدة بتوقّف التنين، وهاد بيضيّع الفائدة الأساسية — إنه واحد بيضل واصل
+    /// ويقولك شو صار للتاني.
+    @State private var board: String = "brain"
     @State private var ssid = ""
     @State private var password = ""
     @State private var phase: Phase = .idle
@@ -33,11 +40,15 @@ struct NodeWiFiView: View {
         case done(success: Bool)
     }
 
-    private var currentSSID: String { node.telemetry?.ssid ?? "" }
+    private var currentSSID: String {
+        board == "camera" ? (node.telemetry?.camSSID ?? "")
+                          : (node.telemetry?.ssid ?? "")
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+                boardPicker
                 currentCard
                 form
                 safetyNote
@@ -48,6 +59,15 @@ struct NodeWiFiView: View {
         }
         .navigationTitle(lang.s("wifi.title"))
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var boardPicker: some View {
+        Picker("", selection: $board) {
+            Text(lang.s("wifi.board.brain")).tag("brain")
+            Text(lang.s("wifi.board.camera")).tag("camera")
+        }
+        .pickerStyle(.segmented)
+        .disabled(phase != .idle)
     }
 
     // ── الوضع الحالي ─────────────────────────────────────────────────────────
@@ -122,7 +142,7 @@ struct NodeWiFiView: View {
         var window = 35
         do {
             window = try await state.api.switchNodeWiFi(
-                nodeId: node.nodeId, ssid: target, password: password)
+                nodeId: node.nodeId, ssid: target, password: password, board: board)
         } catch {
             notice = lang.s("wifi.sendFailed")
             return
@@ -139,7 +159,7 @@ struct NodeWiFiView: View {
         await onFinished()
 
         // النتيجة من النبضة: الاسم اللي بيرجّعه اللوح هو اللي هو عليه فعلًا.
-        let now: String = node.telemetry?.ssid ?? ""
+        let now: String = currentSSID
         let ok: Bool = now == target
         phase = .done(success: ok)
         notice = ok ? "" : lang.s("wifi.rolledBack")

@@ -156,7 +156,7 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
         # نفس درس المخارج بالضبط، بحقل تاني: لوحين تحت معرّف واحد لازم كل
         # واحد يكتب بمساحته.
         telemetry={f"cam_{k}": v for k, v in data.items()
-                   if k in ("ip", "board")},
+                   if k in ("ip", "board", "ssid")},
     )
 
 

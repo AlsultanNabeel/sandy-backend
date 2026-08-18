@@ -139,7 +139,8 @@ def register_devices_api(app, mongo_db=None):
         body = request.get_json(silent=True) or {}
         res = switch_network(node_id,
                              str(body.get("ssid", "")),
-                             str(body.get("password", "")))
+                             str(body.get("password", "")),
+                             board=str(body.get("board", "brain")))
         return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.route("/api/diagnose", methods=["GET"])

@@ -198,15 +198,16 @@ extension APIClient {
     // ثانية يجرّب ويرجع للقديمة لو فشلت، والنتيجة الحقيقية بتوصل بنبضته الجاية
     // بحقل `ssid`.
     @discardableResult
-    func switchNodeWiFi(nodeId: String, ssid: String,
-                        password: String) async throws -> Int {
+    func switchNodeWiFi(nodeId: String, ssid: String, password: String,
+                        board: String = "brain") async throws -> Int {
         // أسماء الحقول مطابقة لرد الخادم حرفيًا (`window_s`)، عشان ما يصير
         // مكانان بيسمّوا نفس الإشي وبيفترقوا.
-        struct Body: Encodable { let ssid: String; let password: String }
+        struct Body: Encodable { let ssid: String; let password: String; let board: String }
         struct Reply: Decodable { let ok: Bool?; let window_s: Int? }
         let r: Reply = try await fetch("/api/nodes/\(enc(nodeId))/wifi",
                                        method: "POST",
-                                       body: Body(ssid: ssid, password: password))
+                                       body: Body(ssid: ssid, password: password,
+                                                  board: board))
         return r.window_s ?? 35
     }
 

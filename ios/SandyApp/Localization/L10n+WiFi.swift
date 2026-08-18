@@ -11,6 +11,8 @@ enum L10nWiFi {
     static let table = L10nTable(
         ar: [
             "title":       .text("شبكة الواي فاي"),
+            "board.brain":  .text("الدماغ"),
+            "board.camera": .text("الكاميرا"),
             "current":     .text("الشبكة الحالية"),
             "unknown":     .text("غير معروفة"),
             "new":         .text("شبكة جديدة"),
@@ -24,6 +26,8 @@ enum L10nWiFi {
         ],
         en: [
             "title":       .text("Wi-Fi network"),
+            "board.brain":  .text("Brain"),
+            "board.camera": .text("Camera"),
             "current":     .text("Current network"),
             "unknown":     .text("Unknown"),
             "new":         .text("New network"),

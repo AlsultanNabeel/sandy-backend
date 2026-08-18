@@ -104,3 +104,41 @@ def test_the_service_channel_allows_wifi_and_the_camera_and_nothing_else():
     assert "/wifi" in allowed and "/cam/" in allowed
     assert not any(c in ("/", "sandy/node/") for c in allowed), (
         "a channel this broad authorises everything")
+
+
+def test_the_two_boards_are_addressed_separately():
+    """They share a node id, so "move Sandy" is an incomplete sentence.
+
+    The camera is part of Sandy rather than a second box, which is why one id
+    covers both — and why the board has to be named. Moving both at once would
+    mean one wrong password takes out the pair, losing the thing that makes this
+    safe at all: one board still connected, able to tell you what happened to
+    the other.
+    """
+    from unittest.mock import patch
+
+    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+         _sent() as c:
+        c.return_value.publish_service.return_value = True
+
+        wifi_switch.switch_network("n1", "Home", "pw", board="brain")
+        assert c.return_value.publish_service.call_args[0][0] == "sandy/node/n1/wifi"
+
+        wifi_switch.switch_network("n1", "Home", "pw", board="camera")
+        assert c.return_value.publish_service.call_args[0][0] == "sandy/node/n1/cam/wifi"
+
+    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
+        assert wifi_switch.switch_network("n1", "Home", "pw",
+                                          board="nonsense")["error"] == "bad_board"
+
+
+def test_the_cameras_network_name_has_its_own_field():
+    """`ssid` belongs to the brain, the way `ip` does.
+
+    Telemetry merges by key under one node id, so a shared field flips between
+    the two boards every five seconds — which already happened once with the
+    address, and made the live view fail every other try for no visible reason.
+    """
+    from app.features.node_store import _TELEMETRY_KEYS
+
+    assert "cam_ssid" in _TELEMETRY_KEYS and "ssid" in _TELEMETRY_KEYS

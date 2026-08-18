@@ -97,6 +97,7 @@
 #define TOPIC_SUFFIX_SNAPSHOT  "/cam/snapshot"
 #define TOPIC_SUFFIX_STATUS    "/cam/status"
 #define TOPIC_SUFFIX_EVENT     "/cam/event"
+#define TOPIC_SUFFIX_WIFI      "/cam/wifi"
 
 // ===== Flash LED (AI-Thinker on-board white LED) =====
 // اللمبة البيضا اللي على ظهر اللوحة. قوية جداً، فمنشغّلها بنبضة عرض (PWM)
