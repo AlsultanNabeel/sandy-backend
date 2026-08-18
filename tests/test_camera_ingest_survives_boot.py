@@ -82,6 +82,46 @@ def test_a_chunk_with_no_waiter_says_so():
         "is the entire point of logging them")
 
 
+def test_the_broker_is_asked_whether_it_granted_the_subscription():
+    """`subscribe()` returning is not the broker agreeing.
+
+    The call returns once the packet is written; the answer arrives later, per
+    topic, and a refusal is 128. Three subscriptions can be granted and the
+    fourth denied with nothing in the logs. That is indistinguishable from a
+    board that never published — and it is a live possibility here, because the
+    camera and the server share one credential but subscribe to different
+    patterns.
+    """
+    assert "on_subscribe" in _SRC, "the SUBACK is still ignored"
+    assert ">= 128" in _SRC, "a refused subscription is not detected"
+
+
+def test_the_listener_counts_what_it_hears():
+    """Counters, because "connected" was never the question.
+
+    The camera captured, the broker fanned out, the server reported nothing, and
+    every layer looked healthy. What was missing was a number: heartbeats heard
+    versus image chunks heard, on this worker. One climbing while the other
+    stays at zero names the fault immediately.
+    """
+    from app.integrations.mqtt_ingest import get_ingest_stats
+
+    s = get_ingest_stats()
+    for key in ("status", "cam_status", "cam_snapshot", "disconnects",
+                "errors", "pid", "connected", "granted_qos"):
+        assert key in s, f"/api/diagnose would not report {key}"
+
+
+def test_a_handler_that_throws_is_not_hidden_at_debug_level():
+    """A raising handler and an uncalled handler look identical from outside.
+
+    This was logged at DEBUG, which on a production log level is the same as not
+    logging at all — so "every message fails" and "no messages arrive" produced
+    the same evidence: silence.
+    """
+    assert 'logger.debug("[mqtt_ingest] message handling failed' not in _SRC
+
+
 def test_the_camera_chunk_subscription_still_matches_the_board_topic():
     """`+` matches exactly one level.
 

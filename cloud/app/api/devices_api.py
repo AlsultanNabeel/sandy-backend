@@ -162,12 +162,31 @@ def register_devices_api(app, mongo_db=None):
         from app.features.device_store import list_devices
         from app.features.node_provision import PART_CATALOGUE
         from app.features.node_store import list_nodes
+        from app.integrations.mqtt_ingest import get_ingest_stats
 
         nodes = list_nodes()
         devices = list_devices()
 
         report = {
             "server_release": RELEASE_ID,
+            # **What this worker's MQTT listener has heard.**
+            #
+            # Publishing and listening are two different clients, so every
+            # outbound success — a flash that lights, a 200 on control — says
+            # nothing at all about whether we can hear the robot answer. That
+            # asymmetry is why a camera could log a perfect capture while the
+            # server reported no chunks, with no layer contradicting itself.
+            #
+            # Read `cam_snapshot` against `cam_status`. Both climbing means the
+            # link is fine and the bug is above it. `cam_status` climbing while
+            # `cam_snapshot` stays at zero means that one subscription is not
+            # being delivered — check `granted_qos` for a 128. Both at zero
+            # means this worker is not listening at all, and any request the
+            # load balancer sends here will wait fifteen seconds for nothing.
+            #
+            # Note it describes ONE worker: refresh a few times, gunicorn runs
+            # two and they do not share memory.
+            "mqtt_ingest": get_ingest_stats(),
             "catalogue_knows": sorted(PART_CATALOGUE),
             "nodes": [
                 {

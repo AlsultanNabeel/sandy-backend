@@ -45,6 +45,49 @@ _started = False
 _lock = threading.Lock()
 _client: Optional[Any] = None
 
+# ── What this listener has actually seen ─────────────────────────────────────
+#
+# Added because a whole class of question was unanswerable from outside: the
+# camera's own log showed a clean capture and five chunks published, the broker
+# demonstrably fanned them out (the board is subscribed to its own branch and
+# received them back), and the server said `0/? chunks`. Every layer reported
+# success and the photo was gone.
+#
+# The gap was that "is the server's subscriber alive and receiving?" had no
+# answer anywhere. Publishing works through a *different* client, so a flash
+# returning 200 proves nothing about this one. And heartbeats are forgiving —
+# they repeat every five seconds, so the registry looks fresh even if most of
+# them are lost, which makes a half-dead subscriber invisible.
+#
+# Counters, not a health flag: "connected" can be true while a subscription was
+# refused. A count that stays at zero while another climbs is the difference
+# between "the link is down" and "this one topic never arrives" — and those have
+# nothing in common as bugs.
+_stats = {
+    "connects": 0,
+    "disconnects": 0,
+    "granted_qos": None,     # None until the broker answers SUBSCRIBE
+    "status": 0,
+    "ir": 0,
+    "cam_status": 0,
+    "cam_snapshot": 0,
+    "errors": 0,
+    "last_message_at": None,
+}
+
+
+def get_ingest_stats() -> dict:
+    """A snapshot of this worker's listener, for /api/diagnose.
+
+    Per worker on purpose — gunicorn runs two and they do not share memory, so a
+    single global number would average away exactly the asymmetry worth seeing.
+    """
+    s = dict(_stats)
+    s["pid"] = os.getpid()
+    s["started"] = _started
+    s["connected"] = bool(_client and _client.is_connected()) if _client else False
+    return s
+
 
 def _node_id_from_topic(topic: str) -> str:
     # sandy/node/<node_id>/status  ->  <node_id>
@@ -54,6 +97,8 @@ def _node_id_from_topic(topic: str) -> str:
 
 
 def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
+    import time as _time
+    _stats["last_message_at"] = _time.time()
     try:
         from app.features.node_store import ingest_status, set_last_ir
 
@@ -63,15 +108,18 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
         payload = msg.payload.decode("utf-8", "ignore").strip()
 
         if msg.topic.endswith("/ir/learned"):
+            _stats["ir"] += 1
             if payload:
                 set_last_ir(node_id, payload)
             return
 
         if msg.topic.endswith("/cam/status"):
+            _stats["cam_status"] += 1
             _ingest_cam_status(node_id, payload)
             return
 
         if msg.topic.endswith("/cam/snapshot"):
+            _stats["cam_snapshot"] += 1
             # Straight through, unparsed and unstored: a photo belongs to
             # whoever asked for it, and nobody may be waiting at all.
             from app.integrations.camera_client import on_chunk
@@ -79,6 +127,7 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
             return
 
         # status (retained JSON heartbeat)
+        _stats["status"] += 1
         data = {}
         if payload:
             try:
@@ -97,7 +146,11 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
             telemetry=data,
         )
     except Exception as e:  # noqa: BLE001 — ingest must never crash the loop
-        logger.debug("[mqtt_ingest] message handling failed: %s", e)
+        # Was DEBUG, which on a quiet log level is the same as not logging. A
+        # handler that throws on every message looks exactly like a handler that
+        # is never called, and the two were confused for days.
+        _stats["errors"] += 1
+        logger.warning("[mqtt_ingest] %s failed: %s", getattr(msg, "topic", "?"), e)
 
 
 def _ingest_cam_status(node_id: str, payload: str) -> None:
@@ -168,14 +221,36 @@ def _on_connect(client, userdata, flags, reason_code, properties=None) -> None: 
         # with live audio. A lost chunk means one retaken photo, not a lost one.
         client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1),
                           (_CAM_SUB, 0), (_CAM_STATUS_SUB, 1)])
+        _stats["connects"] += 1
         # The pid is in the line on purpose. gunicorn runs two workers and each
         # one has its own subscriber and its own memory — so "is ingest up?" is
         # not one question, it is one question per worker, and the answer used
         # to be invisible. Two of these lines at boot means both are listening.
-        logger.info("[mqtt_ingest] worker %d subscribed (status, IR, camera)",
-                    os.getpid())
+        logger.info("[mqtt_ingest] worker %d connected, subscribe sent "
+                    "(rc=%s)", os.getpid(), reason_code)
     except Exception as e:  # noqa: BLE001
         logger.warning("[mqtt_ingest] subscribe failed: %s", e)
+
+
+def _on_subscribe(client, userdata, mid, reason_codes, properties=None) -> None:  # noqa: ANN001
+    """**Whether the broker actually granted the subscription.**
+
+    `client.subscribe()` returns as soon as the packet is written. The answer
+    comes back separately, and a refusal is `128` — per topic, so three can
+    succeed and the fourth be denied with nothing anywhere to say so. We never
+    looked, which left "we are subscribed" as an assumption in the one place the
+    whole camera path depends on it.
+    """
+    codes = [int(r) for r in reason_codes] if reason_codes else []
+    _stats["granted_qos"] = codes
+    if any(c >= 128 for c in codes):
+        logger.error(
+            "[mqtt_ingest] worker %d: broker REFUSED a subscription %s "
+            "(order: status, IR, cam/snapshot, cam/status) — 128 means denied, "
+            "usually a credential without permission on that topic",
+            os.getpid(), codes)
+    else:
+        logger.info("[mqtt_ingest] worker %d granted %s", os.getpid(), codes)
 
 
 def _on_disconnect(client, userdata, *args) -> None:  # noqa: ANN001
@@ -185,6 +260,7 @@ def _on_disconnect(client, userdata, *args) -> None:  # noqa: ANN001
     a TypeError raised inside a callback is swallowed by the network loop — the
     listener would then look connected while delivering nothing.
     """
+    _stats["disconnects"] += 1
     logger.warning("[mqtt_ingest] worker %d disconnected — paho will retry",
                    os.getpid())
 
@@ -227,6 +303,7 @@ def start_mqtt_ingest() -> None:
             c.on_connect = _on_connect
             c.on_message = _on_message
             c.on_disconnect = _on_disconnect
+            c.on_subscribe = _on_subscribe
             c.reconnect_delay_set(min_delay=1, max_delay=30)
 
             # **connect_async, not connect.**
