@@ -1,7 +1,6 @@
 // =========================
 // ESP32-CAM — Sandy's Vision (MQTT-based)
 // =========================
-// شيلنا Arduino IoT Cloud (سبب الانقطاع المتكرر) — الآن:
 //   • WiFi مباشر
 //   • MQTT (HiveMQ) — نفس البروكر تبع Sandy
 //   • Topics:

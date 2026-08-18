@@ -18,6 +18,7 @@ import logging
 import os
 import ssl
 import threading
+import uuid
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -167,9 +168,25 @@ def _on_connect(client, userdata, flags, reason_code, properties=None) -> None: 
         # with live audio. A lost chunk means one retaken photo, not a lost one.
         client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1),
                           (_CAM_SUB, 0), (_CAM_STATUS_SUB, 1)])
-        logger.info("[mqtt_ingest] subscribed to node status + IR + camera")
+        # The pid is in the line on purpose. gunicorn runs two workers and each
+        # one has its own subscriber and its own memory — so "is ingest up?" is
+        # not one question, it is one question per worker, and the answer used
+        # to be invisible. Two of these lines at boot means both are listening.
+        logger.info("[mqtt_ingest] worker %d subscribed (status, IR, camera)",
+                    os.getpid())
     except Exception as e:  # noqa: BLE001
         logger.warning("[mqtt_ingest] subscribe failed: %s", e)
+
+
+def _on_disconnect(client, userdata, *args) -> None:  # noqa: ANN001
+    """A drop used to be silent, and silence read exactly like "working".
+
+    Signature is loose because paho changed it between callback API versions and
+    a TypeError raised inside a callback is swallowed by the network loop — the
+    listener would then look connected while delivering nothing.
+    """
+    logger.warning("[mqtt_ingest] worker %d disconnected — paho will retry",
+                   os.getpid())
 
 
 def start_mqtt_ingest() -> None:
@@ -189,19 +206,48 @@ def start_mqtt_ingest() -> None:
         except ValueError:
             port = 8883
         try:
+            # **Unique per process, not per pid.**
+            #
+            # The id was `sandy-ingest-<pid>`. Containers each have their own pid
+            # namespace, so gunicorn's workers get the same small numbers in every
+            # dyno — and Heroku overlaps the new dyno with the old one on deploy.
+            # Two live connections with one client id is a rule the broker settles
+            # by kicking the older off, which reconnects and kicks the newer, for
+            # as long as both exist. Heartbeats survive that (they repeat every
+            # five seconds; one landing is enough). **A photo does not** — it is
+            # seven messages in one burst, and a burst that arrives during a kick
+            # is gone whole. That is the shape of `0/? chunks`.
             c = mqtt.Client(
                 mqtt.CallbackAPIVersion.VERSION2,
-                client_id=f"sandy-ingest-{os.getpid()}",
+                client_id=f"sandy-ingest-{os.getpid()}-{uuid.uuid4().hex[:8]}",
                 clean_session=True,
             )
             c.username_pw_set(user, password)
             c.tls_set(cert_reqs=ssl.CERT_REQUIRED)
             c.on_connect = _on_connect
             c.on_message = _on_message
-            c.connect(host, port, keepalive=60)
+            c.on_disconnect = _on_disconnect
+            c.reconnect_delay_set(min_delay=1, max_delay=30)
+
+            # **connect_async, not connect.**
+            #
+            # `connect()` resolves DNS and completes the TLS handshake inline, and
+            # raised on failure — which we caught, warned about, and moved on from.
+            # The worker then served traffic for the rest of its life with no
+            # inbound listener at all. Nothing looked broken: the *other* worker's
+            # ingest kept the registry fresh, so the robot showed online with a
+            # current address, and only a request that needed an answer *back*
+            # failed — and only when the load balancer happened to hand it to the
+            # deaf worker. A photo that fails half the time, from a camera that
+            # logs a clean capture, with no server error anywhere.
+            #
+            # Async hands the connect to the network thread, which retries on the
+            # backoff above. A bad minute at boot costs a minute now, not the dyno.
+            c.connect_async(host, port, keepalive=60)
             c.loop_start()
             _client = c
             _started = True
-            logger.info("[mqtt_ingest] started")
+            logger.info("[mqtt_ingest] worker %d connecting to %s:%d",
+                        os.getpid(), host, port)
         except Exception as e:  # noqa: BLE001
             logger.warning("[mqtt_ingest] start failed: %s", e)

@@ -73,6 +73,8 @@ static const lv_font_t *font_for(sandy_screen_size_t size) {
 // has eight megabytes of it.
 static uint8_t *s_img;
 static int      s_expect_chunks;
+// طول القطعة الواحدة — بيجي من القطعة الأولى، مش محسوبًا بالقسمة.
+static size_t   s_chunk_size;
 static uint32_t s_have_mask[(MAX_CHUNKS + 31) / 32];
 static int      s_have_count;
 
@@ -247,6 +249,7 @@ bool screen_image_begin(int total_chunks) {
     }
     memset(s_have_mask, 0, sizeof(s_have_mask));
     s_have_count    = 0;
+    s_chunk_size    = 0;      // تتحدّد من القطعة الأولى
     s_expect_chunks = total_chunks;
     unlock();
     ESP_LOGI(TAG, "image incoming, %d chunks", total_chunks);
@@ -264,8 +267,24 @@ void screen_image_chunk(int seq, const uint8_t *data, size_t len) {
     if (seq < 0 || seq >= s_expect_chunks) { unlock(); return; }
     if (chunk_seen(seq)) { unlock(); return; }
 
-    size_t chunk_size = (IMG_BYTES + s_expect_chunks - 1) / s_expect_chunks;
-    size_t offset     = (size_t)seq * chunk_size;
+    // **مقاس القطعة بيجي مع القطعة، ما بينحسب.**
+    //
+    // كان: `IMG_BYTES / عدد القطع`. وهاد بيعطي مية وخمسة عشر ألف على تسعة عشر
+    // = ٦٠٦٣، والخادم بيبعت قطع بـ ٦١٤٤ (ستة كيلوبايت بالضبط). فرق واحد وثمانين
+    // بايت بكل قطعة، **بيتراكم**: القطعة العاشرة بتنكتب مزحلقة ثمن مية بايت،
+    // والأخيرة أكثر من ألف وأربع مية.
+    //
+    // النتيجة صورة مقسّمة لشرائط أفقية مزحلقة — وهاد بالضبط اللي شافه المالك.
+    // ولأنه الإزاحة بتراكمية، الشرائط بتبيّن مقلوبة ومبعثرة، فشكلها عطل بالشاشة
+    // مش عطل بالحساب.
+    //
+    // والصح إنه الطول موجود قدّامنا: `len` هو طول القطعة الحقيقي. القطعة
+    // الأولى بتحدّد المقاس، والباقي بتتبعه. الأخيرة أقصر عادةً وهاد ما بيهمّ —
+    // هي آخر وحدة، وما في إشي بعدها بيتزحلق.
+    if (seq == 0) s_chunk_size = len;
+    if (s_chunk_size == 0) { unlock(); return; }
+
+    size_t offset = (size_t)seq * s_chunk_size;
     if (offset >= IMG_BYTES) { unlock(); return; }
     size_t room = IMG_BYTES - offset;
     if (len > room) len = room;

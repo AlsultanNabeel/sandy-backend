@@ -31,6 +31,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -102,7 +103,18 @@ def on_chunk(node_id: str, payload: str) -> None:
         # No waiter means a late chunk from a request that already timed out, or
         # a board talking to a backend that never asked. Dropping it is correct:
         # buffering photos nobody is waiting for is how a memory leak starts.
+        #
+        # **But say so.** Dropping silently made two very different failures
+        # print the same line — `0/? chunks` covered both "the broker never
+        # delivered anything" and "it delivered to the other gunicorn worker,
+        # which was not the one waiting". Those need opposite fixes, and a week
+        # went into guessing which. One log line separates them for good.
         if p is None:
+            if seq == 0:
+                logger.info(
+                    "[camera] worker %d got chunk 0 of %s with nobody waiting "
+                    "— the request is on another worker, or it already timed out",
+                    os.getpid(), req_id)
             return
         if total > 0:
             p.total = total
@@ -180,7 +192,11 @@ def request_snapshot(node_id: str, timeout_s: float = 15.0,
 
         if not p.event.wait(timeout_s):
             got, want = len(p.chunks), p.total or "?"
-            logger.info("[camera] %s: timed out with %s/%s chunks", node_id, got, want)
+            # The pid pairs this with the "nobody waiting" line above. Same pid on
+            # both means the chunks are genuinely not arriving; different pids
+            # means they arrived and the waiter was somewhere else.
+            logger.info("[camera] %s: worker %d timed out with %s/%s chunks",
+                        node_id, os.getpid(), got, want)
             return None
         if not p.complete():
             return None
