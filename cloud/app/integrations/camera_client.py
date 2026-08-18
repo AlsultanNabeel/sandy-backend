@@ -37,7 +37,20 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from pymongo.errors import PyMongoError
+try:
+    from pymongo.errors import PyMongoError
+except ImportError:  # pragma: no cover — pymongo is optional for this module
+    # **This module must import without a database driver.**
+    #
+    # It is the camera path, not the storage layer: the topics, the chunk
+    # assembly and the request logic are all testable — and were tested — with no
+    # Mongo anywhere. A hard import turned "the inbox is unavailable" into "the
+    # camera module cannot be loaded", which took the tests down with it.
+    #
+    # Named rather than broad on purpose: `except Exception` around a database
+    # call hides bugs in the code that builds the query.
+    class PyMongoError(Exception):
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -203,9 +216,16 @@ def on_chunk(node_id: str, payload: str) -> None:
         p.chunks[seq] = blob
         if p.complete():
             p.event.set()
-            if not claimed:
-                _unclaimed.pop(key, None)
-                finished = p.assemble()
+            _unclaimed.pop(key, None)
+            # **Always stored, even when someone is waiting right here.**
+            #
+            # Storing only the unclaimed copies kept the old assumption alive in
+            # a new place: that a local waiter means the photo is delivered. It
+            # does not — the waiter can time out between the last chunk and the
+            # assemble. The write costs one small round trip on a path that has
+            # already spent seconds, and it makes the inbox the single answer to
+            # "did this photo arrive", for every worker and every retry.
+            finished = p.assemble()
 
     # Outside the lock: a database round trip must not hold up the MQTT loop,
     # which is delivering every other board's traffic too.
@@ -374,6 +394,45 @@ def _attempt(node_id: str, timeout_s: float, settle_ms: int,
     finally:
         with _lock:
             _pending.pop(_key(node_id, req_id), None)
+
+
+def start_snapshot(node_id: str, settle_ms: int = 0,
+                   flash: str = "auto") -> Optional[str]:
+    """Ask for a photo and return immediately with a ticket.
+
+    **Waiting was the whole problem.** A held request has to guess how long the
+    board will take, and the board's answer moves: 1.3 seconds when it is idle,
+    over twenty when it is not. Guess low and a photo that arrived perfectly is
+    thrown away; guess high and a web request sits on a worker thread for half a
+    minute — and this backend has sixteen of those in total, so a few people
+    taking photos at once is an outage for everybody else.
+
+    The ticket removes the guess. The board takes as long as it takes, whichever
+    worker hears the chunks writes them to the inbox, and the caller comes back
+    for them when it likes. Nothing has to happen inside one window any more.
+    """
+    node_id = (node_id or "").strip()
+    if not node_id:
+        return None
+    req_id = uuid.uuid4().hex[:12]
+    ok = _send(node_id, {
+        "cmd": "snapshot",
+        "id": req_id,
+        "settle_ms": max(0, min(3000, int(settle_ms))),
+        "flash": flash if flash in ("on", "off", "auto") else "auto",
+    })
+    if not ok:
+        logger.info("[camera] %s: command not delivered", node_id)
+        return None
+    return req_id
+
+
+def fetch_snapshot(node_id: str, req_id: str) -> Optional[bytes]:
+    """The photo for a ticket, or None if it has not landed yet."""
+    node_id, req_id = (node_id or "").strip(), (req_id or "").strip()
+    if not node_id or not req_id:
+        return None
+    return _inbox_get(node_id, req_id)
 
 
 def set_flash(node_id: str, state: str, level: int = 128) -> bool:

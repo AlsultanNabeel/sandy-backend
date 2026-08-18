@@ -180,16 +180,41 @@ extension APIClient {
                        body: ["image_base64": jpegData.base64EncodedString()])
     }
 
-    // POST /api/nodes/<id>/snapshot → JPEG bytes (مش JSON)
+    // POST /api/nodes/<id>/snapshot → إمّا الصورة، أو تذكرة نرجع فيها.
     //
-    // بتستعمل `perform` نفسها اللي بيستعملها كل نداء تاني: نفس العنوان الأساسي،
-    // نفس التوكن، نفس معالجة الـ401 وانتهاء الجلسة. اللي بيختلف إنها بترجّع
-    // البايتات زي ما هي بدل ما تفكّها JSON — الرد صورة.
+    // **اللوح ما إله سرعة ثابتة.** بيردّ بثانية وهو فاضي، وبأكتر من عشرين وهو
+    // مشغول. وكل نسخة سابقة حاولت تخبّي هالفرق جوّا نداء واحد: تحطّ مهلة، فإمّا
+    // تكون قصيرة فترمي صورة وصلت سليمة، أو طويلة فتوقّف خيط خادم نص دقيقة —
+    // والخادم عنده ستّة عشر خيط بس، يعني تلات ناس بيصوّروا سوا بيوقّفوا التطبيق
+    // كلّه.
     //
-    // والمهلة أطول من العادة بالقصد: الخادم بيستنى الكاميرا تصوّر والقطع توصل
-    // عبر الوسيط. ثواني، مش عطل شبكة.
+    // فالخادم بيرجّع تذكرة، والصورة بتنحفظ عنده لمّا توصل، وإحنا منسأل عنها.
+    // اللوح بياخد وقته، وما في مهلة لازم يلحقها حدا.
     func cameraSnapshot(nodeId: String) async throws -> Data {
-        try await rawPost("/api/nodes/\(enc(nodeId))/snapshot", timeout: 25)
+        let data = try await rawPost("/api/nodes/\(enc(nodeId))/snapshot", timeout: 20)
+
+        // الرد صورة؟ خلصنا. JPEG بتبدأ بـ FF D8.
+        if data.count > 2, data[data.startIndex] == 0xFF,
+           data[data.index(after: data.startIndex)] == 0xD8 {
+            return data
+        }
+        struct Ticket: Decodable { let req_id: String? }
+        guard let req = (try? JSONDecoder().decode(Ticket.self, from: data))?.req_id else {
+            throw APIError(message: "no_photo")
+        }
+
+        // نسأل عنها. أربعين ثانية بتغطّي أبطأ ردّ شفناه بفرق كبير، والسؤال
+        // نفسه رخيص — نداء صغير كل ثانية ونصف، مش خيط واقف مستنّي.
+        let deadline = Date().addingTimeInterval(40)
+        while Date() < deadline {
+            try await Task.sleep(nanoseconds: 1_500_000_000)
+            let r = try await rawGet("/api/nodes/\(enc(nodeId))/snapshot/\(enc(req))")
+            if r.count > 2, r[r.startIndex] == 0xFF,
+               r[r.index(after: r.startIndex)] == 0xD8 {
+                return r
+            }
+        }
+        throw APIError(message: "no_photo")
     }
 
     // POST /api/nodes/<node_id>/wifi {ssid,password} → {ok, window_s}

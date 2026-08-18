@@ -54,6 +54,12 @@ final class APIClient: APIClientProtocol {
         return data
     }
 
+    /// GET بترجّع البايتات زي ما هي — للردود اللي مش JSON، زي الصور.
+    func rawGet(_ path: String, timeout: TimeInterval = 15) async throws -> Data {
+        try await perform(path, method: "GET", bodyData: nil,
+                          auth: true, timeout: timeout)
+    }
+
     private func perform(_ path: String,
                          method: String,
                          bodyData: Data?,

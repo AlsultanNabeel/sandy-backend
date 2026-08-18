@@ -19,6 +19,8 @@ Endpoints:
 
 from __future__ import annotations
 
+import time
+
 from flask import Response, jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
@@ -290,23 +292,53 @@ def register_devices_api(app, mongo_db=None):
         is more machinery than the wait is worth.
         """
         from app.features.node_store import get_node
-        from app.integrations.camera_client import request_snapshot
+        from app.integrations.camera_client import fetch_snapshot, start_snapshot
 
         if get_node(node_id) is None:
             return _bad("not_found", code=404)
 
         body = request.get_json(silent=True) or {}
-        jpeg = request_snapshot(
+        req_id = start_snapshot(
             node_id,
             settle_ms=int(body.get("settle_ms", 0) or 0),
             flash=str(body.get("flash", "auto")),
         )
-        if not jpeg:
-            # Three different failures look the same from here — camera offline,
-            # command not delivered, chunks never completed — and the camera logs
-            # which. Saying "no photo arrived" is honest; inventing a cause is not.
-            return _bad("no_photo", code=504)
-        return Response(jpeg, mimetype="image/jpeg")
+        if not req_id:
+            return _bad("not_sent", code=502)
+
+        # A short grace period, because the common case is fast and a round trip
+        # the caller does not need is still a round trip. Deliberately short: it
+        # is an optimisation, not the mechanism. When it misses, the ticket is
+        # the answer — not an error.
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            jpeg = fetch_snapshot(node_id, req_id)
+            if jpeg:
+                return Response(jpeg, mimetype="image/jpeg")
+            time.sleep(0.3)
+        return jsonify({"pending": True, "req_id": req_id}), 202
+
+    @app.route("/api/nodes/<node_id>/snapshot/<req_id>", methods=["GET"])
+    @require_tenant
+    def api_node_snapshot_fetch(claims, node_id, req_id):
+        """Collect a photo by ticket. 202 means not yet, 404 means never.
+
+        Split from the POST because taking a photo and having a photo are two
+        different events separated by an amount of time nobody can predict — the
+        board answers in a second when idle and in twenty when it is busy. Every
+        version of this that tried to hide that gap inside one request either
+        threw away photos that arrived late or held a worker thread hostage
+        waiting for them.
+        """
+        from app.features.node_store import get_node
+        from app.integrations.camera_client import fetch_snapshot
+
+        if get_node(node_id) is None:
+            return _bad("not_found", code=404)
+        jpeg = fetch_snapshot(node_id, req_id)
+        if jpeg:
+            return Response(jpeg, mimetype="image/jpeg")
+        return jsonify({"pending": True, "req_id": req_id}), 202
 
     @app.route("/api/devices/<name>/ir-learn", methods=["POST"])
     @require_tenant

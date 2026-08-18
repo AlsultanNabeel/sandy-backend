@@ -153,6 +153,32 @@ def test_the_failure_line_carries_its_own_diagnosis():
         "a failure logged below WARNING disappears at production log levels")
 
 
+def test_taking_a_photo_and_collecting_it_are_separate_requests():
+    """The last version of the same mistake, and the one that ends it.
+
+    Every earlier fix set a timeout: fifteen seconds, then seven, then ten and a
+    retry. All of them were guesses at a number the board does not have — it
+    answers in 1.3 seconds idle and past twenty when busy, and the log shows
+    photos arriving perfectly and being discarded because the guess was low.
+
+    A held request also costs a worker thread, and there are sixteen. Guessing
+    high is not the safe direction; it is an outage under three people.
+
+    So the POST returns a ticket and a GET collects it. The board takes as long
+    as it takes, whichever worker hears the chunks stores them, and nothing has
+    to fit inside a window any more.
+    """
+    from app.integrations import camera_client
+
+    assert hasattr(camera_client, "start_snapshot")
+    assert hasattr(camera_client, "fetch_snapshot")
+
+    api = (Path(__file__).resolve().parent.parent
+           / "cloud/app/api/devices_api.py").read_text(encoding="utf-8")
+    assert "snapshot/<req_id>" in api, "there is no way to collect a late photo"
+    assert "202" in api, "a photo still on its way is reported as an error again"
+
+
 def test_a_photo_is_asked_for_twice_when_nothing_comes_back():
     """The one message in the system that cannot survive a dropped second.
 
