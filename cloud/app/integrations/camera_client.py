@@ -190,7 +190,6 @@ def on_chunk(node_id: str, payload: str) -> None:
 
     with _lock:
         p = _pending.get(key)
-        claimed = p is not None
         if p is None:
             # **Assemble it anyway.** No waiter here means the waiter is in the
             # other worker, or it gave up while the board was still talking.
