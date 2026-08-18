@@ -66,7 +66,77 @@ class _Pending:
 
 
 _pending: Dict[str, _Pending] = {}
+
+# Photos nobody in *this* process asked for. They are still somebody's photo.
+#
+# gunicorn runs two workers with separate memory, and the broker delivers every
+# chunk to both. Only one holds the waiter, so the other used to drop its copy —
+# which was correct until the copies started arriving late. Then the waiter timed
+# out first, its slot was removed, and the complete photo was thrown away twice
+# over: once by each worker, for two different reasons.
+_unclaimed: Dict[str, _Pending] = {}
+_MAX_UNCLAIMED = 8          # a handful of in-flight photos, not a cache
+
 _lock = threading.Lock()
+
+# ── The inbox ────────────────────────────────────────────────────────────────
+#
+# **A photo is saved when it arrives, not caught as it flies past.**
+#
+# Everything before this assumed the picture would land inside one fifteen-second
+# window, in the one process that asked. Three separate things broke that
+# assumption — a listener that reconnects, a board that answers in fourteen
+# seconds when it is busy, and two workers that cannot see each other's memory —
+# and each was fixed on its own while the shape stayed fragile: any future hiccup
+# would look exactly the same again.
+#
+# So the chunks are assembled by whoever receives them and written here. The
+# request reads from here. Now a slow board is slow, a dropped second is a
+# delay, and the wrong worker is nothing at all — none of them are a lost photo.
+_INBOX = "camera_inbox"
+_INBOX_TTL_S = 120
+
+
+def _inbox():
+    try:
+        from app.db import get_db
+        db = get_db()
+        return None if db is None else db[_INBOX]
+    except Exception:  # noqa: BLE001 — no database is not a reason to lose the photo path
+        return None
+
+
+def _inbox_put(node_id: str, req_id: str, jpeg: bytes) -> None:
+    col = _inbox()
+    if col is None:
+        return
+    try:
+        col.replace_one(
+            {"_id": f"{node_id}:{req_id}"},
+            {"_id": f"{node_id}:{req_id}", "node_id": node_id, "req_id": req_id,
+             "jpeg": jpeg, "at": time.time()},
+            upsert=True)
+        # Swept on write rather than by a timer: the only way photos accumulate
+        # is by taking more of them, so the arrival of one is exactly when the
+        # old ones stop being worth keeping.
+        col.delete_many({"at": {"$lt": time.time() - _INBOX_TTL_S}})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[camera] could not store photo %s: %s", req_id, e)
+
+
+def _inbox_get(node_id: str, req_id: str) -> Optional[bytes]:
+    col = _inbox()
+    if col is None:
+        return None
+    try:
+        doc = col.find_one({"_id": f"{node_id}:{req_id}"})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[camera] could not read the inbox: %s", e)
+        return None
+    if not doc or time.time() - float(doc.get("at", 0)) > _INBOX_TTL_S:
+        return None
+    data = doc.get("jpeg")
+    return bytes(data) if data else None
 
 
 def _key(node_id: str, req_id: str) -> str:
@@ -80,6 +150,11 @@ def _sweep() -> None:
     for k in [k for k, p in _pending.items()
               if now - p.started > _ASSEMBLY_TIMEOUT_S]:
         _pending.pop(k, None)
+    # Unclaimed assemblies too: a photo that never finished arriving holds one of
+    # only eight slots, and eight abandoned halves would lock out every real one.
+    for k in [k for k, p in _unclaimed.items()
+              if now - p.started > _ASSEMBLY_TIMEOUT_S]:
+        _unclaimed.pop(k, None)
 
 
 def on_chunk(node_id: str, payload: str) -> None:
@@ -98,34 +173,45 @@ def on_chunk(node_id: str, payload: str) -> None:
         logger.debug("[camera] bad chunk: %s", e)
         return
 
+    key = _key(node_id, req_id)
+    finished: Optional[bytes] = None
+
     with _lock:
-        p = _pending.get(_key(node_id, req_id))
-        # No waiter means a late chunk from a request that already timed out, or
-        # a board talking to a backend that never asked. Dropping it is correct:
-        # buffering photos nobody is waiting for is how a memory leak starts.
-        #
-        # **But say so.** Dropping silently made two very different failures
-        # print the same line — `0/? chunks` covered both "the broker never
-        # delivered anything" and "it delivered to the other gunicorn worker,
-        # which was not the one waiting". Those need opposite fixes, and a week
-        # went into guessing which. One log line separates them for good.
+        p = _pending.get(key)
+        claimed = p is not None
         if p is None:
-            if seq == 0:
-                logger.info(
-                    "[camera] worker %d got chunk 0 of %s with nobody waiting "
-                    "— the request is on another worker, or it already timed out",
-                    os.getpid(), req_id)
-            return
+            # **Assemble it anyway.** No waiter here means the waiter is in the
+            # other worker, or it gave up while the board was still talking.
+            # Neither means nobody wants the photo — and dropping it was how a
+            # complete, correct image got destroyed twice per capture.
+            p = _unclaimed.get(key)
+            if p is None:
+                if len(_unclaimed) >= _MAX_UNCLAIMED:
+                    return
+                p = _Pending()
+                _unclaimed[key] = p
+                logger.info("[camera] worker %d assembling %s for whoever asked",
+                            os.getpid(), req_id)
+
         if total > 0:
             p.total = total
         p.bytes_seen += len(blob)
         if p.bytes_seen > _MAX_IMAGE_BYTES or len(p.chunks) >= _MAX_CHUNKS:
             logger.warning("[camera] %s: oversized image, abandoning", node_id)
             p.event.set()
+            _unclaimed.pop(key, None)
             return
         p.chunks[seq] = blob
         if p.complete():
             p.event.set()
+            if not claimed:
+                _unclaimed.pop(key, None)
+                finished = p.assemble()
+
+    # Outside the lock: a database round trip must not hold up the MQTT loop,
+    # which is delivering every other board's traffic too.
+    if finished is not None:
+        _inbox_put(node_id, req_id, finished)
 
 
 def _send(node_id: str, command: Dict[str, Any]) -> bool:
@@ -238,39 +324,54 @@ def _attempt(node_id: str, timeout_s: float, settle_ms: int,
             logger.info("[camera] %s: command not delivered", node_id)
             return None, True
 
-        if not p.event.wait(timeout_s):
-            got, want = len(p.chunks), p.total or "?"
-            # **The evidence goes on the failure line itself.**
-            #
-            # This used to say `0/? chunks` and stop, which named the symptom and
-            # nothing else. Answering "why" then meant a second tool, a login the
-            # owner does not have, and another round trip — while the failure had
-            # already happened and the numbers that explain it were sitting in
-            # memory a function call away.
-            #
-            # Read it as: is this worker's listener connected, did the broker
-            # grant all four subscriptions (128 = refused), and is it hearing
-            # heartbeats but not chunks? Those are the three causes, and this one
-            # line separates them without asking anybody for anything.
-            try:
-                from app.integrations.mqtt_ingest import get_ingest_stats
-                st = get_ingest_stats()
-                silent = (f"{time.time() - st['last_message_at']:.0f}s"
-                          if st.get("last_message_at") else "never")
-                detail = (f"connected={st['connected']} granted={st['granted_qos']} "
-                          f"status={st['status']} cam_status={st['cam_status']} "
-                          f"cam_snapshot={st['cam_snapshot']} "
-                          f"drops={st['disconnects']} errors={st['errors']} "
-                          f"rebuilds={st.get('rebuilds', 0)} silent_for={silent}")
-            except Exception as e:  # noqa: BLE001 — diagnosis must not mask the failure
-                detail = f"ingest stats unavailable: {e}"
-            logger.warning(
-                "[camera] %s: worker %d timed out with %s/%s chunks — ingest(%s)",
-                node_id, os.getpid(), got, want, detail)
-            return None, got > 0
-        if not p.complete():
-            return None, len(p.chunks) > 0
-        return p.assemble(), True
+        # The fast path: the chunks landed in this process and the event fired.
+        if p.event.wait(min(timeout_s, 3.0)) and p.complete():
+            return p.assemble(), True
+
+        # The patient path. The board may still be working, or the chunks may be
+        # arriving in the other worker. Either way the photo ends up in the
+        # inbox, so from here we just watch for it — which costs one small read
+        # a second instead of a guess about who will get there first.
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if p.event.is_set() and p.complete():
+                return p.assemble(), True
+            found = _inbox_get(node_id, req_id)
+            if found:
+                logger.info("[camera] %s: %s arrived via the inbox (%d bytes)",
+                            node_id, req_id, len(found))
+                return found, True
+            time.sleep(0.4)
+
+        # **The evidence goes on the failure line itself.**
+        #
+        # This used to say `0/? chunks` and stop, which named the symptom and
+        # nothing else. Answering "why" then meant a second tool, a login the
+        # owner does not have, and another round trip — while the failure had
+        # already happened and the numbers that explain it were sitting in memory
+        # a function call away.
+        #
+        # Read it as: is this worker's listener connected, did the broker grant
+        # all four subscriptions (128 = refused), and is it hearing heartbeats but
+        # not chunks? Those are the causes, and this one line separates them
+        # without asking anybody for anything.
+        got, want = len(p.chunks), p.total or "?"
+        try:
+            from app.integrations.mqtt_ingest import get_ingest_stats
+            st = get_ingest_stats()
+            silent = (f"{time.time() - st['last_message_at']:.0f}s"
+                      if st.get("last_message_at") else "never")
+            detail = (f"connected={st['connected']} granted={st['granted_qos']} "
+                      f"status={st['status']} cam_status={st['cam_status']} "
+                      f"cam_snapshot={st['cam_snapshot']} "
+                      f"drops={st['disconnects']} errors={st['errors']} "
+                      f"rebuilds={st.get('rebuilds', 0)} silent_for={silent}")
+        except Exception as e:  # noqa: BLE001 — diagnosis must not mask the failure
+            detail = f"ingest stats unavailable: {e}"
+        logger.warning(
+            "[camera] %s: worker %d gave up with %s/%s chunks and an empty "
+            "inbox — ingest(%s)", node_id, os.getpid(), got, want, detail)
+        return None, got > 0
     finally:
         with _lock:
             _pending.pop(_key(node_id, req_id), None)
