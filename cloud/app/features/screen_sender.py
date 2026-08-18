@@ -133,12 +133,25 @@ def send_image(node_id: str, image_bytes: bytes) -> Dict[str, Any]:
     topic = _topic(node_id, "screen_img")
     total = len(chunks)
 
-    # Ownership is checked once, on the first chunk, by send_to_topic. If the
-    # caller does not own this node the first publish fails and the rest are
-    # skipped — no half-sent picture, and no per-chunk ownership lookup either.
+    # `publish_service`, not `send_to_topic` — and this is the same bug that
+    # silently killed the camera.
+    #
+    # `send_to_topic` authorises by asking "is there a **device** whose transport
+    # builds this topic?". That is right for `screen`, which is a real device with
+    # a text control. `screen_img` is a **channel**: no device declares it, so
+    # every chunk was refused before it left the server, and nothing anywhere said
+    # so. Text appeared and pictures did not — which reads like an image problem
+    # and is a routing problem.
+    #
+    # Ownership is checked once here instead, on the node, before the loop.
+    from app.features.node_store import get_node
+    if get_node(node_id) is None:
+        logger.warning("[screen] refused: %s is not a node this caller owns", node_id)
+        return {"ok": False, "error": "not_yours"}
+
     for seq, chunk in enumerate(chunks):
         payload = f"{seq}:{total}:" + base64.b64encode(chunk).decode("ascii")
-        if not client.send_to_topic(topic, payload):
+        if not client.publish_service(topic, payload):
             logger.warning("[screen] chunk %d/%d not sent — abandoning", seq, total)
             return {"ok": False, "error": "not_sent", "sent": seq}
 

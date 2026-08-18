@@ -142,3 +142,42 @@ def test_the_cameras_network_name_has_its_own_field():
     from app.features.node_store import _TELEMETRY_KEYS
 
     assert "cam_ssid" in _TELEMETRY_KEYS and "ssid" in _TELEMETRY_KEYS
+
+
+def test_every_channel_that_is_not_a_device_uses_the_service_path():
+    """The same routing bug has now been found three times.
+
+    `send_to_topic` authorises by asking "is there a **device** whose transport
+    builds this topic?" — right for a control, wrong for a channel, because no
+    device declares a channel and the publish is refused with nothing said.
+
+    It cost the camera (`cam/command`), and then the picture on the display
+    (`screen_img`) — text worked and pictures did not, which reads like an image
+    problem and was a routing one. This test is the pattern rather than the
+    instance: anything published to a topic no device declares goes through
+    `publish_service`.
+    """
+    import re
+    from pathlib import Path
+
+    from app.integrations.room_device import RoomDeviceClient
+
+    channels = {"cam/command", "cam/wifi", "wifi", "screen_img"}
+    allowed = RoomDeviceClient._SERVICE_CHANNELS
+    for ch in channels:
+        assert any(a.strip("/") in ch for a in allowed), (
+            f"{ch} is a channel but no service entry allows it — every publish "
+            "to it will be refused, silently")
+
+    # And no caller may reach a channel through the device path.
+    src_dir = Path(__file__).resolve().parent.parent / "cloud" / "app"
+    offenders = []
+    for path in src_dir.rglob("*.py"):
+        for line in re.findall(r".*send_to_topic\(.*", path.read_text(encoding="utf-8")):
+            if line.strip().startswith("#"):
+                continue
+            if any(ch in line for ch in ("screen_img", "cam/", "/wifi")):
+                offenders.append(f"{path.name}: {line.strip()[:70]}")
+    assert not offenders, (
+        "a channel is being published through the device path again — it will "
+        f"be refused and nothing will say why: {offenders}")
