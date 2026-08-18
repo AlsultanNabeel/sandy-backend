@@ -166,13 +166,47 @@ def request_snapshot(node_id: str, timeout_s: float = 15.0,
     and the image is still stabilising — the camera firmware honours it, and it is
     the difference between a panorama and a row of blurred frames.
 
-    Call this off the request thread if you can: it blocks for up to ``timeout_s``,
-    and this backend has sixteen of those threads in total.
+    **Asks twice if the first attempt hears absolutely nothing**, and the reason
+    is a property of the link we cannot fix from either end:
+
+    The board publishes at QoS 0 — PubSubClient has no other mode — so the broker
+    will not hold those messages for a subscriber that is briefly away. Our
+    listener does go away: it drops and reconnects within a second, repeatedly.
+    Almost nothing notices, because almost everything here repeats. Heartbeats
+    arrive every five seconds, so losing one costs nothing at all.
+
+    A photo is the exception, and it is the *only* exception in the system: five
+    to seven messages emitted in one burst, once. A burst that lands in a
+    one-second gap is not degraded, it is **gone** — and the board logs a perfect
+    capture, because from its side the capture *was* perfect. That asymmetry is
+    why this failed every time while everything around it looked healthy.
+
+    So: nothing heard at all means we asked into a gap, and asking again is
+    correct. **Partial** chunks mean the link was up and something else went
+    wrong — retrying then would only race a second capture against the first, so
+    we let the original attempt use the whole budget instead.
     """
     node_id = (node_id or "").strip()
     if not node_id:
         return None
 
+    jpeg, heard_anything = _attempt(node_id, timeout_s / 2, settle_ms, flash)
+    if jpeg is not None or heard_anything:
+        return jpeg
+    logger.info("[camera] %s: nothing heard on the first ask — asking once more",
+                node_id)
+    return _attempt(node_id, timeout_s / 2, settle_ms, flash)[0]
+
+
+def _attempt(node_id: str, timeout_s: float, settle_ms: int,
+             flash: str) -> tuple[Optional[bytes], bool]:
+    """One ask. Returns (jpeg or None, whether any chunk at all arrived).
+
+    The second value is returned rather than stored on the module because two
+    people can ask for a photo at the same moment, and a shared flag would let
+    one caller's silence cancel the other's retry — a bug that would appear only
+    under the load nobody reproduces locally.
+    """
     req_id = uuid.uuid4().hex[:12]
     p = _Pending()
     with _lock:
@@ -187,8 +221,11 @@ def request_snapshot(node_id: str, timeout_s: float = 15.0,
             "flash": flash if flash in ("on", "off", "auto") else "auto",
         })
         if not ok:
+            # Not worth a second ask: the command never left the server, so the
+            # camera is not the thing that failed and asking again will not
+            # change it.
             logger.info("[camera] %s: command not delivered", node_id)
-            return None
+            return None, True
 
         if not p.event.wait(timeout_s):
             got, want = len(p.chunks), p.total or "?"
@@ -216,10 +253,10 @@ def request_snapshot(node_id: str, timeout_s: float = 15.0,
             logger.warning(
                 "[camera] %s: worker %d timed out with %s/%s chunks — ingest(%s)",
                 node_id, os.getpid(), got, want, detail)
-            return None
+            return None, got > 0
         if not p.complete():
-            return None
-        return p.assemble()
+            return None, len(p.chunks) > 0
+        return p.assemble(), True
     finally:
         with _lock:
             _pending.pop(_key(node_id, req_id), None)

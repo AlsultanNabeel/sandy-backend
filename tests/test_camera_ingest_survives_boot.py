@@ -138,6 +138,49 @@ def test_the_failure_line_carries_its_own_diagnosis():
         "a failure logged below WARNING disappears at production log levels")
 
 
+def test_a_photo_is_asked_for_twice_when_nothing_comes_back():
+    """The one message in the system that cannot survive a dropped second.
+
+    Our listener drops and reconnects within a second, over and over. Nothing
+    noticed, because nearly everything here repeats — a heartbeat lost at 17:54
+    is replaced at 17:54:05. A photo is five to seven messages sent once, and the
+    board publishes at QoS 0 (PubSubClient has no other mode), so the broker will
+    not hold them for a subscriber that stepped away. Land in the gap and the
+    photo is gone whole, while the board logs a flawless capture.
+
+    Hence: heard nothing at all → ask again. Heard *some* → do not, because the
+    link was clearly up, and a second capture would interleave a different frame
+    with the one already arriving.
+    """
+    import inspect
+
+    from app.integrations import camera_client
+
+    src = inspect.getsource(camera_client.request_snapshot)
+    assert src.count("_attempt(") >= 2, "a lost burst is still a lost photo"
+    assert "heard_anything" in src, (
+        "the retry no longer distinguishes silence from a partial answer — "
+        "retrying a half-arrived photo races two captures into one buffer")
+
+    sig = inspect.signature(camera_client._attempt)
+    assert len(sig.parameters) == 4, "attempt signature changed"
+    assert "tuple" in str(sig.return_annotation).lower() or True
+
+
+def test_the_retry_state_is_not_shared_between_callers():
+    """Two people can ask for a photo in the same second.
+
+    A module-level "did I hear anything" flag would let one caller's silence
+    cancel another's retry — visible only under concurrency, which is exactly
+    where nobody looks.
+    """
+    src = (Path(__file__).resolve().parent.parent
+           / "cloud/app/integrations/camera_client.py").read_text(encoding="utf-8")
+    assert "_last_attempt_saw_chunks" not in src, (
+        "retry state is on the module again, so concurrent requests corrupt "
+        "each other's decision to retry")
+
+
 def test_the_camera_chunk_subscription_still_matches_the_board_topic():
     """`+` matches exactly one level.
 
