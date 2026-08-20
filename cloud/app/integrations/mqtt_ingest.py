@@ -42,6 +42,16 @@ _CAM_SUB = "sandy/node/+/cam/snapshot"
 # بالتطبيق ولا مرّة — وهاد بالضبط اللي كان بيصير.
 _CAM_STATUS_SUB = "sandy/node/+/cam/status"
 
+# قناة أحداث الكاميرا — «صوّرت، وهاد عدد القطع».
+#
+# ما كنّا نسمعها، وكانت هي الدليل الناقص: اللوح بينشر القطع (رسائل كبيرة) ثم
+# حدث الاكتمال (رسالة صغيرة) **بنفس اللحظة وبنفس الاتصال**. فلو وصل الحدث
+# وضاعت القطع، بيصير عندنا مقارنة مضبوطة — كل إشي متطابق إلا الحجم.
+#
+# وإلها فايدة دائمة بعد التشخيص: بتقول كم قطعة أرسل اللوح، فبنعرف «وصل ستّة من
+# تسعة» بدل ما نستنّى ونخمّن.
+_CAM_EVENT_SUB = "sandy/node/+/cam/event"
+
 _started = False
 _lock = threading.Lock()
 _client: Optional[Any] = None
@@ -72,6 +82,7 @@ _stats = {
     "ir": 0,
     "cam_status": 0,
     "cam_snapshot": 0,
+    "cam_event": 0,
     "errors": 0,
     "rebuilds": 0,
     "last_disconnect": None,   # why the broker last hung up — its words, not ours
@@ -118,6 +129,13 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
         if msg.topic.endswith("/cam/status"):
             _stats["cam_status"] += 1
             _ingest_cam_status(node_id, payload)
+            return
+
+        if msg.topic.endswith("/cam/event"):
+            # صغيرة، ومن نفس اللوح، وبنفس ثانية القطع. لو وصلت هي وضاعت هنّ،
+            # الحجم هو الفرق الوحيد الباقي.
+            _stats["cam_event"] += 1
+            logger.info("[camera] %s event: %s", node_id, payload[:160])
             return
 
         if msg.topic.endswith("/cam/snapshot"):
@@ -226,7 +244,8 @@ def _on_connect(client, userdata, flags, reason_code, properties=None) -> None: 
         # QoS 1 would double the round trips on a link the robot already shares
         # with live audio. A lost chunk means one retaken photo, not a lost one.
         client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1),
-                          (_CAM_SUB, 0), (_CAM_STATUS_SUB, 1)])
+                          (_CAM_SUB, 1), (_CAM_STATUS_SUB, 1),
+                          (_CAM_EVENT_SUB, 1)])
         _stats["connects"] += 1
         # The pid is in the line on purpose. gunicorn runs two workers and each
         # one has its own subscriber and its own memory — so "is ingest up?" is

@@ -446,9 +446,9 @@ def start_snapshot(node_id: str, settle_ms: int = 0,
         st = get_ingest_stats()
         logger.info(
             "[camera] %s: asked (%s) — ingest(connected=%s status=%s "
-            "cam_status=%s cam_snapshot=%s drops=%s last=%s)",
+            "cam_status=%s cam_event=%s cam_snapshot=%s drops=%s last=%s)",
             node_id, req_id, st.get("connected"), st.get("status"),
-            st.get("cam_status"), st.get("cam_snapshot"),
+            st.get("cam_status"), st.get("cam_event"), st.get("cam_snapshot"),
             st.get("disconnects"), st.get("last_disconnect"))
     except Exception as exc:  # noqa: BLE001 — التشخيص ما بيوقّف الالتقاط
         logger.debug("[camera] ingest stats unavailable: %s", exc)
