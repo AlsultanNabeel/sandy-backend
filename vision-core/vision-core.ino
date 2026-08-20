@@ -72,19 +72,74 @@ unsigned long g_burstNextAtMs = 0;
 String        g_burstBaseId = "";
 unsigned int  g_burstIndex = 0;
 
+// آخر مرّة قلع فيها اللوح — ليش؟
+//
+// اللوح بيعرف السبب، وكان بيرميه. «بتعمل ريستارت» كانت سؤالًا بلا جواب لأيام،
+// والجواب محفوظ برجستر بيتقرا بسطر واحد.
+//
+// والفرق بين الأسباب مش تفصيل — كل واحد إله حلّ تاني تمامًا:
+//   انهيار كهربا  → مزوّد ومكثّف. مش كود، ولا سطر بيصلحه.
+//   حارس المهام   → الكود علّق. كود.
+//   انهيار برمجي  → خلل بالكود.
+//   إعادة برمجية  → طلبناها إحنا. مش عطل أصلًا.
+static esp_reset_reason_t g_bootReason = ESP_RST_UNKNOWN;
+
+// بتنقرا من `cam_mqtt.ino` عشان تنحطّ بالنبضة — أردوينو بيلزق الملفات ورا
+// بعض، فاللي هون بيسبق الكل والدالة بتوصلهم.
+esp_reset_reason_t camBootReason() { return g_bootReason; }
+
+static const char* bootReasonText(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:  return "كهربا انفصلت ورجعت";
+    case ESP_RST_SW:       return "إعادة برمجية مطلوبة";
+    case ESP_RST_PANIC:    return "انهيار بالكود";
+    case ESP_RST_INT_WDT:  return "حارس المقاطعات";
+    case ESP_RST_TASK_WDT: return "حارس المهام — إشي علّق";
+    case ESP_RST_WDT:      return "حارس";
+    case ESP_RST_BROWNOUT: return "انهيار كهربا — الفولت نزل";
+    case ESP_RST_DEEPSLEEP: return "خروج من نوم عميق";
+    case ESP_RST_EXT:      return "إعادة من الطرف الخارجي";
+    default:               return "غير معروف";
+  }
+}
+
 void setup() {
   Serial.begin(CAMERA_SERIAL_BAUD);
   delay(CAMERA_BOOT_DELAY_MS);
   Serial.println("\n[BOOT] ESP32-CAM starting  build=v4-capabilities");
 
+  g_bootReason = esp_reset_reason();
+  Serial.printf("[BOOT] سبب آخر إقلاع: %s (%d)\n",
+                bootReasonText(g_bootReason), (int)g_bootReason);
+
   settingsInit();
   flashInit();
 
+  // **بعد انهيار كهربا، ما منشغّل الفلاش.**
+  //
+  // الفلاش هو أكبر سحب تيّار باللوح، وبيشتغل بنفس اللحظة اللي بيصوّر فيها
+  // المستشعر ويبعت الراديو — يعني تلات أحمال ع نطّة وحدة. لو المزوّد ما
+  // بيتحمّلها، الفولت بينزل واللوح بيعيد التشغيل، **وبيرجع يعيدها بالالتقاط
+  // اللي بعده**: حلقة بتبيّن كأنّ الروبوت خربان وهي كهربا مش كافية.
+  //
+  // فبنقطع الحلقة: أول التقاط بعد الانهيار بيصير بلا فلاش. صورة أعتم أحسن من
+  // لوح بيختفي، والمالك بيقرا السبب بالسجل بدل ما يخمّن.
+  if (g_bootReason == ESP_RST_BROWNOUT) {
+    g_flashMode = FLASH_MODE_OFF;
+    Serial.println("[BOOT] ⚠️ الفلاش متوقّف مؤقّتًا — آخر إقلاع كان انهيار كهربا. "
+                   "بدّه مزوّد خمس فولت بأمبيرين ومكثّف ألف ميكرو.");
+  }
+
   // ومضة إقلاع: تثبت إنّ الفلاش موصول وشغّال بلا ما نستنى الوسيط، وبتعطي
   // إشارة بصرية إنّ اللوحة قلعت من جديد.
-  flashSet(FLASH_DEFAULT_LEVEL, 250);
-  delay(250);
-  flashOff();
+  //
+  // وبتنشال بعد انهيار كهربا: ومضة بأول ثانية من عمر لوح ما زال مزوّده ضعيف
+  // بترجّعه لنفس الحفرة قبل ما يوصل الشبكة أصلًا.
+  if (g_bootReason != ESP_RST_BROWNOUT) {
+    flashSet(FLASH_DEFAULT_LEVEL, 250);
+    delay(250);
+    flashOff();
+  }
 
   WiFi.onEvent(onWiFiEvent);
   connectWiFi();

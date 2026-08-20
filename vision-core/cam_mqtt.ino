@@ -251,6 +251,8 @@ void camWifiTick() {
   g_log.printf("[WIFI] switch %s\n", ok ? "ok" : "rolled back");
 }
 
+esp_reset_reason_t camBootReason();
+
 static void publishCamStatus() {
   if (!g_mqtt.connected()) return;
   unsigned long now = millis();
@@ -265,10 +267,15 @@ static void publishCamStatus() {
   //
   // نفس الحقلين اللي عند الدماغ بالضبط (ip, board)، فالخادم بيقراهم بنفس
   // المسار بلا ولا سطر جديد عنده.
-  char buf[560];
+  // `boot` = سبب آخر إقلاع.
+  //
+  // بدونه، «بتعمل ريستارت» بتحتاج كبل وحظّ: لازم تكون شابك ومتفرّج بالثانية
+  // اللي صار فيها. وهي بتنشره كل عشر ثواني، فالسبب بيوصلك وإنت بعيد — والأهمّ
+  // إنه بيوصل **بعد** ما يصير، مش وقتها.
+  char buf[600];
   snprintf(buf, sizeof(buf),
            "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"psram\":%u,"
-           "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s,"
+           "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s,\"boot\":%d,"
            "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"%s\","
            "\"outputs\":[{\"id\":\"flash\",\"kind\":\"relay\"},"
            "{\"id\":\"flash_level\",\"kind\":\"pwm\"},"
@@ -283,6 +290,7 @@ static void publishCamStatus() {
            g_cameraReady ? "true" : "false",
            flashIsOn() ? "true" : "false",
            camHttpRunning() ? "true" : "false",
+           (int)camBootReason(),
            WiFi.localIP().toString().c_str(), camSsid(),
            SANDY_CAM_BOARD_ID);
   g_mqtt.publish(g_topicStatus.c_str(), buf, false);
