@@ -45,6 +45,11 @@ struct NodeWiFiView: View {
                           : (node.telemetry?.ssid ?? "")
     }
 
+    private var currentIP: String {
+        board == "camera" ? (node.telemetry?.camIP ?? "")
+                          : (node.telemetry?.ip ?? "")
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
@@ -84,7 +89,16 @@ struct NodeWiFiView: View {
                     Text(currentSSID.isEmpty ? lang.s("wifi.unknown") : currentSSID)
                         .font(Theme.Typography.headline)
                         .foregroundColor(Theme.Colors.primaryText)
-                    Text(node.telemetry?.ip ?? "")
+                    // عنوان **اللوح المختار**، مش الدماغ دايمًا.
+                    //
+                    // كان بيعرض `ip` بأي حالة. فتختار «الكاميرا»، بيتبدّل اسم
+                    // الشبكة وبيضلّ العنوان تبع الدماغ — فالشاشة بتقول إنّ
+                    // اللوحين ع نفس العنوان، وهاد مستحيل.
+                    //
+                    // وهي مش تجميلة: العنوان هو اللي بيوريك إذا اللوحين فعلًا ع
+                    // نفس الشبكة. وبدونه صحيح، فرق الشبكات بيضلّ مخفي — والبثّ
+                    // المحلي بيفشل بلا سبب ظاهر.
+                    Text(currentIP)
                         .font(Theme.Typography.caption.monospacedDigit())
                         .foregroundColor(Theme.Colors.tertiaryText)
                 }

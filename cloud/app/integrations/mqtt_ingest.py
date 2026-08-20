@@ -74,6 +74,7 @@ _stats = {
     "cam_snapshot": 0,
     "errors": 0,
     "rebuilds": 0,
+    "last_disconnect": None,   # why the broker last hung up — its words, not ours
     "last_message_at": None,
 }
 
@@ -274,10 +275,26 @@ def _on_disconnect(client, userdata, *args) -> None:  # noqa: ANN001
     Signature is loose because paho changed it between callback API versions and
     a TypeError raised inside a callback is swallowed by the network loop — the
     listener would then look connected while delivering nothing.
+
+    **And it logs the reason.** It used to say only "disconnected", which meant
+    a week of guessing at a link that drops on a regular fifteen-second cycle —
+    a rhythm too even to be a bad network. The broker states the cause in the
+    packet and it was being thrown away:
+
+        142 (0x8E)  session taken over — another client connected with this id
+        141 (0x8D)  keep alive timeout — our pings stopped arriving
+        139 (0x8B)  server shutting down
+        152 (0x98)  maximum connect time / quota
+
+    Each one has a different fix and no two look alike. Reading it is the
+    difference between knowing and theorising.
     """
     _stats["disconnects"] += 1
-    logger.warning("[mqtt_ingest] worker %d disconnected — paho will retry",
-                   os.getpid())
+    reason = next((a for a in args if a is not None
+                   and not isinstance(a, dict)), None)
+    _stats["last_disconnect"] = str(reason)
+    logger.warning("[mqtt_ingest] worker %d disconnected: %s — paho will retry",
+                   os.getpid(), reason)
 
 
 def start_mqtt_ingest() -> None:
