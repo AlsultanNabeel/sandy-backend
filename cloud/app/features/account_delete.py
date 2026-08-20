@@ -65,11 +65,12 @@ _BY_USER: List[str] = [
 _STM = "sandy_stm"
 
 
-def delete_account(user_id: str) -> Dict[str, Any]:
-    """Remove every trace of one person. Returns what was removed, per collection.
+def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
+    """Clear `names` plus short-term memory for one user. Shared by both paths.
 
-    The counts are returned rather than swallowed because "it worked" is not a
-    checkable claim and this is the one operation nobody can undo to verify.
+    One implementation on purpose. Two erase routines drift, and the way they
+    drift is that one of them stops covering a collection — which is invisible,
+    because both still report success.
     """
     from app.db import get_db
 
@@ -81,7 +82,7 @@ def delete_account(user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "no_store"}
 
     removed: Dict[str, int] = {}
-    for name in _BY_USER:
+    for name in names:
         try:
             r = db[name].delete_many({"user_id": user_id})
             if r.deleted_count:
@@ -89,7 +90,7 @@ def delete_account(user_id: str) -> Dict[str, Any]:
         # مجموعة وحدة فشلت ما بتوقّف الباقي — والفشل بينسجّل بـ«ناقص واحد»
         # بالنتيجة، فالمالك بيعرف إنّ في إشي ما انمسح بدل ما نقوله «تمام».
         except PyMongoError as exc:
-            logger.warning("[delete] %s failed for %s: %s", name, user_id, exc)
+            logger.warning("[erase] %s failed for %s: %s", name, user_id, exc)
             removed[name] = -1
 
     try:
@@ -100,8 +101,41 @@ def delete_account(user_id: str) -> Dict[str, Any]:
         if n:
             removed[_STM] = n
     except PyMongoError as exc:
-        logger.warning("[delete] stm failed for %s: %s", user_id, exc)
+        logger.warning("[erase] stm failed for %s: %s", user_id, exc)
         removed[_STM] = -1
+
+    logger.info("[erase] %s cleared: %s", user_id, removed)
+    return {"ok": True, "removed": removed}
+
+
+def wipe_account_data(user_id: str, keep_nodes: bool = True) -> Dict[str, Any]:
+    """Empty an account without destroying it — "start over".
+
+    Deleting and starting over look the same from the data's side and are not
+    the same request at all. Someone who wants a clean slate still wants his
+    sign-in, his subscription, and above all **his robot**: making him delete
+    the account to clear a conversation would cost him the hardware, because a
+    node released by a deleted account has to be paired again from scratch.
+
+    So this clears everything the account *holds* and keeps what it *is*.
+    """
+    names = [n for n in _BY_USER if not (keep_nodes and n in ("sandy_nodes", "sandy_devices"))]
+    return _erase(user_id, names)
+
+
+def delete_account(user_id: str) -> Dict[str, Any]:
+    """Remove every trace of one person. Returns what was removed, per collection.
+
+    The counts are returned rather than swallowed because "it worked" is not a
+    checkable claim and this is the one operation nobody can undo to verify.
+    """
+    r = _erase(user_id, _BY_USER)
+    if not r.get("ok"):
+        return r
+    removed: Dict[str, int] = r["removed"]
+
+    from app.db import get_db
+    db = get_db()
 
     # The account row goes last, on purpose. If anything above fails hard, the
     # user still exists and can press the button again — whereas deleting the

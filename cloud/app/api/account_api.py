@@ -47,6 +47,30 @@ def register_account_api(app):
             ],
         }), 200
 
+    @app.route("/api/account/reset", methods=["POST"])
+    @require_tenant
+    def api_account_reset(claims):
+        """Empty the account without destroying it. "Start over."
+
+        Distinct from delete for a reason the owner ran into immediately: he
+        wanted a clean slate, not a new identity. Deleting the account would
+        also drop his sign-in, his subscription, and his paired hardware — so
+        "start fresh" would cost him the robot as well as the data.
+
+        This clears everything the account *holds* — conversations, memory,
+        tasks, journal, photos, voiceprint — and leaves the account and its
+        robots exactly where they were.
+        """
+        body = request.get_json(silent=True) or {}
+        if str(body.get("confirm") or "") != "RESET":
+            return jsonify({"error": "confirm_required"}), 400
+        uid = str(claims.get("user_id") or "")
+        if not uid:
+            return jsonify({"error": "no_user"}), 400
+
+        from app.features.account_delete import wipe_account_data
+        return jsonify(wipe_account_data(uid)), 200
+
     @app.route("/api/account", methods=["DELETE"])
     @require_tenant
     def api_account_delete(claims):

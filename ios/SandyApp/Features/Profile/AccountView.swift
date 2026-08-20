@@ -22,6 +22,7 @@ struct AccountView: View {
     @State private var notice = ""
     @State private var busy = false
     @State private var confirmingDelete = false
+    @State private var confirmingReset = false
     @State private var sellNode: NodeItem?
 
     var body: some View {
@@ -102,6 +103,22 @@ struct AccountView: View {
     private var dangerSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader(title: lang.s("account.danger"))
+
+            // «صفّر» قبل «احذف»، وهاد ترتيب مقصود.
+            //
+            // أغلب اللي بيوصل لهون بدّه يفضّي مش يمشي. لو الحذف كان الخيار
+            // الوحيد، رح يحذف حسابه عشان يمسح محادثة — ويخسر روبوته معها.
+            Text(lang.s("account.reset.warn"))
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.secondaryText)
+            SandyButton(title: lang.s("account.reset"),
+                        systemImage: "arrow.counterclockwise",
+                        style: .secondary, fillWidth: true) {
+                confirmingReset = true
+            }
+
+            Divider().overlay(Theme.Colors.border)
+
             Text(lang.s("account.delete.warn"))
                 .font(Theme.Typography.caption)
                 .foregroundColor(Theme.Colors.secondaryText)
@@ -118,6 +135,14 @@ struct AccountView: View {
         } message: {
             Text(lang.s("account.delete.warn"))
         }
+        .alert(lang.s("account.reset.confirm"), isPresented: $confirmingReset) {
+            Button(lang.s("common.cancel"), role: .cancel) {}
+            Button(lang.s("account.reset"), role: .destructive) {
+                Task { await resetData() }
+            }
+        } message: {
+            Text(lang.s("account.reset.warn"))
+        }
     }
 
     // ── الأفعال ──────────────────────────────────────────────────────────────
@@ -130,7 +155,8 @@ struct AccountView: View {
         busy = true; notice = ""
         defer { busy = false }
         do {
-            _ = try await state.api.pairNode(code: code.trimmingCharacters(in: .whitespaces))
+            _ = try await state.api.pairNode(
+                code: code.trimmingCharacters(in: .whitespaces), label: nil)
             code = ""
             await reload()
         } catch {
@@ -151,6 +177,16 @@ struct AccountView: View {
             await reload()
         } catch {
             notice = lang.s("account.sell.failed")
+        }
+    }
+
+    private func resetData() async {
+        do {
+            try await state.api.resetAccountData()
+            notice = lang.s("account.reset.done")
+            await reload()
+        } catch {
+            notice = lang.s("account.reset.failed")
         }
     }
 

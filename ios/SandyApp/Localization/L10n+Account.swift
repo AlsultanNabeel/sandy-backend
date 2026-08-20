@@ -29,6 +29,12 @@ enum L10nAccount {
             "sell.offline":     .text("انفكّ من حسابك، بس اللوح كان مطفي فما انمسح. شغّله وفكّه وهو متصل قبل ما تبيعه."),
             "sell.failed":      .text("ما قدرت أفكّه. جرّب كمان مرّة."),
 
+            "reset":            .text("صفّر كل البيانات"),
+            "reset.confirm":    .text("تمسح كل بياناتك؟"),
+            "reset.warn":       .text("بيمسح المحادثات والذاكرة والمهام واليوميات والصور وبصمة صوتك — وبيخلّي حسابك وروبوتك زي ما هنّ. للبداية من جديد."),
+            "reset.done":       .text("انمسح كل إشي. صفحة بيضا."),
+            "reset.failed":     .text("ما قدرت أمسح. جرّب كمان مرّة."),
+
             "danger":           .text("حذف الحساب"),
             "delete":           .text("احذف حسابي"),
             "delete.confirm":   .text("تحذف حسابك نهائيًا؟"),
@@ -54,6 +60,12 @@ enum L10nAccount {
             "sell.done":        .text("Released and wiped. Ready for its next owner."),
             "sell.offline":     .text("Released from your account, but the board was off so nothing was erased. Power it on and release it while connected before selling."),
             "sell.failed":      .text("Couldn't release it. Try again."),
+
+            "reset":            .text("Erase all data"),
+            "reset.confirm":    .text("Erase all your data?"),
+            "reset.warn":       .text("Clears conversations, memory, tasks, journal, photos and your voiceprint — and leaves your account and robot as they are. For starting over."),
+            "reset.done":       .text("Everything cleared. Clean slate."),
+            "reset.failed":     .text("Couldn't erase it. Try again."),
 
             "danger":           .text("Delete account"),
             "delete":           .text("Delete my account"),

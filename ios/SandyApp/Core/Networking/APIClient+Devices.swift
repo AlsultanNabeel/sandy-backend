@@ -180,31 +180,19 @@ extension APIClient {
                        body: ["image_base64": jpegData.base64EncodedString()])
     }
 
-    // POST /api/nodes/pair {code} → يربط روبوت بحسابك.
-    //
-    // أول حساب بيربط بيملك اللوح. اللي بعده بياخد `already_claimed` — وهاد
-    // مقصود: بلاه، كودان متطابقان بحسابين بيخلّوا الاتنين يسمعوا نفس الروبوت.
-    @discardableResult
-    func pairNode(code: String, label: String = "") async throws -> String {
-        struct Reply: Decodable { let node_id: String?; let already: Bool? }
-        let r: Reply = try await fetch("/api/nodes/pair", method: "POST",
-                                       body: ["code": code, "label": label])
-        return r.node_id ?? ""
-    }
-
-    // DELETE /api/nodes/<id> → فكّ الربط + مسح اللوح (للبيع).
-    //
-    // بترجّع هل اللوح انمسح فعلًا: لو كان مطفي وقتها، الملكية بتتحرّر بس بياناته
-    // بتضلّ عليه ولازم مسح يدوي قبل ما المشتري يقدر يربطه.
-    @discardableResult
-    func unpairNode(nodeId: String) async throws -> Bool {
-        struct Reply: Decodable { let board_wiped: Bool? }
-        let r: Reply = try await fetch("/api/nodes/\(enc(nodeId))", method: "DELETE")
-        return r.board_wiped ?? false
-    }
-
     // DELETE /api/account — حذف نهائي. شرط إلزامي بمتجر أبل، ومطلوب أخلاقيًا:
     // الحساب فيه بصمة صوت ويوميات وصور ومصاريف.
+    // POST /api/account/reset — يفضّي الحساب وبيخلّيه.
+    //
+    // منفصل عن الحذف لأنّ «بدّي أبدأ من جديد» و«بدّي أمشي» مش نفس الطلب:
+    // اللي بدّه يبدأ من جديد بدّه يضلّ يملك **روبوته**. لو خلّيناه يحذف حسابه
+    // عشان يمسح محادثة، بيخسر الجهاز معها.
+    func resetAccountData() async throws {
+        struct Reply: Decodable { let ok: Bool? }
+        let _: Reply = try await fetch("/api/account/reset", method: "POST",
+                                       body: ["confirm": "RESET"])
+    }
+
     func deleteAccount() async throws {
         struct Reply: Decodable { let ok: Bool? }
         let _: Reply = try await fetch("/api/account", method: "DELETE",
@@ -310,9 +298,16 @@ extension APIClient {
                        body: ["label": label])
     }
 
-    // DELETE /api/nodes/<node_id> → {ok}
-    func unpairNode(nodeId: String) async throws {
-        try await send("/api/nodes/\(enc(nodeId))", method: "DELETE")
+    // DELETE /api/nodes/<node_id> → {ok, board_wiped}
+    //
+    // بترجّع هل اللوح **انمسح** فعلًا، مش بس هل انفكّ الربط. التنين مش نفس
+    // الإشي: لو كان مطفي وقت الطلب، الملكية بتتحرّر بس اسم شبكتك وكلمة سرّها
+    // بيضلّوا محفوظين جوّاه — وبينباع فيهن.
+    @discardableResult
+    func unpairNode(nodeId: String) async throws -> Bool {
+        struct Reply: Decodable { let board_wiped: Bool? }
+        let r: Reply = try await fetch("/api/nodes/\(enc(nodeId))", method: "DELETE")
+        return r.board_wiped ?? false
     }
 
     // POST /api/nodes/<node_id>/ir/learn → تضع الوحدة بوضع التعلّم (تلتقط الضغطة القادمة)
