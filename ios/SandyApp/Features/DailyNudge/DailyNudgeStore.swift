@@ -17,11 +17,34 @@ final class DailyNudgeStore: ObservableObject {
 
     private var loaded = false
 
+    /// اليوم اللي انسكّرت فيه البطاقة — محفوظ ع الجهاز.
+    ///
+    /// **كان `dismissed` بالذاكرة وبس.** تسكّر البطاقة، تطلع من التطبيق،
+    /// وترجع — بتلاقيها قدّامك. يعني زرّ الإغلاق ما كان يغلق إشي، كان يخفيه
+    /// لحدّ ما تنسى.
+    ///
+    /// محفوظ **باليوم** مش كعلَم: تنبيه بكرا لازم يظهر. لو خزّنّا «انسكّر»
+    /// وبس، أول إغلاق بيطفّي الميزة للأبد.
+    private static let dismissKey = "sandy.nudge.dismissedOn"
+
+    private var todayKey: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
     /// يجلب تنبيه اليوم مرّة (بصمت — التنبيه ميزة لطيفة مش حرجة، فأي فشل بينخفي).
     func loadIfNeeded(api: APIClient) async {
         guard !loaded else { return }
         loaded = true
+        dismissed = UserDefaults.standard.string(forKey: Self.dismissKey) == todayKey
         nudge = try? await api.getDailyNudge()
+    }
+
+    /// إغلاق بيدوم. البطاقة ما بترجع اليوم، وبترجع بكرا بمحتوى جديد.
+    func dismiss() {
+        dismissed = true
+        UserDefaults.standard.set(todayKey, forKey: Self.dismissKey)
     }
 
     /// يرسل جواب سؤال التعارف ويخفي البطاقة (اليوم خلص).

@@ -296,8 +296,21 @@ def get_onboarding_directive(user_id: Optional[str] = None) -> Optional[str]:
         raw_interests = onboarding.get("interests") or []
         interests = [str(i).strip() for i in raw_interests if str(i).strip()] \
             if isinstance(raw_interests, list) else []
+        # **الملاحظات وأجوبة النبضة — كانوا بينحفظوا وما حدا بيقراهن.**
+        #
+        # الملاحظات حقل خمس مئة حرف بيكتب فيه المستخدم عن حاله بأول تعارف —
+        # وكان بينحفظ ويقعد. وأجوبة النبضة اليومية أسوأ: هي أسئلة «خلّينا
+        # نتعرّف» بتنسأل يوميًا، والجواب كان بينستعمل **بس** عشان ما ينسأل
+        # السؤال مرّتين. يعني بتجاوب عليها كل يوم، وهي ما بتعرف الجواب.
+        #
+        # حقل بينحفظ وما بينقرا أسوأ من حقل مش موجود: المستخدم شايف إنه حكاها،
+        # وهي بتتصرّف كأنه ما حكى.
+        notes = str(onboarding.get("notes", "") or "").strip()
+        raw_answers = onboarding.get("nudge_answers") or {}
+        answers = [str(v).strip() for v in raw_answers.values() if str(v).strip()] \
+            if isinstance(raw_answers, dict) else []
 
-        if not preferred_name and not interests:
+        if not (preferred_name or interests or notes or answers):
             return None
 
         parts: List[str] = []
@@ -305,6 +318,11 @@ def get_onboarding_directive(user_id: Optional[str] = None) -> Optional[str]:
             parts.append(f"نادِ المستخدم باسم «{preferred_name}»")
         if interests:
             parts.append("اهتماماته: " + "، ".join(interests[:8]))
+        if notes:
+            parts.append(f"عن نفسه: {notes[:300]}")
+        if answers:
+            # آخر ستّة: الأحدث أقرب لحاله اليوم، والقائمة بتكبر مع الأيام.
+            parts.append("قال عن حاله: " + " · ".join(answers[-6:]))
         return "[ملف المستخدم: " + " · ".join(parts) + "]"
     except Exception:
         return None

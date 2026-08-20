@@ -169,6 +169,28 @@ def test_she_knows_your_name_on_every_channel():
         "the caller stopped passing the user, so the parameter is decoration")
 
 
+def test_everything_the_user_told_her_is_actually_read():
+    """Two fields were saved and never read by anything.
+
+    `onboarding.notes` is a five-hundred character box where the user writes
+    about himself at first open. `onboarding.nudge_answers` holds his replies to
+    the daily get-to-know-you question — and those were used **only** to avoid
+    repeating a question. He answered one every day and she never learned a
+    thing from any of them.
+
+    A field that is stored and never read is worse than a field that does not
+    exist. The user watched himself tell her, and she behaves as though he
+    never did.
+    """
+    ctx = (Path(__file__).resolve().parent.parent
+           / "cloud/app/agent/context_builder.py").read_text(encoding="utf-8")
+    for field in ('onboarding.get("preferred_name"',
+                  'onboarding.get("interests")',
+                  'onboarding.get("notes"',
+                  'onboarding.get("nudge_answers")'):
+        assert field in ctx, f"{field} is collected from the user and never read"
+
+
 def test_durable_memory_was_always_keyed_by_person():
     """Stated so the next reader does not 'fix' the part that was right.
 
