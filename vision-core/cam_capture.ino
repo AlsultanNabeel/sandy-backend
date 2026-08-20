@@ -121,7 +121,28 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
     return;
   }
 
-  g_log.printf("[CAM] captured %u bytes — publishing...\n", fb->len);
+  g_log.printf("[CAM] captured %u bytes — uploading...\n", fb->len);
+
+  // **الرفع مباشرة للخادم.**
+  //
+  // كانت الصورة بتتقسّم وتتشفّر وتتبعت قطعة قطعة عبر الوسيط — وهاد استعمال
+  // بروتوكول أوامر لنقل ملف. النتيجة: ترميز بيزيد الحجم تلتًا، وقطع بتضيع
+  // بصمت لأنّ النشر ما إله إقرار، وطبقة كاملة من التجميع والتذاكر والمهلات
+  // بنيناها **بس عشان نلتفّ ع هالخطأ**.
+  //
+  // طلب واحد، والبروتوكول بيضمن الوصول بنفسه: إمّا توصل كاملة، أو بيطلع خطأ
+  // نقدر نقراه. والوسيط بيضلّ يحمل الأمر — وهاد اللي بيتقنه.
+  if (uploadSnapshot(id, fb->buf, fb->len)) {
+    esp_camera_fb_return(fb);
+    char done[120];
+    snprintf(done, sizeof(done),
+             "{\"id\":\"%s\",\"event\":\"uploaded\",\"bytes\":%u}",
+             id.c_str(), (unsigned)fb->len);
+    mqttPublishEvent(done);
+    g_log.println("[CAM] upload ok");
+    return;
+  }
+  g_log.println("[CAM] upload failed — falling back to broker chunks");
 
   // قسّم على chunks
   unsigned int total = (fb->len + SNAPSHOT_CHUNK_RAW_BYTES - 1) / SNAPSHOT_CHUNK_RAW_BYTES;

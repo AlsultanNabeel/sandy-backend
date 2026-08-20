@@ -455,6 +455,23 @@ def start_snapshot(node_id: str, settle_ms: int = 0,
     return req_id
 
 
+def store_snapshot(node_id: str, req_id: str, jpeg: bytes) -> None:
+    """Put a finished photo where the waiting request will find it.
+
+    Called by the upload endpoint. The camera now sends the whole JPEG in one
+    HTTPS request instead of scattering it across the broker, so there is
+    nothing to reassemble — the image arrives whole or the upload fails loudly.
+    """
+    _inbox_put((node_id or "").strip(), (req_id or "").strip(), jpeg)
+    # Wake anyone already blocked on this request instead of leaving them to
+    # discover it on their next poll — the difference between a photo that
+    # appears at once and one that appears a second later for no visible reason.
+    with _lock:
+        p = _pending.get(_key(node_id, req_id))
+        if p is not None:
+            p.event.set()
+
+
 def fetch_snapshot(node_id: str, req_id: str) -> Optional[bytes]:
     """The photo for a ticket, or None if it has not landed yet."""
     node_id, req_id = (node_id or "").strip(), (req_id or "").strip()

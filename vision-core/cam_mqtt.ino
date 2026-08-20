@@ -29,7 +29,9 @@ static String g_topicRequest, g_topicCommand, g_topicSnapshot,
 static bool   g_wifiPending = false;
 static String g_wifiSsid, g_wifiPass;
 
-static String camNodeId() {
+// مش `static` — الرفع بيستعملها كمان، ولازم يوقّع بنفس المعرّف اللي الخادم
+// بيعرف الوحدة فيه. نسخة تانية من نفس التحويل كانت رح تفترق يومًا ما.
+String camNodeId() {
   String out;
   const char* src = SANDY_PAIR_CODE;
   for (size_t i = 0; src[i]; i++) {

@@ -20,6 +20,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+
 import time
 
 from flask import Response, jsonify, request
@@ -318,6 +319,76 @@ def register_devices_api(app, mongo_db=None):
                 return Response(jpeg, mimetype="image/jpeg")
             time.sleep(0.3)
         return jsonify({"pending": True, "req_id": req_id}), 202
+
+    @app.route("/api/cam/upload", methods=["POST"])
+    def api_cam_upload():
+        """The camera posts a finished JPEG here. One request, one image.
+
+        **This replaces sending photographs through the message broker.**
+
+        MQTT is a control protocol: small messages, fire and forget, no
+        acknowledgement at the quality level a board like this can publish. A
+        photograph is none of those things, so every version of the broker route
+        needed machinery to survive it — base64 (a third bigger), chunking,
+        sequence numbers, reassembly, an inbox, tickets, timeouts, retries — and
+        it still lost images, because a dropped chunk is silent by design.
+
+        The measurement that ended the argument: heartbeats (500 bytes) always
+        arrived, image chunks (1400 bytes) never did, same board, same second,
+        same connection. Rather than keep shrinking the chunks until they slipped
+        under whatever limit was being hit, the photo now travels over the
+        protocol built for exactly this — where a failed transfer is an error,
+        not silence.
+
+        The broker keeps the job it is good at: carrying "take a photo".
+
+        Authenticated by HMAC over node + request + timestamp, the same scheme
+        and the same shared key as the voice link — no session, no account, and
+        a replay window so a captured upload cannot be repeated later.
+        """
+        import hashlib
+        import hmac as _hmac
+
+        # من `voice_ws._config` مش من البيئة مباشرة: نفس المفتاح ونفس القراءة.
+        # مفتاحان بمكانين بيفترقوا يومًا ما، وساعتها بيصير الصوت شغّالًا والرفع
+        # مرفوضًا بلا سبب ظاهر.
+        from app.api.voice_ws._config import _HMAC_KEY as key
+        if not key:
+            return _bad("auth_not_configured", code=503)
+
+        node_id = (request.headers.get("X-Sandy-Node") or "").strip()
+        req_id = (request.headers.get("X-Sandy-Req") or "").strip()
+        ts = (request.headers.get("X-Sandy-Ts") or "").strip()
+        sig = (request.headers.get("X-Sandy-Sig") or "").strip()
+        if not (node_id and req_id and ts and sig):
+            return _bad("missing_headers")
+
+        try:
+            age = abs(time.time() * 1000 - int(ts))
+        except ValueError:
+            return _bad("bad_ts")
+        if age > 120_000:
+            return _bad("stale")
+
+        expected = _hmac.new(key, f"{node_id}{req_id}{ts}".encode(),
+                             hashlib.sha256).hexdigest()
+        if not _hmac.compare_digest(expected, sig):
+            logging.getLogger(__name__).warning(
+                "[cam] upload rejected: bad signature for %s", node_id)
+            return _bad("auth_fail", code=401)
+
+        jpeg = request.get_data(cache=False)
+        # A JPEG starts FF D8. Checking it here means a truncated or misrouted
+        # body is refused at the door rather than stored and served as a broken
+        # image later, which is far harder to trace back to this moment.
+        if len(jpeg) < 100 or jpeg[:2] != b"\xff\xd8":
+            return _bad("not_a_jpeg")
+
+        from app.integrations.camera_client import store_snapshot
+        store_snapshot(node_id, req_id, jpeg)
+        logging.getLogger(__name__).info(
+            "[cam] upload ok: %s %s (%d bytes)", node_id, req_id, len(jpeg))
+        return jsonify({"ok": True, "bytes": len(jpeg)}), 200
 
     @app.route("/api/nodes/<node_id>/snapshot/<req_id>", methods=["GET"])
     @require_tenant
