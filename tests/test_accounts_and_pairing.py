@@ -102,13 +102,29 @@ def test_the_board_identifies_itself_by_its_node():
     into a node lookup, so it was guaranteed to miss — which is what made the
     fallback fire on every single session rather than rarely.
     """
-    sec = _read("firmware/brain-core/main/secrets.h")
-    assert '#define SANDY_DEVICE_ID     "8421"' in sec, (
-        "the board announces a model name again; the owner lookup cannot "
-        "resolve it and voice sessions become anonymous")
-    assert '#define SANDY_PAIR_CODE     "8421"' in sec, (
-        "the brain and the camera are on different node ids again — they are "
-        "one robot and must share one id")
+    # `secrets.h` holds live credentials and is gitignored, so it does not exist
+    # on CI. Asserting against it made this pass locally and fail on the server
+    # — a test that only runs on one machine is not a test.
+    #
+    # The rule is asserted where it can always be read: the committed example,
+    # which is also the file the next person copies. The real one is checked too
+    # when it happens to be present.
+    example = _read("firmware/brain-core/main/secrets.example.h")
+    assert "SANDY_DEVICE_ID" in example and "SANDY_PAIR_CODE" in example
+    assert "معرّف الوحدة" in example or "node id" in example.lower(), (
+        "the example no longer tells the next person that the device id must be "
+        "the node id — which is the mistake that leaked one owner's memory to "
+        "another")
+
+    real = _ROOT / "firmware/brain-core/main/secrets.h"
+    if real.exists():
+        sec = real.read_text(encoding="utf-8")
+        assert '#define SANDY_DEVICE_ID     "8421"' in sec, (
+            "this board announces a model name again; the owner lookup cannot "
+            "resolve it and its voice sessions become anonymous")
+        assert '#define SANDY_PAIR_CODE     "8421"' in sec, (
+            "the brain and the camera are on different node ids again — they "
+            "are one robot and must share one id")
 
 
 def test_a_robot_can_only_be_claimed_once():

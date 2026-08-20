@@ -15,7 +15,18 @@
 // SANDY_WS_HMAC_KEY config var.
 #define SANDY_VOICE_WS_URI  "wss://YOUR_APP.herokuapp.com/voice"
 #define SANDY_WS_HMAC_KEY   "YOUR_WS_HMAC_KEY"
-#define SANDY_DEVICE_ID     "sandy-brain-s3"
+// **يجب أن يساوي معرّف الوحدة** — أي `SANDY_PAIR_CODE` تحت، بحروف صغيرة
+// وأرقام فقط. ليس اسم موديل.
+//
+// المقبس الصوتي يأخذ هذه القيمة ويسأل بها: «من يملك هذه الوحدة؟» — ليعرف ذاكرة
+// من يفتح. واسم الموديل ليس وحدة، فالبحث يرجع فارغًا، وكانت النتيجة أنّ ساندي
+// تحدّثت مع مالكها الجديد وهي تحمل ذاكرة المالك القديم: نادته باسمه، وعدّدت
+// عليه مهامه.
+//
+// The device id must equal the node id. A model name here makes every voice
+// session anonymous, and anonymous sessions used to inherit somebody else's
+// memory.
+#define SANDY_DEVICE_ID     "sandy0001"
 
 // The pairing code printed on this robot's box — the one its owner types into
 // the app once. The firmware derives its MQTT topics from it (lowercase,
