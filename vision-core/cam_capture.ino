@@ -9,6 +9,7 @@
 // ── إعلانات من ملفات تانية ──
 bool mqttPublishChunk(const char* payload, unsigned int len);
 void mqttPublishEvent(const char* json);
+void mqttServiceOnce();
 bool flashWantedForCapture(FlashMode mode);
 void flashSet(uint8_t level, unsigned long autoOffMs);
 void flashOff();
@@ -157,7 +158,14 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
 
     seq++;
     offset += rawN;
+
+    // `loop()` مع الفاصل — التنين لازم، وكل واحد بيعمل إشي مختلف.
+    //
+    // الفاصل بيعطي الوسيط والشبكة وقت يبلعوا القطعة. و`loop()` بيخلّي مكتبة
+    // الرسائل تفضّي مقبسها فعليًّا وتردّ ع نبضات الوسيط — بدونه، انتظار صامت
+    // بس، والمقبس بيضلّ محشور واللوح بيبيّن كأنه اختفى وقت الإرسال.
     delay(SNAPSHOT_INTER_CHUNK_DELAY_MS);
+    mqttServiceOnce();
   }
 
   esp_camera_fb_return(fb);

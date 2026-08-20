@@ -308,6 +308,15 @@ void updateMQTT() {
   publishCamStatus();
 }
 
+// دورة واحدة للمكتبة — بتنادى بين قطع الصورة.
+//
+// حلقة النشر بتشتغل خارج `loop()` الرئيسية، يعني `g_mqtt.loop()` ما بينادى
+// طول الإرسال. والمكتبة بتحتاجه: بيفضّي المقبس، وبيردّ ع نبضة الوسيط. بدونه
+// الإرسال بيصير كتابة عمياء لثانية كاملة — والوسيط بيشوف لوحًا سكت فجأة.
+void mqttServiceOnce() {
+  if (g_mqtt.connected()) g_mqtt.loop();
+}
+
 // تُستخدم من cam_capture.ino لنشر chunk
 bool mqttPublishChunk(const char* payload, unsigned int len) {
   if (!g_mqtt.connected()) return false;

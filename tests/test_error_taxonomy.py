@@ -66,7 +66,11 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 #       over a robot somebody already holds?" If the lookup fails we do not
 #       know, and not knowing must answer **no**. Catching everything here and
 #       returning False is the safe direction, which is why it is broad.
-BROAD_EXCEPT_BASELINE = 413
+#   camera_client.start_snapshot — the ingest counters printed with every
+#       capture. Diagnostics must never be able to break the thing they are
+#       diagnosing, and this line exists precisely because the previous
+#       diagnostic silently stopped running when the request stopped waiting.
+BROAD_EXCEPT_BASELINE = 414
 
 
 def test_subtypes_have_expected_status_and_code():

@@ -213,6 +213,13 @@ def on_chunk(node_id: str, payload: str) -> None:
             _unclaimed.pop(key, None)
             return
         p.chunks[seq] = blob
+        # سطر واحد بيقول إذا الدفعة وصلت كاملة ولا ناقصة.
+        #
+        # «ولا قطعة» و«سبعة من تسعة» عطلان مختلفان تمامًا: الأول اتصال، والتاني
+        # ازدحام. وكانوا التنين بينطبعوا نفس الإشي — ولا إشي.
+        if len(p.chunks) == 1 or (p.total and len(p.chunks) == p.total):
+            logger.info("[camera] %s: %s — %d/%s chunks",
+                        node_id, req_id, len(p.chunks), p.total or "?")
         if p.complete():
             p.event.set()
             _unclaimed.pop(key, None)
@@ -424,6 +431,27 @@ def start_snapshot(node_id: str, settle_ms: int = 0,
     if not ok:
         logger.info("[camera] %s: command not delivered", node_id)
         return None
+
+    # **حالة السمع مع كل طلب.**
+    #
+    # كانت بتنطبع بسطر الفشل وقت ما الطلب كان بيستنّى الصورة. ولمّا صار يرجّع
+    # تذكرة بعد تلات ثواني، ما عاد يوصل لهداك السطر — فاختفى التشخيص كله من
+    # غير ما ينحذف. صار السجل يقول «طلب» وبعده صمت، وهاد بالضبط اللي كنّا
+    # بنحاول نطلع منه.
+    #
+    # هون بينطبع مع كل التقاط: `cam_snapshot` بيعدّ يعني القطع بتوصل،
+    # وثابت يعني ما بتوصل — والفرق بينهن هو كل التحقيق.
+    try:
+        from app.integrations.mqtt_ingest import get_ingest_stats
+        st = get_ingest_stats()
+        logger.info(
+            "[camera] %s: asked (%s) — ingest(connected=%s status=%s "
+            "cam_status=%s cam_snapshot=%s drops=%s last=%s)",
+            node_id, req_id, st.get("connected"), st.get("status"),
+            st.get("cam_status"), st.get("cam_snapshot"),
+            st.get("disconnects"), st.get("last_disconnect"))
+    except Exception as exc:  # noqa: BLE001 — التشخيص ما بيوقّف الالتقاط
+        logger.debug("[camera] ingest stats unavailable: %s", exc)
     return req_id
 
 
