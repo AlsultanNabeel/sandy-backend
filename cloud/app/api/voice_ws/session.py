@@ -30,6 +30,7 @@ from app.api.voice_ws.speaker import (
 from app.api.voice_ws.memory import (
     _save_voice_turn,
     _stm_chat_id,
+    get_voice_channel,
     get_voice_identity,
     set_voice_channel,
     set_voice_identity,
@@ -752,7 +753,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                 # الذاكرة مش ع المسار الحرج: فشلها بيخسّر سطر بالسجل، وتأخيرها
                 # ما بيجوز يخسّر مقطع صوت. بنطلقها وبنكمّل.
                 loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text,
-                                     get_voice_identity())
+                                     get_voice_identity(), get_voice_channel())
 
             _user_buf.clear()
             _sandy_buf.clear()

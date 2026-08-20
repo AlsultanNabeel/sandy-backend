@@ -68,8 +68,22 @@ def test_a_voice_session_belongs_to_whoever_is_on_it():
         "session identity is back in thread-local storage; anything running in "
         "an executor will not see it")
     assert "contextvars.ContextVar" in mem
-    assert "def bind_identity" in mem, (
-        "pool threads have no way to adopt the session's identity")
+    # **One variable, one setter.** An earlier attempt at this had two — the
+    # session's identity and a separate "override" for pool threads — which is
+    # one fact stored in two places, and two places drift.
+    assert "bind_identity" not in mem, (
+        "a second identity mechanism is back; one fact, one home")
+    assert mem.count("ContextVar(") == 2, (
+        "expected exactly two context variables — who is speaking and which "
+        "body they are speaking through")
+
+    session = _read("cloud/app/api/voice_ws/session.py")
+    for call in ("_build_system_instruction, _who",
+                 "get_voice_identity(), get_voice_channel()",
+                 "_verify_owner, recent.snapshot(), get_voice_identity()"):
+        assert call in session, (
+            f"`{call}` stopped carrying the identity — that work runs on a pool "
+            "thread and will resolve to nobody")
 
     session = _read("cloud/app/api/voice_ws/session.py")
     assert 'claims.get("role") in ("owner", "user")' in session, (

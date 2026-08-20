@@ -46,7 +46,13 @@ def get_voice_channel() -> str:
 
 
 def set_voice_identity(user_id: str) -> None:
-    """مين بيحكي بهالجلسة — بينحدّد مرّة عند المصافحة.
+    """مين بيحكي بهالجلسة.
+
+    **دالة وحدة، ومتغيّر واحد** — بتنادى عند المصافحة، وبتنادى تاني بأول كل
+    دالة بتشتغل ع خيط مجمّع (الوسيط جايي معها). كان في تنين: وحدة للجلسة
+    ووحدة «تجاوز» للمجمّع، ومعلومة وحدة بمكانين بتفترق يومًا ما.
+    خيط المجمّع بيبلّش بسياق نظيف، فالكتابة عليه ما بتلمس الجلسة.
+
 
     قبل هيك كانت الذاكرة الصوتية بتنادي «المالك» من متغيّر بيئة: حساب واحد
     ثابت لكل جلسة صوت بالنظام. اشتغل لأنه كان في شخص واحد. وأول ما صار في
@@ -58,21 +64,6 @@ def set_voice_identity(user_id: str) -> None:
 
 def get_voice_identity() -> str:
     return _identity.get() or ""
-
-
-# الهوية لخيوط المجمّع.
-#
-# متغيّر السياق ما بيعبر لـ`run_in_executor`، فاللي بيشتغل هناك بياخد الهوية
-# كوسيط وبيثبّتها لنفسه بهالمتغيّر — بدل ما نغيّر توقيع كل دالة جوّا السلسلة.
-#
-# متغيّر سياق كمان مش عام: خيطين شغّالين لجلستين مختلفتين ما بيدهسوا بعض.
-_override: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "sandy_voice_user_override", default="")
-
-
-def bind_identity(user_id: str) -> None:
-    """ثبّت هوية الجلسة ع الخيط الحالي. بتنادى بأول أي شغل بمجمّع."""
-    _override.set((user_id or "").strip())
 
 
 def _stm_chat_id() -> str:
@@ -91,7 +82,7 @@ def _stm_chat_id() -> str:
     single-owner behaviour for an existing install, and returns empty for a
     fresh one, which makes her memoryless rather than someone else's.
     """
-    ident = (_override.get() or "").strip() or get_voice_identity()
+    ident = get_voice_identity()
     if ident:
         return ident
 
@@ -213,14 +204,19 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
         return None
 
 
-def _save_voice_turn(user_text: str, sandy_text: str, user_id: str = "") -> None:
+def _save_voice_turn(user_text: str, sandy_text: str,
+                     user_id: str = "", channel: str = "") -> None:
     """Save voice turn to STM (MongoDB) + update cross-session state.
 
-    `user_id` بيوصل من الجلسة: هالدالة بتشتغل ع خيط مجمّع مشترك، وسياق الجلسة
-    ما بيوصله. بلاه بتنحفظ المحادثة لحساب غلط — أو لولا حساب.
+    الهوية **والقناة** بيوصلوا من الجلسة: هالدالة بتشتغل ع خيط مجمّع مشترك،
+    وسياق الجلسة ما بيوصله. بلا الهوية بتنحفظ المحادثة لحساب غلط أو لولا حساب،
+    وبلا القناة بتنحفظ كلمة «الصوت» مكان «الروبوت» أو «مكالمة التطبيق» —
+    فالمالك يسأل «إيمتى قلتلك؟» وياخد جوابًا عامًّا.
     """
     if user_id:
-        bind_identity(user_id)
+        set_voice_identity(user_id)
+    if channel:
+        set_voice_channel(channel)
     chat_id = _stm_chat_id()
     if not chat_id or not user_text or not sandy_text:
         return

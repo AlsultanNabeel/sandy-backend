@@ -40,10 +40,10 @@ def _verify_owner(pcm: bytes, user_id: str = "") -> bool:
     بيعبره. بلاه بتقارن الصوت ببصمة حساب تاني، وهاد أسوأ من ما تقارن أصلًا.
     """
     try:
-        from app.api.voice_ws.memory import bind_identity
+        from app.api.voice_ws.memory import set_voice_identity
         from app.features import speaker_id
         if user_id:
-            bind_identity(user_id)
+            set_voice_identity(user_id)
         chat_id = _stm_chat_id()
         if not chat_id or not speaker_id.has_profile(chat_id):
             logger.info("[voice_ws] no voiceprint enrolled — allowing sensitive command")

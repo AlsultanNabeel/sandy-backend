@@ -10,7 +10,7 @@ from app.api.voice_ws.memory import (
     _load_stm_context,
     _stm_chat_id,
     _voice_memory_context,
-    bind_identity,
+    set_voice_identity,
 )
 from app.api.voice_ws.speaker import (
     _speaker_gate_enabled,
@@ -27,7 +27,7 @@ def _build_system_instruction(user_id: str = "") -> str:
     from app.agent.context_builder import build_effective_persona
 
     if user_id:
-        bind_identity(user_id)
+        set_voice_identity(user_id)
     parts: List[str] = [build_effective_persona(_stm_chat_id() or None).strip()]
 
     # Legacy per-tenant memory doc (lightweight)
@@ -201,7 +201,7 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
     from app.utils.user_profiles import active_user_profile_context
 
     if user_id:
-        bind_identity(user_id)
+        set_voice_identity(user_id)
 
     owner_profile = {
         "chat_id": _stm_chat_id(),
