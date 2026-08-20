@@ -94,6 +94,12 @@ def goal_done(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     )
 
     if result:
+        # **تحتفل فعلًا، مش بتكتب «مبروك».**
+        #
+        # هدف تابعته شهر كان بيخلص بكلمة ع الشاشة وسكوت تام — بينما وشّ الفرح
+        # الكبير ونغمة الاحتفال وإضاءة الحفلة كلهن مبرمجين وشغّالين ع بعد متر.
+        from app.features.robot_expression import celebrate
+        celebrate()
         return {"handled": True, "reply": f"🎉 يييي! خلصت من هدف: *{result['text']}*\nأنا فخورة فيك!"}
     return {"handled": True, "reply": "ما لقيت هالهدف بين أهدافك النشطة. حاول بكلمة أخرى؟"}
 

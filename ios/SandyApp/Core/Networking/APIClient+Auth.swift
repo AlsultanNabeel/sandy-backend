@@ -79,12 +79,13 @@ private struct FeaturesResponse: Decodable {
 }
 
 extension APIClient {
-    func devLogin(password: String) async throws {
-        let r: AuthResponse = try await fetch("/api/auth", method: "POST",
-                                              body: ["password": password], auth: false)
-        guard let t = r.token else { throw APIError(message: "ما رجع توكن") }
-        token = t
-    }
+    // `devLogin` انحذفت.
+    //
+    // كانت بتدخّلك بكلمة سر وحدة ع حساب اسمه «المالك» — حساب من متغيّر بيئة،
+    // مش شخص. اشتغلت لأنه كان في مستخدم واحد، وما كانت بتتوسّع لتاني واحد:
+    // كل من بيعرف الكلمة بيصير **نفس** الشخص، بنفس اليوميات ونفس بصمة الصوت.
+    //
+    // ثلاث طرق دخول وبس، وكلها بتعطي حسابًا حقيقيًا: أبل، جوجل، إيميل.
 
     // تسجيل دخول آبل — يرجّع هل التعارف خلص.
     func signInApple(idToken: String, name: String) async throws -> Bool {

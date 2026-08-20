@@ -161,6 +161,35 @@ def test_the_reply_is_allowed_to_finish_after_the_device_goes_quiet():
         "'she starts a sentence and disappears' report")
 
 
+def test_a_quiet_session_is_kept_alive():
+    """Heroku hangs up on a socket that carries almost nothing for 55 seconds.
+
+    It logs H15 and there is no setting to turn it off. A voice session is quiet
+    constantly and healthily — the owner is thinking, or she is listening and
+    nobody has spoken. Nothing flows, the window expires, and the router closes a
+    session that was working.
+
+    What made this expensive to find is that it never looked like one bug. The
+    connection died mid-thought, so the reply vanished and any tool call in
+    flight died with it. It was reported as "she ignores me sometimes" and as
+    "the tools don't work" — two symptoms, one closed socket, and neither of them
+    the actual event.
+    """
+    src = (Path(__file__).resolve().parent.parent
+           / "cloud/app/api/voice_ws/session.py").read_text(encoding="utf-8")
+
+    assert "_KEEPALIVE_S" in src, "nothing keeps the voice socket open when quiet"
+    assert "_keepalive()" in src, "the keepalive is defined but never started"
+    assert "ka.cancel()" in src, (
+        "the keepalive task outlives the session — one leaked task per call")
+
+    import re
+    m = re.search(r"_KEEPALIVE_S\s*=\s*([\d.]+)", src)
+    assert m and float(m.group(1)) <= 45, (
+        f"a {m.group(1) if m else '?'}s keepalive leaves no margin under a 55s "
+        "router window — one late frame and the session is closed anyway")
+
+
 def test_outbound_writes_have_their_own_thread():
     """Her voice went choppy because sending queued behind parked readers.
 

@@ -40,12 +40,10 @@ def create_app(
     # Imported here (not at module top) so importing this module stays free of
     # the PyJWT dependency until the app is actually built. The decorators below
     # are applied when this factory runs, which is after import.
-    from app.api.auth_handlers import (
-        check_owner_password,
-        check_rate_limit,
-        make_token,
-        require_auth,
-    )
+    # `check_owner_password`, `check_rate_limit` و`make_token` انشالوا من هون:
+    # كانوا موجودين للمسار `/api/auth` تبع كلمة سرّ المالك، وهو انحذف. لسا
+    # مستعملين بمكانهم الصحيح — تسجيل الدخول بأبل وجوجل والإيميل.
+    from app.api.auth_handlers import require_auth
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = _MAX_CONTENT_LENGTH
@@ -163,6 +161,9 @@ def create_app(
     from app.api.email_auth_api import register_email_auth_api
     register_email_auth_api(app)
 
+    from app.api.account_api import register_account_api
+    register_account_api(app)
+
     from app.api.goals_api import register_goals_api
     register_goals_api(app, mongo_db=mongo_db)
 
@@ -182,28 +183,20 @@ def create_app(
     register_weather_api(app, mongo_db=mongo_db)
 
     # Auth endpoints
-    @app.route("/api/auth", methods=["POST"])
-    def web_auth():
-        body = request.get_json(silent=True) or {}
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
-        allowed, remaining = check_rate_limit(ip)
-        if not allowed:
-            return jsonify({"error": "too_many_attempts"}), 429
-        password = (body.get("password") or "").strip()
-        if not password or not check_owner_password(password):
-            return jsonify({"error": "invalid_password", "remaining": remaining - 1}), 401
-        # The owner is tenant #1: log him in under his clean sandy_users uuid
-        # (provider="owner") — the id Phase 1 migrated his data onto — not the
-        # legacy Telegram id. get_or_create_owner() is idempotent and returns
-        # that stable uuid; fall back to SANDY_USER_CHAT_ID only if Mongo is down.
-        from app.config import SANDY_USER_CHAT_ID
-        from app.features import users_store
-        owner_uid = users_store.get_or_create_owner() or str(SANDY_USER_CHAT_ID)
-        try:
-            token = make_token("owner", user_id=owner_uid)
-        except RuntimeError:
-            return jsonify({"error": "auth_not_configured"}), 503
-        return jsonify({"token": token, "role": "owner", "user_id": owner_uid}), 200
+    #
+    # `POST /api/auth` — the shared owner password — is gone.
+    #
+    # It logged anyone who knew one password into an account called "owner",
+    # minted from an environment variable rather than belonging to a person.
+    # That was workable while there was exactly one user and unfixable the
+    # moment there were two: everybody who typed the password became the *same*
+    # person, sharing one journal, one set of expenses and one voiceprint.
+    #
+    # It also could not be deleted, recovered, or handed to a second customer —
+    # so every question about selling a robot ended here.
+    #
+    # Sign-in is Apple, Google, or email now. Each mints a real account with its
+    # own id, and every read and write in the system is already scoped to it.
 
     def _meter_or_error(role, user_id):
         """Record one authenticated request against the user's tier quota.

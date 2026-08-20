@@ -15,8 +15,8 @@ enum L10nAuth {
             "title":        .text("ساندي"),
             "tagline":      .text("سكرتيرك الشخصي"),
             "serverUrl":    .text("عنوان الخادم"),
-            "devLogin":     .text("أو دخول المطوّر (للتجربة)"),
-            "ownerPassword": .text("كلمة سر المالك"),
+            // `devLogin` و`ownerPassword` انحذفوا مع دخول المطوّر — حساب واحد
+            // بكلمة سرّ مشتركة، كل من بيعرفها بيصير نفس الشخص.
             "login":        .text("دخول"),
             "appleFailed":  .text("فشل تسجيل الدخول بآبل"),
         ],
@@ -27,8 +27,6 @@ enum L10nAuth {
             "title":        .text("Sandy"),
             "tagline":      .text("Your personal secretary"),
             "serverUrl":    .text("Server URL"),
-            "devLogin":     .text("Or developer login (for testing)"),
-            "ownerPassword": .text("Owner password"),
             "login":        .text("Log in"),
             "appleFailed":  .text("Sign in with Apple failed"),
         ]

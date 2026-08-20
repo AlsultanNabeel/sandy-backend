@@ -93,12 +93,22 @@ def task_list(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     return _call_task({"action": action_map.get(filter_type, "list")}, ctx)
 
 def task_complete(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
+    # إقرار هادي مش احتفال: شطب مهمة بيصير عشر مرّات باليوم، والاحتفال الكامل
+    # بيفقد معناه لو صار روتين. الاحتفال محجوز للأهداف وسلاسل الأسبوع.
+    from app.features.robot_expression import acknowledge
+
     if args.get("all"):
-        return _call_task({"action": "complete_all"}, ctx)
-    refs = args.get("references")
-    if refs and isinstance(refs, list):
-        return _call_task({"action": "complete_multi", "reference": " ".join(str(r) for r in refs)}, ctx)
-    return _call_task({"action": "complete", "reference": args.get("reference", "")}, ctx)
+        r = _call_task({"action": "complete_all"}, ctx)
+    else:
+        refs = args.get("references")
+        if refs and isinstance(refs, list):
+            r = _call_task({"action": "complete_multi",
+                            "reference": " ".join(str(x) for x in refs)}, ctx)
+        else:
+            r = _call_task({"action": "complete", "reference": args.get("reference", "")}, ctx)
+    if r.get("handled"):
+        acknowledge()
+    return r
 
 def task_uncomplete(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     return _call_task({"action": "uncomplete", "reference": args.get("reference", "")}, ctx)

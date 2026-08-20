@@ -297,13 +297,71 @@ def apply_scene(name: str) -> Dict[str, Any]:
         if docs:
             tcoll.insert_many(docs)
             timers = len(docs)
+    # **ونشغّلها فعلًا.**
+    #
+    # كانت بترجّع قائمة الأوامر كبيانات وبس، والتعليق فوق مكتوب فيه «ما في عتاد
+    # بينشغّل». يعني «شغّلي مشهد الدراسة» بترد «تمام» وما بيصير ولا إشي —
+    # وهاد أسوأ نوع فشل: بيبلّغ نجاحًا ما صار.
+    #
+    # القائمة ضلّت بترجع كمان، لأنّ في زبون (اختصارات الآيفون) بينفّذها بنفسه،
+    # والأجهزة اللي مش عند هالمالك بتفشل بهدوء — كل أمر لحاله.
+    sent, missed = _actuate(sc["actions"])
+
     return {
         "ok": True,
         "name": sc["name"],
         "label": sc["label"],
         "timers": timers,
+        "sent": sent,
+        "missed": missed,
         "actions": sc["actions"],
     }
+
+
+def _actuate(actions: List[Dict[str, Any]]) -> tuple:
+    """Send each action to its device. Returns (sent, names that do not exist).
+
+    `missed` is returned rather than swallowed because a scene naming a device
+    the owner does not own is a **setup** problem, not a runtime one — and the
+    only way he ever finds out is if something says so. The built-in scenes ship
+    with generic names (`light`, `fan`, `curtain`) that match a room node, so on
+    a robot-only setup most of them will land here until he edits the scene.
+    """
+    from app.features.device_store import (
+        command_payload, device_topic, get_device, set_state,
+    )
+    from app.integrations.room_device import get_room_device_client
+
+    sent, missed = 0, []
+    for a in actions or []:
+        name = str(a.get("device") or "").strip().lower()
+        value = str(a.get("value") or "").strip()
+        if not name:
+            continue
+        try:
+            device = get_device(name)
+            if device is None:
+                missed.append(name)
+                continue
+            # نفس بوّابة التحقّق اللي بتستعملها أداة الأجهزة — مش مسار تاني.
+            # مسارين بيتحقّقوا من نفس الأمر بيفترقوا يوم ما، وساعتها بيصير في
+            # طريق بيقبل قيمة الطريق التاني بيرفضها.
+            res = command_payload(device, value, value)
+            if not res.get("ok"):
+                res = command_payload(device, "set", value)
+            if not res.get("ok"):
+                missed.append(name)
+                continue
+            payload = res["payload"]
+            if get_room_device_client().send_to_topic(device_topic(device), payload):
+                set_state(name, payload)
+                sent += 1
+            else:
+                missed.append(name)
+        except Exception as exc:  # noqa: BLE001 — one bad device is not a bad scene
+            logger.debug("[SceneStore] %s failed: %s", name, exc)
+            missed.append(name)
+    return sent, missed
 
 
 def run_due_timers() -> List[Dict[str, str]]:

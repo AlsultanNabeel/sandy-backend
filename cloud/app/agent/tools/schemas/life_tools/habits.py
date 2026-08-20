@@ -27,6 +27,10 @@ def habit_checkin(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
     streak = r.get("streak", 1)
     if r.get("already"):
         return {"handled": True, "reply": f"مسجلة اليوم أصلاً ✅ — سلسلتك {streak} يوم 🔥"}
+    # سلسلة أسبوع فما فوق بتستاهل احتفال كامل. اللي أقلّ بياخد إقرار هادي —
+    # لأنّ احتفال كامل ع كل عادة يوميًا بيلغي معنى الاحتفال، وبيخلّيها متعبة.
+    from app.features.robot_expression import acknowledge, celebrate
+    (celebrate if streak >= 7 else acknowledge)()
     cheer = " 🔥🔥" if streak >= 7 else " 🔥" if streak >= 3 else ""
     return {"handled": True, "reply": f"✅ «{r['name']}» — سلسلتك صارت {streak} يوم{cheer}"}
 

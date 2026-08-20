@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 
+import threading
 import time
 from typing import Any, Dict, List, Optional
 from app.api.voice_ws._config import (
@@ -11,11 +12,59 @@ from app.api.voice_ws._config import (
 
 _voice_ctx_cache: dict[str, tuple[float, str]] = {}  # chat_id -> (built_at, text)
 
+# أي جسم بيحكي — الروبوت اللي بالغرفة ولا مكالمة التطبيق.
+#
+# التنين بيدخلوا من نفس المقبس وبيشاركوا نفس الذاكرة، وهاد صح. بس المالك بيسأل
+# «إيمتى قلتلك؟»، والفرق بين «حكيتيلي وإنتي واقفة قدّامي» و«حكيتيلي بالمكالمة»
+# فرق حقيقي عنده — زي ما أي حدا بيتذكّر إذا الكلام صار وجهًا لوجه ولا ع الهاتف.
+#
+# `threading.local` لأنّ كل اتصال بخيطه الخاص عند flask-sock، فما في خلط بين
+# جلستين شغّالين بنفس اللحظة.
+_channel = threading.local()
+
+
+def set_voice_channel(name: str) -> None:
+    _channel.name = name
+
+
+def get_voice_channel() -> str:
+    return getattr(_channel, "name", "") or "الصوت"
+
+
+def set_voice_identity(user_id: str) -> None:
+    """مين بيحكي بهالجلسة — بينحدّد مرّة عند المصافحة.
+
+    قبل هيك كانت الذاكرة الصوتية بتنادي «المالك» من متغيّر بيئة: حساب واحد
+    ثابت لكل جلسة صوت بالنظام. اشتغل لأنه كان في شخص واحد. وأول ما صار في
+    تسجيل دخول بأبل وجوجل، صار معناها إنّ **كل زبون بيحكي مع ذاكرة زبون تاني**
+    — وهاد مش خلل واجهة، هاد تسريب.
+    """
+    _channel.user = (user_id or "").strip()
+
+
+def get_voice_identity() -> str:
+    return getattr(_channel, "user", "") or ""
+
 
 def _stm_chat_id() -> str:
-    """The owner's canonical tenant id — same one users_store.get_or_create_owner()
-    mints and /api/auth logs him in under, so voice shares one identity/memory
-    space with REST/text-chat instead of keying off a raw legacy env var."""
+    """Whose memory this session is talking to.
+
+    **The identity of the connection, not a global one.** It is set once at the
+    handshake — from the app's token, or from the robot's pairing record — and
+    everything this session reads or writes is scoped to it.
+
+    It used to resolve `users_store.get_or_create_owner()`: a single account,
+    from an environment variable, for every voice session on the server. That
+    was invisible while there was one user and catastrophic the moment there
+    were two — a second customer would have been handed the first one's diary.
+
+    The fallback below is for a robot nobody has paired yet. It keeps the old
+    single-owner behaviour for an existing install, and returns empty for a
+    fresh one, which makes her memoryless rather than someone else's.
+    """
+    ident = get_voice_identity()
+    if ident:
+        return ident
     try:
         from app.features import users_store
         uid = users_store.get_or_create_owner()
@@ -28,12 +77,27 @@ def _stm_chat_id() -> str:
 
 
 def _load_stm_history() -> List[Dict[str, Any]]:
-    """Load STM as list of message dicts from MongoDB."""
+    """Recent turns from **every** channel, not just the voice thread.
+
+    The voice thread and the app's chat threads are separate documents, so
+    reading only this one meant the robot could not remember a conversation the
+    owner had in the app a minute earlier — and the app could not remember what
+    he had just said out loud. Three doors into the same house, three memories.
+
+    The voice thread's own turns are still in here; they are simply no longer
+    the only ones.
+    """
     chat_id = _stm_chat_id()
     if not chat_id:
         return []
     try:
-        from app.agent.graph.graph import _stm_load
+        from app.agent.graph.graph import _stm_load, recent_turns_for_user
+        shared = recent_turns_for_user(chat_id, limit=10)
+        if shared:
+            return shared
+        # Older documents predate the user_id field and cannot be found by it.
+        # Falling back keeps memory working through the deploy rather than
+        # starting the owner from nothing.
         return _stm_load(chat_id, chat_id)
     except Exception as exc:
         logger.debug("[voice_ws] STM load skipped: %s", exc)
@@ -41,7 +105,12 @@ def _load_stm_history() -> List[Dict[str, Any]]:
 
 
 def _load_stm_context() -> str:
-    """Load recent cross-platform conversation history from STM (text format)."""
+    """آخر المحادثات من كل القنوات، وكل جملة مكتوب جنبها من وين إجت.
+
+    المصدر مش زينة. المالك بيحكي مع نفس ساندي بتلات طرق، ومنطقي يسأل «إيمتى
+    قلتلك هيك؟» — والجواب «بالمكالمة» غير «وإنت واقف قدّامي». بلا الوسم، الذاكرة
+    الموحّدة بتصير كومة جُمَل بلا مكان، وهي ما بتقدر تجاوب عن سؤال هي حاضرة فيه.
+    """
     history = _load_stm_history()
     if not history:
         return ""
@@ -49,10 +118,13 @@ def _load_stm_context() -> str:
     for m in history[-10:]:
         role_label = "نبيل" if m.get("role") == "user" else "Sandy"
         content = m.get("content", "")
-        if content:
-            turns.append(f"{role_label}: {content}")
+        if not content:
+            continue
+        via = str(m.get("via") or "").strip()
+        turns.append(f"[{via}] {role_label}: {content}" if via
+                     else f"{role_label}: {content}")
     if turns:
-        return "\nآخر المحادثات عبر المنصات:\n" + "\n".join(turns)
+        return "\nآخر المحادثات عبر كل القنوات:\n" + "\n".join(turns)
     return ""
 
 
@@ -114,7 +186,7 @@ def _save_voice_turn(user_text: str, sandy_text: str) -> None:
         return
     try:
         from app.agent.graph.graph import _stm_save
-        _stm_save(chat_id, chat_id, user_text, sandy_text)
+        _stm_save(chat_id, chat_id, user_text, sandy_text, via=get_voice_channel())
     except Exception as exc:
         logger.debug("[voice_ws] STM save skipped: %s", exc)
     try:

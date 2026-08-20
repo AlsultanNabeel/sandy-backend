@@ -19,6 +19,11 @@ def focus_start(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         end_scene=str(args.get("end_scene", "")),
     )
     if r.get("ok"):
+        # وشّها بيتغيّر لمركّز ونغمة البداية بتعزف والإضاءة بتهدا.
+        # النغمة اسمها `focus_start` وموجودة باللوح من زمان — وما حدا كان
+        # بيناديها، فجلسة التركيز كانت بتبلّش بسطر نصّ وبس.
+        from app.features.robot_expression import focus_begin
+        focus_begin()
         bits = [f"🎯 جلسة تركيز {r['focus_min']} دقيقة بلشت"]
         if r.get("cycles", 1) > 1:
             bits.append(f"— {r['cycles']} دورات، راحة {r['break_min']} دقيقة بين كل وحدة")
@@ -37,6 +42,8 @@ def focus_stop(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     r = stop_focus(completed=completed)
     if not r.get("ok"):
         return {"handled": True, "reply": "ما في جلسة تركيز شغالة."}
+    from app.features.robot_expression import focus_end
+    focus_end()
     if completed:
         return {"handled": True, "reply": f"🎉 برافو! ركزت {r['minutes']} دقيقة" + (f" على {r['label']}" if r.get("label") else "") + "."}
     return {"handled": True, "reply": "ألغيت جلسة التركيز — ولا يهمك."}

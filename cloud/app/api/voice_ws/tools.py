@@ -42,11 +42,22 @@ def _build_system_instruction() -> str:
         logger.info("[voice_ws] memory seed (%d chars): %s", len(rich_ctx),
                     rich_ctx.replace("\n", " ")[:600])
         parts.append(rich_ctx)
-    elif rich_ctx is None:
-        # No owner / context builder unavailable: fall back to plain STM text.
-        stm_context = _load_stm_context()
-        if stm_context:
-            parts.append(stm_context)
+
+    # **وآخر المحادثات — دايمًا، مش لمّا يفشل اللي فوق.**
+    #
+    # `_voice_memory_context` بيبني بـ `durable_only=True`، يعني حقائق ثابتة بس
+    # وبيرمي آخر الجُمَل. وهاد كان مقصودًا — النموذج الصوتي كان بياخد آخر سطر
+    # مسجّل ويكمّل عليه كأنه طلب حالي.
+    #
+    # بس الثمن كان أكبر من الفايدة، والمالك لقيه بتجربة وحدة: سألها «شو بتعرفي
+    # عني» فجاوبت تمام (حقائق ثابتة)، وسألها «شو آخر سؤال سألتك ياه» فقالت ما
+    # بعرف — وهي بتعرف، بس السطور انرمت قبل ما توصلها.
+    #
+    # والحلّ مش إرجاعها وبس: التحذير تحت («هاد سجلّ سابق، ما تردّي عليه») هو
+    # اللي بيمنع التكرار، وهو موجود ومكتوب صراحة. فالسطور بترجع، والحارس بيضلّ.
+    stm_context = _load_stm_context()
+    if stm_context:
+        parts.append(stm_context)
 
     # The memory/STM block above is PAST reference, seeded once. Native-audio
     # Gemini will otherwise continue the last logged line as if it were the

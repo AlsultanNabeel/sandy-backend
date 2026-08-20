@@ -30,6 +30,8 @@ def brainstorm_start(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, 
     doc = brainstorm.start_session(chat_id, topic)
     if not doc:
         return {"handled": True, "reply": "ما قدرت أبدأ الجلسة حالياً."}
+    from app.features.robot_expression import thinking
+    thinking()
     return {
         "handled": True,
         "reply": (

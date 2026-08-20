@@ -224,6 +224,25 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     node_id = code_to_node_id(code)
     if not node_id:
         return {"ok": False, "error": "bad_code"}
+
+    # **مطالَبة مرّة وحدة — عبر كل الحسابات.**
+    #
+    # الفحص اللي فوق مقيّد بحساب المستخدم الحالي، يعني كان بيشوف «هل أنا ربطت
+    # هالكود قبل؟» وبس. فحسابان مختلفان كانوا يقدروا يربطوا **نفس الروبوت**،
+    # وكل واحد بياخد نسخته منه — والاتنين بيسمعوا نفس المواضيع.
+    #
+    # وهاد مش احتمال بعيد: الكود أربع خانات، يعني عشرة آلاف احتمال. أول حساب
+    # بيربط بيملك، وبعدها اللوح مقفول لحدّ ما يترجع لضبط المصنع — زي أي جهاز
+    # منزلي بينباع.
+    if get_db() is not None:
+        # لو فشلت القراءة ما بنكمل الربط: «ما قدرت أتأكد» لازم يوقف مطالبة
+        # ملكية، مش يمرّرها. الفشل هون بيوقّف زبونًا صادقًا دقيقة، والعكس
+        # بيعطي روبوتًا لحدا تاني.
+        claimed = get_db()[_COLL].find_one({"node_id": node_id})
+        if claimed is not None:
+            logger.warning("[NodeStore] %s already claimed — refusing", node_id)
+            return {"ok": False, "error": "already_claimed"}
+
     coll.insert_one({
         "node_id": node_id,
         "label": (label or "Sandy node").strip(),

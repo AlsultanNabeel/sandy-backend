@@ -38,6 +38,10 @@ typedef enum {
 // الصوت.
 wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass);
 
+// يمسح كل إشي محفوظ ويعيد التشغيل. للبيع أو الإهداء: من غيره اللوح بينباع
+// وجوّاه اسم شبكة البائع وكلمة سرّها.
+void wifi_sandy_factory_reset(void);
+
 // اسم الشبكة اللي اللوح عليها الآن — بيروح بالنبضة عشان التطبيق يوريك
 // شو الوضع قبل ما تغيّر.
 const char *wifi_sandy_ssid(void);

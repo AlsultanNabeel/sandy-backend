@@ -100,6 +100,12 @@ struct ProfileView: View {
                 archiveRow(icon: "lightbulb.fill", titleKey: "tabs.projects") { ProjectsView() }
                 archiveRow(icon: "av.remote.fill", titleKey: "tabs.robot") { RobotView() }
                 archiveRow(icon: "sparkles", titleKey: "persona.title") { PersonaView() }
+                // ربط الروبوت، وفكّه للبيع، وحذف الحساب.
+                //
+                // بأسفل الملف الشخصي مش مخبّى بإعدادات فرعية: أبل بتشترط إنّ
+                // حذف الحساب يكون **سهل الوصول**، وبترفض التطبيق لو كان مدفونًا.
+                archiveRow(icon: "person.crop.circle.badge.xmark",
+                           titleKey: "account.title") { AccountView() }
             }
         }
     }

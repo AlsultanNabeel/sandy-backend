@@ -4,6 +4,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "esp_system.h"   // esp_restart — factory reset
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -84,6 +85,28 @@ static char s_ssid[33];
 static char s_pass[65];
 
 const char *wifi_sandy_ssid(void) { return s_ssid; }
+
+// مسح المصنع — للبيع أو الإهداء.
+//
+// فكّ الربط ع الخادم لحاله ما بيكفي: اللوح بيضلّ حافظ اسم شبكة البائع وكلمة
+// سرّها بذاكرته، فالمشتري بيشغّله وهو بيحاول يدخل ع شبكة ببيت حدا تاني. وهاد
+// مش بس إزعاج — هاد بيانات بيت انباعت مع الجهاز.
+//
+// بنمسح المساحة كلها مش المفاتيح اللي بنعرفها: أي إشي انحفظ لاحقًا ونُسي هون
+// بيضلّ ع اللوح، والنسيان بهالمكان بالذات معناه تسريب.
+void wifi_sandy_factory_reset(void) {
+    nvs_handle_t h;
+    if (nvs_open(WIFI_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_erase_all(h);
+        nvs_commit(h);
+        nvs_close(h);
+        ESP_LOGW(TAG, "factory reset — saved network erased");
+    }
+    // إعادة تشغيل عشان يقلع بلا بيانات ويطلع بوضع التزويد. تأخير بسيط عشان
+    // تلحق تنطبع رسالة الخروج، ويوصل الردّ للتطبيق قبل ما ينقطع الاتصال.
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
 
 static void _nvs_get_str(nvs_handle_t h, const char *key, char *out, size_t cap) {
     size_t len = cap;

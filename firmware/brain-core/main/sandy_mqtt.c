@@ -16,6 +16,7 @@
 #include "secrets.h"
 #include "mqtt_client.h"
 #include "esp_crt_bundle.h"
+#include "nvs.h"          // بيانات دخول الوسيط الخاصة باللوح، لو انحفظت
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
@@ -108,22 +109,57 @@ static void _handle_servo(const char *val) {
     if (angle >= 0 && angle <= 180) servo_set_angle((uint8_t)angle);
 }
 
-// حركات الرقبة — أسماء نصية زي باقي الأوامر، فالخادم بيتحقق منها بجدول
-// device_store وما بيوصلنا إلا اسم صالح.
-static const struct { const char *name; sandy_gesture_t g; } GESTURE_MAP[] = {
-    {"nod", GESTURE_NOD},         {"shake", GESTURE_SHAKE},
-    {"tilt", GESTURE_TILT},       {"scan", GESTURE_SCAN},
-    {"dance", GESTURE_DANCE},     {"wake", GESTURE_WAKE},
-    {"sleep", GESTURE_SLEEP},     {"look_left", GESTURE_LOOK_LEFT},
-    {"look_right", GESTURE_LOOK_RIGHT}, {"center", GESTURE_CENTER},
+// حركة = الجسم كله، مش الرقبة لحالها.
+//
+// كانت الحركة بتنادي المحرّك وبس. يعني «ارقصي» بتهزّ رقبتها بوش محايد وبسكوت
+// وبإضاءة زرقا عادية — والنتيجة بتبيّن عطل مش رقصة، مع إنّ كل قطعة كانت شغّالة
+// تمامًا لحالها.
+//
+// وكل اللي كان ناقص هالجدول. التعبير موجود، والنغمة موجودة، والتأثير موجود —
+// تلاتتهن مبرمجين ومختبَرين ومستنيين حدا يناديهن سوا.
+//
+// `MOOD_COUNT` معناها «لا تلمس الوش»، و`MELODY_COUNT` «لا تعزف»، و`LED_FX_COUNT`
+// «لا تغيّر الإضاءة» — لأنّ «بصّي ع الشمال» مش لازم يعزف نغمة، والحركة الصامتة
+// خيار مقصود مش نسيان.
+typedef struct {
+    const char      *name;
+    sandy_gesture_t  g;
+    sandy_mood_t     mood;
+    sandy_melody_t   melody;
+    sandy_led_fx_t   fx;
+} gesture_scene_t;
+
+static const gesture_scene_t GESTURE_MAP[] = {
+    // الاسم        الحركة               الوش              النغمة              الإضاءة
+    {"nod",        GESTURE_NOD,        MOOD_HAPPY,       MELODY_YES,        LED_FX_COUNT},
+    {"shake",      GESTURE_SHAKE,      MOOD_CONFUSED,    MELODY_NO,         LED_FX_COUNT},
+    {"tilt",       GESTURE_TILT,       MOOD_CURIOUS,     MELODY_CURIOUS,    LED_FX_COUNT},
+    {"scan",       GESTURE_SCAN,       MOOD_ALERT,       MELODY_COUNT,      LED_FX_PULSE},
+    {"dance",      GESTURE_DANCE,      MOOD_PLAYFUL,     MELODY_CELEBRATE,  LED_FX_PARTY},
+    {"wake",       GESTURE_WAKE,       MOOD_HAPPY,       MELODY_HELLO,      LED_FX_SUNRISE},
+    {"sleep",      GESTURE_SLEEP,      MOOD_SLEEPY,      MELODY_BYE,        LED_FX_BREATHE},
+    {"look_left",  GESTURE_LOOK_LEFT,  MOOD_COUNT,       MELODY_COUNT,      LED_FX_COUNT},
+    {"look_right", GESTURE_LOOK_RIGHT, MOOD_COUNT,       MELODY_COUNT,      LED_FX_COUNT},
+    {"center",     GESTURE_CENTER,     MOOD_IDLE,        MELODY_COUNT,      LED_FX_COUNT},
 };
 
 static void _handle_gesture(const char *val) {
     for (size_t i = 0; i < sizeof(GESTURE_MAP)/sizeof(GESTURE_MAP[0]); i++) {
-        if (!strcmp(val, GESTURE_MAP[i].name)) {
-            servo_gesture(GESTURE_MAP[i].g);
-            return;
+        const gesture_scene_t *s = &GESTURE_MAP[i];
+        if (strcmp(val, s->name)) continue;
+
+        if (s->mood < MOOD_COUNT) {
+            g_current_mood = s->mood;
+            face_set_mood(s->mood);
         }
+        if (s->melody < MELODY_COUNT) buzzer_play(s->melody);
+        // الإضاءة آخر إشي، و`led_set_effect` بترجّع false وقت الجلسة الحيّة —
+        // مؤشّر الخصوصية بيغلب. يعني «ارقصي» وهي بتسمعك بترقص وبتغنّي، وبيضلّ
+        // الضوّ يقول إنّ المايك شغّال. وهاد صحيح: الرقصة ما بتلغي التحذير.
+        if (s->fx < LED_FX_COUNT) led_set_effect(s->fx, 0, 0);
+
+        servo_gesture(s->g);
+        return;
     }
     ESP_LOGW(TAG, "unknown gesture: %s", val);
 }
@@ -352,6 +388,14 @@ static void _dispatch(const char *out, const char *val) {
     else if (!strcmp(out, "servo"))        _handle_servo(val);
     else if (!strcmp(out, "gesture"))      _handle_gesture(val);
     else if (!strcmp(out, "buzzer"))       _handle_buzzer(val);
+    else if (!strcmp(out, "factory_reset")) {
+        // كلمة وحدة بالضبط. الموضوع بينشر عليه الخادم بس، بس أمر ما إله رجعة
+        // ما بيستاهل يعتمد ع حارس واحد — أي حمولة تانية بتنتجاهل.
+        if (!strcmp(val, "erase")) {
+            ESP_LOGW(TAG, "factory reset requested — erasing");
+            wifi_sandy_factory_reset();   // بتمسح وبتعيد التشغيل، ما بترجع
+        }
+    }
     else if (!strcmp(out, "base"))         _handle_base(val);
     else if (!strcmp(out, "focus"))        _handle_focus(val);
     else if (!strcmp(out, "led"))          _handle_led(val);
@@ -642,6 +686,34 @@ esp_err_t mqtt_sandy_start(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // بيانات دخول الوسيط — من الذاكرة أول، ومن الكود لو ما في.
+    //
+    // **كل لوح بينباع فيه نفس المستخدم ونفس كلمة السرّ، مكتوبين بالكود.** يعني
+    // أي زبون بيقدر يشترك بمواضيع أي زبون تاني: صوت بيته، صور كاميرته، أوامره.
+    // ولوح واحد بينفتح بينكشف معه كل الزباين — وما في طريقة تسحب مفتاحًا واحدًا
+    // بدون حرق كل الأجهزة اللي بالسوق.
+    //
+    // القراءة من الذاكرة هي **النص القابل للتنفيذ من الحلّ**: بتخلّي اللوح يقدر
+    // ياخد مفتاحه الخاص وقت الربط بلا حرق. النص التاني — إصدار مفتاح لكل جهاز
+    // — بده واجهة الوسيط، وهاي بحساب مالكه مش بالكود.
+    static char s_user[65], s_pass[129];
+    snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
+    snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
+    {
+        nvs_handle_t h;
+        if (nvs_open("sandy_mqtt", NVS_READONLY, &h) == ESP_OK) {
+            size_t n = sizeof(s_user);
+            if (nvs_get_str(h, "user", s_user, &n) != ESP_OK)
+                snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
+            n = sizeof(s_pass);
+            if (nvs_get_str(h, "pass", s_pass, &n) != ESP_OK)
+                snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
+            nvs_close(h);
+            ESP_LOGI(TAG, "broker credentials: %s",
+                     strcmp(s_user, MQTT_USER) ? "per-device (stored)" : "shared (compiled in)");
+        }
+    }
+
     esp_mqtt_client_config_t cfg = {
         .broker = {
             .address = { .uri = MQTT_BROKER_URI },
@@ -652,8 +724,8 @@ esp_err_t mqtt_sandy_start(void) {
         },
         .credentials = {
             .client_id  = MQTT_CLIENT_ID,
-            .username   = MQTT_USER,
-            .authentication = { .password = MQTT_PASS },
+            .username   = s_user,
+            .authentication = { .password = s_pass },
         },
         .network = { .reconnect_timeout_ms = MQTT_RECONNECT_MS },
     };

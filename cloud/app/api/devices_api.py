@@ -19,6 +19,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 import time
 
 from flask import Response, jsonify, request
@@ -365,11 +366,29 @@ def register_devices_api(app, mongo_db=None):
     @app.route("/api/nodes/pair", methods=["POST"])
     @require_tenant
     def api_nodes_pair(claims):
+        """Claim a robot. Rate limited, because the code is short.
+
+        A pairing code is four characters — ten thousand possibilities, which a
+        script exhausts in minutes. Claim-once (enforced in `pair_node`) means a
+        guessed code only wins if it belongs to a robot nobody has claimed yet;
+        this limit is what stops someone sweeping the whole space looking for
+        one.
+        """
+        from app.api.auth_handlers import check_rate_limit
         from app.features.node_store import pair_node
+
+        who = str(claims.get("user_id") or "") or request.remote_addr or "unknown"
+        allowed, _ = check_rate_limit(who, scope="node_pair")
+        if not allowed:
+            return _bad("too_many_attempts", code=429)
 
         body = request.get_json(silent=True) or {}
         r = pair_node(body.get("code", ""), body.get("label", ""))
         if not r.get("ok"):
+            # `already_claimed` is deliberately its own code and not folded into
+            # a generic failure: "this robot belongs to another account" is a
+            # sentence the owner can act on (factory reset it), and "pairing
+            # failed" is not.
             return _bad(r.get("error", "pair_failed"))
         return jsonify(r), 200
 
@@ -418,9 +437,39 @@ def register_devices_api(app, mongo_db=None):
     @app.route("/api/nodes/<node_id>", methods=["DELETE"])
     @require_tenant
     def api_nodes_unpair(claims, node_id):
+        """Release a robot — for selling it, or handing it on.
+
+        **Two halves, and the order is the whole trick.**
+
+        The server releasing its claim is not enough: the board still holds the
+        seller's Wi-Fi name and password in its own memory, so the buyer powers
+        it on and it quietly tries to join a network in someone else's house.
+        A reset that leaves that behind is not a reset.
+
+        So the wipe goes out **first**, while we can still address the board —
+        the publish path checks that the caller owns the node, and one line
+        later they will not. Unpairing first would make the robot unreachable by
+        the only person entitled to erase it.
+
+        If the board is offline the unpair still happens: the account must not
+        be stuck owning hardware it no longer has. The reply says which half
+        succeeded, because "sold it while it was unplugged" and "wiped it
+        properly" are different states and the owner should know which one he is
+        in — the board will need a manual reset before the buyer can pair it.
+        """
         from app.features.node_store import unpair_node
+        from app.integrations.room_device import get_room_device_client
+
+        wiped = False
+        try:
+            wiped = bool(get_room_device_client().publish_service(
+                f"sandy/node/{node_id}/factory_reset", "erase"))
+        except Exception as exc:  # noqa: BLE001 — an offline board must not block the sale
+            logging.getLogger(__name__).warning(
+                "[nodes] factory reset not delivered to %s: %s", node_id, exc)
 
         r = unpair_node(node_id)
         if not r.get("ok"):
             return _bad(r.get("error", "unpair_failed"), code=404)
+        r["board_wiped"] = wiped
         return jsonify(r), 200

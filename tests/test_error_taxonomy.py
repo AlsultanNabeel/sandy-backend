@@ -29,7 +29,40 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 # own startup, because error reporting may never be the reason the app is down.
 # Raising a ratchet should always cost a sentence explaining why — that is the
 # difference between a considered exception and quiet drift.
-BROAD_EXCEPT_BASELINE = 407
+# 407 -> 410 on 20 Aug 2026: wiring Sandy's body to her features added three,
+# each at a boundary where the optional half must never break the real one.
+#
+#   robot_expression.express  — a face, a melody, a light. The robot may be
+#       unplugged, on another network, or not owned at all (a phone-only
+#       account). Losing a saved goal because a light failed would be a far
+#       worse bug than the silence this replaced. Deliberately ONE catch at the
+#       edge rather than one per helper — an earlier draft had three, which hid
+#       the interesting failures along with the boring ones.
+#
+#   scene_store._actuate      — per device, so one device the owner does not
+#       have cannot cancel the rest of the scene. The name is collected and
+#       returned in `missed`, not swallowed.
+#
+#   graph.recent_turns_for_user — a cross-channel memory read. If it fails she
+#       answers with slightly less context; if it raised, she would not answer.
+#
+# Raising a ratchet should always cost a sentence explaining why — that is the
+# difference between a considered exception and quiet drift.
+# 410 -> 412 on 20 Aug 2026: real accounts and robot pairing added two.
+#
+#   devices_api.api_nodes_unpair — the factory-reset publish. A board that is
+#       unplugged must not block someone from releasing it before a sale; the
+#       reply reports which half succeeded instead.
+#
+#   voice_ws.tools — the tool dispatch guard, now that a voice session runs as
+#       whichever account is on the line rather than one global owner.
+#
+# Deliberately NOT added: the account deletion sweep and the pairing claim check
+# both catch `PyMongoError` by name. A delete that misses a collection reports
+# success while keeping the diary, and a claim check that swallows an error
+# would hand out a robot somebody already owns — neither is a place to catch
+# everything.
+BROAD_EXCEPT_BASELINE = 412
 
 
 def test_subtypes_have_expected_status_and_code():

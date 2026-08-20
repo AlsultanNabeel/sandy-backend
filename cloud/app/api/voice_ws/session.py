@@ -30,6 +30,8 @@ from app.api.voice_ws.speaker import (
 from app.api.voice_ws.memory import (
     _save_voice_turn,
     _stm_chat_id,
+    set_voice_channel,
+    set_voice_identity,
 )
 from app.api.voice_ws.tools import (
     _build_live_tools,
@@ -165,11 +167,25 @@ def _authenticate(ws, remote: str) -> bool:
         if isinstance(_m, dict) and _m.get("type") == "hello" and _m.get("token"):
             from app.api.auth_handlers import verify_token
             claims = verify_token(str(_m.get("token")))
-            if claims and claims.get("role") == "owner":
+            # **أي حساب مسجّل، مش «المالك» وبس.**
+            #
+            # كان مقبولًا لمّا كان في مستخدم واحد ومتغيّر بيئة اسمه المالك. ومع
+            # الدخول بأبل وجوجل، «المالك» بطّل يكون شخصًا — صار حسابًا قديمًا
+            # ما حدا بيدخل فيه، والمكالمة الصوتية بتنرفض لكل زبون جديد.
+            #
+            # والعزل ما ضعف: الهوية بتنحفظ للجلسة، وكل قراءة وكتابة بعدها
+            # بتنقيّد فيها. يعني كل واحد بيحكي مع ساندي تبعته وذاكرته هو.
+            if claims and claims.get("role") in ("owner", "user"):
+                uid = str(claims.get("user_id") or "")
+                if not uid:
+                    ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
+                    return False
+                set_voice_identity(uid)
+                set_voice_channel("مكالمة التطبيق")
                 ws.send(json.dumps({"type": "auth_ok"}))
-                logger.info("[voice_ws] web auth OK (owner) remote=%s", remote)
+                logger.info("[voice_ws] app voice OK user=%s remote=%s", uid, remote)
                 return True
-            ws.send(json.dumps({"type": "error", "msg": "owner_only"}))
+            ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
             return False
 
     # HMAC handshake
@@ -198,8 +214,25 @@ def _authenticate(ws, remote: str) -> bool:
                 ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
                 return False
 
+            # **الروبوت بيحكي باسم صاحبه.**
+            #
+            # المفتاح بيثبت إنه لوح حقيقي، مش مين صاحبه. والصاحب مكتوب بالوحدة
+            # من ساعة الربط — فمنسأل الوحدة بدل ما نفترض إنه في مالك واحد
+            # بمتغيّر بيئة، وهي فرضية بتنكسر عند تاني زبون.
+            #
+            # ولوح ما حدا ربطه بيحكي، بس بلا ذاكرة شخص — لأنه فعلًا ما إله
+            # شخص بعد. وهاد أحسن من إنه ياخد ذاكرة حدا تاني.
+            from app.features.node_store import get_node_any_tenant
+            node = get_node_any_tenant(device_id) or {}
+            owner = str(node.get("user_id") or "")
+            if owner:
+                set_voice_identity(owner)
+            else:
+                logger.warning("[voice_ws] device %s is not paired to anyone", device_id)
+            set_voice_channel("الروبوت")
             ws.send(json.dumps({"type": "auth_ok"}))
-            logger.info("[voice_ws] auth OK device=%s remote=%s", device_id, remote)
+            logger.info("[voice_ws] auth OK device=%s owner=%s remote=%s",
+                        device_id, owner or "—", remote)
             return True
         except Exception as exc:
             logger.warning("[voice_ws] handshake error from %s: %s", remote, exc)
@@ -593,11 +626,53 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     # المروحة)، ووحدة بتصير تستنى التانية بلا سبب.
     tools_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="voice-tool")
 
+    # ── Keeping the socket alive ─────────────────────────────────────────────
+    #
+    # **Heroku's router closes any connection that carries fewer than about
+    # fifty bytes in fifty-five seconds**, and logs it as H15. That is not a
+    # setting we can change.
+    #
+    # A voice session goes quiet all the time and for entirely healthy reasons:
+    # the owner is thinking, or the robot is listening and nobody has spoken
+    # yet. Nothing flows in either direction, the rolling window runs out, and
+    # the router hangs up on a session that was working perfectly.
+    #
+    # What that looked like from the outside was the worst part. The session
+    # died mid-thought, so the reply never came and any tool call in flight —
+    # `ask_clarification`, a reminder, the flash — was cut off before it ran.
+    # It read as "she ignores me sometimes" and as "the tools do not work", and
+    # neither is what happened: **the connection was closed under her.**
+    #
+    # Twenty seconds is deliberately well inside the window. This costs a
+    # handful of bytes a minute and removes a failure that presents as a dozen
+    # different bugs.
+    _KEEPALIVE_S = 20.0
+    _last_send = time.monotonic()
+
     async def send_bytes(data: bytes) -> None:
+        nonlocal _last_send
+        _last_send = time.monotonic()
         await loop.run_in_executor(tx, ws.send, data)
 
     async def send_msg(obj: Dict[str, Any]) -> None:
+        nonlocal _last_send
+        _last_send = time.monotonic()
         await loop.run_in_executor(tx, _send_json, ws, obj)
+
+    async def _keepalive() -> None:
+        """Send something small whenever the socket has been quiet too long.
+
+        Only when quiet: during a reply the audio itself keeps the window open,
+        and an extra frame in the middle of that is one more thing for the
+        device's parser to step around.
+        """
+        while True:
+            await asyncio.sleep(_KEEPALIVE_S / 2)
+            if time.monotonic() - _last_send >= _KEEPALIVE_S:
+                try:
+                    await send_msg({"type": "ping"})
+                except Exception:  # noqa: BLE001 — a dead socket ends the session anyway
+                    return
 
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
@@ -732,6 +807,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     # back. A pool leaked once per session is the same failure this file was
     # just rewritten to remove — one thread each, quietly, until the worker runs
     # out and the robot stops being answered.
+    ka = asyncio.create_task(_keepalive())
     try:
         while True:
             try:
@@ -746,6 +822,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                 logger.info("[voice_ws] Live receive loop ended: %s", exc)
                 break
     finally:
+        ka.cancel()
         tx.shutdown(wait=False)
         tools_pool.shutdown(wait=False)
 

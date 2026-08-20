@@ -8,9 +8,7 @@ import AuthenticationServices
 struct AuthView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    @State private var password = ""
     @State private var error = ""
-    @State private var loading = false
     // دخول/تسجيل بالإيميل.
     @State private var email = ""
     @State private var emailPassword = ""
@@ -106,30 +104,15 @@ struct AuthView: View {
                                             fillWidth: true) { emailAuth(isSignUp: true) }
                             }
 
-                            // فاصل "أو دخول المطوّر" — خطّان رفيعان حول النص.
-                            HStack(spacing: Theme.Spacing.sm) {
-                                hairline
-                                Text(lang.s("auth.devLogin"))
-                                    .font(Theme.Typography.caption)
-                                    .foregroundColor(Theme.Colors.secondaryText)
-                                    .fixedSize()
-                                hairline
-                            }
-
-                            SecureField(lang.s("auth.ownerPassword"), text: $password)
-                                .textFieldStyle(.plain)
-                                .textContentType(.password)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .submitLabel(.go)
-                                // ضغطة الإدخال بالكيبورد تسجّل دخول مباشرة.
-                                .onSubmit { devLogin() }
-                                .modifier(SandyField())
-
-                            SandyButton(title: lang.s("auth.login"),
-                                        systemImage: "arrow.right.circle.fill",
-                                        isLoading: loading,
-                                        fillWidth: true) { devLogin() }
+                            // «دخول المطوّر» انحذف من هون.
+                            //
+                            // كان حقل كلمة سرّ بيدخّلك ع حساب اسمه «المالك» —
+                            // حساب جاي من متغيّر بيئة، مش شخص. يعني أي حدا
+                            // بيعرف الكلمة كان بيصير **نفس** الشخص: نفس
+                            // اليوميات، ونفس المصاريف، ونفس بصمة الصوت.
+                            //
+                            // اشتغل لأنه كان في مستخدم واحد. وما بيتوسّع
+                            // لتاني واحد بأي شكل.
 
                             // الخطأ بصوت ساندي الدافئ بدل سطر أحمر صارخ.
                             if !error.isEmpty {
@@ -212,20 +195,6 @@ struct AuthView: View {
         case "invalid_email":       return ar ? "الإيميل مش صحيح." : "Invalid email."
         case "auth_unavailable":    return ar ? "تعذّر الاتصال — جرّب بعد شوي." : "Service unavailable — try again."
         default:                    return msg
-        }
-    }
-
-    private func devLogin() {
-        // نتجنّب الإرسال المكرّر (زر + إدخال الكيبورد) أو كلمة سر فاضية.
-        guard !loading, !password.isEmpty else { return }
-        loading = true; error = ""
-        Task {
-            do {
-                try await state.api.devLogin(password: password)
-                let ob = try await state.api.getOnboarding()
-                state.routeAfterAuth(onboardingDone: ob.done)
-            } catch { self.error = error.localizedDescription }
-            loading = false
         }
     }
 

@@ -185,7 +185,8 @@ class RoomDeviceClient:
     # قائمة صريحة مش نمط: «أي إشي تحت sandy/node/» بيسمح لأي خطأ إملائي يوصل
     # للوح، و«أي إشي فيه cam/» بيمنع أي قناة جديدة بصمت. الاسم الصريح بيخلّي
     # إضافة قناة قرارًا مكتوبًا، وبيخلّي المنع مقروءًا.
-    _SERVICE_CHANNELS = ("/cam/", "/wifi", "/cam/wifi", "/screen_img")
+    _SERVICE_CHANNELS = ("/cam/", "/wifi", "/cam/wifi", "/screen_img",
+                         "/factory_reset")
 
     def publish_service(self, topic: str, payload: str) -> bool:
         """Publish on a node's service channel (camera, network — not devices).

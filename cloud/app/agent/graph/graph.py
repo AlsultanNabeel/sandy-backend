@@ -209,6 +209,7 @@ def _stm_save(
     assistant_reply: str,
     *,
     prior_history: Optional[List[Dict[str, Any]]] = None,
+    via: str = "",
 ) -> None:
     """يحفظ رسالة المستخدم + رد ساندي في MongoDB. عملية قراءة + كتابة واحدة لكل
     دور؛ الفائض عن MAX_STM_MESSAGES بينلخّص للذاكرة بعيدة المدى.
@@ -232,20 +233,70 @@ def _stm_save(
             doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
             history = (doc or {}).get("history", []) or []
 
-        history.append({"role": "user", "content": user_msg, "timestamp": ts})
+        # `via` = من وين انحكى الكلام.
+        #
+        # بدونه، الذاكرة الموحّدة بتصير كومة جُمَل بلا مكان. والمالك بيحكي مع
+        # ساندي بتلات طرق، ومنطقي يسأل «إيمتى قلتلك هيك؟» — وهي لازم تعرف إذا
+        # كان بالحكي مع الروبوت ولا مكتوب بالتطبيق، زي ما أي حدا بيتذكّر إذا
+        # الحكي صار وجهًا لوجه ولا ع الهاتف.
+        history.append({"role": "user", "content": user_msg, "timestamp": ts, "via": via})
         if assistant_reply:
-            history.append({"role": "assistant", "content": assistant_reply, "timestamp": ts})
+            history.append({"role": "assistant", "content": assistant_reply,
+                            "timestamp": ts, "via": via})
         if len(history) > MAX_STM_MESSAGES:
             _summarize_to_ltm_async(chat_id, user_id, history[:-MAX_STM_MESSAGES])
         history = history[-MAX_STM_MESSAGES:]
 
         coll.update_one(
             {"key": key},
-            {"$set": {"history": history, "updated_at": now}},
+            # `user_id` is stored as its own field, not left buried inside the
+            # key string. It is what makes recent_turns_for_user() possible: one
+            # person's last few turns can be read across every thread they have,
+            # which is the difference between three memories and one.
+            {"$set": {"history": history, "updated_at": now, "user_id": str(user_id)}},
             upsert=True,
         )
     except Exception as exc:
         logger.warning(f"[graph] STM save failed: {exc}")
+
+
+def recent_turns_for_user(user_id: str, limit: int = 6) -> List[Dict[str, Any]]:
+    """The last few turns this person had, **on any channel**.
+
+    Short-term memory is stored per thread, and that is right: a chat should not
+    have another chat's replies bleeding into it mid-sentence.
+
+    But a person is not a thread. Sandy is reachable three ways — the robot in
+    the room, the voice call in the app, and the app's text chat — and each one
+    was writing to a different thread, so each one only remembered itself. Ask
+    her something out loud, open the app thirty seconds later, and "what did we
+    just say?" had no answer. The owner experienced that as amnesia; it was
+    bookkeeping.
+
+    Durable memory never had this problem: it is keyed by person. This gives the
+    recent turns the same property, without merging the threads themselves —
+    each channel keeps its own transcript, and every channel can see the last
+    thing that happened anywhere.
+    """
+    coll = _stm_collection()
+    if coll is None or not user_id:
+        return []
+    try:
+        docs = coll.find(
+            {"user_id": str(user_id)},
+            {"_id": 0, "history": 1, "updated_at": 1},
+        ).sort("updated_at", -1).limit(5)
+        turns: List[Dict[str, Any]] = []
+        for d in docs:
+            turns.extend(d.get("history") or [])
+        # Ordered by their own timestamps, not by which thread they came from:
+        # interleaving is the point. A question asked aloud and answered in the
+        # app is one conversation, and it should read like one.
+        turns.sort(key=lambda m: str(m.get("timestamp") or ""))
+        return turns[-limit:]
+    except Exception as exc:  # noqa: BLE001 — memory is never worth a failed reply
+        logger.warning(f"[graph] cross-channel STM read failed: {exc}")
+        return []
 
 
 # A1: حفظ اللحظة العاطفية في LTM (fire-and-forget)
@@ -356,6 +407,25 @@ def run_graph(
     # 1. حمّل conversation history من MongoDB (لهذا الخيط تحديدًا)
     history = _stm_load(thread_id, user_id)
 
+    # ثم أضف اللي انقال ع القنوات التانية.
+    #
+    # هالخيط بيشوف حاله بس. والمالك بيحكي مع نفس ساندي بتلات طرق — الروبوت،
+    # ومكالمة التطبيق، وشات التطبيق — فسؤال بالصوت وبعده سؤال مكتوب عن نفس
+    # الموضوع كان بيوصل لواحدة ما سمعت الأول. وهي بتبيّن ناسية، وهي مش ناسية:
+    # كانت بتقرا من دفتر تاني.
+    #
+    # الخيط بيضل صاحب الأولوية — سياقه المباشر أهم — والقنوات التانية بتنضاف
+    # قبله كخلفية. وبنستثني اللي موجود أصلًا عشان ما ينعاد السطر مرّتين.
+    # بلا `try` هون بالقصد: `recent_turns_for_user` بتمسك أخطاءها بنفسها وبترجّع
+    # قائمة فاضية. حارس تاني فوقها بيخبّي غلط بالسطور اللي تحت — وهي اللي بتبني
+    # السياق، يعني بالضبط المكان اللي غلطة فيه لازم تبيّن.
+    cross = recent_turns_for_user(user_id, limit=6)
+    if cross:
+        seen = {(m.get("role"), m.get("content")) for m in history}
+        extra = [m for m in cross if (m.get("role"), m.get("content")) not in seen]
+        if extra:
+            history = extra + history
+
     # 2. ابنِ الـ initial state
     state = create_initial_state(
         message=message,
@@ -424,7 +494,8 @@ def run_graph(
     final_reply = state.get("final_response") or ""
     # Reuse the history loaded in step 1 (same user, same turn) to skip a
     # redundant MongoDB read inside the save.
-    _stm_save(thread_id, user_id, message, final_reply, prior_history=history)
+    _stm_save(thread_id, user_id, message, final_reply, prior_history=history,
+              via="شات التطبيق" if source == "web" else (source or ""))
 
     # 6. حدّث الحالة المشتركة عبر المنصات (background)
     _update_session_state_async(state)

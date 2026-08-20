@@ -180,6 +180,37 @@ extension APIClient {
                        body: ["image_base64": jpegData.base64EncodedString()])
     }
 
+    // POST /api/nodes/pair {code} → يربط روبوت بحسابك.
+    //
+    // أول حساب بيربط بيملك اللوح. اللي بعده بياخد `already_claimed` — وهاد
+    // مقصود: بلاه، كودان متطابقان بحسابين بيخلّوا الاتنين يسمعوا نفس الروبوت.
+    @discardableResult
+    func pairNode(code: String, label: String = "") async throws -> String {
+        struct Reply: Decodable { let node_id: String?; let already: Bool? }
+        let r: Reply = try await fetch("/api/nodes/pair", method: "POST",
+                                       body: ["code": code, "label": label])
+        return r.node_id ?? ""
+    }
+
+    // DELETE /api/nodes/<id> → فكّ الربط + مسح اللوح (للبيع).
+    //
+    // بترجّع هل اللوح انمسح فعلًا: لو كان مطفي وقتها، الملكية بتتحرّر بس بياناته
+    // بتضلّ عليه ولازم مسح يدوي قبل ما المشتري يقدر يربطه.
+    @discardableResult
+    func unpairNode(nodeId: String) async throws -> Bool {
+        struct Reply: Decodable { let board_wiped: Bool? }
+        let r: Reply = try await fetch("/api/nodes/\(enc(nodeId))", method: "DELETE")
+        return r.board_wiped ?? false
+    }
+
+    // DELETE /api/account — حذف نهائي. شرط إلزامي بمتجر أبل، ومطلوب أخلاقيًا:
+    // الحساب فيه بصمة صوت ويوميات وصور ومصاريف.
+    func deleteAccount() async throws {
+        struct Reply: Decodable { let ok: Bool? }
+        let _: Reply = try await fetch("/api/account", method: "DELETE",
+                                       body: ["confirm": "DELETE"])
+    }
+
     // POST /api/nodes/<id>/snapshot → إمّا الصورة، أو تذكرة نرجع فيها.
     //
     // **اللوح ما إله سرعة ثابتة.** بيردّ بثانية وهو فاضي، وبأكتر من عشرين وهو

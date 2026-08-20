@@ -48,7 +48,17 @@ CASES = {
         20,
     ),
     "gesture": (
-        lambda: set(re.findall(r'\{"(\w+)",\s*GESTURE_\w+\}', _read(BRAIN_MQTT))),
+        # No closing brace in the pattern any more: a gesture row used to be
+        # `{"dance", GESTURE_DANCE}` and is now `{"dance", GESTURE_DANCE,
+        # MOOD_PLAYFUL, MELODY_CELEBRATE, LED_FX_PARTY}` — a gesture became the
+        # whole body rather than the neck alone.
+        #
+        # Worth noting how this failed: the regex matched nothing, so the test
+        # would have passed vacuously against an empty set. It failed loudly
+        # only because of the `minimum` guard below, which exists for exactly
+        # this — a source-scraping test that quietly stops scraping is worse
+        # than no test, because it still reports green.
+        lambda: set(re.findall(r'\{"(\w+)",\s*GESTURE_\w+[,}]', _read(BRAIN_MQTT))),
         8,
     ),
     "buzzer": (
