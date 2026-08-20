@@ -139,6 +139,36 @@ def test_every_turn_remembers_which_body_said_it():
         "not recording it")
 
 
+def test_she_knows_your_name_on_every_channel():
+    """He typed his name at first open. She asked him who he was anyway.
+
+    The onboarding answers — preferred name, interests — were saved correctly
+    and read by a function that resolved the user from the *ambient request
+    profile*. The chat has one, so it worked there. The voice path builds its
+    system prompt with no profile open, so the same function returned nothing,
+    and the robot greeted its owner like a stranger.
+
+    Nothing was broken and nothing was missing. One reader was standing
+    somewhere it could not see, and which channel you used decided whether she
+    knew you.
+
+    Passing the id in removes the question entirely.
+    """
+    import inspect
+
+    from app.agent.context_builder import get_onboarding_directive
+
+    sig = inspect.signature(get_onboarding_directive)
+    assert "user_id" in sig.parameters, (
+        "the onboarding profile is read from ambient context again — it will "
+        "silently return nothing on the voice path")
+
+    ctx = (Path(__file__).resolve().parent.parent
+           / "cloud/app/agent/context_builder.py").read_text(encoding="utf-8")
+    assert "get_onboarding_directive(chat_id)" in ctx, (
+        "the caller stopped passing the user, so the parameter is decoration")
+
+
 def test_durable_memory_was_always_keyed_by_person():
     """Stated so the next reader does not 'fix' the part that was right.
 

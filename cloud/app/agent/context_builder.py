@@ -244,7 +244,12 @@ def get_persona_directives(
                 summaries.append(str(d["summary"]))
 
     blocks: List[str] = []
-    onboarding_line = get_onboarding_directive()
+    # نمرّر المستخدم صراحة — `chat_id` هون هو معرّفه.
+    #
+    # القراءة من السياق النشط كانت بتشتغل بالشات (بيفتح سياق) وبتفضى بالصوت
+    # (ما بيفتح). فنفس الدالة كانت بتعطي جوابين حسب مين ناداها، والروبوت وقع
+    # بالنص الفاضي: المالك كاتب اسمه واهتماماته من أول يوم، وهي بتسأله مين هو.
+    onboarding_line = get_onboarding_directive(chat_id)
     if onboarding_line:
         blocks.append(onboarding_line)
     if summaries and include_summaries:
@@ -258,19 +263,30 @@ def get_persona_directives(
     return "\n".join(blocks) if blocks else None
 
 
-def get_onboarding_directive() -> Optional[str]:
-    """Short Arabic line seeding the current user's onboarding profile.
+def get_onboarding_directive(user_id: Optional[str] = None) -> Optional[str]:
+    """Short Arabic line seeding one user's onboarding profile.
 
     Pulls the preferred name + interests the user gave during first-open
     onboarding (``sandy_users.onboarding``) so Sandy greets them by name and
-    knows what they care about. Best-effort and crash-safe: returns None if the
-    multi-user store is unavailable, no user is active, or onboarding is unset.
+    knows what they care about.
+
+    **`user_id` is a parameter now, not something read from ambient context.**
+
+    It used to call `current_user_id()`, which resolves from the active request
+    profile — and the voice path has no active profile while it builds the
+    system prompt. So the robot never saw this line: the owner typed his name
+    and interests at first open, they were saved correctly, and she asked him
+    who he was anyway. The data was fine; the reader was standing somewhere it
+    could not see.
+
+    The ambient lookup stays as a fallback for callers that already run inside a
+    profile, so nothing that worked before stops working.
     """
     try:
         from app.utils.user_profiles import current_user_id
         from app.features import users_store
 
-        user_id = current_user_id()
+        user_id = (user_id or "").strip() or current_user_id()
         if not user_id:
             return None
         user = users_store.get_user(user_id) or {}
