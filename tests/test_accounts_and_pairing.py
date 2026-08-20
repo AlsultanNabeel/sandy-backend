@@ -84,6 +84,26 @@ def test_a_robot_can_only_be_claimed_once():
     assert 'scope="node_pair"' in api, "pairing is unthrottled"
 
 
+def test_the_first_owner_is_not_locked_out_of_his_own_robot():
+    """Claim-once nearly cost the first customer his hardware.
+
+    Everything he owned sat under an account called "owner", reachable only
+    through the shared password — which the same change deleted. So his robot
+    was claimed by an account that can no longer be signed into, and claim-once
+    would answer "this belongs to someone else" forever. He would have lost his
+    robot to an upgrade.
+
+    The exception is exactly one account wide: the pre-accounts owner, which has
+    no login path left. Every real account stays protected.
+    """
+    store = _read("cloud/app/features/node_store.py")
+    assert "_is_legacy_owner" in store
+    assert '== "owner"' in store, (
+        "the takeover no longer checks the provider — widen this and anyone can "
+        "claim a robot that already has an owner")
+    assert "not _is_legacy_owner(claimed.get(\"user_id\"))" in store
+
+
 def test_selling_a_robot_wipes_it_before_releasing_it():
     """Order is the whole thing.
 

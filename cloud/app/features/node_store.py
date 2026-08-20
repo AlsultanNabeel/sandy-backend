@@ -197,6 +197,22 @@ def _provision(node_id: str, outputs: Any, label: str = "") -> None:
         logger.warning("[NodeStore] provisioning %s failed: %s", node_id, e)
 
 
+def _is_legacy_owner(user_id: Any) -> bool:
+    """هل هالحساب هو حساب «المالك» القديم اللي ما عاد فيه دخول؟
+
+    منفصلة عن مكان استعمالها لأنها **سؤال أمني**، وسؤال أمني لازم يكون مقروءًا
+    لحاله: أي توسيع بالإجابة هون بيوسّع مين بيقدر ياخد روبوت حدا تاني.
+    """
+    if not user_id:
+        return False
+    try:
+        from app.features import users_store
+        owner = users_store.get_user(str(user_id)) or {}
+        return str(owner.get("provider") or "") == "owner"
+    except Exception:  # noqa: BLE001 — ما بنعرف يعني لأ، والافتراض الآمن الرفض
+        return False
+
+
 def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     """Bind a factory pairing code to the current tenant.
 
@@ -239,9 +255,25 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
         # ملكية، مش يمرّرها. الفشل هون بيوقّف زبونًا صادقًا دقيقة، والعكس
         # بيعطي روبوتًا لحدا تاني.
         claimed = get_db()[_COLL].find_one({"node_id": node_id})
-        if claimed is not None:
+        if claimed is not None and not _is_legacy_owner(claimed.get("user_id")):
             logger.warning("[NodeStore] %s already claimed — refusing", node_id)
             return {"ok": False, "error": "already_claimed"}
+        if claimed is not None:
+            # **استثناء واحد: الحساب القديم اللي ما عاد فيه دخول.**
+            #
+            # قبل الحسابات الحقيقية، كل إشي كان تحت حساب اسمه «المالك» بيتصنع
+            # من متغيّر بيئة، وبينداخل عليه بكلمة سرّ مشتركة. الكلمة انحذفت مع
+            # مسار الدخول — يعني هالحساب صار **ما فيه طريقة تسجّل دخول عليه**.
+            #
+            # وبلا هالسطر، أول مالك بينقفل برّا روبوته للأبد: الروبوت مطالَب
+            # بحساب ما بيقدر يوصله، وما في زرّ يفكّه. صاحب الجهاز بيخسره
+            # بترقية.
+            #
+            # ضيّق بالقصد: بيمرّ بس لو المالك السابق هو ذاك الحساب تحديدًا.
+            # أي حساب حقيقي تاني بيضلّ محميًّا.
+            logger.info("[NodeStore] %s was held by the pre-accounts owner — "
+                        "handing it to its new account", node_id)
+            get_db()[_COLL].delete_one({"_id": claimed["_id"]})
 
     coll.insert_one({
         "node_id": node_id,

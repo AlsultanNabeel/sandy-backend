@@ -62,7 +62,11 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 # success while keeping the diary, and a claim check that swallows an error
 # would hand out a robot somebody already owns — neither is a place to catch
 # everything.
-BROAD_EXCEPT_BASELINE = 412
+#   node_store._is_legacy_owner — a security question: "may this account take
+#       over a robot somebody already holds?" If the lookup fails we do not
+#       know, and not knowing must answer **no**. Catching everything here and
+#       returning False is the safe direction, which is why it is broad.
+BROAD_EXCEPT_BASELINE = 413
 
 
 def test_subtypes_have_expected_status_and_code():
