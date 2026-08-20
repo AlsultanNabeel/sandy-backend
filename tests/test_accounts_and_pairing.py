@@ -66,6 +66,51 @@ def test_a_voice_session_belongs_to_whoever_is_on_it():
         "account the environment happens to name")
 
 
+def test_an_unidentified_voice_session_gets_no_memory_at_all():
+    """The leak, reproduced in one sentence.
+
+    The robot identifies itself with a device name (`sandy-brain-s3`), not its
+    node id, so "who owns this node?" returned nothing — and the code fell back
+    to `get_or_create_owner()`, the pre-accounts owner. A brand-new account
+    signed in, asked her something out loud, **and she greeted him by the
+    previous owner's name and read out his old tasks.**
+
+    In a product with two customers that same line hands one person the other's
+    journal.
+
+    The fallback was answering the wrong question. Not "who is this most
+    likely?" but "who is this for certain?" — and when the answer is unknown it
+    must be **nobody**. A robot with no memory is a small bug. A robot with
+    somebody else's memory is a breach.
+    """
+    mem = _read("cloud/app/api/voice_ws/memory.py")
+    # Look for the CALL, not the name: the comment explaining why the fallback
+    # was removed mentions it, and a test that fails on its own documentation
+    # teaches people to delete the documentation.
+    assert "uid = users_store.get_or_create_owner()" not in mem, (
+        "the owner fallback is back — an unidentified session will be handed "
+        "the legacy owner's entire history")
+    assert "return OWNER_CHAT_ID" not in mem, "the env-var identity fallback is back"
+    assert 'unidentified session — starting with no memory' in mem, (
+        "the empty case is silent again; it must be visible in the log")
+
+
+def test_the_board_identifies_itself_by_its_node():
+    """The other half: the lookup could never have succeeded.
+
+    `SANDY_DEVICE_ID` was a model name. The voice handshake feeds it straight
+    into a node lookup, so it was guaranteed to miss — which is what made the
+    fallback fire on every single session rather than rarely.
+    """
+    sec = _read("firmware/brain-core/main/secrets.h")
+    assert '#define SANDY_DEVICE_ID     "8421"' in sec, (
+        "the board announces a model name again; the owner lookup cannot "
+        "resolve it and voice sessions become anonymous")
+    assert '#define SANDY_PAIR_CODE     "8421"' in sec, (
+        "the brain and the camera are on different node ids again — they are "
+        "one robot and must share one id")
+
+
 def test_a_robot_can_only_be_claimed_once():
     """The check was scoped to the caller, which is not a check.
 

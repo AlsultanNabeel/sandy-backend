@@ -65,15 +65,20 @@ def _stm_chat_id() -> str:
     ident = get_voice_identity()
     if ident:
         return ident
-    try:
-        from app.features import users_store
-        uid = users_store.get_or_create_owner()
-        if uid:
-            return uid
-    except Exception as exc:
-        logger.debug("[voice_ws] owner tenant lookup failed: %s", exc)
-    from app.utils.user_profiles import OWNER_CHAT_ID, LEGACY_OWNER_CHAT_ID
-    return OWNER_CHAT_ID or LEGACY_OWNER_CHAT_ID or ""
+
+    # **ما في احتياطي. مجهول يعني بلا ذاكرة — مش ذاكرة حدا تاني.**
+    #
+    # كان هون رجوع لـ`get_or_create_owner()`، ونيّته إنّ لوحًا غير مربوط يضلّ
+    # يشتغل. وهاد اللي صار فعليًّا: اللوح بيعرّف عن حاله باسم جهاز
+    # (`sandy-brain-s3`) مش بمعرّف الوحدة، فالبحث عن صاحبه بيرجع فاضي، وبيقع
+    # عالاحتياطي — **فحكى للمالك الجديد باسم القديم، وعدّد عليه مهامه**.
+    #
+    # وبمنتج فيه أكتر من زبون، نفس السطر بيعطي زبونًا يوميات زبون تاني.
+    #
+    # الاحتياطي كان بيجاوب سؤالًا غلط. السؤال مش «مين على الأغلب؟» — السؤال
+    # «مين بالتأكيد؟»، وجوابه لمّا ما نعرف هو **لا أحد**.
+    logger.warning("[voice_ws] unidentified session — starting with no memory")
+    return ""
 
 
 def _load_stm_history() -> List[Dict[str, Any]]:
