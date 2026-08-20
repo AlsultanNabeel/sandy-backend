@@ -38,16 +38,20 @@ struct AuthView: View {
                     }
                     .padding(.top, Theme.Spacing.xl)
 
-                    // بطاقة الدخول: عنوان الخادم + دخول آبل + دخول المطوّر.
+                    // بطاقة الدخول: أبل، جوجل، إيميل.
+                    //
+                    // حقل «عنوان الخادم» انشال. كان أداة تطوير — بتخلّيني أوجّه
+                    // التطبيق ع خادم محلي — وضلّ ظاهر لكل مستخدم بأول شاشة.
+                    //
+                    // وهاد مش بس مش مرتّب. حرف واحد غلط فيه بيخلّي كل إشي يفشل
+                    // بلا سبب ظاهر، **والأسوأ**: بيقدر يوجّه التطبيق كله — مع
+                    // كلمات السرّ والصوت — ع خادم مش إلنا. حقل نصّ مفتوح بيقرّر
+                    // ع مين بتنبعت بياناتك، وهو مكشوف قبل الدخول.
+                    //
+                    // العنوان محفوظ بـ`Backend` وبينقرا من هناك. أي تجريب محلي
+                    // بيصير من متغيّر بالبناء، مش من شاشة الزبون.
                     SandyCard {
                         VStack(spacing: Theme.Spacing.md) {
-                            TextField(lang.s("auth.serverUrl"), text: $state.baseURL)
-                                .textFieldStyle(.plain)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .keyboardType(.URL)
-                                .modifier(SandyField())
-
                             SignInWithAppleButton(.signIn,
                                 onRequest: { $0.requestedScopes = [.fullName, .email] },
                                 onCompletion: handleApple)

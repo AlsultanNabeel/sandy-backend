@@ -14,9 +14,9 @@ enum L10nAuth {
             "logout":       .text("خروج"),
             "title":        .text("ساندي"),
             "tagline":      .text("سكرتيرك الشخصي"),
-            "serverUrl":    .text("عنوان الخادم"),
-            // `devLogin` و`ownerPassword` انحذفوا مع دخول المطوّر — حساب واحد
-            // بكلمة سرّ مشتركة، كل من بيعرفها بيصير نفس الشخص.
+            // `serverUrl` و`devLogin` و`ownerPassword` انحذفوا: أدوات تطوير
+            // كانت مكشوفة بأول شاشة يشوفها الزبون. وحقل العنوان أخطرهن —
+            // بيوجّه التطبيق كله، وبياناته معه، ع خادم مش إلنا.
             "login":        .text("دخول"),
             "appleFailed":  .text("فشل تسجيل الدخول بآبل"),
         ],
@@ -26,7 +26,6 @@ enum L10nAuth {
             "logout":       .text("Log out"),
             "title":        .text("Sandy"),
             "tagline":      .text("Your personal secretary"),
-            "serverUrl":    .text("Server URL"),
             "login":        .text("Log in"),
             "appleFailed":  .text("Sign in with Apple failed"),
         ]
