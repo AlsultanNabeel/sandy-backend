@@ -30,6 +30,7 @@ from app.api.voice_ws.speaker import (
 from app.api.voice_ws.memory import (
     _save_voice_turn,
     _stm_chat_id,
+    get_voice_identity,
     set_voice_channel,
     set_voice_identity,
 )
@@ -393,8 +394,16 @@ async def _live_session(ws, remote: str) -> None:
         _send_json(ws, {"type": "error", "msg": "server_error"})
         return
 
+    # **الهوية بتسافر مع النداء، مش بتنستنّى بالخيط.**
+    #
+    # `run_in_executor` بيشغّل هالدالة ع خيط تاني، ومتغيّر السياق ما بيعبر
+    # لهناك. فلو دوّرت عليه هناك بتلاقيه فاضي — وهاد اللي صار حرفيًّا: المصافحة
+    # حلّت المالك صح، وبناء التعليمات ع خيط تاني قال «جلسة مجهولة».
+    #
+    # وتمريره كوسيط بيشيل السؤال من أصله بدل ما يحاول يوصّل السياق.
+    _who = get_voice_identity()
     system_instruction = await asyncio.get_event_loop().run_in_executor(
-        None, _build_system_instruction
+        None, _build_system_instruction, _who
     )
     live_tools = _build_live_tools(types)
 
@@ -742,7 +751,8 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                 #
                 # الذاكرة مش ع المسار الحرج: فشلها بيخسّر سطر بالسجل، وتأخيرها
                 # ما بيجوز يخسّر مقطع صوت. بنطلقها وبنكمّل.
-                loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text)
+                loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text,
+                                     get_voice_identity())
 
             _user_buf.clear()
             _sandy_buf.clear()
@@ -754,7 +764,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                 # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.
                 if gate_on and fc.name in _SENSITIVE_TOOLS:
                     verified = await loop.run_in_executor(
-                        None, _verify_owner, recent.snapshot()
+                        None, _verify_owner, recent.snapshot(), get_voice_identity()
                     )
                     if not verified:
                         fn_responses.append(types.FunctionResponse(
@@ -780,8 +790,12 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                 # The speaker gate above still stands where it is enabled: it
                 # answers "is this the owner", which is a different question and
                 # the one actually worth asking.
+                # الهوية بتسافر مع الأداة. الأدوات بتكتب بقاعدة البيانات، والكتابة
+                # مقيّدة بالحساب — فأداة بتشتغل بلا هوية بتكتب لحساب غلط أو
+                # بتفشل بصمت، وساندي بتقول «تمام عملتها».
                 result = await loop.run_in_executor(
-                    tools_pool, _dispatch_tool, dispatcher, fc.name, dict(fc.args or {})
+                    tools_pool, _dispatch_tool, dispatcher, fc.name,
+                    dict(fc.args or {}), get_voice_identity()
                 )
                 fn_responses.append(
                     types.FunctionResponse(

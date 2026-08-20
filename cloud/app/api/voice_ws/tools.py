@@ -10,16 +10,24 @@ from app.api.voice_ws.memory import (
     _load_stm_context,
     _stm_chat_id,
     _voice_memory_context,
+    bind_identity,
 )
 from app.api.voice_ws.speaker import (
     _speaker_gate_enabled,
 )
 
 
-def _build_system_instruction() -> str:
-    """Build system instruction: Sandy's personality + full memory context + STM."""
+def _build_system_instruction(user_id: str = "") -> str:
+    """Build system instruction: Sandy's personality + full memory context + STM.
+
+    `user_id` بيوصل من الجلسة لأنّ هالدالة بتشتغل ع خيط مجمّع، وسياق الجلسة ما
+    بيعبر لهناك. من غيره بتبني تعليمات لشخص مجهول — بلا اسم ولا اهتمامات ولا
+    ذاكرة — وهي عارفة مين هو من ثانية المصافحة.
+    """
     from app.agent.context_builder import build_effective_persona
 
+    if user_id:
+        bind_identity(user_id)
     parts: List[str] = [build_effective_persona(_stm_chat_id() or None).strip()]
 
     # Legacy per-tenant memory doc (lightweight)
@@ -175,16 +183,25 @@ def _make_dispatcher():
         return None
 
 
-def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Sync tool dispatch with owner profile context (called via run_in_executor).
+def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
+                   user_id: str = "") -> Dict[str, Any]:
+    """Sync tool dispatch with the caller's profile (called via run_in_executor).
 
-    ``chat_id`` must be the owner's canonical tenant id (``_stm_chat_id()``),
-    not the raw legacy env var — every store a tool touches (tasks, reminders,
-    habits, ...) scopes to ``current_user_id()``, so a mismatch here means
-    voice-added data lands in a tenant the REST/text-chat owner can't see.
+    ``chat_id`` must be the calling user's id — every store a tool touches
+    (tasks, reminders, habits, ...) scopes to ``current_user_id()``, so a
+    mismatch here means voice-added data lands in a tenant the app can't see.
+
+    ``user_id`` is passed in because this runs on a pool thread, and the
+    session's context does not reach it. Without it the profile is built with an
+    empty tenant: every scoped write goes nowhere, every scoped read comes back
+    empty, and the model — which was told the call succeeded — cheerfully
+    reports that it did.
     """
     from app.agent.tools.dispatcher import DispatchContext
     from app.utils.user_profiles import active_user_profile_context
+
+    if user_id:
+        bind_identity(user_id)
 
     owner_profile = {
         "chat_id": _stm_chat_id(),

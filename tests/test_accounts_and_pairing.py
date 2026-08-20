@@ -53,9 +53,23 @@ def test_a_voice_session_belongs_to_whoever_is_on_it():
     """
     mem = _read("cloud/app/api/voice_ws/memory.py")
     assert "def set_voice_identity" in mem
-    assert "ident = get_voice_identity()" in mem, (
+    assert "get_voice_identity()" in mem, (
         "the session identity is ignored again and every caller resolves to the "
         "same global owner")
+
+    # **Not thread-local.** It was, and the identity vanished the moment any
+    # work moved to a pool thread — which is where nearly all of it happens.
+    # The log said it in two consecutive lines: `auth OK owner=1f69b997…`
+    # followed immediately by `unidentified session`.
+    #
+    # A plain module global would be worse still: two calls at once would
+    # overwrite each other and one caller would answer as the other.
+    assert "threading.local()" not in mem, (
+        "session identity is back in thread-local storage; anything running in "
+        "an executor will not see it")
+    assert "contextvars.ContextVar" in mem
+    assert "def bind_identity" in mem, (
+        "pool threads have no way to adopt the session's identity")
 
     session = _read("cloud/app/api/voice_ws/session.py")
     assert 'claims.get("role") in ("owner", "user")' in session, (

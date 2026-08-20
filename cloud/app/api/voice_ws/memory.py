@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 
-import threading
+import contextvars
 import time
 from typing import Any, Dict, List, Optional
 from app.api.voice_ws._config import (
@@ -18,17 +18,31 @@ _voice_ctx_cache: dict[str, tuple[float, str]] = {}  # chat_id -> (built_at, tex
 # «إيمتى قلتلك؟»، والفرق بين «حكيتيلي وإنتي واقفة قدّامي» و«حكيتيلي بالمكالمة»
 # فرق حقيقي عنده — زي ما أي حدا بيتذكّر إذا الكلام صار وجهًا لوجه ولا ع الهاتف.
 #
-# `threading.local` لأنّ كل اتصال بخيطه الخاص عند flask-sock، فما في خلط بين
-# جلستين شغّالين بنفس اللحظة.
-_channel = threading.local()
+# **متغيّرات سياق، مش ذاكرة خيط.**
+#
+# كانت `threading.local`، والنتيجة إنّ الهوية بتنحفظ ع خيط المصافحة وما حدا
+# بيشوفها: `run_in_executor` بيشغّل الدوال ع خيوط تانية. والسجل قال القصّة
+# بسطرين متلاصقين — `auth OK owner=1f69b997…` وبعده مباشرة
+# `unidentified session`. يعني الهوية انحلّت صح، وانحفظت بمكان اللي بيحتاجها
+# ما بيوصله.
+#
+# ومتغيّر عام كان بيصير أسوأ من الاتنين: جلستين بنفس اللحظة بيدهسوا بعض، وواحد
+# بياخد ذاكرة التاني. متغيّر السياق بينسخ لكل مهمة غير متزامنة لحالها.
+#
+# وبيضلّ ما بيعبر لخيوط المجمّع — عشان هيك اللي بيشتغل هناك بياخد الهوية
+# **كوسيط صريح** بدل ما يدوّر عليها.
+_identity: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "sandy_voice_user", default="")
+_channel_name: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "sandy_voice_channel", default="")
 
 
 def set_voice_channel(name: str) -> None:
-    _channel.name = name
+    _channel_name.set(name or "")
 
 
 def get_voice_channel() -> str:
-    return getattr(_channel, "name", "") or "الصوت"
+    return _channel_name.get() or "الصوت"
 
 
 def set_voice_identity(user_id: str) -> None:
@@ -39,11 +53,26 @@ def set_voice_identity(user_id: str) -> None:
     تسجيل دخول بأبل وجوجل، صار معناها إنّ **كل زبون بيحكي مع ذاكرة زبون تاني**
     — وهاد مش خلل واجهة، هاد تسريب.
     """
-    _channel.user = (user_id or "").strip()
+    _identity.set((user_id or "").strip())
 
 
 def get_voice_identity() -> str:
-    return getattr(_channel, "user", "") or ""
+    return _identity.get() or ""
+
+
+# الهوية لخيوط المجمّع.
+#
+# متغيّر السياق ما بيعبر لـ`run_in_executor`، فاللي بيشتغل هناك بياخد الهوية
+# كوسيط وبيثبّتها لنفسه بهالمتغيّر — بدل ما نغيّر توقيع كل دالة جوّا السلسلة.
+#
+# متغيّر سياق كمان مش عام: خيطين شغّالين لجلستين مختلفتين ما بيدهسوا بعض.
+_override: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "sandy_voice_user_override", default="")
+
+
+def bind_identity(user_id: str) -> None:
+    """ثبّت هوية الجلسة ع الخيط الحالي. بتنادى بأول أي شغل بمجمّع."""
+    _override.set((user_id or "").strip())
 
 
 def _stm_chat_id() -> str:
@@ -62,7 +91,7 @@ def _stm_chat_id() -> str:
     single-owner behaviour for an existing install, and returns empty for a
     fresh one, which makes her memoryless rather than someone else's.
     """
-    ident = get_voice_identity()
+    ident = (_override.get() or "").strip() or get_voice_identity()
     if ident:
         return ident
 
@@ -184,8 +213,14 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
         return None
 
 
-def _save_voice_turn(user_text: str, sandy_text: str) -> None:
-    """Save voice turn to STM (MongoDB) + update cross-session state."""
+def _save_voice_turn(user_text: str, sandy_text: str, user_id: str = "") -> None:
+    """Save voice turn to STM (MongoDB) + update cross-session state.
+
+    `user_id` بيوصل من الجلسة: هالدالة بتشتغل ع خيط مجمّع مشترك، وسياق الجلسة
+    ما بيوصله. بلاه بتنحفظ المحادثة لحساب غلط — أو لولا حساب.
+    """
+    if user_id:
+        bind_identity(user_id)
     chat_id = _stm_chat_id()
     if not chat_id or not user_text or not sandy_text:
         return
