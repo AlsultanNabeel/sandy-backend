@@ -361,13 +361,28 @@ def register_devices_api(app, mongo_db=None):
         ts = (request.headers.get("X-Sandy-Ts") or "").strip()
         sig = (request.headers.get("X-Sandy-Sig") or "").strip()
         if not (node_id and req_id and ts and sig):
+            logging.getLogger(__name__).warning(
+                "[cam] upload rejected: missing headers "
+                "(node=%s req=%s ts=%s sig=%s)",
+                bool(node_id), bool(req_id), bool(ts), bool(sig))
             return _bad("missing_headers")
 
+        # كل رفض بينكتب بالسجل مع سببه.
+        #
+        # اللوح بيشوف `400 Bad Request` وبس — والأربع مئة عندها أربعة أسباب
+        # مختلفة تمامًا (ترويسة ناقصة، وقت غلط، وقت قديم، مش صورة). بدون هالسطر،
+        # اللوح بيقول «انرفض» والخادم بيسكت، والفرق بينهن يوم تشخيص.
+        log = logging.getLogger(__name__)
         try:
             age = abs(time.time() * 1000 - int(ts))
         except ValueError:
+            log.warning("[cam] upload rejected: unreadable timestamp %r", ts[:32])
             return _bad("bad_ts")
         if age > 120_000:
+            # السبب الأشيع بفارق كبير: اللوح بيقلع وساعته سنة سبعين، فأول رفع
+            # قبل مزامنة الوقت بيبيّن عمره خمسة وخمسين سنة.
+            log.warning("[cam] upload rejected: timestamp is %.0f minutes off — "
+                        "the board's clock is probably not synced", age / 60000)
             return _bad("stale")
 
         expected = _hmac.new(key, f"{node_id}{req_id}{ts}".encode(),
@@ -382,6 +397,8 @@ def register_devices_api(app, mongo_db=None):
         # body is refused at the door rather than stored and served as a broken
         # image later, which is far harder to trace back to this moment.
         if len(jpeg) < 100 or jpeg[:2] != b"\xff\xd8":
+            log.warning("[cam] upload rejected: not a jpeg (%d bytes, starts %r)",
+                        len(jpeg), jpeg[:4])
             return _bad("not_a_jpeg")
 
         from app.integrations.camera_client import store_snapshot

@@ -32,6 +32,34 @@ String camNodeId();
 #define SANDY_UPLOAD_HOST "sandy-robot-3da0693d32f7.herokuapp.com"
 #endif
 
+// مزامنة الساعة — **شرط للرفع، مش رفاهية.**
+//
+// اللوح بيقلع وساعته سنة سبعين. والتوقيع بيحمل الوقت عشان يمنع إعادة إرسال
+// طلب قديم انلقط، فالخادم بيرفض أي طلب أقدم من دقيقتين — وطلب من سنة سبعين
+// عمره خمسة وخمسين سنة.
+//
+// وهاد بالضبط اللي صار: الرفع وصل الخادم ورجع `400`. مش عطل شبكة ولا حجم ولا
+// مفتاح — ساعة.
+//
+// بتنادى مرّة، وبتستنّى بحد أقصى عشر ثواني. لو ما زبطت، الرفع بيفشل بوضوح
+// وبترجع الصورة للمسار القديم بدل ما تضيع.
+static bool g_clockReady = false;
+
+void camSyncClock() {
+  if (g_clockReady) return;
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  unsigned long deadline = millis() + 10000;
+  while (millis() < deadline) {
+    if (time(nullptr) > 1700000000) {   // أي وقت معقول بعد ٢٠٢٣
+      g_clockReady = true;
+      g_log.println("[TIME] الساعة انضبطت");
+      return;
+    }
+    delay(200);
+  }
+  g_log.println("[TIME] ⚠️ الساعة ما انضبطت — الرفع رح ينرفض");
+}
+
 static String hmacHex(const String& msg) {
   const char* key = SANDY_WS_HMAC_KEY;
   uint8_t out[32];
@@ -53,6 +81,12 @@ static String hmacHex(const String& msg) {
 bool uploadSnapshot(const String& id, const uint8_t* data, size_t len) {
   if (strlen(SANDY_WS_HMAC_KEY) == 0) {
     g_log.println("[UP] لا يوجد مفتاح توقيع — الرفع معطّل");
+    return false;
+  }
+
+  camSyncClock();
+  if (!g_clockReady) {
+    g_log.println("[UP] الساعة مش مضبوطة — التوقيع رح ينرفض، بنوفّر المحاولة");
     return false;
   }
 

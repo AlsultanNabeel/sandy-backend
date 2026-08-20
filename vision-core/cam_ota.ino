@@ -44,11 +44,35 @@ void updateTelnet() {
   if (g_telnetClient && !g_telnetClient.connected()) g_telnetClient.stop();
 }
 
+// آخر عنوان انطلقت عليه الخدمات.
+//
+// **الخدمات كانت بتنطلق مرّة وحدة للأبد.** واللوح ممكن يغيّر شبكته — من
+// التطبيق، أو لأنّ الراوتر رجّع توزيع العناوين — فياخد عنوانًا جديد. وقتها
+// مقبس التلنت وخادم الترقية بيضلّوا مربوطين ع عنوان ما عاد إله وجود: اللوح
+// شغّال وبينبض وبيصوّر، وما حدا بيقدر يوصله.
+//
+// وهاد بيبيّن «خلل بالمراقبة» وهو مش خلل بالمراقبة — هو خدمة ما انولدت من
+// جديد بعد ما تغيّر البيت.
+static IPAddress g_servicesIp;
+
 void startNetworkServicesIfReady() {
-  if (g_networkServicesStarted) return;
   if (WiFi.status() != WL_CONNECTED) return;
+
+  IPAddress now = WiFi.localIP();
+  if (g_networkServicesStarted && now == g_servicesIp) return;
+
+  if (g_networkServicesStarted) {
+    g_log.printf("[NET] العنوان تغيّر %s ← %s — بنعيد تشغيل الخدمات\n",
+                 g_servicesIp.toString().c_str(), now.toString().c_str());
+    // نقفل التلنت القديم صراحة: المقبس المربوط ع عنوان راح بيضلّ ماسك المنفذ،
+    // والربط الجديد بيفشل بصمت.
+    if (g_telnetClient) g_telnetClient.stop();
+    g_telnetServer.stop();
+  }
+
   setupOTA();
   setupTelnet();
   setupMQTT();
+  g_servicesIp = now;
   g_networkServicesStarted = true;
 }
