@@ -191,6 +191,31 @@ def test_everything_the_user_told_her_is_actually_read():
         assert field in ctx, f"{field} is collected from the user and never read"
 
 
+def test_the_profile_is_searchable_without_becoming_a_second_truth():
+    """Same fact, two answers, depending on how you phrase the question.
+
+    Name and interests live in the profile and are injected into the prompt, so
+    she knows them. But "what are my interests?" reads like a memory question,
+    goes to the memory search, finds nothing, and she answers "I have no saved
+    memories" — about something she was told directly.
+
+    Mirroring them into memory fixes that and introduces a worse risk: edit your
+    interests in settings and the old copy sits in memory contradicting the new
+    one. Which is why the mirror is **keyed and upserted**, never appended: one
+    row per fact, rewritten each time. The profile stays the source; this is a
+    generated, searchable view of it.
+    """
+    src = (Path(__file__).resolve().parent.parent
+           / "cloud/app/features/users_store.py").read_text(encoding="utf-8")
+
+    assert "_mirror_onboarding_to_memory" in src
+    assert '"source_key": key' in src and "upsert=True" in src, (
+        "the mirror appends instead of replacing — every settings edit leaves "
+        "the previous answer behind, and she will recite both")
+    assert "insert_one" not in src.split("_mirror_onboarding_to_memory")[1], (
+        "an insert in the mirror means duplicates accumulate per save")
+
+
 def test_durable_memory_was_always_keyed_by_person():
     """Stated so the next reader does not 'fix' the part that was right.
 

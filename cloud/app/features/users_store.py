@@ -215,7 +215,58 @@ def set_onboarding(
     if notes is not None:
         sets["onboarding.notes"] = notes.strip()[:500]
     res = coll.update_one({"_id": user_id}, {"$set": sets})
+    if res.matched_count:
+        _mirror_onboarding_to_memory(user_id)
     return res.matched_count > 0
+
+
+def _mirror_onboarding_to_memory(user_id: str) -> None:
+    """اكتب الاسم والاهتمامات بالذاكرة كمان — **باستبدال، مش بإضافة**.
+
+    الملف الشخصي بينحقن بالتعليمات، فهي بتعرفه بلا ما تدوّر. بس المالك بيسأل
+    «شو اهتماماتي؟» ككلام عادي، والسؤال هيك بيمرق ع البحث بالذاكرة — ولو ما
+    كانوا هناك، بتردّ «ما في ذكريات محفوظة» وهي عارفتهن. نفس المعلومة، وجوابين
+    متناقضين حسب صيغة السؤال.
+
+    والخطر الواضح إنه يصير مصدرين للحقيقة: تعدّل اهتماماتك بالإعدادات، والنسخة
+    القديمة تضلّ بالذاكرة وتناقض الجديدة. عشان هيك السجلّ **مفتاحه ثابت
+    وبينستبدل** كل مرّة — نسخة وحدة بتتحدّث، مش تاريخ بيتراكم.
+
+    الملف الشخصي بيضلّ المصدر؛ هاي نسخة مقروءة للبحث بتتولّد منه.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from app.db import get_db
+
+        db = get_db()
+        coll_user = _coll()
+        if db is None or coll_user is None:
+            return
+        user = coll_user.find_one({"_id": user_id}, {"onboarding": 1}) or {}
+        ob = user.get("onboarding") or {}
+
+        lines = []
+        if str(ob.get("preferred_name") or "").strip():
+            lines.append(("onboarding_name",
+                          f"اسمه المفضّل: {str(ob['preferred_name']).strip()}"))
+        interests = [str(i).strip() for i in (ob.get("interests") or []) if str(i).strip()]
+        if interests:
+            lines.append(("onboarding_interests", "اهتماماته: " + "، ".join(interests)))
+        if str(ob.get("notes") or "").strip():
+            lines.append(("onboarding_notes", f"عن نفسه: {str(ob['notes']).strip()}"))
+
+        for key, text in lines:
+            db["sandy_memories"].update_one(
+                {"chat_id": user_id, "source_key": key},
+                {"$set": {"chat_id": user_id, "user_id": user_id,
+                          "label": "user_fact", "content": text,
+                          "source_key": key,
+                          "created_at": datetime.now(timezone.utc)}},
+                upsert=True,
+            )
+    except Exception as exc:  # noqa: BLE001 — نسخة مساعدة، ما بتوقّف حفظ التعارف
+        logger.debug("[UsersStore] onboarding mirror skipped: %s", exc)
 
 
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:
