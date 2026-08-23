@@ -159,6 +159,99 @@ def test_two_robots_are_refused_rather_than_guessed(db):
         assert published == []
 
 
+# ── the room declares itself ─────────────────────────────────────────────────
+
+def test_three_boards_under_one_node_keep_their_own_outputs(db):
+    """Brain, camera and room node share a node id and take turns heartbeating.
+
+    Each writes in its own prefix and must leave the others alone. The rule used
+    to be a boolean — camera or not — which was correct with two boards and
+    silently wrong with three: the room's outputs read as "not camera", so every
+    brain heartbeat deleted the room and every room heartbeat deleted the brain,
+    five seconds apart, for ever.
+    """
+    with as_tenant("tenant-a"):
+        node_store.pair_node("8421", label="ساندي")
+
+        node_store.ingest_status("8421", outputs=[{"id": "servo", "kind": "servo"}])
+        node_store.ingest_status("8421", outputs=[{"id": "cam/flash", "kind": "relay"}])
+        node_store.ingest_status("8421", outputs=[{"id": "room/light", "kind": "relay"}])
+
+        ids = {o["id"] for o in (node_store.get_node("8421") or {}).get("outputs", [])}
+        assert ids == {"servo", "cam/flash", "room/light"}
+
+        # And a second heartbeat from one board replaces only its own namespace.
+        node_store.ingest_status("8421", outputs=[{"id": "room/music", "kind": "audio"}])
+        ids = {o["id"] for o in (node_store.get_node("8421") or {}).get("outputs", [])}
+        assert ids == {"servo", "cam/flash", "room/music"}
+
+        # Declaring nothing keeps everything: silence is not a claim that the
+        # hardware is gone.
+        node_store.ingest_status("8421", outputs=[])
+        ids2 = {o["id"] for o in (node_store.get_node("8421") or {}).get("outputs", [])}
+        assert ids2 == ids
+
+
+def test_the_room_lamp_becomes_a_device_on_its_own(db):
+    """Pair the code, power the room node, and the lamp is in the app.
+
+    The owner must never have to describe his own hardware to his own app. This
+    is the whole path: the board declares an output, the catalogue says how to
+    draw it, provisioning creates the device, and its topic points back at the
+    board that declared it.
+    """
+    with as_tenant("tenant-a"):
+        node_store.pair_node("8421", label="غرفتي")
+        node_store.ingest_status("8421", outputs=[
+            {"id": "room/light", "kind": "relay"},
+            {"id": "room/music", "kind": "audio"},
+        ])
+
+        lamp = device_store.get_device("room_light")
+        assert lamp is not None, "the room node declared a lamp and no device appeared"
+        assert lamp["control_type"] == "switch"
+        assert device_store.device_topic(lamp) == "sandy/node/8421/room/light"
+
+        music = device_store.get_device("room_music")
+        assert music is not None
+        assert "stop" in music["meta"]["values"]
+
+
+def test_the_room_heartbeat_declares_kinds_the_server_accepts():
+    """An unknown `kind` is dropped silently, and the device never appears.
+
+    That failure has no error anywhere: the board publishes, the server parses,
+    the entry is discarded, and the app is simply missing a lamp. So the two
+    ends are pinned to each other here.
+    """
+    from app.features.node_store import KNOWN_CAPABILITIES
+
+    ino = _read("room-node/room-node.ino")
+    kinds = set(re.findall(r'\\"kind\\":\\"(\w+)\\"', ino))
+    assert kinds, "the room heartbeat declares no outputs at all"
+    assert kinds <= set(KNOWN_CAPABILITIES), (
+        f"room node declares kinds the server drops: {kinds - set(KNOWN_CAPABILITIES)}")
+
+
+def test_every_declared_room_output_has_a_catalogue_entry():
+    """A declared output with no catalogue row is ignored, not drawn."""
+    from app.features.node_provision import PART_CATALOGUE
+
+    ino = _read("room-node/room-node.ino")
+    declared = set(re.findall(r'\\"id\\":\\"(\w+)\\"', ino))
+    for out in declared:
+        assert f"room/{out}" in PART_CATALOGUE, (
+            f"the room node declares {out} and the catalogue cannot draw it")
+
+
+def test_the_server_listens_to_the_room_heartbeat():
+    """The subscription is the difference between working and invisible."""
+    src = _read("cloud/app/integrations/mqtt_ingest.py")
+    assert '_ROOM_STATUS_SUB = "sandy/node/+/room/status"' in src
+    assert "_ROOM_STATUS_SUB, 1" in src, "declared but never subscribed"
+    assert '"/room/status"' in src, "subscribed but never routed"
+
+
 # ── the two firmwares ────────────────────────────────────────────────────────
 
 def test_no_global_room_tree_is_left_in_any_firmware():

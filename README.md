@@ -92,7 +92,7 @@ returns `None`, and every store treats that as "read nothing, write nothing".
 | Conversation | Text and voice, mood-aware, short- and long-term memory |
 | Tasks & reminders | Create, edit, complete, delete; recurrence; confirmation before anything destructive |
 | Life tracking | Shopping, habits with streaks, expenses, journal, reading log, Pomodoro focus |
-| Room control | Saved scenes driving a room node over MQTT — lights, colour, music, fan, curtain |
+| Room control | Saved scenes driving a room node over MQTT — lights, colour, music, fan, curtain. The node declares its outputs in its heartbeat, so its devices appear in the app on their own |
 | Research | Web research and places lookup |
 | Images | Generation, editing and description |
 | Documents | TXT, PDF, DOCX, CSV, XLSX, JSON |

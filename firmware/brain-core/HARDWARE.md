@@ -63,6 +63,8 @@ The catalogue knows how to show these; no board has offered one. Either a part t
 - `cam/snapshot` — التقاط صورة
 - `cam/stream` — بث مباشر
 - `cam/framesize` — دقة الصورة
+- `room/light` — ضوء الغرفة
+- `room/music` — موسيقى الغرفة
 - `cam/quality` — وضوح الصورة
 
 ## Pins

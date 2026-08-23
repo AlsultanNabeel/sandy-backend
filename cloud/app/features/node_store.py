@@ -384,21 +384,42 @@ def set_node_status(code: str, online: bool = True,
 # So both merge. A heartbeat now says what its own board has and stays silent
 # about the other's, which is all it ever knew anyway.
 
-def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Replace only the namespace this heartbeat speaks for.
+def _output_namespace(output_id: Any) -> str:
+    """Which board a declared output belongs to.
 
-    The camera's outputs are `cam/`-prefixed and the brain's are not, so the
-    prefix is the boundary: a list containing `cam/` entries owns the `cam/`
-    entries, and a list without them owns the rest.
+    Several boards answer under one node id — they are one robot, not three
+    boxes — and each writes in its own prefix: the camera under ``cam/``, the
+    room node under ``room/``, the brain in the bare namespace. The prefix is
+    the boundary, so this is the one place that reads it.
+    """
+    oid = str(output_id or "")
+    head, sep, _ = oid.partition("/")
+    return head + sep if sep else ""
+
+
+def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Replace only the namespaces this heartbeat speaks for.
+
+    Two heartbeats arriving five seconds apart would otherwise take turns wiping
+    each other out, and the app would flicker between a robot with a neck and a
+    robot with a flash.
+
+    This used to be a boolean — camera or not — which was right while there were
+    exactly two boards and silently wrong the moment a third arrived: the room
+    node's outputs counted as "not camera", so every brain heartbeat deleted the
+    room and every room heartbeat deleted the brain. Namespaces are what the rule
+    was always about; the boolean was a two-board shortcut.
+
+    A heartbeat that declares nothing keeps everything. Silence is not a claim
+    that the hardware is gone.
     """
     fresh = _clean_outputs(incoming)
-    is_camera = any(str(o.get("id", "")).startswith("cam/") for o in fresh)
+    claimed = {_output_namespace(o.get("id")) for o in fresh}
 
     existing = (get_node_any_tenant(node_id) or {}).get("outputs") or []
     kept = [
         o for o in existing
-        if isinstance(o, dict)
-        and str(o.get("id", "")).startswith("cam/") != is_camera
+        if isinstance(o, dict) and _output_namespace(o.get("id")) not in claimed
     ]
     return kept + fresh
 

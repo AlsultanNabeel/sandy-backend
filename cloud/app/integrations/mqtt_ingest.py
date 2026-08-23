@@ -42,6 +42,13 @@ _CAM_SUB = "sandy/node/+/cam/snapshot"
 # بالتطبيق ولا مرّة — وهاد بالضبط اللي كان بيصير.
 _CAM_STATUS_SUB = "sandy/node/+/cam/status"
 
+# نبضة عقدة الغرفة — نفس القصة تمامًا، لوح تالت تحت نفس معرّف الوحدة.
+#
+# وبدونها العقدة شغّالة وغير موجودة: بتتصل، وبتنفّذ الأوامر، وما بتظهر
+# بالتطبيق ولا مرّة — لأن اللي بيسجّل جهازًا هو **إعلان اللوح عن مخارجه**،
+# وما كان في حدا يسمع الإعلان.
+_ROOM_STATUS_SUB = "sandy/node/+/room/status"
+
 # قناة أحداث الكاميرا — «صوّرت، وهاد عدد القطع».
 #
 # ما كنّا نسمعها، وكانت هي الدليل الناقص: اللوح بينشر القطع (رسائل كبيرة) ثم
@@ -83,6 +90,7 @@ _stats = {
     "cam_status": 0,
     "cam_snapshot": 0,
     "cam_event": 0,
+    "room_status": 0,
     "errors": 0,
     "rebuilds": 0,
     "last_disconnect": None,   # why the broker last hung up — its words, not ours
@@ -129,6 +137,11 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
         if msg.topic.endswith("/cam/status"):
             _stats["cam_status"] += 1
             _ingest_cam_status(node_id, payload)
+            return
+
+        if msg.topic.endswith("/room/status"):
+            _stats["room_status"] += 1
+            _ingest_room_status(node_id, payload)
             return
 
         if msg.topic.endswith("/cam/event"):
@@ -188,7 +201,7 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
     one list is a collision waiting for the day somebody adds a flash to the
     brain.
     """
-    from app.features.node_store import get_node_any_tenant, ingest_status
+    from app.features.node_store import ingest_status
 
     data = {}
     if payload:
@@ -207,17 +220,15 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
         if isinstance(o, dict) and o.get("id")
     ]
 
-    # Keep the brain's. A camera heartbeat says what the camera has; it says
-    # nothing at all about the neck.
-    existing = get_node_any_tenant(node_id) or {}
-    kept = [o for o in (existing.get("outputs") or [])
-            if isinstance(o, dict) and not str(o.get("id", "")).startswith("cam/")]
-
+    # Only the camera's own. Keeping the brain's is node_store._merge_outputs's
+    # job, by namespace — this used to re-read them and pass them back in, which
+    # meant the merge ran twice over the same list and every brain output came
+    # back doubled.
     ingest_status(
         node_id,
         online=True,
         capabilities=None,
-        outputs=kept + namespaced,
+        outputs=namespaced,
         firmware_version="",
         # `cam_` مش `ip`.
         #
@@ -238,6 +249,53 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
     )
 
 
+def _ingest_room_status(node_id: str, payload: str) -> None:
+    """The room node's heartbeat, merged into the node it shares an id with.
+
+    Same shape as the camera's, for the same reason: a third board under one
+    pairing code, writing in its own ``room/`` prefix so its lamp never collides
+    with anything the brain declares.
+
+    **This is what puts the room in the app.** A device exists because a board
+    said it exists — the catalogue only decides how to draw it. Before this, the
+    room node worked perfectly and was invisible: it connected, it obeyed
+    commands published by hand, and the app's "add device" screen could not offer
+    a lamp because nothing had ever declared one. The owner would have had to
+    describe his own hardware to the app, which is the thing provisioning exists
+    to prevent.
+    """
+    from app.features.node_store import ingest_status
+
+    data = {}
+    if payload:
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, ValueError):
+            return
+
+    room_outputs = data.get("outputs")
+    if not isinstance(room_outputs, list):
+        return
+
+    namespaced = [
+        {"id": f"room/{o.get('id')}", "kind": o.get("kind")}
+        for o in room_outputs
+        if isinstance(o, dict) and o.get("id")
+    ]
+
+    ingest_status(
+        node_id,
+        online=True,
+        capabilities=None,
+        outputs=namespaced,
+        firmware_version="",
+        # `room_` مثل `cam_` بالضبط: التليمتري بتندمج بالمفتاح، ولوّ العقدة
+        # بعتت `ip` كانت بتدهس عنوان الدماغ وبالعكس كل خمس ثواني.
+        telemetry={f"room_{k}": v for k, v in data.items()
+                   if k in ("ip", "board", "light", "rssi")},
+    )
+
+
 def _on_connect(client, userdata, flags, reason_code, properties=None) -> None:  # noqa: ANN001
     try:
         # QoS 0 for camera chunks on purpose: a photo is dozens of messages and
@@ -245,7 +303,7 @@ def _on_connect(client, userdata, flags, reason_code, properties=None) -> None: 
         # with live audio. A lost chunk means one retaken photo, not a lost one.
         client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1),
                           (_CAM_SUB, 1), (_CAM_STATUS_SUB, 1),
-                          (_CAM_EVENT_SUB, 1)])
+                          (_CAM_EVENT_SUB, 1), (_ROOM_STATUS_SUB, 1)])
         _stats["connects"] += 1
         # The pid is in the line on purpose. gunicorn runs two workers and each
         # one has its own subscriber and its own memory — so "is ingest up?" is
