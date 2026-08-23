@@ -55,6 +55,8 @@ void updateTelnet() {
 // جديد بعد ما تغيّر البيت.
 static IPAddress g_servicesIp;
 
+void camSyncClock();
+
 void startNetworkServicesIfReady() {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -73,6 +75,12 @@ void startNetworkServicesIfReady() {
   setupOTA();
   setupTelnet();
   setupMQTT();
+  // الساعة مع باقي الخدمات، مش عند أول صورة.
+  //
+  // كانت بتنضبط جوّا الرفع — يعني أول التقاط بيدفع عشر ثواني انتظار زيادة،
+  // ولو فشلت المزامنة ما بيبان السبب إلا لمّا تطلب صورة. هون بتنضبط مرّة
+  // وبتبان بالسجل مع الإقلاع، فبتعرف إنها جاهزة قبل ما تحتاجها.
+  camSyncClock();
   g_servicesIp = now;
   g_networkServicesStarted = true;
 }

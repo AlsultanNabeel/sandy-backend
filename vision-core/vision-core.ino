@@ -52,6 +52,25 @@ MirrorStream g_log;
 void mqttPublishEvent(const char* json);
 void flashSet(uint8_t level, unsigned long autoOffMs);
 void flashOff();
+void camRemoteStreamTick();
+void camRemoteStream(bool on);
+// أردوينو بيولّد إعلانات الدوال لحاله، بس بيوقف عن هيك لمّا يكون في تعريفات
+// قبل `setup` — وهاد اللي صار لمّا ضفنا قراءة سبب الإقلاع. الإعلان الصريح
+// بيشيل الاعتماد ع سلوك ضمني بيتغيّر مع أي إضافة فوق.
+void settingsLoadFromNvs();
+void setupCamera();
+void connectWiFi();
+void ensureWiFiConnected();
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
+void startNetworkServicesIfReady();
+void updateTelnet();
+void updateMQTT();
+void camHttpTick();
+void camWifiTick();
+void flashTick();
+void flashInit();
+void settingsInit();
+void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMode flash);
 
 bool g_networkServicesStarted = false;
 bool g_cameraReady = false;
@@ -167,6 +186,7 @@ void loop() {
     updateTelnet();
     updateMQTT();
     camHttpTick();
+    camRemoteStreamTick();
   }
 
   // بعد الخدمات: التبديل بيقطع الشبكة بقصد، فلازم يصير والخدمات عارفة حالها

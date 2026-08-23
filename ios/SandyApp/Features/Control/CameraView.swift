@@ -123,7 +123,17 @@ struct CameraView: View {
                 // كأن البث خربان.
                 SandyNotice(lang.s("robot.control.camera.stream.noAddress"), kind: .gentleWarning)
             } else if streaming {
-                MJPEGView(url: URL(string: "http://\(localIP)/stream"))
+                // **المحلي أولًا، والبعيد لمّا ما توصله.**
+                //
+                // المحلي بيمشي من الكاميرا لتلفونك مباشرة: سلس وبلا تأخير،
+                // وبس وإنت ببيتك. والبعيد بيمرق ع الخادم: أبطأ، وبيشتغل من أي
+                // مكان.
+                //
+                // والاختيار مش عليك. كنّا منعرض المحلي دايمًا، فالمستخدم برّا
+                // البيت بيشوف مربّعًا فاضيًا ويفكّر إنّ الكاميرا خربانة — وهي
+                // شغّالة، بس ع عنوان ما بيوصله من هناك.
+                LiveView(localIP: localIP, nodeId: node.nodeId)
+                    .environmentObject(state)
                     .aspectRatio(4.0 / 3.0, contentMode: .fit)
                     .cornerRadius(Theme.Radius.card)
                 SandyButton(title: lang.s("robot.control.camera.stream.stop"),
@@ -175,6 +185,68 @@ struct CameraView: View {
     private func stopStream() async {
         streaming = false
         try? await state.api.controlDevice(name: "cam_stream", action: "off")
+    }
+}
+
+/// البثّ — محلي لو الكاميرا قريبة، وعبر الخادم لو بعيدة.
+///
+/// بتجرّب المحلي أول لأنه أحسن بكل مقياس: بلا تأخير، وبمعدّل إطارات كامل، وما
+/// بيكلّف نطاقًا ع الخادم. وإذا ما ردّ خلال ثانيتين — يعني إنت برّا البيت —
+/// بتحوّل للبعيد بلا ما تسأل المستخدم.
+///
+/// **والتحويل بيصير مرّة وحدة وبيثبت.** لو ضلّت تجرّب المحلي بين إطار وإطار،
+/// بتصير الصورة بتقطّع كل مرّة، والمستخدم بيشوف بثًّا مكسورًا بدل بثّ بعيد.
+private struct LiveView: View {
+    @EnvironmentObject var state: AppState
+    let localIP: String
+    let nodeId: String
+
+    @State private var mode: Mode = .probing
+    @State private var frame: UIImage?
+
+    private enum Mode { case probing, local, remote }
+
+    var body: some View {
+        Group {
+            switch mode {
+            case .local:
+                MJPEGView(url: URL(string: "http://\(localIP)/stream"))
+            case .remote:
+                if let frame {
+                    Image(uiImage: frame).resizable().scaledToFit()
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            case .probing:
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task { await decideAndRun() }
+    }
+
+    private func decideAndRun() async {
+        mode = await reachable() ? .local : .remote
+        guard mode == .remote else { return }
+        // ثلاثة بالثانية — نفس وتيرة رفع اللوح. أسرع منها بيسحب نفس الإطار
+        // مرّتين وبيستهلك بيانات بلا فايدة.
+        while !Task.isCancelled {
+            if let d = try? await state.api.liveFrame(nodeId: nodeId),
+               let img = UIImage(data: d) {
+                frame = img
+            }
+            try? await Task.sleep(nanoseconds: 330_000_000)
+        }
+    }
+
+    /// هل الكاميرا موصولة من هون؟ سؤال بمهلة قصيرة — الجواب «لأ» بييجي بسرعة
+    /// ع شبكة تانية، والمستخدم ما بيستنّى عشان يعرف إنه برّا البيت.
+    private func reachable() async -> Bool {
+        guard !localIP.isEmpty,
+              let url = URL(string: "http://\(localIP)/") else { return false }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+        req.httpMethod = "HEAD"
+        return (try? await URLSession.shared.data(for: req)) != nil
     }
 }
 

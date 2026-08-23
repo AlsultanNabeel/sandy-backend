@@ -10,6 +10,8 @@
 bool mqttPublishChunk(const char* payload, unsigned int len);
 void mqttPublishEvent(const char* json);
 void mqttServiceOnce();
+void settingsLoadFromNvs();
+bool uploadSnapshot(const String& id, const uint8_t* data, size_t len);
 bool flashWantedForCapture(FlashMode mode);
 void flashSet(uint8_t level, unsigned long autoOffMs);
 void flashOff();
@@ -41,6 +43,13 @@ static camera_config_t buildCameraConfig() {
   cfg.fb_count = CAMERA_DEFAULT_FB_COUNT;
   cfg.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   cfg.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
+
+  // بلا ذاكرة خارجية ما في مجال للدقّة الكاملة — المخزن الداخلي ما بيسعها،
+  // والتشغيل بيفشل من أصله. فبننزل لدقّة بتشتغل بدل ما نموت بالإقلاع.
+  if (!psramFound()) {
+    cfg.frame_size = FRAMESIZE_SVGA;
+    cfg.jpeg_quality = 15;
+  }
   return cfg;
 }
 
@@ -112,6 +121,29 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
 
   // الفلاش بينطفي فوراً بعد الالتقاط — الباقي نشر بيوخد ثواني، ما إله داعي
   if (useFlash) flashOff();
+
+  if (!fb) {
+    // **محاولة إنعاش قبل الاستسلام.**
+    //
+    // المستشعر بيعلّق أحيانًا: بعد بثّ طويل، أو بعد ساعات بلا التقاط. والنتيجة
+    // إنّ اللوح بيضلّ ينبض ويقول `cam=yes` — وهو مش قادر يصوّر. وهاد أسوأ من
+    // عطل واضح: كل إشي بيبيّن سليم والصورة ما بتيجي.
+    //
+    // دورة كهربا كاملة للمستشعر بترجّعه بأغلب الحالات، وبتوخذ أقلّ من ثانية.
+    // بنجرّبها مرّة: لو زبطت، المالك ما بيلاحظ إشي غير تأخيرة بسيطة؛ ولو ما
+    // زبطت، بنقول فشلنا بصراحة بدل ما نلحّ.
+    g_log.println("[CAM] capture failed — بنعيد تشغيل المستشعر");
+    esp_camera_deinit();
+    delay(120);
+    g_cameraReady = false;
+    setupCamera();
+    if (g_cameraReady) {
+      settingsLoadFromNvs();   // الإعدادات بتضيع مع إعادة التشغيل
+      camera_fb_t* s2 = esp_camera_fb_get();
+      if (s2) esp_camera_fb_return(s2);
+      fb = esp_camera_fb_get();
+    }
+  }
 
   if (!fb) {
     g_log.println("[CAM] capture failed");

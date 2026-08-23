@@ -63,6 +63,7 @@ The catalogue knows how to show these; no board has offered one. Either a part t
 - `cam/snapshot` — التقاط صورة
 - `cam/stream` — بث مباشر
 - `cam/framesize` — دقة الصورة
+- `cam/quality` — وضوح الصورة
 
 ## Pins
 

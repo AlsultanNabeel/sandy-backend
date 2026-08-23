@@ -121,7 +121,8 @@ def build_memory_context(
 
     if mongo_db is not None and chat_id:
         ctx["persona_directives"] = get_persona_directives(
-            chat_id, user_id, mongo_db, include_summaries=not durable_only
+            chat_id, user_id, mongo_db, include_summaries=not durable_only,
+            message=message,
         )
         try:
             from app.agent.session_state import get_session_state
@@ -185,7 +186,8 @@ def format_for_voice(ctx: Dict[str, Any]) -> str:
 
 
 def get_persona_directives(
-    chat_id: str, user_id: str, mongo_db, include_summaries: bool = True
+    chat_id: str, user_id: str, mongo_db, include_summaries: bool = True,
+    message: str = "",
 ) -> Optional[str]:
     """
     Fetch style + preferences + relationships + lessons + summaries from MongoDB.
@@ -244,6 +246,38 @@ def get_persona_directives(
                 summaries.append(str(d["summary"]))
 
     blocks: List[str] = []
+
+    # لقطة حياته — مهامه وتذكيراته وعاداته وكتبه وقائمته.
+    #
+    # هون بالذات لأنّ هالكتلة بتوصل **كل القنوات**: الشات والصوت والروبوت.
+    # ولو انحطّت بمكان أخصّ، بتصير ساندي واعية بمكان وغافلة بمكان — وهاد بالضبط
+    # اللي أكل يومين من التشخيص مع الاسم والاهتمامات.
+    #
+    # وبتسدّ فرقًا حقيقيًّا: كل قائمة إلها أداة بتقراها **لمّا ينسأل عنها**، فسؤال
+    # زي «شو بتتوقّعي أكون السنة الجاي؟» ما بينادي ولا أداة — وبتجاوب من
+    # شخصيتها وكأنها ما بتعرفه. الوعي هو اللي بتعرفه بلا ما تنسأل.
+    snapshot = _safe_life_snapshot()
+    if snapshot:
+        blocks.append(snapshot)
+
+    # والتفاصيل المرتبطة بسؤاله هو — مش كل إشي، بس كل اللي إله علاقة.
+    #
+    # اللقطة فوق بتعطي الشكل، وهاي بتفتح العمق. سأل عن كتاب؟ بيوصلها كل كتبه
+    # اللي فيها الكلمة، حتى لو ما كانوا ضمن الأربعة الأحدث. المجموع إنها بتعرف
+    # حياته إجمالًا، وبتوصل لأي تفصيل لحظة ما يصير إله معنى.
+    if message:
+        # الفهرسة أول: عنصر جديد لازم يصير قابلًا للبحث بالمعنى قبل ما ندوّر.
+        # بتتخطّى اللي انفهرس قبل، فكلفتها مرّة لكل عنصر مش مع كل سؤال.
+        _safe_index_life()
+        # وبعدين البحث بالكلمة — **كطبقة تانية مش وحيدة.**
+        #
+        # البحث بالمعنى بيلاقي «الجيم» لمّا تسأل عن الرياضة، وبيضيّع أحيانًا
+        # المطابقة الحرفية النادرة: اسم كتاب غريب، أو كلمة ما إلها جيران
+        # بالمعنى. التنين بيغطّوا بعض، وكلفة الحرفي صفر.
+        found = _safe_life_search(message)
+        if found:
+            blocks.append(found)
+
     # نمرّر المستخدم صراحة — `chat_id` هون هو معرّفه.
     #
     # القراءة من السياق النشط كانت بتشتغل بالشات (بيفتح سياق) وبتفضى بالصوت
@@ -261,6 +295,35 @@ def get_persona_directives(
     if lessons:
         blocks.append("[دروس سابقة: " + " | ".join(lessons[:3]) + "]")
     return "\n".join(blocks) if blocks else None
+
+
+def _safe_life_snapshot() -> str:
+    """اللقطة، وما بتفشّل السياق لو مصدر منها وقع."""
+    try:
+        from app.agent.life_snapshot import build_life_snapshot
+        return build_life_snapshot()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[context_builder] life snapshot skipped: %s", exc)
+        return ""
+
+
+def _safe_index_life() -> None:
+    """فهرسة عناصره للبحث بالمعنى. تخطّي صامت لو ما في مخزن تضمينات."""
+    try:
+        from app.agent.life_snapshot import index_life_for_search
+        index_life_for_search()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[context_builder] life indexing skipped: %s", exc)
+
+
+def _safe_life_search(message: str) -> str:
+    """التفاصيل المرتبطة بسؤاله. زيادة كمان — ما بتوقّف ردّ."""
+    try:
+        from app.agent.life_snapshot import search_life
+        return search_life(message)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[context_builder] life search skipped: %s", exc)
+        return ""
 
 
 def get_onboarding_directive(user_id: Optional[str] = None) -> Optional[str]:

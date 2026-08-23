@@ -187,6 +187,18 @@ extension APIClient {
     // منفصل عن الحذف لأنّ «بدّي أبدأ من جديد» و«بدّي أمشي» مش نفس الطلب:
     // اللي بدّه يبدأ من جديد بدّه يضلّ يملك **روبوته**. لو خلّيناه يحذف حسابه
     // عشان يمسح محادثة، بيخسر الجهاز معها.
+    // GET /api/nodes/<id>/snapshot/live → آخر إطار من البثّ البعيد.
+    //
+    // نفس نقطة سحب الصورة العادية — الكاميرا بترفع الإطار بمعرّف ثابت `live`،
+    // فالجديد بيستبدل القديم. بترجّع `nil` لو ما في إطار جاهز بعد، وهاد فرق
+    // مهم عن الخطأ: بثّ لسا ما بلّش مش بثّ خربان.
+    func liveFrame(nodeId: String) async throws -> Data? {
+        let r = try await rawGet("/api/nodes/\(enc(nodeId))/snapshot/live", timeout: 8)
+        guard r.count > 2, r[r.startIndex] == 0xFF,
+              r[r.index(after: r.startIndex)] == 0xD8 else { return nil }
+        return r
+    }
+
     func resetAccountData() async throws {
         struct Reply: Decodable { let ok: Bool? }
         let _: Reply = try await fetch("/api/account/reset", method: "POST",

@@ -20,7 +20,9 @@ void flashOff();
 
 static httpd_handle_t g_httpd = NULL;
 static volatile unsigned long g_lastStreamActivityMs = 0;
-static volatile bool g_streamViewerActive = false;
+// مش `static`: البثّ البعيد بيقراها عشان ما ينازع المتفرّج المحلي ع مخزن
+// الإطار الوحيد.
+volatile bool g_streamViewerActive = false;
 
 #define STREAM_BOUNDARY "sandyframe"
 static const char* kStreamContentType =

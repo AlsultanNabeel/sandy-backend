@@ -85,6 +85,25 @@ static bool handleSimpleOutput(const String& out, const String& value) {
     handleCamCommand(String("{\"cmd\":\"set\",\"framesize\":\"") + value + "\"}");
     return true;
   }
+  // الضغط — **الرقم الأصغر جودة أعلى** (عشرة ممتاز، ثلاثة وستّين رديء).
+  //
+  // الصورة بتنضغط جوّا المستشعر لحظة الالتقاط، فهاد الرقم هو **الوحيد** اللي
+  // بيقرّر التفاصيل اللي بتوصل. كان مثبّتًا ع اثنتي عشرة بالكود وما إله زرّ:
+  // المالك بيقدر يكبّر الدقّة وما بيقدر يحسّن الوضوح، وهما إشيان مختلفان —
+  // صورة كبيرة بضغط عالي بتضلّ مغبّشة.
+  if (out == "quality") {
+    // اسم ← رقم. والمقياس مقلوب عند المستشعر: الأصغر أوضح.
+    //
+    // ما بنمرّر الرقم للمستخدم لأنه بيقرا بالعكس. وما بنمرّر الاسم للمستشعر
+    // لأنه ما بيفهمه. الترجمة هون، بسطر واحد، ومكتوب جنبه ليش.
+    int q = 12;
+    if      (value == "high")   q = 10;
+    else if (value == "medium") q = 18;
+    else if (value == "low")    q = 30;
+    else                        q = value.toInt();   // رقم صريح لمين بدّه يضبط
+    handleCamCommand(String("{\"cmd\":\"set\",\"quality\":") + String(q) + "}");
+    return true;
+  }
   return false;
 }
 
@@ -284,7 +303,8 @@ static void publishCamStatus() {
            "{\"id\":\"flash_mode\",\"kind\":\"pwm\"},"
            "{\"id\":\"snapshot\",\"kind\":\"pwm\"},"
            "{\"id\":\"stream\",\"kind\":\"relay\"},"
-           "{\"id\":\"framesize\",\"kind\":\"pwm\"}]}",
+           "{\"id\":\"framesize\",\"kind\":\"pwm\"},"
+           "{\"id\":\"quality\",\"kind\":\"pwm\"}]}",
            now / 1000,
            WiFi.RSSI(),
            ESP.getFreeHeap(),

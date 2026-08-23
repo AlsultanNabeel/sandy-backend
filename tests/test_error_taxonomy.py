@@ -70,7 +70,14 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 #       capture. Diagnostics must never be able to break the thing they are
 #       diagnosing, and this line exists precisely because the previous
 #       diagnostic silently stopped running when the request stopped waiting.
-BROAD_EXCEPT_BASELINE = 414
+#   life_snapshot._safe + context_builder._safe_life_snapshot — الوعي بحياته
+#       زيادة، مش شرط للرد. قائمة وحدة وقعت ما بتجوز تسكّت ساندي — بتخسر سطر
+#       من خلفيتها وبتكمّل.
+#   context_builder._safe_life_search — البحث بكل قوائمه لقاء سؤاله. زيادة
+#       معرفة، مش شرط للرد.
+#   context_builder._safe_index_life — فهرسة قوائمه للبحث بالمعنى. لو ما في
+#       مخزن تضمينات بتتخطّى بصمت، وبيضلّ البحث الحرفي شغّالًا.
+BROAD_EXCEPT_BASELINE = 418
 
 
 def test_subtypes_have_expected_status_and_code():

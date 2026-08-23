@@ -26,6 +26,13 @@ final class DailyNudgeStore: ObservableObject {
     /// محفوظ **باليوم** مش كعلَم: تنبيه بكرا لازم يظهر. لو خزّنّا «انسكّر»
     /// وبس، أول إغلاق بيطفّي الميزة للأبد.
     private static let dismissKey = "sandy.nudge.dismissedOn"
+    // نفس المفتاح ونفس الفكرة للجواب.
+    //
+    // صلّحت الإغلاق وتركت الجواب — وهو نفس العطل بالحرف: `answered` كان
+    // بالذاكرة، فتجاوب ع سؤال اليوم، تسكّر التطبيق، وترجع تلاقيه بينتظر جوابك
+    // من جديد. الجواب محفوظ ع الخادم فعلًا وما بينسأل بكرا، بس بطاقة اليوم
+    // بتضلّ معروضة لأنها انبنت قبل ما تجاوب.
+    private static let answerKey = "sandy.nudge.answeredOn"
 
     private var todayKey: String {
         let f = DateFormatter()
@@ -38,6 +45,7 @@ final class DailyNudgeStore: ObservableObject {
         guard !loaded else { return }
         loaded = true
         dismissed = UserDefaults.standard.string(forKey: Self.dismissKey) == todayKey
+        answered = UserDefaults.standard.string(forKey: Self.answerKey) == todayKey
         nudge = try? await api.getDailyNudge()
     }
 
@@ -56,6 +64,7 @@ final class DailyNudgeStore: ObservableObject {
         do {
             try await api.answerDailyNudge(qid: n.qid, answer: answer)
             answered = true
+            UserDefaults.standard.set(todayKey, forKey: Self.answerKey)
         } catch {
             // فشل الإرسال — نخلّي البطاقة حتى يعيد المحاولة.
         }

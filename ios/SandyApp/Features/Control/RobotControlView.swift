@@ -46,6 +46,9 @@ struct RobotControlView: View {
         static let camSnapshot  = "cam_snapshot"
         static let camStream    = "cam_stream"
         static let camFrameSize = "cam_framesize"
+        // الوضوح جنب الدقّة بالقصد: الاتنين بيتلخبطوا ببعض، وبعدهن عن بعض
+        // بيخلّي المالك يكبّر الدقّة ويستغرب إنّ الصورة ضلّت مغبّشة.
+        static let camQuality   = "cam_quality"
     }
 
     var body: some View {
@@ -123,7 +126,7 @@ struct RobotControlView: View {
     @ViewBuilder
     private var cameraSection: some View {
         let settings = [Part.camFlash, Part.camFlashLvl,
-                        Part.camFlashMode, Part.camFrameSize]
+                        Part.camFlashMode, Part.camFrameSize, Part.camQuality]
             .compactMap { name in store.robotDevices.first { $0.name == name } }
         let hasCamera = !settings.isEmpty
             || store.robotDevices.contains { $0.name == Part.camSnapshot }
@@ -264,7 +267,7 @@ struct RobotControlView: View {
             Part.micLeft, Part.micRight, Part.micLeftGain, Part.micRightGain,
             Part.noise,
             Part.camFlash, Part.camFlashLvl, Part.camFlashMode,
-            Part.camSnapshot, Part.camStream, Part.camFrameSize,
+            Part.camSnapshot, Part.camStream, Part.camFrameSize, Part.camQuality,
         ]
         let rest = store.robotDevices.filter { !placed.contains($0.name) }
         if !rest.isEmpty {

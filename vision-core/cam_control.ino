@@ -415,12 +415,22 @@ void handleCamCommand(const String& payload) {
   }
 
   if (cmd == "stream") {
+    // **الاتنين مع بعض، والمشاهد بيختار.**
+    //
+    // المحلي سريع وسلس وبس ببيتك. والبعيد أبطأ وبيشتغل من أي مكان. تشغيلهن
+    // سوا معناه إنّ التطبيق ما بيحتاج يعرف إنت وين — بيجرّب المحلي، وإذا ما
+    // وصل بيسحب من الخادم.
+    //
+    // والكلفة بسيطة: المحلي ما بيصوّر إلا لمّا حدا يتفرّج، والبعيد بيرفع إطارًا
+    // كل تلت ثانية. اللوح بيحمل التنين.
     String state = jsonStr(payload, "state", "on");
     if (state == "off") {
       stopCamHttp();
+      camRemoteStream(false);
       publishAck("stream", true, "off");
     } else {
       startCamHttp();
+      camRemoteStream(true);
       publishAck("stream", camHttpRunning(),
                  "http://" + WiFi.localIP().toString() + "/stream");
     }

@@ -216,8 +216,23 @@ struct DeviceCard: View {
         } else {
             // segmented لو الخيارات قليلة، وإلا قائمة منسدلة. نفصل الفرعين لأن
             // نمطي الـ Picker نوعان مختلفان لا يتوحّدان بمعامل شرطي واحد.
+            // المطابقة بلا حساسية لحالة الأحرف.
+            //
+            // الخادم بيخزّن القيمة بحروف صغيرة (`uxga`)، والقائمة هون بحروف
+            // كبيرة (`UXGA`) زي ما الفيرموير بيسمّيها. فالقائمة كانت تدوّر ع
+            // مطابق ما بتلاقيه، وترجع لأول خيار — أصغر دقّة بالقائمة.
+            //
+            // والنتيجة إنّ المالك يختار دقّة عالية، **واللوح ينفّذها فعلًا**،
+            // وبعدين يرجع للشاشة فيلاقيها رجعت لأدنى قيمة. فيعيد الاختيار،
+            // فتنبعت من جديد. عرض بيكذب ع نفسه وبيخلّي الجهاز يبيّن معطّلًا
+            // وهو منفّذ كل مرّة.
             let binding = Binding(
-                get: { device.state.isEmpty ? (device.enumValues.first ?? "") : device.state },
+                get: {
+                    let s = device.state
+                    if s.isEmpty { return device.enumValues.first ?? "" }
+                    return device.enumValues.first { $0.caseInsensitiveCompare(s) == .orderedSame }
+                        ?? device.enumValues.first ?? ""
+                },
                 set: { store.control(api: state.api, device: device, action: "set", value: $0) }
             )
             if device.enumValues.count <= 3 {
