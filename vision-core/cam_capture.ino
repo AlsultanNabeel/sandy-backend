@@ -116,6 +116,19 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
   camera_fb_t* stale = esp_camera_fb_get();
   if (stale) esp_camera_fb_return(stale);
 
+  // لو الدقّة المطلوبة أكبر من دقّة التشغيل، بنكبّر هون وبنرجّع بعدين.
+  //
+  // المخزن الكبير بيعيش ثواني بدل ما يحجز الذاكرة الداخلية طول الوقت — وهاي
+  // الذاكرة نفسها اللي بيحتاجها الاتصال المشفّر مع الوسيط. تشغيل دائم ع أعلى
+  // دقّة كان بيخلّي اللوح يصوّر ممتاز **وما يقدر يوصل الخادم**، وكاميرا ما
+  // بتوصل ما إلها قيمة مهما كانت صورتها.
+  sensor_t* sen = esp_camera_sensor_get();
+  framesize_t wanted = sen ? (framesize_t)sen->status.framesize : CAMERA_DEFAULT_FRAME_SIZE;
+  bool raised = false;
+  if (sen && wanted > CAMERA_DEFAULT_FRAME_SIZE) {
+    raised = true;   // بننزّلها بعد الالتقاط
+  }
+
   // التقاط الإطار الحديث
   camera_fb_t* fb = esp_camera_fb_get();
 
@@ -146,6 +159,9 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
   }
 
   if (!fb) {
+    // الرجوع للدقّة المعتادة حتى وقت الفشل — وإلا اللوح بيضلّ ماسك الذاكرة
+    // بعد إخفاق، فالمحاولة الجاية بتفشل كمان وبيصير العطل دائمًا.
+    if (raised && sen) sen->set_framesize(sen, CAMERA_DEFAULT_FRAME_SIZE);
     g_log.println("[CAM] capture failed");
     char err[80];
     snprintf(err, sizeof(err), "{\"id\":\"%s\",\"error\":\"capture_failed\"}", id.c_str());
@@ -164,8 +180,14 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
   //
   // طلب واحد، والبروتوكول بيضمن الوصول بنفسه: إمّا توصل كاملة، أو بيطلع خطأ
   // نقدر نقراه. والوسيط بيضلّ يحمل الأمر — وهاد اللي بيتقنه.
+  // ننزّل الدقّة **قبل** الرفع: الرفع بيفتح اتصالًا مشفّرًا، وهو بده نفس
+  // الذاكرة اللي المخزن الكبير ماسكها. الترتيب هون هو الفرق بين رفع بينجح
+  // ورفع بيفشل بـ«فشل تخصيص ذاكرة».
+  if (raised && sen) sen->set_framesize(sen, CAMERA_DEFAULT_FRAME_SIZE);
+
   if (uploadSnapshot(id, fb->buf, fb->len)) {
     esp_camera_fb_return(fb);
+    if (raised && sen) sen->set_framesize(sen, wanted);   // رجّع اختيار المالك
     char done[120];
     snprintf(done, sizeof(done),
              "{\"id\":\"%s\",\"event\":\"uploaded\",\"bytes\":%u}",

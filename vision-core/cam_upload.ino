@@ -92,10 +92,22 @@ static String hmacHex(const String& msg) {
 // هو الشبكة واللوح، مش الاختيار.
 static bool g_remoteStream = false;
 static unsigned long g_remoteNextMs = 0;
+static unsigned long g_remoteUntilMs = 0;
 
 void camRemoteStream(bool on) {
   g_remoteStream = on;
   g_remoteNextMs = 0;
+  // **مهلة انتهاء — البثّ ما بيجوز يشتغل للأبد.**
+  //
+  // البثّ المحلي عنده مهلة من زمان، وأنا ضفت البعيد بلاها. فلو المستخدم سكّر
+  // التطبيق بلا ما يوقّفه، اللوح بيضلّ يصوّر ويرفع **للأبد**: بيسخن، وبياكل
+  // بيانات، وبيحجز الحلقة — فما بيقدر يستقبل ترقية ولا يردّ بسرعة ع أمر.
+  //
+  // وهاد اللي منع الترقية ع الشبكة: اللوح مشغول برفع إطار كل تلت ثانية، وكل
+  // رفعة بتاخد حوالي ثانية، فما بيلحق يردّ ع طلب الترقية أصلًا.
+  //
+  // خمس دقايق بتكفّي جلسة مشاهدة، وبتنتهي لحالها لو حدا نسي.
+  g_remoteUntilMs = on ? millis() + CAM_REMOTE_STREAM_MAX_MS : 0;
   g_log.printf("[UP] البثّ البعيد %s\n", on ? "اشتغل" : "وقف");
 }
 
@@ -104,6 +116,12 @@ bool camRemoteStreaming() { return g_remoteStream; }
 // بتنادى من الحلقة الرئيسية. بتلتقط وترفع إطارًا واحدًا لمّا يحين وقته.
 void camRemoteStreamTick() {
   if (!g_remoteStream || !g_cameraReady) return;
+
+  if (g_remoteUntilMs && millis() > g_remoteUntilMs) {
+    g_log.println("[UP] البثّ البعيد وقف لحاله — انتهت المهلة");
+    camRemoteStream(false);
+    return;
+  }
 
   // **مخزن إطار واحد — يعني مستهلك واحد بس.**
   //
