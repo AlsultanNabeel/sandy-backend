@@ -152,6 +152,15 @@ SYSTEM_PROMPT_ADDITION: str = os.getenv(
 # or "أنا أنثى، استخدمي صياغة المؤنث", or leaves it empty.
 OWNER_ADDRESS_NOTE: str = os.getenv("SANDY_OWNER_ADDRESS_NOTE", "").strip()
 
+# ── Per-board broker credentials ──────────────────────────────────────────────
+# A JSON object keyed by device id: {"sandy0001": {"user": …, "pass": …}}.
+# Each board is handed its own broker login on the voice handshake, so one
+# customer's key stops working on another customer's topics. Empty means every
+# board keeps the shared credential compiled into it — see
+# app/features/broker_creds.py for why this is a config table and not an API
+# call today.
+SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
+
 
 def validate_config() -> tuple[list[str], list[str]]:
     """Check config at boot. Return (fatal, warnings) lists of messages.

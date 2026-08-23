@@ -10,6 +10,7 @@ The tests below are the boundaries that make a second customer safe.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -238,17 +239,87 @@ def test_account_deletion_exists_and_frees_the_hardware():
 
 
 def test_the_board_can_hold_its_own_broker_key():
-    """Every board still ships with the same broker login compiled in.
+    """Boards used to ship with one broker login compiled into all of them.
 
-    That is the largest remaining hole: one customer's credentials work on every
-    other customer's topics, and a single extracted board exposes the fleet with
-    no way to rotate one key.
+    That was the largest hole in the product: one customer's credentials worked
+    on every other customer's topics, and a single extracted board exposed the
+    fleet with no way to rotate one key.
 
-    Issuing per-device credentials needs the broker's own API. Reading them from
-    storage is the half that can be built here, and without it the other half
-    would require reflashing every robot in the field.
+    The board could already *read* a stored credential — but nothing anywhere
+    ever wrote one, so the mechanism existed and was permanently empty. A read
+    path with no writer is not half a fix; it looks like a fix and is not one.
+    Both halves are asserted here for that reason.
     """
     fw = _read("firmware/brain-core/main/sandy_mqtt.c")
-    assert 'nvs_open("sandy_mqtt"' in fw
+    assert 'CREDS_NS "sandy_mqtt"' in fw
+    assert "nvs_open(CREDS_NS, NVS_READONLY" in fw, "the read half is gone"
+    assert "nvs_set_str(h, \"user\", user)" in fw, (
+        "nothing writes a credential — the board can never take its own key")
     assert ".username   = s_user" in fw, (
         "the compiled-in credentials are wired straight into the client again")
+
+
+def test_each_board_gets_its_own_client_id():
+    """A broker allows one connection per client id, and drops the older one.
+
+    Every brain used to connect as the same fixed name, so two robots on the
+    same broker kicked each other off in a loop that never settles. Per-device
+    credentials do not help: the collision is on the id, not the login. The
+    camera and the room node already derive theirs from the chip's own id.
+    """
+    fw = _read("firmware/brain-core/main/sandy_mqtt.c")
+    assert '"sandy-brain-%s", s_node_id' in fw, (
+        "the client id is fixed again — two robots will fight over it")
+
+    for path, prefix in (("vision-core/cam_mqtt.ino", "sandy-cam-"),
+                         ("room-node/room-node.ino", "sandy-room-")):
+        src = _read(path)
+        assert prefix in src and "getEfuseMac()" in src, (
+            f"{path} no longer derives a unique client id")
+
+
+def test_the_server_hands_a_board_its_own_broker_key():
+    """The credential travels on the voice handshake, deliberately.
+
+    Sending it over the broker would mean the shared login must keep working
+    for ever — the exact thing being retired. The voice socket authenticates
+    against a different key, so it still works after the shared broker login is
+    revoked, which is what makes revoking it possible at all.
+
+    A board with no row configured must get nothing and keep running on what it
+    has: a missing config var may not take a working fleet off the air.
+    """
+    from app import config
+    from app.features import broker_creds
+
+    original = config.SANDY_BROKER_CREDS
+    broker_creds.reset_cache()
+    config.SANDY_BROKER_CREDS = json.dumps({
+        "sandy0001": {"user": "node-0001", "pass": "s3cret"},
+        "sandy0002": {"user": "node-0002"},          # half a credential
+    })
+    try:
+        assert broker_creds.creds_for_device("sandy0001") == {
+            "user": "node-0001", "pass": "s3cret"}
+        assert broker_creds.creds_for_device("sandy0002") is None, (
+            "half a credential was handed out — the board would store it and "
+            "then fail to connect with no fallback left")
+        assert broker_creds.creds_for_device("sandy9999") is None
+
+        broker_creds.reset_cache()
+        config.SANDY_BROKER_CREDS = "{not json"
+        assert broker_creds.creds_for_device("sandy0001") is None, (
+            "a malformed config must not raise into the handshake")
+    finally:
+        config.SANDY_BROKER_CREDS = original
+        broker_creds.reset_cache()
+
+    session = _read("cloud/app/api/voice_ws/session.py")
+    assert "creds_for_device" in session, "the handshake hands out nothing"
+    i_auth = session.index('reply: Dict[str, Any] = {"type": "auth_ok"}')
+    i_send = session.index("ws.send(json.dumps(reply))")
+    assert i_auth < session.index("creds_for_device") < i_send
+
+    fw = _read("firmware/brain-core/main/sandy_voice.c")
+    assert "mqtt_sandy_set_credentials" in fw, (
+        "the board is told its key and does nothing with it")

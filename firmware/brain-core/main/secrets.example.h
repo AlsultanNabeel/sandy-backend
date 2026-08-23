@@ -7,7 +7,9 @@
 
 // HiveMQ Cloud — format: mqtts://xxxx.s1.eu.hivemq.cloud:8883
 #define MQTT_BROKER_URI     "mqtts://YOUR_BROKER.hivemq.cloud:8883"
-#define MQTT_CLIENT_ID      "sandy-brain-s3"
+// آخر مفتاح مشترك: بس للإقلاع الأول، قبل ما اللوح ياخد مفتاحه الخاص من مصافحة
+// الصوت ويحفظه بذاكرته. بعدها المحفوظ هو المستعمل، والمكتوب هون ما بينقرا.
+// انظر docs/مفاتيح-الوسيط.md
 #define MQTT_USER           "YOUR_MQTT_USER"
 #define MQTT_PASS           "YOUR_MQTT_PASS"
 

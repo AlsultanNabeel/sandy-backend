@@ -232,9 +232,33 @@ def _authenticate(ws, remote: str) -> bool:
             else:
                 logger.warning("[voice_ws] device %s is not paired to anyone", device_id)
             set_voice_channel("الروبوت")
-            ws.send(json.dumps({"type": "auth_ok"}))
-            logger.info("[voice_ws] auth OK device=%s owner=%s remote=%s",
-                        device_id, owner or "—", remote)
+
+            # **هون بيتسلّم اللوح مفتاحه الخاص بالوسيط.**
+            #
+            # كل لوح لسا بينباع بنفس مستخدم وكلمة سرّ الوسيط، مكتوبين بالكود —
+            # يعني أي زبون بيقدر يسمع مواضيع أي زبون تاني. هاي المصافحة هي
+            # المكان الصح للتسليم لأنها موثّقة بمفتاح **مش** مفتاح الوسيط، فهي
+            # بتضل شغّالة بعد ما ينلغي المفتاح المشترك. تسليمه ع الوسيط نفسه
+            # كان بيخلّي المفتاح المشترك لازم للأبد.
+            #
+            # ولوح ما إله سطر بالجدول ما بياخد إشي وبيضل ع مفتاحه الحالي: إعداد
+            # ناقص لازم يخلّي الروبوتات الشغّالة شغّالة، مش يوقّفها.
+            reply: Dict[str, Any] = {"type": "auth_ok"}
+            try:
+                from app.features.broker_creds import creds_for_device
+                creds = creds_for_device(device_id)
+                if creds:
+                    reply["broker"] = creds
+            except (ImportError, ValueError, TypeError, AttributeError) as exc:
+                # التسليم إضافة ع المصافحة، مش شرط فيها. عطل هون بيخلّي اللوح
+                # ع مفتاحه القديم — وهاد أهون بكتير من جلسة صوت بتفشل.
+                logger.warning("[voice_ws] broker credential lookup failed for %s: %s",
+                               device_id, exc)
+
+            ws.send(json.dumps(reply))
+            logger.info("[voice_ws] auth OK device=%s owner=%s remote=%s creds=%s",
+                        device_id, owner or "—", remote,
+                        "sent" if "broker" in reply else "—")
             return True
         except Exception as exc:
             logger.warning("[voice_ws] handshake error from %s: %s", remote, exc)

@@ -8,6 +8,9 @@
 const char* WIFI_SSID     = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
+// بيانات دخول خاصة بهالعقدة، مش نسخة عن تبع الدماغ ولا الكاميرا — العقدة ما
+// إلها وصلة صوت تاخد منها مفتاحها، فبياخده من هون وقت الحرق.
+// التفصيل: docs/مفاتيح-الوسيط.md
 #define SANDY_MQTT_HOST "YOUR_HIVEMQ_HOST.s1.eu.hivemq.cloud"
 #define SANDY_MQTT_PORT 8883
 #define SANDY_MQTT_USER "YOUR_MQTT_USER"

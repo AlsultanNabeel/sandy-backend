@@ -673,6 +673,90 @@ static void _status_task(void *arg) {
     }
 }
 
+// ─── Broker credentials ───────────────────────────────────────────────────────
+//
+// **كل لوح بينباع فيه نفس المستخدم ونفس كلمة السرّ، مكتوبين بالكود.** يعني أي
+// زبون بيقدر يشترك بمواضيع أي زبون تاني: صوت بيته، صور كاميرته، أوامره. ولوح
+// واحد بينفتح بينكشف معه كل الزباين — وما في طريقة تسحب مفتاحًا واحدًا بدون حرق
+// كل الأجهزة اللي بالسوق.
+//
+// الحلّ نصّين: اللوح يقدر ياخد مفتاحه ويحفظه، والخادم يعطيه ياه. هدول الاثنين
+// هون: `creds_load` بتقرا المحفوظ وبتقع ع المكتوب بالكود، و
+// `mqtt_sandy_set_credentials` بتستقبل المفتاح الخاص من مصافحة الصوت وبتحفظه.
+
+#define CREDS_NS "sandy_mqtt"
+
+static char s_user[65], s_pass[129];
+
+// إعداد العميل بيضل محفوظ لأنّ `esp_mqtt_set_config` **بترجّع أي حقل مش معبّى
+// لقيمته الافتراضية** — مش بتعدّل اللي بتعطيها ياه وبس. تمرير إعداد فيه المفتاح
+// لحاله كان بيمسح عنوان الوسيط والتحقّق المشفّر ومعرّف العميل، ويرجع اللوح
+// يحاول يتصل بلا مكان يروح عليه. فمنعدّل نسخة كاملة ومنمرّرها كلها.
+static esp_mqtt_client_config_t s_cfg;
+
+static void creds_load(void) {
+    snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
+    snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
+
+    nvs_handle_t h;
+    if (nvs_open(CREDS_NS, NVS_READONLY, &h) != ESP_OK) {
+        ESP_LOGI(TAG, "broker credentials: shared (compiled in)");
+        return;
+    }
+    size_t n = sizeof(s_user);
+    if (nvs_get_str(h, "user", s_user, &n) != ESP_OK)
+        snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
+    n = sizeof(s_pass);
+    if (nvs_get_str(h, "pass", s_pass, &n) != ESP_OK)
+        snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
+    nvs_close(h);
+
+    ESP_LOGI(TAG, "broker credentials: %s",
+             strcmp(s_user, MQTT_USER) ? "per-device (stored)" : "shared (compiled in)");
+}
+
+bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
+    if (!user || !pass || !*user || !*pass) return false;
+
+    // نفس اللي عنا؟ ما منكتب. المصافحة بتصير كل جلسة صوت، وكتابة بكل مصافحة
+    // بتآكل الذاكرة الوامضة مقابل لا شي.
+    if (!strcmp(user, s_user) && !strcmp(pass, s_pass)) return false;
+
+    nvs_handle_t h;
+    if (nvs_open(CREDS_NS, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGE(TAG, "cannot open %s to store the broker credential", CREDS_NS);
+        return false;
+    }
+    esp_err_t e1 = nvs_set_str(h, "user", user);
+    esp_err_t e2 = nvs_set_str(h, "pass", pass);
+    esp_err_t e3 = nvs_commit(h);
+    nvs_close(h);
+    if (e1 != ESP_OK || e2 != ESP_OK || e3 != ESP_OK) {
+        ESP_LOGE(TAG, "storing the broker credential failed");
+        return false;
+    }
+
+    snprintf(s_user, sizeof(s_user), "%s", user);
+    snprintf(s_pass, sizeof(s_pass), "%s", pass);
+    ESP_LOGW(TAG, "stored this board's own broker credential (user=%s)", s_user);
+
+    // بنطبّقها هلق مش ع الإقلاع الجاي: لوح حافظ مفتاحه وشغّال ع المشترك بيضل
+    // ثغرة مفتوحة لحدّ ما حدا يطفّيه — وما حدا بيطفّي روبوت.
+    if (s_client) {
+        // s_user/s_pass مؤشّراتهن أصلًا جوّا s_cfg، بس منكتبهن صراحة عشان
+        // السطر يضل صحيح لو انتغيّر شكل البنية.
+        s_cfg.credentials.username = s_user;
+        s_cfg.credentials.authentication.password = s_pass;
+        if (esp_mqtt_set_config(s_client, &s_cfg) == ESP_OK) {
+            esp_mqtt_client_reconnect(s_client);
+            ESP_LOGI(TAG, "reconnecting with the new credential");
+        } else {
+            ESP_LOGW(TAG, "could not apply the new credential live — next boot will");
+        }
+    }
+    return true;
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 esp_err_t mqtt_sandy_start(void) {
@@ -686,35 +770,19 @@ esp_err_t mqtt_sandy_start(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    // بيانات دخول الوسيط — من الذاكرة أول، ومن الكود لو ما في.
-    //
-    // **كل لوح بينباع فيه نفس المستخدم ونفس كلمة السرّ، مكتوبين بالكود.** يعني
-    // أي زبون بيقدر يشترك بمواضيع أي زبون تاني: صوت بيته، صور كاميرته، أوامره.
-    // ولوح واحد بينفتح بينكشف معه كل الزباين — وما في طريقة تسحب مفتاحًا واحدًا
-    // بدون حرق كل الأجهزة اللي بالسوق.
-    //
-    // القراءة من الذاكرة هي **النص القابل للتنفيذ من الحلّ**: بتخلّي اللوح يقدر
-    // ياخد مفتاحه الخاص وقت الربط بلا حرق. النص التاني — إصدار مفتاح لكل جهاز
-    // — بده واجهة الوسيط، وهاي بحساب مالكه مش بالكود.
-    static char s_user[65], s_pass[129];
-    snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
-    snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
-    {
-        nvs_handle_t h;
-        if (nvs_open("sandy_mqtt", NVS_READONLY, &h) == ESP_OK) {
-            size_t n = sizeof(s_user);
-            if (nvs_get_str(h, "user", s_user, &n) != ESP_OK)
-                snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
-            n = sizeof(s_pass);
-            if (nvs_get_str(h, "pass", s_pass, &n) != ESP_OK)
-                snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
-            nvs_close(h);
-            ESP_LOGI(TAG, "broker credentials: %s",
-                     strcmp(s_user, MQTT_USER) ? "per-device (stored)" : "shared (compiled in)");
-        }
-    }
+    // بيانات دخول الوسيط — من الذاكرة أول، ومن الكود لو ما في. التفصيل فوق.
+    creds_load();
 
-    esp_mqtt_client_config_t cfg = {
+    // **معرّف العميل لازم يكون خاص باللوح.**
+    //
+    // كان مكتوب ثابت بالكود، ونفس القيمة بتنحرق ع كل لوح. والوسيط بيسمح
+    // بمعرّف واحد بس لكل عميل: أول ما لوحين يتصلوا بنفس المعرّف بيفصل كل واحد
+    // التاني، لفّة بلا نهاية. وهاد بيصير حتى لو كل واحد بمفتاح خاص فيه — يعني
+    // إصدار المفاتيح لحاله ما بينفع بدون هالسطر.
+    static char s_client_id[48];
+    snprintf(s_client_id, sizeof(s_client_id), "sandy-brain-%s", s_node_id);
+
+    s_cfg = (esp_mqtt_client_config_t){
         .broker = {
             .address = { .uri = MQTT_BROKER_URI },
             // Real TLS via the built-in CA bundle (same as the voice WSS link).
@@ -723,14 +791,14 @@ esp_err_t mqtt_sandy_start(void) {
             .verification = { .crt_bundle_attach = esp_crt_bundle_attach },
         },
         .credentials = {
-            .client_id  = MQTT_CLIENT_ID,
+            .client_id  = s_client_id,
             .username   = s_user,
             .authentication = { .password = s_pass },
         },
         .network = { .reconnect_timeout_ms = MQTT_RECONNECT_MS },
     };
 
-    s_client = esp_mqtt_client_init(&cfg);
+    s_client = esp_mqtt_client_init(&s_cfg);
     if (!s_client) return ESP_FAIL;
 
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, _handler, NULL);

@@ -434,6 +434,48 @@ static bool text_has(const char *data, int len, const char *needle) {
     return strstr(buf, needle) != NULL;
 }
 
+// قيمة نصّية من إطار تحكّم صغير. مكتوبة بالإيد زي باقي المشروع — تبعية محلّل
+// جيسون كاملة مقابل حقلين ما بتستاهل.
+//
+// **بتقرا الإطار كله مش أول مئة وثمانية وعشرين بايت**، بعكس `text_has`: مفتاح
+// الوسيط بيجي بآخر المصافحة، فتحديد الطول كان بيقصّه بصمت — والنتيجة لوح
+// بيقول «تصادقت» وبيضل ع المفتاح المشترك بلا ما يبيّن السبب.
+static bool json_str_field(const char *data, int len, const char *key,
+                           char *out, size_t cap) {
+    if (!data || len <= 0 || cap == 0) return false;
+    out[0] = '\0';
+
+    // بلا الاقتباس اللي بعد النقطتين: مكتبة الخادم بتحط فراغ بعدهن
+    // (`"user": "x"`)، ونمط ملزوق كان بيفشل بصمت — واللوح بيقول «تصادقت» وبيضل
+    // ع المفتاح المشترك بلا ما يبيّن السبب. منقبل الشكلين.
+    char pat[24];
+    int pn = snprintf(pat, sizeof(pat), "\"%s\":", key);
+    if (pn <= 0 || pn >= (int)sizeof(pat)) return false;
+
+    // الإطار مش منتهي بصفر بالضرورة — منقيّد البحث بالطول.
+    const char *end = data + len;
+    const char *p = NULL;
+    for (int i = 0; i + pn <= len; i++) {
+        if (!memcmp(data + i, pat, pn)) { p = data + i + pn; break; }
+    }
+    if (!p) return false;
+
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (p >= end || *p != '"') return false;   // مش قيمة نصّية
+    p++;
+
+    size_t j = 0;
+    while (p < end && *p != '"' && j + 1 < cap) {
+        if (*p == '\\' && p + 1 < end) p++;   // \" و \\ بيمرّوا كما هنّ
+        out[j++] = *p++;
+    }
+    // اقتباس ناقص = إطار مقصوص. أنصاف القيم أسوأ من لا شي هون: كلمة سرّ مقصوصة
+    // بتنحفظ وبتفشل، وما بيضل مفتاح تاني ترجعله.
+    if (p >= end || *p != '"') return false;
+    out[j] = '\0';
+    return j > 0;
+}
+
 static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *event_data) {
     esp_websocket_event_data_t *ev = (esp_websocket_event_data_t *)event_data;
     switch (id) {
@@ -455,6 +497,19 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 VOICE_FACE(MOOD_FOCUSED);   // she's listening now
                 VOICE_LED(LED_STATE_LISTENING);
                 ESP_LOGI(TAG, "auth ok, streaming");
+
+                // المصافحة بتحمل مفتاح الوسيط الخاص باللوح، لو الخادم أصدر إله
+                // واحد. هون بالضبط لأنه هالمسار موثّق بتوقيع **مش** بمفتاح
+                // الوسيط — فبيضل شغّال بعد ما ينلغي المفتاح المشترك، وهاد شرط
+                // إنه الإلغاء يصير أصلًا.
+                {
+                    char bu[65], bp[129];
+                    if (json_str_field(ev->data_ptr, ev->data_len, "user", bu, sizeof(bu)) &&
+                        json_str_field(ev->data_ptr, ev->data_len, "pass", bp, sizeof(bp))) {
+                        if (mqtt_sandy_set_credentials(bu, bp))
+                            ESP_LOGW(TAG, "took this board's own broker credential");
+                    }
+                }
             } else if (text_has(ev->data_ptr, ev->data_len, "interrupted")) {
                 // Server-side barge-in confirmation: stale audio dies here,
                 // whatever comes next belongs to the NEW turn.
