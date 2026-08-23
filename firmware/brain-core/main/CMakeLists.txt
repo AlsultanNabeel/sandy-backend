@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "sandy_main.c"
         "sandy_wifi.c"
+        "sandy_provision.c"
         "sandy_nvs.c"
         "sandy_servo.c"
         "sandy_buzzer.c"

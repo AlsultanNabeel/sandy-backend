@@ -495,6 +495,34 @@ Declared `kind` values must be in `node_store.KNOWN_CAPABILITIES`. Anything else
 is dropped **silently** — the board publishes, the server parses, the entry
 vanishes, and the app is simply missing a lamp with no error anywhere.
 
+#### First-run network setup
+
+`main/sandy_provision.c`, added 23 Aug 2026, flag `ENABLE_PROVISION`. When no
+network answers within `PROVISION_WINDOW_MS` (90 s), the board raises its own
+access point — `Sandy-<pair code>`, WPA2, password `sandy<pair code>` — serves a
+scan-and-pick page on `192.168.4.1`, and prints the network name on its own
+screen. The chosen credentials go through `wifi_sandy_switch`, which proves them
+before saving and reverts on failure, so a typo cannot leave a board booting onto
+a network that does not exist.
+
+Three things here are load-bearing and easy to undo by accident:
+
+- **APSTA, not AP.** The station side has to stay up to scan and to test. In
+  plain AP mode the scan returns nothing and every choice fails invisibly.
+- **The page answers before the radio moves.** `wifi_sandy_switch` tears down the
+  association the page is served over, so a reply written after it returns never
+  reaches the phone and the browser reports failure for a setup that worked.
+- **`_retry_task` yields** while `s_switching` or `provision_is_active()`. A blind
+  `esp_wifi_connect()` inside a scan or a credential test makes both fail, and it
+  reads as a wrong password.
+
+The window is long on purpose: a robot that enters setup whenever the router is
+slow is worse than one that never does. It doubles as the recovery path when an
+owner changes routers — previously the board retried a dead network for ever.
+
+Pairing is still separate: this hands over the network, the code is still typed
+in the app.
+
 #### Broker credentials
 
 Every board used to ship with one shared broker login compiled in, so any customer

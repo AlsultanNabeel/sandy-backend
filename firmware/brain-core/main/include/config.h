@@ -37,6 +37,16 @@
 #define ENABLE_COMMANDS 0   // local MultiNet "Sandy ..." command words (needs WAKEWORD)
 #define ENABLE_SPK_TEST 0   // temporary: triple-beep to verify amp + speaker
 #define ENABLE_REMOTE   1   // cable-free dev: OTA upload + serial log over WiFi (needs WIFI)
+// تزويد الشبكة من نقطة وصول اللوح نفسه — أول تشغيل، وتبديل راوتر.
+//
+// بدونه اسم الشبكة وكلمة سرّها محروقين بالكود، وكل زبون بده تعديل ملف وترجمة
+// وحرق من عندك لبيته. وما إله أي جواب للحالة العادية: حدا غيّر راوتره. الكود
+// القديم كان بيعيد المحاولة ع شبكة ميتة للأبد وبصمت.
+#define ENABLE_PROVISION 1  // needs WIFI — SoftAP setup page when no network answers
+// كم يستنى قبل ما يطلّع شبكته. طويل بقصد: شبكة بتتأخر دقيقة بالصبح شي عادي،
+// وروبوت بيدخل وضع التزويد كل ما الراوتر يتأخر أسوأ من واحد ما بيدخله أبدًا.
+// وكمان بيخلّي خادم الرفع اللاسلكي (بيستنى ستين ثانية لعنوان) يفضّي المنفذ.
+#define PROVISION_WINDOW_MS  90000
 #define ENABLE_LED      1   // on-board WS2812: idle blue / listening white / talking amber
 
 // ─── GPIO Pins ────────────────────────────────────────────────────────────────

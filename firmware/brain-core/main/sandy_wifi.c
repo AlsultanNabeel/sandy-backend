@@ -1,4 +1,6 @@
 #include "sandy_wifi.h"
+#include "config.h"
+#include "sandy_provision.h"
 #include "esp_wifi.h"
 #include "nvs.h"
 #include "esp_event.h"
@@ -22,6 +24,10 @@ static char s_ip[16] = "";   // آخر عنوان أخذناه، للنبضة
 #define WIFI_RETRY_MS       5000
 
 static EventGroupHandle_t s_eg;
+
+// Declared up here, not next to the switch, because the retry task below has to
+// see it: the two run at the same time by definition.
+static volatile bool s_switching;
 
 static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT) {
@@ -49,6 +55,16 @@ static void _retry_task(void *arg) {
     uint32_t tries = 0;
     for (;;) {
         if (xEventGroupGetBits(s_eg) & WIFI_CONNECTED_BIT) {
+            tries = 0;
+        } else if (s_switching
+#if ENABLE_PROVISION
+                   || provision_is_active()
+#endif
+                  ) {
+            // Someone else is driving the radio. A blind reconnect here lands in
+            // the middle of a scan or a credential test and makes both fail —
+            // and the failure looks like a wrong password, which is the one
+            // wrong answer that sends the owner off to reset their router.
             tries = 0;
         } else {
             tries++;
@@ -158,8 +174,6 @@ static void set_wifi_field(uint8_t *dst, size_t cap, const char *src) {
     memset(dst, 0, cap);
     if (n) memcpy(dst, src, n);
 }
-
-static volatile bool s_switching;
 
 wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     if (!ssid || !*ssid || strlen(ssid) > 32 || (pass && strlen(pass) > 64)) {

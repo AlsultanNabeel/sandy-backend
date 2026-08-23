@@ -7,6 +7,7 @@
 #include "sandy_types.h"
 #include "sandy_nvs.h"
 #include "sandy_wifi.h"
+#include "sandy_provision.h"
 #include "sandy_servo.h"
 #include "sandy_buzzer.h"
 #include "sandy_sensor.h"
@@ -92,6 +93,14 @@ void app_main(void) {
     TRY_INIT("nvs", nvs_sandy_init());
 #if ENABLE_WIFI
     TRY_INIT("wifi", wifi_sandy_start());
+#endif
+#if ENABLE_PROVISION
+    // After wifi_sandy_start, which returns as soon as the radio is up: this
+    // watches whether an association actually happens and raises the setup
+    // access point if none does. Starting it here rather than inside the Wi-Fi
+    // module keeps that module about one thing — the radio — and this one about
+    // the thing that has to keep working when the radio has nowhere to go.
+    TRY_INIT("provision", provision_init());
 #endif
 #if ENABLE_REMOTE
     TRY_INIT("remote", remote_init());   // OTA + remote log over WiFi
