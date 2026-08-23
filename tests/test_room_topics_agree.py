@@ -267,8 +267,10 @@ def test_no_global_room_tree_is_left_in_any_firmware():
 
 def test_the_brain_publishes_under_its_own_node():
     fw = _read("firmware/brain-core/main/sandy_mqtt.c")
-    assert '"%s/room/%s", s_base, out' in fw, (
-        "the brain no longer builds the room topic from its own node base")
+    # Every outgoing topic is built in one place, from the node's own base.
+    assert '"%s/%s", s_base, suffix' in fw, (
+        "the brain no longer builds its topics from its own node base")
+    assert '"room/%s", out' in fw, "the room prefix is gone"
 
     voice = _read("firmware/brain-core/main/sandy_voice.c")
     # Bare output names in the command table — a full topic here would be

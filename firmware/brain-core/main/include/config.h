@@ -47,6 +47,12 @@
 // وروبوت بيدخل وضع التزويد كل ما الراوتر يتأخر أسوأ من واحد ما بيدخله أبدًا.
 // وكمان بيخلّي خادم الرفع اللاسلكي (بيستنى ستين ثانية لعنوان) يفضّي المنفذ.
 #define PROVISION_WINDOW_MS  90000
+// الأشعة تحت الحمراء — تعلّم وإعادة إرسال.
+//
+// أرخص ميزة بالجهاز وأكبرها أثرًا: مستقبل وليد بدولار ونص بيخلّوا كل ريموت
+// بالغرفة إشي بتقدر تكبسه — التلفزيون والمكيّف والمروحة. بلا مرحّلات، وبلا
+// تمديد ع الكهربا، وبلا لوح تاني. نص الخادم جاهز من زمان وكان مستني هالنص.
+#define ENABLE_IR       1   // needs MQTT — IR learn + replay over RMT
 #define ENABLE_LED      1   // on-board WS2812: idle blue / listening white / talking amber
 
 // ─── GPIO Pins ────────────────────────────────────────────────────────────────
@@ -84,6 +90,12 @@
 
 // WS2812 RGB LED — on-board on the DevKitC-1 N16R8 (GPIO48).
 #define PIN_W2812               48
+
+// الأشعة تحت الحمراء. أرجل حرّة ع رأس اللوح، وبعيدة عن أرجل الإقلاع الحسّاسة
+// وعن أرجل اليو إس بي — الليد بتنكتب وقت الإقلاع، ورِجل إقلاع بتخلّي اللوح
+// يقلع بوضع غلط أو ما يقلع.
+#define PIN_IR_TX               21   // IR LED (through a transistor, not direct)
+#define PIN_IR_RX               38   // VS1838B / TSOP38238 data
 
 // ST7789 240×240 display — SPI. Any GPIO works via the S3 GPIO matrix; these
 // stay clear of the PSRAM/strapping/USB pins above.

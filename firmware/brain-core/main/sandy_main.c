@@ -8,6 +8,7 @@
 #include "sandy_nvs.h"
 #include "sandy_wifi.h"
 #include "sandy_provision.h"
+#include "sandy_ir.h"
 #include "sandy_servo.h"
 #include "sandy_buzzer.h"
 #include "sandy_sensor.h"
@@ -93,6 +94,12 @@ void app_main(void) {
     TRY_INIT("nvs", nvs_sandy_init());
 #if ENABLE_WIFI
     TRY_INIT("wifi", wifi_sandy_start());
+#endif
+#if ENABLE_IR
+    // Before MQTT: the `ir` output is dispatched from the MQTT task, and a
+    // "learn" arriving at a driver that does not exist yet is a crash rather
+    // than a missed press.
+    TRY_INIT("ir", ir_init());
 #endif
 #if ENABLE_PROVISION
     // After wifi_sandy_start, which returns as soon as the radio is up: this

@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "sandy_audio_ctl.h"
 #include "sandy_wifi.h"
+#include "sandy_ir.h"
 #include "config.h"
 #include "secrets.h"
 #include "mqtt_client.h"
@@ -420,6 +421,12 @@ static void _dispatch(const char *out, const char *val) {
     else if (!strcmp(out, "autonomous"))
         ESP_LOGI(TAG, "autonomous=%s (TODO)", val);
     else if (!strcmp(out, "wifi"))         _handle_wifi(val);
+#if ENABLE_IR
+    // "learn" arms the receiver; anything else is a recorded code to replay.
+    // One output rather than two because the backend already models it that
+    // way — a button on an `ir` device carries the code as its payload.
+    else if (!strcmp(out, "ir"))           ir_handle(val);
+#endif
     else if (!strcmp(out, "ota"))
         ota_trigger(val);
     else
@@ -608,6 +615,9 @@ static const char *OUTPUTS_JSON =
       "{\"id\":\"speaker_test\",\"kind\":\"audio\"},"
       "{\"id\":\"noise\",\"kind\":\"audio\"},"
       "{\"id\":\"screen\",\"kind\":\"pwm\"},"
+#if ENABLE_IR
+      "{\"id\":\"ir\",\"kind\":\"ir\"},"
+#endif
       "{\"id\":\"screen_size\",\"kind\":\"pwm\"}"
     "]";
 
@@ -673,17 +683,28 @@ void mqtt_publish_status(void) {
 // unwritable: the brain needed its own tree *and* a global one, and a broker
 // credential on the free plan carries a single topic filter. One tree fixes
 // both.
-bool mqtt_publish_room(const char *out, const char *payload) {
-    if (!s_client || !out || !payload) return false;
+bool mqtt_publish_node(const char *suffix, const char *payload) {
+    if (!s_client || !suffix || !payload) return false;
     if (s_base[0] == '\0') {
-        ESP_LOGW(TAG, "no node id yet — dropping room/%s", out);
+        ESP_LOGW(TAG, "no node id yet — dropping %s", suffix);
         return false;
     }
     char topic[96];
-    snprintf(topic, sizeof(topic), "%s/room/%s", s_base, out);
+    snprintf(topic, sizeof(topic), "%s/%s", s_base, suffix);
     int id = esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 0);
-    ESP_LOGI(TAG, "publish %s = %s (%s)", topic, payload, id < 0 ? "FAIL" : "ok");
+    // The payload is truncated in the log on purpose: a learned IR code is a few
+    // hundred characters of timings and would push everything else out of the
+    // 8 KB remote log buffer.
+    ESP_LOGI(TAG, "publish %s = %.60s%s (%s)", topic, payload,
+             strlen(payload) > 60 ? "…" : "", id < 0 ? "FAIL" : "ok");
     return id >= 0;
+}
+
+bool mqtt_publish_room(const char *out, const char *payload) {
+    if (!out) return false;
+    char suffix[64];
+    snprintf(suffix, sizeof(suffix), "room/%s", out);
+    return mqtt_publish_node(suffix, payload);
 }
 
 static void _status_task(void *arg) {

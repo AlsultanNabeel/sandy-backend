@@ -5,6 +5,11 @@
 esp_err_t mqtt_sandy_start(void);
 void      mqtt_publish_status(void);    // call manually if needed; auto every 5s
 
+// Publish under this robot's own tree: sandy/node/<id>/<suffix>.
+// Used for reports the board makes about itself — a learned IR code, for
+// instance — as opposed to commands, which arrive rather than leave.
+bool      mqtt_publish_node(const char *suffix, const char *payload);
+
 // Drive one room output from a local command word — `out` is the bare name
 // ("light", "fan", "music"), and the topic is built under this robot's own tree
 // as sandy/node/<id>/room/<out>. Passing a full topic here is a bug: it would

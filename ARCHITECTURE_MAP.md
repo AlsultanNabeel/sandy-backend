@@ -7,8 +7,8 @@ lives, why it is shaped that way, and which parts are load-bearing.
 Written by reading every source file in the repo, not from the older docs — where
 this contradicts `README.md`, `docs/`, or a code comment, this is the newer
 reading. Last full pass: 14 Aug 2026, kept current through 23 Aug 2026 — §2.7,
-§4.5 and §4.6 rewritten for per-device broker credentials and the room node's move
-onto the per-node topic tree.
+§4.5 and §4.6 rewritten for per-device broker credentials, the room node's move
+onto the per-node topic tree, first-run network setup, and infrared.
 
 **Keep this current.** When you change a contract in here — a topic, a route, an
 ownership rule, a boundary — update the section as part of the same commit. A map
@@ -495,6 +495,34 @@ Declared `kind` values must be in `node_store.KNOWN_CAPABILITIES`. Anything else
 is dropped **silently** — the board publishes, the server parses, the entry
 vanishes, and the app is simply missing a lamp with no error anywhere.
 
+#### Infrared
+
+`main/sandy_ir.c`, added 23 Aug 2026, flag `ENABLE_IR`, RMT on `PIN_IR_TX` (21,
+through a transistor) and `PIN_IR_RX` (38). The backend half — the `ir/learned`
+topic, `/api/nodes/<id>/ir/learn`, the `ir` control type with `meta.buttons` —
+had been complete for a while with nothing on a board to answer it.
+
+One output, `ir`, two payloads: `learn` arms the receiver and the next press is
+published to `sandy/node/<id>/ir/learned`; anything else is a recorded code to
+replay. That is the backend's existing shape, not a new one — a button on an
+`ir` device already carries its code as the payload, so the board keeps no state
+and a second robot learns nothing it was not taught.
+
+**Raw capture, not protocol decoding.** The pulse train is recorded and replayed
+verbatim as microsecond durations, marks at the even indices. Decoding is the
+smaller-sounding job and the one that fails on the customer's air conditioner.
+The mark/space ordering is the whole format: invert it and the replay looks
+perfect on a scope and does nothing in the room.
+
+**The `ir` catalogue row carries no `meta`, deliberately.**
+`node_provision._refresh_from_catalogue` merges the catalogue's meta over the
+device's on every heartbeat, so a `"buttons": {}` row — even empty — would erase
+every button the owner taught, every five seconds, for ever. An absent meta is
+how a field is declared to belong to the owner.
+
+"Turn, then fire" needs no new contract: it is a scene — neck angle, then the IR
+button.
+
 #### First-run network setup
 
 `main/sandy_provision.c`, added 23 Aug 2026, flag `ENABLE_PROVISION`. When no
@@ -591,10 +619,9 @@ from a cross-wired one without a multimeter.
 desk, until it is flashed.**
 
 The camera board program is no longer missing — `vision-core/` exists, is
-flashed, and answers on the broker. Still genuinely missing: the **IR board
-code** (the server side is complete: learn topic, endpoint, device type — only
-the sketch is unwritten, and it is the cheapest large feature left), servo easing
-(it jumps, which is most of what makes the motion look cheap), and two-mic
+flashed, and answers on the broker. Neither is the IR board code (§4.5), though
+it is written and not yet tried on hardware. Still genuinely missing: servo
+easing (it jumps, which is most of what makes the motion look cheap) and two-mic
 beamforming.
 
 The Arabic display font is done: `main/fonts/` now carries the typeface at

@@ -31,6 +31,7 @@ A subsystem set to 0 is not present in the binary. It is not broken and not hidd
 | `ENABLE_SPK_TEST` | off | temporary: triple-beep to verify amp + speaker |
 | `ENABLE_REMOTE` | on | cable-free dev: OTA upload + serial log over WiFi (needs WIFI) |
 | `ENABLE_PROVISION` | on | needs WIFI — SoftAP setup page when no network answers |
+| `ENABLE_IR` | on | needs MQTT — IR learn + replay over RMT |
 | `ENABLE_LED` | on | on-board WS2812: idle blue / listening white / talking amber |
 
 ## Reachable from the app
@@ -52,6 +53,7 @@ Every row here was declared by the board itself in a heartbeat and matched to a 
 | `speaker_test` | audio | أصوات السماعة | enum | `beep`, `chime`, `alert`, `sweep`, `soft`, `happy` |
 | `noise` | audio | عزل الضجّة | enum | `off`, `mild`, `medium`, `aggressive` |
 | `screen` | pwm | شاشة ساندي | text | on / off |
+| `ir` | ir | ريموت ساندي | ir | on / off |
 | `screen_size` | pwm | حجم الكتابة | enum | `small`, `medium`, `large` |
 
 ### Presented but not declared
@@ -85,6 +87,8 @@ Wiring, and what happens if two things claim one pin, is in `firmware/brain-core
 | `PIN_MIC_ADC` | 4 |
 | `PIN_TOUCH` | 14 |
 | `PIN_W2812` | 48 |
+| `PIN_IR_TX` | 21 |
+| `PIN_IR_RX` | 38 |
 | `PIN_TFT_MOSI` | 40 |
 | `PIN_TFT_SCLK` | 41 |
 | `PIN_TFT_CS` | 39 |
