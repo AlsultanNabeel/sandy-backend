@@ -46,8 +46,12 @@
 #include "esp_mn_iface.h"
 #include "esp_mn_models.h"
 #include "esp_mn_speech_commands.h"
-#include "sandy_mqtt.h"
 #endif
+
+// خارج حارس الأوامر بالقصد. كان مضمّنًا جوّاه لأنّ الاستعمال الوحيد كان أوامر
+// الغرفة — وصار في استعمال تاني: مصافحة الصوت بتسلّم اللوح مفتاح الوسيط، وهاد
+// ما إله علاقة بأوامر الصوت. لوح مطفّي عنده الأوامر لازم ياخد مفتاحه كمان.
+#include "sandy_mqtt.h"
 
 #if VOICE_AEC_ENABLE
 #include "esp_aec.h"
@@ -502,6 +506,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 // واحد. هون بالضبط لأنه هالمسار موثّق بتوقيع **مش** بمفتاح
                 // الوسيط — فبيضل شغّال بعد ما ينلغي المفتاح المشترك، وهاد شرط
                 // إنه الإلغاء يصير أصلًا.
+#if ENABLE_MQTT
                 {
                     char bu[65], bp[129];
                     if (json_str_field(ev->data_ptr, ev->data_len, "user", bu, sizeof(bu)) &&
@@ -510,6 +515,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                             ESP_LOGW(TAG, "took this board's own broker credential");
                     }
                 }
+#endif
             } else if (text_has(ev->data_ptr, ev->data_len, "interrupted")) {
                 // Server-side barge-in confirmation: stale audio dies here,
                 // whatever comes next belongs to the NEW turn.
