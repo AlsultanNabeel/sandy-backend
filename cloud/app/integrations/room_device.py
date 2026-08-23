@@ -3,18 +3,33 @@
 A SECOND physical device on the SAME HiveMQ broker as the robot body
 (`sandy_device.py`). The room node is the old classic ESP32 (`sandy/` firmware),
 slated to drive the room. This client is **publish-only** for now — it fires
-`room/cmd/*` commands and is a graceful no-op when MQTT isn't configured, so
-scenes can be wired and tested before the hardware is online.
+room commands and is a graceful no-op when MQTT isn't configured, so scenes can
+be wired and tested before the hardware is online.
 
-Topics (the cloud↔room-node contract — keep firmware in sync):
-    room/cmd/light    — "on" | "off" | "0".."100"  (brightness %)
-    room/cmd/color    — "warm" | "cool" | "white" | "red" | "green" | "blue" |
-                        "purple" | "amber"  (or "#rrggbb")
-    room/cmd/music    — "on" | "off" | "pause"
-    room/cmd/fan      — "on" | "off" | "0".."100"
-    room/cmd/curtain  — "open" | "close"
-    room/cmd/scene    — "<scene name>"  (optional: let the node run a named scene
-                        locally; the cloud also sends the individual commands)
+Topics (the cloud↔room-node contract — keep firmware in sync). They live under
+the robot's own tree, the same namespace the brain and the camera use:
+
+    sandy/node/<node_id>/room/light    — "on" | "off" | "0".."100"  (brightness %)
+    sandy/node/<node_id>/room/color    — "warm" | "cool" | "white" | "red" |
+                        "green" | "blue" | "purple" | "amber"  (or "#rrggbb")
+    sandy/node/<node_id>/room/music    — "on" | "off" | "pause"
+    sandy/node/<node_id>/room/fan      — "on" | "off" | "0".."100"
+    sandy/node/<node_id>/room/curtain  — "open" | "close"
+    sandy/node/<node_id>/room/scene    — "<scene name>"  (optional: let the node
+                        run a named scene locally; the cloud also sends the
+                        individual commands)
+
+They were six fixed global strings — ``room/cmd/light`` and friends — carrying
+no device identity, so every room node ever flashed listened to all of them and
+one tenant's "lights off" would have reached every other tenant's room. The only
+safe answer then was to refuse everyone except the owner, which is what this
+module did.
+
+Moving them under the node's own tree is what lets that restriction go: the
+topic now names whose room it is, so every tenant can drive their own hardware
+and nobody can reach anyone else's. It also makes the broker permission
+writable — the brain needs one topic filter now instead of two, and a credential
+on the free plan carries exactly one.
 
 Reuses the robot's broker creds (in .env — never commit):
     SANDY_MQTT_HOST / SANDY_MQTT_PORT / SANDY_MQTT_USER / SANDY_MQTT_PASS
@@ -36,43 +51,54 @@ try:
 except ImportError:
     MQTT_AVAILABLE = False
 
-_TOPIC_LIGHT   = "room/cmd/light"
-_TOPIC_COLOR   = "room/cmd/color"
-_TOPIC_MUSIC   = "room/cmd/music"
-_TOPIC_FAN     = "room/cmd/fan"
-_TOPIC_CURTAIN = "room/cmd/curtain"
-_TOPIC_SCENE   = "room/cmd/scene"
+# The room outputs, by name. These are *outputs* on a node, not whole topics —
+# the same shape the camera uses ("cam/flash"), so device_store.device_topic
+# builds them the one way it builds every other node topic.
+ROOM_OUTPUT_PREFIX = "room/"
 
-# device name → topic. Used by scene_store to validate + route actions.
-_DEVICE_TOPIC = {
-    "light":   _TOPIC_LIGHT,
-    "color":   _TOPIC_COLOR,
-    "music":   _TOPIC_MUSIC,
-    "fan":     _TOPIC_FAN,
-    "curtain": _TOPIC_CURTAIN,
-    "scene":   _TOPIC_SCENE,
+_DEVICE_OUTPUT = {
+    "light":   ROOM_OUTPUT_PREFIX + "light",
+    "color":   ROOM_OUTPUT_PREFIX + "color",
+    "music":   ROOM_OUTPUT_PREFIX + "music",
+    "fan":     ROOM_OUTPUT_PREFIX + "fan",
+    "curtain": ROOM_OUTPUT_PREFIX + "curtain",
+    "scene":   ROOM_OUTPUT_PREFIX + "scene",
 }
 
-VALID_DEVICES = frozenset(_DEVICE_TOPIC)
+VALID_DEVICES = frozenset(_DEVICE_OUTPUT)
 _VALID_COLOR = {"warm", "cool", "white", "red", "green", "blue", "purple", "amber"}
 
 
-def _caller_owns_room() -> bool:
-    """Gate for the LEGACY fixed ``room/cmd/*`` topics only.
+def _caller_node_id() -> Optional[str]:
+    """The node whose room this caller may drive, or None.
 
-    Those topics carry no device identity: every room node ever flashed listens
-    on the same six strings, so one tenant's "lights off" would land in every
-    other tenant's room. Until the room node moves onto the per-node namespace
-    (``sandy/node/<node_id>/...``, the same one the robot brain uses), the only
-    safe answer here is "owner only".
+    Reads the caller's own nodes, so the answer is scoped to the tenant by
+    construction and there is no separate ownership rule to keep in step.
 
-    This is NOT the gate for registered devices — those carry their own topic and
-    are checked by :func:`device_store.tenant_owns_topic`, which lets every tenant
-    drive their own hardware. See :meth:`RoomDeviceClient.send_to_topic`.
+    **More than one node is refused rather than guessed.** This entry point takes
+    a device name and no node, so with two robots paired there is no honest way
+    to say which room "turn the light off" meant — and picking one would work
+    silently until the day it picked wrong. Callers that know which node they
+    mean go through the device registry, where the node travels with the device.
     """
-    from app.utils.user_profiles import current_user_id, is_owner_chat_id
+    from app.features.node_store import list_nodes
 
-    return is_owner_chat_id(current_user_id())
+    nodes = list_nodes() or []
+    if len(nodes) != 1:
+        if nodes:
+            logger.warning("[room_device] %d nodes paired — say which one via the "
+                           "device registry", len(nodes))
+        return None
+    return str(nodes[0].get("node_id") or "").strip() or None
+
+
+def room_topic(node_id: str, device: str) -> Optional[str]:
+    """``sandy/node/<node_id>/room/<device>`` — one place that builds it."""
+    output = _DEVICE_OUTPUT.get((device or "").strip().lower())
+    node_id = (node_id or "").strip()
+    if not output or not node_id:
+        return None
+    return f"sandy/node/{node_id}/{output}"
 
 
 def normalize_action(device: str, value: str) -> Optional[str]:
@@ -83,7 +109,7 @@ def normalize_action(device: str, value: str) -> Optional[str]:
     """
     device = (device or "").strip().lower()
     value = str(value or "").strip().lower()
-    if device not in _DEVICE_TOPIC or not value:
+    if device not in _DEVICE_OUTPUT or not value:
         return None
     if device in ("light", "fan"):
         if value in ("on", "off"):
@@ -210,22 +236,30 @@ class RoomDeviceClient:
         return self._publish(topic, str(payload))
 
     def send(self, device: str, value: str) -> bool:
-        """Send one normalized command. Returns False if invalid, offline, or the
-        caller doesn't own the room (only the owner may drive his hardware)."""
-        if not _caller_owns_room():
-            logger.warning("[room_device] actuation refused for non-owner caller")
+        """Send one normalized command to the caller's own room node.
+
+        Returns False if the command is invalid, the broker is unconfigured, or
+        the caller has no single node to address. Every tenant reaches their own
+        hardware and only their own: the topic is built from the caller's node,
+        so there is nothing to get wrong at a call site.
+        """
+        node_id = _caller_node_id()
+        if not node_id:
+            logger.warning("[room_device] actuation refused: no node for this caller")
             return False
         payload = normalize_action(device, value)
         if payload is None:
             return False
-        topic = _DEVICE_TOPIC[(device or "").strip().lower()]
+        topic = room_topic(node_id, device)
+        if topic is None:
+            return False
         return self._publish(topic, payload)
 
     def apply_actions(self, actions: List[Dict[str, str]]) -> Dict[str, Any]:
         """Send a list of [{device, value}]. Returns how many reached the broker.
-        Refuses entirely (sent=[]) when the caller isn't the room's owner."""
-        if not _caller_owns_room():
-            logger.warning("[room_device] apply_actions refused for non-owner caller")
+        Refuses entirely (sent=[]) when the caller has no room node to address."""
+        if not _caller_node_id():
+            logger.warning("[room_device] apply_actions refused: no node for this caller")
             return {"available": self.available, "sent": [], "skipped": list(actions or [])}
         sent, skipped = [], []
         for a in actions or []:

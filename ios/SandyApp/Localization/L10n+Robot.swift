@@ -1,9 +1,10 @@
 import Foundation
 
 // Namespace: robot — the Robot tab (room-node device control over MQTT). Lists
-// scenes, applies them (publishes room/cmd/* to the room-node), and adds/edits/
-// deletes them. owner-gated on the backend. Moved out of the focus.scenes.* keys
-// when scenes became their own tab.
+// scenes, applies them (publishes to sandy/node/<id>/room/* on the caller's own
+// robot), and adds/edits/deletes them. Scoped per tenant on the backend by the
+// topic itself. Moved out of the focus.scenes.* keys when scenes became their
+// own tab.
 enum L10nRobot {
     static let ns = "robot"
 

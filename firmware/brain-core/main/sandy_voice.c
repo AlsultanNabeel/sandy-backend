@@ -784,8 +784,9 @@ static bool wakeword_feed(const int16_t *pcm, int n) {
 //      • action   : CMD_ROOM   → publishes payload to the MQTT topic (room node)
 //                   CMD_ALLOFF → turns light+fan+music off (no topic/payload)
 //                   CMD_OPEN   → opens the cloud voice session (free conversation)
-//      • topic    : CMD_ROOM only — e.g. room/cmd/light, room/cmd/fan,
-//                   room/cmd/music, room/cmd/color, room/cmd/curtain. Else NULL.
+//      • output   : CMD_ROOM only — the bare output name: light, fan, music,
+//                   color, curtain. NOT a full topic: mqtt_publish_room builds
+//                   sandy/node/<id>/room/<output> around it. Else NULL.
 //      • payload  : CMD_ROOM only — "on" / "off" / "0".."100". Else NULL.
 //   3. Rebuild + flash (OTA is fine now; only the one-time partition resize
 //      needed a wired flash).
@@ -799,19 +800,19 @@ typedef struct {
     const char  *phrase;    // English, starts with "SANDY", ALL CAPS (for logs)
     const char  *phonemes;  // ESP-SR phoneme string — generate with tools/gen_phonemes.py
     cmd_act_t    act;
-    const char  *topic;     // MQTT topic for CMD_ROOM, else NULL
+    const char  *output;    // bare room output name for CMD_ROOM, else NULL
     const char  *payload;   // MQTT payload for CMD_ROOM, else NULL
 } sandy_cmd_t;
 
 static const sandy_cmd_t SANDY_COMMANDS[] = {
     // ── Room control: fully local over MQTT, no cloud ──
-    {  1, "SANDY TURN ON THE LIGHT",   "SaNDm TkN nN jc LiT",     CMD_ROOM,   "room/cmd/light", "on"  },
-    {  2, "SANDY TURN OFF THE LIGHT",  "SaNDm TkN eF jc LiT",     CMD_ROOM,   "room/cmd/light", "off" },
-    {  3, "SANDY TURN ON THE FAN",     "SaNDm TkN nN jc FaN",     CMD_ROOM,   "room/cmd/fan",   "on"  },
-    {  4, "SANDY TURN OFF THE FAN",    "SaNDm TkN eF jc FaN",     CMD_ROOM,   "room/cmd/fan",   "off" },
-    {  5, "SANDY PLAY MUSIC",          "SaNDm PLd MYoZgK",        CMD_ROOM,   "room/cmd/music", "on"  },
-    {  6, "SANDY TURN OFF MUSIC",      "SaNDm TkN eF MYoZgK",     CMD_ROOM,   "room/cmd/music", "off" },
-    {  7, "SANDY TURN EVERYTHING OFF", "SaNDm TkN fVRmvgl eF",    CMD_ALLOFF, NULL,             NULL  },  // light+fan+music off
+    {  1, "SANDY TURN ON THE LIGHT",   "SaNDm TkN nN jc LiT",     CMD_ROOM,   "light",   "on"  },
+    {  2, "SANDY TURN OFF THE LIGHT",  "SaNDm TkN eF jc LiT",     CMD_ROOM,   "light",   "off" },
+    {  3, "SANDY TURN ON THE FAN",     "SaNDm TkN nN jc FaN",     CMD_ROOM,   "fan",     "on"  },
+    {  4, "SANDY TURN OFF THE FAN",    "SaNDm TkN eF jc FaN",     CMD_ROOM,   "fan",     "off" },
+    {  5, "SANDY PLAY MUSIC",          "SaNDm PLd MYoZgK",        CMD_ROOM,   "music",   "on"  },
+    {  6, "SANDY TURN OFF MUSIC",      "SaNDm TkN eF MYoZgK",     CMD_ROOM,   "music",   "off" },
+    {  7, "SANDY TURN EVERYTHING OFF", "SaNDm TkN fVRmvgl eF",    CMD_ALLOFF, NULL,      NULL  },  // light+fan+music off
 
     // ── Need the cloud (focus sessions / spoken answers). For NOW these just
     //    open the voice session so you can talk. TODO phase 2: send an intent
@@ -870,15 +871,15 @@ static bool commands_dispatch(int id) {
             return true;                       // caller opens the voice session
         case CMD_ALLOFF:
 #if ENABLE_MQTT
-            mqtt_publish_room("room/cmd/light", "off");
-            mqtt_publish_room("room/cmd/fan",   "off");
-            mqtt_publish_room("room/cmd/music", "off");
+            mqtt_publish_room("light", "off");
+            mqtt_publish_room("fan",   "off");
+            mqtt_publish_room("music", "off");
 #endif
             return false;
         case CMD_ROOM:
         default:
 #if ENABLE_MQTT
-            mqtt_publish_room(c->topic, c->payload);
+            mqtt_publish_room(c->output, c->payload);
 #endif
             return false;
         }

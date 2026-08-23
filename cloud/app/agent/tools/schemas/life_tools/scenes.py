@@ -34,8 +34,9 @@ def actuate_scene_actions(actions: list) -> bool:
     whole function on "are you the owner" meant nobody else's scene could ever
     move anything. Each path now carries its own, narrower gate: registry devices
     are checked against the calling tenant's own registry inside
-    ``send_to_topic``, and the legacy fixed ``room/cmd/*`` vocab stays owner-only
-    inside ``client.send`` because those topics carry no device identity.
+    ``send_to_topic``, and the short room vocab resolves the caller's own node
+    inside ``client.send``. Both end up scoped to the caller by the topic itself
+    rather than by a rule someone has to remember to apply.
     """
     try:
         from app.features.device_store import command_payload, device_topic, get_device

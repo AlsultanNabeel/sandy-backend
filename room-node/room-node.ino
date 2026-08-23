@@ -1,7 +1,7 @@
 // =========================
 // Sandy — Room Node (الـESP32 القديمة)
 // =========================
-// جهاز ثانٍ على نفس بروكر HiveMQ تبع الروبوت. يشترك بمواضيع room/cmd/#
+// جهاز ثانٍ على نفس بروكر HiveMQ تبع الروبوت. يشترك بمواضيع غرفته
 // اللي تنشرها ساندي (العقد في cloud/app/integrations/room_device.py)
 // وينفّذها على عتاد الغرفة.
 //
@@ -10,11 +10,22 @@
 //
 // أول جهاز: مفتاح الإضاءة عبر سيرفو يكبس القلّاب ميكانيكياً (صفر تلامس مع 220).
 //
-// المواضيع (نفس عقد الكلاود — خلّي الطرفين متطابقين):
-//   room/cmd/light   ← "on" | "off" | "0".."100"   (السيرفو: أي رقم>0 = تشغيل)
-//   room/cmd/music   ← "play:F:T" | "F:T" | "vol:0..30" | "stop|pause|resume|next|prev"
-//   room/cmd/color   ← (لاحقاً، لما نركّب شريط الألوان)
-//   room/status      → JSON heartbeat كل 5 ثواني
+// ── المواضيع: تحت شجرة الروبوت، مش شجرة عامة ────────────────────────────────
+//
+// كانت `room/cmd/*` — شجرة عالمية مشتركة بين كل الزباين. يعني عقدة غرفة عند
+// شخص كانت تسمع أمر «طفّي الضو» تبع شخص تاني. ومع إنّ كل لوح صار إله مفتاحه
+// الخاص، **صلاحية الوسيط ما كانت تنكتب**: الدماغ بده يوصل لشجرته وللشجرة
+// العامة، والخطة المجانية بتعطي صلاحية وحدة لكل مفتاح. يعني الشجرة العامة
+// كانت بتكسر عزل الأجهزة وبتكلّف اشتراكًا مدفوعًا سوا.
+//
+// هلق كل شي تحت `sandy/node/<معرّف>/`، متل الكاميرا بالضبط — والمعرّف بينشتقّ
+// من كود الاقتران المطبوع ع علبة الروبوت. عقدة الغرفة جزء من نفس الروبوت،
+// فبتاخد نفس الكود.
+//
+//   sandy/node/<معرّف>/room/light   ← "on" | "off" | "0".."100"
+//   sandy/node/<معرّف>/room/music   ← "play:F:T" | "F:T" | "vol:0..30" | "stop|…"
+//   sandy/node/<معرّف>/room/color   ← (لاحقاً، لما نركّب شريط الألوان)
+//   sandy/node/<معرّف>/room/status  → JSON heartbeat كل 5 ثواني
 //
 // رفع OTA: بعد أول فلاش بالكيبل، تظهر اللوحة كـ Network Port باسم "sandy-room".
 
@@ -149,16 +160,49 @@ static void handleMusic(const String& value) {
 //   // TODO: اكتب لون الـLED strip حسب value (اسم لون أو #rrggbb)
 // }
 
-// جدول الأجهزة: موضوع MQTT → دالة. هذا هو "مفتاح التوسعة".
+// جدول الأجهزة: **اسم المخرج** → دالة. هذا هو "مفتاح التوسعة".
+//
+// الاسم مجرّد من الشجرة بالقصد: الشجرة بتنبنى مرة وحدة بـ`roomBuildTopics`،
+// فلو تغيّرت ما بينلزم تعديل سطر هون. الجدول القديم كان فيه المسار كامل بكل
+// صف، فتغيير الشجرة كان لازم يمرّ ع كل صف — وهيك بينتنسى صف.
 typedef void (*DeviceHandler)(const String& value);
-struct Device { const char* topic; DeviceHandler handler; };
+struct Device { const char* name; DeviceHandler handler; };
 
 static const Device DEVICES[] = {
-  { "room/cmd/light", handleLight },
-  { "room/cmd/music", handleMusic },
-  // { "room/cmd/color", handleColor },   // ← أضف جهازاً جديداً بسطر واحد
+  { "light", handleLight },
+  { "music", handleMusic },
+  // { "color", handleColor },   // ← أضف جهازاً جديداً بسطر واحد
 };
 static const size_t DEVICE_COUNT = sizeof(DEVICES) / sizeof(DEVICES[0]);
+
+// =========================
+// المواضيع — تحت شجرة الروبوت
+// =========================
+
+// نفس اشتقاق الكاميرا والدماغ حرفيًّا: حروف صغيرة وأرقام فقط من كود الاقتران.
+// أي فرق بالاشتقاق بين لوحين معناه لوحين ع شجرتين، وهاد بيبيّن «الأمر ما وصل»
+// بلا أي خطأ بأي مكان.
+static String roomNodeId() {
+  String out;
+  const char* src = SANDY_PAIR_CODE;
+  for (size_t i = 0; src[i]; i++) {
+    char c = src[i];
+    if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) out += c;
+  }
+  return out;
+}
+
+static String g_topicBase;      // sandy/node/<معرّف>/room
+static String g_topicFilter;    // sandy/node/<معرّف>/room/#
+static String g_topicStatus;    // sandy/node/<معرّف>/room/status
+
+static void roomBuildTopics() {
+  g_topicBase   = "sandy/node/" + roomNodeId() + "/room";
+  g_topicFilter = g_topicBase + "/#";
+  g_topicStatus = g_topicBase + "/status";
+  Serial.printf("[MQTT] node id = %s\n", roomNodeId().c_str());
+}
 
 // =========================
 // MQTT
@@ -171,13 +215,22 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String t(topic);
   Serial.printf("[MQTT] %s = %s\n", t.c_str(), value.c_str());
 
+  // بناخد المقطع الأخير بعد شجرتنا. الاشتراك بنجمة بيرجّعلنا نبضتنا كمان،
+  // فبنتجاهلها صراحة — بلا هيك كل نبضة بتطبع «لا معالج» كل خمس ثواني.
+  if (!t.startsWith(g_topicBase + "/")) {
+    Serial.printf("[MQTT] موضوع برّا شجرتنا: %s\n", t.c_str());
+    return;
+  }
+  String out = t.substring(g_topicBase.length() + 1);
+  if (out == "status") return;
+
   for (size_t i = 0; i < DEVICE_COUNT; i++) {
-    if (t == DEVICES[i].topic) {
+    if (out == DEVICES[i].name) {
       DEVICES[i].handler(value);
       return;
     }
   }
-  Serial.printf("[MQTT] لا معالج للموضوع %s\n", t.c_str());
+  Serial.printf("[MQTT] لا معالج للمخرج %s\n", out.c_str());
 }
 
 static bool mqttReconnect() {
@@ -192,7 +245,8 @@ static bool mqttReconnect() {
   Serial.printf("[MQTT] connecting as %s ...\n", clientId.c_str());
   if (g_mqtt.connect(clientId.c_str(), SANDY_MQTT_USER, SANDY_MQTT_PASS)) {
     Serial.println("[MQTT] connected");
-    g_mqtt.subscribe("room/cmd/#", 1);
+    g_mqtt.subscribe(g_topicFilter.c_str(), 1);
+    Serial.printf("[MQTT] subscribed to %s\n", g_topicFilter.c_str());
     return true;
   }
   Serial.printf("[MQTT] connect failed rc=%d\n", g_mqtt.state());
@@ -214,7 +268,7 @@ static void publishStatus() {
            "\"ip\":\"%s\",\"board\":\"%s\"}",
            now / 1000, WiFi.RSSI(), ESP.getFreeHeap(), g_lightState.c_str(),
            WiFi.localIP().toString().c_str(), SANDY_ROOM_BOARD_ID);
-  g_mqtt.publish("room/status", buf, false);
+  g_mqtt.publish(g_topicStatus.c_str(), buf, false);
 }
 
 // =========================
@@ -266,6 +320,9 @@ void setup() {
   connectWiFi();
 
   g_tcp.setInsecure();   // مؤقتاً بدون verify cert (زي فيرموير الروبوت)
+  // قبل أي اتصال: المواضيع لازم تكون جاهزة وقت أول محاولة اشتراك.
+  roomBuildTopics();
+
   g_mqtt.setServer(SANDY_MQTT_HOST, SANDY_MQTT_PORT);
   g_mqtt.setCallback(mqttCallback);
   g_mqtt.setBufferSize(512);

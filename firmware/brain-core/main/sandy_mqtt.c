@@ -384,6 +384,12 @@ static void _handle_screen_img(const char *val) {
 // large payload arrives in pieces and must be dispatched exactly once, when the
 // last piece lands — not once per piece.
 static void _dispatch(const char *out, const char *val) {
+    // مخارج ألواح تانية ع نفس الشجرة — الكاميرا وعقدة الغرفة. الدماغ مشترك
+    // بالشجرة كلها بنجمة، فبتوصله رسايلهن كمان. بلا هالسطر كل أمر كاميرا وكل
+    // أمر غرفة كان بيطبع «مخرج مجهول»، وهاد بيخلّي التحذير بلا معنى: لمّا كل
+    // شي بيحذّر، ما حدا بيقرا التحذير الحقيقي.
+    if (!strncmp(out, "cam/", 4) || !strncmp(out, "room/", 5)) return;
+
     if      (!strcmp(out, "mood"))         _handle_mood(val);
     else if (!strcmp(out, "servo"))        _handle_servo(val);
     else if (!strcmp(out, "gesture"))      _handle_gesture(val);
@@ -658,9 +664,23 @@ void mqtt_publish_status(void) {
     if (buf_lock) xSemaphoreGive(buf_lock);
 }
 
-// Raw publish for local command words (room node lives on the same broker).
-bool mqtt_publish_room(const char *topic, const char *payload) {
-    if (!s_client || !topic || !payload) return false;
+// Publish to the room node, which lives on this robot's own topic tree.
+//
+// `out` is the bare output name ("light", "fan", "music") and this builds
+// `sandy/node/<id>/room/<out>`. It used to take the whole topic and publish it
+// raw, on a global `room/cmd/*` tree shared by every customer — so one person's
+// "lights off" reached everybody's room node. It also made the permission
+// unwritable: the brain needed its own tree *and* a global one, and a broker
+// credential on the free plan carries a single topic filter. One tree fixes
+// both.
+bool mqtt_publish_room(const char *out, const char *payload) {
+    if (!s_client || !out || !payload) return false;
+    if (s_base[0] == '\0') {
+        ESP_LOGW(TAG, "no node id yet — dropping room/%s", out);
+        return false;
+    }
+    char topic[96];
+    snprintf(topic, sizeof(topic), "%s/room/%s", s_base, out);
     int id = esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 0);
     ESP_LOGI(TAG, "publish %s = %s (%s)", topic, payload, id < 0 ? "FAIL" : "ok");
     return id >= 0;

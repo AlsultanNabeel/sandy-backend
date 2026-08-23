@@ -15,7 +15,9 @@ Collection: sandy_devices (tenant-scoped via scoped())
     label,         # human label ("ضوء الصالة")
     room,          # optional grouping ("salon")
     control_type,  # switch | dimmer | enum | media | cover | ir | text
-    transport,     # how to reach it: {"kind": "mqtt", "topic": "room/cmd/light"}
+    transport,     # how to reach it: {"kind": "node", "node_id": …, "output": …}
+                   #                  or {"kind": "mqtt", "topic": …} for a
+                   #                  device that is not on one of our boards
     meta,          # type-specific: {values:[...]} for enum, {min,max} for dimmer,
                    #                 {buttons:{name: code}} for ir
     state,         # last known payload we sent ("" until first command)

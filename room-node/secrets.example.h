@@ -18,4 +18,9 @@ const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 #define SANDY_OTA_PASSWORD "sandy-ota"
 
+// كود الاقتران المطبوع ع علبة الروبوت — **نفس الكود المحروق ع الدماغ
+// والكاميرا**. عقدة الغرفة بتشتق منه شجرتها: `sandy/node/<معرّف>/room/…`.
+// كود مختلف معناه العقدة بتسمع ع شجرة تانية، والأوامر بتضيع بلا أي خطأ.
+#define SANDY_PAIR_CODE     "SANDY-0001"
+
 #endif

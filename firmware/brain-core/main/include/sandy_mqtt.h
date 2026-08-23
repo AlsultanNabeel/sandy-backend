@@ -5,10 +5,12 @@
 esp_err_t mqtt_sandy_start(void);
 void      mqtt_publish_status(void);    // call manually if needed; auto every 5s
 
-// Publish a raw retained-0/QoS-0 message to any topic on the shared broker.
-// Used by local command words to drive the room node (e.g. "room/cmd/light").
+// Drive one room output from a local command word — `out` is the bare name
+// ("light", "fan", "music"), and the topic is built under this robot's own tree
+// as sandy/node/<id>/room/<out>. Passing a full topic here is a bug: it would
+// arrive as sandy/node/<id>/room/room/cmd/light and nothing would listen.
 // No-op (returns false) if the MQTT client isn't connected yet.
-bool      mqtt_publish_room(const char *topic, const char *payload);
+bool      mqtt_publish_room(const char *out, const char *payload);
 
 // Store this board's own broker login and start using it.
 //
