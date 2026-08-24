@@ -237,9 +237,9 @@ static const bool s_session_active = true;    // no gate: always streaming
 // بتنفع ونصيحة بتوديه يصلّح الراوتر الشغّال.
 #define TX_WEAK_RSSI_DBM       (-75)
 
-// كم مقطع صوت انرمى لأنّ المقبس كان مشغولًا. عدّاد مش راية: صفر معناه المشكلة
-// برّا اللوح، ورقم بيكبر معناه المنافسة ع المقبس هي السبب — والفرق ما كان إله
-// أي أثر بالسجلّ.
+// كم مرّة كان المقبس مشغولًا وقت ما بدنا نرسل. صار **عدّاد تأخير مش ضياع**:
+// من بعد ما صار القفل بينتاخد قبل قراءة الصوت، ما بيضيع مقطع — بس رقم بيكبر
+// معناه المنافسة ع المقبس شغّالة، وهي أصل التأخير. صفر معناه السبب برّا اللوح.
 static volatile uint32_t s_tx_lock_drops;
 #define SPK_CHUNK_BYTES     1920    // ~40 ms at 24 kHz / 16-bit
 // Jitter buffer — **adaptive, because one number cannot serve both jobs.**
@@ -999,24 +999,35 @@ static void ws_tx_task(void *arg) {
         return;
     }
     for (;;) {
-        size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES,
-                                        pdMS_TO_TICKS(100));
-        if (n == 0) continue;
-        // **A `continue` here throws the audio away.** The chunk has already
-        // been taken out of the stream buffer, so failing to get the socket
-        // does not delay it — it deletes it, and the sentence arrives at the
-        // server with a hole in it. Silent until now, and it is the shape of
-        // "she cut off mid-word on a perfectly good network": nothing about
-        // that failure involves the network at all.
-        if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
-            s_tx_lock_drops++;
+        // **The socket first, the audio second.**
+        //
+        // This used to read a chunk and then try for the socket, and give up on
+        // the chunk if the socket was busy. But the read had already removed it
+        // from the buffer, so giving up did not delay that audio — it deleted
+        // it, and the sentence reached the server with a hole in the middle of a
+        // word. On a fast network, with nothing logged, and looking for all the
+        // world like a network fault.
+        //
+        // Taking the lock first means nothing leaves the buffer that cannot be
+        // sent. A busy socket now costs latency, which the queue absorbs and the
+        // backlog warning below reports — instead of costing words, which
+        // nothing could report because they were gone.
+        if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+            s_tx_lock_drops++;   // now a delay counter, not a loss counter
             continue;
         }
-        if (s_client && s_authed) {
+        // Zero timeout, inside the lock: waiting for audio while holding it
+        // would block a session teardown behind a silent microphone.
+        size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES, 0);
+        if (n && s_client && s_authed) {
             esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
                                           pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
         }
         xSemaphoreGive(s_ws_mutex);
+        if (n == 0) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
 
         // A buffer that stays deep means the link cannot keep up with real-time
         // audio. Say so — "slow net" is a different problem from "no net" and

@@ -107,12 +107,29 @@ def test_the_warning_distinguishes_a_weak_radio_from_a_stalled_link():
     assert "weak ? SANDY_ST_NET_SLOW : SANDY_ST_LINK_STALL" in voice
 
 
-def test_audio_dropped_waiting_for_the_socket_is_counted():
-    """The chunk is already out of the stream buffer when the socket is busy, so
-    giving up does not delay it — it deletes it, and the sentence reaches the
-    server with a hole in it. That path was silent, and it is the shape of "she
-    cut off mid-word on a perfectly good network"."""
+def test_nothing_leaves_the_buffer_that_cannot_be_sent():
+    """The uplink used to read a chunk and then try for the socket, and give up
+    on the chunk if the socket was busy — but the read had already removed it, so
+    giving up deleted the audio rather than delaying it. A hole in the middle of
+    a word, on a fast network, with nothing logged.
+
+    Taking the lock first is the fix: a busy socket costs latency, which the
+    queue absorbs and the backlog warning reports, instead of costing words that
+    nothing could report because they were gone.
+    """
     voice = _read("firmware/brain-core/main/sandy_voice.c")
-    assert "s_tx_lock_drops" in voice
-    lock = voice[voice.index("xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(50))"):][:300]
-    assert "s_tx_lock_drops++" in lock, "the drop is still invisible"
+    body = voice[voice.index("static void ws_tx_task"):]
+    body = body[:body.index("\n}\n")]
+
+    i_lock = body.index("xSemaphoreTake(s_ws_mutex")
+    i_read = body.index("xStreamBufferReceive(s_tx_stream")
+    assert i_lock < i_read, (
+        "the audio is read before the socket is secured — a busy socket deletes "
+        "it again")
+
+    # And the read must not block while the lock is held, or a session teardown
+    # queues behind a silent microphone.
+    read_call = body[i_read:i_read + 160]
+    assert "TX_CHUNK_BYTES, 0)" in read_call, "blocking read inside the lock"
+
+    assert "s_tx_lock_drops++" in body, "socket contention is invisible again"
