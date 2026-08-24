@@ -201,9 +201,29 @@ def get_persona_directives(
     ``include_summaries=False`` drops the recent conversation summaries — the
     voice (native-audio) path passes this so a past topic can't be replayed into
     a live session as if it were the current request.
+
+    **The `sandy_memories` read below feeds three of the six blocks, and nothing
+    more.** It used to `return None` when that collection came back empty, which
+    took the other three down with it — the life snapshot, the life search, and
+    the onboarding profile. So a customer who had just typed their name and
+    interests into first-run setup got *nothing*: Sandy did not know their name,
+    their interests, their tasks or their books, and asked who they were. Then
+    one unrelated summary would happen to be written weeks later and she would
+    appear to learn everything at once.
+
+    The blocks are independent by nature. Each one is now asked for on its own
+    and contributes if it has something, and the function returns ``None`` only
+    when every one of them is empty.
     """
     if mongo_db is None or not chat_id:
         return None
+
+    from app.agent.ltm_crypto import decrypt_field
+    prefs: List[str] = []
+    rels: List[str] = []
+    lessons: List[str] = []
+    summaries: List[str] = []
+
     try:
         docs = list(mongo_db["sandy_memories"].find(
             {
@@ -217,17 +237,13 @@ def get_persona_directives(
             sort=[("created_at", -1)],
             limit=25,
         ))
-    except Exception:
-        return None
-
-    if not docs:
-        return None
-
-    from app.agent.ltm_crypto import decrypt_field
-    prefs: List[str] = []
-    rels: List[str] = []
-    lessons: List[str] = []
-    summaries: List[str] = []
+    except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+        # A failed read costs this one collection's blocks, not the whole
+        # context — the same reason the early return had to go. Reported at
+        # warning: a memory read that fails is a real degradation of what she
+        # knows, and debug is invisible at the level production runs at.
+        logger.warning("[context_builder] sandy_memories read failed: %s", exc)
+        docs = []
 
     for d in docs:
         label = d.get("label")
@@ -266,9 +282,19 @@ def get_persona_directives(
     # اللي فيها الكلمة، حتى لو ما كانوا ضمن الأربعة الأحدث. المجموع إنها بتعرف
     # حياته إجمالًا، وبتوصل لأي تفصيل لحظة ما يصير إله معنى.
     if message:
-        # الفهرسة أول: عنصر جديد لازم يصير قابلًا للبحث بالمعنى قبل ما ندوّر.
-        # بتتخطّى اللي انفهرس قبل، فكلفتها مرّة لكل عنصر مش مع كل سؤال.
-        _safe_index_life()
+        # الفهرسة بتنشغّل ع الخلفية، مش جوّا القراءة.
+        #
+        # هي **كتابة**، وكانت بتنعمل بنص قراءة بيمرّ فيها كل رسالة. وكلفتها
+        # كانت بتكبر مع قوائم المستخدم: كل عنصر استعلام وجود ونداء تضمين لحاله.
+        # مية عنصر = مية رحلة لقاعدة البيانات ومية نداء متسلسل — وأسوأ إشي إنه
+        # بالوضع المستقرّ، لما يكون كل إشي مفهرس أصلًا، الشغل كله بيصير استعلامات
+        # وجود عشان تكتشف إنه ما في إشي لازم ينعمل.
+        #
+        # هلّق الكشف عن الجديد صار استعلام واحد والتضمين نداء واحد مجمّع (شوف
+        # `load_facts_to_chroma`)، وكمان انشال عن خيط الطلب: البحث تحت بيشتغل
+        # ع الفهرس الموجود، والعنصر اللي انضاف هلّق بيلحق بالرسالة الجاية.
+        # عنصر بيتأخّر دور واحد أرخص بكتير من كل دور بيستنّى الفهرسة.
+        _index_life_in_background()
         # وبعدين البحث بالكلمة — **كطبقة تانية مش وحيدة.**
         #
         # البحث بالمعنى بيلاقي «الجيم» لمّا تسأل عن الرياضة، وبيضيّع أحيانًا
@@ -307,13 +333,20 @@ def _safe_life_snapshot() -> str:
         return ""
 
 
-def _safe_index_life() -> None:
-    """فهرسة عناصره للبحث بالمعنى. تخطّي صامت لو ما في مخزن تضمينات."""
-    try:
+def _index_life_in_background() -> None:
+    """فهرسة عناصره للبحث بالمعنى، ع الخلفية.
+
+    `submit_background` بينقل الشغلة لخيط تاني **مع سياق صاحبها** — والسياق هو
+    كل الموضوع هون: الفهرسة بتقرا مخازن مقيّدة بالمستأجر، وخيط بلا سياق بيلاقي
+    قوائم فاضية وبيكتب لا إشي، بصمت.
+    """
+    from app.utils.thread_pool import submit_background
+
+    def _run() -> None:
         from app.agent.life_snapshot import index_life_for_search
         index_life_for_search()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("[context_builder] life indexing skipped: %s", exc)
+
+    submit_background(_run, _label="index_life")
 
 
 def _safe_life_search(message: str) -> str:

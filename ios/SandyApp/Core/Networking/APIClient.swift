@@ -88,17 +88,42 @@ final class APIClient: APIClientProtocol {
             throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 401 {
-            // Only an authenticated request hitting 401 means a dead session;
-            // a 401 from a login attempt is just wrong credentials.
-            if auth { onUnauthorized?() }
-            throw APIError(message: "انتهت الجلسة، سجّل دخولك من جديد.", kind: .unauthorized)
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let machine = Self.nonEmpty(body?["error"] as? String)
+        let human = Self.nonEmpty(body?["message"] as? String)
+
+        // 401 على طلب **موثَّق** = الجلسة ماتت. 401 على طلب مش موثَّق = محاولة
+        // دخول فشلت، وهاي شغلة تانية تمامًا.
+        //
+        // الشرط كان بس ع النداء `onUnauthorized?()`، والرسالة كانت وحدة
+        // للحالتين. فمين بيغلط بكلمة السر كان الخادم يرجّعله
+        // `invalid_credentials` وياخد «انتهت الجلسة، سجّل دخولك من جديد» —
+        // وهو عم يسجّل دخول. وشاشة الدخول عندها ترجمة عربية جاهزة لهالرمز
+        // (`friendlyAuthError`) ما كانت توصلها ولا مرّة.
+        if code == 401 && auth {
+            onUnauthorized?()
+            throw APIError(message: human ?? "انتهت الجلسة، سجّل دخولك من جديد.",
+                           code: machine, kind: .unauthorized)
         }
         if code >= 400 {
-            let err = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw APIError(message: (err?["error"] as? String) ?? "خطأ \(code)", kind: .server)
+            // `message` للعرض، `error` للتفريع — حقلان، مش حقل بمعنيين.
+            //
+            // الخادم بيبعت التنين وهنّي مش نفس الإشي: `error` رمز آلي بتفرّع
+            // عليه الشاشات (`rate_limited`، `already_claimed`)، و`message`
+            // الجملة المكتوبة عشان الإنسان يقراها. قراءة `error` لحاله كانت
+            // بتعرض «daily_quota_exceeded» لمستخدم عربي وبتسمّيها شرحًا.
+            throw APIError(message: human ?? machine ?? "خطأ \(code)",
+                           code: machine, kind: .server)
         }
         return data
+    }
+
+    /// النص بعد قصّ الفراغات، أو nil لو طلع فاضي — عشان `{"message": ""}` ما
+    /// ينتصر على رمز فيه معلومة.
+    private static func nonEmpty(_ s: String?) -> String? {
+        guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !t.isEmpty else { return nil }
+        return t
     }
 
     // السطح غير المطبوع (JSON عام). داخلي (مش private) حتى توصله امتدادات APIClient

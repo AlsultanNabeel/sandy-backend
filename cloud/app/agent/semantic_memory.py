@@ -34,6 +34,8 @@ import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
+from pymongo.errors import PyMongoError
+
 from app.db import configure, get_db
 from app.utils.tenant_db import scoped
 from app.utils.user_profiles import active_profile_is_guest, get_active_user_profile
@@ -156,15 +158,38 @@ def _embed(text: str) -> Optional[List[float]]:
     """Embed text, or None if there's no client or the call fails."""
     if _embed_client is None or not text:
         return None
+    vectors = _embed_many([text])
+    return vectors[0] if vectors else None
+
+
+def _embed_many(texts: List[str]) -> List[Optional[List[float]]]:
+    """Embed a batch in **one** request, in order, with None for any failure.
+
+    The embeddings endpoint has always taken a list; we were calling it once per
+    item inside a `for` loop. Indexing a person's life — their books, habits,
+    tasks and journal — is the caller that made that visible: a hundred items was
+    a hundred sequential HTTPS round trips, which is not slow, it is a stall.
+
+    One call for the whole batch is the same tokens and the same price. The only
+    thing it removes is the waiting.
+    """
+    if _embed_client is None or not texts:
+        return [None] * len(texts)
     try:
-        resp = _embed_client.embeddings.create(
-            model=_embed_model,
-            input=text,
-        )
-        return resp.data[0].embedding
+        resp = _embed_client.embeddings.create(model=_embed_model, input=texts)
+        # `data` is ordered by the API, but it carries an explicit `index` and
+        # relying on the order rather than on the field is how a batch silently
+        # attaches the wrong vector to the wrong text — a failure with no symptom
+        # except that recall stops making sense.
+        out: List[Optional[List[float]]] = [None] * len(texts)
+        for item in resp.data:
+            idx = getattr(item, "index", None)
+            if isinstance(idx, int) and 0 <= idx < len(out):
+                out[idx] = item.embedding
+        return out
     except Exception as e:
-        logger.warning(f"[Memory] embedding failed: {e}")
-        return None
+        logger.warning("[Memory] batch embedding failed (%d texts): %s", len(texts), e)
+        return [None] * len(texts)
 
 
 # ID helpers
@@ -191,47 +216,79 @@ def _conv_id(user_text: str, assistant_text: str, chat_id: str = "") -> str:
 
 
 def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
-    """Upsert user facts, embedding the new ones."""
+    """Upsert user facts, embedding the new ones.
+
+    **Three round trips at most, whatever the size of the batch, and none at all
+    when nothing is new.**
+
+    This used to run per item: one `count_documents` to ask whether it existed,
+    one embedding request if not, one `update_one` to store it. For a person with
+    a hundred books, habits, tasks and journal entries that is a hundred database
+    queries and up to a hundred sequential calls to the embeddings API — and its
+    caller (`life_snapshot.index_life_for_search`) sits on a path that runs on
+    every message. The steady state is the worst part: once everything is
+    indexed, the work is *entirely* the hundred existence checks, every single
+    turn, to discover that there is nothing to do.
+
+    Now: one query to find which ids already exist, one batched embedding call
+    for the genuinely new ones, one bulk write. Nothing new means one query and
+    then nothing, which is what a no-op should cost.
+    """
     if not _can_write_memory():
         return
     coll = _facts_coll()
     if coll is None or not facts:
         return
     chat_id = coll.tenant
-    inserted = 0
+
+    # De-duplicate within the batch too: the same text twice would otherwise
+    # embed twice and race itself in the bulk write.
+    wanted: Dict[str, Dict[str, Any]] = {}
     for fact in facts:
         text = (fact.get("text") or "").strip()
         if not text:
             continue
-        fid = _fact_id(text, chat_id)
-        try:
-            if coll.count_documents({"_id": fid}) > 0:
-                continue
-            doc = {
-                "_id": fid,
-                "text": text,
-                "type": fact.get("type", "general"),
-                "usage_count": 0,
-                "importance_score": 1.0,
-            }
-            vec = _embed(text)
-            if vec:
-                doc["embedding"] = vec
-            # chat_id isn't in `doc` — the scoped upsert seeds it from the
-            # filter's equality terms, so it can't drift from the tenant.
-            result = coll.update_one(
-                {"_id": fid},
-                {"$setOnInsert": doc},
-                upsert=True,
-            )
-            if result.upserted_id is not None:
-                inserted += 1
-        except Exception as e:
-            logger.warning(f"[Memory] load_facts: {e}")
+        wanted.setdefault(_fact_id(text, chat_id), {
+            "text": text,
+            "type": fact.get("type", "general"),
+        })
+    if not wanted:
+        return
+
+    try:
+        existing = {
+            d["_id"] for d in coll.find({"_id": {"$in": list(wanted)}}, {"_id": 1})
+        }
+    except PyMongoError as exc:
+        logger.warning("[Memory] load_facts existence check failed: %s", exc)
+        return
+
+    new_ids = [fid for fid in wanted if fid not in existing]
+    if not new_ids:
+        return
+
+    vectors = _embed_many([wanted[fid]["text"] for fid in new_ids])
+
+    docs: List[Dict[str, Any]] = []
+    for fid, vec in zip(new_ids, vectors):
+        doc: Dict[str, Any] = {
+            "_id": fid,
+            "text": wanted[fid]["text"],
+            "type": wanted[fid]["type"],
+            "usage_count": 0,
+            "importance_score": 1.0,
+        }
+        if vec:
+            doc["embedding"] = vec
+        docs.append(doc)
+
+    try:
+        inserted = coll.insert_missing(docs)
+    except PyMongoError as exc:
+        logger.warning("[Memory] load_facts bulk write failed: %s", exc)
+        return
     if inserted:
-        logger.info(
-            f"[Memory] indexed {inserted} new facts (chat_id={chat_id})", flush=True
-        )
+        logger.info("[Memory] indexed %d new facts (chat_id=%s)", inserted, chat_id)
 
 
 # Conversations
@@ -248,7 +305,12 @@ def load_conversations_to_chroma(
         return
     chat_id = coll.tenant
     recent = conversations[-max_recent:]
-    inserted = 0
+
+    # Same three-round-trip shape as load_facts_to_chroma, and for the same
+    # reason: sixty turns was sixty existence checks and up to sixty sequential
+    # embedding requests.
+    wanted: Dict[str, str] = {}
+    order: List[str] = []
     for conv in recent:
         user_text = (conv.get("user") or conv.get("content") or "").strip()
         asst_text = (conv.get("sandy") or conv.get("assistant") or "").strip()
@@ -258,34 +320,53 @@ def load_conversations_to_chroma(
         if asst_text:
             combined += f"\nساندي: {asst_text}"
         cid = _conv_id(user_text, asst_text, chat_id)
-        try:
-            if coll.count_documents({"_id": cid}) > 0:
-                continue
-            doc = {
-                "_id": cid,
-                "text": combined,
-                "role": "conversation",
-                "ts": conv.get("timestamp", ""),
-            }
-            vec = _embed(combined)
-            if vec:
-                doc["embedding"] = vec
-            # chat_id isn't in `doc` — the scoped upsert seeds it from the
-            # filter's equality terms, so it can't drift from the tenant.
-            result = coll.update_one(
-                {"_id": cid},
-                {"$setOnInsert": doc},
-                upsert=True,
-            )
-            if result.upserted_id is not None:
-                inserted += 1
-        except Exception as e:
-            logger.warning(f"[Memory] load_conversations: {e}")
+        if cid not in wanted:
+            wanted[cid] = combined
+            order.append(cid)
+    if not wanted:
+        return
+
+    try:
+        existing = {
+            d["_id"] for d in coll.find({"_id": {"$in": list(wanted)}}, {"_id": 1})
+        }
+    except PyMongoError as exc:
+        logger.warning("[Memory] load_conversations existence check failed: %s", exc)
+        return
+
+    new_ids = [cid for cid in order if cid not in existing]
+    if not new_ids:
+        return
+
+    vectors = _embed_many([wanted[cid] for cid in new_ids])
+    ts_by_id = {}
+    for conv in recent:
+        user_text = (conv.get("user") or conv.get("content") or "").strip()
+        asst_text = (conv.get("sandy") or conv.get("assistant") or "").strip()
+        if user_text:
+            ts_by_id.setdefault(_conv_id(user_text, asst_text, chat_id),
+                                conv.get("timestamp", ""))
+
+    docs: List[Dict[str, Any]] = []
+    for cid, vec in zip(new_ids, vectors):
+        doc: Dict[str, Any] = {
+            "_id": cid,
+            "text": wanted[cid],
+            "role": "conversation",
+            "ts": ts_by_id.get(cid, ""),
+        }
+        if vec:
+            doc["embedding"] = vec
+        docs.append(doc)
+
+    try:
+        inserted = coll.insert_missing(docs)
+    except PyMongoError as exc:
+        logger.warning("[Memory] load_conversations bulk write failed: %s", exc)
+        return
     if inserted:
-        logger.info(
-            f"[Memory] indexed {inserted} new conversation turns (chat_id={chat_id})",
-            flush=True,
-        )
+        logger.info("[Memory] indexed %d new conversation turns (chat_id=%s)",
+                    inserted, chat_id)
 
 
 # Search
@@ -422,7 +503,20 @@ def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3) -> L
     col = get_db()["sandy_memories"]
     fil = {"chat_id": str(chat_id), "label": "conversation_summary"}
     try:
-        results = _vector_search(col, query, chat_id, n_results, {})
+        # `summary` has to be asked for.
+        #
+        # `_vector_search` projects `text` and `score` and whatever else it is
+        # handed. Summaries live in a field called `summary`, and this passed an
+        # empty dict — so the pipeline ran, matched, and returned documents with
+        # no `summary` key, which the comprehension below then filtered out
+        # entirely. The vector path has therefore always returned nothing, and
+        # the keyword fallback under it never ran either, because the aggregate
+        # succeeded and only a `None` triggers the fallback.
+        #
+        # Sandy has never once recalled a conversation summary through semantic
+        # search on an install where Atlas Vector Search is configured. There is
+        # no error for this: an empty list is what "nothing relevant" looks like.
+        results = _vector_search(col, query, chat_id, n_results, {"summary": 1})
         if results is None:
             results = list(col.find(fil, {"summary": 1}).sort("created_at", -1).limit(n_results))
         return [r["summary"] for r in results if r.get("summary")]

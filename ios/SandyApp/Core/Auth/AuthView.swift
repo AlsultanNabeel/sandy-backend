@@ -185,10 +185,15 @@ struct AuthView: View {
     }
 
     /// يترجم رموز خطأ الباك‑إند لرسائل ودّية حسب اللغة.
+    ///
+    /// بتفرّع على `code` — الرمز الآلي — مش على `message`. كانت تفرّع على
+    /// النص لأنّ الحقلين كانوا واحد، فأي جملة عربية بيبعتها الخادم كانت
+    /// بتوقّع كل الحالات وبتنزل ع الافتراضي.
     private func friendlyAuthError(_ error: Error) -> String {
         let ar = lang.lang == .ar
-        let msg = (error as? APIError)?.message ?? error.localizedDescription
-        switch msg {
+        let apiError = error as? APIError
+        let msg = apiError?.message ?? error.localizedDescription
+        switch apiError?.code ?? msg {
         case "email_taken":
             return ar ? "هالإيميل مستعمل — جرّب تسجّل دخول."
                       : "Email already in use — try signing in."

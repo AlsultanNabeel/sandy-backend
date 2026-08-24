@@ -116,32 +116,66 @@ def _log_azure_usage(response: Any) -> None:
 
     R3: Azure auto-caches stable prompt prefixes ≥1024 tokens, billed at half.
     Keeping the big tool/persona prefix first is what lets cached_tokens stay high.
+
+    **A cost log must never be able to fail a turn.**
+
+    This ran `logger.info(..., flush=True)` — and `Logger.info` takes no such
+    keyword, so it raised `TypeError` on the way out of a call that had already
+    *succeeded*. `route_with_fc` caught it as a routing failure and dropped to
+    the two-intent fallback in `model_fallback`, so every tool except tasks and
+    reminders became plain chat.
+
+    Two things hid it. The branch only runs when `cached_tokens > 0`, which is
+    the *normal* case here by design — the tool catalogue is a ~9k-token stable
+    prefix built to be cached — so message one of a session worked and every
+    message after it did not. And `Logger.info` returns before `_log` when INFO
+    is disabled, so the suite (WARNING) never reached the line that production
+    (`LOG_LEVEL` defaults to INFO) reaches every time.
+
+    The keyword is gone. The guard below is the part that generalises: telemetry
+    sits after the work is done and has nothing to contribute to the caller, so
+    it swallows its own failures rather than converting them into the caller's.
     """
-    usage = getattr(response, "usage", None)
-    if not usage:
-        return
-    in_tok = getattr(usage, "prompt_tokens", 0)
-    out_tok = getattr(usage, "completion_tokens", 0)
-    cached = 0
-    details = getattr(usage, "prompt_tokens_details", None)
-    if details is not None:
-        cached = getattr(details, "cached_tokens", 0) or 0
-    non_cached_in = max(in_tok - cached, 0)
-    rate_in = float(os.getenv("AZURE_COST_IN_PER_1M", "0.15"))
-    rate_cached = float(os.getenv("AZURE_COST_CACHED_PER_1M", "0.075"))
-    rate_out = float(os.getenv("AZURE_COST_OUT_PER_1M", "0.60"))
-    cost = (
-        non_cached_in * rate_in + cached * rate_cached + out_tok * rate_out
-    ) / 1_000_000
-    if cached:
-        pct = (cached / in_tok * 100) if in_tok else 0
-        logger.info(
-            f"[Azure] in={in_tok} (cached={cached} {pct:.0f}%) "
-            f"out={out_tok} ~${cost:.5f}",
-            flush=True,
-        )
-    else:
-        logger.info(f"[Azure] in={in_tok} out={out_tok} ~${cost:.5f}")
+    try:
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return
+        in_tok = getattr(usage, "prompt_tokens", 0)
+        out_tok = getattr(usage, "completion_tokens", 0)
+        cached = 0
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details is not None:
+            cached = getattr(details, "cached_tokens", 0) or 0
+        non_cached_in = max(in_tok - cached, 0)
+        rate_in = float(os.getenv("AZURE_COST_IN_PER_1M", "0.15"))
+        rate_cached = float(os.getenv("AZURE_COST_CACHED_PER_1M", "0.075"))
+        rate_out = float(os.getenv("AZURE_COST_OUT_PER_1M", "0.60"))
+        cost = (
+            non_cached_in * rate_in + cached * rate_cached + out_tok * rate_out
+        ) / 1_000_000
+        # %s for the counts, not %d: a non-numeric field would make `%d` fail
+        # inside the handler's own formatting, where this `except` cannot see it
+        # — the line would be lost to a stderr "Logging error" instead of
+        # degrading. %s renders whatever it is given.
+        if cached:
+            pct = (cached / in_tok * 100) if in_tok else 0
+            logger.info(
+                "[Azure] in=%s (cached=%s %.0f%%) out=%s ~$%.5f",
+                in_tok, cached, pct, out_tok, cost,
+            )
+        else:
+            logger.info("[Azure] in=%s out=%s ~$%.5f", in_tok, out_tok, cost)
+    except (TypeError, ValueError, AttributeError) as exc:
+        # Narrow on purpose, and these three are the whole surface: a usage
+        # object whose fields are not numbers, a cost rate that will not parse,
+        # or a logging call that is malformed — which is exactly the family the
+        # `flush` keyword belonged to. A usage log has nothing to contribute to
+        # the caller, so it keeps its own failures.
+        #
+        # **warning, not debug.** The original bug survived precisely because
+        # production runs at INFO and anything below it is invisible there; a
+        # guard that reports at DEBUG would hide its successor the same way.
+        logger.warning("[Azure] usage log skipped: %s", exc)
 
 
 class AzureIntentClient:

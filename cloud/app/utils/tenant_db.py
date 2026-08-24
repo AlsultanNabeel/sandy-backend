@@ -137,6 +137,51 @@ class ScopedCollection:
     def find_one_and_delete(self, filter: Mapping[str, Any], *args, **kwargs):
         return self._raw.find_one_and_delete(self._scope(filter), *args, **kwargs)
 
+    def insert_missing(self, documents: List[Mapping[str, Any]]) -> int:
+        """Insert each document if its ``_id`` is absent — **one round trip**.
+        Returns how many were actually new.
+
+        There was no bulk write on this class at all, which was safe by accident
+        rather than by design: an unscoped one is precisely the hole this class
+        exists to close, and it was closed by `AttributeError`. But "one document
+        per round trip" is a real cost, and the caller that hit it
+        (`semantic_memory.load_facts_to_chroma`) was re-indexing a person's whole
+        life an item at a time on a path that runs every message.
+
+        **Deliberately not a general `bulk_write`.** Scoping arbitrary pymongo
+        operation objects means reading their private attributes to rebuild them,
+        which ties the isolation boundary — the most important code in the repo —
+        to internals that change between driver releases. This takes plain
+        documents and builds the operations itself, so there is nothing to
+        misread and no way to hand it an operation it does not understand.
+
+        Each document keeps its own ``_id`` and is stamped with the tenant, so a
+        batch cannot write outside its tenant any more than ``insert_one`` could.
+
+        Built on ``insert_many(ordered=False)`` rather than a bulk upsert:
+        "insert what is missing" is what the caller means, and an unordered
+        insert already has the right behaviour for the race — if another writer
+        got there first, that one document is refused as a duplicate key and the
+        rest still land. `ordered=False` is what makes the batch continue past
+        it instead of stopping at the first collision.
+        """
+        docs = [self._stamp(d) for d in documents if d.get("_id") is not None]
+        if not docs:
+            return 0
+        from pymongo.errors import BulkWriteError
+
+        try:
+            result = self._raw.insert_many(docs, ordered=False)
+            return len(getattr(result, "inserted_ids", None) or [])
+        except BulkWriteError as exc:
+            # A duplicate key here is the expected outcome of a race, not a
+            # failure: someone else inserted the same id between our existence
+            # check and this write. Any other write error still propagates.
+            errors = (exc.details or {}).get("writeErrors") or []
+            if errors and all(e.get("code") == 11000 for e in errors):
+                return len(docs) - len(errors)
+            raise
+
 
 def scoped(mongo_db: Any, name: str, field: str = "user_id") -> Optional[ScopedCollection]:
     """Return a tenant-scoped view of ``mongo_db[name]``, or ``None`` when there

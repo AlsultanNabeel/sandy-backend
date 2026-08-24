@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import random
 import time
@@ -15,7 +16,6 @@ from app.agent.soul_vault import (
 from app.agent.emotional_ltm import get_emotional_context
 from app.agent.anomaly_detector import get_wellness_context
 from app.agent.context_builder import get_persona_directives
-from app.utils.user_profiles import active_user_profile_context, get_active_user_profile
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +23,34 @@ logger = logging.getLogger(__name__)
 _SOUL_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="soul")
 
 
-def _run_in_profile(profile, fn, *args, **kwargs):
-    """Re-apply the caller's tenant profile inside a pool worker thread.
+def _submit(fn, *args, **kwargs):
+    """Submit to the soul pool **carrying the caller's context**.
 
-    The active profile lives in a ``ContextVar`` (user_profiles) and does NOT
-    propagate into _SOUL_POOL threads (the pool submits without copy_context), so a
-    scoped() store called there (e.g. semantic-fact search) sees no tenant and
-    silently returns nothing. Capture the profile at submit time in the request
-    thread, re-enter its context here.
+    A pool worker starts with a blank set of context variables, and the active
+    tenant profile is one — so a `scoped()` store called on a pool thread sees
+    no tenant, reads nothing, writes nothing, and returns a perfectly ordinary
+    empty result. Nothing raises. Nothing is logged. Sandy simply does not know
+    the person she is talking to, and only on the paths that happen to be
+    parallelised.
+
+    That was live: the life snapshot and the life search are read through
+    `scoped()` stores, and every caller of `get_persona_directives` here
+    submitted it bare. Both blocks came back empty on every message, on chat and
+    on voice — the same symptom as "she doesn't know my tasks", arriving from a
+    threading detail rather than from the data.
+
+    There was a helper for this (`_run_in_profile`) and it was applied to one
+    call out of nine. **A rule that has to be remembered at each call site is
+    not a rule**, so it lives in the submit instead: every job on this pool now
+    carries the caller's context, and there is no bare `_SOUL_POOL.submit` left
+    to forget.
+
+    `copy_context()` rather than the profile alone, because the profile is not
+    the only context variable in the system — the voice identity is another —
+    and a copy takes whatever exists today and whatever is added later. A fresh
+    copy per submit: a `Context` cannot be entered twice at once.
     """
-    with active_user_profile_context(profile):
-        return fn(*args, **kwargs)
+    return _SOUL_POOL.submit(contextvars.copy_context().run, fn, *args, **kwargs)
 
 _COMPLETION_TOOLS = frozenset({"task_complete", "goal_done", "task_delete"})
 _CHAT_TOOLS = frozenset({"chat_respond", "chat_emotional", "chat_general"})
@@ -148,10 +165,11 @@ def soul_node(state: SandyState) -> SandyState:
 
             _s1_futs = {}
             if _get_proactive_comfort:
-                _s1_futs["comfort"] = _SOUL_POOL.submit(
+                _s1_futs["comfort"] = _submit(
                     _get_proactive_comfort, chat_id, user_id, mongo_db, message=message
                 )
-            _s1_futs["directives"] = _SOUL_POOL.submit(get_persona_directives, chat_id, user_id, mongo_db)
+            _s1_futs["directives"] = _submit(
+                get_persona_directives, chat_id, user_id, mongo_db, message=message)
 
             _s1 = {}
             for k, fut in _s1_futs.items():
@@ -180,14 +198,14 @@ def soul_node(state: SandyState) -> SandyState:
 
             _chat_futs = {}
             if _get_dreams_ctx:
-                _chat_futs["dreams"] = _SOUL_POOL.submit(_get_dreams_ctx, chat_id, user_id, mongo_db)
+                _chat_futs["dreams"] = _submit(_get_dreams_ctx, chat_id, user_id, mongo_db)
             if _get_anniv_ctx:
-                _chat_futs["anniv"] = _SOUL_POOL.submit(_get_anniv_ctx, chat_id, user_id, mongo_db)
+                _chat_futs["anniv"] = _submit(_get_anniv_ctx, chat_id, user_id, mongo_db)
             if _get_future_ctx:
-                _chat_futs["future"] = _SOUL_POOL.submit(_get_future_ctx, chat_id, user_id, mongo_db)
+                _chat_futs["future"] = _submit(_get_future_ctx, chat_id, user_id, mongo_db)
             try:
                 from app.agent.proactive_goals import get_goals_followup_context
-                _chat_futs["goals"] = _SOUL_POOL.submit(
+                _chat_futs["goals"] = _submit(
                     get_goals_followup_context, chat_id, user_id, mongo_db
                 )
             except Exception:
@@ -239,11 +257,11 @@ def soul_node(state: SandyState) -> SandyState:
         intensity = result["intensity"]
         _s2_futs = {}
         if intensity in ("empathetic", "standard"):
-            _s2_futs["emo"] = _SOUL_POOL.submit(
+            _s2_futs["emo"] = _submit(
                 get_emotional_context, chat_id=chat_id, user_id=user_id, mongo_db=mongo_db
             )
         if intensity == "empathetic":
-            _s2_futs["wellness"] = _SOUL_POOL.submit(
+            _s2_futs["wellness"] = _submit(
                 get_wellness_context, chat_id=chat_id, user_id=user_id, mongo_db=mongo_db
             )
         if message:
@@ -259,13 +277,9 @@ def soul_node(state: SandyState) -> SandyState:
                     from app.agent.semantic_memory import search_relevant_summaries, search_relevant_facts
                     # ملخّصات هذا الخيط (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
                     _summ_thread = state.get("conversation_id") or chat_id
-                    _profile = get_active_user_profile()
-                    _s2_futs["summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, _summ_thread)
-                    # facts search is scoped()→current_user_id(): must carry the
-                    # tenant profile into the pool thread, else it returns [].
-                    _s2_futs["sem_facts"] = _SOUL_POOL.submit(
-                        _run_in_profile, _profile, search_relevant_facts, message
-                    )
+                    _s2_futs["summaries"] = _submit(
+                        search_relevant_summaries, message, _summ_thread)
+                    _s2_futs["sem_facts"] = _submit(search_relevant_facts, message)
                 except Exception:
                     logger.debug("ignoring non-critical error", exc_info=True)
 
@@ -401,11 +415,16 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
 
     try:
         from app.agent.proactive_comfort import get_proactive_comfort as _gpc
-        futures["comfort"] = _SOUL_POOL.submit(_gpc, chat_id, user_id, mongo_db, message=message)
+        futures["comfort"] = _submit(_gpc, chat_id, user_id, mongo_db, message=message)
     except Exception:
         logger.debug("ignoring non-critical error", exc_info=True)
 
-    futures["directives"] = _SOUL_POOL.submit(get_persona_directives, chat_id, user_id, mongo_db)
+    # `message=` matters: it is what opens the life-search block inside
+    # `get_persona_directives`. Omitting it meant the chat path could see the
+    # four-item life *snapshot* and never the detail behind it — ask about a
+    # book that is not among the newest four and she had no idea it was hers.
+    futures["directives"] = _submit(
+        get_persona_directives, chat_id, user_id, mongo_db, message=message)
 
     # Semantic memory search only needs the message — start it here so it overlaps
     # the router FC call (~4s) instead of running serially after it in stage2.
@@ -418,12 +437,9 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
             )
             # ملخّصات خيط المحادثة (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
             _summ_thread = conversation_id or chat_id
-            _profile = get_active_user_profile()
-            futures["__summaries"] = _SOUL_POOL.submit(search_relevant_summaries, message, _summ_thread)
-            # carry the tenant profile into the pool thread (scoped facts search).
-            futures["__sem_facts"] = _SOUL_POOL.submit(
-                _run_in_profile, _profile, search_relevant_facts, message
-            )
+            futures["__summaries"] = _submit(
+                search_relevant_summaries, message, _summ_thread)
+            futures["__sem_facts"] = _submit(search_relevant_facts, message)
         except Exception:
             logger.debug("ignoring non-critical error", exc_info=True)
 

@@ -20,11 +20,15 @@ class ChromaHashStabilityTests(unittest.TestCase):
         captured = {}
 
         class FakeCollection:
-            def count_documents(self, *a, **kw): return 0
-            def update_one(self, filter_, update, upsert=False):
-                captured["id"] = filter_["_id"]
+            # Models the batched write shape: one existence query for the whole
+            # batch, then one insert_many for whatever was missing. (It used to
+            # model count_documents + update_one per item, which is the
+            # round-trip-per-fact pattern that was removed.)
+            def find(self, *a, **kw): return iter([])
+            def insert_many(self, documents, ordered=True):
+                captured["id"] = documents[0]["_id"]
                 class R:
-                    upserted_id = filter_["_id"]
+                    inserted_ids = [d["_id"] for d in documents]
                 return R()
 
         class FakeDb:
@@ -42,7 +46,7 @@ class ChromaHashStabilityTests(unittest.TestCase):
             _db.configure(orig_db)
             set_active_user_profile(None)
 
-        self.assertIn("id", captured, "update_one() was never called")
+        self.assertIn("id", captured, "the fact was never written")
         self.assertEqual(captured["id"], expected_id)
         self.assertTrue(expected_id.startswith("f_"), f"ID should start with 'f_', got: {expected_id}")
 

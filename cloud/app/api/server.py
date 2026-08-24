@@ -198,6 +198,19 @@ def create_app(
     # Sign-in is Apple, Google, or email now. Each mints a real account with its
     # own id, and every read and write in the system is already scoped to it.
 
+    # What each rejection code means, in words a person can read.
+    #
+    # `check_and_record` returns a machine code — `rate_limited`,
+    # `daily_quota_exceeded` — which is right: the store should not be writing
+    # Arabic. But the code was being sent to the client as the *only* field, and
+    # the app shows whatever it finds there, so a user who hit their quota was
+    # told "daily_quota_exceeded". Every other 429 in this file already sends a
+    # human `message` beside the code; these two were the exception.
+    _LIMIT_MESSAGES = {
+        "rate_limited": "شوي شوي 😄 وصلت للحد بهالدقيقة — جرّب بعد شوي.",
+        "daily_quota_exceeded": "خلص رصيدك لليوم. بيرجع بكرا، أو رقّي اشتراكك.",
+    }
+
     def _meter_or_error(role, user_id):
         """Record one authenticated request against the user's tier quota.
         Returns an error code string if the user is over their limit, else None.
@@ -211,6 +224,14 @@ def create_app(
         return usage_store.check_and_record(
             user_id, daily_limit=daily, per_min_limit=per_min
         )
+
+    def _limit_response(code: str):
+        """The 429 body for a metered rejection: the code for the client to
+        branch on, and the sentence for it to show."""
+        return {
+            "error": code,
+            "message": _LIMIT_MESSAGES.get(code, "وصلت للحد المسموح — جرّب لاحقاً."),
+        }
 
     def _guest_media_gate(claims):
         """Meter one shared guest unit for the image/vision endpoints and, if the
@@ -351,7 +372,7 @@ def create_app(
         if role != "guest":
             _over = _meter_or_error(role, user_id)
             if _over:
-                return jsonify({"error": _over}), 429
+                return jsonify(_limit_response(_over)), 429
 
         # Authenticated users (owner + signed-in users) get the full per-user
         # pipeline; only true guests fall through to the basic demo chat.
@@ -432,7 +453,7 @@ def create_app(
 
         _over = _meter_or_error(role, user_id)
         if _over:
-            return jsonify({"error": _over}), 429
+            return jsonify(_limit_response(_over)), 429
 
         chunk_queue: "queue.Queue" = queue.Queue()
         outcome: dict = {}

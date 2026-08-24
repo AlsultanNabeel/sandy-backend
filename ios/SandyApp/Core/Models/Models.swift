@@ -414,6 +414,16 @@ enum APIErrorKind { case connection, unauthorized, server, decoding, unknown }
 
 struct APIError: LocalizedError {
     let message: String
+    /// رمز الخطأ الآلي من الخادم (`error`) — للتفريع بالكود، مش للعرض.
+    ///
+    /// كان الرمز والجملة نفس الحقل، فالشاشات كانت تفرّع على `message`. وهاد
+    /// اشتغل بالصدفة: الخادم كان يبعت الرمز لحاله بهالمسارات. أول ما ينضاف
+    /// `message` عربي لأي منها — وهاد بالضبط الاتجاه الصح — كانت المطابقات
+    /// تفشل بصمت وتوقع ع الحالة العامة، وبيصير المستخدم يشوف جملة عامة مكان
+    /// جملة تخصّ حالته.
+    ///
+    /// الحقلان منفصلان هلق: `message` للإنسان، و`code` للكود.
+    var code: String? = nil
     var kind: APIErrorKind = .unknown          // default keeps old initializers working
     var errorDescription: String? { message }
 }

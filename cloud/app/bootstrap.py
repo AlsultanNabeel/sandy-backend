@@ -95,6 +95,71 @@ def ensure_data_dirs() -> None:
     logger.debug("[Bootstrap] Data directories ready")
 
 
+def ensure_indexes() -> None:
+    """Create every boot-time index, each one independently.
+
+    Lifted out of ``bootstrap()`` so it can be called on its own and asserted
+    against — an index that quietly failed to be created is invisible from the
+    outside and shows up only as everything being slower, which is the least
+    debuggable shape a fault can take.
+
+    Runs on the raw handle by design: this is boot, before any request has set a
+    tenant. Every index leads with the field the tenant scoping filters on.
+    """
+    from app.agent.health_monitor import ensure_ttl_index
+    from app.db import get_db
+
+    mongo_db = get_db()
+    try:
+        ensure_ttl_index(mongo_db)
+    except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+        logger.warning("[Bootstrap] ensure_ttl_index failed: %s", exc)
+    if mongo_db is None:
+        return
+
+    # Each index is created independently so one failure doesn't silently
+    # skip the rest. (label, callable) pairs keep the logging cheap.
+    index_jobs = [
+        ("web_chat_history.expire_at", lambda: mongo_db.web_chat_history.create_index(
+            "expire_at", expireAfterSeconds=0, background=True
+        )),
+        ("sandy_session_state.chat_id", lambda: mongo_db.sandy_session_state.create_index(
+            "chat_id", unique=True, background=True
+        )),
+        ("sandy_evals.chat_id+created_at", lambda: mongo_db.sandy_evals.create_index(
+            [("chat_id", 1), ("created_at", -1)], background=True
+        )),
+        ("guest_usage.jti+chat_type", lambda: mongo_db.guest_usage.create_index(
+            [("jti", 1), ("chat_type", 1)], unique=True, background=True
+        )),
+        ("guest_usage.last_request_at", lambda: mongo_db.guest_usage.create_index(
+            "last_request_at", background=True
+        )),
+        ("guest_usage.created_at_ttl", lambda: mongo_db.guest_usage.create_index(
+            "created_at", expireAfterSeconds=60 * 60 * 24 * 90, background=True
+        )),
+        ("sandy_pending_state.updated_at_ttl", lambda: mongo_db.sandy_pending_state.create_index(
+            "updated_at", expireAfterSeconds=60 * 60, background=True
+        )),
+        # `sandy_memories` had no index at all, and it is the collection that
+        # grows fastest — every conversation summary, fact, relationship and
+        # lesson lands here and nothing expires. Both of its hot readers scanned
+        # the whole thing on every message:
+        # `context_builder.get_persona_directives` (filters chat_id + label,
+        # sorts created_at) and the keyword fallback in
+        # `semantic_memory.search_relevant_summaries`. This is the index that
+        # stops Sandy getting slower the longer she is used.
+        ("sandy_memories.chat_id+label+created_at", lambda: mongo_db.sandy_memories.create_index(
+            [("chat_id", 1), ("label", 1), ("created_at", -1)], background=True
+        )),
+    ]
+    for label, job in index_jobs:
+        try:
+            job()
+        except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+            logger.warning("[Bootstrap] create_index %s failed: %s", label, exc)
+
+
 def bootstrap(app_env: str = "prod", app=None) -> None:
     """Run all one-time startup tasks.
 
@@ -137,44 +202,7 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
         logger.warning("[Bootstrap] Tools registration failed: %s", exc)
 
     try:
-        from app.db import get_db
-        from app.agent.health_monitor import ensure_ttl_index
-        mongo_db = get_db()
-        try:
-            ensure_ttl_index(mongo_db)
-        except Exception as exc:
-            logger.warning("[Bootstrap] ensure_ttl_index failed: %s", exc)
-        if mongo_db is not None:
-            # Each index is created independently so one failure doesn't silently
-            # skip the rest. (label, callable) pairs keep the logging cheap.
-            index_jobs = [
-                ("web_chat_history.expire_at", lambda: mongo_db.web_chat_history.create_index(
-                    "expire_at", expireAfterSeconds=0, background=True
-                )),
-                ("sandy_session_state.chat_id", lambda: mongo_db.sandy_session_state.create_index(
-                    "chat_id", unique=True, background=True
-                )),
-                ("sandy_evals.chat_id+created_at", lambda: mongo_db.sandy_evals.create_index(
-                    [("chat_id", 1), ("created_at", -1)], background=True
-                )),
-                ("guest_usage.jti+chat_type", lambda: mongo_db.guest_usage.create_index(
-                    [("jti", 1), ("chat_type", 1)], unique=True, background=True
-                )),
-                ("guest_usage.last_request_at", lambda: mongo_db.guest_usage.create_index(
-                    "last_request_at", background=True
-                )),
-                ("guest_usage.created_at_ttl", lambda: mongo_db.guest_usage.create_index(
-                    "created_at", expireAfterSeconds=60 * 60 * 24 * 90, background=True
-                )),
-                ("sandy_pending_state.updated_at_ttl", lambda: mongo_db.sandy_pending_state.create_index(
-                    "updated_at", expireAfterSeconds=60 * 60, background=True
-                )),
-            ]
-            for label, job in index_jobs:
-                try:
-                    job()
-                except Exception as exc:
-                    logger.warning("[Bootstrap] create_index %s failed: %s", label, exc)
+        ensure_indexes()
     except Exception as exc:
         logger.warning("[Bootstrap] Mongo index setup failed: %s", exc)
 

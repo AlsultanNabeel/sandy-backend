@@ -116,18 +116,53 @@ def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
     return result
 
 
+def _voice_profile(chat_id: str) -> Dict[str, Any]:
+    """The tenant profile a voice session works under.
+
+    One definition, used by both the instruction build and tool dispatch. They
+    had a copy each, and two copies of an identity rule drift.
+    """
+    return {
+        "chat_id": chat_id,
+        "relation": "owner",
+        "tone": "casual",
+        "permissions": "all",
+        "name": "",
+    }
+
+
 def _build_system_instruction(user_id: str = "") -> str:
     """Build system instruction: Sandy's personality + full memory context + STM.
 
     `user_id` بيوصل من الجلسة لأنّ هالدالة بتشتغل ع خيط مجمّع، وسياق الجلسة ما
     بيعبر لهناك. من غيره بتبني تعليمات لشخص مجهول — بلا اسم ولا اهتمامات ولا
     ذاكرة — وهي عارفة مين هو من ثانية المصافحة.
+
+    **وتمرير المعرّف وحده ما كان بيكفي.**
+
+    كل قراءة تحت بتمرّ من `scoped()`، و`scoped()` بيسأل `current_user_id()` —
+    وهاد بيقرا من متغيّر سياق ما بيعبر لخيط المجمّع. فالمعرّف كان بيوصل، وبيتحطّ
+    بمتغيّر الهوية الصوتية، وبعدين كل مخزن بينسأل بيرجع فاضي: `load_memory`
+    بترجّع الافتراضي، ولقطة الحياة والبحث فيها بيرجعوا فاضيين. ولا خطأ، ولا سطر
+    بالسجل — بس ساندي بتحكي وكأنها ما بتعرفه.
+
+    فالدالة كلها بتشتغل جوّا سياق المستأجر. تمرير المعرّف بيحلّ نصّ المسألة؛
+    فتح السياق بيحلّ النصّ التاني.
     """
     from app.agent.context_builder import build_effective_persona
+    from app.utils.user_profiles import active_user_profile_context
 
     if user_id:
         set_voice_identity(user_id)
-    parts: List[str] = [build_effective_persona(_stm_chat_id() or None).strip()]
+    chat_id = _stm_chat_id()
+    with active_user_profile_context(_voice_profile(chat_id) if chat_id else None):
+        return _system_instruction_body(chat_id, build_effective_persona)
+
+
+def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
+    """The instruction text itself. Split out so the tenant context above wraps
+    every read in here without indenting four hundred lines of prompt."""
+    parts: List[str] = [build_effective_persona(chat_id or None).strip()]
 
     # Legacy per-tenant memory doc (lightweight)
     try:
@@ -335,13 +370,7 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
         return {"handled": True,
                 "reply": "تمام، كمّلي عادي — ما في إشي لازم ينفّذ هون."}
 
-    owner_profile = {
-        "chat_id": _stm_chat_id(),
-        "relation": "owner",
-        "tone": "casual",
-        "permissions": "all",
-        "name": "",
-    }
+    owner_profile = _voice_profile(_stm_chat_id())
     # **`state` و`mongo_db` مش اختياريين — بدونهن أغلب الأدوات بتفشل بصمت.**
     #
     # هاد كان أخطر عطل بالنظام كله. الصوت كان يبني السياق بدون التنين، والأدوات

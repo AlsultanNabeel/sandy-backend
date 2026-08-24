@@ -409,72 +409,88 @@ async def _live_session(ws, remote: str) -> None:
         _send_json(ws, {"type": "error", "msg": "server_error"})
         return
 
-    # Start listening BEFORE the slow setup below — see _DeviceReader.
-    reader = _DeviceReader(ws).start()
-
     from app.config import GEMINI_API_KEY, GEMINI_TTS_VOICE
 
+    # Checked before the reader starts, not after: there is no point owning a
+    # thread in order to discover a config value.
     if not GEMINI_API_KEY:
         logger.error("[voice_ws] GEMINI_API_KEY not set")
         _send_json(ws, {"type": "error", "msg": "server_error"})
         return
 
-    # **الهوية بتسافر مع النداء، مش بتنستنّى بالخيط.**
+    # Start listening BEFORE the slow setup below — see _DeviceReader.
     #
-    # `run_in_executor` بيشغّل هالدالة ع خيط تاني، ومتغيّر السياق ما بيعبر
-    # لهناك. فلو دوّرت عليه هناك بتلاقيه فاضي — وهاد اللي صار حرفيًّا: المصافحة
-    # حلّت المالك صح، وبناء التعليمات ع خيط تاني قال «جلسة مجهولة».
+    # **Everything from here down is inside one try/finally.** The reader owns a
+    # thread and a single-worker executor the moment `start()` returns, and the
+    # `finally` that gives them back used to begin much lower, at the Live
+    # connect. So any return or raise in between — the missing key above, or a
+    # `_build_system_instruction` that threw — leaked one thread and one
+    # executor per connection *attempt*, and a robot that retries after a
+    # failure leaks one per retry. Gunicorn has sixteen threads in total. That
+    # is "she answers once and then ignores me", arriving by a second route.
     #
-    # وتمريره كوسيط بيشيل السؤال من أصله بدل ما يحاول يوصّل السياق.
-    _who = get_voice_identity()
-    system_instruction = await asyncio.get_event_loop().run_in_executor(
-        None, _build_system_instruction, _who
-    )
-    live_tools = _build_live_tools(types)
-
-    gate_on = _speaker_gate_enabled()
-    voice_name = (GEMINI_TTS_VOICE or "Aoede").strip()
-    config_kwargs: Dict[str, Any] = dict(
-        response_modalities=["AUDIO"],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
-            )
-        ),
-        system_instruction=types.Content(
-            parts=[types.Part(text=system_instruction)],
-            role="user",
-        ),
-        tools=live_tools or [],
-        # بدون هدول، التفريغ النصي ما بيوصل أبداً → _save_voice_turn ما بينحفظ
-        # → محادثات الصوت ما بتظهر بذاكرة التلي/الويب (الذاكرة الموحدة).
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-    )
-    if gate_on:
-        # التحقّق مفعّل → نطفّي الكشف التلقائي ونتحكّم بنهاية الدور يدوياً عشان
-        # نتحقّق من الصوت ونحقن الهوية قبل ما يردّ الموديل.
-        config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
-            automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
-        )
-    else:
-        # التحقّق مطفّى → نسيب Gemini يكشف الدور، بس نضبطه يردّ بسرعة لحظة ما
-        # تسكت (صمت نهاية أقصر + حساسية نهاية عالية) عشان الرد يكون فوري.
-        config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
-            automatic_activity_detection=types.AutomaticActivityDetection(
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                # كل ما قلّت، أسرع ما تردّ بعد ما يسكت — بس لو نزلت كتير بتقاطعه
-                # وهو واقف بنص جملة. ٣٥٠ توازن: ردّ أسرع بدون قطع. عيّرها لو لزم.
-                silence_duration_ms=350,
-                prefix_padding_ms=200,
-            ),
-        )
-    config = types.LiveConnectConfig(**config_kwargs)
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    dispatcher = _make_dispatcher()
-
+    # Bound to None first, and constructed *inside* the try: `__init__` builds
+    # the executor before `start()` returns, so a raise between the two would
+    # leak a pool that nothing holds a reference to.
+    reader: Optional["_DeviceReader"] = None
     try:
+        reader = _DeviceReader(ws).start()
+
+        # **الهوية بتسافر مع النداء، مش بتنستنّى بالخيط.**
+        #
+        # `run_in_executor` بيشغّل هالدالة ع خيط تاني، ومتغيّر السياق ما بيعبر
+        # لهناك. فلو دوّرت عليه هناك بتلاقيه فاضي — وهاد اللي صار حرفيًّا: المصافحة
+        # حلّت المالك صح، وبناء التعليمات ع خيط تاني قال «جلسة مجهولة».
+        #
+        # وتمريره كوسيط بيشيل السؤال من أصله بدل ما يحاول يوصّل السياق.
+        _who = get_voice_identity()
+        system_instruction = await asyncio.get_event_loop().run_in_executor(
+            None, _build_system_instruction, _who
+        )
+        live_tools = _build_live_tools(types)
+
+        gate_on = _speaker_gate_enabled()
+        voice_name = (GEMINI_TTS_VOICE or "Aoede").strip()
+        config_kwargs: Dict[str, Any] = dict(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+                )
+            ),
+            system_instruction=types.Content(
+                parts=[types.Part(text=system_instruction)],
+                role="user",
+            ),
+            tools=live_tools or [],
+            # بدون هدول، التفريغ النصي ما بيوصل أبداً → _save_voice_turn ما بينحفظ
+            # → محادثات الصوت ما بتظهر بذاكرة التلي/الويب (الذاكرة الموحدة).
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+        if gate_on:
+            # التحقّق مفعّل → نطفّي الكشف التلقائي ونتحكّم بنهاية الدور يدوياً عشان
+            # نتحقّق من الصوت ونحقن الهوية قبل ما يردّ الموديل.
+            config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
+            )
+        else:
+            # التحقّق مطفّى → نسيب Gemini يكشف الدور، بس نضبطه يردّ بسرعة لحظة ما
+            # تسكت (صمت نهاية أقصر + حساسية نهاية عالية) عشان الرد يكون فوري.
+            config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                    # كل ما قلّت، أسرع ما تردّ بعد ما يسكت — بس لو نزلت كتير بتقاطعه
+                    # وهو واقف بنص جملة. ٣٥٠ توازن: ردّ أسرع بدون قطع. عيّرها لو لزم.
+                    silence_duration_ms=350,
+                    prefix_padding_ms=200,
+                ),
+            )
+        config = types.LiveConnectConfig(**config_kwargs)
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        dispatcher = _make_dispatcher()
+
         async with client.aio.live.connect(model=_LIVE_MODEL, config=config) as session:
             logger.info(
                 "[voice_ws] Gemini Live session opened for %s (gate=%s)", remote, gate_on
@@ -554,7 +570,8 @@ async def _live_session(ws, remote: str) -> None:
         logger.error("[voice_ws] Live session error (%s): %s", remote, exc)
         _send_json(ws, {"type": "error", "msg": "live_error"})
     finally:
-        reader.stop()
+        if reader is not None:
+            reader.stop()
 
 
 async def _device_to_live_fast(reader: "_DeviceReader", session) -> None:

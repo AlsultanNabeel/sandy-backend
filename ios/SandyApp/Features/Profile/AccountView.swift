@@ -162,7 +162,11 @@ struct AccountView: View {
         } catch {
             // `already_claimed` بيستاهل جملته الخاصة: «هاد الروبوت مربوط بحساب
             // تاني» شغلة بتقدر تعملها (ارجع لصاحبه يفكّه)، و«فشل الربط» لأ.
-            let m = (error as? APIError)?.message ?? ""
+            //
+            // المطابقة على `code` — الرمز الآلي — مش على `message`. كانت على
+            // النص، فأول ما يبعت الخادم جملة عربية جنب الرمز بتفشل بصمت
+            // وبتنزل ع «فشل الربط» العامة.
+            let m = (error as? APIError)?.code ?? ""
             notice = m == "already_claimed" ? lang.s("account.pair.taken")
                    : m == "too_many_attempts" ? lang.s("account.pair.tooMany")
                    : lang.s("account.pair.failed")

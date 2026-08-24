@@ -48,6 +48,46 @@ _STM_COLL = "sandy_stm"
 _stm_index_ready = False
 
 
+def _ensure_stm_indexes(coll) -> None:
+    """Create the STM indexes, **each one independently**.
+
+    They used to share a single `try`. One index failing therefore skipped every
+    index after it, and the ready-flag was set anyway — so the skip was
+    permanent for the life of the process and logged only at debug. The realistic
+    trigger is not exotic: changing `STM_TTL` makes the `updated_at` index
+    conflict with the one already in the database, and that would have silently
+    cost the `(user_id, updated_at)` index below, which is the one holding up
+    every chat turn.
+
+    Same rule `bootstrap.py` already follows for the rest of the indexes, and
+    for the same reason. Failures report at warning: a missing index does not
+    break a feature, it just makes everything slower forever, which is exactly
+    the kind of fault that needs to be visible to be found.
+    """
+    from app.utils.stm_config import STM_TTL
+
+    jobs = (
+        ("key", lambda: coll.create_index("key", unique=True, background=True)),
+        ("updated_at_ttl", lambda: coll.create_index(
+            "updated_at", expireAfterSeconds=STM_TTL, background=True)),
+        # The index `recent_turns_for_user` needs, and did not have.
+        #
+        # That query filters on `user_id` and sorts by `updated_at`, and it runs
+        # on **every** chat turn and twice at the start of every voice session.
+        # With only the two above it was a collection scan of every conversation
+        # on the server, so the cost of one person's reply grew with everybody
+        # else's history. A compound index answers the filter and the sort
+        # together, so Mongo never sorts in memory.
+        ("user_id+updated_at", lambda: coll.create_index(
+            [("user_id", 1), ("updated_at", -1)], background=True)),
+    )
+    for label, job in jobs:
+        try:
+            job()
+        except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+            logger.warning("[graph] STM index %s failed: %s", label, exc)
+
+
 def _stm_collection():
     """Return the MongoDB STM collection (and ensure its indexes once), or None
     if Mongo isn't wired up yet."""
@@ -59,12 +99,7 @@ def _stm_collection():
             return None
         coll = mongo_db[_STM_COLL]
         if not _stm_index_ready:
-            try:
-                from app.utils.stm_config import STM_TTL
-                coll.create_index("key", unique=True, background=True)
-                coll.create_index("updated_at", expireAfterSeconds=STM_TTL, background=True)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"[graph] STM index skipped: {exc}")
+            _ensure_stm_indexes(coll)
             _stm_index_ready = True
         return coll
     except Exception:

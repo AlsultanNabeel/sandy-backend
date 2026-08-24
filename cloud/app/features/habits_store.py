@@ -125,15 +125,8 @@ def checkin(name: str, date: str = "") -> Dict[str, Any]:
     }
 
 
-def _streak(habit_id: str) -> int:
-    """أيام متتالية لليوم (أو لمبارح إذا اليوم لسا ما انعمل)."""
-    log = _log()
-    if log is None:
-        return 0
-    dates = {
-        d["date"]
-        for d in log.find({"habit_id": habit_id}, {"date": 1}).limit(2000)
-    }
+def _streak_from_dates(dates: set) -> int:
+    """أيام متتالية لليوم (أو لمبارح إذا اليوم لسا ما انعمل)، من تواريخ محمّلة."""
     if not dates:
         return 0
     day = datetime.now(USER_TZ).date()
@@ -146,29 +139,62 @@ def _streak(habit_id: str) -> int:
     return streak
 
 
+def _streak(habit_id: str) -> int:
+    """سلسلة عادة وحدة. للنداءات المفردة؛ `list_habits` بتحمّل الكل دفعة."""
+    log = _log()
+    if log is None:
+        return 0
+    return _streak_from_dates({
+        d["date"]
+        for d in log.find({"habit_id": habit_id}, {"date": 1}).limit(2000)
+    })
+
+
 def list_habits() -> List[Dict[str, Any]]:
     """العادات النشطة مع سلسلة كل وحدة وهل انعملت اليوم.
 
     محدودة بـ MAX_HABITS. حد ما بينوصلّه بالاستعمال العادي، بس بيمنع نداء واحد
     يسحب المجموعة كلها لو صار خلل بالكتابة أو حساب دخل عليه إشي غريب.
+
+    **استعلامان، مهما كان عدد العادات.**
+
+    كانت تلاتة لكل عادة: وحدة للعادات، وبعدين لكل وحدة `find_one` لليوم و`find`
+    لكل سجلّاتها. عشر عادات = واحد وعشرين رحلة لقاعدة البيانات، وهي دالة بتنقرا
+    من لقطة الحياة اللي بتمرّ بكل رسالة — فالعدّ بينضرب بعدد مرّات القراءة.
+
+    هلّق: استعلام للعادات، واستعلام واحد لكل سجلّاتهن مع بعض، والباقي حساب
+    بالذاكرة. «انعملت اليوم» صارت تُقرأ من نفس التواريخ بدل استعلام لحالها —
+    نفس المعلومة كانت تُجلب مرّتين.
     """
     habits = _habits()
     log = _log()
     if habits is None or log is None:
         return []
     today = _today()
-    out = []
-    for h in habits.find({"archived": {"$ne": True}}).sort("created_at", 1).limit(MAX_HABITS):
-        done_today = log.find_one({"_id": f"{h['_id']}:{today}"}) is not None
-        out.append(
-            {
-                "id": h["_id"],
-                "name": h.get("name", ""),
-                "streak": _streak(h["_id"]),
-                "done_today": done_today,
-            }
-        )
-    return out
+    rows = list(
+        habits.find({"archived": {"$ne": True}}).sort("created_at", 1).limit(MAX_HABITS)
+    )
+    if not rows:
+        return []
+
+    ids = [h["_id"] for h in rows]
+    dates_by_habit: Dict[str, set] = {hid: set() for hid in ids}
+    # 5000 = MAX_HABITS × the per-habit cap that used to apply, so the ceiling
+    # is the one this always had rather than a new one introduced by batching.
+    for d in log.find({"habit_id": {"$in": ids}}, {"habit_id": 1, "date": 1}).limit(5000):
+        bucket = dates_by_habit.get(d.get("habit_id"))
+        if bucket is not None and d.get("date"):
+            bucket.add(d["date"])
+
+    return [
+        {
+            "id": h["_id"],
+            "name": h.get("name", ""),
+            "streak": _streak_from_dates(dates_by_habit[h["_id"]]),
+            "done_today": today in dates_by_habit[h["_id"]],
+        }
+        for h in rows
+    ]
 
 
 def delete_habit(habit_id: str) -> bool:

@@ -6,9 +6,11 @@ lives, why it is shaped that way, and which parts are load-bearing.
 
 Written by reading every source file in the repo, not from the older docs — where
 this contradicts `README.md`, `docs/`, or a code comment, this is the newer
-reading. Last full pass: 14 Aug 2026, kept current through 23 Aug 2026 — §2.7,
+reading. Last full pass: 14 Aug 2026, kept current through 24 Aug 2026 — §2.7,
 §4.5 and §4.6 rewritten for per-device broker credentials, the room node's move
-onto the per-node topic tree, first-run network setup, and infrared.
+onto the per-node topic tree, first-run network setup, and infrared; §2.5, §8 and
+§9 for the 24 Aug audit (`AUDIT_2026-08-24.md`, which lists what was found and
+what is still open).
 
 **Keep this current.** When you change a contract in here — a topic, a route, an
 ownership rule, a boundary — update the section as part of the same commit. A map
@@ -159,6 +161,16 @@ Around them: `interests_tracker`, `style_memory`, `lessons_memory`,
 Short-term memory is on Mongo, not Redis, on purpose: the free Redis tier hit its
 monthly request cap and memory silently froze. Mongo has no per-request quota and
 was already wired. Don't "fix" this back to Redis without solving the quota.
+
+**Context does not cross a thread boundary, and memory is full of them.** The
+active tenant lives in a `ContextVar`, and a pool worker starts with none — so a
+`scoped()` store called on a pool thread reads nothing, writes nothing, and
+returns an ordinary empty result. Nothing raises; Sandy simply does not know the
+person. Fixed 24 Aug 2026 by making the propagation belong to the *submit*
+(`nodes/soul.py::_submit` wraps `contextvars.copy_context().run`) rather than to
+each call site, and by running the voice instruction build inside
+`active_user_profile_context`. **Never add a bare `.submit()` on a path that
+touches a scoped store.**
 
 ### 2.6 Tenant isolation — the most important file in the repo
 
@@ -728,13 +740,22 @@ Social and delivery: `sandy_photos`, `sandy_photo_files`, `sandy_gifts`,
 `sandy_shared_content`, `sandy_future_messages`, `sandy_push_tokens`,
 `sandy_daily_nudge`, `sandy_nudge_locks`, `sandy_activity`, `sandy_evals`.
 
-Indexes lead with `user_id` and are created at boot on the raw handle.
+Indexes lead with `user_id` and are created at boot on the raw handle, by
+`bootstrap.ensure_indexes()` — one `try` per index, so one failure cannot skip
+the rest. `sandy_stm`'s three are the exception and live in
+`graph.py::_ensure_stm_indexes`, created on first use, same one-try-each rule.
+
+Two of them were added 24 Aug 2026 and are the reason replies stopped getting
+slower with use: `sandy_stm (user_id, updated_at desc)` for
+`recent_turns_for_user`, and `sandy_memories (chat_id, label, created_at desc)`
+— that collection had **no index at all** and is the fastest-growing one in the
+database.
 
 ---
 
 ## 9. Tests and CI
 
-35 test files, pytest + mongomock, no hardware and no live credentials needed.
+56 test files, pytest + mongomock, no hardware and no live credentials needed.
 `tests/test_device_system.py` carries the headline guarantee: the brain may only
 act on a **registered** device with a **validated** action, and refuses with the
 allowed list rather than guessing.
