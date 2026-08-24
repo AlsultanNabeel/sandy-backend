@@ -30,6 +30,9 @@ try:
 except ImportError:
     MQTT_AVAILABLE = False
 
+# See the note at connect_async: the listener does not have a thread to itself.
+MQTT_KEEPALIVE_S = 30
+
 _STATUS_SUB = "sandy/node/+/status"
 _IR_SUB = "sandy/node/+/ir/learned"
 # Photos come back split across many messages; camera_client holds the pieces.
@@ -94,6 +97,7 @@ _stats = {
     "errors": 0,
     "rebuilds": 0,
     "last_disconnect": None,   # why the broker last hung up — its words, not ours
+    "last_disconnect_flags": None,
     "last_message_at": None,
 }
 
@@ -369,13 +373,36 @@ def _on_disconnect(client, userdata, *args) -> None:  # noqa: ANN001
 
     Each one has a different fix and no two look alike. Reading it is the
     difference between knowing and theorising.
+
+    **And for a while it still was not reading it.** The line above took the
+    first non-dict argument, and in paho's V2 signature —
+    ``(client, userdata, disconnect_flags, reason_code, properties)`` — the first
+    non-dict argument is the *flags*. So every drop logged
+    ``DisconnectFlags(is_disconnect_packet_from_server=False)``: true, useless,
+    and identical whatever the cause. The reason code was sitting in the next
+    argument, discarded, for as long as this docstring claimed otherwise.
+
+    Positional guessing is what broke it, so the arguments are now identified by
+    what they are rather than by where they sit — paho has changed this signature
+    once already and will not ask before doing it again.
     """
     _stats["disconnects"] += 1
-    reason = next((a for a in args if a is not None
-                   and not isinstance(a, dict)), None)
+
+    flags = reason = None
+    for a in args:
+        if a is None or isinstance(a, dict):
+            continue
+        if type(a).__name__ == "DisconnectFlags":
+            flags = a
+        elif isinstance(a, int) or hasattr(a, "getName") or hasattr(a, "value"):
+            # int on the V1 signature, a ReasonCode object on V2.
+            reason = a
+
     _stats["last_disconnect"] = str(reason)
-    logger.warning("[mqtt_ingest] worker %d disconnected: %s — paho will retry",
-                   os.getpid(), reason)
+    _stats["last_disconnect_flags"] = str(flags)
+    logger.warning(
+        "[mqtt_ingest] worker %d disconnected: reason=%s flags=%s — paho will retry",
+        os.getpid(), reason, flags)
 
 
 def start_mqtt_ingest() -> None:
@@ -433,7 +460,16 @@ def start_mqtt_ingest() -> None:
             #
             # Async hands the connect to the network thread, which retries on the
             # backoff above. A bad minute at boot costs a minute now, not the dyno.
-            c.connect_async(host, port, keepalive=60)
+            # **Thirty seconds, not sixty.**
+            #
+            # The listener shares a gunicorn worker with request handling and
+            # with a live voice WebSocket that streams audio for minutes. paho's
+            # network thread has to be scheduled to send its PINGREQ, and under
+            # that load it may not be — a keepalive the broker measures in wall
+            # clock is being kept by a thread competing for the GIL. Pinging
+            # twice as often halves the window in which a busy stretch looks to
+            # the broker like a dead client, and costs two packets a minute.
+            c.connect_async(host, port, keepalive=MQTT_KEEPALIVE_S)
             c.loop_start()
             _client = c
             _started = True
@@ -506,7 +542,7 @@ def _watchdog(host: str, port: int, user: str, password: str) -> None:
             n.on_disconnect = _on_disconnect
             n.on_subscribe = _on_subscribe
             n.reconnect_delay_set(min_delay=1, max_delay=30)
-            n.connect_async(host, port, keepalive=60)
+            n.connect_async(host, port, keepalive=MQTT_KEEPALIVE_S)
             n.loop_start()
             _client = n
             _stats["last_message_at"] = time.time()
