@@ -27,6 +27,94 @@ _ROUTING_SIGNAL_TOOLS = frozenset({
     "pending_confirm", "pending_reject", "pending_select",
 })
 
+# The three that are answers rather than routing: something was held back for a
+# confirmation, and these decide its fate. See _resolve_pending.
+_PENDING_SIGNAL_TOOLS = frozenset({
+    "pending_confirm", "pending_reject", "pending_select",
+})
+
+# One thread per identity for voice, so a held action survives between turns and
+# is the same one the app would see.
+_VOICE_THREAD = "voice"
+
+
+def _pending_words(name: str) -> str:
+    """What the user effectively said, in the words the executor classifies."""
+    return {"pending_confirm": "اه",
+            "pending_reject": "لأ",
+            "pending_select": "1"}.get(name, "اه")
+
+
+def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
+    """Carry out — or drop — the action the previous turn held for confirmation.
+
+    **This is what "she said ok and nothing changed" was.**
+
+    A destructive tool does not act; it stores a pending action and asks. On the
+    text path that pending is persisted and `pending_node` runs it when the
+    answer comes. The voice path built a **fresh empty session dict for every
+    tool call**, so the pending was written into a throwaway and vanished the
+    moment the call returned — and the confirmation that followed had nothing
+    left to confirm.
+
+    The observed sequence, exactly:
+
+        tool task_update ok: متأكد بدك تعدّل اسم المهمة؟
+                             من: إرسال الجيب (السيارة)
+                             إلى: غسيل السيارة
+        …user says "اه متأكد"…
+        pending_confirm …
+        (nothing)
+
+    She was telling the truth about what she was about to do, and then no one
+    did it.
+
+    Persisting through `pending_store` rather than a local dict is deliberate:
+    it is the same store the text path uses, so a confirmation begun by voice
+    can be answered in the app and the other way round.
+    """
+    from app.agent.executor.pending.dispatch import execute_pending_action
+    from app.agent.pending_store import load_pending_state, save_pending_state
+    from app.db import get_db
+    from app.utils.user_profiles import active_user_profile_context
+
+    chat_id = _stm_chat_id() or user_id
+    mongo_db = get_db()
+    pending = load_pending_state(_VOICE_THREAD, chat_id, mongo_db)
+    if not pending:
+        logger.info("[voice_ws] %s with nothing held — answering directly", name)
+        return {"handled": True,
+                "reply": "ما في إشي مستني تأكيد."}
+
+    session: Dict[str, Any] = {"pending_action": pending}
+    profile = {"chat_id": chat_id, "relation": "owner",
+               "tone": "casual", "permissions": "all", "name": ""}
+    try:
+        with active_user_profile_context(profile):
+            result = execute_pending_action(
+                user_message=_pending_words(name),
+                session=session,
+                session_file=None,
+                mongo_db=mongo_db,
+                tasks_file=None,
+                save_session_fn=lambda *a, **k: None,
+            )
+    except Exception as exc:
+        logger.error("[voice_ws] pending %s failed: %s", name, exc, exc_info=True)
+        return {"handled": False, "reply": "ما قدرت أكمّل — صار خطأ عند الخادم."}
+
+    left = session.get("pending_action")
+    if isinstance(left, dict) and left.get("consumed_at"):
+        left = None
+    save_pending_state(_VOICE_THREAD, chat_id, mongo_db, left)
+
+    logger.info("[voice_ws] pending %s → handled=%s reply=%.80s",
+                name, result.get("handled"), result.get("reply") or "")
+    if not result.get("handled"):
+        return {"handled": False,
+                "reply": "[فشل التنفيذ] ما قدرت أنفّذ اللي أكّدته."}
+    return result
+
 
 def _build_system_instruction(user_id: str = "") -> str:
     """Build system instruction: Sandy's personality + full memory context + STM.
@@ -236,6 +324,11 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
     # On this path the routing has already happened — Gemini decides what to
     # call — so the honest response is that there was nothing to run, and to say
     # so as information rather than as a failure.
+    # `pending_*` are answers to a question the previous turn asked, and they
+    # have real work behind them. The rest are pure routing.
+    if name in _PENDING_SIGNAL_TOOLS:
+        return _resolve_pending(name, user_id)
+
     if name in _ROUTING_SIGNAL_TOOLS:
         logger.info("[voice_ws] %s is a routing signal, not an action — "
                     "answering the user directly", name)
@@ -268,10 +361,18 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
     from app.db import get_db
 
     chat_id = _stm_chat_id()
+    # **The session dict is not scratch space — a held action lives in it.**
+    #
+    # A destructive tool stores its pending in `context.session["pending_action"]`
+    # and asks instead of acting. This used to pass a fresh `{}` on every call,
+    # so the pending was written into a throwaway that was discarded a line
+    # later. She asked "متأكد؟", the owner said yes, and there was nothing left
+    # to say yes to.
+    session: Dict[str, Any] = {}
     ctx = DispatchContext(
         user_message="",
         normalized_message="",
-        session={},
+        session=session,
         state={"chat_id": chat_id, "user_id": chat_id},
         mongo_db=get_db(),
     )
@@ -307,6 +408,14 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
                        sorted(result), sorted(args or {}))
         return {"handled": False,
                 "reply": f"[فشل التنفيذ] {text or why or 'الأداة ما اشتغلت.'}"}
+
+    # If the tool held something back for confirmation, persist it so the next
+    # turn's "اه" can find it.
+    held = session.get("pending_action")
+    if held:
+        from app.agent.pending_store import save_pending_state
+        save_pending_state(_VOICE_THREAD, _stm_chat_id() or user_id, get_db(), held)
+        logger.info("[voice_ws] %s is waiting for a confirmation", name)
 
     # A tool that ran is worth one line too. "Did the update actually apply?"
     # had no answer in the log: the call was printed, the outcome never was.

@@ -77,7 +77,7 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 #       معرفة، مش شرط للرد.
 #   context_builder._safe_index_life — فهرسة قوائمه للبحث بالمعنى. لو ما في
 #       مخزن تضمينات بتتخطّى بصمت، وبيضلّ البحث الحرفي شغّالًا.
-BROAD_EXCEPT_BASELINE = 418
+BROAD_EXCEPT_BASELINE = 417
 
 
 def test_subtypes_have_expected_status_and_code():

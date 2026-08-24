@@ -7,14 +7,35 @@ logger = logging.getLogger(__name__)
 PLACES_API_URL = "https://places.googleapis.com/v1/places:searchText"
 
 
+class PlacesUnavailable(RuntimeError):
+    """The search could not be performed — as opposed to finding nothing.
+
+    **These two were the same value and they are not the same fact.**
+
+    A rejected key returned `[]`, which every caller rendered as "ما لقيت أماكن
+    تطابق..." — so a broken configuration was reported to the owner, in her
+    voice, as a confident statement about the world. He goes looking for another
+    greengrocer; there was never a search.
+
+    The log had the truth all along (`403 Client Error: Forbidden`) and the user
+    was told the opposite. Distinguishing them costs one exception.
+    """
+
+
 def search_places(
     query: str,
     api_key: str,
     location_bias: Optional[str] = None,
     max_results: int = 5,
 ) -> List[Dict[str, Any]]:
-    """ابحث عن أماكن عبر Google Places API"""
-    if not api_key or not query:
+    """ابحث عن أماكن عبر Google Places API.
+
+    Raises PlacesUnavailable when the search itself could not run — no key, or
+    the API refused us. An empty list means the search ran and found nothing.
+    """
+    if not api_key:
+        raise PlacesUnavailable("no Google Places API key configured")
+    if not query:
         return []
 
     headers = {
@@ -74,12 +95,17 @@ def search_places(
         logger.info(f"[Places] found {len(results)} places for: {query}")
         return results
 
-    except Exception as e:
-        import traceback
-
-        logger.warning(f"[Places] failed: {e}")
-        traceback.print_exc()
-        return []
+    except requests.HTTPError as e:
+        # 403 is the one worth naming: the key is rejected, disabled, or the
+        # project has no billing. It looked identical to "nothing nearby" for as
+        # long as both returned an empty list.
+        status = getattr(e.response, "status_code", 0)
+        logger.error("[Places] refused (%s) for %r — the search did not run",
+                     status, query)
+        raise PlacesUnavailable(f"Google Places refused the request ({status})") from e
+    except requests.RequestException as e:
+        logger.error("[Places] unreachable for %r: %s", query, e)
+        raise PlacesUnavailable("could not reach Google Places") from e
 
 
 def format_places_for_reply(

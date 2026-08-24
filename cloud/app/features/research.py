@@ -151,16 +151,25 @@ def execute_web_research(
         if not places_api_key:
             return "خدمة الأماكن غير متوفرة حالياً.", []
 
+        # **"Could not search" and "found nothing" must not share a sentence.**
+        #
+        # A rejected API key used to come back as an empty list, and the line
+        # below turned it into "ما لقيت أماكن تطابق..." — a confident claim
+        # about the world, in her voice, when no search had happened at all.
+        # The owner heard it and went looking elsewhere; the log said
+        # `403 Forbidden` the whole time.
+        from app.features.google_places import PlacesUnavailable
         try:
             places = search_places(
                 query, places_api_key, max_results=max(1, min(requested_count, 8))
             )
-        except Exception as e:
-            logger.warning(f"[Research] places call raised: {e}")
-            return f"ما قدرت أجد أماكن عن '{query}' الآن.", []
+        except PlacesUnavailable as e:
+            logger.error("[Research] places unavailable: %s", e)
+            return ("خدمة الأماكن مش شغّالة عندي حاليًا — مش إنه ما في نتايج، "
+                    "إنه البحث نفسه ما اشتغل."), []
 
         if not places:
-            return f"ما قدرت أجد أماكن واضحة عن '{query}'.", []
+            return f"ما لقيت أماكن تطابق '{query}'.", []
 
         ctx_items = places_to_search_items(places, limit=max(requested_count, 8))
         return format_places_for_reply(places), ctx_items

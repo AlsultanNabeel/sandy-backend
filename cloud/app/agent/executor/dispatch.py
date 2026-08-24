@@ -172,7 +172,17 @@ def _handle_places(ctx: "_ActionContext") -> Dict[str, Any]:
         return {"handled": False, "reply": "حدّد اسم المكان أو نوعه."}
 
     places_api_key = os.getenv("GOOGLE_PLACES_API_KEY", "").strip()
-    places = search_places(query, places_api_key, max_results=_PLACES_MAX_RESULTS)
+    from app.features.google_places import PlacesUnavailable
+    try:
+        places = search_places(query, places_api_key,
+                               max_results=_PLACES_MAX_RESULTS)
+    except PlacesUnavailable as exc:
+        # Not "nothing found" — nothing was looked for. Saying so is the whole
+        # difference between a useful answer and a confident wrong one.
+        logger.error("[places] search did not run: %s", exc)
+        return {"handled": True,
+                "reply": ("خدمة الأماكن مش شغّالة عندي حاليًا — البحث نفسه ما "
+                          "اشتغل، مش إنه ما في نتايج.")}
     if places:
         persist_last_search_results(
             ctx.session,

@@ -16,11 +16,14 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 import os
 
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
+
+logger = logging.getLogger(__name__)
 
 
 def _is_guest(claims) -> bool:
@@ -67,10 +70,17 @@ def register_research_api(app):
             return jsonify({"kind": kind, "items": demo, "demo": True}), 200
 
         if kind == "places":
-            from app.features.google_places import search_places
+            from app.features.google_places import PlacesUnavailable, search_places
 
             key = os.getenv("GOOGLE_PLACES_API_KEY", "").strip()
-            items = search_places(q, key, max_results=8)
+            try:
+                items = search_places(q, key, max_results=8)
+            except PlacesUnavailable as exc:
+                # 503, not an empty 200. An empty result set is an answer; a
+                # search that never ran is not, and the app must be able to tell
+                # its user which of the two it is looking at.
+                logger.error("[research] places unavailable: %s", exc)
+                return jsonify({"error": "places_unavailable"}), 503
             return jsonify({"kind": "places", "items": items, "demo": False}), 200
 
         from app.integrations.exa_client import search_exa
