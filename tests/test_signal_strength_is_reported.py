@@ -161,3 +161,35 @@ def test_the_board_asks_the_client_whether_it_is_connected():
     tx = tx[:tx.index("\n}\n")]
     assert "s_authed = false;" in tx
     assert "s_link_lost_ms = now_ms();" in tx
+
+
+def test_the_uplink_bounds_how_old_its_audio_can_be():
+    """Ninety-one kilobytes were observed queued — nearly three seconds.
+
+    A backlog is not only slowness, it is age: audio behind three seconds of
+    other audio describes a sentence the person finished saying three seconds
+    ago, and she answers it as though it were now. Sending it faithfully is
+    worse than dropping it — it is what makes her feel stuck rather than slow.
+
+    This is the same operation as the bug fixed earlier and the opposite
+    decision. That one deleted a chunk by accident, mid-word, and told nobody.
+    This is a written policy with a threshold and a counter, which is the whole
+    difference.
+    """
+    voice = _read("firmware/brain-core/main/sandy_voice.c")
+    assert "TX_MAX_LATENCY_BYTES" in voice
+    assert "s_tx_stale_bytes" in voice
+
+    # One second of 16 kHz 16-bit mono is 32000 bytes. More than about two and
+    # the conversation stops feeling live.
+    import re
+    m = re.search(r"#define TX_MAX_LATENCY_BYTES\s+\((\d+) \* 1024\)", voice)
+    assert m, "the latency cap is gone"
+    assert int(m.group(1)) * 1024 <= 64_000, "the cap allows more than two seconds"
+
+    # And it must drop the OLDEST — dropping what just arrived keeps the stale
+    # audio and throws away the current word, which is backwards.
+    tx = voice[voice.index("static void ws_tx_task"):]
+    i_drop = tx.index("TX_MAX_LATENCY_BYTES")
+    i_send = tx.index("esp_websocket_client_send_bin")
+    assert i_drop < i_send, "the catch-up runs after the send instead of before"

@@ -237,6 +237,24 @@ static const bool s_session_active = true;    // no gate: always streaming
 // بتنفع ونصيحة بتوديه يصلّح الراوتر الشغّال.
 #define TX_WEAK_RSSI_DBM       (-75)
 
+// **سقف التأخير — وهاد الفرق بين حوار وتسجيل.**
+//
+// المخزن مية وتمنية وعشرين كيلو، يعني بيقدر يجمّع أربع ثواني صوت. وشوهد فعليًّا
+// واحد وتسعين كيلو متراكمة: يعني اللي بتحكيه هلّق بيوصل الخادم بعد تلات ثواني،
+// وهي بتردّ ع كلام انتهى. **صوت حيّ متأخّر تلات ثواني مش صوت حيّ، هو تسجيل** —
+// وما إله أي قيمة بمحادثة.
+//
+// فوق هالحدّ منرمي **الأقدم** ومنكمّل من الجديد. الرمي هون قرار مكتوب وممعدود،
+// مش حادث: الغلطة اللي صلّحناها قبل كانت رمي عشوائي بنص كلمة وبلا ما حدا يعرف.
+// وهاي إعادة مزامنة مقصودة، وبتنطبع.
+//
+// ثانية وحدة (اثنين وتلاتين كيلو ع ستّتعش كيلوهرتز، ستّتعش بت، أحادي): تحتها
+// المحادثة بتضل طبيعية، وفوقها بتبلّش تحسّ إنها بتسمعك متأخّرة.
+#define TX_MAX_LATENCY_BYTES   (32 * 1024)
+
+// كم بايت انرمى عشان نلحق الوقت الحقيقي.
+static volatile uint32_t s_tx_stale_bytes;
+
 // كم مرّة كان المقبس مشغولًا وقت ما بدنا نرسل. صار **عدّاد تأخير مش ضياع**:
 // من بعد ما صار القفل بينتاخد قبل قراءة الصوت، ما بيضيع مقطع — بس رقم بيكبر
 // معناه المنافسة ع المقبس شغّالة، وهي أصل التأخير. صفر معناه السبب برّا اللوح.
@@ -1048,6 +1066,27 @@ static void ws_tx_task(void *arg) {
             continue;            // nothing read, so nothing lost
         }
 
+        // **Catch up to real time before sending anything.**
+        //
+        // A backlog is not just slowness, it is age: audio queued behind three
+        // seconds of other audio describes a sentence the person finished
+        // saying three seconds ago, and she answers it as though it were now.
+        // Sending it faithfully is worse than not sending it — it is what makes
+        // her feel stuck rather than slow.
+        //
+        // So the oldest goes. This is the same operation as the bug fixed
+        // earlier and the opposite decision: that one deleted a chunk by
+        // accident, mid-word, and told nobody. This one is a written policy with
+        // a threshold and a counter.
+        size_t queued_now = xStreamBufferBytesAvailable(s_tx_stream);
+        while (queued_now > TX_MAX_LATENCY_BYTES) {
+            size_t drop = xStreamBufferReceive(s_tx_stream, chunk,
+                                               TX_CHUNK_BYTES, 0);
+            if (drop == 0) break;
+            s_tx_stale_bytes += drop;
+            queued_now -= drop;
+        }
+
         // Zero timeout, inside the lock: waiting for audio while holding it
         // would block a session teardown behind a silent microphone.
         size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES, 0);
@@ -1098,9 +1137,11 @@ static void ws_tx_task(void *arg) {
                 // matters: the heartbeat is a five-second average of a moment
                 // that has already passed, and this is the moment.
                 ESP_LOGW(TAG, "audio backing up: %u bytes queued, rssi=%d dBm "
-                              "(%s), %lu chunks dropped waiting for the socket",
+                              "(%s), socket busy %lu times, %lu bytes dropped "
+                              "as stale",
                          (unsigned)queued, rssi, weak ? "weak" : "fine",
-                         (unsigned long)s_tx_lock_drops);
+                         (unsigned long)s_tx_lock_drops,
+                         (unsigned long)s_tx_stale_bytes);
             }
         } else if (queued < TX_BACKLOG_CLEAR_BYTES) {
             s_backlog_since = 0;
