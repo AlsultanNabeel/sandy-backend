@@ -17,6 +17,17 @@ from app.api.voice_ws.speaker import (
 )
 
 
+# Tools that only tell the text pipeline which branch to take. They have no
+# effect and a stub handler; `execute_node` filters them the same way. Kept as a
+# literal list rather than imported from meta_tools so that adding a real tool
+# there can never silently make it unreachable by voice.
+_ROUTING_SIGNAL_TOOLS = frozenset({
+    "chat_respond", "chat_emotional",
+    "ask_clarification", "request_confirmation",
+    "pending_confirm", "pending_reject", "pending_select",
+})
+
+
 def _build_system_instruction(user_id: str = "") -> str:
     """Build system instruction: Sandy's personality + full memory context + STM.
 
@@ -203,6 +214,34 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
     if user_id:
         set_voice_identity(user_id)
 
+    # **Routing signals are not actions, and must not be dispatched.**
+    #
+    # `pending_confirm`, `chat_respond` and the rest of the meta tools exist to
+    # tell the *text* pipeline which branch to take. Their handler is a stub that
+    # returns `{"handled": False, "reply": ""}` and its comment says it is never
+    # called, because `execute_node` filters them out by name before dispatch.
+    #
+    # The voice path had no such filter. So when the model answered a
+    # confirmation — the owner said "أي والله متأكد" — Gemini reported
+    # `pending_confirm`, this dispatched it, the stub declined, and the log read
+    #
+    #     [voice_ws] tool pending_confirm did not run:
+    #
+    # with nothing after the colon, because the stub's reply is an empty string.
+    # The model was then handed "[فشل التنفيذ] الأداة ما اشتغلت" for an answer
+    # that had in fact been given, which is a bad thing to tell a model in the
+    # middle of a confirmation: the next turn is built on the belief that the
+    # user's "yes" failed.
+    #
+    # On this path the routing has already happened — Gemini decides what to
+    # call — so the honest response is that there was nothing to run, and to say
+    # so as information rather than as a failure.
+    if name in _ROUTING_SIGNAL_TOOLS:
+        logger.info("[voice_ws] %s is a routing signal, not an action — "
+                    "answering the user directly", name)
+        return {"handled": True,
+                "reply": "تمام، كمّلي عادي — ما في إشي لازم ينفّذ هون."}
+
     owner_profile = {
         "chat_id": _stm_chat_id(),
         "relation": "owner",
@@ -250,8 +289,26 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
     # وكنّا نمرّر `reply` وبس — فچيميناي بتشوف نصًّا وبتفترض إنه نجح وبتأكّدلك.
     # التصريح بالفشل بيخلّيها تقول إنه ما زبط بدل ما تخترع نجاحًا.
     if not result.get("handled"):
+        # **The whole result, not just `reply`.**
+        #
+        # A refusal often carries its reason in `error`, or in nothing at all —
+        # and the line used to print `reply` only. The log then read
+        #
+        #     [voice_ws] tool pending_confirm did not run:
+        #
+        # with nothing after the colon, which is the least useful thing a
+        # failure can say: it proves something went wrong and hides what. Same
+        # mistake as the broker's disconnect reason, in a different file.
         text = result.get("reply") or ""
-        logger.warning("[voice_ws] tool %s did not run: %s", name, text[:120])
+        why = result.get("error") or result.get("reason") or ""
+        logger.warning("[voice_ws] tool %s did not run — error=%s reply=%r "
+                       "keys=%s args=%s",
+                       name, why or "(none)", text[:120],
+                       sorted(result), sorted(args or {}))
         return {"handled": False,
-                "reply": f"[فشل التنفيذ] {text or 'الأداة ما اشتغلت.'}"}
+                "reply": f"[فشل التنفيذ] {text or why or 'الأداة ما اشتغلت.'}"}
+
+    # A tool that ran is worth one line too. "Did the update actually apply?"
+    # had no answer in the log: the call was printed, the outcome never was.
+    logger.info("[voice_ws] tool %s ok: %.120s", name, result.get("reply") or "")
     return result
