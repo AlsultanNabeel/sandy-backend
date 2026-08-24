@@ -749,8 +749,25 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
         # Turn complete: persist the turn for cross-platform memory only.
         if response.server_content and response.server_content.turn_complete:
             await send_msg({"type": "end_turn"})
-            user_text = " ".join(_user_buf).strip()
-            sandy_text = " ".join(_sandy_buf).strip()
+            # **Concatenated, not space-joined.**
+            #
+            # Gemini streams a transcript as a run of fragments, and a fragment
+            # is not a word — it is whatever part of one was ready. The pieces
+            # already carry their own spaces. Putting a space between them adds
+            # one inside every word it split:
+            #
+            #     heard='اه لي ها و خ لي ها  الا ولو يه  بت اعت ها  عاليه'
+            #
+            # which is "اهليها وخليها الا ولويه بتاعتها عاليه" with the seams
+            # showing. Arabic makes it obvious because the letters join; in
+            # English it reads as a typo and had been going unnoticed.
+            #
+            # This is not only a log cosmetic. This text is what gets written to
+            # short- and long-term memory, so every voice turn has been stored
+            # shredded — and read back to her later as though it were what was
+            # said.
+            user_text = "".join(_user_buf).strip()
+            sandy_text = "".join(_sandy_buf).strip()
 
             # Save the turn so Telegram/web/voice keep sharing one memory. We
             # deliberately do NOT re-inject conversation history back into the
