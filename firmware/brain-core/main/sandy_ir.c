@@ -211,7 +211,10 @@ esp_err_t ir_init(void) {
     };
     rmt_apply_carrier(s_tx, &carrier);
 
-    rmt_copy_encoder_config_t copy_cfg = { 0 };
+    // `= {}` and not `= { 0 }`: this config struct is **empty** in IDF, so a
+    // zero initialiser is one element too many and -Werror stops the build.
+    // Matches what IDF's own RMT examples do.
+    rmt_copy_encoder_config_t copy_cfg = {};
     e = rmt_new_copy_encoder(&copy_cfg, &s_copy);
     if (e != ESP_OK) { ESP_LOGE(TAG, "encoder: %s", esp_err_to_name(e)); return e; }
     rmt_enable(s_tx);

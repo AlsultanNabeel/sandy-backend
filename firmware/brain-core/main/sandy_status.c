@@ -54,8 +54,15 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "النت قطع بنص الحكي. لما يرجع احكيني من جديد.",
     },
     [SANDY_ST_NET_SLOW] = {
-        MOOD_THINKING, LED_STATE_LISTENING, "SLOW NET",
-        "النت بطيء وصوتي ما عم يوصل. قرّبني ع الراوتر.",
+        MOOD_THINKING, LED_STATE_LISTENING, "WEAK SIGNAL",
+        "إشارة الواي فاي عندي ضعيفة وصوتي ما عم يلحق. قرّبني ع الراوتر.",
+    },
+    // نفس العرض، وسبب تاني — والفرق مقصود: هون الإشارة قوية فعلًا، فتوجيه
+    // المالك ع الراوتر بيوديه يصلّح الإشي الوحيد السليم، وبيخلّي الروبوت يبان
+    // غلطان بحق بيته.
+    [SANDY_ST_LINK_STALL] = {
+        MOOD_THINKING, LED_STATE_LISTENING, "LINK STALL",
+        "الإشارة قوية بس الصوت متأخّر عن الوصول. لحظة وبرجع.",
     },
     [SANDY_ST_AUTH_FAILED] = {
         MOOD_ALERT, LED_STATE_OFF, "SETUP",

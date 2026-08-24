@@ -231,6 +231,16 @@ static const bool s_session_active = true;    // no gate: always streaming
 // Once said, it stands at least this long. Otherwise the recovery message
 // arrives before the person has finished reading the warning.
 #define TX_BACKLOG_HOLD_MS     5000
+
+// تحت هالرقم الوصلة اللاسلكية ما بتحمل صوتًا حيًّا، مهما كان النت ورا الراوتر
+// سريعًا. وفوقه، تأخّر الصوت سببه إشي تاني — والتفريق هو الفرق بين نصيحة
+// بتنفع ونصيحة بتوديه يصلّح الراوتر الشغّال.
+#define TX_WEAK_RSSI_DBM       (-75)
+
+// كم مقطع صوت انرمى لأنّ المقبس كان مشغولًا. عدّاد مش راية: صفر معناه المشكلة
+// برّا اللوح، ورقم بيكبر معناه المنافسة ع المقبس هي السبب — والفرق ما كان إله
+// أي أثر بالسجلّ.
+static volatile uint32_t s_tx_lock_drops;
 #define SPK_CHUNK_BYTES     1920    // ~40 ms at 24 kHz / 16-bit
 // Jitter buffer — **adaptive, because one number cannot serve both jobs.**
 //
@@ -992,7 +1002,16 @@ static void ws_tx_task(void *arg) {
         size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES,
                                         pdMS_TO_TICKS(100));
         if (n == 0) continue;
-        if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(50)) != pdTRUE) continue;
+        // **A `continue` here throws the audio away.** The chunk has already
+        // been taken out of the stream buffer, so failing to get the socket
+        // does not delay it — it deletes it, and the sentence arrives at the
+        // server with a hole in it. Silent until now, and it is the shape of
+        // "she cut off mid-word on a perfectly good network": nothing about
+        // that failure involves the network at all.
+        if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+            s_tx_lock_drops++;
+            continue;
+        }
         if (s_client && s_authed) {
             esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
                                           pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
@@ -1009,15 +1028,42 @@ static void ws_tx_task(void *arg) {
 
         if (queued > TX_BACKLOG_WARN_BYTES) {
             if (s_backlog_since == 0) s_backlog_since = t;
-            if (t - s_backlog_since > TX_BACKLOG_WARN_MS &&
-                status_get() != SANDY_ST_NET_SLOW) {
-                status_set(SANDY_ST_NET_SLOW);
+            const bool already = (status_get() == SANDY_ST_NET_SLOW ||
+                                  status_get() == SANDY_ST_LINK_STALL);
+            if (t - s_backlog_since > TX_BACKLOG_WARN_MS && !already) {
+                // **Which fault this is, decided by measurement.**
+                //
+                // A backed-up queue is a symptom with more than one cause, and
+                // the old code named one of them on her face: "slow net, move me
+                // closer to the router". When the signal is strong that is worse
+                // than saying nothing — it sends the owner to fix the only part
+                // that is working, and the robot looks wrong about its own house.
+                const int rssi = wifi_sandy_rssi();
+                const bool weak = (rssi != 0 && rssi < TX_WEAK_RSSI_DBM);
+                status_set(weak ? SANDY_ST_NET_SLOW : SANDY_ST_LINK_STALL);
                 s_warned_at = t;
+                // **The two numbers that tell you which problem this is.**
+                //
+                // "her voice isn't getting out" has at least three causes that
+                // look identical on her face: a weak radio link, a busy server,
+                // and a board that cannot encode fast enough. The signal
+                // strength separates the first from the other two immediately —
+                // below about -75 dBm the link simply cannot carry real-time
+                // audio, and no amount of reading server logs will say so.
+                //
+                // Printing it here rather than leaving it to the heartbeat
+                // matters: the heartbeat is a five-second average of a moment
+                // that has already passed, and this is the moment.
+                ESP_LOGW(TAG, "audio backing up: %u bytes queued, rssi=%d dBm "
+                              "(%s), %lu chunks dropped waiting for the socket",
+                         (unsigned)queued, rssi, weak ? "weak" : "fine",
+                         (unsigned long)s_tx_lock_drops);
             }
         } else if (queued < TX_BACKLOG_CLEAR_BYTES) {
             s_backlog_since = 0;
-            if (s_authed && status_get() == SANDY_ST_NET_SLOW &&
-                t - s_warned_at > TX_BACKLOG_HOLD_MS) {
+            if (s_authed && t - s_warned_at > TX_BACKLOG_HOLD_MS &&
+                (status_get() == SANDY_ST_NET_SLOW ||
+                 status_get() == SANDY_ST_LINK_STALL)) {
                 status_set(SANDY_ST_OK);
             }
         }

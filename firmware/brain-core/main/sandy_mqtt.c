@@ -653,6 +653,10 @@ void mqtt_publish_status(void) {
         "\"mic_l_gain\":%d,\"mic_r_gain\":%d,"
         "\"mic_l_muted\":%s,\"mic_r_muted\":%s,"
         "\"volume\":%d,\"noise\":%d,\"online\":true,"
+        // قوّة الإشارة. الكاميرا وعقدة الغرفة بيبعتوها من زمان والدماغ ما كان
+        // — وهو اللوح الوحيد اللي بيمرّر صوتًا حيًّا، يعني الوحيد اللي بيهمّه.
+        // «النت بطيء» بلا هالرقم بيخلّي التشخيص تخمينًا بين الراوتر والخادم.
+        "\"rssi\":%d,"
         // Key names are the backend's, not ours: mqtt_ingest reads
         // "firmware_version", "capabilities" and "outputs" by those exact
         // spellings and silently ignores anything else. A heartbeat that looks
@@ -667,7 +671,7 @@ void mqtt_publish_status(void) {
         mic_get_gain(MIC_LEFT),  mic_get_gain(MIC_RIGHT),
         mic_is_muted(MIC_LEFT)  ? "true" : "false",
         mic_is_muted(MIC_RIGHT) ? "true" : "false",
-        spk_get_volume(), (int)ns_get_level(),
+        spk_get_volume(), (int)ns_get_level(), wifi_sandy_rssi(),
         wifi_sandy_ip(), wifi_sandy_ssid(),
         SANDY_FW_VERSION, OUTPUTS_JSON);
     esp_mqtt_client_publish(s_client, s_topic_status, buf, 0, 0, 0);

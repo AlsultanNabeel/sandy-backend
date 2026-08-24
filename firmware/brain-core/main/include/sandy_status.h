@@ -20,7 +20,14 @@ typedef enum {
     SANDY_ST_NO_WIFI,       // no association with the access point
     SANDY_ST_NO_SERVER,     // Wi-Fi up, the cloud is not answering
     SANDY_ST_LINK_DROPPED,  // was connected, the link died mid-conversation
-    SANDY_ST_NET_SLOW,      // connected but audio can't get out in time
+    SANDY_ST_NET_SLOW,      // audio can't get out AND the radio link is weak
+    // Audio can't get out and the radio is fine — a different fault wearing the
+    // same symptom. Split from NET_SLOW because the old single state told the
+    // owner to move closer to the router, which is useless advice when the
+    // router is two metres away and the signal is strong: it sends them to fix
+    // the one thing that is not broken, and makes the robot look wrong about its
+    // own house.
+    SANDY_ST_LINK_STALL,
     SANDY_ST_AUTH_FAILED,   // the server refused this device (config problem)
     SANDY_ST_LOW_MEMORY,    // not enough internal RAM to open a session
     SANDY_ST_COUNT

@@ -302,6 +302,13 @@ const char *wifi_sandy_ip(void) {
     return s_ip;
 }
 
+int wifi_sandy_rssi(void) {
+    if (!wifi_sandy_is_connected()) return 0;
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return 0;
+    return ap.rssi;
+}
+
 bool wifi_sandy_is_connected(void) {
     if (!s_eg) return false;
     return (xEventGroupGetBits(s_eg) & WIFI_CONNECTED_BIT) != 0;
