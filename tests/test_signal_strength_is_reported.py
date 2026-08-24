@@ -193,3 +193,30 @@ def test_the_uplink_bounds_how_old_its_audio_can_be():
     i_drop = tx.index("TX_MAX_LATENCY_BYTES")
     i_send = tx.index("esp_websocket_client_send_bin")
     assert i_drop < i_send, "the catch-up runs after the send instead of before"
+
+
+def test_the_websocket_client_has_a_lock_per_direction():
+    """The root of "she stops mid-sentence", and the library ships the fix off.
+
+    esp_websocket_client guards the whole client with one recursive mutex, so
+    while Sandy is speaking the receive path holds it — decoding her audio and
+    filling the speaker buffer — and the microphone queues behind it. The proof
+    is that `Could not lock ws-client within 400 timeout` appears only while
+    talking=1: it cannot happen when she is silent.
+
+    The component's own Kconfig offers a separate TX lock, described as avoiding
+    "the lock contention when send and receive data at the same time" — which is
+    this exact case, and the permanent case for any two-way voice call. It
+    defaults to off.
+    """
+    defaults = _read("firmware/brain-core/sdkconfig.defaults")
+    assert "CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y" in defaults
+
+    # sdkconfig.defaults does not override a key the generated sdkconfig already
+    # carries, and it carried this one as "not set" — so a build could quietly
+    # keep the single lock while the defaults file claimed otherwise.
+    generated = _ROOT / "firmware" / "brain-core" / "sdkconfig"
+    if generated.exists():
+        text = generated.read_text(encoding="utf-8")
+        assert "# CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK is not set" not in text, (
+            "the generated config still disables the separate TX lock")
