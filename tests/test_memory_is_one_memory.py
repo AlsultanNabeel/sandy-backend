@@ -226,4 +226,6 @@ def test_durable_memory_was_always_keyed_by_person():
     """
     ctx = (Path(__file__).resolve().parent.parent
            / "cloud/app/agent/context_builder.py").read_text(encoding="utf-8")
-    assert "search_relevant_summaries(message, chat_id" in ctx
+    # The two searches became one call — they were embedding the same string
+    # twice — but the identity it searches by is still the person.
+    assert "search_memory_for_turn(message, chat_id" in ctx

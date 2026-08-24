@@ -132,9 +132,11 @@ def build_memory_context(
 
     if include_semantic and message and chat_id:
         try:
-            from app.agent.semantic_memory import search_relevant_summaries, search_relevant_facts
-            ctx["semantic_summaries"] = search_relevant_summaries(message, chat_id, n_results=3)
-            ctx["semantic_facts"] = search_relevant_facts(message, n_results=5)
+            from app.agent.semantic_memory import search_memory_for_turn
+            # واحدة مش تنتين — كانوا يعملوا تضمين لنفس النص كل واحد لحاله.
+            _sem = search_memory_for_turn(message, chat_id, n_facts=5, n_summaries=3)
+            ctx["semantic_summaries"] = _sem["summaries"]
+            ctx["semantic_facts"] = _sem["facts"]
         except Exception as exc:
             logger.debug("[context_builder] semantic search skipped: %s", exc)
 

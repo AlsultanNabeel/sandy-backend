@@ -10,6 +10,7 @@ from app.api.voice_ws._config import (
 )
 from app.api.voice_ws.memory import (
     _load_stm_context,
+    _load_stm_history,
     _stm_chat_id,
     _voice_memory_context,
     set_voice_identity,
@@ -183,7 +184,11 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
 
     # Rich MongoDB context: persona directives + session state + STM. No query
     # yet at session start; semantic search happens per-turn via injection.
-    rich_ctx = _voice_memory_context("", include_semantic=False)
+    # قراءة وحدة للذاكرة القصيرة، بتتمرّر للاتنين. كانت تنقرأ مرتين بكل بداية
+    # مكالمة، وهاي الثواني اللي بين «هاي آندي» وأول صوت بترجع منها.
+    stm_history = _load_stm_history()
+    rich_ctx = _voice_memory_context(
+        "", include_semantic=False, stm_history=stm_history)
     if rich_ctx:
         # Proof line: this is the EXACT memory text seeded into the voice prompt.
         # If a phantom reply ("focus session", "eggs") shows up, grep this to see
@@ -204,7 +209,7 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
     #
     # والحلّ مش إرجاعها وبس: التحذير تحت («هاد سجلّ سابق، ما تردّي عليه») هو
     # اللي بيمنع التكرار، وهو موجود ومكتوب صراحة. فالسطور بترجع، والحارس بيضلّ.
-    stm_context = _load_stm_context()
+    stm_context = _load_stm_context(stm_history)
     if stm_context:
         parts.append(stm_context)
 

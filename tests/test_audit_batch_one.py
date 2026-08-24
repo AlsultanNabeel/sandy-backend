@@ -325,7 +325,10 @@ def test_summary_vector_search_projects_the_summary_field(monkeypatch):
     appdb.configure(db)
     captured = {}
 
-    def _fake_vector_search(col, query, chat_id, n_results, extra_project):
+    def _fake_vector_search(col, query, chat_id, n_results, extra_project,
+                            query_vector=None):
+        # `query_vector` arrived with the one-embedding-per-turn change: callers
+        # that run more than one search over the same string pay for it once.
         captured["projected"] = dict(extra_project)
         # What Atlas would hand back, honouring the projection it was given.
         doc = {"summary": "حكينا عن السفر"}

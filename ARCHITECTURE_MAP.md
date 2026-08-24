@@ -210,6 +210,22 @@ Around them: `interests_tracker`, `style_memory`, `lessons_memory`,
 `relationships_memory`, `shared_history`, `dreams_engine`, `session_state`,
 `deep_context`, `soul_vault`.
 
+**One embedding per turn, not one per search.** `search_relevant_facts` and
+`search_relevant_summaries` each embedded the query independently — two OpenAI
+round trips per message for one string, on every channel. `search_memory_for_turn`
+embeds once and hands the vector to both; the individual functions still take an
+optional `query_vector` so a single search is unchanged.
+
+**A caching layer for `get_persona_directives` was designed and cut**, and the
+reason is worth keeping. It is 26 of the 44 round trips a chat turn waits for and
+is rebuilt from scratch every message, so caching it is the obvious win. Three
+reviews found three different ways it went wrong, and the last one is the
+disqualifying one: the invalidation was built on `ScopedCollection` being the
+single choke point for tenant writes, and it is not — `features/users_store.py`
+and `api/memory_api.py` write on raw handles, which are exactly the two
+collections the cached blocks come from. Anyone picking this up again needs to
+start there, not with the cache.
+
 Short-term memory is on Mongo, not Redis, on purpose: the free Redis tier hit its
 monthly request cap and memory silently froze. Mongo has no per-request quota and
 was already wired. Don't "fix" this back to Redis without solving the quota.
@@ -353,8 +369,22 @@ Images are Azure FLUX with an Azure OpenAI image fallback. Research is Exa; plac
 are Google Places. Push is APNs over HTTP/2 (`h2` is in `requirements.txt` for
 exactly this). MQTT is HiveMQ Cloud over TLS.
 
-Everything external goes through `utils/circuit_breaker.py`. A missing key
-disables only its own feature — the app still boots.
+Everything external goes through `utils/circuit_breaker.py` — including
+`azure_intent_client`, the hottest call in the system, which was outside it
+until 25 Aug 2026.
+
+**None of the breakers pass `timeout=`, and that is on purpose.** The class
+supports one and it looks like the missing half; it is not. `_invoke` enforces a
+deadline by submitting to a shared eight-worker pool and waiting on the future,
+so *queue* time counts against the call's own budget and the resulting timeout is
+scored as a failure. Switch it on across every client and load alone can open a
+breaker in front of a provider that is answering perfectly — and `future.cancel()`
+cannot stop a running job, so slow calls keep their slots exactly when the queue
+is longest. Per-request deadlines belong on the SDK client, where they cost no
+threads: `AZURE_INTENT_TIMEOUT_S` and `semantic_memory._EMBED_TIMEOUT_S` are
+there for that reason.
+
+A missing key disables only its own feature — the app still boots.
 
 ---
 

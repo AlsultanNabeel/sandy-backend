@@ -7,6 +7,7 @@ import logging
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 from app.agent.graph.state import SandyState, merge_state
 from app.agent.soul_vault import (
@@ -20,7 +21,46 @@ from app.agent.context_builder import get_persona_directives
 logger = logging.getLogger(__name__)
 
 # Shared executor reused across every turn — avoids per-request thread churn.
-_SOUL_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="soul")
+#
+# **Sized so one turn's fan-out fits.** It is shared by every request in the
+# worker and a turn submits up to eight jobs, so at four workers a single chat
+# already queued its own work and the parallelism this pool exists to provide
+# was gone. Eight is one turn, not eight turns: with `--threads 8` a busy worker
+# can still queue, and a job that misses `_SOUL_WAIT_S` is dropped rather than
+# waited for. That is the honest limit of this pool — sizing it for the worst
+# case would mean sixty-four threads, which is a different trade and not one to
+# make quietly.
+_SOUL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="soul")
+
+# One deadline for everything on this pool.
+#
+# Two of the four collection sites called `fut.result()` with no timeout at all,
+# so a hung Mongo query parked a gunicorn thread until the 120-second kill —
+# while the other two gave up after three seconds on the same call. Same work,
+# two policies; this is the one.
+_SOUL_WAIT_S = 3.0
+
+
+def _collect(name: str, fut):
+    """Wait for one soul job, and **say so when it does not arrive.**
+
+    Giving up is not free. `directives` is the whole persona — life snapshot,
+    life search, onboarding line, preferences, relationships, lessons — and
+    `soul_node` drops all of it on a `None`. Before this, the only trace was
+    `directives=False` inside an INFO line, which is indistinguishable from a
+    user who genuinely has no data. A user who is suddenly a stranger to her is
+    worth a warning.
+    """
+    try:
+        return fut.result(timeout=_SOUL_WAIT_S)
+    except FuturesTimeoutError:
+        logger.warning(
+            "[soul] %s gave up after %.1fs — that block is missing from this turn",
+            name, _SOUL_WAIT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 — one job failing must not end the turn
+        logger.warning("[soul] %s failed: %s", name, exc)
+    return None
 
 
 def _submit(fn, *args, **kwargs):
@@ -151,10 +191,7 @@ def soul_node(state: SandyState) -> SandyState:
             for k, fut in prefetch.items():
                 if k.startswith("__"):
                     continue   # prefetched semantic search — collected in stage2
-                try:
-                    _s1[k] = fut.result(timeout=3.0)
-                except Exception:
-                    _s1[k] = None
+                _s1[k] = _collect(k, fut)
         else:
             # Fallback: run the always-needed queries now (no prefetch available)
             _get_proactive_comfort = None
@@ -173,10 +210,7 @@ def soul_node(state: SandyState) -> SandyState:
 
             _s1 = {}
             for k, fut in _s1_futs.items():
-                try:
-                    _s1[k] = fut.result()
-                except Exception:
-                    _s1[k] = None
+                _s1[k] = _collect(k, fut)
 
         # Chat-only context (dreams/anniv/future) is fetched here — only for chat
         # tools — since routing has run and fc_name is now known. Avoids wasting
@@ -212,10 +246,7 @@ def soul_node(state: SandyState) -> SandyState:
                 logger.debug("ignoring non-critical error", exc_info=True)
 
             for k, fut in _chat_futs.items():
-                try:
-                    _s1[k] = fut.result(timeout=3.0)
-                except Exception:
-                    _s1[k] = None
+                _s1[k] = _collect(k, fut)
 
         logger.info(f"[soul] stage1: {(time.perf_counter()-_t_soul)*1000:.0f}ms")
 
@@ -266,29 +297,25 @@ def soul_node(state: SandyState) -> SandyState:
             )
         if message:
             pf = state.get("soul_prefetch") or {}
-            if "__summaries" in pf or "__sem_facts" in pf:
+            if "__semantic" in pf:
                 # Already started during prefetch (overlapped the router) — just collect.
-                if "__summaries" in pf:
-                    _s2_futs["summaries"] = pf["__summaries"]
-                if "__sem_facts" in pf:
-                    _s2_futs["sem_facts"] = pf["__sem_facts"]
+                _s2_futs["__semantic"] = pf["__semantic"]
             else:
                 try:
-                    from app.agent.semantic_memory import search_relevant_summaries, search_relevant_facts
+                    from app.agent.semantic_memory import search_memory_for_turn
                     # ملخّصات هذا الخيط (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
                     _summ_thread = state.get("conversation_id") or chat_id
-                    _s2_futs["summaries"] = _submit(
-                        search_relevant_summaries, message, _summ_thread)
-                    _s2_futs["sem_facts"] = _submit(search_relevant_facts, message)
+                    _s2_futs["__semantic"] = _submit(
+                        search_memory_for_turn, message, _summ_thread)
                 except Exception:
                     logger.debug("ignoring non-critical error", exc_info=True)
 
         _s2 = {}
         for k, fut in _s2_futs.items():
-            try:
-                _s2[k] = fut.result()
-            except Exception:
-                _s2[k] = None
+            _s2[k] = _collect(k, fut)
+        _sem = _s2.pop("__semantic", None) or {}
+        _s2["summaries"] = _sem.get("summaries") or []
+        _s2["sem_facts"] = _sem.get("facts") or []
 
         logger.info(f"[soul] stage2: {(time.perf_counter()-_t_soul)*1000:.0f}ms")
 
@@ -431,15 +458,13 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
     # The "__" keys are collected later in stage2, not awaited in stage1.
     if message:
         try:
-            from app.agent.semantic_memory import (
-                search_relevant_facts,
-                search_relevant_summaries,
-            )
+            from app.agent.semantic_memory import search_memory_for_turn
             # ملخّصات خيط المحادثة (سيشن الشات) لو موجود، وإلا chat_id (السلوك القديم).
             _summ_thread = conversation_id or chat_id
-            futures["__summaries"] = _submit(
-                search_relevant_summaries, message, _summ_thread)
-            futures["__sem_facts"] = _submit(search_relevant_facts, message)
+            # وظيفة وحدة مش تنتين: الاتنين كانوا يعملوا تضمين لنفس النص، يعني
+            # نداءين لـ OpenAI بكل رسالة عشان استعلام واحد.
+            futures["__semantic"] = _submit(
+                search_memory_for_turn, message, _summ_thread)
         except Exception:
             logger.debug("ignoring non-critical error", exc_info=True)
 

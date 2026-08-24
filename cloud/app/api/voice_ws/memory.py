@@ -4,13 +4,19 @@ import logging
 
 import contextvars
 import time
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 from app.api.voice_ws._config import (
     logger,
     _VOICE_CTX_TTL_S,
 )
 
-_voice_ctx_cache: dict[str, tuple[float, str]] = {}  # chat_id -> (built_at, text)
+# chat_id -> (built_at, text). **Bounded.** A plain dict here grows one entry
+# per customer who has ever used voice and never sheds one: the TTL below makes
+# a stale entry unused, not gone. Oldest-first eviction, same shape as the
+# persona cache in `context_builder`.
+_VOICE_CTX_MAX = 128
+_voice_ctx_cache: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
 
 # أي جسم بيحكي — الروبوت اللي بالغرفة ولا مكالمة التطبيق.
 #
@@ -129,14 +135,18 @@ def _load_stm_history() -> List[Dict[str, Any]]:
     return []
 
 
-def _load_stm_context() -> str:
+def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
     """آخر المحادثات من كل القنوات، وكل جملة مكتوب جنبها من وين إجت.
 
     المصدر مش زينة. المالك بيحكي مع نفس ساندي بتلات طرق، ومنطقي يسأل «إيمتى
     قلتلك هيك؟» — والجواب «بالمكالمة» غير «وإنت واقف قدّامي». بلا الوسم، الذاكرة
     الموحّدة بتصير كومة جُمَل بلا مكان، وهي ما بتقدر تجاوب عن سؤال هي حاضرة فيه.
     """
-    history = _load_stm_history()
+    # يُمرَّر من فوق لمّا يكون محمّل أصلاً: بناء تعليمات الجلسة كان بينادي
+    # `_load_stm_history` مرتين — مرة من هون ومرة من `_voice_memory_context` —
+    # يعني نفس القراءة مرّتين بكل بداية مكالمة، وهي على مسار «قال هاي آندي»
+    # لحدّ ما تسمع صوتها.
+    history = _load_stm_history() if history is None else history
     if not history:
         return ""
     turns = []
@@ -158,7 +168,10 @@ def _load_stm_context() -> str:
 # makes reconnects/rapid re-opens effectively instant without staleness risk.
 
 
-def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[str]:
+def _voice_memory_context(
+    message: str, *, include_semantic: bool,
+    stm_history: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[str]:
     """Shared rich-context builder for the voice helpers.
 
     Returns the voice-formatted memory context for the owner chat, or ``None``
@@ -182,7 +195,8 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
         from app.agent.context_builder import build_memory_context, format_for_voice
         from app.db import get_db
         mongo_db = get_db()
-        stm_history = _load_stm_history()
+        if stm_history is None:
+            stm_history = _load_stm_history()
         ctx = build_memory_context(
             chat_id=chat_id,
             user_id=chat_id,
@@ -198,6 +212,9 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
         text = format_for_voice(ctx)
         if cacheable:
             _voice_ctx_cache[chat_id] = (time.monotonic(), text)
+            _voice_ctx_cache.move_to_end(chat_id)
+            while len(_voice_ctx_cache) > _VOICE_CTX_MAX:
+                _voice_ctx_cache.popitem(last=False)
         return text
     except Exception as exc:
         logger.debug("[voice_ws] context_builder skipped: %s", exc)

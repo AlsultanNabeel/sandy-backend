@@ -25,7 +25,12 @@ def _connect_mongo(uri: str) -> Any:
         "connectTimeoutMS": 20000,
         "socketTimeoutMS": 20000,
         "retryWrites": True,
-        "maxPoolSize": 10,
+        # Sized against the threads that actually contend for it, per worker:
+        # 8 gunicorn threads + the 8-worker soul pool + the 10-worker
+        # sandy_executor + the MQTT listener + the scheduler. At the old value
+        # of 10 they queued for a connection under any real concurrency, and a
+        # request that is waiting on the pool looks exactly like a slow query.
+        "maxPoolSize": 50,
         "minPoolSize": 1,
         "appname": "sandy-heroku-agent",
     }
@@ -52,39 +57,24 @@ def init_mongo_connection(
         logger.info("[MongoDB] connected (db=%s)", mongodb_db_name)
         return mongo_client, mongo_db
 
-    except Exception as first_error:
-        logger.warning("[MongoDB] primary TLS connection failed: %s", first_error)
-
-        try:
-            mongo_client = MongoClient(
-                mongodb_uri,
-                serverSelectionTimeoutMS=20000,
-                connectTimeoutMS=20000,
-                socketTimeoutMS=20000,
-                tls=True,
-                tlsAllowInvalidCertificates=True,
-                retryWrites=True,
-                maxPoolSize=10,
-                minPoolSize=1,
-                appname="sandy-heroku-agent-fallback",
-            )
-            mongo_client.admin.command("ping")
-            mongo_db = mongo_client[mongodb_db_name]
-            # Loud on purpose: this path disables cert validation (MITM risk), so
-            # it must not pass unnoticed if it ever becomes the normal route.
-            logger.warning(
-                "[MongoDB] connected with FALLBACK TLS mode — cert validation "
-                "disabled (db=%s)", mongodb_db_name
-            )
-            return mongo_client, mongo_db
-
-        except Exception as second_error:
-            logger.error("[MongoDB] connection failed: %s", second_error)
-            logger.error(
-                "[MongoDB] Hint: check Atlas Network Access allowlist and URI credentials"
-            )
-            logger.error("[MongoDB] Falling back to JSON memory")
-            return None, None
+    except Exception as connect_error:
+        # **There is no retry without certificate validation.**
+        #
+        # There used to be: any failure of the connect above — including an
+        # actual interception — fell through to a client built with
+        # `tlsAllowInvalidCertificates=True`, and the only trace was a warning
+        # nobody reads. Every message, every memory and every voiceprint then
+        # travelled over a connection that would accept a forged certificate.
+        #
+        # The first attempt already pins `certifi`, so a genuine CA problem is
+        # fixed there. A database that will not connect is a loud outage; a
+        # database that connects insecurely is a quiet one.
+        logger.error("[MongoDB] connection failed: %s", connect_error)
+        logger.error(
+            "[MongoDB] Hint: check Atlas Network Access allowlist and URI credentials"
+        )
+        logger.error("[MongoDB] Falling back to JSON memory")
+        return None, None
 
 
 async def save_document_async(

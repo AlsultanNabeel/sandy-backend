@@ -50,6 +50,17 @@ _vector_search_warned = False
 _embed_client = None
 _embed_model = "text-embedding-3-small"
 
+# **A deadline on the embedding call.**
+#
+# There was none, and the OpenAI SDK's default is ten minutes with retries. This
+# call runs on the soul pool, which a request waits on for three seconds and then
+# abandons — but abandoning returns the *caller*, never the worker. A stalled
+# embeddings endpoint therefore holds pool workers for minutes while every new
+# turn queues more work behind them, and once all of them are held, every user
+# on that dyno gets a Sandy who does not know their name. The timeout is what
+# makes the worker come back.
+_EMBED_TIMEOUT_S = 8.0
+
 _EMBEDDING_MODEL = "text-embedding-3-small"
 _EMBEDDING_DIMS = 1536
 _VECTOR_INDEX = "sandy_vector_index"
@@ -154,6 +165,37 @@ def _importance_score(usage_count: int, created_at=None) -> float:
     return (usage_count + 1) * recency
 
 
+def _bump_usage_later(coll, results: List[Dict]) -> None:
+    """Record that these facts were used, off the request path.
+
+    A ranking counter that changes nothing about this reply, or the next one, is
+    not worth a write the user waits for. The values are read out here — the
+    background job must not re-read the documents, or it pays back the round
+    trips it was written to remove.
+    """
+    updates = [
+        (r["_id"], _importance_score((r.get("usage_count") or 0) + 1,
+                                     r.get("created_at")))
+        for r in results if r.get("_id") is not None
+    ]
+    if not updates:
+        return
+
+    def _apply() -> None:
+        for doc_id, score in updates:
+            try:
+                coll.update_one(
+                    {"_id": doc_id},
+                    {"$inc": {"usage_count": 1}, "$set": {"importance_score": score}},
+                )
+            except PyMongoError:
+                logger.debug("[chroma] usage bump skipped", exc_info=True)
+
+    from app.utils.thread_pool import submit_background
+
+    submit_background(_apply, _label="facts-usage")
+
+
 def _embed(text: str) -> Optional[List[float]]:
     """Embed text, or None if there's no client or the call fails."""
     if _embed_client is None or not text:
@@ -176,7 +218,8 @@ def _embed_many(texts: List[str]) -> List[Optional[List[float]]]:
     if _embed_client is None or not texts:
         return [None] * len(texts)
     try:
-        resp = _embed_client.embeddings.create(model=_embed_model, input=texts)
+        resp = _embed_client.embeddings.create(
+            model=_embed_model, input=texts, timeout=_EMBED_TIMEOUT_S)
         # `data` is ordered by the API, but it carries an explicit `index` and
         # relying on the order rather than on the field is how a batch silently
         # attaches the wrong vector to the wrong text — a failure with no symptom
@@ -373,10 +416,15 @@ def load_conversations_to_chroma(
 
 
 def _vector_search(
-    col, query: str, chat_id: str, n_results: int, extra_project: Dict
+    col, query: str, chat_id: str, n_results: int, extra_project: Dict,
+    query_vector: Optional[List[float]] = None,
 ) -> Optional[List[Dict]]:
-    """$vectorSearch filtered by chat_id, or None if it can't run."""
-    vec = _embed(query)
+    """$vectorSearch filtered by chat_id, or None if it can't run.
+
+    `query_vector` lets a caller that is about to run more than one search over
+    the same string pay for the embedding once — see `search_memory_for_turn`.
+    """
+    vec = query_vector if query_vector else _embed(query)
     if not vec:
         return None
     try:
@@ -410,7 +458,8 @@ def _vector_search(
         return None
 
 
-def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
+def search_relevant_facts(query: str, n_results: int = 5,
+        query_vector: Optional[List[float]] = None) -> List[str]:
     """Semantic search over the current user's facts."""
     if not _can_read_memory():
         return []
@@ -427,7 +476,7 @@ def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
         # the wrapper's auto-$match can't be used here.
         results = _vector_search(
             get_db()["sandy_facts"], query, chat_id, n_results,
-            {"usage_count": 1, "created_at": 1},
+            {"usage_count": 1, "created_at": 1}, query_vector,
         )
 
         if results is None:
@@ -447,21 +496,22 @@ def search_relevant_facts(query: str, n_results: int = 5) -> List[str]:
                     .limit(n_results)
                 )
 
+        # الترتيب بيتحدّث بالخلفية.
+        #
+        # كان `update_one` لكل نتيجة على مسار الطلب — خمس كتبات بكل رسالة
+        # عشان عدّاد ترتيب ما بيغيّر ردّ هالدور ولا الدور اللي بعده. المستخدم
+        # كان يستنّاهن. صاروا يتنفّذوا بعد ما يمشي الردّ، وبيحملوا المستأجر
+        # معهن (`submit_background` بينسخ السياق).
         if results:
-            for r in results:
-                new_usage = (r.get("usage_count") or 0) + 1
-                score = _importance_score(new_usage, r.get("created_at"))
-                coll.update_one(
-                    {"_id": r["_id"]},
-                    {"$inc": {"usage_count": 1}, "$set": {"importance_score": score}},
-                )
+            _bump_usage_later(coll, results)
         return [r["text"] for r in results if r.get("text")]
     except Exception as e:
         logger.warning(f"[Memory] search_relevant_facts: {e}")
         return []
 
 
-def search_relevant_conversations(query: str, n_results: int = 3) -> List[str]:
+def search_relevant_conversations(query: str, n_results: int = 3,
+        query_vector: Optional[List[float]] = None) -> List[str]:
     """Semantic search over the current user's conversation turns."""
     if not _can_read_memory():
         return []
@@ -473,7 +523,8 @@ def search_relevant_conversations(query: str, n_results: int = 3) -> List[str]:
         if coll.count_documents({}) == 0:
             return []
 
-        results = _vector_search(get_db()["sandy_conversations"], query, chat_id, n_results, {})
+        results = _vector_search(get_db()["sandy_conversations"], query, chat_id,
+                                 n_results, {}, query_vector)
 
         if results is None:
             try:
@@ -496,7 +547,8 @@ def search_relevant_conversations(query: str, n_results: int = 3) -> List[str]:
         return []
 
 
-def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3) -> List[str]:
+def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3,
+                              query_vector: Optional[List[float]] = None) -> List[str]:
     """Semantic search over conversation summaries in sandy_memories."""
     if get_db() is None or not chat_id:
         return []
@@ -516,13 +568,39 @@ def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3) -> L
         # Sandy has never once recalled a conversation summary through semantic
         # search on an install where Atlas Vector Search is configured. There is
         # no error for this: an empty list is what "nothing relevant" looks like.
-        results = _vector_search(col, query, chat_id, n_results, {"summary": 1})
+        results = _vector_search(col, query, chat_id, n_results, {"summary": 1},
+                                 query_vector)
         if results is None:
             results = list(col.find(fil, {"summary": 1}).sort("created_at", -1).limit(n_results))
         return [r["summary"] for r in results if r.get("summary")]
     except Exception as exc:
         logger.warning(f"[chroma] search_relevant_summaries failed: {exc}")
         return []
+
+
+def search_memory_for_turn(
+    query: str,
+    summary_thread: str,
+    n_facts: int = 5,
+    n_summaries: int = 3,
+) -> Dict[str, List[str]]:
+    """Both semantic lookups a turn needs, over one embedding of the query.
+
+    They used to be two jobs on the soul pool, and each embedded the *same
+    string* on its own: two OpenAI round trips per message for one query, every
+    message, on chat and on voice. Embedding once and handing the vector to both
+    halves that, and the two Mongo aggregates that now run in sequence cost far
+    less than the request they replace.
+
+    Returns `{"summaries": [...], "facts": [...]}`; either list is empty when
+    that layer has nothing or is not configured, exactly as before.
+    """
+    vec = _embed(query) if query else None
+    return {
+        "summaries": search_relevant_summaries(
+            query, summary_thread, n_results=n_summaries, query_vector=vec),
+        "facts": search_relevant_facts(query, n_results=n_facts, query_vector=vec),
+    }
 
 
 def semantic_memory_stats() -> Dict[str, Any]:

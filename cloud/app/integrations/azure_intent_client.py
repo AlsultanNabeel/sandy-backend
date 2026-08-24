@@ -10,6 +10,7 @@ import os
 from typing import Any, Dict, Optional
 
 from app.config import AZURE_OPENAI_API_VERSION
+from app.utils.circuit_breaker import CircuitBreaker
 import logging
 
 logger = logging.getLogger(__name__)
@@ -86,14 +87,51 @@ def _rejected_param(exc: Exception) -> Optional[str]:
     return None
 
 
+# The breaker for the hottest external call in the system.
+#
+# `ARCHITECTURE_MAP` said everything external went through `circuit_breaker`.
+# Five clients did; this one — the router, called on every single message — did
+# not. When Azure is slow every request pays the full `AZURE_INTENT_TIMEOUT_S`
+# before falling through, and sixteen threads each parked for twelve seconds is
+# an outage, not a degradation.
+#
+# **Errors only — deliberately no `timeout=`.**
+#
+# The class supports one, and it looks like the obvious other half. It is not:
+# `_invoke` enforces it by submitting to a shared eight-worker pool and waiting
+# on the future, so *queue* time counts against the call's own deadline and the
+# resulting timeout is scored as a failure. Switch it on across every client and
+# load alone can open a breaker in front of a provider that is answering
+# perfectly. `future.cancel()` cannot stop a running job either, so the slow
+# calls keep their slots exactly when the queue is longest.
+#
+# The SDK's own `timeout=AZURE_INTENT_TIMEOUT_S` per request is the deadline
+# that matters here, and it needs no pool. A model that is slow past that raises,
+# and raising is what this breaker counts.
+_cb = CircuitBreaker(
+    name="azure_intent",
+    failure_threshold=5,
+    recovery_timeout=30.0,
+)
+
+
 def _create_chat_resilient(client: Any, kwargs: Dict[str, Any]) -> Any:
-    """create() that adapts to per-model parameter quirks.
+    """create() through the breaker, adapting to per-model parameter quirks.
 
     gpt-5 / o-series reject ``max_tokens`` (want ``max_completion_tokens``) and a
     fixed ``temperature``; older models want ``max_tokens``. Try the call, and on
     an unsupported-parameter 400 remap or drop that one param and retry, so the
     same code works across deployments without a config flag.
+
+    A rejected-parameter 400 is a *contract* mismatch, not the service being
+    down, so the remap loop sits inside one breaker call: four remaps of the same
+    request must count as one attempt, or a deployment with two quirky params
+    would trip the breaker on its own working traffic.
     """
+    return _cb.call(_create_chat_adapting, client, kwargs)
+
+
+def _create_chat_adapting(client: Any, kwargs: Dict[str, Any]) -> Any:
     kwargs = dict(kwargs)
     _protected = {"model", "messages", "tools"}
     for _ in range(4):

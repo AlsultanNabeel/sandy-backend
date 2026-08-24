@@ -146,10 +146,29 @@ CALLS.clear()
 with active_user_profile_context(PROFILE):
     state = run_graph("مرحبا كيفك اليوم", user_id=USER, chat_id=USER, source="web")
 
-# Background work is fired onto a pool; give it a moment so its cost is counted
-# rather than hidden.
+# **Wait for the background pool to drain, do not sleep for a guess.**
+#
+# Background work is fired onto `sandy_executor`, and a fixed sleep made the
+# total depend on how fast the machine happened to be that minute: the same tree
+# measured 40 one hour and 42 the next, which is worse than useless for a number
+# whose whole job is to be compared against a later reading. Draining is exact.
 import time  # noqa: E402
-time.sleep(2.0)
+from app.utils.thread_pool import sandy_executor  # noqa: E402
+
+# `qsize() == 0` means the last job was *dequeued*, not that it finished, so the
+# quiet period below is still part of the condition — it is a bound on how long
+# a job may keep writing after being picked up, not a guess at total duration.
+# This drains `sandy_executor` only; `_SOUL_POOL` jobs the request abandoned may
+# still be running, and their writes land after this print.
+_deadline = time.monotonic() + 30.0
+while time.monotonic() < _deadline:
+    if sandy_executor._work_queue.qsize() == 0:
+        time.sleep(0.25)
+        if sandy_executor._work_queue.qsize() == 0:
+            break
+    time.sleep(0.05)
+else:
+    print("WARNING: background pool did not drain in 30s — total is a lower bound")
 
 print(f"\nSeeded life items: {seeded}")
 print(f"Reply: {state.get('final_response')!r}\n")
