@@ -50,16 +50,30 @@ _Handler = Callable[["_ActionContext"], Dict[str, Any]]
 def _guard(fail_reply: str, *, handled_on_error: bool) -> Callable[[_Handler], _Handler]:
     """Wrap a handler so any unexpected error is logged once and turned into
     the handler's standard failure reply — the try/except/logger.exception block
-    that was repeated at every action site."""
+    that was repeated at every action site.
+
+    `handled_on_error=True` means "the caller does not need to look elsewhere
+    for an answer" — it never meant the work succeeded. It read that way to
+    every caller until 24 Aug 2026, so the one thing `tool_health` exists to
+    notice, a tool actually blowing up, was recorded as a clean call: the
+    weather API could raise on every request and the monitor stayed green.
+
+    `error` is what marks it as the tool's own failure rather than a refusal,
+    and is the field the dispatcher scores health on."""
 
     def deco(fn: _Handler) -> _Handler:
         @wraps(fn)
         def wrapper(ctx: "_ActionContext") -> Dict[str, Any]:
             try:
                 return fn(ctx)
-            except Exception:
+            except Exception as exc:
                 logger.exception("%s action failed", fn.__name__)
-                return {"handled": handled_on_error, "reply": fail_reply}
+                return {
+                    "handled": handled_on_error,
+                    "ok": False,
+                    "error": f"{fn.__name__}: {type(exc).__name__}",
+                    "reply": fail_reply,
+                }
 
         return wrapper
 
@@ -180,7 +194,7 @@ def _handle_places(ctx: "_ActionContext") -> Dict[str, Any]:
         # Not "nothing found" — nothing was looked for. Saying so is the whole
         # difference between a useful answer and a confident wrong one.
         logger.error("[places] search did not run: %s", exc)
-        return {"handled": True,
+        return {"handled": True, "ok": False,
                 "reply": ("خدمة الأماكن مش شغّالة عندي حاليًا — البحث نفسه ما "
                           "اشتغل، مش إنه ما في نتايج.")}
     if places:
@@ -235,7 +249,7 @@ def _handle_image_edit(ctx: "_ActionContext") -> Dict[str, Any]:
     image_state = (ctx.session or {}).get("image_state") or {}
     image_bytes = image_state.get("active_image_bytes")
     if not image_bytes:
-        return {"handled": True, "reply": "ما عندي صورة سابقة أعدّلها. ابعت صورة أولاً."}
+        return {"handled": True, "ok": False, "reply": "ما عندي صورة سابقة أعدّلها. ابعت صورة أولاً."}
 
     prompt = str(ctx.params.get("prompt") or ctx.user_message or "").strip()
     if not prompt:
@@ -248,7 +262,7 @@ def _handle_image_edit(ctx: "_ActionContext") -> Dict[str, Any]:
     )
     edited_bytes = edit_image_with_azure(image_bytes, edit_prompt)
     if not edited_bytes:
-        return {"handled": True, "reply": "ما قدرت أعدّل الصورة حالياً. جرّب مرة ثانية."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت أعدّل الصورة حالياً. جرّب مرة ثانية."}
 
     image_state["active_image_bytes"] = edited_bytes
     image_state.setdefault("active_image", {})["action"] = "edited"
@@ -275,7 +289,7 @@ def _handle_weather(ctx: "_ActionContext") -> Dict[str, Any]:
         return {"handled": False, "reply": "ادخل مدينة أو اسم مكان للطقس."}
     data = get_weather(city)
     if not data:
-        return {"handled": True, "reply": f"ما قدرت أجيب بيانات الطقس لـ {city} حالياً."}
+        return {"handled": True, "ok": False, "reply": f"ما قدرت أجيب بيانات الطقس لـ {city} حالياً."}
     return {"handled": True, "reply": format_weather_for_prompt(data)}
 
 

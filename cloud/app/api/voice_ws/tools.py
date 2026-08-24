@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Optional
+
+from app.agent.tool_result import result_failed, result_ok
 from app.api.voice_ws._config import (
     logger,
 )
@@ -108,11 +110,16 @@ def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
         left = None
     save_pending_state(_VOICE_THREAD, chat_id, mongo_db, left)
 
-    logger.info("[voice_ws] pending %s → handled=%s reply=%.80s",
-                name, result.get("handled"), result.get("reply") or "")
-    if not result.get("handled"):
-        return {"handled": False,
-                "reply": "[فشل التنفيذ] ما قدرت أنفّذ اللي أكّدته."}
+    logger.info("[voice_ws] pending %s → ok=%s reply=%.80s",
+                name, result_ok(result), result.get("reply") or "")
+    # نفس وسمَي `_dispatch_tool`. وكلام الرفض بيمرّ معه — الجملة العامّة كانت
+    # تبلع «سجّل دخولك» وتخلّي چيميناي تخترع سبب.
+    broke = result_failed(result) or not result.get("handled")
+    if broke or not result_ok(result):
+        text = str(result.get("reply") or "").strip()
+        tag = "[فشل التنفيذ]" if broke else "[لم يُنفَّذ]"
+        return {"handled": True, "ok": False,
+                "reply": f"{tag} {text or 'ما قدرت أنفّذ اللي أكّدته.'}"}
     return result
 
 
@@ -413,12 +420,28 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
         return {"handled": False,
                 "reply": f"ما قدرت أنفّذ {name} — صار خطأ عند الخادم."}
 
-    # الفشل لازم يوصل الموديل كفشل.
+    # If the tool held something back for confirmation, persist it so the next
+    # turn's "اه" can find it. **Before the failure branch below**, which used to
+    # sit above this and could swallow a pending a refusing handler had stored.
+    held = session.get("pending_action")
+    if held:
+        from app.agent.pending_store import save_pending_state
+        save_pending_state(_VOICE_THREAD, _stm_chat_id() or user_id, get_db(), held)
+        logger.info("[voice_ws] %s is waiting for a confirmation", name)
+
+    # **اللي ما صار لازم يوصل الموديل موسوماً — بس بالكلمة الصح.**
     #
-    # `dispatch` بترجّع `handled=False` لما ما تلاقي الأداة أو ترفض التنفيذ،
-    # وكنّا نمرّر `reply` وبس — فچيميناي بتشوف نصًّا وبتفترض إنه نجح وبتأكّدلك.
-    # التصريح بالفشل بيخلّيها تقول إنه ما زبط بدل ما تخترع نجاحًا.
-    if not result.get("handled"):
+    # چيميناي بتقرأ ردّ الأداة كنصّ. من غير وسم بتفترض إنه نجح وبتأكّد للمستخدم
+    # شغل ما صار، وهاد نصّ شكوى «بتقول إنها عملتها». فكل نتيجة ما نفّذت
+    # بتتوسم — بس الوسم مش واحد:
+    #
+    # `[فشل التنفيذ]` للعطل: الأداة رمت، أو ما انلاقت (`handled=False`)، أو
+    # بلعت استثناءها وصرّحت بـ`error`. `[لم يُنفَّذ]` للرفض: «سجّل دخولك»،
+    # «ما لقيت جهاز بهالاسم، أي واحد تقصد؟». التنتين بيمنعوا افتراض النجاح،
+    # بس تسمية سؤال توضيحي «فشل» بتخلّيها تتخلّى عن مسار المستخدم بدل ما تسأل.
+    handled_flag = bool(result.get("handled"))
+    broke = result_failed(result) or not handled_flag
+    if broke or not result_ok(result):
         # **The whole result, not just `reply`.**
         #
         # A refusal often carries its reason in `error`, or in nothing at all —
@@ -431,22 +454,16 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
         # mistake as the broker's disconnect reason, in a different file.
         text = result.get("reply") or ""
         why = result.get("error") or result.get("reason") or ""
-        logger.warning("[voice_ws] tool %s did not run — error=%s reply=%r "
-                       "keys=%s args=%s",
-                       name, why or "(none)", text[:120],
+        logger.warning("[voice_ws] tool %s did not run — broke=%s error=%s "
+                       "reply=%r keys=%s args=%s",
+                       name, broke, why or "(none)", text[:120],
                        sorted(result), sorted(args or {}))
-        return {"handled": False,
-                "reply": f"[فشل التنفيذ] {text or why or 'الأداة ما اشتغلت.'}"}
-
-    # If the tool held something back for confirmation, persist it so the next
-    # turn's "اه" can find it.
-    held = session.get("pending_action")
-    if held:
-        from app.agent.pending_store import save_pending_state
-        save_pending_state(_VOICE_THREAD, _stm_chat_id() or user_id, get_db(), held)
-        logger.info("[voice_ws] %s is waiting for a confirmation", name)
+        tag = "[فشل التنفيذ]" if broke else "[لم يُنفَّذ]"
+        return {"handled": handled_flag, "ok": False,
+                "reply": f"{tag} {text or why or 'الأداة ما اشتغلت.'}"}
 
     # A tool that ran is worth one line too. "Did the update actually apply?"
     # had no answer in the log: the call was printed, the outcome never was.
-    logger.info("[voice_ws] tool %s ok: %.120s", name, result.get("reply") or "")
+    logger.info("[voice_ws] tool %s ok: %.120s",
+                name, result.get("reply") or "")
     return result

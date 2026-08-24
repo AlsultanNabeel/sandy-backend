@@ -26,6 +26,7 @@ def _handle_delete(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_reference_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -62,7 +63,8 @@ def _handle_delete(
         reply = f"متأكد بدك أحذف المهمة: {task_text}؟"
     else:
         reply = "ما قدرت أحدد المهمة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -76,6 +78,7 @@ def _handle_delete_multi(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_references_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -89,6 +92,7 @@ def _handle_delete_multi(
         bad_ref = str(result.get("reference", "")).strip()
         if bad_ref:
             reply = f"المهمة رقم/مرجع ({bad_ref}) غير موجودة حالياً في قائمة المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."
+            ok = False
         else:
             reply = "أي مهام بدك أحذف بالضبط؟"
     elif status == "partial":
@@ -136,8 +140,10 @@ def _handle_delete_multi(
             )
         else:
             reply = f"المهام التالية غير موجودة حالياً: {missing_text}"
+            ok = False
     elif status == "single":
         reply = "حددت مهمة واحدة فقط. إذا بدك حذف مهمة واحدة استخدم أمر حذف عادي، أو اذكر أكثر من مهمة."
+        ok = False
     elif status == "ambiguous":
         reply = (
             "لقيت أكثر من مهمة مطابقة:\n"
@@ -163,7 +169,8 @@ def _handle_delete_multi(
         reply = f"متأكد بدك أحذف المهام التالية؟\n{lines}"
     else:
         reply = "ما قدرت أحدد المهام."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -192,7 +199,9 @@ def _handle_delete_completed(*, mongo_db, tasks_file):
     try:
         count = delete_completed_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
         if count == 0:
-            return {"handled": True, "reply": "ما في مهام مكتملة لحذفها."}
+            return {"handled": True, "ok": False, "reply": "ما في مهام مكتملة لحذفها."}
         return {"handled": True, "reply": f"✅ حذفت {count} مهمة مكتملة."}
     except Exception as e:
-        return {"handled": True, "reply": f"ما قدرت أحذف المهام المكتملة: {e}"}
+        return {"handled": True, "ok": False,
+                "error": f"delete_completed: {type(e).__name__}",
+                "reply": f"ما قدرت أحذف المهام المكتملة: {e}"}

@@ -57,7 +57,7 @@ def book_status(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         s = str(args.get("status", ""))
         word = {"done": "مكتمل 🎉", "reading": "قيد القراءة 📖", "wishlist": "عالقائمة 🔖"}.get(s, s)
         return {"handled": True, "reply": f"«{r['title']}» صار {word}"}
-    return {"handled": True, "reply": "ما لقيت الكتاب أو الحالة غير صالحة."}
+    return {"handled": True, "ok": False, "reply": "ما لقيت الكتاب أو الحالة غير صالحة."}
 
 
 def book_meta(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -77,7 +77,7 @@ def book_meta(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         current_page=_opt("current_page", int),
     )
     if not r.get("ok"):
-        return {"handled": True, "reply": "ما لقيت الكتاب أو ما في إشي أعدّله."}
+        return {"handled": True, "ok": False, "reply": "ما لقيت الكتاب أو ما في إشي أعدّله."}
     return {"handled": True, "reply": f"✏️ حدّثت «{r['title']}»."}
 
 
@@ -86,7 +86,7 @@ def book_note(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
 
     r = add_note(str(args.get("title", "")), str(args.get("text", "")))
     if not r.get("ok"):
-        return {"handled": True, "reply": "ما لقيت الكتاب أو الملاحظة فاضية."}
+        return {"handled": True, "ok": False, "reply": "ما لقيت الكتاب أو الملاحظة فاضية."}
     return {"handled": True, "reply": f"📝 ضفت ملاحظة على «{r['title']}»."}
 
 
@@ -95,7 +95,7 @@ def book_quote(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
 
     r = add_quote(str(args.get("title", "")), str(args.get("text", "")), page=int(args.get("page", 0) or 0))
     if not r.get("ok"):
-        return {"handled": True, "reply": "ما لقيت الكتاب أو الاقتباس فاضي."}
+        return {"handled": True, "ok": False, "reply": "ما لقيت الكتاب أو الاقتباس فاضي."}
     return {"handled": True, "reply": f"❝ حفظت اقتباس من «{r['title']}»."}
 
 
@@ -146,13 +146,13 @@ def reading_pause(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
         r = resume_session()
         if r.get("ok"):
             return {"handled": True, "reply": "📖 رجعنا — كمل قراءة!"}
-        return {"handled": True, "reply": "ما في جلسة موقوفة مؤقتاً."}
+        return {"handled": True, "ok": False, "reply": "ما في جلسة موقوفة مؤقتاً."}
     r = pause_session()
     if r.get("ok"):
         return {"handled": True, "reply": "⏸ وقفت العداد — قول «كمل قراءة» لما ترجع."}
     if r.get("error") == "already_paused":
         return {"handled": True, "reply": "هي أصلاً موقوفة مؤقتاً ⏸"}
-    return {"handled": True, "reply": "ما في جلسة قراءة شغالة."}
+    return {"handled": True, "ok": False, "reply": "ما في جلسة قراءة شغالة."}
 
 
 def reading_stop(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -161,7 +161,7 @@ def reading_stop(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
     page = args.get("page")
     r = stop_session(end_page=int(page) if page is not None else None)
     if not r.get("ok"):
-        return {"handled": True, "reply": "ما في جلسة قراءة شغالة."}
+        return {"handled": True, "ok": False, "reply": "ما في جلسة قراءة شغالة."}
     if r.get("needs_page"):
         return {"handled": True, "reply": "وين وصلت؟ قلي رقم الصفحة 📖"}
     msg = f"📖 سكّرت الجلسة — قريت {r['pages']} صفحة بـ {r['minutes']} دقيقة."

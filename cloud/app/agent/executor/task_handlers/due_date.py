@@ -34,6 +34,7 @@ def _handle_update_due_date(
     create_chat_completion_fn,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_reference_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -45,6 +46,7 @@ def _handle_update_due_date(
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."
+        ok = False
 
     elif status == "ambiguous":
         due_iso_for_update = task_due_iso
@@ -79,7 +81,7 @@ def _handle_update_due_date(
 
         if not due_iso_for_update:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما فهمت التاريخ الجديد بدقة. اكتب التاريخ بشكل أوضح.",
             }
 
@@ -92,7 +94,7 @@ def _handle_update_due_date(
 
             if due_dt.date() < datetime.now(USER_TZ).date():
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "التاريخ الجديد بالماضي. أعطني تاريخ اليوم أو تاريخ لاحق.",
                 }
 
@@ -101,7 +103,7 @@ def _handle_update_due_date(
 
         except Exception:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "التاريخ الجديد غير صالح. اكتب التاريخ بشكل أوضح.",
             }
 
@@ -137,6 +139,7 @@ def _handle_update_due_date(
     elif task_obj:
         if str(task_obj.get("due_at", "")).strip():
             reply = "هاي المهمة لسا مش جاهزة"
+            ok = False
         else:
             due_iso_for_update = task_due_iso
 
@@ -170,7 +173,7 @@ def _handle_update_due_date(
 
             if not due_iso_for_update:
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "ما فهمت التاريخ الجديد بدقة. اكتب التاريخ بشكل أوضح.",
                 }
 
@@ -185,7 +188,7 @@ def _handle_update_due_date(
 
                 if due_dt.date() < datetime.now(USER_TZ).date():
                     return {
-                        "handled": True,
+                        "handled": True, "ok": False,
                         "reply": "التاريخ الجديد بالماضي. أعطني تاريخ اليوم أو تاريخ لاحق.",
                     }
 
@@ -194,7 +197,7 @@ def _handle_update_due_date(
 
             except Exception:
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "التاريخ الجديد غير صالح. اكتب التاريخ بشكل أوضح.",
                 }
 
@@ -217,8 +220,9 @@ def _handle_update_due_date(
 
     else:
         reply = "ما قدرت أحدد المهمة."
+        ok = False
 
-    return {"handled": True, "reply": reply}
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -236,6 +240,7 @@ def _handle_update_due_time(
     create_chat_completion_fn,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_reference_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -247,13 +252,14 @@ def _handle_update_due_time(
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."
+        ok = False
 
     elif status == "ambiguous":
         time_source = task_time_text or task_due_text
 
         if not task_due_iso and not time_source:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما فهمت الوقت الجديد بدقة. اكتب الوقت بشكل أوضح.",
             }
 
@@ -350,7 +356,7 @@ def _handle_update_due_time(
 
         if not due_iso_for_update:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما فهمت الوقت الجديد بدقة. اكتب الوقت بشكل أوضح.",
             }
 
@@ -363,7 +369,7 @@ def _handle_update_due_time(
 
             if due_dt <= datetime.now(USER_TZ):
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "الوقت الجديد بالماضي. أعطني وقت لاحق.",
                 }
 
@@ -372,7 +378,7 @@ def _handle_update_due_time(
 
         except Exception:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "الوقت الجديد غير صالح. اكتب الوقت بشكل أوضح.",
             }
 
@@ -395,8 +401,9 @@ def _handle_update_due_time(
 
     else:
         reply = "ما قدرت أحدد المهمة."
+        ok = False
 
-    return {"handled": True, "reply": reply}
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -415,7 +422,7 @@ def _handle_bulk_update_due_date(
     to_due_text = str(params.get("to_due_text", "")).strip()
 
     if not from_due_text or not to_due_text:
-        return {"handled": True, "reply": "مش واضح: من أي تاريخ وإلى أي تاريخ؟"}
+        return {"handled": True, "ok": False, "reply": "مش واضح: من أي تاريخ وإلى أي تاريخ؟"}
 
     parsed_to = parse_reminder_time_ai(
         normalize_user_message(to_due_text),
@@ -441,7 +448,7 @@ def _handle_bulk_update_due_date(
                 }
             else:
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": f"ما فهمت التاريخ الجديد: '{to_due_text}'. حدد التاريخ بوضوح.",
                 }
     else:
@@ -449,7 +456,7 @@ def _handle_bulk_update_due_date(
 
     if not to_due_iso:
         return {
-            "handled": True,
+            "handled": True, "ok": False,
             "reply": f"ما فهمت التاريخ الجديد: '{to_due_text}'. حدد التاريخ بوضوح.",
         }
 
@@ -461,13 +468,13 @@ def _handle_bulk_update_due_date(
             to_dt = to_dt.astimezone(USER_TZ)
         if to_dt.date() < datetime.now(USER_TZ).date():
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "التاريخ الجديد في الماضي. أعطني تاريخ اليوم أو لاحق.",
             }
         to_due_iso = to_dt.isoformat()
         to_due_display = to_dt.strftime("%d/%m/%Y")
     except Exception:
-        return {"handled": True, "reply": "التاريخ الجديد غير صالح."}
+        return {"handled": True, "ok": False, "reply": "التاريخ الجديد غير صالح."}
 
     parsed_from = parse_reminder_time_ai(
         normalize_user_message(from_due_text),
@@ -493,7 +500,7 @@ def _handle_bulk_update_due_date(
                 }
             else:
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": f"ما فهمت تاريخ البحث: '{from_due_text}'. حدد التاريخ بوضوح.",
                 }
     else:
@@ -501,7 +508,7 @@ def _handle_bulk_update_due_date(
 
     if not from_due_iso:
         return {
-            "handled": True,
+            "handled": True, "ok": False,
             "reply": f"ما فهمت تاريخ البحث: '{from_due_text}'. حدد التاريخ بوضوح.",
         }
 
@@ -511,7 +518,7 @@ def _handle_bulk_update_due_date(
             from_dt = from_dt.replace(tzinfo=USER_TZ)
         from_date_str = from_dt.date().isoformat()
     except Exception:
-        return {"handled": True, "reply": "تاريخ البحث غير صالح."}
+        return {"handled": True, "ok": False, "reply": "تاريخ البحث غير صالح."}
 
     all_tasks = load_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
     matching_tasks = [
@@ -521,7 +528,7 @@ def _handle_bulk_update_due_date(
     ]
 
     if not matching_tasks:
-        return {"handled": True, "reply": f"ما في مهام مستحقة في {from_due_text}."}
+        return {"handled": True, "ok": False, "reply": f"ما في مهام مستحقة في {from_due_text}."}
 
     lines = "\n".join(f"- {t['text']}" for t in matching_tasks)
     session["pending_action"] = create_pending_action(

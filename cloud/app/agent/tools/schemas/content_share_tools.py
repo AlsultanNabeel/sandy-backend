@@ -31,7 +31,7 @@ def share_interesting_content(args: Dict[str, Any], ctx: "DispatchContext") -> D
 
     if not topic:
         return {
-            "handled": True,
+            "handled": True, "ok": False,
             "reply": "ما عندي فكرة عن اهتماماتك بعد، احكيلي عن شي بحبه وبجيبلك معلومات حلوة عنه 💛",
         }
 
@@ -47,7 +47,7 @@ def share_interesting_content(args: Dict[str, Any], ctx: "DispatchContext") -> D
         logger.debug(f"[content_share] research failed: {exc}")
 
     return {
-        "handled": True,
+        "handled": True, "ok": False,
         "reply": f"حابب أشاركك محتوى عن {topic}، بس البحث مش شغّال هلق — جرّبني بعد شوي.",
     }
 

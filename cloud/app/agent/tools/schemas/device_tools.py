@@ -63,10 +63,10 @@ def device_control(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, An
     if device is None:
         devices = list_devices()
         if not devices:
-            return {"handled": True,
+            return {"handled": True, "ok": False,
                     "reply": "ما في عندك أجهزة مضافة بعد — ضيفها من تبويب التحكّم بالتطبيق."}
         names = "، ".join(d["label"] for d in devices)
-        return {"handled": True,
+        return {"handled": True, "ok": False,
                 "reply": f"ما لقيت جهاز بهالاسم. أجهزتك: {names}. أي واحد تقصد؟"}
 
     label = device.get("label", device.get("name", ""))
@@ -76,13 +76,13 @@ def device_control(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, An
     res = command_payload(device, action, value)
     if not res.get("ok"):
         allowed = "، ".join(str(a) for a in res.get("allowed", [])) or "—"
-        return {"handled": True,
+        return {"handled": True, "ok": False,
                 "reply": f"ما ينفع هالأمر لـ {label}. المتاح: {allowed}."}
 
     payload = res["payload"]
     topic = device_topic(device)
     if not topic:
-        return {"handled": True,
+        return {"handled": True, "ok": False,
                 "reply": f"{label} مش مربوط بمخرج صحيح — راجع إعداده بالتطبيق."}
 
     # Actuate via the registry-driven topic (owner-gated inside the client).
@@ -97,7 +97,7 @@ def device_control(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, An
     if sent:
         set_state(device["name"], payload)
         return {"handled": True, "reply": _confirm_text(label, action, payload)}
-    return {"handled": True,
+    return {"handled": True, "ok": False,
             "reply": f"{_confirm_text(label, action, payload)} — بس {label} مش متّصل هلّق."}
 
 

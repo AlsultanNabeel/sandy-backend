@@ -8,6 +8,8 @@ import logging
 
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from app.agent.tool_result import result_ok
+
 if TYPE_CHECKING:
     from app.agent.tools.dispatcher import DispatchContext
 
@@ -40,6 +42,19 @@ def _task_create_reply(titles: List[str], due: str = "", intensity: str = "stand
     return f"{intro} {len(titles)} مهام: {listed}{due_part}."
 
 
+def _with_alerts(reply: str, alerts: List[str]) -> str:
+    """Re-attach anything the handler produced that this adapter cannot rebuild.
+
+    `task_create` replaces the handler's sentence with a persona-toned one, and
+    that used to throw away the scheduling-conflict warning built next to it —
+    the one piece of that reply carrying information rather than tone. The
+    handler hands it over as `alert` so overwriting the prose stops costing it.
+    """
+    if not alerts:
+        return reply
+    return reply + "".join(f"\n\n⚠️ {a}" for a in alerts)
+
+
 def _call_task(params: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     from app.agent.executor.task_handlers import handle_task_action
     return handle_task_action(
@@ -65,13 +80,41 @@ def task_create(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         "project": args.get("project", ""),
     }
     intensity = _persona_intensity(ctx)
-    if titles and isinstance(titles, list):
-        created = []
-        for t in titles:
-            r = _call_task({"action": "create", "text": str(t), "due_text": due, "notes": args.get("notes", ""), **extras}, ctx)
-            if r.get("handled"):
-                created.append(str(t))
-        return {"handled": True, "reply": _task_create_reply(created, due, intensity) if created else "تم."}
+    # الجملة الجاهزة بتنكتب فوق ردّ المنفّذ، فلازم تنكتب على النجاح فقط.
+    # كانت بتتبع `handled`، والرفض `handled=True` كمان — فطلب ثلاث مهام
+    # وكتابة فاشلة كان يطلع «سجّلتها ✅ 3 مهام» وما ينكتب ولا صف.
+    if isinstance(titles, list):
+        wanted = [str(t).strip() for t in titles if str(t).strip()]
+        if not wanted:
+            # قايمة فاضية أو كلها فراغات — كانت بتنزل لمسار العنوان المفرد
+            # وتطلع «سجّلتها ✅ ''».
+            return {"handled": True, "ok": False,
+                    "reply": "شو المهام اللي بدك أضيفها؟"}
+        created, failed, alerts = [], [], []
+        refusal = None
+        for t in wanted:
+            r = _call_task({"action": "create", "text": t, "due_text": due, "notes": args.get("notes", ""), **extras}, ctx)
+            if result_ok(r):
+                created.append(t)
+                if r.get("alert"):
+                    alerts.append(str(r["alert"]))
+            else:
+                failed.append(t)
+                if refusal is None:
+                    refusal = r
+        if not created:
+            # ما انكتبت ولا وحدة — رجّع سبب أول رفض بدل «تم.» الصامتة.
+            return {"handled": True, "ok": False,
+                    "reply": (refusal or {}).get("reply") or "ما قدرت أضيف المهام."}
+        reply = _task_create_reply(created, due, intensity)
+        if failed:
+            # النجاح الجزئي لازم يقول شو ضاع. بدون هالسطر بيطلب تلاتة، بيسمع
+            # عن تنتين، وما بيعرف أبداً إنه في وحدة ما انكتبت.
+            listed = "، ".join(f"'{t}'" for t in failed)
+            why = str((refusal or {}).get("reply") or "").strip()
+            reply += f"\nبس ما قدرت أضيف: {listed}." + (f" {why}" if why else "")
+        return {"handled": True, "ok": not failed,
+                "reply": _with_alerts(reply, alerts)}
     result = _call_task({
         "action": "create",
         "text": args.get("title", ""),
@@ -79,8 +122,11 @@ def task_create(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         "notes": args.get("notes", ""),
         **extras,
     }, ctx)
-    if result.get("handled"):
-        result["reply"] = _task_create_reply([args.get("title", "")], due, intensity)
+    if result_ok(result):
+        result["reply"] = _with_alerts(
+            _task_create_reply([args.get("title", "")], due, intensity),
+            [str(result["alert"])] if result.get("alert") else [],
+        )
     return result
 
 def task_list(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -106,7 +152,7 @@ def task_complete(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
                             "reference": " ".join(str(x) for x in refs)}, ctx)
         else:
             r = _call_task({"action": "complete", "reference": args.get("reference", "")}, ctx)
-    if r.get("handled"):
+    if result_ok(r):
         acknowledge()
     return r
 

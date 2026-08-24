@@ -15,7 +15,7 @@ def journal_add(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         return {"handled": True, "reply": "شو بدك أدوّن؟"}
     if add_entry(text):
         return {"handled": True, "reply": "📔 دوّنتها."}
-    return {"handled": True, "reply": "ما قدرت أدوّن."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أدوّن."}
 
 
 def journal_show(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:

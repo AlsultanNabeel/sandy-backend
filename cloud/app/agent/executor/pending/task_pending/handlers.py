@@ -97,7 +97,7 @@ def _handle_clarify_task_choice(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل تعديل الاسم. جرّب الأمر من جديد.",
             }
         session["pending_action"] = create_pending_action(
@@ -122,7 +122,7 @@ def _handle_clarify_task_choice(
         if not task_id:
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-            return {"handled": True, "reply": "ما قدرت أكمل الحذف. جرّب الأمر من جديد."}
+            return {"handled": True, "ok": False, "reply": "ما قدرت أكمل الحذف. جرّب الأمر من جديد."}
         session["pending_action"] = create_pending_action(
             {
                 "type": "task",
@@ -142,7 +142,7 @@ def _handle_clarify_task_choice(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل المهمة. جرّب الأمر من جديد.",
             }
         session["pending_action"] = create_pending_action(
@@ -168,7 +168,7 @@ def _handle_clarify_task_choice(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل إضافة الملاحظة. جرّب الأمر من جديد.",
             }
         session["pending_action"] = create_pending_action(
@@ -195,7 +195,7 @@ def _handle_clarify_task_choice(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل استبدال الملاحظة. جرّب الأمر من جديد.",
             }
         pending_note_action = "replace_note"
@@ -225,14 +225,14 @@ def _handle_clarify_task_choice(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "هاي المهمة فيها وقت/تذكير محفوظ. تعديل تاريخ هالمهام لسا مش جاهز.",
             }
         if not task_id or not due_iso:
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل تعديل التاريخ. جرّب الأمر من جديد.",
             }
         session["pending_action"] = create_pending_action(
@@ -290,7 +290,7 @@ def _handle_clarify_task_choice(
                 clear_pending_action(session)
                 save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "ما قدرت أفهم الوقت الجديد. جرّب الأمر من جديد.",
                 }
 
@@ -306,7 +306,7 @@ def _handle_clarify_task_choice(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل تعديل الوقت. جرّب الأمر من جديد.",
             }
 
@@ -321,7 +321,7 @@ def _handle_clarify_task_choice(
                 clear_pending_action(session)
                 save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "الوقت الجديد بالماضي. أعطني وقت لاحق.",
                 }
 
@@ -332,7 +332,7 @@ def _handle_clarify_task_choice(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "الوقت الجديد غير صالح. اكتب الوقت بشكل أوضح.",
             }
 
@@ -355,7 +355,7 @@ def _handle_clarify_task_choice(
 
     clear_pending_action(session)
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-    return {"handled": True, "reply": "نوع الاختيار غير مدعوم حالياً."}
+    return {"handled": True, "ok": False, "reply": "نوع الاختيار غير مدعوم حالياً."}
 
 
 def _handle_clarify_task_write(
@@ -388,7 +388,7 @@ def _handle_confirm_task_due_date(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل إضافة المهمة. جرّب من جديد.",
             }
         try:
@@ -403,7 +403,7 @@ def _handle_confirm_task_due_date(
                 clear_pending_action(session)
                 save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "موعد المهمة صار بالماضي. أعطني وقت لاحق.",
                 }
             task_id = deps.add_task(
@@ -420,11 +420,13 @@ def _handle_confirm_task_due_date(
                     "handled": True,
                     "reply": f"تم التسجيل. المهمة محفوظة؛ الاستحقاق: {due_text}",
                 }
-            return {"handled": True, "reply": "صار خطأ وأنا بحفظ المهمة."}
+            return {"handled": True, "ok": False, "reply": "صار خطأ وأنا بحفظ المهمة."}
         except Exception as e:
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-            return {"handled": True, "reply": f"ما قدرت أكمل: {str(e)[:50]}"}
+            return {"handled": True, "ok": False,
+                    "error": f"confirm_task_due_date: {type(e).__name__}",
+                    "reply": f"ما قدرت أكمل: {str(e)[:50]}"}
     elif is_cancellation(user_message):
         clear_pending_action(session)
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)

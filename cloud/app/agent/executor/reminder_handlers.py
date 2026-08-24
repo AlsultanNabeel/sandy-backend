@@ -49,8 +49,9 @@ def handle_reminder_action(
     create_chat_completion_fn,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     if active_profile_is_guest():
-        return {"handled": True, "reply": "سجّل دخولك عشان أقدر أذكّرك 😊"}
+        return {"handled": True, "ok": False, "reply": "سجّل دخولك عشان أقدر أذكّرك 😊"}
 
     reply = ""
     reminder_action = str(params.get("action", "create")).strip().lower()
@@ -63,7 +64,7 @@ def handle_reminder_action(
         "snooze",
         "rename",
     }:
-        return {"handled": True, "reply": "نوع إجراء التذكير غير صالح."}
+        return {"handled": True, "ok": False, "reply": "نوع إجراء التذكير غير صالح."}
 
     reminder_text = str(params.get("text", "")).strip()
     time_text = str(params.get("time_text", "")).strip()
@@ -155,6 +156,7 @@ def handle_reminder_action(
             ]
             if not matched:
                 reply = f"ما لقيت تذكير مرتبط بـ '{target_text}'."
+                ok = False
             else:
                 deleted = 0
                 for r in matched:
@@ -164,6 +166,7 @@ def handle_reminder_action(
                         deleted += delete_sandy_reminder_by_task_id(task_id)
                     elif reminder_id and delete_reminder(reminder_id):
                         deleted += 1
+                ok = bool(deleted)
                 reply = (
                     f"تمام، حذفت {deleted} تذكير مرتبط بـ '{target_text}'."
                     if deleted
@@ -193,7 +196,7 @@ def handle_reminder_action(
         ]
         if not matched:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": f"ما لقيت تذكير مرتبط بـ '{target_text}'.",
             }
         reminder = matched[0]
@@ -263,13 +266,13 @@ def handle_reminder_action(
                     )
                     if new_dt <= datetime.now(USER_TZ):
                         return {
-                            "handled": True,
+                            "handled": True, "ok": False,
                             "reply": "وقت التذكير صار بالماضي، أعطني وقت لاحق.",
                         }
                     new_time_iso = new_dt.isoformat()
                 except Exception:
                     return {
-                        "handled": True,
+                        "handled": True, "ok": False,
                         "reply": "وقت غير صالح. أعطني الوقت بشكل أوضح.",
                     }
 
@@ -311,8 +314,10 @@ def handle_reminder_action(
             err = result.get("error", "")
             if err == "past_datetime":
                 reply = "وقت التذكير صار بالماضي، أعطني وقت لاحق."
+                ok = False
             else:
                 reply = "ما قدرت أعدّل التذكير. جرّب مرة ثانية."
+                ok = False
 
     else:
         if not reminder_text:
@@ -390,12 +395,12 @@ def handle_reminder_action(
 
                     if remind_dt <= datetime.now(USER_TZ):
                         reply = "وقت التذكير صار بالماضي، أعطني وقت لاحق."
-                        return {"handled": True, "reply": reply}
+                        return {"handled": True, "ok": False, "reply": reply}
 
                     remind_at_iso = remind_dt.isoformat()
                 except Exception:
                     reply = "وقت التذكير غير صالح. اكتب التاريخ أو الوقت بشكل أوضح."
-                    return {"handled": True, "reply": reply}
+                    return {"handled": True, "ok": False, "reply": reply}
 
             if not remind_at_iso:
                 # خزّن pending عشان لما المستخدم يرد بالوقت نكمّل التذكير
@@ -444,4 +449,4 @@ def handle_reminder_action(
                     if store_result.get("success")
                     else "صار خطأ وأنا بضيف التذكير. جرّب مرة ثانية."
                 )
-    return {"handled": True, "reply": reply}
+    return {"handled": True, "ok": ok, "reply": reply}

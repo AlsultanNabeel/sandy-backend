@@ -315,6 +315,6 @@ def _handle_modify_response(
         clear_pending_action(session)
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
         return {
-            "handled": True,
+            "handled": True, "ok": False,
             "reply": "ما قدرت أكمل التعديل. جرّب من جديد.",
         }

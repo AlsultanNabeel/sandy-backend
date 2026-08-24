@@ -21,7 +21,7 @@ def expense_add(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     if add_expense(amount, note=note, category=category):
         label = note or category or ""
         return {"handled": True, "reply": f"💸 سجلت {amount:g}" + (f" — {label}" if label else "")}
-    return {"handled": True, "reply": "ما قدرت أسجل المصروف."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أسجل المصروف."}
 
 
 def expense_summary(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:

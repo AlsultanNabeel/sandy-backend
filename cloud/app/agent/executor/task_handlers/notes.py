@@ -25,6 +25,7 @@ def _handle_rename(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_reference_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -37,6 +38,7 @@ def _handle_rename(
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."
+        ok = False
     elif status == "ambiguous":
         choices = [
             {"id": task.get("id", ""), "text": task.get("text", "")}
@@ -77,7 +79,8 @@ def _handle_rename(
         reply = f"متأكد بدك تعدّل اسم المهمة؟\nمن: {old_text}\nإلى: {new_text}"
     else:
         reply = "ما قدرت أحدد المهمة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -93,6 +96,7 @@ def _handle_append_note(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_reference_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -105,6 +109,7 @@ def _handle_append_note(
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."
+        ok = False
     elif status == "ambiguous":
         choices = [
             {"id": task.get("id", ""), "text": task.get("text", "")}
@@ -145,7 +150,8 @@ def _handle_append_note(
         reply = f"متأكد بدك تضيف هاي الملاحظة للمهمة؟\n- {task_text_current}\nالملاحظة: {note_text}"
     else:
         reply = "ما قدرت أحدد المهمة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -161,6 +167,7 @@ def _handle_replace_note(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_reference_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -173,6 +180,7 @@ def _handle_replace_note(
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."
+        ok = False
     elif status == "ambiguous":
         choices = [
             {
@@ -223,4 +231,5 @@ def _handle_replace_note(
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
     else:
         reply = "ما قدرت أحدد المهمة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}

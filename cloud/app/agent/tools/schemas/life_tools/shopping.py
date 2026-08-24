@@ -37,7 +37,7 @@ def shopping_check(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, An
 
     name = check_item(str(args.get("item", "")))
     if not name:
-        return {"handled": True, "reply": "ما لقيت هالعنصر بالقائمة."}
+        return {"handled": True, "ok": False, "reply": "ما لقيت هالعنصر بالقائمة."}
     return {"handled": True, "reply": f"✅ شطبت «{name}» — مبروك الشراء!"}
 
 
@@ -46,7 +46,7 @@ def shopping_remove(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, A
 
     name = remove_item(str(args.get("item", "")))
     if not name:
-        return {"handled": True, "reply": "ما لقيت هالعنصر بالقائمة."}
+        return {"handled": True, "ok": False, "reply": "ما لقيت هالعنصر بالقائمة."}
     return {"handled": True, "reply": f"🗑 حذفت «{name}» من القائمة."}
 
 

@@ -24,7 +24,7 @@ def _exec_task_complete(
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
     if ok:
         return {"handled": True, "reply": f"تمام، علّمت المهمة كمكتملة:\n- {task_text}"}
-    return {"handled": True, "reply": "ما قدرت أكمل المهمة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أكمل المهمة."}
 
 
 def _exec_task_complete_multi(
@@ -63,7 +63,7 @@ def _exec_task_complete_multi(
             "handled": True,
             "reply": f"علّمت كمكتملة:\n{ok_lines}\nوما قدرت أكمل:\n{fail_lines}",
         }
-    return {"handled": True, "reply": "ما قدرت أكمل المهام المحددة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أكمل المهام المحددة."}
 
 
 def _exec_task_uncomplete(
@@ -85,7 +85,7 @@ def _exec_task_uncomplete(
             "handled": True,
             "reply": f"تمام، رجّعت المهمة لقائمة المهام النشطة: {task_text}",
         }
-    return {"handled": True, "reply": "ما قدرت أرجّع المهمة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أرجّع المهمة."}
 
 
 def _exec_task_rename(
@@ -108,7 +108,7 @@ def _exec_task_rename(
             "handled": True,
             "reply": f"تمام، عدّلت اسم المهمة:\nمن: {old_text}\nإلى: {new_text}",
         }
-    return {"handled": True, "reply": "ما قدرت أعدل اسم المهمة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أعدل اسم المهمة."}
 
 
 def _exec_task_update_due_date(
@@ -137,15 +137,15 @@ def _exec_task_update_due_date(
     reason = result.get("reason")
     if reason == "has_time":
         return {
-            "handled": True,
+            "handled": True, "ok": False,
             "reply": "هاي المهمة فيها وقت/تذكير محفوظ. تعديل تاريخ المهام اللي فيها وقت مؤجل للمرحلة 6.6.3.",
         }
     if reason == "past":
         return {
-            "handled": True,
+            "handled": True, "ok": False,
             "reply": "التاريخ الجديد بالماضي. أعطني تاريخ اليوم أو تاريخ لاحق.",
         }
-    return {"handled": True, "reply": "ما قدرت أعدل تاريخ المهمة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أعدل تاريخ المهمة."}
 
 
 def _exec_task_update_due_time(
@@ -168,8 +168,8 @@ def _exec_task_update_due_time(
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
     if not result.get("ok"):
         if result.get("reason") == "past":
-            return {"handled": True, "reply": "الوقت الجديد بالماضي. أعطني وقت لاحق."}
-        return {"handled": True, "reply": "ما قدرت أعدل وقت المهمة."}
+            return {"handled": True, "ok": False, "reply": "الوقت الجديد بالماضي. أعطني وقت لاحق."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت أعدل وقت المهمة."}
     deps.delete_sandy_reminder_by_task_id(task_id)
     reminder_description = (
         f"Reminder created by Sandy: {task_text}\n[SANDY_TASK_ID:{task_id}]"
@@ -213,7 +213,7 @@ def _exec_task_append_note(
             "handled": True,
             "reply": f"تمام، أضفت الملاحظة على المهمة:\n- {task_text}",
         }
-    return {"handled": True, "reply": "ما قدرت أضيف الملاحظة للمهمة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أضيف الملاحظة للمهمة."}
 
 
 def _exec_task_replace_note(
@@ -238,7 +238,7 @@ def _exec_task_replace_note(
             "handled": True,
             "reply": f"تمام، استبدلت ملاحظة المهمة:\n- {task_text}",
         }
-    return {"handled": True, "reply": "ما قدرت أستبدل ملاحظة المهمة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أستبدل ملاحظة المهمة."}
 
 
 def _exec_task_uncomplete_multi(
@@ -275,7 +275,7 @@ def _exec_task_uncomplete_multi(
             "handled": True,
             "reply": f"رجّعت بعض المهام:\n{ok_lines}\n\nوما قدرت أرجّع:\n{fail_lines}",
         }
-    return {"handled": True, "reply": "ما قدرت أرجّع المهام."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أرجّع المهام."}
 
 
 def _exec_task_delete_one(
@@ -296,7 +296,7 @@ def _exec_task_delete_one(
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
     if ok:
         return {"handled": True, "reply": f"تمام، حذفت المهمة: {task_text}"}
-    return {"handled": True, "reply": "ما قدرت أحذف المهمة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أحذف المهمة."}
 
 
 def _exec_task_delete_multi(
@@ -335,7 +335,7 @@ def _exec_task_delete_multi(
             "handled": True,
             "reply": f"حذفت:\n{ok_lines}\nوما قدرت أحذف:\n{fail_lines}",
         }
-    return {"handled": True, "reply": "ما قدرت أحذف المهام المحددة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أحذف المهام المحددة."}
 
 
 def _exec_task_delete_all(
@@ -352,7 +352,7 @@ def _exec_task_delete_all(
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
     if deleted_count == 0:
         return {
-            "handled": True,
+            "handled": True, "ok": False,
             "reply": "ما في مهام نشطة للحذف. المهام المكتملة بقيت كما هي.",
         }
     return {
@@ -403,4 +403,4 @@ def _exec_task_bulk_update_due_date(
             "handled": True,
             "reply": f"أجّلت:\n{ok_lines}\n\nوما قدرت أؤجل:\n{fail_lines}",
         }
-    return {"handled": True, "reply": "ما قدرت أؤجل المهام."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أؤجل المهام."}

@@ -29,7 +29,7 @@ def save_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     image_state = session.get("image_state") or {}
     img = image_state.get("active_image_bytes") or session.get("last_image_bytes")
     if not img:
-        return {"handled": True, "reply": "ما في صورة حالية أحفظها — ابعتلي صورة الأول 🖼"}
+        return {"handled": True, "ok": False, "reply": "ما في صورة حالية أحفظها — ابعتلي صورة الأول 🖼"}
 
     name = str(args.get("name") or "").strip() or None
     uid = image_state.get("active_image_uid")
@@ -37,7 +37,7 @@ def save_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         chat_id, img, file_unique_id=uid, name=name, user_caption=name or ""
     )
     if not saved:
-        return {"handled": True, "reply": "ما قدرت أحفظ الصورة."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت أحفظ الصورة."}
 
     # وسوم ذكية بالخلفية (ما نأخّر الرد)
     if not saved.get("ai_caption"):
@@ -61,7 +61,7 @@ def show_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     query = str(args.get("query") or "").strip()
     chat_id = _chat_id(ctx)
     if not chat_id:
-        return {"handled": True, "reply": "ما قدرت أحدد المحادثة."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت أحدد المحادثة."}
 
     found = photo_album.get_photo_bytes(chat_id, query)
     if not found:

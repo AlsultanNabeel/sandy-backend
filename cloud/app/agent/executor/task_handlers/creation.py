@@ -34,8 +34,13 @@ def _handle_create(
     create_chat_completion_fn,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
+    conflict_alert = ""
     if not task_text:
-        return {"handled": True, "reply": "شو المهمة اللي بدك أضيفها؟"}
+        # سؤال، بس ما في `pending` بيحمله للدور الجاي — يعني المعالجة خلصت
+        # وما انكتب إشي. بدون `ok=False` المحوّل فوق بيكتب فوقه «سجّلتها ✅ ''».
+        return {"handled": True, "ok": False,
+                "reply": "شو المهمة اللي بدك أضيفها؟"}
 
     if not task_due_iso and task_due_text:
         due_parse_source = normalize_user_message(task_due_text)
@@ -78,7 +83,7 @@ def _handle_create(
 
         if not task_due_iso:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "في موعد للمهمة لكن ما فهمته بدقة. اكتب التاريخ أو الوقت بشكل أوضح.",
             }
 
@@ -97,14 +102,14 @@ def _handle_create(
 
             if due_dt <= datetime.now(USER_TZ):
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "موعد المهمة صار بالماضي، أعطني وقت لاحق.",
                 }
 
             task_due_iso = due_dt.isoformat()
         except Exception:
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "وقت المهمة غير صالح. اكتب التاريخ أو الوقت بشكل أوضح.",
             }
 
@@ -148,4 +153,13 @@ def _handle_create(
             reply = "تم التسجيل. المهمة محفوظة."
     else:
         reply = "ما قدرت أضيف المهمة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    # التنبيه بحقل لحاله كمان.
+    #
+    # `task_tools.task_create` بتكتب فوق `reply` بجملة بنبرة ساندي، فتحذير
+    # التعارض — وهو الإشي الوحيد هون اللي المحوّل ما بيقدر يعيد بناءه — كان
+    # بينمسح كل مرة. النصّ ملك المحوّل، والتحذير ملك المعالج.
+    out: Dict[str, Any] = {"handled": True, "ok": ok, "reply": reply}
+    if conflict_alert:
+        out["alert"] = conflict_alert
+    return out

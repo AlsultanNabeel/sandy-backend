@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from app.errors import ConfigError
 from app.agent.graph.state import SandyState, merge_state
+from app.agent.tool_result import result_ok
 from app.agent.tools.schemas.meta_tools import META_TOOLS as _META_TOOLS
 from app.utils.arabic_days import WEEKDAY_TO_AR_NAME
 from app.utils.session import build_session_from_state as _build_session_from_state
@@ -261,6 +262,7 @@ def execute_node(state: SandyState) -> SandyState:
 
         replies: list = []
         any_handled = False
+        any_ok = False
         blocked_any = False
         for fc_item in multi_fcs:
             t_name = fc_item.get("name", "")
@@ -284,7 +286,12 @@ def execute_node(state: SandyState) -> SandyState:
                     replies.append(r["reply"])
                 if r.get("handled"):
                     any_handled = True
-                logger.info(f"[execute_node] multi: {t_name} → handled={r.get('handled')}")
+                if result_ok(r):
+                    any_ok = True
+                logger.info(
+                    f"[execute_node] multi: {t_name} → "
+                    f"handled={r.get('handled')} ok={result_ok(r)}"
+                )
             except Exception as exc:
                 logger.error(f"[execute_node] multi: {t_name} failed: {exc}")
 
@@ -298,6 +305,7 @@ def execute_node(state: SandyState) -> SandyState:
         updates: Dict[str, Any] = {
             "execution_result": {
                 "handled": any_handled,
+                "ok": any_ok,
                 "reply": combined,
                 "source": "execute_node_multi",
             },
@@ -326,7 +334,7 @@ def execute_node(state: SandyState) -> SandyState:
             if _requires_account(tool_name) and active_profile_is_guest():
                 logger.warning(f"[execute_node] blocked tool={tool_name} for guest")
                 return merge_state(state, {
-                    "execution_result": {"handled": True, "reply": "سجّل دخولك عشان أقدر أساعدك بهالطلب 😊"},
+                    "execution_result": {"handled": True, "ok": False, "reply": "سجّل دخولك عشان أقدر أساعدك بهالطلب 😊"},
                 })
             # أجهزة المالك (الروبوت/الغرفة) — انتقالياً للمالك فقط حتى تجي
             # أدوات التحكم لكل مستأجر.
@@ -335,7 +343,7 @@ def execute_node(state: SandyState) -> SandyState:
                     f"[execute_node] blocked device tool={tool_name} for non-owner chat_id={state.get('chat_id')}"
                 )
                 return merge_state(state, {
-                    "execution_result": {"handled": True, "reply": "هذا جهاز خاص بنبيل 😊"},
+                    "execution_result": {"handled": True, "ok": False, "reply": "هذا جهاز خاص بنبيل 😊"},
                 })
 
             try:
@@ -371,6 +379,7 @@ def execute_node(state: SandyState) -> SandyState:
                 "pending_archived": pending_archived,
                 "execution_result": {
                     "handled": handled,
+                    "ok": result_ok(result),
                     "reply": reply,
                     "reply_markup": reply_markup,
                     "image_bytes": result.get("image_bytes"),
@@ -455,6 +464,7 @@ def execute_node(state: SandyState) -> SandyState:
         "pending_archived": pending_archived,
         "execution_result": {
             "handled": handled,
+            "ok": result_ok(result),
             "reply": reply,
             "reply_markup": reply_markup,
             "image_bytes": image_bytes,

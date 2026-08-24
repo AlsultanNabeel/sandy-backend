@@ -27,6 +27,7 @@ def _handle_uncomplete_multi(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_completed_task_references_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -38,6 +39,7 @@ def _handle_uncomplete_multi(
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهام ضمن المهام المكتملة. اعرض المهام المكتملة مرة ثانية واختر مهام موجودة."
+        ok = False
     elif status == "ambiguous":
         reply = (
             "لقيت أكثر من مهمة مكتملة مطابقة:\n"
@@ -76,7 +78,8 @@ def _handle_uncomplete_multi(
             reply = f"متأكد بدك أرجّع هاي المهام لقائمة المهام النشطة؟\n{lines}"
     else:
         reply = "ما قدرت أحدد المهام المكتملة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -90,6 +93,7 @@ def _handle_uncomplete(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_completed_task_reference_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -101,6 +105,7 @@ def _handle_uncomplete(
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام المكتملة. اعرض المهام المكتملة مرة ثانية واختر مهمة موجودة."
+        ok = False
     elif status == "ambiguous":
         reply = (
             "لقيت أكثر من مهمة مكتملة مطابقة:\n"
@@ -123,7 +128,8 @@ def _handle_uncomplete(
         reply = f"متأكد بدك أرجّع المهمة لقائمة المهام النشطة؟\n- {task_text}"
     else:
         reply = "ما قدرت أحدد المهمة المكتملة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -137,6 +143,7 @@ def _handle_complete(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_references_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -177,6 +184,7 @@ def _handle_complete(
         task_text = str(task.get("text", "")).strip()
         if not task_id:
             reply = "حددت المهمة، بس ما قدرت أجيب معرفها."
+            ok = False
         else:
             session["pending_action"] = create_pending_action(
                 {
@@ -191,7 +199,8 @@ def _handle_complete(
             reply = f"متأكد بدك أعلّم المهمة كمكتملة؟\n- {task_text}"
     else:
         reply = "ما قدرت أحدد المهمة."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -205,6 +214,7 @@ def _handle_complete_multi(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ok = True
     result = resolve_task_references_for_write(
         task_reference,
         mongo_db=mongo_db,
@@ -218,6 +228,7 @@ def _handle_complete_multi(
         bad_ref = str(result.get("reference", "")).strip()
         if bad_ref:
             reply = f"المهمة ({bad_ref}) غير موجودة حالياً في قائمة المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."
+            ok = False
         else:
             reply = "أي مهمة بدك أعلّمها كمكتملة؟"
     elif status == "single":
@@ -237,6 +248,7 @@ def _handle_complete_multi(
             reply = f"لقيت مهمة واحدة فقط:\n- {task_text}\nبدك أعلّمها كمكتملة؟"
         else:
             reply = "حددت مهمة واحدة فقط، بس ما قدرت أجيب معرف المهمة."
+            ok = False
     elif status == "ambiguous":
         reply = _ambiguous_choice_reply(
             result,
@@ -273,6 +285,7 @@ def _handle_complete_multi(
             )
         else:
             reply = f"المهام التالية غير موجودة حالياً: {missing_text}"
+            ok = False
     elif tasks:
         pending_tasks = [
             {"id": task.get("id", ""), "text": task.get("text", "")}
@@ -292,7 +305,8 @@ def _handle_complete_multi(
         reply = f"متأكد بدك أعلّم المهام التالية كمكتملة؟\n{lines}"
     else:
         reply = "ما قدرت أحدد المهام."
-    return {"handled": True, "reply": reply}
+        ok = False
+    return {"handled": True, "ok": ok, "reply": reply}
 
 
 
@@ -301,10 +315,11 @@ def _handle_complete_all(*, mongo_db, tasks_file):
     try:
         count = complete_all_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
         if count == 0:
-            return {"handled": True, "reply": "ما في مهام نشطة لإكمالها."}
+            return {"handled": True, "ok": False, "reply": "ما في مهام نشطة لإكمالها."}
         return {"handled": True, "reply": f"✅ كمّلت {count} مهمة."}
     except Exception as e:
-        return {"handled": True, "reply": f"ما قدرت أكمّل المهام: {e}"}
+        return {"handled": True, "ok": False, "error": f"complete_all: {type(e).__name__}",
+                "reply": f"ما قدرت أكمّل المهام: {e}"}
 
 
 # Common Arabic command prefixes the planner may leave on a task reference

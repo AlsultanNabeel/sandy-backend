@@ -145,6 +145,58 @@ devices.
 Destructive tools are named once, in `agent/guards.py`, and that one set is shared
 by the text path and the voice path. Do not redefine it locally.
 
+**A result answers three questions.** `handled` — this handler owns the turn and
+here is its answer. `ok` — the change actually happened. `error` — the tool
+itself broke. Only `handled` existed until 24 Aug 2026, so every reader that
+wanted one of the other two asked it instead, and a refusal is `handled`.
+
+What that produced: a task whose write failed was confirmed as saved
+(`tasks_store.add_task` swallows every exception and returns `""`), the graph
+appended `" ✅"` to `سجّل دخولك…`, and on the voice path a refusal reached Gemini
+as ordinary text, which she then confirmed to the user.
+
+**`tool_health` reads `error`, not `ok`, and that distinction is load-bearing.**
+The audit's first reading was that it should record `ok` — but a refusal is the
+tool *working*, and `_history` is process-global and keyed by tool name alone,
+not per tenant. Scoring refusals as failures means three different customers
+each mistyping a shopping item once crosses the degradation threshold and the
+owner is told his shopping tool is broken. Meanwhile the one thing the monitor
+exists to catch — `executor/dispatch.py::_guard` swallowing a real exception
+behind a friendly sentence — was being recorded as a clean call, so the weather
+API could raise on every request and the health surface stayed green.
+
+`handled: False` is not breakage either — it is a routing signal, the same
+distinction commit `ea628a6` drew on the voice path — so three ordinary
+`حدّد ما تريد تعديله` turns must not mark `task_update` degraded.
+
+That health surface was dead anyway. `response_node`'s degradation warning sat
+in an `elif reply:` branch that needs a node setting `execution_result`
+*without* `final_response`; every node sets both, so no user has ever seen it.
+It is wired into both branches now. The generic `" ✅"` append that shared that
+branch is deleted: it reached nothing, and every handler that wants a tick
+writes its own (`سجّلتها ✅`).
+
+**On the voice path everything that did not happen is marked**, because an
+unmarked refusal is exactly what Gemini reads as success and confirms to the
+user. The two marks are not the same: `[فشل التنفيذ]` for breakage,
+`[لم يُنفَّذ]` for a refusal. Calling `ما لقيت جهاز بهالاسم، أي واحد تقصد؟` a
+failed execution makes her abandon a disambiguation the user is mid-way through.
+
+`app/agent/tool_result.py` holds the contract, `result_ok()` and
+`result_failed()`. Omitting `ok` means `ok == handled`, which is what the ~330
+un-migrated sites meant already; the refusal sites carry it explicitly. **An ask
+that keeps a pending alive is not a refusal** — the flow is continuing, and
+marking it makes the next turn look like a failure to a model that is mid
+conversation. An ask that stores no pending is finished, and is marked: without
+that, `task_create` with an empty title wrote `سجّلتها ✅ ''` over its own
+question. Rules in `CONVENTIONS.md` C10. **Never read `result["handled"]` to
+decide whether something worked.**
+
+One more shape to keep: an adapter that replaces a handler's reply must not
+destroy what only the handler knows. `task_create` swaps in a persona-toned
+sentence and used to take the scheduling-conflict warning with it; the warning
+now travels beside the reply as `alert`.
+
 ### 2.5 Memory
 
 | Layer | Module | Store |

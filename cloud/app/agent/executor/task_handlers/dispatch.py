@@ -159,7 +159,7 @@ def handle_task_action(
     save_session_fn,
 ) -> Dict[str, Any]:
     if active_profile_is_guest():
-        return {"handled": True, "reply": "سجّل دخولك عشان أقدر أنظّم مهامك 😊"}
+        return {"handled": True, "ok": False, "reply": "سجّل دخولك عشان أقدر أنظّم مهامك 😊"}
 
     task_action = str(params.get("action", "create")).strip().lower()
     if task_action not in {
@@ -185,7 +185,7 @@ def handle_task_action(
         "delete_completed",
         "bulk_update_due_date",
     }:
-        return {"handled": True, "reply": "نوع إجراء المهمة غير صالح."}
+        return {"handled": True, "ok": False, "reply": "نوع إجراء المهمة غير صالح."}
 
     task_text = str(params.get("text", "")).strip()
     task_reference = str(params.get("reference", "")).strip()

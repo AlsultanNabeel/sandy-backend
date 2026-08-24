@@ -23,7 +23,7 @@ def habit_checkin(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
 
     r = checkin(str(args.get("name", "")))
     if not r.get("ok"):
-        return {"handled": True, "reply": "ما لقيت هالعادة — بدك أضيفها؟"}
+        return {"handled": True, "ok": False, "reply": "ما لقيت هالعادة — بدك أضيفها؟"}
     streak = r.get("streak", 1)
     if r.get("already"):
         return {"handled": True, "reply": f"مسجلة اليوم أصلاً ✅ — سلسلتك {streak} يوم 🔥"}

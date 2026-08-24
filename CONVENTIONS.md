@@ -58,3 +58,53 @@ acceptable where that's the reason. For NEW code, prefer module-top imports;
 only drop an import inside a function when a module-top import would create a
 cycle, and add a one-line comment saying so. Do not mass-hoist existing inline
 imports — they are load-bearing.
+
+## C10 — A handler result answers three questions, not one
+`handled` — "this handler owns the turn and here is its answer".
+`ok` — "the change the user asked for actually happened".
+`error` — "the tool itself broke".
+
+A refusal is `{"handled": True, "ok": False}`: it ran, and the answer is no. A
+handler that catches its own exception adds `error`, because a friendly failure
+sentence is still a failure — `_guard` in `executor/dispatch.py` is the model to
+copy.
+
+Set `ok=False` when the handler is **finished** and the request did not take
+effect: a refusal, a not-found target of a change, an input it gave up on, a
+failed write, a no-op with nothing to act on. Do **not** set it when:
+- a read or search legitimately found nothing — the request took effect and the
+  answer is an empty list;
+- the requested end state already holds (pausing what is paused);
+- **a pending action is still live.** A confirmation prompt or a re-ask that
+  keeps the pending alive is the flow continuing, not ending, and marking it
+  makes the next turn look like a failure to a model that is mid-conversation.
+
+An ask that stores **no** pending is finished, and is marked: `task_create` with
+no title asks "شو المهمة اللي بدك أضيفها؟" and nothing carries that forward, so
+without the mark the adapter above it wrote "سجّلتها ✅" over the question.
+
+Read `ok` with `app.agent.tool_result.result_ok` at any site that renders a
+success sentence. Read breakage with `result_failed`, which is `error` and
+nothing else:
+- `tool_health` uses `result_failed`, never `ok`. A refusal is not flakiness,
+  and the counter is process-global and keyed by tool name, so three customers
+  each mistyping an item once would otherwise be enough to tell the owner his
+  shopping tool is broken.
+- `handled: False` is **not** breakage either. It is a routing signal —
+  `task_update` returns it for "say which field you want changed" — and scoring
+  it as failure marks a healthy tool degraded after three clarifications.
+- The voice path marks **everything** that did not happen, because an unmarked
+  refusal is what Gemini reads as success and confirms to the user. It marks
+  them differently: `[فشل التنفيذ]` for breakage — raised, not found
+  (`handled: False`), or `error` set — and `[لم يُنفَّذ]` for a refusal.
+  Calling "ما لقيت جهاز بهالاسم، أي واحد تقصد؟" a failed execution makes her
+  abandon a disambiguation the user is halfway through.
+
+Never read `result["handled"]` to decide whether something worked. Omitting `ok`
+means `ok == handled`, so an un-migrated handler keeps its old behaviour; that
+default is a migration aid, not a licence to skip it — and it is why a site that
+overwrites a reply with a success sentence must check `ok`, not `handled`.
+
+An adapter that replaces a handler's reply must not destroy what the handler
+alone knows. `task_create` swaps in a persona-toned sentence; the scheduling
+conflict warning travels beside it as `alert` so the swap stops costing it.

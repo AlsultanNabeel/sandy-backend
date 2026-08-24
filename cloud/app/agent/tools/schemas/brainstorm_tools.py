@@ -26,10 +26,10 @@ def brainstorm_start(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, 
     topic = str(args.get("topic") or "").strip()
     chat_id = _chat_id(ctx)
     if not chat_id:
-        return {"handled": True, "reply": "ما قدرت أحدد المحادثة."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت أحدد المحادثة."}
     doc = brainstorm.start_session(chat_id, topic)
     if not doc:
-        return {"handled": True, "reply": "ما قدرت أبدأ الجلسة حالياً."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت أبدأ الجلسة حالياً."}
     from app.features.robot_expression import thinking
     thinking()
     return {
@@ -51,7 +51,7 @@ def brainstorm_add(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, An
     chat_id = _chat_id(ctx)
     n = brainstorm.add_point(chat_id, point)
     if n == 0:
-        return {"handled": True, "reply": "ما في جلسة عصف نشطة — قول «خلينا نعصف ذهني عن...» نبدأ."}
+        return {"handled": True, "ok": False, "reply": "ما في جلسة عصف نشطة — قول «خلينا نعصف ذهني عن...» نبدأ."}
     return {"handled": True, "reply": f"سجّلتها ✅ ({n} نقطة لهلأ). كمّل."}
 
 
@@ -61,7 +61,7 @@ def brainstorm_cancel(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str,
 
     if brainstorm.cancel_session(_chat_id(ctx)):
         return {"handled": True, "reply": "تمام، ألغيت جلسة العصف 👍 رجعنا عادي."}
-    return {"handled": True, "reply": "ما في جلسة عصف نشطة أصلاً."}
+    return {"handled": True, "ok": False, "reply": "ما في جلسة عصف نشطة أصلاً."}
 
 
 def brainstorm_finish(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -71,7 +71,7 @@ def brainstorm_finish(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str,
     chat_id = _chat_id(ctx)
     result = brainstorm.finish_session(chat_id, ctx.create_chat_completion_fn)
     if not result:
-        return {"handled": True, "reply": "ما في جلسة عصف نشطة ألخّصها."}
+        return {"handled": True, "ok": False, "reply": "ما في جلسة عصف نشطة ألخّصها."}
     plan_text, _, topic = result
     return {"handled": True, "reply": f"{plan_text}\n\n(محفوظة عندي 🧠)"}
 
@@ -121,7 +121,7 @@ def brainstorm_delete(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str,
     query = str(args.get("query") or "").strip()
     p = brainstorm.propose_action(_chat_id(ctx), query, "delete")
     if not p:
-        return {"handled": True, "reply": "ما لقيت خطة بهالوصف 🧠"}
+        return {"handled": True, "ok": False, "reply": "ما لقيت خطة بهالوصف 🧠"}
     return {"handled": True, "reply": f"{_confirm_line(p)}؟\nأحذفها نهائياً؟ قوليلي «آه احذفيها» ✅"}
 
 
@@ -135,7 +135,7 @@ def brainstorm_edit(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, A
         return {"handled": True, "reply": "شو التعديل اللي بدك إياه بالخطة؟"}
     p = brainstorm.propose_action(_chat_id(ctx), query, "edit", change)
     if not p:
-        return {"handled": True, "reply": "ما لقيت خطة أعدّلها بهالوصف 🧠"}
+        return {"handled": True, "ok": False, "reply": "ما لقيت خطة أعدّلها بهالوصف 🧠"}
     return {"handled": True, "reply": f"{_confirm_line(p)}؟\nالتعديل: {change}\nأنفّذه؟ قوليلي «آه» ✅"}
 
 
@@ -145,10 +145,10 @@ def brainstorm_confirm(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str
 
     result = brainstorm.confirm_pending(_chat_id(ctx), ctx.create_chat_completion_fn)
     if not result:
-        return {"handled": True, "reply": "ما في عملية معلّقة أأكّدها."}
+        return {"handled": True, "ok": False, "reply": "ما في عملية معلّقة أأكّدها."}
     op, data = result
     if not data.get("ok"):
-        return {"handled": True, "reply": "ما قدرت ألاقي الخطة — يمكن انحذفت."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت ألاقي الخطة — يمكن انحذفت."}
     if op == "delete":
         return {"handled": True, "reply": f"حذفت خطة «{data['topic']}» ✅"}
     return {"handled": True, "reply": f"عدّلت خطة «{data['topic']}» ✅\n\n{data.get('plan_text', '')}"}

@@ -32,7 +32,7 @@ def focus_start(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         return {"handled": True, "reply": " ".join(bits) + ". ركّز! 💪"}
     if r.get("error") == "already_active":
         return {"handled": True, "reply": "في جلسة تركيز شغالة أصلاً — قول «خلصت» أو «الغي التركيز»."}
-    return {"handled": True, "reply": "ما قدرت أبلش الجلسة."}
+    return {"handled": True, "ok": False, "reply": "ما قدرت أبلش الجلسة."}
 
 
 def focus_stop(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -41,7 +41,7 @@ def focus_stop(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     completed = not bool(args.get("cancel"))
     r = stop_focus(completed=completed)
     if not r.get("ok"):
-        return {"handled": True, "reply": "ما في جلسة تركيز شغالة."}
+        return {"handled": True, "ok": False, "reply": "ما في جلسة تركيز شغالة."}
     from app.features.robot_expression import focus_end
     focus_end()
     if completed:
@@ -77,8 +77,8 @@ def focus_sound(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         word = {"start": "بداية التركيز", "break": "الراحة", "end": "نهاية التركيز"}.get(r["event"], r["event"])
         return {"handled": True, "reply": f"🔔 غيّرت صوت {word} لـ «{r['melody']}»."}
     if r.get("error") == "bad_melody":
-        return {"handled": True, "reply": "النغمة مش موجودة. المتاح: " + "، ".join(r.get("choices", []))}
-    return {"handled": True, "reply": "حدّد بداية/راحة/نهاية ونغمة صحيحة."}
+        return {"handled": True, "ok": False, "reply": "النغمة مش موجودة. المتاح: " + "، ".join(r.get("choices", []))}
+    return {"handled": True, "ok": False, "reply": "حدّد بداية/راحة/نهاية ونغمة صحيحة."}
 
 
 _GOAL_AR = {"day": "اليومي", "week": "الأسبوعي", "month": "الشهري", "year": "السنوي"}

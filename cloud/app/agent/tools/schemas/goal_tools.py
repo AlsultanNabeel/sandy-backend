@@ -80,7 +80,7 @@ def goal_done(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     """يُكمّل هدفاً."""
     coll = _goals_db(ctx)
     if coll is None:
-        return {"handled": True, "reply": "ما قدرت أوصل للأهداف."}
+        return {"handled": True, "ok": False, "reply": "ما قدرت أوصل للأهداف."}
 
     chat_id = str((ctx.state or {}).get("chat_id", "default"))
     goal_text = str(args.get("goal") or args.get("text") or "").strip()
@@ -101,7 +101,7 @@ def goal_done(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         from app.features.robot_expression import celebrate
         celebrate()
         return {"handled": True, "reply": f"🎉 يييي! خلصت من هدف: *{result['text']}*\nأنا فخورة فيك!"}
-    return {"handled": True, "reply": "ما لقيت هالهدف بين أهدافك النشطة. حاول بكلمة أخرى؟"}
+    return {"handled": True, "ok": False, "reply": "ما لقيت هالهدف بين أهدافك النشطة. حاول بكلمة أخرى؟"}
 
 
 GOAL_TOOLS = [

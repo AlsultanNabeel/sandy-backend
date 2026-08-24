@@ -12,6 +12,7 @@ from typing import Optional
 from app.agent.graph.state import SandyState, merge_state
 from app.agent.soul_vault import get_apology
 from app.agent import tool_health
+from app.agent.tool_result import result_ok
 
 logger = logging.getLogger(__name__)
 
@@ -74,21 +75,22 @@ def response_node(state: SandyState) -> SandyState:
 
     function_call_name = (state.get("function_call") or {}).get("name", "")
 
-    if final:
-        text = final
-    elif reply:
-        text = _build_final_text(
+    if final or reply:
+        text = final or _build_final_text(
             reply, persona_snippet or None, response_template or None
         )
-        if (
-            execution.get("handled")
-            and function_call_name
-            and function_call_name not in _CHAT_TOOLS
-            and "✅" not in text
-        ):
-            text += " ✅"
         # تنبيه تعثّر الـ tool. ما نضيفه لو الرد أصلاً فيه تحذير صريح.
-        disclosure = _degradation_disclosure(function_call_name)
+        #
+        # **كان ما بيوصل لحدا أبداً.** كان محطوط بفرع `elif reply:` لحاله،
+        # وهاد الفرع بده عقدة تحطّ `execution_result` بدون `final_response` —
+        # وكل العقد بتحطّ الاتنين إلا فرعَي رفض بـ execute_node. يعني التحذير
+        # الوحيد اللي بيوصل للمستخدم عن صحّة الأدوات كان ميّت من يوم ما انكتب.
+        #
+        # ومربوط بـ `ok`: نصّه بيقول «جرّبت أعمل اللي طلبته، بس لو بان ناقص
+        # خبّرني» — جملة عن شغل صار. حطّها فوق رفض بيخلّيها تكذب.
+        disclosure = (
+            _degradation_disclosure(function_call_name) if result_ok(execution) else ""
+        )
         if disclosure and "⚠️" not in text:
             text = disclosure + text
     else:

@@ -179,7 +179,7 @@ def fetch_url(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         return {"handled": True, "reply": "أعطيني الرابط."}
     if not _is_safe_public_url(url):
         # عنوان داخلي/غير مدعوم — نرفض بدل ما نجلب أسرار الشبكة الداخلية (SSRF).
-        return {"handled": True, "reply": "ما بقدر أجلب هذا الرابط."}
+        return {"handled": True, "ok": False, "reply": "ما بقدر أجلب هذا الرابط."}
 
     try:
         # allow_redirects=False: تحويل من رابط مسموح لعنوان داخلي = تجاوز الفحص.
@@ -189,7 +189,7 @@ def fetch_url(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
             headers={"User-Agent": "Sandy-Bot/1.0"},
         )
         if resp.is_redirect or resp.is_permanent_redirect:
-            return {"handled": True, "reply": "الرابط بيحوّل لمكان ثاني، ما قدرت أجلبه."}
+            return {"handled": True, "ok": False, "reply": "الرابط بيحوّل لمكان ثاني، ما قدرت أجلبه."}
         resp.raise_for_status()
         raw = resp.raw.read(_MAX_FETCH_BYTES + 1, decode_content=True) or b""
         html = raw[:_MAX_FETCH_BYTES].decode(resp.encoding or "utf-8", errors="ignore")
@@ -205,7 +205,9 @@ def fetch_url(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         # رسالة عامة للمستخدم؛ التفاصيل تبقى بالسجلّ (لا تسريب طوبولوجيا داخلية).
         logger.warning("[fetch_url] fetch failed for %s: %s", url, exc)
-        return {"handled": True, "reply": "ما قدرت أجلب الصفحة."}
+        return {"handled": True, "ok": False,
+                "error": f"fetch_url: {type(exc).__name__}",
+                "reply": "ما قدرت أجلب الصفحة."}
 
 
 # Schemas

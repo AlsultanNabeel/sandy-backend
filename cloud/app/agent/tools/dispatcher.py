@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Optional
 
 from app.agent.guards import DESTRUCTIVE_TOOLS
 from app.agent.tool_health import record_call as _record_health
+from app.agent.tool_result import result_failed
 from app.agent.tools.registry import ToolRegistry, get_registry
 
 logger = logging.getLogger(__name__)
@@ -95,10 +96,11 @@ class ToolDispatcher:
         args: Dict[str, Any],
         context: DispatchContext,
     ) -> Dict[str, Any]:
-        """نفّذ tool وارجع {handled, reply, ...}.
+        """نفّذ tool وارجع {handled, ok, reply, ...}.
 
         كل استدعاء (نجح أو فشل) يتسجّل في tool_health حتى نعرف الأداة
-        المتذبذبة بدون ما نرجع نقرأ اللوقات.
+        المتذبذبة بدون ما نرجع نقرأ اللوقات. الرفض مش فشل — شوف
+        app/agent/tool_result.py للعقد كامل.
         """
         tool = self.registry.get_tool(tool_name)
         if not tool:
@@ -135,15 +137,19 @@ class ToolDispatcher:
                 logger.debug("ignoring non-critical error", exc_info=True)
             return {"handled": False, "reply": f"خطأ في تنفيذ {tool_name}."}
 
-        # handled=True يعتبر نجاح
+        # الصحّة بتسأل «الأداة معطّلة؟»، مش «صار اللي طلبه المستخدم؟». الرفض
+        # ردّ صحيح — والعدّاد مشترك على مستوى العملية كلها ومفتاحه اسم الأداة
+        # بس، فتسجيل الرفض فشلاً بيخلّي ثلاث زبائن كل واحد غلّط باسم غرض
+        # كافيين ليتبلّغ المالك إنّ أداة التسوّق عنده خربانة. شوف
+        # tool_result.result_failed.
         elapsed_ms = (time.perf_counter() - start) * 1000.0
-        ok = bool(result.get("handled")) and error_for_health is None
+        failed = error_for_health is not None or result_failed(result)
         try:
             _record_health(
                 tool_name,
-                ok=ok,
+                ok=not failed,
                 latency_ms=elapsed_ms,
-                error=error_for_health or (None if ok else "handled=False"),
+                error=error_for_health or (str(result.get("error") or "") or None),
             )
         except Exception:
             logger.debug("ignoring non-critical error", exc_info=True)

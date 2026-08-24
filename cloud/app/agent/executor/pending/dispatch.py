@@ -72,6 +72,8 @@ def execute_pending_action(
         if pending_type == "task" and pending_action == "await_name":
             task_name = (user_message or "").strip()
             if not task_name:
+                # الـ pending لسا محفوظ — سؤال ثاني، مش نهاية. زي فرعَي
+                # `_handle_await_remind_at`، فبيضلّ على الافتراضي.
                 return {"handled": True, "reply": "ما فهمت الاسم، حاول مرة ثانية."}
             try:
                 from app.features.tasks_store import add_task as _add_task
@@ -86,7 +88,9 @@ def execute_pending_action(
                 save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
                 return {"handled": True, "reply": f"✅ تم إضافة المهمة: {task_name}"}
             except Exception as _e:
-                return {"handled": True, "reply": f"ما قدرت أضيف المهمة: {_e}"}
+                return {"handled": True, "ok": False,
+                        "error": f"await_name: {type(_e).__name__}",
+                        "reply": f"ما قدرت أضيف المهمة: {_e}"}
 
         if pending_type == "reminder" and pending_action == "await_remind_at":
             return _handle_await_remind_at(

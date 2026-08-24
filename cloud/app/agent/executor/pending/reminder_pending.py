@@ -25,7 +25,7 @@ def _handle_confirm_remind_at(
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "ما قدرت أكمل إضافة التذكير. جرّب من جديد.",
             }
         try:
@@ -38,7 +38,7 @@ def _handle_confirm_remind_at(
                 clear_pending_action(session)
                 save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
                 return {
-                    "handled": True,
+                    "handled": True, "ok": False,
                     "reply": "وقت التذكير صار بالماضي. أعطني وقت لاحق.",
                 }
             store_result = deps.add_reminder(
@@ -54,13 +54,15 @@ def _handle_confirm_remind_at(
                     "reply": f"تم التسجيل. التذكير محفوظ؛ الوقت: {due_text}",
                 }
             return {
-                "handled": True,
+                "handled": True, "ok": False,
                 "reply": "صار خطأ وأنا بحفظ التذكير.",
             }
         except Exception as e:
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-            return {"handled": True, "reply": f"ما قدرت أكمل: {str(e)[:50]}"}
+            return {"handled": True, "ok": False,
+                    "error": f"confirm_remind_at: {type(e).__name__}",
+                    "reply": f"ما قدرت أكمل: {str(e)[:50]}"}
     elif is_cancellation(user_message):
         clear_pending_action(session)
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
@@ -89,7 +91,7 @@ def _handle_await_remind_at(
     if not reminder_text:
         clear_pending_action(session)
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        return {"handled": True, "reply": "ما عدت أذكر شو التذكير. جرّب من جديد."}
+        return {"handled": True, "ok": False, "reply": "ما عدت أذكر شو التذكير. جرّب من جديد."}
 
     parsed = deps.parse_reminder_time_ai(
         normalize_user_message(user_message),
@@ -147,7 +149,7 @@ def _handle_await_remind_at(
             "reply": f"تمام، سجلت التذكير: {reminder_text} — {due_text}",
         }
     return {
-        "handled": True,
+        "handled": True, "ok": False,
         "reply": "صار خطأ وأنا بحفظ التذكير. جرّب مرة ثانية.",
     }
 
