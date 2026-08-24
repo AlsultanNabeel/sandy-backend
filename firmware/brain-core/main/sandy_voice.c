@@ -1016,10 +1016,42 @@ static void ws_tx_task(void *arg) {
             s_tx_lock_drops++;   // now a delay counter, not a loss counter
             continue;
         }
+        // **Ask the client, do not trust our own flag — and ask before reading.**
+        //
+        // `s_authed` says "the server accepted us", and it is cleared on the
+        // DISCONNECTED event. But the socket can be gone while that event has
+        // not arrived, and then this loop pushed a chunk at a dead client ten
+        // times a second, each one printing
+        //
+        //     E websocket_client: Websocket client is not connected
+        //
+        // which is the flood that buries every other line in the 8 KB remote
+        // log. Worse than the noise: the board went on believing it was in a
+        // call. `authed=1` with nothing reaching anyone is exactly how "she
+        // stopped mid-sentence and never came back" looks from the inside.
+        //
+        // The check sits above the read for the same reason the lock does:
+        // audio taken out of the buffer and then not sent is audio deleted.
+        const bool live = s_client && esp_websocket_client_is_connected(s_client);
+        if (s_authed && !live) {
+            // Reconcile once, quietly, and hand it to the machinery that already
+            // knows what to do: the grace timer waits for the auto-reconnect and
+            // hangs up only if it never comes.
+            s_authed = false;
+            if (s_session_active && !s_link_lost_ms) s_link_lost_ms = now_ms();
+            ESP_LOGW(TAG, "socket gone without a disconnect event — "
+                          "holding the session for the reconnect");
+        }
+        if (!(live && s_authed)) {
+            xSemaphoreGive(s_ws_mutex);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;            // nothing read, so nothing lost
+        }
+
         // Zero timeout, inside the lock: waiting for audio while holding it
         // would block a session teardown behind a silent microphone.
         size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES, 0);
-        if (n && s_client && s_authed) {
+        if (n) {
             esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
                                           pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
         }

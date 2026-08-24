@@ -133,3 +133,31 @@ def test_nothing_leaves_the_buffer_that_cannot_be_sent():
     assert "TX_CHUNK_BYTES, 0)" in read_call, "blocking read inside the lock"
 
     assert "s_tx_lock_drops++" in body, "socket contention is invisible again"
+
+    # And the same rule for a dead socket: check before reading, not after.
+    i_live = body.index("esp_websocket_client_is_connected")
+    assert i_live < i_read, (
+        "the audio is read before the socket is known to be alive — a dropped "
+        "link deletes it instead of holding it")
+
+
+def test_the_board_asks_the_client_whether_it_is_connected():
+    """`s_authed` is our belief; the client knows.
+
+    The two can disagree: the socket can be gone while the DISCONNECTED event
+    has not arrived. The uplink then pushed a chunk at a dead client ten times a
+    second — a flood that buries every other line in the 8 KB remote log — while
+    the board went on believing it was in a call. `authed=1` with nothing
+    reaching anyone is what "she stopped mid-sentence and never came back" looks
+    like from the inside.
+    """
+    voice = _read("firmware/brain-core/main/sandy_voice.c")
+    assert "esp_websocket_client_is_connected(s_client)" in voice
+
+    # Disagreement must start the existing grace timer rather than be papered
+    # over — that is what waits for the auto-reconnect and hangs up only if it
+    # never comes.
+    tx = voice[voice.index("static void ws_tx_task"):]
+    tx = tx[:tx.index("\n}\n")]
+    assert "s_authed = false;" in tx
+    assert "s_link_lost_ms = now_ms();" in tx
