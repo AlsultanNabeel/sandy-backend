@@ -62,7 +62,7 @@ _ANTI_INJECTION = (
 # message, not the persona, and follow it **per message**: "مرحبا" then
 # "how are you" is one conversation that changes language halfway, which is how
 # bilingual people actually talk.
-_LANGUAGE_RULE = (
+LANGUAGE_RULE = (
     "\n🗣️ اللغة: ردّي بلغة آخر رسالة وصلتك. كتب بالعربي → ردّي بالعربي بلهجتك؛ "
     "كتب بالإنجليزي → ردّي بالإنجليزي كاملاً؛ خلط → اتبعي اللغة الغالبة. "
     "والتبديل بينطبق على كل رسالة لحالها — لو غيّر اللغة بنص المحادثة، غيّري "
@@ -100,7 +100,7 @@ def build_effective_persona(user_id: Optional[str]) -> str:
     # anti-injection and language rules sit just before it.
     return (
         f"{tone}\n{dialect['instruction']}"
-        f"{_LANGUAGE_RULE}{_ANTI_INJECTION}\n{SANDY_IDENTITY_LOCK}"
+        f"{LANGUAGE_RULE}{_ANTI_INJECTION}\n{SANDY_IDENTITY_LOCK}"
     )
 
 

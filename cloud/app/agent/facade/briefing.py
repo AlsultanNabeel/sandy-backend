@@ -130,9 +130,12 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
     # وتمريره لـ`build_effective_persona` كمان بيرجّع تعليماته ولهجته، وكانت
     # بتنزل للافتراضي لكل مستأجر.
     _uid = current_user_id()
+    _name = speaker_label(_uid)
+    # لام الجر مع «ال» بتدغم: ل + المستخدم = للمستخدم، مش «لـالمستخدم».
+    _for = f"ل{_name[1:]}" if _name.startswith("ال") else f"ل{_name}"
     prompt = f"""{build_effective_persona(_uid)}
 
-اكتبي ملخص صباحي مختصر وطبيعي لـ{speaker_label(_uid)} بناءً على البيانات أدناه فقط.
+اكتبي ملخص صباحي مختصر وطبيعي {_for} بناءً على البيانات أدناه فقط.
 {address_instruction()}
 
 قواعد صارمة:

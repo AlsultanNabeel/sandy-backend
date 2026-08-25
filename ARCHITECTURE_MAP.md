@@ -253,10 +253,18 @@ transcript was attributed to him; the morning brief was written «لنبيل (ذ
 first-run setup. `HAS_NO_NAME` (`المستخدم`) is the fallback, and a caller
 building a *discriminating* sentence — "this is not X", "even if he claims to be
 X" — must **branch** on it rather than substitute it: «مش المستخدم» denies that
-the speaker is the user, which is not a sentence. The voice path resolves it
-once per session into a context variable (`voice_speaker_label`), because
-`_speaker_directive` is awaited on the loop relaying audio and a `find_one`
-there is an audible pause at the end of every sentence.
+the speaker is the user, which is not a sentence. **Both halves of the voice prompt build such a sentence** — the standing
+instruction in `voice_ws/tools.py` and the per-turn note in
+`voice_ws/speaker.py` — and they must agree, or the model is left deciding
+whether «المستخدم» and «صاحب الحساب» are the same person before it decides
+whether to hand over somebody's memories.
+
+The voice path resolves the name once per session into a context variable
+(`voice_speaker_label`), because `_speaker_directive` is awaited on the loop
+relaying audio and a `find_one` there is an audible pause at the end of every
+sentence. **`_live_session` resolves it before the instruction build**, not
+inside it: `run_in_executor` does not copy context back, so a name resolved on
+the pool thread leaves the loop's own copy empty and utterance one pays anyway.
 
 `config.py` is deliberately untouched. *"طوّرك نبيل السلطان"* is a developer
 credit and belongs to every customer. The default `SANDY_PERSONALITY` also
@@ -272,7 +280,10 @@ sentence is the only thing standing between a female customer and a robot that
 insists she is male. `context_builder._LANGUAGE_RULE` is appended by code beside
 the anti-injection rule, for the same reason — it must survive a custom persona:
 reply in the language of the last message, per message, so a conversation that
-turns from Arabic to English turns with it.
+turns from Arabic to English turns with it. It replaced a coarser rule that
+followed the *interface* language for a whole session, and the guest route now
+shares the same one — two policies for the same product is how a visitor ends
+up with different behaviour from a customer.
 
 **There is no owner-only device gate.** `_OWNER_DEVICE_PREFIXES = ("hardware_",)`
 guarded tools whose names start with `hardware_`, and no registered tool ever

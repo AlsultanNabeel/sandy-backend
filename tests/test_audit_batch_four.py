@@ -16,6 +16,8 @@ his partner is product copy (`CONVENTIONS.md` C7) and the owner's call.
 """
 from __future__ import annotations
 
+import inspect
+
 import mongomock
 import pytest
 
@@ -265,15 +267,33 @@ def test_naming_the_speaker_costs_no_read_on_the_audio_path(db, monkeypatch):
     """`_speaker_directive` is awaited on the loop that relays audio, once per
     utterance. `_verify_owner` is pushed to an executor on the line above and
     `_save_voice_turn` is fire-and-forget with a comment about the pause being
-    audible — a synchronous find_one here is the same stall."""
+    audible — a synchronous find_one here is the same stall.
+
+    **And the warm-up must be production's, not the test's.** The first version
+    of this test called `voice_speaker_label()` by hand before asserting — the
+    exact step `_live_session` was not doing — so it proved "a warm cache stays
+    warm" while the loop still paid a read on the first utterance of every call.
+    Here the session does the warming, through the same line production runs.
+    """
     import app.api.voice_ws.memory as vm
+    import app.api.voice_ws.session as vsession
     import app.api.voice_ws.speaker as vs
     import app.features.users_store as us
     from app.utils import user_profiles
 
+    src = inspect.getsource(vsession._live_session)
+    assert "voice_speaker_label()" in src, \
+        "the session no longer resolves the name before audio starts"
+    # Before the *audio* starts, not merely somewhere in the function: the
+    # session opens the Gemini link right after building the instruction, and
+    # `_speaker_directive` fires at the end of the first utterance after that.
+    assert (src.index("voice_speaker_label()")
+            < src.index("None, _build_system_instruction")), \
+        "resolved after the instruction build — the loop pays for utterance one"
+
     with user_profiles.active_user_profile_context(PROFILE):
         vm.set_voice_identity(CUSTOMER)
-        vm.voice_speaker_label()          # resolved once, at setup
+        vm.voice_speaker_label()   # stands in for the session line asserted above
 
         reads = []
         monkeypatch.setattr(us, "get_user",
@@ -315,3 +335,86 @@ def test_the_language_rule_reaches_voice_too(db):
         text = vt._system_instruction_body(CUSTOMER, build_effective_persona)
 
     assert "بلغة آخر رسالة" in text
+
+
+def test_both_halves_of_the_voice_prompt_name_the_same_person(db):
+    """**The rule was written into the map and broken in the same commit.**
+
+    The standing instruction (`tools.py`) and the per-turn verification note
+    (`speaker.py`) both build discriminating sentences about the same person.
+    One branched on `HAS_NO_NAME` and the other substituted it, so a tenant
+    with no `preferred_name` got «مش المستخدم» in one and «مش صاحب الحساب» in
+    the other — two referents in one session, in the prompt whose job is to
+    stop somebody talking their way into another person's memories.
+    """
+    import app.api.voice_ws.memory as vm
+    import app.api.voice_ws.speaker as vs
+    import app.api.voice_ws.tools as vt
+    from app.utils import user_profiles
+
+    nameless = {**PROFILE, "chat_id": "no-name", "user_id": "no-name"}
+    with user_profiles.active_user_profile_context(nameless):
+        vm.set_voice_identity("no-name")
+        standing = vt._system_instruction_body("no-name", lambda _uid: "شخصية")
+        per_turn = vs._speaker_directive(False)
+
+    for text in (standing, per_turn):
+        assert "مش المستخدم" not in text
+        assert "أنا المستخدم" not in text
+        assert "صاحب الحساب" in text
+
+
+def test_the_voice_prompt_does_not_order_a_dialect_over_the_language_rule(db):
+    """`ردودك قصيرة ومباشرة وبالشامي` sat after the language rule and was more
+    specific about the same decision, so an English utterance got two orders
+    and the later one normally wins."""
+    import app.api.voice_ws.memory as vm
+    import app.api.voice_ws.tools as vt
+    from app.agent.context_builder import build_effective_persona
+    from app.utils import user_profiles
+
+    with user_profiles.active_user_profile_context(PROFILE):
+        vm.set_voice_identity(CUSTOMER)
+        text = vt._system_instruction_body(CUSTOMER, build_effective_persona)
+
+    assert "وبالشامي" not in text
+    assert "بلغة آخر رسالة" in text
+
+
+def test_a_visitor_gets_the_same_language_policy_as_a_customer():
+    """The guest route followed the *interface* language for a whole session
+    while everyone else followed the last message. Same product, two rules."""
+    from app.agent.context_builder import LANGUAGE_RULE
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent
+           / "cloud/app/api/server.py").read_text(encoding="utf-8")
+    assert "GUEST_PERSONALITY + LANGUAGE_RULE" in src
+    assert "I'm on the English interface" not in src, \
+        "the interface-language override is back, and it outranks the rule"
+    assert "بلغة آخر رسالة" in LANGUAGE_RULE
+
+
+def test_the_morning_brief_addresses_a_nameless_tenant_in_arabic(db):
+    """«لـ» + «المستخدم» renders «لـالمستخدم». The lam assimilates."""
+    import app.integrations.azure_intent_client as aic
+    from app.agent.facade.briefing import build_morning_briefing
+    from app.utils import user_profiles
+
+    captured = {}
+    with user_profiles.active_user_profile_context(
+            {**PROFILE, "chat_id": "no-name", "user_id": "no-name"}):
+        import pytest as _pytest
+        mp = _pytest.MonkeyPatch()
+        try:
+            mp.setattr(aic.AzureIntentClient, "__init__",
+                       lambda self, *a, **kw: None)
+            mp.setattr(aic.AzureIntentClient, "_generate_with_gemini",
+                       lambda self, prompt, **kw: (
+                           captured.setdefault("p", str(prompt)), "صباح")[1])
+            build_morning_briefing(memory={}, mongo_db=db, tasks_file=None)
+        finally:
+            mp.undo()
+
+    assert "لـالمستخدم" not in captured["p"]
+    assert "للمستخدم" in captured["p"]

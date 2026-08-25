@@ -293,7 +293,7 @@ def create_app(
         return jsonify({"ok": True}), 200
 
     # Web agent endpoint: full SA pipeline, shared memory.
-    def _run_authenticated_agent(claims: dict, body: dict, lang: str) -> dict:
+    def _run_authenticated_agent(claims: dict, body: dict) -> dict:
         """The full per-user LangGraph pipeline for an owner/user request:
         builds the profile, runs the graph, saves pending state, formats the
         reply. Synchronous — shared by ``/api/agent`` (calls it directly) and
@@ -314,12 +314,13 @@ def create_app(
         # Every authenticated user (owner included) gets full CRUD on their
         # own data; isolation is by scope.
         _profile = build_user_profile(claims)
+        # **لغة الردّ من الرسالة، مش من لغة الواجهة.**
+        #
+        # كان بينحقن سطر بالرسالة نفسها بيقول «ردّي بالإنجليزي» لأنّ الواجهة
+        # إنجليزية — سياسة على مستوى الجلسة كلها. وهاد بيناقض قاعدة اللغة اللي
+        # صارت بالشخصية: واحد بواجهة إنجليزية بيكتب بالعربي كان بيوصله ردّ
+        # إنجليزي على رسالته العربية. القاعدة بتشوف الرسالة، وهي الأدقّ.
         graph_message = message
-        if lang == "en":
-            graph_message = (
-                f"{message}\n\n(Note: I'm on the English interface — please "
-                "reply in English, keeping your usual personality.)"
-            )
         # سيشن الشات (اختياري): يفصل ذاكرة كل محادثة على حدة. غيابه =
         # السلوك القديم (خيط واحد لكل مستخدم).
         conversation_id = (body.get("conversation_id") or "").strip()
@@ -357,8 +358,9 @@ def create_app(
         if not message:
             return jsonify({"error": "no message"}), 400
 
-        # Site language picks Sandy's reply language (same personality).
-        lang = (body.get("lang") or "ar").strip().lower()
+        # The site language no longer picks the reply language — the message
+        # does, per message (`context_builder.LANGUAGE_RULE`), so `lang` is not
+        # read on this route any more.
 
         role = claims.get("role", "guest")
         # Identity from the token: every authenticated user has a stable
@@ -378,7 +380,7 @@ def create_app(
         # pipeline; only true guests fall through to the basic demo chat.
         if role in ("owner", "user"):
             try:
-                return jsonify(_run_authenticated_agent(claims, body, lang)), 200
+                return jsonify(_run_authenticated_agent(claims, body)), 200
             except Exception:
                 logger.exception("[web_agent] user pipeline failed")
                 return jsonify({"error": "internal_error"}), 500
@@ -405,15 +407,16 @@ def create_app(
 
         try:
             from app.config import GUEST_PERSONALITY
+            from app.agent.context_builder import LANGUAGE_RULE
             from app.agent.facade.agent import create_chat_completion
             history = body.get("history") or []
-            guest_system = GUEST_PERSONALITY
-            if lang == "en":
-                guest_system += (
-                    " IMPORTANT: The user is on the English interface — reply in natural, "
-                    "fluent English while keeping the same warm, friendly personality "
-                    "(you can still say you're Sandy, built by Nabeel)."
-                )
+            # نفس قاعدة اللغة اللي بتوصل كل قناة تانية.
+            #
+            # هون كانت السياسة مختلفة: بتتبع لغة **الواجهة** لكل الجلسة، بينما
+            # المسجّلين بتتبع لغة **آخر رسالة**. يعني زائر بواجهة عربية بيكتب
+            # بالإنجليزي كان يوصله ردّ عربي — سياستين لنفس المنتج، والزائر
+            # واخد الأقدم.
+            guest_system = GUEST_PERSONALITY + LANGUAGE_RULE
             messages = [{"role": "system", "content": guest_system}]
             for h in history[-6:]:
                 r = "user" if h.get("role") == "user" else "assistant"
@@ -444,7 +447,6 @@ def create_app(
         if not message:
             return jsonify({"error": "no message"}), 400
 
-        lang = (body.get("lang") or "ar").strip().lower()
         role = claims.get("role", "guest")
         user_id = claims.get("user_id") or ""
 
@@ -464,7 +466,7 @@ def create_app(
             # spawned it (they don't cross threads).
             set_stream_hooks(on_start=lambda: None, on_chunk=chunk_queue.put)
             try:
-                outcome["result"] = _run_authenticated_agent(claims, body, lang)
+                outcome["result"] = _run_authenticated_agent(claims, body)
             except Exception:
                 logger.exception("[web_agent_stream] user pipeline failed")
                 outcome["error"] = True

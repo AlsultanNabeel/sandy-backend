@@ -80,9 +80,12 @@ def test_a_voice_session_belongs_to_whoever_is_on_it():
     # find_one there is an audible pause. `set_voice_identity` resets it in the
     # same call that sets the identity, so it cannot outlive or contradict it —
     # which is the drift this assertion exists to prevent.
-    assert mem.count("ContextVar(") <= 3, (
-        "a third *independent* fact about the session appeared; identity and "
-        "channel are the only two, and anything else must be derived from them")
+    # Two facts — who is speaking, which body — plus exactly one value derived
+    # from the first and cleared with it. `<=` was wrong: it stopped catching a
+    # *removal*, so deleting `_identity` outright would have passed.
+    assert mem.count("ContextVar(") == 3, (
+        "expected identity, channel, and the derived speaker name — no more, "
+        "and no fewer")
     assert '_speaker_name.set("")' in mem, (
         "the derived name is not cleared where the identity is set — that is "
         "exactly how two copies of one fact drift")

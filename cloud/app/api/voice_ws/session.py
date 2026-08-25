@@ -32,6 +32,7 @@ from app.api.voice_ws.memory import (
     _stm_chat_id,
     get_voice_channel,
     get_voice_identity,
+    voice_speaker_label,
     set_voice_channel,
     set_voice_identity,
 )
@@ -444,6 +445,14 @@ async def _live_session(ws, remote: str) -> None:
         #
         # وتمريره كوسيط بيشيل السؤال من أصله بدل ما يحاول يوصّل السياق.
         _who = get_voice_identity()
+        # **والاسم كمان لازم ينحلّ هون، ع الحلقة.**
+        #
+        # `_speaker_directive` بينشغّل بآخر كل جملة، منتظَر ع نفس الحلقة اللي
+        # بتمرّر الصوت. حلّ الاسم كسول، ولو انحلّ جوّا `run_in_executor` بينحفظ
+        # بسياق خيط المجمّع — والحلقة بتضلّ فاضية، فبتدفع قراءة قاعدة بيانات
+        # بأول جملة بالضبط: قبل أول ردّ، بأسوأ مكان ممكن. سطر هون بيخلّيه محلول
+        # قبل ما تبلّش أي جملة.
+        voice_speaker_label()
         system_instruction = await asyncio.get_event_loop().run_in_executor(
             None, _build_system_instruction, _who
         )
