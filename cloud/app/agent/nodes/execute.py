@@ -131,10 +131,6 @@ def _get_chat_completion_fn():
 
 
 
-def _noop_save(*args, **kwargs) -> None:
-    pass
-
-
 def _get_current_time_context() -> str:
     """يبني سياق الوقت الحالي لحقنه في system prompt."""
     try:
@@ -427,7 +423,6 @@ def execute_node(state: SandyState) -> SandyState:
         )
 
     # FC غير مفعّل أو tool غير مسجل → ردّ دردشة fallback
-    session: Dict[str, Any] = {}
     try:
         create_chat_completion_fn = _get_chat_completion_fn()
         reply = _handle_chat(state, create_chat_completion_fn)
@@ -443,15 +438,19 @@ def execute_node(state: SandyState) -> SandyState:
     image_source = result.get("image_source")
     caption = result.get("caption", "")
 
-    # Propagate pending_state set by action handlers back to graph state
-    new_pending = session.get("pending_action")
-    pending_archived = session.get("archived_pending") or []
-    if isinstance(pending_archived, dict):
-        pending_archived = [pending_archived]
-
+    # **القراءة كانت ميتة، بس الكتابة لأ.**
+    #
+    # هالفرع بينادي الموديل للدردشة وبس — ما بيمرّ ولا معالج إجراء، فما في إشي
+    # بيكتب `pending_action`، والقراءة من قاموس انخلق فاضي سطرين فوق كانت
+    # بترجّع `None` دايماً. بس هديك الـ`None` كانت **بتنكتب**: بتمسح أي
+    # `pending_state` قديم بالحالة، والخادم بيحفظ اللي بالحالة بعدها مباشرة.
+    #
+    # شيلها بدون هالسطر معناه إنّ تأكيد قديم بيضلّ محفوظ لما الدور بيقع
+    # ع الدردشة، و«أوكي» بعد ربع ساعة بتشغّله. وهاد بالضبط العيب اللي
+    # الكوميت `912035a` انكتب عشانه.
     updates: Dict[str, Any] = {
-        "pending_state": new_pending,
-        "pending_archived": pending_archived,
+        "pending_state": None,
+        "pending_archived": [],
         "execution_result": {
             "handled": handled,
             "ok": result_ok(result),

@@ -75,7 +75,7 @@ def get_proactive_comfort(
     try:
         from app.agent.health_monitor import get_late_night_streak
 
-        streak = get_late_night_streak(chat_id, user_id, mongo_db)
+        streak = get_late_night_streak()
         if streak >= _CRITICAL_STREAK:
             return (
                 "empathetic",

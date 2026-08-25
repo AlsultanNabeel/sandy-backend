@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:
@@ -48,7 +47,8 @@ def save_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
             if cap or tags:
                 photo_album.set_ai_metadata(pid, cap, tags)
 
-        threading.Thread(target=_bg, args=(saved["_id"], img), daemon=True).start()
+        from app.utils.thread_pool import submit_background
+        submit_background(_bg, saved["_id"], img, _label="photo-tags")
 
     nm = saved.get("name") or "الصورة"
     return {"handled": True, "reply": f"حفظت الصورة «{nm}» بالألبوم ✅"}

@@ -794,36 +794,25 @@ what makes the text-size control real rather than decorative.
 
 ## 5. The other boards
 
-- **`vision-core/`** (ESP32-CAM) — **this directory does not exist.** It is
-  named here, in `README.md` and in `docs/Claude.md`, and it was described in
-  this file as "fully working on the bench" — none of which was ever true.
+- **`vision-core/`** (ESP32-CAM) — the camera board's own program. It exists,
+  it is flashed, and it answers on the broker (§4.6). This section used to say
+  in bold that it did not exist, while §4.6 two pages later said it was working
+  — the map contradicting itself, which is worse than either answer.
 
-  Everything the camera needs on *our* side is written and tested: the command
-  channel, the chunked-snapshot reassembly in `camera_client.py`, the `cam/`
-  telemetry namespace, six catalogue parts, and a viewer screen in the app.
-  The board program those talk to was never written.
+  What it has to do is set by what the backend already expects.
+  `app/integrations/camera_client.py` publishes the request, holds the pieces
+  and hands back one JPEG; the sketch derives its `node_id` from
+  `SANDY_PAIR_CODE` in its own `secrets.h`, which must be **flashed with the
+  same code as its robot's brain** — that is what makes the two boards one node
+  instead of two things to pair. Topics are built once in `setupMQTT()` before
+  any subscribe, because empty topics leave the board publishing into
+  `sandy/node//cam/...` and looking healthy while nobody hears it.
 
-  This is why the camera has never worked once, through every fix aimed at it:
-  the snapshot request is published correctly to `sandy/node/<id>/cam/command`
-  and nothing is subscribed; no `cam/status` heartbeat is ever sent, so the
-  address the live view needs never arrives, and "couldn't get the address" was
-  the exact truth. Each of those symptoms was read as a bug in the plumbing and
-  the plumbing was fine.
-
-  A stock `CameraWebServer` sketch flashed to the board would serve
-  `http://<ip>/stream` — so the live view would work the moment the address is
-  known by some other means — but it speaks no MQTT, so it can never announce
-  that address itself and cannot answer a snapshot request.
-
-  What it must do, to match what is already built:
-  `app/integrations/camera_client.py` (added 14 Aug 2026) is the backend half:
-  it publishes the request, holds the pieces, and hands back one JPEG.
-  The sketch moved onto `sandy/node/<id>/cam/*` in the same session: it derives
-  its `node_id` from `SANDY_PAIR_CODE` in its own `secrets.h`, which must be
-  **flashed with the same code as its robot's brain** — that is what makes the two
-  boards one node instead of two things to pair. Topics are built once in
-  `setupMQTT()` before any subscribe, because empty topics would leave the board
-  publishing into `sandy/node//cam/...` and looking healthy while nobody hears it.
+  For the record, because it cost a long time: every fix aimed at the camera
+  before that sketch existed was aimed at plumbing that was already correct. The
+  snapshot request was published exactly right and nothing was subscribed; no
+  `cam/status` heartbeat was ever sent, so the address the live view needs never
+  arrived, and "couldn't get the address" was the literal truth.
 - **`sandy/`** (classic ESP32) — the room node.
 - **`room-node/`**, **`firmware/sandy_node/`** — the room controller and the
   sellable pre-flashed node.

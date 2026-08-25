@@ -339,8 +339,7 @@ def create_app(
             )
         save_pending_state(thread_id, user_id, mongo_db, state.get("pending_state"))
         reply = get_final_reply(state)
-        chunks = reply.get("chunks") or [reply.get("text", "")]
-        text = "\n".join(chunks)
+        text = reply.get("text", "")
         result = {"reply": text, "role": role}
         img_bytes = reply.get("image_bytes")
         if img_bytes:
@@ -474,6 +473,12 @@ def create_app(
                 clear_stream_hooks()
                 chunk_queue.put(None)  # sentinel: no more chunks
 
+        # **مش «أطلقها وانساها»، فمش اللي بتحكمه قاعدة C3.**
+        #
+        # الطلب نفسه بيستنّى هالخيط: بيقرا القطع من الطابور وبيبثّها للمتصفّح،
+        # وبيخلص لمّا يخلص. حطّه ع مجمّع الخلفية المشترك بيصير أسوأ — الوظيفة
+        # بتمسك عاملاً طول الدور كله (ثواني)، فعشر بثّات متزامنة بتجوّع كل شغل
+        # الخلفية بالعملية. وعدد الخيوط هون محدود أصلاً بعدد خيوط جونيكورن.
         threading.Thread(target=_worker, daemon=True).start()
 
         def _generate():

@@ -11,29 +11,49 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from app.db import get_db
+from app.utils.tenant_db import scoped
+from app.utils.user_profiles import current_user_id
+
 logger = logging.getLogger(__name__)
 
+
 _COLL = "sandy_activity"
+
+
+def _coll():
+    """The tenant-scoped handle, and the only way into storage here.
+
+    This module used to take `chat_id` and `mongo_db` and write on the raw
+    collection with the tenant stamped by hand — the pattern `tenant_db` exists
+    to abolish, and the one `ARCHITECTURE_MAP` §2.6 says must never come back on
+    a request path. It was invisible to `test_tenant_scoping_guard.py`, so a
+    forgotten filter would have been a cross-tenant leak with nothing watching.
+
+    It could not move before: these writers run on background threads and the
+    tenant lives in a `ContextVar` that did not cross one. `submit_background`
+    carries it now (§2.5), so the scoping works where it is actually called.
+    """
+    return scoped(get_db(), _COLL, field="chat_id")
+
+
 _LATE_HOUR_START = 0   # منتصف الليل
 _LATE_HOUR_END = 4     # الرابعة صباحاً
 _STREAK_THRESHOLD = 3  # عدد الليالي المتتالية للتنبيه
 
 
 def record_activity(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     now: Optional[datetime] = None,
 ) -> None:
     """سجّل توقيت النشاط الحالي — يُستدعى من graph.py بشكل خفي."""
-    if mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return
     try:
         from app.utils.time import USER_TZ
         ts = now or datetime.now(USER_TZ)
-        mongo_db[_COLL].insert_one({
-            "chat_id": str(chat_id),
-            "user_id": str(user_id),
+        coll.insert_one({
+            "user_id": str(current_user_id() or ""),
             "hour": ts.hour,
             "date": ts.strftime("%Y-%m-%d"),
             "created_at": datetime.now(timezone.utc),
@@ -43,18 +63,16 @@ def record_activity(
 
 
 def get_late_night_streak(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     days: int = 7,
 ) -> int:
     """يرجع عدد الليالي المتتالية التي سهر فيها المستخدم بعد منتصف الليل."""
-    if mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return 0
     try:
         from app.utils.time import USER_TZ
-        docs = list(mongo_db[_COLL].find(
-            {"chat_id": str(chat_id), "hour": {"$gte": _LATE_HOUR_START, "$lte": _LATE_HOUR_END}},
+        docs = list(coll.find(
+            {"hour": {"$gte": _LATE_HOUR_START, "$lte": _LATE_HOUR_END}},
             {"_id": 0, "date": 1},
             sort=[("created_at", -1)],
             limit=days * 5,
@@ -83,9 +101,6 @@ def get_late_night_streak(
 
 
 def get_sleep_context(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
 ) -> Optional[str]:
     """يرجع context موجز لـ soul_node إذا كان المستخدم سهران متأخراً.
 
@@ -98,7 +113,7 @@ def get_sleep_context(
         if not is_late:
             return None
 
-        streak = get_late_night_streak(chat_id, user_id, mongo_db)
+        streak = get_late_night_streak()
         if streak >= _STREAK_THRESHOLD:
             return f"[ملاحظة: سهران متأخر {streak} ليالي متتالية — تعامل برفق]"
         if streak >= 1:
@@ -109,17 +124,27 @@ def get_sleep_context(
 
 
 def ensure_ttl_index(mongo_db=None, ttl_days: int = 30) -> None:
-    """أنشئ الفهارس اللازمة على sandy_activity عند أول تشغيل."""
+    """أنشئ الفهارس اللازمة على sandy_activity عند أول تشغيل.
+
+    **على المقبض الخام، مش المنطاق.** هاي بتنشغّل بالإقلاع — قبل ما أي طلب
+    يحدّد مستأجر — فـ`scoped()` بترجّع `None` وما بينعمل ولا فهرس أبداً. وحتى
+    لو في مستأجر، `ScopedCollection` ما عندها `create_index` أصلاً. الاستثناء
+    مكتوب بـ`tenant_db.py`: إنشاء الفهارس بيضلّ ع المقبض الخام.
+    """
+    if mongo_db is None:
+        from app.db import get_db
+        mongo_db = get_db()
     if mongo_db is None:
         return
     try:
-        mongo_db[_COLL].create_index(
+        coll = mongo_db[_COLL]
+        coll.create_index(
             "created_at", expireAfterSeconds=ttl_days * 86400, background=True
         )
         # get_late_night_streak و get_avg_activity_hour بيفلتروا بـ chat_id
         # ويرتّبوا بـ created_at — بدون هالفهرس بيصير مسح كامل للمجموعة
         # (لاحظنا ثانيتين تأخير وقت الفحوصات الليلية).
-        mongo_db[_COLL].create_index(
+        coll.create_index(
             [("chat_id", 1), ("created_at", -1)], background=True
         )
     except Exception:
@@ -127,17 +152,15 @@ def ensure_ttl_index(mongo_db=None, ttl_days: int = 30) -> None:
 
 
 def get_avg_activity_hour(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     days: int = 7,
 ) -> Optional[float]:
     """يرجع متوسط ساعة النشاط خلال آخر N أيام — يُستخدم في Anomaly Detection."""
-    if mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return None
     try:
-        docs = list(mongo_db[_COLL].find(
-            {"chat_id": str(chat_id)},
+        docs = list(coll.find(
+            {},
             {"_id": 0, "hour": 1},
             sort=[("created_at", -1)],
             limit=days * 10,

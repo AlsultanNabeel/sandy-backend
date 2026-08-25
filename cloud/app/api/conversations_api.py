@@ -85,10 +85,10 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
 
 
 def _generate_title_async(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
-    import threading
-    threading.Thread(
-        target=_generate_title, args=(coll, cid, uid, user_msg, reply), daemon=True
-    ).start()
+    from app.utils.thread_pool import submit_background
+
+    submit_background(_generate_title, coll, cid, uid, user_msg, reply,
+                      _label="conversation-title")
 
 
 def _semantic_hits(mongo_db, query: str, limit: int = 30):

@@ -17,6 +17,7 @@ from app.agent.soul_vault import (
 from app.agent.emotional_ltm import get_emotional_context
 from app.agent.anomaly_detector import get_wellness_context
 from app.agent.context_builder import get_persona_directives
+from app.utils.thread_pool import submit_background
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,6 @@ def _is_humorous(message: str) -> bool:
 
 def _log_retrieval_eval_async(chat_id: str, query: str, summaries: list, facts: list) -> None:
     """Async save of retrieval event to sandy_evals for quality monitoring."""
-    import threading
-
     def _save():
         try:
             from datetime import datetime, timezone
@@ -169,7 +168,10 @@ def _log_retrieval_eval_async(chat_id: str, query: str, summaries: list, facts: 
         except Exception:
             logger.debug("ignoring non-critical error", exc_info=True)
 
-    threading.Thread(target=_save, daemon=True).start()
+    # `CONVENTIONS.md` C3: fire-and-forget goes on the shared pool. A raw
+    # thread here is one per turn that retrieved anything — unbounded creation
+    # under load, and it was the rule's own example of what not to do.
+    submit_background(_save, _label="retrieval-eval")
 
 
 def soul_node(state: SandyState) -> SandyState:
@@ -234,7 +236,7 @@ def soul_node(state: SandyState) -> SandyState:
             if _get_dreams_ctx:
                 _chat_futs["dreams"] = _submit(_get_dreams_ctx, chat_id, user_id, mongo_db)
             if _get_anniv_ctx:
-                _chat_futs["anniv"] = _submit(_get_anniv_ctx, chat_id, user_id, mongo_db)
+                _chat_futs["anniv"] = _submit(_get_anniv_ctx)
             if _get_future_ctx:
                 _chat_futs["future"] = _submit(_get_future_ctx, chat_id, user_id, mongo_db)
             try:
@@ -289,12 +291,10 @@ def soul_node(state: SandyState) -> SandyState:
         _s2_futs = {}
         if intensity in ("empathetic", "standard"):
             _s2_futs["emo"] = _submit(
-                get_emotional_context, chat_id=chat_id, user_id=user_id, mongo_db=mongo_db
+                get_emotional_context
             )
         if intensity == "empathetic":
-            _s2_futs["wellness"] = _submit(
-                get_wellness_context, chat_id=chat_id, user_id=user_id, mongo_db=mongo_db
-            )
+            _s2_futs["wellness"] = _submit(get_wellness_context)
         if message:
             pf = state.get("soul_prefetch") or {}
             if "__semantic" in pf:

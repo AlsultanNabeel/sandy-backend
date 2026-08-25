@@ -13,10 +13,33 @@ import re
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from app.db import get_db
+from app.utils.tenant_db import scoped
+from app.utils.user_profiles import current_user_id
+
 logger = logging.getLogger(__name__)
+
 
 _COLL = "sandy_memories"
 _LABEL = "relationship"
+
+
+def _coll():
+    """The tenant-scoped handle, and the only way into storage here.
+
+    This module used to take `chat_id` and `mongo_db` and write on the raw
+    collection with the tenant stamped by hand — the pattern `tenant_db` exists
+    to abolish, and the one `ARCHITECTURE_MAP` §2.6 says must never come back on
+    a request path. It was invisible to `test_tenant_scoping_guard.py`, so a
+    forgotten filter would have been a cross-tenant leak with nothing watching.
+
+    It could not move before: these writers run on background threads and the
+    tenant lives in a `ContextVar` that did not cross one. `submit_background`
+    carries it now (§2.5), so the scoping works where it is actually called.
+    """
+    return scoped(get_db(), _COLL, field="chat_id")
+
+
 
 # كلمة العلاقة زي ما يكتبها المستخدم، والكلمة الموحّدة اللي بنخزّنها
 _RELATION_TERMS = {
@@ -66,25 +89,22 @@ def detect_relationships(message: str) -> List[Tuple[str, str]]:
 
 
 def save_relationship(
-    chat_id: str,
-    user_id: str,
     relation: str,
     name: str,
-    mongo_db=None,
 ) -> bool:
     """يحفظ علاقة جديدة. ما يكرّر نفس (relation, name) لو موجودة."""
-    if mongo_db is None or not relation or not name:
+    coll = _coll()
+    if coll is None or not relation or not name:
         return False
     try:
-        existing = mongo_db[_COLL].find_one(
-            {"chat_id": str(chat_id), "label": _LABEL, "relation": relation, "name": name},
+        existing = coll.find_one(
+            {"label": _LABEL, "relation": relation, "name": name},
             {"_id": 1},
         )
         if existing:
             return False
-        mongo_db[_COLL].insert_one({
-            "chat_id": str(chat_id),
-            "user_id": str(user_id),
+        coll.insert_one({
+            "user_id": str(current_user_id() or ""),
             "label": _LABEL,
             "relation": relation,
             "name": name,
@@ -98,17 +118,15 @@ def save_relationship(
 
 
 def get_relationships_context(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     limit: int = 10,
 ) -> Optional[str]:
     """يرجّع علاقات المستخدم كـ context لـ soul_node."""
-    if mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return None
     try:
-        docs = list(mongo_db[_COLL].find(
-            {"chat_id": str(chat_id), "label": _LABEL},
+        docs = list(coll.find(
+            {"label": _LABEL},
             {"_id": 0, "relation": 1, "name": 1},
             sort=[("created_at", -1)],
             limit=limit,
@@ -124,14 +142,11 @@ def get_relationships_context(
 
 
 def save_detected_relationships(
-    chat_id: str,
-    user_id: str,
     message: str,
-    mongo_db=None,
 ) -> int:
     """يكتشف ويحفظ بخطوة وحدة. بيستدعيه graph.py في thread بالخلفية."""
     saved = 0
     for relation, name in detect_relationships(message):
-        if save_relationship(chat_id, user_id, relation, name, mongo_db):
+        if save_relationship(relation, name):
             saved += 1
     return saved

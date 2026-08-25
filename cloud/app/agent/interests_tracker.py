@@ -17,10 +17,33 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.db import get_db
+from app.utils.tenant_db import scoped
+from app.utils.user_profiles import current_user_id
+
 logger = logging.getLogger(__name__)
+
 
 _COLL = "sandy_memories"
 _LABEL = "interest"
+
+
+def _coll():
+    """The tenant-scoped handle, and the only way into storage here.
+
+    This module used to take `chat_id` and `mongo_db` and write on the raw
+    collection with the tenant stamped by hand — the pattern `tenant_db` exists
+    to abolish, and the one `ARCHITECTURE_MAP` §2.6 says must never come back on
+    a request path. It was invisible to `test_tenant_scoping_guard.py`, so a
+    forgotten filter would have been a cross-tenant leak with nothing watching.
+
+    It could not move before: these writers run on background threads and the
+    tenant lives in a `ContextVar` that did not cross one. `submit_background`
+    carries it now (§2.5), so the scoping works where it is actually called.
+    """
+    return scoped(get_db(), _COLL, field="chat_id")
+
+
 
 # مؤشرات الاهتمام — "بحب X" / "مهتم بـ X" / "حابب X" / "متابع X"
 _INTEREST_RE = re.compile(
@@ -53,21 +76,19 @@ def detect_interest_keywords(message: str) -> List[str]:
 
 
 def bump_interest(
-    chat_id: str,
-    user_id: str,
     keyword: str,
-    mongo_db=None,
 ) -> bool:
     """يزيد عداد keyword في sandy_memories. idempotent."""
-    if mongo_db is None or not keyword.strip():
+    coll = _coll()
+    if coll is None or not keyword.strip():
         return False
     try:
         now = datetime.now(timezone.utc)
-        mongo_db[_COLL].update_one(
-            {"chat_id": str(chat_id), "label": _LABEL, "keyword": keyword.strip()},
+        coll.update_one(
+            {"label": _LABEL, "keyword": keyword.strip()},
             {
                 "$inc": {"count": 1},
-                "$set": {"user_id": str(user_id), "last_seen": now},
+                "$set": {"user_id": str(current_user_id() or ""), "last_seen": now},
                 "$setOnInsert": {"created_at": now},
             },
             upsert=True,
@@ -79,17 +100,15 @@ def bump_interest(
 
 
 def get_top_interests(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     limit: int = 5,
 ) -> List[str]:
     """يرجع أعلى اهتمامات المستخدم — مرتبة بالـ count."""
-    if mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return []
     try:
-        docs = list(mongo_db[_COLL].find(
-            {"chat_id": str(chat_id), "label": _LABEL},
+        docs = list(coll.find(
+            {"label": _LABEL},
             {"_id": 0, "keyword": 1, "count": 1},
             sort=[("count", -1)],
             limit=limit,
@@ -100,17 +119,15 @@ def get_top_interests(
 
 
 def get_interest_frequencies(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     limit: int = 5,
 ) -> List[Dict[str, Any]]:
     """يرجع الاهتمامات مع عدد التكرار، مرتبة تنازلياً."""
-    if mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return []
     try:
-        docs = list(mongo_db[_COLL].find(
-            {"chat_id": str(chat_id), "label": _LABEL},
+        docs = list(coll.find(
+            {"label": _LABEL},
             {"_id": 0, "keyword": 1, "count": 1, "last_seen": 1},
             sort=[("count", -1), ("last_seen", -1)],
             limit=limit,
@@ -139,41 +156,32 @@ def get_interest_frequencies(
 
 
 def get_proactive_interest_candidate(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     min_count: int = 3,
     limit: int = 5,
 ) -> Optional[str]:
     """يرجع أول اهتمام موثق يكفي للتعامل معه بشكل استباقي."""
-    for item in get_interest_frequencies(chat_id, user_id, mongo_db, limit=limit):
+    for item in get_interest_frequencies(limit=limit):
         if item.get("count", 0) >= min_count:
             return item["keyword"]
     return None
 
 
 def track_message_interests(
-    chat_id: str,
-    user_id: str,
     message: str,
-    mongo_db=None,
 ) -> int:
     """شامل: يكتشف ويزيد العدّاد. يُستدعى من graph.py في background."""
     keywords = detect_interest_keywords(message)
     bumped = 0
     for kw in keywords[:3]:  # حد أعلى لكل رسالة
-        if bump_interest(chat_id, user_id, kw, mongo_db):
+        if bump_interest(kw):
             bumped += 1
     return bumped
 
 
 def get_interests_context(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
 ) -> Optional[str]:
     """يرجع اهتمامات المستخدم كـ hint لـ soul_node — لتخصيص الردود."""
-    top = get_top_interests(chat_id, user_id, mongo_db, limit=5)
+    top = get_top_interests(limit=5)
     if not top:
         return None
     return "[اهتمامات: " + " · ".join(top) + "]"

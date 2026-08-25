@@ -357,7 +357,7 @@ def _save_emotional_async(state: "SandyState", message: str) -> None:
         # A1: ذاكرة عاطفية
         if mood in _SIGNIFICANT_MOODS:
             from app.agent.emotional_ltm import save_emotional_moment
-            save_emotional_moment(chat_id, user_id, mood, message[:200], mongo_db)
+            save_emotional_moment(mood, message[:200])
 
         # A3: تصحيح أسلوبي
         from app.agent.style_memory import detect_style_correction, save_style_preference
@@ -366,23 +366,23 @@ def _save_emotional_async(state: "SandyState", message: str) -> None:
 
         # #1: تسجيل وقت النشاط للصحة
         from app.agent.health_monitor import record_activity
-        record_activity(chat_id, user_id, mongo_db)
+        record_activity()
 
         # B2: استخراج وحفظ العلاقات (أخوي محمد، صديقتي سارة، ...)
         from app.agent.relationships_memory import save_detected_relationships
-        save_detected_relationships(chat_id, user_id, message, mongo_db)
+        save_detected_relationships(message)
 
         # D2: استخراج وحفظ الدروس المستفادة
         from app.agent.lessons_memory import save_detected_lesson
-        save_detected_lesson(chat_id, user_id, message, mongo_db)
+        save_detected_lesson(message)
 
         # F7: استخراج وحفظ المعالم المهمة (تخرج، زواج، انتقال، ...)
         from app.agent.shared_history import save_detected_milestone
-        save_detected_milestone(chat_id, user_id, message, mongo_db)
+        save_detected_milestone(message)
 
         # C2: تتبّع الاهتمامات (للمشاركة الذكية لاحقاً)
         from app.agent.interests_tracker import track_message_interests
-        track_message_interests(chat_id, user_id, message, mongo_db)
+        track_message_interests(message)
 
     submit_background(_do_save, _label="ltm_emotional")
 
@@ -555,27 +555,19 @@ def _update_session_state_async(state: "SandyState") -> None:
 
 
 def get_final_reply(state: SandyState) -> Dict[str, Any]:
-    """يستخرج الرد النهائي بشكل جاهز للإرسال عبر Telegram.
+    """يستخرج الرد النهائي جاهز للإرسال.
+
+    **بلا تقطيع.** كان بيقسّم الردّ عند ٤٠٩٦ حرف — حدّ رسالة تيليجرام — ونقل
+    تيليجرام انشال من المشروع. المستهلك الوحيد الباقي (`api/server.py`) كان
+    بيلصق القطع فوراً بـ`"\n".join`، فالعملية صافي خسارة: بتقص عند مسافة أو
+    سطر وبتحطّ مكانه سطر جديد، يعني بتقدر تكسر جملة بنصّها بردّ طويل.
 
     Returns:
         {"text": str, "reply_markup": Optional[dict], "image_bytes": Optional[bytes], "caption": str}
     """
-    _TG_LIMIT = 4096
     execution = state.get("execution_result") or {}
-    text = state.get("final_response") or ""
-    chunks = []
-    while len(text) > _TG_LIMIT:
-        split_at = text.rfind("\n", 0, _TG_LIMIT)
-        if split_at <= 0:
-            split_at = text.rfind(" ", 0, _TG_LIMIT)
-        if split_at <= 0:
-            split_at = _TG_LIMIT
-        chunks.append(text[:split_at].strip())
-        text = text[split_at:].strip()
-    chunks.append(text)
     return {
-        "text": chunks[0],
-        "chunks": chunks,
+        "text": state.get("final_response") or "",
         "reply_markup": execution.get("reply_markup"),
         "image_bytes": execution.get("image_bytes"),
         "image_source": execution.get("image_source"),

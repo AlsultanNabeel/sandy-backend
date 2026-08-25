@@ -14,17 +14,13 @@ logger = logging.getLogger(__name__)
 _HOUR_DEVIATION_THRESHOLD = 3.0  # ساعات — انحراف يُعتبر شاذاً
 
 
-def detect_habit_anomaly(
-    chat_id: str,
+def detect_habit_anomaly(    chat_id: str,
     user_id: str,
-    mongo_db=None,
 ) -> Optional[str]:
     """يكتشف إذا كان النشاط الحالي شاذاً مقارنةً بالعادة.
 
     يرجع وصف الشذوذ أو None إذا كل شي طبيعي.
     """
-    if mongo_db is None:
-        return None
     try:
         from app.utils.time import USER_TZ
         from app.agent.health_monitor import get_avg_activity_hour
@@ -33,7 +29,7 @@ def detect_habit_anomaly(
         now = datetime.now(USER_TZ)
         current_hour = now.hour
 
-        avg_hour = get_avg_activity_hour(chat_id, user_id, mongo_db, days=7)
+        avg_hour = get_avg_activity_hour(days=7)
         if avg_hour is None:
             return None
 
@@ -55,15 +51,11 @@ def detect_habit_anomaly(
         return None
 
 
-def get_wellness_context(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
-) -> Optional[str]:
+def get_wellness_context() -> Optional[str]:
     """يجمع كل سياق الصحة (سهر + شذوذ) في سطر واحد لـ soul_node."""
     from app.agent.health_monitor import get_sleep_context
-    sleep = get_sleep_context(chat_id, user_id, mongo_db)
-    anomaly = detect_habit_anomaly(chat_id, user_id, mongo_db)
+    sleep = get_sleep_context()
+    anomaly = detect_habit_anomaly()
 
     parts = [p for p in (sleep, anomaly) if p]
     return " ".join(parts) if parts else None

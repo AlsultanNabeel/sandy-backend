@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import threading
 
 from flask import Response, jsonify, request
 
@@ -237,4 +236,5 @@ def _start_ai_tagging(photo_id, image_bytes, album) -> None:
         except Exception as e:  # noqa: BLE001
             logger.info("[photos_api] background tagging failed: %s", e)
 
-    threading.Thread(target=_bg, daemon=True).start()
+    from app.utils.thread_pool import submit_background
+    submit_background(_bg, _label="photo-tags")

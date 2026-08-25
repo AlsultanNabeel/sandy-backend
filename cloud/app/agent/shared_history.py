@@ -11,10 +11,33 @@ import re
 from datetime import date, datetime, timezone
 from typing import List, Optional, Tuple
 
+from app.db import get_db
+from app.utils.tenant_db import scoped
+from app.utils.user_profiles import current_user_id
+
 logger = logging.getLogger(__name__)
+
 
 _COLL = "sandy_memories"
 _LABEL = "milestone"
+
+
+def _coll():
+    """The tenant-scoped handle, and the only way into storage here.
+
+    This module used to take `chat_id` and `mongo_db` and write on the raw
+    collection with the tenant stamped by hand — the pattern `tenant_db` exists
+    to abolish, and the one `ARCHITECTURE_MAP` §2.6 says must never come back on
+    a request path. It was invisible to `test_tenant_scoping_guard.py`, so a
+    forgotten filter would have been a cross-tenant leak with nothing watching.
+
+    It could not move before: these writers run on background threads and the
+    tenant lives in a `ContextVar` that did not cross one. `submit_background`
+    carries it now (§2.5), so the scoping works where it is actually called.
+    """
+    return scoped(get_db(), _COLL, field="chat_id")
+
+
 
 # كلمات بتدل على معلم مهم
 _MILESTONE_SIGNALS = (
@@ -46,22 +69,19 @@ def detect_milestone(message: str) -> Optional[Tuple[str, str]]:
 
 
 def save_milestone(
-    chat_id: str,
-    user_id: str,
     signal: str,
     context: str,
     event_date: Optional[date] = None,
-    mongo_db=None,
 ) -> bool:
     """يحفظ معلم مع تاريخه."""
-    if mongo_db is None or not signal:
+    coll = _coll()
+    if coll is None or not signal:
         return False
     try:
         from app.agent.ltm_crypto import encrypt_field
         now_utc = datetime.now(timezone.utc)
-        mongo_db[_COLL].insert_one({
-            "chat_id": str(chat_id),
-            "user_id": str(user_id),
+        coll.insert_one({
+            "user_id": str(current_user_id() or ""),
             "label": _LABEL,
             "signal": signal,
             "context": encrypt_field(context.strip()[:200]),
@@ -76,21 +96,18 @@ def save_milestone(
 
 
 def get_anniversaries(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
     today: Optional[date] = None,
 ) -> List[dict]:
     """يرجّع ذكريات اليوم: نفس الشهر واليوم بس من سنين سابقة."""
-    if mongo_db is None:
+    coll = _coll()
+    if coll is None:
         return []
     try:
         today = today or date.today()
         target_mm_dd = today.strftime("-%m-%d")  # "-05-16"
-        docs = list(mongo_db[_COLL].find(
+        docs = list(coll.find(
             {
-                "chat_id": str(chat_id),
-                "label": _LABEL,
+                    "label": _LABEL,
                 "event_date": {"$regex": f"{target_mm_dd}$"},
             },
             {"_id": 0, "signal": 1, "context": 1, "event_date": 1},
@@ -105,12 +122,9 @@ def get_anniversaries(
 
 
 def get_anniversary_context(
-    chat_id: str,
-    user_id: str,
-    mongo_db=None,
 ) -> Optional[str]:
     """يرجّع سطر ذكرى للرسائل الاستباقية، أو None لو ما في."""
-    anniv = get_anniversaries(chat_id, user_id, mongo_db)
+    anniv = get_anniversaries()
     if not anniv:
         return None
     first = anniv[0]
@@ -127,14 +141,11 @@ def get_anniversary_context(
 
 
 def save_detected_milestone(
-    chat_id: str,
-    user_id: str,
     message: str,
-    mongo_db=None,
 ) -> bool:
     """يكتشف ويحفظ بخطوة وحدة. بيستدعيه graph.py بالخلفية."""
     detected = detect_milestone(message)
     if not detected:
         return False
     signal, context = detected
-    return save_milestone(chat_id, user_id, signal, context, mongo_db=mongo_db)
+    return save_milestone(signal, context)

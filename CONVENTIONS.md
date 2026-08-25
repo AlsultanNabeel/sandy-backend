@@ -59,6 +59,22 @@ only drop an import inside a function when a module-top import would create a
 cycle, and add a one-line comment saying so. Do not mass-hoist existing inline
 imports — they are load-bearing.
 
+## C3b — What "fire-and-forget" means
+C3 bans raw `threading.Thread` for fire-and-forget work. Two shapes are outside
+it and must say so where they sit:
+
+- **A long-lived singleton** started once for the life of the process — the MQTT
+  reconnect watchdog, the one-shot speaker-model warm-up.
+- **Work the request waits on.** `/api/agent/stream` runs the pipeline on a
+  thread and streams what it produces; the request ends when that thread ends.
+  Putting it on the shared background pool would let ten concurrent streams hold
+  every worker for the length of a turn and starve everything genuinely
+  fire-and-forget. Its thread count is already bounded by gunicorn's.
+
+Everything else goes through `utils/thread_pool.submit_background`, which also
+carries the caller's tenant context — a raw thread does not, so background work
+started that way reads and writes nothing and says nothing about it.
+
 ## C10 — A handler result answers three questions, not one
 `handled` — "this handler owns the turn and here is its answer".
 `ok` — "the change the user asked for actually happened".

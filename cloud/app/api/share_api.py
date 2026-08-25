@@ -51,7 +51,7 @@ def _topic_for(uid, mongo_db, explicit):
     from app.agent.interests_tracker import get_top_interests
 
     # In REST the active profile's chat_id is the user_id for both keys.
-    tops = get_top_interests(uid, uid, mongo_db, limit=1)
+    tops = get_top_interests(limit=1)
     return tops[0] if tops else ""
 
 

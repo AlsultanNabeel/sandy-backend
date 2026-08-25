@@ -21,9 +21,7 @@ def share_interesting_content(args: Dict[str, Any], ctx: "DispatchContext") -> D
     if not topic and ctx.mongo_db is not None:
         try:
             from app.agent.interests_tracker import get_top_interests
-            chat_id = str((ctx.state or {}).get("chat_id", "default"))
-            user_id = str((ctx.state or {}).get("user_id", "default"))
-            tops = get_top_interests(chat_id, user_id, ctx.mongo_db, limit=1)
+            tops = get_top_interests(limit=1)
             if tops:
                 topic = tops[0]
         except Exception:
