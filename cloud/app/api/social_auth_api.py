@@ -34,7 +34,7 @@ from typing import Optional
 import jwt  # PyJWT
 from flask import jsonify, request
 
-from app.api.auth_handlers import make_token
+from app.api.auth_handlers import make_token, role_for_email
 from app.features import users_store
 
 logger = logging.getLogger(__name__)
@@ -206,7 +206,8 @@ def _issue_for_identity(*, provider: str, sub: str, email: str, name: str, pictu
 
     user_id = user.get("_id")
     try:
-        token = make_token("user", user_id=user_id)
+        token = make_token(role_for_email(email or user.get("email") or ""),
+                           user_id=user_id)
     except RuntimeError:
         # JWT_SECRET not configured — we verified the user but can't sign a token.
         logger.error("[social_auth] cannot mint token: JWT_SECRET unset")

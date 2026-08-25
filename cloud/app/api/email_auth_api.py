@@ -18,7 +18,7 @@ import re
 from flask import jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app.api.auth_handlers import check_rate_limit, make_token
+from app.api.auth_handlers import check_rate_limit, make_token, role_for_email
 from app.features import users_store
 
 # تحقّق إيميل بسيط (شكل عام) — التحقّق الحقيقي يصير عند الاستعمال.
@@ -46,7 +46,7 @@ def _result_for(user):
     """يصكّ توكن التطبيق لمستخدم ويرجّع نفس شكل ردّ المصادقة الاجتماعية."""
     user_id = user.get("_id")
     try:
-        token = make_token("user", user_id=user_id)
+        token = make_token(role_for_email(user.get("email") or ""), user_id=user_id)
     except RuntimeError:
         return jsonify({"error": "auth_unavailable"}), 503
     onboarding = user.get("onboarding") or {}

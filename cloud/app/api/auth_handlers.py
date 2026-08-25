@@ -69,6 +69,24 @@ def _jwt_secret() -> str:
     return secret
 
 
+def role_for_email(email: str) -> str:
+    """``owner`` for the addresses named in ``SANDY_OWNER_EMAILS``, else ``user``.
+
+    **Nobody was ever the owner.** Both login routes minted `role="user"`, and
+    the only other way to the top quota tier is `is_subscriber`, which the
+    owner's own account is not — so his phone ran on the free tier: forty
+    requests a day. An afternoon of testing spent it, and every message after
+    that came back "تعذر". The product's own line is that the owner is tenant
+    number one; this is the one place that was missing.
+
+    Comma-separated, compared case-insensitively. Unset means nobody is owner,
+    which is the right default for a multi-tenant product.
+    """
+    wanted = {e.strip().lower() for e in os.getenv("SANDY_OWNER_EMAILS", "").split(",")
+              if e.strip()}
+    return "owner" if wanted and (email or "").strip().lower() in wanted else "user"
+
+
 def make_token(role: str, user_id: Optional[str] = None) -> str:
     hours = GUEST_TOKEN_HOURS if role == "guest" else AUTH_TOKEN_HOURS
     payload = {
