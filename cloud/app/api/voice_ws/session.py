@@ -402,6 +402,46 @@ class _DeviceReader:
         self._pool.shutdown(wait=False)
 
 
+async def _open_live_session(client, config):
+    """Open the first Live model that actually accepts audio.
+
+    **`connect()` succeeding proves nothing.** The refusal that took voice down
+    in production — `1007 CONTENT_TYPE_AUDIO is not supported` — arrived at the
+    *first audio frame*, long after the handshake and the memory seed had been
+    logged as fine. So the probe is a real one: send a frame of silence, and
+    treat a close as "this model is not it".
+
+    Returns ``(cm, session, model_name, last_error)``. **The caller owns the
+    manager and must `__aexit__` it — it is entered here, exactly once.** The
+    first cut of this kept the already-opened manager and then wrote
+    ``async with cm:`` over it. `contextlib` deletes the arguments it needs on
+    the first entry, so the second raised ``'_AsyncGeneratorContextManager'
+    object has no attribute 'args'`` and every call died right after the seed.
+    """
+    from google.genai import types
+
+    last_error: Exception | None = None
+    for candidate in live_model_candidates():
+        probe = client.aio.live.connect(model=candidate, config=config)
+        try:
+            session = await probe.__aenter__()
+            await session.send_realtime_input(
+                audio=types.Blob(data=b"\x00\x00" * 160,
+                                 mime_type="audio/pcm;rate=16000"))
+        except Exception as exc:  # noqa: BLE001 — any refusal means "try the next"
+            last_error = exc
+            logger.warning("[voice_ws] live model %s refused: %s", candidate, exc)
+            # A refused candidate can still hold an open socket — the refusal
+            # lands after the handshake. Close it, or every retry leaks one.
+            try:
+                await probe.__aexit__(type(exc), exc, exc.__traceback__)
+            except Exception:  # noqa: BLE001 — already failing; nothing to add
+                logger.debug("[voice_ws] probe close failed", exc_info=True)
+            continue
+        return probe, session, candidate, None
+    return None, None, "", last_error
+
+
 async def _live_session(ws, remote: str) -> None:
     """Open a Gemini Live speech-to-speech session and bridge it to the device WS."""
     try:
@@ -508,27 +548,7 @@ async def _live_session(ws, remote: str) -> None:
         client = genai.Client(api_key=GEMINI_API_KEY)
         dispatcher = _make_dispatcher()
 
-        # **Walk the candidates until one accepts audio.**
-        #
-        # `connect()` succeeding is not enough: the refusal that took voice down
-        # arrived at the *first audio frame*, as a 1007 close, long after the
-        # handshake and the memory seed. So the probe is a real one — send a
-        # silent frame, and treat a close as "this model is not it".
-        model_name = ""
-        last_error: Exception | None = None
-        for candidate in live_model_candidates():
-            try:
-                cm = client.aio.live.connect(model=candidate, config=config)
-                session = await cm.__aenter__()
-                await session.send_realtime_input(
-                    audio=types.Blob(data=b"\x00\x00" * 160,
-                                     mime_type="audio/pcm;rate=16000"))
-            except Exception as exc:  # noqa: BLE001 — any refusal means "try the next"
-                last_error = exc
-                logger.warning("[voice_ws] live model %s refused: %s", candidate, exc)
-                continue
-            model_name = candidate
-            break
+        cm, session, model_name, last_error = await _open_live_session(client, config)
 
         if not model_name:
             _send_json(ws, {"type": "error", "msg": "live_model_unavailable"})
@@ -536,7 +556,7 @@ async def _live_session(ws, remote: str) -> None:
             return
 
         remember_live_model(model_name)
-        async with cm:
+        try:
             logger.info(
                 "[voice_ws] Gemini Live session opened for %s (gate=%s, model=%s)",
                 remote, gate_on, model_name
@@ -611,6 +631,10 @@ async def _live_session(ws, remote: str) -> None:
                     )
                 else:
                     logger.info("[voice_ws] %s ended cleanly, closing session", side)
+        finally:
+            # What `async with` would have done. Not suppressing anything: an
+            # error in the bridge belongs in the handler below, not swallowed here.
+            await cm.__aexit__(None, None, None)
 
     except Exception as exc:
         logger.error("[voice_ws] Live session error (%s): %s", remote, exc)
