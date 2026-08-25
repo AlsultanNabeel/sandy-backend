@@ -24,7 +24,7 @@ def _secret(monkeypatch):
 def test_the_owners_address_gets_the_owner_role(monkeypatch):
     from app.api.auth_handlers import role_for_email
 
-    monkeypatch.setenv("SANDY_OWNER_EMAILS", "boss@example.com")
+    monkeypatch.setattr("app.config.SANDY_OWNER_EMAILS", "boss@example.com")
     assert role_for_email("boss@example.com") == "owner"
     assert role_for_email("BOSS@Example.COM") == "owner", "matching is case-sensitive"
     assert role_for_email("  boss@example.com  ") == "owner"
@@ -33,7 +33,7 @@ def test_the_owners_address_gets_the_owner_role(monkeypatch):
 def test_everyone_else_is_a_customer(monkeypatch):
     from app.api.auth_handlers import role_for_email
 
-    monkeypatch.setenv("SANDY_OWNER_EMAILS", "boss@example.com")
+    monkeypatch.setattr("app.config.SANDY_OWNER_EMAILS", "boss@example.com")
     assert role_for_email("someone@example.com") == "user"
     assert role_for_email("") == "user"
 
@@ -43,11 +43,11 @@ def test_an_unset_list_makes_nobody_the_owner(monkeypatch):
     everybody puts every customer on the operator's quota."""
     from app.api.auth_handlers import role_for_email
 
-    monkeypatch.delenv("SANDY_OWNER_EMAILS", raising=False)
+    monkeypatch.setattr("app.config.SANDY_OWNER_EMAILS", "")
     assert role_for_email("anyone@example.com") == "user"
     assert role_for_email("") == "user"
 
-    monkeypatch.setenv("SANDY_OWNER_EMAILS", " , ,  ")
+    monkeypatch.setattr("app.config.SANDY_OWNER_EMAILS", " , ,  ")
     assert role_for_email("anyone@example.com") == "user"
 
 

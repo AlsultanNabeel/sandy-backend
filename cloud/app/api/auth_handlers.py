@@ -82,8 +82,9 @@ def role_for_email(email: str) -> str:
     Comma-separated, compared case-insensitively. Unset means nobody is owner,
     which is the right default for a multi-tenant product.
     """
-    wanted = {e.strip().lower() for e in os.getenv("SANDY_OWNER_EMAILS", "").split(",")
-              if e.strip()}
+    from app.config import SANDY_OWNER_EMAILS
+
+    wanted = {e.strip().lower() for e in SANDY_OWNER_EMAILS.split(",") if e.strip()}
     return "owner" if wanted and (email or "").strip().lower() in wanted else "user"
 
 

@@ -23,6 +23,12 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 # Owner identity (legacy single-owner ids — the owner becomes tenant #1; these
 # get folded into a tenant role in Phase 3 of the product migration).
 SANDY_USER_CHAT_ID = os.getenv("SANDY_USER_CHAT_ID", "").strip()
+
+# The addresses that sign in as the operator rather than as a customer.
+# Comma-separated. Unset means nobody is — the dangerous default would be the
+# other one, where an empty setting matches everybody and puts every customer
+# on the operator's quota. See `api/auth_handlers.role_for_email`.
+SANDY_OWNER_EMAILS: str = os.getenv("SANDY_OWNER_EMAILS", "")
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
 
 # Auth secrets (read via os.getenv inside auth_handlers.py today; exposed here as
