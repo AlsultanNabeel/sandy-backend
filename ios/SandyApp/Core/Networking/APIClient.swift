@@ -6,6 +6,43 @@ import Foundation
 /// endpoint methods live in the `APIClient+<Feature>` extensions under
 /// `Core/Networking/`.
 final class APIClient: APIClientProtocol {
+    /// The app's own session, so transport policy lives in one place.
+    ///
+    /// **`waitsForConnectivity` is deliberately OFF**, and that is worth saying
+    /// because it is the obvious thing to reach for and it makes this app
+    /// worse. With it on, the session ignores the per-request timeout during a
+    /// connectivity wait — the only bound left is `timeoutIntervalForResource`,
+    /// which caps the *entire transfer*, not idle time. That forces a choice
+    /// between two broken settings: leave the resource timeout at its seven-day
+    /// default and an offline phone shows a spinner forever, or lower it and
+    /// the chat SSE stream and every photo upload get cut off mid-flight by the
+    /// same number. A caller asking for `timeout: 8` would get neither.
+    ///
+    /// What that setting was wanted for is the Wi-Fi to cellular handover, and
+    /// `sendWithRetry` below covers it properly: the connection drops, the
+    /// backoff gives the handover its beat to settle, the retry succeeds — and
+    /// a phone that is genuinely offline still fails in a second, which is what
+    /// someone staring at a spinner needs.
+    ///
+    /// No blanket `Accept` header either: three call sites fetch a JPEG, a WAV
+    /// and an SSE stream, so `application/json` would be a lie on each. Cache
+    /// policy stays the default — these are per-user reads behind a bearer
+    /// token, and a stale list off disk is worse than a slow one.
+    ///
+    /// Not private: the per-feature extensions build their own requests and
+    /// must send them the same way. A policy applied to this file and not to
+    /// those is not a policy.
+    static let session: URLSession = URLSession(configuration: .default)
+
+    /// How many times a *safe* request is retried before the error is shown.
+    ///
+    /// There was no retry anywhere, so one dropped packet on cellular was a
+    /// visible failure with a red banner. Only idempotent methods qualify:
+    /// retrying a POST could create the same task twice, which is worse than
+    /// the error it avoids.
+    static let idempotentMethods: Set<String> = ["GET", "HEAD"]
+    static let maxRetries = 2
+
     var baseURL: String
     /// توكن الدخول — يُحفظ تلقائياً بالـKeychain عند أي تغيير (وnil = تسجيل خروج).
     /// فالجلسة تستعيد نفسها عند الإقلاع، والنوايا/الويدجت تقدر تصادق بمعزل.
@@ -36,6 +73,40 @@ final class APIClient: APIClientProtocol {
         self.baseURL = baseURL
         // نحمّل التوكن المحفوظ (لو في) — التعيين بالـinit ما يشغّل didSet فما يعيد الحفظ.
         self.token = Keychain.loadToken()
+    }
+
+    /// Send, retrying a transient network failure on a safe method.
+    ///
+    /// Cancellation is never retried — it is a decision, not a failure. Nor is
+    /// anything the server said: a 500 that repeats is the server's problem and
+    /// hammering it is not the client's job. This is only for the case the
+    /// phone creates by being a phone — a connection that dropped between the
+    /// request leaving and the response arriving.
+    static func sendWithRetry(_ req: URLRequest,
+                              method: String) async throws -> (Data, URLResponse) {
+        var attempt = 0
+        while true {
+            do {
+                return try await session.data(for: req)
+            } catch let error as URLError {
+                let retryable: Set<URLError.Code> = [
+                    .networkConnectionLost, .timedOut, .cannotConnectToHost,
+                    .dnsLookupFailed, .notConnectedToInternet,
+                ]
+                guard idempotentMethods.contains(method),
+                      retryable.contains(error.code),
+                      attempt < maxRetries
+                else { throw error }
+                attempt += 1
+                // Back off so a retry does not land in the same dead moment the
+                // first one did — a handover takes a beat to settle.
+                //
+                // `try`, not `try?`: the sleep is this loop's only cancellation
+                // checkpoint, and swallowing it would send another request for
+                // a screen the user has already left.
+                try await Task.sleep(nanoseconds: UInt64(attempt) * 400_000_000)
+            }
+        }
     }
 
     // النقل الأساسي: يبني الطلب، يرسله، يترجم رمز الحالة لأخطاء APIError، ويرجّع الجسم
@@ -76,7 +147,7 @@ final class APIClient: APIClientProtocol {
         let data: Data
         let resp: URLResponse
         do {
-            (data, resp) = try await URLSession.shared.data(for: req)
+            (data, resp) = try await Self.sendWithRetry(req, method: method)
         } catch let urlError as URLError {
             // A cancelled request (e.g. a refresh superseded by a newer tap)
             // must keep its cancellation identity so callers' isCancellation

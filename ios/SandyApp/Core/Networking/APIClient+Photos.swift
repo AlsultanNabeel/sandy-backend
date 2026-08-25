@@ -47,7 +47,9 @@ extension APIClient {
         }
         var req = URLRequest(url: url)
         if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        // Through the retry, not straight at the session: this is a GET for a
+        // JPEG on cellular, the exact request the retry exists for.
+        let (data, resp) = try await APIClient.sendWithRetry(req, method: "GET")
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code >= 400 { throw APIError(message: "تعذّر جلب الصورة (\(code))") }
         return data
@@ -64,7 +66,7 @@ extension APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         if let body { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await APIClient.sendWithRetry(req, method: method)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if code >= 400 { throw APIError(message: (json["error"] as? String) ?? "خطأ \(code)") }

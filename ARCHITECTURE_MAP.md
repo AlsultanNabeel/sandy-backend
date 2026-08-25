@@ -26,8 +26,8 @@ I can shape how she answers.* Everything else is secondary.
 
 - **The robot** is her body: mics, speaker, a display that is her face, a neck
   servo, an on-board LED, and a separate camera board.
-- **The apps** (iPhone, Android) are the same assistant over a different
-  transport, plus the control surface for the hardware.
+- **The app** (iPhone) is the same assistant over a different transport, plus
+  the control surface for the hardware. Android is deferred — §7.
 - **The room node** lets a user add their own devices (lights, fan, curtain, IR
   gear) so she can act on the physical world beyond her own body.
 
@@ -47,7 +47,6 @@ vision-core/          ESP32-CAM (Arduino) — camera board
 sandy/                classic ESP32 (Arduino) — the room node firmware
 room-node/            room controller sketch
 ios/SandyApp/         SwiftUI iPhone client
-android/              Kotlin + Compose client
 tests/                backend tests (pytest + mongomock)
 scripts/              sync, smoke test, voice-WS probe, laptop voice client
 docs/                 NOT IN GIT — see §11
@@ -848,13 +847,14 @@ safe to delete.
 
 ## 7. Android app
 
-`android/`, Kotlin + Compose, ~4 000 lines. Foundation stage — the shell is built
-and features are mounted into tabs one at a time. Present: auth, home, daily
-(tasks, reminders, habits, focus), life (expenses, journal), Sandy hub + chat,
-onboarding. `data/ApiClient.kt` is the whole networking layer.
+**There is no `android/` directory.** It was removed and the work deferred — the
+owner's call, 25 Aug 2026: not its turn yet. This section used to describe four
+thousand lines of Kotlin, a tab shell and eight mounted features, none of which
+is in the tree; `§1`'s layout listed the directory too.
 
-The gap between iPhone (26 features) and Android (about 8) is the largest
-inconsistency in the product.
+Nothing depends on it. The backend is transport-agnostic by design (§0), so
+whenever Android comes back it mounts the same API the iPhone client already
+uses, and the only thing to rebuild is the client.
 
 ---
 
@@ -903,8 +903,20 @@ CI (`.github/workflows/tests.yml`): pytest with coverage → Codecov → `bandit
 → `ruff check` → a secret scan that fails the build if a `.env`, key, or
 service-account JSON is ever tracked.
 
-**CI does not build iOS, Android, or the firmware.** Twenty-one thousand lines of
-Swift have no build gate.
+**CI gates the client and the firmware too**, which §9 used to say it did not:
+
+- `ios` job — `swiftc -typecheck` over every source, driven directly rather than
+  through a project file, because the `.xcodeproj` lives in the owner's build
+  copy and not in the repo. It catches what actually breaks here: a renamed
+  symbol, a wrong type, a missing argument. Then SwiftLint, deliberately after
+  the compile — ordered the other way, a long line hid the answer to "does it
+  still build?", which is the only question that can block a merge. No
+  `--strict`: the rules that crash an app are `error` in `.swiftlint.yml` and do
+  stop the build; the rest print as advice.
+- `firmware` job — a C declaration-order check and a real `idf.py build` of the
+  robot brain, against a placeholder `secrets.h`.
+
+Android has no gate because there is no Android (§7).
 
 Running the backend tests needs `pyOpenSSL>=23.2.0` alongside `pymongo`, or
 collection dies on an OpenSSL symbol mismatch.
@@ -973,8 +985,6 @@ Updated 14 Aug 2026.
    were never ported from the archive. Failures are discovered by the user — which
    is exactly how the voice bug was found.
 6. **No staging environment.** Production is what the robot on the desk talks to. §1.
-7. **No CI gate for iOS, Android or firmware.** §9. The firmware gap is the one
-   that bit today.
 8. **The room node is still on global topics**, which is the last thing keeping
    `room_device.send()` owner-only. §2.7.
 9. **Stale in-code documentation.** `feature_flags.py` advertises three flags for
@@ -983,7 +993,6 @@ Updated 14 Aug 2026.
    3–4 user family app, which contradicts the product. `auth_handlers.py`'s
    docstring still mentions Telegram. `docs/HARDWARE_CAPABILITIES.md` is stale on
    moods, mics and the speaker — see §4.6.
-10. **Android is far behind iOS.** §7.
 11. **Servo motion is a jump, not a move.** ~30 lines of easing, and it is most of
     the difference between looking like a product and looking like a prototype.
 12. **The display has no Arabic font.** LVGL ships

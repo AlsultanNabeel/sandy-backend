@@ -1,7 +1,7 @@
 # Sandy
 
 Sandy is a voice-first personal assistant. She lives in a small desktop robot and
-in companion apps for iPhone and Android. You talk, she answers in her own voice,
+in a companion app for iPhone. You talk, she answers in her own voice,
 she remembers you across sessions, and her personality can be tuned per user.
 
 > **Goal number one: low-latency voice.** You speak, Sandy understands, Sandy
@@ -19,7 +19,6 @@ firmware for every board.
 |---|---|
 | The robot | ESP32-S3 with a mic, speaker, display face, servo and sensors. Streams audio live to the backend over a WebSocket. |
 | iPhone app | SwiftUI client — chat, voice, and the control surface for the robot and room devices. |
-| Android app | Kotlin + Compose client against the same backend. Foundation stage. |
 
 Same personality, same backend, same memory. Only the transport changes.
 
@@ -111,7 +110,7 @@ OpenAI · AWS Bedrock                further fallbacks
 Azure Speech                        speech to text
 Exa                                 web research
 ESP-IDF / Arduino · MQTT            firmware and device transport
-SwiftUI · Kotlin Compose            iPhone and Android clients
+SwiftUI                             iPhone client
 Heroku                              deployment
 ```
 
@@ -130,7 +129,7 @@ firmware/         ESP32-S3 robot brain (ESP-IDF, C)
 vision-core/      ESP32-CAM
 sandy/            classic ESP32 node
 room-node/        room controller (Arduino)
-ios/  android/    mobile clients
+ios/                mobile client
 tests/  scripts/
 ```
 
@@ -175,4 +174,3 @@ Code style and error-handling rules live in [CONVENTIONS.md](CONVENTIONS.md).
 Board wiring is documented in
 [firmware/brain-core/WIRING.md](firmware/brain-core/WIRING.md); build steps for
 the clients are in [ios/README_RUN.md](ios/README_RUN.md) and
-[android/README.md](android/README.md).

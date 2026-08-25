@@ -246,6 +246,10 @@ private struct LiveView: View {
         var req = URLRequest(url: url)
         req.timeoutInterval = 2
         req.httpMethod = "HEAD"
+        // The robot on the local network, not the backend — so it keeps the
+        // shared session deliberately: `waitsForConnectivity` would hold a
+        // reachability probe open instead of answering "not reachable", which
+        // is the one thing this call exists to find out.
         return (try? await URLSession.shared.data(for: req)) != nil
     }
 }

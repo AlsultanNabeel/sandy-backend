@@ -115,8 +115,14 @@ extension APIClient {
         let bytes: URLSession.AsyncBytes
         let resp: URLResponse
         do {
-            (bytes, resp) = try await URLSession.shared.bytes(for: req)
-        } catch is URLError {
+            // No retry on a stream: a reply that is half-delivered must not be
+            // started over. `req.timeoutInterval` is the idle bound here.
+            (bytes, resp) = try await APIClient.session.bytes(for: req)
+        } catch let urlError as URLError {
+            // Cancellation keeps its identity — a send superseded by a newer
+            // one is a decision, not a failure, and collapsing it here is the
+            // spurious "couldn't load" notice `perform` has a comment about.
+            if urlError.code == .cancelled { throw urlError }
             throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0

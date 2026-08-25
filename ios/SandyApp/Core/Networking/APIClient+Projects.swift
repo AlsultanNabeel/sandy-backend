@@ -147,7 +147,8 @@ extension APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "mood": mood])
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await APIClient.sendWithRetry(
+            req, method: req.httpMethod ?? "GET")
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code >= 400 { throw APIError(message: "صوت غير متاح (\(code))") }
         return data
