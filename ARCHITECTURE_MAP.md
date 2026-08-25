@@ -10,6 +10,18 @@ reading. Last full pass: 14 Aug 2026, kept current through **25 Aug 2026**, when
 a system-wide audit ran in eight batches and rewrote §2.4, §2.5, §2.5b, §5, §7,
 §9 and §12 from what the code does now.
 
+`scripts/audit_turn_cost.py` and `scripts/audit_all_tools.py` are the audit's
+two instruments and they stayed: the first counts the database round trips and
+external calls in one chat turn with the models stubbed, the second dispatches
+all 80 tools and prints what each returned. §12 cites the first by name, and a
+number in a document with no way to re-measure it is how a regression gets
+called an improvement — which happened once in this audit already, when a
+feature that had stopped running read as two round trips saved.
+
+Current readings: **40 round trips, 1 embedding call**; **RAISED 0,
+NOT-HANDLED 9, OK 71** (the nine are seven routing meta-tools with stub
+handlers and the two image tools, which need a key).
+
 **§12 is the list of what is still wrong**, ranked by whether a customer can
 feel it. It was rewritten from scratch in that pass because four of the nine
 items in it had already been fixed and the list had not been told — a ranked
