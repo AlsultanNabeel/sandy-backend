@@ -89,11 +89,21 @@ def voice_speaker_label() -> str:
     cached = _speaker_name.get()
     if cached:
         return cached
-    from app.utils.user_profiles import speaker_label
-
-    name = speaker_label(get_voice_identity() or None)
+    name = resolve_speaker_label(get_voice_identity() or None)
     _speaker_name.set(name)
     return name
+
+
+def resolve_speaker_label(user_id: str = "") -> str:
+    """The blocking half — a Mongo read. **Never call this on the audio loop.**"""
+    from app.utils.user_profiles import speaker_label
+
+    return speaker_label(user_id or get_voice_identity() or None)
+
+
+def set_voice_speaker_label(name: str) -> None:
+    """Store a name resolved elsewhere (a pool thread) into *this* context."""
+    _speaker_name.set(name or "")
 
 
 def _stm_chat_id() -> str:

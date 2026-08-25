@@ -93,8 +93,18 @@ async def _verify_and_inject(session, pcm: bytes) -> None:
     if not _speaker_gate_enabled():
         return
     from google.genai import types
+    from app.api.voice_ws.memory import get_voice_identity
+
+    # **الهوية بتتمرّر، مش بتتلاقى.**
+    #
+    # `_verify_owner` بيشتغل ع خيط مجمّع وسياق الجلسة ما بيعبره — لهيك عنده
+    # وسيط `user_id` أصلاً، والنداء التاني (`session.py`) بيمرّره. هون كان
+    # ناقص، فعلى خيط جديد بالمجمّع `_stm_chat_id()` بترجع فاضية، و`has_profile("")`
+    # بترجع خطأ، والدالة بتسمح («ما في بصمة محفوظة»). يعني مقارنة ما صارت
+    # بترجع «هو المالك» — وهالدفعة خلّت الجملة الكاذبة تقول اسم الزبون الحقيقي.
     loop = asyncio.get_event_loop()
-    is_owner = await loop.run_in_executor(None, _verify_owner, pcm)
+    is_owner = await loop.run_in_executor(
+        None, _verify_owner, pcm, get_voice_identity())
     try:
         await session.send_client_content(
             turns=[types.Content(role="user", parts=[types.Part(

@@ -32,7 +32,8 @@ from app.api.voice_ws.memory import (
     _stm_chat_id,
     get_voice_channel,
     get_voice_identity,
-    voice_speaker_label,
+    resolve_speaker_label,
+    set_voice_speaker_label,
     set_voice_channel,
     set_voice_identity,
 )
@@ -452,8 +453,14 @@ async def _live_session(ws, remote: str) -> None:
         # بسياق خيط المجمّع — والحلقة بتضلّ فاضية، فبتدفع قراءة قاعدة بيانات
         # بأول جملة بالضبط: قبل أول ردّ، بأسوأ مكان ممكن. سطر هون بيخلّيه محلول
         # قبل ما تبلّش أي جملة.
-        voice_speaker_label()
-        system_instruction = await asyncio.get_event_loop().run_in_executor(
+        # **بالمجمّع، مش ع الحلقة.** `voice_speaker_label` بتقرا من مونغو، وهاي
+        # قراءة حاجبة — نداؤها هون مباشرةً كان بينقل التعثّر من أول جملة لبداية
+        # الجلسة، مش بيشيله، والقارئ بيكون عم يخزّن صوت وقتها. بننادي `_resolve`
+        # بالمجمّع وبنحطّ الناتج بسياق الحلقة، فالقيمة موجودة قبل أي جملة.
+        _loop = asyncio.get_event_loop()
+        set_voice_speaker_label(
+            await _loop.run_in_executor(None, resolve_speaker_label, _who))
+        system_instruction = await _loop.run_in_executor(
             None, _build_system_instruction, _who
         )
         live_tools = _build_live_tools(types)

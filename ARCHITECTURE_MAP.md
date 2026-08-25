@@ -253,7 +253,15 @@ transcript was attributed to him; the morning brief was written «لنبيل (ذ
 first-run setup. `HAS_NO_NAME` (`المستخدم`) is the fallback, and a caller
 building a *discriminating* sentence — "this is not X", "even if he claims to be
 X" — must **branch** on it rather than substitute it: «مش المستخدم» denies that
-the speaker is the user, which is not a sentence. **Both halves of the voice prompt build such a sentence** — the standing
+the speaker is the user, which is not a sentence. **The speaker gate is handed the identity, never left to find it.**
+`_verify_owner` runs on a pool thread where the session context does not reach —
+that is why it takes a `user_id` — and `_verify_and_inject` was not passing one.
+An empty id means `has_profile("")` is false, which takes the "no voiceprint
+enrolled, allow" branch: a comparison that never ran returning *owner*. Naming
+the customer correctly in that sentence only made the false positive more
+convincing.
+
+**Both halves of the voice prompt build such a sentence** — the standing
 instruction in `voice_ws/tools.py` and the per-turn note in
 `voice_ws/speaker.py` — and they must agree, or the model is left deciding
 whether «المستخدم» and «صاحب الحساب» are the same person before it decides
@@ -281,9 +289,16 @@ insists she is male. `context_builder._LANGUAGE_RULE` is appended by code beside
 the anti-injection rule, for the same reason — it must survive a custom persona:
 reply in the language of the last message, per message, so a conversation that
 turns from Arabic to English turns with it. It replaced a coarser rule that
-followed the *interface* language for a whole session, and the guest route now
-shares the same one — two policies for the same product is how a visitor ends
-up with different behaviour from a customer.
+followed the *interface* language for a whole session, on **three** routes —
+deleting one at a time is how the second survived, so the guard test looks for
+the shape (`lang == "en"` then an instruction about English) rather than one
+phrasing. The guest route shares the rule now: two policies for the same product
+is how a visitor ends up with different behaviour from a customer.
+
+The rule also has to **say** it outranks the dialect preset sitting beside it.
+«احكي باللهجة الفلسطينية» is more specific and about the same decision, so
+without that clause an English-only customer gets two orders and the narrower
+one wins. The dialect line describes her Arabic; it does not require Arabic.
 
 **There is no owner-only device gate.** `_OWNER_DEVICE_PREFIXES = ("hardware_",)`
 guarded tools whose names start with `hardware_`, and no registered tool ever

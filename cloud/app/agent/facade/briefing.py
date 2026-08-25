@@ -122,7 +122,7 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
 
     from app.agent.context_builder import build_effective_persona
     from app.utils.user_profiles import (
-        address_instruction, current_user_id, speaker_label,
+        HAS_NO_NAME, address_instruction, current_user_id, speaker_label,
     )
 
     # الملخّص بيتبنى لصاحب الحساب اللي طلبه، مش لشخص مكتوب اسمه بالكود. المسار
@@ -131,8 +131,10 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
     # بتنزل للافتراضي لكل مستأجر.
     _uid = current_user_id()
     _name = speaker_label(_uid)
-    # لام الجر مع «ال» بتدغم: ل + المستخدم = للمستخدم، مش «لـالمستخدم».
-    _for = f"ل{_name[1:]}" if _name.startswith("ال") else f"ل{_name}"
+    # لام الجر مع «ال» التعريف بتدغم: ل + المستخدم = للمستخدم. بس ما منقدر
+    # نحزر إذا «ال» بأول اسم هي أداة تعريف ولا جزء منه — «الياس» بتصير
+    # «للياس»، وهاد اسم تاني. فالإدغام للكلمة اللي منملكها وحدها.
+    _for = "للمستخدم" if _name == HAS_NO_NAME else f"لـ{_name}"
     prompt = f"""{build_effective_persona(_uid)}
 
 اكتبي ملخص صباحي مختصر وطبيعي {_for} بناءً على البيانات أدناه فقط.

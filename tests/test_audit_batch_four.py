@@ -16,7 +16,7 @@ his partner is product copy (`CONVENTIONS.md` C7) and the owner's call.
 """
 from __future__ import annotations
 
-import inspect
+import threading
 
 import mongomock
 import pytest
@@ -269,39 +269,43 @@ def test_naming_the_speaker_costs_no_read_on_the_audio_path(db, monkeypatch):
     `_save_voice_turn` is fire-and-forget with a comment about the pause being
     audible — a synchronous find_one here is the same stall.
 
-    **And the warm-up must be production's, not the test's.** The first version
-    of this test called `voice_speaker_label()` by hand before asserting — the
-    exact step `_live_session` was not doing — so it proved "a warm cache stays
-    warm" while the loop still paid a read on the first utterance of every call.
-    Here the session does the warming, through the same line production runs.
+    **Driven through the session, not warmed by hand.** The first version of
+    this test called `voice_speaker_label()` itself — the exact step
+    `_live_session` was not doing — so it proved "a warm cache stays warm"
+    while the loop went on reading. Here the setup is the production one, and
+    it also asserts the resolution happens *in the executor*: called straight
+    on the loop it is still a blocking read, just moved from utterance one to
+    session start.
     """
+    import asyncio
+
     import app.api.voice_ws.memory as vm
-    import app.api.voice_ws.session as vsession
     import app.api.voice_ws.speaker as vs
     import app.features.users_store as us
     from app.utils import user_profiles
 
-    src = inspect.getsource(vsession._live_session)
-    assert "voice_speaker_label()" in src, \
-        "the session no longer resolves the name before audio starts"
-    # Before the *audio* starts, not merely somewhere in the function: the
-    # session opens the Gemini link right after building the instruction, and
-    # `_speaker_directive` fires at the end of the first utterance after that.
-    assert (src.index("voice_speaker_label()")
-            < src.index("None, _build_system_instruction")), \
-        "resolved after the instruction build — the loop pays for utterance one"
+    reads = []
+    monkeypatch.setattr(
+        us, "get_user",
+        lambda uid: reads.append((uid, threading.current_thread().name)) or
+        {"onboarding": {"preferred_name": "سامي"}})
+
+    async def _session_setup():
+        # The two lines `_live_session` runs before any audio flows.
+        loop = asyncio.get_event_loop()
+        vm.set_voice_speaker_label(
+            await loop.run_in_executor(None, vm.resolve_speaker_label, CUSTOMER))
+        # …then five utterances, each ending in a directive, on this loop.
+        return [vs._speaker_directive(True) for _ in range(5)]
 
     with user_profiles.active_user_profile_context(PROFILE):
         vm.set_voice_identity(CUSTOMER)
-        vm.voice_speaker_label()   # stands in for the session line asserted above
+        out = asyncio.run(_session_setup())
 
-        reads = []
-        monkeypatch.setattr(us, "get_user",
-                            lambda uid: reads.append(uid) or {"onboarding": {}})
-        for _ in range(5):
-            vs._speaker_directive(True)
-
-    assert reads == [], f"{len(reads)} database reads on the audio path"
+    assert all("سامي" in t for t in out), "the name never reached the directive"
+    assert len(reads) == 1, f"{len(reads)} reads for one session, expected 1"
+    assert not reads[0][1].startswith("MainThread"), \
+        "the one read happened on the loop — moved, not removed"
 
 
 def test_she_answers_in_the_language_she_was_written_to(db):
@@ -381,18 +385,26 @@ def test_the_voice_prompt_does_not_order_a_dialect_over_the_language_rule(db):
     assert "بلغة آخر رسالة" in text
 
 
-def test_a_visitor_gets_the_same_language_policy_as_a_customer():
-    """The guest route followed the *interface* language for a whole session
-    while everyone else followed the last message. Same product, two rules."""
-    from app.agent.context_builder import LANGUAGE_RULE
+def test_no_route_still_follows_the_interface_language():
+    """Two routes carried the old session-scoped policy — «reply in English
+    because the site is in English» — and deleting one left the other. An
+    English-interface user asking «شو في بالصورة؟» was ordered to answer their
+    Arabic question in English, which is the exact failure the rule replaced.
+
+    A substring check for one phrasing is what let the second one survive, so
+    this looks for the *shape*: any branch on the interface language that then
+    dictates a reply language.
+    """
+    import re
     from pathlib import Path
 
     src = (Path(__file__).resolve().parent.parent
            / "cloud/app/api/server.py").read_text(encoding="utf-8")
-    assert "GUEST_PERSONALITY + LANGUAGE_RULE" in src
-    assert "I'm on the English interface" not in src, \
-        "the interface-language override is back, and it outranks the rule"
-    assert "بلغة آخر رسالة" in LANGUAGE_RULE
+    for match in re.finditer(r'lang.{0,40}==\s*"en"', src):
+        window = src[match.end():match.end() + 400]
+        assert "English" not in window, (
+            "a route still tells her to reply in English because the site is "
+            f"in English: ...{window[:120]}")
 
 
 def test_the_morning_brief_addresses_a_nameless_tenant_in_arabic(db):
@@ -418,3 +430,78 @@ def test_the_morning_brief_addresses_a_nameless_tenant_in_arabic(db):
 
     assert "لـالمستخدم" not in captured["p"]
     assert "للمستخدم" in captured["p"]
+
+
+def test_the_speaker_gate_is_told_who_it_is_verifying(db):
+    """**The batch made a false positive convincing.**
+
+    `_verify_owner` takes a `user_id` because it runs on a pool thread where the
+    session context does not reach — its own docstring says so, and the other
+    caller passes it. `_verify_and_inject` did not, so on a fresh pool worker
+    `_stm_chat_id()` came back empty, `has_profile("")` was false, and the
+    function took its "no voiceprint enrolled — allow" branch. A comparison that
+    never ran returned *owner*, and this batch then had the directive announce
+    it by the customer's real name.
+    """
+    import inspect
+
+    import app.api.voice_ws.speaker as vs
+
+    src = inspect.getsource(vs._verify_and_inject)
+    assert "get_voice_identity()" in src, \
+        "the gate runs without an identity — on a fresh pool thread it fails open"
+    assert "_verify_owner, pcm, get_voice_identity()" in src
+
+
+def test_the_dialect_preset_does_not_outrank_the_language_rule(db):
+    """The persona says «احكي باللهجة الفلسطينية» and the rule says reply in the
+    language of the message. Both are about the same decision and the dialect
+    line is the more specific one, so an English-only customer on the main text
+    path got two orders. The rule states its own precedence now, and says what
+    the dialect line actually governs."""
+    from app.agent.context_builder import LANGUAGE_RULE, build_effective_persona
+
+    persona = build_effective_persona(None)
+    assert "اللهجة الفلسطينية" in persona, "the fixture no longer covers a dialect"
+    assert "بتغلب أي تعليمة لهجة" in LANGUAGE_RULE
+    assert "مش بتلزمك تحكي عربي" in LANGUAGE_RULE
+    assert persona.index("اللهجة الفلسطينية") < persona.index("بتغلب أي تعليمة لهجة")
+
+
+def test_a_guest_cannot_be_handed_full_permissions_by_a_dict(db):
+    """`active_profile_is_guest` reads permissions alone, so a profile saying
+    `relation: guest, permissions: all` clears every guest gate in the system.
+    A default is not a limit — the relation has to be the ceiling."""
+    from app.utils import user_profiles
+
+    for relation in ("guest", "family"):
+        out = user_profiles._normalize_profile(
+            "g1", {"chat_id": "g1", "relation": relation, "permissions": "all"})
+        assert out["permissions"] == "chat-only", \
+            f"a {relation} was handed full permissions by its own dict"
+
+    ok = user_profiles._normalize_profile(
+        "u1", {"chat_id": "u1", "relation": "user", "permissions": "all"})
+    assert ok["permissions"] == "all", "an authenticated user lost their own data"
+
+
+def test_a_name_that_begins_with_alef_lam_is_not_mangled(db, monkeypatch):
+    """«الياس» is a name, not «ال» + «ياس». Assimilating blindly turns it into
+    «للياس», which is a different person."""
+    import app.integrations.azure_intent_client as aic
+    import app.utils.user_profiles as up
+    from app.agent.facade.briefing import build_morning_briefing
+
+    captured = {}
+    monkeypatch.setattr(aic.AzureIntentClient, "__init__",
+                        lambda self, *a, **kw: None)
+    monkeypatch.setattr(
+        aic.AzureIntentClient, "_generate_with_gemini",
+        lambda self, prompt, **kw: (captured.setdefault("p", str(prompt)), "صباح")[1])
+    monkeypatch.setattr(up, "speaker_label", lambda *a, **kw: "الياس")
+
+    with up.active_user_profile_context(PROFILE):
+        build_morning_briefing(memory={}, mongo_db=db, tasks_file=None)
+
+    assert "للياس" not in captured["p"]
+    assert "الياس" in captured["p"]

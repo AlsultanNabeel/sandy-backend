@@ -215,9 +215,13 @@ def _normalize_profile(
             if normalized["tone"] in {"casual", "gentle", "formal"}
             else DEFAULT_TONE_BY_RELATION[normalized["relation"]]
         )
-        if normalized["permissions"] not in {"all", "chat-only"}:
-            normalized["permissions"] = DEFAULT_PERMISSIONS_BY_RELATION[
-                normalized["relation"]]
+        # **حدّ أعلى، مش قيمة افتراضية.** التراجع للافتراضي بيصلح القيم
+        # المكسورة بس، وبيخلّي قاموس المتصل يغلب العلاقة: ضيف بصلاحيات «all»
+        # كان مستحيل بناءً، وصار مقبول — و`active_profile_is_guest` بتقرا
+        # الصلاحيات وحدها، يعني هيك ملف بيعدّي كل بوابات الضيف بالنظام.
+        allowed = DEFAULT_PERMISSIONS_BY_RELATION[normalized["relation"]]
+        if allowed != "all" or normalized["permissions"] not in {"all", "chat-only"}:
+            normalized["permissions"] = allowed
 
     return normalized
 

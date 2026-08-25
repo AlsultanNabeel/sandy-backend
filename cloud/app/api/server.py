@@ -583,8 +583,12 @@ def create_app(
 
         image_b64 = (body.get("image") or "").strip()
         question = (body.get("question") or "صف هذه الصورة بتفصيل").strip()
-        if (body.get("lang") or "ar").strip().lower() == "en":
-            question = f"{question}\n\n(Reply in English.)"
+        # لغة الردّ من السؤال نفسه، مش من لغة الواجهة — نفس القاعدة اللي بكل
+        # القنوات. كان هون نسخة تانية من التجاوز اللي انشال من مسار الوكيل:
+        # واحد بواجهة إنجليزية بيسأل «شو في بالصورة؟» كان يوصله أمر يردّ
+        # إنجليزي على سؤاله العربي.
+        from app.agent.context_builder import LANGUAGE_RULE as _lang_rule
+        question = f"{question}{_lang_rule}"
         if not image_b64:
             return jsonify({"error": "no image"}), 400
 
