@@ -1,8 +1,8 @@
 """Quick test for the /voice WebSocket endpoint (echo mode).
 
 Usage:
-    python scripts/test_voice_ws.py
-    python scripts/test_voice_ws.py wss://your-app.herokuapp.com/voice
+    python scripts/probe_voice_ws.py
+    python scripts/probe_voice_ws.py wss://your-app.herokuapp.com/voice
 """
 
 import asyncio
