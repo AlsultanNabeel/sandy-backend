@@ -95,13 +95,17 @@ def register_memory_api(app, mongo_db=None):
             if not uid:
                 return jsonify({"ok": False}), 403
             # Same shape the memory_store tool writes (plain user_fact, no embedding).
-            _bump_persona(uid)
             res = mongo_db["sandy_memories"].insert_one({
                 "chat_id": uid,
                 "label": "user_fact",
                 "content": text,
                 "created_at": datetime.now(timezone.utc),
             })
+            # **After the write, never before.** A bump ahead of the write lets
+            # the other worker rebuild from a database that does not contain it
+            # yet and cache that under the new version — stale until something
+            # unrelated changes, which is worse than the staleness it prevents.
+            _bump_persona(uid)
         return jsonify({"ok": True, "id": str(res.inserted_id)}), 200
 
     @app.route("/api/memory/<fact_id>", methods=["PATCH"])
@@ -124,11 +128,11 @@ def register_memory_api(app, mongo_db=None):
             if not uid:
                 return jsonify({"ok": False}), 403
             # Scoped + never edits an auto summary by id.
-            _bump_persona(uid)
             res = mongo_db["sandy_memories"].update_one(
                 {"_id": oid, "chat_id": uid, "label": {"$ne": "conversation_summary"}},
                 {"$set": {"content": text}},
             )
+            _bump_persona(uid)
         return jsonify({"ok": res.matched_count > 0}), (200 if res.matched_count else 400)
 
     @app.route("/api/memory/<fact_id>", methods=["DELETE"])
@@ -148,8 +152,8 @@ def register_memory_api(app, mongo_db=None):
             if not uid:
                 return jsonify({"ok": False}), 403
             # Scoped + never deletes an auto summary by id.
-            _bump_persona(uid)
             res = mongo_db["sandy_memories"].delete_one(
                 {"_id": oid, "chat_id": uid, "label": {"$ne": "conversation_summary"}}
             )
+            _bump_persona(uid)
         return jsonify({"ok": res.deleted_count > 0}), 200

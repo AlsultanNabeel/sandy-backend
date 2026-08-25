@@ -8,9 +8,37 @@ here, so they build context the same way.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+import threading
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# What `get_persona_directives` costs, and what this holds instead.
+#
+# Measured in production: 32 of the 41 database round trips a chat turn waits
+# for, and about four of its nine seconds. Almost all of it is the same answer
+# as last message — his tasks, his habits, his books, his preferences. Only the
+# keyword search over his life depends on what he just said, and that one stays
+# live below.
+#
+# The key carries the tenant's version stamp (`utils/tenant_version.py`), so a
+# write anywhere — this process, the other worker, the phone app writing through
+# the REST API — moves the key and the next read rebuilds. There is no TTL: a
+# TTL would mean "add a task, ask about it, hear that you have none" for however
+# long it ran, which is the failure that got the first attempt at this cut.
+_DIRECTIVES_CACHE: Dict[Tuple[str, str, str, bool], Tuple[int, str, str, float]] = {}
+_DIRECTIVES_LOCK = threading.Lock()
+_DIRECTIVES_MAX = 256
+
+# A ceiling, **not** the invalidation. Writes are what make a block stale, and
+# the version stamp catches those exactly. This covers the other kind: two of
+# the values inside the block are functions of the clock rather than of the
+# data — a habit streak breaks at midnight with nobody writing anything, and
+# the reminders line filters on "since half an hour ago". Without a ceiling,
+# a quiet account would hear "ما شاء الله، ١٢ يوم متواصل" about a streak that
+# ended yesterday.
+_MAX_AGE_S = 600.0
 
 # Per-user dialect choice (Phase: personality customization). "instruction" is
 # the line layered onto the persona prompt; "label" is what the picker in the
@@ -242,7 +270,101 @@ def get_persona_directives(
     if mongo_db is None or not chat_id:
         return None
 
+    head, tail = _cached_directive_blocks(
+        chat_id, user_id, mongo_db, include_summaries)
+
+    blocks: List[str] = []
+    if head:
+        blocks.append(head)
+
+    # The one block that cannot be cached: it depends on what he just said.
+    #
+    # اللقطة فوق بتعطي الشكل، وهاي بتفتح العمق. سأل عن كتاب؟ بيوصلها كل كتبه
+    # اللي فيها الكلمة، حتى لو ما كانوا ضمن الأربعة الأحدث. المجموع إنها بتعرف
+    # حياته إجمالًا، وبتوصل لأي تفصيل لحظة ما يصير إله معنى.
+    if message:
+        # الفهرسة بتنشغّل ع الخلفية، مش جوّا القراءة.
+        #
+        # هي **كتابة**، وكانت بتنعمل بنص قراءة بيمرّ فيها كل رسالة. وكلفتها
+        # كانت بتكبر مع قوائم المستخدم: كل عنصر استعلام وجود ونداء تضمين لحاله.
+        # مية عنصر = مية رحلة لقاعدة البيانات ومية نداء متسلسل — وأسوأ إشي إنه
+        # بالوضع المستقرّ، لما يكون كل إشي مفهرس أصلًا، الشغل كله بيصير استعلامات
+        # وجود عشان تكتشف إنه ما في إشي لازم ينعمل.
+        _index_life_in_background()
+        # وبعدين البحث بالكلمة — **كطبقة تانية مش وحيدة.**
+        #
+        # البحث بالمعنى بيلاقي «الجيم» لمّا تسأل عن الرياضة، وبيضيّع أحيانًا
+        # المطابقة الحرفية النادرة: اسم كتاب غريب، أو كلمة ما إلها جيران
+        # بالمعنى. التنين بيغطّوا بعض، وكلفة الحرفي صفر.
+        found = _safe_life_search(message)
+        if found:
+            blocks.append(found)
+
+    if tail:
+        blocks.append(tail)
+    return "\n".join(blocks) if blocks else None
+
+
+def _cached_directive_blocks(
+    chat_id: str, user_id: str, mongo_db, include_summaries: bool,
+) -> Tuple[str, str]:
+    """The version-keyed cache in front of `_build_directive_blocks`.
+
+    Returns ``(head, tail)`` — the life snapshot, and everything that follows
+    the live keyword search. Two pieces rather than one string because the
+    uncached block sits between them and the order is what Sandy reads.
+    """
+    from app.utils.tenant_version import version_for
+    from app.utils.user_profiles import current_user_id
+
+    # The same id the writes stamp with, so a bump and a read cannot disagree
+    # about whose data changed.
+    tenant = str(current_user_id() or user_id or chat_id or "")
+    version = version_for(tenant) if tenant else -1
+    key = (tenant, str(chat_id), str(user_id), bool(include_summaries))
+
+    now = time.monotonic()
+    if version >= 0:
+        with _DIRECTIVES_LOCK:
+            hit = _DIRECTIVES_CACHE.get(key)
+        if hit is not None and hit[0] == version and hit[3] > now:
+            return hit[1], hit[2]
+
+    head, tail, complete = _build_directive_blocks(
+        chat_id, user_id, mongo_db, include_summaries)
+
+    # **A failed read is not an answer, and must not become one.** The readers
+    # below degrade instead of raising — a Mongo hiccup makes the memories query
+    # return nothing and the snapshot come back empty. Caching that would turn
+    # one bad second into "ما عندك ولا مهمة" for every message until the next
+    # write, because nothing about a failure moves the version.
+    if version >= 0 and complete:
+        with _DIRECTIVES_LOCK:
+            if len(_DIRECTIVES_CACHE) >= _DIRECTIVES_MAX:
+                _DIRECTIVES_CACHE.clear()   # bounded; a rebuild costs time, not truth
+            _DIRECTIVES_CACHE[key] = (version, head, tail, now + _MAX_AGE_S)
+    return head, tail
+
+
+def clear_directives_cache() -> None:
+    """Drop every cached block. Test-only, and used by account deletion."""
+    with _DIRECTIVES_LOCK:
+        _DIRECTIVES_CACHE.clear()
+
+
+def _build_directive_blocks(
+    chat_id: str, user_id: str, mongo_db, include_summaries: bool,
+) -> Tuple[str, str, bool]:
+    """Read everything that does not depend on the current message.
+
+    This is the expensive half — the `sandy_memories` read, the life snapshot
+    across nine stores, and the onboarding profile.
+
+    Returns ``(head, tail, complete)``. ``complete`` is False when a read failed
+    rather than came back empty, and the caller must not cache that.
+    """
     from app.agent.ltm_crypto import decrypt_field
+    complete = True
     prefs: List[str] = []
     rels: List[str] = []
     lessons: List[str] = []
@@ -268,6 +390,7 @@ def get_persona_directives(
         # knows, and debug is invisible at the level production runs at.
         logger.warning("[context_builder] sandy_memories read failed: %s", exc)
         docs = []
+        complete = False
 
     for d in docs:
         label = d.get("label")
@@ -285,8 +408,6 @@ def get_persona_directives(
             if d.get("summary"):
                 summaries.append(str(d["summary"]))
 
-    blocks: List[str] = []
-
     # لقطة حياته — مهامه وتذكيراته وعاداته وكتبه وقائمته.
     #
     # هون بالذات لأنّ هالكتلة بتوصل **كل القنوات**: الشات والصوت والروبوت.
@@ -297,37 +418,11 @@ def get_persona_directives(
     # زي «شو بتتوقّعي أكون السنة الجاي؟» ما بينادي ولا أداة — وبتجاوب من
     # شخصيتها وكأنها ما بتعرفه. الوعي هو اللي بتعرفه بلا ما تنسأل.
     snapshot = _safe_life_snapshot()
-    if snapshot:
-        blocks.append(snapshot)
+    if snapshot is None:
+        complete = False
+    head = snapshot or ""
 
-    # والتفاصيل المرتبطة بسؤاله هو — مش كل إشي، بس كل اللي إله علاقة.
-    #
-    # اللقطة فوق بتعطي الشكل، وهاي بتفتح العمق. سأل عن كتاب؟ بيوصلها كل كتبه
-    # اللي فيها الكلمة، حتى لو ما كانوا ضمن الأربعة الأحدث. المجموع إنها بتعرف
-    # حياته إجمالًا، وبتوصل لأي تفصيل لحظة ما يصير إله معنى.
-    if message:
-        # الفهرسة بتنشغّل ع الخلفية، مش جوّا القراءة.
-        #
-        # هي **كتابة**، وكانت بتنعمل بنص قراءة بيمرّ فيها كل رسالة. وكلفتها
-        # كانت بتكبر مع قوائم المستخدم: كل عنصر استعلام وجود ونداء تضمين لحاله.
-        # مية عنصر = مية رحلة لقاعدة البيانات ومية نداء متسلسل — وأسوأ إشي إنه
-        # بالوضع المستقرّ، لما يكون كل إشي مفهرس أصلًا، الشغل كله بيصير استعلامات
-        # وجود عشان تكتشف إنه ما في إشي لازم ينعمل.
-        #
-        # هلّق الكشف عن الجديد صار استعلام واحد والتضمين نداء واحد مجمّع (شوف
-        # `load_facts_to_chroma`)، وكمان انشال عن خيط الطلب: البحث تحت بيشتغل
-        # ع الفهرس الموجود، والعنصر اللي انضاف هلّق بيلحق بالرسالة الجاية.
-        # عنصر بيتأخّر دور واحد أرخص بكتير من كل دور بيستنّى الفهرسة.
-        _index_life_in_background()
-        # وبعدين البحث بالكلمة — **كطبقة تانية مش وحيدة.**
-        #
-        # البحث بالمعنى بيلاقي «الجيم» لمّا تسأل عن الرياضة، وبيضيّع أحيانًا
-        # المطابقة الحرفية النادرة: اسم كتاب غريب، أو كلمة ما إلها جيران
-        # بالمعنى. التنين بيغطّوا بعض، وكلفة الحرفي صفر.
-        found = _safe_life_search(message)
-        if found:
-            blocks.append(found)
-
+    tail: List[str] = []
     # نمرّر المستخدم صراحة — `chat_id` هون هو معرّفه.
     #
     # القراءة من السياق النشط كانت بتشتغل بالشات (بيفتح سياق) وبتفضى بالصوت
@@ -335,26 +430,30 @@ def get_persona_directives(
     # بالنص الفاضي: المالك كاتب اسمه واهتماماته من أول يوم، وهي بتسأله مين هو.
     onboarding_line = get_onboarding_directive(chat_id)
     if onboarding_line:
-        blocks.append(onboarding_line)
+        tail.append(onboarding_line)
     if summaries and include_summaries:
-        blocks.append("[ملخصات محادثات سابقة: " + " | ".join(summaries[:3]) + "]")
+        tail.append("[ملخصات محادثات سابقة: " + " | ".join(summaries[:3]) + "]")
     if prefs:
-        blocks.append("[تفضيلات: " + " | ".join(prefs[:5]) + "]")
+        tail.append("[تفضيلات: " + " | ".join(prefs[:5]) + "]")
     if rels:
-        blocks.append("[علاقات: " + " · ".join(rels[:8]) + "]")
+        tail.append("[علاقات: " + " · ".join(rels[:8]) + "]")
     if lessons:
-        blocks.append("[دروس سابقة: " + " | ".join(lessons[:3]) + "]")
-    return "\n".join(blocks) if blocks else None
+        tail.append("[دروس سابقة: " + " | ".join(lessons[:3]) + "]")
+    return head, "\n".join(tail), complete
 
 
-def _safe_life_snapshot() -> str:
-    """اللقطة، وما بتفشّل السياق لو مصدر منها وقع."""
+def _safe_life_snapshot() -> Optional[str]:
+    """اللقطة، وما بتفشّل السياق لو مصدر منها وقع.
+
+    ``None`` معناها **وقعت**، مش «فاضية» — والفرق مهم من ساعة ما صار في كاش:
+    الفاضي بينحفظ، والوقعانة لأ.
+    """
     try:
         from app.agent.life_snapshot import build_life_snapshot
         return build_life_snapshot()
     except Exception as exc:  # noqa: BLE001
         logger.debug("[context_builder] life snapshot skipped: %s", exc)
-        return ""
+        return None
 
 
 def _index_life_in_background() -> None:

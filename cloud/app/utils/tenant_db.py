@@ -52,12 +52,14 @@ class ScopedCollection:
     (the tenant value always wins).
     """
 
-    __slots__ = ("_raw", "_tenant", "_field")
+    __slots__ = ("_raw", "_tenant", "_field", "_bump")
 
-    def __init__(self, raw: Any, tenant: str, field: str = "user_id"):
+    def __init__(self, raw: Any, tenant: str, field: str = "user_id",
+                 bump: bool = True):
         self._raw = raw
         self._tenant = tenant
         self._field = field
+        self._bump = bump
 
     @property
     def tenant(self) -> str:
@@ -107,6 +109,8 @@ class ScopedCollection:
     # writes already pass through; the handful that reach past it call
     # `bump_for` themselves, and those are named in that module.
     def _note_write(self) -> None:
+        if not self._bump:
+            return
         from app.utils.tenant_version import bump_for
 
         bump_for(self._tenant, collection=getattr(self._raw, "name", ""))
@@ -212,7 +216,8 @@ class ScopedCollection:
             raise
 
 
-def scoped(mongo_db: Any, name: str, field: str = "user_id") -> Optional[ScopedCollection]:
+def scoped(mongo_db: Any, name: str, field: str = "user_id",
+           bump: bool = True) -> Optional[ScopedCollection]:
     """Return a tenant-scoped view of ``mongo_db[name]``, or ``None`` when there
     is no database handle or no active tenant (fail-closed). Callers already
     guard ``if coll is None`` — that guard now also blocks unauthenticated access.
@@ -220,10 +225,16 @@ def scoped(mongo_db: Any, name: str, field: str = "user_id") -> Optional[ScopedC
     ``field`` is the scope field to stamp/filter on. Defaults to ``user_id``;
     pass ``field="chat_id"`` for the older collections (semantic memory) that
     predate that naming.
+
+    ``bump=False`` opts a caller out of the cache-invalidation stamp described
+    in `utils/tenant_version.py`. **Only for a writer that runs every single
+    turn and feeds nothing the cached persona block is built from** — the
+    interest counter is the one, and left bumping it invalidated the cache on
+    every message, which is a cache that costs a round trip and returns nothing.
     """
     if mongo_db is None:
         return None
     tenant = current_user_id()
     if not tenant:
         return None
-    return ScopedCollection(mongo_db[name], tenant, field=field)
+    return ScopedCollection(mongo_db[name], tenant, field=field, bump=bump)

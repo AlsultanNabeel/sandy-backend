@@ -24,9 +24,29 @@ list joins the block by existing.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# The five lists `search_life` scans, held per tenant version.
+#
+# The search itself depends on what he just said, so its *result* cannot be
+# cached — but what it reads cannot change without a write, and a write moves
+# the version (`utils/tenant_version.py`). So the scan stays live and the five
+# round trips behind it happen once per change instead of once per message.
+# That is the whole remaining cost of the block after the persona cache: five
+# reads of lists that were identical to last turn.
+# Keyed by tenant alone, with the version **inside** the value. Putting the
+# version in the key leaves every old version sitting in the dict, and
+# `tenant_version.forget()` sends a deleted account's version back to zero —
+# which would make a stale entry reachable again on the worker that did not run
+# the delete. Overwriting per tenant cannot do that.
+_LISTS_CACHE: Dict[str, Tuple[int, Dict[str, Any], float]] = {}
+_LISTS_LOCK = threading.Lock()
+_LISTS_MAX = 256
+_LISTS_MAX_AGE_S = 600.0
 
 # Keep it tight. This rides in every prompt, and a block nobody reads to the end
 # is worse than a short one — the model weights the start heaviest.
@@ -99,8 +119,12 @@ def build_life_snapshot() -> str:
         "app.features.shopping_store", fromlist=["x"]).list_items(), "shopping")
     if shopping:
         pending = [s for s in shopping if not s.get("done")]
+        # `list_items` returns the name under `text`; this read `item` and got
+        # nothing, so the line she carried in every prompt was «قائمة تسوّقه:
+        # ، ، ، (وغيرها — ٧ بالمجموع)» — a count with no items, which is worse
+        # than leaving the line out.
         parts.append(_line("قائمة تسوّقه",
-                           [str(s.get("item", ""))[:40] for s in pending], len(pending)))
+                           [str(s.get("text", ""))[:40] for s in pending], len(pending)))
 
     if not parts:
         return ""
@@ -164,14 +188,19 @@ def index_life_for_search() -> int:
             if text.strip():
                 facts.append({"text": f"{prefix}: {text}"[:300], "type": kind})
 
-    add(_safe(lambda: __import__("app.features.reading_store", fromlist=["x"])
-              .list_books(), "books"), ["title", "author", "category"], "book", "كتاب عنده")
-    add(_safe(lambda: __import__("app.features.habits_store", fromlist=["x"])
-              .list_habits(), "habits"), ["name"], "habit", "عادة بيتابعها")
-    add(_safe(lambda: __import__("app.features.tasks_store", fromlist=["x"])
-              .load_tasks(), "tasks"), ["text", "notes"], "task", "مهمة عنده")
-    add(_safe(lambda: __import__("app.features.journal_store", fromlist=["x"])
-              .recent_entries(limit=100), "journal"), ["text"], "journal", "دوّن")
+    # Same lists the search scans, same cache — this runs on the background pool
+    # every turn, and reading them again was four round trips per message for
+    # data the search had already fetched.
+    lists = _searchable_lists()
+    add(lists.get("books"), ["title", "author", "category"], "book", "كتاب عنده")
+    add(lists.get("habits"), ["name"], "habit", "عادة بيتابعها")
+    add(lists.get("tasks"), ["text", "notes"], "task", "مهمة عنده")
+    # The shared fetch reads 200 journal entries; the indexer has always taken
+    # 100 and keeps taking 100. Embedding the older half would push tasks and
+    # books out of the five slots a turn retrieves, and would enlarge the single
+    # batched embedding call that returns nothing for everything when it times
+    # out — a change to what she recalls, smuggled in as a change to a limit.
+    add((lists.get("journal") or [])[:100], ["text"], "journal", "دوّن")
 
     if not facts:
         return 0
@@ -184,36 +213,78 @@ def _terms(query: str) -> List[str]:
     return [w for w in words if len(w) >= 3 and w not in _STOP][:6]
 
 
+_SEARCHED: List[Tuple[str, Callable[[], Any], List[str], str]] = [
+    ("books", lambda: __import__("app.features.reading_store", fromlist=["x"])
+     .list_books(), ["title", "author", "category"], "كتاب"),
+    ("tasks", lambda: __import__("app.features.tasks_store", fromlist=["x"])
+     .load_tasks(), ["text", "notes"], "مهمة"),
+    ("journal", lambda: __import__("app.features.journal_store", fromlist=["x"])
+     .recent_entries(limit=200), ["text"], "يومية"),
+    ("habits", lambda: __import__("app.features.habits_store", fromlist=["x"])
+     .list_habits(), ["name"], "عادة"),
+    ("reminders", lambda: __import__("app.features.reminders_store", fromlist=["x"])
+     .load_reminders(), ["text"], "تذكير"),
+]
+
+
+def _searchable_lists() -> Dict[str, Any]:
+    """The five lists, from cache when the tenant has not written since."""
+    from app.utils.tenant_version import version_for
+    from app.utils.user_profiles import current_user_id
+
+    tenant = str(current_user_id() or "")
+    version = version_for(tenant) if tenant else -1
+
+    now = time.monotonic()
+    if version >= 0:
+        with _LISTS_LOCK:
+            hit = _LISTS_CACHE.get(tenant)
+        if hit is not None and hit[0] == version and hit[2] > now:
+            return hit[1]
+
+    lists = {name: _safe(fn, name) for name, fn, _f, _l in _SEARCHED}
+
+    # `_safe` returns None for a store that **raised**, and an empty list for a
+    # store that is genuinely empty. Only the second is an answer worth keeping:
+    # caching a failure would silently drop a whole list out of her awareness
+    # until the next write, since a failure moves no version.
+    complete = all(v is not None for v in lists.values())
+
+    if version >= 0 and complete:
+        with _LISTS_LOCK:
+            if len(_LISTS_CACHE) >= _LISTS_MAX:
+                _LISTS_CACHE.clear()
+            _LISTS_CACHE[tenant] = (version, lists, now + _LISTS_MAX_AGE_S)
+    return lists
+
+
+def clear_lists_cache() -> None:
+    """Drop every cached list. Test-only, and used by account deletion."""
+    with _LISTS_LOCK:
+        _LISTS_CACHE.clear()
+
+
 def search_life(query: str) -> str:
     """كل إشي مرتبط بسؤاله، من كل قوائمه. فاضي لو ما في علاقة.
 
-    بتنادى بكل دور مع نصّ رسالته.
+    بتنادى بكل دور مع نصّ رسالته — **البحث حيّ، والقراءة مكشّنة.**
     """
     terms = _terms(query)
     if not terms:
         return ""
 
     hits: List[str] = []
+    lists = _searchable_lists()
 
-    def scan(items: Any, fields: List[str], label: str) -> None:
+    for name, _fn, fields, label in _SEARCHED:
+        items = lists.get(name)
         if not items:
-            return
+            continue
         for it in items:
             blob = " ".join(str(it.get(f, "")) for f in fields).lower()
             if any(t.lower() in blob for t in terms):
                 text = " · ".join(str(it.get(f, "")) for f in fields if it.get(f))
                 hits.append(f"{label}: {text[:110]}")
-
-    scan(_safe(lambda: __import__("app.features.reading_store", fromlist=["x"])
-               .list_books(), "books"), ["title", "author", "category"], "كتاب")
-    scan(_safe(lambda: __import__("app.features.tasks_store", fromlist=["x"])
-               .load_tasks(), "tasks"), ["text", "notes"], "مهمة")
-    scan(_safe(lambda: __import__("app.features.journal_store", fromlist=["x"])
-               .recent_entries(limit=200), "journal"), ["text"], "يومية")
-    scan(_safe(lambda: __import__("app.features.habits_store", fromlist=["x"])
-               .list_habits(), "habits"), ["name"], "عادة")
-    scan(_safe(lambda: __import__("app.features.reminders_store", fromlist=["x"])
-               .load_reminders(), "reminders"), ["text"], "تذكير")
 
     if not hits:
         return ""

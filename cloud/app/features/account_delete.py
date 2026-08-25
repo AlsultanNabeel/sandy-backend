@@ -201,5 +201,16 @@ def delete_account(user_id: str) -> Dict[str, Any]:
         logger.warning("[delete] user row failed for %s: %s", user_id, exc)
         return {"ok": False, "error": "partial", "removed": removed}
 
+    # And the cache stamp, which is keyed by the id rather than by a scope field
+    # and so is invisible to `_erase`. It is one integer, but it is one integer
+    # belonging to a person who asked to be forgotten.
+    from app.agent.context_builder import clear_directives_cache
+    from app.agent.life_snapshot import clear_lists_cache
+    from app.utils.tenant_version import forget
+
+    forget(user_id)
+    clear_directives_cache()
+    clear_lists_cache()
+
     logger.info("[delete] account %s erased: %s", user_id, removed)
     return {"ok": True, "removed": removed}

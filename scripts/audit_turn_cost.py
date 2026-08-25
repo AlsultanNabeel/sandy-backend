@@ -170,17 +170,46 @@ while time.monotonic() < _deadline:
 else:
     print("WARNING: background pool did not drain in 30s — total is a lower bound")
 
+first = OPS.copy()
+
+# **The second turn is the one to watch.**
+#
+# The persona block is cached per tenant version, so a cold first turn pays for
+# everything and every turn after it pays only for what changed. Measuring turn
+# one alone reported the cache as a regression — it adds the version read and
+# the stamp writes — while the number a person actually waits for, on message
+# two and three and every one after, is the one below.
+OPS.clear()
+with active_user_profile_context(PROFILE):
+    run_graph("والحمدلله تمام", user_id=USER, chat_id=USER, source="web")
+_drain = time.monotonic() + 30.0
+while time.monotonic() < _drain:
+    if sandy_executor._work_queue.qsize() == 0:
+        time.sleep(0.25)
+        if sandy_executor._work_queue.qsize() == 0:
+            break
+    time.sleep(0.05)
+second = OPS.copy()
+
 print(f"\nSeeded life items: {seeded}")
 print(f"Reply: {state.get('final_response')!r}\n")
 print("=" * 74)
 print("MONGO ROUND TRIPS FOR ONE CHAT TURN")
 print("=" * 74)
 total = 0
-for op, n in OPS.most_common():
+for op, n in first.most_common():
     print(f"{n:5}  {op}")
     total += n
 print("-" * 74)
-print(f"{total:5}  TOTAL round trips")
+print(f"{total:5}  TOTAL round trips (first turn, cold cache)")
+print()
+print("=" * 74)
+print("MONGO ROUND TRIPS FOR THE SECOND TURN (warm cache) — the one to watch")
+print("=" * 74)
+for op, n in second.most_common():
+    print(f"{n:5}  {op}")
+print("-" * 74)
+print(f"{sum(second.values()):5}  TOTAL round trips")
 print()
 print("=" * 74)
 print("EXTERNAL CALLS")

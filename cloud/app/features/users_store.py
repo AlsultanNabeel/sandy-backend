@@ -276,7 +276,6 @@ def _mirror_onboarding_to_memory(user_id: str) -> None:
             lines.append(("onboarding_notes", f"عن نفسه: {str(ob['notes']).strip()}"))
 
         for key, text in lines:
-            _bump(user_id, "sandy_memories")
             db["sandy_memories"].update_one(
                 {"chat_id": user_id, "source_key": key},
                 {"$set": {"chat_id": user_id, "user_id": user_id,
@@ -285,6 +284,12 @@ def _mirror_onboarding_to_memory(user_id: str) -> None:
                           "created_at": datetime.now(timezone.utc)}},
                 upsert=True,
             )
+        # One bump, after the whole mirror is written. It used to fire before
+        # each `update_one`, so the last bump always preceded the last write and
+        # a concurrent read on the other worker could cache the state one line
+        # short of finished, under the finished version.
+        if lines:
+            _bump(user_id, "sandy_memories")
     except Exception as exc:  # noqa: BLE001 — نسخة مساعدة، ما بتوقّف حفظ التعارف
         logger.debug("[UsersStore] onboarding mirror skipped: %s", exc)
 
@@ -306,11 +311,11 @@ def record_nudge_answer(user_id: str, qid: str, answer: str) -> bool:
     answer = (answer or "").strip()[:300]
     if coll is None or not user_id or not qid or not answer:
         return False
-    _bump(user_id)
     res = coll.update_one(
         {"_id": user_id},
         {"$set": {f"onboarding.nudge_answers.{qid}": answer, "last_seen_at": _now()}},
     )
+    _bump(user_id)
     return res.matched_count > 0
 
 

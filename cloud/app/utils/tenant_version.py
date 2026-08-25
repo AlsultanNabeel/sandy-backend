@@ -32,9 +32,7 @@ change every single turn, do not defeat the cache they have nothing to do with.
 from __future__ import annotations
 
 import logging
-import threading
-import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional
 
 from pymongo.errors import PyMongoError
 
@@ -63,14 +61,12 @@ VERSIONED = frozenset({
     "sandy_focus_meta",
 })
 
-# A read-through memo, so a burst of turns for one tenant does not each pay for
-# the version lookup. **This is the only staleness left in the design**, and it
-# is bounded by this number: a change made on the other worker is invisible for
-# at most this long. Kept short deliberately — the round trip it saves is one,
-# and the thing it can cost is Sandy contradicting the app.
-_MEMO_TTL_S = 3.0
-_memo: Dict[str, Tuple[float, int]] = {}
-_lock = threading.Lock()
+# **No read-through memo.** There was one, holding the version for a few seconds
+# so a burst of turns would not each pay the lookup. It saves exactly one small
+# round trip and costs the only thing this design has: a write on the other
+# worker stays invisible for the length of the memo, which is "add a task, ask
+# about it, hear that you have none" — the failure the version stamp exists to
+# make impossible. One read per turn, always current.
 
 
 def _coll():
@@ -81,36 +77,30 @@ def _coll():
 
 
 def version_for(tenant: str) -> int:
-    """Current version for a tenant, or 0 when it cannot be read.
+    """Current version for a tenant, or ``-1`` when it cannot be read.
 
-    0 on failure is deliberate: a version that cannot be read never matches a
-    stored one, so the cache misses and the caller rebuilds. Degrading costs
-    round trips, never accuracy — which is the right direction for a cache.
+    ``-1`` is never stored, so a version that cannot be read never matches a
+    cached one and the caller rebuilds. Degrading costs round trips, never
+    accuracy — the right direction for a cache.
+
+    A tenant with no stamp document is ``0``, which **is** cacheable: an account
+    that has not written anything yet is the commonest case on a fresh install,
+    and refusing to cache it would exempt exactly the accounts with the least
+    data from the saving.
     """
     key = str(tenant or "")
     if not key:
-        return 0
-
-    now = time.monotonic()
-    with _lock:
-        hit = _memo.get(key)
-        if hit and hit[0] > now:
-            return hit[1]
+        return -1
 
     coll = _coll()
     if coll is None:
-        return 0
+        return -1
     try:
         doc = coll.find_one({"_id": key}, {"v": 1})
         version = int((doc or {}).get("v") or 0)
     except PyMongoError as exc:
         logger.debug("[tenant_version] read failed: %s", exc)
-        return 0
-
-    with _lock:
-        _memo[key] = (now + _MEMO_TTL_S, version)
-        if len(_memo) > 512:      # bounded: one entry per recently-seen tenant
-            _memo.clear()
+        return -1
     return version
 
 
@@ -120,11 +110,17 @@ def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
     `collection` is the name that was written; anything outside `VERSIONED` is
     ignored, so the per-turn stores do not invalidate a cache they have nothing
     to do with. Pass `None` to force a bump when the caller knows something
-    changed but not which collection.
+    changed but not which collection. A writer inside a versioned collection
+    that still runs every turn opts out at the call site instead — see
+    `scoped(..., bump=False)`.
 
-    The memo is dropped synchronously and the database write is fired onto the
-    background pool: the write is what other workers see, and the process that
-    made the change must not read its own stale memo in the meantime.
+    **Both halves are synchronous, and that is the whole point.** The bump was
+    on the background pool at first, which leaves a window: add a task on one
+    worker, ask about it on the other a moment later, and the second worker
+    reads a version the first has not written yet and answers from the cache —
+    "you have no tasks", about a task that exists. A cache that can do that is
+    worse than no cache. The cost is one small upsert on a write path that has
+    already paid for a round trip; reads outnumber writes by a wide margin here.
     """
     key = str(tenant or "")
     if not key:
@@ -132,29 +128,28 @@ def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
     if collection is not None and collection not in VERSIONED:
         return
 
-    with _lock:
-        _memo.pop(key, None)
-
-    def _apply() -> None:
-        coll = _coll()
-        if coll is None:
-            return
-        try:
-            coll.update_one({"_id": key}, {"$inc": {"v": 1}}, upsert=True)
-        except PyMongoError as exc:
-            logger.debug("[tenant_version] bump failed: %s", exc)
-
-    from app.utils.thread_pool import submit_background
-
-    submit_background(_apply, _label="tenant-version")
+    coll = _coll()
+    if coll is None:
+        return
+    try:
+        coll.update_one({"_id": key}, {"$inc": {"v": 1}}, upsert=True)
+    except PyMongoError as exc:
+        logger.debug("[tenant_version] bump failed: %s", exc)
 
 
-def reset_for_tests() -> None:
-    """Drop the read-through memo. Test-only."""
-    with _lock:
-        _memo.clear()
+def forget(tenant: str) -> None:
+    """Drop a tenant's stamp entirely — for account deletion.
 
-
-def snapshot_for_tests() -> Dict[str, Any]:
-    with _lock:
-        return dict(_memo)
+    Left behind, it is a row keyed by the id of an account that no longer
+    exists, and it would hand a stale version to whoever reuses that id.
+    """
+    key = str(tenant or "")
+    if not key:
+        return
+    coll = _coll()
+    if coll is None:
+        return
+    try:
+        coll.delete_one({"_id": key})
+    except PyMongoError as exc:
+        logger.debug("[tenant_version] forget failed: %s", exc)

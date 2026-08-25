@@ -228,6 +228,10 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
         if vec:
             doc["embedding"] = vec
         mongo_db["sandy_memories"].insert_one(doc)
+        # Raw handle again — and a summary that never reaches the prompt is a
+        # conversation she does not remember having.
+        from app.utils.tenant_version import bump_for
+        bump_for(str(user_id or chat_id or ""), collection="sandy_memories")
         logger.info(f"[graph] STM→LTM summary saved for {chat_id}")
     except Exception as exc:
         logger.debug(f"[graph] STM summarization failed: {exc}")

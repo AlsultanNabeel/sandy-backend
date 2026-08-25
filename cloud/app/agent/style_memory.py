@@ -46,6 +46,13 @@ def save_style_preference(
             "source_message": encrypt_field(str(source_message)[:200]),
             "created_at": datetime.now(timezone.utc),
         })
+        # Raw handle, so the tenant wrapper's stamp never fires — and this
+        # writes the `style_memory` label that the cached persona block is
+        # built from. Without this line he says «اختصري» and she keeps writing
+        # the same long replies, because the block she reads is the one from
+        # before he said it.
+        from app.utils.tenant_version import bump_for
+        bump_for(str(user_id or chat_id or ""), collection=_COLL)
         logger.info(f"[style_memory] saved preference for {chat_id}: {preference[:60]}")
         return True
     except Exception as exc:

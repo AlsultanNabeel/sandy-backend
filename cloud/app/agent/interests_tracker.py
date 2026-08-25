@@ -41,7 +41,12 @@ def _coll():
     tenant lives in a `ContextVar` that did not cross one. `submit_background`
     carries it now (§2.5), so the scoping works where it is actually called.
     """
-    return scoped(get_db(), _COLL, field="chat_id")
+    # `bump=False`: this counter is written on **every message** that mentions
+    # anything, and the persona block that gets cached is built from the
+    # `style_memory` / `preferences` / `relationship` / `lesson_learned` /
+    # `conversation_summary` labels — never from `interest`. Left bumping, it
+    # invalidated that cache once per turn and the cache never once hit.
+    return scoped(get_db(), _COLL, field="chat_id", bump=False)
 
 
 

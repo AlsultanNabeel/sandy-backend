@@ -49,6 +49,13 @@ def memory_store(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
         "content": content,
         "created_at": datetime.now(timezone.utc),
     })
+    # Raw handle — the tenant wrapper's stamp does not fire here, and this is
+    # the `user_fact` the cached persona block reads. The app's own
+    # `POST /api/memory` writes the identical document and bumps; without this
+    # line, telling Sandy to remember something worked and saving it from the
+    # app worked, but only one of them reached her next reply.
+    from app.utils.tenant_version import bump_for
+    bump_for(uid, collection=_COLL)
     return {"handled": True, "reply": "دوّنتها 📝"}
 
 
