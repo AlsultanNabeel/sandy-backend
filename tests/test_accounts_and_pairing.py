@@ -74,9 +74,18 @@ def test_a_voice_session_belongs_to_whoever_is_on_it():
     # one fact stored in two places, and two places drift.
     assert "bind_identity" not in mem, (
         "a second identity mechanism is back; one fact, one home")
-    assert mem.count("ContextVar(") == 2, (
-        "expected exactly two context variables — who is speaking and which "
-        "body they are speaking through")
+    # Two facts, plus anything **derived** from them and cleared with them.
+    # `_speaker_name` is the display name for `_identity`, memoised because
+    # `_speaker_directive` runs on the audio event loop once per utterance and a
+    # find_one there is an audible pause. `set_voice_identity` resets it in the
+    # same call that sets the identity, so it cannot outlive or contradict it —
+    # which is the drift this assertion exists to prevent.
+    assert mem.count("ContextVar(") <= 3, (
+        "a third *independent* fact about the session appeared; identity and "
+        "channel are the only two, and anything else must be derived from them")
+    assert '_speaker_name.set("")' in mem, (
+        "the derived name is not cleared where the identity is set — that is "
+        "exactly how two copies of one fact drift")
 
     session = _read("cloud/app/api/voice_ws/session.py")
     for call in ("_build_system_instruction, _who",

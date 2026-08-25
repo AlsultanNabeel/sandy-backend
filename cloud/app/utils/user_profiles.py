@@ -46,12 +46,16 @@ _ACTIVE_PROFILE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
 
 DEFAULT_TONE_BY_RELATION = {
     "owner": "casual",
+    "user": "casual",
     "family": "gentle",
     "guest": "formal",
 }
 
 DEFAULT_PERMISSIONS_BY_RELATION = {
+    # An authenticated tenant, owner or not, has full rights over their OWN
+    # data — isolation is `current_user_id()` scoping, never a relation check.
     "owner": "all",
+    "user": "all",
     "family": "chat-only",
     "guest": "chat-only",
 }
@@ -124,17 +128,27 @@ def active_user_profile_context(profile: Optional[Dict[str, Any]]):
 
 
 def address_instruction(profile: Optional[Dict[str, Any]] = None) -> str:
-    """Arabic line telling Sandy which grammatical gender to address the current
-    speaker with. The default speaker is the owner (male), so anything that
-    isn't an explicitly-female profile resolves to masculine."""
+    """Arabic line telling Sandy which grammatical gender to address the speaker
+    with.
+
+    Masculine is the default because Arabic forces a choice, **not** because the
+    speaker is a particular person: this used to read «المالك نبيل افتراضياً»,
+    so every woman who used the product was told she was the owner by default.
+
+    **The default stays conditional on purpose.** `gender` is read from the
+    active profile and no production path sets it today, so the escape hatch
+    that matters is the one inside the sentence: the model is told to switch the
+    moment it learns otherwise. A flat masculine assertion would leave a female
+    customer's robot with no way out at all — worse than the guess it replaced.
+    """
     if profile is None:
         profile = get_active_user_profile()
     gender = str((profile or {}).get("gender", "") or "").strip().lower()
     if gender == "female":
         return "المتحدثة معك أنثى — خاطبيها بصيغة المؤنث."
     return (
-        "المتحدث معك ذكر (المالك نبيل افتراضياً حتى يتعرّف على ضيف) — "
-        "خاطبيه بصيغة المذكر."
+        "الافتراضي مذكر لحد ما تتأكدي — خاطبيه بصيغة المذكر؛ وإذا بان إنّ "
+        "المتحدثة أنثى، خاطبيها بصيغة المؤنث من هديك اللحظة."
     )
 
 
@@ -154,7 +168,11 @@ def active_profile_is_guest() -> bool:
 
 def _normalize_relation(value: str) -> str:
     relation = str(value or "guest").strip().lower()
-    return relation if relation in {"owner", "family", "guest"} else "guest"
+    # `build_user_profile` has emitted "user" for every authenticated caller
+    # since the multi-tenant migration and this never learned the word, so it
+    # round-tripped to "guest" — which forces permissions to chat-only and would
+    # fire the privacy refusal at a paying customer.
+    return relation if relation in {"owner", "user", "family", "guest"} else "guest"
 
 
 def _normalize_profile(
@@ -184,15 +202,22 @@ def _normalize_profile(
         normalized["relation"] = "owner"
         normalized["tone"] = "casual"
         normalized["permissions"] = "all"
-        normalized["gender"] = "male"  # the owner is male — the default speaker
+        normalized["gender"] = "male"  # the owner's own profile, set by him
     else:
+        # **Not "anyone who is not the owner is chat-only".** That was the rule
+        # for one person's house; in a product it refuses a paying customer
+        # their own data. Rights follow the relation, and the isolation that
+        # matters is `current_user_id()` scoping — see `active_profile_is_guest`,
+        # which every store already consults.
         normalized["relation"] = _normalize_relation(normalized["relation"])
         normalized["tone"] = (
             normalized["tone"]
             if normalized["tone"] in {"casual", "gentle", "formal"}
             else DEFAULT_TONE_BY_RELATION[normalized["relation"]]
         )
-        normalized["permissions"] = "chat-only"
+        if normalized["permissions"] not in {"all", "chat-only"}:
+            normalized["permissions"] = DEFAULT_PERMISSIONS_BY_RELATION[
+                normalized["relation"]]
 
     return normalized
 
@@ -340,7 +365,7 @@ def build_user_profile_prompt_sections(
     if normalized["permissions"] != "all":
         privacy_line = (
             "\n🔒 هذا الحساب chat-only: لا تنفذي أو تذكري أي تفاصيل من المهام أو التقويم أو البريد أو الذاكرة. "
-            "إذا طُلب شيء من هذه المجالات، ارجعي فقط إلى: هذا خاص بنبيل 😊\n"
+            "إذا طُلب شيء من هذه المجالات، ارجعي فقط إلى: هذا خاص بصاحب الحساب 😊\n"
         )
 
     return {
@@ -402,6 +427,28 @@ def resolve_display_name(user_id: str | None = None, mongo_db=None, default: str
         # A missing name is expected for guests — log quietly and degrade (C1).
         logger.debug("[user_profiles] resolve_display_name failed: %s", exc)
         return default
+
+
+# What `speaker_label` returns when nobody has told us a name. Callers that
+# build a *discriminating* sentence — "this is not X", "even if he claims to be
+# X" — must branch on it rather than substitute it, or they end up asserting
+# that the speaker is not "the user".
+HAS_NO_NAME = "المستخدم"
+
+
+def speaker_label(user_id: str | None = None, mongo_db=None) -> str:
+    """What to call the person in front of Sandy, in a prompt or a transcript.
+
+    Every site that needed this had the owner's name typed into it — the live
+    voice prompt, the speaker-verification note, the transcript labels, the
+    morning brief. So a customer who had just typed «سامي» into first-run setup
+    was told, by their own robot, that they were talking to somebody else.
+
+    `المستخدم` when no name is known. That is the honest answer; another
+    person's name is not, and a blank is worse than either — a prompt reading
+    "you are in a voice conversation with " invites the model to fill the gap.
+    """
+    return resolve_display_name(user_id, mongo_db, default=HAS_NO_NAME)
 
 
 def reconcile_owner_identity(mongo_db) -> None:

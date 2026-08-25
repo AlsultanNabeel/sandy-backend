@@ -53,6 +53,23 @@ _ANTI_INJECTION = (
 )
 
 
+# Standing language rule, appended by CODE for the same reason as the one above:
+# it has to survive a custom persona and a Heroku override.
+#
+# Nothing told her which language to answer in. The persona is written in
+# Levantine Arabic, so an English message got an Arabic reply — and a customer
+# who writes in English gets a robot that will not speak to them. Follow the
+# message, not the persona, and follow it **per message**: "مرحبا" then
+# "how are you" is one conversation that changes language halfway, which is how
+# bilingual people actually talk.
+_LANGUAGE_RULE = (
+    "\n🗣️ اللغة: ردّي بلغة آخر رسالة وصلتك. كتب بالعربي → ردّي بالعربي بلهجتك؛ "
+    "كتب بالإنجليزي → ردّي بالإنجليزي كاملاً؛ خلط → اتبعي اللغة الغالبة. "
+    "والتبديل بينطبق على كل رسالة لحالها — لو غيّر اللغة بنص المحادثة، غيّري "
+    "معه من هديك الرسالة، بدون ما تعلّقي على التغيير."
+)
+
+
 def build_effective_persona(user_id: Optional[str]) -> str:
     """The system-prompt persona block for one turn.
 
@@ -80,8 +97,11 @@ def build_effective_persona(user_id: Optional[str]) -> str:
 
     dialect = DIALECT_PRESETS.get(dialect_key, DIALECT_PRESETS[DEFAULT_DIALECT])
     # Identity lock stays the LAST line (final word on identity); the
-    # anti-injection rule sits just before it.
-    return f"{tone}\n{dialect['instruction']}{_ANTI_INJECTION}\n{SANDY_IDENTITY_LOCK}"
+    # anti-injection and language rules sit just before it.
+    return (
+        f"{tone}\n{dialect['instruction']}"
+        f"{_LANGUAGE_RULE}{_ANTI_INJECTION}\n{SANDY_IDENTITY_LOCK}"
+    )
 
 
 def build_memory_context(

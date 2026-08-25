@@ -187,9 +187,13 @@ def finish_session(
         from app.agent.graph.graph import load_stm
         cid = str(chat_id)
         msgs = load_stm(cid, cid)
+        # الاسم من ملفّه — كل دور للمستخدم كان موسوم باسم المالك، فالموديل
+        # بيقرا نقاش زبون تاني وكل جملة فيه منسوبة لشخص ما إله علاقة.
+        from app.utils.user_profiles import speaker_label
+        user_label = speaker_label(cid)
         lines = []
         for m in msgs:
-            who = "نبيل" if m.get("role") == "user" else "ساندي"
+            who = user_label if m.get("role") == "user" else "ساندي"
             txt = (m.get("content") or "").strip()
             if txt:
                 lines.append(f"{who}: {txt}")

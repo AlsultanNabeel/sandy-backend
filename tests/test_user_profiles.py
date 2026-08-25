@@ -82,7 +82,10 @@ def test_prompt_sections_reflect_tone_and_privacy(monkeypatch):
     )
 
     assert "formal" in sections["user_profile_block"]
-    assert "هذا خاص بنبيل" in sections["user_profile_priority_line"]
+    # The refusal names the account, not the owner: it is shown to every
+    # chat-only visitor on every tenant.
+    assert "هذا خاص بصاحب الحساب" in sections["user_profile_priority_line"]
+    assert "نبيل" not in sections["user_profile_priority_line"]
     assert user_profiles.is_sensitive_domain_request("شو مهامي اليوم") is True
     assert user_profiles.is_sensitive_domain_request("احكيلي نكتة") is False
 

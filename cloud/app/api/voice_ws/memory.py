@@ -41,6 +41,9 @@ _identity: contextvars.ContextVar[str] = contextvars.ContextVar(
     "sandy_voice_user", default="")
 _channel_name: contextvars.ContextVar[str] = contextvars.ContextVar(
     "sandy_voice_channel", default="")
+# Resolved once per session so nothing on the audio path pays a Mongo read.
+_speaker_name: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "sandy_voice_speaker_name", default="")
 
 
 def set_voice_channel(name: str) -> None:
@@ -66,10 +69,31 @@ def set_voice_identity(user_id: str) -> None:
     — وهاد مش خلل واجهة، هاد تسريب.
     """
     _identity.set((user_id or "").strip())
+    _speaker_name.set("")   # re-resolved lazily — see voice_speaker_label
 
 
 def get_voice_identity() -> str:
     return _identity.get() or ""
+
+
+def voice_speaker_label() -> str:
+    """The session owner's display name, resolved **once** per session.
+
+    `_speaker_directive` runs at the end of every utterance, awaited directly on
+    the event loop that is relaying audio — the same loop `_verify_owner` is
+    pushed off with `run_in_executor`, and `_save_voice_turn` is pushed off with
+    a comment about the pause being audible. A synchronous `find_one` there is
+    one stall per sentence, so the lookup happens once and everything after it
+    reads a context variable.
+    """
+    cached = _speaker_name.get()
+    if cached:
+        return cached
+    from app.utils.user_profiles import speaker_label
+
+    name = speaker_label(get_voice_identity() or None)
+    _speaker_name.set(name)
+    return name
 
 
 def _stm_chat_id() -> str:
@@ -149,9 +173,12 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
     history = _load_stm_history() if history is None else history
     if not history:
         return ""
+    # كل دور للمستخدم كان موسوم باسم المالك — يعني الموديل بيقرا محادثة زبون
+    # وكل جملة فيها منسوبة لشخص ما إله علاقة فيها.
+    user_label = voice_speaker_label()
     turns = []
     for m in history[-10:]:
-        role_label = "نبيل" if m.get("role") == "user" else "Sandy"
+        role_label = user_label if m.get("role") == "user" else "Sandy"
         content = m.get("content", "")
         if not content:
             continue

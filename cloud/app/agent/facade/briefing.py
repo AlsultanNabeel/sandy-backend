@@ -121,12 +121,19 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
 {chr(10).join(cal_lines) if cal_lines else "لا توجد تذكيرات"}"""
 
     from app.agent.context_builder import build_effective_persona
-    # Not yet threaded to a specific tenant (this module has no user_id concept
-    # today, it's the owner-only proactive briefing) — resolves to the default
-    # persona (identity lock included) rather than silently dropping it.
-    prompt = f"""{build_effective_persona(None)}
+    from app.utils.user_profiles import (
+        address_instruction, current_user_id, speaker_label,
+    )
 
-اكتبي ملخص صباحي مختصر وطبيعي لنبيل (ذكر) بناءً على البيانات أدناه فقط.
+    # الملخّص بيتبنى لصاحب الحساب اللي طلبه، مش لشخص مكتوب اسمه بالكود. المسار
+    # بيمرّ من `execute_node` وهو جوّا سياق المستأجر، فالمعرّف موجود هون —
+    # وتمريره لـ`build_effective_persona` كمان بيرجّع تعليماته ولهجته، وكانت
+    # بتنزل للافتراضي لكل مستأجر.
+    _uid = current_user_id()
+    prompt = f"""{build_effective_persona(_uid)}
+
+اكتبي ملخص صباحي مختصر وطبيعي لـ{speaker_label(_uid)} بناءً على البيانات أدناه فقط.
+{address_instruction()}
 
 قواعد صارمة:
 - ابدئي بـ"صباح الخير ☀️" بشكل عفوي شامي
@@ -135,7 +142,7 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
 - اذكري المهام الأخرى بإيجاز
 - اذكري تذكيرات اليوم لو في
 - اختمي قبل الجملة الشخصية باقتراح ذكي لترتيب اليوم بسطر أو سطرين (شو يبدأ فيه وليش)
-- اختمي بجملة واحدة شخصية شامية مختلفة كل يوم (مذكر)
+- اختمي بجملة واحدة شخصية شامية مختلفة كل يوم، بنفس صيغة المخاطبة أعلاه
 - لا تكتبي قوائم منقطة ولا عناوين رسمية
 - الطول الكلي: ٥-٨ أسطر فقط
 

@@ -240,6 +240,48 @@ each call site, and by running the voice instruction build inside
 `active_user_profile_context`. **Never add a bare `.submit()` on a path that
 touches a scoped store.**
 
+### 2.5b Whose name she says
+
+Eight strings that reach a customer had the owner's name typed into them, and
+the worst was the live voice prompt: *"you are in a voice conversation with نبيل
+(your partner)"* — the first thing every robot in the world is told about the
+person standing in front of it. The speaker-verification note told a customer
+«مش نبيل» after matching *their own* voice; every user turn in a recalled
+transcript was attributed to him; the morning brief was written «لنبيل (ذكر)».
+
+`user_profiles.speaker_label()` is the one answer, reading the name from
+first-run setup. `HAS_NO_NAME` (`المستخدم`) is the fallback, and a caller
+building a *discriminating* sentence — "this is not X", "even if he claims to be
+X" — must **branch** on it rather than substitute it: «مش المستخدم» denies that
+the speaker is the user, which is not a sentence. The voice path resolves it
+once per session into a context variable (`voice_speaker_label`), because
+`_speaker_directive` is awaited on the loop relaying audio and a `find_one`
+there is an audible pause at the end of every sentence.
+
+`config.py` is deliberately untouched. *"طوّرك نبيل السلطان"* is a developer
+credit and belongs to every customer. The default `SANDY_PERSONALITY` also
+opens by calling her his partner — that is product copy (`CONVENTIONS.md` C7),
+it is overridden by a Heroku config var in production, and it is the owner's
+call, not a silent edit.
+
+**Gender and language are told to the model, not assumed.**
+`address_instruction()` keeps its escape hatch — masculine by default because
+Arabic forces a choice, switching to feminine the moment the speaker turns out
+to be a woman. No production path sets `gender` on a profile yet, so that
+sentence is the only thing standing between a female customer and a robot that
+insists she is male. `context_builder._LANGUAGE_RULE` is appended by code beside
+the anti-injection rule, for the same reason — it must survive a custom persona:
+reply in the language of the last message, per message, so a conversation that
+turns from Arabic to English turns with it.
+
+**There is no owner-only device gate.** `_OWNER_DEVICE_PREFIXES = ("hardware_",)`
+guarded tools whose names start with `hardware_`, and no registered tool ever
+has — the two branches that called it were dead, and the refusal one of them
+held named the owner to customers who could never reach it. §2.7 is the real
+boundary and it works: a device is actuated only through
+`device_store.tenant_owns_topic`, which asks whether the topic belongs to a
+device in the *calling tenant's* registry.
+
 ### 2.6 Tenant isolation — the most important file in the repo
 
 `app/utils/tenant_db.py`. Every data operation goes through `scoped(db, name)`,
