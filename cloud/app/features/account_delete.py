@@ -27,7 +27,18 @@ except ImportError:  # pragma: no cover — the driver is optional for import
 
 logger = logging.getLogger(__name__)
 
-# Keyed by `user_id` — the id every scoped read already filters on.
+# **Both keys, because the database uses both.**
+#
+# `scoped()` filters on `user_id` by default and on `chat_id` where a store
+# passes `field="chat_id"` — `sandy_facts`, `sandy_conversations`,
+# `sandy_memories` and `sandy_activity` do. Deleting only by `user_id` left all
+# four behind: a person's facts, their conversation turns, their emotional
+# memory and their activity log survived a full account delete, and this
+# module's own docstring says a delete that misses one is worse than no delete
+# at all.
+#
+# The filter is an `$or` on both fields rather than two lists, so a collection
+# that changes its key does not silently stop being erased.
 _BY_USER: List[str] = [
     "sandy_nodes",
     "sandy_devices",
@@ -55,6 +66,26 @@ _BY_USER: List[str] = [
     "sandy_activity",
     "sandy_usage",
     "memory",
+    # Keyed by chat_id — the semantic memory layer and everything beside it.
+    "sandy_facts",
+    "sandy_conversations",
+    "sandy_context_metadata",
+    "sandy_vector_index",
+    # Owned by the account and previously untouched by either path.
+    "sandy_books",
+    "sandy_reading_sessions",
+    "sandy_reading_meta",
+    "sandy_habit_log",
+    "sandy_focus_meta",
+    "sandy_photos",
+    "sandy_gifts",
+    "sandy_bs_pending",
+    "sandy_evals",
+    "sandy_state",
+    "sandy_nudge_locks",
+    "sandy_usage_daily",
+    "sandy_usage_rl",
+    "sandy_active_user_profile",
 ]
 
 # Short-term memory keys its documents `"<thread>:<user>"` and also carries a
@@ -84,7 +115,8 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     removed: Dict[str, int] = {}
     for name in names:
         try:
-            r = db[name].delete_many({"user_id": user_id})
+            r = db[name].delete_many(
+                {"$or": [{"user_id": user_id}, {"chat_id": user_id}]})
             if r.deleted_count:
                 removed[name] = r.deleted_count
         # مجموعة وحدة فشلت ما بتوقّف الباقي — والفشل بينسجّل بـ«ناقص واحد»

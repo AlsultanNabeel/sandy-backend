@@ -6,11 +6,15 @@ lives, why it is shaped that way, and which parts are load-bearing.
 
 Written by reading every source file in the repo, not from the older docs — where
 this contradicts `README.md`, `docs/`, or a code comment, this is the newer
-reading. Last full pass: 14 Aug 2026, kept current through 24 Aug 2026 — §2.7,
-§4.5 and §4.6 rewritten for per-device broker credentials, the room node's move
-onto the per-node topic tree, first-run network setup, and infrared; §2.5, §8 and
-§9 for the 24 Aug audit (`AUDIT_2026-08-24.md`, which lists what was found and
-what is still open).
+reading. Last full pass: 14 Aug 2026, kept current through **25 Aug 2026**, when
+a system-wide audit ran in eight batches and rewrote §2.4, §2.5, §2.5b, §5, §7,
+§9 and §12 from what the code does now.
+
+**§12 is the list of what is still wrong**, ranked by whether a customer can
+feel it. It was rewritten from scratch in that pass because four of the nine
+items in it had already been fixed and the list had not been told — a ranked
+defect list that nobody re-reads becomes a way of believing things that stopped
+being true.
 
 **Keep this current.** When you change a contract in here — a topic, a route, an
 ownership rule, a boundary — update the section as part of the same commit. A map
@@ -969,32 +973,66 @@ From `CONVENTIONS.md` and the owner's standing instructions:
 
 ## 12. Known defects, ranked
 
-Updated 14 Aug 2026.
+Rewritten 25 Aug 2026 after an independent pass. Every item was checked against
+the source, not carried forward — and four of the nine that were here had been
+fixed without this list being told, which is its own lesson about a ranked list
+nobody re-reads. **Ranked by whether a customer can feel it.**
 
-1. **Nothing written today is on the robot.** The firmware changes — uplink
-   buffer, status layer, per-node topics, mic and speaker control, noise
-   suppression — are source only. **They were never compiled**: this work was done
-   in an environment with no ESP-IDF toolchain. Run `idf.py build` before the
-   first flash and expect to fix build errors. Everything in §4 describes the
-   source, not the board.
-2. **No control page.** The backend surface and the firmware controls both exist
-   now; the iPhone screen that drives them does not. It should read
-   `/api/devices` and render by `control_type`, with **no robot-specific code** —
-   that is what makes it work for a Tuya plug tomorrow.
-3. **Visitor approval path is dead code.** §2.10.
-4. **No error tracking in production.** Sentry, Langfuse and the metrics modules
-   were never ported from the archive. Failures are discovered by the user — which
-   is exactly how the voice bug was found.
-6. **No staging environment.** Production is what the robot on the desk talks to. §1.
-8. **The room node is still on global topics**, which is the last thing keeping
-   `room_device.send()` owner-only. §2.7.
-9. **Stale in-code documentation.** `feature_flags.py` advertises three flags for
-   subsystems that do not exist here (Anthropic prompt caching — the SDK is not
-   even a dependency; DSPy; Telegram feedback buttons) and describes Sandy as a
-   3–4 user family app, which contradicts the product. `auth_handlers.py`'s
-   docstring still mentions Telegram. §4.6.
-11. **Servo motion is a jump, not a move.** ~30 lines of easing, and it is most of
-    the difference between looking like a product and looking like a prototype.
-12. **The display has no Arabic font.** LVGL ships
-    `LV_USE_ARABIC_PERSIAN_CHARS`; until it is enabled with a font that has the
-    glyphs, her status banner has to be Latin. §4.2.
+### Reaches a user
+
+1. **No error tracking in production.** Sentry, Langfuse and the metrics modules
+   were never ported from the archive, so failures are discovered by the owner
+   using the product. Two of this audit's worst findings — unpairing not
+   releasing the devices, and the account delete leaving nine collections —
+   were reported that way, which is the argument for this item and not for
+   anything else on the list.
+2. **`tool_health` is process-global and not per tenant.** `_history` is keyed
+   by tool name alone, so one customer's outage shapes what `get_capabilities`
+   tells another. It reads `error` rather than `ok` now, so ordinary refusals no
+   longer trip it (§2.4), but a genuinely broken upstream is still reported to
+   everybody. The fix is a key, not a rewrite.
+3. **The persona is rebuilt from scratch every turn** — 26 of the 44 database
+   round trips a user waits for, on every message, on every channel. A cache was
+   designed and cut; the reason is in §2.5 and it is the place to start.
+4. **The chat turn makes two model calls in series** — the function-calling
+   router, then the reply. That pair, not the database, is why chat feels slower
+   than voice: voice injects memory once at session start and then only streams.
+   Merging them, or streaming the reply before routing finishes, is the open
+   question.
+
+### Real, but nobody hits it today
+
+5. **No staging environment.** Production is what the robot on the desk talks
+   to. §1.
+6. **The visitor approval flow is half-built.** A visitor can `POST
+   /api/access/request` and poll it, and nothing in the system can approve it —
+   the Telegram handler that used to is gone. Wire it to an owner endpoint or
+   delete the flow; a silently disabled feature is worse than an absent one.
+   §2.10.
+7. **`_normalize_profile` and the JSON profile store around it are dead.**
+   `find_user_profile`, `save_user_profile`, `ensure_user_profile` and
+   `is_owner_chat_id` have no caller outside their own module. It is the last
+   place in `cloud/` that still encodes "tenant #1 is special", and leaving it
+   half-alive is what let a batch of this audit fix a string nobody reads.
+   Delete it or wire it up.
+8. **`GeminiLiveManager` builds its own `URLSession`.** Harmless today, but the
+   app's one-transport-policy rule (§6) cannot see it, so a future change to
+   retry or timeouts will miss it.
+
+### Hardware, and the owner already knows
+
+9. **Servo motion is a jump, not a move.** ~30 lines of easing, and most of the
+   difference between looking like a product and looking like a prototype.
+10. **Two-mic beamforming is not written.** §4.6.
+11. **Voice status clips are not flashed** — `status_set()` has the hook and the
+    sentences, the partition table has no room reserved. §4.2.
+
+### Checked and closed since the last version of this list
+
+The firmware **is** built in CI (`idf.py build`, §9), so "never compiled" is no
+longer true. The control page **exists** (`ios/SandyApp/Features/Control/`). The
+room node is **on the per-node topic tree** (§4.5), so `room_device.send()` is
+not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
+(`firmware/brain-core/main/fonts/`). `feature_flags.py` no longer advertises
+subsystems this repo does not contain, and the last comments pointing at the
+removed Telegram transport are gone.

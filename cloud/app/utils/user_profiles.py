@@ -379,7 +379,7 @@ def build_user_profile_prompt_sections(
 
 
 def is_sensitive_domain_request(message_text: str) -> bool:
-    # Public alias kept for callers (telegram_handlers, tests); the canonical
+    # Public alias kept for callers and tests; the canonical
     # implementation is is_sensitive_request.
     return is_sensitive_request(message_text)
 

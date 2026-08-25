@@ -331,13 +331,36 @@ def rename_node(node_id: str, label: str) -> Dict[str, Any]:
 
 
 def unpair_node(node_id: str) -> Dict[str, Any]:
+    """Release a node **and everything that reaches the world through it.**
+
+    Deleting the node row alone left the account still controlling the robot.
+    A device row carries its own transport — `{"kind": "node", "node_id": …}` —
+    and §2.7's boundary asks "does this topic actuate a device in the calling
+    tenant's registry?", not "does the tenant still own the node". So the light
+    and the neck and the face stayed in the app, stayed switchable, and kept
+    publishing to a board that had just been sold.
+
+    The board is not listening for permission either: its topics come from the
+    pairing code compiled into it, so it obeys whatever arrives. Which is why
+    this has to be a delete and not a flag.
+
+    Returns the device count too — "unpaired" is not a checkable claim on its
+    own, and this is the operation somebody performs while selling hardware.
+    """
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_store"}
-    r = coll.delete_one({"node_id": (node_id or "").strip()})
+    node_id = (node_id or "").strip()
+    r = coll.delete_one({"node_id": node_id})
     if r.deleted_count == 0:
         return {"ok": False, "error": "not_found"}
-    return {"ok": True, "node_id": node_id}
+
+    devices_removed = 0
+    if node_id:
+        from app.features.device_store import delete_devices_for_node
+
+        devices_removed = delete_devices_for_node(node_id)
+    return {"ok": True, "node_id": node_id, "devices_removed": devices_removed}
 
 
 # ── Heartbeat ingest (called by the firmware-facing path, not tenant-scoped) ──

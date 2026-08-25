@@ -39,6 +39,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from pymongo.errors import PyMongoError
+
 from app.utils.tenant_db import scoped
 from app.db import configure, get_db
 
@@ -347,6 +349,28 @@ def learn_ir_button(name: str, button: str, code: str) -> Dict[str, Any]:
     coll.update_one({"name": d["name"]},
                     {"$set": {"meta": meta, "updated_at": _now()}})
     return {"ok": True, "name": d["name"], "button": button}
+
+
+def delete_devices_for_node(node_id: str) -> int:
+    """Remove every device in this tenant that reaches the world through a node.
+
+    Called by `node_store.unpair_node`, because releasing a robot has to release
+    what it actuates. Tenant-scoped like everything else here, so unpairing
+    cannot touch another account's rows even if two of them somehow shared a
+    node id.
+    """
+    coll = _coll()
+    node_id = (node_id or "").strip()
+    if coll is None or not node_id:
+        return 0
+    try:
+        r = coll.delete_many({"transport.kind": "node",
+                              "transport.node_id": node_id})
+        return int(getattr(r, "deleted_count", 0) or 0)
+    except PyMongoError as exc:
+        logger.warning("[device_store] releasing devices for %s failed: %s",
+                       node_id, exc)
+        return 0
 
 
 def device_topic(device: Dict[str, Any]) -> Optional[str]:

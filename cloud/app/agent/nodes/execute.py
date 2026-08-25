@@ -23,7 +23,12 @@ _stream_tls = threading.local()
 
 
 def set_stream_hooks(on_start, on_chunk):
-    """يحدد callbacks للـ streaming — thread-local، يُستدعى من Telegram handler."""
+    """يحدد callbacks للـ streaming — thread-local، يُستدعى من `/api/agent/stream`.
+
+    كان مكتوب «من Telegram handler» — والمنصة انشالت من المشروع. المنادي
+    الوحيد اليوم هو مسار البثّ بالويب، وهو بيضبطهم **جوّا خيط الشغل**، لأنهم
+    ثريد-لوكال وما بيعبروا من خيط الطلب.
+    """
     _stream_tls.on_start = on_start
     _stream_tls.on_chunk = on_chunk
 
@@ -182,7 +187,7 @@ def _handle_chat(state: SandyState, create_chat_completion_fn) -> str:
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": state["message"]})
 
-    # Streaming path — thread-local hooks set by Telegram handler
+    # Streaming path — thread-local hooks set by /api/agent/stream's worker
     hooks = _get_stream_hooks()
     if hooks:
         on_start, on_chunk = hooks
