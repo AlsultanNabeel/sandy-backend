@@ -16,6 +16,7 @@ from app.agent.executor.task_handlers._common import (
     _ambiguous_choice_reply,
     _format_task_choices,
 )
+from app.agent.executor.task_handlers._now import run_now
 
 
 def _handle_uncomplete_multi(
@@ -51,7 +52,6 @@ def _handle_uncomplete_multi(
             "لقيت مهمة واحدة فقط. لإلغاء اكتمال مهمة واحدة استخدم: رجّعي المهمة الأولى."
         )
     elif status in {"matched", "partial"} and tasks:
-        missing_refs = result.get("missing_references", [])
         task_items = [
             {"id": task.get("id", ""), "text": task.get("text", "")}
             for task in tasks
@@ -65,17 +65,10 @@ def _handle_uncomplete_multi(
                 "confirmation_status": "pending",
             }
         )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        lines = "\n".join(f"- {item['text']}" for item in task_items)
-        if status == "partial":
-            missing_text = "، ".join(str(ref) for ref in missing_refs)
-            reply = (
-                f"بعض المهام غير موجودة ضمن المكتملة: {missing_text}\n\n"
-                f"لقيت هاي المهام فقط:\n{lines}\n\n"
-                f"متأكد بدك أرجّعها لقائمة المهام النشطة؟"
-            )
-        else:
-            reply = f"متأكد بدك أرجّع هاي المهام لقائمة المهام النشطة؟\n{lines}"
+        return run_now(
+            {"type": "task", "action": "uncomplete_multi", "tasks": task_items},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهام المكتملة."
         ok = False
@@ -115,17 +108,10 @@ def _handle_uncomplete(
     elif task_obj:
         task_id = task_obj.get("id", "")
         task_text = task_obj.get("text", "")
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "uncomplete",
-                "task_id": task_id,
-                "text": task_text,
-                "confirmation_status": "pending",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        reply = f"متأكد بدك أرجّع المهمة لقائمة المهام النشطة؟\n- {task_text}"
+        return run_now(
+            {"type": "task", "action": "uncomplete", "task_id": task_id, "text": task_text},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهمة المكتملة."
         ok = False
@@ -186,17 +172,11 @@ def _handle_complete(
             reply = "حددت المهمة، بس ما قدرت أجيب معرفها."
             ok = False
         else:
-            session["pending_action"] = create_pending_action(
-                {
-                    "type": "task",
-                    "action": "complete",
-                    "task_id": task_id,
-                    "text": task_text,
-                    "confirmation_status": "pending",
-                }
-            )
-            save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-            reply = f"متأكد بدك أعلّم المهمة كمكتملة؟\n- {task_text}"
+            return run_now(
+                {"type": "task", "action": "complete",
+                 "task_id": task_id, "text": task_text},
+                session=session, session_file=session_file, mongo_db=mongo_db,
+                tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهمة."
         ok = False
@@ -293,16 +273,10 @@ def _handle_complete_multi(
             if task.get("id")
         ]
         lines = "\n".join(f"- {task.get('text', '')}" for task in pending_tasks)
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "complete_multi",
-                "tasks": pending_tasks,
-                "confirmation_status": "pending",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        reply = f"متأكد بدك أعلّم المهام التالية كمكتملة؟\n{lines}"
+        return run_now(
+            {"type": "task", "action": "complete_multi", "tasks": pending_tasks},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهام."
         ok = False

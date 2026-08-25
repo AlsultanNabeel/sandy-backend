@@ -15,6 +15,7 @@ from app.agent.executor.task_handlers._common import (
     _ambiguous_choice_reply,
     _format_task_choices,
 )
+from app.agent.executor.task_handlers._now import run_now
 
 
 def _handle_delete(
@@ -50,17 +51,10 @@ def _handle_delete(
     elif task_obj:
         task_id = task_obj.get("id", "")
         task_text = task_obj.get("text", "")
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "delete_one",
-                "task_id": task_id,
-                "text": task_text,
-                "confirmation_status": "pending",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        reply = f"متأكد بدك أحذف المهمة: {task_text}؟"
+        return run_now(
+            {"type": "task", "action": "delete_one", "task_id": task_id, "text": task_text},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهمة."
         ok = False

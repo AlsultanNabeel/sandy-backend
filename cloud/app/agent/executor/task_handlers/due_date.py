@@ -20,6 +20,7 @@ from app.features.tasks_store import (
 from app.agent.executor.task_handlers._common import (
     _format_task_choices,
 )
+from app.agent.executor.task_handlers._now import run_now
 
 
 def _handle_update_due_date(
@@ -201,22 +202,13 @@ def _handle_update_due_date(
                     "reply": "التاريخ الجديد غير صالح. اكتب التاريخ بشكل أوضح.",
                 }
 
-            task_text_current = task_obj.get("text", "")
-
-            session["pending_action"] = create_pending_action(
-                {
-                    "type": "task",
-                    "action": "update_due_date",
-                    "task_id": task_obj.get("id", ""),
-                    "text": task_text_current,
-                    "due_iso": due_iso_for_update,
-                    "new_due_text": new_due_text,
-                    "confirmation_status": "pending",
-                }
-            )
-            save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-
-            reply = f"متأكد بدك تعدّل تاريخ المهمة؟\n- {task_text_current}\nالتاريخ الجديد: {new_due_text}"
+            return run_now(
+                {"type": "task", "action": "update_due_date",
+                 "task_id": task_obj.get("id", ""),
+                 "text": task_obj.get("text", ""),
+                 "due_iso": due_iso_for_update, "new_due_text": new_due_text},
+                session=session, session_file=session_file, mongo_db=mongo_db,
+                tasks_file=tasks_file, save_session_fn=save_session_fn)
 
     else:
         reply = "ما قدرت أحدد المهمة."
@@ -384,20 +376,12 @@ def _handle_update_due_time(
 
         task_text_current = task_obj.get("text", "")
 
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "update_due_time",
-                "task_id": task_obj.get("id", ""),
-                "text": task_text_current,
-                "due_iso": due_iso_for_update,
-                "new_due_text": new_due_text,
-                "confirmation_status": "pending",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-
-        reply = f"متأكد بدك تعدّل وقت تذكير المهمة؟\n- {task_text_current}\nالوقت الجديد: {new_due_text}"
+        return run_now(
+            {"type": "task", "action": "update_due_time",
+             "task_id": task_obj.get("id", ""), "text": task_text_current,
+             "due_iso": due_iso_for_update, "new_due_text": new_due_text},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
 
     else:
         reply = "ما قدرت أحدد المهمة."

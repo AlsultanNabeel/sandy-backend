@@ -26,6 +26,9 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: Dict[str, ToolDefinition] = {}
+        # Built on first use and dropped whenever a tool is registered, so a
+        # late registration cannot leave the router sending a stale catalogue.
+        self._declarations_cache: Optional[List[Dict[str, Any]]] = None
 
     # التسجيل
 
@@ -37,6 +40,7 @@ class ToolRegistry:
         handler: Callable,
     ) -> None:
         """سجّل Python handler كـ tool."""
+        self._declarations_cache = None
         self._tools[name] = ToolDefinition(
             name=name,
             description=description,
@@ -59,15 +63,26 @@ class ToolRegistry:
     # تصدير الـ schemas
 
     def get_function_declarations(self) -> List[Dict[str, Any]]:
-        """يرجع schemas بصيغة function_declarations (متوافق Azure OpenAI/أي مزوّد)."""
-        return [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            }
-            for tool in self._tools.values()
-        ]
+        """يرجع schemas بصيغة function_declarations (متوافق Azure OpenAI/أي مزوّد).
+
+        **بينتبنى مرة وحدة، مش بكل رسالة.** الكتالوج ستّة وعشرين ألف حرف من
+        ثمانين أداة، والسجل ما بيتغيّر بعد الإقلاع — `register_all_tools` بتشتغل
+        مرة. بناؤه بكل دور كان شغل معالج على مسار الطلب مقابل نتيجة مطابقة حرفياً
+        كل مرة.
+
+        وبيرجّع نسخة، لأنّ اللي بيرجّع مرجع لبنيته الداخلية بيخلّي أي منادي
+        يعدّل عليها بالغلط يفسد كل الأدوار اللي بعده.
+        """
+        if self._declarations_cache is None:
+            self._declarations_cache = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+                for tool in self._tools.values()
+            ]
+        return [dict(d) for d in self._declarations_cache]
 
     # وصف القدرات مع حالة كل أداة
 

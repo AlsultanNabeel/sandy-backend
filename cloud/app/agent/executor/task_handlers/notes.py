@@ -13,6 +13,7 @@ from app.agent.executor.helpers import _has_visible_task_note
 from app.agent.executor.task_handlers._common import (
     _format_task_choices,
 )
+from app.agent.executor.task_handlers._now import run_now
 
 
 def _handle_rename(
@@ -64,19 +65,12 @@ def _handle_rename(
     elif not new_text:
         reply = "شو الاسم الجديد للمهمة؟"
     elif task_obj:
-        old_text = task_obj.get("text", "")
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "rename",
-                "task_id": task_obj.get("id", ""),
-                "old_text": old_text,
-                "new_text": new_text,
-                "confirmation_status": "pending",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        reply = f"متأكد بدك تعدّل اسم المهمة؟\nمن: {old_text}\nإلى: {new_text}"
+        return run_now(
+            {"type": "task", "action": "rename",
+             "task_id": task_obj.get("id", ""),
+             "old_text": task_obj.get("text", ""), "new_text": new_text},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهمة."
         ok = False
@@ -135,19 +129,12 @@ def _handle_append_note(
     elif not note_text:
         reply = "شو الملاحظة اللي بدك أضيفها؟"
     elif task_obj:
-        task_text_current = task_obj.get("text", "")
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "append_note",
-                "task_id": task_obj.get("id", ""),
-                "text": task_text_current,
-                "note": note_text,
-                "confirmation_status": "pending",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        reply = f"متأكد بدك تضيف هاي الملاحظة للمهمة؟\n- {task_text_current}\nالملاحظة: {note_text}"
+        return run_now(
+            {"type": "task", "action": "append_note",
+             "task_id": task_obj.get("id", ""),
+             "text": task_obj.get("text", ""), "note": note_text},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهمة."
         ok = False
@@ -210,25 +197,16 @@ def _handle_replace_note(
     elif not note_text:
         reply = "شو الملاحظة الجديدة؟"
     elif task_obj:
-        task_text_current = task_obj.get("text", "")
-        pending_note_action = "replace_note"
-        reply = f"متأكد بدك تستبدل ملاحظة المهمة؟\n- {task_text_current}\nالملاحظة الجديدة: {note_text}"
-
-        if not _has_visible_task_note(task_obj):
-            pending_note_action = "append_note"
-            reply = f"ما في ملاحظة قديمة أستبدلها للمهمة:\n- {task_text_current}\nبدك أضيف هاي الملاحظة؟\nالملاحظة: {note_text}"
-
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": pending_note_action,
-                "task_id": task_obj.get("id", ""),
-                "text": task_text_current,
-                "note": note_text,
-                "confirmation_status": "pending",
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
+        # «استبدل» على مهمة بلا ملاحظة معناه «ضيف». كان بيسأل عن الفرق قبل ما
+        # ينفّذ؛ هلّق بينفّذ وبيقول شو صار — الفرق بيبان بالردّ، مش بسؤال قبله.
+        return run_now(
+            {"type": "task",
+             "action": ("replace_note" if _has_visible_task_note(task_obj)
+                        else "append_note"),
+             "task_id": task_obj.get("id", ""),
+             "text": task_obj.get("text", ""), "note": note_text},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:
         reply = "ما قدرت أحدد المهمة."
         ok = False

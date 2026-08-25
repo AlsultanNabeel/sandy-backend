@@ -14,7 +14,8 @@ from app.api.voice_ws._config import (
     logger,
     _HMAC_KEY,
     _LEGACY_SECRET,
-    _LIVE_MODEL,
+    live_model_candidates,
+    remember_live_model,
     _ANTI_REPLAY_MS,
     _SENSITIVE_TOOLS,
     _VAD_RMS_THRESHOLD,
@@ -507,9 +508,38 @@ async def _live_session(ws, remote: str) -> None:
         client = genai.Client(api_key=GEMINI_API_KEY)
         dispatcher = _make_dispatcher()
 
-        async with client.aio.live.connect(model=_LIVE_MODEL, config=config) as session:
+        # **Walk the candidates until one accepts audio.**
+        #
+        # `connect()` succeeding is not enough: the refusal that took voice down
+        # arrived at the *first audio frame*, as a 1007 close, long after the
+        # handshake and the memory seed. So the probe is a real one — send a
+        # silent frame, and treat a close as "this model is not it".
+        model_name = ""
+        last_error: Exception | None = None
+        for candidate in live_model_candidates():
+            try:
+                cm = client.aio.live.connect(model=candidate, config=config)
+                session = await cm.__aenter__()
+                await session.send_realtime_input(
+                    audio=types.Blob(data=b"\x00\x00" * 160,
+                                     mime_type="audio/pcm;rate=16000"))
+            except Exception as exc:  # noqa: BLE001 — any refusal means "try the next"
+                last_error = exc
+                logger.warning("[voice_ws] live model %s refused: %s", candidate, exc)
+                continue
+            model_name = candidate
+            break
+
+        if not model_name:
+            _send_json(ws, {"type": "error", "msg": "live_model_unavailable"})
+            logger.error("[voice_ws] no live model accepted audio; last: %s", last_error)
+            return
+
+        remember_live_model(model_name)
+        async with cm:
             logger.info(
-                "[voice_ws] Gemini Live session opened for %s (gate=%s)", remote, gate_on
+                "[voice_ws] Gemini Live session opened for %s (gate=%s, model=%s)",
+                remote, gate_on, model_name
             )
 
             if reader.dropped:

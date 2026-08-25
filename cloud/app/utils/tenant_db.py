@@ -101,41 +101,69 @@ class ScopedCollection:
         return self._raw.aggregate(scoped_pipeline, *args, **kwargs)
 
     # ── writes ───────────────────────────────────────────────────────────────
+    #
+    # Every write marks the tenant's cached context stale — see
+    # `utils/tenant_version.py`. Here because this class is what most tenant
+    # writes already pass through; the handful that reach past it call
+    # `bump_for` themselves, and those are named in that module.
+    def _note_write(self) -> None:
+        from app.utils.tenant_version import bump_for
+
+        bump_for(self._tenant, collection=getattr(self._raw, "name", ""))
+
     def insert_one(self, document: Mapping[str, Any], *args, **kwargs):
-        return self._raw.insert_one(self._stamp(document), *args, **kwargs)
+        out = self._raw.insert_one(self._stamp(document), *args, **kwargs)
+        self._note_write()
+        return out
 
     def insert_many(self, documents, *args, **kwargs):
-        return self._raw.insert_many(
+        out = self._raw.insert_many(
             [self._stamp(d) for d in documents], *args, **kwargs
         )
+        self._note_write()
+        return out
 
     def update_one(self, filter: Mapping[str, Any], update, *args, **kwargs):
-        return self._raw.update_one(self._scope(filter), update, *args, **kwargs)
+        out = self._raw.update_one(self._scope(filter), update, *args, **kwargs)
+        self._note_write()
+        return out
 
     def update_many(self, filter: Mapping[str, Any], update, *args, **kwargs):
-        return self._raw.update_many(self._scope(filter), update, *args, **kwargs)
+        out = self._raw.update_many(self._scope(filter), update, *args, **kwargs)
+        self._note_write()
+        return out
 
     def replace_one(self, filter: Mapping[str, Any], replacement, *args, **kwargs):
         # Keep the tenant on the replacement too — a replace must not strip it.
-        return self._raw.replace_one(
+        out = self._raw.replace_one(
             self._scope(filter), self._stamp(replacement), *args, **kwargs
         )
+        self._note_write()
+        return out
 
     def delete_one(self, filter: Mapping[str, Any], *args, **kwargs):
-        return self._raw.delete_one(self._scope(filter), *args, **kwargs)
+        out = self._raw.delete_one(self._scope(filter), *args, **kwargs)
+        self._note_write()
+        return out
 
     def delete_many(self, filter: Mapping[str, Any], *args, **kwargs):
-        return self._raw.delete_many(self._scope(filter), *args, **kwargs)
+        out = self._raw.delete_many(self._scope(filter), *args, **kwargs)
+        self._note_write()
+        return out
 
     def find_one_and_update(self, filter: Mapping[str, Any], update, *args, **kwargs):
         # On upsert, pymongo seeds the new doc from the filter's equality terms,
         # so scoping the filter also stamps the tenant onto an upserted document.
-        return self._raw.find_one_and_update(
+        out = self._raw.find_one_and_update(
             self._scope(filter), update, *args, **kwargs
         )
+        self._note_write()
+        return out
 
     def find_one_and_delete(self, filter: Mapping[str, Any], *args, **kwargs):
-        return self._raw.find_one_and_delete(self._scope(filter), *args, **kwargs)
+        out = self._raw.find_one_and_delete(self._scope(filter), *args, **kwargs)
+        self._note_write()
+        return out
 
     def insert_missing(self, documents: List[Mapping[str, Any]]) -> int:
         """Insert each document if its ``_id`` is absent — **one round trip**.
@@ -172,6 +200,7 @@ class ScopedCollection:
 
         try:
             result = self._raw.insert_many(docs, ordered=False)
+            self._note_write()
             return len(getattr(result, "inserted_ids", None) or [])
         except BulkWriteError as exc:
             # A duplicate key here is the expected outcome of a race, not a

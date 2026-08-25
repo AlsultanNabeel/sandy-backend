@@ -30,6 +30,25 @@ from app.utils.user_profiles import (
 )
 
 
+def _bump_persona(user_id: str) -> None:
+    """Mark this tenant's cached persona stale.
+
+    These three routes write `sandy_memories` on a raw handle, so the bump in
+    `ScopedCollection` never sees them — and `sandy_memories` is where the
+    preferences, relationships and lessons in a cached persona come from. A
+    preference saved in the app has to be true in the next reply, not a minute
+    later.
+    """
+    try:
+        from app.utils.tenant_version import bump_for
+
+        bump_for(str(user_id or ""), collection="sandy_memories")
+    except Exception:  # noqa: BLE001 — a stale cache must not fail the write
+        import logging
+
+        logging.getLogger(__name__).debug("bump skipped", exc_info=True)
+
+
 def register_memory_api(app, mongo_db=None):
     @app.route("/api/memory", methods=["GET"])
     @require_auth
@@ -76,6 +95,7 @@ def register_memory_api(app, mongo_db=None):
             if not uid:
                 return jsonify({"ok": False}), 403
             # Same shape the memory_store tool writes (plain user_fact, no embedding).
+            _bump_persona(uid)
             res = mongo_db["sandy_memories"].insert_one({
                 "chat_id": uid,
                 "label": "user_fact",
@@ -104,6 +124,7 @@ def register_memory_api(app, mongo_db=None):
             if not uid:
                 return jsonify({"ok": False}), 403
             # Scoped + never edits an auto summary by id.
+            _bump_persona(uid)
             res = mongo_db["sandy_memories"].update_one(
                 {"_id": oid, "chat_id": uid, "label": {"$ne": "conversation_summary"}},
                 {"$set": {"content": text}},
@@ -127,6 +148,7 @@ def register_memory_api(app, mongo_db=None):
             if not uid:
                 return jsonify({"ok": False}), 403
             # Scoped + never deletes an auto summary by id.
+            _bump_persona(uid)
             res = mongo_db["sandy_memories"].delete_one(
                 {"_id": oid, "chat_id": uid, "label": {"$ne": "conversation_summary"}}
             )

@@ -50,12 +50,23 @@ class TaskActionsTests(unittest.TestCase):
         set_active_user_profile(None)
 
     @patch("app.agent.executor.task_handlers.completion.resolve_task_references_for_write", return_value=_SINGLE)
-    def test_complete_single_sets_pending(self, _):
+    def test_complete_single_runs_without_asking(self, _):
+        """**No confirmation turn.**
+
+        This used to assert that a pending was stored — that «خلصت المهمة»
+        answered «متأكد بدك أعلّم المهمة كمكتملة؟» and waited. The owner's
+        objection is the right one: he already said it. A confirmation earns its
+        cost when the action is hard to undo and the machine might have
+        misheard, and marking a task done is neither. Bulk deletes still ask;
+        see `task_handlers/_now.py`.
+        """
         session = {}
         r = _call("task", {"action": "complete", "reference": "شراء حليب"}, session)
         self.assertTrue(r["handled"])
-        self.assertEqual(session["pending_action"]["action"], "complete")
-        self.assertEqual(session["pending_action"]["task_id"], "task-001")
+        # The executor clears the slot on its way out, so the key can exist
+        # with a `None` in it — what must not exist is something waiting.
+        self.assertIsNone(session.get("pending_action"),
+                          "a confirmation turn came back for a single complete")
 
     @patch("app.agent.executor.task_handlers.completion.resolve_task_references_for_write", return_value=_NOT_FOUND)
     def test_complete_not_found_asks_clarification(self, _):
@@ -67,12 +78,17 @@ class TaskActionsTests(unittest.TestCase):
 
     @patch("app.agent.executor.task_handlers.deletion.resolve_task_reference_for_write",
            return_value={"status": "single", "task": _TASK})
-    def test_delete_single_sets_pending(self, _):
+    def test_delete_single_runs_without_asking(self, _):
+        """Deleting **one named task** is direct; the name is the evidence she
+        heard it right. Deleting many at once still asks — that is a rule about
+        scale, not danger: a misheard «احذف الكل» costs work that cannot be
+        spoken back into existence. See `task_handlers/_now.py`.
+        """
         session = {}
         r = _call("task", {"action": "delete", "reference": "شراء حليب"}, session)
         self.assertTrue(r["handled"])
-        self.assertEqual(session["pending_action"]["action"], "delete_one")
-        self.assertEqual(session["pending_action"]["task_id"], "task-001")
+        self.assertIsNone(session.get("pending_action"),
+                          "a confirmation turn came back for a single delete")
 
     @patch("app.features.tasks_store.load_tasks", return_value=[_TASK])
     @patch("app.agent.executor.task_handlers.creation.add_task", return_value="task-002")

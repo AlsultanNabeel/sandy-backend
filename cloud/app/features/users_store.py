@@ -54,6 +54,23 @@ def is_available() -> bool:
     return get_db() is not None
 
 
+def _bump(user_id: str, collection: str = "sandy_users") -> None:
+    """Mark this tenant's cached persona stale.
+
+    **This module is why the first attempt at that cache had to be cut.** It
+    writes on the raw collection — `_coll()` below returns `get_db()[_COLL]`,
+    not a `ScopedCollection` — so a bump that lived only in the tenant wrapper
+    never saw the onboarding name or the persona change, and Sandy would keep
+    saying she did not know you for a minute after you told her.
+    """
+    try:
+        from app.utils.tenant_version import bump_for
+
+        bump_for(str(user_id or ""), collection=collection)
+    except Exception:  # noqa: BLE001 — a stale cache must not fail the write
+        logger.debug("[users_store] version bump skipped", exc_info=True)
+
+
 def _coll():
     return get_db()[_COLL] if get_db() is not None else None
 
@@ -113,6 +130,7 @@ def upsert_from_oauth(
             if value and not existing.get(field):
                 updates[field] = value
         coll.update_one({"_id": existing["_id"]}, {"$set": updates})
+        _bump(str(existing["_id"]))
         existing.update(updates)
         return existing
 
@@ -215,6 +233,7 @@ def set_onboarding(
     if notes is not None:
         sets["onboarding.notes"] = notes.strip()[:500]
     res = coll.update_one({"_id": user_id}, {"$set": sets})
+    _bump(user_id)
     if res.matched_count:
         _mirror_onboarding_to_memory(user_id)
     return res.matched_count > 0
@@ -257,6 +276,7 @@ def _mirror_onboarding_to_memory(user_id: str) -> None:
             lines.append(("onboarding_notes", f"عن نفسه: {str(ob['notes']).strip()}"))
 
         for key, text in lines:
+            _bump(user_id, "sandy_memories")
             db["sandy_memories"].update_one(
                 {"chat_id": user_id, "source_key": key},
                 {"$set": {"chat_id": user_id, "user_id": user_id,
@@ -286,6 +306,7 @@ def record_nudge_answer(user_id: str, qid: str, answer: str) -> bool:
     answer = (answer or "").strip()[:300]
     if coll is None or not user_id or not qid or not answer:
         return False
+    _bump(user_id)
     res = coll.update_one(
         {"_id": user_id},
         {"$set": {f"onboarding.nudge_answers.{qid}": answer, "last_seen_at": _now()}},
@@ -328,6 +349,7 @@ def set_persona(
     if not sets:
         return True
     res = coll.update_one({"_id": user_id}, {"$set": sets})
+    _bump(user_id)
     return res.matched_count > 0
 
 
@@ -351,6 +373,7 @@ def set_subscription(
         "subscription.source": source,
     }
     res = coll.update_one({"_id": user_id}, {"$set": sets})
+    _bump(user_id)
     return res.matched_count > 0
 
 
