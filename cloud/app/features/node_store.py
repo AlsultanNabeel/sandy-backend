@@ -330,6 +330,19 @@ def rename_node(node_id: str, label: str) -> Dict[str, Any]:
     return {"ok": True, "node_id": node_id}
 
 
+def _wipe_board(node_id: str) -> bool:
+    """Tell the board to forget its network credentials. Best effort."""
+    try:
+        from app.integrations.room_device import get_room_device_client
+
+        return bool(get_room_device_client().publish_service(
+            f"sandy/node/{node_id}/factory_reset", "erase"))
+    except Exception as exc:  # noqa: BLE001 — an offline board must not block the release
+        logger.warning("[NodeStore] factory reset not delivered to %s: %s",
+                       node_id, exc)
+        return False
+
+
 def unpair_node(node_id: str) -> Dict[str, Any]:
     """Release a node **and everything that reaches the world through it.**
 
@@ -351,16 +364,43 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
     if coll is None:
         return {"ok": False, "error": "no_store"}
     node_id = (node_id or "").strip()
-    r = coll.delete_one({"node_id": node_id})
-    if r.deleted_count == 0:
+    if not coll.find_one({"node_id": node_id}, {"_id": 1}):
         return {"ok": False, "error": "not_found"}
 
-    devices_removed = 0
-    if node_id:
-        from app.features.device_store import delete_devices_for_node
+    # **Devices first, node row second.**
+    #
+    # `ingest_status` looks the node up and *then* provisions from the outputs
+    # it declared. A heartbeat that passed that lookup a moment before the node
+    # row went away would run `provision_from_outputs` afterwards and rebuild
+    # the whole robot in the registry of the account that had just released it.
+    # Boards heartbeat every few seconds and provisioning is many round trips,
+    # so the window is real. Deleting the devices while the node is still there
+    # closes it: once the row is gone, `ingest_status` returns early and there
+    # is nothing left to re-create.
+    # **And wipe the board itself, while it is still addressable.**
+    #
+    # The publish path checks that the caller owns the node, and one line below
+    # they will not — so this has to happen first. It also has to happen *here*
+    # rather than in the endpoint, because deleting an account releases every
+    # node by calling this function directly: the strongest erase a person can
+    # ask for was producing the weakest hardware erase, leaving the seller's
+    # Wi-Fi name and password in a board somebody else is about to power on.
+    #
+    # An offline board does not block the release: the account must not be stuck
+    # owning hardware it no longer has. `board_wiped` says which of the two
+    # happened, because "sold it while it was unplugged" and "wiped it properly"
+    # are different states and only one of them needs a manual reset.
+    board_wiped = _wipe_board(node_id)
 
-        devices_removed = delete_devices_for_node(node_id)
-    return {"ok": True, "node_id": node_id, "devices_removed": devices_removed}
+    from app.features.device_store import delete_devices_for_node
+
+    devices_removed = delete_devices_for_node(node_id)
+    r = coll.delete_one({"node_id": node_id})
+    if r.deleted_count == 0:
+        return {"ok": False, "error": "not_found",
+                "devices_removed": devices_removed, "board_wiped": board_wiped}
+    return {"ok": True, "node_id": node_id,
+            "devices_removed": devices_removed, "board_wiped": board_wiped}
 
 
 # ── Heartbeat ingest (called by the firmware-facing path, not tenant-scoped) ──

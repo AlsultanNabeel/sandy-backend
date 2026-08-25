@@ -181,3 +181,96 @@ def test_deleting_an_account_also_releases_its_robots(db):
     with user_profiles.active_user_profile_context(other):
         assert node_store.pair_node("ABC123", label="روبوت مستعمل")["ok"] is True
         assert device_store is not None
+
+
+def test_a_legacy_numeric_id_does_not_survive_the_delete(db):
+    """**Mongo equality is type-strict.**
+
+    Legacy documents carry the owner's old Telegram id as an *integer* —
+    `api/studio_api.py::_brainstorm_chat_ids` exists only to read them and
+    queries `{"$in": [uid, int(uid)]}` for exactly this reason. The delete
+    compared the string form alone and walked straight past every one of them,
+    while reporting success. The batch that added collections to the list left
+    the type axis open, and the coverage test checks names, not types.
+    """
+    from app.features.account_delete import delete_account
+
+    numeric = "628544372"
+    db["sandy_users"].insert_one({"_id": numeric, "user_id": numeric})
+    db["sandy_brainstorms"].insert_one({"chat_id": int(numeric), "topic": "قديم"})
+    db["sandy_photos"].insert_one({"chat_id": int(numeric), "cap": "صورة قديمة"})
+    db["sandy_tasks"].insert_one({"user_id": numeric, "text": "جديد"})
+
+    delete_account(numeric)
+
+    left = {c: db[c].count_documents({}) for c in db.list_collection_names()
+            if db[c].count_documents({}) and c != "sandy_users"}
+    assert left == {}, f"legacy numeric-id documents survived the delete: {left}"
+
+
+def test_releasing_a_robot_wipes_it_and_clears_devices_before_the_node_row(db,
+                                                                          monkeypatch):
+    """Two orderings, both load-bearing, both invisible to a source-text check.
+
+    The wipe must go out **before** the node row disappears, because the publish
+    path checks that the caller owns the node — one line later they do not. And
+    the devices must go **before** it too: `ingest_status` looks the node up and
+    provisions from its outputs afterwards, so a heartbeat already past that
+    lookup would rebuild the whole robot in the registry of the account that
+    just released it. Boards heartbeat every few seconds.
+    """
+    import app.features.node_store as node_store
+    import app.integrations.room_device as room_device
+    from app.features import device_store
+    from app.utils import user_profiles
+
+    seen = []
+
+    class _Client:
+        def publish_service(self, topic, payload):
+            seen.append(("wipe", db["sandy_nodes"].count_documents({}),
+                         db["sandy_devices"].count_documents({})))
+            return True
+
+    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Client())
+
+    with user_profiles.active_user_profile_context(P):
+        node_id, _ = _paired_robot_with_a_light()
+        out = node_store.unpair_node(node_id)
+
+    assert seen, "the board was released without being told to erase itself"
+    _, nodes_at_wipe, devices_at_wipe = seen[0]
+    assert nodes_at_wipe == 1, "the wipe went out after the release — undeliverable"
+    assert devices_at_wipe == 1, "the fixture is wrong"
+    assert out["board_wiped"] is True
+    assert db["sandy_nodes"].count_documents({}) == 0
+    assert device_store.list_devices() == []
+
+
+def test_deleting_an_account_also_wipes_the_boards_it_releases(db, monkeypatch):
+    """`DELETE /api/account` releases nodes by calling `unpair_node` directly.
+    The wipe lived in the *endpoint* for selling a robot, so the strongest erase
+    a person can ask for produced the weakest hardware erase — the board kept
+    the seller's Wi-Fi name and password."""
+    import app.integrations.room_device as room_device
+    from app.features import node_store
+    from app.features.account_delete import delete_account
+    from app.utils import user_profiles
+
+    wiped = []
+
+    class _Client:
+        def publish_service(self, topic, payload):
+            wiped.append(topic)
+            return True
+
+    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Client())
+
+    with user_profiles.active_user_profile_context(P):
+        _paired_robot_with_a_light()
+        for n in node_store.list_nodes() or []:
+            node_store.unpair_node(str(n.get("node_id") or ""))
+    delete_account(U)
+
+    assert any(t.endswith("/factory_reset") for t in wiped), \
+        "a deleted account left its boards holding the owner's network"

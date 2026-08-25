@@ -212,14 +212,50 @@ def test_selling_a_robot_wipes_it_before_releasing_it():
     The publish path checks that the caller owns the node. Unpair first and the
     board becomes unreachable by the only person entitled to erase it — so it
     ships to its buyer still holding the seller's Wi-Fi name and password.
+
+    **Driven, not read.** This used to assert that one string literal appeared
+    before another in `devices_api.py` — so renaming a local broke it, a real
+    reorder that kept the literals passed it, and it could not see that
+    `DELETE /api/account` released nodes by calling `unpair_node` directly and
+    skipped the wipe entirely. The wipe lives inside `unpair_node` now, and this
+    watches the order the publish and the delete actually happen in.
     """
-    api = _read("cloud/app/api/devices_api.py")
-    i_wipe = api.index("factory_reset")
-    i_unpair = api.index("r = unpair_node(node_id)")
-    assert i_wipe < i_unpair, (
-        "the robot is released before it is wiped, so the wipe cannot be "
+    import mongomock
+
+    import app.db as appdb
+    import app.features.node_store as node_store
+    from app.utils import user_profiles
+
+    db = mongomock.MongoClient()["t"]
+    appdb.configure(db)
+    order = []
+
+    class _Client:
+        def publish_service(self, topic, payload):
+            order.append(("wipe", topic, node_store._coll().count_documents({})))
+            return True
+
+    import app.integrations.room_device as room_device
+    real = room_device.get_room_device_client
+    room_device.get_room_device_client = lambda: _Client()
+    try:
+        profile = {"user_id": "u1", "chat_id": "u1", "relation": "user",
+                   "permissions": "all", "is_guest": False}
+        db["sandy_users"].insert_one({"_id": "u1", "user_id": "u1"})
+        with user_profiles.active_user_profile_context(profile):
+            node_id = node_store.pair_node("ABC123", label="روبوت")["node_id"]
+            out = node_store.unpair_node(node_id)
+    finally:
+        room_device.get_room_device_client = real
+        appdb.reset()
+
+    assert order, "the board was released without being told to erase itself"
+    _, topic, nodes_at_wipe = order[0]
+    assert topic.endswith("/factory_reset")
+    assert nodes_at_wipe == 1, (
+        "the robot was released before it was wiped, so the wipe could not be "
         "delivered and the buyer inherits the seller's home network")
-    assert "board_wiped" in api, (
+    assert out["board_wiped"] is True, (
         "the caller cannot tell a wiped board from an offline one — those need "
         "different actions before a sale")
 

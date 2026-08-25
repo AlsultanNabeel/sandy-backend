@@ -545,19 +545,12 @@ def register_devices_api(app, mongo_db=None):
         properly" are different states and the owner should know which one he is
         in — the board will need a manual reset before the buyer can pair it.
         """
+        # The wipe lives in `unpair_node` now, ahead of the release and inside
+        # the same function, because deleting an account releases nodes by
+        # calling it directly and was skipping this half entirely.
         from app.features.node_store import unpair_node
-        from app.integrations.room_device import get_room_device_client
-
-        wiped = False
-        try:
-            wiped = bool(get_room_device_client().publish_service(
-                f"sandy/node/{node_id}/factory_reset", "erase"))
-        except Exception as exc:  # noqa: BLE001 — an offline board must not block the sale
-            logging.getLogger(__name__).warning(
-                "[nodes] factory reset not delivered to %s: %s", node_id, exc)
 
         r = unpair_node(node_id)
         if not r.get("ok"):
             return _bad(r.get("error", "unpair_failed"), code=404)
-        r["board_wiped"] = wiped
         return jsonify(r), 200

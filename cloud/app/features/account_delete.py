@@ -17,6 +17,7 @@ and this file says so.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List
 
 try:
@@ -96,6 +97,21 @@ _BY_USER: List[str] = [
 _STM = "sandy_stm"
 
 
+def _id_forms(user_id: str) -> List[Any]:
+    """Every shape this id appears in, because Mongo equality is type-strict.
+
+    Legacy documents carry the owner's Telegram id as an **integer** —
+    `api/studio_api.py::_brainstorm_chat_ids` exists only to read them and
+    queries `{"$in": [uid, int(uid)]}` for exactly this reason. A delete that
+    compares the string form alone walks straight past them, and the whole point
+    of this module is that a delete which misses one is worse than none.
+    """
+    forms: List[Any] = [user_id]
+    if user_id.isdigit():
+        forms.append(int(user_id))
+    return forms
+
+
 def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     """Clear `names` plus short-term memory for one user. Shared by both paths.
 
@@ -112,11 +128,13 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     if db is None:
         return {"ok": False, "error": "no_store"}
 
+    forms = _id_forms(user_id)
     removed: Dict[str, int] = {}
     for name in names:
         try:
             r = db[name].delete_many(
-                {"$or": [{"user_id": user_id}, {"chat_id": user_id}]})
+                {"$or": [{"user_id": {"$in": forms}},
+                         {"chat_id": {"$in": forms}}]})
             if r.deleted_count:
                 removed[name] = r.deleted_count
         # مجموعة وحدة فشلت ما بتوقّف الباقي — والفشل بينسجّل بـ«ناقص واحد»
@@ -126,9 +144,12 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
             removed[name] = -1
 
     try:
-        r = db[_STM].delete_many({"user_id": user_id})
+        r = db[_STM].delete_many({"user_id": {"$in": forms}})
         n = r.deleted_count
-        r2 = db[_STM].delete_many({"key": {"$regex": f":{user_id}$"}})
+        # Escaped: an id is interpolated into a pattern here, and this is the
+        # path the module calls the worst thing it could leave behind.
+        r2 = db[_STM].delete_many(
+            {"key": {"$regex": f":{re.escape(user_id)}$"}})
         n += r2.deleted_count
         if n:
             removed[_STM] = n

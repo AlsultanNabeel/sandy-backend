@@ -991,10 +991,16 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    tells another. It reads `error` rather than `ok` now, so ordinary refusals no
    longer trip it (§2.4), but a genuinely broken upstream is still reported to
    everybody. The fix is a key, not a rewrite.
-3. **The persona is rebuilt from scratch every turn** — 26 of the 44 database
-   round trips a user waits for, on every message, on every channel. A cache was
+3. **The persona is rebuilt from scratch every turn** — most of the 40 database
+   round trips a user waits for (`scripts/audit_turn_cost.py`), on every
+   message, on every channel. A cache was
    designed and cut; the reason is in §2.5 and it is the place to start.
-4. **The chat turn makes two model calls in series** — the function-calling
+4. **A POST is never retried, and the chat send is a POST.** `sendWithRetry`
+   guards on GET/HEAD because retrying a write could duplicate it, which is
+   right — but it means the one dropped packet that motivated the whole change
+   is still a red banner on the most-used call in the app. An idempotency key
+   on the send is what would close it.
+5. **The chat turn makes two model calls in series** — the function-calling
    router, then the reply. That pair, not the database, is why chat feels slower
    than voice: voice injects memory once at session start and then only streams.
    Merging them, or streaming the reply before routing finishes, is the open
@@ -1002,29 +1008,37 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
 
 ### Real, but nobody hits it today
 
-5. **No staging environment.** Production is what the robot on the desk talks
+6. **No staging environment.** Production is what the robot on the desk talks
    to. §1.
-6. **The visitor approval flow is half-built.** A visitor can `POST
+7. **The visitor approval flow is half-built.** A visitor can `POST
    /api/access/request` and poll it, and nothing in the system can approve it —
    the Telegram handler that used to is gone. Wire it to an owner endpoint or
    delete the flow; a silently disabled feature is worse than an absent one.
    §2.10.
-7. **`_normalize_profile` and the JSON profile store around it are dead.**
+8. **`_normalize_profile` and the JSON profile store around it are dead.**
    `find_user_profile`, `save_user_profile`, `ensure_user_profile` and
    `is_owner_chat_id` have no caller outside their own module. It is the last
    place in `cloud/` that still encodes "tenant #1 is special", and leaving it
    half-alive is what let a batch of this audit fix a string nobody reads.
    Delete it or wire it up.
-8. **`GeminiLiveManager` builds its own `URLSession`.** Harmless today, but the
+9. **`GeminiLiveManager` builds its own `URLSession`.** Harmless today, but the
    app's one-transport-policy rule (§6) cannot see it, so a future change to
    retry or timeouts will miss it.
 
+**Two more, found by the final review and left open deliberately** — both are
+sizing decisions rather than bugs, and both want a measurement first:
+`_SOUL_POOL`'s three-second deadline is per future, so two concurrent turns on
+one worker can add several of them onto the request thread; and
+`submit_background`'s ten workers now carry two LLM calls per turn (the STM
+summary and the conversation title) with no timeout and no future ever read, so
+a stalled upstream would silently stop every memory write in the process.
+
 ### Hardware, and the owner already knows
 
-9. **Servo motion is a jump, not a move.** ~30 lines of easing, and most of the
+10. **Servo motion is a jump, not a move.** ~30 lines of easing, and most of the
    difference between looking like a product and looking like a prototype.
-10. **Two-mic beamforming is not written.** §4.6.
-11. **Voice status clips are not flashed** — `status_set()` has the hook and the
+11. **Two-mic beamforming is not written.** §4.6.
+12. **Voice status clips are not flashed** — `status_set()` has the hook and the
     sentences, the partition table has no room reserved. §4.2.
 
 ### Checked and closed since the last version of this list
