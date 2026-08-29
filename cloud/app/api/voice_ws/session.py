@@ -670,8 +670,15 @@ async def _device_to_live_fast(reader: "_DeviceReader", session) -> None:
                 logger.info("[voice_ws] first audio frame forwarded to Gemini "
                             "(%d bytes)", len(chunk))
     finally:
-        logger.info("[voice_ws] device→live done: %d frames, %d bytes, %.1fs audio",
-                    frames, sent, sent / 2 / 16000)
+        # `dropped` is the one that answers "why only on long sentences".
+        # The reader holds eight seconds; past that it throws away the oldest
+        # frame to take a new one, and until now that was reported once, at
+        # setup, and never again. A sentence longer than the buffer loses its
+        # beginning silently, and a turn missing its start is a turn Gemini can
+        # answer badly or not at all.
+        logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
+                    "%.1fs audio, %d frames dropped",
+                    frames, sent, sent / 2 / 16000, reader.dropped)
 
 
 async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio") -> None:
@@ -736,8 +743,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 utter_ms = 0.0
         # Idle silence before any speech: don't forward it, saves bandwidth.
 
-    logger.info("[voice_ws] device→live done: %d frames, %d bytes, %.1fs audio",
-                frames, sent, sent / 2 / 16000)
+    logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
+                "%.1fs audio, %d frames dropped",
+                frames, sent, sent / 2 / 16000, reader.dropped)
 
 
 async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> None:
