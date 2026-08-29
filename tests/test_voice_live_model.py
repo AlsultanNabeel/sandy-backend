@@ -147,3 +147,116 @@ def test_the_session_never_re_enters_the_manager():
         "the double-enter crash is back"
     assert "await cm.__aexit__(None, None, None)" in src, \
         "the Live socket is opened and never closed"
+
+
+# ── The refusal arrives after the send returns ──────────────────────────────
+#
+# Production, with the probe already in place and reporting the model healthy:
+#
+#     [voice_ws] Gemini Live session opened (model=gemini-2.5-flash-native-audio-latest)
+#     ...eight seconds later...
+#     1007 The audio content type (CONTENT_TYPE_AUDIO) is not supported
+#          for this model configuration.
+#
+# `send_realtime_input` writes to a socket and returns. The refusal is a close
+# frame that comes back afterwards, so a probe that only sends proves nothing at
+# all — it proved the socket accepted a write, which it always does. The wait
+# and the second frame are the actual test.
+
+
+class _LateRefusalSession:
+    """Accepts the first frame, closes, and raises on everything after."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.sends = 0
+
+    async def send_realtime_input(self, **kwargs):
+        self.sends += 1
+        if self.closed:
+            raise RuntimeError(
+                "received 1007 The audio content type (CONTENT_TYPE_AUDIO) is "
+                "not supported for this model configuration")
+        self.closed = True      # the close frame lands right after this send
+
+
+class _LateRefusalLive(_FakeLive):
+    def connect(self, *, model: str, config=None):
+        @contextlib.asynccontextmanager
+        async def _cm():
+            self.opened.append(model)
+            try:
+                yield (_FakeSession(refuse=False) if model in self.accepts
+                       else _LateRefusalSession())
+            finally:
+                self.closed.append(model)
+
+        return _cm()
+
+
+def test_a_model_that_refuses_after_the_send_is_still_caught(monkeypatch, loop):
+    import app.api.voice_ws.session as session_mod
+    from app.api.voice_ws.session import _open_live_session
+
+    monkeypatch.setattr(session_mod, "_PROBE_SETTLE_S", 0.01)
+    monkeypatch.setattr(session_mod, "pinned_live_model", lambda: "")
+    live = _LateRefusalLive(accepts={"model-good"})
+    _patch_candidates(monkeypatch, ["model-late", "model-good"])
+
+    cm, _session, name, _err = loop.run_until_complete(
+        _open_live_session(_FakeClient(live), None))
+
+    assert name == "model-good", \
+        "a model whose refusal arrives after the send was reported healthy"
+    assert live.closed[0] == "model-late"
+    loop.run_until_complete(cm.__aexit__(None, None, None))
+
+
+def test_a_proven_model_does_not_pay_for_the_wait(monkeypatch, loop):
+    """The wait is the price of not knowing. Once a real session has proved a
+    model, it is skipped — and `forget_live_model` removes the pin the moment
+    that stops being true, so trust never outlives the evidence."""
+    import app.api.voice_ws.session as session_mod
+    from app.api.voice_ws.session import _open_live_session
+
+    monkeypatch.setattr(session_mod, "pinned_live_model", lambda: "model-a")
+    live = _FakeLive(accepts={"model-a"})
+    _patch_candidates(monkeypatch, ["model-a"])
+
+    session_holder = {}
+
+    import time as _time
+    t0 = _time.monotonic()
+    cm, session, name, _err = loop.run_until_complete(
+        _open_live_session(_FakeClient(live), None))
+    elapsed = _time.monotonic() - t0
+
+    assert name == "model-a"
+    assert len(session.frames) == 1, "a proven model was probed twice anyway"
+    assert elapsed < 0.3, "every voice call pays the settle wait"
+    session_holder["cm"] = cm
+    loop.run_until_complete(cm.__aexit__(None, None, None))
+
+
+def test_the_env_var_is_a_preference_and_not_the_whole_list(monkeypatch):
+    """It held a name that refuses audio, and because it replaced the list there
+    was nothing to fall through to. An escape hatch that can trap is a trap."""
+    import app.api.voice_ws._config as cfg
+
+    monkeypatch.setattr(cfg, "_LIVE_MODEL", "gemini-2.5-flash-native-audio-latest")
+    monkeypatch.setattr(cfg, "_live_model_working", "")
+
+    order = cfg.live_model_candidates()
+    assert order[0] == "gemini-2.5-flash-native-audio-latest"
+    assert len(order) > 1, "the env var still removes every fallback"
+    assert len(order) == len(set(order)), "the same model is tried twice"
+
+
+def test_a_model_that_fails_in_a_real_session_is_unpinned(monkeypatch):
+    import app.api.voice_ws._config as cfg
+
+    monkeypatch.setattr(cfg, "_live_model_working", "model-a")
+    cfg.forget_live_model("model-b")
+    assert cfg.pinned_live_model() == "model-a", "the wrong model was unpinned"
+    cfg.forget_live_model("model-a")
+    assert cfg.pinned_live_model() == "", "a failing model stayed preferred"

@@ -26,8 +26,12 @@ _LEGACY_SECRET: str = os.environ.get("ROBOT_WS_SECRET", "")          # backward 
 # takes voice down completely and silently; a list degrades to "the newest one
 # that still works" and says in the log which that was.
 #
-# `SANDY_LIVE_MODEL` still wins outright when set — that is the escape hatch for
-# a name this list has not learned yet, and it needs no deploy.
+# `SANDY_LIVE_MODEL` goes **first**, and does not exclude the rest. It used to be
+# the only entry when set, which turned the escape hatch into a trap: the config
+# var held `gemini-2.5-flash-native-audio-latest`, that name refuses audio input,
+# and because it was the whole list there was nothing to fall through to. Voice
+# was down with the fallback logic sitting right there, disabled by a setting
+# whose purpose was to help.
 _LIVE_MODEL_CANDIDATES: tuple[str, ...] = (
     "gemini-live-2.5-flash-preview",
     "gemini-2.5-flash-preview-native-audio-dialog",
@@ -39,21 +43,44 @@ _live_model_working: str = ""
 
 
 def live_model_candidates() -> tuple[str, ...]:
-    """What to try, in order. An explicit env var is the only entry when set."""
-    if _LIVE_MODEL:
-        return (_LIVE_MODEL,)
-    if _live_model_working:
-        return (_live_model_working,) + tuple(
-            m for m in _LIVE_MODEL_CANDIDATES if m != _live_model_working)
-    return _LIVE_MODEL_CANDIDATES
+    """What to try, in order: the preferred one first, then everything else.
+
+    Preference is the env var if set, otherwise whichever name last worked in
+    this process. Neither one removes the others from the list — a preference
+    that stops working has to be survivable, or it is a single point of failure
+    wearing the clothes of a convenience.
+    """
+    order: list[str] = []
+    for name in (_LIVE_MODEL, _live_model_working, *_LIVE_MODEL_CANDIDATES):
+        if name and name not in order:
+            order.append(name)
+    return tuple(order)
 
 
 def remember_live_model(name: str) -> None:
-    """Pin the one that connected, so later sessions do not re-walk the list."""
+    """Pin the one that worked, so later sessions do not re-walk the list."""
     global _live_model_working
     if name and name != _live_model_working:
         _live_model_working = name
         logger.info("[voice_ws] live model settled on %s", name)
+
+
+def pinned_live_model() -> str:
+    """The model a real session has already proved, if any."""
+    return _live_model_working
+
+
+def forget_live_model(name: str) -> None:
+    """Unpin a model that has just failed in a live session.
+
+    The probe cannot catch everything, and a name that worked yesterday can stop
+    working today. Without this, one bad answer would be repeated for the life
+    of the dyno, because the failing model stays the preferred one.
+    """
+    global _live_model_working
+    if name and name == _live_model_working:
+        _live_model_working = ""
+        logger.warning("[voice_ws] live model %s failed in session — unpinned", name)
 _ANTI_REPLAY_MS: int = 30_000
 
 # Phase 4 (V4.4–V4.6): على المايك (اللابتوب) نتأكد إنه صوت المالك قبل أمر حسّاس.

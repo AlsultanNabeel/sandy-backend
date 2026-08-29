@@ -14,7 +14,9 @@ from app.api.voice_ws._config import (
     logger,
     _HMAC_KEY,
     _LEGACY_SECRET,
+    forget_live_model,
     live_model_candidates,
+    pinned_live_model,
     remember_live_model,
     _ANTI_REPLAY_MS,
     _SENSITIVE_TOOLS,
@@ -402,6 +404,16 @@ class _DeviceReader:
         self._pool.shutdown(wait=False)
 
 
+# How long a refusal is given to come back before a candidate counts as good.
+#
+# **A send that returns is not a send that was accepted.** The 1007 is a close
+# frame that arrives afterwards, so the first probe declared the model healthy,
+# handed it a working session, and the real audio hit the same refusal eight
+# seconds later. Waiting and then sending a second frame is the whole test: if
+# the first was refused, the socket is shut and the second raises.
+_PROBE_SETTLE_S = 0.6
+
+
 async def _open_live_session(client, config):
     """Open the first Live model that actually accepts audio.
 
@@ -420,14 +432,21 @@ async def _open_live_session(client, config):
     """
     from google.genai import types
 
+    silence = types.Blob(data=b"\x00\x00" * 160, mime_type="audio/pcm;rate=16000")
+    trusted = pinned_live_model()
     last_error: Exception | None = None
     for candidate in live_model_candidates():
         probe = client.aio.live.connect(model=candidate, config=config)
         try:
             session = await probe.__aenter__()
-            await session.send_realtime_input(
-                audio=types.Blob(data=b"\x00\x00" * 160,
-                                 mime_type="audio/pcm;rate=16000"))
+            await session.send_realtime_input(audio=silence)
+            if candidate != trusted:
+                # A model a real session already proved skips the wait; anything
+                # else pays for the answer. `forget_live_model` takes the pin
+                # away again the moment a proven one stops working, so trusting
+                # it cannot outlive the evidence.
+                await asyncio.sleep(_PROBE_SETTLE_S)
+                await session.send_realtime_input(audio=silence)
         except Exception as exc:  # noqa: BLE001 — any refusal means "try the next"
             last_error = exc
             logger.warning("[voice_ws] live model %s refused: %s", candidate, exc)
@@ -625,10 +644,13 @@ async def _live_session(ws, remote: str) -> None:
                 if t.cancelled():
                     logger.info("[voice_ws] %s cancelled", side)
                 elif t.exception():
-                    logger.error(
-                        "[voice_ws] %s failed: %r", side, t.exception(),
-                        exc_info=t.exception(),
-                    )
+                    exc = t.exception()
+                    logger.error("[voice_ws] %s failed: %r", side, exc,
+                                 exc_info=exc)
+                    # A refusal that got past the probe must not be repeated for
+                    # the life of the dyno. Unpin, and the next call re-walks.
+                    if "CONTENT_TYPE_AUDIO" in str(exc) or "1007" in str(exc):
+                        forget_live_model(model_name)
                 else:
                     logger.info("[voice_ws] %s ended cleanly, closing session", side)
         finally:
