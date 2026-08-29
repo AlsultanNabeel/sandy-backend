@@ -32,10 +32,24 @@ _LEGACY_SECRET: str = os.environ.get("ROBOT_WS_SECRET", "")          # backward 
 # and because it was the whole list there was nothing to fall through to. Voice
 # was down with the fallback logic sitting right there, disabled by a setting
 # whose purpose was to help.
+# **These are the names the service itself reported**, on 2026-08-29, filtered
+# to the ones that take audio in and give audio back. The three that were here
+# before were all dead — every session spent about a second and a half failing
+# through them before discovery found a live one, and printed three warnings
+# doing it.
+#
+# Left out on purpose, from the same listing:
+#   gemini-3.5-transcribe-live        refuses the AUDIO response modality
+#   gemini-3.5-live-translate-preview a translator, not a conversation
+#   gemini-robotics-er-2-streaming    a different product entirely
+#
+# When these go stale too — and they will — `_discover_live_models` asks the API
+# and the log names what it found. This list is the fast path, not the truth.
 _LIVE_MODEL_CANDIDATES: tuple[str, ...] = (
-    "gemini-live-2.5-flash-preview",
-    "gemini-2.5-flash-preview-native-audio-dialog",
-    "gemini-2.0-flash-live-001",
+    "gemini-2.5-flash-native-audio-latest",
+    "gemini-2.5-flash-native-audio-preview-12-2025",
+    "gemini-2.5-flash-native-audio-preview-09-2025",
+    "gemini-3.1-flash-live-preview",
 )
 _LIVE_MODEL: str = os.environ.get("SANDY_LIVE_MODEL", "")
 

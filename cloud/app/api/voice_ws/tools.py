@@ -179,8 +179,23 @@ def _build_system_instruction(user_id: str = "") -> str:
 
 def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
     """The instruction text itself. Split out so the tenant context above wraps
-    every read in here without indenting four hundred lines of prompt."""
+    every read in here without indenting four hundred lines of prompt.
+
+    **Six seconds live between «auth OK» and «memory seed»**, measured on the
+    robot, before Gemini has even been dialled. Four reads run here, one after
+    another, and until now the log gave one line for all four — so the six
+    seconds had no owner. Each is timed on its own now.
+    """
+    import time as _t
+
+    _t0 = _t.perf_counter()
+
+    def _took(what: str) -> None:
+        logger.info("[voice_ws] seed %s: %.0fms", what,
+                    (_t.perf_counter() - _t0) * 1000)
+
     parts: List[str] = [build_effective_persona(chat_id or None).strip()]
+    _took("persona")
 
     # Legacy per-tenant memory doc (lightweight)
     try:
@@ -191,14 +206,17 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
             parts.append(f"\nذاكرتك:\n{json.dumps(memory, ensure_ascii=False, indent=2)}")
     except Exception as exc:
         logger.debug("[voice_ws] memory load skipped: %s", exc)
+    _took("legacy memory")
 
     # Rich MongoDB context: persona directives + session state + STM. No query
     # yet at session start; semantic search happens per-turn via injection.
     # قراءة وحدة للذاكرة القصيرة، بتتمرّر للاتنين. كانت تنقرأ مرتين بكل بداية
     # مكالمة، وهاي الثواني اللي بين «هاي آندي» وأول صوت بترجع منها.
     stm_history = _load_stm_history()
+    _took("stm")
     rich_ctx = _voice_memory_context(
         "", include_semantic=False, stm_history=stm_history)
+    _took("context")
     if rich_ctx:
         # Proof line: this is the EXACT memory text seeded into the voice prompt.
         # If a phantom reply ("focus session", "eggs") shows up, grep this to see

@@ -358,3 +358,28 @@ def test_closing_a_refused_probe_does_not_invent_a_second_failure(monkeypatch, l
     src = pathlib.Path(session_mod.__file__).read_text(encoding="utf-8")
     assert "await probe.__aexit__(type(exc), exc, exc.__traceback__)" not in src
     assert "await probe.__aexit__(None, None, None)" in src
+
+
+def test_the_candidate_list_holds_only_names_that_do_audio_both_ways():
+    """The list is the fast path. When every name in it is dead, every session
+    pays a second and a half of failures and prints a warning per name before
+    discovery finds a live one — which is what production did, twice a call.
+
+    Two of the models the API reports as live-capable are not conversation
+    models, and one of them refuses the AUDIO response modality outright. They
+    must not be in here just because the listing mentioned them.
+    """
+    from app.api.voice_ws._config import _LIVE_MODEL_CANDIDATES
+
+    assert "gemini-2.5-flash-native-audio-latest" in _LIVE_MODEL_CANDIDATES, \
+        "the one model production proved is missing from the fast path"
+    for dead in ("gemini-live-2.5-flash-preview",
+                 "gemini-2.5-flash-preview-native-audio-dialog",
+                 "gemini-2.0-flash-live-001"):
+        assert dead not in _LIVE_MODEL_CANDIDATES, \
+            f"{dead} answers 1008 — it is a guaranteed wasted round trip"
+    for wrong in ("gemini-3.5-transcribe-live",
+                  "gemini-3.5-live-translate-preview",
+                  "gemini-robotics-er-2-streaming-preview"):
+        assert wrong not in _LIVE_MODEL_CANDIDATES, \
+            f"{wrong} is live-capable but is not a speech conversation model"
