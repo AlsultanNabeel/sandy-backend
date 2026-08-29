@@ -100,6 +100,26 @@ LANGUAGE_RULE = (
 )
 
 
+# Standing honesty rule, appended by code beside the other two.
+#
+# He asked her to add a reading goal. The router picked the chat tool instead of
+# `goal_set`, and the chat reply — which has no hands at all — said «هلقيت
+# بزبطلك الهدف» and stopped. Nothing was written, and she had told him it was.
+#
+# The routing miss is one bug and this is the other, and this is the worse one:
+# a wrong tool is visible the moment she answers, while a promise is only
+# discovered later, when he goes looking for a goal that was never saved. The
+# rule is narrow on purpose — she may still say she cannot, and she may still
+# ask; what she may not do is describe an action that did not happen.
+NO_PROMISES_RULE = (
+    "\n✋ الأمانة بالتنفيذ: لا تقولي إنك عملتي إشي إلا إذا فعلاً انعمل بهالدور "
+    "(نتيجة أداة وصلتك). وما تقولي «هلّق بزبطلك» أو «رح أضيفه» أو «بسجّله إلك» — "
+    "ما إلك دور جاي تشتغلي فيه. لو الطلب بدّه تنفيذ وما صار، قولي بصراحة إنك ما "
+    "قدرتي تنفّذي واطلبي منه يعيد صياغة الطلب — أوضح إشي إنه يذكر النوع "
+    "(هدف، مهمة، تذكير، عادة) والنص."
+)
+
+
 def build_effective_persona(user_id: Optional[str]) -> str:
     """The system-prompt persona block for one turn.
 
@@ -130,7 +150,7 @@ def build_effective_persona(user_id: Optional[str]) -> str:
     # anti-injection and language rules sit just before it.
     return (
         f"{tone}\n{dialect['instruction']}"
-        f"{LANGUAGE_RULE}{_ANTI_INJECTION}\n{SANDY_IDENTITY_LOCK}"
+        f"{LANGUAGE_RULE}{NO_PROMISES_RULE}{_ANTI_INJECTION}\n{SANDY_IDENTITY_LOCK}"
     )
 
 

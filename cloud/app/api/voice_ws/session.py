@@ -651,10 +651,27 @@ async def _device_to_live_fast(reader: "_DeviceReader", session) -> None:
     """
     from google.genai import types
 
-    async for chunk in reader.frames():
-        await session.send_realtime_input(
-            audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
-        )
+    # **The evidence that was missing.** A session could look perfect — wake
+    # word, TLS, auth, streaming, a microphone with signal in it — and still
+    # produce no reply, and nothing in any log said whether the sentence had
+    # actually reached Gemini. `mic=3027` on the board proves the microphone
+    # heard something, not that a packet left it. First frame and final total,
+    # nothing per-frame: enough to place the break, cheap enough to leave on.
+    frames = 0
+    sent = 0
+    try:
+        async for chunk in reader.frames():
+            await session.send_realtime_input(
+                audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
+            )
+            frames += 1
+            sent += len(chunk)
+            if frames == 1:
+                logger.info("[voice_ws] first audio frame forwarded to Gemini "
+                            "(%d bytes)", len(chunk))
+    finally:
+        logger.info("[voice_ws] device→live done: %d frames, %d bytes, %.1fs audio",
+                    frames, sent, sent / 2 / 16000)
 
 
 async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio") -> None:
@@ -672,10 +689,19 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     silence_ms = 0.0
     utter_ms = 0.0
 
+    frames = 0
+    sent = 0
+
     async def _send_audio(chunk: bytes) -> None:
+        nonlocal frames, sent
         await session.send_realtime_input(
             audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
         )
+        frames += 1
+        sent += len(chunk)
+        if frames == 1:
+            logger.info("[voice_ws] first audio frame forwarded to Gemini "
+                        "(%d bytes)", len(chunk))
 
     async for chunk in reader.frames():
         samples = np.frombuffer(chunk, dtype="<i2")
@@ -709,6 +735,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 silence_ms = 0.0
                 utter_ms = 0.0
         # Idle silence before any speech: don't forward it, saves bandwidth.
+
+    logger.info("[voice_ws] device→live done: %d frames, %d bytes, %.1fs audio",
+                frames, sent, sent / 2 / 16000)
 
 
 async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> None:
@@ -798,6 +827,14 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
 
+    # The other half of the missing evidence. `_first` fires on the very first
+    # message of any kind from Gemini — a transcript fragment, an audio part, a
+    # tool call — which is the moment that separates "she is slow" from "the
+    # sentence never became a turn". `_audio_out` is what actually reached the
+    # speaker; a session that heard, thought, and sent nothing looks the same
+    # from the board as one that never heard anything.
+    _seen = {"any": False, "user_text": False, "audio_out": 0}
+
     async def _handle(response) -> bool:
         """Process one Live response; return True to stop the session.
 
@@ -806,10 +843,18 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
         saves STM, and gates sensitive tools.
         """
 
+        if not _seen["any"]:
+            _seen["any"] = True
+            logger.info("[voice_ws] first response from Gemini")
+
         # Capture user speech transcript
         if response.server_content and response.server_content.input_transcription:
             t = response.server_content.input_transcription.text
             if t:
+                if not _seen["user_text"]:
+                    _seen["user_text"] = True
+                    logger.info("[voice_ws] Gemini heard the user (first "
+                                "transcript fragment)")
                 _user_buf.append(t)
 
         # Capture Sandy's speech transcript (native-audio models don't put
@@ -829,6 +874,9 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
         if response.server_content and response.server_content.model_turn:
             for part in response.server_content.model_turn.parts:
                 if part.inline_data and part.inline_data.data:
+                    if not _seen["audio_out"]:
+                        logger.info("[voice_ws] first reply audio → device")
+                    _seen["audio_out"] += len(part.inline_data.data)
                     await send_bytes(part.inline_data.data)
                 if part.text:
                     _sandy_buf.append(part.text)
@@ -962,7 +1010,10 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                 if stop:
                     break
             except Exception as exc:
-                logger.info("[voice_ws] Live receive loop ended: %s", exc)
+                logger.info(
+                    "[voice_ws] Live receive loop ended: %s "
+                    "(heard user=%s, any response=%s, reply audio=%d bytes)",
+                    exc, _seen["user_text"], _seen["any"], _seen["audio_out"])
                 break
     finally:
         ka.cancel()
