@@ -61,10 +61,15 @@ def test_the_identity_lock_still_has_the_last_word():
 
 def test_the_goal_tools_are_actually_in_the_catalogue():
     """The routing half. If `goal_set` were missing, no prompt rule would help —
-    she would be honestly unable to do it, forever."""
-    from app.bootstrap import bootstrap
-    from app.agent.tools.registry import get_registry
+    she would be honestly unable to do it, forever.
 
-    bootstrap()
+    Registration, not `bootstrap()`: the full startup wants a database and a
+    model deployment, which CI has neither of — and what is being checked here
+    is the catalogue, not the environment.
+    """
+    from app.agent.tools.registry import get_registry
+    from app.agent.tools.setup import register_all_tools
+
+    register_all_tools()
     names = set(get_registry().all_names())
     assert {"goal_set", "goal_list", "goal_done"} <= names

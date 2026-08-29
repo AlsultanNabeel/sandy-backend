@@ -260,3 +260,101 @@ def test_a_model_that_fails_in_a_real_session_is_unpinned(monkeypatch):
     assert cfg.pinned_live_model() == "model-a", "the wrong model was unpinned"
     cfg.forget_live_model("model-a")
     assert cfg.pinned_live_model() == "", "a failing model stayed preferred"
+
+
+# ── When the whole list goes stale at once ──────────────────────────────────
+#
+#     1008 models/gemini-2.0-flash-live-001 is not found for API version
+#          v1beta, or is not supported for bidiGenerateContent
+#
+# Every name in the list, and the one in the config var connected and then
+# refused audio. A hardcoded list of names somebody else renames is a countdown,
+# not a fix. The service knows which models do bidirectional audio; asking is
+# the difference between voice degrading and voice ending.
+
+
+class _Model:
+    def __init__(self, name, actions):
+        self.name = name
+        self.supported_actions = actions
+
+
+def test_it_asks_the_api_when_the_known_names_are_gone(monkeypatch, loop):
+    import app.api.voice_ws.session as session_mod
+    from app.api.voice_ws.session import _open_live_session
+
+    monkeypatch.setattr(session_mod, "_PROBE_SETTLE_S", 0.01)
+    monkeypatch.setattr(session_mod, "pinned_live_model", lambda: "")
+    _patch_candidates(monkeypatch, ["dead-one", "dead-two"])
+
+    live = _FakeLive(accepts={"models-say-this-one"})
+    client = _FakeClient(live)
+    client.models = type("_M", (), {"list": staticmethod(lambda: [
+        _Model("models/some-text-model", ["generateContent"]),
+        _Model("models/models-say-this-one", ["bidiGenerateContent"]),
+    ])})()
+
+    cm, _session, name, _err = loop.run_until_complete(
+        _open_live_session(client, None))
+
+    assert name == "models-say-this-one", \
+        "every known name was dead and it gave up instead of asking"
+    assert live.opened[:2] == ["dead-one", "dead-two"], \
+        "the known names should still be tried first — they cost nothing"
+    loop.run_until_complete(cm.__aexit__(None, None, None))
+
+
+def test_a_model_is_never_tried_twice(monkeypatch, loop):
+    """The API will list a name the static list already holds."""
+    import app.api.voice_ws.session as session_mod
+    from app.api.voice_ws.session import _open_live_session
+
+    monkeypatch.setattr(session_mod, "_PROBE_SETTLE_S", 0.01)
+    monkeypatch.setattr(session_mod, "pinned_live_model", lambda: "")
+    _patch_candidates(monkeypatch, ["model-a"])
+
+    live = _FakeLive(accepts=set())
+    client = _FakeClient(live)
+    client.models = type("_M", (), {"list": staticmethod(lambda: [
+        _Model("models/model-a", ["bidiGenerateContent"]),
+    ])})()
+
+    loop.run_until_complete(_open_live_session(client, None))
+    assert live.opened == ["model-a"], f"tried twice: {live.opened}"
+
+
+def test_a_failed_listing_does_not_take_voice_down(monkeypatch, loop):
+    """Discovery is a fallback. If it throws, the known names still get their
+    turn — the opposite would make a bonus into a dependency."""
+    import app.api.voice_ws.session as session_mod
+    from app.api.voice_ws.session import _open_live_session
+
+    monkeypatch.setattr(session_mod, "_PROBE_SETTLE_S", 0.01)
+    monkeypatch.setattr(session_mod, "pinned_live_model", lambda: "")
+    _patch_candidates(monkeypatch, ["model-a"])
+
+    def _boom():
+        raise RuntimeError("permission denied on models.list")
+
+    live = _FakeLive(accepts={"model-a"})
+    client = _FakeClient(live)
+    client.models = type("_M", (), {"list": staticmethod(_boom)})()
+
+    cm, _session, name, _err = loop.run_until_complete(
+        _open_live_session(client, None))
+    assert name == "model-a"
+    loop.run_until_complete(cm.__aexit__(None, None, None))
+
+
+def test_closing_a_refused_probe_does_not_invent_a_second_failure(monkeypatch, loop):
+    """`__aexit__(type, exc, tb)` throws the failure back into the SDK's
+    generator, which then does not stop, and `contextlib` raises
+    `RuntimeError: generator didn't stop after athrow()` — a second, invented
+    error printed with a traceback pointing at the cleanup, not the cause."""
+    import pathlib
+
+    import app.api.voice_ws.session as session_mod
+
+    src = pathlib.Path(session_mod.__file__).read_text(encoding="utf-8")
+    assert "await probe.__aexit__(type(exc), exc, exc.__traceback__)" not in src
+    assert "await probe.__aexit__(None, None, None)" in src

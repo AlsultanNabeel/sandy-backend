@@ -414,6 +414,43 @@ class _DeviceReader:
 _PROBE_SETTLE_S = 0.6
 
 
+def _discover_live_models(client) -> tuple[str, ...]:
+    """Ask the API which models actually do bidirectional audio, right now.
+
+    **The list in `_config` went stale all at once.** Every name in it came back
+    `1008 ... is not found for API version v1beta, or is not supported for
+    bidiGenerateContent`, and the one in the config var connected and then
+    refused audio. Google renames these faster than anyone deploys, so a
+    hardcoded list is a countdown, not a fix — it works until it does not, and
+    when it stops, voice stops with it and nothing says why.
+
+    The service knows the answer. This asks for it, and the static list becomes
+    what it should always have been: a fast path, not the only path.
+    """
+    try:
+        models = list(client.models.list())
+    except Exception as exc:  # noqa: BLE001 — discovery is a bonus, never a gate
+        logger.warning("[voice_ws] could not list models: %s", exc)
+        return ()
+
+    found: list[str] = []
+    for m in models:
+        actions = (getattr(m, "supported_actions", None)
+                   or getattr(m, "supported_generation_methods", None) or [])
+        if "bidiGenerateContent" not in set(actions):
+            continue
+        name = str(getattr(m, "name", "") or "").removeprefix("models/")
+        if name:
+            found.append(name)
+
+    if found:
+        logger.info("[voice_ws] models the API reports as live-capable: %s",
+                    ", ".join(found))
+    else:
+        logger.warning("[voice_ws] the API listed no live-capable model")
+    return tuple(found)
+
+
 async def _open_live_session(client, config):
     """Open the first Live model that actually accepts audio.
 
@@ -435,7 +472,19 @@ async def _open_live_session(client, config):
     silence = types.Blob(data=b"\x00\x00" * 160, mime_type="audio/pcm;rate=16000")
     trusted = pinned_live_model()
     last_error: Exception | None = None
-    for candidate in live_model_candidates():
+
+    # The known names first — they are usually right and cost nothing to try.
+    # Whatever the service itself reports as live-capable goes after them, so a
+    # list that has gone stale costs one round of failures rather than the
+    # feature.
+    tried: set[str] = set()
+    candidates = list(live_model_candidates())
+    for candidate in candidates + [
+        n for n in _discover_live_models(client) if n not in candidates
+    ]:
+        if candidate in tried:
+            continue
+        tried.add(candidate)
         probe = client.aio.live.connect(model=candidate, config=config)
         try:
             session = await probe.__aenter__()
@@ -452,8 +501,15 @@ async def _open_live_session(client, config):
             logger.warning("[voice_ws] live model %s refused: %s", candidate, exc)
             # A refused candidate can still hold an open socket — the refusal
             # lands after the handshake. Close it, or every retry leaks one.
+            #
+            # **Closed, not blamed.** Passing the exception in re-raises it
+            # inside the SDK's generator, which then does not stop, and
+            # `contextlib` turns that into `RuntimeError: generator didn't stop
+            # after athrow()` — a second, invented failure on top of the real
+            # one, printed with a traceback that points at the cleanup instead
+            # of the cause.
             try:
-                await probe.__aexit__(type(exc), exc, exc.__traceback__)
+                await probe.__aexit__(None, None, None)
             except Exception:  # noqa: BLE001 — already failing; nothing to add
                 logger.debug("[voice_ws] probe close failed", exc_info=True)
             continue
