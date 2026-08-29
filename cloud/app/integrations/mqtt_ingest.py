@@ -20,6 +20,7 @@ import ssl
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,31 @@ except ImportError:
 
 # See the note at connect_async: the listener does not have a thread to itself.
 MQTT_KEEPALIVE_S = 30
+
+# **Nothing slow runs on paho's network thread.**
+#
+# `_on_message` used to do the whole ingest inline: parse the heartbeat, then
+# `ingest_status`, which is several Atlas round trips. That thread has one other
+# job — sending PINGREQ before the keepalive expires — and it cannot do it while
+# it is waiting on a database in Virginia. The broker sees a client that stopped
+# pinging and drops it:
+#
+#     [mqtt_ingest] worker 12 disconnected: reason=Keep alive timeout
+#     [mqtt_ingest] worker 12 connected, subscribe sent
+#
+# every seventy seconds, on both workers, forever. It filled the log to the point
+# where an actual conversation could not be found in it, and every drop is a
+# window where a command to the robot goes nowhere.
+#
+# One worker, not the shared pool: heartbeats and photo chunks arrive in an order
+# that means something, and a pool of eight would write an older state over a
+# newer one and hand the camera its slices shuffled.
+_INGEST = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mqtt-ingest")
+
+# A bound, because an unbounded queue in front of a stalled database is just a
+# slower way to run out of memory. Heartbeats are retained and repeat every few
+# seconds, so dropping one costs nothing; the alternative costs the dyno.
+_INGEST_MAX_PENDING = 200
 
 _STATUS_SUB = "sandy/node/+/status"
 _IR_SUB = "sandy/node/+/ir/learned"
@@ -123,39 +149,62 @@ def _node_id_from_topic(topic: str) -> str:
 
 
 def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
+    """Hand off and return. **This runs on paho's network thread.**
+
+    Everything this function does before returning is time the client is not
+    sending its keepalive ping, so it copies the two values it needs off the
+    message and queues the work. See `_INGEST`.
+    """
     _stats["last_message_at"] = time.time()
+    pending = _INGEST._work_queue.qsize()
+    if pending >= _INGEST_MAX_PENDING:
+        _stats["dropped"] = _stats.get("dropped", 0) + 1
+        if _stats["dropped"] % 100 == 1:
+            logger.warning("[mqtt_ingest] ingest queue full (%d) — dropping "
+                           "messages; %d so far", pending, _stats["dropped"])
+        return
+    topic = str(msg.topic)
+    payload = bytes(msg.payload or b"")
+    try:
+        _INGEST.submit(_handle_message, topic, payload)
+    except RuntimeError:      # pool shut down at exit
+        logger.debug("[mqtt_ingest] ingest pool closed; message dropped")
+
+
+def _handle_message(topic: str, raw: bytes) -> None:
+    """The actual ingest, on our own thread where it can take as long as it takes."""
     try:
         from app.features.node_store import ingest_status, set_last_ir
 
-        node_id = _node_id_from_topic(msg.topic)
+        node_id = _node_id_from_topic(topic)
         if not node_id:
             return
-        payload = msg.payload.decode("utf-8", "ignore").strip()
+        payload = raw.decode("utf-8", "ignore").strip()
 
-        if msg.topic.endswith("/ir/learned"):
+        if topic.endswith("/ir/learned"):
             _stats["ir"] += 1
             if payload:
                 set_last_ir(node_id, payload)
             return
 
-        if msg.topic.endswith("/cam/status"):
+        if topic.endswith("/cam/status"):
             _stats["cam_status"] += 1
             _ingest_cam_status(node_id, payload)
             return
 
-        if msg.topic.endswith("/room/status"):
+        if topic.endswith("/room/status"):
             _stats["room_status"] += 1
             _ingest_room_status(node_id, payload)
             return
 
-        if msg.topic.endswith("/cam/event"):
+        if topic.endswith("/cam/event"):
             # صغيرة، ومن نفس اللوح، وبنفس ثانية القطع. لو وصلت هي وضاعت هنّ،
             # الحجم هو الفرق الوحيد الباقي.
             _stats["cam_event"] += 1
             logger.info("[camera] %s event: %s", node_id, payload[:160])
             return
 
-        if msg.topic.endswith("/cam/snapshot"):
+        if topic.endswith("/cam/snapshot"):
             _stats["cam_snapshot"] += 1
             # Straight through, unparsed and unstored: a photo belongs to
             # whoever asked for it, and nobody may be waiting at all.
@@ -187,7 +236,7 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
         # handler that throws on every message looks exactly like a handler that
         # is never called, and the two were confused for days.
         _stats["errors"] += 1
-        logger.warning("[mqtt_ingest] %s failed: %s", getattr(msg, "topic", "?"), e)
+        logger.warning("[mqtt_ingest] %s failed: %s", topic, e)
 
 
 def _ingest_cam_status(node_id: str, payload: str) -> None:
@@ -400,6 +449,15 @@ def _on_disconnect(client, userdata, *args) -> None:  # noqa: ANN001
 
     _stats["last_disconnect"] = str(reason)
     _stats["last_disconnect_flags"] = str(flags)
+
+    # paho reports one drop twice — once from the socket close and once from the
+    # loop unwinding — so every disconnect appeared in the log as an identical
+    # pair with the same timestamp. Two lines for one event reads as two events,
+    # which doubles the apparent rate of the very problem you are measuring.
+    now = time.time()
+    if now - _stats.get("last_disconnect_log", 0.0) < 1.0:
+        return
+    _stats["last_disconnect_log"] = now
     logger.warning(
         "[mqtt_ingest] worker %d disconnected: reason=%s flags=%s — paho will retry",
         os.getpid(), reason, flags)
