@@ -22,6 +22,7 @@ from app.api.voice_ws._config import (
     _SENSITIVE_TOOLS,
     _VAD_RMS_THRESHOLD,
     _VAD_SILENCE_MS,
+    _VAD_BLIND_MS,
     _VAD_MIN_UTTER_MS,
 )
 from app.api.voice_ws.speaker import (
@@ -600,24 +601,26 @@ async def _live_session(ws, remote: str) -> None:
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
         )
-        if gate_on:
-            # التحقّق مفعّل → نطفّي الكشف التلقائي ونتحكّم بنهاية الدور يدوياً عشان
-            # نتحقّق من الصوت ونحقن الهوية قبل ما يردّ الموديل.
-            config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
-                automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
-            )
-        else:
-            # التحقّق مطفّى → نسيب Gemini يكشف الدور، بس نضبطه يردّ بسرعة لحظة ما
-            # تسكت (صمت نهاية أقصر + حساسية نهاية عالية) عشان الرد يكون فوري.
-            config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
-                automatic_activity_detection=types.AutomaticActivityDetection(
-                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                    # كل ما قلّت، أسرع ما تردّ بعد ما يسكت — بس لو نزلت كتير بتقاطعه
-                    # وهو واقف بنص جملة. ٣٥٠ توازن: ردّ أسرع بدون قطع. عيّرها لو لزم.
-                    silence_duration_ms=350,
-                    prefix_padding_ms=200,
-                ),
-            )
+        # **نهاية الدور بتتقرّر عنا، دايمًا.**
+        #
+        # كان الكشف التلقائي شغّال لمّا التحقّق مطفّى، وهاد بالضبط اللي خلّاها
+        # «ما بتردّ». اللوح بيبثّ صوت الغرفة بلا توقّف، فما بيوصل جيميناي صمت
+        # يعتبره نهاية كلام — وبيضلّ مستني. باللوج ظهر إنّ أوّل ردّ منه بيجي
+        # **ثانية ونص بعد ما اللوح سكّر الاتصال**، مش بعد ما المستخدم سكت:
+        #
+        #     21:22:41.96  device→live done        ← اللوح قطع
+        #     21:22:43.53  first response from Gemini
+        #     21:22:46.02  first reply audio → device
+        #
+        # واللوح بيستنّى تمان ثواني بس بعد آخر كلمة (`VOICE_SESSION_IDLE_MS`)،
+        # فالردّ كان بيوصل لسمّاعة مسكّرة — كل مرة، من غير استثناء.
+        #
+        # عنّا كاشف صمت شغّال أصلاً بمسار التحقّق. التحقّق من هوية المتكلّم
+        # والتحكّم بنهاية الدور مسألتين منفصلتين، وربطهن ببعض هو الغلط: التحقّق
+        # اختياري، ونهاية الدور لأ.
+        config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
+        )
         config = types.LiveConnectConfig(**config_kwargs)
 
         client = genai.Client(api_key=GEMINI_API_KEY)
@@ -644,10 +647,8 @@ async def _live_session(ws, remote: str) -> None:
                 )
 
             recent = _RecentAudio()
-            if gate_on:
-                t_in = asyncio.create_task(_device_to_live(reader, session, recent))
-            else:
-                t_in = asyncio.create_task(_device_to_live_fast(reader, session))
+            t_in = asyncio.create_task(
+                _device_to_live(reader, session, recent, verify=gate_on))
             t_out = asyncio.create_task(_live_to_device(ws, session, dispatcher, recent))
 
             done, pending = await asyncio.wait(
@@ -722,44 +723,8 @@ async def _live_session(ws, remote: str) -> None:
             reader.stop()
 
 
-async def _device_to_live_fast(reader: "_DeviceReader", session) -> None:
-    """تمرير مباشر للصوت — Gemini يكشف الدور تلقائياً (أسرع، يُستعمل لما التحقّق مطفّى).
-
-    بلا VAD عندنا، بلا إشارات يدوية، بلا تحقّق — أقل تأخير ممكن للرد.
-    """
-    from google.genai import types
-
-    # **The evidence that was missing.** A session could look perfect — wake
-    # word, TLS, auth, streaming, a microphone with signal in it — and still
-    # produce no reply, and nothing in any log said whether the sentence had
-    # actually reached Gemini. `mic=3027` on the board proves the microphone
-    # heard something, not that a packet left it. First frame and final total,
-    # nothing per-frame: enough to place the break, cheap enough to leave on.
-    frames = 0
-    sent = 0
-    try:
-        async for chunk in reader.frames():
-            await session.send_realtime_input(
-                audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
-            )
-            frames += 1
-            sent += len(chunk)
-            if frames == 1:
-                logger.info("[voice_ws] first audio frame forwarded to Gemini "
-                            "(%d bytes)", len(chunk))
-    finally:
-        # `dropped` is the one that answers "why only on long sentences".
-        # The reader holds eight seconds; past that it throws away the oldest
-        # frame to take a new one, and until now that was reported once, at
-        # setup, and never again. A sentence longer than the buffer loses its
-        # beginning silently, and a turn missing its start is a turn Gemini can
-        # answer badly or not at all.
-        logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
-                    "%.1fs audio, %d frames dropped",
-                    frames, sent, sent / 2 / 16000, reader.dropped)
-
-
-async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio") -> None:
+async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio",
+                          *, verify: bool = True) -> None:
     """Read PCM frames from the device and stream to Live with manual turn control.
 
     We run our own VAD: on speech we open an activity, and on about 700ms of
@@ -776,6 +741,10 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
 
     frames = 0
     sent = 0
+    heard_ms = 0.0
+    peak = 0.0
+    opened = False
+    threshold = _VAD_RMS_THRESHOLD
 
     async def _send_audio(chunk: bytes) -> None:
         nonlocal frames, sent
@@ -794,7 +763,25 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             continue
         rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
         ms = samples.size / 16000 * 1000
-        is_speech = rms >= _VAD_RMS_THRESHOLD
+        heard_ms += ms
+        peak = max(peak, rms)
+        is_speech = rms >= threshold
+
+        # **A gate that never opens is worse than no gate.**
+        #
+        # This path forwards nothing until it decides the user is talking, so a
+        # threshold set too high for one room means Gemini receives silence for
+        # the whole call and the robot looks broken in a completely new way.
+        # If seconds go by with audio arriving and nothing ever counted as
+        # speech, the threshold is wrong, not the room — so it bends to what is
+        # actually coming in, once, and says so.
+        if not opened and heard_ms >= _VAD_BLIND_MS and peak > 0:
+            threshold = min(threshold, max(peak * 0.4, 40.0))
+            opened = True
+            logger.warning(
+                "[voice_ws] no speech in %.0fs (peak rms %.0f, threshold %.0f) "
+                "— lowering to %.0f", heard_ms / 1000, peak,
+                _VAD_RMS_THRESHOLD, threshold)
 
         if is_speech and not speaking:
             # Speech onset, open a manual activity. We do NOT clear `recent`
@@ -813,9 +800,15 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             silence_ms = 0.0 if is_speech else silence_ms + ms
             if silence_ms >= _VAD_SILENCE_MS:
                 # End of utterance: verify the speaker and inject persona before the reply.
-                if utter_ms >= _VAD_MIN_UTTER_MS:
+                # التحقّق اختياري؛ إنهاء الدور تحت مش اختياري.
+                if verify and utter_ms >= _VAD_MIN_UTTER_MS:
                     await _verify_and_inject(session, recent.snapshot())
                 await session.send_realtime_input(activity_end=types.ActivityEnd())
+                # The line that says the turn was closed, and when. Without it
+                # "she did not answer" and "she was never told the question was
+                # over" look identical in the log — and for weeks they were.
+                logger.info("[voice_ws] turn closed after %.1fs of speech",
+                            utter_ms / 1000)
                 speaking = False
                 silence_ms = 0.0
                 utter_ms = 0.0
@@ -920,6 +913,8 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
     # speaker; a session that heard, thought, and sent nothing looks the same
     # from the board as one that never heard anything.
     _seen = {"any": False, "user_text": False, "audio_out": 0}
+    _audio = {"at": time.monotonic(), "chunks": 0, "wait": 0.0,
+              "send": 0.0, "worst": 0.0}
 
     async def _handle(response) -> bool:
         """Process one Live response; return True to stop the session.
@@ -963,7 +958,23 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                     if not _seen["audio_out"]:
                         logger.info("[voice_ws] first reply audio → device")
                     _seen["audio_out"] += len(part.inline_data.data)
+                    # **Where the stutter comes from, measured rather than
+                    # guessed.** The reply arrives as chunks and is played as it
+                    # arrives, so a gap anywhere becomes a gap in her voice — and
+                    # there are three places it can open: Gemini producing slowly,
+                    # this dyno being busy, or the link to the robot. `wait` is
+                    # how long we sat with nothing to send; `send` is how long
+                    # handing it over took. Their sum against the audio's own
+                    # duration says which of the three it is: if the sum exceeds
+                    # the audio, the robot runs out before the next piece lands.
+                    _now = time.monotonic()
+                    _wait = _now - _audio["at"]
                     await send_bytes(part.inline_data.data)
+                    _audio["at"] = time.monotonic()
+                    _audio["chunks"] += 1
+                    _audio["wait"] += _wait
+                    _audio["send"] += _audio["at"] - _now
+                    _audio["worst"] = max(_audio["worst"], _wait)
                 if part.text:
                     _sandy_buf.append(part.text)
 
@@ -1100,6 +1111,16 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
                     "[voice_ws] Live receive loop ended: %s "
                     "(heard user=%s, any response=%s, reply audio=%d bytes)",
                     exc, _seen["user_text"], _seen["any"], _seen["audio_out"])
+                if _audio["chunks"]:
+                    # 24 kHz, 16-bit: two bytes a sample. If `audio` is less
+                    # than `wait`, she is being played faster than she is
+                    # arriving, and that is exactly what a listener hears as a
+                    # bad line.
+                    logger.info(
+                        "[voice_ws] reply timing: %d chunks, %.1fs audio, "
+                        "%.1fs waiting (worst gap %.2fs), %.2fs sending",
+                        _audio["chunks"], _seen["audio_out"] / 2 / 24000,
+                        _audio["wait"], _audio["worst"], _audio["send"])
                 break
     finally:
         ka.cancel()

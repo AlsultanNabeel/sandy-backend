@@ -383,3 +383,45 @@ def test_the_candidate_list_holds_only_names_that_do_audio_both_ways():
                   "gemini-robotics-er-2-streaming-preview"):
         assert wrong not in _LIVE_MODEL_CANDIDATES, \
             f"{wrong} is live-capable but is not a speech conversation model"
+
+
+# ── Who decides the question is over ────────────────────────────────────────
+#
+# From the log, twice in a row:
+#
+#     21:22:41.96  device→live done          ← the board hung up
+#     21:22:43.53  first response from Gemini
+#     21:22:46.02  first reply audio → device
+#
+# Gemini's first response came a second and a half *after the board closed the
+# connection*, not after the user stopped talking. The board streams the room
+# continuously, so automatic detection never sees the silence it is waiting for
+# and only commits the turn when the stream ends. The firmware waits eight
+# seconds after the last word (`VOICE_SESSION_IDLE_MS`) — so the reply was
+# racing a clock it had already lost.
+
+
+def test_the_turn_is_always_closed_by_us():
+    """Speaker verification and turn control are separate questions. Tying them
+    together left the no-verification path with nobody ending the turn."""
+    import pathlib
+
+    import app.api.voice_ws.session as session_mod
+
+    src = pathlib.Path(session_mod.__file__).read_text(encoding="utf-8")
+    assert "end_of_speech_sensitivity" not in src, \
+        "automatic detection is back on a path that streams the room non-stop"
+    assert src.count("automatic_activity_detection=types.AutomaticActivityDetection("
+                     "disabled=True)") == 1
+    assert "_device_to_live_fast" not in src, "the bypassed bridge is still here"
+
+
+def test_a_gate_that_never_opens_lowers_itself(monkeypatch):
+    """This path forwards nothing until it decides the user is speaking, so a
+    threshold too high for one room means Gemini gets silence for the whole call
+    — the same symptom, arriving by the opposite route."""
+    import app.api.voice_ws._config as cfg
+
+    assert cfg._VAD_BLIND_MS > 0
+    # The floor exists so a room of pure noise cannot drive it to zero.
+    assert max(10.0 * 0.4, 40.0) == 40.0

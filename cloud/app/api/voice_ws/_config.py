@@ -112,4 +112,8 @@ _MIN_VERIFY_BYTES = 16_000
 _VAD_RMS_THRESHOLD = float(os.getenv("SANDY_VAD_RMS", "350"))      # فوقها = كلام
 _VAD_SILENCE_MS = int(os.getenv("SANDY_VAD_SILENCE_MS", "700"))    # صمت ينهي الدور
 _VAD_MIN_UTTER_MS = int(os.getenv("SANDY_VAD_MIN_MS", "300"))      # أقصر من هيك = نتجاهله
+# بعد هالمدة من صوت واصل بلا ولا كلمة انكشفت، العتبة غلط مش الغرفة — بتنزل لمرة.
+# ثابت، مش متغيّر بيئة: هاي شبكة أمان لعتبة موجودة أصلاً، ومفتاح تعيير إلها
+# بيعني مفتاحين لنفس القرار.
+_VAD_BLIND_MS = 4000
 _VOICE_CTX_TTL_S = float(os.getenv("SANDY_VOICE_CTX_TTL_S", "60"))
