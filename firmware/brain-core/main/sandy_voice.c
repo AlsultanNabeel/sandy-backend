@@ -1185,6 +1185,63 @@ static void session_heap_report(void) {
 #endif
 
 #if ENABLE_WAKEWORD
+// ── Uplink squelch: send speech, not the room ────────────────────────────────
+//
+// **The link carries a quarter of a megabit a second, continuously, and almost
+// all of it is nothing.** The mic streams sixteen kilohertz sixteen-bit PCM the
+// entire time the session is open — while he thinks, while the room is empty,
+// while nobody has said a word. On a strong link that is merely wasteful. On a
+// weak one it is the whole problem: the uplink saturates, and because the radio
+// is shared, *her voice coming back stutters* — the reply is queued behind the
+// silence we insisted on uploading.
+//
+// The floor is measured rather than assumed, for the same reason the server
+// stopped assuming it: a fixed number cannot be right in two rooms. The quietest
+// thing seen in the last few seconds is the room, because nobody talks without
+// pausing. Speech is what stands clear of it.
+//
+// Nothing of the sentence is lost. Below the gate the audio still goes into the
+// preroll buffer that already exists for the barge-in gate, so the syllable
+// before the gate opened arrives with the rest. And the gate stays open for a
+// hangover after the last loud frame, so a quiet word at the end of a sentence
+// is not clipped off.
+#define TX_FLOOR_SLOTS      24      // ~3 s of history at 128 ms a batch
+#define TX_FLOOR_FACTOR     5       // speech is this many halves above the floor
+#define TX_FLOOR_MIN        250     // absolute floor: a silent room is not speech
+#define TX_HANGOVER_MS      900     // keep sending this long after the last word
+
+static int   s_tx_floor_ring[TX_FLOOR_SLOTS];
+static int   s_tx_floor_at;
+static int   s_tx_floor_n;
+static int64_t s_tx_open_until;
+
+// True while this batch should go up the wire.
+static bool tx_gate(int avg) {
+    s_tx_floor_ring[s_tx_floor_at] = avg;
+    s_tx_floor_at = (s_tx_floor_at + 1) % TX_FLOOR_SLOTS;
+    if (s_tx_floor_n < TX_FLOOR_SLOTS) s_tx_floor_n++;
+
+    int floor = avg;
+    for (int i = 0; i < s_tx_floor_n; i++) {
+        if (s_tx_floor_ring[i] < floor) floor = s_tx_floor_ring[i];
+    }
+    // Half-steps, so the factor can be 2.5 without floating point.
+    int gate = (floor * TX_FLOOR_FACTOR) / 2;
+    if (gate < TX_FLOOR_MIN) gate = TX_FLOOR_MIN;
+
+    if (avg >= gate) {
+        s_tx_open_until = now_ms() + TX_HANGOVER_MS;
+        return true;
+    }
+    return s_tx_open_until && now_ms() < s_tx_open_until;
+}
+
+static void tx_gate_reset(void) {
+    s_tx_floor_n = 0;
+    s_tx_floor_at = 0;
+    s_tx_open_until = 0;
+}
+
 // Send whatever was captured while the session was still connecting, before
 // the live frame, so the first words arrive in order.
 static void preroll_flush(void) {
@@ -1465,9 +1522,15 @@ static void mic_task(void *arg) {
                             xStreamBufferSend(s_preroll, use,
                                               frames * sizeof(int16_t), 0);
                         }
-                    } else {
+                    } else if (tx_gate(avg)) {
                         preroll_flush();
                         mic_send(use, frames * sizeof(int16_t));
+                    } else if (s_preroll) {
+                        // Below the gate: hold it, do not send it. The preroll
+                        // is what makes that safe — when the gate opens, this
+                        // goes up first and the sentence keeps its beginning.
+                        xStreamBufferSend(s_preroll, use,
+                                          frames * sizeof(int16_t), 0);
                     }
                 } else if (gate_run) {
                     // The spike died before qualifying — it was echo, not a
@@ -1707,6 +1770,10 @@ static void voice_task(void *arg) {
             if (s_wake_req) {
                 s_wake_req = false;
                 ESP_LOGI(TAG, "opening voice session");
+                // Fresh room, fresh floor. Carrying the last call's noise
+                // history into a different room is how a gate ends up set for
+                // a place nobody is standing in any more.
+                tx_gate_reset();
 #if ENABLE_COMMANDS
                 // Free the command model BEFORE opening, not after the session
                 // goes active. The old order deadlocked: its ~70KB of internal

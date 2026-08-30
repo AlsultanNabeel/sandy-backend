@@ -279,3 +279,46 @@ def test_a_quiet_room_does_not_turn_a_hiss_into_a_sentence(loop):
         _device_to_live(_Reader(chunks), session, _RecentAudio(), verify=False))
 
     assert session.starts == 0, "a hiss in a silent room opened a turn"
+
+
+def test_the_turn_ends_when_the_board_goes_quiet(loop):
+    """**The board no longer uploads the room.**
+
+    It streamed sixteen kilohertz PCM continuously — a quarter of a megabit a
+    second of mostly nothing — and because the radio is shared, that flood is
+    what made her voice coming back stutter. With the uplink gated on the
+    device, the end of a question arrives as *nothing arriving*, and a plain
+    `async for` waits for that forever.
+    """
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    class _ThenSilence(_Reader):
+        """Speaks, then stops sending entirely — the new firmware's shape."""
+
+        async def frames(self):
+            for c in self._chunks:
+                self._left -= 1
+                await asyncio.sleep(0.05)
+                yield c
+            await asyncio.sleep(3.0)   # the gap that means "I am done"
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    session = _Session()
+    task = loop.create_task(
+        _device_to_live(_ThenSilence([_at(4000)] * 5), session, _RecentAudio(),
+                        verify=False))
+    loop.run_until_complete(asyncio.sleep(1.6))
+    task.cancel()
+    try:
+        loop.run_until_complete(task)
+    except asyncio.CancelledError:
+        pass
+
+    assert session.starts == 1, "the sentence was never opened"
+    assert session.ends == 1, (
+        "the board stopped sending and nobody told Gemini the question was "
+        "over — which is silence, from the other end")

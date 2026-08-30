@@ -24,6 +24,7 @@ from app.api.voice_ws._config import (
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
     _CHUNK_BYTES,
+    _SILENCE_GAP_S,
     _COMPRESS_TRIGGER_TOKENS,
     _COMPRESS_WINDOW_TOKENS,
     _VAD_FLOOR_FACTOR,
@@ -841,7 +842,46 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                         "(%d bytes, split into %d)", len(chunk),
                         max(1, -(-len(chunk) // _CHUNK_BYTES)))
 
-    async for chunk in reader.frames():
+    async def _close_turn(reason: str) -> None:
+        """End the user's turn and tell Gemini so. The one thing that must
+        happen for an answer to exist at all."""
+        nonlocal speaking, silence_ms, utter_ms
+        if verify and utter_ms >= _VAD_MIN_UTTER_MS:
+            await _verify_and_inject(session, recent.snapshot())
+        await session.send_realtime_input(activity_end=types.ActivityEnd())
+        logger.info("[voice_ws] turn closed after %.1fs of speech (%s)",
+                    utter_ms / 1000, reason)
+        speaking = False
+        silence_ms = 0.0
+        utter_ms = 0.0
+
+    # **Pulled with a deadline, not iterated.**
+    #
+    # The board no longer uploads the room — it sends while somebody is talking
+    # and stops when they stop. So the end of a question arrives as *nothing
+    # arriving*, and a plain `async for` waits for that forever. The frame is
+    # awaited with a timeout instead, and a gap is an answer.
+    #
+    # The task is never cancelled on timeout: cancelling `__anext__` of an async
+    # generator closes the generator, which would end the call at the first pause
+    # instead of ending the turn.
+    stream = reader.frames().__aiter__()
+    frame_task: Optional[asyncio.Task] = None
+    while True:
+        if frame_task is None:
+            frame_task = asyncio.ensure_future(stream.__anext__())
+        finished_now, _ = await asyncio.wait({frame_task}, timeout=_SILENCE_GAP_S)
+        if not finished_now:
+            # Nothing for a whole gap. If a turn is open, it is over.
+            if speaking and not draining:
+                await _close_turn("device went quiet")
+            continue
+        frame_task = None
+        try:
+            chunk = finished_now.pop().result()
+        except StopAsyncIteration:
+            break
+
         samples = np.frombuffer(chunk, dtype="<i2")
         if samples.size == 0:
             continue
@@ -940,6 +980,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 silence_ms = 0.0
                 utter_ms = 0.0
         # Idle silence before any speech: don't forward it, saves bandwidth.
+
+    if frame_task is not None:
+        frame_task.cancel()
 
     logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
                 "%.1fs audio, %d frames dropped",
