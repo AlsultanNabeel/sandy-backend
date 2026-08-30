@@ -810,6 +810,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     sent = 0
     heard_ms = 0.0
     window: "deque[float]" = deque(maxlen=_VAD_FLOOR_FRAMES)
+    threshold = float(_VAD_RMS_FLOOR)
+    consumed = 0
     backlog = reader.pending()
     draining = backlog > _BACKLOG_FRAMES
     if draining:
@@ -867,122 +869,161 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     # instead of ending the turn.
     stream = reader.frames().__aiter__()
     frame_task: Optional[asyncio.Task] = None
-    while True:
-        if frame_task is None:
-            frame_task = asyncio.ensure_future(stream.__anext__())
-        finished_now, _ = await asyncio.wait({frame_task}, timeout=_SILENCE_GAP_S)
-        if not finished_now:
-            # Nothing for a whole gap. If a turn is open, it is over.
-            if speaking and not draining:
-                await _close_turn("device went quiet")
-            continue
-        frame_task = None
-        try:
-            chunk = finished_now.pop().result()
-        except StopAsyncIteration:
-            break
-
-        samples = np.frombuffer(chunk, dtype="<i2")
-        if samples.size == 0:
-            continue
-        rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
-        ms = samples.size / 16000 * 1000
-        heard_ms += ms
-
-        # **Speech is louder than the room. It is not louder than a constant.**
-        #
-        # A fixed number cannot be right in two rooms. Set it too high and the
-        # gate never opens — Gemini gets silence for the whole call. Set it too
-        # low, or stand the robot near a fan, and every frame counts as speech:
-        # the silence that ends a turn never accumulates, nobody ever tells
-        # Gemini the question is over, and she says nothing at all. That second
-        # one is what production did, for a whole day, with a threshold of 350
-        # in a room whose floor was above it.
-        #
-        # So the floor is measured: **the quietest moment in the last few
-        # seconds is the room.** Nobody talks continuously, so that minimum is
-        # the room and nothing else — and unlike a decaying average it cannot be
-        # dragged upward by a long sentence. Speech is what stands above it by a
-        # clear margin, with an absolute minimum underneath so a silent room
-        # cannot promote a hiss to a sentence.
-        window.append(rms)
-        floor = min(window) if len(window) >= _VAD_FLOOR_MIN_FRAMES else 0.0
-        threshold = max(floor * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR)
-        is_speech = rms >= threshold
-
-        if is_speech and not speaking:
-            # Speech onset, open a manual activity. We do NOT clear `recent`
-            # here: verification needs a few seconds of audio for a reliable
-            # CAM++ embedding, so we keep a rolling window (last ~5s of speech,
-            # which is dominated by this speaker).
-            speaking = True
-            silence_ms = 0.0
-            utter_ms = 0.0
-            await session.send_realtime_input(activity_start=types.ActivityStart())
-
-        if speaking:
-            recent.add(chunk)
-            await _send_audio(chunk)
-            utter_ms += ms
-            silence_ms = 0.0 if is_speech else silence_ms + ms
-
-            # **A backlog is one question, not four.**
-            #
-            # The robot records from the wake word, and the session behind it
-            # takes seconds to open — so speech sits in the buffer and then
-            # drains at machine speed, and the pauses inside one sentence look
-            # like the ends of four separate questions. Each turn we open cancels
-            # the reply to the last: four `turn closed` lines in two seconds and
-            # `replied=0 chars` every time.
-            #
-            # So no turn is closed while frames are still queued. **The queue is
-            # the measure, not the clock** — comparing the audio clock to the
-            # wall clock said "still catching up" for the entire call, because a
-            # device streaming in real time keeps its head start forever, and
-            # then nothing ever closed the turn at all.
-            # **Once, at the start, and then never again.**
-            #
-            # Asking "is the queue deep right now" every frame is a test that can
-            # stay true forever: a device sending one frame every one hundred and
-            # thirty milliseconds keeps a frame or two in flight at all times, so
-            # the hold never lifted and a whole call went by with no turn closed
-            # — thirty-nine seconds of speech and not one answer. The backlog is
-            # a fact about *the beginning* of the call. The moment it is gone, it
-            # is gone.
-            # **Counted, not sampled.**
-            #
-            # How deep the queue is *right now* is not the question, and asking
-            # it every frame is a test that never comes back false: a device
-            # sending one frame every hundred and thirty milliseconds keeps one
-            # or two in flight permanently. The question is whether the frames
-            # that were already waiting when this call began have gone through,
-            # and that is a number taken once and counted down.
-            if draining and frames >= backlog:
+    # **The pull task never outlives this bridge.**
+    #
+    # `asyncio.wait` does not cancel what it was given, so a cancel from
+    # outside — which is what a GoAway reconnect does to this task — left a
+    # pending `__anext__` on the shared queue. The next bridge opened a
+    # second reader over the same queue and the orphan, being first in line,
+    # ate a frame; worse, it could eat the end-of-stream marker, after which
+    # the new bridge never finished and held a worker thread for ten minutes.
+    try:
+        while True:
+            if frame_task is None:
+                frame_task = asyncio.ensure_future(stream.__anext__())
+            finished_now, _ = await asyncio.wait({frame_task}, timeout=_SILENCE_GAP_S)
+            if not finished_now:
+                # Nothing for a whole gap. If a turn is open, it is over — and
+                # **this is not conditional on the backlog.** It was, which put
+                # the one detector built as a safety net behind the very flag it
+                # exists to catch. A device that has stopped sending has stopped
+                # sending; by definition there is no backlog left to drain.
                 draining = False
-                if backlog:
-                    logger.info("[voice_ws] %d buffered frames are through — "
-                                "live now", backlog)
-            if draining:
+                if speaking:
+                    await _close_turn("device went quiet")
                 continue
+            frame_task = None
+            try:
+                chunk = finished_now.pop().result()
+            except StopAsyncIteration:
+                break
 
-            if silence_ms >= _VAD_SILENCE_MS:
-                # End of utterance: verify the speaker and inject persona before the reply.
-                # التحقّق اختياري؛ إنهاء الدور تحت مش اختياري.
-                if verify and utter_ms >= _VAD_MIN_UTTER_MS:
-                    await _verify_and_inject(session, recent.snapshot())
-                await session.send_realtime_input(activity_end=types.ActivityEnd())
-                # The line that says the turn was closed, and when. Without it
-                # "she did not answer" and "she was never told the question was
-                # over" look identical in the log — and for weeks they were.
-                logger.info("[voice_ws] turn closed after %.1fs of speech",
-                            utter_ms / 1000)
-                speaking = False
+            consumed += 1
+            samples = np.frombuffer(chunk, dtype="<i2")
+            if samples.size == 0:
+                continue
+            rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+            ms = samples.size / 16000 * 1000
+            heard_ms += ms
+
+            # **Speech is louder than the room. It is not louder than a constant.**
+            #
+            # A fixed number cannot be right in two rooms. Set it too high and the
+            # gate never opens — Gemini gets silence for the whole call. Set it too
+            # low, or stand the robot near a fan, and every frame counts as speech:
+            # the silence that ends a turn never accumulates, nobody ever tells
+            # Gemini the question is over, and she says nothing at all. That second
+            # one is what production did, for a whole day, with a threshold of 350
+            # in a room whose floor was above it.
+            #
+            # So the floor is measured: **the quietest moment in the last few
+            # seconds is the room.** Nobody talks continuously, so that minimum is
+            # the room and nothing else — and unlike a decaying average it cannot be
+            # dragged upward by a long sentence. Speech is what stands above it by a
+            # clear margin, with an absolute minimum underneath so a silent room
+            # cannot promote a hiss to a sentence.
+            # **The floor is learned between sentences, not during them.**
+            #
+            # Taking the minimum of the last few seconds works only while room
+            # frames keep arriving. The board now gates its uplink and sends
+            # speech alone, so a window that keeps updating fills with speech,
+            # the floor climbs to the quietest *word*, and the threshold sits
+            # above the voice: the second question of a call was never forwarded
+            # at all, and a long first one closed a dozen times mid-sentence.
+            #
+            # So the window only takes frames while no turn is open. Inside an
+            # utterance the threshold is whatever the room was just before it
+            # began, which is the only honest measure of it.
+            if not speaking:
+                window.append(rms)
+                if len(window) >= _VAD_FLOOR_MIN_FRAMES:
+                    threshold = max(min(window) * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR)
+            # **And nothing is speech until the room is known.** Opening a turn
+            # on the first frame, before there is anything to compare it to,
+            # freezes the threshold at the absolute minimum for the whole
+            # utterance — after which the room itself never falls below it and
+            # the turn cannot close. Half a second of listening first costs
+            # nothing: the board sends its preroll ahead of the first word, and
+            # that preroll is the room.
+            is_speech = (len(window) >= _VAD_FLOOR_MIN_FRAMES
+                         and rms >= threshold)
+
+            if is_speech and not speaking:
+                # Speech onset, open a manual activity. We do NOT clear `recent`
+                # here: verification needs a few seconds of audio for a reliable
+                # CAM++ embedding, so we keep a rolling window (last ~5s of speech,
+                # which is dominated by this speaker).
+                speaking = True
                 silence_ms = 0.0
                 utter_ms = 0.0
-        # Idle silence before any speech: don't forward it, saves bandwidth.
+                await session.send_realtime_input(activity_start=types.ActivityStart())
 
-    if frame_task is not None:
-        frame_task.cancel()
+            if speaking:
+                recent.add(chunk)
+                await _send_audio(chunk)
+                utter_ms += ms
+                silence_ms = 0.0 if is_speech else silence_ms + ms
+
+                # **A backlog is one question, not four.**
+                #
+                # The robot records from the wake word, and the session behind it
+                # takes seconds to open — so speech sits in the buffer and then
+                # drains at machine speed, and the pauses inside one sentence look
+                # like the ends of four separate questions. Each turn we open cancels
+                # the reply to the last: four `turn closed` lines in two seconds and
+                # `replied=0 chars` every time.
+                #
+                # So no turn is closed while frames are still queued. **The queue is
+                # the measure, not the clock** — comparing the audio clock to the
+                # wall clock said "still catching up" for the entire call, because a
+                # device streaming in real time keeps its head start forever, and
+                # then nothing ever closed the turn at all.
+                # **Once, at the start, and then never again.**
+                #
+                # Asking "is the queue deep right now" every frame is a test that can
+                # stay true forever: a device sending one frame every one hundred and
+                # thirty milliseconds keeps a frame or two in flight at all times, so
+                # the hold never lifted and a whole call went by with no turn closed
+                # — thirty-nine seconds of speech and not one answer. The backlog is
+                # a fact about *the beginning* of the call. The moment it is gone, it
+                # is gone.
+                # **Counted, not sampled.**
+                #
+                # How deep the queue is *right now* is not the question, and asking
+                # it every frame is a test that never comes back false: a device
+                # sending one frame every hundred and thirty milliseconds keeps one
+                # or two in flight permanently. The question is whether the frames
+                # that were already waiting when this call began have gone
+                # through.
+                #
+                # **And it has to be counted against what it counted.**
+                # `backlog` is every queued frame, speech or not; `frames`
+                # counts only the ones actually *forwarded*, and room audio
+                # below the threshold is consumed without being forwarded. One
+                # unforwarded frame in the startup queue was enough to leave
+                # this set for the rest of the call — and while it is set no
+                # turn can close, `speaking` stays true forever, `activity_end`
+                # is never sent, and she never answers. That is the outage this
+                # whole sequence was trying to end, put back by the fix for it.
+                if draining and consumed >= backlog:
+                    draining = False
+                    if backlog:
+                        logger.info("[voice_ws] %d buffered frames are through — "
+                                    "live now", backlog)
+                if draining:
+                    continue
+
+                if silence_ms >= _VAD_SILENCE_MS:
+                    # Kept beside the gap test above, deliberately: a board still
+                    # running the old firmware uploads the room without pause, so
+                    # no gap ever arrives and this is the only thing that would
+                    # close a turn. Either detector alone leaves one of the two
+                    # boards mute.
+                    await _close_turn("quiet frames")
+            # Idle silence before any speech: don't forward it, saves bandwidth.
+    finally:
+        if frame_task is not None:
+            frame_task.cancel()
 
     logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
                 "%.1fs audio, %d frames dropped",

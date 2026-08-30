@@ -129,7 +129,12 @@ def test_a_pause_in_real_time_still_ends_the_turn(loop):
                 await asyncio.sleep(0.2)
                 yield c
 
-    chunks = [_speech(200)] * 3 + [_speech(200, loud=False)] * 5
+    # The room first, then the sentence — which is the order the board sends
+    # in: below its own gate the audio goes to the preroll, and the preroll is
+    # flushed ahead of the first word. Nothing can be judged loud before there
+    # is something quiet to judge it against.
+    chunks = ([_speech(200, loud=False)] * 4 + [_speech(200)] * 3
+              + [_speech(200, loud=False)] * 5)
     session = _Session()
 
     t0 = time.monotonic()
@@ -309,8 +314,8 @@ def test_the_turn_ends_when_the_board_goes_quiet(loop):
 
     session = _Session()
     task = loop.create_task(
-        _device_to_live(_ThenSilence([_at(4000)] * 5), session, _RecentAudio(),
-                        verify=False))
+        _device_to_live(_ThenSilence([_at(30)] * 4 + [_at(4000)] * 5), session,
+                        _RecentAudio(), verify=False))
     loop.run_until_complete(asyncio.sleep(1.6))
     task.cancel()
     try:
@@ -322,3 +327,101 @@ def test_the_turn_ends_when_the_board_goes_quiet(loop):
     assert session.ends == 1, (
         "the board stopped sending and nobody told Gemini the question was "
         "over — which is silence, from the other end")
+
+
+# ── What the hostile review found, and what it would have cost ─────────────
+
+
+def test_room_frames_in_the_backlog_do_not_gag_the_turn(loop):
+    """**The outage, put back by its own fix.**
+
+    `backlog` counts every queued frame; the first cut compared it to the count
+    of frames *forwarded*, and room audio below the threshold is consumed
+    without being forwarded. One such frame in the startup queue left the hold
+    on for the rest of the call — and while it is on, no turn can close. She
+    hears everything and answers nothing, which is the failure of the last week
+    exactly.
+    """
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    # Room, sentence, room — and every one of them was queued during setup.
+    chunks = [_at(40)] * 6 + [_at(5000)] * 5 + [_at(40)] * 6
+    session = _Session()
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks, backlog=len(chunks)), session,
+                        _RecentAudio(), verify=False))
+
+    assert session.starts == 1
+    assert session.ends == 1, (
+        "the quiet frames in the backlog were never counted, so the hold never "
+        "lifted and the question was never closed")
+
+
+def test_the_pull_task_never_outlives_the_bridge(loop):
+    """A cancelled bridge left a pending read on the shared queue. The next one
+    opened a second reader over the same queue, and the orphan — first in line —
+    ate a frame, or the end-of-stream marker, after which the new bridge never
+    finished and held a worker thread for ten minutes."""
+    import asyncio as aio
+
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    class _Slow(_Reader):
+        async def frames(self):
+            for c in self._chunks:
+                self._left -= 1
+                await aio.sleep(0.3)
+                yield c
+
+    def _at(level: int) -> bytes:
+        import numpy as np
+        return np.full(4800, level, dtype="<i2").tobytes()
+
+    before = len(aio.all_tasks(loop)) if loop.is_running() else 0
+    task = loop.create_task(
+        _device_to_live(_Slow([_at(40)] * 10), _Session(), _RecentAudio(),
+                        verify=False))
+    loop.run_until_complete(aio.sleep(0.4))
+    task.cancel()
+    try:
+        loop.run_until_complete(task)
+    except aio.CancelledError:
+        pass
+    loop.run_until_complete(aio.sleep(0.05))
+
+    leaked = [t for t in aio.all_tasks(loop)
+              if not t.done() and "async_generator_asend" in repr(t)]
+    assert not leaked, f"{len(leaked)} orphaned reads left on the queue: {leaked}"
+    assert before >= 0
+
+
+def test_the_floor_is_not_learned_from_the_speech_itself(loop):
+    """With the board's uplink gated, only speech arrives — so a floor that
+    keeps updating fills with speech, climbs to the quietest word, and puts the
+    threshold above the voice. The second question of a call was never forwarded
+    at all, and a long first one closed a dozen times mid-sentence."""
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    # Room, then one long continuous sentence — no pause inside it at all.
+    chunks = [_at(40)] * 5 + [_at(5000)] * 40
+    session = _Session()
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(), verify=False))
+
+    assert session.starts == 1, "the sentence opened more than one turn"
+    assert session.ends == 0, (
+        "a continuous sentence was cut into pieces — the floor rose into the "
+        "speech and the threshold climbed above the voice")
