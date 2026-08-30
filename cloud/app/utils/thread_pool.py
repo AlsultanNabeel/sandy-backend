@@ -40,3 +40,35 @@ def submit_background(fn, *args, _label: str | None = None, **kwargs):
             logger.exception("[background] %s failed", label)
 
     return sandy_executor.submit(contextvars.copy_context().run, _runner)
+
+
+def gather(jobs: "dict[str, object]") -> "dict[str, object]":
+    """Run independent readers at the same time and return their results.
+
+    **Serial round trips are the whole cost of building context.** The voice
+    prompt was measured at six seconds before Gemini was even dialled, and
+    almost all of it was thirty small queries to Atlas taken one at a time —
+    each one fast, all of them waiting on the one before. Nothing in that set
+    depends on anything else in it.
+
+    ``jobs`` maps a name to a zero-argument callable. Every job runs with a copy
+    of the caller's context, which is not optional here: the stores underneath
+    are tenant-scoped and read the tenant from a context variable, so a job on a
+    bare thread would quietly return an empty list instead of the user's data.
+
+    A job that raises contributes ``None`` rather than taking the rest down.
+    """
+    if not jobs:
+        return {}
+
+    ctx = contextvars.copy_context()
+    futures = {name: sandy_executor.submit(ctx.copy().run, fn)
+               for name, fn in jobs.items()}
+    out: "dict[str, object]" = {}
+    for name, fut in futures.items():
+        try:
+            out[name] = fut.result()
+        except Exception:  # noqa: BLE001 — one broken area, not the whole picture
+            logger.debug("[gather] %s failed", name, exc_info=True)
+            out[name] = None
+    return out

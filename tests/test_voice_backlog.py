@@ -48,14 +48,25 @@ class _Session:
 
 
 class _Reader:
-    """Hands over every frame at once, the way a drained queue does."""
+    """Hands over every frame at once, the way a drained queue does.
+
+    `pending()` is the real reader's queue depth, and it is what the bridge
+    asks: the first attempt compared clocks instead, and a device streaming in
+    real time keeps its head start forever — so "still catching up" was true for
+    the whole call and no turn was ever closed at all.
+    """
 
     def __init__(self, chunks) -> None:
-        self._chunks = chunks
+        self._chunks = list(chunks)
+        self._left = len(self._chunks)
         self.dropped = 0
+
+    def pending(self) -> int:
+        return self._left
 
     async def frames(self):
         for c in self._chunks:
+            self._left -= 1
             yield c
 
 
@@ -106,6 +117,9 @@ def test_a_pause_in_real_time_still_ends_the_turn(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     class _LiveReader(_Reader):
+        def pending(self) -> int:
+            return 0        # a live mic keeps nothing waiting
+
         async def frames(self):
             for c in self._chunks:
                 # Play it out at roughly its own duration, like a live mic.

@@ -26,7 +26,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
+
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from app.utils.thread_pool import gather
 
 logger = logging.getLogger(__name__)
 
@@ -83,31 +86,48 @@ def build_life_snapshot() -> str:
     Runs inside the caller's tenant context — every store below is scoped, so
     this can only ever see the person who is asking.
     """
+    # **Six queries at once, not one after another.**
+    #
+    # Measured on the robot: six seconds between «auth OK» and the prompt being
+    # ready, with the microphone recording the whole time — and almost all of it
+    # was small Atlas queries taken in turn. None of them depends on any other.
+    # `gather` carries the tenant context into each thread, which is the part
+    # that cannot be skipped: these stores read the tenant from a context
+    # variable and a bare thread would find nothing and say so silently.
+    got = gather({
+        "tasks": lambda: __import__(
+            "app.features.tasks_store", fromlist=["x"]).load_tasks(),
+        "reminders": lambda: __import__(
+            "app.features.reminders_store", fromlist=["x"]).load_reminders(),
+        "habits": lambda: __import__(
+            "app.features.habits_store", fromlist=["x"]).list_habits(),
+        "books": lambda: __import__(
+            "app.features.reading_store", fromlist=["x"]).list_books(),
+        "shopping": lambda: __import__(
+            "app.features.shopping_store", fromlist=["x"]).list_items(),
+    })
+
     parts: List[str] = []
 
-    tasks = _safe(lambda: __import__(
-        "app.features.tasks_store", fromlist=["x"]).load_tasks(), "tasks")
+    tasks = got.get("tasks")
     if tasks:
         open_tasks = [t for t in tasks if not t.get("done")]
         parts.append(_line("مهامه المفتوحة",
                            [str(t.get("text", ""))[:60] for t in open_tasks],
                            len(open_tasks)))
 
-    rem = _safe(lambda: __import__(
-        "app.features.reminders_store", fromlist=["x"]).load_reminders(), "reminders")
+    rem = got.get("reminders")
     if rem:
         parts.append(_line("تذكيراته",
                            [str(r.get("text", ""))[:60] for r in rem], len(rem)))
 
-    habits = _safe(lambda: __import__(
-        "app.features.habits_store", fromlist=["x"]).list_habits(), "habits")
+    habits = got.get("habits")
     if habits:
         parts.append(_line("عاداته", [
             f"{h.get('name','')} ({h.get('streak',0)} يوم)" for h in habits
         ], len(habits)))
 
-    books = _safe(lambda: __import__(
-        "app.features.reading_store", fromlist=["x"]).list_books(), "books")
+    books = got.get("books")
     if books:
         reading = [b for b in books if str(b.get("status", "")) == "reading"]
         parts.append(_line("بيقرا", [str(b.get("title", ""))[:50] for b in reading],
@@ -115,8 +135,7 @@ def build_life_snapshot() -> str:
                      _line("كتبه", [str(b.get("title", ""))[:50] for b in books],
                            len(books)))
 
-    shopping = _safe(lambda: __import__(
-        "app.features.shopping_store", fromlist=["x"]).list_items(), "shopping")
+    shopping = got.get("shopping")
     if shopping:
         pending = [s for s in shopping if not s.get("done")]
         # `list_items` returns the name under `text`; this read `item` and got
@@ -242,7 +261,7 @@ def _searchable_lists() -> Dict[str, Any]:
         if hit is not None and hit[0] == version and hit[2] > now:
             return hit[1]
 
-    lists = {name: _safe(fn, name) for name, fn, _f, _l in _SEARCHED}
+    lists = gather({name: fn for name, fn, _f, _l in _SEARCHED})
 
     # `_safe` returns None for a store that **raised**, and an empty list for a
     # store that is genuinely empty. Only the second is an answer worth keeping:

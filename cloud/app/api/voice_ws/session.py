@@ -22,7 +22,7 @@ from app.api.voice_ws._config import (
     _SENSITIVE_TOOLS,
     _VAD_RMS_THRESHOLD,
     _VAD_SILENCE_MS,
-    _BACKLOG_GRACE_S,
+    _BACKLOG_FRAMES,
     _VAD_BLIND_MS,
     _VAD_MIN_UTTER_MS,
 )
@@ -388,6 +388,17 @@ class _DeviceReader:
                 pass
         self._q.put_nowait(None)
 
+    def pending(self) -> int:
+        """Frames waiting to be read — how far behind the bridge is, exactly.
+
+        Timing cannot answer this. A first attempt compared the audio clock to
+        the wall clock, and a device streaming in real time keeps whatever lead
+        it started with forever, so the "still catching up" test was true for
+        the whole call and no turn was ever closed. The queue knows: empty means
+        live, anything else means there is stored speech still to hand over.
+        """
+        return self._q.qsize()
+
     async def frames(self):
         """Yield PCM frames, oldest buffered first, until the device goes away."""
         while True:
@@ -746,7 +757,6 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     peak = 0.0
     opened = False
     threshold = _VAD_RMS_THRESHOLD
-    started_at = time.monotonic()
     backlog_logged = False
 
     async def _send_audio(chunk: bytes) -> None:
@@ -805,23 +815,23 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             # **A backlog is one question, not four.**
             #
             # The robot records from the wake word, and the session behind it
-            # took six to nine seconds to open — so seconds of speech sat in the
-            # buffer and then drained at machine speed. Wall clock barely moved
-            # while the audio clock ran, our detector saw the pauses inside one
-            # sentence as four separate questions, and each new turn cut off the
-            # answer to the one before it. The log said it plainly: four
-            # `turn closed` lines inside two seconds, and `replied=0 chars`
-            # every time.
+            # takes seconds to open — so speech sits in the buffer and then
+            # drains at machine speed, and the pauses inside one sentence look
+            # like the ends of four separate questions. Each turn we open cancels
+            # the reply to the last: four `turn closed` lines in two seconds and
+            # `replied=0 chars` every time.
             #
-            # So while we are still catching up — the audio ahead of the wall
-            # clock by more than a breath — no turn is closed. When the two
-            # meet, we are live again and a pause means what it means.
-            behind = heard_ms / 1000.0 - (time.monotonic() - started_at)
-            if behind > _BACKLOG_GRACE_S:
+            # So no turn is closed while frames are still queued. **The queue is
+            # the measure, not the clock** — comparing the audio clock to the
+            # wall clock said "still catching up" for the entire call, because a
+            # device streaming in real time keeps its head start forever, and
+            # then nothing ever closed the turn at all.
+            if reader.pending() > _BACKLOG_FRAMES:
                 if not backlog_logged:
                     backlog_logged = True
-                    logger.info("[voice_ws] draining %.1fs of buffered speech — "
-                                "holding the turn open", behind)
+                    logger.info("[voice_ws] %d frames still queued — holding the "
+                                "turn open until they are through",
+                                reader.pending())
                 continue
 
             if silence_ms >= _VAD_SILENCE_MS:
