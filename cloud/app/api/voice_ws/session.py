@@ -23,6 +23,9 @@ from app.api.voice_ws._config import (
     _SENSITIVE_TOOLS,
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
+    _CHUNK_BYTES,
+    _COMPRESS_TRIGGER_TOKENS,
+    _COMPRESS_WINDOW_TOKENS,
     _VAD_FLOOR_FACTOR,
     _VAD_FLOOR_FRAMES,
     _VAD_FLOOR_MIN_FRAMES,
@@ -341,6 +344,9 @@ class _DeviceReader:
         self._q: asyncio.Queue = asyncio.Queue(maxsize=buffer_ms // self._FRAME_MS)
         self._task: Optional[asyncio.Task] = None
         self._stop = False
+        # True once the device's socket is gone. The reconnect decision needs to
+        # know the difference between "Gemini hung up" and "the robot did".
+        self.finished = False
         # Its own thread, not the shared default executor.
         #
         # Two reasons. asyncio.run() only waits for the *default* executor, so a
@@ -383,6 +389,7 @@ class _DeviceReader:
                 except asyncio.QueueEmpty:
                     pass
             self._q.put_nowait(bytes(chunk))
+        self.finished = True
         # Wake whoever is waiting so the bridge ends instead of hanging.
         if self._q.full():
             try:
@@ -615,6 +622,25 @@ async def _live_session(ws, remote: str) -> None:
             # → محادثات الصوت ما بتظهر بذاكرة التلي/الويب (الذاكرة الموحدة).
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+
+            # **A call that lasts is a call that survives the connection.**
+            #
+            # Google's own limits, and none of them were handled here: a Live
+            # connection lives about ten minutes, an audio session dies at
+            # fifteen without compression, and the server sends `GoAway` shortly
+            # before it hangs up. So a long conversation ended by itself, mid
+            # sentence, with nothing in the log that looked like a failure —
+            # which is the same thing the owner reports as "she stops answering".
+            #
+            # Resumption keeps the session's state server-side for a day and
+            # hands back a token to reconnect with; compression slides a window
+            # over the oldest turns instead of hitting the wall. Together they
+            # are what makes "always answers" a property rather than a hope.
+            context_window_compression=types.ContextWindowCompressionConfig(
+                trigger_tokens=_COMPRESS_TRIGGER_TOKENS,
+                sliding_window=types.SlidingWindow(
+                    target_tokens=_COMPRESS_WINDOW_TOKENS),
+            ),
         )
         # **نهاية الدور بتتقرّر عنا، دايمًا.**
         #
@@ -636,99 +662,124 @@ async def _live_session(ws, remote: str) -> None:
         config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
         )
-        config = types.LiveConnectConfig(**config_kwargs)
-
+        # **The session outlives the connection.**
+        #
+        # A Live connection lasts about ten minutes and the server sends
+        # `GoAway` shortly before it closes one. Nothing here listened, so a
+        # long conversation simply stopped — mid sentence, with a clean-looking
+        # log — and from the room that is indistinguishable from her deciding
+        # to ignore him. The handle Google hands back reconnects to the same
+        # session with its memory intact, so the reconnect is invisible.
+        resume_handle: Optional[str] = None
+        live_state: Dict[str, Any] = {"resume": None, "goaway": False}
         client = genai.Client(api_key=GEMINI_API_KEY)
         dispatcher = _make_dispatcher()
 
-        cm, session, model_name, last_error = await _open_live_session(client, config)
+        while True:
+            config_kwargs["session_resumption"] = types.SessionResumptionConfig(
+                handle=resume_handle)
+            config = types.LiveConnectConfig(**config_kwargs)
 
-        if not model_name:
-            _send_json(ws, {"type": "error", "msg": "live_model_unavailable"})
-            logger.error("[voice_ws] no live model accepted audio; last: %s", last_error)
-            return
+            cm, session, model_name, last_error = await _open_live_session(client, config)
 
-        remember_live_model(model_name)
-        try:
-            logger.info(
-                "[voice_ws] Gemini Live session opened for %s (gate=%s, model=%s)",
-                remote, gate_on, model_name
-            )
+            if not model_name:
+                _send_json(ws, {"type": "error", "msg": "live_model_unavailable"})
+                logger.error("[voice_ws] no live model accepted audio; last: %s", last_error)
+                return
 
-            if reader.dropped:
-                logger.warning(
-                    "[voice_ws] setup took long enough to drop %d buffered frames",
-                    reader.dropped,
+            remember_live_model(model_name)
+            try:
+                logger.info(
+                    "[voice_ws] Gemini Live session opened for %s (gate=%s, model=%s)",
+                    remote, gate_on, model_name
                 )
 
-            recent = _RecentAudio()
-            t_in = asyncio.create_task(
-                _device_to_live(reader, session, recent, verify=gate_on))
-            t_out = asyncio.create_task(_live_to_device(ws, session, dispatcher, recent))
-
-            done, pending = await asyncio.wait(
-                [t_in, t_out],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            # The two directions are not equals, and treating them as equals is
-            # what cut her off mid-sentence.
-            #
-            # device→live ending means the robot stopped sending audio. That is
-            # the *normal* end of a question — and Gemini is very often still
-            # speaking the answer when it happens. Cancelling the other side
-            # right there threw away a reply that was already on its way, which
-            # the owner heard as her starting a sentence and vanishing. The log
-            # line for it read "device→live ended cleanly, closing session",
-            # which sounded like success.
-            #
-            # So when the input side finishes we let the output side finish
-            # too, up to a bounded wait. A reply longer than this is a stuck
-            # stream, not a long answer.
-            #
-            # live→device ending is the opposite: Gemini is done or has failed,
-            # and there is nothing left to wait for.
-            if t_in in done and t_out in pending:
-                try:
-                    await asyncio.wait_for(t_out, timeout=_REPLY_DRAIN_S)
-                    logger.info("[voice_ws] device stopped sending; reply finished")
-                except asyncio.TimeoutError:
+                if reader.dropped:
                     logger.warning(
-                        "[voice_ws] reply still running %ds after the device went "
-                        "quiet — cutting it", _REPLY_DRAIN_S)
-                except Exception:  # noqa: BLE001
-                    logger.debug("reply drain ended with an error", exc_info=True)
-                done = {t_in, t_out}
-                pending = set()
+                        "[voice_ws] setup took long enough to drop %d buffered frames",
+                        reader.dropped,
+                    )
 
-            for t in pending:
-                t.cancel()
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                    logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
-            # Name which side ended and why. Without this a silent clean exit on
-            # either bridge looked identical to a crash: the only thing in the log
-            # was the CancelledError of the OTHER task, which is a symptom, never
-            # the cause.
-            for t in done:
-                side = "device→live" if t is t_in else "live→device"
-                if t.cancelled():
-                    logger.info("[voice_ws] %s cancelled", side)
-                elif t.exception():
-                    exc = t.exception()
-                    logger.error("[voice_ws] %s failed: %r", side, exc,
-                                 exc_info=exc)
-                    # A refusal that got past the probe must not be repeated for
-                    # the life of the dyno. Unpin, and the next call re-walks.
-                    if "CONTENT_TYPE_AUDIO" in str(exc) or "1007" in str(exc):
-                        forget_live_model(model_name)
-                else:
-                    logger.info("[voice_ws] %s ended cleanly, closing session", side)
-        finally:
-            # What `async with` would have done. Not suppressing anything: an
-            # error in the bridge belongs in the handler below, not swallowed here.
-            await cm.__aexit__(None, None, None)
+                recent = _RecentAudio()
+                t_in = asyncio.create_task(
+                    _device_to_live(reader, session, recent, verify=gate_on))
+                t_out = asyncio.create_task(
+                    _live_to_device(ws, session, dispatcher, recent, live_state))
+
+                done, pending = await asyncio.wait(
+                    [t_in, t_out],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                # The two directions are not equals, and treating them as equals is
+                # what cut her off mid-sentence.
+                #
+                # device→live ending means the robot stopped sending audio. That is
+                # the *normal* end of a question — and Gemini is very often still
+                # speaking the answer when it happens. Cancelling the other side
+                # right there threw away a reply that was already on its way, which
+                # the owner heard as her starting a sentence and vanishing. The log
+                # line for it read "device→live ended cleanly, closing session",
+                # which sounded like success.
+                #
+                # So when the input side finishes we let the output side finish
+                # too, up to a bounded wait. A reply longer than this is a stuck
+                # stream, not a long answer.
+                #
+                # live→device ending is the opposite: Gemini is done or has failed,
+                # and there is nothing left to wait for.
+                if t_in in done and t_out in pending:
+                    try:
+                        await asyncio.wait_for(t_out, timeout=_REPLY_DRAIN_S)
+                        logger.info("[voice_ws] device stopped sending; reply finished")
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[voice_ws] reply still running %ds after the device went "
+                            "quiet — cutting it", _REPLY_DRAIN_S)
+                    except Exception:  # noqa: BLE001
+                        logger.debug("reply drain ended with an error", exc_info=True)
+                    done = {t_in, t_out}
+                    pending = set()
+
+                for t in pending:
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
+                # Name which side ended and why. Without this a silent clean exit on
+                # either bridge looked identical to a crash: the only thing in the log
+                # was the CancelledError of the OTHER task, which is a symptom, never
+                # the cause.
+                for t in done:
+                    side = "device→live" if t is t_in else "live→device"
+                    if t.cancelled():
+                        logger.info("[voice_ws] %s cancelled", side)
+                    elif t.exception():
+                        exc = t.exception()
+                        logger.error("[voice_ws] %s failed: %r", side, exc,
+                                     exc_info=exc)
+                        # A refusal that got past the probe must not be repeated for
+                        # the life of the dyno. Unpin, and the next call re-walks.
+                        if "CONTENT_TYPE_AUDIO" in str(exc) or "1007" in str(exc):
+                            forget_live_model(model_name)
+                    else:
+                        logger.info("[voice_ws] %s ended cleanly, closing session", side)
+            finally:
+                # What `async with` would have done. Not suppressing anything: an
+                # error in the bridge belongs in the handler below, not swallowed here.
+                await cm.__aexit__(None, None, None)
+
+            # Reconnect only when Gemini asked us to, the device is still
+            # there, and we hold a handle to come back with. Any other ending
+            # is the call being over.
+            resume_handle = live_state.get("resume") or resume_handle
+            if not (live_state.get("goaway") and resume_handle
+                    and reader is not None and not reader.finished):
+                break
+            live_state["goaway"] = False
+            logger.info("[voice_ws] reconnecting to the same session after "
+                        "GoAway")
 
     except Exception as exc:
         logger.error("[voice_ws] Live session error (%s): %s", remote, exc)
@@ -765,15 +816,30 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                     "not several", backlog)
 
     async def _send_audio(chunk: bytes) -> None:
+        """Forward one device frame, split to the size Google asks for.
+
+        **The board sends a hundred and twenty-eight milliseconds at a time;
+        the Live API documentation asks for twenty to forty.** A big frame is a
+        coarse frame: the earliest the far end can notice speech starting or
+        stopping is the boundary of whichever one it is inside, so every turn
+        begins and ends late by up to a frame. Splitting costs nothing — it is
+        the same bytes, in more messages — and it is the cheapest latency in the
+        whole path.
+        """
         nonlocal frames, sent
-        await session.send_realtime_input(
-            audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
-        )
+        for i in range(0, len(chunk), _CHUNK_BYTES):
+            piece = chunk[i:i + _CHUNK_BYTES]
+            if not piece:
+                continue
+            await session.send_realtime_input(
+                audio=types.Blob(data=piece, mime_type="audio/pcm;rate=16000")
+            )
         frames += 1
         sent += len(chunk)
         if frames == 1:
             logger.info("[voice_ws] first audio frame forwarded to Gemini "
-                        "(%d bytes)", len(chunk))
+                        "(%d bytes, split into %d)", len(chunk),
+                        max(1, -(-len(chunk) // _CHUNK_BYTES)))
 
     async for chunk in reader.frames():
         samples = np.frombuffer(chunk, dtype="<i2")
@@ -880,8 +946,16 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 frames, sent, sent / 2 / 16000, reader.dropped)
 
 
-async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> None:
-    """Read Gemini Live responses, relay audio to the device, handle tool calls."""
+async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
+                          live_state: Optional[Dict[str, Any]] = None) -> None:
+    """Read Gemini Live responses, relay audio to the device, handle tool calls.
+
+    `live_state` carries two things back to the caller that decide whether the
+    call survives: the latest resumption handle, and whether the server has said
+    it is about to hang up.
+    """
+    if live_state is None:
+        live_state = {}
     from google.genai import types
 
 
@@ -988,6 +1062,23 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio") -> No
         if not _seen["any"]:
             _seen["any"] = True
             logger.info("[voice_ws] first response from Gemini")
+
+        # **The handle, kept every time it changes.** It is what makes the
+        # reconnect invisible: the same session, with everything said so far
+        # still in it. Without one, a reconnect is a stranger asking who you are.
+        update = getattr(response, "session_resumption_update", None)
+        if update is not None and getattr(update, "resumable", False):
+            handle = getattr(update, "new_handle", "")
+            if handle:
+                live_state["resume"] = handle
+
+        # And the warning that the connection is ending. Ten minutes is the
+        # documented lifetime; this arrives before the end, with the time left.
+        away = getattr(response, "go_away", None)
+        if away is not None:
+            live_state["goaway"] = True
+            logger.info("[voice_ws] GoAway from Gemini (%s left) — will reconnect",
+                        getattr(away, "time_left", "?"))
 
         # Capture user speech transcript
         if response.server_content and response.server_content.input_transcription:
