@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Dict, List, Optional
 
 from app.agent.tool_result import result_failed, result_ok
@@ -174,7 +175,51 @@ def _build_system_instruction(user_id: str = "") -> str:
         set_voice_identity(user_id)
     chat_id = _stm_chat_id()
     with active_user_profile_context(_voice_profile(chat_id) if chat_id else None):
-        return _system_instruction_body(chat_id, build_effective_persona)
+        return _cached_system_instruction(chat_id, build_effective_persona)
+
+
+# The whole instruction, cached per tenant version.
+#
+# It cost between six and nine seconds to build, measured on the robot, and the
+# robot is *recording the user the entire time* — so every one of those seconds
+# became a second of audio queued behind a session that had not opened yet. What
+# came out the other end was not a delay, it was a mess: the backlog drained at
+# machine speed, our turn detector saw four questions in two seconds, and each
+# new turn cut off the reply to the one before. `replied=0 chars`, four times.
+#
+# Caching the persona block underneath helped one layer. This caches the answer.
+# Same key as everything else — a write anywhere moves the tenant's version and
+# the next call rebuilds — so it cannot go stale on a memory the user just saved.
+_INSTRUCTION_CACHE: Dict[str, tuple] = {}
+_INSTRUCTION_LOCK = threading.Lock()
+
+
+def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
+    from app.utils.tenant_version import version_for
+
+    key = str(chat_id or "")
+    version = version_for(key) if key else -1
+    if version >= 0:
+        with _INSTRUCTION_LOCK:
+            hit = _INSTRUCTION_CACHE.get(key)
+        if hit is not None and hit[0] == version:
+            logger.info("[voice_ws] instruction from cache (version %d)", version)
+            return hit[1]
+
+    text = _system_instruction_body(chat_id, build_effective_persona)
+
+    if version >= 0 and text:
+        with _INSTRUCTION_LOCK:
+            if len(_INSTRUCTION_CACHE) > 256:
+                _INSTRUCTION_CACHE.clear()
+            _INSTRUCTION_CACHE[key] = (version, text)
+    return text
+
+
+def clear_instruction_cache() -> None:
+    """Test-only, and used by account deletion."""
+    with _INSTRUCTION_LOCK:
+        _INSTRUCTION_CACHE.clear()
 
 
 def _system_instruction_body(chat_id: str, build_effective_persona) -> str:

@@ -22,6 +22,7 @@ from app.api.voice_ws._config import (
     _SENSITIVE_TOOLS,
     _VAD_RMS_THRESHOLD,
     _VAD_SILENCE_MS,
+    _BACKLOG_GRACE_S,
     _VAD_BLIND_MS,
     _VAD_MIN_UTTER_MS,
 )
@@ -745,6 +746,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     peak = 0.0
     opened = False
     threshold = _VAD_RMS_THRESHOLD
+    started_at = time.monotonic()
+    backlog_logged = False
 
     async def _send_audio(chunk: bytes) -> None:
         nonlocal frames, sent
@@ -798,6 +801,29 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             await _send_audio(chunk)
             utter_ms += ms
             silence_ms = 0.0 if is_speech else silence_ms + ms
+
+            # **A backlog is one question, not four.**
+            #
+            # The robot records from the wake word, and the session behind it
+            # took six to nine seconds to open — so seconds of speech sat in the
+            # buffer and then drained at machine speed. Wall clock barely moved
+            # while the audio clock ran, our detector saw the pauses inside one
+            # sentence as four separate questions, and each new turn cut off the
+            # answer to the one before it. The log said it plainly: four
+            # `turn closed` lines inside two seconds, and `replied=0 chars`
+            # every time.
+            #
+            # So while we are still catching up — the audio ahead of the wall
+            # clock by more than a breath — no turn is closed. When the two
+            # meet, we are live again and a pause means what it means.
+            behind = heard_ms / 1000.0 - (time.monotonic() - started_at)
+            if behind > _BACKLOG_GRACE_S:
+                if not backlog_logged:
+                    backlog_logged = True
+                    logger.info("[voice_ws] draining %.1fs of buffered speech — "
+                                "holding the turn open", behind)
+                continue
+
             if silence_ms >= _VAD_SILENCE_MS:
                 # End of utterance: verify the speaker and inject persona before the reply.
                 # التحقّق اختياري؛ إنهاء الدور تحت مش اختياري.

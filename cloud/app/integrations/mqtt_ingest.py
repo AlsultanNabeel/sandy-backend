@@ -13,6 +13,7 @@ unconditionally: it no-ops when MQTT isn't configured.
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
@@ -53,6 +54,21 @@ MQTT_KEEPALIVE_S = 30
 # that means something, and a pool of eight would write an older state over a
 # newer one and hand the camera its slices shuffled.
 _INGEST = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mqtt-ingest")
+
+
+@atexit.register
+def _drop_pending_ingest() -> None:
+    """Let the dyno die on time.
+
+    `concurrent.futures` joins its worker threads at interpreter exit, and this
+    one can be sitting on a Mongo call with a queue behind it — so a restart hit
+    `Error R12 (Exit timeout)` and Heroku killed the process with SIGKILL after
+    thirty seconds. Registered after that module's own hook, so it runs before
+    it: the queue is thrown away and only the job already in flight is waited
+    on. Nothing here is worth delaying a deploy for — every message is a
+    heartbeat that will be sent again.
+    """
+    _INGEST.shutdown(wait=False, cancel_futures=True)
 
 # A bound, because an unbounded queue in front of a stalled database is just a
 # slower way to run out of memory. Heartbeats are retained and repeat every few

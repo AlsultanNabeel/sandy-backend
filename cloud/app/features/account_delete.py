@@ -211,6 +211,12 @@ def delete_account(user_id: str) -> Dict[str, Any]:
     forget(user_id)
     clear_directives_cache()
     clear_lists_cache()
+    try:
+        from app.api.voice_ws.tools import clear_instruction_cache
+
+        clear_instruction_cache()
+    except Exception:  # noqa: BLE001 — voice is optional; the erase is not
+        logger.debug("[delete] voice instruction cache not cleared", exc_info=True)
 
     logger.info("[delete] account %s erased: %s", user_id, removed)
     return {"ok": True, "removed": removed}
