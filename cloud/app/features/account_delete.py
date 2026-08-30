@@ -87,6 +87,10 @@ _BY_USER: List[str] = [
     "sandy_usage_daily",
     "sandy_usage_rl",
     "sandy_active_user_profile",
+    # The built voice prompt, keyed by tenant and version. It holds the user's
+    # name, interests and lists verbatim — a forgotten account must not leave a
+    # copy of its own prompt behind.
+    "sandy_prompt_cache",
 ]
 
 # Short-term memory keys its documents `"<thread>:<user>"` and also carries a

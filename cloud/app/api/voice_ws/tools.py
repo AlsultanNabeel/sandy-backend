@@ -5,6 +5,8 @@ import json
 import threading
 from typing import Any, Dict, List, Optional
 
+from pymongo.errors import PyMongoError
+
 from app.agent.tool_result import result_failed, result_ok
 from app.api.voice_ws._config import (
     logger,
@@ -194,25 +196,84 @@ _INSTRUCTION_CACHE: Dict[str, tuple] = {}
 _INSTRUCTION_LOCK = threading.Lock()
 
 
+_PROMPT_COLL = "sandy_prompt_cache"
+
+
+def _shared_get(key: str, version: int) -> Optional[str]:
+    """The same instruction, from whichever worker built it last.
+
+    **A cache in one process is a coin toss when there are two.** `Procfile`
+    runs two gunicorn workers and the robot lands on whichever is free, so a
+    per-process cache missed about half the time — and every miss is the four
+    seconds of database reads that the microphone spends recording into a
+    buffer nobody can use. The instruction is a pure function of the tenant and
+    its version, which is exactly the shape that belongs in shared storage.
+    """
+    try:
+        from app.db import get_db
+
+        db = get_db()
+        if db is None:
+            return None
+        doc = db[_PROMPT_COLL].find_one({"_id": f"{key}:{version}"}, {"text": 1})
+        return (doc or {}).get("text") or None
+    except PyMongoError as exc:
+        logger.debug("[voice_ws] shared prompt read skipped: %s", exc)
+        return None
+
+
+def _shared_put(key: str, version: int, text: str) -> None:
+    from datetime import datetime, timezone
+
+    try:
+        from app.db import get_db
+
+        db = get_db()
+        if db is None:
+            return
+        db[_PROMPT_COLL].update_one(
+            {"_id": f"{key}:{version}"},
+            {"$set": {"text": text, "user_id": key,
+                      "created_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
+    except PyMongoError as exc:
+        logger.debug("[voice_ws] shared prompt write skipped: %s", exc)
+
+
 def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
     from app.utils.tenant_version import version_for
 
     key = str(chat_id or "")
     version = version_for(key) if key else -1
-    if version >= 0:
+    if version < 0:
+        return _system_instruction_body(chat_id, build_effective_persona)
+
+    with _INSTRUCTION_LOCK:
+        hit = _INSTRUCTION_CACHE.get(key)
+    if hit is not None and hit[0] == version:
+        logger.info("[voice_ws] instruction from cache (version %d)", version)
+        return hit[1]
+
+    shared = _shared_get(key, version)
+    if shared:
+        logger.info("[voice_ws] instruction from the shared cache (version %d)",
+                    version)
         with _INSTRUCTION_LOCK:
-            hit = _INSTRUCTION_CACHE.get(key)
-        if hit is not None and hit[0] == version:
-            logger.info("[voice_ws] instruction from cache (version %d)", version)
-            return hit[1]
+            _INSTRUCTION_CACHE[key] = (version, shared)
+        return shared
 
     text = _system_instruction_body(chat_id, build_effective_persona)
-
-    if version >= 0 and text:
+    if text:
         with _INSTRUCTION_LOCK:
             if len(_INSTRUCTION_CACHE) > 256:
                 _INSTRUCTION_CACHE.clear()
             _INSTRUCTION_CACHE[key] = (version, text)
+        from app.utils.thread_pool import submit_background
+
+        # Off the connection path: the caller already has the text, and the
+        # robot is waiting. Whoever comes next benefits, not this call.
+        submit_background(_shared_put, key, version, text, _label="prompt-cache")
     return text
 
 

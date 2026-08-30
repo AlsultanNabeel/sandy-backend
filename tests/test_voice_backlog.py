@@ -425,3 +425,99 @@ def test_the_floor_is_not_learned_from_the_speech_itself(loop):
     assert session.ends == 0, (
         "a continuous sentence was cut into pieces — the floor rose into the "
         "speech and the threshold climbed above the voice")
+
+
+def test_the_instruction_cache_crosses_the_worker_boundary(monkeypatch):
+    """**A cache in one process is a coin toss when there are two.**
+
+    `Procfile` runs two gunicorn workers and the robot lands on whichever is
+    free, so a per-process cache missed about half the time — and every miss is
+    four seconds of database reads with the microphone recording into a buffer
+    nobody can use. Production never logged a single hit.
+
+    The instruction is a pure function of the tenant and its version, which is
+    the shape that belongs in shared storage.
+    """
+    import app.api.voice_ws.tools as vt
+
+    store: dict = {}
+    monkeypatch.setattr(vt, "_shared_get",
+                        lambda k, v: store.get(f"{k}:{v}"))
+    monkeypatch.setattr(vt, "_shared_put",
+                        lambda k, v, t: store.__setitem__(f"{k}:{v}", t))
+    monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 3)
+    # The write is fired onto the background pool — the robot is already waiting
+    # and whoever comes next is the one who benefits. Run it inline so the test
+    # is about the cache and not about thread timing.
+    monkeypatch.setattr("app.utils.thread_pool.submit_background",
+                        lambda fn, *a, **kw: fn(*a))
+
+    builds = {"n": 0}
+    monkeypatch.setattr(vt, "_system_instruction_body",
+                        lambda cid, persona: (builds.__setitem__("n", builds["n"] + 1)
+                                              or "التعليمات الكاملة"))
+
+    vt.clear_instruction_cache()
+    assert vt._cached_system_instruction("u1", None) == "التعليمات الكاملة"
+    assert builds["n"] == 1
+
+    # The other worker: same tenant, same version, empty local cache.
+    vt.clear_instruction_cache()
+    assert vt._cached_system_instruction("u1", None) == "التعليمات الكاملة"
+    assert builds["n"] == 1, "the second worker rebuilt the whole thing"
+
+    # And a write still invalidates it everywhere.
+    monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 4)
+    vt.clear_instruction_cache()
+    vt._cached_system_instruction("u1", None)
+    assert builds["n"] == 2, "a saved memory never reached the voice prompt"
+    vt.clear_instruction_cache()
+
+
+def test_the_shared_prompt_is_erased_with_the_account():
+    """It holds the user's name, interests and lists verbatim."""
+    from app.api.voice_ws.tools import _PROMPT_COLL
+    from app.features import account_delete
+
+    assert _PROMPT_COLL in account_delete._BY_USER
+
+
+def test_the_model_list_is_only_asked_for_when_it_is_needed(monkeypatch, loop):
+    """Building the candidate list eagerly called `models.list()` on every call —
+    seven hundred milliseconds of network before the first candidate had even
+    been tried, on a path where the microphone is recording the whole time."""
+    import app.api.voice_ws.session as session_mod
+    from app.api.voice_ws.session import _open_live_session
+
+    import contextlib
+
+    asked = {"n": 0}
+
+    class _Live:
+        def __init__(self):
+            self.opened = []
+
+        def connect(self, *, model, config=None):
+            @contextlib.asynccontextmanager
+            async def _cm():
+                self.opened.append(model)
+                yield type("_S", (), {
+                    "send_realtime_input": staticmethod(
+                        lambda **kw: asyncio.sleep(0))})()
+
+            return _cm()
+
+    live = _Live()
+    client = type("_C", (), {})()
+    client.aio = type("_A", (), {"live": live})()
+    client.models = type("_M", (), {"list": staticmethod(
+        lambda: asked.__setitem__("n", asked["n"] + 1) or [])})()
+
+    monkeypatch.setattr(session_mod, "pinned_live_model", lambda: "model-a")
+    monkeypatch.setattr(session_mod, "live_model_candidates",
+                        lambda: ("model-a", "model-b"))
+
+    cm, _s, name, _e = loop.run_until_complete(_open_live_session(client, None))
+    assert name == "model-a"
+    assert asked["n"] == 0, "the service was asked even though the first name worked"
+    loop.run_until_complete(cm.__aexit__(None, None, None))

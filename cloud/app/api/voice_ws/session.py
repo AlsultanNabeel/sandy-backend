@@ -501,11 +501,25 @@ async def _open_live_session(client, config):
     # Whatever the service itself reports as live-capable goes after them, so a
     # list that has gone stale costs one round of failures rather than the
     # feature.
+    # **Discovery is the fallback, so it is not run until it is the fallback.**
+    #
+    # Building the list eagerly called `models.list()` on every single call —
+    # about seven hundred milliseconds of network before the first candidate had
+    # even been tried, on a path where the microphone is recording into a buffer
+    # the whole time. The known names go first, and the service is only asked
+    # when every one of them has refused.
     tried: set[str] = set()
-    candidates = list(live_model_candidates())
-    for candidate in candidates + [
-        n for n in _discover_live_models(client) if n not in candidates
-    ]:
+    queue = list(live_model_candidates())
+    asked = False
+    while True:
+        if not queue:
+            if asked:
+                break
+            asked = True
+            queue = [n for n in _discover_live_models(client) if n not in tried]
+            if not queue:
+                break
+        candidate = queue.pop(0)
         if candidate in tried:
             continue
         tried.add(candidate)
