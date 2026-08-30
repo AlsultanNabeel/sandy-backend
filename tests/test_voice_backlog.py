@@ -56,13 +56,15 @@ class _Reader:
     the whole call and no turn was ever closed at all.
     """
 
-    def __init__(self, chunks) -> None:
+    def __init__(self, chunks, backlog: int = 0) -> None:
         self._chunks = list(chunks)
         self._left = len(self._chunks)
+        self._backlog = backlog
         self.dropped = 0
 
     def pending(self) -> int:
-        return self._left
+        """What was waiting when the bridge started — the only thing asked."""
+        return self._backlog
 
     async def frames(self):
         for c in self._chunks:
@@ -101,7 +103,8 @@ def test_a_drained_buffer_is_one_question(loop, monkeypatch):
     session = _Session()
 
     loop.run_until_complete(
-        _device_to_live(_Reader(chunks), session, _RecentAudio(), verify=False))
+        _device_to_live(_Reader(chunks, backlog=len(chunks)), session,
+                        _RecentAudio(), verify=False))
 
     assert session.audio > 0, "no audio was forwarded at all"
     assert session.ends <= 1, (
@@ -190,3 +193,89 @@ def test_the_ingest_pool_does_not_hold_the_dyno_open():
     # Registered, and safe to call twice — atexit will call it once more.
     mi._drop_pending_ingest()
     atexit.unregister(mi._drop_pending_ingest)
+
+
+def test_the_hold_lifts_and_stays_lifted(loop):
+    """**A test that can stay true forever is not a test.**
+
+    Asking "is the queue deep right now" on every frame never released: a device
+    sending one frame every hundred and thirty milliseconds keeps one or two in
+    flight permanently, so the hold survived the whole call —
+
+        07:42:40  66 frames still queued — holding the turn open
+        07:43:22  device→live done: 105 frames, 13.4s audio
+
+    thirty-nine seconds of speech in the earlier one, and not a single
+    `turn closed`. The backlog is a fact about the beginning of a call, so it is
+    decided once.
+    """
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    class _NeverEmpties(_Reader):
+        """A live device: always a frame or two in flight, forever. Under the
+        old per-frame check this never released."""
+
+        def pending(self) -> int:
+            return 3
+
+    chunks = ([_speech(300)] * 8 + [_speech(300, loud=False)] * 4
+              + [_speech(300)] * 4 + [_speech(300, loud=False)] * 4)
+    session = _Session()
+
+    loop.run_until_complete(
+        _device_to_live(_NeverEmpties(chunks), session, _RecentAudio(),
+                        verify=False))
+
+    assert session.ends >= 1, (
+        "the hold never lifted — a device that always has a frame in flight "
+        "would never get an answer at all")
+
+
+def test_a_noisy_room_still_gets_an_answer(loop):
+    """**The bug that produced a whole day of silence.**
+
+    The threshold was a constant, 350, and the room's own floor was above it —
+    so every frame counted as speech, the seven hundred milliseconds of quiet
+    that end a turn never accumulated, and Gemini was never told the question
+    was over. Not one `turn closed` line in thirty-nine seconds of talking.
+    """
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    # A room humming well above the old constant, then a sentence, then the room
+    # again. The pause is quiet *for this room*, which is the only sense in which
+    # any pause is ever quiet.
+    chunks = ([_at(600)] * 4 + [_at(6000)] * 6 + [_at(600)] * 6)
+    session = _Session()
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(), verify=False))
+
+    assert session.starts >= 1, "the sentence was never heard over the room"
+    assert session.ends >= 1, (
+        "the turn never closed — Gemini was never told the question was over, "
+        "which is exactly what silence sounds like from the other end")
+
+
+def test_a_quiet_room_does_not_turn_a_hiss_into_a_sentence(loop):
+    """The other way to be wrong. With no absolute minimum, a floor near zero
+    makes any faint noise stand out by the required margin."""
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    chunks = [_at(3)] * 6 + [_at(20)] * 4 + [_at(3)] * 6
+    session = _Session()
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(), verify=False))
+
+    assert session.starts == 0, "a hiss in a silent room opened a turn"

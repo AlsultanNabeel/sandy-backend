@@ -8,6 +8,7 @@ import hmac as _hmac
 import json
 import os
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 from app.api.voice_ws._config import (
@@ -20,10 +21,12 @@ from app.api.voice_ws._config import (
     remember_live_model,
     _ANTI_REPLAY_MS,
     _SENSITIVE_TOOLS,
-    _VAD_RMS_THRESHOLD,
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
-    _VAD_BLIND_MS,
+    _VAD_FLOOR_FACTOR,
+    _VAD_FLOOR_FRAMES,
+    _VAD_FLOOR_MIN_FRAMES,
+    _VAD_RMS_FLOOR,
     _VAD_MIN_UTTER_MS,
 )
 from app.api.voice_ws.speaker import (
@@ -754,10 +757,12 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     frames = 0
     sent = 0
     heard_ms = 0.0
-    peak = 0.0
-    opened = False
-    threshold = _VAD_RMS_THRESHOLD
-    backlog_logged = False
+    window: "deque[float]" = deque(maxlen=_VAD_FLOOR_FRAMES)
+    backlog = reader.pending()
+    draining = backlog > _BACKLOG_FRAMES
+    if draining:
+        logger.info("[voice_ws] %d frames were buffered during setup — one turn, "
+                    "not several", backlog)
 
     async def _send_audio(chunk: bytes) -> None:
         nonlocal frames, sent
@@ -777,24 +782,27 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
         rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
         ms = samples.size / 16000 * 1000
         heard_ms += ms
-        peak = max(peak, rms)
-        is_speech = rms >= threshold
 
-        # **A gate that never opens is worse than no gate.**
+        # **Speech is louder than the room. It is not louder than a constant.**
         #
-        # This path forwards nothing until it decides the user is talking, so a
-        # threshold set too high for one room means Gemini receives silence for
-        # the whole call and the robot looks broken in a completely new way.
-        # If seconds go by with audio arriving and nothing ever counted as
-        # speech, the threshold is wrong, not the room — so it bends to what is
-        # actually coming in, once, and says so.
-        if not opened and heard_ms >= _VAD_BLIND_MS and peak > 0:
-            threshold = min(threshold, max(peak * 0.4, 40.0))
-            opened = True
-            logger.warning(
-                "[voice_ws] no speech in %.0fs (peak rms %.0f, threshold %.0f) "
-                "— lowering to %.0f", heard_ms / 1000, peak,
-                _VAD_RMS_THRESHOLD, threshold)
+        # A fixed number cannot be right in two rooms. Set it too high and the
+        # gate never opens — Gemini gets silence for the whole call. Set it too
+        # low, or stand the robot near a fan, and every frame counts as speech:
+        # the silence that ends a turn never accumulates, nobody ever tells
+        # Gemini the question is over, and she says nothing at all. That second
+        # one is what production did, for a whole day, with a threshold of 350
+        # in a room whose floor was above it.
+        #
+        # So the floor is measured: **the quietest moment in the last few
+        # seconds is the room.** Nobody talks continuously, so that minimum is
+        # the room and nothing else — and unlike a decaying average it cannot be
+        # dragged upward by a long sentence. Speech is what stands above it by a
+        # clear margin, with an absolute minimum underneath so a silent room
+        # cannot promote a hiss to a sentence.
+        window.append(rms)
+        floor = min(window) if len(window) >= _VAD_FLOOR_MIN_FRAMES else 0.0
+        threshold = max(floor * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR)
+        is_speech = rms >= threshold
 
         if is_speech and not speaking:
             # Speech onset, open a manual activity. We do NOT clear `recent`
@@ -826,12 +834,29 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             # wall clock said "still catching up" for the entire call, because a
             # device streaming in real time keeps its head start forever, and
             # then nothing ever closed the turn at all.
-            if reader.pending() > _BACKLOG_FRAMES:
-                if not backlog_logged:
-                    backlog_logged = True
-                    logger.info("[voice_ws] %d frames still queued — holding the "
-                                "turn open until they are through",
-                                reader.pending())
+            # **Once, at the start, and then never again.**
+            #
+            # Asking "is the queue deep right now" every frame is a test that can
+            # stay true forever: a device sending one frame every one hundred and
+            # thirty milliseconds keeps a frame or two in flight at all times, so
+            # the hold never lifted and a whole call went by with no turn closed
+            # — thirty-nine seconds of speech and not one answer. The backlog is
+            # a fact about *the beginning* of the call. The moment it is gone, it
+            # is gone.
+            # **Counted, not sampled.**
+            #
+            # How deep the queue is *right now* is not the question, and asking
+            # it every frame is a test that never comes back false: a device
+            # sending one frame every hundred and thirty milliseconds keeps one
+            # or two in flight permanently. The question is whether the frames
+            # that were already waiting when this call began have gone through,
+            # and that is a number taken once and counted down.
+            if draining and frames >= backlog:
+                draining = False
+                if backlog:
+                    logger.info("[voice_ws] %d buffered frames are through — "
+                                "live now", backlog)
+            if draining:
                 continue
 
             if silence_ms >= _VAD_SILENCE_MS:

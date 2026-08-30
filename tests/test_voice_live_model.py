@@ -416,12 +416,14 @@ def test_the_turn_is_always_closed_by_us():
     assert "_device_to_live_fast" not in src, "the bypassed bridge is still here"
 
 
-def test_a_gate_that_never_opens_lowers_itself(monkeypatch):
-    """This path forwards nothing until it decides the user is speaking, so a
-    threshold too high for one room means Gemini gets silence for the whole call
-    — the same symptom, arriving by the opposite route."""
+def test_speech_is_measured_against_the_room_not_a_constant():
+    """A fixed threshold cannot be right in two rooms, and both ways of being
+    wrong end in silence: too high and the gate never opens, too low and every
+    frame is speech so the pause that ends a turn never arrives. The second is
+    what production did all day, at 350, in a room whose floor was above it."""
     import app.api.voice_ws._config as cfg
 
-    assert cfg._VAD_BLIND_MS > 0
-    # The floor exists so a room of pure noise cannot drive it to zero.
-    assert max(10.0 * 0.4, 40.0) == 40.0
+    assert cfg._VAD_FLOOR_FACTOR > 1.0, "speech must stand clear of the room"
+    assert cfg._VAD_RMS_FLOOR > 0, \
+        "with no absolute minimum, a silent room turns a hiss into a sentence"
+    assert not hasattr(cfg, "_VAD_RMS_THRESHOLD"), "the constant is back"
