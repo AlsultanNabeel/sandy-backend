@@ -122,3 +122,41 @@ def test_a_finished_turn_reports_audio_and_not_only_characters():
     assert "bytes of audio" in src, "the one line that matters still counts text"
     assert '_turn_audio["n"] = 0' in src, \
         "the counter is never reset, so every turn reports the whole call"
+
+
+def test_the_voice_path_does_not_think_before_it_speaks():
+    """**Six and a half seconds of thinking, and a board that waits eight.**
+
+    Measured locally with `scripts/voice_probe.py` against the real API: the
+    first audio arrived 6.4s after the question ended, and the model's own
+    reasoning was leaking into the transcript (`**Analyzing the Inquiry**`).
+    The firmware closes an idle session eight seconds after the last word, so
+    the answer was arriving at a socket that had closed, or barely beating it.
+
+    With thinking off, the same question came back in 3.7s. Nobody in a
+    conversation waits three extra seconds for a slightly better sentence —
+    thinking belongs to the chat path, not to speech.
+    """
+    import pathlib
+
+    import app.api.voice_ws.session as session_mod
+
+    src = pathlib.Path(session_mod.__file__).read_text(encoding="utf-8")
+    assert "thinking_budget=0" in src, "the voice path is thinking again"
+    assert "include_thoughts=False" in src, \
+        "the model's reasoning would be read aloud as if it were the answer"
+
+
+def test_the_probe_exists_and_needs_no_deploy():
+    """The loop this replaces: deploy, call the robot, read a log, one
+    hypothesis per round trip, with the owner as the transport."""
+    import pathlib
+
+    probe = (pathlib.Path(__file__).resolve().parent.parent
+             / "scripts" / "voice_probe.py")
+    assert probe.exists()
+    src = probe.read_text(encoding="utf-8")
+    # It must use the real instruction builder — that is the part most likely
+    # to be the thing telling her to stay quiet.
+    assert "_build_system_instruction" in src
+    assert "VERDICT" in src
