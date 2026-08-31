@@ -263,6 +263,13 @@ def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
             _INSTRUCTION_CACHE[key] = (version, shared)
         return shared
 
+    # Say why, not just that it missed. A cache that never hits has exactly two
+    # explanations — the row was not there, or the version moved between calls —
+    # and they need opposite fixes. Guessing between them costs a round trip to
+    # the owner and a night.
+    logger.info("[voice_ws] instruction rebuilt (version %d, shared row %s)",
+                version, "absent" if shared is None else "empty")
+
     text = _system_instruction_body(chat_id, build_effective_persona)
     if text:
         with _INSTRUCTION_LOCK:

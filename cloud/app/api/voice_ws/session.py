@@ -23,6 +23,7 @@ from app.api.voice_ws._config import (
     _SENSITIVE_TOOLS,
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
+    _BARGE_MIN_MS,
     _CHUNK_BYTES,
     _SILENCE_GAP_S,
     _COMPRESS_TRIGGER_TOKENS,
@@ -717,7 +718,8 @@ async def _live_session(ws, remote: str) -> None:
 
                 recent = _RecentAudio()
                 t_in = asyncio.create_task(
-                    _device_to_live(reader, session, recent, verify=gate_on))
+                    _device_to_live(reader, session, recent, verify=gate_on,
+                                    live_state=live_state))
                 t_out = asyncio.create_task(
                     _live_to_device(ws, session, dispatcher, recent, live_state))
 
@@ -805,7 +807,8 @@ async def _live_session(ws, remote: str) -> None:
 
 
 async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio",
-                          *, verify: bool = True) -> None:
+                          *, verify: bool = True,
+                          live_state: Optional[Dict[str, Any]] = None) -> None:
     """Read PCM frames from the device and stream to Live with manual turn control.
 
     We run our own VAD: on speech we open an activity, and on about 700ms of
@@ -826,6 +829,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     window: "deque[float]" = deque(maxlen=_VAD_FLOOR_FRAMES)
     threshold = float(_VAD_RMS_FLOOR)
     consumed = 0
+    speech_ms = 0.0
     backlog = reader.pending()
     draining = backlog > _BACKLOG_FRAMES
     if draining:
@@ -858,18 +862,43 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                         "(%d bytes, split into %d)", len(chunk),
                         max(1, -(-len(chunk) // _CHUNK_BYTES)))
 
+    state: Dict[str, Any] = live_state if live_state is not None else {}
+
     async def _close_turn(reason: str) -> None:
         """End the user's turn and tell Gemini so. The one thing that must
-        happen for an answer to exist at all."""
-        nonlocal speaking, silence_ms, utter_ms
+        happen for an answer to exist at all.
+
+        **Except while she is already answering.** Every `activity_end` starts a
+        generation, and a second one cancels the first — so a cough, a chair, a
+        second of room noise between the question and the reply threw the answer
+        away. The log said it plainly: turn closed, first response from Gemini,
+        turn closed again nine hundred milliseconds later, `replied=0 chars`.
+        A real interruption is still honoured; it just has to be long enough to
+        be a sentence rather than a noise.
+        """
+        nonlocal speaking, silence_ms, utter_ms, speech_ms
+        # **Measured in speech, not in elapsed time.** `utter_ms` counts every
+        # frame while a turn is open, silence included — so the seven hundred
+        # milliseconds of quiet that *end* the turn are inside it, and a blip of
+        # two frames measured as a second and a half.
+        if state.get("replying") and speech_ms < _BARGE_MIN_MS:
+            logger.info("[voice_ws] ignoring a %.1fs blip while she is answering",
+                        speech_ms / 1000)
+            speaking = False
+            silence_ms = 0.0
+            utter_ms = 0.0
+            speech_ms = 0.0
+            return
         if verify and utter_ms >= _VAD_MIN_UTTER_MS:
             await _verify_and_inject(session, recent.snapshot())
         await session.send_realtime_input(activity_end=types.ActivityEnd())
+        state["replying"] = True
         logger.info("[voice_ws] turn closed after %.1fs of speech (%s)",
                     utter_ms / 1000, reason)
         speaking = False
         silence_ms = 0.0
         utter_ms = 0.0
+        speech_ms = 0.0
 
     # **Pulled with a deadline, not iterated.**
     #
@@ -976,6 +1005,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 recent.add(chunk)
                 await _send_audio(chunk)
                 utter_ms += ms
+                if is_speech:
+                    speech_ms += ms
                 silence_ms = 0.0 if is_speech else silence_ms + ms
 
                 # **A backlog is one question, not four.**
@@ -1230,6 +1261,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
 
         # Turn complete: persist the turn for cross-platform memory only.
         if response.server_content and response.server_content.turn_complete:
+            live_state["replying"] = False
             await send_msg({"type": "end_turn"})
             # **Concatenated, not space-joined.**
             #

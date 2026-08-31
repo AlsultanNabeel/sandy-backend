@@ -521,3 +521,61 @@ def test_the_model_list_is_only_asked_for_when_it_is_needed(monkeypatch, loop):
     assert name == "model-a"
     assert asked["n"] == 0, "the service was asked even though the first name worked"
     loop.run_until_complete(cm.__aexit__(None, None, None))
+
+
+def test_a_blip_does_not_cancel_the_answer(loop):
+    """**Every `activity_end` starts a generation, and a second one cancels the
+    first.**
+
+    From the log, in order: `turn closed after 6.5s`, `first response from
+    Gemini`, `Gemini heard the user`, then `turn closed after 0.9s` — and
+    `replied=0 chars`. She heard «صباح الخير ممكن تضغط الغرفه وتطفي الفراش»
+    perfectly and said nothing, because a second of room noise between the
+    question and the answer threw the answer away.
+
+    A real interruption is still honoured. It just has to be long enough to be a
+    sentence rather than a noise.
+    """
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    # Room, a question, the pause that ends it, then a short noise, then quiet.
+    chunks = ([_at(40)] * 5 + [_at(5000)] * 8 + [_at(40)] * 4
+              + [_at(5000)] * 2 + [_at(40)] * 4)
+    session = _Session()
+    state: dict = {}
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(),
+                        verify=False, live_state=state))
+
+    assert session.ends == 1, (
+        f"{session.ends} turns were closed — the second one cancels the answer "
+        "to the first, which is silence from the room")
+
+
+def test_a_real_interruption_still_gets_through(loop):
+    """The other half. If nothing can close a turn while she is answering, the
+    fix for "she says nothing" becomes "she cannot be stopped"."""
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    # Room, question, pause — then a whole second sentence, not a blip.
+    chunks = ([_at(40)] * 5 + [_at(5000)] * 8 + [_at(40)] * 4
+              + [_at(5000)] * 8 + [_at(40)] * 4)
+    session = _Session()
+    state: dict = {}
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(),
+                        verify=False, live_state=state))
+
+    assert session.ends == 2, "a real second question was swallowed"
