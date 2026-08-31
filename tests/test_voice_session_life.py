@@ -103,3 +103,22 @@ def test_the_reader_reports_when_the_robot_is_gone():
         reader.stop()
 
     asyncio.run(_run())
+
+
+def test_a_finished_turn_reports_audio_and_not_only_characters():
+    """`replied=0 chars` was read for days as "she said nothing".
+
+    It does not mean that. The reply *is* audio; the text beside it is a
+    transcript that frequently has not arrived by the time the turn completes.
+    So a turn that produced a second of speech and no transcript logged
+    identically to one that produced silence — two entirely different faults
+    wearing the same line, and a week spent chasing the wrong one.
+    """
+    import pathlib
+
+    import app.api.voice_ws.session as session_mod
+
+    src = pathlib.Path(session_mod.__file__).read_text(encoding="utf-8")
+    assert "bytes of audio" in src, "the one line that matters still counts text"
+    assert '_turn_audio["n"] = 0' in src, \
+        "the counter is never reset, so every turn reports the whole call"

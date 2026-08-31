@@ -1179,6 +1179,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
     _seen = {"any": False, "user_text": False, "audio_out": 0}
     _audio = {"at": time.monotonic(), "chunks": 0, "wait": 0.0,
               "send": 0.0, "worst": 0.0}
+    _turn_audio = {"n": 0}
 
     async def _handle(response) -> bool:
         """Process one Live response; return True to stop the session.
@@ -1239,6 +1240,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                     if not _seen["audio_out"]:
                         logger.info("[voice_ws] first reply audio → device")
                     _seen["audio_out"] += len(part.inline_data.data)
+                    _turn_audio["n"] += len(part.inline_data.data)
                     # **Where the stutter comes from, measured rather than
                     # guessed.** The reply arrives as chunks and is played as it
                     # arrives, so a gap anywhere becomes a gap in her voice — and
@@ -1295,8 +1297,19 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
             # the user, and did it produce any reply? heard=non-empty + replied=0
             # means she heard but stayed silent (turn/VAD issue); heard empty
             # means the audio never made it (mic/device side — check serial).
-            logger.info("[voice_ws] turn done: heard=%r replied=%d chars",
-                        user_text[:120], len(sandy_text))
+            # **Characters were the wrong thing to count.**
+            #
+            # `replied=0 chars` was read for days as "she said nothing", and it
+            # does not mean that: the reply is audio, and the text beside it is
+            # a transcript that often has not arrived by the time the turn
+            # completes. A turn that produced a second of speech and no
+            # transcript logged identically to one that produced silence — two
+            # completely different faults wearing one line.
+            logger.info("[voice_ws] turn done: heard=%r replied=%d chars, "
+                        "%d bytes of audio (%.1fs)",
+                        user_text[:120], len(sandy_text), _turn_audio["n"],
+                        _turn_audio["n"] / 2 / 24000)
+            _turn_audio["n"] = 0
             if user_text and sandy_text:
                 # مش `await`.
                 #
