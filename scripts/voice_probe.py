@@ -11,13 +11,16 @@ three run here. This opens a real Live session with the real config, sends real
 speech, and reports the one fact that has been ambiguous for days: **did audio
 come back.**
 
-    ~/sandy_app_venv/bin/python scripts/voice_probe.py            # synthetic tone
-    ~/sandy_app_venv/bin/python scripts/voice_probe.py question.wav
+    python scripts/voice_probe.py                       # a tone, not speech
+    python scripts/voice_probe.py question.wav          # mono 16-bit 16 kHz
+    python scripts/voice_probe.py --say "شو مهامي اليوم؟"     # spoken by TTS
+    python scripts/voice_probe.py --say "..." --think        # with thinking on
 
-The WAV must be mono 16-bit at 16 kHz — the format the board sends. Without one
-it sends a tone, which Gemini will not recognise as speech; that still tells you
-whether the session opens, the model accepts audio, and the turn signals are
-accepted, which is most of what breaks.
+`--say` speaks the text with the same Gemini voice stack the product uses and
+feeds the result in as if the owner had said it, which makes the probe a real
+question and not a beep. `--think` leaves extended thinking enabled, so the two
+runs can be compared — the reason it is off by default is six and a half
+seconds of it against a robot that hangs up after eight.
 """
 
 from __future__ import annotations
@@ -35,6 +38,31 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv()
 
 _FRAME_BYTES = 1280          # 40 ms at 16 kHz / 16-bit — what we send Gemini
+
+
+def _speak(text: str) -> bytes:
+    """Say the question out loud, in the product's own voice, at the board's rate.
+
+    A tone proves the session opens; only speech proves she understood and
+    answered. And the answer to "is thinking worth three seconds" cannot be
+    argued — it has to be heard, twice, on the same sentence.
+    """
+    import audioop
+    import io
+
+    from app.integrations.gemini_tts import synthesize_voice_with_gemini
+
+    wav = synthesize_voice_with_gemini(text, mood="neutral")
+    if not wav:
+        raise SystemExit("TTS returned nothing — check GEMINI_API_KEY")
+    with wave.open(io.BytesIO(wav), "rb") as w:
+        pcm = w.readframes(w.getnframes())
+        rate = w.getframerate()
+        if w.getnchannels() == 2:
+            pcm = audioop.tomono(pcm, w.getsampwidth(), 1, 1)
+    if rate != 16000:
+        pcm, _ = audioop.ratecv(pcm, 2, 1, rate, 16000, None)
+    return pcm
 
 
 def _load(path: str | None) -> bytes:
@@ -70,7 +98,13 @@ async def main() -> int:
     if not key:
         raise SystemExit("GEMINI_API_KEY is not set")
 
-    audio = _load(sys.argv[1] if len(sys.argv) > 1 else None)
+    args = sys.argv[1:]
+    think = "--think" in args
+    args = [a for a in args if a != "--think"]
+    if args and args[0] == "--say":
+        audio = _speak(" ".join(args[1:]) or "مرحبا")
+    else:
+        audio = _load(args[0] if args else None)
     print(f"question: {len(audio) / 2 / 16000:.1f}s of audio")
 
     # The same instruction the robot gets, built the same way — this is the
@@ -84,14 +118,29 @@ async def main() -> int:
         print(f"instruction unavailable ({exc}); using a bare one")
         instruction = "أنتِ ساندي. ردّي بصوتك على آخر شي قاله المستخدم."
 
+    # **The tools go in, or the comparison is a lie.**
+    #
+    # Without them she reads the call out loud — `reminder_add(time=...)` — as
+    # if it were a sentence, and that would be blamed on whatever else the run
+    # was testing. The session the robot gets has them; so does this.
+    try:
+        from app.api.voice_ws.session import _build_live_tools
+
+        live_tools = _build_live_tools(types)
+        print(f"tools: {sum(len(t.function_declarations or []) for t in live_tools)}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"tools unavailable ({exc})")
+        live_tools = None
+
     config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],
+        tools=live_tools,
         system_instruction=types.Content(parts=[types.Part(text=instruction)],
                                          role="user"),
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
-        thinking_config=types.ThinkingConfig(thinking_budget=0,
-                                            include_thoughts=False),
+        thinking_config=None if think else types.ThinkingConfig(
+            thinking_budget=0, include_thoughts=False),
         realtime_input_config=types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
                 disabled=True),
@@ -105,7 +154,7 @@ async def main() -> int:
 
     client = genai.Client(api_key=key)
     model = live_model_candidates()[0]
-    print(f"model: {model}")
+    print(f"model: {model}  thinking: {'on' if think else 'off'}")
 
     heard: list[str] = []
     said: list[str] = []
@@ -128,6 +177,10 @@ async def main() -> int:
         async def _read() -> None:
             nonlocal audio_out, first_audio_at
             async for response in session.receive():
+                if response.tool_call:
+                    names = [f.name for f in (response.tool_call.function_calls or [])]
+                    said.append(f"[tool: {', '.join(names)}]")
+                    return
                 sc = response.server_content
                 if not sc:
                     continue
