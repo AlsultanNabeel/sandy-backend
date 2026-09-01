@@ -133,6 +133,15 @@ def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
         return
     try:
         coll.update_one({"_id": key}, {"$inc": {"v": 1}}, upsert=True)
+        # **Name the collection that moved it.**
+        #
+        # The voice prompt is cached against this number, and in production it
+        # went from fifty-five to fifty-six between two calls — so the cache
+        # missed and the session paid six seconds of reads again. Which write
+        # did it is not guessable from the outside: there are fifteen versioned
+        # collections and several paths into each. One line here ends the
+        # question the first time it happens.
+        logger.info("[tenant_version] %s bumped by %s", key, collection or "?")
     except PyMongoError as exc:
         logger.debug("[tenant_version] bump failed: %s", exc)
 

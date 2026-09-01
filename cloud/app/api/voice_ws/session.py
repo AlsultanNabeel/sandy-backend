@@ -25,6 +25,7 @@ from app.api.voice_ws._config import (
     _BACKLOG_FRAMES,
     _BARGE_MIN_MS,
     _CHUNK_BYTES,
+    _HELD_FRAMES_MAX,
     _SILENCE_GAP_S,
     _COMPRESS_TRIGGER_TOKENS,
     _COMPRESS_WINDOW_TOKENS,
@@ -843,6 +844,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     threshold = float(_VAD_RMS_FLOOR)
     consumed = 0
     speech_ms = 0.0
+    held: List[bytes] = []
+    held_ms = 0.0
     backlog = reader.pending()
     draining = backlog > _BACKLOG_FRAMES
     if draining:
@@ -1005,6 +1008,31 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                          and rms >= threshold)
 
             if is_speech and not speaking:
+                # **Opening a turn is what cancels her answer, not closing one.**
+                #
+                # `activity_start` interrupts whatever the model is generating.
+                # The log: turn closed at 54.7 with the whole question in it,
+                # `turn_complete` at 55.4 with zero bytes — half a second is not
+                # long enough to generate anything, so it was cancelled, by an
+                # onset our own detector raised on the room a moment after the
+                # question ended. She never got to say a word. Once, she got two
+                # words out and stopped, which is the same thing arriving a
+                # little later.
+                #
+                # So while she is answering, an onset has to earn the
+                # interruption. The frames wait here in the meantime and go up
+                # the moment it qualifies, so a real second question keeps its
+                # beginning and a chair scraping keeps nothing.
+                if state.get("replying"):
+                    held.append(chunk)
+                    held_ms += ms
+                    if len(held) > _HELD_FRAMES_MAX:
+                        held.pop(0)
+                    if held_ms < _BARGE_MIN_MS:
+                        continue
+                    logger.info("[voice_ws] %.1fs of speech while she answers — "
+                                "taking it as an interruption", held_ms / 1000)
+
                 # Speech onset, open a manual activity. We do NOT clear `recent`
                 # here: verification needs a few seconds of audio for a reliable
                 # CAM++ embedding, so we keep a rolling window (last ~5s of speech,
@@ -1013,6 +1041,15 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 silence_ms = 0.0
                 utter_ms = 0.0
                 await session.send_realtime_input(activity_start=types.ActivityStart())
+                for pending in held:
+                    await _send_audio(pending)
+                held.clear()
+                held_ms = 0.0
+            elif not speaking and held:
+                # The noise died before it became a sentence. Drop it with the
+                # claim it was making.
+                held.clear()
+                held_ms = 0.0
 
             if speaking:
                 recent.add(chunk)

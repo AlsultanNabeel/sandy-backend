@@ -100,7 +100,7 @@ async def main() -> int:
 
     args = sys.argv[1:]
     think = "--think" in args
-    args = [a for a in args if a != "--think"]
+    args = [a for a in args if a not in ("--think", "--probe-frames")]
     if args and args[0] == "--say":
         audio = _speak(" ".join(args[1:]) or "مرحبا")
     else:
@@ -164,6 +164,19 @@ async def main() -> int:
 
     async with client.aio.live.connect(model=model, config=config) as session:
         print(f"session open at {time.monotonic() - t0:.1f}s")
+
+        if "--probe-frames" in sys.argv:
+            # What `_open_live_session` does to decide the model accepts audio:
+            # two frames of silence, sent **outside any activity window**. With
+            # automatic detection disabled that audio has no turn to belong to,
+            # and the question is whether it poisons the first real one.
+            silence = b"\x00\x00" * 160
+            await session.send_realtime_input(
+                audio=types.Blob(data=silence, mime_type="audio/pcm;rate=16000"))
+            await asyncio.sleep(0.6)
+            await session.send_realtime_input(
+                audio=types.Blob(data=silence, mime_type="audio/pcm;rate=16000"))
+            print("sent two probe frames outside any activity")
 
         await session.send_realtime_input(activity_start=types.ActivityStart())
         for i in range(0, len(audio), _FRAME_BYTES):

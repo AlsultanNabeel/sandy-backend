@@ -579,3 +579,63 @@ def test_a_real_interruption_still_gets_through(loop):
                         verify=False, live_state=state))
 
     assert session.ends == 2, "a real second question was swallowed"
+
+
+def test_an_onset_does_not_cancel_the_answer_it_interrupts(loop):
+    """**Opening a turn is what cancels her answer, not closing one.**
+
+    Production, one call:
+
+        08:02:54.7  turn closed after 4.5s of speech
+        08:02:55.4  turn done: heard='كيف الحال اليوم؟'  0 bytes of audio
+
+    Seven hundred milliseconds is not long enough to generate anything, so it
+    was cancelled — by an `activity_start` our own detector raised on the room
+    a moment after the question ended. She never got a word out. The blip guard
+    added before this one covered the *close*, and the close was never the
+    thing doing the damage.
+    """
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    chunks = ([_at(40)] * 5 + [_at(5000)] * 8 + [_at(40)] * 4
+              + [_at(5000)] * 2 + [_at(40)] * 6)
+    session = _Session()
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(),
+                        verify=False, live_state={}))
+
+    assert session.starts == 1, (
+        f"{session.starts} turns were opened — the second one interrupts the "
+        "answer to the first, and an interrupted answer is silence")
+
+
+def test_an_interruption_keeps_the_beginning_of_its_sentence(loop):
+    """The held frames go up the moment the interruption qualifies. Dropping
+    them would trade one bug for a question that always loses its first word."""
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    def _at(level: int, ms: int = 300) -> bytes:
+        import numpy as np
+        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+
+    quiet, loud = [_at(40)], [_at(5000)]
+    chunks = (quiet * 5 + loud * 8 + quiet * 4 + loud * 8 + quiet * 4)
+    session = _Session()
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(),
+                        verify=False, live_state={}))
+
+    assert session.starts == 2, "the real second question never opened a turn"
+    # 16 loud frames went in; every one of them must have been forwarded, the
+    # four held ones included.
+    assert session.audio >= 16, (
+        f"only {session.audio} frames reached Gemini — the beginning of the "
+        "interruption was thrown away")
