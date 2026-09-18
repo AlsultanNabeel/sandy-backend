@@ -70,7 +70,7 @@ def format_tasks_for_briefing(
     """Describe all active tasks for the morning briefing."""
     active_tasks = [t for t in (tasks or []) if not t.get("done", False)]
     if not active_tasks:
-        return "لا توجد مهام نشطة على Google Tasks حالياً."
+        return "لا توجد مهام نشطة حالياً."
 
     lines: List[str] = []
     for i, task in enumerate(active_tasks[:max_lines], 1):

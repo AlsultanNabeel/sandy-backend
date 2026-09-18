@@ -4,8 +4,8 @@ Collection: sandy_focus
   {_id, label, minutes, started_at, ends_at, state: active|done|cancelled,
    reminder_id}
 
-التنبيه عند النهاية بمر عبر نظام التذكيرات نفسه (مخزَّن في Mongo) — يعني
-بنجو من إعادة تشغيل السيرفر، وبوصل تيليجرام بأزرار الغفوة العادية.
+الأطوار بتتقدّم عند القراءة (focus_status / start_focus)، فالحالة المخزّنة
+بتضل صحيحة بلا مؤقّت بالسيرفر.
 
 عزل المستأجرين مفروض من طبقة scoped(): _coll()/_meta() ترجع None لو ما في
 مستأجر. خانات الميتا (sounds/goals) بتضمّن معرّف المستأجر في الـ _id لأنه
@@ -105,11 +105,12 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
     focus_min/break_min/cycles كلها يحددها المالك. `scene` بيتطبّق عند البداية.
     `end_scene` (اختياري) بيتطبّق لما تخلص الجلسة كلها — وبدونه الغرفة بتضل
     على حالها فما يطفّي إشي وإنت لسا موجود. انتقالات الأطوار بتمر عبر
-    advance_focus_phase() اللي بتنده الجدولة كل دقيقة.
+    advance_focus_phase()، وبتنحسب عند كل قراءة (`_catch_up`).
     """
     coll = _coll()
     if coll is None:
         return {"ok": False}
+    _catch_up()
     if active_focus():
         return {"ok": False, "error": "already_active"}
     focus_min = max(1, min(240, int(focus_min or 25)))
@@ -237,21 +238,26 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
 
     # خلص تركيز وفي راحة → ادخل طور الراحة
     if phase == "focus" and break_min > 0:
+        # From the moment the phase ended, not from now: a session caught up
+        # late (see `_catch_up`) must keep its real timeline.
         coll.update_one(
             {"_id": s["_id"]},
-            {"$set": {"phase": "break", "phase_ends_at": now + timedelta(minutes=break_min)}},
+            {"$set": {"phase": "break", "phase_ends_at": pe + timedelta(minutes=break_min)}},
         )
         return {"event": "break", "break_min": break_min,
                 "cycle_idx": cycle_idx, "cycles": cycles, "label": label}
 
     # خلصت راحة (أو تركيز بدون راحة) → دورة تركيز جديدة
     cycle_idx += 1
+    new_end = pe + timedelta(minutes=focus_min)
     coll.update_one(
         {"_id": s["_id"]},
         {"$set": {"phase": "focus", "cycle_idx": cycle_idx,
-                  "phase_ends_at": now + timedelta(minutes=focus_min)}},
+                  "phase_ends_at": new_end}},
     )
-    if s.get("scene"):
+    # Re-apply the room scene only for a phase that is actually running now,
+    # not for every cycle skipped over while catching up.
+    if s.get("scene") and new_end > now:
         try:
             from app.features.scene_store import apply_scene
             apply_scene(s["scene"])
@@ -261,7 +267,21 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
             "focus_min": focus_min, "label": label}
 
 
+def _catch_up() -> None:
+    """Advance the session through every phase that has already ended.
+
+    Nothing calls ``advance_focus_phase`` on a timer, so a pomodoro never left
+    its first phase: it stayed "active" forever and every new start answered
+    ``already_active``. Advancing on read makes the stored state true whenever
+    anyone looks at it.
+    """
+    for _ in range(64):  # 12 cycles × 2 phases, with room to spare
+        if advance_focus_phase() is None:
+            return
+
+
 def focus_status() -> Dict[str, Any]:
+    _catch_up()
     s = active_focus()
     if not s:
         return {"active": False}

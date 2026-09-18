@@ -1126,6 +1126,5 @@ The firmware **is** built in CI (`idf.py build`, §9), so "never compiled" is no
 longer true. The control page **exists** (`ios/SandyApp/Features/Control/`). The
 room node is **on the per-node topic tree** (§4.5), so `room_device.send()` is
 not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
-(`firmware/brain-core/main/fonts/`). `feature_flags.py` no longer advertises
-subsystems this repo does not contain, and the last comments pointing at the
+(`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed, and the last comments pointing at the
 removed Telegram transport are gone.
