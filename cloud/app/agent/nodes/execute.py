@@ -301,9 +301,26 @@ def execute_node(state: SandyState) -> SandyState:
             combined = "بعض الطلبات مش متاحة إلك حالياً 😊"
         elif blocked_any:
             combined = "\n".join(replies) + "\n(بعض الطلبات مش متاحة إلك حالياً 😊)"
+        elif replies:
+            combined = "\n".join(replies)
+        elif any_ok:
+            combined = "تم."
         else:
-            combined = "\n".join(replies) if replies else "تم."
+            # **Not "تم." for nothing.** Every call was a routing signal, an
+            # unknown name or a silent failure, and this used to announce success
+            # anyway. Say it did not happen, so the next turn is not built on it.
+            combined = "ما قدرت أنفّذ الطلب، جرّب تحكيه بطريقة تانية."
+
+        # **The held action, same as the single-call path below.** A delete asks
+        # "متأكد؟" by storing a pending in the session — and this path never read
+        # it back, so "احذف X وضيف Y" asked the question and then forgot it: the
+        # "اه" that followed had nothing left to confirm.
+        new_pending = session.get("pending_action")
+        if isinstance(new_pending, dict) and new_pending.get("consumed_at"):
+            new_pending = None
         updates: Dict[str, Any] = {
+            "pending_state": new_pending,
+            "pending_archived": session.get("archived_pending") or [],
             "execution_result": {
                 "handled": any_handled,
                 "ok": any_ok,
