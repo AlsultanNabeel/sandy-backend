@@ -42,3 +42,20 @@ def test_partial_erase_keeps_the_account(monkeypatch):
     assert not r["ok"] and r["error"] == "partial"
     assert d.sandy_users.find_one({"_id": "u1"}) is not None
     appdb.reset()
+
+
+def test_photo_bytes_in_gridfs_are_erased():
+    """Photo bytes live in GridFS (`sandy_photo_files.files/.chunks`), which has
+    no user field; only the metadata rows used to be deleted."""
+    d = _db()
+    for gid, owner in (("g-mine", "u1"), ("g-theirs", "u2")):
+        d["sandy_photo_files.files"].insert_one({"_id": gid})
+        d["sandy_photo_files.chunks"].insert_one({"files_id": gid, "n": 0, "data": b"x"})
+        d.sandy_photos.insert_one({"chat_id": owner, "grid_id": gid})
+
+    assert account_delete.delete_account("u1")["ok"]
+    assert d["sandy_photo_files.files"].find_one({"_id": "g-mine"}) is None
+    assert d["sandy_photo_files.chunks"].find_one({"files_id": "g-mine"}) is None
+    assert d["sandy_photo_files.files"].find_one({"_id": "g-theirs"}) is not None
+    assert d.sandy_photos.count_documents({"chat_id": "u1"}) == 0
+    appdb.reset()

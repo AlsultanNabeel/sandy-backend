@@ -56,7 +56,6 @@ _BY_USER: List[str] = [
     "sandy_goals",
     "sandy_brainstorms",
     "sandy_memories",
-    "sandy_photo_files",
     "sandy_voiceprints",
     "sandy_push_tokens",
     "sandy_future_messages",
@@ -120,6 +119,30 @@ def _id_forms(user_id: str) -> List[Any]:
     return forms
 
 
+# Photo bytes live in GridFS under this prefix, i.e. in
+# `sandy_photo_files.files` + `sandy_photo_files.chunks` — neither has a user
+# field, so the `$or` delete below cannot reach them. They are removed through
+# the `grid_id` on each `sandy_photos` row, before those rows go.
+_PHOTO_BUCKET = "sandy_photo_files"
+
+
+def _erase_photo_blobs(db, forms: List[Any]) -> int:
+    """Delete the GridFS files behind this user's photos. Returns how many.
+
+    Done on the two GridFS collections directly (what ``GridFS.delete`` does):
+    chunks first, so an interruption leaves an orphan file header rather than
+    orphan image bytes.
+    """
+    # بلا سقف: a capped read here would leave the rest of the photos behind.
+    ids = [row["grid_id"] for row in db["sandy_photos"].find(
+        {"$or": [{"user_id": {"$in": forms}}, {"chat_id": {"$in": forms}}]},
+        {"grid_id": 1}) if row.get("grid_id") is not None]
+    if not ids:
+        return 0
+    db[f"{_PHOTO_BUCKET}.chunks"].delete_many({"files_id": {"$in": ids}})
+    return db[f"{_PHOTO_BUCKET}.files"].delete_many({"_id": {"$in": ids}}).deleted_count
+
+
 def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     """Clear `names` plus short-term memory for one user. Shared by both paths.
 
@@ -138,6 +161,14 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
 
     forms = _id_forms(user_id)
     removed: Dict[str, int] = {}
+    if "sandy_photos" in names:
+        try:
+            n = _erase_photo_blobs(db, forms)
+            if n:
+                removed[_PHOTO_BUCKET] = n
+        except PyMongoError as exc:
+            logger.warning("[erase] photo files failed for %s: %s", user_id, exc)
+            removed[_PHOTO_BUCKET] = -1
     for name in names:
         try:
             r = db[name].delete_many(
