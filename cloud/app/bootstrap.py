@@ -79,11 +79,15 @@ def write_google_credentials() -> None:
         return
     key_path = "sandy-gcloud-key.json"
     try:
-        with open(key_path, "w") as f:
+        # Owner-only (0600): this is a service-account private key, and `open(…,
+        # "w")` made it world-readable on any machine with a normal umask.
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             f.write(creds_json)
+        os.chmod(key_path, 0o600)   # an existing file keeps its old mode otherwise
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(key_path)
         logger.debug("[Bootstrap] Google credentials written to %s", key_path)
-    except Exception as exc:
+    except OSError as exc:
         logger.warning("[Bootstrap] Failed to write Google credentials: %s", exc)
 
 

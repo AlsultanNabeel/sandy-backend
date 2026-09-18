@@ -224,7 +224,6 @@ def test_control_bad_action_refuses_without_actuating(db, mock_actuation):
 def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, monkeypatch):
     """A scene action on a registered device goes through command_payload +
     device_topic (the same validated path device_control uses), not the old vocab."""
-    monkeypatch.setattr("app.utils.user_profiles.is_owner_chat_id", lambda x: True)
     from app.agent.tools.schemas.life_tools import actuate_scene_actions
 
     with as_tenant("t1"):

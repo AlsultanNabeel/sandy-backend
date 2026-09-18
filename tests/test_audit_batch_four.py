@@ -128,16 +128,6 @@ def test_recalled_transcripts_attribute_turns_to_the_right_person(db):
     assert "نبيل" not in captured.get("prompt", "")
 
 
-def test_the_chat_only_refusal_names_the_account_not_the_owner(db):
-    """Shown to every chat-only visitor on every tenant."""
-    from app.utils import user_profiles
-
-    line = user_profiles.build_user_profile_prompt_sections(
-        {**PROFILE, "permissions": "chat-only"})["user_profile_priority_line"]
-    assert "نبيل" not in line
-    assert "صاحب الحساب" in line
-
-
 def test_the_address_instruction_does_not_name_anyone(db):
     """Masculine is the default because Arabic forces a choice, not because the
     speaker is a particular person — it read «المالك نبيل افتراضياً»."""
@@ -248,19 +238,6 @@ def test_the_anti_impersonation_line_still_says_something(db):
     assert "مش المستخدم" not in anon, "a sentence that denies the speaker is 'the user'"
     assert "ادّعى إنه المستخدم" not in anon
     assert "صاحب الحساب" in anon
-
-
-def test_the_relation_vocabulary_accepts_the_word_it_emits(db):
-    """`build_user_profile` has emitted `relation: "user"` since the
-    multi-tenant migration and `_normalize_relation` never learned it, so it
-    round-tripped to `guest` — which forces `permissions` to chat-only and would
-    fire the privacy refusal at a paying customer."""
-    from app.utils import user_profiles
-
-    normalized = user_profiles._normalize_profile(
-        CUSTOMER, {"chat_id": CUSTOMER, "relation": "user"})
-    assert normalized["relation"] == "user"
-    assert normalized["permissions"] == "all"
 
 
 def test_naming_the_speaker_costs_no_read_on_the_audio_path(db, monkeypatch):
@@ -466,23 +443,6 @@ def test_the_dialect_preset_does_not_outrank_the_language_rule(db):
     assert "بتغلب أي تعليمة لهجة" in LANGUAGE_RULE
     assert "مش بتلزمك تحكي عربي" in LANGUAGE_RULE
     assert persona.index("اللهجة الفلسطينية") < persona.index("بتغلب أي تعليمة لهجة")
-
-
-def test_a_guest_cannot_be_handed_full_permissions_by_a_dict(db):
-    """`active_profile_is_guest` reads permissions alone, so a profile saying
-    `relation: guest, permissions: all` clears every guest gate in the system.
-    A default is not a limit — the relation has to be the ceiling."""
-    from app.utils import user_profiles
-
-    for relation in ("guest", "family"):
-        out = user_profiles._normalize_profile(
-            "g1", {"chat_id": "g1", "relation": relation, "permissions": "all"})
-        assert out["permissions"] == "chat-only", \
-            f"a {relation} was handed full permissions by its own dict"
-
-    ok = user_profiles._normalize_profile(
-        "u1", {"chat_id": "u1", "relation": "user", "permissions": "all"})
-    assert ok["permissions"] == "all", "an authenticated user lost their own data"
 
 
 def test_a_name_that_begins_with_alef_lam_is_not_mangled(db, monkeypatch):

@@ -30,9 +30,12 @@ from app.bootstrap import bootstrap  # noqa: E402  (env must load before app imp
 def main() -> None:
     from app.agent.facade.agent import init_runtime
     from app.api.server import create_app
-    from app.config import APP_ENV
+    from app.bootstrap import configure_logging
+    from app.config import APP_ENV, LOG_LEVEL
     from app.db import get_db
 
+    # Before init_runtime, so its connection report is not swallowed (see wsgi.py).
+    configure_logging(LOG_LEVEL)
     # Explicit runtime init (no import-time side effects): connect Mongo, register
     # the shared handle on app.db, initialize the feature stores, start ingest.
     init_runtime()

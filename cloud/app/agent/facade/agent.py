@@ -27,32 +27,6 @@ from openai import OpenAI, AzureOpenAI
 from app.integrations.openai_client import make_chat_completion_fn
 from app.integrations.mongodb_store import init_mongo_connection
 
-# Try to import Google Cloud Text-to-Speech
-try:
-    from google.cloud import texttospeech
-
-    GOOGLE_TTS_AVAILABLE = True
-except ImportError:
-    texttospeech = None
-    GOOGLE_TTS_AVAILABLE = False
-    logger.warning(
-        "[Warning] Google Cloud Text-to-Speech not available. To enable: pip install google-cloud-texttospeech"
-    )
-
-
-# Internal architecture glossary — injected into every system prompt so Sandy
-# uses these terms accurately.  Do NOT share or explain these to the user.
-_ARCH_GLOSSARY = """\
-🔧 مصطلحات داخلية (للاستخدام الداخلي فقط — لا تشاركها مع المستخدم):
-- Telegram polling: حلقة runtime تطلب updates من Telegram — ليست استطلاع رأي أو تصويت.
-- memory_lock: threading.Lock يمنع تعديل self.memory/sandy_state من خيوط خلفية في نفس الوقت — مكوّن تزامن خيوط فقط.
-- mood_cache: cache محدود (max 256 مدخلة) للمزاج مع TTL — الاختبار يشمل الطرد والحداثة، ليس فقط الاسترجاع.
-- Circuit Breaker: wrapper يعزل فشل الخدمات الخارجية — يُرجع قيمة آمنة أو exception معالج، ليس قطع شبكة.
-- MongoDB/JSON fallback: الذاكرة تفضل MongoDB، وتنتقل تلقائياً لـ JSON المحلي عند عدم الاتصال.
-- Memory layer: الحقائق والمحادثات محفوظة في MongoDB (sandy_facts, sandy_conversations) — تستمر عبر إعادة التشغيل.
-- Semantic memory: ذاكرة دلالية على MongoDB Vector Search — تتدهور بشكل صريح وآمن إذا لم يكن الـ index متاحاً.\
-"""
-
 # Runtime handles — populated by init_runtime(); None until then. Nothing should
 # import ``mongo_db`` from this module: the DB handle is the single source of
 # truth on app.db, read via app.db.get_db(). ``create_chat_completion`` is the

@@ -1056,12 +1056,10 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    the Telegram handler that used to is gone. Wire it to an owner endpoint or
    delete the flow; a silently disabled feature is worse than an absent one.
    §2.10.
-8. **`_normalize_profile` and the JSON profile store around it are dead.**
-   `find_user_profile`, `save_user_profile`, `ensure_user_profile` and
-   `is_owner_chat_id` have no caller outside their own module. It is the last
-   place in `cloud/` that still encodes "tenant #1 is special", and leaving it
-   half-alive is what let a batch of this audit fix a string nobody reads.
-   Delete it or wire it up.
+8. *(closed 18 Sep 2026)* The dead JSON profile store in `utils/user_profiles.py`
+   (`find/save/ensure/update_user_profile`, `_normalize_profile`,
+   `is_owner_chat_id`, the prompt-section builder) and `utils/files.py`, which
+   only it used, are deleted with their tests.
 9. **`GeminiLiveManager` builds its own `URLSession`.** Harmless today, but the
    app's one-transport-policy rule (§6) cannot see it, so a future change to
    retry or timeouts will miss it.

@@ -49,7 +49,8 @@ class ScopedCollection:
     instead — pass ``field=`` to match) forced to that tenant, and every
     inserted document gets it stamped on — a caller cannot widen the scope or
     write to another tenant even by passing an explicit value for that field
-    (the tenant value always wins).
+    (the tenant value always wins) — including through an update operator
+    (see :meth:`_guard_update`).
     """
 
     __slots__ = ("_raw", "_tenant", "_field", "_bump")
@@ -79,6 +80,62 @@ class ScopedCollection:
         stamped = dict(doc)
         stamped[self._field] = self._tenant
         return stamped
+
+    # Operators that assign a field, and ones that take it away.
+    _ASSIGN_OPS = ("$set", "$setOnInsert")
+    _REMOVE_OPS = ("$unset", "$rename")
+
+    def _guard_update(self, update: Any) -> Any:
+        """Keep an update from moving a document out of this tenant.
+
+        The filter is scoped, so an update can only *reach* this tenant's
+        documents — but until this existed it could still carry
+        ``{"$set": {"user_id": <someone else>}}`` and hand the document to
+        another tenant, or ``$unset`` the field and orphan it where no tenant
+        can see it. The class docstring promised neither could happen; this is
+        what makes that true. An assignment of the scope field is rewritten to
+        this tenant (several stores set it deliberately on upsert, always to
+        themselves), and a removal or rename of it is dropped.
+
+        Handles both update shapes pymongo accepts: an operator document, and
+        an aggregation-pipeline update (a list of stages).
+        """
+        if isinstance(update, Mapping):
+            return self._guard_operators(update)
+        if isinstance(update, list):
+            return [self._guard_stage(st) if isinstance(st, Mapping) else st
+                    for st in update]
+        return update
+
+    def _guard_operators(self, update: Mapping[str, Any]) -> Dict[str, Any]:
+        out = dict(update)
+        for op in self._ASSIGN_OPS:
+            if isinstance(out.get(op), Mapping) and self._field in out[op]:
+                out[op] = {**out[op], self._field: self._tenant}
+        for op in self._REMOVE_OPS:
+            if isinstance(out.get(op), Mapping) and self._field in out[op]:
+                out[op] = {k: v for k, v in out[op].items() if k != self._field}
+                if not out[op]:
+                    del out[op]
+        if update and not out:
+            # The whole update was an attempt to strip the tenant. Doing nothing
+            # silently would hide the bug; sending `{}` would be a driver error
+            # that names the wrong cause.
+            raise ValueError(
+                f"update would only remove the tenant field {self._field!r}")
+        return out
+
+    def _guard_stage(self, stage: Mapping[str, Any]) -> Dict[str, Any]:
+        out = dict(stage)
+        for op in ("$set", "$addFields"):
+            if isinstance(out.get(op), Mapping) and self._field in out[op]:
+                out[op] = {**out[op], self._field: self._tenant}
+        unset = out.get("$unset")
+        if unset == self._field:
+            del out["$unset"]
+        elif isinstance(unset, list) and self._field in unset:
+            out["$unset"] = [f for f in unset if f != self._field]
+        return out
 
     # ── reads ────────────────────────────────────────────────────────────────
     def find(self, filter: Optional[Mapping[str, Any]] = None, *args, **kwargs):
@@ -128,12 +185,14 @@ class ScopedCollection:
         return out
 
     def update_one(self, filter: Mapping[str, Any], update, *args, **kwargs):
-        out = self._raw.update_one(self._scope(filter), update, *args, **kwargs)
+        out = self._raw.update_one(
+            self._scope(filter), self._guard_update(update), *args, **kwargs)
         self._note_write()
         return out
 
     def update_many(self, filter: Mapping[str, Any], update, *args, **kwargs):
-        out = self._raw.update_many(self._scope(filter), update, *args, **kwargs)
+        out = self._raw.update_many(
+            self._scope(filter), self._guard_update(update), *args, **kwargs)
         self._note_write()
         return out
 
@@ -159,7 +218,7 @@ class ScopedCollection:
         # On upsert, pymongo seeds the new doc from the filter's equality terms,
         # so scoping the filter also stamps the tenant onto an upserted document.
         out = self._raw.find_one_and_update(
-            self._scope(filter), update, *args, **kwargs
+            self._scope(filter), self._guard_update(update), *args, **kwargs
         )
         self._note_write()
         return out

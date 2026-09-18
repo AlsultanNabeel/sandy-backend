@@ -1,8 +1,7 @@
-"""MongoDB connection helpers with async fire-and-forget wrappers."""
+"""MongoDB connection setup."""
 
-import asyncio
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import certifi
 
@@ -75,47 +74,3 @@ def init_mongo_connection(
         )
         logger.error("[MongoDB] Falling back to JSON memory")
         return None, None
-
-
-async def save_document_async(
-    mongo_db: Any,
-    collection: str,
-    doc_id: str,
-    data: Dict[str, Any],
-) -> None:
-    """Fire-and-forget async MongoDB upsert. Runs sync driver in thread pool."""
-    if mongo_db is None:
-        return
-    loop = asyncio.get_running_loop()
-
-    def _upsert() -> None:
-        doc = {**data, "_id": doc_id}
-        mongo_db[collection].replace_one({"_id": doc_id}, doc, upsert=True)
-
-    try:
-        await loop.run_in_executor(None, _upsert)
-    except Exception as e:
-        logger.warning("[MongoDB] async save failed (%s/%s): %s", collection, doc_id, e)
-
-
-async def find_one_async(
-    mongo_db: Any,
-    collection: str,
-    filter_dict: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-    """Async MongoDB find_one. Runs sync driver in thread pool."""
-    if mongo_db is None:
-        return None
-    loop = asyncio.get_running_loop()
-
-    def _find() -> Optional[Dict[str, Any]]:
-        doc = mongo_db[collection].find_one(filter_dict)
-        if doc:
-            doc.pop("_id", None)
-        return doc
-
-    try:
-        return await loop.run_in_executor(None, _find)
-    except Exception as e:
-        logger.warning("[MongoDB] async find failed (%s): %s", collection, e)
-        return None

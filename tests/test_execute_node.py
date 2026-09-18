@@ -78,8 +78,7 @@ class TestExecuteNodeFC(unittest.TestCase):
         with patch("app.agent.tools.registry.get_registry", return_value=mock_registry), \
              patch("app.agent.tools.dispatcher.ToolDispatcher") as MockDispatcher, \
              patch("app.agent.nodes.execute._get_chat_completion_fn"), \
-             patch("app.agent.nodes.execute._get_mongo_db", return_value=None), \
-             patch("app.utils.user_profiles.is_owner_chat_id", return_value=True):
+             patch("app.agent.nodes.execute._get_mongo_db", return_value=None):
             MockDispatcher.return_value.dispatch.return_value = dispatch_result
             from app.agent.nodes.execute import execute_node
             return execute_node(state)
@@ -124,8 +123,7 @@ class TestExecuteNodeFC(unittest.TestCase):
         with patch("app.agent.tools.registry.get_registry", return_value=mock_registry), \
              patch("app.agent.tools.dispatcher.ToolDispatcher") as MockDispatcher, \
              patch("app.agent.nodes.execute._get_chat_completion_fn"), \
-             patch("app.agent.nodes.execute._get_mongo_db", return_value=None), \
-             patch("app.utils.user_profiles.is_owner_chat_id", return_value=True):
+             patch("app.agent.nodes.execute._get_mongo_db", return_value=None):
             MockDispatcher.return_value.dispatch.side_effect = fake_dispatch
             from app.agent.nodes.execute import execute_node
             result = execute_node(state)
@@ -169,8 +167,7 @@ class TestExecuteNodeFC(unittest.TestCase):
         with patch("app.agent.tools.registry.get_registry", return_value=mock_registry), \
              patch("app.agent.tools.dispatcher.ToolDispatcher") as MockDispatcher, \
              patch("app.agent.nodes.execute._get_chat_completion_fn"), \
-             patch("app.agent.nodes.execute._get_mongo_db", return_value=None), \
-             patch("app.utils.user_profiles.is_owner_chat_id", return_value=True):
+             patch("app.agent.nodes.execute._get_mongo_db", return_value=None):
             MockDispatcher.return_value.dispatch.side_effect = RuntimeError("crash")
             from app.agent.nodes.execute import execute_node
             result = execute_node(state)
