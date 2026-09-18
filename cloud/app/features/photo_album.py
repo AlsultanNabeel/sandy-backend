@@ -1,6 +1,6 @@
 """ألبوم الصور (Photo Album).
 
-ساندي تحفظ الصور اللي بتوصلها على تيليجرام، تعمل لها وصف ووسوم ذكية
+ساندي تحفظ الصور اللي بتوصلها من التطبيق، تعمل لها وصف ووسوم ذكية
 (عبر Vision)، وتقدر ترجّعها لاحقاً بالاسم أو الوسم أو الوصف.
 
 التخزين:
@@ -9,7 +9,7 @@
     {chat_id, name, grid_id, file_unique_id, user_caption, ai_caption, tags[], created_at}
 
 لو Mongo مش متاح كل دالة بترجّع فاضي بهدوء.
-العرض عبر تيليجرام والتطبيق فقط.
+العرض عبر التطبيق.
 """
 
 from __future__ import annotations
@@ -232,7 +232,7 @@ def delete_photo(chat_id: Any, query: str) -> Tuple[bool, str]:
     try:
         _gridfs.delete(doc["grid_id"])
     except Exception as e:  # noqa: BLE001
-        logger.debug("[photo_album] gridfs delete: %s", e)
+        logger.warning("[photo_album] gridfs delete: %s", e)
     get_db()[_META].delete_one({"_id": doc["_id"]})
     return True, str(doc.get("name", "الصورة"))
 

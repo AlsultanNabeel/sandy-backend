@@ -16,7 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 def _chat_id(ctx: "DispatchContext") -> str:
-    return str((ctx.state or {}).get("chat_id", "") or "")
+    """The album owner: the signed-in tenant, the same id photos_api uses.
+
+    Not ``state["chat_id"]``: that can be empty, and an empty id was a shared
+    ``""`` album that any other empty-id turn could list or delete from.
+    """
+    from app.utils.user_profiles import current_user_id
+
+    return str(current_user_id() or "")
+
+
+_NO_ALBUM = {"handled": True, "ok": False, "reply": "ما قدرت أحدد الألبوم تبعك."}
 
 
 def save_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -24,6 +34,8 @@ def save_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     from app.features import photo_album
 
     chat_id = _chat_id(ctx)
+    if not chat_id:
+        return dict(_NO_ALBUM)
     session = ctx.session or {}
     image_state = session.get("image_state") or {}
     img = image_state.get("active_image_bytes") or session.get("last_image_bytes")
@@ -61,7 +73,7 @@ def show_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     query = str(args.get("query") or "").strip()
     chat_id = _chat_id(ctx)
     if not chat_id:
-        return {"handled": True, "ok": False, "reply": "ما قدرت أحدد المحادثة."}
+        return dict(_NO_ALBUM)
 
     found = photo_album.get_photo_bytes(chat_id, query)
     if not found:
@@ -82,6 +94,8 @@ def list_photos(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     from app.features import photo_album
 
     chat_id = _chat_id(ctx)
+    if not chat_id:
+        return dict(_NO_ALBUM)
     tag = str(args.get("tag") or "").strip() or None
     docs = photo_album.find_photos(chat_id, tag=tag, limit=20)
     if not docs:
@@ -103,11 +117,16 @@ def delete_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
     from app.features import photo_album
 
     chat_id = _chat_id(ctx)
+    if not chat_id:
+        return dict(_NO_ALBUM)
     query = str(args.get("query") or "").strip()
+    if not query:
+        # An empty query matches the newest photo — never delete on a guess.
+        return {"handled": True, "ok": False, "reply": "أي صورة بدك أحذف؟ قلي اسمها أو وصفها."}
     ok, msg = photo_album.delete_photo(chat_id, query)
     if ok:
         return {"handled": True, "reply": f"حذفت «{msg}» ✅"}
-    return {"handled": True, "reply": msg}
+    return {"handled": True, "ok": False, "reply": msg}
 
 
 def rename_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -115,12 +134,14 @@ def rename_photo(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
     from app.features import photo_album
 
     chat_id = _chat_id(ctx)
+    if not chat_id:
+        return dict(_NO_ALBUM)
     query = str(args.get("query") or "").strip()
     new_name = str(args.get("new_name") or "").strip()
     ok, msg = photo_album.rename_photo(chat_id, query, new_name)
     if ok:
         return {"handled": True, "reply": f"صار اسمها «{msg}» ✅"}
-    return {"handled": True, "reply": msg}
+    return {"handled": True, "ok": False, "reply": msg}
 
 
 PHOTO_TOOLS = [
