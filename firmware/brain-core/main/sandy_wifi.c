@@ -13,6 +13,13 @@
 #include "freertos/event_groups.h"
 #include "secrets.h"
 
+
+// WPA2 as the floor when there is a password (never downgrade to WEP/WPA);
+// an empty password is an open network, which a WPA2 floor can never join —
+// though the setup page tells the owner to leave it empty for one.
+static wifi_auth_mode_t auth_threshold(const char *pass) {
+    return (pass && pass[0]) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+}
 static const char *TAG = "wifi";
 static char s_ip[16] = "";   // آخر عنوان أخذناه، للنبضة
 
@@ -201,7 +208,7 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     wifi_config_t cfg = { 0 };
     set_wifi_field(cfg.sta.ssid, sizeof(cfg.sta.ssid), ssid);
     set_wifi_field(cfg.sta.password, sizeof(cfg.sta.password), pass ? pass : "");
-    cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    cfg.sta.threshold.authmode = auth_threshold(pass);
     cfg.sta.pmf_cfg.capable = true;
 
     esp_wifi_disconnect();
@@ -241,7 +248,7 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     wifi_config_t back = { 0 };
     set_wifi_field(back.sta.ssid, sizeof(back.sta.ssid), old_ssid);
     set_wifi_field(back.sta.password, sizeof(back.sta.password), old_pass);
-    back.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    back.sta.threshold.authmode = auth_threshold(old_pass);
     back.sta.pmf_cfg.capable = true;
     esp_wifi_disconnect();
     esp_wifi_set_config(WIFI_IF_STA, &back);
@@ -274,7 +281,7 @@ esp_err_t wifi_sandy_start(void) {
     wifi_config_t wifi_cfg = { 0 };
     set_wifi_field(wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), s_ssid);
     set_wifi_field(wifi_cfg.sta.password, sizeof(wifi_cfg.sta.password), s_pass);
-    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_cfg.sta.threshold.authmode = auth_threshold(s_pass);
     wifi_cfg.sta.pmf_cfg.capable = true;
     wifi_cfg.sta.pmf_cfg.required = false;
     WIFI_TRY("set mode", esp_wifi_set_mode(WIFI_MODE_STA));

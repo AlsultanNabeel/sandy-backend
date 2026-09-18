@@ -19,6 +19,33 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+
+// A 32-byte SSID where every byte needs the longest entity (6 chars) + NUL.
+#define SSID_ESC_MAX (32 * 6 + 1)
+
+static void html_escape(const char *in, char *out, size_t cap) {
+    size_t k = 0;
+    for (; *in && k + 6 < cap; in++) {  // room for the longest entity + NUL
+        const char *r = NULL;
+        switch (*in) {
+            case '"':  r = "&quot;"; break;
+            case '\'': r = "&#39;";  break;
+            case '<':  r = "&lt;";   break;
+            case '>':  r = "&gt;";   break;
+            case '&':  r = "&amp;";  break;
+            default:   break;
+        }
+        if (r) {
+            size_t l = strlen(r);
+            memcpy(out + k, r, l);
+            k += l;
+        } else {
+            out[k++] = *in;
+        }
+    }
+    out[k] = '\0';
+}
+
 static const char *TAG = "provision";
 
 static httpd_handle_t s_httpd = NULL;
@@ -101,18 +128,18 @@ static esp_err_t root_get(httpd_req_t *req) {
         for (uint16_t i = 0; i < n; i++) {
             const char *ssid = (const char *)aps[i].ssid;
             if (!ssid[0]) continue;
-            // Escaping is not decoration here: a network named with a quote
-            // would otherwise break the option out of its own tag, and the
-            // names on the air are written by strangers.
-            char opt[160];
-            int k = snprintf(opt, sizeof(opt), "<option value=\"");
-            for (const char *p = ssid; *p && k < (int)sizeof(opt) - 24; p++) {
-                if (*p == '"')      k += snprintf(opt + k, sizeof(opt) - k, "&quot;");
-                else if (*p == '<') k += snprintf(opt + k, sizeof(opt) - k, "&lt;");
-                else if (*p == '&') k += snprintf(opt + k, sizeof(opt) - k, "&amp;");
-                else                opt[k++] = *p, opt[k] = '\0';
-            }
-            k += snprintf(opt + k, sizeof(opt) - k, "\">%s</option>", ssid);
+            // Escaping is not decoration here: the names on the air are
+            // written by strangers, and this is the page the owner types the
+            // Wi-Fi password into. Both the value and the visible text are
+            // escaped (the text used to go out raw), and the length sent is
+            // clamped to what was written — a 32-quote name used to push `k`
+            // past the buffer and send stack bytes after it.
+            char esc[SSID_ESC_MAX];
+            html_escape(ssid, esc, sizeof(esc));
+            char opt[2 * SSID_ESC_MAX + 32];
+            int k = snprintf(opt, sizeof(opt), "<option value=\"%s\">%s</option>", esc, esc);
+            if (k <= 0) continue;
+            if (k >= (int)sizeof(opt)) k = (int)sizeof(opt) - 1;
             httpd_resp_send_chunk(req, opt, k);
         }
         free(aps);

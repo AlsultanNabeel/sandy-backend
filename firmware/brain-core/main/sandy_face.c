@@ -179,7 +179,10 @@ static void _lvgl_task(void *arg) {
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             uint32_t ms = lv_timer_handler();
             xSemaphoreGive(s_mutex);
-            vTaskDelay(pdMS_TO_TICKS(ms < 1 ? 1 : ms > 50 ? 50 : ms));
+            // At a 100 Hz tick, pdMS_TO_TICKS(1..9) is 0 and vTaskDelay(0)
+            // only yields — the task spun at priority 5. Always sleep a tick.
+            TickType_t t = pdMS_TO_TICKS(ms > 50 ? 50 : ms);
+            vTaskDelay(t ? t : 1);
         } else {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
