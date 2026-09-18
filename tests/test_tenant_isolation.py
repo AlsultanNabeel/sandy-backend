@@ -315,3 +315,22 @@ def test_future_messages_isolated_and_fail_closed(db, monkeypatch):
     with as_tenant("tenant-A"):
         assert "ghost" not in _blob(fm.list_pending_messages())
         assert fm.cancel_message(a_id)
+
+
+def test_goal_tools_isolated_and_fail_closed(db):
+    """goal tools used state["chat_id"] (fallback "default") on the raw
+    collection; now scoped. Also: the user's words are not a regex."""
+    from app.agent.tools.schemas.goal_tools import goal_done, goal_list, goal_set
+
+    ctx = SimpleNamespace(mongo_db=db, state={}, create_chat_completion_fn=None)
+    with as_tenant("tenant-A"):
+        assert goal_set({"goal": "A-goal-zzz (run)"}, ctx).get("ok", True)
+    with as_tenant("tenant-B"):
+        assert "A-goal" not in goal_list({}, ctx)["reply"]
+        assert goal_done({"goal": ".*"}, ctx)["ok"] is False
+    with no_tenant():
+        assert goal_set({"goal": "ghost-zzz"}, ctx)["ok"] is False
+    with as_tenant("tenant-A"):
+        assert "ghost" not in goal_list({}, ctx)["reply"]
+        assert goal_done({"goal": ".*"}, ctx)["ok"] is False, "regex was not escaped"
+        assert goal_done({"goal": "goal-zzz (run"}, ctx).get("ok", True)
