@@ -1095,8 +1095,10 @@ sizing decisions rather than bugs, and both want a measurement first:
 `_SOUL_POOL`'s three-second deadline is per future, so two concurrent turns on
 one worker can add several of them onto the request thread; and
 `submit_background`'s ten workers now carry two LLM calls per turn (the STM
-summary and the conversation title) with no timeout and no future ever read, so
-a stalled upstream would silently stop every memory write in the process.
+summary and the conversation title) with no future ever read — *(partly closed
+18 Sep 2026: both calls now go through `_create_chat_resilient` with
+`OPENAI_CHAT_TIMEOUT_S`, so a stalled upstream costs a worker for that long,
+not for ever)*.
 
 ### Hardware, and the owner already knows
 

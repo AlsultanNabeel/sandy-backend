@@ -334,8 +334,11 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
         # Proof line: this is the EXACT memory text seeded into the voice prompt.
         # If a phantom reply ("focus session", "eggs") shows up, grep this to see
         # whether the topic was actually injected or came from elsewhere.
-        logger.info("[voice_ws] memory seed (%d chars): %s", len(rich_ctx),
-                    rich_ctx.replace("\n", " ")[:600])
+        # The size at INFO, the text at DEBUG: this is a customer's personal
+        # memory, and INFO is what production keeps. Set LOG_LEVEL=DEBUG to see it.
+        logger.info("[voice_ws] memory seed (%d chars)", len(rich_ctx))
+        logger.debug("[voice_ws] memory seed text: %s",
+                     rich_ctx.replace("\n", " ")[:600])
         parts.append(rich_ctx)
 
     # **وآخر المحادثات — دايمًا، مش لمّا يفشل اللي فوق.**

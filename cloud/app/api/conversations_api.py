@@ -70,17 +70,23 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
             api_version=AZURE_OPENAI_API_VERSION,
             max_retries=0,  # fail fast — the SDK's default retries silently triple any timeout
         )
-        resp = client.chat.completions.create(
-            model=AZURE_OPENAI_CHAT_DEPLOYMENT,
-            messages=[
+        from app.integrations.azure_intent_client import _create_chat_resilient
+        from app.integrations.openai_client import DEFAULT_CHAT_TIMEOUT_S
+
+        # Adapter, breaker and a deadline — this runs on the shared background
+        # pool, where a hung call would hold a worker indefinitely.
+        resp = _create_chat_resilient(client, {
+            "model": AZURE_OPENAI_CHAT_DEPLOYMENT,
+            "messages": [
                 {"role": "system", "content": (
                     "اكتب عنوانًا قصيرًا جدًا (كلمتين لأربع كلمات) يلخّص موضوع المحادثة. "
                     "بنفس لغة المستخدم، بدون علامات اقتباس وبدون نقطة في الآخر."
                 )},
                 {"role": "user", "content": f"المستخدم: {user_msg}\nساندي: {reply}"},
             ],
-            max_tokens=20,
-        )
+            "max_tokens": 20,
+            "timeout": DEFAULT_CHAT_TIMEOUT_S,
+        })
         title = (resp.choices[0].message.content or "").strip().strip('"').strip("«»").strip()
         if title:
             coll.update_one({"_id": cid, "user_id": uid},

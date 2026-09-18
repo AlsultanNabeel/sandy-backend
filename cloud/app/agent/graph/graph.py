@@ -115,7 +115,7 @@ def _stm_load(chat_id: str, user_id: str) -> List[Dict[str, Any]]:
         doc = coll.find_one({"key": f"{chat_id}:{user_id}"}, {"_id": 0, "history": 1})
         return (doc or {}).get("history", []) or []
     except Exception as exc:
-        logger.warning(f"[graph] STM load failed: {exc}")
+        logger.warning("[graph] STM load failed: %s", exc)
         return []
 
 
@@ -192,16 +192,25 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
             f"{user_label if m['role'] == 'user' else 'Sandy'}: {m['content']}"
             for m in messages if m.get("content")
         )
+        from app.integrations.azure_intent_client import _create_chat_resilient
+        from app.integrations.openai_client import DEFAULT_CHAT_TIMEOUT_S
+
         client = _get_summary_client()
-        resp = client.chat.completions.create(
-            model=AZURE_OPENAI_CHAT_DEPLOYMENT,
-            messages=[
+        # Through the same adapter and breaker as the router, and **with a
+        # deadline**. This runs on the shared ten-worker background pool with no
+        # future ever read, so a provider that hung would have parked a worker
+        # per turn until every memory write in the process stopped — the open
+        # item at the end of the map's §12.
+        resp = _create_chat_resilient(client, {
+            "model": AZURE_OPENAI_CHAT_DEPLOYMENT,
+            "messages": [
                 {"role": "system", "content": "لخّص المحادثة التالية في جملتين أو ثلاث بالعربي. ركّز على القرارات والمعلومات المهمة فقط."},
                 {"role": "user", "content": turns},
             ],
-            max_tokens=200,
-        )
-        summary = resp.choices[0].message.content.strip()
+            "max_tokens": 200,
+            "timeout": DEFAULT_CHAT_TIMEOUT_S,
+        })
+        summary = (resp.choices[0].message.content or "").strip()
         if not summary:
             return
 
@@ -214,7 +223,7 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
             logger.debug("ignoring non-critical error", exc_info=True)
 
         if _is_duplicate_memory(mongo_db, chat_id, vec):
-            logger.info(f"[graph] STM→LTM duplicate skipped for {chat_id}")
+            logger.info("[graph] STM→LTM duplicate skipped for %s", chat_id)
             return
 
         doc: Dict[str, Any] = {
@@ -232,9 +241,9 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
         # conversation she does not remember having.
         from app.utils.tenant_version import bump_for
         bump_for(str(user_id or chat_id or ""), collection="sandy_memories")
-        logger.info(f"[graph] STM→LTM summary saved for {chat_id}")
+        logger.info("[graph] STM→LTM summary saved for %s", chat_id)
     except Exception as exc:
-        logger.debug(f"[graph] STM summarization failed: {exc}")
+        logger.warning("[graph] STM summarization failed: %s", exc)
 
 
 def _summarize_to_ltm_async(chat_id: str, user_id: str, messages: List[Dict[str, Any]]) -> None:
@@ -296,7 +305,7 @@ def _stm_save(
             upsert=True,
         )
     except Exception as exc:
-        logger.warning(f"[graph] STM save failed: {exc}")
+        logger.warning("[graph] STM save failed: %s", exc)
 
 
 def recent_turns_for_user(user_id: str, limit: int = 6) -> List[Dict[str, Any]]:
@@ -334,7 +343,7 @@ def recent_turns_for_user(user_id: str, limit: int = 6) -> List[Dict[str, Any]]:
         turns.sort(key=lambda m: str(m.get("timestamp") or ""))
         return turns[-limit:]
     except Exception as exc:  # noqa: BLE001 — memory is never worth a failed reply
-        logger.warning(f"[graph] cross-channel STM read failed: {exc}")
+        logger.warning("[graph] cross-channel STM read failed: %s", exc)
         return []
 
 

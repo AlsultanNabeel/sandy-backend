@@ -70,12 +70,8 @@ def test_caller_kwargs_not_mutated():
     assert kw["reasoning_effort"] == "minimal"
 
 
-def test_chat_path_uses_the_adapter(monkeypatch):
+def test_chat_path_uses_the_adapter():
     from app.integrations import openai_client
-    from app.utils.circuit_breaker import CircuitBreaker
-    # A fresh breaker: the module one is shared, and an earlier test may have
-    # left it open.
-    monkeypatch.setattr(openai_client, "_cb", CircuitBreaker(name="t", failure_threshold=5))
     client, calls = _client({"temperature"})
     openai_client.create_chat_completion([], client, openai_model="m4", prefer_azure=False)
     assert "temperature" not in calls[-1]
