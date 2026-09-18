@@ -30,18 +30,15 @@ def test_check_conflicts_detects_study_vs_meeting_same_day():
             "notes": "",
         }
     ]
-    calendar_events = []
-
     result = check_conflicts(
         {
-            "id": "evt_1",
-            "source": "calendar",
+            "id": "t_new",
+            "source": "task",
             "title": "اجتماع الفريق",
             "start_iso": day.replace(hour=15).isoformat(),
             "end_iso": day.replace(hour=16).isoformat(),
         },
         tasks=tasks,
-        calendar_events=calendar_events,
     )
 
     assert result["has_conflict"] is True
@@ -57,14 +54,13 @@ def test_check_conflicts_returns_no_conflict_for_different_days():
 
     result = check_conflicts(
         {
-            "id": "evt_2",
-            "source": "calendar",
+            "id": "t_new",
+            "source": "task",
             "title": "اجتماع",
             "start_iso": day_2.isoformat(),
             "end_iso": (day_2 + timedelta(hours=1)).isoformat(),
         },
         tasks=tasks,
-        calendar_events=[],
     )
 
     assert result["has_conflict"] is False
@@ -73,25 +69,17 @@ def test_check_conflicts_returns_no_conflict_for_different_days():
 
 def test_check_conflicts_detects_overlapping_meetings_same_time():
     day = _dt(days_from_now=3, hour=14)
-    calendar_events = [
-        {
-            "id": "evt_old",
-            "summary": "اجتماع المنتج",
-            "start": {"dateTime": day.isoformat()},
-            "end": {"dateTime": (day + timedelta(hours=1)).isoformat()},
-        }
-    ]
+    tasks = [{"id": "t_old", "text": "اجتماع المنتج", "due_at": day.isoformat(), "due": "", "notes": ""}]
 
     result = check_conflicts(
         {
-            "id": "evt_new",
-            "source": "calendar",
+            "id": "t_new",
+            "source": "task",
             "title": "اجتماع الفريق",
             "start_iso": day.isoformat(),
             "end_iso": (day + timedelta(hours=1)).isoformat(),
         },
-        tasks=[],
-        calendar_events=calendar_events,
+        tasks=tasks,
     )
 
     assert result["has_conflict"] is True

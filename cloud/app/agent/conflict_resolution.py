@@ -1,13 +1,20 @@
+"""Same-day clash check for a newly added task.
+
+When a task with a due time lands on a day that already holds a monitored
+commitment (study, deadline, volunteering, meeting) that it clashes with, the
+reply carries a short alert and up to three free slots that day.
+"""
+
 from __future__ import annotations
 
+import logging
+import os
 import re
 from datetime import datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
-import os
 
 from app.utils.arabic_days import WEEKDAY_TO_AR_NAME
 from app.utils.time import USER_TZ
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -123,33 +130,6 @@ def _normalize_task(task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def _normalize_calendar_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    start_data = (event.get("start", {}) or {}).get("dateTime") or (
-        event.get("start", {}) or {}
-    ).get("date")
-    end_data = (event.get("end", {}) or {}).get("dateTime") or (
-        event.get("end", {}) or {}
-    ).get("date")
-
-    start = _parse_iso(str(start_data or ""))
-    if start is None:
-        return None
-
-    end = _parse_iso(str(end_data or "")) or (start + timedelta(hours=1))
-    summary = str(event.get("summary", "") or "").strip()
-    description = str(event.get("description", "") or "").strip()
-    full_text = f"{summary} {description}".strip()
-
-    return {
-        "id": str(event.get("id", "") or ""),
-        "title": summary or "موعد",
-        "category": _detect_category(full_text, default="meeting"),
-        "start": start,
-        "end": end,
-        "source": "calendar",
-    }
-
-
 def _overlaps(
     a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime
 ) -> bool:
@@ -255,9 +235,7 @@ def check_conflicts(
     new_item: Dict[str, Any],
     *,
     tasks: List[Dict[str, Any]],
-    calendar_events: List[Dict[str, Any]],
     exclude_task_id: str = "",
-    exclude_event_id: str = "",
     owner_name: str = "",
 ) -> Dict[str, Any]:
     start = _parse_iso(str(new_item.get("start_iso", "") or ""))
@@ -289,7 +267,7 @@ def check_conflicts(
         "category": _detect_category(text_for_category, default=default_category),
         "start": start,
         "end": end,
-        "source": source or "calendar",
+        "source": source or "task",
     }
 
     existing: List[Dict[str, Any]] = []
@@ -299,13 +277,6 @@ def check_conflicts(
         norm_task = _normalize_task(task)
         if norm_task:
             existing.append(norm_task)
-
-    for event in calendar_events or []:
-        if exclude_event_id and str(event.get("id", "") or "") == exclude_event_id:
-            continue
-        norm_event = _normalize_calendar_event(event)
-        if norm_event:
-            existing.append(norm_event)
 
     same_day = [e for e in existing if e["start"].date() == new_entry["start"].date()]
 
@@ -338,12 +309,6 @@ def check_conflicts(
     }
 
 
-def _day_window(target: datetime) -> Tuple[str, str]:
-    start = target.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = target.replace(hour=23, minute=59, second=59, microsecond=0)
-    return start.isoformat(), end.isoformat()
-
-
 def run_conflict_check_after_task_add(
     *,
     task_id: str,
@@ -363,8 +328,6 @@ def run_conflict_check_after_task_add(
 
         tasks = load_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
         owner_name = resolve_display_name(mongo_db=mongo_db, default="")
-        # Calendar events are gone (no external calendar) — conflicts are
-        # task-vs-task on the same day now.
         result = check_conflicts(
             {
                 "id": task_id,
@@ -374,7 +337,6 @@ def run_conflict_check_after_task_add(
                 "start_iso": due_dt.isoformat(),
             },
             tasks=tasks,
-            calendar_events=[],
             exclude_task_id=task_id,
             owner_name=owner_name,
         )
@@ -388,5 +350,5 @@ def run_conflict_check_after_task_add(
             "suggestions": suggestions,
         }
     except Exception as exc:
-        logger.warning(f"[ConflictResolution] task conflict check failed: {exc}")
+        logger.warning("[ConflictResolution] task conflict check failed: %s", exc)
         return {"has_conflict": False, "alert_text": "", "suggestions": []}
