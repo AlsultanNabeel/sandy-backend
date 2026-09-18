@@ -923,9 +923,11 @@ until 18 Sep 2026 neither was, and a deleted account's chats survived.
 
 Identity and access: `sandy_users`, `sandy_auth`, `sandy_active_user_profile`,
 `sandy_usage_daily`, `sandy_usage_rl`, `guest_usage`.
-Conversation and memory: `sandy_stm`, `sandy_conversations`, `sandy_facts`,
-`memory`, `sandy_memories`, `sandy_vector_index`, `sandy_context_metadata`,
-`sandy_session_state`, `sandy_pending_state`, `sandy_state`.
+Conversation and memory: `sandy_stm`, `sandy_facts`, `memory`,
+`sandy_memories`, `sandy_session_state`, `sandy_pending_state`, `sandy_state`.
+`sandy_vector_index` is the Atlas vector index name, not a collection.
+Legacy, no longer written: `sandy_conversations` (still cleared by account
+deletion), `sandy_context_metadata`.
 Productivity: `sandy_tasks`, `sandy_reminders`, `sandy_goals`, `sandy_focus`,
 `sandy_focus_meta`, `sandy_brainstorms`, `sandy_bs_pending`.
 Life: `sandy_shopping`, `sandy_habits`, `sandy_habit_log`, `sandy_expenses`,
