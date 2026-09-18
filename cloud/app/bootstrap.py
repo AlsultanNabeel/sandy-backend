@@ -156,6 +156,11 @@ def ensure_indexes() -> None:
         ("sandy_memories.chat_id+label+created_at", lambda: mongo_db.sandy_memories.create_index(
             [("chat_id", 1), ("label", 1), ("created_at", -1)], background=True
         )),
+        # Popped on every chat message (passive delivery of due messages).
+        ("sandy_future_messages.chat_id+delivered+deliver_at",
+         lambda: mongo_db.sandy_future_messages.create_index(
+             [("chat_id", 1), ("delivered", 1), ("deliver_at", 1)], background=True
+         )),
     ]
     for label, job in index_jobs:
         try:
