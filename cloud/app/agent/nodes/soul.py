@@ -290,9 +290,10 @@ def soul_node(state: SandyState) -> SandyState:
         intensity = result["intensity"]
         _s2_futs = {}
         if intensity in ("empathetic", "standard"):
-            _s2_futs["emo"] = _submit(
-                get_emotional_context
-            )
+            pf = state.get("soul_prefetch") or {}
+            # Started during prefetch when available (see start_soul_prefetch):
+            # it depends on nothing the router decides, only on who is talking.
+            _s2_futs["emo"] = pf.get("__emo") or _submit(get_emotional_context)
         if intensity == "empathetic":
             _s2_futs["wellness"] = _submit(get_wellness_context)
         if message:
@@ -452,6 +453,14 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
     # book that is not among the newest four and she had no idea it was hers.
     futures["directives"] = _submit(
         get_persona_directives, chat_id, user_id, mongo_db, message=message)
+
+    # **The emotional context, too.** It is read on nearly every turn (intensity
+    # standard or empathetic) and depends only on the tenant — yet it was
+    # submitted after routing and collected on its own, which made it a whole
+    # extra serial round trip to Atlas on the request path of every message.
+    # Started here it overlaps the router; a turn whose intensity turns out not
+    # to need it simply ignores one cheap read. Read-only, so safe to speculate.
+    futures["__emo"] = _submit(get_emotional_context)
 
     # Semantic memory search only needs the message — start it here so it overlaps
     # the router FC call (~4s) instead of running serially after it in stage2.

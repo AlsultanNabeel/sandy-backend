@@ -225,6 +225,15 @@ Around them: `interests_tracker`, `style_memory`, `lessons_memory`,
 `relationships_memory`, `shared_history`, `dreams_engine`, `session_state`,
 `deep_context`, `soul_vault`.
 
+**Nothing that ignores the router waits for it.** `start_soul_prefetch` starts
+the reads that depend only on who is talking — comfort, directives, the semantic
+search, and the emotional context — before routing, so they overlap the model
+call. The emotional context used to be submitted after routing and collected
+alone: one whole serial Atlas round trip on nearly every message. The chat-only
+block (dreams, anniversaries, goals, future messages) stays after routing on
+purpose — `get_future_messages_context` *pops* due messages, and running it
+speculatively on a task turn would deliver them to nobody.
+
 **One embedding per turn, not one per search.** `search_relevant_facts` and
 `search_relevant_summaries` each embedded the query independently — two OpenAI
 round trips per message for one string, on every channel. `search_memory_for_turn`
@@ -479,6 +488,12 @@ now remembers the answer per model name for the life of the process. The chat
 reply (`openai_client.create_chat_completion`) goes through the same adapter;
 before, a reasoning deployment failed the streamed reply, failed the retry, and
 fell to OpenAI direct.
+
+**What would change it** is `scripts/latency_bench.py`: the router with its real
+prompt and catalogue timed on a labelled set of sentences (speed *and* correct
+picks), optionally beside the Gemini router (`--gemini <model>`), plus the chat
+reply's time to first token. Needs network to the providers, so it runs on the
+owner's machine, not in a sandbox.
 
 **Where a chat turn's time goes** is one log line: `[turn] …ms total — route ·
 soul · <node> (<tool>)`, from `run_graph`. Grep it before theorising.
