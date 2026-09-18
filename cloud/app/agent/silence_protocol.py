@@ -29,7 +29,7 @@ def _parse_quiet_hours() -> Tuple[int, int]:
             if 0 <= start <= 23 and 0 <= end <= 23:
                 return start, end
         except Exception:
-            logger.warning(f"[silence_protocol] bad SANDY_QUIET_HOURS: {raw!r}")
+            logger.warning("[silence_protocol] bad SANDY_QUIET_HOURS: %r", raw)
     return _DEFAULT_QUIET_START, _DEFAULT_QUIET_END
 
 

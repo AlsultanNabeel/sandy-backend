@@ -22,13 +22,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
+from pymongo.errors import DuplicateKeyError
+
 logger = logging.getLogger(__name__)
 
 _COLLECTION = "guest_usage"
 _DEFAULT_LIMIT = 3
-# Cap how many daily reminders we send the owner about one pending guest, so a
-# long-pending request can't ping forever.
-_MAX_REPINGS = 3
 # "all" is the shared budget: chat, search, voice and images draw from one
 # counter per guest, so a guest gets `_DEFAULT_LIMIT` messages across everything.
 _CHAT_TYPES = frozenset({"all", "image", "search", "chat"})
@@ -38,14 +37,6 @@ def guest_label(jti: str) -> str:
     """User-friendly label from JTI: 'Guest #A92K'"""
     h = hashlib.sha1(jti.encode(), usedforsecurity=False).hexdigest().upper()
     return f"Guest #{h[:4]}"
-
-
-def detect_chat_type(message: str) -> str:
-    """Infer resource type from message content (chat vs search)."""
-    m = message.strip()
-    if any(m.startswith(p) for p in ("ابحث", "ابحثي", "search", "بحث عن")):
-        return "search"
-    return "chat"
 
 
 def check_and_increment(
@@ -59,9 +50,12 @@ def check_and_increment(
 
     The budget is finite: a guest gets `limit` uses. `count` goes up only
     on an allowed use, never while pending or blocked, so the count/limit
-    math stays exact. When the budget runs out the owner is asked; an
-    approval grants `boost` more uses (limit += boost) and then the owner is
-    asked again. There is no "approved means unlimited" shortcut.
+    math stays exact. When the budget runs out the doc is marked ``pending``
+    (see the module docstring: nothing approves it today). ``rejected`` is
+    still honoured for docs that carry it from the Telegram era.
+
+    A database error refuses the guest (``block``): guest traffic is the
+    unauthenticated, uncapped-cost path, so it fails closed.
 
     Returns:
         (status, count, limit)
@@ -75,19 +69,24 @@ def check_and_increment(
         col = mongo_db[_COLLECTION]
         doc = col.find_one({"jti": jti, "chat_type": chat_type})
 
-        # First use ever → create doc and allow.
+        # First use ever → create doc and allow. Two first requests can race
+        # here; the unique (jti, chat_type) index makes the loser raise, and it
+        # is then simply a second use of the doc the winner created.
         if doc is None:
-            col.insert_one({
-                "jti": jti,
-                "chat_type": chat_type,
-                "name": name or guest_label(jti),
-                "count": 1,
-                "limit": _DEFAULT_LIMIT,
-                "approval_state": "none",
-                "created_at": now,
-                "last_request_at": now,
-            })
-            return "allow", 1, _DEFAULT_LIMIT
+            try:
+                col.insert_one({
+                    "jti": jti,
+                    "chat_type": chat_type,
+                    "name": name or guest_label(jti),
+                    "count": 1,
+                    "limit": _DEFAULT_LIMIT,
+                    "approval_state": "none",
+                    "created_at": now,
+                    "last_request_at": now,
+                })
+                return "allow", 1, _DEFAULT_LIMIT
+            except DuplicateKeyError:
+                doc = col.find_one({"jti": jti, "chat_type": chat_type}) or {}
 
         count = doc.get("count", 0)
         limit = doc.get("limit", _DEFAULT_LIMIT)
@@ -118,78 +117,16 @@ def check_and_increment(
                 return "block", count, limit
 
         # Budget used up (count >= limit), so don't consume.
-        if state == "pending":
-            # Already waiting. Re-ping the owner only if it's been >24h since
-            # the last notification (a reminder, not spam). Guest polling for
-            # status goes through a separate read-only endpoint, so it does
-            # not reset this timer.
-            notified_at = doc.get("notified_at") or doc.get("last_request_at")
-            if notified_at is not None:
-                if notified_at.tzinfo is None:
-                    notified_at = notified_at.replace(tzinfo=timezone.utc)
-                reping_count = int(doc.get("reping_count") or 0)
-                if (now - notified_at).total_seconds() > 86_400 and reping_count < _MAX_REPINGS:
-                    col.update_one(
-                        {"jti": jti, "chat_type": chat_type},
-                        {"$set": {"notified_at": now}, "$inc": {"reping_count": 1}},
-                    )
-                    _notify_owner(jti, name, chat_type, count, limit)
-            return "pending", count, limit
-
-        # state in ("none", "approved") and budget used up → ask for more.
-        col.update_one(
-            {"jti": jti, "chat_type": chat_type},
-            {"$set": {"approval_state": "pending", "notified_at": now,
-                      "last_request_at": now}},
-        )
-        _notify_owner(jti, name, chat_type, count, limit)
+        if state != "pending":
+            col.update_one(
+                {"jti": jti, "chat_type": chat_type},
+                {"$set": {"approval_state": "pending", "last_request_at": now}},
+            )
         return "pending", count, limit
 
     except Exception as exc:
-        logger.debug("[guest_usage] check_and_increment failed: %s", exc)
-        return "allow", 0, _DEFAULT_LIMIT
-
-
-def approve_guest(jti: str, chat_type: str, boost: int, mongo_db) -> bool:
-    """Grant `boost` more uses, measured from the current count.
-
-    Setting ``limit = count + boost`` (not ``limit += boost``) keeps the grant
-    correct whatever the current count is, including legacy docs whose count
-    was inflated before the finite-budget fix. Otherwise, if the count already
-    passed the old limit, the next message would still be over budget and the
-    owner would get pinged again right after approving.
-    """
-    if mongo_db is None:
-        return False
-    try:
-        col = mongo_db[_COLLECTION]
-        doc = col.find_one({"jti": jti, "chat_type": chat_type})
-        current = (doc or {}).get("count", 0)
-        new_limit = current + max(1, int(boost))
-        col.update_one(
-            {"jti": jti, "chat_type": chat_type},
-            {"$set": {"limit": new_limit, "approval_state": "approved",
-                      "notified_at": None}},
-        )
-        return True
-    except Exception as exc:
-        logger.debug("[guest_usage] approve failed: %s", exc)
-        return False
-
-
-def reject_guest(jti: str, chat_type: str, mongo_db) -> bool:
-    """Block all further requests for this (jti, chat_type)."""
-    if mongo_db is None:
-        return False
-    try:
-        mongo_db[_COLLECTION].update_one(
-            {"jti": jti, "chat_type": chat_type},
-            {"$set": {"approval_state": "rejected"}},
-        )
-        return True
-    except Exception as exc:
-        logger.debug("[guest_usage] reject failed: %s", exc)
-        return False
+        logger.warning("[guest_usage] check_and_increment failed: %s", exc)
+        return "block", 0, _DEFAULT_LIMIT
 
 
 def get_usage_doc(jti: str, chat_type: str, mongo_db) -> Optional[dict]:
@@ -200,16 +137,7 @@ def get_usage_doc(jti: str, chat_type: str, mongo_db) -> Optional[dict]:
         return mongo_db[_COLLECTION].find_one(
             {"jti": jti, "chat_type": chat_type}, {"_id": 0}
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("[guest_usage] read failed: %s", exc)
         return None
 
-
-def _notify_owner(jti: str, name: str, chat_type: str, count: int, limit: int) -> None:
-    """Owner notification for a guest's access request.
-
-    Telegram was removed in the product migration; the request is still recorded
-    as ``pending`` on the usage doc by the caller. Delivering the notification
-    (and the approve/extend action) moves to in-app push in a later phase, so
-    this is intentionally a no-op for now.
-    """
-    return

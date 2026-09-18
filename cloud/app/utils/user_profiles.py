@@ -193,7 +193,7 @@ def reconcile_owner_identity(mongo_db) -> None:
     tagged as the owner's (or untagged pre-isolation docs) — never another
     tenant's.
 
-    ``api/voice_ws.py`` used to key STM/persona/facts off the legacy env-var
+    ``api/voice_ws/`` used to key STM/persona/facts off the legacy env-var
     ids directly (there's no active profile there to derive the canonical id
     from), so without this reconciliation his voice and text-chat memories
     silently lived in different tenants.

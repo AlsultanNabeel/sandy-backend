@@ -2,7 +2,7 @@
 
 Enabled when ``GEMINI_ROUTER_MODEL`` is set (e.g. ``gemini-flash-lite-latest``).
 Uses the same google-genai SDK already installed for the voice path
-(``app/api/voice_ws.py``), with native function-calling so it consumes the same
+(``app/api/voice_ws/``), with native function-calling so it consumes the same
 tool specs as the other router backends.
 
 Returns a list of {name, args} calls (empty = the model chose to chat), or None

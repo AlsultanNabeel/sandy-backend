@@ -1,7 +1,7 @@
 """Shared command-disambiguation rules for Sandy's two understanding brains.
 
 The text path (`agents/fc_router.py`, `_ROUTER_SYSTEM`) and the voice path
-(`api/voice_ws.py`, `_build_system_instruction`) are deliberately separate
+(`api/voice_ws/tools.py`, `_build_system_instruction`) are deliberately separate
 brains — voice needs Gemini Live for speed — but the cross-domain
 disambiguation rules must not drift between them. This is the single source for
 those rules; both prompts import the constant below.

@@ -1,8 +1,9 @@
 """Shared deterministic guards for command execution.
 
-One canonical definition of the destructive-tool set, imported by both the text
-router (`agents/fc_router.py`, Track 1.2) and the voice path (`api/voice_ws.py`,
-Track 4.2) so the two never drift.
+One canonical definition of the destructive-tool set, imported by the text
+router (`agents/fc_router.py`) and by the tool dispatcher
+(`agent/tools/dispatcher.py`), which serves both the chat and the voice path, so
+the two never drift.
 """
 
 from __future__ import annotations
