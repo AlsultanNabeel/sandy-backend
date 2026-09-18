@@ -102,7 +102,8 @@ def _stm_collection():
             _ensure_stm_indexes(coll)
             _stm_index_ready = True
         return coll
-    except Exception:
+    except Exception as exc:
+        logger.warning("[graph] STM collection unavailable: %s", exc)
         return None
 
 
@@ -120,7 +121,7 @@ def _stm_load(chat_id: str, user_id: str) -> List[Dict[str, Any]]:
 
 
 def _is_duplicate_memory(
-    mongo_db, chat_id: str, embedding: Optional[List[float]], threshold: float = 0.92
+    mongo_db, tenant: str, embedding: Optional[List[float]], threshold: float = 0.92
 ) -> bool:
     """Return True if a near-identical summary already exists (cosine similarity ≥ threshold)."""
     if not embedding or mongo_db is None:
@@ -135,7 +136,7 @@ def _is_duplicate_memory(
                     "numCandidates": 10,
                     "limit": 1,
                     "filter": {
-                        "chat_id": {"$eq": chat_id},
+                        "chat_id": {"$eq": tenant},
                         "label": "conversation_summary",
                     },
                 }
@@ -144,7 +145,8 @@ def _is_duplicate_memory(
         ]
         results = list(mongo_db["sandy_memories"].aggregate(pipeline))
         return bool(results and results[0].get("score", 0) >= threshold)
-    except Exception:
+    except Exception as exc:
+        logger.warning("[graph] summary dedup check failed: %s", exc)
         return False
 
 
@@ -172,8 +174,16 @@ def _get_summary_client():
     return _summary_client
 
 
-def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]) -> None:
-    """Summarize overflowing STM messages and save to MongoDB LTM (dedup-protected)."""
+def _summarize_to_ltm(thread_id: str, user_id: str, messages: List[Dict[str, Any]]) -> None:
+    """Summarize overflowing STM messages and save to MongoDB LTM (dedup-protected).
+
+    **Keyed on the user, not the thread.** ``thread_id`` is the client-supplied
+    ``conversation_id`` when there is one, and it used to be stored as
+    ``chat_id`` — so two accounts that both sent ``"default"`` shared one bucket:
+    each got the other's summaries in the prompt, and one's summary could be
+    dropped as a "duplicate" of the other's. ``chat_id`` is now the user (the
+    tenant field every reader filters on) and the thread is its own field.
+    """
     try:
         from datetime import datetime, timezone
         from app.config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT
@@ -222,13 +232,15 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
         except Exception:
             logger.debug("ignoring non-critical error", exc_info=True)
 
-        if _is_duplicate_memory(mongo_db, chat_id, vec):
-            logger.info("[graph] STM→LTM duplicate skipped for %s", chat_id)
+        tenant = str(user_id)
+        if _is_duplicate_memory(mongo_db, tenant, vec):
+            logger.info("[graph] STM→LTM duplicate skipped for %s", thread_id)
             return
 
         doc: Dict[str, Any] = {
-            "chat_id": str(chat_id),
-            "user_id": str(user_id),
+            "chat_id": tenant,
+            "user_id": tenant,
+            "thread_id": str(thread_id),
             "label": "conversation_summary",
             "summary": summary,
             "source_turns": len(messages),
@@ -240,14 +252,14 @@ def _summarize_to_ltm(chat_id: str, user_id: str, messages: List[Dict[str, Any]]
         # Raw handle again — and a summary that never reaches the prompt is a
         # conversation she does not remember having.
         from app.utils.tenant_version import bump_for
-        bump_for(str(user_id or chat_id or ""), collection="sandy_memories")
-        logger.info("[graph] STM→LTM summary saved for %s", chat_id)
+        bump_for(tenant, collection="sandy_memories")
+        logger.info("[graph] STM→LTM summary saved for %s", thread_id)
     except Exception as exc:
         logger.warning("[graph] STM summarization failed: %s", exc)
 
 
-def _summarize_to_ltm_async(chat_id: str, user_id: str, messages: List[Dict[str, Any]]) -> None:
-    submit_background(_summarize_to_ltm, chat_id, user_id, messages, _label="stm_summarize")
+def _summarize_to_ltm_async(thread_id: str, user_id: str, messages: List[Dict[str, Any]]) -> None:
+    submit_background(_summarize_to_ltm, thread_id, user_id, messages, _label="stm_summarize")
 
 
 def _stm_save(
@@ -451,7 +463,8 @@ def run_graph(
     thread_id = str(conversation_id or chat_id)
 
     # 1. حمّل conversation history من MongoDB (لهذا الخيط تحديدًا)
-    history = _stm_load(thread_id, user_id)
+    thread_history = _stm_load(thread_id, user_id)
+    history = thread_history
 
     # ثم أضف اللي انقال ع القنوات التانية.
     #
@@ -555,9 +568,10 @@ def run_graph(
     # 5. احفظ في STM (MongoDB) — على نفس خيط المحادثة، فالفائض يتلخّص لذاكرة
     # بعيدة المدى مفهرسة بـ conversation_id (استرجاع دلالي لكل محادثة على حدة).
     final_reply = state.get("final_response") or ""
-    # Reuse the history loaded in step 1 (same user, same turn) to skip a
-    # redundant MongoDB read inside the save.
-    _stm_save(thread_id, user_id, message, final_reply, prior_history=history,
+    # Reuse this thread's history loaded in step 1 to skip a redundant read.
+    # Only the thread's own turns: the cross-channel lines added for context
+    # must not be written into this thread, or threads slowly merge.
+    _stm_save(thread_id, user_id, message, final_reply, prior_history=thread_history,
               via="شات التطبيق" if source == "web" else (source or ""))
 
     # 6. حدّث الحالة المشتركة عبر المنصات (background)

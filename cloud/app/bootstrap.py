@@ -215,6 +215,14 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     except Exception as exc:
         logger.warning("[Bootstrap] Mongo index setup failed: %s", exc)
 
+    try:
+        from app.agent.semantic_memory import migrate_summary_threads
+        from app.db import get_db
+
+        migrate_summary_threads(get_db())
+    except Exception as exc:
+        logger.warning("[Bootstrap] summary migration failed: %s", exc)
+
     # Daily push nudge — stays idle until APNs is configured (paid Apple keys).
     try:
         from app.db import get_db

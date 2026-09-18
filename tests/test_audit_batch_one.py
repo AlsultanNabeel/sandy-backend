@@ -324,7 +324,7 @@ def test_summary_vector_search_projects_the_summary_field(monkeypatch):
     captured = {}
 
     def _fake_vector_search(col, query, chat_id, n_results, extra_project,
-                            query_vector=None):
+                            query_vector=None, post_match=None):
         # `query_vector` arrived with the one-embedding-per-turn change: callers
         # that run more than one search over the same string pay for it once.
         captured["projected"] = dict(extra_project)
@@ -333,8 +333,11 @@ def test_summary_vector_search_projects_the_summary_field(monkeypatch):
         return [{k: v for k, v in doc.items() if k in extra_project}]
 
     monkeypatch.setattr(sem, "_vector_search", _fake_vector_search)
+    from app.utils.user_profiles import active_user_profile_context
     try:
-        out = sem.search_relevant_summaries("سفر", "chat-1")
+        with active_user_profile_context(
+                {"user_id": "u1", "chat_id": "u1", "relation": "user", "permissions": "all"}):
+            out = sem.search_relevant_summaries("سفر", "chat-1")
         assert "summary" in captured["projected"], \
             "the caller must project the field it then reads"
         assert out == ["حكينا عن السفر"], \

@@ -240,6 +240,16 @@ round trips per message for one string, on every channel. `search_memory_for_tur
 embeds once and hands the vector to both; the individual functions still take an
 optional `query_vector` so a single search is unchanged.
 
+**Conversation summaries belong to the user; the thread is a field.** When STM
+overflows, `graph._summarize_to_ltm` writes a `conversation_summary` into
+`sandy_memories` with `chat_id` = the user (the tenant field) and `thread_id` =
+the conversation (`conversation_id`, or the user id when there is none). The
+client supplies `conversation_id`, so it must never be the only key: it used to
+be stored as `chat_id`, and two accounts sending "default" shared summaries.
+`semantic_memory.migrate_summary_threads` rewrites old rows at boot. The
+per-turn search filters by tenant in `$vectorSearch` and by thread in a `$match`
+after it (the Atlas index does not declare `thread_id`).
+
 **`get_persona_directives` is cached per tenant, keyed on a version stamp**
 (`utils/tenant_version.py`, `context_builder._cached_directive_blocks`). Every
 write to a collection the cached blocks read must bump that version.

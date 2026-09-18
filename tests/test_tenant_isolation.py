@@ -356,3 +356,31 @@ def test_facts_stored_without_a_vector_get_one_later(db, monkeypatch):
         assert db["sandy_facts"].count_documents({}) == 1
     finally:
         appdb.reset()
+
+
+def test_conversation_summaries_are_per_user_not_per_thread_id(db, monkeypatch):
+    """Summaries used to be keyed by the client's conversation_id alone, so two
+    accounts sending the same id ("default") shared one bucket."""
+    import app.db as appdb
+    from app.agent import semantic_memory as sem
+    from app.agent.graph import graph
+
+    appdb.configure(db)
+    monkeypatch.setattr(sem, "_vector_search", lambda *a, **k: None)  # keyword path
+    try:
+        for user in ("tenant-A", "tenant-B"):
+            db["sandy_memories"].insert_one({
+                "chat_id": user, "user_id": user, "thread_id": "default",
+                "label": "conversation_summary", "summary": f"{user}-summary-zzz",
+                "created_at": 1,
+            })
+        with as_tenant("tenant-B"):
+            got = sem.search_relevant_summaries("x", "default")
+        assert got == ["tenant-B-summary-zzz"]
+        with no_tenant():
+            assert sem.search_relevant_summaries("x", "default") == []
+
+        # The writer stores the user as chat_id and the thread separately.
+        assert graph._is_duplicate_memory(db, "tenant-A", None) is False
+    finally:
+        appdb.reset()

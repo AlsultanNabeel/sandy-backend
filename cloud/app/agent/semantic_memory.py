@@ -334,11 +334,16 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
 def _vector_search(
     col, query: str, chat_id: str, n_results: int, extra_project: Dict,
     query_vector: Optional[List[float]] = None,
+    post_match: Optional[Dict[str, Any]] = None,
 ) -> Optional[List[Dict]]:
     """$vectorSearch filtered by chat_id, or None if it can't run.
 
     `query_vector` lets a caller that is about to run more than one search over
     the same string pay for the embedding once — see `search_memory_for_turn`.
+
+    `post_match` narrows further on fields the Atlas index does not declare as
+    filters (adding one there is an index rebuild). It runs after the search, so
+    the search over-fetches to leave enough behind.
     """
     vec = query_vector if query_vector else _embed(query)
     if not vec:
@@ -350,11 +355,12 @@ def _vector_search(
                     "index": _VECTOR_INDEX,
                     "path": "embedding",
                     "queryVector": vec,
-                    "numCandidates": n_results * 10,
-                    "limit": n_results,
+                    "numCandidates": n_results * 20 if post_match else n_results * 10,
+                    "limit": n_results * 5 if post_match else n_results,
                     "filter": {"chat_id": {"$eq": chat_id}},
                 }
             },
+            *([{"$match": post_match}, {"$limit": n_results}] if post_match else []),
             {
                 "$project": {
                     "text": 1,
@@ -426,35 +432,55 @@ def search_relevant_facts(query: str, n_results: int = 5,
         return []
 
 
-def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3,
+def search_relevant_summaries(query: str, thread_id: str, n_results: int = 3,
                               query_vector: Optional[List[float]] = None) -> List[str]:
-    """Semantic search over conversation summaries in sandy_memories."""
-    if get_db() is None or not chat_id:
+    """Semantic search over this user's summaries of one conversation thread.
+
+    The tenant comes from the context (the summaries' ``chat_id`` is the user);
+    ``thread_id`` picks the conversation. It used to be the other way round —
+    the client-supplied conversation id was the only filter, so two accounts
+    using the same id read each other's summaries.
+    """
+    if not _can_read_memory():
         return []
-    col = get_db()["sandy_memories"]
-    fil = {"chat_id": str(chat_id), "label": "conversation_summary"}
+    coll = scoped(get_db(), "sandy_memories", field="chat_id", bump=False)
+    if coll is None or not thread_id:
+        return []
+    match = {"label": "conversation_summary", "thread_id": str(thread_id)}
     try:
-        # `summary` has to be asked for.
-        #
-        # `_vector_search` projects `text` and `score` and whatever else it is
-        # handed. Summaries live in a field called `summary`, and this passed an
-        # empty dict — so the pipeline ran, matched, and returned documents with
-        # no `summary` key, which the comprehension below then filtered out
-        # entirely. The vector path has therefore always returned nothing, and
-        # the keyword fallback under it never ran either, because the aggregate
-        # succeeded and only a `None` triggers the fallback.
-        #
-        # Sandy has never once recalled a conversation summary through semantic
-        # search on an install where Atlas Vector Search is configured. There is
-        # no error for this: an empty list is what "nothing relevant" looks like.
-        results = _vector_search(col, query, chat_id, n_results, {"summary": 1},
-                                 query_vector)
+        # `summary` has to be asked for: `_vector_search` projects only `text`,
+        # `score` and what it is handed, and summaries live in `summary`.
+        results = _vector_search(get_db()["sandy_memories"], query, coll.tenant,
+                                 n_results, {"summary": 1}, query_vector,
+                                 post_match=match)
         if results is None:
-            results = list(col.find(fil, {"summary": 1}).sort("created_at", -1).limit(n_results))
+            results = list(coll.find(match, {"summary": 1})
+                           .sort("created_at", -1).limit(n_results))
         return [r["summary"] for r in results if r.get("summary")]
     except Exception as exc:
         logger.warning("[chroma] search_relevant_summaries failed: %s", exc)
         return []
+
+
+def migrate_summary_threads(mongo_db) -> None:
+    """Boot-time, idempotent: move old summaries onto their user.
+
+    Summaries written before the fix carry the thread in ``chat_id`` and the
+    user in ``user_id``. Rewrite them to ``chat_id=user_id`` and keep the thread
+    as ``thread_id``, so the new reader (and account deletion) finds them.
+    """
+    if mongo_db is None:
+        return
+    try:
+        res = mongo_db["sandy_memories"].update_many(
+            {"label": "conversation_summary", "thread_id": {"$exists": False},
+             "user_id": {"$nin": [None, ""]}},
+            [{"$set": {"thread_id": "$chat_id", "chat_id": "$user_id"}}],
+        )
+        if res.modified_count:
+            logger.info("[Memory] moved %d summaries onto their user", res.modified_count)
+    except PyMongoError as exc:
+        logger.warning("[Memory] summary thread migration failed: %s", exc)
 
 
 def search_memory_for_turn(
