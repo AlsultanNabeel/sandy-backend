@@ -1059,12 +1059,21 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    The fix is a per-device secret (provisioned at flash or pairing, stored
    server-side against the node) checked in both places. Found 18 Sep 2026;
    not fixed, because it spans firmware, pairing and the server at once.
-1. **No error tracking in production.** Sentry, Langfuse and the metrics modules
-   were never ported from the archive, so failures are discovered by the owner
-   using the product. Two of this audit's worst findings — unpairing not
-   releasing the devices, and the account delete leaving nine collections —
-   were reported that way, which is the argument for this item and not for
-   anything else on the list.
+0b. **The brain accepts firmware from anyone on the LAN.** `sandy_remote.c`
+   (`ENABLE_REMOTE 1` in `config.h`) serves `POST /update` with no
+   authentication, secure boot and signed images are off, and port 3333
+   streams the log (which includes the setup access-point password). The
+   Arduino boards (camera, room node, legacy `sandy/`) connect to the broker
+   with `setInsecure()`, and `room-node/secrets.example.h` ships a default
+   OTA password. Fix: `ENABLE_REMOTE 0` for shipped builds (or a signed
+   image/token on `/update`), Secure Boot v2 + flash encryption, and
+   `setCACert` on the Arduino boards. Found 19 Sep 2026; needs the owner,
+   because the remote path is how he flashes over Wi-Fi today.
+1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
+   starts at boot when `SENTRY_DSN` is set; `before_send` strips request
+   bodies and, since 19 Sep 2026, log breadcrumbs down to their `[tag]`.
+   Without the DSN, failures are still discovered by the owner using the
+   product.
 2. **`tool_health` is process-global and not per tenant.** `_history` is keyed
    by tool name alone, so one customer's outage shapes what `get_capabilities`
    tells another. It reads `error` rather than `ok` now, so ordinary refusals no
