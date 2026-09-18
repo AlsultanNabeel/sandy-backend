@@ -23,6 +23,7 @@ list joins the block by existing.
 
 from __future__ import annotations
 
+import importlib
 import logging
 import threading
 import time
@@ -57,6 +58,17 @@ _MAX_ITEMS = 4
 _MAX_CHARS = 900
 
 
+def _reader(module: str, fn: str, **kwargs: Any) -> Callable[[], Any]:
+    """A zero-arg reader for ``app.features.<module>.<fn>``, imported on call.
+
+    Lazy on purpose: the feature stores pull in the database layer, and this
+    module is imported by the context builder at startup.
+    """
+    def _run() -> Any:
+        return getattr(importlib.import_module(f"app.features.{module}"), fn)(**kwargs)
+    return _run
+
+
 def _line(label: str, items: List[str], total: Optional[int] = None) -> str:
     if not items:
         return ""
@@ -86,7 +98,7 @@ def build_life_snapshot() -> str:
     Runs inside the caller's tenant context — every store below is scoped, so
     this can only ever see the person who is asking.
     """
-    # **Six queries at once, not one after another.**
+    # **Five queries at once, not one after another.**
     #
     # Measured on the robot: six seconds between «auth OK» and the prompt being
     # ready, with the microphone recording the whole time — and almost all of it
@@ -95,16 +107,11 @@ def build_life_snapshot() -> str:
     # that cannot be skipped: these stores read the tenant from a context
     # variable and a bare thread would find nothing and say so silently.
     got = gather({
-        "tasks": lambda: __import__(
-            "app.features.tasks_store", fromlist=["x"]).load_tasks(),
-        "reminders": lambda: __import__(
-            "app.features.reminders_store", fromlist=["x"]).load_reminders(),
-        "habits": lambda: __import__(
-            "app.features.habits_store", fromlist=["x"]).list_habits(),
-        "books": lambda: __import__(
-            "app.features.reading_store", fromlist=["x"]).list_books(),
-        "shopping": lambda: __import__(
-            "app.features.shopping_store", fromlist=["x"]).list_items(),
+        "tasks": _reader("tasks_store", "load_tasks"),
+        "reminders": _reader("reminders_store", "load_reminders"),
+        "habits": _reader("habits_store", "list_habits"),
+        "books": _reader("reading_store", "list_books"),
+        "shopping": _reader("shopping_store", "list_items"),
     })
 
     parts: List[str] = []
@@ -233,16 +240,11 @@ def _terms(query: str) -> List[str]:
 
 
 _SEARCHED: List[Tuple[str, Callable[[], Any], List[str], str]] = [
-    ("books", lambda: __import__("app.features.reading_store", fromlist=["x"])
-     .list_books(), ["title", "author", "category"], "كتاب"),
-    ("tasks", lambda: __import__("app.features.tasks_store", fromlist=["x"])
-     .load_tasks(), ["text", "notes"], "مهمة"),
-    ("journal", lambda: __import__("app.features.journal_store", fromlist=["x"])
-     .recent_entries(limit=200), ["text"], "يومية"),
-    ("habits", lambda: __import__("app.features.habits_store", fromlist=["x"])
-     .list_habits(), ["name"], "عادة"),
-    ("reminders", lambda: __import__("app.features.reminders_store", fromlist=["x"])
-     .load_reminders(), ["text"], "تذكير"),
+    ("books", _reader("reading_store", "list_books"), ["title", "author", "category"], "كتاب"),
+    ("tasks", _reader("tasks_store", "load_tasks"), ["text", "notes"], "مهمة"),
+    ("journal", _reader("journal_store", "recent_entries", limit=200), ["text"], "يومية"),
+    ("habits", _reader("habits_store", "list_habits"), ["name"], "عادة"),
+    ("reminders", _reader("reminders_store", "load_reminders"), ["text"], "تذكير"),
 ]
 
 

@@ -1,10 +1,12 @@
 import contextvars
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-sandy_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="SandyWorker")
+_WORKER_PREFIX = "SandyWorker"
+sandy_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix=_WORKER_PREFIX)
 
 
 def submit_background(fn, *args, _label: str | None = None, **kwargs):
@@ -57,18 +59,33 @@ def gather(jobs: "dict[str, object]") -> "dict[str, object]":
     bare thread would quietly return an empty list instead of the user's data.
 
     A job that raises contributes ``None`` rather than taking the rest down.
+
+    **Called from a pool worker, it runs the jobs inline.** A worker that
+    submits to its own pool and then blocks on the result holds a slot while it
+    waits; ten such callers at once (background indexing does exactly this)
+    fill all ten slots with waiters whose jobs sit in the queue behind them,
+    and nothing ever finishes.
     """
     if not jobs:
         return {}
 
+    out: "dict[str, object]" = {}
+    if threading.current_thread().name.startswith(_WORKER_PREFIX):
+        for name, fn in jobs.items():
+            try:
+                out[name] = fn()
+            except Exception:  # noqa: BLE001 — one broken area, not the whole picture
+                logger.warning("[gather] %s failed", name, exc_info=True)
+                out[name] = None
+        return out
+
     ctx = contextvars.copy_context()
     futures = {name: sandy_executor.submit(ctx.copy().run, fn)
                for name, fn in jobs.items()}
-    out: "dict[str, object]" = {}
     for name, fut in futures.items():
         try:
             out[name] = fut.result()
         except Exception:  # noqa: BLE001 — one broken area, not the whole picture
-            logger.debug("[gather] %s failed", name, exc_info=True)
+            logger.warning("[gather] %s failed", name, exc_info=True)
             out[name] = None
     return out
