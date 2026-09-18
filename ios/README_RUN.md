@@ -1,55 +1,25 @@
-# تشغيل تطبيق ساندي (آيفون) — دليل خطوة بخطوة
+# Running the iOS app
 
-الملفات جاهزة في `ios/SandyApp/`. إكس-كود ما بيقدر يفتح ملفات `.swift` لحالها كمشروع، فبنعمل مشروع جديد ونضيفها فيه (هاد المعتاد).
+The Xcode project lives on the owner's Mac (it is not in this repository); this
+folder holds the Swift sources (`SandyApp/`) and tests (`SandyAppTests/`).
 
-## ١) أنشئ المشروع
-- إكس-كود ← `File` ← `New` ← `Project…` ← `iOS` ← `App` ← `Next`.
-- `Product Name`: **SandyApp**
-- `Interface`: **SwiftUI** ، `Language`: **Swift**
-- احفظه بأي مكان.
+## Build
 
-## ٢) أضف ملفات ساندي
-- بإكس-كود، احذف الملفَين الافتراضيَّين `ContentView.swift` و `SandyAppApp.swift` (موجود بدالهم تبعنا).
-- اسحب كل ملفات `.swift` من `ios/SandyApp/` (سبعة ملفات) لداخل المشروع — وتأكد **`Copy items if needed`** مفعّل و الـ target مأشّر.
+1. Open the Sandy Xcode project and make sure every file under `ios/SandyApp/`
+   is in the app target (Copy items if needed is **not** required when the
+   project references this folder directly).
+2. Signing & Capabilities: your team, plus **Sign in with Apple** and **Push
+   Notifications**.
+3. Run on a simulator or a device.
 
-## ٣) اسمح بالاتصال المحلي (مهم جداً)
-التطبيق بيكلّم خادم محلي عبر `http`، وآبل بتمنعها افتراضياً. لازم تضيف استثناء:
-- اختر الـ target ← تبويب `Info` ← اضغط زائد وأضف:
-```
-App Transport Security Settings  (Dictionary)
-  └─ Allow Arbitrary Loads = YES  (Boolean)
-```
+## Backend
 
-## ٤) متغيّرات `.env` المطلوبة للدخول
-الدخول يحتاج متغيّرين بملف `.env` (انضافوا فعلاً بتاريخ عشرين-ستة):
-```
-OWNER_PASSWORD=sandy2026
-JWT_SECRET=<سلسلة عشوائية طويلة>
-```
-ولعزل بيانات التجربة عن الأصلية:
-```
-MONGODB_DB_NAME=sandy_app_test
-```
+The app talks to the production backend by default
+(`Core/Networking/Backend.swift`, `defaultURL`). Sign-in is Apple, Google or
+email; there is no developer/owner password login any more.
 
-## ٥) شغّل الخادم (خادم الـ API فقط — بدون تيليجرام)
-بترمنال:
-```
-cd /Users/nabeelalsultan/Desktop/Sandy-App
-python cloud/serve_api.py
-```
-- بيخدم الـ API على المنفذ ثمانية آلاف وثمانين، **بلا** استطلاع تيليجرام ولا ويبهوك (ما بيلمس البوت الأصلي).
-- **مهم:** ملاحظة `RUN_MODE=polling python cloud/sandy_agent.py` بتشغّل تيليجرام بس وما بتخدم الـ API — استعمل `serve_api.py`.
-- أول إقلاع بياخد دقيقة-دقيقتين (تهيئة فهارس مونغو). استنى لـ`Running on http://0.0.0.0:8080`.
+## Local network
 
-## ٦) شغّل التطبيق
-- بإكس-كود اختر سيميوليتر آيفون ← اضغط زر التشغيل (▶).
-- بشاشة الدخول، حط `عنوان الخادم`:
-  - **سيميوليتر:** `http://localhost:8080`
-  - **جوال حقيقي:** `http://<آيبي-الماك>:8080` (لاقي الآيبي من إعدادات الواي-فاي)
-- اضغط **دخول المطوّر** بكلمة السر `sandy2026`.
-- بعدها: شاشة التعارف ← المحادثة. اكتب لساندي وجرّب.
-
-## ملاحظات صريحة
-- **تسجيل دخول آبل** بالزر يحتاج حساب مطوّر آبل + تفعيل ميزة `Sign in with Apple` (الـ target ← `Signing & Capabilities` ← `+ Capability`). للتجربة السريعة استخدم **دخول المطوّر**.
-- إذا ساندي ما ردّت أو طلع خطأ: تأكد الخادم شغّال، والعنوان صح، والاستثناء بخطوة ٣ مضبوط.
-- هاي نسخة أولى بسيطة (دخول + تعارف + محادثة) لإثبات الوصل بالباك-إند — التصميم والتبويبات نبنيها بعدين.
+Only the local camera stream uses plain `http://<device-ip>`. Allow that with
+`NSAppTransportSecurity › NSAllowsLocalNetworking = YES` — do **not** enable
+`NSAllowsArbitraryLoads`, which turns off TLS checks for every host.
