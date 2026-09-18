@@ -67,6 +67,9 @@ from app.api.voice_ws.tools import (
 # and holding the session open only delays the next question.
 _REPLY_DRAIN_S = 20
 
+# Enough for a generous enrolment (16 kHz · 16-bit · mono = 32 KB/s → ~2 min).
+_ENROLL_MAX_BYTES = 4 * 1024 * 1024
+
 
 def register_voice_ws(app) -> None:
     """Attach the /voice WebSocket route to an existing Flask app."""
@@ -124,6 +127,7 @@ def _enroll_session(ws, remote: str) -> None:
 
     samples: List[bytes] = []
     cur = bytearray()
+    total = 0
     while True:
         try:
             frame = ws.receive(timeout=120)
@@ -132,6 +136,13 @@ def _enroll_session(ws, remote: str) -> None:
         if frame is None:
             break
         if isinstance(frame, (bytes, bytearray)):
+            # Bounded. Every frame was kept, and the 120 s timeout resets on each
+            # one — so a client that kept streaming held a gunicorn thread and
+            # grew this buffer for as long as it liked.
+            total += len(frame)
+            if total > _ENROLL_MAX_BYTES:
+                _send_json(ws, {"type": "enroll_result", "ok": False, "msg": "too_long"})
+                return
             cur.extend(frame)
             continue
         try:
@@ -1027,7 +1038,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                     held.append(chunk)
                     held_ms += ms
                     if len(held) > _HELD_FRAMES_MAX:
-                        held.pop(0)
+                        # The dropped frame's time leaves with it, or `held_ms`
+                        # overstates and a shorter noise passes the bar below.
+                        held_ms -= len(held.pop(0)) / 2 / 16000 * 1000
                     if held_ms < _BARGE_MIN_MS:
                         continue
                     logger.info("[voice_ws] %.1fs of speech while she answers — "
@@ -1059,47 +1072,26 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                     speech_ms += ms
                 silence_ms = 0.0 if is_speech else silence_ms + ms
 
-                # **A backlog is one question, not four.**
+                # **A startup backlog is one question, not four.**
                 #
-                # The robot records from the wake word, and the session behind it
-                # takes seconds to open — so speech sits in the buffer and then
-                # drains at machine speed, and the pauses inside one sentence look
-                # like the ends of four separate questions. Each turn we open cancels
-                # the reply to the last: four `turn closed` lines in two seconds and
-                # `replied=0 chars` every time.
+                # The robot records from the wake word and the session behind it
+                # takes seconds to open, so speech sits in the buffer and then
+                # drains at machine speed — and the pauses inside one sentence look
+                # like the ends of four questions, each turn cancelling the reply
+                # to the last. So no turn closes until the frames that were queued
+                # when the call began have gone through.
                 #
-                # So no turn is closed while frames are still queued. **The queue is
-                # the measure, not the clock** — comparing the audio clock to the
-                # wall clock said "still catching up" for the entire call, because a
-                # device streaming in real time keeps its head start forever, and
-                # then nothing ever closed the turn at all.
-                # **Once, at the start, and then never again.**
-                #
-                # Asking "is the queue deep right now" every frame is a test that can
-                # stay true forever: a device sending one frame every one hundred and
-                # thirty milliseconds keeps a frame or two in flight at all times, so
-                # the hold never lifted and a whole call went by with no turn closed
-                # — thirty-nine seconds of speech and not one answer. The backlog is
-                # a fact about *the beginning* of the call. The moment it is gone, it
-                # is gone.
-                # **Counted, not sampled.**
-                #
-                # How deep the queue is *right now* is not the question, and asking
-                # it every frame is a test that never comes back false: a device
-                # sending one frame every hundred and thirty milliseconds keeps one
-                # or two in flight permanently. The question is whether the frames
-                # that were already waiting when this call began have gone
-                # through.
-                #
-                # **And it has to be counted against what it counted.**
-                # `backlog` is every queued frame, speech or not; `frames`
-                # counts only the ones actually *forwarded*, and room audio
-                # below the threshold is consumed without being forwarded. One
-                # unforwarded frame in the startup queue was enough to leave
-                # this set for the rest of the call — and while it is set no
-                # turn can close, `speaking` stays true forever, `activity_end`
-                # is never sent, and she never answers. That is the outage this
-                # whole sequence was trying to end, put back by the fix for it.
+                # Two ways this went wrong, both of which left `speaking` true for
+                # the whole call and her silent:
+                #   • it asked "is the queue deep *now*" every frame — a device
+                #     sending every 130 ms always has a frame in flight, so that
+                #     test never came back false;
+                #   • it compared `backlog` (every queued frame) with `frames`
+                #     (only the ones forwarded) — room audio below the threshold is
+                #     consumed, not forwarded, so one quiet frame in the queue kept
+                #     the hold up for ever.
+                # Hence: checked against the startup count, counted in *consumed*
+                # frames, and lifted once for good.
                 if draining and consumed >= backlog:
                     draining = False
                     if backlog:
