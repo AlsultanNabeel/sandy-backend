@@ -148,6 +148,7 @@ def _handle_replace_note(
     task_text: str,
     task_notes: str,
     *,
+    clear: bool = False,
     session: Dict[str, Any],
     session_file,
     mongo_db,
@@ -163,7 +164,16 @@ def _handle_replace_note(
     )
     status = result.get("status")
     task_obj = result.get("task")
-    note_text = task_notes or task_text
+    # Clearing is its own request: an empty note used to fall back to the task
+    # title, so «امسحي الملاحظة» either asked for a new note or wrote the title in.
+    note_text = "" if clear else (task_notes or task_text)
+
+    if clear and task_obj and status not in {"empty", "missing", "not_found", "ambiguous"}:
+        return run_now(
+            {"type": "task", "action": "replace_note",
+             "task_id": task_obj.get("id", ""), "text": task_obj.get("text", ""), "note": ""},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
 
     if status in {"empty", "missing", "not_found"}:
         reply = "ما لقيت هاي المهمة ضمن المهام النشطة. اعرض المهام مرة ثانية واختر مهمة موجودة."

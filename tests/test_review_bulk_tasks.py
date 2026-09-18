@@ -31,3 +31,15 @@ def test_fetch_url_refuses_carrier_grade_nat():
     fake = [(None, None, None, None, ("93.184.216.34", 80))]
     with patch.object(mcp_tools.socket, "getaddrinfo", return_value=fake):
         assert mcp_tools._is_safe_public_url("http://example.test/") is True
+
+
+def test_clear_note_writes_an_empty_note():
+    from app.agent.executor.task_handlers import notes
+    resolved = {"status": "single", "task": {"id": "t1", "text": "مهمة", "notes": "قديم"}}
+    with patch.object(notes, "resolve_task_reference_for_write", return_value=resolved), \
+         patch("app.agent.executor.pending.task_pending.executors.deps") as deps:
+        deps.replace_task_note.return_value = True
+        notes._handle_replace_note("مهمة", "مهمة", "", clear=True, session={},
+                                   session_file=None, mongo_db=None, tasks_file=None,
+                                   save_session_fn=MagicMock())
+    assert deps.replace_task_note.call_args.args[:2] == ("t1", "")

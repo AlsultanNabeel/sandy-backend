@@ -228,7 +228,8 @@ def _handle_image(ctx: "_ActionContext") -> Dict[str, Any]:
     if not img_res.get("handled"):
         return {"handled": False, "reply": "لم تُنفّذ عملية صورة."}
     reply = img_res.get("reply_text") or img_res.get("caption") or ""
-    out = {"handled": True, "reply": reply}
+    # `success: False` (e.g. nothing to describe) is a refusal, not a result.
+    out = {"handled": True, "ok": bool(img_res.get("success", True)), "reply": reply}
     if img_res.get("image_bytes"):
         out["image_bytes"] = img_res.get("image_bytes")
         out["caption"] = img_res.get("caption")

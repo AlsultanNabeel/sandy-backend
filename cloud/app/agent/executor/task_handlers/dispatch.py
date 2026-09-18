@@ -240,8 +240,8 @@ def handle_task_action(
     elif task_action == "append_note":
         return _handle_append_note(task_reference, task_text, task_notes, **_common)
     elif task_action in {"replace_note", "clear_note"}:
-        note_content = "" if task_action == "clear_note" else task_notes
-        return _handle_replace_note(task_reference, task_text, note_content, **_common)
+        return _handle_replace_note(task_reference, task_text, task_notes,
+                                    clear=task_action == "clear_note", **_common)
     elif task_action == "update_due_time":
         return _handle_update_due_time(
             task_reference, task_due_iso, task_due_text, task_time_text, **_with_ai
