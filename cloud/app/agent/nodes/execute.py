@@ -233,7 +233,7 @@ def _get_mongo_db():
 
 
 def execute_node(state: SandyState) -> SandyState:
-    """LangGraph node: ينفذ الـ intent عبر الـ planner والـ handlers الموجودة.
+    """Pipeline node: ينفذ الـ intent عبر الـ planner والـ handlers الموجودة.
 
     لو في function_calls (2+) → نفّذ كل tool بالترتيب.
     لو في function_call واحد + tool مسجل → ToolDispatcher.

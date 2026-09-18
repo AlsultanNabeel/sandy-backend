@@ -1,4 +1,4 @@
-"""SandyState — قلب الـ LangGraph.
+"""SandyState — الحالة اللي بتمرّ على عقد الـ pipeline (graph.run_graph).
 
 TypedDict موحد يمر عبر كل nodes في الـ graph.
 كل node يقرأ منه ويضيف إليه — لا global variables.
@@ -78,7 +78,7 @@ def create_initial_state(
     image_state: Optional[dict] = None,
     conversation_id: str = "",
 ) -> SandyState:
-    """أنشئ SandyState فارغة جاهزة لـ graph.ainvoke().
+    """أنشئ SandyState فارغة جاهزة لـ run_graph.
 
     Args:
         message: نص رسالة المستخدم

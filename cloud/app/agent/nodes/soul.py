@@ -175,7 +175,7 @@ def _log_retrieval_eval_async(chat_id: str, query: str, summaries: list, facts: 
 
 
 def soul_node(state: SandyState) -> SandyState:
-    """LangGraph node: يحقن persona_snippet في الـ state."""
+    """Pipeline node: يحقن persona_snippet في الـ state."""
     _t_soul = time.perf_counter()
     try:
         message = state.get("message", "").strip()

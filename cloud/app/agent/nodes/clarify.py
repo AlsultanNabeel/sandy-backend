@@ -34,7 +34,7 @@ def _build_clarify_pending(state: SandyState) -> Dict[str, Any]:
 
 
 def clarify_node(state: SandyState) -> SandyState:
-    """LangGraph node: يُرجع سؤال توضيحي ويحفظ السياق كـ pending.
+    """Pipeline node: يُرجع سؤال توضيحي ويحفظ السياق كـ pending.
 
     يُستدعى فقط عندما requires_clarification=True.
     """

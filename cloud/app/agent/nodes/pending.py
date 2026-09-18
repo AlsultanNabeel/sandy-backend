@@ -56,7 +56,7 @@ _INTENT_TO_PENDING_RESPONSE = {
 
 
 def pending_node(state: SandyState) -> SandyState:
-    """LangGraph node: ينفذ الـ pending action الحالي.
+    """Pipeline node: ينفذ الـ pending action الحالي.
 
     يستدعي execute_pending_action() الموجودة عبر session مؤقت.
     """

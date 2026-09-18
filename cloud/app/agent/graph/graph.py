@@ -459,7 +459,7 @@ def run_graph(
         SandyState مع final_response جاهز للإرسال
     """
     # خيط ذاكرة المحادثة: conversation_id لو موجود (سيشن شات مستقلة) وإلا chat_id
-    # (السلوك القديم تمامًا — تيليجرام/هاردوير/استدعاء بلا سيشن).
+    # (خيط واحد لكل مستخدم — هاردوير أو استدعاء بلا سيشن).
     thread_id = str(conversation_id or chat_id)
 
     # 1. حمّل conversation history من MongoDB (لهذا الخيط تحديدًا)

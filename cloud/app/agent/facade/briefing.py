@@ -66,14 +66,21 @@ def build_morning_briefing(*, memory: Dict[str, Any], mongo_db, tasks_file) -> s
     tasks_lines = []
     for t in active_tasks:
         text = (t.get("text") or "").strip()
+        # `due` is a date-only midnight-UTC stamp; showing it as a time gave a
+        # "03:00 AM" nobody set. Only `due_at` carries a real time.
+        has_time = bool(str(t.get("due_at") or "").strip())
         raw_due = str(t.get("due_at") or t.get("due") or "").strip()
         due_label = ""
         if raw_due:
             try:
-                dt = datetime.fromisoformat(raw_due.replace("Z", "+00:00")).astimezone(USER_TZ)
-                due_label = f" (موعد: {dt.strftime('%a %d/%m %I:%M %p')})"
-            except Exception:
-                logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
+                if has_time:
+                    dt = datetime.fromisoformat(raw_due.replace("Z", "+00:00")).astimezone(USER_TZ)
+                    due_label = f" (موعد: {dt.strftime('%a %d/%m %I:%M %p')})"
+                else:
+                    d = datetime.fromisoformat(raw_due.replace("Z", "+00:00")).date()
+                    due_label = f" (موعد: {d.strftime('%a %d/%m')})"
+            except ValueError:
+                logging.getLogger(__name__).debug("bad due %r", raw_due)
         tasks_lines.append(f"- {text}{due_label}")
 
     cal_lines = []

@@ -64,9 +64,9 @@ def route_after_router(state: SandyState) -> str:
 
 
 def router_node(state: SandyState) -> SandyState:
-    """LangGraph node: يضبط routing_hint وينظّف pending_state الفاسد.
+    """Pipeline node: يضبط routing_hint وينظّف pending_state الفاسد.
 
-    الـ routing نفسه يتم عبر route_after_router() كـ conditional edge.
+    الـ routing نفسه بيتم عبر route_after_router() اللي بيناديها run_graph.
     """
     try:
         updates: dict = {

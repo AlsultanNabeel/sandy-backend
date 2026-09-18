@@ -58,7 +58,7 @@ def _build_final_text(reply: str, response_template: Optional[str]) -> str:
 
 
 def response_node(state: SandyState) -> SandyState:
-    """LangGraph node: يبني الرد النهائي من نتائج الـ nodes السابقة.
+    """Pipeline node: يبني الرد النهائي من نتائج الـ nodes السابقة.
 
     الأولوية:
     1. final_response موجود مسبقاً → استخدمه مباشرة
