@@ -4,7 +4,7 @@ struct ChatMessage: Identifiable {
     let id = UUID()
     let role: String   // "user" | "sandy"
     // var (not let): streaming updates a "sandy" bubble's text in place as
-    // chunks arrive, in-array by index, keeping the same id (ChatStore.send).
+    // chunks arrive, found by its id (ChatStore.send).
     var text: String
 }
 

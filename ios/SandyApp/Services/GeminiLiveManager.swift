@@ -36,8 +36,18 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
     func stop() {
         stopped = true
+        teardown()
+    }
+
+    /// Everything a finished call has to release — shared by a user stop and a
+    /// dropped connection. A drop used to only set the error text: the mic kept
+    /// capturing into a dead socket and the audio session stayed active until
+    /// the sheet was closed.
+    private func teardown() {
         ws?.cancel(with: .goingAway, reason: nil)
         ws = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
         audio.stop()
         phase = .idle
         mouthOpen = 0
@@ -80,14 +90,17 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     }
 
     private func receiveLoop() {
-        ws?.receive { [weak self] result in
+        guard let task = ws else { return }
+        task.receive { [weak self, weak task] result in
             guard let self else { return }
             switch result {
             case .failure:
                 Task { @MainActor in
-                    guard !self.stopped else { return }
+                    // A late failure from a previous socket must not end the
+                    // call that replaced it.
+                    guard !self.stopped, let task, task === self.ws else { return }
+                    self.teardown()
                     self.errorText = "انقطع الاتصال"
-                    self.phase = .idle
                 }
             case .success(let message):
                 switch message {
@@ -198,12 +211,15 @@ private final class LiveAudioBridge {
         engine.prepare()
         try engine.start()
         player.play()
-        started = true
+        lock.lock(); started = true; lock.unlock()
     }
 
     func stop() {
-        guard started else { return }
+        lock.lock()
+        let wasStarted = started
         started = false
+        lock.unlock()
+        guard wasStarted else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.mainMixerNode.removeTap(onBus: 0)
         player.stop()
@@ -247,6 +263,9 @@ private final class LiveAudioBridge {
     func enqueuePlayback(_ data: Data) {
         guard let buf = makeBuffer(data) else { return }
         lock.lock()
+        // Frames arrive on the URLSession queue; one in flight when `stop()`
+        // ran would call `play()` on a stopped engine, which raises.
+        guard started else { lock.unlock(); return }
         lastPlaybackAt = CFAbsoluteTimeGetCurrent()
         pendingBuffers += 1
         let wasSpeaking = speaking

@@ -135,13 +135,18 @@ final class APIClient: APIClientProtocol {
                          method: String,
                          bodyData: Data?,
                          auth: Bool,
-                         timeout: TimeInterval = 30) async throws -> Data {
+                         timeout: TimeInterval = 30,
+                         bearer: String? = nil) async throws -> Data {
         guard let url = URL(string: baseURL + path) else { throw APIError(message: "عنوان غير صالح") }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = timeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if auth, let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        // The token this request actually carries. `bearer` lets a caller pin
+        // one explicitly (sign-out sends its last request after `token` is
+        // already cleared).
+        let sentToken = auth ? (bearer ?? token) : nil
+        if let t = sentToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.httpBody = bodyData
 
         let data: Data
@@ -172,7 +177,11 @@ final class APIClient: APIClientProtocol {
         // وهو عم يسجّل دخول. وشاشة الدخول عندها ترجمة عربية جاهزة لهالرمز
         // (`friendlyAuthError`) ما كانت توصلها ولا مرّة.
         if code == 401 && auth {
-            onUnauthorized?()
+            // Only the current session dying is a reason to sign out. A request
+            // that carried no token, or an older one than the app now holds
+            // (in flight across a sign-out/sign-in), must not end the new
+            // session — that fed a sign-out loop.
+            if let s = sentToken, s == token { onUnauthorized?() }
             throw APIError(message: human ?? "انتهت الجلسة، سجّل دخولك من جديد.",
                            code: machine, kind: .unauthorized)
         }
@@ -229,8 +238,9 @@ final class APIClient: APIClientProtocol {
     func send(_ path: String,
               method: String,
               body: (any Encodable)? = nil,
-              auth: Bool = true) async throws {
+              auth: Bool = true,
+              bearer: String? = nil) async throws {
         let bodyData = try body.map { try JSONEncoder().encode($0) }
-        _ = try await perform(path, method: method, bodyData: bodyData, auth: auth)
+        _ = try await perform(path, method: method, bodyData: bodyData, auth: auth, bearer: bearer)
     }
 }

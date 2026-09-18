@@ -109,7 +109,8 @@ extension APIClient {
         req.httpMethod = "POST"
         req.timeoutInterval = 60
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        let sentToken = token
+        if let t = sentToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
 
         let bytes: URLSession.AsyncBytes
@@ -127,7 +128,8 @@ extension APIClient {
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 {
-            onUnauthorized?()
+            // Same rule as `perform`: only the current session dying signs out.
+            if let s = sentToken, s == token { onUnauthorized?() }
             throw APIError(message: "انتهت الجلسة، سجّل دخولك من جديد.", kind: .unauthorized)
         }
         if code >= 400 {
@@ -135,10 +137,14 @@ extension APIClient {
             var data = Data()
             for try await byte in bytes { data.append(byte) }
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            throw APIError(message: (json["error"] as? String) ?? "خطأ \(code)", kind: .server)
+            // `message` is the sentence for people, `error` the code for branching.
+            throw APIError(message: (json["message"] as? String) ?? (json["error"] as? String) ?? "خطأ \(code)",
+                           code: json["error"] as? String, kind: .server)
         }
 
         var finalReply = ""
+        var lastPartial = ""
+        var sawDone = false
         var imageURL: String?
         for try await line in bytes.lines {
             guard line.hasPrefix("data: "),
@@ -151,11 +157,22 @@ extension APIClient {
             if obj["done"] as? Bool == true {
                 finalReply = obj["reply"] as? String ?? finalReply
                 imageURL = obj["image_url"] as? String
+                sawDone = true
                 break
             }
             if let partial = obj["text"] as? String {
+                lastPartial = partial
                 await onChunk(partial)
             }
+        }
+        // A stream cut before `done` (router timeout, server restart) used to
+        // return "" as success and blank the bubble. Keep what arrived, and
+        // fail only when nothing did.
+        if !sawDone {
+            if lastPartial.isEmpty {
+                throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
+            }
+            finalReply = lastPartial
         }
         return (finalReply, imageURL)
     }

@@ -44,6 +44,11 @@ final class AppState: ObservableObject {
             onboarding = ob
             stage = ob.done ? .chat : .onboarding
             setupPush()
+        } catch let error as APIError where error.kind != .unauthorized {
+            // Offline, a timeout or a server restart is not a dead session:
+            // keep the token instead of forcing a fresh sign-in.
+            stage = .chat
+            setupPush()
         } catch {
             api.token = nil
             stage = .auth
@@ -92,9 +97,10 @@ final class AppState: ObservableObject {
     /// نلغي توكن دفع هالجهاز أولاً (بينما التوكن لسّا صالح) حتى ما يوصله دفع
     /// المستخدم القديم — أفضل جهد، والباك-إند بينظّف التوكن الميت تلقائيًا كمان.
     func signOut() {
-        if let deviceToken = NotificationManager.shared.lastDeviceToken {
+        if let deviceToken = NotificationManager.shared.lastDeviceToken,
+           let session = api.token {
             let apiRef = api
-            Task { try? await apiRef.unregisterPushToken(deviceToken) }
+            Task { try? await apiRef.unregisterPushToken(deviceToken, bearer: session) }
         }
         NotificationManager.shared.onDeviceToken = nil
         api.token = nil

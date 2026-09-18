@@ -148,9 +148,11 @@ extension APIClient {
     }
 
     // POST /api/push/unregister {token} — عند تسجيل الخروج نلغي توكن هالجهاز.
-    func unregisterPushToken(_ token: String) async throws {
+    /// `bearer`: the session to act for — sign-out passes the token it is
+    /// about to clear, since this request is sent after it is gone.
+    func unregisterPushToken(_ token: String, bearer: String? = nil) async throws {
         try await send("/api/push/unregister", method: "POST",
-                       body: ["token": token])
+                       body: ["token": token], bearer: bearer)
     }
 
     // GET /api/features → {hidden:[...]} — الميزات اللي أخفاها المالك مركزياً.

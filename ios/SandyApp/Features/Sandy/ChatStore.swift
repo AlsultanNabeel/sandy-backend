@@ -32,6 +32,8 @@ final class ChatStore: ObservableObject {
     }
 
     func open(api: APIClient, id: String) async {
+        // A reply still streaming belongs to the conversation being left.
+        sendTask?.cancel()
         if let r = try? await api.getConversation(id: id) {
             messages = r.messages
             errorMessage = ""
@@ -42,6 +44,7 @@ final class ChatStore: ObservableObject {
 
     /// محادثة جديدة فورية (كسولة): يصفّي العرض، والإنشاء الفعلي عند أول رسالة.
     func startNew() {
+        sendTask?.cancel()
         messages = []
         errorMessage = ""
         currentID = nil
@@ -86,21 +89,26 @@ final class ChatStore: ObservableObject {
                 // نمرّر سيشن المحادثة فتتذكّرها ساندي مستقلة عن باقي محادثاتك. أول
                 // قطعة توصل تستبدل مؤشّر الكتابة بفقاعة نصّية تكبر تدريجياً — ردود
                 // الأدوات (زي "أضف مهمة") ما فيها قطع، بترجع دفعة وحدة بالنهاية.
-                var sandyIndex: Int?
+                // By id, not index: `messages` can be replaced mid-stream (new
+                // chat, another conversation opened), and a stored index then
+                // points past the end — a crash on the next chunk.
+                var sandyID: UUID?
                 let (reply, _) = try await api.sendMessageStreaming(text, conversationId: cid) { [weak self] partial in
-                    guard let self else { return }
-                    if let idx = sandyIndex {
+                    guard let self, !Task.isCancelled else { return }
+                    if let id = sandyID, let idx = self.messages.firstIndex(where: { $0.id == id }) {
                         self.messages[idx].text = partial
-                    } else {
+                    } else if sandyID == nil {
                         self.sending = false
-                        sandyIndex = self.messages.count
-                        self.messages.append(ChatMessage(role: "sandy", text: partial))
+                        let bubble = ChatMessage(role: "sandy", text: partial)
+                        sandyID = bubble.id
+                        self.messages.append(bubble)
                     }
                 }
                 _ = try? await saveUser
-                if let idx = sandyIndex {
+                try Task.checkCancellation()
+                if let id = sandyID, let idx = messages.firstIndex(where: { $0.id == id }) {
                     messages[idx].text = reply
-                } else {
+                } else if sandyID == nil {
                     messages.append(ChatMessage(role: "sandy", text: reply))
                 }
                 try? await api.appendMessage(cid: cid, role: "sandy", text: reply)
