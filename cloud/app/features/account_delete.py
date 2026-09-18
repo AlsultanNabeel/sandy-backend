@@ -91,6 +91,10 @@ _BY_USER: List[str] = [
     # name, interests and lists verbatim — a forgotten account must not leave a
     # copy of its own prompt behind.
     "sandy_prompt_cache",
+    # Every chat thread in the app — title and full transcript. No `sandy_`
+    # prefix, which is how it stayed off this list while being the most
+    # complete record of what a person said.
+    "conversations",
 ]
 
 # Short-term memory keys its documents `"<thread>:<user>"` and also carries a
@@ -161,7 +165,25 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
         logger.warning("[erase] stm failed for %s: %s", user_id, exc)
         removed[_STM] = -1
 
+    # The web chat transcript, keyed by `_id` alone (`web_chat_<user_id>`) with
+    # no user field — so the `$or` above walked past it and a deleted person's
+    # whole web conversation survived the delete.
+    try:
+        r = db["web_chat_history"].delete_one({"_id": f"web_chat_{user_id}"})
+        if r.deleted_count:
+            removed["web_chat_history"] = r.deleted_count
+    except PyMongoError as exc:
+        logger.warning("[erase] web chat history failed for %s: %s", user_id, exc)
+        removed["web_chat_history"] = -1
+
     logger.info("[erase] %s cleared: %s", user_id, removed)
+    # **Not "ok" when something was left behind.** A collection that failed is
+    # recorded as -1 and the loop carries on so one outage does not block the
+    # rest — but this used to report ok regardless, and `delete_account` then
+    # removed the account row: the leftover data stranded with no owner and no
+    # button left to press. A partial erase says so, and the caller stops.
+    if any(n < 0 for n in removed.values()):
+        return {"ok": False, "error": "partial", "removed": removed}
     return {"ok": True, "removed": removed}
 
 

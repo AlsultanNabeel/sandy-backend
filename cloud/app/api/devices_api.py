@@ -79,8 +79,14 @@ def register_devices_api(app, mongo_db=None):
     def api_devices_update(claims, name):
         from app.features.device_store import update_device
 
-        body = request.get_json(silent=True) or {}
-        r = update_device(name, **body)
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return _bad("invalid_request")
+        # Only the fields `update_device` patches. Spreading the raw body let a
+        # `name` key collide with the positional argument — a TypeError, a 500.
+        fields = {k: body[k] for k in ("label", "room", "control_type", "transport", "meta")
+                  if k in body}
+        r = update_device(name, **fields)
         if not r.get("ok"):
             return _bad(r.get("error", "update_failed"),
                         {"allowed": r.get("allowed")} if r.get("allowed") else None)
@@ -300,9 +306,13 @@ def register_devices_api(app, mongo_db=None):
             return _bad("not_found", code=404)
 
         body = request.get_json(silent=True) or {}
+        try:
+            settle_ms = int(body.get("settle_ms", 0) or 0)
+        except (TypeError, ValueError):
+            return _bad("bad_settle_ms")
         req_id = start_snapshot(
             node_id,
-            settle_ms=int(body.get("settle_ms", 0) or 0),
+            settle_ms=settle_ms,
             flash=str(body.get("flash", "auto")),
         )
         if not req_id:

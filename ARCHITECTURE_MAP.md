@@ -906,9 +906,15 @@ uses, and the only thing to rebuild is the client.
 
 ## 8. Data model
 
-47 Mongo collections, all reached through `scoped()`. 45 carry the `sandy_`
+47 Mongo collections, most reached through `scoped()`. 45 carry the `sandy_`
 prefix; two predate it (`memory`, `guest_usage`) and key on `chat_id` rather than
-`user_id` — pass `field=` to `scoped()` for those.
+`user_id` — pass `field=` to `scoped()` for those. Two more are outside
+`scoped()` and outside the prefix, and are the easy ones to forget: the app's
+chat threads, `conversations` (filtered by `user_id` by hand in
+`conversations_api.py`), and the older single-blob `web_chat_history`, keyed
+`_id: web_chat_<user_id>` with no user field at all. Both are in
+`account_delete`'s list — the first by name, the second by `_id` — because
+until 18 Sep 2026 neither was, and a deleted account's chats survived.
 
 Identity and access: `sandy_users`, `sandy_auth`, `sandy_active_user_profile`,
 `sandy_usage_daily`, `sandy_usage_rl`, `guest_usage`.
@@ -1021,6 +1027,19 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
 
 ### Reaches a user
 
+0. **One device key for every board, and the handshake believes the id it is
+   given.** `SANDY_WS_HMAC_KEY` is compiled into every brain and camera; the
+   voice handshake (`voice_ws/session.py::_authenticate`) and `/api/cam/upload`
+   verify a signature over a `device_id` the board itself supplies, then act as
+   that device: the voice session takes the node owner's identity — their
+   memory, their name — and `broker_creds.creds_for_device` hands back that
+   node's private broker login. So anyone who reads the key out of their own
+   robot's flash can speak to Sandy as another customer and take over their
+   robot's topics, and node ids come from four-character pairing codes. The
+   per-board broker credentials of 23 Aug 2026 are only as private as this key.
+   The fix is a per-device secret (provisioned at flash or pairing, stored
+   server-side against the node) checked in both places. Found 18 Sep 2026;
+   not fixed, because it spans firmware, pairing and the server at once.
 1. **No error tracking in production.** Sentry, Langfuse and the metrics modules
    were never ported from the archive, so failures are discovered by the owner
    using the product. Two of this audit's worst findings — unpairing not

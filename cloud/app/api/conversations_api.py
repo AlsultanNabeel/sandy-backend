@@ -33,6 +33,11 @@ from flask import jsonify, request
 from app.api.auth_handlers import require_auth
 
 
+# Longer than any real chat message; short enough that a thread's document stays
+# far from Mongo's 16 MB cap.
+_MAX_MESSAGE_CHARS = 20_000
+
+
 def _uid(claims) -> str:
     """Caller's user id, or '' which every query treats as fail-closed."""
     return str(claims.get("user_id") or "")
@@ -222,6 +227,10 @@ def register_conversations_api(app, mongo_db=None):
         text = (body.get("text") or "").strip()
         if role not in ("user", "sandy") or not text:
             return jsonify({"error": "bad_message"}), 400
+        # One message, bounded. Every message is pushed onto a single document,
+        # and Mongo caps a document at 16 MB — one oversized append was enough
+        # to make every later write to the thread fail.
+        text = text[:_MAX_MESSAGE_CHARS]
 
         d = coll.find_one(
             {"_id": cid, "user_id": uid},

@@ -69,7 +69,9 @@ def register_account_api(app):
             return jsonify({"error": "no_user"}), 400
 
         from app.features.account_delete import wipe_account_data
-        return jsonify(wipe_account_data(uid)), 200
+        r = wipe_account_data(uid)
+        # Same contract as delete: a partial wipe is not a 200.
+        return jsonify(r), (200 if r.get("ok") else 500)
 
     @app.route("/api/account", methods=["DELETE"])
     @require_tenant
