@@ -98,13 +98,6 @@ def get_user(user_id: str) -> Optional[Dict[str, Any]]:
     return coll.find_one({"_id": user_id})
 
 
-def get_by_provider(provider: str, provider_sub: str) -> Optional[Dict[str, Any]]:
-    coll = _coll()
-    if coll is None or not provider or not provider_sub:
-        return None
-    return coll.find_one({"provider": provider, "provider_sub": provider_sub})
-
-
 # ── writes ───────────────────────────────────────────────────────────────
 
 def upsert_from_oauth(
@@ -216,13 +209,6 @@ def get_or_create_owner(name: str = "") -> Optional[str]:
     sub = (os.getenv("OWNER_CHAT_ID") or os.getenv("SANDY_USER_CHAT_ID") or "owner").strip() or "owner"
     user = upsert_from_oauth("owner", sub, name=name)
     return (user or {}).get("_id")
-
-
-def touch_last_seen(user_id: str) -> None:
-    coll = _coll()
-    if coll is None or not user_id:
-        return
-    coll.update_one({"_id": user_id}, {"$set": {"last_seen_at": _now()}})
 
 
 def set_onboarding(

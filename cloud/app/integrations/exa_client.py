@@ -1,6 +1,5 @@
 """Exa search client with circuit breaker and async wrappers."""
 
-import asyncio
 import logging
 from typing import Any, Dict, List
 
@@ -97,28 +96,3 @@ def get_exa_page_content(
     except Exception as e:
         logger.error("[Exa] contents fetch failed for %s: %s", url, e)
         return {}
-
-
-async def search_exa_async(
-    query: str,
-    exa_api_key: str,
-    num_results: int = 10,
-    timeout: int = 60,
-) -> List[Dict[str, Any]]:
-    """Async wrapper for search_exa. Runs in a thread pool so it won't block the loop."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, lambda: search_exa(query, exa_api_key, num_results, timeout)
-    )
-
-
-async def get_exa_page_content_async(
-    url: str,
-    exa_api_key: str,
-    timeout: int = 60,
-) -> Dict[str, Any]:
-    """Async wrapper for get_exa_page_content. Runs in a thread pool."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, lambda: get_exa_page_content(url, exa_api_key, timeout)
-    )

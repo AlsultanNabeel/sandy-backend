@@ -13,15 +13,6 @@ from typing import Any, Dict, List
 from app.utils.time import USER_TZ
 
 
-def _format_due_ar(due: str) -> str:
-    if not due:
-        return ""
-    try:
-        return datetime.fromisoformat(due[:10]).strftime("%d/%m/%Y")
-    except Exception:
-        return due[:10] if len(due) >= 10 else due
-
-
 def _task_ordinal_ar(index: int) -> str:
     names = [
         "الأولى",

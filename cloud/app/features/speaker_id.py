@@ -294,14 +294,3 @@ def get_profile_vector(chat_id: int):
 
 def has_profile(chat_id: int) -> bool:
     return get_profile_vector(chat_id) is not None
-
-
-def delete_profile(chat_id: int) -> bool:
-    if get_db() is None:
-        return False
-    try:
-        res = get_db()[_COLLECTION].delete_one({"_id": str(chat_id)})
-        return res.deleted_count > 0
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[speaker_id] Mongo delete failed: %s", e)
-        return False

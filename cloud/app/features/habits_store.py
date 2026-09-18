@@ -93,17 +93,6 @@ def add_habit(name: str) -> bool:
     return True
 
 
-def archive_habit(name: str) -> str:
-    coll = _habits()
-    if coll is None:
-        return ""
-    h = _find_habit(name)
-    if not h:
-        return ""
-    coll.update_one({"_id": h["_id"]}, {"$set": {"archived": True}})
-    return h.get("name", "")
-
-
 def checkin(name: str, date: str = "") -> Dict[str, Any]:
     """يسجل إنجاز اليوم (أو تاريخ معطى). يرجّع {ok, name, streak, already}."""
     log = _log()

@@ -417,21 +417,6 @@ def set_task_priority(task_id: str, priority: str, mongo_db=None) -> bool:
         return False
 
 
-def set_task_project(task_id: str, project: str, mongo_db=None) -> bool:
-    try:
-        coll = _coll(mongo_db)
-        if coll is None or not task_id:
-            return False
-        r = coll.update_one(
-            {"_id": task_id},
-            {"$set": {"project": str(project or "").strip()}},
-        )
-        return r.matched_count > 0
-    except Exception as e:
-        logger.warning(f"[TasksStore] set project failed: {e}")
-        return False
-
-
 # ─── Bulk operations ─────────────────────────────────────────────────────────
 
 def active_task_ids(mongo_db=None) -> List[str]:

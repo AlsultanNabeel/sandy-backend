@@ -51,25 +51,6 @@ def _topic(node_id: str, output: str) -> str:
     return f"sandy/node/{node_id}/{output}"
 
 
-def send_text(node_id: str, text: str) -> Dict[str, Any]:
-    """Put a line of text on the display. Empty text takes it down."""
-    from app.integrations.room_device import get_room_device_client
-
-    node_id = (node_id or "").strip()
-    if not node_id:
-        return {"ok": False, "error": "no_node"}
-
-    text = (text or "").strip()
-    encoded = text.encode("utf-8")
-    if len(encoded) > TEXT_MAX_BYTES:
-        return {"ok": False, "error": "too_long", "max_bytes": TEXT_MAX_BYTES}
-
-    client = get_room_device_client()
-    payload = f"text:{text}" if text else "dismiss"
-    ok = client.send_to_topic(_topic(node_id, "screen"), payload)
-    return {"ok": bool(ok)} if ok else {"ok": False, "error": "not_sent"}
-
-
 def dismiss(node_id: str) -> Dict[str, Any]:
     """Take whatever is on the display down and give the face back."""
     from app.integrations.room_device import get_room_device_client

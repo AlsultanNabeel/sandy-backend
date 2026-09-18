@@ -483,17 +483,3 @@ def fetch_snapshot(node_id: str, req_id: str) -> Optional[bytes]:
     if not node_id or not req_id:
         return None
     return _inbox_get(node_id, req_id)
-
-
-def set_flash(node_id: str, state: str, level: int = 128) -> bool:
-    """Torch on/off — separate from the shutter flash, for lighting a dark room."""
-    if state not in ("on", "off"):
-        return False
-    return _send(node_id, {"cmd": "flash", "state": state,
-                           "level": max(0, min(255, int(level)))})
-
-
-def set_stream(node_id: str, on: bool) -> bool:
-    """Start or stop the board's HTTP video server. The URL comes back on the
-    camera's status topic — this only asks."""
-    return _send(node_id, {"cmd": "stream", "state": "on" if on else "off"})

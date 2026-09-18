@@ -47,14 +47,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def requests_today(user_id: str) -> int:
-    if get_db() is None or not user_id:
-        return 0
-    key = f"{user_id}:{_now():%Y-%m-%d}"
-    doc = get_db()[_DAILY].find_one({"_id": key})
-    return int((doc or {}).get("count", 0))
-
-
 def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> Optional[str]:
     """Count one request and return a rejection reason if the user is over a
     limit, else None. A limit of 0 disables that limit. Fails open on errors."""

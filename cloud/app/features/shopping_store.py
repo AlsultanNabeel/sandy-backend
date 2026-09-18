@@ -227,10 +227,3 @@ def delete_item_by_id(item_id: str) -> bool:
     if coll is None or not item_id:
         return False
     return coll.delete_one({"_id": item_id}).deleted_count > 0
-
-
-def clear_bought() -> int:
-    coll = _coll()
-    if coll is None:
-        return 0
-    return coll.delete_many({"done": True}).deleted_count

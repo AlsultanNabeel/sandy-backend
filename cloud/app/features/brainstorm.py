@@ -309,15 +309,6 @@ def list_plans(chat_id: Any, limit: int = 10) -> List[Dict[str, Any]]:
         return []
 
 
-def delete_plan(chat_id: Any, query: str) -> Tuple[bool, str]:
-    """يحذف خطة محفوظة من الذاكرة. يرجّع (تمّ؟، الموضوع/رسالة)."""
-    p = get_plan(chat_id, query)
-    if not p:
-        return False, "ما لقيت خطة بهالوصف."
-    get_db()[_COLL].delete_one({"_id": p["_id"]})
-    return True, str(p.get("topic", "الخطة"))
-
-
 _AR_NORM = str.maketrans({
     "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا",
     "ى": "ي", "ئ": "ي", "ؤ": "و", "ة": "ه",

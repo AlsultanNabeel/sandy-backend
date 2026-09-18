@@ -36,7 +36,7 @@ the owner's; the value list follows the firmware.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -373,14 +373,3 @@ def provision_for_owner(node_id: str, owner_id: str,
         {"chat_id": owner_id, "permissions": "all", "relation": "user"}
     ):
         return provision_from_outputs(node_id, outputs, label)
-
-
-def outputs_for_node(node_id: str) -> Optional[List[Dict[str, Any]]]:
-    """The outputs a node last reported, read in the caller's tenant context."""
-    from app.features.node_store import get_node
-
-    node = get_node(node_id)
-    if node is None:
-        return None
-    outs = node.get("outputs")
-    return outs if isinstance(outs, list) else []

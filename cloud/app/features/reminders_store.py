@@ -219,53 +219,6 @@ def update_reminder(
         return {"success": False, "error": str(e)}
 
 
-def snooze_reminder(reminder_id: str, minutes: int = 30) -> Dict[str, Any]:
-    """Push a reminder forward from now (works on sent ones too — that's the point)."""
-    try:
-        coll = _coll()
-        if coll is None or not reminder_id:
-            return {"success": False, "error": "missing"}
-        new_dt = datetime.now(USER_TZ) + timedelta(minutes=max(1, int(minutes)))
-        r = coll.update_one(
-            {"_id": reminder_id},
-            {
-                "$set": {
-                    "remind_at": _to_utc(new_dt),
-                    "send_state": "pending",
-                    "sent_at": None,
-                }
-            },
-        )
-        if r.matched_count == 0:
-            return {"success": False, "error": "not_found"}
-        return {"success": True, "new_iso": new_dt.isoformat()}
-    except Exception as e:
-        logger.warning(f"[RemindersStore] snooze failed: {e}")
-        return {"success": False, "error": str(e)}
-
-
-def complete_reminder(reminder_id: str) -> bool:
-    """Owner tapped "done" — close it out, recurring or not."""
-    try:
-        coll = _coll()
-        if coll is None or not reminder_id:
-            return False
-        r = coll.update_one(
-            {"_id": reminder_id},
-            {
-                "$set": {
-                    "send_state": "sent",
-                    "recurrence": "",
-                    "sent_at": datetime.now(timezone.utc),
-                }
-            },
-        )
-        return r.matched_count > 0
-    except Exception as e:
-        logger.warning(f"[RemindersStore] complete failed: {e}")
-        return False
-
-
 def delete_reminder(reminder_id: str) -> bool:
     try:
         coll = _coll()

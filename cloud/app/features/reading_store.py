@@ -224,20 +224,6 @@ def set_book_status(title: str, status: str) -> Dict[str, Any]:
     return {"ok": True, "title": b.get("title", "")}
 
 
-def set_book_cover(title: str, cover_url: str) -> bool:
-    coll = _books()
-    if coll is None:
-        return False
-    b = _find_book(title)
-    if not b:
-        return False
-    coll.update_one(
-        {"_id": b["_id"]},
-        {"$set": {"cover_url": str(cover_url or "").strip()}},
-    )
-    return True
-
-
 def list_books(status: str = "") -> List[Dict[str, Any]]:
     coll = _books()
     if coll is None:
@@ -287,19 +273,6 @@ def get_book(title: str) -> Optional[Dict[str, Any]]:
         "notes": d.get("notes", []),
         "quotes": d.get("quotes", []),
     }
-
-
-def delete_book(title: str) -> str:
-    books = _books()
-    sess = _sess()
-    if books is None or sess is None:
-        return ""
-    b = _find_book(title)
-    if not b:
-        return ""
-    sess.delete_many({"book_id": b["_id"]})
-    books.delete_one({"_id": b["_id"]})
-    return b.get("title", "")
 
 
 # ─── الجلسات ─────────────────────────────────────────────────────────────────
