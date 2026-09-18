@@ -104,7 +104,7 @@ def _register_books(app):
         from app.features.reading_store import set_reading_goal
 
         r = set_reading_goal(
-            books_year=body_int(body, "books_year"),
-            pages_year=body_int(body, "pages_year"),
+            books_year=body_int(body, "books_year") if "books_year" in body else None,
+            pages_year=body_int(body, "pages_year") if "pages_year" in body else None,
         )
         return jsonify(r), (200 if r.get("ok") else 400)

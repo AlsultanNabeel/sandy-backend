@@ -103,10 +103,15 @@ def reading_goal(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
     from app.features.reading_store import goal_progress, set_reading_goal
 
     if args.get("books_year") is not None or args.get("pages_year") is not None:
-        r = set_reading_goal(
-            books_year=int(args.get("books_year", 0) or 0),
-            pages_year=int(args.get("pages_year", 0) or 0),
-        )
+        def _num(key):
+            try:
+                return int(args[key]) if args.get(key) is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        r = set_reading_goal(books_year=_num("books_year"), pages_year=_num("pages_year"))
+        if not r.get("ok"):
+            return {"handled": True, "ok": False, "reply": "ما قدرت أحفظ هدف القراءة."}
         parts = []
         if r["books_year"]:
             parts.append(f"{r['books_year']} كتاب")

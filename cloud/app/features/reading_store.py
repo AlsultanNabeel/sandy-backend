@@ -516,21 +516,28 @@ def _reading_streak() -> int:
     return streak
 
 
-def set_reading_goal(books_year: int = 0, pages_year: int = 0) -> Dict[str, Any]:
-    """هدف القراءة السنوي — عدد كتب و/أو عدد صفحات."""
+def set_reading_goal(books_year: Optional[int] = None,
+                     pages_year: Optional[int] = None) -> Dict[str, Any]:
+    """هدف القراءة السنوي — عدد كتب و/أو عدد صفحات.
+
+    Only the parts given are changed: setting a book count used to write
+    ``pages_year=0`` and erase a page goal set earlier.
+    """
     uid = current_user_id()
     if uid is None:
         return {"ok": False}
     meta = _meta()
     if meta is None:
         return {"ok": False}
-    by, py = max(0, int(books_year or 0)), max(0, int(pages_year or 0))
-    meta.update_one(
-        {"_id": f"goal:{uid}"},
-        {"$set": {"user_id": uid, "books_year": by, "pages_year": py}},
-        upsert=True,
-    )
-    return {"ok": True, "books_year": by, "pages_year": py}
+    changes: Dict[str, Any] = {"user_id": uid}
+    if books_year is not None:
+        changes["books_year"] = max(0, int(books_year))
+    if pages_year is not None:
+        changes["pages_year"] = max(0, int(pages_year))
+    meta.update_one({"_id": f"goal:{uid}"}, {"$set": changes}, upsert=True)
+    goal = meta.find_one({"_id": f"goal:{uid}"}) or {}
+    return {"ok": True, "books_year": int(goal.get("books_year") or 0),
+            "pages_year": int(goal.get("pages_year") or 0)}
 
 
 def goal_progress() -> Dict[str, Any]:

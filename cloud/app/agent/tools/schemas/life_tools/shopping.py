@@ -11,13 +11,20 @@ def shopping_add(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
     from app.features.shopping_store import add_items
 
     items = args.get("items")
+    if isinstance(items, str):
+        # The model sometimes sends one item as a bare string; iterating it
+        # would add each letter as its own item.
+        items = [items]
     if not items:
         single = str(args.get("item", "")).strip()
         items = [single] if single else []
     if not items:
         return {"handled": True, "reply": "شو بدك أضيف عالقائمة؟"}
-    n = add_items([str(x) for x in items])
+    n = add_items([str(x) for x in items if str(x).strip()])
     if n == 0:
+        from app.features.shopping_store import is_available
+        if not is_available():
+            return {"handled": True, "ok": False, "reply": "ما قدرت أوصل لقائمة التسوق هلأ."}
         return {"handled": True, "reply": "كلهم موجودين عالقائمة أصلاً 🛒"}
     return {"handled": True, "reply": f"🛒 ضفت {n} عالقائمة." if n > 1 else f"🛒 ضفت «{items[0]}»."}
 

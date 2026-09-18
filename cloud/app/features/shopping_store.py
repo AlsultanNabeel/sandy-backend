@@ -44,6 +44,11 @@ def _coll():
     return scoped(get_db(), _COLL)
 
 
+def is_available() -> bool:
+    """True when there is a database and a tenant to write the list for."""
+    return _coll() is not None
+
+
 def add_item(text: str, category: str = "") -> bool:
     """يضيف عنصر واحد مع تصنيف اختياري؛ يتجاهل المكرر النشط."""
     coll = _coll()
@@ -155,7 +160,11 @@ def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
             set_fields["qty"] = eff_qty
         except (TypeError, ValueError):
             logger.debug("ignoring non-critical error", exc_info=True)
-    coll.update_one({"_id": item_id}, {"$set": set_fields})
+    # Only an item still on the list can be bought: re-ticking a bought item
+    # (or a double tap) used to add its expense a second time.
+    if coll.update_one({"_id": item_id, "done": False},
+                       {"$set": set_fields}).matched_count == 0:
+        return {"ok": True, "expense_added": False}
 
     expense_added = False
     if eff_price and eff_price > 0:
