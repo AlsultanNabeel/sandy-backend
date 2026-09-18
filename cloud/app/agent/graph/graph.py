@@ -562,6 +562,13 @@ def run_graph(
             },
         )
 
+    # Scheduled messages shown in the prompt count as delivered only now that
+    # a real reply exists.
+    if state.get("future_message_ids") and not state.get("error"):
+        from app.agent.future_messages import mark_delivered
+        submit_background(mark_delivered, list(state["future_message_ids"]),
+                          _label="future-delivered")
+
     # 4. A1: احفظ لحظة عاطفية مهمة في LTM (background — لا يبطئ الرد)
     _save_emotional_async(state, message)
 

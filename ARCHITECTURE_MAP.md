@@ -231,8 +231,10 @@ search, and the emotional context — before routing, so they overlap the model
 call. The emotional context used to be submitted after routing and collected
 alone: one whole serial Atlas round trip on nearly every message. The chat-only
 block (dreams, anniversaries, goals, future messages) stays after routing on
-purpose — `get_future_messages_context` *pops* due messages, and running it
-speculatively on a task turn would deliver them to nobody.
+purpose — it surfaces due scheduled messages, and running it speculatively on a
+task turn would show them to nobody. It only reads; `run_graph` marks them
+delivered after the reply exists, so a read that finishes past the soul deadline
+cannot mark a message delivered that never reached a reply.
 
 **One embedding per turn, not one per search.** `search_relevant_facts` and
 `search_relevant_summaries` each embedded the query independently — two OpenAI

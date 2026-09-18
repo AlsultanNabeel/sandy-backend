@@ -304,9 +304,12 @@ def test_future_messages_isolated_and_fail_closed(db, monkeypatch):
         assert fm.get_future_messages_context() is None, "B must not receive A's due message"
     with as_tenant("tenant-A"):
         pending = fm.list_pending_messages()
-        a_id = pending[-1]["_id"]  # the later one; the due one is delivered below
+        a_id = pending[-1]["_id"]  # the later one; the due one is marked delivered below
         assert len(pending) == 2
-        assert "A-due-zzz" in (fm.get_future_messages_context() or "")
+        text, ids = fm.get_future_messages_context()
+        assert "A-due-zzz" in text
+        fm.mark_delivered(ids)
+        assert fm.get_future_messages_context() is None, "delivered twice"
     with as_tenant("tenant-B"):
         assert not fm.cancel_message(a_id), "B cancelled A's message"
     with no_tenant():

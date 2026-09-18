@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.db import get_db
 from app.utils.tenant_db import scoped
@@ -90,36 +90,50 @@ def cancel_message(msg_id: Any) -> bool:
         return False
 
 
-def pop_due_messages(limit: int = 3) -> List[dict]:
-    """يجلب الرسائل المستحقة الآن ويعلّمها delivered=True (atomic per message).
+def peek_due_messages(limit: int = 3) -> List[dict]:
+    """Due, undelivered messages for the current tenant — read only.
 
-    يُستدعى مرة عند كل رسالة من المستخدم — passive delivery.
+    Reading and marking are separate on purpose. The read happens while the
+    prompt is being built, on a pool job the turn stops waiting for after a few
+    seconds; a job that marked as it read could finish late and mark messages
+    delivered that never reached a reply. They are marked by
+    :func:`mark_delivered` once the reply exists.
     """
     coll = _coll()
     if coll is None:
         return []
     try:
         now = datetime.now(timezone.utc)
-        delivered = []
-        for _ in range(limit):
-            doc = coll.find_one_and_update(
-                {"delivered": False, "deliver_at": {"$lte": now}},
-                {"$set": {"delivered": True, "delivered_at": now}},
-                projection={"_id": 0, "text": 1, "deliver_at": 1, "created_at": 1},
-                sort=[("deliver_at", 1)],
-            )
-            if not doc:
-                break
-            delivered.append(doc)
-        return delivered
+        return list(
+            coll.find({"delivered": False, "deliver_at": {"$lte": now}},
+                      {"_id": 1, "text": 1, "deliver_at": 1, "created_at": 1})
+            .sort("deliver_at", 1).limit(limit)
+        )
     except Exception as exc:
-        logger.warning("[future_messages] pop failed: %s", exc)
+        logger.warning("[future_messages] read failed: %s", exc)
         return []
 
 
-def get_future_messages_context() -> Optional[str]:
-    """إذا في رسائل مستحقة، يُسلَّمها كـ context لـ Sandy لتذكر المستخدم بها."""
-    due = pop_due_messages()
+def mark_delivered(ids: List[Any]) -> None:
+    """Mark these messages delivered (only ones still undelivered)."""
+    coll = _coll()
+    if coll is None or not ids:
+        return
+    try:
+        coll.update_many(
+            {"_id": {"$in": list(ids)}, "delivered": False},
+            {"$set": {"delivered": True, "delivered_at": datetime.now(timezone.utc)}},
+        )
+    except Exception as exc:
+        logger.warning("[future_messages] mark delivered failed: %s", exc)
+
+
+def get_future_messages_context() -> Optional[Tuple[str, List[Any]]]:
+    """Due messages as a prompt line, with their ids for :func:`mark_delivered`.
+
+    None when nothing is due.
+    """
+    due = peek_due_messages()
     if not due:
         return None
 
@@ -131,4 +145,5 @@ def get_future_messages_context() -> Optional[str]:
         msg = decrypt_field(d.get("text", ""))[:200]
         parts.append(f"({created_str}): {msg}" if created_str else msg)
 
-    return "[رسالة مجدولة من المستخدم لنفسه: " + " | ".join(parts) + "]"
+    text = "[رسالة مجدولة من المستخدم لنفسه: " + " | ".join(parts) + "]"
+    return text, [d["_id"] for d in due]

@@ -59,6 +59,9 @@ class SandyState(TypedDict):
 
     # soul prefetch
     soul_prefetch: Optional[Any]  # dict of Future objects started before routing
+    # Scheduled messages shown in this turn's prompt; marked delivered only
+    # once the reply exists (see graph.run_graph).
+    future_message_ids: Optional[List[Any]]
 
     # meta
     error: Optional[str]
@@ -114,6 +117,7 @@ def create_initial_state(
         created_at=datetime.now(timezone.utc).isoformat(),
         image_state=image_state,
         soul_prefetch=None,
+        future_message_ids=None,
     )
 
 

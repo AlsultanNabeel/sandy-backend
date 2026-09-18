@@ -399,8 +399,10 @@ def soul_node(state: SandyState) -> SandyState:
             snippet = _join(snippet, _s1["dreams"])
         if _s1.get("anniv"):
             snippet = _join(snippet, _s1["anniv"])
+        future_ids = None
         if _s1.get("future"):
-            snippet = _join(snippet, _s1["future"])
+            future_text, future_ids = _s1["future"]
+            snippet = _join(snippet, future_text)
 
         # لو البحث الدلالي رجّع ذكريات ذات صلة والرسالة قصيرة/مفتوحة،
         # خلّيها تشير لها بعفوية بدون فرض.
@@ -414,6 +416,7 @@ def soul_node(state: SandyState) -> SandyState:
         return merge_state(state, {
             "persona_intensity": result["intensity"],
             "persona_snippet": snippet,
+            "future_message_ids": future_ids,
         })
 
     except Exception as exc:
