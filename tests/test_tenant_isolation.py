@@ -334,3 +334,25 @@ def test_goal_tools_isolated_and_fail_closed(db):
         assert "ghost" not in goal_list({}, ctx)["reply"]
         assert goal_done({"goal": ".*"}, ctx)["ok"] is False, "regex was not escaped"
         assert goal_done({"goal": "goal-zzz (run"}, ctx).get("ok", True)
+
+
+def test_facts_stored_without_a_vector_get_one_later(db, monkeypatch):
+    """A fact indexed while embeddings were down used to stay keyword-only."""
+    import app.db as appdb
+    from app.agent import semantic_memory as sem
+
+    appdb.configure(db)
+    try:
+        monkeypatch.setattr(sem, "_embed_client", None)
+        with as_tenant("tenant-A"):
+            sem.load_facts_to_chroma([{"text": "fact-one-zzz"}])
+        assert "embedding" not in db["sandy_facts"].find_one({})
+
+        monkeypatch.setattr(sem, "_embed_client", object())
+        monkeypatch.setattr(sem, "_embed_many", lambda texts: [[0.1, 0.2] for _ in texts])
+        with as_tenant("tenant-A"):
+            sem.load_facts_to_chroma([{"text": "fact-one-zzz"}])
+        assert db["sandy_facts"].find_one({})["embedding"] == [0.1, 0.2]
+        assert db["sandy_facts"].count_documents({}) == 1
+    finally:
+        appdb.reset()

@@ -1,11 +1,10 @@
 """Semantic memory on top of MongoDB + OpenAI embeddings.
 
 Collections:
-  sandy_facts             user facts from the learning system
-  sandy_conversations     recent (user, assistant) turns
-  sandy_context_metadata  per-turn topic tracking
+  sandy_facts             user facts, including the indexed life lists
+  sandy_memories          conversation summaries (read here, written by graph.py)
 
-Every doc has a chat_id. Facts/conversations go through the enforced
+Every doc has a chat_id. Facts go through the enforced
 ``tenant_db.scoped(..., field="chat_id")`` wrapper — the same isolation-by-
 construction boundary as every other store — so a forgotten filter can't leak
 across tenants. Every authenticated (non-guest) user reads and writes their
@@ -73,10 +72,6 @@ def _facts_coll():
     return scoped(get_db(), "sandy_facts", field="chat_id")
 
 
-def _convs_coll():
-    return scoped(get_db(), "sandy_conversations", field="chat_id")
-
-
 def _can_write_memory() -> bool:
     """Any authenticated (non-guest) tenant may write their own memory.
 
@@ -131,22 +126,12 @@ def init_mongo_memory(
             default_language="none",
             background=True,
         )
-        mongo_db["sandy_conversations"].create_index(
-            [("chat_id", 1), ("text", "text")],
-            default_language="none",
-            background=True,
-        )
         mongo_db["sandy_facts"].create_index([("chat_id", 1)], background=True)
-        mongo_db["sandy_conversations"].create_index([("chat_id", 1)], background=True)
-        mongo_db["sandy_context_metadata"].create_index(
-            [("timestamp", -1)],
-            background=True,
-        )
     except Exception as e:
-        logger.warning(f"[Memory] index setup: {e}")
+        logger.warning("[Memory] index setup: %s", e)
 
     mode = "vector + keyword" if _embed_client else "keyword only"
-    logger.info(f"[Memory] MongoDB memory ready ({mode})")
+    logger.info("[Memory] MongoDB memory ready (%s)", mode)
 
 
 # Embeddings
@@ -248,13 +233,6 @@ def _fact_id(text: str, chat_id: str = "") -> str:
     )
 
 
-def _conv_id(user_text: str, assistant_text: str, chat_id: str = "") -> str:
-    combined = f"{chat_id}:{user_text}||{assistant_text}"
-    return (
-        "c_" + hashlib.sha1(combined.encode(), usedforsecurity=False).hexdigest()[:20]
-    )
-
-
 # Facts
 
 
@@ -274,8 +252,9 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
     turn, to discover that there is nothing to do.
 
     Now: one query to find which ids already exist, one batched embedding call
-    for the genuinely new ones, one bulk write. Nothing new means one query and
-    then nothing, which is what a no-op should cost.
+    for the genuinely new ones (plus any stored earlier without a vector), one
+    bulk write. Nothing new means one query and then nothing, which is what a
+    no-op should cost.
     """
     if not _can_write_memory():
         return
@@ -299,18 +278,33 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
         return
 
     try:
-        existing = {
-            d["_id"] for d in coll.find({"_id": {"$in": list(wanted)}}, {"_id": 1})
-        }
+        # `$slice: 1` keeps the payload to one float per fact while still
+        # telling us which stored facts have no vector yet.
+        found = list(coll.find({"_id": {"$in": list(wanted)}},
+                               {"_id": 1, "embedding": {"$slice": 1}}))
     except PyMongoError as exc:
         logger.warning("[Memory] load_facts existence check failed: %s", exc)
         return
+    existing = {d["_id"] for d in found}
+    # A fact stored while the embeddings endpoint was down has no vector and
+    # would stay keyword-only forever; retry those whenever embedding is on.
+    unembedded = ([d["_id"] for d in found if not d.get("embedding")]
+                  if _embed_client is not None else [])
 
     new_ids = [fid for fid in wanted if fid not in existing]
-    if not new_ids:
+    if not new_ids and not unembedded:
         return
 
-    vectors = _embed_many([wanted[fid]["text"] for fid in new_ids])
+    vectors = _embed_many([wanted[fid]["text"] for fid in new_ids + unembedded])
+    for fid, vec in zip(unembedded, vectors[len(new_ids):]):
+        if vec:
+            try:
+                coll.update_one({"_id": fid}, {"$set": {"embedding": vec}})
+            except PyMongoError as exc:
+                logger.warning("[Memory] embedding backfill failed: %s", exc)
+    vectors = vectors[:len(new_ids)]
+    if not new_ids:
+        return
 
     docs: List[Dict[str, Any]] = []
     for fid, vec in zip(new_ids, vectors):
@@ -332,84 +326,6 @@ def load_facts_to_chroma(facts: List[Dict[str, Any]]) -> None:
         return
     if inserted:
         logger.info("[Memory] indexed %d new facts (chat_id=%s)", inserted, chat_id)
-
-
-# Conversations
-
-
-def load_conversations_to_chroma(
-    conversations: List[Dict[str, Any]], max_recent: int = 60
-) -> None:
-    """Upsert recent conversation turns, embedding the new ones."""
-    if not _can_write_memory():
-        return
-    coll = _convs_coll()
-    if coll is None or not conversations:
-        return
-    chat_id = coll.tenant
-    recent = conversations[-max_recent:]
-
-    # Same three-round-trip shape as load_facts_to_chroma, and for the same
-    # reason: sixty turns was sixty existence checks and up to sixty sequential
-    # embedding requests.
-    wanted: Dict[str, str] = {}
-    order: List[str] = []
-    for conv in recent:
-        user_text = (conv.get("user") or conv.get("content") or "").strip()
-        asst_text = (conv.get("sandy") or conv.get("assistant") or "").strip()
-        if not user_text:
-            continue
-        combined = f"المستخدم: {user_text}"
-        if asst_text:
-            combined += f"\nساندي: {asst_text}"
-        cid = _conv_id(user_text, asst_text, chat_id)
-        if cid not in wanted:
-            wanted[cid] = combined
-            order.append(cid)
-    if not wanted:
-        return
-
-    try:
-        existing = {
-            d["_id"] for d in coll.find({"_id": {"$in": list(wanted)}}, {"_id": 1})
-        }
-    except PyMongoError as exc:
-        logger.warning("[Memory] load_conversations existence check failed: %s", exc)
-        return
-
-    new_ids = [cid for cid in order if cid not in existing]
-    if not new_ids:
-        return
-
-    vectors = _embed_many([wanted[cid] for cid in new_ids])
-    ts_by_id = {}
-    for conv in recent:
-        user_text = (conv.get("user") or conv.get("content") or "").strip()
-        asst_text = (conv.get("sandy") or conv.get("assistant") or "").strip()
-        if user_text:
-            ts_by_id.setdefault(_conv_id(user_text, asst_text, chat_id),
-                                conv.get("timestamp", ""))
-
-    docs: List[Dict[str, Any]] = []
-    for cid, vec in zip(new_ids, vectors):
-        doc: Dict[str, Any] = {
-            "_id": cid,
-            "text": wanted[cid],
-            "role": "conversation",
-            "ts": ts_by_id.get(cid, ""),
-        }
-        if vec:
-            doc["embedding"] = vec
-        docs.append(doc)
-
-    try:
-        inserted = coll.insert_missing(docs)
-    except PyMongoError as exc:
-        logger.warning("[Memory] load_conversations bulk write failed: %s", exc)
-        return
-    if inserted:
-        logger.info("[Memory] indexed %d new conversation turns (chat_id=%s)",
-                    inserted, chat_id)
 
 
 # Search
@@ -506,44 +422,7 @@ def search_relevant_facts(query: str, n_results: int = 5,
             _bump_usage_later(coll, results)
         return [r["text"] for r in results if r.get("text")]
     except Exception as e:
-        logger.warning(f"[Memory] search_relevant_facts: {e}")
-        return []
-
-
-def search_relevant_conversations(query: str, n_results: int = 3,
-        query_vector: Optional[List[float]] = None) -> List[str]:
-    """Semantic search over the current user's conversation turns."""
-    if not _can_read_memory():
-        return []
-    coll = _convs_coll()
-    if coll is None:
-        return []
-    chat_id = coll.tenant
-    try:
-        if coll.count_documents({}) == 0:
-            return []
-
-        results = _vector_search(get_db()["sandy_conversations"], query, chat_id,
-                                 n_results, {}, query_vector)
-
-        if results is None:
-            try:
-                results = list(
-                    coll.find(
-                        {"$text": {"$search": query}},
-                        {"score": {"$meta": "textScore"}, "text": 1},
-                    )
-                    .sort([("score", {"$meta": "textScore"})])
-                    .limit(n_results)
-                )
-            except Exception:
-                results = list(
-                    coll.find({}, {"text": 1}).sort("ts", -1).limit(n_results)
-                )
-
-        return [r["text"] for r in results if r.get("text")]
-    except Exception as e:
-        logger.warning(f"[Memory] search_relevant_conversations: {e}")
+        logger.warning("[Memory] search_relevant_facts: %s", e)
         return []
 
 
@@ -574,7 +453,7 @@ def search_relevant_summaries(query: str, chat_id: str, n_results: int = 3,
             results = list(col.find(fil, {"summary": 1}).sort("created_at", -1).limit(n_results))
         return [r["summary"] for r in results if r.get("summary")]
     except Exception as exc:
-        logger.warning(f"[chroma] search_relevant_summaries failed: {exc}")
+        logger.warning("[chroma] search_relevant_summaries failed: %s", exc)
         return []
 
 
@@ -606,34 +485,26 @@ def search_memory_for_turn(
 def semantic_memory_stats() -> Dict[str, Any]:
     """Return counts for the current user, for health checks and debugging."""
     if not _can_read_memory():
-        return {"path": "mongodb", "facts": 0, "conversations": 0}
+        return {"path": "mongodb", "facts": 0}
     facts_count = 0
-    convs_count = 0
     facts_coll = _facts_coll()
     if facts_coll is not None:
         try:
             facts_count = facts_coll.count_documents({})
-        except Exception:
-            logger.debug("ignoring non-critical error", exc_info=True)
-    convs_coll = _convs_coll()
-    if convs_coll is not None:
-        try:
-            convs_count = convs_coll.count_documents({})
-        except Exception:
-            logger.debug("ignoring non-critical error", exc_info=True)
+        except PyMongoError:
+            logger.warning("[Memory] facts count failed", exc_info=True)
     return {
         "path": "mongodb",
         "vector_search": _embed_client is not None,
         "facts": facts_count,
-        "conversations": convs_count,
     }
 
 
 __all__ = [
     "init_mongo_memory",
     "load_facts_to_chroma",
-    "load_conversations_to_chroma",
     "search_relevant_facts",
-    "search_relevant_conversations",
+    "search_relevant_summaries",
+    "search_memory_for_turn",
     "semantic_memory_stats",
 ]

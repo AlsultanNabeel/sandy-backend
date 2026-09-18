@@ -119,10 +119,8 @@ def test_memory_index_logging_never_raises(caplog):
     try:
         with active_user_profile_context(profile):
             sem.load_facts_to_chroma([{"text": "حقيقة", "type": "general"}])
-            sem.load_conversations_to_chroma([{"user": "مرحبا", "sandy": "أهلين"}])
         assert db["sandy_facts"].count_documents({}) == 1, \
             "nothing was written, so the log line under test never ran"
-        assert db["sandy_conversations"].count_documents({}) == 1
     finally:
         appdb.reset()
 
