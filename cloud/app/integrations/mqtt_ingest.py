@@ -585,11 +585,18 @@ def _watchdog(host: str, port: int, user: str, password: str) -> None:
             last = _stats.get("last_message_at")
             if c is None or last is None:
                 continue
+            # A real message since the last rebuild ends the silent streak.
+            if last > _stats.get("rebuilt_at", 0) + 1:
+                _stats["silent_streak"] = 0
+            streak = int(_stats.get("silent_streak", 0))
             silent_for = time.time() - last
-            if silent_for < _WATCHDOG_SILENCE_S:
+            # Back off while nothing answers: with no board online (overnight,
+            # or no customers yet) a fixed 90 s meant a rebuild and an ERROR
+            # line every half minute for as long as the fleet was idle.
+            if silent_for < _WATCHDOG_SILENCE_S * (2 ** min(streak, 6)):
                 continue
 
-            logger.error(
+            (logger.error if streak == 0 else logger.warning)(
                 "[mqtt_ingest] worker %d heard nothing for %.0fs (connected=%s) "
                 "— rebuilding the listener",
                 os.getpid(), silent_for, c.is_connected())
@@ -619,7 +626,10 @@ def _watchdog(host: str, port: int, user: str, password: str) -> None:
             n.connect_async(host, port, keepalive=MQTT_KEEPALIVE_S)
             n.loop_start()
             _client = n
-            _stats["last_message_at"] = time.time()
+            now = time.time()
+            _stats["last_message_at"] = now
+            _stats["rebuilt_at"] = now
+            _stats["silent_streak"] = streak + 1
             _stats["rebuilds"] = _stats.get("rebuilds", 0) + 1
         except Exception as e:  # noqa: BLE001 — the watchdog must outlive anything
             logger.warning("[mqtt_ingest] watchdog error: %s", e)

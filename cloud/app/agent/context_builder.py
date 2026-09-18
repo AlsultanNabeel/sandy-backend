@@ -1,7 +1,7 @@
 """Builds the context block for Sandy.
 
 Combines STM, semantic LTM, persona directives and session state. Both the
-LangGraph pipeline (soul_node) and the Gemini Live voice session import from
+chat pipeline (soul_node) and the Gemini Live voice session import from
 here, so they build context the same way.
 """
 
