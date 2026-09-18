@@ -139,9 +139,8 @@ def test_the_memory_writers_actually_write(db):
 
 def test_one_tenant_cannot_read_another_ones_memories(db):
     from app.agent.emotional_ltm import get_emotional_context, save_emotional_moment
-    from app.agent.relationships_memory import (
-        get_relationships_context, save_relationship,
-    )
+    from app.agent.relationships_memory import _coll as relationships_coll
+    from app.agent.relationships_memory import save_relationship
     from app.utils import user_profiles
 
     with user_profiles.active_user_profile_context(A):
@@ -149,7 +148,7 @@ def test_one_tenant_cannot_read_another_ones_memories(db):
         save_relationship("أخوي", "محمد")
     with user_profiles.active_user_profile_context(B):
         seen = (str(get_emotional_context() or "")
-                + str(get_relationships_context() or ""))
+                + str(list(relationships_coll().find({}))))
 
     assert "مشروع الشغل" not in seen
     assert "محمد" not in seen

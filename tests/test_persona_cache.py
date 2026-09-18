@@ -284,7 +284,7 @@ def test_a_style_correction_reaches_the_next_reply(db, builds):
 
     with user_profiles.active_user_profile_context(P):
         _directives(db)
-        assert save_style_preference(U, U, "اختصري ردودك", "ردودك طويلة", db) is True
+        assert save_style_preference("اختصري ردودك", "ردودك طويلة") is True
         out = _directives(db)
 
     assert builds["n"] == 2

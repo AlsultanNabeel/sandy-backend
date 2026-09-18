@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 from typing import TYPE_CHECKING, Any, Dict
 from urllib.parse import urlparse
@@ -15,16 +16,23 @@ from urllib.parse import urlparse
 if TYPE_CHECKING:
     from app.agent.tools.dispatcher import DispatchContext
 
+from app.utils.tenant_db import scoped
+
 logger = logging.getLogger(__name__)
 
 
 # Memory adapters — stored in MongoDB so they survive restarts.
 
 _COLL = "sandy_memories"
+_MAX_FACT_CHARS = 1000
 
 
 def _mem_db(ctx: "DispatchContext"):
-    return ctx.mongo_db[_COLL] if ctx.mongo_db is not None else None
+    """Tenant-scoped handle (``chat_id`` is the tenant field). None with no
+    tenant, so nothing is ever written to or read from a shared bucket. Writes
+    through it bump the tenant version, so the cached persona block sees a new
+    ``user_fact`` on the very next reply."""
+    return scoped(ctx.mongo_db, _COLL, field="chat_id")
 
 
 def memory_store(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -34,28 +42,19 @@ def memory_store(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]
 
     coll = _mem_db(ctx)
     if coll is None:
-        return {"handled": True, "reply": "دوّنتها 📝"}  # graceful in tests
+        return {"handled": True, "ok": False, "reply": "ما قدرت أوصل للذاكرة الآن، حاول لاحقاً."}
 
     from datetime import datetime, timezone
-    from app.utils.user_profiles import current_user_id
 
-    uid = current_user_id()
-    if not uid:
-        # fail-closed: no tenant in context → never write to a shared bucket.
-        return {"handled": True, "reply": "دوّنتها 📝"}
+    # The label is fixed: the persona block reads `user_fact`, and a free-form
+    # label from the model ("عمل") used to make the fact invisible to it. The
+    # model's tag is kept as a category instead.
     coll.insert_one({
-        "chat_id": uid,
-        "label": str(args.get("label") or "user_fact").strip(),
-        "content": content,
+        "label": "user_fact",
+        "category": str(args.get("label") or "").strip()[:40],
+        "content": content[:_MAX_FACT_CHARS],
         "created_at": datetime.now(timezone.utc),
     })
-    # Raw handle — the tenant wrapper's stamp does not fire here, and this is
-    # the `user_fact` the cached persona block reads. The app's own
-    # `POST /api/memory` writes the identical document and bumps; without this
-    # line, telling Sandy to remember something worked and saving it from the
-    # app worked, but only one of them reached her next reply.
-    from app.utils.tenant_version import bump_for
-    bump_for(uid, collection=_COLL)
     return {"handled": True, "reply": "دوّنتها 📝"}
 
 
@@ -68,16 +67,10 @@ def memory_recall(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
     if coll is None:
         return {"handled": True, "reply": "ما عندي ذكريات محفوظة بعد."}
 
-    from app.utils.user_profiles import current_user_id
-
-    uid = current_user_id()
-    if not uid:
-        # fail-closed: no tenant → never read a shared bucket.
-        return {"handled": True, "reply": "ما عندي ذكريات محفوظة بعد."}
-
-    # Try regex match on content first
+    # Substring match first. Escaped: the query is the user's words, not a
+    # pattern — "(" would raise and ".*" would match everything.
     docs = list(coll.find(
-        {"chat_id": uid, "content": {"$regex": query, "$options": "i"}},
+        {"content": {"$regex": re.escape(query), "$options": "i"}},
         {"_id": 0, "content": 1},
         limit=10,
     ))
@@ -85,7 +78,7 @@ def memory_recall(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
     # Broad query (e.g. "شو تعرفيه عني") → return all
     if not docs:
         docs = list(coll.find(
-            {"chat_id": uid},
+            {"content": {"$exists": True}},
             {"_id": 0, "content": 1},
             sort=[("created_at", -1)],
             limit=20,
@@ -102,7 +95,6 @@ def memory_recall(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any
 
 def _html_to_text(html: str, max_length: int = 4000) -> str:
     """يشيل HTML tags ويرجع نص نظيف مقسم بفقرات."""
-    import re
     text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
     # كسر السطر عند عناصر الهيكل

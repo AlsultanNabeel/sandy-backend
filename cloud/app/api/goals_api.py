@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
+from app.utils.tenant_db import scoped
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
@@ -44,9 +45,9 @@ def register_goals_api(app, mongo_db=None):
                 return jsonify({"items": []}), 200
             items = []
             cur = (
-                mongo_db[_COLL]
+                scoped(mongo_db, _COLL, field="chat_id")
                 .find(
-                    {"chat_id": uid},
+                    {},
                     {"text": 1, "deadline": 1, "status": 1},
                 )
                 .sort("created_at", 1)
@@ -80,8 +81,7 @@ def register_goals_api(app, mongo_db=None):
                 return jsonify({"ok": False}), 403
             now = datetime.now(timezone.utc)
             # Same doc shape the goal_set tool writes.
-            res = mongo_db[_COLL].insert_one({
-                "chat_id": uid,
+            res = scoped(mongo_db, _COLL, field="chat_id").insert_one({
                 "user_id": uid,
                 "text": text,
                 "deadline": deadline,
@@ -125,8 +125,8 @@ def register_goals_api(app, mongo_db=None):
             uid = current_user_id()
             if not uid:
                 return jsonify({"ok": False}), 403
-            res = mongo_db[_COLL].update_one(
-                {"_id": oid, "chat_id": uid},
+            res = scoped(mongo_db, _COLL, field="chat_id").update_one(
+                {"_id": oid},
                 {"$set": changes},
             )
         return jsonify({"ok": res.matched_count > 0}), (200 if res.matched_count else 400)
@@ -147,5 +147,5 @@ def register_goals_api(app, mongo_db=None):
             uid = current_user_id()
             if not uid:
                 return jsonify({"ok": False}), 403
-            res = mongo_db[_COLL].delete_one({"_id": oid, "chat_id": uid})
+            res = scoped(mongo_db, _COLL, field="chat_id").delete_one({"_id": oid})
         return jsonify({"ok": res.deleted_count > 0}), 200

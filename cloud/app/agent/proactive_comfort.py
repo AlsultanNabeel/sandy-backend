@@ -86,7 +86,7 @@ def get_proactive_comfort(
 
         # إشارة أخف: ما في override للـ intensity، بس تذكير
         from app.agent.anomaly_detector import detect_habit_anomaly
-        anomaly = detect_habit_anomaly(chat_id, user_id, mongo_db)
+        anomaly = detect_habit_anomaly()
         if anomaly:
             return (
                 None,

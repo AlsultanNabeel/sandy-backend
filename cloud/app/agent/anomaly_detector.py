@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 _HOUR_DEVIATION_THRESHOLD = 3.0  # ساعات — انحراف يُعتبر شاذاً
 
 
-def detect_habit_anomaly(    chat_id: str,
-    user_id: str,
-) -> Optional[str]:
+def detect_habit_anomaly() -> Optional[str]:
     """يكتشف إذا كان النشاط الحالي شاذاً مقارنةً بالعادة.
 
     يرجع وصف الشذوذ أو None إذا كل شي طبيعي.
@@ -47,7 +45,7 @@ def detect_habit_anomaly(    chat_id: str,
                 return f"[شذوذ: نشط متأخراً ({now_str}) مقارنةً بعادته ({avg_str})]"
         return None
     except Exception as exc:
-        logger.debug(f"[anomaly_detector] check failed: {exc}")
+        logger.warning("[anomaly_detector] check failed: %s", exc)
         return None
 
 

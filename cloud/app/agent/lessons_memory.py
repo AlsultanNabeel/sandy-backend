@@ -1,7 +1,7 @@
 """D2 — الدروس المستفادة (Lessons Learned LTM).
 
 Sandy تكتشف عبارات "تعلمت كذا" / "اكتشفت إن" وتحفظها كدروس في sandy_memories،
-ثم تذكر المستخدم بها عند الحاجة (proactive_context).
+ثم تذكر المستخدم بها عند الحاجة (عبر soul_node).
 """
 
 from __future__ import annotations
@@ -83,31 +83,6 @@ def save_lesson(
     except Exception as exc:
         logger.warning("[lessons] save failed: %s", exc)
         return False
-
-
-def get_lessons_context(
-    limit: int = 3,
-) -> Optional[str]:
-    """يرجع آخر دروس كـ context لـ soul_node — للتذكير."""
-    coll = _coll()
-    if coll is None:
-        return None
-    try:
-        docs = list(coll.find(
-            {"label": _LABEL},
-            {"_id": 0, "lesson": 1},
-            sort=[("created_at", -1)],
-            limit=limit,
-        ))
-    except Exception:
-        return None
-
-    if not docs:
-        return None
-
-    from app.agent.ltm_crypto import decrypt_field
-    lessons = [decrypt_field(d["lesson"]) for d in docs if d.get("lesson")]
-    return "[دروس سابقة: " + " | ".join(lessons) + "]" if lessons else None
 
 
 def save_detected_lesson(

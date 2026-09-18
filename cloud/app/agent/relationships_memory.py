@@ -1,7 +1,7 @@
 """تذكّر أسماء العلاقات المهمة.
 
-Sandy بتطلع أسماء الأهل والأصحاب والزملاء من رسائل المستخدم، بتخزّنهم
-في sandy_memories، وبترجّعهم في soul_node عشان تغني persona_snippet.
+Sandy بتطلع أسماء الأهل والأصحاب والزملاء من رسائل المستخدم وبتخزّنهم
+في sandy_memories؛ context_builder بيقراهم مع باقي كتلة الشخصية.
 
 نفس نمط الحفظ اللي في emotional_ltm.py و style_memory.py، بـ label="relationship".
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from app.db import get_db
 from app.utils.tenant_db import scoped
@@ -114,30 +114,6 @@ def save_relationship(
     except Exception as exc:
         logger.warning("[relationships] save failed: %s", exc)
         return False
-
-
-def get_relationships_context(
-    limit: int = 10,
-) -> Optional[str]:
-    """يرجّع علاقات المستخدم كـ context لـ soul_node."""
-    coll = _coll()
-    if coll is None:
-        return None
-    try:
-        docs = list(coll.find(
-            {"label": _LABEL},
-            {"_id": 0, "relation": 1, "name": 1},
-            sort=[("created_at", -1)],
-            limit=limit,
-        ))
-    except Exception:
-        return None
-
-    if not docs:
-        return None
-
-    parts = [f"{d['relation']} {d['name']}" for d in docs if d.get("name")]
-    return "[علاقات: " + " · ".join(parts) + "]" if parts else None
 
 
 def save_detected_relationships(

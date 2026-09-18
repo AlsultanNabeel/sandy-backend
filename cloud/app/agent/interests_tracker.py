@@ -1,9 +1,7 @@
 """C2 — متتبّع الاهتمامات (Interests Tracker).
 
 يستخرج اهتمامات المستخدم من رسائله ويحفظها كـ keyword frequency في sandy_memories.
-يُستخدم لاحقاً لـ:
-  - مشاركة محتوى ذكي (research_web on top topic)
-  - تخصيص الردود
+يُستخدم لمشاركة محتوى ذكي (``get_top_interests`` → share_api و content_share_tools).
 
 التحقيق ذو مرحلتين:
   1. detect_interest_keywords() — regex على الرسالة، يستخرج keywords مرشحة
@@ -15,7 +13,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import List
 
 from app.db import get_db
 from app.utils.tenant_db import scoped
@@ -49,7 +47,6 @@ def _coll():
     return scoped(get_db(), _COLL, field="chat_id", bump=False)
 
 
-
 # مؤشرات الاهتمام — "بحب X" / "مهتم بـ X" / "حابب X" / "متابع X"
 _INTEREST_RE = re.compile(
     r"(?:بحب|أحب|احب|مهتم\s+بـ?|حابب|متابع|بدرس|بتابع)\s+(?:ال)?([ء-ي]{3,30}(?:\s+[ء-ي]{3,15})?)",
@@ -60,10 +57,6 @@ _STOPWORDS = {
     "الموضوع", "الكلام", "الحكي", "الفكرة", "اشي", "شي", "الشي",
     "هاي", "هاد", "كذا", "هيك", "وقت", "اشياء",
 }
-
-
-def _normalize_keyword(keyword: str) -> str:
-    return " ".join(str(keyword or "").split()).strip().lower()
 
 
 def detect_interest_keywords(message: str) -> List[str]:
@@ -100,7 +93,7 @@ def bump_interest(
         )
         return True
     except Exception as exc:
-        logger.debug(f"[interests] bump failed: {exc}")
+        logger.warning("[interests] bump failed: %s", exc)
         return False
 
 
@@ -123,54 +116,6 @@ def get_top_interests(
         return []
 
 
-def get_interest_frequencies(
-    limit: int = 5,
-) -> List[Dict[str, Any]]:
-    """يرجع الاهتمامات مع عدد التكرار، مرتبة تنازلياً."""
-    coll = _coll()
-    if coll is None:
-        return []
-    try:
-        docs = list(coll.find(
-            {"label": _LABEL},
-            {"_id": 0, "keyword": 1, "count": 1, "last_seen": 1},
-            sort=[("count", -1), ("last_seen", -1)],
-            limit=limit,
-        ))
-    except Exception:
-        return []
-
-    out: List[Dict[str, Any]] = []
-    for d in docs:
-        keyword = str(d.get("keyword") or "").strip()
-        if not keyword:
-            continue
-        try:
-            count = int(d.get("count") or 0)
-        except Exception:
-            count = 0
-        out.append(
-            {
-                "keyword": keyword,
-                "normalized_keyword": _normalize_keyword(keyword),
-                "count": count,
-                "last_seen": d.get("last_seen"),
-            }
-        )
-    return out
-
-
-def get_proactive_interest_candidate(
-    min_count: int = 3,
-    limit: int = 5,
-) -> Optional[str]:
-    """يرجع أول اهتمام موثق يكفي للتعامل معه بشكل استباقي."""
-    for item in get_interest_frequencies(limit=limit):
-        if item.get("count", 0) >= min_count:
-            return item["keyword"]
-    return None
-
-
 def track_message_interests(
     message: str,
 ) -> int:
@@ -182,11 +127,3 @@ def track_message_interests(
             bumped += 1
     return bumped
 
-
-def get_interests_context(
-) -> Optional[str]:
-    """يرجع اهتمامات المستخدم كـ hint لـ soul_node — لتخصيص الردود."""
-    top = get_top_interests(limit=5)
-    if not top:
-        return None
-    return "[اهتمامات: " + " · ".join(top) + "]"

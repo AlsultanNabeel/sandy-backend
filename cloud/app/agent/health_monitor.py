@@ -1,7 +1,7 @@
 """#1 — Health & Wellness: رصد أنماط السهر.
 
 Sandy ترصد توقيت رسائل المستخدم وتكتشف أنماط السهر المتأخر.
-تُحفظ في MongoDB وتُستخدم في soul_node وproactive_context.
+تُحفظ في MongoDB وتُستخدم في soul_node و anomaly_detector و proactive_comfort.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def record_activity(
             "created_at": datetime.now(timezone.utc),
         })
     except Exception as exc:
-        logger.debug(f"[health_monitor] record failed: {exc}")
+        logger.warning("[health_monitor] record failed: %s", exc)
 
 
 def get_late_night_streak(
@@ -96,7 +96,7 @@ def get_late_night_streak(
                 break
         return streak
     except Exception as exc:
-        logger.debug(f"[health_monitor] streak check failed: {exc}")
+        logger.warning("[health_monitor] streak check failed: %s", exc)
         return 0
 
 

@@ -11,20 +11,23 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from app.db import get_db
+from app.utils.tenant_db import scoped
+
 logger = logging.getLogger(__name__)
 
 _STALE_DAYS = int(os.getenv("SANDY_GOAL_STALE_DAYS", "7"))
 
 
-def get_goals_followup_context(chat_id: str, user_id: str, mongo_db) -> Optional[str]:
+def get_goals_followup_context() -> Optional[str]:
     """Return a goal follow-up directive if stale active goals exist, else None."""
-    if mongo_db is None or not chat_id:
+    coll = scoped(get_db(), "sandy_goals", field="chat_id")
+    if coll is None:
         return None
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_DAYS)
-        goals = list(mongo_db["sandy_goals"].find(
+        goals = list(coll.find(
             {
-                "chat_id": str(chat_id),
                 "status": "active",
                 "$or": [
                     {"updated_at": {"$lt": cutoff}},

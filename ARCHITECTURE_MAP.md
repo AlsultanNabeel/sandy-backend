@@ -240,15 +240,13 @@ round trips per message for one string, on every channel. `search_memory_for_tur
 embeds once and hands the vector to both; the individual functions still take an
 optional `query_vector` so a single search is unchanged.
 
-**A caching layer for `get_persona_directives` was designed and cut**, and the
-reason is worth keeping. It is 26 of the 44 round trips a chat turn waits for and
-is rebuilt from scratch every message, so caching it is the obvious win. Three
-reviews found three different ways it went wrong, and the last one is the
-disqualifying one: the invalidation was built on `ScopedCollection` being the
-single choke point for tenant writes, and it is not — `features/users_store.py`
-and `api/memory_api.py` write on raw handles, which are exactly the two
-collections the cached blocks come from. Anyone picking this up again needs to
-start there, not with the cache.
+**`get_persona_directives` is cached per tenant, keyed on a version stamp**
+(`utils/tenant_version.py`, `context_builder._cached_directive_blocks`). Every
+write to a collection the cached blocks read must bump that version.
+`ScopedCollection` bumps on every write it makes, so the rule is simply: write
+tenant data through `scoped()`. The few writers that still reach past it
+(`users_store`, `api/memory_api.py`) call `bump_for` themselves. A failed read
+is never cached. The per-message keyword search stays outside the cache.
 
 Short-term memory is on Mongo, not Redis, on purpose: the free Redis tier hit its
 monthly request cap and memory silently froze. Mongo has no per-request quota and

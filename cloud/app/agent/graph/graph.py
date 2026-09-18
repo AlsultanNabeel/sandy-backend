@@ -355,8 +355,6 @@ _SIGNIFICANT_MOODS = {"stressed", "frustrated", "sad", "angry", "happy", "excite
 def _save_emotional_async(state: "SandyState", message: str) -> None:
     """A1: يحفظ لحظة عاطفية + A3: يحفظ تصحيح أسلوبي — على الـ pool المشترك."""
     mood = state.get("mood") or ""
-    chat_id = state.get("chat_id", "")
-    user_id = state.get("user_id", "")
 
     def _do_save():
         # submit_background logs any exception (C1); no inner broad swallow here.
@@ -375,7 +373,7 @@ def _save_emotional_async(state: "SandyState", message: str) -> None:
         # A3: تصحيح أسلوبي
         from app.agent.style_memory import detect_style_correction, save_style_preference
         if detect_style_correction(message):
-            save_style_preference(chat_id, user_id, message[:300], message, mongo_db)
+            save_style_preference(message[:300], message)
 
         # #1: تسجيل وقت النشاط للصحة
         from app.agent.health_monitor import record_activity

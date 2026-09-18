@@ -234,16 +234,14 @@ def soul_node(state: SandyState) -> SandyState:
 
             _chat_futs = {}
             if _get_dreams_ctx:
-                _chat_futs["dreams"] = _submit(_get_dreams_ctx, chat_id, user_id, mongo_db)
+                _chat_futs["dreams"] = _submit(_get_dreams_ctx)
             if _get_anniv_ctx:
                 _chat_futs["anniv"] = _submit(_get_anniv_ctx)
             if _get_future_ctx:
                 _chat_futs["future"] = _submit(_get_future_ctx)
             try:
                 from app.agent.proactive_goals import get_goals_followup_context
-                _chat_futs["goals"] = _submit(
-                    get_goals_followup_context, chat_id, user_id, mongo_db
-                )
+                _chat_futs["goals"] = _submit(get_goals_followup_context)
             except Exception:
                 logger.debug("ignoring non-critical error", exc_info=True)
 

@@ -9,6 +9,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from app.db import get_db
+from app.utils.tenant_db import scoped
+
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_memories"
@@ -23,40 +26,32 @@ CORRECTION_SIGNALS = [
 ]
 
 
-def save_style_preference(
-    chat_id: str,
-    user_id: str,
-    preference: str,
-    source_message: str = "",
-    mongo_db=None,
-) -> bool:
+def save_style_preference(preference: str, source_message: str = "") -> bool:
     """يحفظ تفضيل أسلوب جديد في MongoDB.
 
     بيستدعيه الـ graph pipeline لما يكتشف رسالة تصحيح. يرجّع True لو نجح.
+    The write goes through the tenant-scoped handle, which also bumps the
+    tenant version — the `style_memory` label feeds the cached persona block,
+    and without the bump «اختصري» would not reach her next reply.
     """
-    if mongo_db is None or not preference.strip():
+    coll = scoped(get_db(), _COLL, field="chat_id")
+    if coll is None or not (preference or "").strip():
         return False
     try:
         from app.agent.ltm_crypto import encrypt_field
-        mongo_db[_COLL].insert_one({
-            "chat_id": str(chat_id),
-            "user_id": str(user_id),
+        from app.utils.user_profiles import current_user_id
+
+        coll.insert_one({
+            "user_id": str(current_user_id() or ""),
             "label": _LABEL,
             "preference": encrypt_field(str(preference).strip()[:300]),
             "source_message": encrypt_field(str(source_message)[:200]),
             "created_at": datetime.now(timezone.utc),
         })
-        # Raw handle, so the tenant wrapper's stamp never fires — and this
-        # writes the `style_memory` label that the cached persona block is
-        # built from. Without this line he says «اختصري» and she keeps writing
-        # the same long replies, because the block she reads is the one from
-        # before he said it.
-        from app.utils.tenant_version import bump_for
-        bump_for(str(user_id or chat_id or ""), collection=_COLL)
-        logger.info(f"[style_memory] saved preference for {chat_id}: {preference[:60]}")
+        logger.info("[style_memory] saved preference")
         return True
     except Exception as exc:
-        logger.debug(f"[style_memory] save failed: {exc}")
+        logger.warning("[style_memory] save failed: %s", exc)
         return False
 
 

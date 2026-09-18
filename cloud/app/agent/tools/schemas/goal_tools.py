@@ -6,11 +6,15 @@ Sandy تحفظ الأهداف، تتابع تقدمها، وتذكّر بها ا
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:
     from app.agent.tools.dispatcher import DispatchContext
+
+from app.utils.tenant_db import scoped
+from app.utils.user_profiles import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +22,9 @@ _COLL = "sandy_goals"
 
 
 def _goals_db(ctx: "DispatchContext"):
-    return ctx.mongo_db[_COLL] if ctx.mongo_db is not None else None
+    """Tenant-scoped handle (``chat_id`` is the tenant field); None without a
+    tenant, so a turn with no signed-in user can never write a shared bucket."""
+    return scoped(ctx.mongo_db, _COLL, field="chat_id")
 
 
 def goal_set(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
@@ -28,20 +34,18 @@ def goal_set(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         return {"handled": True, "reply": "شو الهدف اللي تبي تحققه؟"}
 
     coll = _goals_db(ctx)
-    chat_id = str((ctx.state or {}).get("chat_id", "default"))
-    user_id = str((ctx.state or {}).get("user_id", "default"))
+    if coll is None:
+        return {"handled": True, "ok": False, "reply": "ما قدرت أوصل للأهداف."}
     deadline = str(args.get("deadline") or "").strip() or None
 
-    if coll is not None:
-        coll.insert_one({
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "text": text,
-            "deadline": deadline,
-            "status": "active",
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-        })
+    coll.insert_one({
+        "user_id": str(current_user_id() or ""),
+        "text": text,
+        "deadline": deadline,
+        "status": "active",
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    })
 
     deadline_str = f" (الموعد: {deadline})" if deadline else ""
     return {"handled": True, "reply": f"سجّلت هدفك: {text}{deadline_str} 🎯\nبتابعك عليه!"}
@@ -53,11 +57,10 @@ def goal_list(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     if coll is None:
         return {"handled": True, "reply": "ما عندي أهداف محفوظة بعد."}
 
-    chat_id = str((ctx.state or {}).get("chat_id", "default"))
     status_filter = str(args.get("status") or "active")
 
     docs = list(coll.find(
-        {"chat_id": chat_id, "status": status_filter},
+        {"status": status_filter},
         {"_id": 1, "text": 1, "deadline": 1, "status": 1},
         sort=[("created_at", 1)],
         limit=10,
@@ -82,14 +85,15 @@ def goal_done(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
     if coll is None:
         return {"handled": True, "ok": False, "reply": "ما قدرت أوصل للأهداف."}
 
-    chat_id = str((ctx.state or {}).get("chat_id", "default"))
     goal_text = str(args.get("goal") or args.get("text") or "").strip()
 
     if not goal_text:
         return {"handled": True, "reply": "أي هدف خلصت منه؟"}
 
     result = coll.find_one_and_update(
-        {"chat_id": chat_id, "status": "active", "text": {"$regex": goal_text[:50], "$options": "i"}},
+        # Escaped: the user's words are a substring, not a pattern ("(" would
+        # raise, ".*" would complete whichever goal came first).
+        {"status": "active", "text": {"$regex": re.escape(goal_text[:50]), "$options": "i"}},
         {"$set": {"status": "done", "updated_at": datetime.now(timezone.utc)}},
     )
 
