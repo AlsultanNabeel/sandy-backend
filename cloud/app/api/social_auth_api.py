@@ -11,7 +11,7 @@ backend can treat the request as a known signed-in user.
 
 Both return the same shape::
 
-    {"token", "user_id", "role": "user", "onboarding_done": bool}
+    {"token", "user_id", "role", "onboarding_done": bool}
 
 Verification uses PyJWT's ``PyJWKClient`` to fetch each provider's JWKS (their
 RS256 public keys), checks the signature + ``exp`` + issuer + audience, then
@@ -84,7 +84,8 @@ def _verify_id_token(
     forged/expired/malformed token returns None (mapped to 401).
 
     ``audience`` may be None: when the expected client id / bundle id env var is
-    unset we skip the audience check (and log a warning) rather than reject.
+    unset we skip the audience check (and log a warning) rather than reject — so
+    such a sign-in never earns the owner tier (see `_issue_for_identity`).
     """
     try:
         signing_key = _get_jwks_client(jwks_url).get_signing_key_from_jwt(id_token)
@@ -155,6 +156,7 @@ def register_social_auth_api(app):
             email=str(claims.get("email") or ""),
             name=str(claims.get("name") or ""),
             picture=str(claims.get("picture") or ""),
+            email_trusted=bool(audience) and _is_true(claims.get("email_verified")),
         )
 
     @app.route("/api/auth/apple", methods=["POST"])
@@ -191,11 +193,28 @@ def register_social_auth_api(app):
             email=str(claims.get("email") or ""),
             name=str(body.get("name") or ""),
             picture="",
+            email_trusted=bool(audience) and _is_true(claims.get("email_verified")),
         )
 
 
-def _issue_for_identity(*, provider: str, sub: str, email: str, name: str, picture: str):
-    """Find-or-create the user for a verified identity and mint our app token."""
+def _is_true(value) -> bool:
+    """Google sends `email_verified` as a boolean, Apple as the string "true"."""
+    return value is True or str(value).strip().lower() == "true"
+
+
+def _issue_for_identity(*, provider: str, sub: str, email: str, name: str,
+                        picture: str, email_trusted: bool = False):
+    """Find-or-create the user for a verified identity and mint our app token.
+
+    **The owner tier is granted on an email the provider vouched for, and only
+    then.** `role_for_email` matches the address in the token against
+    `SANDY_OWNER_EMAILS`, and it used to accept any address the token carried —
+    including one the provider marks `email_verified: false`, and including a
+    token minted for somebody else's app when the audience check is skipped
+    (`GOOGLE_OAUTH_CLIENT_ID` / `APPLE_BUNDLE_ID` unset). Either way the owner's
+    address in a token was enough for the owner's quota tier. Unverified sign-ins
+    still work; they just get the ordinary role.
+    """
     user = users_store.upsert_from_oauth(
         provider, sub, email=email, name=name, picture=picture
     )
@@ -205,9 +224,9 @@ def _issue_for_identity(*, provider: str, sub: str, email: str, name: str, pictu
         return jsonify({"error": "auth_unavailable"}), 503
 
     user_id = user.get("_id")
+    role = role_for_email(email) if email_trusted else "user"
     try:
-        token = make_token(role_for_email(email or user.get("email") or ""),
-                           user_id=user_id)
+        token = make_token(role, user_id=user_id)
     except RuntimeError:
         # JWT_SECRET not configured — we verified the user but can't sign a token.
         logger.error("[social_auth] cannot mint token: JWT_SECRET unset")
@@ -217,6 +236,6 @@ def _issue_for_identity(*, provider: str, sub: str, email: str, name: str, pictu
     return jsonify({
         "token": token,
         "user_id": user_id,
-        "role": "user",
+        "role": role,
         "onboarding_done": bool(onboarding.get("done", False)),
     }), 200

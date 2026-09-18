@@ -31,11 +31,10 @@ SANDY_USER_CHAT_ID = os.getenv("SANDY_USER_CHAT_ID", "").strip()
 SANDY_OWNER_EMAILS: str = os.getenv("SANDY_OWNER_EMAILS", "")
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
 
-# Auth secrets (read via os.getenv inside auth_handlers.py today; exposed here as
-# named constants so validate_config can check them. Track 2 migrates the call
-# sites to import these.)
+# Auth secret — exposed here so validate_config can check it. (There is no owner
+# password any more: the owner signs in by email like everyone, and is named by
+# SANDY_OWNER_EMAILS above.)
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
-OWNER_PASSWORD = os.getenv("OWNER_PASSWORD", "").strip()
 
 # ── Error reporting (optional) ────────────────────────────────────────────────
 # Empty DSN = reporting off and the app behaves exactly as before. The release
@@ -197,8 +196,6 @@ def validate_config() -> tuple[list[str], list[str]]:
     if APP_ENV == "prod":
         if not JWT_SECRET:
             warnings.append("JWT_SECRET is empty in prod (tokens are insecure).")
-        if not OWNER_PASSWORD:
-            warnings.append("OWNER_PASSWORD is empty in prod (owner login open).")
 
     return fatal, warnings
 

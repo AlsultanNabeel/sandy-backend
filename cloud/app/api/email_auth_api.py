@@ -27,9 +27,18 @@ _MIN_PASSWORD = 8
 
 
 def _client_ip() -> str:
-    return request.headers.get(
-        "X-Forwarded-For", request.remote_addr or "unknown"
-    ).split(",")[0].strip()
+    """The address that actually connected, as Heroku's router saw it.
+
+    **The last entry, not the first.** `X-Forwarded-For` arrives from the client
+    and Heroku's router *appends* the connecting address to whatever was there.
+    The first entry is therefore whatever the caller chose to send — reading it
+    let a password-guessing script name a fresh "IP" on every request and never
+    meet the per-IP limit. The last one is the only entry nobody but the router
+    wrote.
+    """
+    forwarded = [h.strip() for h in
+                 request.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+    return forwarded[-1] if forwarded else (request.remote_addr or "unknown")
 
 
 def _rate_blocked(*checks) -> bool:
@@ -45,15 +54,17 @@ def _rate_blocked(*checks) -> bool:
 def _result_for(user):
     """يصكّ توكن التطبيق لمستخدم ويرجّع نفس شكل ردّ المصادقة الاجتماعية."""
     user_id = user.get("_id")
+    role = role_for_email(user.get("email") or "")
     try:
-        token = make_token(role_for_email(user.get("email") or ""), user_id=user_id)
+        token = make_token(role, user_id=user_id)
     except RuntimeError:
         return jsonify({"error": "auth_unavailable"}), 503
     onboarding = user.get("onboarding") or {}
     return jsonify({
         "token": token,
         "user_id": user_id,
-        "role": "user",
+        # The role the token carries — this said "user" even for the owner.
+        "role": role,
         "onboarding_done": bool(onboarding.get("done", False)),
     }), 200
 

@@ -28,7 +28,10 @@ _MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 _SUBSCRIBER_DAILY, _SUBSCRIBER_PER_MIN = 5000, 60
 _FREE_DAILY, _FREE_PER_MIN = 40, 12
 
-# مدة بقاء سجل شات الزائر قبل انتهائه (ساعة).
+# أقصى عدد رسائل بنحفظه من سجل شات الويب — الأحدث بس.
+_MAX_HISTORY_MESSAGES = 500
+
+# مدة بقاء سجل شات الزائر قبل انتهائه (٤٨ ساعة).
 _GUEST_CHAT_TTL = timedelta(hours=48)
 
 
@@ -79,15 +82,19 @@ def create_app(
                 mongo_status.update(
                     {"ok": True, "database": getattr(mongo_db, "name", None)}
                 )
-            except Exception as exc:
-                mongo_status["error"] = str(exc)
+            except Exception as exc:  # noqa: BLE001 — a health probe reports, never raises
+                # The type, not the message: this endpoint is public, and a
+                # driver error names the cluster host. The log has the detail.
+                logger.warning("[health] mongo ping failed: %s", exc)
+                mongo_status["error"] = type(exc).__name__
 
         chroma_status = {"ok": False}
         try:
             chroma_data = semantic_memory_stats_fn() if callable(semantic_memory_stats_fn) else {}
             chroma_status.update({"ok": True, **(chroma_data or {})})
-        except Exception as exc:
-            chroma_status["error"] = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[health] semantic memory stats failed: %s", exc)
+            chroma_status["error"] = type(exc).__name__
 
         overall_ok = (
             mongo_status.get("ok")
@@ -259,6 +266,34 @@ def create_app(
             }, 403
         return None
 
+    def _media_gate(claims):
+        """Meter one image-model call for whoever is asking.
+
+        **Signed-in users were not metered here at all.** The three image
+        endpoints below said "authenticated users are metered in /api/agent" —
+        but they are separate routes, so a free account calling them directly
+        generated and analysed images, each a paid Azure call, with no quota
+        whatsoever. Guests go through the visitor budget as before; everyone
+        else is charged against the same tier quota as a chat message.
+        Returns a ready ``(body, status)`` refusal, or None to proceed.
+        """
+        if claims.get("role") == "guest":
+            return _guest_media_gate(claims)
+        over = _meter_or_error(claims.get("role", "user"), claims.get("user_id") or "")
+        if over:
+            return _limit_response(over), 429
+        return None
+
+    def _decode_image(image_b64: str):
+        """Client base64 → bytes, or None when it is not base64 at all (a 400,
+        not the 500 an uncaught `binascii.Error` used to become)."""
+        import binascii
+
+        try:
+            return base64.b64decode(image_b64, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+
     # Web chat history (MongoDB)
     def _chat_history_key(claims):
         # Authenticated users (owner + signed-in) key history by their stable
@@ -283,6 +318,12 @@ def create_app(
             return jsonify({"ok": True}), 200
         body = request.get_json(silent=True) or {}
         messages = body.get("messages", [])
+        if not isinstance(messages, list):
+            return jsonify({"error": "invalid_request"}), 400
+        # The newest ones only. The request cap is 16 MB and so is a Mongo
+        # document — a client that kept appending got a 500 on the write that
+        # finally crossed it, and lost the save.
+        messages = messages[-_MAX_HISTORY_MESSAGES:]
         key = _chat_history_key(claims)
         expire_at = None if claims.get("role") != "guest" else \
             datetime.now(timezone.utc) + _GUEST_CHAT_TTL
@@ -518,9 +559,7 @@ def create_app(
         if not prompt:
             return jsonify({"error": "no prompt"}), 400
 
-        # Rate-limit guests on image generation (authenticated users are metered
-        # in /api/agent instead, not via the visitor-approval flow).
-        gate = _guest_media_gate(claims)
+        gate = _media_gate(claims)
         if gate is not None:
             err_body, code = gate
             return jsonify(err_body), code
@@ -546,15 +585,17 @@ def create_app(
         if not prompt or not image_b64:
             return jsonify({"error": "no prompt or image"}), 400
 
-        # Same guest metering as /api/image (authenticated users metered in /api/agent).
-        gate = _guest_media_gate(claims)
+        gate = _media_gate(claims)
         if gate is not None:
             err_body, code = gate
             return jsonify(err_body), code
 
+        source = _decode_image(image_b64)
+        if source is None:
+            return jsonify({"error": "invalid_image"}), 400
         try:
             from app.features.vision import edit_image_with_azure
-            img_bytes = edit_image_with_azure(base64.b64decode(image_b64), prompt)
+            img_bytes = edit_image_with_azure(source, prompt)
             if img_bytes:
                 b64 = base64.b64encode(img_bytes).decode()
                 return jsonify({"url": f"data:image/png;base64,{b64}"}), 200
@@ -597,9 +638,7 @@ def create_app(
         if not image_b64:
             return jsonify({"error": "no image"}), 400
 
-        # Rate-limit guests (shared unified budget). Authenticated users are
-        # metered in /api/agent, not via the visitor-approval flow.
-        gate = _guest_media_gate(claims)
+        gate = _media_gate(claims)
         if gate is not None:
             err_body, code = gate
             return jsonify(err_body), code
@@ -611,7 +650,9 @@ def create_app(
             # Telegram pipeline uses. Without it the call raised TypeError and
             # every web image analysis failed.
             from app.agent.facade.agent import create_chat_completion
-            img_bytes = base64.b64decode(image_b64)
+            img_bytes = _decode_image(image_b64)
+            if img_bytes is None:
+                return jsonify({"error": "invalid_image"}), 400
             reply = analyze_image_with_azure(
                 img_bytes, question, create_chat_completion_fn=create_chat_completion,
                 user_id=claims.get("user_id") or None,

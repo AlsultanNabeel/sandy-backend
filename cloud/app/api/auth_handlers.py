@@ -16,8 +16,6 @@ reachable. People sign in with email or a social account instead.
 from __future__ import annotations
 
 import functools
-import hashlib
-import hmac
 import logging
 import os
 import threading
@@ -172,17 +170,7 @@ def require_tenant(view):
     return require_auth(_inner)
 
 
-def check_owner_password(password: str) -> bool:
-    owner_pass = os.getenv("OWNER_PASSWORD", "")
-    if not owner_pass:
-        return False
-    return hmac.compare_digest(
-        hashlib.sha256(password.encode()).digest(),
-        hashlib.sha256(owner_pass.encode()).digest(),
-    )
-
-
-# Auth state (login rate limit + web access requests) lives in MongoDB. It used
+# Auth state (login rate limit) lives in MongoDB. It used
 # to be in Redis, but we dropped Redis/Upstash. One collection, `sandy_auth`, with
 # a TTL index on `expire_at` (absolute expiry datetime) so entries self-clean.
 _AUTH_COLL = "sandy_auth"
@@ -223,7 +211,6 @@ def check_rate_limit(ip: str, scope: str = "login") -> Tuple[bool, int]:
         )
         return _memory_rate_check(ip, scope)
     try:
-        from datetime import datetime, timezone, timedelta
         from pymongo import ReturnDocument
         now = datetime.now(timezone.utc)
         doc = coll.find_one_and_update(
