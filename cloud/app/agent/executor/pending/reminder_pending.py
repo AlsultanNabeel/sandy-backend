@@ -44,6 +44,8 @@ def _handle_confirm_remind_at(
             store_result = deps.add_reminder(
                 text=reminder_text,
                 remind_at_iso=remind_dt.isoformat(),
+                recurrence=str(pending.get("recurrence", "") or ""),
+                linked_task_id=str(pending.get("linked_task_id", "") or ""),
             )
             clear_pending_action(session)
             save_session_fn(session, session_file=session_file, mongo_db=mongo_db)

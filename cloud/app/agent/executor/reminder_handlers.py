@@ -37,6 +37,19 @@ def _parse_snooze_minutes(time_text: str) -> int:
     return 30
 
 
+def _match_reminders(reminders, target_text: str, target_id: str):
+    """Reminders the user means: by id, else an exact title, else substring."""
+    if target_id:
+        return [r for r in reminders if str(r.get("id", "")) == target_id]
+    target = (target_text or "").strip().lower()
+    if not target:
+        return []
+    exact = [r for r in reminders if (r.get("text", "") or "").strip().lower() == target]
+    if exact:
+        return exact[:1]
+    return [r for r in reminders if target in (r.get("text", "") or "").lower()]
+
+
 def handle_reminder_action(
     params: Dict[str, Any],
     *,
@@ -144,18 +157,19 @@ def handle_reminder_action(
 
     elif reminder_action == "delete":
         target_text = reminder_text or str(params.get("text", "")).strip()
-        if not target_text:
+        target_id = str(params.get("reminder_id", "")).strip()
+        if not target_text and not target_id:
             reply = "شو اسم التذكير أو المهمة اللي بدك تحذف تذكيرها؟"
         else:
-            reminders = load_reminders()
-            target_lower = target_text.lower()
-            matched = [
-                r
-                for r in reminders
-                if target_lower in (r.get("text", "") or "").lower()
-            ]
+            matched = _match_reminders(load_reminders(), target_text, target_id)
             if not matched:
-                reply = f"ما لقيت تذكير مرتبط بـ '{target_text}'."
+                reply = f"ما لقيت تذكير مرتبط بـ '{target_text or target_id}'."
+                ok = False
+            elif len(matched) > 1:
+                # A substring hit is not a choice: «دوا» matches every
+                # medication reminder, and deleting them all is not undoable.
+                names = "\n".join(f"- {r.get('text', '')}" for r in matched[:5])
+                reply = f"لقيت أكثر من تذكير مطابق:\n{names}\nأي واحد بالضبط؟"
                 ok = False
             else:
                 deleted = 0
@@ -189,11 +203,7 @@ def handle_reminder_action(
         if not target_text:
             return {"handled": True, "reply": "شو اسم التذكير اللي بدك تعدّله؟"}
 
-        reminders = load_reminders()
-        target_lower = target_text.lower()
-        matched = [
-            r for r in reminders if target_lower in (r.get("text", "") or "").lower()
-        ]
+        matched = _match_reminders(load_reminders(), target_text, "")
         if not matched:
             return {
                 "handled": True, "ok": False,
@@ -237,7 +247,8 @@ def handle_reminder_action(
             new_dt = base_dt + timedelta(minutes=snooze_minutes)
             new_time_iso = new_dt.isoformat()
 
-        else:  # update: time and/or recurrence
+        else:  # update: title, time and/or recurrence
+            new_title = str(params.get("new_text", "")).strip()
             if not remind_at_iso and time_text:
                 parse_source = normalize_user_message(time_text) or (
                     normalized_user_message or user_message
@@ -249,7 +260,7 @@ def handle_reminder_action(
                 )
                 if isinstance(parsed, dict) and parsed.get("success"):
                     remind_at_iso = parsed.get("remind_at_iso") or ""
-            if not remind_at_iso and not new_recurrence:
+            if not remind_at_iso and not new_recurrence and not new_title:
                 return {
                     "handled": True,
                     "reply": "أعطني الوقت الجديد أو التكرار الجديد للتذكير.",
@@ -297,6 +308,8 @@ def handle_reminder_action(
                 reply = f"✅ أجّلت تذكير '{current_text}' — الوقت الجديد: {disp}."
             else:
                 parts = []
+                if new_title:
+                    parts.append(f"الاسم: {new_title}")
                 if new_time_iso:
                     try:
                         disp_dt = datetime.fromisoformat(new_time_iso).astimezone(
@@ -358,6 +371,8 @@ def handle_reminder_action(
                                     "action": "confirm_remind_at",
                                     "reminder_text": reminder_text,
                                     "suggested_iso": suggested,
+                                    "recurrence": recurrence,
+                                    "linked_task_id": str(params.get("linked_task_id", "")).strip(),
                                     "confirmation_status": "pending",
                                 }
                             )
@@ -449,4 +464,5 @@ def handle_reminder_action(
                     if store_result.get("success")
                     else "صار خطأ وأنا بضيف التذكير. جرّب مرة ثانية."
                 )
+                ok = bool(store_result.get("success"))
     return {"handled": True, "ok": ok, "reply": reply}
