@@ -35,6 +35,7 @@ import os
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 try:
@@ -126,7 +127,11 @@ def _inbox_put(node_id: str, req_id: str, jpeg: bytes) -> None:
         col.replace_one(
             {"_id": f"{node_id}:{req_id}"},
             {"_id": f"{node_id}:{req_id}", "node_id": node_id, "req_id": req_id,
-             "jpeg": jpeg, "at": time.time()},
+             "jpeg": jpeg, "at": time.time(),
+             # TTL-indexed (bootstrap.ensure_indexes): the sweep below only
+             # runs when another photo arrives, so without this the last
+             # picture taken in someone's home would stay forever.
+             "expire_at": datetime.now(timezone.utc) + timedelta(seconds=_INBOX_TTL_S)},
             upsert=True)
         # Swept on write rather than by a timer: the only way photos accumulate
         # is by taking more of them, so the arrival of one is exactly when the

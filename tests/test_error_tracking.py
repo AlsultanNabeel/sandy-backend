@@ -80,6 +80,24 @@ def test_request_body_is_never_sent():
     assert out["request"]["url"] == "/api/life/journal"
 
 
+def test_breadcrumbs_keep_the_tag_not_the_words():
+    """INFO lines name task text and search queries; they ride along as crumbs."""
+    event = {
+        "breadcrumbs": {"values": [
+            {"message": "[TasksStore] added: اشتري هدية لسارة", "data": {"q": "x"}},
+            {"message": "plain line with a secret"},
+        ]},
+        "logentry": {"message": "[x] failed for %s", "params": ["sara@example.com"],
+                     "formatted": "[x] failed for sara@example.com"},
+    }
+    out = et._before_send(event, None)
+    crumbs = out["breadcrumbs"]["values"]
+    assert crumbs[0]["message"] == "[TasksStore]" and "data" not in crumbs[0]
+    assert crumbs[1]["message"] == "[redacted]"
+    assert "params" not in out["logentry"] and "formatted" not in out["logentry"]
+    assert out["logentry"]["message"] == "[x] failed for %s"
+
+
 def test_a_failing_scrubber_drops_the_event(monkeypatch):
     """Better to lose a report than to send an unscrubbed one."""
     def explode(*_a, **_k):

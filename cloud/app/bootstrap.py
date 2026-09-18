@@ -156,6 +156,9 @@ def ensure_indexes() -> None:
         ("sandy_memories.chat_id+label+created_at", lambda: mongo_db.sandy_memories.create_index(
             [("chat_id", 1), ("label", 1), ("created_at", -1)], background=True
         )),
+        ("camera_inbox.expire_at_ttl", lambda: mongo_db.camera_inbox.create_index(
+            "expire_at", expireAfterSeconds=0, background=True
+        )),
         # Popped on every chat message (passive delivery of due messages).
         ("sandy_future_messages.chat_id+delivered+deliver_at",
          lambda: mongo_db.sandy_future_messages.create_index(

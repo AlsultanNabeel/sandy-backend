@@ -75,6 +75,14 @@ def _scrub(obj: Any, depth: int = 0) -> Any:
     return obj
 
 
+def _log_tag(message: Any) -> str:
+    """The leading "[tag]" of a log line, or a marker — never its content."""
+    text = str(message or "")
+    if text.startswith("[") and "]" in text:
+        return text[: text.index("]") + 1]
+    return "[redacted]"
+
+
 def _before_send(event: Dict[str, Any], hint: Any) -> Optional[Dict[str, Any]]:
     """Last gate before an event leaves the process."""
     try:
@@ -91,6 +99,23 @@ def _before_send(event: Dict[str, Any], hint: Any) -> Optional[Dict[str, Any]]:
         for key in ("extra", "contexts", "tags"):
             if key in event:
                 event[key] = _scrub(event[key])
+        # Breadcrumbs are the INFO log lines leading up to the event, and INFO
+        # lines on this backend name task text, reminder text and search
+        # queries. Keep the shape of the story (logger, level, time and the
+        # "[tag]" a line starts with), not its words.
+        crumbs = event.get("breadcrumbs")
+        values = crumbs.get("values") if isinstance(crumbs, dict) else crumbs
+        if isinstance(values, list):
+            for crumb in values:
+                if isinstance(crumb, dict):
+                    crumb["message"] = _log_tag(crumb.get("message"))
+                    crumb.pop("data", None)
+        # The event's own log record: the template stays (it is code), the
+        # values interpolated into it do not.
+        entry = event.get("logentry")
+        if isinstance(entry, dict):
+            entry.pop("params", None)
+            entry.pop("formatted", None)
         return event
     except Exception:  # noqa: BLE001
         # A scrubber that throws must not send the unscrubbed event. Dropping it
