@@ -131,8 +131,31 @@ def _create_chat_resilient(client: Any, kwargs: Dict[str, Any]) -> Any:
     return _cb.call(_create_chat_adapting, client, kwargs)
 
 
+# **What each deployment refused, remembered for the life of the process.**
+#
+# The adaptation below used to be relearned on every call. The router sends
+# `reasoning_effort` so a reasoning model does not think for seconds before
+# picking a tool — and an ordinary model rejects it with a 400. Nothing kept
+# that answer, so on a non-reasoning deployment **every message** paid one
+# refused request, a full network round trip to Azure, before the one that
+# worked. A deployment does not change its parameter contract between calls;
+# it is learned once per model name.
+_ADAPTED: Dict[str, Dict[str, Optional[str]]] = {}
+
+
+def _apply_known_quirks(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Rewrite kwargs with what this model already refused: renamed or dropped."""
+    for param, renamed in _ADAPTED.get(str(kwargs.get("model", "")), {}).items():
+        if param in kwargs:
+            value = kwargs.pop(param)
+            if renamed:
+                kwargs[renamed] = value
+    return kwargs
+
+
 def _create_chat_adapting(client: Any, kwargs: Dict[str, Any]) -> Any:
-    kwargs = dict(kwargs)
+    kwargs = _apply_known_quirks(dict(kwargs))
+    quirks = _ADAPTED.setdefault(str(kwargs.get("model", "")), {})
     _protected = {"model", "messages", "tools"}
     for _ in range(4):
         try:
@@ -141,9 +164,13 @@ def _create_chat_adapting(client: Any, kwargs: Dict[str, Any]) -> Any:
             param = _rejected_param(exc)
             if param == "max_tokens" and "max_tokens" in kwargs:
                 kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+                quirks["max_tokens"] = "max_completion_tokens"
                 continue
             if param and param in kwargs and param not in _protected:
                 kwargs.pop(param)
+                quirks[param] = None
+                logger.info("[azure] %s rejects %s — dropped from now on",
+                            kwargs.get("model"), param)
                 continue
             raise
     return client.chat.completions.create(**kwargs)

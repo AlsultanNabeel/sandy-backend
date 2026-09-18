@@ -498,12 +498,17 @@ def run_graph(
             logger.debug("ignoring non-critical error", exc_info=True)
 
         # توجيه: نداء FC واحد على كامل الكتالوج
+        _t = time.perf_counter()
         state = _route_intent(state)
+        t_route = time.perf_counter() - _t
 
+        _t = time.perf_counter()
         state = soul_node(state)
         state = router_node(state)
         next_node = route_after_router(state)
+        t_soul = time.perf_counter() - _t
 
+        _t = time.perf_counter()
         if next_node == "pending_node":
             state = pending_node(state)
         elif next_node == "clarify_node":
@@ -512,6 +517,18 @@ def run_graph(
             state = execute_node(state)
 
         state = response_node(state)
+        t_exec = time.perf_counter() - _t
+
+        # **One line per turn that says where the wait went.** Each stage logs
+        # its own number somewhere, but they are scattered across modules and
+        # interleaved with every other request on the worker — this is the
+        # line to grep when chat feels slow.
+        logger.info(
+            "[turn] %.0fms total — route %.0f · soul %.0f · %s %.0f (%s)",
+            (time.perf_counter() - t_total) * 1000, t_route * 1000,
+            t_soul * 1000, next_node, t_exec * 1000,
+            (state.get("function_call") or {}).get("name", ""),
+        )
 
     except Exception as exc:
         logger.error(

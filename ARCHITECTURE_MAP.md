@@ -469,6 +469,20 @@ there for that reason.
 
 A missing key disables only its own feature — the app still boots.
 
+**Parameter quirks are learned once per deployment, and both model calls share
+them.** `azure_intent_client._create_chat_adapting` retries a call without a
+parameter the model refused (`reasoning_effort`, `temperature`) or with
+`max_tokens` renamed — and it used to relearn that on every call. The router
+always sends `reasoning_effort`, so on a non-reasoning deployment every message
+paid one refused round trip to Azure before the call that worked. `_ADAPTED`
+now remembers the answer per model name for the life of the process. The chat
+reply (`openai_client.create_chat_completion`) goes through the same adapter;
+before, a reasoning deployment failed the streamed reply, failed the retry, and
+fell to OpenAI direct.
+
+**Where a chat turn's time goes** is one log line: `[turn] …ms total — route ·
+soul · <node> (<tool>)`, from `run_graph`. Grep it before theorising.
+
 ---
 
 ## 3. The voice path
@@ -1016,7 +1030,7 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    router, then the reply. That pair, not the database, is why chat feels slower
    than voice: voice injects memory once at session start and then only streams.
    Merging them, or streaming the reply before routing finishes, is the open
-   question.
+   question. The `[turn]` log line (§2.11) now gives the split per message.
 
 ### Real, but nobody hits it today
 

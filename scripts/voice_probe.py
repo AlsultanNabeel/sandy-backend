@@ -15,12 +15,16 @@ come back.**
     python scripts/voice_probe.py question.wav          # mono 16-bit 16 kHz
     python scripts/voice_probe.py --say "شو مهامي اليوم؟"     # spoken by TTS
     python scripts/voice_probe.py --say "..." --think        # with thinking on
+    python scripts/voice_probe.py --say "..." --no-tools     # without the catalogue
 
 `--say` speaks the text with the same Gemini voice stack the product uses and
 feeds the result in as if the owner had said it, which makes the probe a real
 question and not a beep. `--think` leaves extended thinking enabled, so the two
 runs can be compared — the reason it is off by default is six and a half
-seconds of it against a robot that hangs up after eight.
+seconds of it against a robot that hangs up after eight. `--no-tools` drops the
+tool catalogue (eighty declarations, ~26k characters) so the same question can
+be timed with and without it — the one way to know what the catalogue costs
+before anyone trims it.
 """
 
 from __future__ import annotations
@@ -100,7 +104,8 @@ async def main() -> int:
 
     args = sys.argv[1:]
     think = "--think" in args
-    args = [a for a in args if a not in ("--think", "--probe-frames")]
+    no_tools = "--no-tools" in args
+    args = [a for a in args if a not in ("--think", "--probe-frames", "--no-tools")]
     if args and args[0] == "--say":
         audio = _speak(" ".join(args[1:]) or "مرحبا")
     else:
@@ -123,14 +128,17 @@ async def main() -> int:
     # Without them she reads the call out loud — `reminder_add(time=...)` — as
     # if it were a sentence, and that would be blamed on whatever else the run
     # was testing. The session the robot gets has them; so does this.
-    try:
-        from app.api.voice_ws.session import _build_live_tools
+    live_tools = None
+    if no_tools:
+        print("tools: none (--no-tools)")
+    else:
+        try:
+            from app.api.voice_ws.session import _build_live_tools
 
-        live_tools = _build_live_tools(types)
-        print(f"tools: {sum(len(t.function_declarations or []) for t in live_tools)}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"tools unavailable ({exc})")
-        live_tools = None
+            live_tools = _build_live_tools(types)
+            print(f"tools: {sum(len(t.function_declarations or []) for t in live_tools)}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"tools unavailable ({exc})")
 
     config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],

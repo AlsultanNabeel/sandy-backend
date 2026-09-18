@@ -68,11 +68,16 @@ def create_chat_completion(
     if stream:
         kwargs["stream"] = True
 
+    # Same per-model parameter adaptation as the router: a deployment that
+    # rejects `max_tokens` or `temperature` (gpt-5 / o-series) used to fail the
+    # reply, fail the non-stream retry, and fall to OpenAI direct — three calls
+    # for one answer, and never streamed. Imported here, not at module top:
+    # azure_intent_client is the heavier module and this one is on every path.
+    from app.integrations.azure_intent_client import _create_chat_adapting
+
     try:
-        if stream:
-            # Return stream directly — circuit breaker wraps only the initial call
-            return _cb.call(client.chat.completions.create, **kwargs)
-        return _cb.call(client.chat.completions.create, **kwargs)
+        # Stream or not, the breaker wraps only the initial call.
+        return _cb.call(_create_chat_adapting, client, kwargs)
     except CircuitOpenError:
         raise RuntimeError("[OpenAI] Circuit OPEN — AI service temporarily unavailable")
 
