@@ -292,25 +292,6 @@ def _handle_modify_response(
             "reply": f"متأكد، بدك تعدّل شنو من المهمة؟\nالمهمة: {task_text}\n\nبدك تعدّل: الاسم، التاريخ، الملاحظة، أو الأولوية؟",
         }
 
-    elif pending_type == "calendar":
-        # Ask which field to change.
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "calendar",
-                "action": "awaiting_field_to_modify",
-                "original_action": pending.get("action", ""),
-                "original_data": pending,
-                "correction_step": 1,
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-
-        event_title = pending.get("title", "الحدث")
-        return {
-            "handled": True,
-            "reply": f"متأكد، بدك تعدّل شنو من الحدث؟\nالحدث: {event_title}\n\nبدك تعدّل: الوقت، التاريخ، الموقع، أو الوصف؟",
-        }
-
     else:
         clear_pending_action(session)
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)

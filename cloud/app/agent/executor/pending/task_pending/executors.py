@@ -170,24 +170,24 @@ def _exec_task_update_due_time(
         if result.get("reason") == "past":
             return {"handled": True, "ok": False, "reply": "الوقت الجديد بالماضي. أعطني وقت لاحق."}
         return {"handled": True, "ok": False, "reply": "ما قدرت أعدل وقت المهمة."}
+    # Move the task-linked reminder to the new due time. The store deletes by
+    # linked_task_id, so the old one must go before the new one is written.
     deps.delete_sandy_reminder_by_task_id(task_id)
-    reminder_description = (
-        f"Reminder created by Sandy: {task_text}\n[SANDY_TASK_ID:{task_id}]"
+    reminder_result = deps.add_reminder(
+        text=task_text,
+        remind_at_iso=due_iso,
+        linked_task_id=task_id,
     )
-    calendar_result = deps.add_calendar_event(
-        title=task_text,
-        start_iso=due_iso,
-        description=reminder_description,
-        reminder_minutes=0,
-    )
-    if calendar_result.get("success"):
+    if reminder_result.get("success"):
         return {
             "handled": True,
+            "ok": True,
             "reply": f"تمام، عدّلت وقت تذكير المهمة:\n- {task_text}\nالوقت الجديد: {new_due_text}",
         }
     return {
         "handled": True,
-        "reply": f"عدّلت وقت المهمة، بس صار خطأ وأنا بحدّث تذكير Google Calendar:\n- {task_text}",
+        "ok": True,
+        "reply": f"عدّلت وقت المهمة، بس صار خطأ وأنا بحدّث التذكير تبعها:\n- {task_text}",
     }
 
 

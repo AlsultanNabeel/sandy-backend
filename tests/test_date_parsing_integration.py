@@ -168,20 +168,6 @@ class TestPendingActionConfirmationFlow(unittest.TestCase):
         self.assertEqual(pending["action"], "confirm_task_due_date")
         self.assertIsNotNone(pending["suggested_iso"])
 
-    def test_confirm_update_with_time_action_structure(self):
-        """Verify pending_action structure for calendar event time confirmation."""
-        pending = {
-            "type": "calendar",
-            "action": "confirm_update_with_time",
-            "event_id": "event123",
-            "suggested_start_iso": "2026-05-20T14:00:00+03:00",
-            "title_display": "اجتماع العمل",
-            "confirmation_status": "pending",
-        }
-        self.assertEqual(pending["type"], "calendar")
-        self.assertEqual(pending["action"], "confirm_update_with_time")
-        self.assertIsNotNone(pending["event_id"])
-
 
 if __name__ == "__main__":
     unittest.main()

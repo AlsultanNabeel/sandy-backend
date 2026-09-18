@@ -100,7 +100,7 @@ _ANTI_REPLAY_MS: int = 30_000
 # Phase 4 (V4.4–V4.6): على المايك (اللابتوب) نتأكد إنه صوت المالك قبل أمر حسّاس.
 # على التلي/الموقع الهوية معروفة، فالتحقّق هون فقط. مفعّل بـ SANDY_REQUIRE_SPEAKER_AUTH=1.
 _SENSITIVE_TOOLS = {
-    "task_delete", "reminder_delete", "calendar_delete",
+    "task_delete", "reminder_delete",
     "schedule_message_to_self",
 }
 # نحتفظ بآخر ~5 ثوانٍ من صوت الجهاز (16kHz·16bit·mono = 32KB/s) للتحقّق عند أمر حسّاس.

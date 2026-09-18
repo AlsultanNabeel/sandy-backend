@@ -34,11 +34,6 @@ def route_after_router(state: SandyState) -> str:
     """
     pending = state.get("pending_state")
     routing_hint = state.get("routing_hint") or ""
-    intent = state.get("intent") or ""
-
-    # اختيار من اقتراحات تقويم → execute دائماً (يتجاوز pending)
-    if intent == "calendar.pick_suggestion":
-        return "execute_node"
 
     # pending نشط: إذا كان نوعه "انتظار إدخال" → pending دائماً بغض النظر عن routing_hint
     if pending and isinstance(pending, dict):

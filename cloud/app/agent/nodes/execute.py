@@ -53,7 +53,7 @@ _META_TOOL_NAMES = frozenset(t["name"] for t in _META_TOOLS)
 # authenticated user; refused only for guests (chat-only visitors). Data
 # isolation is by current_user_id() scoping, not an owner check.
 _ACCOUNT_TOOL_PREFIXES = (
-    "calendar_", "task_", "reminder_", "memory_",
+    "task_", "reminder_", "memory_",
 )
 
 # **There is no owner-only device gate, and there was never one that worked.**

@@ -58,23 +58,6 @@ _TEMPLATES: dict[str, dict[str, str]] = {
         "formal": "تم حذف التذكير.",
         "minimal": "",
     },
-    "calendar.add": {
-        "standard": "أضفت الحدث 📅",
-        "playful": "يالله! أضفته 📅🎉",
-        "empathetic": "سجّلته عشانك.",
-        "formal": "تم إضافة الحدث إلى التقويم.",
-        "minimal": "",
-    },
-    "calendar.update": {
-        "standard": "عدّلت الحدث ✅",
-        "formal": "تم تعديل الحدث.",
-        "minimal": "",
-    },
-    "calendar.delete": {
-        "standard": "حُذف الحدث ✅",
-        "formal": "تم حذف الحدث.",
-        "minimal": "",
-    },
     "research.web": {
         "standard": "إليك ما وجدت 🔍",
         "formal": "نتائج البحث:",

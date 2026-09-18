@@ -43,8 +43,7 @@ def _extract_results_from_session(
 
 
 def _noop_save(*args, **kwargs) -> None:
-    """save_session_fn وهمية — LangGraph يتولى الـ persistence."""
-    pass
+    """save_session_fn وهمية — الـ graph بيحفظ الـ pending بنفسه."""
 
 
 _INTENT_TO_PENDING_RESPONSE = {
@@ -89,7 +88,7 @@ def pending_node(state: SandyState) -> SandyState:
 
             return execute_node(new_state)
         except Exception as exc:
-            logger.error(f"[pending_node] clarification re-execute failed: {exc}")
+            logger.error("[pending_node] clarification re-execute failed: %s", exc)
             return merge_state(
                 state,
                 {
@@ -109,14 +108,14 @@ def pending_node(state: SandyState) -> SandyState:
     intent_hint = _INTENT_TO_PENDING_RESPONSE.get(state.get("intent") or "", "")
 
     try:
-        mongo_db = None
-        create_chat_completion_fn = None
-        try:
-            import app.agent.executor.deps as deps
+        from app.db import get_db
 
-            mongo_db = getattr(deps, "mongo_db", None)
-        except Exception:
-            logger.debug("ignoring non-critical error", exc_info=True)
+        # From the one handle every store reads. This used to be
+        # `getattr(executor.deps, "mongo_db", None)` — an attribute `deps` has
+        # never had, so it was always None and only worked because each store
+        # falls back to `get_db()` itself.
+        mongo_db = get_db()
+        create_chat_completion_fn = None
         try:
             from app.agent.nodes.execute import _get_chat_completion_fn
             create_chat_completion_fn = _get_chat_completion_fn()
@@ -135,7 +134,7 @@ def pending_node(state: SandyState) -> SandyState:
         )
 
     except Exception as exc:
-        logger.error(f"[pending_node] execute_pending_action failed: {exc}")
+        logger.exception("[pending_node] execute_pending_action failed: %s", exc)
         result = {"handled": False, "reply": "حصل خطأ، حاول مرة ثانية."}
 
     handled = result.get("handled", False)

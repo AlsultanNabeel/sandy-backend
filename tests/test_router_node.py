@@ -32,13 +32,6 @@ class TestRouteAfterRouter(unittest.TestCase):
         s = self._state(requires_clarification=True)
         self.assertEqual(self.route(s), "clarify_node")
 
-    def test_calendar_pick_suggestion_goes_execute(self):
-        s = self._state(
-            intent="calendar.pick_suggestion",
-            pending_state={"pending_type": "conflict_resolution"},
-        )
-        self.assertEqual(self.route(s), "execute_node")
-
     def test_pending_overrides_clarification(self):
         s = self._state(
             pending_state={"pending_type": "confirmation"},
