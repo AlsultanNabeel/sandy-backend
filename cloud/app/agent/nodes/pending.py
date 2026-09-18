@@ -3,8 +3,11 @@
 Wrapper يحوّل SandyState للـ session القديمة ويستدعي execute_pending_action().
 
 الحالات: confirmation (نعم/لا)، clarification (إجابة سؤال)،
-selection (اختيار رقم)، destructive (تأكيد قبل حذف)،
-conflict_resolution (اختيار slot تقويم).
+selection (اختيار رقم)، destructive (تأكيد قبل حذف).
+
+When the pending handlers decline the message (``handled`` false, no reply —
+the user moved on to something else), the turn continues on the normal path
+instead of ending in an apology.
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ from app.agent.executor.pending_execution import execute_pending_action
 from app.utils.session import build_session_from_state as _build_session_from_state
 
 logger = logging.getLogger(__name__)
-
 
 
 def _extract_results_from_session(
@@ -60,6 +62,12 @@ def pending_node(state: SandyState) -> SandyState:
     """
 
     original_pending = state.get("pending_state") or {}
+
+    # An expired question must not be glued onto today's message.
+    from app.agent.pending import get_valid_pending_action
+    if original_pending and get_valid_pending_action(
+            {"pending_action": dict(original_pending)}) is None:
+        return _continue_without_pending(merge_state(state, {"pending_state": None}))
 
     # clarification await: المستخدم أجاب على سؤال توضيحي
     if (
@@ -160,5 +168,17 @@ def pending_node(state: SandyState) -> SandyState:
 
     if reply:
         updates["final_response"] = reply
+    elif not handled:
+        # Not an answer to the pending question: handle it as a new message.
+        return _continue_without_pending(merge_state(state, pending_updates))
 
     return merge_state(state, updates)
+
+
+def _continue_without_pending(state: SandyState) -> SandyState:
+    """Run the turn as if no pending had caught it."""
+    if state.get("requires_clarification"):
+        from app.agent.nodes.clarify import clarify_node
+        return clarify_node(state)
+    from app.agent.nodes.execute import execute_node
+    return execute_node(state)

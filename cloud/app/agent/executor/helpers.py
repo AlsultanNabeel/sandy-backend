@@ -3,7 +3,6 @@ from typing import Any, Dict
 
 
 from app.utils.nlp_normalizer import normalize_user_message
-from app.agent.pending import create_pending_action, clear_pending_action
 
 
 def _task_choice_index(text: str):
@@ -241,61 +240,3 @@ def is_cancellation(text: str) -> bool:
     if any(w in _CANCEL_EXACT for w in v.split()):
         return True
     return any(s in v for s in _CANCEL_SUB)
-
-
-def _handle_modify_response(
-    *,
-    user_message: str,
-    pending: Dict[str, Any],
-    pending_type: str,
-    session: Dict[str, Any],
-    session_file,
-    mongo_db,
-    save_session_fn,
-) -> Dict[str, Any]:
-    """User wants to fix something. Ask for the right field based on pending_type."""
-
-    if pending_type == "reminder":
-        # Ask for the new date/time.
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "reminder",
-                "action": "awaiting_corrected_date",
-                "original_action": pending.get("action", ""),
-                "original_data": pending,
-                "correction_step": 1,
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-
-        return {
-            "handled": True,
-            "reply": "تمام، قول لي التاريخ والساعة الصحيحة للتذكير؟\nمثلاً: غدا عند الساعة 3 أو الجمعة عند 9 صباح",
-        }
-
-    elif pending_type == "task":
-        # Ask which field to change.
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "awaiting_field_to_modify",
-                "original_action": pending.get("action", ""),
-                "original_data": pending,
-                "correction_step": 1,
-            }
-        )
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-
-        task_text = pending.get("text", "المهمة")
-        return {
-            "handled": True,
-            "reply": f"متأكد، بدك تعدّل شنو من المهمة؟\nالمهمة: {task_text}\n\nبدك تعدّل: الاسم، التاريخ، الملاحظة، أو الأولوية؟",
-        }
-
-    else:
-        clear_pending_action(session)
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        return {
-            "handled": True, "ok": False,
-            "reply": "ما قدرت أكمل التعديل. جرّب من جديد.",
-        }

@@ -38,10 +38,26 @@ class TestPendingNode(unittest.TestCase):
         result = self._run(state, {"handled": True, "reply": "تمام، لغيت العملية."})
         self.assertIn("لغيت", result["final_response"])
 
-    def test_not_handled_preserves_state(self):
+    def test_not_handled_continues_as_a_new_message(self):
+        """A message that does not answer the pending is a new request, not an
+        error: it used to end in an apology."""
         state = _make_state("شيء ثاني", "task", "delete_one")
-        result = self._run(state, {"handled": False})
-        self.assertIsNone(result.get("final_response"))
+        with patch("app.agent.nodes.execute.execute_node",
+                   side_effect=lambda s: merge_state(s, {"final_response": "ردّ عادي"})) as ex:
+            result = self._run(state, {"handled": False})
+        ex.assert_called_once()
+        self.assertEqual(result["final_response"], "ردّ عادي")
+
+    def test_expired_pending_is_not_answered(self):
+        state = _make_state("اه", "task", "delete_one")
+        state["pending_state"]["expires_at"] = "2000-01-01T00:00:00+00:00"
+        with patch("app.agent.nodes.execute.execute_node",
+                   side_effect=lambda s: merge_state(s, {"final_response": "ok"})), \
+             patch("app.agent.nodes.pending.execute_pending_action") as epa:
+            from app.agent.nodes.pending import pending_node
+            result = pending_node(state)
+        epa.assert_not_called()
+        self.assertIsNone(result["pending_state"])
 
     def test_execution_result_has_source(self):
         state = _make_state("تمام")
@@ -73,10 +89,12 @@ class TestPendingNode(unittest.TestCase):
         self.assertIsNotNone(session["pending_action"])
         self.assertEqual(session["user_id"], "u1")
 
-    def test_no_pending_returns_not_handled(self):
+    def test_no_pending_falls_through_to_execute(self):
         state = create_initial_state("مرحبا", "u1", "c1")
-        result = self._run(state, {"handled": False})
-        self.assertFalse(result["execution_result"]["handled"])
+        with patch("app.agent.nodes.execute.execute_node",
+                   side_effect=lambda s: merge_state(s, {"final_response": "أهلين"})):
+            result = self._run(state, {"handled": False})
+        self.assertEqual(result["final_response"], "أهلين")
 
 
 if __name__ == "__main__":

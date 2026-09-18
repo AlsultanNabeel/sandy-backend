@@ -8,8 +8,9 @@ from app.agent.pending import (
     consume_pending_action,
 )
 from app.agent.executor.helpers import (
-    _handle_modify_response,
     _is_quick_confirmation,
+    _task_choice_index,
+    _task_choice_pair_indexes,
     is_cancellation,
 )
 from app.agent.executor.pending.task_pending import (
@@ -69,29 +70,6 @@ def execute_pending_action(
 
     # await_* actions take free-form input, so skip the classify gate.
     if pending_action.startswith("await_"):
-        if pending_type == "task" and pending_action == "await_name":
-            task_name = (user_message or "").strip()
-            if not task_name:
-                # الـ pending لسا محفوظ — سؤال ثاني، مش نهاية. زي فرعَي
-                # `_handle_await_remind_at`، فبيضلّ على الافتراضي.
-                return {"handled": True, "reply": "ما فهمت الاسم، حاول مرة ثانية."}
-            try:
-                from app.features.tasks_store import add_task as _add_task
-                from app.utils.user_profiles import (
-                    active_user_profile_context,
-                    get_active_user_profile,
-                )
-
-                with active_user_profile_context(get_active_user_profile()):
-                    _add_task(task_name, mongo_db=mongo_db, tasks_file=tasks_file)
-                consume_pending_action(session)
-                save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-                return {"handled": True, "reply": f"✅ تم إضافة المهمة: {task_name}"}
-            except Exception as _e:
-                return {"handled": True, "ok": False,
-                        "error": f"await_name: {type(_e).__name__}",
-                        "reply": f"ما قدرت أضيف المهمة: {_e}"}
-
         if pending_type == "reminder" and pending_action == "await_remind_at":
             return _handle_await_remind_at(
                 user_message,
@@ -118,28 +96,9 @@ def execute_pending_action(
         save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
         return {"handled": True, "reply": "تمام، لغيت العملية."}
 
-    if response_intent == "ignore":
-        current_pending = get_valid_pending_action(session) or {}
-        if current_pending:
-            session["archived_pending"] = {
-                **current_pending,
-                "archived_at": datetime.now(USER_TZ).isoformat(),
-            }
-        clear_pending_action(session)
-        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
-        return {"handled": False}
-
-    if response_intent == "modify":
-        return _handle_modify_response(
-            user_message=user_message,
-            pending=pending,
-            pending_type=pending_type,
-            session=session,
-            session_file=session_file,
-            mongo_db=mongo_db,
-            save_session_fn=save_session_fn,
-        )
-
+    # Answers to a question Sandy asked come before the "ignore" check: «2»
+    # or «الثانية» is neither yes nor no, and classified as ignore it archived
+    # the question and lost the user's choice.
     if pending_type == "task":
         image_state = session.get("image_state")
         if isinstance(image_state, dict):
@@ -153,7 +112,11 @@ def execute_pending_action(
         save_session_fn=save_session_fn,
     )
 
-    if pending_type == "task" and pending_action == "clarify_task_choice":
+    _moved_on = response_intent == "ignore" and (
+        _task_choice_index(user_message) is None
+        and not _task_choice_pair_indexes(user_message, len(pending.get("choices") or []))
+    )
+    if pending_type == "task" and pending_action == "clarify_task_choice" and not _moved_on:
         return _handle_clarify_task_choice(
             user_message,
             pending,
@@ -174,6 +137,17 @@ def execute_pending_action(
             tasks_file=tasks_file,
             **_clarify_common,
         )
+
+    if response_intent == "ignore":
+        current_pending = get_valid_pending_action(session) or {}
+        if current_pending:
+            session["archived_pending"] = {
+                **current_pending,
+                "archived_at": datetime.now(USER_TZ).isoformat(),
+            }
+        clear_pending_action(session)
+        save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
+        return {"handled": False}
 
     # Quick-confirmation gate.
     if not _is_quick_confirmation(user_message):
