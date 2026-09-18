@@ -7,7 +7,6 @@ from app.agent.pending import create_pending_action
 from app.features.tasks_store import (
     resolve_task_reference_for_write,
     resolve_task_references_for_write,
-    delete_completed_tasks,
 )
 
 
@@ -59,8 +58,6 @@ def _handle_delete(
         reply = "ما قدرت أحدد المهمة."
         ok = False
     return {"handled": True, "ok": ok, "reply": reply}
-
-
 
 
 def _handle_delete_multi(
@@ -167,8 +164,6 @@ def _handle_delete_multi(
     return {"handled": True, "ok": ok, "reply": reply}
 
 
-
-
 def _handle_delete_all(
     *,
     session: Dict[str, Any],
@@ -187,15 +182,22 @@ def _handle_delete_all(
     return {"handled": True, "reply": "متأكد بدك أحذف كل المهام؟"}
 
 
+def _handle_delete_completed(
+    *,
+    session: Dict[str, Any],
+    session_file,
+    mongo_db,
+    save_session_fn,
+) -> Dict[str, Any]:
+    """Ask first: deleting every completed task cannot be undone (the tool
+    schema already promised a confirmation; the handler deleted at once)."""
+    session["pending_action"] = create_pending_action(
+        {
+            "type": "task",
+            "action": "delete_completed",
+            "confirmation_status": "pending",
+        }
+    )
+    save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
+    return {"handled": True, "reply": "متأكد بدك أحذف كل المهام المكتملة؟"}
 
-
-def _handle_delete_completed(*, mongo_db, tasks_file):
-    try:
-        count = delete_completed_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
-        if count == 0:
-            return {"handled": True, "ok": False, "reply": "ما في مهام مكتملة لحذفها."}
-        return {"handled": True, "reply": f"✅ حذفت {count} مهمة مكتملة."}
-    except Exception as e:
-        return {"handled": True, "ok": False,
-                "error": f"delete_completed: {type(e).__name__}",
-                "reply": f"ما قدرت أحذف المهام المكتملة: {e}"}

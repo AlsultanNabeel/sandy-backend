@@ -155,7 +155,8 @@ def _handle_briefing(ctx: "_ActionContext") -> Dict[str, Any]:
     reply = build_morning_briefing(
         memory=memory, mongo_db=ctx.mongo_db, tasks_file=ctx.tasks_file
     )
-    session["last_briefing_date"] = datetime.now().strftime("%Y-%m-%d")
+    from app.utils.time import USER_TZ
+    session["last_briefing_date"] = datetime.now(USER_TZ).strftime("%Y-%m-%d")
     session.setdefault("sandy_state", {})["last_briefing_date"] = session[
         "last_briefing_date"
     ]

@@ -350,7 +350,11 @@ def _exec_task_delete_all(
     tasks_file,
     save_session_fn,
 ) -> Dict[str, Any]:
+    ids = deps.active_task_ids(mongo_db=mongo_db)
     deleted_count = deps.delete_active_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
+    if deleted_count:
+        for task_id in ids:
+            deps.delete_sandy_reminder_by_task_id(task_id)
     clear_pending_action(session)
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
     if deleted_count == 0:
@@ -362,6 +366,23 @@ def _exec_task_delete_all(
         "handled": True,
         "reply": f"تمام، حذفت كل المهام النشطة ({deleted_count}) وتركت المهام المكتملة.",
     }
+
+
+def _exec_task_delete_completed(
+    pending: Dict[str, Any],
+    *,
+    session: Dict[str, Any],
+    session_file,
+    mongo_db,
+    tasks_file,
+    save_session_fn,
+) -> Dict[str, Any]:
+    count = deps.delete_completed_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
+    clear_pending_action(session)
+    save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
+    if count == 0:
+        return {"handled": True, "ok": False, "reply": "ما في مهام مكتملة لحذفها."}
+    return {"handled": True, "reply": f"✅ حذفت {count} مهمة مكتملة."}
 
 
 def _exec_task_bulk_update_due_date(

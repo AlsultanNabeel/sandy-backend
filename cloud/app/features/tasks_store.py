@@ -434,6 +434,20 @@ def set_task_project(task_id: str, project: str, mongo_db=None) -> bool:
 
 # ─── Bulk operations ─────────────────────────────────────────────────────────
 
+def active_task_ids(mongo_db=None) -> List[str]:
+    """Ids of every open task — for cleaning up their reminders in bulk ops."""
+    try:
+        coll = _coll(mongo_db)
+        if coll is None:
+            return []
+        # بلا سقف: a bulk complete/delete touches every open task, so its
+        # reminder cleanup must see every one of them.
+        return [str(d["_id"]) for d in coll.find({"done": False}, {"_id": 1})]
+    except Exception as e:
+        logger.warning("[TasksStore] active ids failed: %s", e)
+        return []
+
+
 def complete_all_tasks(mongo_db=None, tasks_file=None) -> int:
     try:
         coll = _coll(mongo_db)

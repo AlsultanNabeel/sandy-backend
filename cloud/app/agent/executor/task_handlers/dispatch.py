@@ -268,7 +268,12 @@ def handle_task_action(
             save_session_fn=save_session_fn,
         )
     elif task_action == "delete_completed":
-        return _handle_delete_completed(**_tasks_only)
+        return _handle_delete_completed(
+            session=session,
+            session_file=session_file,
+            mongo_db=mongo_db,
+            save_session_fn=save_session_fn,
+        )
     elif task_action == "bulk_update_due_date":
         return _handle_bulk_update_due_date(params, **_with_ai)
     else:  # create

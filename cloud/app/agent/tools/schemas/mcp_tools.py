@@ -140,10 +140,10 @@ def _is_safe_public_url(url: str) -> bool:
             ip = ipaddress.ip_address(info[4][0])
         except ValueError:
             return False
-        if (
-            ip.is_private or ip.is_loopback or ip.is_link_local
-            or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-        ):
+        # `is_global` is the allow-list form of the old deny-list: it also
+        # rejects ranges the deny-list missed, such as carrier-grade NAT
+        # (100.64.0.0/10) and IPv4-mapped IPv6.
+        if not ip.is_global or ip.is_multicast:
             return False
     return bool(infos)
 
@@ -192,7 +192,11 @@ def fetch_url(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
         resp.raise_for_status()
         raw = resp.raw.read(_MAX_FETCH_BYTES + 1, decode_content=True) or b""
         html = raw[:_MAX_FETCH_BYTES].decode(resp.encoding or "utf-8", errors="ignore")
-        text = _html_to_text(html, max_length=8000)
+        try:
+            limit = int(args.get("max_length") or 5000)
+        except (TypeError, ValueError):
+            limit = 5000
+        text = _html_to_text(html, max_length=max(500, min(limit, 8000)))
         if not text:
             return {"handled": True, "reply": "الصفحة فارغة أو ما فيها نص."}
 

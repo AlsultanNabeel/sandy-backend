@@ -9,10 +9,12 @@ from app.features.reminders_store import (  # noqa: F401
 )
 from app.features.time_parser import parse_reminder_time_ai  # noqa: F401
 from app.features.tasks_store import (  # noqa: F401
+    active_task_ids,
     add_task,
     append_task_note,
     complete_task,
     delete_active_tasks,
+    delete_completed_tasks,
     delete_task,
     rename_task,
     replace_task_note,

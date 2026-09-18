@@ -1,10 +1,13 @@
 """Task completion handlers."""
+import logging
 from typing import Any, Dict
 
 
 from app.agent.pending import create_pending_action
 
+from app.features.reminders_store import delete_sandy_reminder_by_task_id
 from app.features.tasks_store import (
+    active_task_ids,
     resolve_completed_task_reference_for_write,
     resolve_completed_task_references_for_write,
     resolve_task_references_for_write,
@@ -17,6 +20,8 @@ from app.agent.executor.task_handlers._common import (
     _format_task_choices,
 )
 from app.agent.executor.task_handlers._now import run_now
+
+logger = logging.getLogger(__name__)
 
 
 def _handle_uncomplete_multi(
@@ -279,13 +284,19 @@ def _handle_complete_multi(
 
 def _handle_complete_all(*, mongo_db, tasks_file):
     try:
+        ids = active_task_ids(mongo_db=mongo_db)
         count = complete_all_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
         if count == 0:
             return {"handled": True, "ok": False, "reply": "ما في مهام نشطة لإكمالها."}
+        # A finished task's reminder must not fire (the single-task path
+        # already does this; the bulk one did not).
+        for task_id in ids:
+            delete_sandy_reminder_by_task_id(task_id)
         return {"handled": True, "reply": f"✅ كمّلت {count} مهمة."}
     except Exception as e:
+        logger.warning("[tasks] complete_all failed: %s", e)
         return {"handled": True, "ok": False, "error": f"complete_all: {type(e).__name__}",
-                "reply": f"ما قدرت أكمّل المهام: {e}"}
+                "reply": "ما قدرت أكمّل المهام. جرّب مرة ثانية."}
 
 
 # Common Arabic command prefixes the planner may leave on a task reference

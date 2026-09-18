@@ -29,6 +29,7 @@ from app.agent.executor.pending.task_pending import (
     _exec_task_delete_one,
     _exec_task_delete_multi,
     _exec_task_delete_all,
+    _exec_task_delete_completed,
     _exec_task_bulk_update_due_date,
 )
 from app.agent.executor.pending.reminder_pending import (
@@ -198,6 +199,8 @@ def execute_pending_action(
         return _exec_task_delete_multi(**_exec_common)
     if pending_type == "task" and pending_action == "delete_all":
         return _exec_task_delete_all(**_exec_common)
+    if pending_type == "task" and pending_action == "delete_completed":
+        return _exec_task_delete_completed(**_exec_common)
     if pending_type == "task" and pending_action == "bulk_update_due_date":
         return _exec_task_bulk_update_due_date(**_exec_common)
 

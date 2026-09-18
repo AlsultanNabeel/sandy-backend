@@ -21,6 +21,7 @@ from app.agent.executor.pending.task_pending.executors import (
     _exec_task_delete_one,
     _exec_task_delete_multi,
     _exec_task_delete_all,
+    _exec_task_delete_completed,
     _exec_task_bulk_update_due_date,
 )
 
@@ -40,5 +41,6 @@ __all__ = [
     "_exec_task_delete_one",
     "_exec_task_delete_multi",
     "_exec_task_delete_all",
+    "_exec_task_delete_completed",
     "_exec_task_bulk_update_due_date",
 ]
