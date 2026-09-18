@@ -41,6 +41,7 @@ import logging
 import os
 import ssl
 import threading
+import uuid
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -160,8 +161,12 @@ class RoomDeviceClient:
             try:
                 c = mqtt.Client(
                     mqtt.CallbackAPIVersion.VERSION2,
-                    client_id=f"sandy-room-{os.getpid()}",
-                    clean_session=False,
+                    # Unique per process: during a deploy the old and new dyno
+                    # share pids, and one broker id kicked the other off in a
+                    # loop (mqtt_ingest fixed the same collision). Publish-only,
+                    # so there is no session worth keeping.
+                    client_id=f"sandy-room-{os.getpid()}-{uuid.uuid4().hex[:8]}",
+                    clean_session=True,
                 )
                 c.username_pw_set(self._user, self._pass)
                 c.tls_set(cert_reqs=ssl.CERT_REQUIRED)

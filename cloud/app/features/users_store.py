@@ -24,11 +24,14 @@ Wired at boot via init_users_store(mongo_db) — same pattern as the other store
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from pymongo.errors import DuplicateKeyError
+
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +152,12 @@ def upsert_from_oauth(
         "created_at": now,
         "last_seen_at": now,
     }
-    coll.insert_one(doc)
+    try:
+        coll.insert_one(doc)
+    except DuplicateKeyError:
+        # Two first sign-ins raced; the unique (provider, provider_sub) index
+        # let one through. Return that account instead of a 500.
+        return coll.find_one({"provider": provider, "provider_sub": provider_sub})
     return doc
 
 
@@ -192,7 +200,10 @@ def create_email_user(
         "created_at": now,
         "last_seen_at": now,
     }
-    coll.insert_one(doc)
+    try:
+        coll.insert_one(doc)
+    except DuplicateKeyError:
+        return None  # a concurrent sign-up took this email first
     return doc
 
 

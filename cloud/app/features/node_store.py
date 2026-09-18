@@ -32,6 +32,8 @@ from typing import Any, Dict, List, Optional
 from app.utils.tenant_db import scoped
 from app.db import configure, get_db
 
+from pymongo.errors import DuplicateKeyError
+
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_nodes"
@@ -55,6 +57,12 @@ def init_node_store(mongo_db) -> None:
         )
         # Heartbeat ingest looks nodes up by code hash across tenants.
         mongo_db[_COLL].create_index([("code_hash", 1)], background=True)
+        # One owner per board, enforced by the database: the claim check in
+        # `pair_node` reads then inserts, and two accounts pairing the same
+        # code at the same moment both passed it.
+        mongo_db[_COLL].create_index(
+            [("node_id", 1)], unique=True, background=True, name="node_id_owner_unique"
+        )
         logger.info("[NodeStore] ready")
     except Exception as e:  # noqa: BLE001
         logger.warning("[NodeStore] index skipped: %s", e)
@@ -289,16 +297,20 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
                         "handing it to its new account", node_id)
             get_db()[_COLL].delete_one({"_id": claimed["_id"]})
 
-    coll.insert_one({
-        "node_id": node_id,
-        "label": (label or "Sandy node").strip(),
-        "code_hash": code_hash,
-        "capabilities": [],
-        "outputs": [],
-        "firmware_version": "",
-        "online": False,
-        "paired_at": _now(),
-    })
+    try:
+        coll.insert_one({
+            "node_id": node_id,
+            "label": (label or "Sandy node").strip(),
+            "code_hash": code_hash,
+            "capabilities": [],
+            "outputs": [],
+            "firmware_version": "",
+            "online": False,
+            "paired_at": _now(),
+        })
+    except DuplicateKeyError:
+        logger.warning("[NodeStore] %s claimed concurrently — refusing", node_id)
+        return {"ok": False, "error": "already_claimed"}
     return {"ok": True, "node_id": node_id, "already": False}
 
 
