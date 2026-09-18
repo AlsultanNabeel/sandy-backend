@@ -149,6 +149,11 @@ def register_studio_api(app, mongo_db=None):
         from app.features import brainstorm
         from app.agent.facade.agent import create_chat_completion
 
+        # A paid provider call — one unit of the caller's quota (`api/metering`).
+        from app.api.metering import meter_claims
+        refusal = meter_claims(claims)
+        if refusal:
+            return jsonify(refusal[0]), refusal[1]
         uid = str(claims.get("user_id") or "")
         result = brainstorm.finish_session(uid, create_chat_completion)
         if not result:
@@ -184,6 +189,11 @@ def register_studio_api(app, mongo_db=None):
             oid = ObjectId(plan_id)
         except (InvalidId, TypeError):
             return jsonify({"error": "not_found"}), 404
+        # A paid provider call — one unit of the caller's quota (`api/metering`).
+        from app.api.metering import meter_claims
+        refusal = meter_claims(claims)
+        if refusal:
+            return jsonify(refusal[0]), refusal[1]
         revised = brainstorm.update_plan_by_id(
             _brainstorm_chat_ids(claims), oid, change, create_chat_completion
         )

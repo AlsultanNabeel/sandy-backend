@@ -49,9 +49,13 @@ _QUESTIONS: List[Dict[str, str]] = [
 _AGENDA_INSTRUCTION = (
     "\n\nاكتبي إشعاراً يومياً واحداً قصيراً (جملة أو جملتين) بصوتك، ذكياً وغير "
     "مكرر أبداً. لو يوم المستخدم مضغوط (مهام كثيرة أو متأخرة) نبّهيه بلطف إنه ما "
-    "يتقاعس وحمّسيه يبلّش؛ لو خفيف طمّنيه وشجّعيه ياخد نفَس. خاطبيه بصيغة المذكر. "
+    "يتقاعس وحمّسيه يبلّش؛ لو خفيف طمّنيه وشجّعيه ياخد نفَس. "
     "بلا قوائم ولا رموز نقطية — جملة طبيعية دافئة."
 )
+# The address line is appended per call from the active profile
+# (`address_instruction`), not fixed here: this used to say «خاطبيه بصيغة
+# المذكر» to every customer, which is the owner's default typed into a
+# product-wide prompt — §2.5b of the map.
 
 
 def _today() -> str:
@@ -124,7 +128,8 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
     try:
         from app.agent.context_builder import build_effective_persona
         from app.agent.facade.agent import create_chat_completion
-        system = build_effective_persona(uid) + _AGENDA_INSTRUCTION
+        from app.utils.user_profiles import address_instruction
+        system = build_effective_persona(uid) + _AGENDA_INSTRUCTION + "\n" + address_instruction()
         user = load_line + (" أبرز العناوين: " + "؛ ".join(titles) if titles else "")
         if late:
             user += (

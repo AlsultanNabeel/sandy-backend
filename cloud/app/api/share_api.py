@@ -76,6 +76,12 @@ def register_share_api(app, mongo_db=None):
             # No interests tracked yet — let the client show its warm hint.
             return jsonify({"topic": "", "items": []}), 200
 
+        # A paid provider call — one unit of the caller's quota (`api/metering`).
+        from app.api.metering import meter_claims
+        refusal = meter_claims(claims)
+        if refusal:
+            return jsonify(refusal[0]), refusal[1]
+
         # Reuse the tool's query shape, but return structured cards (no LLM).
         from app.integrations.exa_client import search_exa
 

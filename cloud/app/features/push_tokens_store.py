@@ -41,6 +41,8 @@ def init_push_tokens_store(mongo_db) -> None:
 
 
 def _coll():
+    # Written as `get_db()[...]` on purpose: tests/test_tenant_scoping_guard.py
+    # finds raw (unscoped) access by that exact shape.
     return get_db()[_COLL] if get_db() is not None else None
 
 
@@ -65,14 +67,25 @@ def register_token(user_id: str, token: str, platform: str = "ios") -> bool:
         return False
 
 
-def unregister_token(token: str) -> bool:
-    """Drop a token (on logout, or when APNs reports it gone)."""
+def unregister_token(token: str, user_id: str | None = None) -> bool:
+    """Drop a token (on logout, or when APNs reports it gone).
+
+    ``user_id`` restricts the delete to a token that caller owns — the API path
+    passes it, so one account cannot switch off another's notifications by
+    sending their token. The APNs pruning path passes none: a token Apple says
+    is dead is dead whoever registered it.
+    """
     coll = _coll()
     token = (token or "").strip()
     if coll is None or not token:
         return False
+    query = {"_id": token}
+    if user_id is not None:
+        if not user_id:
+            return False
+        query["user_id"] = str(user_id)
     try:
-        coll.delete_one({"_id": token})
+        coll.delete_one(query)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("[PushTokens] unregister failed: %s", exc)

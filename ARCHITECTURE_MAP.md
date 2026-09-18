@@ -437,6 +437,13 @@ journal, books, focus, scenes) · devices + nodes · memory · photos · goals �
 future messages · share · timeline · research · images · weather · persona ·
 onboarding · push · subscriptions · features · daily nudge · studio plans · voice TTS.
 
+**Every route that spends money on a provider is metered** through
+`api/metering.py` — the chat routes, image generation and analysis, web and
+place search, page fetch, content suggestions, gift writing, studio summaries
+and photo tagging, one unit each against the caller's tier. Until 18 Sep 2026
+only the two chat routes were; the rest reached Exa, Google and Azure with no
+limit for a signed-in free account. A new paid route calls `meter_claims`.
+
 ### 2.10 Auth
 
 `api/auth_handlers.py`. JWT, HS256. Owner tokens 7 days, guest 48 hours. Login

@@ -37,5 +37,5 @@ def register_push_api(app):
         token = str(body.get("token") or "").strip()
         if not token:
             return jsonify({"error": "bad_request"}), 400
-        push_tokens_store.unregister_token(token)
+        push_tokens_store.unregister_token(token, user_id=str(claims.get("user_id") or ""))
         return jsonify({"ok": True}), 200

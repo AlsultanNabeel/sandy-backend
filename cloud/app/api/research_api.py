@@ -69,6 +69,12 @@ def register_research_api(app):
             demo = _DEMO_WEB if kind == "web" else _DEMO_PLACES
             return jsonify({"kind": kind, "items": demo, "demo": True}), 200
 
+        # A paid provider call — one unit of the caller's quota (`api/metering`).
+        from app.api.metering import meter_claims
+        refusal = meter_claims(claims)
+        if refusal:
+            return jsonify(refusal[0]), refusal[1]
+
         if kind == "places":
             from app.features.google_places import PlacesUnavailable, search_places
 
@@ -98,6 +104,12 @@ def register_research_api(app):
 
         if _is_guest(claims):
             return jsonify({"item": {}, "demo": True}), 200
+
+        # A paid provider call — one unit of the caller's quota (`api/metering`).
+        from app.api.metering import meter_claims
+        refusal = meter_claims(claims)
+        if refusal:
+            return jsonify(refusal[0]), refusal[1]
 
         from app.integrations.exa_client import get_exa_page_content
 

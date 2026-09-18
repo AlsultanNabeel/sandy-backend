@@ -22,11 +22,6 @@ _MAX_MESSAGE_CHARS = 6000
 # الضخمة مبكراً (413) قبل قراءتها للذاكرة — حاجز إغراق.
 _MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 
-# حصص الاستهلاك للمستخدم المصادَق (يومي, بالدقيقة). المالك والمشترك على الطبقة
-# العليا؛ المجاني على طبقة متواضعة. مصدر واحد يمنع انحراف المسارين
-# (/api/agent و /api/agent/stream) عن بعض.
-_SUBSCRIBER_DAILY, _SUBSCRIBER_PER_MIN = 5000, 60
-_FREE_DAILY, _FREE_PER_MIN = 40, 12
 
 # أقصى عدد رسائل بنحفظه من سجل شات الويب — الأحدث بس.
 _MAX_HISTORY_MESSAGES = 500
@@ -205,40 +200,10 @@ def create_app(
     # Sign-in is Apple, Google, or email now. Each mints a real account with its
     # own id, and every read and write in the system is already scoped to it.
 
-    # What each rejection code means, in words a person can read.
-    #
-    # `check_and_record` returns a machine code — `rate_limited`,
-    # `daily_quota_exceeded` — which is right: the store should not be writing
-    # Arabic. But the code was being sent to the client as the *only* field, and
-    # the app shows whatever it finds there, so a user who hit their quota was
-    # told "daily_quota_exceeded". Every other 429 in this file already sends a
-    # human `message` beside the code; these two were the exception.
-    _LIMIT_MESSAGES = {
-        "rate_limited": "شوي شوي 😄 وصلت للحد بهالدقيقة — جرّب بعد شوي.",
-        "daily_quota_exceeded": "خلص رصيدك لليوم. بيرجع بكرا، أو رقّي اشتراكك.",
-    }
-
-    def _meter_or_error(role, user_id):
-        """Record one authenticated request against the user's tier quota.
-        Returns an error code string if the user is over their limit, else None.
-        Shared by /api/agent and /api/agent/stream so the two can't drift."""
-        from app.features import usage_store, users_store
-
-        if role == "owner" or users_store.is_subscriber(user_id):
-            daily, per_min = _SUBSCRIBER_DAILY, _SUBSCRIBER_PER_MIN
-        else:
-            daily, per_min = _FREE_DAILY, _FREE_PER_MIN
-        return usage_store.check_and_record(
-            user_id, daily_limit=daily, per_min_limit=per_min
-        )
-
-    def _limit_response(code: str):
-        """The 429 body for a metered rejection: the code for the client to
-        branch on, and the sentence for it to show."""
-        return {
-            "error": code,
-            "message": _LIMIT_MESSAGES.get(code, "وصلت للحد المسموح — جرّب لاحقاً."),
-        }
+    # The tier quota lives in `app.api.metering`, shared with every other route
+    # that spends money on a provider.
+    from app.api.metering import limit_response as _limit_response
+    from app.api.metering import meter_or_error as _meter_or_error
 
     def _guest_media_gate(claims):
         """Meter one shared guest unit for the image/vision endpoints and, if the

@@ -54,28 +54,26 @@ def test_an_unset_list_makes_nobody_the_owner(monkeypatch):
 def test_the_owner_role_reaches_the_top_quota_tier(monkeypatch):
     """The role is only worth minting if metering reads it — this pins the two
     together, which is the join that was missing."""
-    import app.api.server as server
-
     seen = {}
 
-    class _Usage:
-        @staticmethod
-        def check_and_record(user_id, *, daily_limit, per_min_limit):
-            seen["daily"] = daily_limit
-            return None
+    def _record(user_id, *, daily_limit, per_min_limit):
+        seen["daily"] = daily_limit
+        return None
 
-    class _Users:
-        @staticmethod
-        def is_subscriber(user_id):
-            return False
+    # Patched on the real modules, not swapped in `sys.modules`: once another
+    # test has imported them, `from app.features import usage_store` returns the
+    # package attribute and a `sys.modules` swap is never seen.
+    monkeypatch.setattr("app.features.usage_store.check_and_record", _record)
+    monkeypatch.setattr("app.features.users_store.is_subscriber", lambda _uid: False)
 
-    monkeypatch.setitem(__import__("sys").modules, "app.features.usage_store", _Usage)
-    monkeypatch.setitem(__import__("sys").modules, "app.features.users_store", _Users)
+    from app.api import metering
+    assert metering.SUBSCRIBER_DAILY > metering.FREE_DAILY
+    assert metering.FREE_DAILY == 40, "the free tier moved; this test names it"
 
-    # `_meter_or_error` is a closure inside `register_api`; reach it the way the
-    # route does, through the constants it branches on.
-    assert server._SUBSCRIBER_DAILY > server._FREE_DAILY
-    assert server._FREE_DAILY == 40, "the free tier moved; this test names it"
+    metering.meter_or_error("owner", "u1")
+    assert seen["daily"] == metering.SUBSCRIBER_DAILY
+    metering.meter_or_error("user", "u1")
+    assert seen["daily"] == metering.FREE_DAILY
 
 
 def test_both_login_routes_ask_for_the_role(monkeypatch):

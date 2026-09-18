@@ -91,3 +91,17 @@ def test_social_owner_tier_needs_a_vouched_email(monkeypatch):
                                          name="", picture="", email_trusted=True)
         assert resp.get_json()["role"] == "owner"
     assert sa._is_true("true") and sa._is_true(True) and not sa._is_true("false")
+
+
+def test_paid_routes_are_metered(monkeypatch):
+    """Every route that calls a paid provider charges the caller's quota."""
+    app, _ = _app(monkeypatch)
+    from app.features import usage_store
+    monkeypatch.setattr(usage_store, "check_and_record",
+                        lambda *a, **k: "daily_quota_exceeded")
+    c = app.test_client()
+    h = _bearer()
+    assert c.get("/api/research?q=x", headers=h).status_code == 429
+    assert c.get("/api/research/page?url=http://x", headers=h).status_code == 429
+    assert c.post("/api/gifts/generate", json={}, headers=h).status_code == 429
+    assert c.post("/api/plans/active/finish", headers=h).status_code == 429

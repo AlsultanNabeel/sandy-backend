@@ -172,7 +172,7 @@ def register_photos_api(app, mongo_db=None):
         if "," in image_b64 and image_b64.lstrip().startswith("data:"):
             image_b64 = image_b64.split(",", 1)[1]
         try:
-            image_bytes = base64.b64decode(image_b64)
+            image_bytes = base64.b64decode(image_b64, validate=True)
         except (ValueError, TypeError):
             return jsonify({"error": "bad_image"}), 400
         if not image_bytes:
@@ -184,6 +184,11 @@ def register_photos_api(app, mongo_db=None):
         uid = current_user_id()
         if not uid:
             return jsonify({"error": "forbidden"}), 403
+        # A paid provider call — one unit of the caller's quota (`api/metering`).
+        from app.api.metering import meter_claims
+        refusal = meter_claims(claims)
+        if refusal:
+            return jsonify(refusal[0]), refusal[1]
         saved = photo_album.save_photo(
             uid, image_bytes, name=name, user_caption=name or ""
         )

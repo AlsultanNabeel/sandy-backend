@@ -113,6 +113,11 @@ def register_gifts_api(app, mongo_db=None):
         Stateless: it only returns text; nothing is persisted. The client may
         send that text back to POST /api/gifts to keep it.
         """
+        # A paid provider call — one unit of the caller's quota (`api/metering`).
+        from app.api.metering import meter_claims
+        refusal = meter_claims(claims)
+        if refusal:
+            return jsonify(refusal[0]), refusal[1]
         body = request.get_json(silent=True) or {}
         kind = _clean_kind(body.get("kind"))
         # Context = recipient + occasion, so the generated text fits the moment.
