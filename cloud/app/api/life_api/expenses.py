@@ -15,7 +15,13 @@ def _register_expenses(app):
             return jsonify({**_DEMO["expenses"], "demo": True}), 200
         from app.features.expenses_store import list_expenses, month_summary
 
-        days = int(request.args.get("days", 30) or 30)
+        # A query string is user input: `?days=abc` was a ValueError 500, and a
+        # negative or enormous window reached the store as-is.
+        try:
+            days = int(request.args.get("days", 30) or 30)
+        except ValueError:
+            return jsonify({"error": "bad_days"}), 400
+        days = max(1, min(days, 3650))
         with active_user_profile_context(build_user_profile(claims)):
             items = list_expenses(days=days, limit=50)
             summary = month_summary(days=days)

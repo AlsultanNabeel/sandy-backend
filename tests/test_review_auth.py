@@ -105,3 +105,13 @@ def test_paid_routes_are_metered(monkeypatch):
     assert c.get("/api/research/page?url=http://x", headers=h).status_code == 429
     assert c.post("/api/gifts/generate", json={}, headers=h).status_code == 429
     assert c.post("/api/plans/active/finish", headers=h).status_code == 429
+
+
+def test_non_numeric_body_fields_are_a_400(monkeypatch):
+    app, _ = _app(monkeypatch)
+    c = app.test_client()
+    h = _bearer()
+    r = c.post("/api/life/books", json={"title": "x", "total_pages": "abc"}, headers=h)
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_request"
+    assert c.post("/api/life/focus/start", json={"focus_min": "x"}, headers=h).status_code == 400
+    assert c.get("/api/life/expenses?days=abc", headers=h).status_code == 400

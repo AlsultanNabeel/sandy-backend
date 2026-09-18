@@ -2,7 +2,7 @@
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
-from app.api.life_api._common import _DEMO, _is_guest
+from app.api.life_api._common import _DEMO, _is_guest, body_int
 from app.utils.user_profiles import active_user_profile_context, build_user_profile
 
 
@@ -30,9 +30,9 @@ def _register_books(app):
         r = add_book(
             (body.get("title") or "").strip(),
             status=(body.get("status") or "reading").strip(),
-            total_pages=int(body.get("total_pages", 0) or 0),
+            total_pages=body_int(body, "total_pages"),
             cover_url=(body.get("cover_url") or "").strip(),
-            current_page=int(body.get("current_page", 0) or 0),
+            current_page=body_int(body, "current_page"),
             author=(body.get("author") or "").strip(),
             category=(body.get("category") or "").strip(),
             fmt=(body.get("fmt") or "").strip(),
@@ -66,7 +66,9 @@ def _register_books(app):
 
         def _opt(k, cast=str):
             v = body.get(k)
-            return cast(v) if v is not None and str(v) != "" else None
+            if v is None or str(v) == "":
+                return None
+            return body_int(body, k) if cast is int else cast(v)
 
         r = set_book_meta(
             (body.get("title") or "").strip(),
@@ -92,7 +94,7 @@ def _register_books(app):
         from app.features.reading_store import add_quote
 
         r = add_quote((body.get("title") or "").strip(), (body.get("text") or "").strip(),
-                      page=int(body.get("page", 0) or 0))
+                      page=body_int(body, "page"))
         return jsonify(r), (200 if r.get("ok") else 400)
 
     @app.route("/api/life/books/goal", methods=["POST"])
@@ -102,7 +104,7 @@ def _register_books(app):
         from app.features.reading_store import set_reading_goal
 
         r = set_reading_goal(
-            books_year=int(body.get("books_year", 0) or 0),
-            pages_year=int(body.get("pages_year", 0) or 0),
+            books_year=body_int(body, "books_year"),
+            pages_year=body_int(body, "pages_year"),
         )
         return jsonify(r), (200 if r.get("ok") else 400)

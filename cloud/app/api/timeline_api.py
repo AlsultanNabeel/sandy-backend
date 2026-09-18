@@ -48,7 +48,7 @@ def register_timeline_api(app):
                         "ts": ts, "done": done,
                     })
             except Exception as e:  # noqa: BLE001
-                logger.warning(f"[Timeline] tasks failed: {e}")
+                logger.warning("[Timeline] tasks failed: %s", e)
 
             # Reminders.
             try:
@@ -61,7 +61,7 @@ def register_timeline_api(app):
                         "done": False,
                     })
             except Exception as e:  # noqa: BLE001
-                logger.warning(f"[Timeline] reminders failed: {e}")
+                logger.warning("[Timeline] reminders failed: %s", e)
 
             # Expenses.
             try:
@@ -76,7 +76,7 @@ def register_timeline_api(app):
                         "ts": _iso(x.get("at")), "done": False,
                     })
             except Exception as e:  # noqa: BLE001
-                logger.warning(f"[Timeline] expenses failed: {e}")
+                logger.warning("[Timeline] expenses failed: %s", e)
 
             # Journal.
             try:
@@ -88,7 +88,7 @@ def register_timeline_api(app):
                         "ts": _iso(j.get("at") or j.get("date")), "done": False,
                     })
             except Exception as e:  # noqa: BLE001
-                logger.warning(f"[Timeline] journal failed: {e}")
+                logger.warning("[Timeline] journal failed: %s", e)
 
         events = [e for e in events if e["ts"]]
         events.sort(key=lambda e: e["ts"], reverse=True)

@@ -48,3 +48,22 @@ _DEMO = {
 
 def _is_guest(claims) -> bool:
     return claims.get("role") == "guest"
+
+
+def body_int(body: dict, key: str, default: int = 0) -> int:
+    """An integer field from a JSON body, or a 400.
+
+    These routes used `int(body.get(...))` inline, so `"total_pages": "abc"`
+    was an uncaught ValueError and a 500 — a server fault reported for a typing
+    mistake. `ValidationError` is turned into `{"error": "invalid_request"}` by
+    the handler in `create_app`.
+    """
+    from app.errors import ValidationError
+
+    raw = body.get(key, default)
+    if raw in (None, ""):
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{key} must be a whole number") from None

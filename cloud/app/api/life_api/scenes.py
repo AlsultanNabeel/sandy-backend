@@ -2,7 +2,7 @@
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
-from app.api.life_api._common import _DEMO, _is_guest
+from app.api.life_api._common import _DEMO, _is_guest, body_int
 from app.utils.user_profiles import active_user_profile_context, build_user_profile
 
 
@@ -50,9 +50,9 @@ def _register_scenes(app):
 
         name = (body.get("name") or "").strip()
         r = apply_scene(name)
-        # فعّل المشهد فعليًا على الروم-نود عبر MQTT — للمالك فقط (غرفته
-        # الفيزيائية). غير المالك يحفظ/يعرض مشاهده هو بس بدون تحكّم بغرفة
-        # المالك. انتقالي حتى تجي أدوات التحكّم لكل مستأجر (المرحلة الخامسة).
+        # فعّل المشهد فعليًا على أجهزة هالمستأجر عبر MQTT. البوابة هي ملكية
+        # الموضوع (`device_store.tenant_owns_topic`)، مش «المالك وبس» — هاد
+        # كان قبل ما تصير الغرفة تحت شجرة كل وحدة (خريطة المعمارية §2.7).
         online = False
         if r.get("ok"):
             from app.agent.tools.schemas.life_tools import actuate_scene_actions
@@ -87,10 +87,10 @@ def _register_scenes(app):
         from app.features.focus_store import start_focus
 
         r = start_focus(
-            focus_min=int(body.get("focus_min", 25) or 25),
+            focus_min=body_int(body, "focus_min", 25),
             label=(body.get("label") or "").strip(),
-            break_min=int(body.get("break_min", 0) or 0),
-            cycles=int(body.get("cycles", 1) or 1),
+            break_min=body_int(body, "break_min"),
+            cycles=body_int(body, "cycles", 1),
             scene=(body.get("scene") or "").strip(),
             end_scene=(body.get("end_scene") or "").strip(),
         )
@@ -137,7 +137,7 @@ def _register_scenes(app):
         from app.features.focus_store import set_focus_goal
 
         r = set_focus_goal((body.get("period") or "").strip(),
-                           int(body.get("minutes", 0) or 0))
+                           body_int(body, "minutes"))
         return jsonify(r), (200 if r.get("ok") else 400)
 
     @app.route("/api/life/focus/sounds", methods=["GET"])

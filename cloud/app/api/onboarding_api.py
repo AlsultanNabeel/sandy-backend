@@ -23,6 +23,11 @@ from app.api.auth_handlers import require_auth
 from app.features import users_store
 
 _MAX_INTERESTS = 20
+# These go straight into every prompt Sandy is given, so they are bounded like
+# the persona's custom instructions are.
+_MAX_NAME = 60
+_MAX_INTEREST = 60
+_MAX_NOTES = 2000
 
 
 def register_onboarding_api(app):
@@ -50,21 +55,21 @@ def register_onboarding_api(app):
 
         body = request.get_json(silent=True) or {}
 
-        preferred_name = str(body.get("preferred_name") or "").strip()
+        preferred_name = str(body.get("preferred_name") or "").strip()[:_MAX_NAME]
 
         raw_interests = body.get("interests")
         interests = []
         if isinstance(raw_interests, list):
             seen = set()
             for item in raw_interests:
-                cleaned = str(item).strip()
+                cleaned = str(item).strip()[:_MAX_INTEREST]
                 if cleaned and cleaned not in seen:
                     seen.add(cleaned)
                     interests.append(cleaned)
                 if len(interests) >= _MAX_INTERESTS:
                     break
 
-        notes = str(body.get("notes") or "").strip()
+        notes = str(body.get("notes") or "").strip()[:_MAX_NOTES]
 
         ok = users_store.set_onboarding(
             user_id,
