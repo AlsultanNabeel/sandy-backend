@@ -278,9 +278,26 @@ def update_task_due_date(
         current = coll.find_one({"_id": task_id})
         if not current:
             return {"ok": False, "reason": "missing"}
-        # A task with an exact due TIME needs update_task_due_time, not this.
-        if current.get("due_at"):
-            return {"ok": False, "reason": "has_time"}
+
+        # A task with an exact time keeps its time of day on the new date.
+        # (Task creation always sets a time, so refusing these — as this used
+        # to — meant no dated task could ever be moved.)
+        # Stored datetimes come back naive-UTC from Mongo; `_iso` is the one
+        # place that knows that.
+        raw_at = current.get("due_at")
+        old_at = _parse_iso(_iso(raw_at) if isinstance(raw_at, datetime) else raw_at) \
+            if raw_at else None
+        if old_at:
+            new_at = datetime.combine(due_dt.date(), old_at.timetz().replace(tzinfo=None),
+                                      tzinfo=USER_TZ)
+            if new_at <= datetime.now(USER_TZ):
+                return {"ok": False, "reason": "past"}
+            coll.update_one(
+                {"_id": task_id},
+                {"$set": {"due_date": new_at.date().isoformat(), "due_at": new_at}},
+            )
+            return {"ok": True, "due_date": new_at.date().isoformat(),
+                    "due_at": new_at.isoformat()}
 
         coll.update_one(
             {"_id": task_id},

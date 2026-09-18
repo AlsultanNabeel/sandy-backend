@@ -57,16 +57,8 @@ def _handle_uncomplete_multi(
             for task in tasks
             if task.get("id")
         ]
-        session["pending_action"] = create_pending_action(
-            {
-                "type": "task",
-                "action": "uncomplete_multi",
-                "items": task_items,
-                "confirmation_status": "pending",
-            }
-        )
         return run_now(
-            {"type": "task", "action": "uncomplete_multi", "tasks": task_items},
+            {"type": "task", "action": "uncomplete_multi", "items": task_items},
             session=session, session_file=session_file, mongo_db=mongo_db,
             tasks_file=tasks_file, save_session_fn=save_session_fn)
     else:

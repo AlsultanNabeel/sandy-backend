@@ -23,6 +23,20 @@ from app.agent.executor.task_handlers._common import (
 from app.agent.executor.task_handlers._now import run_now
 
 
+def _ask_to_confirm(
+    pending: Dict[str, Any], reply: str, *, session: Dict[str, Any],
+    session_file, mongo_db, save_session_fn,
+) -> Dict[str, Any]:
+    """Ask "did you mean …?" **and remember the question**.
+
+    These replies used to ask without storing anything, so the user's «اه»
+    reached a turn with no pending action and nothing happened.
+    """
+    session["pending_action"] = create_pending_action(
+        {**pending, "confirmation_status": "pending"})
+    save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
+    return {"handled": True, "reply": reply}
+
 def _handle_update_due_date(
     task_reference: str,
     task_due_iso: str,
@@ -138,85 +152,83 @@ def _handle_update_due_date(
         )
 
     elif task_obj:
-        if str(task_obj.get("due_at", "")).strip():
-            reply = "هاي المهمة لسا مش جاهزة"
-            ok = False
-        else:
-            due_iso_for_update = task_due_iso
+        due_iso_for_update = task_due_iso
 
-            if not due_iso_for_update and task_due_text:
-                parsed = parse_reminder_time_ai(
-                    normalize_user_message(task_due_text),
-                    create_chat_completion_fn=create_chat_completion_fn,
-                    return_json=True,
-                )
-                if isinstance(parsed, dict):
-                    if parsed.get("success"):
-                        due_iso_for_update = parsed.get("remind_at_iso") or ""
-                    else:
-                        suggested = parsed.get("suggested_iso")
-                        if suggested:
-                            try:
-                                sdt = datetime.fromisoformat(
-                                    suggested.replace("Z", "+00:00")
-                                )
-                                if sdt.tzinfo is not None:
-                                    sdt = sdt.astimezone(USER_TZ)
-                                confirm_text = sdt.strftime("%d/%m/%Y")
-                            except Exception:
-                                confirm_text = suggested
-                            return {
-                                "handled": True,
-                                "reply": f"ما فهمت التاريخ بدقّة. تقصد اختار المهمة وعدّل التاريخ ليوم {confirm_text}?",
-                            }
+        if not due_iso_for_update and task_due_text:
+            parsed = parse_reminder_time_ai(
+                normalize_user_message(task_due_text),
+                create_chat_completion_fn=create_chat_completion_fn,
+                return_json=True,
+            )
+            if isinstance(parsed, dict):
+                if parsed.get("success"):
+                    due_iso_for_update = parsed.get("remind_at_iso") or ""
                 else:
-                    due_iso_for_update = parsed or ""
+                    suggested = parsed.get("suggested_iso")
+                    if suggested:
+                        try:
+                            sdt = datetime.fromisoformat(
+                                suggested.replace("Z", "+00:00")
+                            )
+                            if sdt.tzinfo is not None:
+                                sdt = sdt.astimezone(USER_TZ)
+                            confirm_text = sdt.strftime("%d/%m/%Y")
+                        except Exception:
+                            confirm_text = suggested
+                        return _ask_to_confirm(
+                            {"type": "task", "action": "update_due_date",
+                             "task_id": task_obj.get("id", ""),
+                             "text": task_obj.get("text", ""),
+                             "due_iso": suggested, "new_due_text": confirm_text},
+                            f"ما فهمت التاريخ بدقّة. تقصد اختار المهمة وعدّل التاريخ ليوم {confirm_text}?",
+                            session=session, session_file=session_file,
+                            mongo_db=mongo_db, save_session_fn=save_session_fn)
+            else:
+                due_iso_for_update = parsed or ""
 
-            if not due_iso_for_update:
+        if not due_iso_for_update:
+            return {
+                "handled": True, "ok": False,
+                "reply": "ما فهمت التاريخ الجديد بدقة. اكتب التاريخ بشكل أوضح.",
+            }
+
+        try:
+            due_dt = datetime.fromisoformat(
+                due_iso_for_update.replace("Z", "+00:00")
+            )
+            if due_dt.tzinfo is None:
+                due_dt = due_dt.replace(tzinfo=USER_TZ)
+            else:
+                due_dt = due_dt.astimezone(USER_TZ)
+
+            if due_dt.date() < datetime.now(USER_TZ).date():
                 return {
                     "handled": True, "ok": False,
-                    "reply": "ما فهمت التاريخ الجديد بدقة. اكتب التاريخ بشكل أوضح.",
+                    "reply": "التاريخ الجديد بالماضي. أعطني تاريخ اليوم أو تاريخ لاحق.",
                 }
 
-            try:
-                due_dt = datetime.fromisoformat(
-                    due_iso_for_update.replace("Z", "+00:00")
-                )
-                if due_dt.tzinfo is None:
-                    due_dt = due_dt.replace(tzinfo=USER_TZ)
-                else:
-                    due_dt = due_dt.astimezone(USER_TZ)
+            due_iso_for_update = due_dt.isoformat()
+            new_due_text = due_dt.strftime("%d/%m/%Y")
 
-                if due_dt.date() < datetime.now(USER_TZ).date():
-                    return {
-                        "handled": True, "ok": False,
-                        "reply": "التاريخ الجديد بالماضي. أعطني تاريخ اليوم أو تاريخ لاحق.",
-                    }
+        except Exception:
+            return {
+                "handled": True, "ok": False,
+                "reply": "التاريخ الجديد غير صالح. اكتب التاريخ بشكل أوضح.",
+            }
 
-                due_iso_for_update = due_dt.isoformat()
-                new_due_text = due_dt.strftime("%d/%m/%Y")
-
-            except Exception:
-                return {
-                    "handled": True, "ok": False,
-                    "reply": "التاريخ الجديد غير صالح. اكتب التاريخ بشكل أوضح.",
-                }
-
-            return run_now(
-                {"type": "task", "action": "update_due_date",
-                 "task_id": task_obj.get("id", ""),
-                 "text": task_obj.get("text", ""),
-                 "due_iso": due_iso_for_update, "new_due_text": new_due_text},
-                session=session, session_file=session_file, mongo_db=mongo_db,
-                tasks_file=tasks_file, save_session_fn=save_session_fn)
+        return run_now(
+            {"type": "task", "action": "update_due_date",
+             "task_id": task_obj.get("id", ""),
+             "text": task_obj.get("text", ""),
+             "due_iso": due_iso_for_update, "new_due_text": new_due_text},
+            session=session, session_file=session_file, mongo_db=mongo_db,
+            tasks_file=tasks_file, save_session_fn=save_session_fn)
 
     else:
         reply = "ما قدرت أحدد المهمة."
         ok = False
 
     return {"handled": True, "ok": ok, "reply": reply}
-
-
 
 
 def _handle_update_due_time(
@@ -339,10 +351,14 @@ def _handle_update_due_time(
                             confirm_text = sdt.strftime("%d/%m/%Y %I:%M %p")
                         except Exception:
                             confirm_text = suggested
-                        return {
-                            "handled": True,
-                            "reply": f"ما فهمت الوقت بدقّة. تقصد تعدّل وقت المهمة ليوم {confirm_text}?",
-                        }
+                        return _ask_to_confirm(
+                            {"type": "task", "action": "update_due_time",
+                             "task_id": task_obj.get("id", ""),
+                             "text": task_obj.get("text", ""),
+                             "due_iso": suggested, "new_due_text": confirm_text},
+                            f"ما فهمت الوقت بدقّة. تقصد تعدّل وقت المهمة ليوم {confirm_text}?",
+                            session=session, session_file=session_file,
+                            mongo_db=mongo_db, save_session_fn=save_session_fn)
             else:
                 due_iso_for_update = parsed or ""
 
@@ -388,8 +404,6 @@ def _handle_update_due_time(
         ok = False
 
     return {"handled": True, "ok": ok, "reply": reply}
-
-
 
 
 def _handle_bulk_update_due_date(

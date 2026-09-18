@@ -39,15 +39,41 @@ class TestTaskDueReminder(unittest.TestCase):
         d.add_reminder.assert_called_once_with(
             text="اشتري خبز", remind_at_iso=_PENDING["due_iso"], linked_task_id="t1"
         )
-        self.assertTrue(out["ok"])
+        self.assertTrue(out.get("ok", True))
         self.assertIn("بكرا الصبح", out["reply"])
 
     def test_reminder_failure_is_reported_honestly(self):
         out, _ = _run({"success": False})
         self.assertTrue(out["handled"])
+        self.assertFalse(out["ok"])
         self.assertIn("خطأ", out["reply"])
         self.assertNotIn("Google", out["reply"])
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_timed_task_moves_to_a_new_date_keeping_its_time():
+    """Creation always sets a time, and the store refused to move any task that
+    had one, so no dated task could be rescheduled."""
+    from datetime import datetime, timedelta
+
+    import mongomock
+
+    from app.features import tasks_store
+    from app.utils.time import USER_TZ
+    from app.utils.user_profiles import active_user_profile_context
+
+    db = mongomock.MongoClient().db
+    tasks_store.init_tasks_store(db)
+    at = (datetime.now(USER_TZ) + timedelta(days=1)).replace(hour=9, minute=30, second=0, microsecond=0)
+    with active_user_profile_context({"user_id": "u1", "chat_id": "u1", "relation": "user",
+                                      "permissions": "all"}):
+        tid = tasks_store.add_task("اجتماع", due_iso=at.isoformat())
+        target = (at + timedelta(days=3)).date().isoformat()
+        r = tasks_store.update_task_due_date(tid, target)
+    assert r["ok"], r
+    moved = datetime.fromisoformat(r["due_at"])
+    assert moved.date().isoformat() == target
+    assert (moved.hour, moved.minute) == (9, 30)

@@ -111,6 +111,18 @@ def _exec_task_rename(
     return {"handled": True, "ok": False, "reply": "ما قدرت أعدل اسم المهمة."}
 
 
+def _move_task_reminder(task_id: str, task_text: str, due_iso: str) -> bool:
+    """Point the task's linked reminder at its new time. True on success.
+
+    The store deletes by ``linked_task_id``, so the old reminder goes first and
+    the new one is written after; a failure leaves the task without one, which
+    the caller reports rather than calling it done.
+    """
+    deps.delete_sandy_reminder_by_task_id(task_id)
+    result = deps.add_reminder(text=task_text, remind_at_iso=due_iso, linked_task_id=task_id)
+    return bool(result.get("success"))
+
+
 def _exec_task_update_due_date(
     pending: Dict[str, Any],
     *,
@@ -130,16 +142,16 @@ def _exec_task_update_due_date(
     clear_pending_action(session)
     save_session_fn(session, session_file=session_file, mongo_db=mongo_db)
     if result.get("ok"):
+        if result.get("due_at") and not _move_task_reminder(task_id, task_text, result["due_at"]):
+            return {
+                "handled": True, "ok": False, "error": "reminder_not_moved",
+                "reply": f"عدّلت تاريخ المهمة، بس صار خطأ وأنا بحدّث التذكير تبعها:\n- {task_text}",
+            }
         return {
             "handled": True,
             "reply": f"تمام، عدّلت تاريخ المهمة:\n- {task_text}\nالتاريخ الجديد: {new_due_text}",
         }
     reason = result.get("reason")
-    if reason == "has_time":
-        return {
-            "handled": True, "ok": False,
-            "reply": "هاي المهمة فيها وقت/تذكير محفوظ. تعديل تاريخ المهام اللي فيها وقت مؤجل للمرحلة 6.6.3.",
-        }
     if reason == "past":
         return {
             "handled": True, "ok": False,
@@ -170,23 +182,14 @@ def _exec_task_update_due_time(
         if result.get("reason") == "past":
             return {"handled": True, "ok": False, "reply": "الوقت الجديد بالماضي. أعطني وقت لاحق."}
         return {"handled": True, "ok": False, "reply": "ما قدرت أعدل وقت المهمة."}
-    # Move the task-linked reminder to the new due time. The store deletes by
-    # linked_task_id, so the old one must go before the new one is written.
-    deps.delete_sandy_reminder_by_task_id(task_id)
-    reminder_result = deps.add_reminder(
-        text=task_text,
-        remind_at_iso=due_iso,
-        linked_task_id=task_id,
-    )
-    if reminder_result.get("success"):
+    if _move_task_reminder(task_id, task_text, due_iso):
         return {
             "handled": True,
-            "ok": True,
             "reply": f"تمام، عدّلت وقت تذكير المهمة:\n- {task_text}\nالوقت الجديد: {new_due_text}",
         }
+    # The task moved but nothing will remind the user: not a success.
     return {
-        "handled": True,
-        "ok": True,
+        "handled": True, "ok": False, "error": "reminder_not_moved",
         "reply": f"عدّلت وقت المهمة، بس صار خطأ وأنا بحدّث التذكير تبعها:\n- {task_text}",
     }
 
@@ -385,6 +388,8 @@ def _exec_task_bulk_update_due_date(
             task_id, to_due_iso, mongo_db=mongo_db, tasks_file=tasks_file
         )
         if result.get("ok"):
+            if result.get("due_at"):
+                _move_task_reminder(task_id, task_text_item, result["due_at"])
             updated.append(task_text_item)
         else:
             failed.append(task_text_item)
