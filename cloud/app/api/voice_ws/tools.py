@@ -321,14 +321,12 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
         logger.debug("[voice_ws] memory load skipped: %s", exc)
     _took("legacy memory")
 
-    # Rich MongoDB context: persona directives + session state + STM. No query
-    # yet at session start; semantic search happens per-turn via injection.
-    # قراءة وحدة للذاكرة القصيرة، بتتمرّر للاتنين. كانت تنقرأ مرتين بكل بداية
-    # مكالمة، وهاي الثواني اللي بين «هاي آندي» وأول صوت بترجع منها.
+    # Rich MongoDB context: persona directives + session state (durable facts
+    # only). No query yet at session start; semantic search happens per-turn via
+    # injection. The short-term turns are read once here and seeded below.
     stm_history = _load_stm_history()
     _took("stm")
-    rich_ctx = _voice_memory_context(
-        "", include_semantic=False, stm_history=stm_history)
+    rich_ctx = _voice_memory_context("", include_semantic=False)
     _took("context")
     if rich_ctx:
         # Proof line: this is the EXACT memory text seeded into the voice prompt.

@@ -235,7 +235,7 @@ def format_for_voice(ctx: Dict[str, Any]) -> str:
     if state_parts:
         parts.append("[حالة المستخدم: " + " | ".join(state_parts) + "]")
 
-    if ctx.get("semantic_summaries"):
+    if ctx.get("semantic_summaries") and not durable_only:
         parts.append("[ملخصات ذات صلة: " + " | ".join(ctx["semantic_summaries"][:2]) + "]")
     if ctx.get("semantic_facts"):
         parts.append("[معلومات ذات صلة: " + " | ".join(ctx["semantic_facts"][:3]) + "]")

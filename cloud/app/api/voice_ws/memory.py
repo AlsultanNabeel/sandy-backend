@@ -176,10 +176,8 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
     قلتلك هيك؟» — والجواب «بالمكالمة» غير «وإنت واقف قدّامي». بلا الوسم، الذاكرة
     الموحّدة بتصير كومة جُمَل بلا مكان، وهي ما بتقدر تجاوب عن سؤال هي حاضرة فيه.
     """
-    # يُمرَّر من فوق لمّا يكون محمّل أصلاً: بناء تعليمات الجلسة كان بينادي
-    # `_load_stm_history` مرتين — مرة من هون ومرة من `_voice_memory_context` —
-    # يعني نفس القراءة مرّتين بكل بداية مكالمة، وهي على مسار «قال هاي آندي»
-    # لحدّ ما تسمع صوتها.
+    # يُمرَّر من فوق لمّا يكون محمّل أصلاً، عشان ما تنقرا الذاكرة القصيرة مرّتين
+    # بكل بداية مكالمة.
     history = _load_stm_history() if history is None else history
     if not history:
         return ""
@@ -205,10 +203,7 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
 # makes reconnects/rapid re-opens effectively instant without staleness risk.
 
 
-def _voice_memory_context(
-    message: str, *, include_semantic: bool,
-    stm_history: Optional[List[Dict[str, Any]]] = None,
-) -> Optional[str]:
+def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[str]:
     """Shared rich-context builder for the voice helpers.
 
     Returns the voice-formatted memory context for the owner chat, or ``None``
@@ -232,14 +227,13 @@ def _voice_memory_context(
         from app.agent.context_builder import build_memory_context, format_for_voice
         from app.db import get_db
         mongo_db = get_db()
-        if stm_history is None:
-            stm_history = _load_stm_history()
+        # No STM here: `durable_only` drops the turns anyway. The session
+        # builder reads them once and seeds them itself (`_load_stm_context`).
         ctx = build_memory_context(
             chat_id=chat_id,
             user_id=chat_id,
             message=message,
             mongo_db=mongo_db,
-            stm_history=stm_history,
             include_semantic=include_semantic,
             # Voice seed = stable facts only. Recent topics/summaries/STM turns
             # are the exact text that resurfaces as phantom replies on the
