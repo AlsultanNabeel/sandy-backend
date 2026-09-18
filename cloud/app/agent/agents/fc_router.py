@@ -29,79 +29,18 @@ from app.agent.guards import DESTRUCTIVE_TOOLS as _DESTRUCTIVE_TOOLS
 from app.integrations.azure_intent_client import AzureIntentClient
 from app.utils.user_profiles import address_instruction
 
+from app.agent.tools.schemas.meta_tools import META_TOOLS
+
 logger = logging.getLogger(__name__)
 
 
-# Handled by routing logic, not the ToolDispatcher.
-_META_TOOL_NAMES = frozenset({
-    "ask_clarification",
-    "request_confirmation",
-    "chat_respond",
-    "chat_emotional",
-    "pending_confirm",
-    "pending_reject",
-    "pending_select",
-})
+# Handled by routing logic, not the ToolDispatcher. The specs themselves are
+# registered from `tools/schemas/meta_tools.py` and reach the model with every
+# other declaration — one definition, not a second copy here that the
+# de-duplication below silently dropped.
+_META_TOOL_NAMES = frozenset(t["name"] for t in META_TOOLS)
 
 _FC_DEFAULT_CALL = {"name": "chat_respond", "args": {"type": "general"}}
-
-# Routing-only meta-tools, in native function-calling shape. They never reach the
-# ToolDispatcher — the graph turns them into chat / clarify / pending flows.
-_META_TOOL_SPECS: List[Dict[str, Any]] = [
-    {
-        "name": "chat_respond",
-        "description": "دردشة عامة، تحية، شكر، أو لا يوجد طلب/أمر واضح",
-        "parameters": {
-            "type": "object",
-            "properties": {"type": {"type": "string", "description": "نوع الدردشة"}},
-        },
-    },
-    {
-        "name": "chat_emotional",
-        "description": "دعم عاطفي عندما يكون المستخدم متوتراً/محبَطاً/حزيناً",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "ask_clarification",
-        "description": "اسأل سؤالاً توضيحياً فقط عند غموض كامل (لا object إطلاقاً)",
-        "parameters": {
-            "type": "object",
-            "properties": {"question": {"type": "string"}},
-            "required": ["question"],
-        },
-    },
-    {
-        "name": "request_confirmation",
-        "description": (
-            "اطلب تأكيداً قبل تنفيذ عملية خطيرة/لا رجعة فيها عندما يكون الهدف غير "
-            "واضح صراحةً (عدا task_delete وtask_complete — لهم تأكيد تلقائي)"
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {"summary": {"type": "string"}},
-            "required": ["summary"],
-        },
-    },
-    {
-        "name": "pending_confirm",
-        "description": "المستخدم وافق على pending نشط (تمام/اه/أوكي)",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "pending_reject",
-        "description": "المستخدم رفض pending نشط (لأ/خلص/الغي)",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "pending_select",
-        "description": "المستخدم اختار خياراً من pending نشط (رقم/اسم)",
-        "parameters": {
-            "type": "object",
-            "properties": {"choice": {"type": "string"}},
-            "required": ["choice"],
-        },
-    },
-]
 
 _ROUTER_SYSTEM = """\
 أنت طبقة فهم النية لمساعدة اسمها Sandy. مهمتك: اقرأ رسالة المستخدم واستدعِ الأداة \
@@ -130,12 +69,12 @@ ask_clarification هي الملاذ الأخير عند الغموض الكام�
 
 
 def _build_native_tools(declarations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Wrap registry declarations + the meta-tools into native FC tool specs.
+    """Wrap the registry declarations (meta-tools included) into native FC specs.
 
     Kept identical turn-to-turn (declarations are static) so it sits in the
     cached prefix.
     """
-    specs = list(declarations) + _META_TOOL_SPECS
+    specs = list(declarations)
     tools = []
     seen = set()
     for d in specs:
@@ -300,7 +239,7 @@ def route_with_fc(
         from app.integrations.bedrock_router import bedrock_enabled, route_with_bedrock
         from app.integrations.gemini_router import gemini_enabled, route_with_gemini
 
-        all_specs = list(declarations) + _META_TOOL_SPECS
+        all_specs = list(declarations)
         calls: Optional[List[Dict[str, Any]]] = None
         if gemini_enabled():
             calls = route_with_gemini(system, user_prompt, all_specs)

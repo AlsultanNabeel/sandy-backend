@@ -349,16 +349,18 @@ def execute_node(state: SandyState) -> SandyState:
         if tool and tool_name not in _META_TOOL_NAMES:
             from app.utils.user_profiles import active_profile_is_guest
 
-            # أدوات الحساب (مهام/تذكير/تقويم/ذاكرة) متاحة لأي مستخدم مسجّل،
+            # أدوات الحساب (مهام/تذكير/ذاكرة) متاحة لأي مستخدم مسجّل،
             # ممنوعة على الضيف فقط — العزل عبر current_user_id() لكل مستخدم.
             if _requires_account(tool_name) and active_profile_is_guest():
                 logger.warning(f"[execute_node] blocked tool={tool_name} for guest")
                 return merge_state(state, {
                     "execution_result": {"handled": True, "ok": False, "reply": "سجّل دخولك عشان أقدر أساعدك بهالطلب 😊"},
                 })
+            # Built outside the try: a failure below (e.g. no model configured)
+            # still has to read the session afterwards.
+            session = _build_session_from_state(state)
             try:
                 create_chat_completion_fn = _get_chat_completion_fn()
-                session = _build_session_from_state(state)
                 normalized = normalize_user_message(state["message"])
 
                 context = DispatchContext(
