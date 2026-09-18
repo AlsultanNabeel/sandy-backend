@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 
 from app.db import get_db
 from app.utils.tenant_db import scoped
+from app.utils.time import USER_TZ
 from app.utils.user_profiles import current_user_id
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,6 @@ def _coll():
     return scoped(get_db(), _COLL, field="chat_id")
 
 
-
 # كلمات بتدل على معلم مهم
 _MILESTONE_SIGNALS = (
     "تخرجت", "تجوزت", "خطبت", "انتقلت", "استقلت", "تعينت",
@@ -52,6 +52,11 @@ _MILESTONE_RE = re.compile(
     r"(" + "|".join(re.escape(s) for s in _MILESTONE_SIGNALS) + r")"
     r"\s+(.{3,150})"
 )
+
+
+def _today() -> date:
+    """The user's calendar day — the dyno runs in UTC, the user does not."""
+    return datetime.now(USER_TZ).date()
 
 
 def detect_milestone(message: str) -> Optional[Tuple[str, str]]:
@@ -85,13 +90,13 @@ def save_milestone(
             "label": _LABEL,
             "signal": signal,
             "context": encrypt_field(context.strip()[:200]),
-            "event_date": (event_date or now_utc.date()).isoformat(),
+            "event_date": (event_date or _today()).isoformat(),
             "created_at": now_utc,
         })
-        logger.info(f"[shared_history] milestone saved: {signal} {context[:40]}")
+        logger.info("[shared_history] milestone saved (%s)", signal)
         return True
     except Exception as exc:
-        logger.debug(f"[shared_history] save failed: {exc}")
+        logger.warning("[shared_history] save failed: %s", exc)
         return False
 
 
@@ -103,21 +108,20 @@ def get_anniversaries(
     if coll is None:
         return []
     try:
-        today = today or date.today()
+        today = today or _today()
         target_mm_dd = today.strftime("-%m-%d")  # "-05-16"
         docs = list(coll.find(
             {
-                    "label": _LABEL,
-                "event_date": {"$regex": f"{target_mm_dd}$"},
+                "label": _LABEL,
+                # Same day and month, from an earlier year.
+                "event_date": {"$regex": f"{target_mm_dd}$", "$ne": today.isoformat()},
             },
             {"_id": 0, "signal": 1, "context": 1, "event_date": 1},
             limit=5,
         ))
-        # شيل ذكريات نفس السنة الحالية
-        today_iso = today.isoformat()
-        return [d for d in docs if d.get("event_date") != today_iso]
+        return docs
     except Exception as exc:
-        logger.debug(f"[shared_history] anniversary check failed: {exc}")
+        logger.warning("[shared_history] anniversary check failed: %s", exc)
         return []
 
 
@@ -131,7 +135,7 @@ def get_anniversary_context(
     try:
         from app.agent.ltm_crypto import decrypt_field
         year = first["event_date"][:4]
-        years_ago = date.today().year - int(year)
+        years_ago = _today().year - int(year)
         if years_ago <= 0:
             return None
         context = decrypt_field(first.get("context", ""))[:80]

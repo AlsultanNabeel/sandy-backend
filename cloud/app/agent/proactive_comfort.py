@@ -58,7 +58,7 @@ def get_proactive_comfort(
     user_id: str,
     mongo_db=None,
     message: str = "",
-) -> Optional[Tuple[str, str]]:
+) -> Optional[Tuple[Optional[str], str]]:
     """يرجّع (intensity_override, comfort_directive) لو في إشارات حرجة.
 
     intensity_override بيكون 'empathetic' دايماً وقت التفعيل.
@@ -89,11 +89,11 @@ def get_proactive_comfort(
         anomaly = detect_habit_anomaly(chat_id, user_id, mongo_db)
         if anomaly:
             return (
-                None,  # type: ignore[return-value]
+                None,
                 "[تذكير لطيف: المستخدم نشط بشكل غير معتاد — راعي ذلك في النبرة]",
             )
     except Exception as exc:
-        logger.debug(f"[proactive_comfort] check failed: {exc}")
+        logger.debug("[proactive_comfort] check failed: %s", exc)
         return None
 
     return None

@@ -563,7 +563,7 @@ You can probe all of this from a browser without hardware — see §10.
 `features/speaker_id.py` + `voice_ws/speaker.py`. CAM++ via sherpa-onnx, running
 locally: no account, no torch. Gated by `SANDY_REQUIRE_SPEAKER_AUTH=1`, off by
 default, and it only guards the sensitive tool set (`task_delete`,
-`reminder_delete`, `calendar_delete`, `schedule_message_to_self`). With no
+`reminder_delete`, `schedule_message_to_self`). With no
 voiceprint enrolled it allows — it does not lock the owner out before enrolment.
 
 ---

@@ -24,7 +24,6 @@ _DEFAULT_RESEARCH_COUNT = 5
 _PLACES_MAX_RESULTS = 8
 _PLACES_ITEMS_LIMIT = 12
 _PLACES_QUERY_CAP = 320
-_PLACES_SUMMARY_CAP = 200
 _DEFAULT_HOME_CITY = "October City"
 
 
@@ -177,7 +176,6 @@ def _handle_places(ctx: "_ActionContext") -> Dict[str, Any]:
     from app.agent.deep_context import (
         persist_last_search_results,
         places_to_search_items,
-        record_last_action,
     )
     from app.features.google_places import format_places_for_reply, search_places
 
@@ -203,12 +201,6 @@ def _handle_places(ctx: "_ActionContext") -> Dict[str, Any]:
             domain="places",
             query=str(query or "")[:_PLACES_QUERY_CAP],
             items=places_to_search_items(places, limit=_PLACES_ITEMS_LIMIT),
-        )
-        record_last_action(
-            ctx.session,
-            "places_shown",
-            summary=str(query or "")[:_PLACES_SUMMARY_CAP],
-            refs={"query": query},
         )
         return {
             "handled": True,

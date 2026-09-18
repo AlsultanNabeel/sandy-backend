@@ -58,15 +58,16 @@ def schedule_message_to_self(args: Dict[str, Any], ctx: "DispatchContext") -> Di
     deliver_at = _parse_when(when_str)
     if not deliver_at:
         return {"handled": True, "ok": False, "reply": "ما فهمت الموعد. جرب: 'بعد سنة' أو تاريخ مثل '2027-05-16'."}
+    if deliver_at.tzinfo is None:
+        deliver_at = deliver_at.replace(tzinfo=timezone.utc)
+    if deliver_at <= datetime.now(timezone.utc):
+        return {"handled": True, "ok": False, "reply": "الموعد لازم يكون بالمستقبل."}
 
     if ctx.mongo_db is None:
         return {"handled": True, "ok": False, "reply": "ما قدرت أوصل للذاكرة الآن، حاول لاحقاً."}
 
-    chat_id = str((ctx.state or {}).get("chat_id", "default"))
-    user_id = str((ctx.state or {}).get("user_id", "default"))
-
     from app.agent.future_messages import schedule_future_message
-    ok = schedule_future_message(chat_id, user_id, text, deliver_at, ctx.mongo_db)
+    ok = schedule_future_message(text, deliver_at)
     if not ok:
         return {"handled": True, "ok": False, "reply": "صار خطأ بالحفظ، جرب مرة ثانية."}
 

@@ -6,7 +6,6 @@ from typing import Any, Dict
 from app.utils.nlp_normalizer import normalize_user_message
 from app.utils.time import USER_TZ
 from app.agent.pending import create_pending_action
-from app.agent.deep_context import record_last_action
 from app.agent.conflict_resolution import run_conflict_check_after_task_add
 
 from app.features.time_parser import (
@@ -125,12 +124,6 @@ def _handle_create(
     if task_id:
         session["_last_created_task_id"] = task_id
         session["_last_created_task_text"] = task_text
-        record_last_action(
-            session,
-            "task_created",
-            summary=task_text,
-            refs={"task_id": task_id, "task_text": task_text},
-        )
         if task_due_iso:
             reply = "تم التسجيل. المهمة محفوظة مع استحقاق."
             conflict_result = run_conflict_check_after_task_add(

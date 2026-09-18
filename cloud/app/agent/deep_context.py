@@ -1,17 +1,15 @@
-"""
-Deep contextual memory: recent search/options buffer + last-action pointer for Planner/chat.
-"""
+"""Recent search/options buffer, so a follow-up like "which is closest?" can be
+answered from the results Sandy just showed instead of searching again."""
 
 from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.utils.time import USER_TZ
 
 LAST_SEARCH_RESULTS_KEY = "last_search_results"
-LAST_ACTION_CONTEXT_KEY = "last_action_context"
 
 _COMPARISON_HINT = re.compile(
     r"(?:أحسن|احسن|أفضل|افضل|ارخص|أرخص|أغلا|اغلا|أقرب|اقرب|أبعد|ابعد|أسرع|اسرع|"
@@ -57,23 +55,6 @@ def persist_last_search_results(
     }
 
 
-def record_last_action(
-    session: Dict[str, Any],
-    kind: str,
-    *,
-    summary: str,
-    refs: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Pointer for elliptical follow-ups (احذفه، عدلي…)."""
-    sess = session if isinstance(session, dict) else {}
-    sess[LAST_ACTION_CONTEXT_KEY] = {
-        "kind": str(kind or "unknown").strip()[:64],
-        "summary": str(summary or "").strip()[:400],
-        "refs": dict(refs) if isinstance(refs, dict) else {},
-        "ts": datetime.now(USER_TZ).isoformat(),
-    }
-
-
 def places_to_search_items(
     places: List[Dict[str, Any]], limit: int = 12
 ) -> List[Dict[str, Any]]:
@@ -97,76 +78,6 @@ def places_to_search_items(
             }
         )
     return out
-
-
-
-def build_agent_runtime_state(session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Compact JSON-safe blob for Planner user payload."""
-    sess = session if isinstance(session, dict) else {}
-    lac = sess.get(LAST_ACTION_CONTEXT_KEY)
-    if not isinstance(lac, dict):
-        lac = {}
-
-    sr = sess.get(LAST_SEARCH_RESULTS_KEY)
-    if not isinstance(sr, dict):
-        sr = {}
-
-    items = sr.get("items") if isinstance(sr.get("items"), list) else []
-    preview_rows: List[Dict[str, Any]] = []
-    for it in items[:8]:
-        if not isinstance(it, dict):
-            continue
-        preview_rows.append(
-            {
-                "row": it.get("row"),
-                "title": str(it.get("title", "") or "")[:220],
-                "url": str(it.get("url", "") or "")[:240],
-                "snippet": str(it.get("snippet", "") or "")[:260],
-            }
-        )
-
-    return {
-        "last_action": {
-            "kind": lac.get("kind"),
-            "summary": str(lac.get("summary", "") or "")[:300],
-            "refs_keys": (
-                sorted(str(k) for k in (lac.get("refs") or {}).keys())
-                if isinstance(lac.get("refs"), dict)
-                else []
-            ),
-        },
-        "last_search": {
-            "domain": sr.get("domain"),
-            "query": str(sr.get("query", "") or "")[:200],
-            "n_items": len(items),
-            "items_preview": preview_rows,
-            "has_buffer": len(preview_rows) > 0,
-        },
-    }
-
-
-def runtime_state_chat_block(session: Optional[Dict[str, Any]]) -> str:
-    """Short Arabic block for Sandy chat system prompt."""
-    blob = build_agent_runtime_state(session)
-    parts: List[str] = []
-    la = blob.get("last_action") or {}
-    if la.get("kind"):
-        parts.append(f"آخر نشاط تشغيلي: {la.get('kind')} — {la.get('summary', '')}")
-
-    sr = blob.get("last_search") or {}
-    if sr.get("has_buffer"):
-        n = sr.get("n_items", 0)
-        dq = sr.get("query", "")
-        parts.append(
-            f"آخر خيارات/نتائج مُعرضة للمستخدم ({sr.get('domain')}, عن «{dq}»، عددها ~{n})."
-        )
-
-    if not parts:
-        return ""
-    return (
-        "🧭 الحالة الراهنة للوكيل (استخدمها لحل الإشارات الضمنية؛ لا تعيد البحث إلا إذا طلب المستخدم جلب جديد):\n- "
-        + "\n- ".join(parts)
-    )
 
 
 def wants_comparison_grounded_in_search(normalized_message: str) -> bool:

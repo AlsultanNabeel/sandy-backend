@@ -67,7 +67,7 @@ def encrypt_field(value: str) -> str:
         return f"{_PREFIX}{token}"
     except Exception as exc:
         # Warn, not debug: a failed encrypt means plaintext gets stored.
-        logger.warning(f"[ltm_crypto] encrypt failed, storing plaintext: {exc}")
+        logger.warning("[ltm_crypto] encrypt failed, storing plaintext: %s", exc)
         return value
 
 
@@ -82,11 +82,7 @@ def decrypt_field(value: str) -> str:
         token = value[len(_PREFIX):].encode("ascii")
         return f.decrypt(token).decode("utf-8")  # type: ignore[attr-defined]
     except Exception as exc:
-        logger.debug(f"[ltm_crypto] decrypt failed: {exc}")
+        # Warn: a wrong/rotated key means ciphertext reaches the prompt.
+        logger.warning("[ltm_crypto] decrypt failed: %s", type(exc).__name__)
         return value
 
-
-def generate_key_for_setup() -> str:
-    """يولّد Fernet key جديد للـ env var. بتستدعيه مرة وقت إعداد المشروع."""
-    from cryptography.fernet import Fernet
-    return Fernet.generate_key().decode("ascii")

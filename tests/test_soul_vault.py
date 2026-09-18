@@ -129,30 +129,6 @@ class TestSoulVaultNewFeatures(unittest.TestCase):
         from app.agent.soul_vault import get_apology
         self.assertEqual(get_apology(None), get_apology("neutral"))
 
-    # D5 — get_hint_snippet
-    def test_hint_stressed_returns_string(self):
-        from app.agent.soul_vault import get_hint_snippet
-        result = get_hint_snippet("stressed")
-        self.assertIsInstance(result, str)
-        self.assertTrue(len(result) > 0)
-
-    def test_hint_frustrated_returns_string(self):
-        from app.agent.soul_vault import get_hint_snippet
-        result = get_hint_snippet("frustrated")
-        self.assertIsInstance(result, str)
-
-    def test_hint_neutral_returns_none(self):
-        from app.agent.soul_vault import get_hint_snippet
-        self.assertIsNone(get_hint_snippet("neutral"))
-
-    def test_hint_happy_returns_none(self):
-        from app.agent.soul_vault import get_hint_snippet
-        self.assertIsNone(get_hint_snippet("happy"))
-
-    def test_hint_none_mood_returns_none(self):
-        from app.agent.soul_vault import get_hint_snippet
-        self.assertIsNone(get_hint_snippet(None))
-
     # D5 — get_persona uses hints for negative moods
     def test_get_persona_stressed_uses_hint(self):
         from app.agent.soul_vault import get_persona, _HINT_SNIPPETS

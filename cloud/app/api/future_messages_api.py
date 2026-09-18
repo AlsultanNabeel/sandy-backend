@@ -1,16 +1,12 @@
 """Future Messages API — schedule a message to your future self.
 
 User-facing view over the SAME store the agent's ``schedule_message_to_self`` tool
-writes to: ``sandy_future_messages`` (collection ``_COLL`` in
-``app.agent.future_messages``). Each doc is scoped by ``chat_id`` (== the user's
-``user_id`` for app users), its ``text`` is encrypted at rest, and delivery is
+writes to (``app.agent.future_messages``). Every read and write goes through that
+module's tenant-scoped handle, so the stored shape never diverges and a caller
+only ever sees their own messages. ``text`` is encrypted at rest, and delivery is
 passive — Sandy surfaces a message in her next reply once ``deliver_at`` passes.
 
-This API only adds create / list / delete over REST; the existing delivery
-mechanism (``pop_due_messages`` / ``get_future_messages_context``) stays as-is. We
-reuse ``schedule_future_message`` for writes so the stored shape never diverges.
-
-Scoped to the caller's own ``user_id`` (isolated); guests get nothing.
+Guests (no tenant) get nothing.
 
 Endpoints:
   GET    /api/future-messages            this user's upcoming scheduled messages
@@ -24,10 +20,11 @@ from datetime import datetime, timezone
 
 from flask import jsonify, request
 
-# Reuse the tool's writer + its collection name (single source of truth) so the
-# stored shape never diverges from what the agent writes.
-from app.agent.future_messages import _COLL as _FUTURE_MESSAGES_COLL
-from app.agent.future_messages import schedule_future_message
+from app.agent.future_messages import (
+    cancel_message,
+    list_pending_messages,
+    schedule_future_message,
+)
 from app.api.auth_handlers import require_auth
 from app.utils.user_profiles import (
     active_user_profile_context,
@@ -67,16 +64,7 @@ def register_future_messages_api(app, mongo_db=None):
             from app.agent.ltm_crypto import decrypt_field
 
             items = []
-            cur = (
-                mongo_db[_FUTURE_MESSAGES_COLL]
-                .find(
-                    {"chat_id": uid, "delivered": {"$ne": True}},
-                    {"text": 1, "deliver_at": 1, "created_at": 1},
-                )
-                .sort("deliver_at", 1)
-                .limit(200)
-            )
-            for d in cur:
+            for d in list_pending_messages():
                 text = decrypt_field(d.get("text", "")).strip()
                 if not text:
                     continue
@@ -109,9 +97,7 @@ def register_future_messages_api(app, mongo_db=None):
             uid = current_user_id()
             if not uid:
                 return jsonify({"ok": False}), 403
-            # Reuse the tool's writer so the stored shape (encryption, fields,
-            # delivery flags) stays identical. App user → chat_id == user_id.
-            ok = schedule_future_message(uid, uid, text, deliver_at, mongo_db)
+            ok = schedule_future_message(text, deliver_at)
         return jsonify({"ok": ok}), (200 if ok else 400)
 
     @app.route("/api/future-messages/<msg_id>", methods=["DELETE"])
@@ -130,8 +116,5 @@ def register_future_messages_api(app, mongo_db=None):
             uid = current_user_id()
             if not uid:
                 return jsonify({"ok": False}), 403
-            # Scoped to the caller; only cancels still-undelivered messages.
-            res = mongo_db[_FUTURE_MESSAGES_COLL].delete_one(
-                {"_id": oid, "chat_id": uid, "delivered": {"$ne": True}}
-            )
-        return jsonify({"ok": res.deleted_count > 0}), 200
+            ok = cancel_message(oid)
+        return jsonify({"ok": ok}), 200

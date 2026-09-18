@@ -141,11 +141,6 @@ def get_apology(mood: Optional[str] = None) -> str:
     return _APOLOGY_SNIPPETS.get(mood or "neutral", _APOLOGY_SNIPPETS["neutral"])
 
 
-def get_hint_snippet(mood: Optional[str] = None) -> Optional[str]:
-    """تلميح بصيغة سؤال للمودات الضاغطة. يرجّع None لباقي المودات."""
-    return _HINT_SNIPPETS.get(mood or "")
-
-
 def get_gratitude_snippet() -> str:
     """رد امتنان عشوائي."""
     return random.choice(_GRATITUDE_SNIPPETS)

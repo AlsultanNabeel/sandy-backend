@@ -41,7 +41,7 @@ def load_pending_state(thread_id: str, chat_id: str, mongo_db) -> Optional[Dict[
         doc = mongo_db[_COLL].find_one({"_id": _key(chat_id, thread_id), "chat_id": chat_id})
         return doc.get("pending") if doc else None
     except Exception as exc:
-        logger.warning(f"[pending_store] load failed: {exc}")
+        logger.warning("[pending_store] load failed: %s", exc)
         return None
 
 
@@ -69,4 +69,4 @@ def save_pending_state(
             upsert=True,
         )
     except Exception as exc:
-        logger.warning(f"[pending_store] save failed: {exc}")
+        logger.warning("[pending_store] save failed: %s", exc)

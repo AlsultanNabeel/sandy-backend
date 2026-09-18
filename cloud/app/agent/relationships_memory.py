@@ -40,7 +40,6 @@ def _coll():
     return scoped(get_db(), _COLL, field="chat_id")
 
 
-
 # كلمة العلاقة زي ما يكتبها المستخدم، والكلمة الموحّدة اللي بنخزّنها
 _RELATION_TERMS = {
     "أبوي": "والد", "ابوي": "والد", "بابا": "والد", "والدي": "والد",
@@ -110,10 +109,10 @@ def save_relationship(
             "name": name,
             "created_at": datetime.now(timezone.utc),
         })
-        logger.info(f"[relationships] saved: {relation}={name}")
+        logger.info("[relationships] saved (%s)", relation)
         return True
     except Exception as exc:
-        logger.debug(f"[relationships] save failed: {exc}")
+        logger.warning("[relationships] save failed: %s", exc)
         return False
 
 

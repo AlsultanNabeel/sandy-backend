@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _GPT_ROUTING_SYSTEM = """أنت مساعد يحدد نوع طلب المستخدم.
 أجب بـ JSON فقط: {"intent": "<نوع الطلب>"}
-الأنواع: task | reminder | calendar | chat | search | other"""
+الأنواع: task | reminder | chat | search | other"""
 
 _openai_direct_client: Any = None
 
@@ -68,10 +68,10 @@ def route_with_gpt(message: str) -> Optional[str]:
         except (ValueError, AttributeError):
             # Malformed reply: degrade to plain chat instead of giving up.
             intent = "chat"
-        logger.info(f"[model_fallback] GPT routing fallback, intent={intent}")
+        logger.info("[model_fallback] GPT routing fallback, intent=%s", intent)
         return intent
     except Exception as exc:
-        logger.debug(f"[model_fallback] GPT routing failed: {exc}")
+        logger.warning("[model_fallback] GPT routing failed: %s", exc)
         return None
 
 
@@ -86,7 +86,7 @@ def chat_with_fallback(
     try:
         return primary_fn(messages=messages, max_tokens=max_tokens, temperature=temperature)
     except Exception as exc:
-        logger.warning(f"[model_fallback] primary chat failed: {exc}, trying OpenAI direct")
+        logger.warning("[model_fallback] primary chat failed: %s, trying OpenAI direct", exc)
 
     try:
         client = _get_openai_direct_client()
@@ -100,5 +100,5 @@ def chat_with_fallback(
             temperature=temperature,
         )
     except Exception as exc:
-        logger.error(f"[model_fallback] OpenAI direct also failed: {exc}")
+        logger.error("[model_fallback] OpenAI direct also failed: %s", exc)
         return None

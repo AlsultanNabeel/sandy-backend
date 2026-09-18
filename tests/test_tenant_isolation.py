@@ -281,3 +281,37 @@ def test_focus_goals_isolated_and_fail_closed(db):
         assert focus_store.get_focus_goals().get("day") != 99
     with as_tenant("tenant-A"):
         assert focus_store.get_focus_goals().get("day") == 11
+
+
+def test_future_messages_isolated_and_fail_closed(db, monkeypatch):
+    """agent/future_messages.py used to filter the raw collection by a caller-
+    supplied chat_id (the agent tool fell back to "default"). It now goes
+    through the scoped handle, so the tenant comes only from the context."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.agent import future_messages as fm
+
+    monkeypatch.setattr(fm, "get_db", lambda: db)
+    past = datetime.now(timezone.utc) - timedelta(minutes=1)
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+
+    with as_tenant("tenant-A"):
+        assert fm.schedule_future_message("A-later-zzz", later)
+        assert fm.schedule_future_message("A-due-zzz", past)
+    with as_tenant("tenant-B"):
+        assert fm.schedule_future_message("B-later-zzz", later)
+        assert "A-" not in _blob(fm.list_pending_messages())
+        assert fm.get_future_messages_context() is None, "B must not receive A's due message"
+    with as_tenant("tenant-A"):
+        pending = fm.list_pending_messages()
+        a_id = pending[-1]["_id"]  # the later one; the due one is delivered below
+        assert len(pending) == 2
+        assert "A-due-zzz" in (fm.get_future_messages_context() or "")
+    with as_tenant("tenant-B"):
+        assert not fm.cancel_message(a_id), "B cancelled A's message"
+    with no_tenant():
+        assert not fm.schedule_future_message("ghost-zzz", later)
+        assert fm.list_pending_messages() == []
+    with as_tenant("tenant-A"):
+        assert "ghost" not in _blob(fm.list_pending_messages())
+        assert fm.cancel_message(a_id)

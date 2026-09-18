@@ -38,7 +38,6 @@ def _coll():
     return scoped(get_db(), _COLL, field="chat_id")
 
 
-
 # مؤشرات الدروس — العبارة + ما بعدها هو الدرس
 _LESSON_SIGNALS = [
     "تعلمت إن", "تعلمت ان", "تعلمت اليوم", "اكتشفت إن", "اكتشفت ان",
@@ -79,10 +78,10 @@ def save_lesson(
             "lesson": encrypt_field(lesson.strip()[:200]),
             "created_at": datetime.now(timezone.utc),
         })
-        logger.info(f"[lessons] saved: {lesson[:50]}")
+        logger.info("[lessons] saved (%d chars)", len(lesson))
         return True
     except Exception as exc:
-        logger.debug(f"[lessons] save failed: {exc}")
+        logger.warning("[lessons] save failed: %s", exc)
         return False
 
 
