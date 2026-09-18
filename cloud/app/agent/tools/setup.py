@@ -23,7 +23,6 @@ def register_all_tools() -> None:
     global _registered
     if _registered:
         return
-    _registered = True
 
     from app.agent.tools.registry import get_registry
     from app.agent.tools.schemas.task_tools import TASK_TOOLS
@@ -54,4 +53,8 @@ def register_all_tools() -> None:
             )
             count += 1
 
-    logger.info(f"[ToolRegistry] {count} tools registered")
+    # Only now: set before the imports, one failing schema module left the
+    # registry empty for the life of the process, and every later call —
+    # voice included — returned early believing the job was done.
+    _registered = True
+    logger.info("[ToolRegistry] %d tools registered", count)

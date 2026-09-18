@@ -206,7 +206,9 @@ def _handle_chat(state: SandyState, create_chat_completion_fn) -> str:
         except Exception as exc:
             logger.warning(f"[execute_node] streaming failed, falling back: {exc}")
 
-    # #4: Graceful Degradation — Azure → OpenAI direct → persona_snippet فقط
+    # Graceful degradation: Azure → OpenAI direct → "" (the caller apologises).
+    # Never the persona snippet: it is prompt text (directives, memories, the
+    # life snapshot) and would reach the user verbatim as Sandy's answer.
     try:
         from app.agent.model_fallback import chat_with_fallback
         response = chat_with_fallback(
@@ -215,9 +217,9 @@ def _handle_chat(state: SandyState, create_chat_completion_fn) -> str:
         if response is not None:
             return (response.choices[0].message.content or "").strip()
     except Exception as exc:
-        logger.error(f"[execute_node] chat LLM failed after fallback: {exc}")
+        logger.error("[execute_node] chat LLM failed after fallback: %s", exc)
 
-    return state.get("persona_snippet") or ""
+    return ""
 
 
 
@@ -431,7 +433,9 @@ def execute_node(state: SandyState) -> SandyState:
             logger.error(f"[execute_node] chat setup failed: {exc}")
             reply = ""
         if not reply:
-            reply = "وينك؟ 😄"
+            # The model gave nothing: say so, don't paper over it.
+            from app.agent.soul_vault import get_apology
+            reply = get_apology(state.get("mood"))
         return merge_state(
             state,
             {
@@ -448,7 +452,10 @@ def execute_node(state: SandyState) -> SandyState:
     try:
         create_chat_completion_fn = _get_chat_completion_fn()
         reply = _handle_chat(state, create_chat_completion_fn)
-        result = {"handled": bool(reply), "reply": reply or "وينك؟ 😄"}
+        if not reply:
+            from app.agent.soul_vault import get_apology
+            reply = get_apology(state.get("mood"))
+        result = {"handled": True, "reply": reply}
     except Exception as exc:
         logger.error(f"[execute_node] fallback chat failed: {exc}")
         result = {"handled": False, "reply": "حصل خطأ، حاول مرة ثانية."}

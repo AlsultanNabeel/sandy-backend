@@ -34,8 +34,15 @@ def _get_client():
     global _client
     if _client is None:
         import boto3
+        from botocore.config import Config
 
-        _client = boto3.client("bedrock-runtime", region_name=_REGION)
+        # boto3's defaults are 60 s to connect, 60 s to read, plus retries —
+        # minutes on a request path that Heroku cuts at 30 s.
+        _client = boto3.client(
+            "bedrock-runtime", region_name=_REGION,
+            config=Config(connect_timeout=3, read_timeout=12,
+                          retries={"max_attempts": 1}),
+        )
     return _client
 
 

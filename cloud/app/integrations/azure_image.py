@@ -14,6 +14,7 @@ Env vars:
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import logging
 import os
@@ -25,13 +26,21 @@ from app.config import AZURE_OPENAI_API_VERSION
 
 logger = logging.getLogger(__name__)
 
+_IMAGE_TIMEOUT_S = 60.0
+
 
 def _client():
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
     api_key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-    api_version = AZURE_OPENAI_API_VERSION
     if not endpoint or not api_key:
         return None
+    return _cached_client(endpoint, api_key, AZURE_OPENAI_API_VERSION)
+
+
+@functools.lru_cache(maxsize=2)
+def _cached_client(endpoint: str, api_key: str, api_version: str):
+    """One client per credential set. Building one per call leaked a
+    connection pool each time and never reused a warm connection."""
     try:
         from openai import AzureOpenAI
         return AzureOpenAI(
@@ -39,6 +48,9 @@ def _client():
             api_version=api_version,
             azure_endpoint=endpoint,
             max_retries=0,  # fail fast — image calls are already slow; don't triple that
+            # The SDK default is ten minutes; an image that has not come back
+            # in a minute is not coming back to this request.
+            timeout=_IMAGE_TIMEOUT_S,
         )
     except Exception as e:
         logger.warning("[azure_image] AzureOpenAI client init failed: %s", e)

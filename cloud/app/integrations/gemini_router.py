@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 _MODEL_ID = os.getenv("GEMINI_ROUTER_MODEL", "").strip()
 _MAX_TOKENS = int(os.getenv("GEMINI_ROUTER_MAX_TOKENS", "700"))
+# This call is on the chat request path and runs before the Azure router; with
+# no deadline a hung call held the request until Heroku's 30 s cut-off.
+_TIMEOUT_MS = int(float(os.getenv("GEMINI_ROUTER_TIMEOUT_S", "12")) * 1000)
 
 _client = None
 
@@ -35,8 +38,12 @@ def _get_client():
     global _client
     if _client is None:
         from google import genai
+        from google.genai import types
 
-        _client = genai.Client(api_key=GEMINI_API_KEY)
+        _client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=types.HttpOptions(timeout=_TIMEOUT_MS),
+        )
     return _client
 
 

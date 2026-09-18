@@ -1,7 +1,7 @@
 """response_node: يبني الرد النهائي.
 
-آخر node بالـ graph. يجمع execution_result.reply مع persona_snippet
-و response_template، ويطلّع final_response جاهز للإرسال للتطبيق.
+آخر node بالـ graph. يجمع execution_result.reply مع response_template،
+ويطلّع final_response جاهز للإرسال للتطبيق.
 """
 
 from __future__ import annotations
@@ -41,14 +41,14 @@ def _degradation_disclosure(tool_name: str) -> str:
     )
 
 
-def _build_final_text(
-    reply: str,
-    persona_snippet: Optional[str],
-    response_template: Optional[str],
-) -> str:
-    """يدمج الـ reply مع persona و template."""
+def _build_final_text(reply: str, response_template: Optional[str]) -> str:
+    """يدمج الـ reply مع الـ template.
+
+    The persona snippet never becomes the reply: it is prompt text for the
+    model (directives, memories), not something to say to the user.
+    """
     if not reply:
-        return persona_snippet or _FALLBACK_REPLY
+        return _FALLBACK_REPLY
 
     parts = []
     if response_template and len(reply) < 30 and response_template not in reply:
@@ -62,23 +62,19 @@ def response_node(state: SandyState) -> SandyState:
 
     الأولوية:
     1. final_response موجود مسبقاً → استخدمه مباشرة
-    2. execution_result.reply → ادمجه مع persona/template
-    3. persona_snippet → ردّ مؤدب بدون تنفيذ
-    4. fallback → رسالة خطأ آمنة
+    2. execution_result.reply → ادمجه مع الـ template
+    3. fallback → اعتذار مناسب للمود
     """
     final = state.get("final_response") or ""
     execution = state.get("execution_result") or {}
     reply = str(execution.get("reply") or "").strip()
     reply_markup = execution.get("reply_markup")
-    persona_snippet = str(state.get("persona_snippet") or "").strip()
     response_template = str(state.get("response_template") or "").strip()
 
     function_call_name = (state.get("function_call") or {}).get("name", "")
 
     if final or reply:
-        text = final or _build_final_text(
-            reply, persona_snippet or None, response_template or None
-        )
+        text = final or _build_final_text(reply, response_template or None)
         # تنبيه تعثّر الـ tool. ما نضيفه لو الرد أصلاً فيه تحذير صريح.
         #
         # **كان ما بيوصل لحدا أبداً.** كان محطوط بفرع `elif reply:` لحاله،
