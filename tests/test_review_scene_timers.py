@@ -67,3 +67,29 @@ def test_something_schedules_the_runner():
     src = (pathlib.Path(__file__).resolve().parents[1]
            / "cloud/app/bootstrap.py").read_text()
     assert "start_scene_timer_runner(" in src, "nothing fires scene reverts again"
+
+
+def test_undelivered_revert_is_retried_then_given_up(monkeypatch):
+    d = _db()
+    monkeypatch.setattr(ss, "_actuate", lambda actions: (0, ["light"]))
+    try:
+        _timer(d, "u1", 1)
+        for _ in range(ss.MAX_TIMER_TRIES):
+            runner.run_all_due(d)
+            d["sandy_scene_timers"].update_many(
+                {}, {"$set": {"fire_at": datetime.now(timezone.utc) - timedelta(seconds=1)}})
+        assert d["sandy_scene_timers"].count_documents({}) == 0, "retries forever"
+    finally:
+        appdb.reset()
+
+
+def test_undelivered_revert_comes_back(monkeypatch):
+    d = _db()
+    monkeypatch.setattr(ss, "_actuate", lambda actions: (0, ["light"]))
+    try:
+        _timer(d, "u1", 1)
+        runner.run_all_due(d)
+        left = list(d["sandy_scene_timers"].find({}))
+        assert len(left) == 1 and left[0]["tries"] == 1 and left[0]["user_id"] == "u1"
+    finally:
+        appdb.reset()

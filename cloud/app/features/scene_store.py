@@ -73,6 +73,7 @@ _COLL = "sandy_scenes"
 # كلها ويوقّع الطلب.
 MAX_SCENES = 200
 MAX_DUE_TIMERS = 100
+MAX_TIMER_TRIES = 5
 _TIMERS = "sandy_scene_timers"   # timed reverts: {fire_at, device, value}
 
 # name → (label, icon, default actions). Seeded once; the owner can edit freely.
@@ -385,11 +386,24 @@ def run_due_timers() -> Dict[str, Any]:
                                       sort=[("fire_at", 1)])
         if not t:
             break
-        due.append({"device": t.get("device", ""), "value": t.get("value", "")})
+        due.append({"device": t.get("device", ""), "value": t.get("value", ""),
+                    "tries": int(t.get("tries") or 0)})
     if not due:
         return {"due": [], "sent": 0, "missed": []}
     sent, missed = _actuate(due)
-    return {"due": due, "sent": sent, "missed": missed}
+    # اللي ما وصل (الوسيط واقع، أو الجهاز فاصل) بيرجع للطابور بعد دقيقة، لحد
+    # MAX_TIMER_TRIES محاولات — عشان «ضوّي بعد الفيلم» ما تضيع لأنّ الشبكة
+    # رمشت لحظتها. السقف موجود عشان جهاز انشال ما يضل يتجرّب للأبد.
+    retry = []
+    for a in due:
+        name = str(a["device"]).strip().lower()
+        if name in missed and a["tries"] + 1 < MAX_TIMER_TRIES:
+            retry.append({"fire_at": _now() + timedelta(minutes=1),
+                          "device": a["device"], "value": a["value"],
+                          "tries": a["tries"] + 1})
+    if retry:
+        tcoll.insert_many(retry)
+    return {"due": due, "sent": sent, "missed": missed, "retrying": len(retry)}
 
 
 def users_with_due_timers(mongo_db, limit: int = 500) -> List[str]:
