@@ -37,9 +37,18 @@
 #define ENABLE_COMMANDS 0   // local MultiNet "Sandy ..." command words (needs WAKEWORD)
 #define ENABLE_SPK_TEST 0   // temporary: triple-beep to verify amp + speaker
 // Dev only: unauthenticated image upload + log stream on the LAN. Anyone on the
-// same Wi-Fi can flash the board while this is on — set it to 0 for every
-// unit that leaves the house. Sold robots update through ENABLE_OTA.
+// same Wi-Fi can flash the board while this is on. Sold robots update through
+// ENABLE_OTA instead.
+//
+// نسخة البيع بتسكّره لحالها. ملف النشر بيبني بمجلد منفصل مع SANDY_RETAIL=1
+// (`idf.py -B build-retail -DSANDY_RETAIL=1 build`)، فأي نسخة بتنزل بالتحديث
+// عن بعد مستحيل تطلع وهو مفتوح — ما في إشي لازم حدا يتذكّره قبل البيع. بناء
+// التطوير العادي (`idf.py build`) بيضل زي ما هو.
+#if defined(SANDY_RETAIL) && SANDY_RETAIL
+#define ENABLE_REMOTE   0
+#else
 #define ENABLE_REMOTE   1   // cable-free dev: OTA upload + serial log over WiFi (needs WIFI)
+#endif
 // تزويد الشبكة من نقطة وصول اللوح نفسه — أول تشغيل، وتبديل راوتر.
 //
 // بدونه اسم الشبكة وكلمة سرّها محروقين بالكود، وكل زبون بده تعديل ملف وترجمة

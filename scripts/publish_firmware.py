@@ -5,7 +5,7 @@
         --canary 8421 [--rollout 0] [--notes "…"]
 
 Reads the version from main/include/config.h (SANDY_FW_VERSION) and the image
-from firmware/brain-core/build/sandy-brain-s3.bin. Signs
+from firmware/brain-core/build-retail/sandy-brain-s3.bin (the sale build). Signs
 ``sandy-fw|<version>|<size>|<sha256>`` with the private key (ECDSA P-256), checks
 the signature against the public key compiled into the firmware — a release the
 robots would refuse is caught here, not in the field — and uploads.
@@ -33,7 +33,10 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 FW = REPO / "firmware" / "brain-core"
-IMAGE = FW / "build" / "sandy-brain-s3.bin"
+# The sale build (idf.py -B build-retail -DSANDY_RETAIL=1 build): LAN upload
+# server off. Only this image is ever published — a dev image would hand every
+# sold robot an unauthenticated flash port.
+IMAGE = FW / "build-retail" / "sandy-brain-s3.bin"
 CONFIG_H = FW / "main" / "include" / "config.h"
 PUBLIC = FW / "main" / "fw_pubkey.pem"
 ENV_FILE = pathlib.Path("~/Desktop/.sandy-publish.env").expanduser()
@@ -92,6 +95,11 @@ def main() -> int:
     image = IMAGE.read_bytes()
     if image[:1] != b"\xe9":
         sys.exit(f"{IMAGE} is not an ESP32 app image")
+    # Belt and braces: the LAN upload server's task name only exists in a dev
+    # build. If it is in here, this is not the sale build — refuse to ship it.
+    if b"logsrv\x00" in image:
+        sys.exit(f"{IMAGE} still has the LAN upload server (ENABLE_REMOTE) — "
+                 "build with: idf.py -B build-retail -DSANDY_RETAIL=1 build")
     sha = hashlib.sha256(image).hexdigest()
     message = f"sandy-fw|{version}|{len(image)}|{sha}".encode()
 

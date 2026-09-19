@@ -1,4 +1,5 @@
 build/
+build-retail/
 sdkconfig
 sdkconfig.old
 main/secrets.h

@@ -29,6 +29,7 @@ A subsystem set to 0 is not present in the binary. It is not broken and not hidd
 | `ENABLE_WAKEWORD` | on | local WakeNet gate for the voice session (needs VOICE) |
 | `ENABLE_COMMANDS` | off | local MultiNet "Sandy ..." command words (needs WAKEWORD) |
 | `ENABLE_SPK_TEST` | off | temporary: triple-beep to verify amp + speaker |
+| `ENABLE_REMOTE` | off |  |
 | `ENABLE_REMOTE` | on | cable-free dev: OTA upload + serial log over WiFi (needs WIFI) |
 | `ENABLE_PROVISION` | on | needs WIFI — SoftAP setup page when no network answers |
 | `ENABLE_IR` | on | needs MQTT — IR learn + replay over RMT |

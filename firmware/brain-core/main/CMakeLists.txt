@@ -62,3 +62,10 @@ idf_component_register(
         mbedtls
         esp-sr
 )
+
+# Sale build: `idf.py -B build-retail -DSANDY_RETAIL=1 build`. Shuts the LAN
+# upload/log server (see ENABLE_REMOTE in config.h). The publish script always
+# builds this way, so nothing that goes out over the air can ship with it open.
+if(SANDY_RETAIL)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE SANDY_RETAIL=1)
+endif()
