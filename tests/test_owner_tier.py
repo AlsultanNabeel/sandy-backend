@@ -76,16 +76,16 @@ def test_the_owner_role_reaches_the_top_quota_tier(monkeypatch):
     assert seen["daily"] == metering.FREE_DAILY
 
 
-def test_both_login_routes_ask_for_the_role(monkeypatch):
-    """One route fixed and the other not is the shape this bug would come back
-    in: sign in with email and get the owner tier, sign in with Google and not."""
+def test_only_google_decides_the_owner_tier(monkeypatch):
+    """Google asks for the role (verified address); email never grants it."""
     import pathlib
 
     import app.api.email_auth_api as email_api
     import app.api.social_auth_api as social_api
 
-    for mod in (email_api, social_api):
-        src = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
-        assert 'make_token("user"' not in src, \
-            f"{mod.__name__} still hardcodes the customer role"
-        assert "role_for_email" in src
+    # Google (verified address) decides the tier; email/password never grants
+    # it, because nothing there proves the address.
+    src = pathlib.Path(social_api.__file__).read_text(encoding="utf-8")
+    assert 'make_token("user"' not in src
+    assert "role_for_email" in src
+    assert "role_for_email" not in pathlib.Path(email_api.__file__).read_text(encoding="utf-8")

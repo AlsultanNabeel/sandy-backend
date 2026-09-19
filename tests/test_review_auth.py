@@ -21,13 +21,16 @@ def test_single_hop_and_no_header():
     assert _ip({}) == "10.0.0.9"
 
 
-def test_owner_role_is_reported(monkeypatch):
+def test_email_login_never_grants_owner(monkeypatch):
+    """The address on this route is unverified: registering with the owner's
+    email must not buy his tier."""
+    from app import config
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
-    monkeypatch.setattr(email_auth_api, "role_for_email", lambda e: "owner")
+    monkeypatch.setattr(config, "SANDY_OWNER_EMAILS", "o@x.y", raising=False)
     app = Flask(__name__)
     with app.test_request_context("/"):
         resp, status = email_auth_api._result_for({"_id": "u1", "email": "o@x.y"})
-    assert status == 200 and resp.get_json()["role"] == "owner"
+    assert status == 200 and resp.get_json()["role"] == "user"
 
 
 def _app(monkeypatch):

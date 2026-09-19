@@ -18,7 +18,7 @@ import re
 from flask import jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app.api.auth_handlers import check_rate_limit, make_token, role_for_email
+from app.api.auth_handlers import check_rate_limit, make_token
 from app.features import users_store
 
 # تحقّق إيميل بسيط (شكل عام) — التحقّق الحقيقي يصير عند الاستعمال.
@@ -54,7 +54,11 @@ def _rate_blocked(*checks) -> bool:
 def _result_for(user):
     """يصكّ توكن التطبيق لمستخدم ويرجّع نفس شكل ردّ المصادقة الاجتماعية."""
     user_id = user.get("_id")
-    role = role_for_email(user.get("email") or "")
+    # Never the owner tier here. Nothing on this route proves the address
+    # belongs to whoever typed it — anyone could register with the owner's
+    # email and get his quota. The owner signs in with Google, where the
+    # provider has verified the address (social_auth_api).
+    role = "user"
     try:
         token = make_token(role, user_id=user_id)
     except RuntimeError:
