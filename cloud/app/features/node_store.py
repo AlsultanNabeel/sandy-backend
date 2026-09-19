@@ -256,6 +256,7 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
         # was paired offline finally gets its parts.
         _provision(existing["node_id"], existing.get("outputs"),
                    existing.get("label", ""))
+        _open_key_enrolment(existing["node_id"])
         return {"ok": True, "node_id": existing["node_id"], "already": True}
 
     # node_id = the code itself (slugified) so the firmware's topic is deterministic.
@@ -311,7 +312,19 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     except DuplicateKeyError:
         logger.warning("[NodeStore] %s claimed concurrently — refusing", node_id)
         return {"ok": False, "error": "already_claimed"}
+    _open_key_enrolment(node_id)
     return {"ok": True, "node_id": node_id, "already": False}
+
+
+def _open_key_enrolment(node_id: str) -> None:
+    """Pairing is the one moment the owner vouches for the board: let it collect
+    its own voice key now (features/device_keys). Never fails a pairing."""
+    try:
+        from app.features.device_keys import cam_key_id, open_enrolment
+        open_enrolment(node_id)
+        open_enrolment(cam_key_id(node_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[NodeStore] key enrolment not opened for %s: %s", node_id, exc)
 
 
 def list_nodes() -> List[Dict[str, Any]]:
@@ -410,8 +423,9 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
     # The board's voice key goes with it: a sold robot must enrol afresh for
     # its next owner, not keep a key the old account's era issued.
     try:
-        from app.features.device_keys import revoke_key
+        from app.features.device_keys import cam_key_id, revoke_key
         revoke_key(node_id)
+        revoke_key(cam_key_id(node_id))
     except Exception as exc:  # noqa: BLE001 — the release must not hinge on it
         logger.warning("[NodeStore] could not revoke the voice key of %s: %s",
                        node_id, exc)

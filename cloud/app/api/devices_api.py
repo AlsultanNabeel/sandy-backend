@@ -352,9 +352,13 @@ def register_devices_api(app, mongo_db=None):
 
         The broker keeps the job it is good at: carrying "take a photo".
 
-        Authenticated by HMAC over node + request + timestamp, the same scheme
-        and the same shared key as the voice link — no session, no account, and
-        a replay window so a captured upload cannot be repeated later.
+        Authenticated by HMAC over node + request + timestamp — no session, no
+        account, and a replay window so a captured upload cannot be repeated
+        later. The key is the camera's own (``X-Sandy-Kv: 2``) once it has one;
+        until then the shared key, and in the minutes after pairing the reply
+        carries the camera's own key — the same enrolment as the voice link
+        (features/device_keys), under a separate id so the camera and the robot
+        never share a key.
         """
         import hashlib
         import hmac as _hmac
@@ -395,12 +399,32 @@ def register_devices_api(app, mongo_db=None):
                         "the board's clock is probably not synced", age / 60000)
             return _bad("stale")
 
+        from app.features.device_keys import (
+            KEY_VERSION, cam_key_id, confirm_key, get_key, issue_key,
+        )
+        kid = cam_key_id(node_id)
+        own_key = (request.headers.get("X-Sandy-Kv") or "").strip() == str(KEY_VERSION)
+        record = get_key(kid)
+        if own_key:
+            if record is None:
+                # Un-paired, or the key was never recorded: the camera drops its
+                # key and signs with the shared one until it is paired again.
+                log.warning("[cam] upload rejected: no key on record for %s", node_id)
+                return _bad("key_unknown", code=401)
+            key = record["key"]
+        elif record is not None and record["state"] == "confirmed":
+            log.warning("[cam] upload rejected: shared key refused for %s — it "
+                        "has its own key", node_id)
+            return _bad("auth_fail", code=401)
+
         expected = _hmac.new(key, f"{node_id}{req_id}{ts}".encode(),
                              hashlib.sha256).hexdigest()
         if not _hmac.compare_digest(expected, sig):
             logging.getLogger(__name__).warning(
                 "[cam] upload rejected: bad signature for %s", node_id)
             return _bad("auth_fail", code=401)
+        if own_key and record["state"] == "issued":
+            confirm_key(kid)
 
         jpeg = request.get_data(cache=False)
         # A JPEG starts FF D8. Checking it here means a truncated or misrouted
@@ -415,7 +439,17 @@ def register_devices_api(app, mongo_db=None):
         store_snapshot(node_id, req_id, jpeg)
         logging.getLogger(__name__).info(
             "[cam] upload ok: %s %s (%d bytes)", node_id, req_id, len(jpeg))
-        return jsonify({"ok": True, "bytes": len(jpeg)}), 200
+        reply = {"ok": True, "bytes": len(jpeg)}
+        if not own_key:
+            try:
+                from app.features.node_store import get_node_any_tenant
+                if get_node_any_tenant(node_id):
+                    fresh = issue_key(kid)   # None outside the pairing window
+                    if fresh:
+                        reply["device_key"] = fresh
+            except Exception as exc:  # noqa: BLE001 — enrolment is extra, not a gate
+                log.warning("[cam] key issue failed for %s: %s", node_id, exc)
+        return jsonify(reply), 200
 
     @app.route("/api/nodes/<node_id>/snapshot/<req_id>", methods=["GET"])
     @require_tenant

@@ -13,13 +13,19 @@ that board (``issued``). The board stores it and signs every later hello with it
 shared key is refused for that board — the key is the board's, and only the
 board has it.
 
-**What this does and does not close.** After confirmation, the shared key no
-longer impersonates the board. Before it, someone holding the shared key who
-connects as that board first would receive its key instead; the real board is
-then refused and the owner sees it offline — loud, not silent — and un-pairing
-resets it. Unpaired boards are never issued a key. Closing the enrolment window
-completely needs the key written at flash time instead (see ARCHITECTURE_MAP
-§12); this table is also where that would store it.
+**The enrolment window.** A key is handed out only in the
+``ENROL_WINDOW_MIN`` minutes after the owner pairs the board in the app (pairing
+the same code again reopens it — that is how a board that missed its window, or
+one un-paired and re-paired, gets back in). Outside that window a shared-key
+hello still works as before, it just never carries a key.
+
+Without the window, anyone holding the shared key could ask for any board's key
+at any time before that board enrolled — and a board whose owner never updated
+it would stay claimable forever. With it, they would have to act in the same few
+minutes the owner is pairing, as that board's id. After confirmation the shared
+key no longer impersonates the board at all. Closing the window completely needs
+the key written at flash time instead (see ARCHITECTURE_MAP §12); this table is
+also where that would store it.
 
 Keys are stored encrypted when ``SANDY_LTM_KEY`` is set (``ltm_crypto``).
 Keyed by device id, across tenants: this is device infrastructure, read on the
@@ -30,7 +36,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from app.db import get_db
@@ -39,6 +45,14 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_device_keys"
 KEY_VERSION = 2          # the `kv` a hello signed with the board's own key carries
+ENROL_WINDOW_MIN = 15    # how long after pairing a board may collect its key
+
+
+def cam_key_id(node_id: str) -> str:
+    """The camera's own record. It shares the robot's node id (same pairing
+    code), so it needs a separate key id — one opened camera must not yield the
+    robot's key, nor the other way round."""
+    return f"{(node_id or '').strip()}:cam"
 
 
 def _coll():
@@ -78,20 +92,45 @@ def issue_key(device_id: str) -> Optional[str]:
     if coll is None or not device_id:
         return None
     current = get_key(device_id)
+    if current and current["state"] != "issued":
+        return None
+    if coll.find_one({"_id": device_id,
+                      "enrol_until": {"$gt": datetime.now(timezone.utc)}}) is None:
+        # No pairing just happened. Not an error — the board keeps working on
+        # the shared key and collects its own the next time it is paired.
+        return None
     if current:
-        return current["hex"] if current["state"] == "issued" else None
+        return current["hex"]
     from app.agent.ltm_crypto import encrypt_field
 
     hex_key = secrets.token_hex(32)
+    # Only fills a record that has no key yet: a concurrent issue that won
+    # keeps its key, and the re-read below returns that one.
     coll.update_one(
-        {"_id": device_id},
-        {"$setOnInsert": {"key": encrypt_field(hex_key), "state": "issued",
-                          "issued_at": datetime.now(timezone.utc)}},
-        upsert=True,
+        {"_id": device_id, "key": {"$exists": False}},
+        {"$set": {"key": encrypt_field(hex_key), "state": "issued",
+                  "issued_at": datetime.now(timezone.utc)}},
     )
     # Re-read: a concurrent issue may have won the upsert.
     stored = get_key(device_id)
     return stored["hex"] if stored and stored["state"] == "issued" else None
+
+
+def open_enrolment(device_id: str, minutes: int = ENROL_WINDOW_MIN) -> None:
+    """The owner just paired this board: it may collect its key for a while.
+
+    A board that already has a confirmed key is left alone — pairing again must
+    not hand a second copy of a key the board is already using.
+    """
+    coll = _coll()
+    device_id = (device_id or "").strip()
+    if coll is None or not device_id:
+        return
+    until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    coll.update_one({"_id": device_id, "state": {"$ne": "confirmed"}},
+                    {"$set": {"enrol_until": until}}, upsert=False)
+    if coll.find_one({"_id": device_id}) is None:
+        coll.insert_one({"_id": device_id, "enrol_until": until})
 
 
 def confirm_key(device_id: str) -> None:

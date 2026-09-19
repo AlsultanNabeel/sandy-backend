@@ -340,9 +340,11 @@ static void sync_clock(void) {
 // ── This board's own voice key ───────────────────────────────────────────────
 //
 // Every board ships signing its hello with the same compiled-in key, so reading
-// it out of one robot was enough to speak as any other. Once this board is
-// paired, the server answers a shared-key hello with a key of its own
-// ("device_key"); it is kept here and signs every later hello ("kv":2). After
+// it out of one robot was enough to speak as any other. In the minutes after
+// the owner pairs this board in the app, the server answers a shared-key hello
+// with a key of its own ("device_key"); it is kept here and signs every later
+// hello ("kv":2). A board that misses that window keeps working on the shared
+// key and collects its key the next time it is paired. After
 // the first such hello the server refuses the shared key for this board.
 // "key_unknown" (un-paired, key revoked) drops it and the board re-enrols.
 //

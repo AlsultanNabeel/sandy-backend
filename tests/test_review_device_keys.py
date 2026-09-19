@@ -42,6 +42,8 @@ def db(monkeypatch):
     monkeypatch.setattr(sess, "set_voice_identity", lambda *_: None)
     monkeypatch.setattr(sess, "set_voice_channel", lambda *_: None)
     d["sandy_nodes"].insert_one({"node_id": "8421", "user_id": "owner-1"})
+    from app.features.device_keys import open_enrolment
+    open_enrolment("8421")          # the owner just paired it
     yield d
     appdb.reset()
 
@@ -81,6 +83,10 @@ def test_revoked_key_is_reported_so_the_board_re_enrols(db):
     ok, reply = _auth(_hello("8421", own, kv=2))
     assert not ok and reply["msg"] == "key_unknown"
     ok, reply = _auth(_hello("8421", SHARED))
+    assert ok and "device_key" not in reply, "a key handed out with nobody pairing"
+    from app.features.device_keys import open_enrolment
+    open_enrolment("8421")          # paired again
+    ok, reply = _auth(_hello("8421", SHARED))
     assert ok and reply.get("device_key")
 
 
@@ -88,3 +94,23 @@ def test_wrong_own_key_is_refused(db):
     _auth(_hello("8421", SHARED))
     ok, reply = _auth(_hello("8421", b"x" * 32, kv=2))
     assert not ok and reply["msg"] == "auth_fail"
+
+
+def test_no_key_outside_the_pairing_window(db):
+    from datetime import datetime, timedelta, timezone
+    db["sandy_device_keys"].update_one(
+        {"_id": "8421"},
+        {"$set": {"enrol_until": datetime.now(timezone.utc) - timedelta(minutes=1)}})
+    ok, reply = _auth(_hello("8421", SHARED))
+    assert ok and "device_key" not in reply, "shared key can still claim a board's key"
+
+
+def test_pairing_opens_the_window_but_never_reissues_a_confirmed_key(db):
+    ok, reply = _auth(_hello("8421", SHARED))
+    own = bytes.fromhex(reply["device_key"])
+    _auth(_hello("8421", own, kv=2))
+    from app.features.device_keys import get_key, open_enrolment
+    open_enrolment("8421")
+    assert get_key("8421")["state"] == "confirmed"
+    ok, reply = _auth(_hello("8421", SHARED))
+    assert not ok, "re-pairing let the shared key back in"
