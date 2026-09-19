@@ -55,7 +55,7 @@
 #define DF_PIN_ESP_RX     26     // ESP RX  ← وصّل DF TX
 #define DF_PIN_ESP_TX     27     // ESP TX  → وصّل DF RX
 #define DF_VOLUME_DEFAULT  20    // 0..30 (التشغيل العادي عبر ساندي)
-#define DF_SELFTEST        1     // 1 = شغّل مجلد1/مقطع1 تلقائياً بعد الإقلاع (تأكيد العتاد)
+#define DF_SELFTEST        0     // 1 = شغّل مجلد1/مقطع1 تلقائياً بعد الإقلاع (للتجربة بس — مش للبيع)
 #define DF_SELFTEST_VOLUME 18    // تجربة حاسمة: صوت واضح 3ث ثم يوقف
 
 #define WIFI_RECONNECT_INTERVAL_MS  10000
@@ -138,7 +138,12 @@ static void dfSetup() {
 static void handleMusic(const String& value) {
   Serial.printf("[MUSIC] %s\n", value.c_str());
 
-  if      (value == "stop")   { dfStop();   return; }
+  // «on» و«off» هنّ كلمات المشاهد والخادم (room_device.normalize_action)،
+  // والباقي كلمات المشغّل نفسه. الاتنين لازم ينفهموا، وإلا «طفّي الموسيقى»
+  // بالمشهد بتنطبع «صيغة غير معروفة» وبتضل شغّالة.
+  if      (value == "on")     { dfResume(); return; }
+  else if (value == "off")    { dfStop();   return; }
+  else if (value == "stop")   { dfStop();   return; }
   else if (value == "pause")  { dfPause();  return; }
   else if (value == "resume") { dfResume(); return; }
   else if (value == "next")   { dfNext();   return; }

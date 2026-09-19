@@ -1,8 +1,7 @@
 """Room Device Client — MQTT control for the room node (lights/music/fan/curtain).
 
-A SECOND physical device on the SAME HiveMQ broker as the robot body
-(`sandy_device.py`). The room node is the old classic ESP32 (`sandy/` firmware),
-slated to drive the room. This client is **publish-only** for now — it fires
+A SECOND physical board on the SAME HiveMQ broker as the robot body. The room
+node is a classic ESP32 running `room-node/room-node.ino` (light servo + DFPlayer). This client is **publish-only** for now — it fires
 room commands and is a graceful no-op when MQTT isn't configured, so scenes can
 be wired and tested before the hardware is online.
 
@@ -12,7 +11,7 @@ the robot's own tree, the same namespace the brain and the camera use:
     sandy/node/<node_id>/room/light    — "on" | "off" | "0".."100"  (brightness %)
     sandy/node/<node_id>/room/color    — "warm" | "cool" | "white" | "red" |
                         "green" | "blue" | "purple" | "amber"  (or "#rrggbb")
-    sandy/node/<node_id>/room/music    — "on" | "off" | "pause"
+    sandy/node/<node_id>/room/music    — "on" | "off" | "stop" | "pause" | "resume" | "next" | "prev"
     sandy/node/<node_id>/room/fan      — "on" | "off" | "0".."100"
     sandy/node/<node_id>/room/curtain  — "open" | "close"
     sandy/node/<node_id>/room/scene    — "<scene name>"  (optional: let the node
@@ -106,7 +105,8 @@ def normalize_action(device: str, value: str) -> Optional[str]:
     """Return a clean payload for (device, value), or None if invalid.
 
     Light/fan accept on|off or a 0..100 brightness/speed; color accepts a named
-    color or #rrggbb; music accepts on|off|pause; curtain open|close.
+    color or #rrggbb; music accepts on|off and the player's own
+    stop|pause|resume|next|prev (``handleMusic`` in room-node.ino); curtain open|close.
     """
     device = (device or "").strip().lower()
     value = str(value or "").strip().lower()
@@ -126,7 +126,8 @@ def normalize_action(device: str, value: str) -> Optional[str]:
             return value
         return None
     if device == "music":
-        return value if value in ("on", "off", "pause") else None
+        return value if value in ("on", "off", "stop", "pause", "resume",
+                                  "next", "prev") else None
     if device == "curtain":
         return value if value in ("open", "close") else None
     if device == "scene":

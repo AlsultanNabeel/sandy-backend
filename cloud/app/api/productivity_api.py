@@ -2,7 +2,7 @@
 
 Every signed-in user (owner or regular app user) gets real CRUD against
 sandy_reminders/sandy_tasks, scoped to their own ``user_id`` — the same
-collections the Telegram bot and the voice channel use. A guest (visitor page)
+collections the chat and the voice channel use. A guest (visitor page)
 sees the same tabs but with obviously-fake demo data, so the page looks alive
 without exposing anything private.
 

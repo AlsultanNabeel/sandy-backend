@@ -2,7 +2,7 @@
 
 Sandy has two halves that were never introduced. The **life** half — tasks,
 focus, goals, habits, reminders — writes to a database and returns a sentence.
-The **body** half — twenty-five faces, fourteen melodies, fifteen light effects —
+The **body** half — twenty-five faces, seventeen melodies, eleven light effects —
 sits on the board waiting for someone to call it.
 
 Nobody ever did. Finishing a goal she had tracked for a month produced the word

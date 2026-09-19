@@ -615,7 +615,7 @@ def create_app(
             from app.features.vision import analyze_image_with_azure
             # analyze_image_with_azure needs the bound chat-completion fn (the
             # one with the Azure/OpenAI clients and circuit breaker) that the
-            # Telegram pipeline uses. Without it the call raised TypeError and
+            # chat pipeline uses. Without it the call raised TypeError and
             # every web image analysis failed.
             from app.agent.facade.agent import create_chat_completion
             img_bytes = _decode_image(image_b64)

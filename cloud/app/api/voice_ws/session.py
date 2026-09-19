@@ -1368,7 +1368,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
             user_text = "".join(_user_buf).strip()
             sandy_text = "".join(_sandy_buf).strip()
 
-            # Save the turn so Telegram/web/voice keep sharing one memory. We
+            # Save the turn so the app and voice keep sharing one memory. We
             # deliberately do NOT re-inject conversation history back into the
             # live session: Gemini's native-audio model treats an injected text
             # turn as live input and does not reliably honor a "don't reply" tag
