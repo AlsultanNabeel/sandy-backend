@@ -27,8 +27,8 @@ Only the parts whose `ENABLE_*` flag is `1` are actually wired right now.
 | | SD (shutdown) | leave floating / pull to VIN | |
 | SG90 servo (neck) | signal | 16 | **5V** |
 | Passive piezo buzzer | one leg | 17 | other leg → **GND** |
-| HC-SR04 distance | TRIG | 15 | **5V** |
-| | ECHO | 13 | see warning |
+| IR LED (transmit) | via a transistor, not direct | 21 | |
+| IR receiver (VS1838B / TSOP38238) | data | 38 | |
 | WS2812 RGB LED | — | 48 | on-board, nothing to wire |
 
 Both INMP441s share SCK/WS/SD on one I2S bus. The **only** difference between
@@ -36,18 +36,19 @@ them is the L/R pin: grounded = left slot, tied to 3V3 = right slot. Get this
 wrong and both mics land in the same slot — the other slot reads a constant
 noise floor, and sound-direction stops working.
 
-> **HC-SR04 ECHO warning:** the sensor is a 5V part and its ECHO line drives 5V
+> **HC-SR04 ECHO warning (if `ENABLE_SENSOR` is turned back on):** the sensor is a 5V part and its ECHO line drives 5V
 > into a 3.3V-only GPIO. Put a divider on it (1kΩ from ECHO to GPIO13, 2kΩ from
 > GPIO13 to GND) or use a 3.3V-tolerant module.
 
 ## Disabled — nothing wired
 
-`ENABLE_MOTORS`, `ENABLE_TOUCH`, `ENABLE_MIC` (MAX9814 clap mic), `ENABLE_EARS`,
-`ENABLE_OTA`, `ENABLE_SPK_TEST` are all `0`. Their pins are reserved in
+`ENABLE_SENSOR`, `ENABLE_MOTORS`, `ENABLE_TOUCH`, `ENABLE_MIC` (MAX9814 clap mic),
+`ENABLE_EARS`, `ENABLE_SPK_TEST` are all `0`. Their pins are reserved in
 `config.h` but no part hangs off them:
 
 | Part | GPIO |
 |---|---|
+| HC-SR04 distance | TRIG 15, ECHO 13 (5V part — see warning) |
 | L298N motor driver | 18, 8, 12, 47 |
 | MAX9814 clap mic | 4 (ADC1 CH3) |
 | TTP223 touch | 14 |

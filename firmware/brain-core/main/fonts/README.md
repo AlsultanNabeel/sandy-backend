@@ -15,7 +15,7 @@
     npm i lv_font_conv@1.5.2
     R="0x20-0x7F,0x600-0x6FF,0xFE70-0xFEFF"
     for sz in 24 32; do
-      lv_font_conv --font DejaVuSans.ttf --range "$R" --size $sz \
+      npx lv_font_conv --font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf --range "$R" --size $sz \
         --bpp 4 --format lvgl --no-compress --lv-include lvgl.h \
         -o sandy_font_ar_${sz}.c
     done

@@ -18,7 +18,7 @@ number in a document with no way to re-measure it is how a regression gets
 called an improvement — which happened once in this audit already, when a
 feature that had stopped running read as two round trips saved.
 
-Current readings: **40 round trips, 1 embedding call**; **RAISED 0,
+Current readings: **30 round trips on a warm turn (47 cold), 1 embedding call per turn**; **RAISED 0,
 NOT-HANDLED 9, OK 71** (the nine are seven routing meta-tools with stub
 handlers and the two image tools, which need a key).
 
@@ -58,13 +58,13 @@ owner, it is called out as a defect, not a style.
 ```
 cloud/                the Python backend — the brain and the API
 firmware/brain-core/  ESP32-S3 robot brain (ESP-IDF, C) — voice, face, servo, MQTT
-firmware/sandy_node/  the sellable pre-flashed node sketch
 vision-core/          ESP32-CAM (Arduino) — camera board
-sandy/                classic ESP32 (Arduino) — the room node firmware
-room-node/            room controller sketch
+sandy/                classic ESP32 (Arduino) — the old robot sketch from before ESP-IDF; incomplete, not used
+room-node/            classic ESP32 (Arduino) — the room node (sandy/node/<id>/room/*)
 ios/SandyApp/         SwiftUI iPhone client
 tests/                backend tests (pytest + mongomock)
-scripts/              sync, smoke test, voice-WS probe, laptop voice client
+scripts/              sync, smoke test, voice-WS probe, laptop voice client, the two audit
+                      instruments, firmware keygen/publish, CA-roots generator, latency bench
 docs/                 NOT IN GIT — see §11
 ```
 
@@ -75,7 +75,7 @@ Three repos exist on the owner's Desktop; only one is worked in. See
 - `Desktop/Nabeel/Sandy` → read-only archive of the original single-owner project.
 - `Desktop/sandy-web` → the website, a separate repo, deferred.
 
-Deploy target: Heroku app `sandy-robot-3da0693d32f7`, database `sandy-app`. The
+Deploy target: Heroku app `sandy-robot` (host `sandy-robot-3da0693d32f7.herokuapp.com`), database `sandy-app` (set by config var; the code default is `sany-db`). The
 Heroku app name is inherited from the old project; the code and data on it are
 this one's. There is **no staging environment** — production is also what the
 robot on the owner's desk is talking to.
@@ -98,7 +98,7 @@ inside the request under a 120-second cap. If you add anything slower than that,
 you are adding a queue first.
 
 `wsgi.py` is production; `serve_api.py` is the local dev runner. Both build the
-same app: `bootstrap()` → `init_runtime()` → `create_app()`. Nothing connects to
+same app: `configure_logging()` → `init_runtime()` → `create_app()` → `bootstrap()`. Nothing connects to
 a database at *import* time — that is deliberate, and it is what lets the whole
 package import in a test with no credentials. Do not add import-time side effects.
 
@@ -106,16 +106,16 @@ package import in a test with no credentials. Do not add import-time side effect
 
 | Path | Role |
 |---|---|
-| `app/config.py` | Every env var the app reads, in one place. Import from here, never call `os.getenv` at a call site. |
-| `app/bootstrap.py` | One-time startup: logging, quiet third-party loggers, idempotent. |
+| `app/config.py` | The central env-var module. New code imports from here rather than calling `os.getenv` at a call site; older modules (bootstrap, ltm_crypto, integrations/*, …) still read the environment directly. |
+| `app/bootstrap.py` | One-time startup, run last: `validate_config` (fatal → `RuntimeError`), Google creds, Sentry, tool registry, `ensure_indexes`, summary migration, the nudge scheduler and the scene-timer runner. Idempotent. |
 | `app/db.py` | The single Mongo handle. Every store reads through `get_db()`. |
 | `app/errors.py` | Typed error taxonomy. |
 | `app/agent/` | The brain: graph, nodes, tools, executor, and the memory layers. |
 | `app/api/` | HTTP routes and the `/voice` WebSocket. |
 | `app/features/` | Feature stores — the data layer, one module per domain. |
 | `app/integrations/` | Clients for everything external. |
-| `app/services/` | Push delivery and the nudge scheduler. |
-| `app/utils/` | Tenancy, rate limiting, circuit breaker, profiles, text. |
+| `app/services/` | Push delivery (APNs), the nudge scheduler, and the scene-timer runner (once a minute). |
+| `app/utils/` | Tenancy (+ `tenant_version`), circuit breaker, background thread pool, profiles, time, text. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
 
 ### 2.3 The agent graph
 
@@ -186,8 +186,8 @@ distinction commit `ea628a6` drew on the voice path — so three ordinary
 
 That health surface was dead anyway. `response_node`'s degradation warning sat
 in an `elif reply:` branch that needs a node setting `execution_result`
-*without* `final_response`; every node sets both, so no user has ever seen it.
-It is wired into both branches now. The generic `" ✅"` append that shared that
+*without* `final_response`; almost every node sets both, so the warning was effectively dead.
+It now sits in the single `if final or reply:` branch, and fires only when `result_ok`. The generic `" ✅"` append that shared that
 branch is deleted: it reached nothing, and every handler that wants a tick
 writes its own (`سجّلتها ✅`).
 
@@ -217,8 +217,8 @@ now travels beside the reply as `alert`.
 | Layer | Module | Store |
 |---|---|---|
 | Short-term conversation | `graph/graph.py` | `sandy_stm`, one doc per chat, TTL-expired |
-| Facts | `agent/memory.py` | `memory` / `sandy_facts` |
-| Semantic recall | `agent/semantic_memory.py` | Mongo Vector Search + OpenAI embeddings; degrades safely with no index |
+| Facts | `agent/memory.py` | `memory` |
+| Semantic recall | `agent/semantic_memory.py` | `sandy_facts` + `sandy_memories` (summaries) via Atlas `$vectorSearch` + OpenAI/Azure embeddings; degrades to keyword/recency with no index |
 | Emotional, encrypted | `agent/emotional_ltm.py` + `ltm_crypto.py` | Fernet-encrypted fields |
 
 Around them: `interests_tracker`, `style_memory`, `lessons_memory`,
@@ -257,7 +257,7 @@ after it (the Atlas index does not declare `thread_id`).
 write to a collection the cached blocks read must bump that version.
 `ScopedCollection` bumps on every write it makes, so the rule is simply: write
 tenant data through `scoped()`. The few writers that still reach past it
-(`users_store`, `api/memory_api.py`) call `bump_for` themselves. A failed read
+(`users_store`, `api/memory_api.py`, `graph._summarize_to_ltm`) call `bump_for` themselves. A failed read
 is never cached. The per-message keyword search stays outside the cache.
 
 Short-term memory is on Mongo, not Redis, on purpose: the free Redis tier hit its
@@ -309,17 +309,14 @@ inside it: `run_in_executor` does not copy context back, so a name resolved on
 the pool thread leaves the loop's own copy empty and utterance one pays anyway.
 
 `config.py` is deliberately untouched. *"طوّرك نبيل السلطان"* is a developer
-credit and belongs to every customer. The default `SANDY_PERSONALITY` also
-opens by calling her his partner — that is product copy (`CONVENTIONS.md` C7),
-it is overridden by a Heroku config var in production, and it is the owner's
-call, not a silent edit.
+credit and belongs to every customer.
 
 **Gender and language are told to the model, not assumed.**
 `address_instruction()` keeps its escape hatch — masculine by default because
 Arabic forces a choice, switching to feminine the moment the speaker turns out
 to be a woman. No production path sets `gender` on a profile yet, so that
 sentence is the only thing standing between a female customer and a robot that
-insists she is male. `context_builder._LANGUAGE_RULE` is appended by code beside
+insists she is male. `context_builder.LANGUAGE_RULE` is appended by code beside
 the anti-injection rule, for the same reason — it must survive a custom persona:
 reply in the language of the last message, per message, so a conversation that
 turns from Arabic to English turns with it. It replaced a coarser rule that
@@ -358,7 +355,7 @@ One forgotten filter there was a cross-tenant leak. **Never reintroduce a raw
 collection handle on a request path.**
 
 Index creation is the one exception: it runs on the raw handle at boot, before any
-request sets a tenant. Indexes lead with `user_id`.
+request sets a tenant. Indexes lead with the tenant field (`user_id`, or `chat_id` on the older collections).
 
 ### 2.7 Actuation ownership
 
@@ -391,7 +388,7 @@ Now:
 > Devices are **data, not code**. Each tenant owns a list. Adding a device is a
 > row, never new code per device.
 
-- Control types: `switch`, `dimmer`, `enum`, `media`, `cover`, `ir`.
+- Control types: `switch`, `dimmer`, `enum`, `media`, `cover`, `ir`, `text` (free text for her screen, limited by `meta.max_bytes`, default 255).
 - `command_payload(device, action, value)` is the **only** validator. It returns
   the payload or refuses with the list of allowed values so Sandy asks instead of
   guessing. This is what ends "turn the light on → applied the off scene".
@@ -419,40 +416,37 @@ what a board reports: given output `servo`, use this label, this control type,
 this range. An output the backend has not learned about is skipped, never guessed
 at, so newer firmware cannot break an older backend.
 
-Runs at two points, additively and idempotently — an owner who renames her robot's
-neck keeps the name:
+Runs at two points. Label and room are never overwritten, so an owner who renames
+her robot's neck keeps the name; `control_type` and the catalogue's `meta` *are*
+refreshed on existing rows (`_refresh_from_catalogue`), because they describe the
+hardware:
 
-- `pair_node()` — for a robot paired before it was ever powered on.
+- `pair_node()` — only when a code already paired is paired again (a first pairing
+  stores no outputs; the next heartbeat provisions).
 - `ingest_status()` — so a firmware upgrade that adds a part appears on its own.
 
 The heartbeat path has no tenant (it is the MQTT thread), so it enters the owner's
 context using the owner id already on the node document from when that tenant
 paired the code. **A heartbeat cannot nominate its own owner.**
 
-The archive's `sandy_device.py` was deliberately *not* ported: it hardcodes global
-single-owner topics, and roughly ninety per cent of it already exists here under
-better names (`room_device.send_to_topic` is a generic publisher despite the name;
-`mqtt_ingest` is the subscriber). Only the camera logic was genuinely missing.
-
 ### 2.9 HTTP surface
 
-136 routes. All under `/api/*` except `/health`, `/` and `/webhook/revenuecat`.
+148 routes, two of them WebSockets (`/voice`, `/voice/enroll`). All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and those two sockets.
 Registered by explicit `register_*_api(app, …)` calls in `api/server.py` — there
 are no Flask blueprints, so **route discovery means reading `server.py`'s
 registration block**, not grepping for blueprints.
 
-Groups: auth (password, email, Google, Apple, guest access requests) · agent (chat
+Groups: auth (email, Google, Apple) · account (get / reset / delete) · agent (chat
 + stream) · conversations · tasks · reminders · life (shopping, habits, expenses,
 journal, books, focus, scenes) · devices + nodes · memory · photos · goals · gifts ·
 future messages · share · timeline · research · images · weather · persona ·
-onboarding · push · subscriptions · features · daily nudge · studio plans · voice TTS.
+onboarding · push · subscriptions · features · daily nudge · studio plans · voice TTS ·
+firmware images · unified search · diagnose · camera upload.
 
 **Every route that spends money on a provider is metered** through
 `api/metering.py` — the chat routes, image generation and analysis, web and
 place search, page fetch, content suggestions, gift writing, studio summaries
-and photo tagging, one unit each against the caller's tier. Until 18 Sep 2026
-only the two chat routes were; the rest reached Exa, Google and Azure with no
-limit for a signed-in free account. A new paid route calls `meter_claims`.
+and photo tagging, one unit each against the caller's tier. A new paid route calls `meter_claims`.
 
 ### 2.10 Auth
 
@@ -461,26 +455,23 @@ rate-limited to 5 attempts per 15 minutes per IP, with an in-process sliding
 window as a fail-closed fallback when Mongo is down. `JWT_SECRET` has no default —
 an empty secret would let anyone forge a token, so it refuses rather than degrade.
 
-**Known dead path.** `approve_access_request()` and `deny_access_request()` are
-defined and called from nowhere in the repo. They used to be invoked by the
-Telegram handler, which was removed. So a visitor can `POST /api/access/request`
-and poll its status, but nothing in the system can ever approve it. Either wire it
-to an owner-facing endpoint or delete the whole flow — a silently disabled feature
-is worse than an absent one. The module docstring still says "with a Telegram
-approval flow"; that is stale.
-
 ### 2.11 External services
 
-Routing brains, in fallback order: **Azure OpenAI** (primary) → Gemini → OpenAI
-direct → a safe canned reply. A Bedrock router exists as an alternative backend.
-Speech-to-text is Azure Speech. TTS is Gemini first, then Google, then Azure.
+Tool router (`agent/agents/fc_router.py`): Gemini if `GEMINI_ROUTER_MODEL` is set →
+Bedrock if `BEDROCK_ROUTER_MODEL_ID` is set → **Azure OpenAI** (the default). If
+routing throws, `model_fallback.route_with_gpt` (OpenAI direct) can still pick a
+task or reminder; otherwise it falls to `chat_respond`. The chat reply is Azure
+OpenAI → OpenAI direct → a persona snippet. Speech-to-text on the voice path is
+Gemini Live's own input transcription. TTS (`/api/voice/tts`) is Gemini only.
 Images are Azure FLUX with an Azure OpenAI image fallback. Research is Exa; places
 are Google Places. Push is APNs over HTTP/2 (`h2` is in `requirements.txt` for
 exactly this). MQTT is HiveMQ Cloud over TLS.
 
-Everything external goes through `utils/circuit_breaker.py` — including
-`azure_intent_client`, the hottest call in the system, which was outside it
-until 25 Aug 2026.
+Circuit breakers (`utils/circuit_breaker.py`) wrap `azure_intent_client` (the
+hottest call), `openai_client`, `exa_client`, `gemini_tts`, `google_tts` and
+`features/weather`. Not wrapped: `azure_flux`, `azure_image`, `gemini_router`,
+`bedrock_router`, `google_places`, `services/apns`, and the embeddings in
+`semantic_memory`.
 
 **None of the breakers pass `timeout=`, and that is on purpose.** The class
 supports one and it looks like the missing half; it is not. `_invoke` enforces a
@@ -528,7 +519,7 @@ robot mic (I2S)
   → voice_ws/session.py
       ├─ _authenticate()      HMAC handshake, ±30 s anti-replay
       ├─ speaker.py           CAM++ speaker verification (sherpa-onnx, local)
-      ├─ VAD                  RMS threshold + silence + minimum utterance
+      ├─ VAD                  measured (adaptive) RMS floor + silence + minimum utterance
       ├─ tools.py             the same tool set as the text path
       └─ memory.py            writes the turn into short-term memory
   → Gemini Live
@@ -540,29 +531,30 @@ robot mic (I2S)
 Firmware sends, on connect:
 
 ```json
-{"type":"hello","device_id":"<id>","ts":<unix_ms>,"hmac":"<hex>"}
-hmac = HMAC-SHA256(SANDY_WS_HMAC_KEY, device_id + str(ts))
+{"type":"hello","device_id":"<id>","ts":<unix_ms>,"hmac":"<hex>"[,"kv":2]}
+hmac = HMAC-SHA256(key, device_id + str(ts))   # key = the board's own key when kv=2, else SANDY_WS_HMAC_KEY
 ```
 
-Server replies `{"type":"auth_ok"}` or an error frame. Error codes and what each
+Server replies `{"type":"auth_ok"}` (to a device it may add `broker` MQTT credentials
+and, in the pairing window, a `device_key`) or `{"type":"error","msg":"<code>"}`. Error codes and what each
 actually means:
 
 | Frame | Meaning |
 |---|---|
 | `auth_ok` | accepted, start streaming |
-| `auth_fail` | the HMAC did not match — wrong key |
+| `auth_fail` | the HMAC did not match, a board with its own confirmed key signed with the shared one, or the JWT is not a signed-in account |
 | `replay` | `ts` was outside ±30 s — the **board's clock** is wrong, not the key |
 | `bad_handshake` | malformed hello |
 | `auth_not_configured` | the server has no `SANDY_WS_HMAC_KEY` at all |
-| `owner_only` | a browser JWT that is not an owner token |
+| `key_unknown` | signed with `kv` 2, but the server holds no key for that board (unpaired or revoked); the board drops its key and falls back to the shared one |
 
 The `ts` must be wall-clock, so the firmware blocks on SNTP before it can connect.
 A board that cannot reach a time server will sit there forever while the wake word
 keeps working — that failure looks exactly like a dead network.
 
 Three ways in, checked in this order: a legacy plain-text secret (dev/echo tests),
-a browser JWT (`{"type":"hello","token":…}`, owner only — live voice is the owner
-experience), then the device HMAC. With no key configured at all it refuses unless
+a browser JWT (`{"type":"hello","token":…}`, any signed-in account; guests are
+refused), then the device HMAC. With no key configured at all it refuses unless
 `SANDY_WS_ALLOW_OPEN=1`, so a missing env var in production cannot leave the
 socket open.
 
@@ -580,7 +572,7 @@ voiceprint enrolled it allows — it does not lock the owner out before enrolmen
 
 ## 4. The firmware — robot brain
 
-`firmware/brain-core/`, ESP-IDF, ESP32-S3. `sandy_voice.c` is 1400 lines and is
+`firmware/brain-core/`, ESP-IDF, ESP32-S3. `sandy_voice.c` is about 2000 lines and is
 where the difficulty lives.
 
 | File | Does |
@@ -592,6 +584,10 @@ where the difficulty lives.
 | `sandy_mqtt.c` | command subscriptions + status publish |
 | `sandy_wifi.c` | association; power save is explicitly **off** (`WIFI_PS_NONE`) for real-time audio |
 | `sandy_led.c` `sandy_servo.c` `sandy_buzzer.c` `sandy_motors.c` `sandy_sensor.c` `sandy_touch.c` `sandy_ears.c` `sandy_mic.c` `sandy_spktest.c` `sandy_ota.c` `sandy_nvs.c` `sandy_remote.c` | peripherals, OTA, remote log |
+| `sandy_audio_ctl.c` | mic gain/mute, volume, noise suppression; persisted in NVS |
+| `sandy_screen.c` | owner text/picture on the display, Arabic fonts 24/32 |
+| `sandy_ir.c` | IR learn + replay (§4.5) |
+| `sandy_provision.c` | first-run SoftAP setup (§4.5) |
 
 ### 4.1 The session lifecycle
 
@@ -620,18 +616,19 @@ serial cable.
 One table maps each condition to a face, an LED state, a Latin banner drawn across
 the bottom of the display, and the Arabic sentence she will speak once clips are
 flashed: `OK`, `BOOTING`, `NO_WIFI`, `NO_SERVER`, `LINK_DROPPED`, `NET_SLOW`,
-`AUTH_FAILED`, `LOW_MEMORY`.
+`LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`.
 
 Rules:
 - **Subsystems must not set the face directly for error conditions.** Call
   `status_set()`. Direct face writes are how a half-finished state stayed on screen.
 - `status_set()` is idempotent — re-reporting the same condition does not
   re-announce, so retry loops don't make her repeat herself.
-- The banner is Latin because Montserrat is the only font in this build and has no
-  Arabic glyphs or shaping. Arabic lives in the spoken line. Adding an Arabic font
-  is the fix, and it is not done.
+- The banner is still Latin (Montserrat 14), but Arabic fonts are in the build
+  (DejaVu 16 with shaping, `fonts/sandy_font_ar_24.c` / `_32.c`, used by
+  `sandy_screen.c`). An Arabic banner now only needs a font set on `s_banner`.
 - Voice clips are **not** flashed yet — the partition table has no room reserved.
-  `status_set()` has the hook and the sentences; the audio is the missing piece.
+  The sentences are in the table; the hook that would speak them
+  (`voice_say_status()`) is not written yet.
 
 ### 4.3 The uplink — why it is buffered
 
@@ -653,7 +650,10 @@ Now: `mic_send()` writes into a 128 KB PSRAM stream buffer (~4 s of 16 kHz 16-bi
 mono) and returns immediately, dropping the newest audio if full. `ws_tx_task`
 (priority 6, below the audio pair at 8/9) drains it with 4 s of patience, which it
 can afford because nothing real-time waits on it. A backlog past half the buffer
-raises `SANDY_ST_NET_SLOW`. The buffer is reset on session close so the tail of
+for more than 3 s raises `SANDY_ST_NET_SLOW` when RSSI is below −75 dBm, otherwise
+`SANDY_ST_LINK_STALL`. Anything queued past 32 KB (~1 s) is dropped oldest-first so
+she answers the present, and an uplink squelch sends only audio above a measured
+room floor. The buffer is reset on session close so the tail of
 one call never opens the next.
 
 ### 4.4 The frozen-face bug, for the record
@@ -671,13 +671,15 @@ followed on 23 Aug 2026; **nothing global is left.** All three boards are flashe
 and verified on this tree.
 
 ```
-sandy/node/<node_id>/mood · servo · buzzer · base · led · autonomous · focus · ota
+sandy/node/<node_id>/mood · servo · gesture · buzzer · base · led · autonomous · focus · ota
+                     · wifi · factory_reset · screen · screen_size · screen_img
 sandy/node/<node_id>/mic_l · mic_r                 mute (payload "on" = unmuted)
 sandy/node/<node_id>/mic_l_gain · mic_r_gain       digital gain, 0..300
 sandy/node/<node_id>/volume · speaker_test · noise
 sandy/node/<node_id>/status                        heartbeat → ingest_status
 sandy/node/<node_id>/ir/learned                    captured IR code
-sandy/node/<node_id>/cam/command · snapshot · status · event
+sandy/node/<node_id>/cam/request · command · wifi · flash · flash_level · flash_mode · stream · framesize (in)
+sandy/node/<node_id>/cam/snapshot · status · event (out)
 sandy/node/<node_id>/room/light · music            room node commands
 sandy/node/<node_id>/room/status                   room heartbeat → ingest_status
 ```
@@ -828,10 +830,11 @@ was named here twice and does not exist; the generator has never written it.)
 | Microphones | Yes — per-channel gain, mute, live level | Yes |
 | Speaker | Yes — volume 0..100, test tone | Yes, through the voice path |
 | Noise suppression | Yes — off / mild / medium / aggressive | Yes |
-| On-board LED | Yes — off / idle / listening / talking | Yes |
+| On-board LED | Yes — off / idle / listening / talking, plus 11 effects | Yes |
 | Neck servo | Yes | **Not physically wired yet** |
 | Base motors | Topic exists | `ENABLE_MOTORS = 0` |
-| Buzzer, distance sensor | Yes | Dropped by decision; flags still `1` |
+| Buzzer | Yes — 17 melodies | Yes — passive piezo on GPIO 17 |
+| Distance sensor | No | Dropped; `ENABLE_SENSOR = 0` |
 | Room light (room node) | Yes — `room/light`, provisioned from its heartbeat | Yes — servo presses the wall switch |
 | Room music (room node) | Yes — `room/music`, stop/pause/resume/next/prev | Yes — DFPlayer over UART2 |
 
@@ -843,9 +846,8 @@ from a cross-wired one without a multimeter.
 desk, until it is flashed.**
 
 The camera board program is no longer missing — `vision-core/` exists, is
-flashed, and answers on the broker. Neither is the IR board code (§4.5), though
-it is written and not yet tried on hardware. Still genuinely missing: servo
-easing (it jumps, which is most of what makes the motion look cheap) and two-mic
+flashed, and answers on the broker. Neither is the IR code (`main/sandy_ir.c`, on the brain; §4.5), though
+it is written and not yet tried on hardware. Still genuinely missing: two-mic
 beamforming.
 
 The Arabic display font is done: `main/fonts/` now carries the typeface at
@@ -875,19 +877,20 @@ what makes the text-size control real rather than decorative.
   snapshot request was published exactly right and nothing was subscribed; no
   `cam/status` heartbeat was ever sent, so the address the live view needs never
   arrived, and "couldn't get the address" was the literal truth.
-- **`sandy/`** (classic ESP32) — the room node.
-- **`room-node/`**, **`firmware/sandy_node/`** — the room controller and the
-  sellable pre-flashed node.
+- **`sandy/`** (classic ESP32, Arduino) — the old robot sketch from before ESP-IDF.
+  Incomplete: half the `.ino` files its header lists are missing. Not used.
+- **`room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
+  `sandy/node/<id>/room/`.
 
 ---
 
 ## 6. iPhone app
 
-`ios/SandyApp/`, SwiftUI, ~21 000 lines, 26 feature folders. Swift is one module,
+`ios/SandyApp/`, SwiftUI, ~23 500 lines, 26 feature folders. Swift is one module,
 so folders are organisation only.
 
 - `App/` — `SandyApp`, `AppState` (holds the base URL), `MainTabView`.
-- `Core/Networking/` — `APIClient` split into 16 extensions by domain, behind
+- `Core/Networking/` — `APIClient` split into 15 extensions by domain, behind
   `APIClientProtocol`. **Add new endpoints as an extension, not to the base class.**
 - `Core/Auth/` — Keychain (`…ThisDeviceOnly`), Google sign-in, auth view.
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
@@ -897,14 +900,10 @@ so folders are organisation only.
 - `Localization/` — one `L10n+<Area>.swift` per feature. Arabic/English, RTL/LTR.
 - `Widgets/` — home-screen widgets.
 
-Sync to the Xcode build copy with `scripts/sync_ios.sh` (rsync, `--delete`). The
+Sync to the Xcode build copy with `scripts/sync_ios.sh` (rsync of `*.swift`, then prunes build-copy `.swift` files missing from the repo). The
 build copy lives at `~/Desktop/SandyApp/SandyApp`, which is why that folder must
 not be renamed. Build from the Xcode GUI — `xcodebuild` on the CLI hangs on the
 iCloud-synced folder.
-
-**Housekeeping:** five empty `… 2` folders (`Core 2`, `Services 2`, `Features 2`,
-`Widgets 2`, `Localization 2`) are Finder duplication leftovers. Untracked, empty,
-safe to delete.
 
 ---
 
@@ -913,7 +912,7 @@ safe to delete.
 **There is no `android/` directory.** It was removed and the work deferred — the
 owner's call, 25 Aug 2026: not its turn yet. This section used to describe four
 thousand lines of Kotlin, a tab shell and eight mounted features, none of which
-is in the tree; `§1`'s layout listed the directory too.
+is in the tree.
 
 Nothing depends on it. The backend is transport-agnostic by design (§0), so
 whenever Android comes back it mounts the same API the iPhone client already
@@ -923,20 +922,23 @@ uses, and the only thing to rebuild is the client.
 
 ## 8. Data model
 
-47 Mongo collections, most reached through `scoped()`. 45 carry the `sandy_`
-prefix; two predate it (`memory`, `guest_usage`) and key on `chat_id` rather than
-`user_id` — pass `field=` to `scoped()` for those. Two more are outside
+Most Mongo collections are reached through `scoped()` and carry the `sandy_`
+prefix. Two predate it: `memory` (scoped on `user_id`) and `guest_usage` (keyed on
+the guest token's `jti`, not scoped). The semantic-memory collections
+(`sandy_facts`, `sandy_memories`, `sandy_goals`, `sandy_activity`,
+`sandy_future_messages`) key on `chat_id`: pass `field="chat_id"` to `scoped()`. Two more are outside
 `scoped()` and outside the prefix, and are the easy ones to forget: the app's
 chat threads, `conversations` (filtered by `user_id` by hand in
 `conversations_api.py`), and the older single-blob `web_chat_history`, keyed
-`_id: web_chat_<user_id>` with no user field at all. Both are in
+`_id: web_chat_<user_id>` with no user field at all. (`camera_inbox`, a TTL inbox for snapshots in
+`integrations/camera_client.py`, is a third.) Both are in
 `account_delete`'s list — the first by name, the second by `_id` — because
 until 18 Sep 2026 neither was, and a deleted account's chats survived.
 
-Identity and access: `sandy_users`, `sandy_auth`, `sandy_active_user_profile`,
+Identity and access: `sandy_users`, `sandy_auth`,
 `sandy_usage_daily`, `sandy_usage_rl`, `guest_usage`.
 Conversation and memory: `sandy_stm`, `sandy_facts`, `memory`,
-`sandy_memories`, `sandy_session_state`, `sandy_pending_state`, `sandy_state`.
+`sandy_memories`, `sandy_session_state`, `sandy_pending_state`, `sandy_prompt_cache`, `sandy_cache_stamps`.
 `sandy_vector_index` is the Atlas vector index name, not a collection.
 Legacy, no longer written: `sandy_conversations` (still cleared by account
 deletion), `sandy_context_metadata`.
@@ -945,12 +947,12 @@ Productivity: `sandy_tasks`, `sandy_reminders`, `sandy_goals`, `sandy_focus`,
 Life: `sandy_shopping`, `sandy_habits`, `sandy_habit_log`, `sandy_expenses`,
 `sandy_journal`, `sandy_books`, `sandy_reading_sessions`, `sandy_reading_meta`.
 Hardware: `sandy_devices`, `sandy_nodes`, `sandy_device_keys`, `sandy_scenes`, `sandy_scene_timers`,
-`sandy_voiceprints`, `sandy_face`.
+`sandy_voiceprints`, `sandy_firmware`, `sandy_firmware_chunks`.
 Social and delivery: `sandy_photos`, `sandy_photo_files`, `sandy_gifts`,
 `sandy_shared_content`, `sandy_future_messages`, `sandy_push_tokens`,
 `sandy_daily_nudge`, `sandy_nudge_locks`, `sandy_activity`, `sandy_evals`.
 
-Indexes lead with `user_id` and are created at boot on the raw handle, by
+Indexes are created at boot on the raw handle, by
 `bootstrap.ensure_indexes()` — one `try` per index, so one failure cannot skip
 the rest. `sandy_stm`'s three are the exception and live in
 `graph.py::_ensure_stm_indexes`, created on first use, same one-try-each rule.
@@ -965,7 +967,7 @@ database.
 
 ## 9. Tests and CI
 
-56 test files, pytest + mongomock, no hardware and no live credentials needed.
+89 test files, pytest + mongomock, no hardware and no live credentials needed.
 `tests/test_device_system.py` carries the headline guarantee: the brain may only
 act on a **registered** device with a **validated** action, and refuses with the
 allowed list rather than guessing.
@@ -1029,8 +1031,8 @@ From `CONVENTIONS.md` and the owner's standing instructions:
 - One `logger = logging.getLogger(__name__)` per module, area-prefixed messages
   (`[router]`, `[auth]`, `[voice]`), lazy `%s` formatting, never `print`.
 - All fire-and-forget work goes through `utils/thread_pool.submit_background`.
-  Raw `threading.Thread` is not allowed for it (long-lived loops and the MQTT
-  listener are exempt).
+  Raw `threading.Thread` is not allowed for it (exempt: long-lived singletons such as the MQTT
+  reconnect watchdog and the speaker-model warm-up, and work the request waits on).
 - Docs and commit messages in English. Conversation with the owner in Arabic.
 - **`docs/` is excluded by `.gitignore`.** Everything in it — the deploy map, the
   hardware inventory, the audit plan, the analysis — exists only on the owner's
@@ -1039,7 +1041,7 @@ From `CONVENTIONS.md` and the owner's standing instructions:
 
 ## 12. Known defects, ranked
 
-Rewritten 25 Aug 2026 after an independent pass. Every item was checked against
+Rewritten 25 Aug 2026, re-checked against the code 19 Sep 2026. Every item was checked against
 the source, not carried forward — and four of the nine that were here had been
 fixed without this list being told, which is its own lesson about a ranked list
 nobody re-reads. **Ranked by whether a customer can feel it.**
@@ -1082,10 +1084,10 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    tells another. It reads `error` rather than `ok` now, so ordinary refusals no
    longer trip it (§2.4), but a genuinely broken upstream is still reported to
    everybody. The fix is a key, not a rewrite.
-3. **The persona is rebuilt from scratch every turn** — most of the 40 database
-   round trips a user waits for (`scripts/audit_turn_cost.py`), on every
-   message, on every channel. A cache was
-   designed and cut; the reason is in §2.5 and it is the place to start.
+3. **A warm chat turn still costs 30 database round trips** (47 cold;
+   `scripts/audit_turn_cost.py`) even though the persona block is cached per
+   tenant version (§2.5). What remains is mostly `sandy_facts` and
+   `sandy_memories` reads and writes, plus the version-stamp reads.
 4. **A POST is never retried, and the chat send is a POST.** `sendWithRetry`
    guards on GET/HEAD because retrying a write could duplicate it, which is
    right — but it means the one dropped packet that motivated the whole change
@@ -1101,17 +1103,8 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
 
 6. **No staging environment.** Production is what the robot on the desk talks
    to. §1.
-7. **The visitor approval flow is half-built.** A visitor can `POST
-   /api/access/request` and poll it, and nothing in the system can approve it —
-   the Telegram handler that used to is gone. Wire it to an owner endpoint or
-   delete the flow; a silently disabled feature is worse than an absent one.
-   §2.10.
-8. *(closed 18 Sep 2026)* The dead JSON profile store in `utils/user_profiles.py`
-   (`find/save/ensure/update_user_profile`, `_normalize_profile`,
-   `is_owner_chat_id`, the prompt-section builder) and `utils/files.py`, which
-   only it used, are deleted with their tests.
-9. **`GeminiLiveManager` builds its own `URLSession`.** Harmless today, but the
-   app's one-transport-policy rule (§6) cannot see it, so a future change to
+7. **`GeminiLiveManager` builds its own `URLSession`.** Harmless today, but the
+   app's shared `APIClient.session` / `sendWithRetry` policy cannot see it, so a future change to
    retry or timeouts will miss it.
 
 **Two more, found by the final review and left open deliberately** — both are
@@ -1126,11 +1119,9 @@ not for ever)*.
 
 ### Hardware, and the owner already knows
 
-10. **Servo motion is a jump, not a move.** ~30 lines of easing, and most of the
-   difference between looking like a product and looking like a prototype.
-11. **Two-mic beamforming is not written.** §4.6.
-12. **Voice status clips are not flashed** — `status_set()` has the hook and the
-    sentences, the partition table has no room reserved. §4.2.
+8. **Two-mic beamforming is not written.** §4.6.
+9. **Voice status clips are not flashed** — the sentences are in the table, the
+   speaking hook is not written and the partition table has no room reserved. §4.2.
 
 ### Checked and closed since the last version of this list
 
@@ -1138,5 +1129,5 @@ The firmware **is** built in CI (`idf.py build`, §9), so "never compiled" is no
 longer true. The control page **exists** (`ios/SandyApp/Features/Control/`). The
 room node is **on the per-node topic tree** (§4.5), so `room_device.send()` is
 not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
-(`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed, and the last comments pointing at the
-removed Telegram transport are gone.
+(`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed. Servo easing and ten gestures are in
+(`sandy_servo.c`). The visitor approval flow and the JSON profile store are gone.

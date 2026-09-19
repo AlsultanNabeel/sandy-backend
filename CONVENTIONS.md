@@ -1,6 +1,6 @@
 # Sandy Engineering Conventions
 
-Rules every change in this codebase follows. Tasks in `PLAN/` cite these by number.
+Rules every change in this codebase follows. Tests and code comments cite them by number.
 
 ## C1 — Error handling: make problems louder, not quieter
 - Never write `except Exception: pass`. If you truly must continue, log first:

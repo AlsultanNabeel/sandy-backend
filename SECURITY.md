@@ -27,9 +27,11 @@ to another is treated as the most serious class, ahead of availability.
 - **Device actuation** — `device_store.tenant_owns_topic`. A tenant can only
   drive hardware registered to their own account.
 - **The voice link** — HMAC handshake with a ±30 second replay window. With no
-  key configured the socket refuses connections rather than accepting them.
+  key configured the socket refuses connections rather than accepting them,
+  unless the dev flag `SANDY_WS_ALLOW_OPEN=1` is set.
 - **Secrets** — `.env`, `secrets.h` and service-account keys are gitignored, and
-  CI fails the build if one is ever committed.
+  CI fails the build if a `.env`, key file or service-account JSON is ever
+  committed (`secrets.h` is covered by `.gitignore` only).
 
 ## Known and accepted
 
@@ -38,9 +40,6 @@ These are deliberate, documented positions rather than oversights:
 - **Usage metering fails open.** A brief database outage lets requests through
   rather than blocking every user. The cost risk is narrow; the availability cost
   of the alternative is not.
-- **The room node's fixed `room/cmd/*` topics carry no device identity**, so
-  actuation on them is restricted to the owner until that node moves to the
-  per-node namespace the robot already uses.
 
 ## Not in scope
 

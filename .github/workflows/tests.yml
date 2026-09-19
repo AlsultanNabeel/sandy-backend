@@ -51,7 +51,12 @@ jobs:
         run: |
           leaks=$(git ls-files \
             | grep -iE '(^|/)\.env($|\.)|.*(gcloud|service[-_]account).*key.*\.json$|.*\.(pem|p12|pfx|key)$' \
-            | grep -vE '\.env\.example$' || true)
+            | grep -vE '\.env\.example$|(^|/)fw_pubkey\.pem$' || true)
+          # fw_pubkey.pem is the PUBLIC half of the release-signing key and has to
+          # ship in the firmware. It is let through only while it holds no private key.
+          if git grep -q "PRIVATE KEY" -- '*fw_pubkey.pem'; then
+            leaks="$leaks firmware/brain-core/main/fw_pubkey.pem (contains a PRIVATE KEY)"
+          fi
           if [ -n "$leaks" ]; then
             echo "❌ Secret-looking file(s) tracked by git — remove and rotate the key:"
             echo "$leaks"

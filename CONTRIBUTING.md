@@ -7,7 +7,7 @@
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # fill in at least the five keys marked required
+cp .env.example .env        # fill in its REQUIRED block (MONGODB_URI, JWT_SECRET, a brain key)
 python cloud/serve_api.py
 ```
 
@@ -17,6 +17,7 @@ is deliberate, so you never need every credential to work on one thing.
 **Tests** — no database, no hardware, no credentials:
 
 ```bash
+pip install pytest pytest-cov pytest-subtests mongomock ruff   # test tools, as CI installs them
 python -m pytest tests/ -q
 ruff check cloud/ scripts/
 ```

@@ -5,9 +5,11 @@ folder holds the Swift sources (`SandyApp/`) and tests (`SandyAppTests/`).
 
 ## Build
 
-1. Open the Sandy Xcode project and make sure every file under `ios/SandyApp/`
-   is in the app target (Copy items if needed is **not** required when the
-   project references this folder directly).
+1. Run `scripts/sync_ios.sh` to mirror every `*.swift` under `ios/SandyApp/`
+   into the Xcode build copy (default `~/Desktop/SandyApp/SandyApp`, override
+   with `SANDY_IOS_BUILD`). The app target uses synchronized groups, so the
+   files are picked up with no `.xcodeproj` edits; the script exits non-zero if
+   the build copy does not match the repo. Then open that Xcode project.
 2. Signing & Capabilities: your team, plus **Sign in with Apple** and **Push
    Notifications**.
 3. Run on a simulator or a device.
