@@ -2,8 +2,9 @@
 //
 // Protocol (matches cloud/app/api/voice_ws.py):
 //   1. Connect (WSS) and send a hello frame:
-//        {"type":"hello","device_id":"...","ts":<unix_ms>,"hmac":"<hex>"}
-//        hmac = HMAC-SHA256(SANDY_WS_HMAC_KEY, device_id + str(ts))
+//        {"type":"hello","device_id":"...","ts":<unix_ms>,"hmac":"<hex>"[,"kv":2]}
+//        hmac = HMAC-SHA256(key, device_id + str(ts)); key = this board's own
+//        key once it has one ("kv":2), else the shared SANDY_WS_HMAC_KEY.
 //   2. Wait for {"type":"auth_ok"}.
 //   3. Mic up: binary PCM, 16-bit LE, 16 kHz mono.
 //      Sandy down: binary PCM, 16-bit LE, 24 kHz mono.
@@ -16,6 +17,7 @@
 #include "config.h"
 #include "secrets.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
@@ -33,6 +35,7 @@
 #include "esp_netif_sntp.h"
 #include "driver/i2s_std.h"
 #include "mbedtls/md.h"
+#include "nvs.h"
 #include "esp_heap_caps.h"
 
 #if ENABLE_WAKEWORD
@@ -334,28 +337,108 @@ static void sync_clock(void) {
     }
 }
 
-// Build the HMAC handshake frame into `out`. Returns the string length.
+// ── This board's own voice key ───────────────────────────────────────────────
+//
+// Every board ships signing its hello with the same compiled-in key, so reading
+// it out of one robot was enough to speak as any other. Once this board is
+// paired, the server answers a shared-key hello with a key of its own
+// ("device_key"); it is kept here and signs every later hello ("kv":2). After
+// the first such hello the server refuses the shared key for this board.
+// "key_unknown" (un-paired, key revoked) drops it and the board re-enrols.
+//
+// Read and written only on the voice task and the websocket task, which never
+// run a handshake at the same time. Written at most once per pairing, so the
+// flash commit on this path does not recur (see sandy_nvs.h).
+#define DEVKEY_NS  "sandy_vkey"
+#define DEVKEY_HEX 64
+static char s_dev_key[DEVKEY_HEX + 1];   // hex; "" = use the shared key
+
+static bool is_hex_key(const char *s) {
+    if (strlen(s) != DEVKEY_HEX) return false;
+    for (int i = 0; i < DEVKEY_HEX; i++) {
+        if (!isxdigit((unsigned char)s[i])) return false;
+    }
+    return true;
+}
+
+static void devkey_load(void) {
+    s_dev_key[0] = '\0';
+    nvs_handle_t h;
+    if (nvs_open(DEVKEY_NS, NVS_READONLY, &h) == ESP_OK) {
+        size_t n = sizeof(s_dev_key);
+        if (nvs_get_str(h, "k", s_dev_key, &n) != ESP_OK || !is_hex_key(s_dev_key)) {
+            s_dev_key[0] = '\0';
+        }
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "voice key: %s", s_dev_key[0] ? "own" : "shared (not enrolled yet)");
+}
+
+// `hex` NULL or "" forgets the key.
+static void devkey_store(const char *hex) {
+    nvs_handle_t h;
+    if (nvs_open(DEVKEY_NS, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGE(TAG, "voice key: cannot open NVS");
+        return;
+    }
+    esp_err_t e = (hex && *hex) ? nvs_set_str(h, "k", hex) : nvs_erase_key(h, "k");
+    if (e == ESP_OK || e == ESP_ERR_NVS_NOT_FOUND) e = nvs_commit(h);
+    nvs_close(h);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "voice key: storing failed (%s)", esp_err_to_name(e));
+        return;
+    }
+    snprintf(s_dev_key, sizeof(s_dev_key), "%s", (hex && *hex) ? hex : "");
+    ESP_LOGW(TAG, "voice key: %s", s_dev_key[0] ? "stored this board's own key"
+                                                 : "forgotten — will re-enrol");
+}
+
+static int hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    c = (char)tolower((unsigned char)c);
+    return (c >= 'a' && c <= 'f') ? c - 'a' + 10 : 0;
+}
+
+// Build the HMAC handshake frame into `out`. Returns the string length, or -1
+// when it does not fit (a truncated frame must never be sent: it reads past
+// what was written and the server would refuse it anyway).
 static int build_hello(char *out, size_t out_len) {
     int64_t ts = wall_ms();
 
     char signed_msg[96];
     int n = snprintf(signed_msg, sizeof(signed_msg), "%s%lld", SANDY_DEVICE_ID, ts);
+    if (n <= 0 || n >= (int)sizeof(signed_msg)) return -1;
+
+    // The server keys HMAC with the raw bytes behind the hex it issued.
+    unsigned char own[DEVKEY_HEX / 2];
+    const unsigned char *key = (const unsigned char *)SANDY_WS_HMAC_KEY;
+    size_t key_len = strlen(SANDY_WS_HMAC_KEY);
+    const bool use_own = s_dev_key[0] != '\0';
+    if (use_own) {
+        for (int i = 0; i < DEVKEY_HEX / 2; i++) {
+            own[i] = (unsigned char)((hex_nibble(s_dev_key[2 * i]) << 4) |
+                                     hex_nibble(s_dev_key[2 * i + 1]));
+        }
+        key = own;
+        key_len = sizeof(own);
+    }
 
     unsigned char mac[32];
     const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    mbedtls_md_hmac(md,
-                    (const unsigned char *)SANDY_WS_HMAC_KEY, strlen(SANDY_WS_HMAC_KEY),
-                    (const unsigned char *)signed_msg, n,
-                    mac);
+    if (mbedtls_md_hmac(md, key, key_len,
+                        (const unsigned char *)signed_msg, n, mac) != 0) {
+        return -1;
+    }
 
     char hex[65];
     for (int i = 0; i < 32; i++) {
         snprintf(hex + i * 2, 3, "%02x", mac[i]);
     }
 
-    return snprintf(out, out_len,
-                    "{\"type\":\"hello\",\"device_id\":\"%s\",\"ts\":%lld,\"hmac\":\"%s\"}",
-                    SANDY_DEVICE_ID, ts, hex);
+    int len = snprintf(out, out_len,
+                       "{\"type\":\"hello\",\"device_id\":\"%s\",\"ts\":%lld,\"hmac\":\"%s\"%s}",
+                       SANDY_DEVICE_ID, ts, hex, use_own ? ",\"kv\":2" : "");
+    return (len > 0 && len < (int)out_len) ? len : -1;
 }
 
 
@@ -512,8 +595,12 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
     esp_websocket_event_data_t *ev = (esp_websocket_event_data_t *)event_data;
     switch (id) {
     case WEBSOCKET_EVENT_CONNECTED: {
-        char hello[192];
+        char hello[224];
         int n = build_hello(hello, sizeof(hello));
+        if (n <= 0) {
+            ESP_LOGE(TAG, "hello does not fit — check SANDY_DEVICE_ID");
+            break;
+        }
         // ev->client, not s_client: this runs on the WS task, and the session
         // manager may already be swapping s_client for the next session.
         esp_websocket_client_send_text(ev->client, hello, n, portMAX_DELAY);
@@ -544,6 +631,13 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                     }
                 }
 #endif
+                {
+                    char dk[DEVKEY_HEX + 8];
+                    if (json_str_field(ev->data_ptr, ev->data_len, "device_key", dk, sizeof(dk)) &&
+                        is_hex_key(dk) && strcmp(dk, s_dev_key) != 0) {
+                        devkey_store(dk);
+                    }
+                }
             } else if (text_has(ev->data_ptr, ev->data_len, "interrupted")) {
                 // Server-side barge-in confirmation: stale audio dies here,
                 // whatever comes next belongs to the NEW turn.
@@ -554,6 +648,10 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
             } else if (text_has(ev->data_ptr, ev->data_len, "end_turn")) {
                 s_squelch_until_ms = 0;   // stale turn fully drained server-side
                 ESP_LOGD(TAG, "end of Sandy's turn");
+            } else if (text_has(ev->data_ptr, ev->data_len, "key_unknown")) {
+                // Our key was revoked (un-paired) or never recorded: drop it and
+                // enrol again with the shared key on the next session.
+                devkey_store(NULL);
             } else if (text_has(ev->data_ptr, ev->data_len, "auth_fail") ||
                        text_has(ev->data_ptr, ev->data_len, "auth_not_configured") ||
                        text_has(ev->data_ptr, ev->data_len, "bad_handshake") ||
@@ -1656,6 +1754,7 @@ static void voice_task(void *arg) {
     // kind of lie.
     status_set(SANDY_ST_OK);
     sync_clock();
+    devkey_load();
 
     if (i2s_start() != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed, voice disabled");

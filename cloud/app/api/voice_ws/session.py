@@ -226,6 +226,7 @@ def _authenticate(ws, remote: str) -> bool:
             device_id = str(msg["device_id"])
             ts = int(msg["ts"])
             token = str(msg["hmac"])
+            kv = int(msg.get("kv") or 1)
 
             now_ms = int(time.time() * 1000)
             if abs(now_ms - ts) > _ANTI_REPLAY_MS:
@@ -233,8 +234,33 @@ def _authenticate(ws, remote: str) -> bool:
                 ws.send(json.dumps({"type": "error", "msg": "replay"}))
                 return False
 
+            # **Which key signs this hello.** A board that has its own key
+            # says so (`kv` 2) and is checked against it alone. The shared key
+            # is refused for a board whose own key is confirmed — otherwise
+            # the per-board key would protect nothing (features/device_keys).
+            from app.features.device_keys import (
+                KEY_VERSION, confirm_key, get_key, issue_key,
+            )
+            record = get_key(device_id)
+            if kv == KEY_VERSION:
+                if not record:
+                    # Revoked (un-paired) or never issued: the board drops its
+                    # key and re-enrols with the shared one.
+                    logger.warning("[voice_ws] %s signed with a key we do not hold",
+                                   device_id)
+                    ws.send(json.dumps({"type": "error", "msg": "key_unknown"}))
+                    return False
+                sign_key = record["key"]
+            else:
+                if record and record["state"] == "confirmed":
+                    logger.warning("[voice_ws] shared key refused for %s — it has "
+                                   "its own key (remote=%s)", device_id, remote)
+                    ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
+                    return False
+                sign_key = _HMAC_KEY
+
             expected = _hmac.new(
-                _HMAC_KEY,
+                sign_key,
                 f"{device_id}{ts}".encode(),
                 hashlib.sha256,
             ).hexdigest()
@@ -242,6 +268,8 @@ def _authenticate(ws, remote: str) -> bool:
                 logger.warning("[voice_ws] HMAC invalid from %s", remote)
                 ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
                 return False
+            if kv == KEY_VERSION and record["state"] == "issued":
+                confirm_key(device_id)
 
             # **الروبوت بيحكي باسم صاحبه.**
             #
@@ -282,10 +310,23 @@ def _authenticate(ws, remote: str) -> bool:
                 logger.warning("[voice_ws] broker credential lookup failed for %s: %s",
                                device_id, exc)
 
+            # A paired board still on the shared key gets its own key here, in
+            # the same authenticated reply that carries its broker login.
+            if kv != KEY_VERSION and owner:
+                try:
+                    own = issue_key(device_id)
+                    if own:
+                        reply["device_key"] = own
+                except Exception as exc:  # noqa: BLE001 — enrolment is extra, not a gate
+                    logger.warning("[voice_ws] device key issue failed for %s: %s",
+                                   device_id, exc)
+
             ws.send(json.dumps(reply))
-            logger.info("[voice_ws] auth OK device=%s owner=%s remote=%s creds=%s",
+            logger.info("[voice_ws] auth OK device=%s owner=%s remote=%s creds=%s key=%s",
                         device_id, owner or "—", remote,
-                        "sent" if "broker" in reply else "—")
+                        "sent" if "broker" in reply else "—",
+                        "own" if kv == KEY_VERSION else
+                        ("issued" if "device_key" in reply else "shared"))
             return True
         except Exception as exc:
             logger.warning("[voice_ws] handshake error from %s: %s", remote, exc)

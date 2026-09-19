@@ -407,6 +407,14 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
     from app.features.device_store import delete_devices_for_node
 
     devices_removed = delete_devices_for_node(node_id)
+    # The board's voice key goes with it: a sold robot must enrol afresh for
+    # its next owner, not keep a key the old account's era issued.
+    try:
+        from app.features.device_keys import revoke_key
+        revoke_key(node_id)
+    except Exception as exc:  # noqa: BLE001 — the release must not hinge on it
+        logger.warning("[NodeStore] could not revoke the voice key of %s: %s",
+                       node_id, exc)
     r = coll.delete_one({"node_id": node_id})
     if r.deleted_count == 0:
         return {"ok": False, "error": "not_found",

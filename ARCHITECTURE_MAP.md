@@ -944,7 +944,7 @@ Productivity: `sandy_tasks`, `sandy_reminders`, `sandy_goals`, `sandy_focus`,
 `sandy_focus_meta`, `sandy_brainstorms`, `sandy_bs_pending`.
 Life: `sandy_shopping`, `sandy_habits`, `sandy_habit_log`, `sandy_expenses`,
 `sandy_journal`, `sandy_books`, `sandy_reading_sessions`, `sandy_reading_meta`.
-Hardware: `sandy_devices`, `sandy_nodes`, `sandy_scenes`, `sandy_scene_timers`,
+Hardware: `sandy_devices`, `sandy_nodes`, `sandy_device_keys`, `sandy_scenes`, `sandy_scene_timers`,
 `sandy_voiceprints`, `sandy_face`.
 Social and delivery: `sandy_photos`, `sandy_photo_files`, `sandy_gifts`,
 `sandy_shared_content`, `sandy_future_messages`, `sandy_push_tokens`,
@@ -1046,19 +1046,17 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
 
 ### Reaches a user
 
-0. **One device key for every board, and the handshake believes the id it is
-   given.** `SANDY_WS_HMAC_KEY` is compiled into every brain and camera; the
-   voice handshake (`voice_ws/session.py::_authenticate`) and `/api/cam/upload`
-   verify a signature over a `device_id` the board itself supplies, then act as
-   that device: the voice session takes the node owner's identity — their
-   memory, their name — and `broker_creds.creds_for_device` hands back that
-   node's private broker login. So anyone who reads the key out of their own
-   robot's flash can speak to Sandy as another customer and take over their
-   robot's topics, and node ids come from four-character pairing codes. The
-   per-board broker credentials of 23 Aug 2026 are only as private as this key.
-   The fix is a per-device secret (provisioned at flash or pairing, stored
-   server-side against the node) checked in both places. Found 18 Sep 2026;
-   not fixed, because it spans firmware, pairing and the server at once.
+0. **Per-board voice keys: enrolment is trust-on-first-use.** Since 19 Sep
+   2026 a paired board still signing with the shared `SANDY_WS_HMAC_KEY` is
+   issued its own key in `auth_ok` (`features/device_keys`, NVS
+   `sandy_vkey/k`); it then signs with it (`"kv": 2`) and the shared key is
+   refused for that board. Un-pairing revokes it and the board re-enrols
+   (`key_unknown`). What is left: before a board's first own-key hello,
+   someone holding the shared key who connects as that board first gets its
+   key instead (the real board is then refused — visible, not silent); unpaired
+   ids are four-character codes; and `/api/cam/upload` (camera, Arduino) still
+   checks the shared key. Closing it fully means writing each board's key at
+   flash time and storing it in `sandy_device_keys` before the board ships.
 0b. **The brain accepts firmware from anyone on the LAN.** `sandy_remote.c`
    (`ENABLE_REMOTE 1` in `config.h`) serves `POST /update` with no
    authentication, secure boot and signed images are off, and port 3333
