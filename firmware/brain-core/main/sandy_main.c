@@ -166,6 +166,7 @@ void app_main(void) {
 #endif
 #if ENABLE_OTA
     TRY_INIT("ota", ota_init());
+    ota_updates_start();
 #endif
 
     // ── Network ───────────────────────────────────────────────────────────────

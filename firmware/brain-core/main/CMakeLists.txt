@@ -31,6 +31,9 @@ idf_component_register(
     INCLUDE_DIRS
         "include"
         "."
+    # The public half of the release-signing key (scripts/firmware_keygen.py).
+    EMBED_TXTFILES
+        "fw_pubkey.pem"
     REQUIRES
         esp_wifi
         esp_event
@@ -43,6 +46,7 @@ idf_component_register(
         esp_driver_rmt
         esp_driver_spi
         esp_https_ota
+        esp_http_client
         esp_http_server
         esp_netif
         esp_timer

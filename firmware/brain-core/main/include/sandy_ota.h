@@ -3,7 +3,13 @@
 #include <stdbool.h>
 
 esp_err_t ota_init(void);
-void      ota_trigger(const char *url);   // called from MQTT handler
+
+// Signed over-the-air updates pulled from the server (see sandy_ota.c): a first
+// check a minute after boot, then every six hours. Call once, after Wi-Fi.
+void      ota_updates_start(void);
+// Check for a release now (the MQTT "ota" command). The payload is ignored: the
+// board only ever installs what the manifest lists and the owner's key signed.
+void      ota_check_now(void);
 
 // ── Rollback ─────────────────────────────────────────────────────────────────
 //
@@ -16,8 +22,8 @@ void      ota_trigger(const char *url);   // called from MQTT handler
 // it, and the way back is a cable and an opened case. This turns that into a
 // robot that reboots once and comes back on the version that worked.
 //
-// Healthy means **still rescuable**, nothing more: Wi-Fi associated and the
-// update server listening. Not "the cloud answers" — tie it to that and a home
+// Healthy means **still rescuable**, nothing more: Wi-Fi associated, so it can
+// fetch the next release. Not "the cloud answers" — tie it to that and a home
 // internet outage rolls back perfectly good firmware. Not "everything
 // initialised" either; a robot with a broken servo but a working uplink is a
 // robot you can fix remotely, and rolling it back would throw away the fix.
@@ -26,5 +32,3 @@ void      ota_trigger(const char *url);   // called from MQTT handler
 // already been confirmed, so it costs nothing on an ordinary boot.
 void      ota_start_health_watch(void);
 
-// True once this image has been confirmed (or was never pending).
-bool      ota_image_confirmed(void);

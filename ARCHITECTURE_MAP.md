@@ -1057,16 +1057,18 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    ids are four-character codes; and `/api/cam/upload` (camera, Arduino) still
    checks the shared key. Closing it fully means writing each board's key at
    flash time and storing it in `sandy_device_keys` before the board ships.
-0b. **The brain accepts firmware from anyone on the LAN.** `sandy_remote.c`
-   (`ENABLE_REMOTE 1` in `config.h`) serves `POST /update` with no
-   authentication, secure boot and signed images are off, and port 3333
-   streams the log (which includes the setup access-point password). The
-   Arduino boards (camera, room node, legacy `sandy/`) connect to the broker
-   with `setInsecure()`, and `room-node/secrets.example.h` ships a default
-   OTA password. Fix: `ENABLE_REMOTE 0` for shipped builds (or a signed
-   image/token on `/update`), Secure Boot v2 + flash encryption, and
-   `setCACert` on the Arduino boards. Found 19 Sep 2026; needs the owner,
-   because the remote path is how he flashes over Wi-Fi today.
+0b. **Firmware updates.** Since 19 Sep 2026 the brain pulls signed releases
+   (`sandy_ota.c`, `features/firmware_store`, `api/firmware_api`): a manifest
+   signed with the owner's ECDSA P-256 key (`scripts/firmware_keygen.py`;
+   private key off-repo, public key in `main/fw_pubkey.pem`), streamed into the
+   idle slot with the size and SHA-256 checked before switching, canary ids
+   then a stable percentage (`scripts/publish_firmware.py`), never a downgrade,
+   bootloader rollback if the new image cannot reach Wi-Fi. The MQTT `ota`
+   command only triggers a check — it no longer takes a URL. Still open:
+   `ENABLE_REMOTE` (unauthenticated LAN upload + log on 3333) must be 0 on
+   every unit that is sold; secure boot and flash encryption are off; the
+   Arduino boards (camera, room node) connect with `setInsecure()` and are not
+   on this update path.
 1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
    starts at boot when `SENTRY_DSN` is set; `before_send` strips request
    bodies and, since 19 Sep 2026, log breadcrumbs down to their `[tag]`.

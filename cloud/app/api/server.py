@@ -184,6 +184,9 @@ def create_app(
     from app.api.weather_api import register_weather_api
     register_weather_api(app, mongo_db=mongo_db)
 
+    from app.api.firmware_api import register_firmware_api
+    register_firmware_api(app)
+
     # Auth endpoints
     #
     # `POST /api/auth` — the shared owner password — is gone.

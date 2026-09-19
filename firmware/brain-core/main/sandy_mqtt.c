@@ -428,7 +428,7 @@ static void _dispatch(const char *out, const char *val) {
     else if (!strcmp(out, "ir"))           ir_handle(val);
 #endif
     else if (!strcmp(out, "ota"))
-        ota_trigger(val);
+        ota_check_now();   // never a URL from the message: only signed releases
     else
         ESP_LOGW(TAG, "unknown output: %s", out);
 }

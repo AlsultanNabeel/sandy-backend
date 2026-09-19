@@ -23,7 +23,7 @@ A subsystem set to 0 is not present in the binary. It is not broken and not hidd
 | `ENABLE_TOUCH` | off |  |
 | `ENABLE_MIC` | off | MAX9814 clap mic |
 | `ENABLE_EARS` | off | stereo sound-direction (temp off; merging into VOICE next) |
-| `ENABLE_OTA` | off | needs WIFI |
+| `ENABLE_OTA` | on | needs WIFI — pulls signed releases from the server (sandy_ota.c) |
 | `ENABLE_MQTT` | on | needs WIFI — cloud body control (mood/servo/buzzer/base) |
 | `ENABLE_VOICE` | on | needs WIFI |
 | `ENABLE_WAKEWORD` | on | local WakeNet gate for the voice session (needs VOICE) |

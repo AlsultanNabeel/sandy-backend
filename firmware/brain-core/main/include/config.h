@@ -13,7 +13,7 @@
 #define ENABLE_TOUCH    0
 #define ENABLE_MIC      0   // MAX9814 clap mic
 #define ENABLE_EARS     0   // stereo sound-direction (temp off; merging into VOICE next)
-#define ENABLE_OTA      0   // needs WIFI
+#define ENABLE_OTA      1   // needs WIFI — pulls signed releases from the server (sandy_ota.c)
 #define ENABLE_MQTT     1   // needs WIFI — cloud body control (mood/servo/buzzer/base)
 #define ENABLE_VOICE    1   // needs WIFI
 #define ENABLE_WAKEWORD 1   // local WakeNet gate for the voice session (needs VOICE)
@@ -36,6 +36,9 @@
 // الكود كله محروس بهاي الراية ومكانه، فرجعتها لواحد بترجّع الميزة كاملة.
 #define ENABLE_COMMANDS 0   // local MultiNet "Sandy ..." command words (needs WAKEWORD)
 #define ENABLE_SPK_TEST 0   // temporary: triple-beep to verify amp + speaker
+// Dev only: unauthenticated image upload + log stream on the LAN. Anyone on the
+// same Wi-Fi can flash the board while this is on — set it to 0 for every
+// unit that leaves the house. Sold robots update through ENABLE_OTA.
 #define ENABLE_REMOTE   1   // cable-free dev: OTA upload + serial log over WiFi (needs WIFI)
 // تزويد الشبكة من نقطة وصول اللوح نفسه — أول تشغيل، وتبديل راوتر.
 //
@@ -149,7 +152,7 @@
 // Reported in every heartbeat. Bump it with each flash: without it, "did that
 // fix actually reach the board?" is a question nobody can answer from the app,
 // and today that question cost an afternoon.
-#define SANDY_FW_VERSION "0.9.1"
+#define SANDY_FW_VERSION "0.10.0"
 
 // Which board this is. Three ESP boards share the house network and take three
 // different binaries that are not interchangeable:

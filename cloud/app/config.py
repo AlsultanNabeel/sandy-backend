@@ -32,7 +32,7 @@ SANDY_OWNER_EMAILS: str = os.getenv("SANDY_OWNER_EMAILS", "")
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
 
 # Auth secret — exposed here so validate_config can check it. (There is no owner
-# password any more: the owner signs in by email like everyone, and is named by
+# password any more: the owner signs in with Google, and is named by
 # SANDY_OWNER_EMAILS above.)
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 
@@ -165,6 +165,12 @@ OWNER_ADDRESS_NOTE: str = os.getenv("SANDY_OWNER_ADDRESS_NOTE", "").strip()
 # app/features/broker_creds.py for why this is a config table and not an API
 # call today.
 SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
+
+# Firmware releases (features/firmware_store, api/firmware_api). The token lets
+# the publish script upload a release; unset means nobody can publish. It only
+# guards the upload — robots trust a release because of its signature, which
+# is made with a private key that never leaves the owner's machine.
+SANDY_FIRMWARE_TOKEN: str = os.getenv("SANDY_FIRMWARE_TOKEN", "").strip()
 
 
 def validate_config() -> tuple[list[str], list[str]]:
