@@ -25,6 +25,35 @@ struct NotificationItem {
     let title: String
     let body: String
     let date: Date
+    /// How it repeats, from the reminder's RRULE. `.none` rings once.
+    var repeats: NotificationRepeat = .none
+}
+
+/// The repeat patterns a local notification can express by itself. A reminder
+/// that repeats in a way this cannot express rings at its next occurrence, and
+/// the server moves it forward the next time the list is loaded.
+enum NotificationRepeat {
+    case none, daily, weekly, monthly
+
+    init(rrule: String) {
+        // "RRULE:FREQ=WEEKLY;BYDAY=MO" → ["FREQ": "WEEKLY", "BYDAY": "MO"]
+        var parts: [String: String] = [:]
+        let body = rrule.uppercased().replacingOccurrences(of: "RRULE:", with: "")
+        for pair in body.split(separator: ";") {
+            let kv = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            if kv.count == 2 { parts[kv[0]] = kv[1] }
+        }
+        // Only what one calendar trigger can express: every single day, one day
+        // a week, or one day a month. "Every 2 days" or "Mon and Wed" cannot.
+        if let n = parts["INTERVAL"], n != "1" { self = .none; return }
+        let days = parts["BYDAY"].map { $0.split(separator: ",").count } ?? 0
+        switch parts["FREQ"] {
+        case "DAILY" where days == 0:   self = .daily
+        case "WEEKLY" where days <= 1:  self = .weekly
+        case "MONTHLY" where days == 0: self = .monthly
+        default:                        self = .none
+        }
+    }
 }
 
 /// وجهة النقر على الإشعار — الشاشة اللي نفتحها حسب نوع الإشعار.
@@ -114,21 +143,32 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             let stale = reqs.map(\.identifier).filter { $0.hasPrefix(prefix) }
             self.center.removePendingNotificationRequests(withIdentifiers: stale)
             for it in items {
-                self.schedule(id: prefix + it.id, title: it.title, body: it.body, at: it.date)
+                self.schedule(id: prefix + it.id, title: it.title, body: it.body,
+                              at: it.date, repeats: it.repeats)
             }
         }
     }
 
     /// إشعار واحد بهوية ثابتة (يستبدل أي قديم بنفس الهوية). الماضي يُتجاهل.
-    private func schedule(id: String, title: String, body: String, at date: Date) {
-        guard date > Date() else { return }
+    private func schedule(id: String, title: String, body: String, at date: Date,
+                          repeats: NotificationRepeat = .none) {
+        guard date > Date() || repeats != .none else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        let comps = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute], from: date)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        // A repeating reminder used to be scheduled once and never again, so
+        // "every day at 8" rang on the first day only. The matching components
+        // decide the repeat: time of day, plus weekday or day of month.
+        let fields: Set<Calendar.Component>
+        switch repeats {
+        case .none:    fields = [.year, .month, .day, .hour, .minute]
+        case .daily:   fields = [.hour, .minute]
+        case .weekly:  fields = [.weekday, .hour, .minute]
+        case .monthly: fields = [.day, .hour, .minute]
+        }
+        let comps = Calendar.current.dateComponents(fields, from: date)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: repeats != .none)
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 

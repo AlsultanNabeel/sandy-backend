@@ -18,7 +18,8 @@ final class RemindersStore: LoadableStore {
         let title = isAR ? "تذكير" : "Reminder"
         let items = reminders.compactMap { r -> NotificationItem? in
             guard let date = NotificationManager.parseISO(r.remindAt) else { return nil }
-            return NotificationItem(id: r.id, title: title, body: r.text, date: date)
+            return NotificationItem(id: r.id, title: title, body: r.text, date: date,
+                                    repeats: NotificationRepeat(rrule: r.recurrence))
         }
         NotificationManager.shared.sync(prefix: "reminder.", items: items)
 

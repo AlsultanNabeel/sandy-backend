@@ -101,6 +101,7 @@ struct ReminderItem: Identifiable {
     let text: String
     let remindAt: String   // ISO أو فاضي
     let isRecurring: Bool
+    var recurrence: String = ""   // RRULE من الخادم، مثل "RRULE:FREQ=DAILY"
     var note: String = ""    // ملاحظة اختيارية
 }
 

@@ -65,6 +65,9 @@ def register_productivity_api(app, mongo_db=None):
                 "text": r.get("text", ""),
                 "remind_at": r.get("remind_at", ""),
                 "is_recurring": bool(r.get("is_recurring", False)),
+                # The RRULE, so the phone can schedule a repeating notification
+                # instead of one that rings once.
+                "recurrence": r.get("recurrence", "") or "",
                 "note": r.get("note", "") or "",
             }
             for r in items

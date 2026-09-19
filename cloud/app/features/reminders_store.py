@@ -102,12 +102,51 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 # ─── Reads ────────────────────────────────────────────────────────────────────
 
+def _next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optional[datetime]:
+    """The first occurrence of ``recurrence`` (an RRULE anchored at ``first``)
+    strictly after ``after``; None when the rule has ended (UNTIL/COUNT)."""
+    from dateutil.rrule import rrulestr
+
+    # Anchored in the user's zone, so "every day at 8" stays at 8 local time
+    # across a daylight-saving change instead of drifting by an hour in UTC.
+    start = first.astimezone(USER_TZ)
+    rule = rrulestr(recurrence.removeprefix("RRULE:"), dtstart=start)
+    nxt = rule.after(after.astimezone(USER_TZ), inc=False)
+    return nxt.astimezone(timezone.utc) if nxt else None
+
+
+def _advance_recurring(coll, now: datetime) -> None:
+    """Move every recurring reminder whose time has passed to its next time.
+
+    Nothing advanced them: the phone schedules a notification from `remind_at`,
+    and once that was more than `_LOOKBACK_MIN` in the past the reminder fell
+    out of every list — a daily reminder rang once and then vanished. Done on
+    read, so the next time anyone looks (the app, Sandy) the list is current.
+    """
+    cutoff = now - timedelta(minutes=_LOOKBACK_MIN)
+    # Recurring reminders are few; this touches only the ones that are due.
+    for doc in coll.find({"recurrence": {"$nin": ["", None]},
+                          "remind_at": {"$lt": cutoff}}).limit(200):
+        first = _as_aware_utc(doc.get("remind_at"))
+        try:
+            nxt = _next_occurrence(doc["recurrence"], first, cutoff) if first else None
+        except (ValueError, TypeError) as exc:
+            logger.warning("[RemindersStore] bad recurrence on %s: %s", doc.get("_id"), exc)
+            continue
+        if nxt is None:
+            coll.update_one({"_id": doc["_id"]}, {"$set": {"send_state": "sent"}})
+        else:
+            coll.update_one({"_id": doc["_id"]},
+                            {"$set": {"remind_at": nxt, "send_state": "pending"}})
+
+
 def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
     """Upcoming (not yet sent) reminders, soonest first."""
     try:
         coll = _coll()
         if coll is None:
             return []
+        _advance_recurring(coll, datetime.now(timezone.utc))
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=_LOOKBACK_MIN)
         docs = (
             coll.find(

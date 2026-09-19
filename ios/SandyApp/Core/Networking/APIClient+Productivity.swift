@@ -82,6 +82,7 @@ extension APIClient {
             let text: String?
             let remind_at: String?
             let is_recurring: Bool?
+            let recurrence: String?
             let note: String?
         }
     }
@@ -95,6 +96,7 @@ extension APIClient {
                                 text: row.text ?? "",
                                 remindAt: row.remind_at ?? "",
                                 isRecurring: row.is_recurring ?? false,
+                                recurrence: row.recurrence ?? "",
                                 note: row.note ?? "")
         }
         return ListResult(items: parsed, demo: r.demo ?? false)
