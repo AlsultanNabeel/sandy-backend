@@ -126,7 +126,6 @@ cloud/            backend
   app/utils/        tenancy, background thread pool, circuit breaker, profiles
 firmware/         ESP32-S3 robot brain (ESP-IDF, C)
 vision-core/      ESP32-CAM
-sandy/            classic ESP32 node
 room-node/        room controller (Arduino)
 ios/              iPhone client (SwiftUI)
 tests/  scripts/

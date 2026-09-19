@@ -59,7 +59,6 @@ owner, it is called out as a defect, not a style.
 cloud/                the Python backend — the brain and the API
 firmware/brain-core/  ESP32-S3 robot brain (ESP-IDF, C) — voice, face, servo, MQTT
 vision-core/          ESP32-CAM (Arduino) — camera board
-sandy/                classic ESP32 (Arduino) — the old robot sketch from before ESP-IDF; incomplete, not used
 room-node/            classic ESP32 (Arduino) — the room node (sandy/node/<id>/room/*)
 ios/SandyApp/         SwiftUI iPhone client
 tests/                backend tests (pytest + mongomock)
@@ -877,8 +876,6 @@ what makes the text-size control real rather than decorative.
   snapshot request was published exactly right and nothing was subscribed; no
   `cam/status` heartbeat was ever sent, so the address the live view needs never
   arrived, and "couldn't get the address" was the literal truth.
-- **`sandy/`** (classic ESP32, Arduino) — the old robot sketch from before ESP-IDF.
-  Incomplete: half the `.ino` files its header lists are missing. Not used.
 - **`room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
   `sandy/node/<id>/room/`.
 
