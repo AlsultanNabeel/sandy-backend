@@ -36,6 +36,8 @@
 #include <PubSubClient.h>
 #include <ESP32Servo.h>
 #include "secrets.h"
+#include "sandy_ca_roots.h"
+#include <time.h>
 
 // ===== إعدادات تعايرها هنا =====
 #define SERVO_PIN        13      // إشارة السيرفو (برتقالي)
@@ -239,6 +241,13 @@ static bool mqttReconnect() {
   if (now - g_lastMqttAttemptMs < MQTT_RECONNECT_INTERVAL_MS) return false;
   g_lastMqttAttemptMs = now;
 
+  // التحقّق من الشهادة بيقارن تاريخها بساعة اللوح، واللوح بيقلع ع سنة سبعين —
+  // يعني كل شهادة بتبيّن «لسا ما بلّشت». بنستنى الساعة بدل ما نفشل بالمصافحة.
+  if (time(nullptr) < 1700000000) {
+    Serial.println("[MQTT] الساعة لسا مش مضبوطة — بستنى قبل الاتصال");
+    return false;
+  }
+
   String clientId = "sandy-room-";
   clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
 
@@ -335,7 +344,10 @@ void setup() {
 
   connectWiFi();
 
-  g_tcp.setInsecure();   // مؤقتاً بدون verify cert (زي فيرموير الروبوت)
+  // بنتحقّق من شهادة الوسيط. بلاها، أي حدا ع نفس الشبكة بيقدر يعمل حاله الوسيط
+  // ويبعت «شغّل» و«طفّي» للمرحّلات — والتشفير لحاله ما بيمنع هاد.
+  g_tcp.setCACert(SANDY_CA_ROOTS);
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   // قبل أي اتصال: المواضيع لازم تكون جاهزة وقت أول محاولة اشتراك.
   roomBuildTopics();
 

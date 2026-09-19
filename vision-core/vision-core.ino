@@ -26,6 +26,7 @@
 #include "esp_system.h"
 #include "config.h"
 #include "secrets.h"
+#include "sandy_ca_roots.h"
 
 // ── Telnet mirror (Serial → WiFi) ───────────────────────────────
 WiFiServer g_telnetServer(23);

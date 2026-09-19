@@ -2,6 +2,9 @@
 // ESP32-CAM — MQTT (HiveMQ)
 // =========================
 
+void camSyncClock();
+bool camClockReady();
+
 static WiFiClientSecure g_mqttTcp;
 static PubSubClient     g_mqtt(g_mqttTcp);
 static unsigned long    g_lastMqttAttemptMs = 0;
@@ -185,7 +188,9 @@ void setupMQTT() {
   // قبل أي اشتراك أو نشر: بلا مواضيع، كل رسالة بتروح ع "sandy/node//cam/..."
   // وما في حدا سامع، والكاميرا بتبيّن شغّالة وهي فعليًا معزولة.
   camBuildTopics();
-  g_mqttTcp.setInsecure();
+  // بنتحقّق من شهادة الوسيط — بلاها أي حدا ع نفس الشبكة بيقدر يعمل حاله
+  // الوسيط ويطلب صور، أو يسمع كل إشي.
+  g_mqttTcp.setCACert(SANDY_CA_ROOTS);
   g_mqtt.setServer(SANDY_MQTT_HOST, SANDY_MQTT_PORT);
   g_mqtt.setCallback(mqttCallback);
   g_mqtt.setBufferSize(MQTT_BUFFER_SIZE);  // كبير لاستيعاب chunks
@@ -199,6 +204,10 @@ static bool mqttReconnect() {
   unsigned long now = millis();
   if (now - g_lastMqttAttemptMs < g_mqttBackoffMs) return false;
   g_lastMqttAttemptMs = now;
+
+  // التحقّق من الشهادة بيحتاج ساعة صحيحة (اللوح بيقلع ع سنة سبعين).
+  camSyncClock();
+  if (!camClockReady()) return false;
 
   String clientId = "sandy-cam-";
   clientId += String((uint32_t)ESP.getEfuseMac(), HEX);

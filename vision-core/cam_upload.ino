@@ -20,6 +20,7 @@
 
 #include <WiFiClientSecure.h>
 #include "mbedtls/md.h"
+#include <Preferences.h>
 #include <time.h>
 
 String camNodeId();
@@ -61,13 +62,76 @@ void camSyncClock() {
   g_log.println("[TIME] ⚠️ الساعة ما انضبطت — الرفع رح ينرفض");
 }
 
+bool camClockReady() { return g_clockReady; }
+
+// مفتاح الكاميرا الخاص.
+//
+// المفتاح المشترك محروق بكل لوح، فقراءته من كاميرا وحدة كانت بتكفّي ترفع صور
+// باسم أي كاميرا تانية. بالدقايق اللي بعد ما المالك يقرن الروبوت بالتطبيق،
+// ردّ الخادم ع رفع موقّع بالمشترك بيحمل مفتاح خاص بهالكاميرا — بنخزّنه هون
+// وبنوقّع فيه كل رفع بعده. أوّل رفع ناجح فيه بيخلّي الخادم يرفض المشترك لهاد
+// اللوح. ولو الخادم قال «key_unknown» (انفكّ الاقتران) بنمسحه وبنرجع للمشترك.
+static uint8_t g_ownKey[32];
+static bool    g_hasOwnKey = false;
+static bool    g_ownKeyLoaded = false;
+
+static int hexNibble(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+static bool parseKeyHex(const String& hex, uint8_t out[32]) {
+  if (hex.length() != 64) return false;
+  for (int i = 0; i < 32; i++) {
+    int hi = hexNibble(hex[2 * i]), lo = hexNibble(hex[2 * i + 1]);
+    if (hi < 0 || lo < 0) return false;
+    out[i] = (uint8_t)((hi << 4) | lo);
+  }
+  return true;
+}
+
+static void ownKeyLoad() {
+  if (g_ownKeyLoaded) return;
+  g_ownKeyLoaded = true;
+  Preferences p;
+  if (!p.begin("sandy_ckey", true)) return;
+  String hex = p.getString("k", "");
+  p.end();
+  g_hasOwnKey = parseKeyHex(hex, g_ownKey);
+  if (g_hasOwnKey) g_log.println("[UP] مفتاح الكاميرا الخاص جاهز");
+}
+
+static void ownKeyStore(const String& hex) {
+  uint8_t k[32];
+  if (!parseKeyHex(hex, k)) return;
+  Preferences p;
+  if (!p.begin("sandy_ckey", false)) return;
+  bool ok = p.putString("k", hex) == hex.length();
+  p.end();
+  if (!ok) return;
+  memcpy(g_ownKey, k, sizeof(k));
+  g_hasOwnKey = true;
+  g_log.println("[UP] استلمنا مفتاح الكاميرا الخاص");
+}
+
+static void ownKeyDrop() {
+  Preferences p;
+  if (p.begin("sandy_ckey", false)) { p.remove("k"); p.end(); }
+  memset(g_ownKey, 0, sizeof(g_ownKey));
+  g_hasOwnKey = false;
+  g_log.println("[UP] الخادم ما بيعرف مفتاحنا — رجعنا للمشترك لحد الاقتران الجاي");
+}
+
 static String hmacHex(const String& msg) {
-  const char* key = SANDY_WS_HMAC_KEY;
+  const unsigned char* key = g_hasOwnKey ? g_ownKey : (const unsigned char*)SANDY_WS_HMAC_KEY;
+  size_t keyLen = g_hasOwnKey ? sizeof(g_ownKey) : strlen(SANDY_WS_HMAC_KEY);
   uint8_t out[32];
   mbedtls_md_context_t ctx;
   mbedtls_md_init(&ctx);
   mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
-  mbedtls_md_hmac_starts(&ctx, (const unsigned char*)key, strlen(key));
+  mbedtls_md_hmac_starts(&ctx, key, keyLen);
   mbedtls_md_hmac_update(&ctx, (const unsigned char*)msg.c_str(), msg.length());
   mbedtls_md_hmac_finish(&ctx, out);
   mbedtls_md_free(&ctx);
@@ -160,7 +224,8 @@ void camRemoteStreamTick() {
 
 // بترجّع true لو الخادم استلم الصورة.
 bool uploadSnapshot(const String& id, const uint8_t* data, size_t len) {
-  if (strlen(SANDY_WS_HMAC_KEY) == 0) {
+  ownKeyLoad();
+  if (!g_hasOwnKey && strlen(SANDY_WS_HMAC_KEY) == 0) {
     g_log.println("[UP] لا يوجد مفتاح توقيع — الرفع معطّل");
     return false;
   }
@@ -172,9 +237,10 @@ bool uploadSnapshot(const String& id, const uint8_t* data, size_t len) {
   }
 
   WiFiClientSecure client;
-  // نفس ما بيعمل مقبس الرسائل: بلا تحقّق من الشهادة. القناة مشفّرة، والتوثيق
-  // بالتوقيع مش بالشهادة — ومخزن الشهادات الكامل ما بيسع بذاكرة اللوح.
-  client.setInsecure();
+  // بنتحقّق من شهادة الخادم بقائمة جذور قصيرة (sandy_ca_roots.h) — المخزن
+  // الكامل ما بيسع، بس خمس جذور بيسعوا. بلا تحقّق، أي حدا ع نفس الشبكة بياخد
+  // صور البيت ومفتاح الكاميرا.
+  client.setCACert(SANDY_CA_ROOTS);
   client.setTimeout(15000);
 
   if (!client.connect(SANDY_UPLOAD_HOST, 443)) {
@@ -196,7 +262,8 @@ bool uploadSnapshot(const String& id, const uint8_t* data, size_t len) {
       "X-Sandy-Node: " + node + "\r\n"
       "X-Sandy-Req: " + id + "\r\n"
       "X-Sandy-Ts: " + String(ts) + "\r\n"
-      "X-Sandy-Sig: " + sig + "\r\n"
+      "X-Sandy-Sig: " + sig + "\r\n" +
+      (g_hasOwnKey ? String("X-Sandy-Kv: 2\r\n") : String("")) +
       "Connection: close\r\n\r\n";
   client.print(head);
 
@@ -226,9 +293,26 @@ bool uploadSnapshot(const String& id, const uint8_t* data, size_t len) {
     if (client.available()) { status = client.readStringUntil('\n'); break; }
     delay(10);
   }
+  // باقي الرد (ترويسات وجسم صغير) — فيه مفتاحنا لو الخادم بعته. محدود بالحجم
+  // والوقت: رد غريب ما بيعلّق الرفع ولا بيعبّي الذاكرة.
+  String rest;
+  while (millis() < deadline && (client.connected() || client.available()) &&
+         rest.length() < 1024) {
+    if (client.available()) rest += (char)client.read();
+    else delay(5);
+  }
   client.stop();
 
   bool ok = status.indexOf("200") > 0;
   if (!ok) g_log.printf("[UP] ردّ الخادم: %s\n", status.c_str());
+  if (ok && !g_hasOwnKey) {
+    // متسامح مع المسافات: `"device_key": "…"` و`"device_key":"…"` نفس الإشي.
+    int at = rest.indexOf("\"device_key\"");
+    int colon = at >= 0 ? rest.indexOf(':', at) : -1;
+    int q = colon >= 0 ? rest.indexOf('"', colon) : -1;
+    if (q >= 0) ownKeyStore(rest.substring(q + 1, q + 1 + 64));
+  } else if (!ok && g_hasOwnKey && rest.indexOf("key_unknown") >= 0) {
+    ownKeyDrop();
+  }
   return ok;
 }

@@ -1046,17 +1046,18 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
 
 ### Reaches a user
 
-0. **Per-board voice keys: enrolment is trust-on-first-use.** Since 19 Sep
-   2026 a paired board still signing with the shared `SANDY_WS_HMAC_KEY` is
-   issued its own key in `auth_ok` (`features/device_keys`, NVS
-   `sandy_vkey/k`); it then signs with it (`"kv": 2`) and the shared key is
-   refused for that board. Un-pairing revokes it and the board re-enrols
-   (`key_unknown`). What is left: before a board's first own-key hello,
-   someone holding the shared key who connects as that board first gets its
-   key instead (the real board is then refused — visible, not silent); unpaired
-   ids are four-character codes; and `/api/cam/upload` (camera, Arduino) still
-   checks the shared key. Closing it fully means writing each board's key at
-   flash time and storing it in `sandy_device_keys` before the board ships.
+0. **Per-board keys: enrolment is limited to the pairing window.** Since 19
+   Sep 2026 a paired board still signing with the shared `SANDY_WS_HMAC_KEY` is
+   issued its own key in `auth_ok` (`features/device_keys`, NVS `sandy_vkey/k`)
+   — but only in the `ENROL_WINDOW_MIN` minutes after the owner pairs (or
+   re-pairs) it (`node_store.pair_node` → `open_enrolment`). It then signs
+   with it (`"kv": 2`) and the shared key is refused for that board. The camera
+   does the same over `/api/cam/upload` (`X-Sandy-Kv: 2`, Preferences
+   `sandy_ckey/k`) under its own id `<node>:cam`, so camera and brain never
+   share a key. Un-pairing revokes both (`key_unknown`). What is left: inside
+   the window, someone holding the shared key who connects as that board first
+   gets its key (the real board is then refused — visible, not silent).
+   Closing it fully means writing each board's key at flash time.
 0b. **Firmware updates.** Since 19 Sep 2026 the brain pulls signed releases
    (`sandy_ota.c`, `features/firmware_store`, `api/firmware_api`): a manifest
    signed with the owner's ECDSA P-256 key (`scripts/firmware_keygen.py`;
@@ -1064,11 +1065,13 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    idle slot with the size and SHA-256 checked before switching, canary ids
    then a stable percentage (`scripts/publish_firmware.py`), never a downgrade,
    bootloader rollback if the new image cannot reach Wi-Fi. The MQTT `ota`
-   command only triggers a check — it no longer takes a URL. Still open:
-   `ENABLE_REMOTE` (unauthenticated LAN upload + log on 3333) must be 0 on
-   every unit that is sold; secure boot and flash encryption are off; the
-   Arduino boards (camera, room node) connect with `setInsecure()` and are not
-   on this update path.
+   command only triggers a check — it no longer takes a URL. Published images
+   are always the sale build (`idf.py -B build-retail -DSANDY_RETAIL=1`), which
+   compiles `ENABLE_REMOTE` (LAN upload + log on 3333) out; the publish script
+   refuses an image that still contains it. The Arduino boards verify TLS
+   against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`). Still open: secure
+   boot and flash encryption are off; the Arduino boards are not on this
+   update path.
 1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
    starts at boot when `SENTRY_DSN` is set; `before_send` strips request
    bodies and, since 19 Sep 2026, log breadcrumbs down to their `[tag]`.
