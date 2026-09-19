@@ -364,21 +364,45 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
     return sent, missed
 
 
-def run_due_timers() -> List[Dict[str, str]]:
-    """Return any timed reverts whose moment has come. Call every minute.
+def run_due_timers() -> Dict[str, Any]:
+    """Fire the active user's timed reverts whose moment has come.
 
-    Returns the due revert actions as data (a list of {device, value}) and
-    clears them from the store; a caller can hand them to an app to execute.
-    A scheduler job — it runs inside the active user's profile context, so it
-    only ever fires that user's own scene timers.
+    Each due timer is **claimed** with an atomic find-and-delete before it is
+    sent, so two workers (or two overlapping ticks) can never fire the same
+    revert twice; a claimed timer whose device is gone is dropped, not retried —
+    retrying a device that does not exist would fire forever.
+
+    Returns ``{"due": [...], "sent": n, "missed": [...]}``. Runs inside the
+    active user's profile context, so it only ever touches that user's timers.
     """
     tcoll = _timers()
     if tcoll is None:
-        return []
+        return {"due": [], "sent": 0, "missed": []}
     due: List[Dict[str, str]] = []
-    # سقف لكل دورة: المؤقتات المستحقة بتنمسح وقت ما بتنقرا، فاللي فوق السقف
-    # بيوصل بالدورة الجاي بدل ما ينضاع.
-    for t in list(tcoll.find({"fire_at": {"$lte": _now()}}).limit(MAX_DUE_TIMERS)):
+    # سقف لكل دورة: اللي فوق السقف بيضل بالمجموعة وبيوصل بالدورة الجاي.
+    for _ in range(MAX_DUE_TIMERS):
+        t = tcoll.find_one_and_delete({"fire_at": {"$lte": _now()}},
+                                      sort=[("fire_at", 1)])
+        if not t:
+            break
         due.append({"device": t.get("device", ""), "value": t.get("value", "")})
-        tcoll.delete_one({"_id": t["_id"]})
-    return due
+    if not due:
+        return {"due": [], "sent": 0, "missed": []}
+    sent, missed = _actuate(due)
+    return {"due": due, "sent": sent, "missed": missed}
+
+
+def users_with_due_timers(mongo_db, limit: int = 500) -> List[str]:
+    """Owners that have at least one revert due now (raw, cross-tenant read).
+
+    Only ids leave this function — the timers themselves are then read and
+    claimed through the scoped view inside each owner's own context.
+    """
+    if mongo_db is None:
+        return []
+    try:
+        ids = mongo_db[_TIMERS].distinct("user_id", {"fire_at": {"$lte": _now()}})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[SceneStore] due-timer scan failed: %s", exc)
+        return []
+    return [str(u) for u in ids if u][:limit]

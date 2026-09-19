@@ -234,4 +234,12 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     except Exception as exc:
         logger.warning("[Bootstrap] nudge scheduler start failed: %s", exc)
 
+    # Scene timed reverts ("movie for two hours, then lights on") — once a minute.
+    try:
+        from app.db import get_db
+        from app.services.scene_timer_runner import start_scene_timer_runner
+        start_scene_timer_runner(get_db())
+    except Exception as exc:
+        logger.warning("[Bootstrap] scene timer runner start failed: %s", exc)
+
     logger.debug("[Bootstrap] Startup complete (env=%s)", app_env)
