@@ -3,19 +3,21 @@
 // =========================
 //   • WiFi مباشر
 //   • MQTT (HiveMQ) — نفس البروكر تبع Sandy
-//   • Topics:
-//       sandy/cam/request   ← Sandy تطلب snapshot
-//       sandy/cam/snapshot  ← ESP-CAM ينشر chunks الصورة
-//       sandy/cam/status    ← حالة الكاميرا كل 10s
-//       sandy/cam/event     ← أحداث (e.g. capture errors)
-//   • OTA + Telnet — لا حاجة لـ TTL بعد الآن
+//   • Topics — تحت شجرة الروبوت (sandy/node/<node_id>/cam/…، الأسماء بـ config.h):
+//       cam/request · command · wifi · flash · stream · framesize  ← أوامر داخلة
+//       cam/status  ← حالة الكاميرا (نبضة)،  cam/event ← أحداث
+//     الصورة نفسها ما بتمرّ بالوسيط: بتنرفع بطلب واحد لـ /api/cam/upload.
+//   • OTA + Telnet
 //
 // التقسيم على ملفات .ino — يدمجها Arduino IDE تلقائياً:
-//   esp32cam_Camera.ino — globals + setup + loop (هذا الملف)
-//   cam_capture.ino     — esp_camera init + JPEG capture + chunked publish
-//   cam_mqtt.ino        — MQTT connect / subscribe / status / send chunks
-//   cam_ota.ino         — OTA + Telnet
-//   cam_wifi.ino        — WiFi + diagnostics
+//   vision-core.ino  — globals + setup + loop (هذا الملف)
+//   cam_capture.ino  — esp_camera init + JPEG capture
+//   cam_control.ino  — إعدادات الكاميرا والفلاش (محفوظة)
+//   cam_http.ino     — البث المباشر على الشبكة المحلية
+//   cam_mqtt.ino     — MQTT connect / subscribe / status
+//   cam_ota.ino      — OTA + Telnet
+//   cam_upload.ino   — رفع الصورة للخادم (موقّع، مع مفتاح الكاميرا الخاص)
+//   cam_wifi.ino     — WiFi + diagnostics
 
 #include <Arduino.h>
 #include "esp_camera.h"

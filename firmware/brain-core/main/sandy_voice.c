@@ -1,6 +1,6 @@
 // Real-time voice link: I2S mic/speaker <-> /voice WebSocket (Gemini Live).
 //
-// Protocol (matches cloud/app/api/voice_ws.py):
+// Protocol (matches cloud/app/api/voice_ws/session.py):
 //   1. Connect (WSS) and send a hello frame:
 //        {"type":"hello","device_id":"...","ts":<unix_ms>,"hmac":"<hex>"[,"kv":2]}
 //        hmac = HMAC-SHA256(key, device_id + str(ts)); key = this board's own

@@ -1,7 +1,7 @@
 """Azure OpenAI adapter for intent routing (FC mode) — يحلّ محل GeminiFlashClient.
 
 يستخدم Azure GPT-4o-mini مع JSON mode، بنفس الواجهة العامة للـ GeminiFlashClient
-ليكون الاستبدال drop-in في maestro.py و gift_tools.py.
+ليكون الاستبدال drop-in في fc_router.py و gift_tools.py.
 """
 
 from __future__ import annotations

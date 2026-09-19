@@ -109,7 +109,7 @@ TASKS_DIR = DATA_DIR / "tasks"
 # عيوني/يا برو/يا صاحبي are fine. A signed-in user's dialect choice and/or
 # custom instructions (context_builder.build_effective_persona) replace this
 # tone text; SANDY_IDENTITY_LOCK below still always applies on top.
-# SANDY_PERSONALITY (Heroku) or a local sandy_config.py overrides it.
+# The SANDY_PERSONALITY config var (Heroku / .env) overrides it.
 SANDY_PERSONALITY: str = os.getenv(
     "SANDY_PERSONALITY",
     """
@@ -125,7 +125,7 @@ SANDY_PERSONALITY: str = os.getenv(
 # Palestinian identity and who built her. context_builder.build_effective_persona
 # appends this unconditionally, AFTER any custom instructions a user set, so
 # their override text can never talk her out of it.
-# SANDY_IDENTITY_LOCK (Heroku) or a local sandy_config.py overrides the wording
+# The SANDY_IDENTITY_LOCK config var (Heroku / .env) overrides the wording
 # (owner-only knob — never exposed to per-user customization).
 SANDY_IDENTITY_LOCK: str = os.getenv(
     "SANDY_IDENTITY_LOCK",

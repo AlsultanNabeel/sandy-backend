@@ -8,7 +8,7 @@ allows). The client keeps ALL the code; this just decides what's shown.
 
   GET /api/features → {"hidden": ["habits","gifts",...]}
 
-The key list is the client's contract (see FeatureFlags.swift on iOS); the
+The key list is the client's contract (the `key`s filtered in `Features/Daily/DailyView.swift` on iOS); the
 backend stays dumb on purpose — it just relays the owner's hidden set — so adding
 a new feature never needs a backend change.
 """
