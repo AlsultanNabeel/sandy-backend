@@ -13,6 +13,12 @@ static const char *TAG = "servo";
 #define ARRAY_LEN_S(a) (sizeof(a) / sizeof((a)[0]))
 static uint8_t s_angle = SERVO_DEFAULT_POS;
 
+// Blocks ~20 ms per degree (the easing). Only ever called on the gesture task
+// (and once by servo_init, before that task exists): a caller on the mic task
+// stalled audio capture for up to two seconds right after the wake word, and
+// two tasks moving the neck at once raced on s_angle.
+static void _move_blocking(uint8_t angle);
+
 // Map angle [0-180] to LEDC duty for 14-bit timer at 50Hz (period = 20000us)
 static uint32_t _angle_to_duty(uint8_t angle) {
     uint32_t pw_us = SERVO_MIN_US +
@@ -45,11 +51,11 @@ esp_err_t servo_init(void) {
     if (nvs_load_servo_angle(&saved) == ESP_OK) {
         ESP_LOGI(TAG, "restored angle=%d from NVS", saved);
     }
-    servo_set_angle(saved);
+    _move_blocking(saved);
     return ESP_OK;
 }
 
-void servo_set_angle(uint8_t angle) {
+static void _move_blocking(uint8_t angle) {
     if (angle < SERVO_SAFE_MIN) angle = SERVO_SAFE_MIN;
     if (angle > SERVO_SAFE_MAX) angle = SERVO_SAFE_MAX;
     if (angle == s_angle) return;
@@ -116,10 +122,8 @@ static const gesture_def_t GESTURES[GESTURE_COUNT] = {
 };
 
 static volatile sandy_gesture_t s_pending = GESTURE_NONE;
-static volatile bool            s_playing;
+static volatile int16_t         s_goto = -1;    // pending absolute move, or -1
 static TaskHandle_t             s_gesture_task;
-
-bool servo_gesture_active(void) { return s_playing; }
 
 static void _gesture_task(void *arg) {
     (void)arg;
@@ -128,49 +132,69 @@ static void _gesture_task(void *arg) {
         // neck that moves twice an hour is a core doing nothing, expensively.
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        // A plain "go to this angle" (the voice path turning toward whoever
+        // called, the app's slider). Taken and cleared first; if a gesture was
+        // also asked for after it, the loop below still plays that.
+        int16_t target = s_goto;
+        if (target >= 0) {
+            s_goto = -1;
+            _move_blocking((uint8_t)target);
+        }
+
         sandy_gesture_t g = s_pending;
         if (g <= GESTURE_NONE || g >= GESTURE_COUNT) continue;
 
         const gesture_def_t *def = &GESTURES[g];
-        s_playing = true;
 
         if (def->absolute_center) {
-            servo_set_angle(SERVO_DEFAULT_POS);
+            _move_blocking(SERVO_DEFAULT_POS);
             vTaskDelay(pdMS_TO_TICKS(300));
         } else {
             const uint8_t home = servo_get_angle();
             for (size_t i = 0; i < def->count; i++) {
                 // A newer gesture cancels this one mid-step: the last thing
                 // asked for is what she does.
-                if (s_pending != g) break;
+                if (s_pending != g || s_goto >= 0) break;
                 int target = (int)home + def->steps[i].offset;
                 if (target < SERVO_SAFE_MIN) target = SERVO_SAFE_MIN;
                 if (target > SERVO_SAFE_MAX) target = SERVO_SAFE_MAX;
-                servo_set_angle((uint8_t)target);
+                _move_blocking((uint8_t)target);
                 vTaskDelay(pdMS_TO_TICKS(def->steps[i].hold_ms));
             }
             // Always come home. Without this a nod every few minutes walks her
             // head off to one side over an evening, and nothing ever puts it back.
-            if (s_pending == g) servo_set_angle(home);
+            if (s_pending == g && s_goto < 0) _move_blocking(home);
         }
 
-        s_playing = false;
         if (s_pending == g) s_pending = GESTURE_NONE;
+        // Something arrived while this ran: go round again without waiting.
+        if (s_goto >= 0 || s_pending != GESTURE_NONE) xTaskNotifyGive(s_gesture_task);
     }
+}
+
+static bool _ensure_task(void) {
+    if (s_gesture_task) return true;
+    // 2560: it delays and eases the servo, which does not go deep. Task stacks
+    // are internal RAM and internal RAM is what the voice session needs, so
+    // this is sized to the work and not rounded up.
+    if (xTaskCreate(_gesture_task, "servo_gest", 2560, NULL, 3, &s_gesture_task) != pdPASS) {
+        ESP_LOGE(TAG, "gesture task create failed — neck unavailable");
+        s_gesture_task = NULL;
+        return false;
+    }
+    return true;
 }
 
 void servo_gesture(sandy_gesture_t g) {
     if (g <= GESTURE_NONE || g >= GESTURE_COUNT) return;
-    if (!s_gesture_task) {
-        // 2560: it delays and calls servo_set_angle, which does not go deep.
-        // Task stacks are internal RAM and internal RAM is what the voice
-        // session needs, so this is sized to the work and not rounded up.
-        if (xTaskCreate(_gesture_task, "servo_gest", 2560, NULL, 3, &s_gesture_task) != pdPASS) {
-            ESP_LOGE(TAG, "gesture task create failed — gestures unavailable");
-            s_gesture_task = NULL;
-            return;
-        }
-    }
+    if (!_ensure_task()) return;
     s_pending = g;
+    xTaskNotifyGive(s_gesture_task);
+}
+
+void servo_move_to(uint8_t angle) {
+    if (!_ensure_task()) return;
+    s_goto = angle;
+    s_pending = GESTURE_NONE;   // the last thing asked for is what she does
     xTaskNotifyGive(s_gesture_task);
 }

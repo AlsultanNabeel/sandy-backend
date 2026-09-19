@@ -1580,7 +1580,7 @@ static void mic_task(void *arg) {
                     int off = bal * VOICE_EARS_SWING / 10;
                     if (off >  VOICE_EARS_SWING) off =  VOICE_EARS_SWING;
                     if (off < -VOICE_EARS_SWING) off = -VOICE_EARS_SWING;
-                    servo_set_angle((uint8_t)(90 + off));
+                    servo_move_to((uint8_t)(90 + off));
                     ESP_LOGI(TAG, "ears: l=%d r=%d bal=%d -> angle=%d",
                              ear_l, ear_r, bal, 90 + off);
                 }

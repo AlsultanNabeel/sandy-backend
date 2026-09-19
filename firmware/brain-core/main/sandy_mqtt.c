@@ -107,7 +107,7 @@ static void _handle_mood(const char *val) {
 
 static void _handle_servo(const char *val) {
     int angle = atoi(val);
-    if (angle >= 0 && angle <= 180) servo_set_angle((uint8_t)angle);
+    if (angle >= 0 && angle <= 180) servo_move_to((uint8_t)angle);
 }
 
 // حركة = الجسم كله، مش الرقبة لحالها.

@@ -4,7 +4,10 @@
 #include <stdbool.h>
 
 esp_err_t servo_init(void);
-void      servo_set_angle(uint8_t angle);   // clamped to safe range, sine-eased
+// Turn to an angle (clamped, sine-eased) on the neck's own task. Returns at
+// once: the easing takes ~20 ms per degree, and the mic task that calls this
+// after the wake word must never wait for it. Replaces any gesture in progress.
+void      servo_move_to(uint8_t angle);
 uint8_t   servo_get_angle(void);
 
 // ── Gestures ─────────────────────────────────────────────────────────────────
@@ -38,6 +41,3 @@ typedef enum {
 // Play one. Non-blocking; replaces any gesture in progress.
 void servo_gesture(sandy_gesture_t g);
 
-// True while one is playing — the voice path checks this so a gesture and a
-// gaze-toward-the-speaker do not fight over the same neck.
-bool servo_gesture_active(void);
