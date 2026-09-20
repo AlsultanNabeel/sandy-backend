@@ -15,12 +15,21 @@
 			</array>
 		</dict>
 		<dict>
-			<key>CFBundleIdentifier</key>
-			<string></string>
+			<!-- sandy:// — widgets, Live Activity and Control Center open the app
+			     straight into a call / chat / quick add (App/DeepLinkRouter.swift). -->
+			<key>CFBundleURLName</key>
+			<string>com.sandy.app.deeplink</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sandy</string>
+			</array>
 		</dict>
 	</array>
+	<!-- The live voice call shows on the Lock Screen and in the Dynamic Island. -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict>
 		<!-- Theme.Colors.background (#020508): the system launch screen was white,

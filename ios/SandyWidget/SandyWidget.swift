@@ -54,6 +54,7 @@ struct SandyProvider: TimelineProvider {
 
 struct SandyWidgetEntryView: View {
     var entry: SandyEntry
+    @Environment(\.widgetFamily) private var family
 
     /// نفس لغة التطبيق: ar → أرقام عربية وأسماء عربية، en → إنجليزي.
     private var locale: Locale { Locale(identifier: entry.isArabic ? "ar" : "en") }
@@ -66,7 +67,40 @@ struct SandyWidgetEntryView: View {
         return f.string(from: NSNumber(value: entry.activeTasks)) ?? String(entry.activeTasks)
     }
 
+    private var isAccessory: Bool {
+        family == .accessoryCircular || family == .accessoryRectangular || family == .accessoryInline
+    }
+
     var body: some View {
+        content
+            .environment(\.locale, locale)
+            .environment(\.layoutDirection, entry.isArabic ? .rightToLeft : .leftToRight)
+            // نقرة على الويدجت (خارج الأزرار) تفتح الشات مباشرة.
+            .widgetURL(SandyLinks.chat)
+            .containerBackground(for: .widget) {
+                isAccessory ? Color.clear : Color.black
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch family {
+        case .accessoryCircular:    circular
+        case .accessoryRectangular: rectangular
+        case .accessoryInline:      inline
+        case .systemMedium:
+            HStack(spacing: 12) {
+                summary
+                actions
+            }
+        default:
+            summary
+        }
+    }
+
+    // MARK: الشاشة الرئيسية
+
+    private var summary: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles").foregroundStyle(.cyan)
@@ -87,9 +121,88 @@ struct SandyWidgetEntryView: View {
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .environment(\.locale, locale)
-        .environment(\.layoutDirection, entry.isArabic ? .rightToLeft : .leftToRight)
-        .containerBackground(for: .widget) { Color.black }
+    }
+
+    /// أزرار تفتح التطبيق مباشرة على الوجهة: مكالمة صوتية، شات، إضافة سريعة.
+    private var actions: some View {
+        VStack(spacing: 6) {
+            actionButton(SandyLinks.call, icon: "waveform",
+                         title: entry.isArabic ? "احكي" : "Talk", prominent: true)
+            actionButton(SandyLinks.chat, icon: "bubble.left.fill",
+                         title: entry.isArabic ? "شات" : "Chat", prominent: false)
+            actionButton(SandyLinks.quickAdd, icon: "plus",
+                         title: entry.isArabic ? "إضافة" : "Add", prominent: false)
+        }
+        .frame(width: 104)
+    }
+
+    private func actionButton(_ url: URL, icon: String, title: String, prominent: Bool) -> some View {
+        Link(destination: url) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+                Text(title).font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(prominent ? Color.black : Color.white)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .background(Capsule().fill(prominent ? Color.cyan : Color.white.opacity(0.14)))
+        }
+    }
+
+    // MARK: شاشة القفل
+
+    private var circular: some View {
+        ZStack {
+            AccessoryWidgetBackground()
+            circularGlyph
+        }
+    }
+
+    private var circularGlyph: some View {
+        VStack(spacing: 1) {
+            Image(systemName: "sparkles").font(.system(size: 15, weight: .semibold))
+            if let at = entry.reminderAt {
+                Text(at, style: .time)
+                    .font(.system(size: 10, weight: .semibold))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            }
+        }
+        .widgetAccentable()
+        .accessibilityLabel(entry.isArabic ? "ساندي" : "Sandy")
+    }
+
+    private var rectangular: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                Text(entry.isArabic ? "ساندي" : "Sandy").bold()
+                if let at = entry.reminderAt {
+                    Spacer(minLength: 0)
+                    Text(at, style: .time)
+                }
+            }
+            .font(.caption)
+            .widgetAccentable()
+            Text(entry.reminderText
+                 ?? (entry.isArabic ? "ما في تذكيرات قادمة" : "No upcoming reminders"))
+                .font(.headline)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var inline: some View {
+        if let reminder = entry.reminderText, let at = entry.reminderAt {
+            Text(at, style: .time) + Text(" · " + reminder)
+        } else if let reminder = entry.reminderText {
+            Text(reminder)
+        } else {
+            Text(entry.isArabic ? "ساندي · ما في تذكيرات" : "Sandy · No reminders")
+        }
     }
 }
 
@@ -102,6 +215,7 @@ struct SandyWidget: Widget {
         }
         .configurationDisplayName("ساندي")
         .description("تذكيرك الجاي ومهامك.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium,
+                            .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }

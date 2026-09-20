@@ -34,6 +34,8 @@ struct LiveVoiceView: View {
             live.start(baseURL: state.api.baseURL, token: state.api.token ?? "")
         }
         .onDisappear { live.stop() }
+        // «إنهاء» من الـ Live Activity / الجزيرة الديناميكية (sandy://call/end).
+        .onReceive(DeepLinkRouter.shared.endCall) { _ in dismiss() }
     }
 
     // MARK: - ساندي + الهالة (تتفاعل مع الطور)

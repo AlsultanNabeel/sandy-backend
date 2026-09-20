@@ -44,6 +44,13 @@ struct MainTabView: View {
     /// مدير الإشعارات — نراقب `pendingRoute` حتى يفتح النقر على إشعار شاشته.
     @ObservedObject private var notifs = NotificationManager.shared
 
+    /// روابط ساندي (ويدجت / Live Activity / مركز التحكم) — sandy://call|chat|quickadd.
+    @ObservedObject private var router = DeepLinkRouter.shared
+    /// مكالمة صوتية مفتوحة من رابط (نفس شاشة زر الصوت بالشات).
+    @State private var showLiveCall = false
+    /// نافذة الإضافة السريعة مفتوحة من رابط (نفس نافذة الرئيسية).
+    @State private var showQuickAdd = false
+
     /// هل الكيبورد طالع؟ لما يطلع نخفي شريط التبويبات والرفيق العائم حتى ما
     /// يزدحموا فوق الكيبورد (يبقى حقل الكتابة وحده فوقه). نرصده عبر إشعارات
     /// النظام (iOS 16-safe، بدون أي API أحدث).
@@ -121,6 +128,38 @@ struct MainTabView: View {
                 selection = .home
                 notifs.pendingRoute = nil
             }
+        }
+        // رابط ساندي — `initial` يلتقط رابطًا وصل قبل ما تنبني هالشاشة (إقلاع بارد/دخول).
+        .onChange(of: router.pending, initial: true) { _, link in
+            guard let link else { return }
+            router.pending = nil
+            open(link)
+        }
+        // المكالمة الصوتية الحيّة (جيميني لايف) — نفس عرض زر الصوت بالشات.
+        .sheet(isPresented: $showLiveCall) {
+            LiveVoiceView()
+                .environmentObject(state)
+                .environmentObject(lang)
+                .environment(\.layoutDirection, lang.lang.layoutDirection)
+                .environment(\.locale, AppLocale.locale(for: lang.lang))
+        }
+        // الإضافة السريعة — تطفو بالنص زي ما تفتحها الرئيسية.
+        .fullScreenCover(isPresented: $showQuickAdd) {
+            QuickAddSheet()
+                .environmentObject(state)
+                .environmentObject(lang)
+        }
+    }
+
+    /// يفتح وجهة رابط ساندي: تبويب الشات، أو المكالمة، أو الإضافة السريعة.
+    private func open(_ link: DeepLink) {
+        switch link {
+        case .chat:
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { selection = .sandy }
+        case .call:
+            showLiveCall = true
+        case .quickAdd:
+            showQuickAdd = true
         }
     }
 

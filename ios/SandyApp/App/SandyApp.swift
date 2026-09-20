@@ -11,6 +11,13 @@ import GoogleSignIn
 /// تُضاف المفاتيح.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // No call runs at launch: clear any call Live Activity a killed run left behind.
+        CallLiveActivity.endStale()
+        return true
+    }
+
+    func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         NotificationManager.shared.handleDeviceToken(deviceToken)
     }
@@ -45,6 +52,8 @@ struct SandyApp: App {
                 .preferredColorScheme(.dark)
                 // استقبال رابط رجوع جوجل بعد المصادقة.
                 .onOpenURL { url in
+                    // روابط ساندي (ويدجت / Live Activity / مركز التحكم) أولاً.
+                    if DeepLinkRouter.shared.handle(url) { return }
                     #if canImport(GoogleSignIn)
                     GIDSignIn.sharedInstance.handle(url)
                     #endif
@@ -55,6 +64,7 @@ struct SandyApp: App {
 
 struct RootView: View {
     @EnvironmentObject var state: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var handoffDone = false
 
     var body: some View {
@@ -78,6 +88,10 @@ struct RootView: View {
         // نحاول استعادة الجلسة مرّة عند الإقلاع (توكن محفوظ → رئيسية مباشرة).
         .task {
             if state.needsSessionRestore { await state.restoreSession() }
+        }
+        // زر «تكلّم مع ساندي» بمركز التحكم بيترك الرابط بالمساحة المشتركة احتياطًا.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            if phase == .active { DeepLinkRouter.shared.consumeSharedPending() }
         }
     }
 }

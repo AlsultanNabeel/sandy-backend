@@ -10,7 +10,20 @@ import SwiftUI
 final class GeminiLiveManager: NSObject, ObservableObject {
     enum Phase: Equatable { case idle, connecting, listening, speaking }
 
-    @Published var phase: Phase = .idle
+    /// Every real transition feels different (haptics) and drives the call's
+    /// Live Activity / Dynamic Island: started on connecting, updated on each
+    /// change, ended the moment the call goes idle (stop, error, drop).
+    @Published var phase: Phase = .idle {
+        didSet {
+            guard phase != oldValue else { return }
+            switch phase {
+            case .listening: Haptics.play(.listening)
+            case .speaking:  Haptics.play(.speaking)
+            case .idle, .connecting: break
+            }
+            CallLiveActivity.shared.phaseChanged(phase)
+        }
+    }
     @Published var mouthOpen: CGFloat = 0
     @Published var permissionDenied = false
     @Published var errorText = ""
@@ -104,6 +117,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
                     guard !self.stopped, let task, task === self.ws else { return }
                     self.teardown()
                     self.errorText = "انقطع الاتصال"
+                    Haptics.play(.failure)
                 }
             case .success(let message):
                 switch message {
