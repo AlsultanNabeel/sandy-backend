@@ -36,11 +36,26 @@ final class AppState: ObservableObject {
         api.onUnauthorized = { [weak self] in
             Task { @MainActor in self?.signOut() }
         }
+        // Decide the first screen before the first frame: a signed-in user who
+        // finished onboarding opens on the app itself, not on the launch screen
+        // for a moment. `restoreSession` finishes the job (push, background check).
+        if api.token != nil && onboardingDoneCached {
+            stage = .chat
+            launchedFromCache = true
+        }
     }
+
+    /// The first screen was chosen from the cache in `init`; `restoreSession`
+    /// still has to run once for push setup and the background check.
+    private var launchedFromCache = false
+
+    /// Whether the launch still owes a `restoreSession` call.
+    var needsSessionRestore: Bool { stage == .launching || launchedFromCache }
 
     /// استعادة الجلسة عند الإقلاع: لو في توكن محفوظ نتحقّق منه ونوجّه؛ وإلا دخول.
     /// توكن غير صالح/منتهٍ → نمسحه ونرجّع لشاشة الدخول (fail closed).
     func restoreSession() async {
+        launchedFromCache = false
         guard api.token != nil else { stage = .auth; return }
 
         // **Open at once when we already know the answer.** The launch used to

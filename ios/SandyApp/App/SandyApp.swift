@@ -67,7 +67,7 @@ struct RootView: View {
         }
         // نحاول استعادة الجلسة مرّة عند الإقلاع (توكن محفوظ → رئيسية مباشرة).
         .task {
-            if state.stage == .launching { await state.restoreSession() }
+            if state.needsSessionRestore { await state.restoreSession() }
         }
     }
 }
