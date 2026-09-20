@@ -4,6 +4,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request, Response
@@ -28,6 +29,14 @@ _MAX_HISTORY_MESSAGES = 500
 
 # مدة بقاء سجل شات الزائر قبل انتهائه (٤٨ ساعة).
 _GUEST_CHAT_TTL = timedelta(hours=48)
+
+# A retried send (same `client_msg_id`) whose first run is still going: the
+# stream route waits this long for that run's reply before giving up.
+_DUPLICATE_WAIT_S = 120
+_STILL_PROCESSING = {
+    "error": "still_processing",
+    "message": "ساندي لسا عم تجاوب على هالرسالة، لحظة.",
+}
 
 
 def create_app(
@@ -357,6 +366,25 @@ def create_app(
             result["image_url"] = f"data:image/png;base64,{b64}"
         return result
 
+    from app.api.conversations_api import (claim_turn, ensure_conversation, finish_turn,
+                                           release_turn, turn_status, valid_client_id)
+
+    def _conversation_refusal(user_id: str, body: dict):
+        """A named conversation must be the caller's. A new chat's id is picked
+        by the app, so the first turn that names it creates it (no POST round
+        trip before the first token); an id owned by someone else is refused —
+        never read, never written, never used as a graph thread."""
+        cid = (body.get("conversation_id") or "").strip()
+        if not cid or mongo_db is None:
+            return None
+        if ensure_conversation(mongo_db, user_id, cid):
+            return None
+        return jsonify({"error": "conversation_not_found"}), 404
+
+    def _client_msg_id(body: dict) -> str:
+        cmid = body.get("client_msg_id")
+        return cmid if valid_client_id(cmid) else ""
+
     @app.route("/api/agent", methods=["POST"])
     @require_auth
     def web_agent(claims):
@@ -376,22 +404,44 @@ def create_app(
         # owner-id fallback, so a token without a user_id gets an empty scope.
         user_id = claims.get("user_id") or ""
 
+        # Idempotency: a retried send (same client_msg_id) is answered from
+        # the ledger — never run, never metered twice.
+        cmid = ""
+        if role in ("owner", "user"):
+            refused = _conversation_refusal(user_id, body)
+            if refused is not None:
+                return refused
+            cmid = _client_msg_id(body)
+            if cmid:
+                turn, cached = claim_turn(mongo_db, user_id, cmid)
+                if turn == "done":
+                    return jsonify(cached), 200
+                if turn == "processing":
+                    return jsonify(_STILL_PROCESSING), 409
+
         # Cost control: meter every authenticated request per user. The owner is
         # tenant #1 / operator, so he shares the top (subscriber) tier; free
         # users get a modest quota. Guests use demo data — skip.
         if role != "guest":
             _over = _meter_or_error(role, user_id)
             if _over:
+                if cmid:
+                    release_turn(mongo_db, user_id, cmid)
                 return jsonify(_limit_response(_over)), 429
 
         # Authenticated users (owner + signed-in users) get the full per-user
         # pipeline; only true guests fall through to the basic demo chat.
         if role in ("owner", "user"):
             try:
-                return jsonify(_run_authenticated_agent(claims, body)), 200
+                result = _run_authenticated_agent(claims, body)
             except Exception:
                 logger.exception("[web_agent] user pipeline failed")
+                if cmid:
+                    finish_turn(mongo_db, user_id, cmid, error=True)
                 return jsonify({"error": "internal_error"}), 500
+            if cmid:
+                finish_turn(mongo_db, user_id, cmid, result)
+            return jsonify(result), 200
 
         # Guest path: rate-limit check, then a friendly basic chat.
         from app.agent.guest_usage import check_and_increment, guest_label
@@ -461,8 +511,49 @@ def create_app(
         if role not in ("owner", "user"):
             return jsonify({"error": "streaming_requires_account"}), 403
 
+        refused = _conversation_refusal(user_id, body)
+        if refused is not None:
+            return refused
+
+        sse_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+        def _sse(obj) -> str:
+            return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+        # A retry of a send the network cut (same client_msg_id): don't run the
+        # turn again. Finished → the stored reply as the `done` event; still
+        # running → wait for it here (keep-alives), then the same.
+        cmid = _client_msg_id(body)
+        if cmid:
+            turn, cached = claim_turn(mongo_db, user_id, cmid)
+            if turn == "done":
+                return Response(_sse({**cached, "done": True}),
+                                mimetype="text/event-stream", headers=sse_headers)
+            if turn == "processing":
+                def _await_first_run():
+                    deadline = time.monotonic() + _DUPLICATE_WAIT_S
+                    last_ping = time.monotonic()
+                    while time.monotonic() < deadline:
+                        status, result = turn_status(mongo_db, user_id, cmid)
+                        if status == "done":
+                            yield _sse({**(result or {}), "done": True})
+                            return
+                        if status in ("error", "missing"):
+                            yield _sse({"error": "internal_error"})
+                            return
+                        if time.monotonic() - last_ping >= 10:
+                            last_ping = time.monotonic()
+                            yield ": keep-alive\n\n"
+                        time.sleep(0.5)
+                    yield _sse(_STILL_PROCESSING)
+
+                return Response(_await_first_run(), mimetype="text/event-stream",
+                                headers=sse_headers)
+
         _over = _meter_or_error(role, user_id)
         if _over:
+            if cmid:
+                release_turn(mongo_db, user_id, cmid)
             return jsonify(_limit_response(_over)), 429
 
         chunk_queue: "queue.Queue" = queue.Queue()
@@ -475,9 +566,13 @@ def create_app(
             set_stream_hooks(on_start=lambda: None, on_chunk=chunk_queue.put)
             try:
                 outcome["result"] = _run_authenticated_agent(claims, body)
+                if cmid:
+                    finish_turn(mongo_db, user_id, cmid, outcome["result"])
             except Exception:
                 logger.exception("[web_agent_stream] user pipeline failed")
                 outcome["error"] = True
+                if cmid:
+                    finish_turn(mongo_db, user_id, cmid, error=True)
             finally:
                 clear_stream_hooks()
                 chunk_queue.put(None)  # sentinel: no more chunks
@@ -510,13 +605,9 @@ def create_app(
 
             payload = dict(outcome.get("result") or {})
             payload["done"] = True
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            yield _sse(payload)
 
-        return Response(
-            _generate(),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return Response(_generate(), mimetype="text/event-stream", headers=sse_headers)
 
     @app.route("/api/image", methods=["POST"])
     @require_auth

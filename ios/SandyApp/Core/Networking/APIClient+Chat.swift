@@ -78,9 +78,16 @@ extension APIClient {
     /// نفس /api/agent بس ستريمنغ (SSE) — ينادي onChunk بالنص التراكمي أول
     /// بأول (رد الدردشة العادي بس؛ ردود الأدوات زي "أضف مهمة" ما فيها أجزاء
     /// تتستريم، بترجع دفعة وحدة بآخر حدث). يرجع الرد النهائي + رابط صورة لو في.
+    ///
+    /// `clientMsgId` is the message's idempotency key: a retry with the same
+    /// key gets the first run's reply instead of running the turn again. Every
+    /// failure of the connection itself (connect, drop mid-stream, cut before
+    /// `done`) comes out as `APIError(kind: .connection)` — the only kind the
+    /// caller may retry; anything the server said is `.server`/`.unauthorized`.
     func sendMessageStreaming(
         _ text: String,
         conversationId: String? = nil,
+        clientMsgId: String? = nil,
         onChunk: @MainActor @escaping (String) -> Void
     ) async throws -> (reply: String, imageURL: String?) {
         guard let url = URL(string: baseURL + "/api/agent/stream") else {
@@ -89,6 +96,7 @@ extension APIClient {
         let lang = await LanguageManager.shared.lang.rawValue
         var bodyDict: [String: Any] = ["message": text, "lang": lang]
         if let cid = conversationId, !cid.isEmpty { bodyDict["conversation_id"] = cid }
+        if let key = clientMsgId, !key.isEmpty { bodyDict["client_msg_id"] = key }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -101,8 +109,10 @@ extension APIClient {
         let bytes: URLSession.AsyncBytes
         let resp: URLResponse
         do {
-            // No retry on a stream: a reply that is half-delivered must not be
-            // started over. `req.timeoutInterval` is the idle bound here.
+            // No retry on a stream in here: a reply that is half-delivered must
+            // not be started over by the transport. The caller retries the whole
+            // send with the same `clientMsgId`, so the server never runs it twice.
+            // `req.timeoutInterval` is the idle bound here.
             (bytes, resp) = try await APIClient.session.bytes(for: req)
         } catch let urlError as URLError {
             // Cancellation keeps its identity — a send superseded by a newer
@@ -128,36 +138,39 @@ extension APIClient {
         }
 
         var finalReply = ""
-        var lastPartial = ""
         var sawDone = false
         var imageURL: String?
-        for try await line in bytes.lines {
-            guard line.hasPrefix("data: "),
-                  let data = line.dropFirst("data: ".count).data(using: .utf8),
-                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            else { continue }
-            if let err = obj["error"] as? String {
-                throw APIError(message: err == "internal_error" ? "معلش، صار خطأ." : err, kind: .server)
+        do {
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data: "),
+                      let data = line.dropFirst("data: ".count).data(using: .utf8),
+                      let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                else { continue }
+                if let err = obj["error"] as? String {
+                    let message = (obj["message"] as? String)
+                        ?? (err == "internal_error" ? "معلش، صار خطأ." : err)
+                    throw APIError(message: message, code: err, kind: .server)
+                }
+                if obj["done"] as? Bool == true {
+                    finalReply = obj["reply"] as? String ?? finalReply
+                    imageURL = obj["image_url"] as? String
+                    sawDone = true
+                    break
+                }
+                if let partial = obj["text"] as? String {
+                    await onChunk(partial)
+                }
             }
-            if obj["done"] as? Bool == true {
-                finalReply = obj["reply"] as? String ?? finalReply
-                imageURL = obj["image_url"] as? String
-                sawDone = true
-                break
-            }
-            if let partial = obj["text"] as? String {
-                lastPartial = partial
-                await onChunk(partial)
-            }
+        } catch let urlError as URLError {
+            // The connection dropped mid-stream (timeout, network handover).
+            if urlError.code == .cancelled { throw urlError }
+            throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
         }
-        // A stream cut before `done` (router timeout, server restart) used to
-        // return "" as success and blank the bubble. Keep what arrived, and
-        // fail only when nothing did.
+        // A stream cut before `done` (router timeout, server restart) is a
+        // connection failure: the caller retries with the same key and gets
+        // the whole reply, and keeps what arrived only if every try fails.
         if !sawDone {
-            if lastPartial.isEmpty {
-                throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
-            }
-            finalReply = lastPartial
+            throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
         }
         return (finalReply, imageURL)
     }

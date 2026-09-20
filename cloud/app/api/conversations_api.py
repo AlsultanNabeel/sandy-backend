@@ -20,18 +20,35 @@ Endpoints:
   DELETE /api/conversations/<cid>            delete
   POST   /api/conversations/<cid>/messages   append {role,text}; sets title if empty
   GET    /api/conversations/search?q=        text search over titles + messages
+
+A conversation can also be created implicitly: the app picks the id itself
+(a uuid hex) for a new chat and the first write that names it — the chat
+stream route or the message append — creates it for the caller
+(`ensure_conversation`). That removes a round trip before the first token.
+An id that already belongs to another user is refused, never written into.
+
+Turn ledger (`agent_turns`): the chat routes take an optional idempotency key
+`client_msg_id` per user message so the app can retry a send cut off by the
+network without running the turn twice (`claim_turn` / `finish_turn`).
 """
 
 from __future__ import annotations
 import logging
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Optional, Tuple
 
 from flask import jsonify, request
+from pymongo.errors import DuplicateKeyError
 
 from app.api.auth_handlers import require_auth
+from app.utils.tenant_db import ScopedCollection, scoped
+from app.utils.user_profiles import active_user_profile_context
 from app.utils.text_query import contains
+
+logger = logging.getLogger(__name__)
 
 
 # Longer than any real chat message; short enough that a thread's document stays
@@ -40,6 +57,185 @@ _MAX_MESSAGE_CHARS = 20_000
 
 # Most results one search returns (text and semantic matches together).
 _MAX_SEARCH_RESULTS = 50
+
+
+# A client-chosen conversation id / message key: uuid hex (or dashed uuid),
+# nothing that could smuggle an operator or a path.
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+# Turn ledger: how long a processed `client_msg_id` is remembered (Mongo TTL),
+# and after how long a turn still marked "processing" is presumed abandoned
+# (worker died with the process) and may be claimed again.
+_TURNS = "agent_turns"
+_TURN_TTL_S = 600
+_TURN_STALE_S = 180
+
+_turn_index_lock = threading.Lock()
+# id(db) -> db. The handle is held so its id can't be recycled by a new
+# database object (tests build many) that would then skip index creation.
+_turn_index_ready: dict = {}
+
+
+def valid_client_id(value: Any) -> bool:
+    return isinstance(value, str) and bool(_ID_RE.match(value))
+
+
+def _scoped_for(mongo_db, uid: str, name: str) -> Optional[ScopedCollection]:
+    """`tenant_db.scoped` for `uid` (the route's caller) — every filter gets
+    user_id=uid, every insert is stamped with it. bump=False: a chat thread
+    and a turn record feed nothing the cached persona block is built from."""
+    with active_user_profile_context({"chat_id": uid}):
+        return scoped(mongo_db, name, bump=False)
+
+
+def _conversations(mongo_db, uid: str) -> Optional[ScopedCollection]:
+    return _scoped_for(mongo_db, uid, "conversations")
+
+
+def ensure_conversation(mongo_db, uid: str, cid: str) -> bool:
+    """Make sure `cid` is one of `uid`'s conversations, creating it (empty,
+    untitled — the first user message titles it, as with POST) when no such id
+    exists. False when the id is malformed or belongs to someone else: `_id` is
+    unique across users, so the insert fails and the scoped re-read finds
+    nothing — another user's thread is never read or written.
+    """
+    if mongo_db is None or not uid or not valid_client_id(cid):
+        return False
+    coll = _conversations(mongo_db, uid)
+    if coll is None:
+        return False
+    if coll.find_one({"_id": cid}, {"_id": 1}) is not None:
+        return True
+    now = _now()
+    try:
+        coll.insert_one({
+            "_id": cid,
+            "title": "",
+            "title_generated": False,
+            "created_at": now,
+            "updated_at": now,
+            "messages": [],
+        })
+        return True
+    except DuplicateKeyError:
+        # Either a concurrent create of our own (the stream and the append
+        # race on a new chat's first message) or someone else's id.
+        return coll.find_one({"_id": cid}, {"_id": 1}) is not None
+
+
+def _turns(mongo_db, uid: str) -> ScopedCollection:
+    key = id(mongo_db)
+    if _turn_index_ready.get(key) is not mongo_db:
+        with _turn_index_lock:
+            if _turn_index_ready.get(key) is not mongo_db:
+                # Index management stays on the raw handle (tenant_db's rule);
+                # both indexes lead with / are independent of the tenant.
+                raw = mongo_db[_TURNS]
+                try:
+                    raw.create_index([("user_id", 1), ("client_msg_id", 1)],
+                                     unique=True, name="user_client_msg_unique")
+                    raw.create_index("created_at", expireAfterSeconds=_TURN_TTL_S,
+                                     name="created_at_ttl")
+                    _turn_index_ready[key] = mongo_db
+                except Exception:  # noqa: BLE001 — retried on the next call
+                    logger.warning("[turns] index creation failed", exc_info=True)
+    return _scoped_for(mongo_db, uid, _TURNS)
+
+
+def _age_s(ts) -> float:
+    if not isinstance(ts, datetime):
+        return 0.0
+    if ts.tzinfo is None:  # Mongo hands datetimes back naive (UTC)
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - ts).total_seconds()
+
+
+def claim_turn(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
+    """Claim the turn for (uid, client_msg_id).
+
+    Returns ("new", None) — the caller runs the turn and must `finish_turn`;
+    ("done", result) — already answered, return the stored reply;
+    ("processing", None) — another request is running it right now.
+    A turn whose earlier run failed, or that has sat in "processing" past
+    `_TURN_STALE_S`, is claimed again (compare-and-set on `attempt`, so only
+    one retry wins). Without a db, a user or a valid key there is no ledger.
+    """
+    if mongo_db is None or not uid or not valid_client_id(cmid):
+        return "new", None
+    coll = _turns(mongo_db, uid)
+    now = datetime.now(timezone.utc)
+    try:
+        coll.insert_one({"client_msg_id": cmid, "status": "processing",
+                         "attempt": 1, "created_at": now})
+        return "new", None
+    except DuplicateKeyError:
+        pass
+    d = coll.find_one({"client_msg_id": cmid})
+    if d is None:  # expired between the insert and the read — take it fresh
+        try:
+            coll.insert_one({"client_msg_id": cmid, "status": "processing",
+                             "attempt": 1, "created_at": now})
+            return "new", None
+        except DuplicateKeyError:
+            return "processing", None
+    status = d.get("status")
+    if status == "done":
+        return "done", dict(d.get("result") or {})
+    if status == "error" or (status == "processing"
+                             and _age_s(d.get("claimed_at") or d.get("created_at")) > _TURN_STALE_S):
+        attempt = int(d.get("attempt") or 1)
+        won = coll.find_one_and_update(
+            {"client_msg_id": cmid, "attempt": attempt},
+            {"$set": {"status": "processing", "attempt": attempt + 1, "claimed_at": now}},
+        )
+        return ("new", None) if won is not None else ("processing", None)
+    return "processing", None
+
+
+def turn_status(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
+    """Current ledger state: ("done", result) / ("processing", None) /
+    ("error", None) / ("missing", None)."""
+    if mongo_db is None or not uid or not valid_client_id(cmid):
+        return "missing", None
+    d = _turns(mongo_db, uid).find_one({"client_msg_id": cmid})
+    if d is None:
+        return "missing", None
+    status = d.get("status") or "processing"
+    return status, (dict(d.get("result") or {}) if status == "done" else None)
+
+
+def finish_turn(mongo_db, uid: str, cmid: str, result: Optional[dict] = None,
+                error: bool = False) -> None:
+    """Record how a claimed turn ended. Best-effort: a failed write only
+    costs a retry its shortcut (it re-runs after the stale window)."""
+    if mongo_db is None or not uid or not valid_client_id(cmid):
+        return
+    coll = _turns(mongo_db, uid)
+    fields = {"status": "error"} if error else {"status": "done", "result": result or {}}
+    try:
+        coll.update_one({"client_msg_id": cmid}, {"$set": fields})
+    except Exception:  # noqa: BLE001
+        if error or "image_url" not in (result or {}):
+            logger.warning("[turns] finish failed", exc_info=True)
+            return
+        # A big generated image can push the record past Mongo's cap; the
+        # text alone still spares the retry a second run.
+        try:
+            slim = {k: v for k, v in (result or {}).items() if k != "image_url"}
+            coll.update_one({"client_msg_id": cmid},
+                            {"$set": {"status": "done", "result": slim}})
+        except Exception:  # noqa: BLE001
+            logger.warning("[turns] finish failed", exc_info=True)
+
+
+def release_turn(mongo_db, uid: str, cmid: str) -> None:
+    """Forget a claim that never ran (e.g. refused by the quota)."""
+    if mongo_db is None or not uid or not valid_client_id(cmid):
+        return
+    try:
+        _turns(mongo_db, uid).delete_one({"client_msg_id": cmid, "status": "processing"})
+    except Exception:  # noqa: BLE001
+        logger.warning("[turns] release failed", exc_info=True)
 
 
 def _uid(claims) -> str:
@@ -247,7 +443,12 @@ def register_conversations_api(app, mongo_db=None):
             {"title": 1, "title_generated": 1, "messages": {"$slice": -1}},
         )
         if not d:
-            return jsonify({"error": "not_found"}), 404
+            # A new chat whose id the app chose: the append may land before
+            # the chat stream created it. Create it for this user — or 404
+            # when the id is someone else's.
+            if not ensure_conversation(mongo_db, uid, cid):
+                return jsonify({"error": "not_found"}), 404
+            d = {}
 
         update = {
             "$push": {"messages": {"role": role, "text": text, "ts": _now()}},
