@@ -156,6 +156,13 @@ def ensure_indexes() -> None:
         ("sandy_memories.chat_id+label+created_at", lambda: mongo_db.sandy_memories.create_index(
             [("chat_id", 1), ("label", 1), ("created_at", -1)], background=True
         )),
+        # صفّ لكل (مستأجر، نسخة)، والنسخة بتتحرّك مع كل كتابة — يعني الصفوف
+        # بتتراكم وما في مين يشيلها. الصفّ اللي عمره شهر ما إلو مين يسأل عنه:
+        # نسخته راحت من زمان.
+        ("sandy_prompt_cache.created_at_ttl",
+         lambda: mongo_db.sandy_prompt_cache.create_index(
+             "created_at", expireAfterSeconds=60 * 60 * 24 * 30, background=True
+         )),
         ("camera_inbox.expire_at_ttl", lambda: mongo_db.camera_inbox.create_index(
             "expire_at", expireAfterSeconds=0, background=True
         )),

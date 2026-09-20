@@ -83,6 +83,17 @@ _TURN_MEMO: contextvars.ContextVar[Optional[Dict[str, int]]] = contextvars.Conte
     "tenant_version_turn_memo", default=None)
 
 
+def detach_turn_memo() -> None:
+    """انسَ نسخ هالدور — لمهمّة خلفية ورثت سياقه.
+
+    `submit_background` بينسخ سياق اللي نادى، وفيه ذاكرة الدور: قاموس فيه رقم
+    نسخة كل مستأجر **وقت ما بلّش الدور**. المهمّة اللي بتشتغل بعد الكتابة
+    بتقرا من هالقاموس رقمًا قديمًا، وبتبني وبتحفظ تحته — يعني بتسخّن مفتاحًا
+    ما حدا رح يسأل عنه، والمفتاح الصحيح بيضلّ بارد. سطر واحد بيفكّها.
+    """
+    _TURN_MEMO.set(None)
+
+
 @contextlib.contextmanager
 def turn_scope() -> Iterator[None]:
     """Remember each tenant's version for the duration of one turn.
@@ -183,6 +194,19 @@ def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
         logger.info("[tenant_version] %s bumped by %s", key, collection or "?")
     except PyMongoError as exc:
         logger.debug("[tenant_version] bump failed: %s", exc)
+        return
+    # **والنسخة الجديدة بدها تعليمات جديدة — بالخلفية، هلّق.**
+    #
+    # هالسطر هو اللي بيخلّي الإبطال فوق مجّانيًّا للصوت. بدونه، كل مكالمة بتحفظ
+    # اللي انحكى بآخرها، والحفظ بيحرّك الرقم، والمكالمة الجاية بتدفع خمس ثواني
+    # قراءات وصاحبها ساكت بيستنّى. البناء نفسه ما تغيّر — بس صار وقته وقت
+    # الكتابة، مش وقت السؤال.
+    try:
+        from app.utils.prompt_prewarm import schedule
+
+        schedule(key)
+    except Exception:  # noqa: BLE001 — تسخين، مش شرط صحّة
+        logger.debug("[tenant_version] prewarm skipped", exc_info=True)
 
 
 def forget(tenant: str) -> None:

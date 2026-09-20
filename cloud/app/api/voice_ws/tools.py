@@ -274,14 +274,47 @@ def _shared_put(key: str, version: int, text: str) -> None:
         db = get_db()
         if db is None:
             return
+        now = datetime.now(timezone.utc)
         db[_PROMPT_COLL].update_one(
             {"_id": f"{key}:{version}:r{_PROMPT_REV}"},
-            {"$set": {"text": text, "user_id": key,
-                      "created_at": datetime.now(timezone.utc)}},
+            {"$set": {"text": text, "user_id": key, "created_at": now}},
+            upsert=True,
+        )
+        # علامة «هاد المستأجر بيستعمل الصوت» — عشان التسخين المسبق ما يبني
+        # تعليمات صوت لكل زبون بيضيف مهمّة وهو ما فتح مكالمة بحياته. بتتجدّد
+        # كل بناء، فبتنتهي صلاحيتها لحالها لمين بطّل يستعمل الصوت.
+        db[_PROMPT_COLL].update_one(
+            {"_id": _voice_marker_id(key)},
+            {"$set": {"user_id": key, "created_at": now}},
             upsert=True,
         )
     except PyMongoError as exc:
         logger.debug("[voice_ws] shared prompt write skipped: %s", exc)
+
+
+def _voice_marker_id(key: str) -> str:
+    return f"{key}:voice"
+
+
+def tenant_uses_voice(tenant: str) -> bool:
+    """هل فتح هالمستأجر مكالمة صوت من قبل — بقراءة مفتاح واحد.
+
+    بترجع `True` لو ما قدرنا نقرا: تسخين زيادة أرخص من مكالمة باردة.
+    """
+    key = str(tenant or "")
+    if not key:
+        return False
+    try:
+        from app.db import get_db
+
+        db = get_db()
+        if db is None:
+            return False
+        return db[_PROMPT_COLL].find_one(
+            {"_id": _voice_marker_id(key)}, {"_id": 1}) is not None
+    except PyMongoError as exc:
+        logger.debug("[voice_ws] voice marker read skipped: %s", exc)
+        return True
 
 
 def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
