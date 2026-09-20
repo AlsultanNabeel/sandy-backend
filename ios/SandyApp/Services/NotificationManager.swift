@@ -266,7 +266,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let info = [Self.reminderIdKey: reminderId,
                     Self.reminderRecurrenceKey: recurrence]
 
-        Task { [weak self] in
+        // المدير كائن واجهة (ObservableObject) — بننفّذ ع الخيط الرئيسي بدل ما
+        // نمرّره لإغلاق متوازٍ.
+        Task { @MainActor [weak self] in
             guard let self else { completion(); return }
             let api = APIClient(baseURL: Backend.currentURL)   // التوكن من الـKeychain
             do {
@@ -295,7 +297,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 case .delete:
                     try await api.deleteReminder(id: reminderId)
                 }
-                DispatchQueue.main.async { self.remindersChanged &+= 1 }
+                self.remindersChanged &+= 1
             } catch {
                 Logger(subsystem: Bundle.main.bundleIdentifier ?? "SandyApp",
                        category: "reminders")
