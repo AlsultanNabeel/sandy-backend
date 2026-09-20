@@ -82,6 +82,15 @@ def handle_reminder_action(
     reminder_text = str(params.get("text", "")).strip()
     time_text = str(params.get("time_text", "")).strip()
     remind_at_iso = str(params.get("remind_at_iso", "")).strip()
+    # The router fills `remind_at_iso` itself. A time it guessed — in the past,
+    # or years away — is not the user's; their own words (`time_text`, else the
+    # message) go to the parser that knows today's date instead. Without this,
+    # "ذكريني الساعة 5 العصر" answered "that time is in the past".
+    from app.utils.time_awareness import plausible_future_iso
+    _dropped_iso = ""
+    if remind_at_iso and not plausible_future_iso(remind_at_iso):
+        logger.info("[Reminder] ignoring implausible model time %s", remind_at_iso)
+        _dropped_iso, remind_at_iso = remind_at_iso, ""
     recurrence = str(params.get("recurrence", "")).strip()
     end_iso = str(params.get("end_iso", "")).strip()
 
@@ -416,6 +425,12 @@ def handle_reminder_action(
                 except Exception:
                     reply = "وقت التذكير غير صالح. اكتب التاريخ أو الوقت بشكل أوضح."
                     return {"handled": True, "ok": False, "reply": reply}
+
+            if not remind_at_iso and _dropped_iso:
+                # قراءة كلامه ما طلّعت وقت بالمستقبل، والوقت اللي فهمه الموجّه
+                # فات فعلًا — نفس الجواب اللي كان قبل: الوقت بالماضي.
+                return {"handled": True, "ok": False,
+                        "reply": "وقت التذكير صار بالماضي، أعطني وقت لاحق."}
 
             if not remind_at_iso:
                 # خزّن pending عشان لما المستخدم يرد بالوقت نكمّل التذكير

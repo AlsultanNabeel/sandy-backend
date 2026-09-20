@@ -1,4 +1,5 @@
 """Task-action dispatcher: routes a parsed task action to its handler."""
+import logging
 from typing import Any, Dict
 
 
@@ -210,7 +211,21 @@ def handle_task_action(
                 break
 
     task_due_iso = str(params.get("due_iso", "")).strip()
+    # Same rule as reminders: a due date the router guessed (past, or years
+    # away) is dropped, so the user's own words are parsed against today —
+    # for creating a task and for moving its due date alike.
+    from app.utils.time_awareness import plausible_future_iso
+    if task_due_iso and not plausible_future_iso(task_due_iso):
+        logging.getLogger(__name__).info(
+            "[Task] ignoring implausible model due date %s", task_due_iso)
+        task_due_iso = ""
+        # It did hear a date somewhere — read it from their own message.
+        _dropped_due = True
+    else:
+        _dropped_due = False
     task_due_text = str(params.get("due_text", "")).strip()
+    if _dropped_due and not task_due_text:
+        task_due_text = normalized_user_message or user_message
     task_time_text = str(
         params.get("time_text", "") or params.get("due_text", "")
     ).strip()

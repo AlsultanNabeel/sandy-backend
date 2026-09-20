@@ -176,14 +176,23 @@ def _fn_to_routing_hint(name: str) -> str:
 
 
 def _build_user_prompt(state: SandyState) -> str:
-    parts = [f"رسالة المستخدم: {state['message']}"]
-    if state.get("conversation_history"):
-        last = state["conversation_history"][-2:]
-        history_text = "\n".join(
-            f"{'المستخدم' if m['role'] == 'user' else 'Sandy'}: {m['content']}"
-            for m in last
-        )
-        parts.append(f"\nآخر رسائل:\n{history_text}")
+    # الوقت بالجزء المتغيّر من الطلب، مش بالبادئة الثابتة: بيتغيّر كل رسالة،
+    # فمكانه هون ما بيكسر كاش البادئة. وبلاه الموجّه كان يعبّي حقول التاريخ
+    # (`remind_at_iso`, `due_iso`) بتاريخ من سنين تدريبه — «ذكريني الساعة 5»
+    # كانت ترجع «الوقت صار بالماضي».
+    from app.utils.time_awareness import last_contact_line, now_line, turn_stamp
+
+    history = state.get("conversation_history") or []
+    parts = [f"[{now_line()}]", f"[{last_contact_line(history)}]",
+             f"رسالة المستخدم: {state['message']}"]
+    if history:
+        lines = []
+        for m in history[-2:]:
+            who = "المستخدم" if m["role"] == "user" else "Sandy"
+            stamp = turn_stamp(m)
+            lines.append(f"({stamp}) {who}: {m['content']}" if stamp
+                         else f"{who}: {m['content']}")
+        parts.append("\nآخر رسائل:\n" + "\n".join(lines))
     if state.get("pending_state"):
         p = state["pending_state"]
         ctx = f"\nيوجد pending نشط: نوعه={p.get('type')} | action={p.get('action')}"

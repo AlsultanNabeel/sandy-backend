@@ -11,7 +11,7 @@ from app.api.voice_ws._config import (
     logger,
 )
 from app.api.voice_ws.memory import (
-    _load_stm_context,
+    session_context,
     _load_stm_history,
     _stm_chat_id,
     _voice_memory_context,
@@ -170,7 +170,7 @@ def _build_system_instruction(user_id: str = "") -> str:
     فتح السياق بيحلّ النصّ التاني.
     """
     base = _build_cached_instruction(user_id)
-    return with_recent_turns(base, _load_stm_context(_load_stm_history()))
+    return with_recent_turns(base, session_context(_load_stm_history()))
 
 
 def _build_cached_instruction(user_id: str) -> str:

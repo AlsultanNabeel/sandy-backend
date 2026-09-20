@@ -1,5 +1,8 @@
 """Reminder tool behaviour the model relies on."""
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
+
+from app.utils.time import USER_TZ
 
 from app.agent.executor import reminder_handlers as rh
 
@@ -42,5 +45,6 @@ def test_update_with_only_a_new_title_renames():
 
 def test_failed_create_is_not_ok():
     with patch.object(rh, "add_reminder", return_value={"success": False}):
-        out = _run({"action": "create", "text": "اتصل", "remind_at_iso": "2099-01-01T10:00:00+02:00"})
+        soon = (datetime.now(USER_TZ) + timedelta(days=1)).isoformat()
+        out = _run({"action": "create", "text": "اتصل", "remind_at_iso": soon})
     assert out["ok"] is False

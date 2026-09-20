@@ -14,7 +14,6 @@ from app.errors import ConfigError
 from app.agent.graph.state import SandyState, merge_state
 from app.agent.tool_result import result_ok
 from app.agent.tools.schemas.meta_tools import META_TOOLS as _META_TOOLS
-from app.utils.arabic_days import WEEKDAY_TO_AR_NAME
 from app.utils.session import build_session_from_state as _build_session_from_state
 
 logger = logging.getLogger(__name__)
@@ -136,22 +135,6 @@ def _get_chat_completion_fn():
 
 
 
-def _get_current_time_context() -> str:
-    """يبني سياق الوقت الحالي لحقنه في system prompt."""
-    try:
-        from datetime import datetime
-        from app.utils.time import USER_TZ
-
-        now = datetime.now(USER_TZ)
-        day_ar = WEEKDAY_TO_AR_NAME.get(now.weekday(), "")
-        return (
-            f"[الوقت الحالي: {now.strftime('%I:%M %p').replace('AM', 'ص').replace('PM', 'م')} | "
-            f"التاريخ: {now.strftime('%d/%m/%Y')} ({day_ar})]"
-        )
-    except Exception:
-        return ""
-
-
 _CHAT_BEHAVIOR_RULES = """
 قواعد الرد:
 - ما تنهي كل رد بسؤال متابعة (مثل "شو رأيك؟"، "بدك تطلع؟"، "ماشي؟"). أضيفي السؤال فقط لو السياق فعلاً يستدعيه (الموضوع ناقص أو المستخدم سأل رأيك).
@@ -180,7 +163,8 @@ def _handle_chat(state: SandyState, create_chat_completion_fn) -> str:
     sandy_personality = _effective_persona(state)
 
     persona_snippet = state.get("persona_snippet") or ""
-    time_ctx = _get_current_time_context()
+    from app.utils.time_awareness import time_awareness_block
+    time_ctx = time_awareness_block(state.get("conversation_history"))
     system = sandy_personality or (
         "أنتِ ساندي (Sandy)، شريكة تقنية ذكية ومساعدة شخصية. "
         "ردودك طبيعية وموجزة بالعامية. لا تشرحي نفسك."

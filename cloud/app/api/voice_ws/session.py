@@ -42,7 +42,7 @@ from app.api.voice_ws.speaker import (
     _verify_owner,
 )
 from app.api.voice_ws.memory import (
-    _load_stm_context,
+    session_context,
     _save_voice_turn,
     _stm_chat_id,
     get_voice_channel,
@@ -680,7 +680,7 @@ async def _live_session(ws, remote: str) -> None:
             _loop.run_in_executor(None, load_recent_turns, _who),
         )
         set_voice_speaker_label(_label)
-        system_instruction = with_recent_turns(_base, _load_stm_context(_recent))
+        system_instruction = with_recent_turns(_base, session_context(_recent))
         live_tools = _build_live_tools(types)
 
         gate_on = _speaker_gate_enabled()

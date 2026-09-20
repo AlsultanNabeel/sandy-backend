@@ -182,6 +182,8 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
         return ""
     # كل دور للمستخدم كان موسوم باسم المالك — يعني الموديل بيقرا محادثة زبون
     # وكل جملة فيها منسوبة لشخص ما إله علاقة فيها.
+    from app.utils.time_awareness import turn_stamp
+
     user_label = voice_speaker_label()
     turns = []
     for m in history[-10:]:
@@ -190,11 +192,25 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
         if not content:
             continue
         via = str(m.get("via") or "").strip()
-        turns.append(f"[{via}] {role_label}: {content}" if via
-                     else f"{role_label}: {content}")
+        line = (f"[{via}] {role_label}: {content}" if via
+                else f"{role_label}: {content}")
+        # متى، مش بس وين: «(قبل ساعتين) [الروبوت] …».
+        ago = turn_stamp({"timestamp": m.get("timestamp")})
+        turns.append(f"({ago}) {line}" if ago else line)
     if turns:
         return "\nآخر المحادثات عبر كل القنوات:\n" + "\n".join(turns)
     return ""
+
+
+def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
+    """What a voice session learns fresh at its start: the clock, how long since
+    they last spoke (on any channel), and the recent turns — never cached, since
+    all three change between sessions (see `with_recent_turns`)."""
+    from app.utils.time_awareness import time_awareness_block
+
+    history = _load_stm_history() if history is None else history
+    return ("\n" + time_awareness_block(history) + "\n(هاد وقت بداية المكالمة.)"
+            + _load_stm_context(history))
 
 
 # Tiny in-process cache for the durable session-start seed. The seed is built
