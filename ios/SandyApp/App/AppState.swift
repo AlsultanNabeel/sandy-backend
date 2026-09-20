@@ -15,6 +15,9 @@ final class AppState: ObservableObject {
     }
     /// بيانات التعارف (الاسم المفضّل + الاهتمامات) — تُعرض بتبويب حسابي.
     @Published var onboarding = OnboardingData()
+    /// هل جبنا بيانات التعارف من الخادم بهالجلسة؟ الإقلاع بيجيبها أصلًا، فالتبويبات
+    /// ما لازم تعيد نفس الطلب أول ما تظهر.
+    private var onboardingLoaded = false
     /// الميزات اللي أخفاها المالك مركزياً (طبقة السيرفر) — كل شبكة تبويب تحترمها.
     @Published var serverHiddenFeatures: Set<String> = []
     let api: APIClient
@@ -42,6 +45,7 @@ final class AppState: ObservableObject {
         do {
             let ob = try await api.getOnboarding()
             onboarding = ob
+            onboardingLoaded = true
             stage = ob.done ? .chat : .onboarding
             setupPush()
         } catch let error as APIError where error.kind != .unauthorized {
@@ -83,7 +87,14 @@ final class AppState: ObservableObject {
     func refreshOnboarding() async {
         if let data = try? await api.getOnboarding() {
             onboarding = data
+            onboardingLoaded = true
         }
+    }
+
+    /// زي `refreshOnboarding` بس بتتخطّى الطلب لو البيانات انجابت بهالجلسة.
+    func refreshOnboardingIfNeeded() async {
+        guard !onboardingLoaded else { return }
+        await refreshOnboarding()
     }
 
     /// يحفظ الاسم المفضّل + الاهتمامات بالباك-إند ويعكسها محلياً.
@@ -105,6 +116,7 @@ final class AppState: ObservableObject {
         NotificationManager.shared.onDeviceToken = nil
         api.token = nil
         onboarding = OnboardingData()
+        onboardingLoaded = false
         stage = .auth
     }
 }

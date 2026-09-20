@@ -106,13 +106,20 @@ def build_life_snapshot() -> str:
     # `gather` carries the tenant context into each thread, which is the part
     # that cannot be skipped: these stores read the tenant from a context
     # variable and a bare thread would find nothing and say so silently.
-    got = gather({
-        "tasks": _reader("tasks_store", "load_tasks"),
-        "reminders": _reader("reminders_store", "load_reminders"),
-        "habits": _reader("habits_store", "list_habits"),
-        "books": _reader("reading_store", "list_books"),
-        "shopping": _reader("shopping_store", "list_items"),
-    })
+    #
+    # Four of these five are lists `search_life` reads right after, on the same
+    # turn. Built on the same cache: a hit costs only the shopping read, and a
+    # miss fetches the searchable lists in this one parallel round and stores
+    # them, so the search that follows does not read them all again.
+    tenant, version, lists = _cached_lists()
+    jobs: Dict[str, Callable[[], Any]] = {"shopping": _reader("shopping_store", "list_items")}
+    if lists is None:
+        jobs.update({name: fn for name, fn, _f, _l in _SEARCHED})
+    got = gather(jobs)
+    if lists is None:
+        lists = {name: got.get(name) for name, _fn, _f, _l in _SEARCHED}
+        _store_lists(tenant, version, lists)
+    got = {**lists, "shopping": got.get("shopping")}
 
     parts: List[str] = []
 
@@ -248,34 +255,40 @@ _SEARCHED: List[Tuple[str, Callable[[], Any], List[str], str]] = [
 ]
 
 
-def _searchable_lists() -> Dict[str, Any]:
-    """The five lists, from cache when the tenant has not written since."""
+def _cached_lists() -> Tuple[str, int, Optional[Dict[str, Any]]]:
+    """``(tenant, version, lists)`` — lists is None on a miss."""
     from app.utils.tenant_version import version_for
     from app.utils.user_profiles import current_user_id
 
     tenant = str(current_user_id() or "")
     version = version_for(tenant) if tenant else -1
-
-    now = time.monotonic()
     if version >= 0:
         with _LISTS_LOCK:
             hit = _LISTS_CACHE.get(tenant)
-        if hit is not None and hit[0] == version and hit[2] > now:
-            return hit[1]
+        if hit is not None and hit[0] == version and hit[2] > time.monotonic():
+            return tenant, version, hit[1]
+    return tenant, version, None
 
-    lists = gather({name: fn for name, fn, _f, _l in _SEARCHED})
 
-    # `_safe` returns None for a store that **raised**, and an empty list for a
+def _store_lists(tenant: str, version: int, lists: Dict[str, Any]) -> None:
+    # `gather` returns None for a store that **raised**, and an empty list for a
     # store that is genuinely empty. Only the second is an answer worth keeping:
     # caching a failure would silently drop a whole list out of her awareness
     # until the next write, since a failure moves no version.
-    complete = all(v is not None for v in lists.values())
+    if version < 0 or any(v is None for v in lists.values()):
+        return
+    with _LISTS_LOCK:
+        if len(_LISTS_CACHE) >= _LISTS_MAX:
+            _LISTS_CACHE.clear()
+        _LISTS_CACHE[tenant] = (version, lists, time.monotonic() + _LISTS_MAX_AGE_S)
 
-    if version >= 0 and complete:
-        with _LISTS_LOCK:
-            if len(_LISTS_CACHE) >= _LISTS_MAX:
-                _LISTS_CACHE.clear()
-            _LISTS_CACHE[tenant] = (version, lists, now + _LISTS_MAX_AGE_S)
+
+def _searchable_lists() -> Dict[str, Any]:
+    """The five lists, from cache when the tenant has not written since."""
+    tenant, version, lists = _cached_lists()
+    if lists is None:
+        lists = gather({name: fn for name, fn, _f, _l in _SEARCHED})
+        _store_lists(tenant, version, lists)
     return lists
 
 

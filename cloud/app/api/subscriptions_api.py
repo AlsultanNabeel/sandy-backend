@@ -155,5 +155,6 @@ def register_subscriptions_api(app):
         return jsonify({
             "status": sub.get("status", "none"),
             "plan": sub.get("plan", ""),
-            "is_subscriber": users_store.is_subscriber(user_id),
+            # From the document just read, not a second read of the same user.
+            "is_subscriber": users_store.has_live_subscription(user),
         }), 200

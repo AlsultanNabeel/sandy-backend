@@ -1,6 +1,7 @@
+import threading
 import time
 import requests
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
 
 from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
@@ -12,6 +13,14 @@ _cb = CircuitBreaker(name="weather", failure_threshold=5, recovery_timeout=60.0)
 _RETRY_ATTEMPTS = 2
 _RETRY_DELAY = 1.0
 
+# Conditions for a city are shared by everyone asking about it and change on
+# the scale of an hour. Without this every open of the app — and every agent
+# turn that mentions the weather — paid a round trip to wttr.in, up to eleven
+# seconds when it is slow. Successful answers only: a failure is retried next time.
+_CACHE_TTL_S = 600
+_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_cache_lock = threading.Lock()
+
 
 def _fetch_weather(url: str) -> Dict[str, Any]:
     response = requests.get(url, timeout=5)
@@ -20,6 +29,19 @@ def _fetch_weather(url: str) -> Dict[str, Any]:
 
 
 def get_weather(city: str = "October City", **kwargs) -> Optional[Dict[str, Any]]:
+    key = city.strip().lower()
+    with _cache_lock:
+        hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < _CACHE_TTL_S:
+        return dict(hit[1])
+    result = _get_weather_uncached(city)
+    if result:
+        with _cache_lock:
+            _cache[key] = (time.monotonic(), dict(result))
+    return result
+
+
+def _get_weather_uncached(city: str) -> Optional[Dict[str, Any]]:
     url = f"https://wttr.in/{quote(city)}+Egypt?format=j1"
 
     last_error: Exception = Exception("unknown")

@@ -65,7 +65,7 @@ class ToolRegistry:
     def get_function_declarations(self) -> List[Dict[str, Any]]:
         """يرجع schemas بصيغة function_declarations (متوافق Azure OpenAI/أي مزوّد).
 
-        **بينتبنى مرة وحدة، مش بكل رسالة.** الكتالوج ستّة وعشرين ألف حرف من
+        **بينتبنى مرة وحدة، مش بكل رسالة.** الكتالوج قرابة أربعة وعشرين ألف حرف من
         ثمانين أداة، والسجل ما بيتغيّر بعد الإقلاع — `register_all_tools` بتشتغل
         مرة. بناؤه بكل دور كان شغل معالج على مسار الطلب مقابل نتيجة مطابقة حرفياً
         كل مرة.
@@ -78,7 +78,7 @@ class ToolRegistry:
                 {
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": tool.parameters,
+                    "parameters": _compact_parameters(tool.parameters),
                 }
                 for tool in self._tools.values()
             ]
@@ -105,6 +105,14 @@ class ToolRegistry:
             }
             for tool in self._tools.values()
         ]
+
+
+def _compact_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
+    """نفس الـ schema بلا ``"required": []`` — المفتاح الفاضي ما بيعني شي بـ
+    JSON Schema، ونصف الأدوات فيها، وكل حرف بالكتالوج بينبعت مع كل دور."""
+    if isinstance(params, dict) and params.get("required") == []:
+        return {k: v for k, v in params.items() if k != "required"}
+    return params
 
 
 # singleton عام

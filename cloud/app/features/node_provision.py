@@ -245,11 +245,19 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
     Returns a summary rather than raising: this runs from a heartbeat, and a
     malformed payload must never take the ingest loop down with it.
     """
-    from app.features.device_store import add_device, get_device
+    from app.features.device_store import add_device, get_devices
 
     node_id = (node_id or "").strip()
     if not node_id or not isinstance(outputs, list):
         return {"ok": False, "error": "bad_input"}
+
+    # One read for every catalogued output, not one per output: this runs on
+    # every heartbeat that declares outputs, i.e. every few seconds per board.
+    existing_by_name = get_devices([
+        PART_CATALOGUE[str(o.get("id", "")).strip()]["name"]
+        for o in outputs
+        if isinstance(o, dict) and str(o.get("id", "")).strip() in PART_CATALOGUE
+    ])
 
     added: List[str] = []
     refreshed: List[str] = []
@@ -268,7 +276,7 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
             continue
 
         name = spec["name"]
-        existing = get_device(name)
+        existing = existing_by_name.get(name)
         if existing is not None:
             if _refresh_from_catalogue(name, existing, spec):
                 refreshed.append(name)

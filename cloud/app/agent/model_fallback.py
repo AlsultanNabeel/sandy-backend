@@ -1,7 +1,9 @@
 """موديلات احتياطية لما الـ API يفشل.
 
-maestro: Gemini Flash، وبعدها GPT-4o للـ routing، وبعدها default آمن.
-execute: Azure GPT، وبعدها OpenAI مباشرة، وبعدها persona_snippet بس.
+routing (fc_router): لو نداء الأدوات فشل، `route_with_gpt` بيصنّف النية
+بنداء JSON صغير، وبعدها default آمن (دردشة).
+chat (execute): Azure GPT، وبعدها OpenAI مباشرة، وبعدها `None` — والمنادي
+بيعتذر. الـ persona_snippet ما بيوصل للمستخدم أبدًا كردّ.
 """
 
 from __future__ import annotations

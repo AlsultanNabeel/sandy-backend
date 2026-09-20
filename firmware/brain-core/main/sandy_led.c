@@ -70,6 +70,9 @@ static void paint_state(sandy_led_state_t st) {
 static void led_task(void *arg) {
     (void)arg;
     int frame = 0;
+    // The state last painted, or -1 (not a valid state) when the pixel shows
+    // something else and the next indicator pass must repaint.
+    int last = -1;
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(FRAME_MS));
@@ -78,12 +81,14 @@ static void led_task(void *arg) {
             // The privacy indicator holds the light. Repaint only on change —
             // refreshing an unchanged pixel fifty times a second is pure noise
             // on the RMT peripheral.
-            // -1 is not a valid state, so the first pass always paints.
-            static int last = -1;
             if (last != (int)s_state) { paint_state(s_state); last = (int)s_state; }
             frame = 0;
             continue;
         }
+        // An effect is painting over the indicator. Forget what it last showed:
+        // otherwise "led idle" after an effect, with the state already IDLE,
+        // matched `last` and left the effect's final colour lit for good.
+        last = -1;
 
         const int  spd = s_speed < 1 ? 1 : (s_speed > 10 ? 10 : s_speed);
         const uint32_t rgb = s_rgb;

@@ -164,6 +164,51 @@ def ensure_indexes() -> None:
          lambda: mongo_db.sandy_future_messages.create_index(
              [("chat_id", 1), ("delivered", 1), ("deliver_at", 1)], background=True
          )),
+        # Read twice on every chat reply (`dreams_engine.get_dreams_context` and
+        # `proactive_goals.get_goals_followup_context`, both chat_id + status),
+        # and no module created an index for it — each read scanned every
+        # goal on the server.
+        ("sandy_goals.chat_id+status+updated_at", lambda: mongo_db.sandy_goals.create_index(
+            [("chat_id", 1), ("status", 1), ("updated_at", 1)], background=True
+        )),
+        # Found by the 19 Sep 2026 audit: each query below filtered or sorted on
+        # fields no index covered, so it scanned the whole collection.
+        # the conversation list and search
+        ("conversations.user_id+updated_at", lambda: mongo_db.conversations.create_index(
+            [("user_id", 1), ("updated_at", -1)], background=True
+        )),
+        # the active session and history
+        ("sandy_focus.user_id+state+started_at", lambda: mongo_db.sandy_focus.create_index(
+            [("user_id", 1), ("state", 1), ("started_at", -1)], background=True
+        )),
+        # focus stats by day
+        ("sandy_focus.user_id+state+ended_at", lambda: mongo_db.sandy_focus.create_index(
+            [("user_id", 1), ("state", 1), ("ended_at", 1)], background=True
+        )),
+        # the habit list
+        ("sandy_habits.user_id+archived+created_at", lambda: mongo_db.sandy_habits.create_index(
+            [("user_id", 1), ("archived", 1), ("created_at", 1)], background=True
+        )),
+        # reads sort by `at`, the old index is on `date`
+        ("sandy_journal.user_id+at", lambda: mongo_db.sandy_journal.create_index(
+            [("user_id", 1), ("at", -1)], background=True
+        )),
+        # reading stats filter on `ended_at`
+        ("sandy_reading_sessions.user_id+state+ended_at", lambda: mongo_db.sandy_reading_sessions.create_index(
+            [("user_id", 1), ("state", 1), ("ended_at", 1)], background=True
+        )),
+        # the once-a-minute cross-tenant due scan
+        ("sandy_scene_timers.fire_at", lambda: mongo_db.sandy_scene_timers.create_index(
+            [("fire_at", 1)], background=True
+        )),
+        # the gifts list
+        ("sandy_gifts.chat_id+created_at", lambda: mongo_db.sandy_gifts.create_index(
+            [("chat_id", 1), ("created_at", -1)], background=True
+        )),
+        # the saved-content list
+        ("sandy_shared_content.chat_id+created_at", lambda: mongo_db.sandy_shared_content.create_index(
+            [("chat_id", 1), ("created_at", -1)], background=True
+        )),
     ]
     for label, job in index_jobs:
         try:

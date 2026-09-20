@@ -194,5 +194,3 @@ struct MemorySheet: View {
         }
     }
 }
-
-// MARK: - الستور

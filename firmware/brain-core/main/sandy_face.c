@@ -9,6 +9,7 @@
 #include "sandy_face.h"
 #include "config.h"
 #include "esp_log.h"
+#include "esp_check.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_panel_ops.h"
@@ -27,10 +28,18 @@
 static const char *TAG = "face";
 
 // ─── Display + LVGL internals ─────────────────────────────────────────────────
-#define LVGL_TICK_PERIOD_MS     2
+// 5 ms is well inside LVGL's 1-10 ms guidance; at 2 ms the esp_timer task
+// (priority 22, above every task on the board) woke 500 times a second just to
+// add 2 to a counter.
+#define LVGL_TICK_PERIOD_MS     5
 #define LVGL_TASK_STACK         6144
 #define LVGL_TASK_PRIORITY      5
-#define LCD_BUF_LINES           40
+// Two draw buffers of this many lines. They must be DMA-capable, which means
+// internal RAM — the RAM the voice session's TLS runs out of. 40 lines was
+// 2 x 19.2 KB; 20 lines halves that for a face that mostly repaints small
+// regions (blinks, drifts), and costs a large repaint only a few more 2 ms SPI
+// transfers.
+#define LCD_BUF_LINES           20
 
 static esp_lcd_panel_handle_t s_panel = NULL;
 static lv_disp_t             *s_disp  = NULL;
@@ -668,18 +677,18 @@ static esp_err_t _lcd_init(void) {
         .speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = LEDC_TIMER_8_BIT,
         .timer_num = LEDC_TIMER_2, .freq_hz = 5000, .clk_cfg = LEDC_AUTO_CLK,
     };
-    ledc_timer_config(&bl_timer);
+    ESP_RETURN_ON_ERROR(ledc_timer_config(&bl_timer), TAG, "backlight timer");
     ledc_channel_config_t bl_ch = {
         .gpio_num = PIN_TFT_BLK, .speed_mode = LEDC_LOW_SPEED_MODE,
         .channel = LEDC_CHANNEL_2, .timer_sel = LEDC_TIMER_2, .duty = 200, .hpoint = 0,
     };
-    ledc_channel_config(&bl_ch);
+    ESP_RETURN_ON_ERROR(ledc_channel_config(&bl_ch), TAG, "backlight channel");
 
     spi_bus_config_t bus = {
         .mosi_io_num = PIN_TFT_MOSI, .miso_io_num = -1, .sclk_io_num = PIN_TFT_SCLK,
         .quadwp_io_num = -1, .quadhd_io_num = -1, .max_transfer_sz = TFT_WIDTH * LCD_BUF_LINES * 2,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
+    ESP_RETURN_ON_ERROR(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO), TAG, "spi bus");
 
     esp_lcd_panel_io_handle_t io;
     esp_lcd_panel_io_spi_config_t io_cfg = {
@@ -688,17 +697,18 @@ static esp_err_t _lcd_init(void) {
         .spi_mode = 0, .trans_queue_depth = 10,
         .on_color_trans_done = _on_flush_ready, .user_ctx = &s_drv,
     };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_cfg, &io));
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_cfg, &io),
+                        TAG, "panel io");
 
     esp_lcd_panel_dev_config_t panel_cfg = {
         .reset_gpio_num = PIN_TFT_RST, .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB, .bits_per_pixel = 16,
     };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io, &panel_cfg, &s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_panel, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, 0, 0));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_st7789(io, &panel_cfg, &s_panel), TAG, "st7789");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_panel), TAG, "reset");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_panel), TAG, "init");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_invert_color(s_panel, true), TAG, "invert");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(s_panel, 0, 0), TAG, "gap");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "display on");
     return ESP_OK;
 }
 
@@ -721,8 +731,12 @@ static void _lvgl_init(void) {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 esp_err_t face_init(void) {
+    // A display that will not come up returns an error to TRY_INIT instead of
+    // aborting the boot: every face_set_* call only writes variables, so the
+    // rest of the robot runs fine without a face.
     s_mutex = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(_lcd_init());
+    if (!s_mutex) return ESP_ERR_NO_MEM;
+    ESP_RETURN_ON_ERROR(_lcd_init(), TAG, "display");
     _lvgl_init();
     if (xSemaphoreTake(s_mutex, portMAX_DELAY)) {
         build_face();

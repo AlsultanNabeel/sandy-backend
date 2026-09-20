@@ -138,22 +138,29 @@ def load_completed_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]
         return []
 
 
+def overdue_among(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The tasks in ``tasks`` whose due moment has passed (exact time, else end
+    of due day). For a caller that already holds the open tasks, so it does not
+    read them a second time."""
+    now = datetime.now(USER_TZ)
+    today = now.date().isoformat()
+    overdue: List[Dict[str, Any]] = []
+    for task in tasks:
+        due_at = _parse_iso(task.get("due_at") or "")
+        if due_at:
+            if due_at < now:
+                overdue.append(task)
+            continue
+        due_date = (task.get("due") or "")[:10]
+        if due_date and due_date < today:
+            overdue.append(task)
+    return overdue
+
+
 def load_overdue_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
     """Active tasks whose due moment has passed (exact time, else end of due day)."""
     try:
-        now = datetime.now(USER_TZ)
-        today = now.date().isoformat()
-        overdue: List[Dict[str, Any]] = []
-        for task in load_tasks(mongo_db=mongo_db, tasks_file=tasks_file):
-            due_at = _parse_iso(task.get("due_at") or "")
-            if due_at:
-                if due_at < now:
-                    overdue.append(task)
-                continue
-            due_date = (task.get("due") or "")[:10]
-            if due_date and due_date < today:
-                overdue.append(task)
-        return overdue
+        return overdue_among(load_tasks(mongo_db=mongo_db, tasks_file=tasks_file))
     except Exception as e:
         logger.warning(f"[TasksStore] load overdue failed: {e}")
         return []
@@ -220,27 +227,6 @@ def complete_task(task_id: str, mongo_db=None, tasks_file=None) -> bool:
         return r.matched_count > 0
     except Exception as e:
         logger.warning(f"[TasksStore] complete failed: {e}")
-        return False
-
-
-def set_task_due(task_id: str, due_iso: str = "", mongo_db=None) -> bool:
-    """Set or clear a task's due date/time (edit). Empty due_iso clears it. Unlike
-    create, editing allows any time (the user may reschedule freely)."""
-    try:
-        coll = _coll(mongo_db)
-        if coll is None or not task_id:
-            return False
-        if due_iso:
-            due_dt = _parse_iso(due_iso)
-            if due_dt is None:
-                return False
-            updates: Dict[str, Any] = {"due_date": due_dt.date().isoformat(), "due_at": due_dt}
-        else:
-            updates = {"due_date": "", "due_at": None}
-        r = coll.update_one({"_id": task_id}, {"$set": updates})
-        return r.matched_count > 0
-    except Exception as e:
-        logger.warning(f"[TasksStore] set_due failed: {e}")
         return False
 
 
@@ -402,18 +388,60 @@ def replace_task_note(
         return False
 
 
-def set_task_priority(task_id: str, priority: str, mongo_db=None) -> bool:
+_PRIORITIES = {"", "high", "normal", "low"}
+
+
+def update_task(
+    task_id: str,
+    *,
+    text: Optional[str] = None,
+    notes: Optional[str] = None,
+    priority: Optional[str] = None,
+    due_iso: Optional[str] = None,
+    done: Optional[bool] = None,
+    mongo_db=None,
+) -> bool:
+    """Edit several fields of one task in a single write. ``None`` = unchanged.
+
+    For the app's edit sheet, which sends whatever changed at once; it used to
+    be one update (and one cache bump) per field. ``text`` must be non-empty,
+    ``priority`` one of ``_PRIORITIES``; ``due_iso`` empty clears the due date
+    and, unlike creation, may be in the past (a reschedule is the user's call).
+    An invalid value refuses the whole edit rather than applying part of it.
+    """
     try:
         coll = _coll(mongo_db)
         if coll is None or not task_id:
             return False
-        clean = str(priority or "").strip().lower()
-        if clean not in {"", "high", "normal", "low"}:
+        updates: Dict[str, Any] = {}
+        if text is not None:
+            clean = str(text).strip()
+            if not clean:
+                return False
+            updates["text"] = clean
+        if notes is not None:
+            updates["notes"] = str(notes).strip()
+        if priority is not None:
+            clean = str(priority).strip().lower()
+            if clean not in _PRIORITIES:
+                return False
+            updates["priority"] = clean
+        if due_iso is not None:
+            if due_iso.strip():
+                due_dt = _parse_iso(due_iso.strip())
+                if due_dt is None:
+                    return False
+                updates.update(due_date=due_dt.date().isoformat(), due_at=due_dt)
+            else:
+                updates.update(due_date="", due_at=None)
+        if done is not None:
+            updates.update(done=bool(done),
+                           completed_at=datetime.now(timezone.utc) if done else None)
+        if not updates:
             return False
-        r = coll.update_one({"_id": task_id}, {"$set": {"priority": clean}})
-        return r.matched_count > 0
+        return coll.update_one({"_id": task_id}, {"$set": updates}).matched_count > 0
     except Exception as e:
-        logger.warning(f"[TasksStore] set priority failed: {e}")
+        logger.warning(f"[TasksStore] update failed: {e}")
         return False
 
 

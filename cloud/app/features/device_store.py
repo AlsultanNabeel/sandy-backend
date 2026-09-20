@@ -223,6 +223,15 @@ def get_device(name: str) -> Optional[Dict[str, Any]]:
     return d or None
 
 
+def get_devices(names: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Several devices by name in one query, keyed by name (missing ones absent)."""
+    coll = _coll()
+    wanted = sorted({(n or "").strip().lower() for n in names if (n or "").strip()})
+    if coll is None or not wanted:
+        return {}
+    return {d["name"]: d for d in coll.find({"name": {"$in": wanted}}).limit(len(wanted))}
+
+
 def add_device(name: str, label: str, control_type: str,
                transport: Dict[str, Any], room: str = "",
                meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -313,20 +322,6 @@ def set_state(name: str, payload: str) -> None:
                         {"$set": {"state": str(payload), "updated_at": _now()}})
     except Exception as e:  # noqa: BLE001
         logger.debug("[DeviceStore] set_state failed for %s: %s", name, e)
-
-
-def set_online(name: str, online: bool) -> None:
-    """Record a device heartbeat (best-effort) for the diagnosis layer."""
-    coll = _coll()
-    if coll is None:
-        return
-    try:
-        coll.update_one(
-            {"name": (name or "").strip().lower()},
-            {"$set": {"online": bool(online), "last_seen": _now()}},
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.debug("[DeviceStore] set_online failed for %s: %s", name, e)
 
 
 def learn_ir_button(name: str, button: str, code: str) -> Dict[str, Any]:

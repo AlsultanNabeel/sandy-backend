@@ -1,8 +1,8 @@
 """Deterministic destructive-action guard (dispatcher chokepoint).
 
-Locks the safety property that previously had zero coverage: the five
+Locks the safety property that previously had zero coverage: the
 immediate destructive tools never run without an explicit confirmation, while
-task_delete / reminder_delete keep their own confirmation (excluded here so they
+task_delete / reminder_delete / brainstorm_delete keep their own confirmation (excluded here so they
 are not double-confirmed).
 """
 
@@ -44,7 +44,7 @@ class TestDestructiveGuard(unittest.TestCase):
         """
         self.assertEqual(
             set(_GUARDED_DESTRUCTIVE),
-            {"delete_photo", "brainstorm_delete"},
+            {"delete_photo"},
         )
 
     def test_switching_something_on_is_not_guarded(self):
@@ -55,6 +55,9 @@ class TestDestructiveGuard(unittest.TestCase):
         # They run their own confirmation; guarding them would double-ask.
         self.assertNotIn("task_delete", _GUARDED_DESTRUCTIVE)
         self.assertNotIn("reminder_delete", _GUARDED_DESTRUCTIVE)
+        # brainstorm_delete only proposes; brainstorm_confirm deletes. Guarding
+        # it made the owner confirm twice before a plan was gone.
+        self.assertNotIn("brainstorm_delete", _GUARDED_DESTRUCTIVE)
 
     def test_fresh_pick_holds_for_confirmation_without_running_handler(self):
         session = {}

@@ -29,8 +29,9 @@ Usage (drop-in for a raw pymongo collection on the data path)::
     coll.find({"done": False})            # user_id injected automatically
     coll.insert_one({"text": "..."})      # user_id stamped automatically
 
-Index creation stays on the raw handle at boot (``mongo_db[name].create_index``):
-indexes already lead with ``user_id`` and run before any request sets a tenant.
+Index creation stays on the raw handle (``mongo_db[name].create_index``), in
+``bootstrap.ensure_indexes`` or a store's ``init_*``: it runs before any request
+sets a tenant, and every index leads with the scope field.
 """
 
 from __future__ import annotations

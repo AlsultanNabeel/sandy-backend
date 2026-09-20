@@ -2,7 +2,7 @@
 
 لما health_monitor و anomaly_detector يطلعوا إشارات تعب، الوحدة هاي
 تبدّل persona_intensity لـ empathetic وتحقن توجيه مواساة. بتستدعيها
-soul_node بعد ما يجيب wellness، وبترجّع override للـ intensity.
+soul_node بأول مرحلة (أو الـ prefetch قبلها)، وبترجّع override للـ intensity.
 
 عمداً ما بنلمز للسهر إلا لو الوقت فعلاً متأخر (من منتصف الليل لـ ٤ صباحاً)
 أو المستخدم نفسه ذكر تعب أو سهر في رسالته. هيك ما بنفرض افتراض قديم
@@ -16,12 +16,15 @@ import re
 from datetime import datetime
 from typing import Optional, Tuple
 
-logger = logging.getLogger(__name__)
+# نافذة السهر وعتبة الليالي المتتالية من health_monitor — مصدر واحد، عشان
+# «سهران» هون وبـ get_sleep_context ما يختلفوا.
+from app.agent.health_monitor import (
+    _LATE_HOUR_END,
+    _LATE_HOUR_START,
+    _STREAK_THRESHOLD as _CRITICAL_STREAK,
+)
 
-# كام ليلة سهر متتالية تكفي عشان نتدخّل بغض النظر عن المود
-_CRITICAL_STREAK = 3
-_LATE_HOUR_START = 0
-_LATE_HOUR_END = 4
+logger = logging.getLogger(__name__)
 
 # لو ذكر المستخدم وحدة من هدول، نسمح للمواساة تشتغل برا ساعات السهر
 _FATIGUE_KEYWORDS_AR = (

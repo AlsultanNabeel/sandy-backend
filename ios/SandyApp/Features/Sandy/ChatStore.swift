@@ -13,13 +13,17 @@ final class ChatStore: ObservableObject {
     @Published private(set) var currentID: String?
 
     private var sendTask: Task<String?, Never>?
+    /// Bumped per send. A superseded send's cleanup must not clear `sending`
+    /// for the send that replaced it.
+    private var sendGeneration = 0
     private let currentKey = "sandy_current_conv"
 
     /// عند فتح التبويب: يحمّل السجل، ويستكمل آخر محادثة من اليوم أو يبدأ نظيفة.
     func bootstrap(api: APIClient) async {
-        await loadList(api: api)
-        // لو في محادثة معروضة أصلًا (رجعنا للتبويب) لا نعيد شيئًا.
+        // لو في محادثة معروضة أصلًا (رجعنا للتبويب) لا نعيد شيئًا — ولا حتى
+        // القائمة: ورقة السجل بتحمّلها بنفسها لما تنفتح.
         if currentID != nil || !messages.isEmpty { return }
+        await loadList(api: api)
         let savedID = UserDefaults.standard.string(forKey: currentKey)
         if let latest = conversations.first, isToday(latest.updatedAt),
            savedID == nil || savedID == latest.id {
@@ -71,11 +75,13 @@ final class ChatStore: ObservableObject {
     /// يرسل، يخزّن السؤال والرد، ويرجّع رد ساندي (ليقرأه الـView بالصوت).
     func send(api: APIClient, text: String) async -> String? {
         sendTask?.cancel()
+        sendGeneration += 1
+        let generation = sendGeneration
         messages.append(ChatMessage(role: "user", text: text))
         sending = true
         errorMessage = ""
         let t = Task { @MainActor () -> String? in
-            defer { sending = false }
+            defer { if generation == sendGeneration { sending = false } }
             do {
                 if currentID == nil {
                     let id = try await api.createConversation()
@@ -125,8 +131,10 @@ final class ChatStore: ObservableObject {
     }
 
     /// مقارنة تقريبية (بادئة التاريخ بتوقيت UTC) — تكفي لسلوك "سيشن اليوم".
+    private static let iso = ISO8601DateFormatter()
+
     private func isToday(_ iso: String) -> Bool {
-        let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        let today = Self.iso.string(from: Date()).prefix(10)
         return iso.prefix(10) == today
     }
 }

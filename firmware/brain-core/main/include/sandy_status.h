@@ -44,16 +44,3 @@ void status_set(sandy_status_t st);
 
 // The current condition.
 sandy_status_t status_get(void);
-
-// True when the last reported condition is anything other than OK.
-bool status_is_degraded(void);
-
-// The Arabic line for a status — what she says out loud and what goes in the
-// log. Exposed so the spoken line and the log can never drift apart.
-const char *status_text(sandy_status_t st);
-
-// The short banner drawn on the 240x240 face. Latin on purpose: the only font
-// compiled into LVGL here is Montserrat, which has no Arabic glyphs and no
-// shaping, so Arabic on screen would render as disconnected boxes. Arabic lives
-// in the voice line above until an Arabic font is added to the build.
-const char *status_banner(sandy_status_t st);

@@ -132,8 +132,6 @@ struct SearchView: View {
     }
 }
 
-// MARK: - الستور (مصدر الحقيقة للنتائج)
-
 // MARK: - صف نتيجة ويب
 
 private struct WebRow: View {

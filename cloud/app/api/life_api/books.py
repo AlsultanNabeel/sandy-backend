@@ -13,12 +13,11 @@ def _register_books(app):
     def api_books(claims):
         if _is_guest(claims):
             return jsonify({"items": _DEMO["books"], "demo": True, "stats": {"sessions": 4, "pages": 96, "minutes": 210}}), 200
-        from app.features.reading_store import goal_progress, list_books, reading_stats
+        from app.features.reading_store import list_books, reading_overview
 
         with active_user_profile_context(build_user_profile(claims)):
             items = list_books()
-            stats = reading_stats(days=30)
-            goal = goal_progress()
+            stats, goal = reading_overview(days=30)
         return jsonify({"items": items, "stats": stats, "goal": goal, "demo": False}), 200
 
     @app.route("/api/life/books", methods=["POST"])
@@ -49,14 +48,6 @@ def _register_books(app):
             (body.get("title") or "").strip(), (body.get("status") or "").strip()
         )
         return jsonify(r), (200 if r.get("ok") else 404)
-
-    @app.route("/api/life/books/detail", methods=["GET"])
-    @require_tenant
-    def api_book_detail(claims):
-        from app.features.reading_store import get_book
-
-        b = get_book((request.args.get("title") or "").strip())
-        return jsonify(b or {"error": "not_found"}), (200 if b else 404)
 
     @app.route("/api/life/books/meta", methods=["POST"])
     @require_tenant

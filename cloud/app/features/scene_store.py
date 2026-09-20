@@ -329,18 +329,24 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
     a robot-only setup most of them will land here until he edits the scene.
     """
     from app.features.device_store import (
-        command_payload, device_topic, get_device, set_state,
+        command_payload, device_topic, get_devices, set_state,
     )
     from app.integrations.room_device import get_room_device_client
 
     sent, missed = 0, []
+    # Every device the scene names, in one read.
+    try:
+        devices = get_devices([str(a.get("device") or "") for a in actions or []])
+    except Exception as exc:  # noqa: BLE001 — reported below as missed devices
+        logger.debug("[SceneStore] device lookup failed: %s", exc)
+        devices = {}
     for a in actions or []:
         name = str(a.get("device") or "").strip().lower()
         value = str(a.get("value") or "").strip()
         if not name:
             continue
         try:
-            device = get_device(name)
+            device = devices.get(name)
             if device is None:
                 missed.append(name)
                 continue

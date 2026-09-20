@@ -267,11 +267,6 @@ class AzureIntentClient:
         ).strip()
         self._model = model  # for test mocks
 
-    def generate_text(self, prompt: str, **kwargs) -> str:
-        """Public one-shot text generation. New code should call this instead of
-        the legacy ``_generate_with_gemini`` name (kept for backward compat)."""
-        return self._generate_with_gemini(prompt, **kwargs)
-
     def _generate_with_gemini(
         self,
         prompt: str,

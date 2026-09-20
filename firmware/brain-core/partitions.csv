@@ -5,9 +5,9 @@ otadata,    data,  ota,      0xe000,    0x2000,
 phy_init,   data,  phy,      0x10000,   0x1000,
 ota_0,      app,   ota_0,    0x20000,   0x1E0000,
 ota_1,      app,   ota_1,    0x200000,  0x1E0000,
-# esp-sr models (srmodels.bin). 4MB now holds the wake word (~300KB) PLUS the
-# English MultiNet command model (mn5q8_en, ~2.1MB) for on-device "Sandy ..."
-# commands. The old 2MB was wake-word only. ~10MB of flash still free after
-# this. Growing the partition changes the table → needs ONE wired flash (not
-# OTA); OTA works again afterward.
+# esp-sr models (srmodels.bin). 4MB holds the wake word (~300KB) PLUS the
+# English MultiNet command model (mn5q8_en, ~2.1MB). ENABLE_COMMANDS is 0 in
+# config.h, so MultiNet is flashed but never loaded — it is packed only because
+# sdkconfig.defaults still selects CONFIG_SR_MN_EN_MULTINET5_*. The old 2MB was
+# wake-word only. Resizing changes the table → needs ONE wired flash (not OTA).
 model,      data,  spiffs,   0x3E0000,  0x400000,

@@ -34,11 +34,14 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
+from app.utils.tenant_db import scoped
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
     current_user_id,
 )
+
+_COLL = "sandy_gifts"
 
 # The gift kinds Sandy can write — mirrors the agent tool's enum exactly so the
 # generation helper recognizes them.
@@ -57,13 +60,13 @@ def register_gifts_api(app, mongo_db=None):
         if mongo_db is None:
             return jsonify({"items": []}), 200
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = scoped(mongo_db, _COLL, field="chat_id")
+            if coll is None:
                 return jsonify({"items": []}), 200
             items = []
             cur = (
-                mongo_db["sandy_gifts"]
-                .find({"chat_id": uid})
+                coll
+                .find({})
                 .sort("created_at", -1)
                 .limit(300)
             )
@@ -91,11 +94,10 @@ def register_gifts_api(app, mongo_db=None):
         from datetime import datetime, timezone
 
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = scoped(mongo_db, _COLL, field="chat_id")
+            if coll is None:
                 return jsonify({"ok": False}), 403
-            res = mongo_db["sandy_gifts"].insert_one({
-                "chat_id": uid,
+            res = coll.insert_one({
                 "kind": _clean_kind(body.get("kind")),
                 "recipient": recipient,
                 "occasion": occasion,
@@ -113,11 +115,6 @@ def register_gifts_api(app, mongo_db=None):
         Stateless: it only returns text; nothing is persisted. The client may
         send that text back to POST /api/gifts to keep it.
         """
-        # A paid provider call — one unit of the caller's quota (`api/metering`).
-        from app.api.metering import meter_claims
-        refusal = meter_claims(claims)
-        if refusal:
-            return jsonify(refusal[0]), refusal[1]
         body = request.get_json(silent=True) or {}
         kind = _clean_kind(body.get("kind"))
         # Context = recipient + occasion, so the generated text fits the moment.
@@ -131,6 +128,12 @@ def register_gifts_api(app, mongo_db=None):
         with active_user_profile_context(build_user_profile(claims)):
             if not current_user_id():
                 return jsonify({"content": ""}), 403
+            # A paid provider call — one unit of the caller's quota
+            # (`api/metering`). Charged only once the caller may use it.
+            from app.api.metering import meter_claims
+            refusal = meter_claims(claims)
+            if refusal:
+                return jsonify(refusal[0]), refusal[1]
             from app.agent.tools.schemas.gift_tools import _generate_with_llm
 
             content = _generate_with_llm(kind, context) or ""
@@ -149,8 +152,8 @@ def register_gifts_api(app, mongo_db=None):
         except (InvalidId, TypeError):
             return jsonify({"ok": False}), 200
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = scoped(mongo_db, _COLL, field="chat_id")
+            if coll is None:
                 return jsonify({"ok": False}), 403
-            res = mongo_db["sandy_gifts"].delete_one({"_id": oid, "chat_id": uid})
+            res = coll.delete_one({"_id": oid})
         return jsonify({"ok": res.deleted_count > 0}), 200

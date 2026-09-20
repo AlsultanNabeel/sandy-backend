@@ -233,28 +233,20 @@ struct FutureMessage: Identifiable {
     }
 
     /// مُحلِّل ISO متسامح — الباك-إند قد يرسل بمنطقة زمنية أو بدونها.
-    static func parseISO(_ s: String) -> Date? {
-        if s.isEmpty { return nil }
-        let isoFull = ISO8601DateFormatter()
-        isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = isoFull.date(from: s) { return d }
-        let isoPlain = ISO8601DateFormatter()
-        isoPlain.formatOptions = [.withInternetDateTime]
-        if let d = isoPlain.date(from: s) { return d }
-        let noTZ = DateFormatter()
-        noTZ.locale = Locale(identifier: "en_US_POSIX")
-        noTZ.timeZone = TimeZone.current
-        noTZ.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        return noTZ.date(from: s)
-    }
+    /// نفس المحلّل المشترك اللي بيستعمله الستور لجدولة الإشعار — مكرّر هون كان.
+    static func parseISO(_ s: String) -> Date? { NotificationManager.parseISO(s) }
 
-    /// تسمية مطلقة لطيفة (يوم + ساعة) بالعربية.
-    static func absoluteLabel(_ date: Date) -> String {
+    private static let absoluteFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "ar")
         f.dateStyle = .medium
         f.timeStyle = .short
-        return f.string(from: date)
+        return f
+    }()
+
+    /// تسمية مطلقة لطيفة (يوم + ساعة) بالعربية.
+    static func absoluteLabel(_ date: Date) -> String {
+        absoluteFormatter.string(from: date)
     }
 }
 

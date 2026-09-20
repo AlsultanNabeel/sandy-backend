@@ -55,9 +55,14 @@ struct SandyCompanionLayer: View {
         // الطبقة كلها ما تمنع نقرات تحتها — فقط ساندي نفسها تستقبل النقر.
         .allowsHitTesting(true)
         .ignoresSafeArea(.keyboard)
-        .onAppear { startIdleLoops() }
-        .onChange(of: tab) { announceTab() }
-        .onAppear { announceTab() }
+        .onAppear { startBob() }
+        // Structured loops: cancelled when the layer goes away, so a second
+        // appearance can't stack a second never-ending chain on the main queue.
+        .task { await blinkLoop() }
+        .task { await scanLoop() }
+        // Runs on appear and again per tab change, cancelling the previous run —
+        // a quick tab switch no longer has the old timer hide the new bubble.
+        .task(id: tab) { await announceTab() }
     }
 
     // MARK: - الرفيق (فقاعة + روبوت عائم)
@@ -130,49 +135,47 @@ struct SandyCompanionLayer: View {
 
     // MARK: - الحلقات الحيّة (بوب + رمشة + نظرة تمسح)
 
-    private func startIdleLoops() {
-        // بوب عمودي لطيف يتكرّر للأبد (التنفّس).
+    /// بوب عمودي لطيف يتكرّر للأبد (التنفّس).
+    private func startBob() {
         withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
             bob = true
         }
-        scheduleBlink()
-        scheduleScan()
     }
 
     /// رمشة عشوائية كل بضع ثوانٍ (مثل blink loop بالويب).
-    private func scheduleBlink() {
-        let delay = Double.random(in: 3.0...6.0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+    private func blinkLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(Double.random(in: 3.0...6.0)))
+            guard !Task.isCancelled else { return }
             blink = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
-                blink = false
-                scheduleBlink()
-            }
+            try? await Task.sleep(for: .milliseconds(130))
+            blink = false
         }
     }
 
     /// نظرة تمسح المكان لما تكون هادئة (تقابل SCAN بالويب).
-    private func scheduleScan() {
-        let delay = Double.random(in: 1.6...2.8)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+    private func scanLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(Double.random(in: 1.6...2.8)))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.5)) {
                 gaze = CGSize(
                     width: CGFloat.random(in: -6...6),
                     height: CGFloat.random(in: -3...6)
                 )
             }
-            scheduleScan()
         }
     }
 
-    /// عند تبدّل التبويب: تطلّع الفقاعة برسالة التبويب الجديدة، ثم تختفي لحالها.
-    private func announceTab() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) { showBubble = true }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { showBubble = false }
-        }
+    /// عند تبدّل التبويب: تطلّع الفقاعة برسالة التبويب الجديدة، ثم تختفي لحالها
+    /// (تظهر بعد ٠٫٥٥ث، وتختفي عند ٥ث من التبديل).
+    private func announceTab() async {
+        try? await Task.sleep(for: .milliseconds(550))
+        guard !Task.isCancelled else { return }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) { showBubble = true }
+        try? await Task.sleep(for: .milliseconds(4450))
+        guard !Task.isCancelled else { return }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { showBubble = false }
     }
 
     // MARK: - الانتقال (زوايا حسب التبويب)

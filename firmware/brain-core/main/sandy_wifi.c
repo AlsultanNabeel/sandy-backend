@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_system.h"   // esp_restart — factory reset
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -31,6 +32,7 @@ static char s_ip[16] = "";   // آخر عنوان أخذناه، للنبضة
 #define WIFI_RETRY_MS       5000
 
 static EventGroupHandle_t s_eg;
+static TaskHandle_t       s_retry_task;
 
 // Declared up here, not next to the switch, because the retry task below has to
 // see it: the two run at the same time by definition.
@@ -42,7 +44,15 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             esp_wifi_connect();
         } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
             wifi_event_sta_disconnected_t *ev = (wifi_event_sta_disconnected_t *)data;
+            const bool was_up = (xEventGroupGetBits(s_eg) & WIFI_CONNECTED_BIT) != 0;
             xEventGroupClearBits(s_eg, WIFI_CONNECTED_BIT);
+            s_ip[0] = '\0';   // no address now; never report the old one
+            // A link that was up just dropped: retry now rather than up to
+            // WIFI_RETRY_MS later — a voice call only survives a short gap.
+            // Only on that edge: the failed attempts after it also land here,
+            // and waking on every one of them is the hard spin the pacing
+            // below exists to prevent.
+            if (was_up && s_retry_task) xTaskNotifyGive(s_retry_task);
             ESP_LOGW(TAG, "disconnected (reason=%d) — retrying every %dms",
                      ev ? ev->reason : -1, WIFI_RETRY_MS);
         }
@@ -82,7 +92,8 @@ static void _retry_task(void *arg) {
             }
             esp_wifi_connect();
         }
-        vTaskDelay(pdMS_TO_TICKS(WIFI_RETRY_MS));
+        // Sleeps WIFI_RETRY_MS, or less when the event handler reports a drop.
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WIFI_RETRY_MS));
     }
 }
 
@@ -292,7 +303,7 @@ esp_err_t wifi_sandy_start(void) {
     // choppy playback. The robot runs off a supply, so the power cost is fine.
     WIFI_TRY("power save off", esp_wifi_set_ps(WIFI_PS_NONE));
 
-    xTaskCreate(_retry_task, "wifi_retry", 3072, NULL, 3, NULL);
+    xTaskCreate(_retry_task, "wifi_retry", 3072, NULL, 3, &s_retry_task);
 
     // Returns as soon as the radio is up — association happens in the
     // background. Boot used to block here until connected, then hand an

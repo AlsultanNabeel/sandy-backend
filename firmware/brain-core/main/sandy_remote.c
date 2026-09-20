@@ -32,7 +32,6 @@ static const char *TAG = "remote";
 
 static StreamBufferHandle_t s_logbuf;
 static vprintf_like_t       s_old_vprintf;
-static volatile bool        s_log_connected = false;
 
 // Tee every esp_log line: to UART (as before) and into a buffer the log task
 // drains to the TCP client. We buffer ALWAYS (not just while connected): when
@@ -79,7 +78,6 @@ static void log_server_task(void *arg) {
         setsockopt(c, IPPROTO_TCP, TCP_KEEPCNT,   &cnt,   sizeof(cnt));
         // Keep whatever boot/init logs are already buffered (don't reset) so the
         // client sees them on connect.
-        s_log_connected = true;
         ESP_LOGI(TAG, "log client connected");
         char buf[256];
         for (;;) {
@@ -95,7 +93,6 @@ static void log_server_task(void *arg) {
                 if (pk < 0 && errno != EWOULDBLOCK && errno != EAGAIN) break;  // socket dead
             }
         }
-        s_log_connected = false;
         close(c);
     }
 }
@@ -242,7 +239,14 @@ esp_err_t remote_init(void) {
     // PSRAM is unreachable.
     s_logbuf = xStreamBufferCreateWithCaps(LOG_BUF_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_old_vprintf = esp_log_set_vprintf(log_vprintf);
-    xTaskCreate(log_server_task, "logsrv", 4096, NULL, 4, NULL);
+    // Stack in PSRAM: sockets and a stream buffer only, never flash, and a dev
+    // convenience has no claim on the internal RAM the voice session needs.
+    // The name "logsrv" is load-bearing: publish_firmware.py looks for it to
+    // prove a retail image left this server out.
+    if (xTaskCreateWithCaps(log_server_task, "logsrv", 4096, NULL, 4, NULL,
+                            MALLOC_CAP_SPIRAM) != pdPASS) {
+        xTaskCreate(log_server_task, "logsrv", 4096, NULL, 4, NULL);
+    }
     // On its own task, because start_http() now waits for an address and this
     // runs on the boot path — blocking here would hold up the face, the voice
     // link and everything after them for as long as the router takes.

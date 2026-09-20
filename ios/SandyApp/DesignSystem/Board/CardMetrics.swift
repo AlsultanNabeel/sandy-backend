@@ -18,15 +18,6 @@ enum CardSize: String, CaseIterable, Codable {
     /// السطر كامل، ومساحة تتنفّس فيها.
     case large
 
-    /// نسبة العرض من عرض اللوح.
-    var fraction: Double {
-        switch self {
-        case .small:  return 0.5
-        case .medium: return 1.0
-        case .large:  return 1.0
-        }
-    }
-
     var labelKey: String { "board.size.\(rawValue)" }
 
     func next() -> CardSize {

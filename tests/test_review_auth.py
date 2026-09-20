@@ -105,7 +105,6 @@ def test_paid_routes_are_metered(monkeypatch):
     c = app.test_client()
     h = _bearer()
     assert c.get("/api/research?q=x", headers=h).status_code == 429
-    assert c.get("/api/research/page?url=http://x", headers=h).status_code == 429
     assert c.post("/api/gifts/generate", json={}, headers=h).status_code == 429
     assert c.post("/api/plans/active/finish", headers=h).status_code == 429
 

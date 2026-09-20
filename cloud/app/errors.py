@@ -87,9 +87,3 @@ class ConfigError(SandyError):
     code = "not_configured"
 
 
-class ExternalServiceError(SandyError):
-    """A dependency (model provider, MQTT, room device, ...) failed in a way the
-    caller should see rather than a silent fallback."""
-
-    http_status = 502
-    code = "upstream_failed"

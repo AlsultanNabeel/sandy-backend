@@ -1,6 +1,5 @@
 """voice_ws memory."""
 from __future__ import annotations
-import logging
 
 import contextvars
 import time
@@ -261,21 +260,39 @@ def _save_voice_turn(user_text: str, sandy_text: str,
     وبلا القناة بتنحفظ كلمة «الصوت» مكان «الروبوت» أو «مكالمة التطبيق» —
     فالمالك يسأل «إيمتى قلتلك؟» وياخد جوابًا عامًّا.
     """
-    if user_id:
-        set_voice_identity(user_id)
-    if channel:
-        set_voice_channel(channel)
+    # Always, even when empty: a pool thread keeps its context between jobs, so
+    # `if user_id:` let an unpaired robot's turn land in whichever account last
+    # used this thread.
+    set_voice_identity(user_id)
+    set_voice_channel(channel)
     chat_id = _stm_chat_id()
     if not chat_id or not user_text or not sandy_text:
         return
     try:
-        from app.agent.graph.graph import _stm_save
+        from app.agent.graph.graph import _save_emotional_async, _stm_save
         _stm_save(chat_id, chat_id, user_text, sandy_text, via=get_voice_channel())
+        # **Same durable extraction as the chat turn.** The chat pulls
+        # relationships, lessons, milestones, style corrections and interests
+        # out of every message; the voice saved only the transcript. "My
+        # brother is Mohammad" said to the robot was forgotten the moment the
+        # short-term window rolled over, and the app never learned it at all.
+        # No mood on this path, so the emotional-moment half is skipped.
+        from app.api.voice_ws.tools import _voice_profile
+        from app.utils.user_profiles import active_user_profile_context
+        with active_user_profile_context(_voice_profile(chat_id)):
+            _save_emotional_async({}, user_text)
     except Exception as exc:
-        logger.debug("[voice_ws] STM save skipped: %s", exc)
+        logger.warning("[voice_ws] voice turn save failed: %s", exc)
     try:
         from app.db import get_db
         from app.agent.session_state import update_session_state
         update_session_state(chat_id, get_db(), platform="voice")
     except Exception:
-        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
+        logger.debug("ignoring non-critical error", exc_info=True)
+
+
+def load_recent_turns(user_id: str) -> List[Dict[str, Any]]:
+    """`_load_stm_history` for a pool thread: the identity travels as an
+    argument, and is written even when empty (see `_save_voice_turn`)."""
+    set_voice_identity(user_id)
+    return _load_stm_history()

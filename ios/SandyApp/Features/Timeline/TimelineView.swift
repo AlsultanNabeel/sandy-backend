@@ -259,5 +259,3 @@ private struct TimelineDetailSheet: View {
         return out.string(from: d)
     }
 }
-
-// MARK: - الستور

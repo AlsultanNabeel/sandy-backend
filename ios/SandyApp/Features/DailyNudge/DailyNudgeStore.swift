@@ -35,7 +35,11 @@ final class DailyNudgeStore: ObservableObject {
     private static let answerKey = "sandy.nudge.answeredOn"
 
     private var todayKey: String {
+        // مفتاح تخزين مش نص معروض: تقويم ميلادي وأرقام لاتينية ثابتة، حتى ما
+        // يتغيّر المفتاح لو المستخدم بدّل لغة الجهاز أو تقويمه بنص اليوم.
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
     }

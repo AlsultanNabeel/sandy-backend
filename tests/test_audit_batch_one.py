@@ -294,7 +294,7 @@ def test_live_session_stops_the_reader_when_setup_fails(monkeypatch):
             stopped["n"] += 1
 
     monkeypatch.setattr(sess, "_DeviceReader", lambda ws: _FakeReader())
-    monkeypatch.setattr(sess, "_build_system_instruction",
+    monkeypatch.setattr(sess, "_build_cached_instruction",
                         lambda who: (_ for _ in ()).throw(RuntimeError("mongo down")))
     monkeypatch.setattr(sess, "_send_json", lambda ws, payload: None)
 
@@ -324,7 +324,7 @@ def test_summary_vector_search_projects_the_summary_field(monkeypatch):
     captured = {}
 
     def _fake_vector_search(col, query, chat_id, n_results, extra_project,
-                            query_vector=None, post_match=None):
+                            query_vector=None, post_match=None, embedded=False):
         # `query_vector` arrived with the one-embedding-per-turn change: callers
         # that run more than one search over the same string pay for it once.
         captured["projected"] = dict(extra_project)

@@ -106,5 +106,8 @@ def test_the_keepalive_is_short_enough_for_a_shared_worker():
     with open(src_path, encoding="utf-8") as fh:
         src = fh.read()
     assert "keepalive=60" not in src, "a client is still on the old keepalive"
-    assert src.count("keepalive=MQTT_KEEPALIVE_S") == 2, (
-        "the watchdog's replacement client must match the original")
+    # One factory (`_new_client`) builds both the first client and the
+    # watchdog's replacement, so they cannot disagree on the keepalive.
+    assert src.count("keepalive=MQTT_KEEPALIVE_S") == 1, (
+        "every client must be built by _new_client")
+    assert src.count("_new_client(host, port, user, password)") == 2

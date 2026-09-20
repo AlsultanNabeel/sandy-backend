@@ -48,11 +48,6 @@ def version_key(version: str) -> tuple:
     return tuple(int(p) for p in str(version).split("."))
 
 
-def signed_message(version: str, size: int, sha256_hex: str) -> bytes:
-    """Exactly what the signature covers; the firmware builds the same string."""
-    return f"sandy-fw|{version}|{int(size)}|{sha256_hex.lower()}".encode()
-
-
 def bucket(device_id: str) -> int:
     """A stable 0..99 per device, for staged rollout."""
     return int(hashlib.sha256((device_id or "").encode()).hexdigest()[:8], 16) % 100

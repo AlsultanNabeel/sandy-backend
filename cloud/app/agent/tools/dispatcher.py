@@ -18,11 +18,13 @@ from app.agent.tools.registry import ToolRegistry, get_registry
 
 logger = logging.getLogger(__name__)
 
-# Deterministic confirmation guard. task_delete and reminder_delete run their own
-# confirmation flows, so they are excluded here to avoid double-asking; the rest
+# Deterministic confirmation guard. task_delete, reminder_delete and
+# brainstorm_delete run their own confirmation flows (brainstorm_delete only
+# proposes; brainstorm_confirm deletes), so they are excluded here to avoid
+# double-asking; the rest
 # execute immediately, so the dispatcher forces a confirmation before running them
 # (unless the user already confirmed this turn — see _GUARD_CONFIRMED_FLAG).
-_SELF_CONFIRMING_TOOLS = frozenset({"task_delete", "reminder_delete"})
+_SELF_CONFIRMING_TOOLS = frozenset({"task_delete", "reminder_delete", "brainstorm_delete"})
 _GUARDED_DESTRUCTIVE = frozenset(DESTRUCTIVE_TOOLS) - _SELF_CONFIRMING_TOOLS
 _GUARD_CONFIRMED_FLAG = "_destructive_confirmed"
 
@@ -31,7 +33,6 @@ _GUARD_CONFIRMED_FLAG = "_destructive_confirmed"
 # انشالوا من الحراسة — مش تدمير، وكل واحد فيهن بينعكس بجملة.
 _GUARD_SUMMARY = {
     "delete_photo": "تحذف الصورة",
-    "brainstorm_delete": "تحذف جلسة العصف الذهني",
 }
 
 

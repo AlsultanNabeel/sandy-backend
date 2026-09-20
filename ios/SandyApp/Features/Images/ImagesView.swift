@@ -1,5 +1,6 @@
-import SwiftUI
+import ImageIO
 import PhotosUI
+import SwiftUI
 
 /// وضع الصور — توليد من نص، تعديل صورة موجودة، أو وصف صورة.
 enum ImageMode: Hashable { case generate, edit, describe }
@@ -186,14 +187,36 @@ struct ImagesView: View {
     private func loadPicked(_ item: PhotosPickerItem?) {
         guard let item else { return }
         Task {
-            if let data = try? await item.loadTransferable(type: Data.self),
-               let img = UIImage(data: data) {
-                await MainActor.run {
-                    sourceImage = img
-                    store.reset()
-                }
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+            // الفكّ والتصغير برّا الخيط الرئيسي: صورة كاميرا ٤٨ ميغابكسل كانت
+            // بتنفكّ كاملة، وبعدين بتنضغط JPEG كاملة وبتنرفع — ثواني من التعليق
+            // وعشرات الميغا بيانات، والنموذج أصلًا بيصغّرها عنده.
+            let img = await Task.detached(priority: .userInitiated) {
+                Self.downsample(data)
+            }.value
+            guard let img else { return }
+            await MainActor.run {
+                sourceImage = img
+                store.reset()
             }
         }
+    }
+
+    /// أطول ضلع للصورة المرسلة — كفاية للتعديل والوصف.
+    private nonisolated static let maxUploadPixels: CGFloat = 2048
+
+    /// يفكّ الصورة مصغّرة مباشرة (بدون ما يفكّها كاملة بالذاكرة أول)، ويطبّق اتجاه EXIF.
+    private nonisolated static func downsample(_ data: Data) -> UIImage? {
+        let sourceOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithData(data as CFData, sourceOpts) else { return nil }
+        let thumbOpts = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxUploadPixels,
+        ] as CFDictionary
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts) else { return nil }
+        return UIImage(cgImage: cg)
     }
 }
 

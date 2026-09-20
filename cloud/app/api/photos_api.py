@@ -121,12 +121,7 @@ def register_photos_api(app, mongo_db=None):
             uid = current_user_id()
             if not uid:
                 return jsonify({"items": []}), 200
-            counts: dict[str, int] = {}
-            for d in photo_album.find_photos(uid, limit=500):
-                for tag in d.get("tags") or []:
-                    tag = (tag or "").strip()
-                    if tag:
-                        counts[tag] = counts.get(tag, 0) + 1
+            counts = photo_album.tag_counts(uid)
         items = [
             {"name": name, "count": counts[name]}
             for name in sorted(counts, key=lambda n: (-counts[n], n))

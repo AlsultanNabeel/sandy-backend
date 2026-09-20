@@ -323,8 +323,6 @@ private struct ShoppingBuySheet: View {
     }
 }
 
-// MARK: - الستور
-
 // MARK: - النموذج
 
 /// غرض بقائمة التسوّق — يطابق عناصر GET /api/life/shopping:
@@ -367,5 +365,3 @@ private enum Money {
             : String(format: "%.2f", value)
     }
 }
-
-// MARK: - نداءات الباك-إند (تعيش هنا حتى ما نلمس APIClient.swift)

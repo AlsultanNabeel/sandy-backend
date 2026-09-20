@@ -1,7 +1,7 @@
-"""External web-research API: web search + place search + page fetch.
+"""External web-research API: web search + place search.
 
 A direct REST surface over the same engines the agent's research_web /
-research_places / fetch_url tools use (Exa + Google Places) — but returns
+research_places tools use (Exa + Google Places) — but returns
 structured results (titles / urls / snippets) with no LLM summarization and no
 agent session, for the iOS Search tab.
 
@@ -11,7 +11,6 @@ authenticated user runs a real search.
 
 Endpoints:
   GET /api/research?q=...&kind=web|places   structured search results
-  GET /api/research/page?url=...            fetch one page's contents (fetch_url)
 """
 
 from __future__ import annotations
@@ -89,30 +88,8 @@ def register_research_api(app):
                 return jsonify({"error": "places_unavailable"}), 503
             return jsonify({"kind": "places", "items": items, "demo": False}), 200
 
-        from app.integrations.exa_client import search_exa
+        from app.integrations.exa_client import INTERACTIVE_TIMEOUT_S, search_exa
 
         key = os.getenv("EXA_API_KEY", "").strip()
-        items = search_exa(q, key, num_results=8)
+        items = search_exa(q, key, num_results=8, timeout=INTERACTIVE_TIMEOUT_S)
         return jsonify({"kind": "web", "items": items, "demo": False}), 200
-
-    @app.route("/api/research/page", methods=["GET"])
-    @require_auth
-    def api_research_page(claims):
-        url = (request.args.get("url") or "").strip()
-        if not url:
-            return jsonify({"error": "url_required"}), 400
-
-        if _is_guest(claims):
-            return jsonify({"item": {}, "demo": True}), 200
-
-        # A paid provider call — one unit of the caller's quota (`api/metering`).
-        from app.api.metering import meter_claims
-        refusal = meter_claims(claims)
-        if refusal:
-            return jsonify(refusal[0]), refusal[1]
-
-        from app.integrations.exa_client import get_exa_page_content
-
-        key = os.getenv("EXA_API_KEY", "").strip()
-        item = get_exa_page_content(url, key)
-        return jsonify({"item": item, "demo": False}), 200

@@ -381,7 +381,11 @@ def set_subscription(
 
 def is_subscriber(user_id: str) -> bool:
     """True while the user has paid or trial access (gates premium features)."""
-    user = get_user(user_id)
+    return has_live_subscription(get_user(user_id))
+
+
+def has_live_subscription(user: Optional[Dict[str, Any]]) -> bool:
+    """:func:`is_subscriber` for a user document the caller already holds."""
     if not user:
         return False
     sub = user.get("subscription") or {}

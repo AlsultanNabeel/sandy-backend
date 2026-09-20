@@ -1,5 +1,3 @@
-# Text-to-Speech and utilities
-emoji>=2.0.0
 requests==2.33.0
 Flask>=2.2.0
 gunicorn>=21.2.0
@@ -12,26 +10,19 @@ pymongo>=4.6.0
 python-dotenv==1.2.2
 python-dateutil>=2.9.0  # RRULE recurrence for native reminders (sandy_reminders)
 certifi>=2024.0.0
-SpeechRecognition==3.14.3
 sherpa-onnx>=1.10.0  # local CAM++ speaker verification (Phase 4); ONNX, no torch, no account
 numpy>=1.24
 google-genai>=1.0.0
 google-cloud-texttospeech>=2.16.2
 google-auth>=2.0.0  # transitive dep of google-cloud-texttospeech / google-genai
 Pillow>=10.0.0
-pypdf>=4.0.0
-python-docx>=1.1.0
-openpyxl>=3.1.0
 urllib3==2.7.0
 cryptography>=42.0.0
-python-snappy>=0.6.1
-PyYAML>=6.0.2
-psutil>=5.9.0
 websockets>=13.0
 flask-sock>=0.7.0
 flask-cors>=4.0.0
 PyJWT>=2.8.0
-paho-mqtt>=2.0  # room-node control (publish room/cmd/* scenes over MQTT)
+paho-mqtt>=2.0  # heartbeat ingest + room-node commands on sandy/node/<id>/*
 # pyaudio>=0.2.13  # LOCAL TESTING ONLY: pip install pyaudio (requires portaudio system lib)
 
 # Error reporting. Optional at runtime: with no SENTRY_DSN the integration is a

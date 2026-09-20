@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from app.db import get_db
@@ -17,13 +18,18 @@ logger = logging.getLogger(__name__)
 _COLL = "sandy_memories"
 _LABEL = "style_memory"
 
-# كلمات بتدل على تصحيح أسلوبي، maestro بيكتشفها
+# كلمات بتدل على تصحيح أسلوبي. لازم تيجي ببداية كلمة: كـ substring كانت «أطل»
+# بتلقط «بدي أطلب…» و«فضلي» بتلقط «تفضلي»، وكل رسالة منهن كانت تنحفظ
+# «تفضيل أسلوب» وتنحقن بالبرسونا بكل رد بعدها.
 CORRECTION_SIGNALS = [
-    "لا تـ", "لا تستخدم", "لا تكتب", "ما أريد", "ما أحب", "ما يعجبني",
-    "قلل", "أطل", "اختصر", "بدون رموز", "بدون ايموجي", "بدون ايموجيات",
+    "لا تستخدم", "لا تكتب", "ما أريد", "ما أحب", "ما يعجبني",
+    "قلل", "طوّل", "اختصر", "بدون رموز", "بدون ايموجي",
     "ردودك طويلة", "ردودك قصيرة", "بدي ردود", "أريدك أن", "فضلي",
     "تذكري إني", "خليك", "كوني",
 ]
+_CORRECTION_RE = re.compile(
+    r"(?:^|\s)(?:" + "|".join(re.escape(s) for s in CORRECTION_SIGNALS) + ")"
+)
 
 
 def save_style_preference(preference: str, source_message: str = "") -> bool:
@@ -58,7 +64,6 @@ def save_style_preference(preference: str, source_message: str = "") -> bool:
 def detect_style_correction(message: str) -> bool:
     """يشوف لو الرسالة فيها تصحيح أسلوبي.
 
-    بنستخدمه في route_with_fc قبل ما نبعت الرسالة لـ Gemini.
+    بيستدعيه graph.py بالخلفية بعد الرد (مش على مسار الرد).
     """
-    msg_lower = message.lower()
-    return any(signal in msg_lower for signal in CORRECTION_SIGNALS)
+    return bool(_CORRECTION_RE.search(message or ""))

@@ -169,8 +169,11 @@ extension APIClient {
                                   isSubscriber: r.isSubscriber ?? false)
     }
 
+    /// مهلة قصيرة: الإقلاع مستنّي هالطلب، وفشل الاتصال أصلًا بيدخّل المستخدم
+    /// عالرئيسية بالتوكن المحفوظ. مع إعادتين عند انتهاء المهلة، ثلاثين ثانية
+    /// الافتراضية كانت بتعني دقيقة ونص قدّام شاشة الإقلاع؛ هيك أقصاها حوالي خمسة وعشرين ثانية.
     func getOnboarding() async throws -> OnboardingData {
-        let r: OnboardingResponse = try await fetch("/api/onboarding")
+        let r: OnboardingResponse = try await fetch("/api/onboarding", timeout: 8)
         return OnboardingData(done: r.done ?? false,
                               preferredName: r.preferredName ?? "",
                               interests: r.interests ?? [],

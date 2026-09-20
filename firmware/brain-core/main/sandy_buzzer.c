@@ -41,15 +41,15 @@ static const note_t LOWBATT[]   = {{440,180},{0,80},{392,180},{0,80},{330,300}};
 typedef struct { const note_t *notes; size_t count; } melody_def_t;
 static const melody_def_t s_defs[MELODY_COUNT] = {
     [MELODY_NONE]    = {NULL,  0},
-    [MELODY_BOOT]    = {BOOT,    5},
-    [MELODY_HAPPY]   = {HAPPY,   3},
-    [MELODY_CURIOUS] = {CURIOUS, 4},
-    [MELODY_SAD]     = {SAD,     3},
-    [MELODY_ALERT]   = {ALERT,   5},
-    [MELODY_ERROR]   = {ERR,     5},
-    [MELODY_FOCUS_START] = {FOC_START, 4},
-    [MELODY_FOCUS_BREAK] = {FOC_BREAK, 3},
-    [MELODY_FOCUS_END]   = {FOC_END,   4},
+    [MELODY_BOOT]    = {BOOT,    ARRAY_LEN(BOOT)},
+    [MELODY_HAPPY]   = {HAPPY,   ARRAY_LEN(HAPPY)},
+    [MELODY_CURIOUS] = {CURIOUS, ARRAY_LEN(CURIOUS)},
+    [MELODY_SAD]     = {SAD,     ARRAY_LEN(SAD)},
+    [MELODY_ALERT]   = {ALERT,   ARRAY_LEN(ALERT)},
+    [MELODY_ERROR]   = {ERR,     ARRAY_LEN(ERR)},
+    [MELODY_FOCUS_START] = {FOC_START, ARRAY_LEN(FOC_START)},
+    [MELODY_FOCUS_BREAK] = {FOC_BREAK, ARRAY_LEN(FOC_BREAK)},
+    [MELODY_FOCUS_END]   = {FOC_END,   ARRAY_LEN(FOC_END)},
     // ARRAY_LEN بدل رقم مكتوب: العدد الغلط هون بيقرا خارج المصفوفة، وهاد عطل
     // بيظهر كنغمة فيها ضجيج مش كخطأ — يعني بتدوّر عليه بالمكان الغلط.
     [MELODY_HELLO]     = {HELLO,     ARRAY_LEN(HELLO)},
@@ -105,7 +105,8 @@ esp_err_t buzzer_init(void) {
         .freq_hz         = 2000,
         .clk_cfg         = LEDC_AUTO_CLK,
     };
-    ESP_ERROR_CHECK(ledc_timer_config(&timer));
+    esp_err_t err = ledc_timer_config(&timer);
+    if (err != ESP_OK) return err;
 
     ledc_channel_config_t ch = {
         .gpio_num   = PIN_BUZZER,
@@ -115,10 +116,19 @@ esp_err_t buzzer_init(void) {
         .duty       = 0,
         .hpoint     = 0,
     };
-    ESP_ERROR_CHECK(ledc_channel_config(&ch));
+    err = ledc_channel_config(&ch);
+    if (err != ESP_OK) return err;
 
-    s_q = xQueueCreate(3, sizeof(sandy_melody_t));
-    xTaskCreate(_task, "buzzer", 2048, NULL, 5, NULL);
+    // s_q stays NULL unless the player task is really running: buzzer_play
+    // checks it, so a failed start means silence, not a queue nobody drains.
+    QueueHandle_t q = xQueueCreate(3, sizeof(sandy_melody_t));
+    if (!q) return ESP_ERR_NO_MEM;
+    s_q = q;
+    if (xTaskCreate(_task, "buzzer", 2048, NULL, 5, NULL) != pdPASS) {
+        s_q = NULL;
+        vQueueDelete(q);
+        return ESP_ERR_NO_MEM;
+    }
     ESP_LOGI(TAG, "ready");
     return ESP_OK;
 }
@@ -131,11 +141,4 @@ esp_err_t buzzer_init(void) {
 void buzzer_play(sandy_melody_t melody) {
     if (!s_q) return;
     xQueueSend(s_q, &melody, 0);
-}
-
-void buzzer_stop(void) {
-    if (!s_q) return;
-    xQueueReset(s_q);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CH_BUZZER, 0);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CH_BUZZER);
 }

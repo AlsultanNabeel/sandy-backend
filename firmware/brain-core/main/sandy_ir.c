@@ -12,6 +12,7 @@
 #include "driver/rmt_rx.h"
 #include "driver/rmt_encoder.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -95,16 +96,25 @@ static void ir_rx_task(void *arg) {
             continue;
         }
 
-        static char text[IR_MAX_DURATIONS * 7];
-        frame_to_text(&f, text, sizeof(text));
+        // PSRAM, for the moment of one publish: 2.8 KB of internal RAM held
+        // forever for a button that is learned a handful of times a year was
+        // the wrong trade on a board whose internal RAM is what runs out.
+        const size_t text_cap = IR_MAX_DURATIONS * 7;
+        char *text = heap_caps_malloc(text_cap, MALLOC_CAP_SPIRAM);
         s_learning = false;
+        if (!text) {
+            ESP_LOGE(TAG, "no memory to report the learned code — press learn again");
+            continue;
+        }
+        frame_to_text(&f, text, text_cap);
 
         ESP_LOGW(TAG, "learned %u symbols (%u chars)", (unsigned)f.n,
                  (unsigned)strlen(text));
         // The backend stores this against the node and the app binds it to a
         // button. Publishing on its own subtopic keeps it out of the command
         // path — a learned code is a report, not an instruction.
-        mqtt_publish_node("ir/learned", text);
+        mqtt_publish_node("ir/learned", text);   // the client copies it
+        free(text);
     }
 }
 
@@ -232,7 +242,13 @@ esp_err_t ir_init(void) {
     rmt_rx_register_event_callbacks(s_rx, &cbs, NULL);
     rmt_enable(s_rx);
 
-    xTaskCreate(ir_rx_task, "ir_rx", 4096, NULL, 4, NULL);
+    // Stack in PSRAM: the task waits on a queue, formats text and publishes —
+    // never flash — so its 4 KB need not come out of internal RAM.
+    if (xTaskCreateWithCaps(ir_rx_task, "ir_rx", 4096, NULL, 4, NULL,
+                            MALLOC_CAP_SPIRAM) != pdPASS &&
+        xTaskCreate(ir_rx_task, "ir_rx", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "no memory for the receive task — learning unavailable");
+    }
     ESP_LOGI(TAG, "ready — LED on GPIO %d, receiver on GPIO %d",
              PIN_IR_TX, PIN_IR_RX);
     return ESP_OK;

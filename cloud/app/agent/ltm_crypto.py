@@ -50,11 +50,6 @@ def _get_fernet():
         return None
 
 
-def is_enabled() -> bool:
-    """True لو التشفير شغّال."""
-    return _get_fernet() is not None
-
-
 def encrypt_field(value: str) -> str:
     """يشفّر النص، أو يرجّعه زي ما هو لو التشفير معطّل."""
     if not value:

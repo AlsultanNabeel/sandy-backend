@@ -161,11 +161,23 @@ _CHAT_BEHAVIOR_RULES = """
 """
 
 
+def _effective_persona(state: SandyState) -> str:
+    """The persona block, read during routing by the turn's prefetch when one
+    ran (`soul._read_ambient`), so the reply does not wait on it."""
+    fut = (state.get("soul_prefetch") or {}).get("__ambient")
+    if fut is not None:
+        from app.agent.nodes.soul import _collect
+        persona = (_collect("ambient", fut) or {}).get("persona")
+        if persona:
+            return persona
+    from app.agent.context_builder import build_effective_persona
+    return build_effective_persona(state.get("user_id") or state.get("chat_id"))
+
+
 def _handle_chat(state: SandyState, create_chat_completion_fn) -> str:
     """يستدعي Azure LLM لـ chat intents ويرجع الرد كـ string."""
 
-    from app.agent.context_builder import build_effective_persona
-    sandy_personality = build_effective_persona(state.get("user_id") or state.get("chat_id"))
+    sandy_personality = _effective_persona(state)
 
     persona_snippet = state.get("persona_snippet") or ""
     time_ctx = _get_current_time_context()

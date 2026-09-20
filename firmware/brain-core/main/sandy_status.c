@@ -3,8 +3,7 @@
 // Everything here is deliberately cheap and non-blocking: it runs from whatever
 // task noticed the problem — the Wi-Fi event handler, the websocket callback,
 // the session manager — and none of those may stall. Drawing is handed to the
-// LVGL task through face_set_banner(); the spoken line is queued for the
-// speaker task rather than played inline.
+// LVGL task through face_set_banner(); the Arabic line goes to the log only.
 
 #include "sandy_status.h"
 
@@ -29,7 +28,7 @@ typedef struct {
     sandy_mood_t       mood;
     sandy_led_state_t  led;
     const char      *banner;   // Latin, drawn on the face
-    const char      *say;      // Arabic, spoken + logged
+    const char      *say;      // Arabic, logged with the banner
 } status_face_t;
 
 static const status_face_t TABLE[SANDY_ST_COUNT] = {
@@ -74,26 +73,9 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
     },
 };
 
-const char *status_text(sandy_status_t st)
-{
-    if (st < 0 || st >= SANDY_ST_COUNT) return "";
-    return TABLE[st].say;
-}
-
-const char *status_banner(sandy_status_t st)
-{
-    if (st < 0 || st >= SANDY_ST_COUNT) return "";
-    return TABLE[st].banner;
-}
-
 sandy_status_t status_get(void)
 {
     return (sandy_status_t)atomic_load(&s_status);
-}
-
-bool status_is_degraded(void)
-{
-    return status_get() != SANDY_ST_OK;
 }
 
 void status_init(void)

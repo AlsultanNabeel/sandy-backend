@@ -89,6 +89,9 @@ final class APIClient: APIClientProtocol {
             do {
                 return try await session.data(for: req)
             } catch let error as URLError {
+                // `.timedOut` retries the whole timeout: worst case is
+                // (maxRetries + 1) × timeout, so a caller the user is waiting
+                // on (the launch screen) passes a short one.
                 let retryable: Set<URLError.Code> = [
                     .networkConnectionLost, .timedOut, .cannotConnectToHost,
                     .dnsLookupFailed, .notConnectedToInternet,
@@ -223,9 +226,11 @@ final class APIClient: APIClientProtocol {
     func fetch<T: Decodable>(_ path: String,
                              method: String = "GET",
                              body: (any Encodable)? = nil,
-                             auth: Bool = true) async throws -> T {
+                             auth: Bool = true,
+                             timeout: TimeInterval = 30) async throws -> T {
         let bodyData = try body.map { try JSONEncoder().encode($0) }
-        let data = try await perform(path, method: method, bodyData: bodyData, auth: auth)
+        let data = try await perform(path, method: method, bodyData: bodyData,
+                                     auth: auth, timeout: timeout)
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {

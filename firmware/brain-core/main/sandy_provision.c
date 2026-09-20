@@ -51,6 +51,7 @@ static const char *TAG = "provision";
 static httpd_handle_t s_httpd = NULL;
 static volatile bool  s_active = false;
 static char           s_ap_ssid[33];
+static esp_netif_t   *s_ap_netif;   // created once; start_ap may run again
 
 bool provision_is_active(void) { return s_active; }
 
@@ -274,7 +275,10 @@ static void start_ap(void) {
     char pass[65];
     build_ap_identity(s_ap_ssid, sizeof(s_ap_ssid), pass, sizeof(pass));
 
-    esp_netif_create_default_wifi_ap();
+    // Once only. start_ap runs again whenever the setup page could not bind,
+    // and a second default AP interface is refused — the IDF helper asserts on
+    // that, which turned "port 80 busy, try again" into a reboot.
+    if (!s_ap_netif) s_ap_netif = esp_netif_create_default_wifi_ap();
 
     wifi_config_t ap = { 0 };
     size_t sn = strlen(s_ap_ssid);

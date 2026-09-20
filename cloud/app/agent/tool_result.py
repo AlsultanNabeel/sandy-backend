@@ -4,7 +4,7 @@
 ``ok`` means *"the change the user asked for actually happened"*.
 
 They are not the same thing, and for a long time only ``handled`` existed, so
-every reader that wanted the second question had to ask the first one. Three
+every reader that wanted the second question had to ask the first one. Four
 features were built on that mistake:
 
 * the task adapter overwrote a refusal with a success sentence — a guest was

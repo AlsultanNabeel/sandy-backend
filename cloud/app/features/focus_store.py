@@ -399,20 +399,30 @@ def focus_stats() -> Dict[str, Any]:
     if coll is None:
         return empty
     goals = get_focus_goals()
+    starts = _period_starts()
+    minutes_in = {k: 0 for k in starts}
+    sessions_in = {k: 0 for k in starts}
+    # One read for all four periods (it was one aggregate per period): every
+    # session since the earliest start — the week can begin before January 1st
+    # — counted into each period it falls in.
+    # بلا سقف: مجموع، وسقف بيرجّع رقم أصغر من الحقيقة. محدود بسنة.
+    for d in coll.find({"state": {"$in": ["done", "cancelled"]},
+                        "ended_at": {"$gte": min(starts.values())}},
+                       {"ended_at": 1, "focused_min": 1}):
+        ended = _aware(d.get("ended_at"))
+        if ended is None:
+            continue
+        for key, start in starts.items():
+            if ended >= start:
+                minutes_in[key] += int(d.get("focused_min") or 0)
+                sessions_in[key] += 1
     out: Dict[str, Any] = {}
-    for key, start in _period_starts().items():
-        agg = list(coll.aggregate([
-            {"$match": {"state": {"$in": ["done", "cancelled"]},
-                        "ended_at": {"$gte": start}}},
-            {"$group": {"_id": None,
-                        "minutes": {"$sum": {"$ifNull": ["$focused_min", 0]}},
-                        "sessions": {"$sum": 1}}},
-        ]))
-        minutes = int(agg[0]["minutes"]) if agg else 0
+    for key in starts:
+        minutes = minutes_in[key]
         target = int(goals.get(key, 0))
         out[key] = {
             "minutes": minutes,
-            "sessions": int(agg[0]["sessions"]) if agg else 0,
+            "sessions": sessions_in[key],
             "goal_min": target,
             "pct": min(100, int(minutes * 100 / target)) if target else 0,
         }

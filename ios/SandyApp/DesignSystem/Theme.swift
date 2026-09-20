@@ -33,11 +33,6 @@ enum Theme {
         /// سطح ثانوي (حقول، شرائح) أغمق قليلاً.
         static let surface = Color(red: 0.055, green: 0.102, blue: 0.165)    // ~#0E1A2A
 
-        /// فقاعة المستخدم بالشات — أكسنت أزرق بشفافية.
-        static let userBubble = Color(red: 0.0, green: 0.831, blue: 1.0).opacity(0.18)
-        /// فقاعة ساندي بالشات — سطح داكن.
-        static let sandyBubble = Color(red: 0.055, green: 0.102, blue: 0.165) // ~#0E1A2A
-
         /// النص الأساسي (#F0FAFF) — صريح عشان يبقى فاتح على الخلفية الداكنة.
         static let primaryText = Color(red: 0.941, green: 0.980, blue: 1.0)  // #F0FAFF
         /// النص الثانوي (~#9DB2C6) — رمادي-أزرق، رُفع تبايُنه شوي لقراءة أوضح.
@@ -109,8 +104,8 @@ enum Theme {
     enum Shadow {
         /// ظل البطاقة العادي — أسود خفيف على الخلفية الداكنة.
         static let cardColor = Color.black.opacity(0.45)
-        static let cardRadius: CGFloat = 8
-        static let cardY: CGFloat = 3
+        static let cardRadius: CGFloat = 9
+        static let cardY: CGFloat = 4
 
         /// ظل مرفوع (عناصر عائمة كزر الإضافة / ساندي العائمة).
         static let liftColor = Color.black.opacity(0.6)
@@ -162,7 +157,8 @@ struct LiquidGlass: ViewModifier {
                     lineWidth: 1)
             }
             // ظل أنعم وأقرب (كان radius 12/y 5) — عمق أهدأ بضجيج أقل.
-            .shadow(color: Theme.Shadow.cardColor, radius: 9, x: 0, y: 4)
+            .shadow(color: Theme.Shadow.cardColor,
+                    radius: Theme.Shadow.cardRadius, x: 0, y: Theme.Shadow.cardY)
     }
 }
 

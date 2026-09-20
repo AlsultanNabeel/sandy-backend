@@ -111,9 +111,13 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                // Lazy: a long thread builds only the rows on screen.
+                LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     ForEach(store.messages) { m in
-                        messageRow(m)
+                        // Equatable row: a streamed chunk re-renders only the
+                        // growing bubble, not every bubble above it.
+                        ChatBubbleRow(isUser: m.role == "user", text: m.text)
+                            .equatable()
                             .id(m.id)
                             // حيوية: كل فقاعة تظهر بتكبير لطيف + تلاشٍ.
                             .transition(
@@ -149,6 +153,13 @@ struct ChatView: View {
             .onTapGesture { dismissKeyboard() }
             .onChange(of: store.messages.count) {
                 scrollToBottom(proxy)
+            }
+            // Keep the streaming bubble in view as it grows. No animation: this
+            // fires per chunk, and stacked springs would lag behind the text.
+            .onChange(of: store.messages.last?.text) {
+                if !store.sending, let last = store.messages.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
             }
             .onChange(of: store.sending) { _, isSending in
                 // ننزل لمؤشّر الكتابة لما يظهر.
@@ -213,7 +224,7 @@ struct ChatView: View {
             ZStack {
                 Circle()
                     .fill(Theme.Colors.surface)
-                    .frame(width: 40, height: 40)
+                    .frame(width: ChatMetrics.control, height: ChatMetrics.control)
                     .overlay(Circle().stroke(Theme.Colors.border, lineWidth: 1))
 
                 Image(systemName: "waveform")
@@ -234,7 +245,7 @@ struct ChatView: View {
                             ? AnyShapeStyle(Theme.Colors.accent)
                             : AnyShapeStyle(Theme.Colors.accent.opacity(0.18))
                     )
-                    .frame(width: 40, height: 40)
+                    .frame(width: ChatMetrics.control, height: ChatMetrics.control)
                     .sandyGlow(canSend)
 
                 if store.sending {
@@ -253,36 +264,6 @@ struct ChatView: View {
         .disabled(!canSend)
         .animation(.easeInOut(duration: 0.2), value: canSend)
         .accessibilityLabel(lang.s("chat.send"))
-    }
-
-    // MARK: - صف الرسالة (فقاعة)
-
-    @ViewBuilder
-    private func messageRow(_ m: ChatMessage) -> some View {
-        let isUser = (m.role == "user")
-        HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
-            if isUser {
-                Spacer(minLength: 40)
-                bubble(m.text, isUser: true)
-            } else {
-                // فقاعة ساندي تجيها أفاتار صغير لها.
-                SandyAvatar(size: 28, mood: .happy)
-                bubble(m.text, isUser: false)
-                Spacer(minLength: 40)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func bubble(_ text: String, isUser: Bool) -> some View {
-        Text(text)
-            .font(Theme.Typography.body)
-            .foregroundColor(Theme.Colors.primaryText)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(Theme.Spacing.md)
-            // فقاعات زجاج سائل — فقاعتك أزرق أوضح، فقاعة ساندي زجاج صافٍ.
-            .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: isUser ? 0.28 : 0.06)
     }
 
     // MARK: - الأفعال
@@ -332,7 +313,48 @@ struct ChatView: View {
     private static let typingAnchorID = "sandy-typing-indicator"
 }
 
-// MARK: - ستور المحادثة (مصدر الحقيقة + الحفظ التلقائي + السجل)
+// MARK: - صف الرسالة (فقاعة)
+
+/// Layout constants shared by the chat rows and input bar.
+private enum ChatMetrics {
+    /// Round buttons in the input bar (live call, send).
+    static let control: CGFloat = 40
+    static let avatar: CGFloat = 28
+    /// Minimum empty space beside a bubble, so it never spans the full width.
+    static let bubbleGutter: CGFloat = 40
+}
+
+/// One bubble. Equatable on its inputs so SwiftUI skips unchanged rows while a
+/// reply streams into the last one.
+private struct ChatBubbleRow: View, Equatable {
+    let isUser: Bool
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
+            if isUser {
+                Spacer(minLength: ChatMetrics.bubbleGutter)
+                bubble
+            } else {
+                // فقاعة ساندي تجيها أفاتار صغير لها.
+                SandyAvatar(size: ChatMetrics.avatar, mood: .happy)
+                bubble
+                Spacer(minLength: ChatMetrics.bubbleGutter)
+            }
+        }
+    }
+
+    private var bubble: some View {
+        Text(text)
+            .font(Theme.Typography.body)
+            .foregroundColor(Theme.Colors.primaryText)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(Theme.Spacing.md)
+            // فقاعات زجاج سائل — فقاعتك أزرق أوضح، فقاعة ساندي زجاج صافٍ.
+            .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: isUser ? 0.28 : 0.06)
+    }
+}
 
 // MARK: - ورقة سجل المحادثات (قائمة + بحث + جديد)
 
@@ -511,12 +533,21 @@ private struct ChatHistorySheet: View {
         return "older"
     }
 
-    private func parseISO(_ iso: String) -> Date? {
+    // Built once: `grouped` parses every row's date on each render, and a
+    // formatter per call made opening the history sheet visibly slower.
+    private static let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: iso) { return d }
+        return f
+    }()
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
-        return f.date(from: iso)
+        return f
+    }()
+
+    private func parseISO(_ iso: String) -> Date? {
+        Self.isoFractional.date(from: iso) ?? Self.isoPlain.date(from: iso)
     }
 }
 
@@ -530,7 +561,7 @@ private struct TypingIndicator: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
-            SandyAvatar(size: 28, mood: .happy)
+            SandyAvatar(size: ChatMetrics.avatar, mood: .happy)
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
@@ -549,7 +580,7 @@ private struct TypingIndicator: View {
             .padding(.vertical, Theme.Spacing.md)
             .padding(.horizontal, Theme.Spacing.md)
             .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: 0.06)
-            Spacer(minLength: 40)
+            Spacer(minLength: ChatMetrics.bubbleGutter)
         }
         .onAppear { animating = true }
         .accessibilityLabel(lang.s("chat.typingA11y"))

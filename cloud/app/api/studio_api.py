@@ -1,4 +1,4 @@
-"""Studio web APIs: project plans (brainstorm) and the unified search box.
+"""Studio web APIs: project plans (brainstorm).
 
 Guest/authenticated split everywhere, same as productivity_api: guests see
 demo payloads with `demo: true`; every authenticated user gets their own data,
@@ -14,7 +14,6 @@ Endpoints:
   POST   /api/plans/active/cancel       abandon the active session
   PATCH  /api/plans/<id>                {change} → revise a saved plan
   DELETE /api/plans/<id>                delete a saved plan
-  GET    /api/search?q=...              one box across tasks/reminders/plans
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
-from app.utils.user_profiles import active_user_profile_context, build_user_profile
 import logging
 
 logger = logging.getLogger(__name__)
@@ -40,13 +38,6 @@ def _brainstorm_chat_ids(claims) -> list:
     if uid.isdigit():
         ids.append(int(uid))
     return ids
-
-
-_DEMO_SEARCH = {
-    "tasks": [{"id": "demo-t1", "text": "تجهيز العرض التقديمي"}],
-    "reminders": [{"id": "demo-r1", "text": "موعد طبيب الأسنان", "remind_at": "2026-06-15T16:00:00"}],
-    "plans": [{"topic": "خطة تعلم البرمجة", "summary": "ثلاث مراحل خلال شهرين"}],
-}
 
 
 def register_studio_api(app, mongo_db=None):
@@ -219,56 +210,3 @@ def register_studio_api(app, mongo_db=None):
             {"_id": oid, "chat_id": {"$in": _brainstorm_chat_ids(claims)}}
         )
         return jsonify({"ok": res.deleted_count > 0}), (200 if res.deleted_count else 404)
-
-    # ── Unified search ───────────────────────────────────────────────────
-    @app.route("/api/search", methods=["GET"])
-    @require_auth
-    def api_unified_search(claims):
-        q = (request.args.get("q") or "").strip()
-        if not q:
-            return jsonify({"error": "q_required"}), 400
-        if _is_guest(claims):
-            return jsonify({**_DEMO_SEARCH, "demo": True}), 200
-
-        ql = q.lower()
-        out = {"tasks": [], "reminders": [], "plans": [], "demo": False}
-
-        with active_user_profile_context(build_user_profile(claims)):
-            try:
-                from app.features.tasks_store import load_tasks, load_completed_tasks
-
-                for t in load_tasks() + load_completed_tasks():
-                    hay = f"{t.get('text','')} {t.get('notes','')} {t.get('project','')}".lower()
-                    if ql in hay:
-                        out["tasks"].append(
-                            {"id": t["id"], "text": t["text"], "done": t["done"]}
-                        )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[StudioAPI] search tasks failed: {e}")
-
-            try:
-                from app.features.reminders_store import load_reminders
-
-                for r in load_reminders(max_results=100):
-                    if ql in (r.get("text", "") or "").lower():
-                        out["reminders"].append(
-                            {"id": r["id"], "text": r["text"], "remind_at": r["remind_at"]}
-                        )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[StudioAPI] search reminders failed: {e}")
-
-            try:
-                if mongo_db is not None:
-                    for d in mongo_db["sandy_brainstorms"].find(
-                        {"status": "done", "chat_id": {"$in": _brainstorm_chat_ids(claims)}},
-                        {"topic": 1, "summary": 1, "plan_text": 1},
-                    ).limit(100):
-                        hay = f"{d.get('topic','')} {d.get('summary','')} {d.get('plan_text','')}".lower()
-                        if ql in hay:
-                            out["plans"].append(
-                                {"topic": d.get("topic", ""), "summary": d.get("summary", "")}
-                            )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[StudioAPI] search plans failed: {e}")
-
-        return jsonify(out), 200

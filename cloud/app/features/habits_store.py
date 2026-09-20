@@ -135,7 +135,9 @@ def _streak(habit_id: str) -> int:
         return 0
     return _streak_from_dates({
         d["date"]
-        for d in log.find({"habit_id": habit_id}, {"date": 1}).limit(2000)
+        # Newest first, so the cap drops the oldest days, never the ones the
+        # streak is counted from.
+        for d in log.find({"habit_id": habit_id}, {"date": 1}).sort("date", -1).limit(2000)
     })
 
 
@@ -170,7 +172,10 @@ def list_habits() -> List[Dict[str, Any]]:
     dates_by_habit: Dict[str, set] = {hid: set() for hid in ids}
     # 5000 = MAX_HABITS × the per-habit cap that used to apply, so the ceiling
     # is the one this always had rather than a new one introduced by batching.
-    for d in log.find({"habit_id": {"$in": ids}}, {"habit_id": 1, "date": 1}).limit(5000):
+    # Newest first for the same reason as `_streak`: the cap must cut history,
+    # not today.
+    for d in (log.find({"habit_id": {"$in": ids}}, {"habit_id": 1, "date": 1})
+              .sort("date", -1).limit(5000)):
         bucket = dates_by_habit.get(d.get("habit_id"))
         if bucket is not None and d.get("date"):
             bucket.add(d["date"])
@@ -230,58 +235,4 @@ def uncheckin(habit_id: str, date: str = "") -> Dict[str, Any]:
         "ok": True,
         "streak": _streak(habit_id),
         "removed": res.deleted_count > 0,
-    }
-
-
-def habit_history(habit_id: str, days: int = 35) -> Dict[str, Any]:
-    """تفاصيل عادة: أيام الإنجاز بآخر فترة، أطول سلسلة، ونسبة الالتزام منذ الإنشاء."""
-    log = _log()
-    if log is None:
-        return {"ok": False}
-    h = _find_by_id(habit_id)
-    if not h:
-        return {"ok": False}
-    all_dates = sorted(
-        d["date"]
-        for d in log.find({"habit_id": habit_id}, {"date": 1}).limit(5000)
-    )
-    date_set = set(all_dates)
-    today = datetime.now(USER_TZ).date()
-
-    # أيام آخر فترة (للعرض كنقاط) مع علم الإنجاز
-    window = []
-    for i in range(days - 1, -1, -1):
-        day = (today - timedelta(days=i)).isoformat()
-        window.append({"date": day, "done": day in date_set})
-
-    # أطول سلسلة متتالية على الإطلاق
-    longest = 0
-    run = 0
-    prev = None
-    for ds in all_dates:
-        cur = datetime.fromisoformat(ds).date()
-        if prev is not None and (cur - prev).days == 1:
-            run += 1
-        else:
-            run = 1
-        longest = max(longest, run)
-        prev = cur
-
-    # نسبة الالتزام منذ الإنشاء (أيام منجزة / أيام منقضية)
-    created = h.get("created_at")
-    try:
-        start = created.astimezone(USER_TZ).date() if created else today
-    except Exception:  # noqa: BLE001
-        start = today
-    elapsed = max(1, (today - start).days + 1)
-    rate = round(100 * len(date_set) / elapsed)
-
-    return {
-        "ok": True,
-        "id": habit_id,
-        "name": h.get("name", ""),
-        "window": window,
-        "longest": longest,
-        "rate": min(100, rate),
-        "total_done": len(date_set),
     }

@@ -30,6 +30,7 @@ import os
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
+from app.utils.tenant_db import scoped
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
@@ -43,7 +44,7 @@ def _is_guest(claims) -> bool:
     return claims.get("role", "guest") == "guest"
 
 
-def _topic_for(uid, mongo_db, explicit):
+def _topic_for(mongo_db, explicit):
     """Same selection the tool uses: explicit topic, else the top interest."""
     topic = (explicit or "").strip()
     if topic or mongo_db is None:
@@ -70,7 +71,7 @@ def register_share_api(app, mongo_db=None):
             uid = current_user_id()
             if not uid:
                 return jsonify({"topic": "", "items": []}), 200
-            topic = _topic_for(uid, mongo_db, explicit)
+            topic = _topic_for(mongo_db, explicit)
 
         if not topic:
             # No interests tracked yet — let the client show its warm hint.
@@ -83,10 +84,11 @@ def register_share_api(app, mongo_db=None):
             return jsonify(refusal[0]), refusal[1]
 
         # Reuse the tool's query shape, but return structured cards (no LLM).
-        from app.integrations.exa_client import search_exa
+        from app.integrations.exa_client import INTERACTIVE_TIMEOUT_S, search_exa
 
         key = os.getenv("EXA_API_KEY", "").strip()
-        items = search_exa(f"معلومات مثيرة عن {topic}", key, num_results=8)
+        items = search_exa(f"معلومات مثيرة عن {topic}", key, num_results=8,
+                           timeout=INTERACTIVE_TIMEOUT_S)
         return jsonify({"topic": topic, "items": items}), 200
 
     @app.route("/api/share/saved", methods=["GET"])
@@ -95,14 +97,14 @@ def register_share_api(app, mongo_db=None):
         if mongo_db is None or _is_guest(claims):
             return jsonify({"items": []}), 200
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = scoped(mongo_db, _COLL, field="chat_id")
+            if coll is None:
                 return jsonify({"items": []}), 200
             items = []
             cur = (
-                mongo_db[_COLL]
+                coll
                 .find(
-                    {"chat_id": uid},
+                    {},
                     {"title": 1, "url": 1, "text": 1, "topic": 1},
                 )
                 .sort("created_at", -1)
@@ -130,11 +132,10 @@ def register_share_api(app, mongo_db=None):
             return jsonify({"error": "title_or_url_required"}), 400
         from datetime import datetime, timezone
 
-        uid = current_user_id()
-        if not uid:
+        coll = scoped(mongo_db, _COLL, field="chat_id")
+        if coll is None:
             return jsonify({"ok": False}), 403
-        res = mongo_db[_COLL].insert_one({
-            "chat_id": uid,
+        res = coll.insert_one({
             "title": title,
             "url": url,
             "text": (body.get("text") or "").strip(),
@@ -155,8 +156,8 @@ def register_share_api(app, mongo_db=None):
             oid = ObjectId(item_id)
         except (InvalidId, TypeError):
             return jsonify({"ok": False}), 200
-        uid = current_user_id()
-        if not uid:
+        coll = scoped(mongo_db, _COLL, field="chat_id")
+        if coll is None:
             return jsonify({"ok": False}), 403
-        res = mongo_db[_COLL].delete_one({"_id": oid, "chat_id": uid})
+        res = coll.delete_one({"_id": oid})
         return jsonify({"ok": res.deleted_count > 0}), 200

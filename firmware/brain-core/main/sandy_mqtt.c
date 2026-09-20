@@ -97,8 +97,7 @@ static const struct { const char *name; sandy_mood_t mood; } MOOD_MAP[] = {
 static void _handle_mood(const char *val) {
     for (size_t i = 0; i < sizeof(MOOD_MAP)/sizeof(MOOD_MAP[0]); i++) {
         if (!strcmp(val, MOOD_MAP[i].name)) {
-            g_current_mood = MOOD_MAP[i].mood;
-            face_set_mood(MOOD_MAP[i].mood);
+            face_set_mood(MOOD_MAP[i].mood);   // also sets g_current_mood
             return;
         }
     }
@@ -149,10 +148,7 @@ static void _handle_gesture(const char *val) {
         const gesture_scene_t *s = &GESTURE_MAP[i];
         if (strcmp(val, s->name)) continue;
 
-        if (s->mood < MOOD_COUNT) {
-            g_current_mood = s->mood;
-            face_set_mood(s->mood);
-        }
+        if (s->mood < MOOD_COUNT) face_set_mood(s->mood);   // sets g_current_mood too
         if (s->melody < MELODY_COUNT) buzzer_play(s->melody);
         // الإضاءة آخر إشي، و`led_set_effect` بترجّع false وقت الجلسة الحيّة —
         // مؤشّر الخصوصية بيغلب. يعني «ارقصي» وهي بتسمعك بترقص وبتغنّي، وبيضلّ
@@ -621,8 +617,27 @@ static const char *OUTPUTS_JSON =
       "{\"id\":\"screen_size\",\"kind\":\"pwm\"}"
     "]";
 
+// Guards the heartbeat buffer below. Created in mqtt_sandy_start, before the
+// client or the status task exist: creating it lazily on first use let the
+// status task and a connect event both see NULL and each make their own.
+static SemaphoreHandle_t s_status_lock;
+
+// SSIDs are arbitrary bytes. One with a quote or a backslash in it made the
+// whole heartbeat invalid JSON, and the backend then dropped every field of it.
+// Worst case doubles 32 bytes, which the 896-byte buffer below still holds.
+static void json_escape(const char *in, char *out, size_t cap) {
+    size_t k = 0;
+    for (; in && *in && k + 2 < cap; in++) {
+        unsigned char c = (unsigned char)*in;
+        if (c < 0x20) continue;                 // control bytes: drop, don't escape
+        if (c == '"' || c == '\\') out[k++] = '\\';
+        out[k++] = (char)c;
+    }
+    out[k] = '\0';
+}
+
 void mqtt_publish_status(void) {
-    if (!s_client) return;
+    if (!s_client || !s_status_lock) return;
     // static, not on the stack.
     //
     // This buffer grew from 256 to 896 bytes when the heartbeat started carrying
@@ -633,14 +648,14 @@ void mqtt_publish_status(void) {
     // days.
     //
     // A static buffer costs no stack at all. Two tasks can reach this — the
-    // status timer and the MQTT event handler on connect — so the mutex below is
+    // status timer and the MQTT event handler on connect — so s_status_lock is
     // what makes sharing it safe. Without it, a connect landing mid-publish
     // would interleave two JSON documents into one and the backend would parse
     // neither.
     static char buf[896];
-    static SemaphoreHandle_t buf_lock;
-    if (!buf_lock) buf_lock = xSemaphoreCreateMutex();
-    if (buf_lock && xSemaphoreTake(buf_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
+    if (xSemaphoreTake(s_status_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
+    static char ssid[2 * 32 + 1];   // under the lock, like buf
+    json_escape(wifi_sandy_ssid(), ssid, sizeof(ssid));
     // mic_l / mic_r are live input levels, 0..100. They are in the heartbeat and
     // not on a topic of their own so a control screen gets meters by reading the
     // state it already polls — speak, watch which one moves, and you know which
@@ -672,10 +687,10 @@ void mqtt_publish_status(void) {
         mic_is_muted(MIC_LEFT)  ? "true" : "false",
         mic_is_muted(MIC_RIGHT) ? "true" : "false",
         spk_get_volume(), (int)ns_get_level(), wifi_sandy_rssi(),
-        wifi_sandy_ip(), wifi_sandy_ssid(),
+        wifi_sandy_ip(), ssid,
         SANDY_FW_VERSION, OUTPUTS_JSON);
     esp_mqtt_client_publish(s_client, s_topic_status, buf, 0, 0, 0);
-    if (buf_lock) xSemaphoreGive(buf_lock);
+    xSemaphoreGive(s_status_lock);
 }
 
 // Publish to the room node, which lives on this robot's own topic tree.
@@ -843,13 +858,22 @@ esp_err_t mqtt_sandy_start(void) {
         .network = { .reconnect_timeout_ms = MQTT_RECONNECT_MS },
     };
 
+    s_status_lock = xSemaphoreCreateMutex();
+    if (!s_status_lock) return ESP_ERR_NO_MEM;
+
     s_client = esp_mqtt_client_init(&s_cfg);
     if (!s_client) return ESP_FAIL;
 
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, _handler, NULL);
     esp_mqtt_client_start(s_client);
 
-    xTaskCreate(_status_task, "mqtt_status", 3072, NULL, 4, NULL);
+    // Stack in PSRAM: this task only formats and publishes (no flash access,
+    // which a PSRAM stack must never do), and 3 KB of internal RAM held for a
+    // five-second heartbeat is 3 KB the voice session's TLS cannot have.
+    if (xTaskCreateWithCaps(_status_task, "mqtt_status", 3072, NULL, 4, NULL,
+                            MALLOC_CAP_SPIRAM) != pdPASS) {
+        xTaskCreate(_status_task, "mqtt_status", 3072, NULL, 4, NULL);
+    }
     ESP_LOGI(TAG, "started → %s", MQTT_BROKER_URI);
     return ESP_OK;
 }

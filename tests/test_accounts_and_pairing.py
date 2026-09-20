@@ -91,7 +91,8 @@ def test_a_voice_session_belongs_to_whoever_is_on_it():
         "exactly how two copies of one fact drift")
 
     session = _read("cloud/app/api/voice_ws/session.py")
-    for call in ("_build_system_instruction, _who",
+    for call in ("_build_cached_instruction, _who",
+                 "load_recent_turns, _who",
                  "get_voice_identity(), get_voice_channel()",
                  "_verify_owner, recent.snapshot(), get_voice_identity()"):
         assert call in session, (

@@ -42,8 +42,9 @@ def _verify_owner(pcm: bytes, user_id: str = "") -> bool:
     try:
         from app.api.voice_ws.memory import set_voice_identity
         from app.features import speaker_id
-        if user_id:
-            set_voice_identity(user_id)
+        # Always, even when empty — a pool thread keeps its context between
+        # jobs, and an inherited identity compares against someone else's print.
+        set_voice_identity(user_id)
         chat_id = _stm_chat_id()
         if not chat_id or not speaker_id.has_profile(chat_id):
             logger.info("[voice_ws] no voiceprint enrolled — allowing sensitive command")

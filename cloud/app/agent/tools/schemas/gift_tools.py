@@ -3,7 +3,7 @@
 Sandy تولّد هدية رقمية مخصصة (بيت شعر، رسالة تحفيزية، اقتباس، أو ابتسامة)
 بناءً على mood + history + كلمات مفتاحية.
 
-تستخدم Gemini Flash للتوليد (رخيص) — fallback إلى Azure إذا فشل.
+التوليد عبر Gemini (رخيص)؛ لو فشل بنرجع لقالب جاهز من _FALLBACK_GIFTS.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ _GIFT_PROMPTS = {
 
 
 def _generate_with_llm(gift_type: str, context: str) -> str | None:
-    """يحاول التوليد عبر Azure GPT-4o-mini، None إذا فشل."""
+    """يحاول التوليد عبر Gemini، None إذا فشل."""
     prompt = _GIFT_PROMPTS.get(gift_type)
     if not prompt:
         return None
@@ -108,12 +108,12 @@ def _generate_with_llm(gift_type: str, context: str) -> str | None:
         if out and len(out.strip()) > 5:
             return out.strip()
     except Exception as exc:
-        logger.debug(f"[gift] Azure intent failed: {exc}")
+        logger.debug(f"[gift] LLM generation failed: {exc}")
     return None
 
 
 def digital_gift(args: Dict[str, Any], ctx: "DispatchContext") -> Dict[str, Any]:
-    """يولّد هدية رقمية: شعر | اقتباس | تحفيز | ابتسامة."""
+    """يولّد هدية رقمية: شعر | اقتباس | تحفيز | ابتسامة | نكتة | لغز."""
     gift_type = str(args.get("type") or "smile").lower()
     context = str(args.get("context") or "").strip()
 
@@ -141,13 +141,8 @@ GIFT_TOOLS = [
     {
         "name": "digital_gift",
         "description": (
-            "ولّدي هدية للمستخدم. **يجب** تحديد النوع المناسب: "
-            "poem=شعر (طلب شعر/قصيدة/أبيات)، "
-            "quote=اقتباس (حكمة/مقولة)، "
-            "motivation=تحفيز (طاقة إيجابية/تشجيع)، "
-            "smile=ابتسامة (شي بسيط يفرح)، "
-            "joke=نكتة (نكتة/ضحكة)، "
-            "riddle=لغز (لغز/تحدي/خمّن)."
+            "هدية للمستخدم حسب النوع: poem=شعر/قصيدة، quote=حكمة/مقولة، "
+            "motivation=تشجيع، smile=شي بسيط يفرح، joke=نكتة، riddle=لغز/خمّن."
         ),
         "parameters": {
             "type": "object",
@@ -155,7 +150,6 @@ GIFT_TOOLS = [
                 "type": {
                     "type": "string",
                     "enum": ["poem", "quote", "motivation", "smile", "joke", "riddle"],
-                    "description": "نوع الهدية — مطلوب اختيار النوع الصحيح حسب طلب المستخدم",
                 },
                 "context": {"type": "string", "description": "سياق اختياري (مزاج، حدث)"},
             },

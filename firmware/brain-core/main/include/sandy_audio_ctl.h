@@ -125,9 +125,7 @@ typedef enum {
     SPK_SOUND_COUNT
 } sandy_spk_sound_t;
 
-// Play one. Blocks for its duration on the caller's task, so call it from a
-// command handler and not from anything real-time.
+// Play one. Queues the tones into the speaker stream and returns at once (a tone
+// that does not fit in the stream is dropped, never waited for), so it is safe
+// from the MQTT handler.
 void     spk_play(sandy_spk_sound_t sound);
-
-// Kept for the existing call sites: the plain beep.
-void     spk_test_tone(void);

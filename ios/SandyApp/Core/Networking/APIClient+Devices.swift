@@ -180,13 +180,6 @@ extension APIClient {
                        body: ["image_base64": jpegData.base64EncodedString()])
     }
 
-    // DELETE /api/account — حذف نهائي. شرط إلزامي بمتجر أبل، ومطلوب أخلاقيًا:
-    // الحساب فيه بصمة صوت ويوميات وصور ومصاريف.
-    // POST /api/account/reset — يفضّي الحساب وبيخلّيه.
-    //
-    // منفصل عن الحذف لأنّ «بدّي أبدأ من جديد» و«بدّي أمشي» مش نفس الطلب:
-    // اللي بدّه يبدأ من جديد بدّه يضلّ يملك **روبوته**. لو خلّيناه يحذف حسابه
-    // عشان يمسح محادثة، بيخسر الجهاز معها.
     // GET /api/nodes/<id>/snapshot/live → آخر إطار من البثّ البعيد.
     //
     // نفس نقطة سحب الصورة العادية — الكاميرا بترفع الإطار بمعرّف ثابت `live`،
@@ -199,12 +192,19 @@ extension APIClient {
         return r
     }
 
+    // POST /api/account/reset — يفضّي الحساب وبيخلّيه.
+    //
+    // منفصل عن الحذف لأنّ «بدّي أبدأ من جديد» و«بدّي أمشي» مش نفس الطلب:
+    // اللي بدّه يبدأ من جديد بدّه يضلّ يملك **روبوته**. لو خلّيناه يحذف حسابه
+    // عشان يمسح محادثة، بيخسر الجهاز معها.
     func resetAccountData() async throws {
         struct Reply: Decodable { let ok: Bool? }
         let _: Reply = try await fetch("/api/account/reset", method: "POST",
                                        body: ["confirm": "RESET"])
     }
 
+    // DELETE /api/account — حذف نهائي. شرط إلزامي بمتجر أبل، ومطلوب أخلاقيًا:
+    // الحساب فيه بصمة صوت ويوميات وصور ومصاريف.
     func deleteAccount() async throws {
         struct Reply: Decodable { let ok: Bool? }
         let _: Reply = try await fetch("/api/account", method: "DELETE",

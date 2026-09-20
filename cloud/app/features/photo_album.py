@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 _META = "sandy_photos"
 _FILES_COLLECTION = "sandy_photo_files"
+# How many recent photos a text search or the album counts look through.
+_SEARCH_WINDOW = 500
 
 _gridfs = None
 
@@ -186,11 +188,14 @@ def find_photos(
     mongo_filter: Dict[str, Any] = {"chat_id": cid}
     if tag:
         mongo_filter["tags"] = tag.strip()
+    # A text query is matched here in Python, so it needs a window of recent
+    # photos to search; without one the database can stop at `limit` itself.
+    cap = _SEARCH_WINDOW if query and query.strip() else max(1, min(limit, _SEARCH_WINDOW))
     try:
         # السقف بنفس السلسلة مش ع متغيّر بعدين: بيقرا أوضح، وفحص «كل قراءة
         # قائمة إلها سقف» بيمشي ع التعبير نفسه فما بيشوف سقف بمتغيّر تاني.
         docs = list(
-            get_db()[_META].find(mongo_filter).sort("created_at", -1).limit(500)
+            get_db()[_META].find(mongo_filter).sort("created_at", -1).limit(cap)
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("[photo_album] find failed: %s", e)
@@ -198,6 +203,30 @@ def find_photos(
     if query and query.strip():
         docs = [d for d in docs if _matches(d, query)]
     return docs[:limit]
+
+
+def tag_counts(chat_id: Any) -> Dict[str, int]:
+    """How many of the user's recent photos carry each tag, counted in the
+    database — the albums screen used to pull every photo document to do this."""
+    if not is_available():
+        return {}
+    try:
+        rows = get_db()[_META].aggregate([
+            {"$match": {"chat_id": str(chat_id)}},
+            {"$sort": {"created_at": -1}},
+            {"$limit": _SEARCH_WINDOW},
+            {"$unwind": "$tags"},
+            {"$group": {"_id": "$tags", "n": {"$sum": 1}}},
+        ])
+        counts: Dict[str, int] = {}
+        for r in rows:
+            tag = str(r.get("_id") or "").strip()
+            if tag:
+                counts[tag] = counts.get(tag, 0) + int(r.get("n") or 0)
+        return counts
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[photo_album] tag count failed: %s", e)
+        return {}
 
 
 def get_photo_bytes(chat_id: Any, query: str) -> Optional[Tuple[bytes, Dict[str, Any]]]:

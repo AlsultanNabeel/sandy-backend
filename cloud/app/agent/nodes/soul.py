@@ -214,10 +214,13 @@ def soul_node(state: SandyState) -> SandyState:
             for k, fut in _s1_futs.items():
                 _s1[k] = _collect(k, fut)
 
-        # Chat-only context (dreams/anniv/future) is fetched here — only for chat
-        # tools — since routing has run and fc_name is now known. Avoids wasting
-        # Mongo round-trips on task/calendar messages.
-        if fc_name in _CHAT_TOOLS:
+        # Chat-only context (dreams/anniv/future/goals). Normally started during
+        # the prefetch, overlapping the router (see `_read_chat_context`); the
+        # branch below is the fallback when no prefetch ran.
+        _pf = prefetch or {}
+        if fc_name in _CHAT_TOOLS and "__chat_ctx" in _pf:
+            _s1.update(_collect("chat_ctx", _pf["__chat_ctx"]) or {})
+        elif fc_name in _CHAT_TOOLS:
             _get_dreams_ctx = _get_anniv_ctx = _get_future_ctx = None
             try:
                 from app.agent.dreams_engine import get_dreams_context as _get_dreams_ctx
@@ -340,10 +343,15 @@ def soul_node(state: SandyState) -> SandyState:
         if _s1.get("directives"):
             snippet = _join(snippet, _s1["directives"])
 
+        ambient = _collect("ambient", _pf["__ambient"]) if "__ambient" in _pf else None
+
         # حالة المستخدم عبر الجلسات
         try:
-            from app.agent.session_state import get_session_state
-            ss = get_session_state(chat_id, mongo_db)
+            if ambient is not None:
+                ss = ambient.get("session")
+            else:
+                from app.agent.session_state import get_session_state
+                ss = get_session_state(chat_id, mongo_db)
             if ss:
                 ss_parts = []
                 if ss.get("last_mood") and ss["last_mood"] not in ("neutral",):
@@ -359,8 +367,11 @@ def soul_node(state: SandyState) -> SandyState:
 
         # وضع العصف الذهني نشط: سلوك شريكة التفكير طول الجلسة
         try:
-            from app.features.brainstorm import get_active
-            active_bs = get_active(chat_id)
+            if ambient is not None:
+                active_bs = ambient.get("brainstorm")
+            else:
+                from app.features.brainstorm import get_active
+                active_bs = get_active(chat_id)
             if active_bs:
                 snippet = _join(
                     snippet,
@@ -427,17 +438,71 @@ def soul_node(state: SandyState) -> SandyState:
         })
 
 
+def _read_ambient(chat_id: str, user_id: str, mongo_db) -> dict:
+    """The small per-turn reads that depend only on who is talking.
+
+    Session state and the active brainstorm are read by `soul_node`, the persona
+    block by the chat reply. Each was its own serial round trip on the request
+    thread *after* routing; here they run during it. One job rather than three so
+    a turn's fan-out still fits the pool. A read that fails is left out, and the
+    reader treats a missing key the way it treated the failure before: no block.
+    """
+    out: dict = {}
+    try:
+        from app.agent.session_state import get_session_state
+        out["session"] = get_session_state(chat_id, mongo_db)
+    except Exception:  # noqa: BLE001 — context is never worth a failed reply
+        logger.debug("ignoring non-critical error", exc_info=True)
+    try:
+        from app.features.brainstorm import get_active
+        out["brainstorm"] = get_active(chat_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("ignoring non-critical error", exc_info=True)
+    try:
+        from app.agent.context_builder import build_effective_persona
+        out["persona"] = build_effective_persona(user_id or chat_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("ignoring non-critical error", exc_info=True)
+    return out
+
+
+def _read_chat_context() -> dict:
+    """Dreams, anniversaries, due future messages and stale goals.
+
+    Only chat replies use them, and routing has not decided yet when this
+    starts — so on a tool turn these four small reads are spent for nothing.
+    That is the trade: on a chat turn, the commonest kind, they used to be a
+    whole round trip after routing on the way to the first token, and now they
+    are done before the router answers. All four are read-only; future messages
+    are only marked delivered once a reply exists (`run_graph`).
+    """
+    out: dict = {}
+    jobs = (
+        ("dreams", "app.agent.dreams_engine", "get_dreams_context"),
+        ("anniv", "app.agent.shared_history", "get_anniversary_context"),
+        ("future", "app.agent.future_messages", "get_future_messages_context"),
+        ("goals", "app.agent.proactive_goals", "get_goals_followup_context"),
+    )
+    import importlib
+    for key, module, fn in jobs:
+        try:
+            out[key] = getattr(importlib.import_module(module), fn)()
+        except Exception:  # noqa: BLE001 — one missing block must not end the rest
+            logger.debug("ignoring non-critical error", exc_info=True)
+    return out
+
+
 def start_soul_prefetch(chat_id: str, user_id: str, message: str,
                         conversation_id: str = "") -> dict:
-    """Eagerly starts the always-needed soul MongoDB queries before maestro runs.
+    """Start every read the turn will need before routing runs.
 
-    Only the queries needed for EVERY message (comfort + directives) are
-    prefetched here, since routing has not run yet and chat-only context
-    (dreams/anniv/future) would be wasted on task/calendar messages.
-    soul_node fetches those conditionally once fc_name is known.
+    Keys without a ``__`` prefix (comfort, directives) are awaited in soul
+    stage 1; ``__`` keys are collected where they are used — the router
+    (``__devices``), soul stage 2 (``__emo``, ``__semantic``), soul_node
+    (``__ambient``, ``__chat_ctx``) and the chat reply (``__ambient`` persona).
 
-    Returns a dict of Future objects. Attach to state['soul_prefetch'] so
-    soul_node can collect results without waiting a second time.
+    Returns a dict of Future objects. Attach to state['soul_prefetch'] so the
+    readers can collect results without waiting a second time.
     """
     mongo_db = _get_mongo_db()
     futures: dict = {}
@@ -462,6 +527,17 @@ def start_soul_prefetch(chat_id: str, user_id: str, message: str,
     # Started here it overlaps the router; a turn whose intensity turns out not
     # to need it simply ignores one cheap read. Read-only, so safe to speculate.
     futures["__emo"] = _submit(get_emotional_context)
+
+    # The router's device list, the ambient reads and the chat-only context:
+    # none depends on what the router decides, and each used to be a serial
+    # round trip on the request thread. See `_read_ambient` / `_read_chat_context`.
+    try:
+        from app.agent.tools.schemas.device_tools import build_device_catalog
+        futures["__devices"] = _submit(build_device_catalog)
+    except Exception:
+        logger.debug("ignoring non-critical error", exc_info=True)
+    futures["__ambient"] = _submit(_read_ambient, chat_id, user_id, mongo_db)
+    futures["__chat_ctx"] = _submit(_read_chat_context)
 
     # Semantic memory search only needs the message — start it here so it overlaps
     # the router FC call (~4s) instead of running serially after it in stage2.

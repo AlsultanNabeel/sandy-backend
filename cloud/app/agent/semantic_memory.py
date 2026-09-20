@@ -335,6 +335,7 @@ def _vector_search(
     col, query: str, chat_id: str, n_results: int, extra_project: Dict,
     query_vector: Optional[List[float]] = None,
     post_match: Optional[Dict[str, Any]] = None,
+    embedded: bool = False,
 ) -> Optional[List[Dict]]:
     """$vectorSearch filtered by chat_id, or None if it can't run.
 
@@ -344,8 +345,12 @@ def _vector_search(
     `post_match` narrows further on fields the Atlas index does not declare as
     filters (adding one there is an index rebuild). It runs after the search, so
     the search over-fetches to leave enough behind.
+
+    `embedded=True` says the caller already tried to embed this query: a
+    missing `query_vector` then means the embedding *failed*, and asking the
+    endpoint again for the same string would only add another timeout.
     """
-    vec = query_vector if query_vector else _embed(query)
+    vec = query_vector if (query_vector or embedded) else _embed(query)
     if not vec:
         return None
     try:
@@ -381,8 +386,12 @@ def _vector_search(
 
 
 def search_relevant_facts(query: str, n_results: int = 5,
-        query_vector: Optional[List[float]] = None) -> List[str]:
-    """Semantic search over the current user's facts."""
+        query_vector: Optional[List[float]] = None,
+        embedded: bool = False) -> List[str]:
+    """Semantic search over the current user's facts.
+
+    `embedded` — see `_vector_search`.
+    """
     if not _can_read_memory():
         return []
     coll = _facts_coll()
@@ -390,7 +399,11 @@ def search_relevant_facts(query: str, n_results: int = 5,
         return []
     chat_id = coll.tenant
     try:
-        if coll.count_documents({}) == 0:
+        # The emptiness check exists to spare an embedding call for a user
+        # with no facts. Once the query is embedded it saves nothing — an empty
+        # collection answers the search with nothing just as well — and it was
+        # one more serial round trip on every turn.
+        if not (query_vector or embedded) and coll.count_documents({}) == 0:
             return []
 
         # $vectorSearch must be pipeline stage one (Atlas requirement), so it
@@ -398,7 +411,7 @@ def search_relevant_facts(query: str, n_results: int = 5,
         # the wrapper's auto-$match can't be used here.
         results = _vector_search(
             get_db()["sandy_facts"], query, chat_id, n_results,
-            {"usage_count": 1, "created_at": 1}, query_vector,
+            {"usage_count": 1, "created_at": 1}, query_vector, embedded=embedded,
         )
 
         if results is None:
@@ -433,7 +446,8 @@ def search_relevant_facts(query: str, n_results: int = 5,
 
 
 def search_relevant_summaries(query: str, thread_id: str, n_results: int = 3,
-                              query_vector: Optional[List[float]] = None) -> List[str]:
+                              query_vector: Optional[List[float]] = None,
+                              embedded: bool = False) -> List[str]:
     """Semantic search over this user's summaries of one conversation thread.
 
     The tenant comes from the context (the summaries' ``chat_id`` is the user);
@@ -452,7 +466,7 @@ def search_relevant_summaries(query: str, thread_id: str, n_results: int = 3,
         # `score` and what it is handed, and summaries live in `summary`.
         results = _vector_search(get_db()["sandy_memories"], query, coll.tenant,
                                  n_results, {"summary": 1}, query_vector,
-                                 post_match=match)
+                                 post_match=match, embedded=embedded)
         if results is None:
             results = list(coll.find(match, {"summary": 1})
                            .sort("created_at", -1).limit(n_results))
@@ -503,8 +517,10 @@ def search_memory_for_turn(
     vec = _embed(query) if query else None
     return {
         "summaries": search_relevant_summaries(
-            query, summary_thread, n_results=n_summaries, query_vector=vec),
-        "facts": search_relevant_facts(query, n_results=n_facts, query_vector=vec),
+            query, summary_thread, n_results=n_summaries, query_vector=vec,
+            embedded=True),
+        "facts": search_relevant_facts(query, n_results=n_facts, query_vector=vec,
+                                       embedded=True),
     }
 
 

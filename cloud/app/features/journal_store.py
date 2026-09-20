@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from app.utils.tenant_db import scoped
+from app.utils.text_query import contains
 from app.utils.time import USER_TZ
 from app.db import configure, get_db
 import logging
@@ -85,16 +86,16 @@ def search_entries(query: str, limit: int = 20) -> List[Dict[str, Any]]:
     coll = _coll()
     if coll is None:
         return []
-    ql = str(query or "").strip().lower()
-    if not ql:
+    q = str(query or "").strip()
+    if not q:
         return []
-    out = []
-    for doc in coll.find({}).sort("at", -1).limit(2000):
-        if ql in (doc.get("text", "") or "").lower():
-            out.append({"id": doc["_id"], "date": doc["date"], "text": doc.get("text", "")})
-            if len(out) >= limit:
-                break
-    return out
+    # Matched by the database (escaped, case-insensitive — see text_query), so
+    # only hits cross the network; this used to read the newest 2000 entries
+    # and compare them here.
+    return [
+        {"id": doc["_id"], "date": doc["date"], "text": doc.get("text", "")}
+        for doc in coll.find(contains("text", q)).sort("at", -1).limit(limit)
+    ]
 
 
 def delete_entry(entry_id: str) -> bool:

@@ -42,20 +42,23 @@ from app.api.voice_ws.speaker import (
     _verify_owner,
 )
 from app.api.voice_ws.memory import (
+    _load_stm_context,
     _save_voice_turn,
     _stm_chat_id,
     get_voice_channel,
     get_voice_identity,
+    load_recent_turns,
     resolve_speaker_label,
     set_voice_speaker_label,
     set_voice_channel,
     set_voice_identity,
 )
 from app.api.voice_ws.tools import (
+    _build_cached_instruction,
     _build_live_tools,
-    _build_system_instruction,
     _dispatch_tool,
     _make_dispatcher,
+    with_recent_turns,
 )
 
 
@@ -665,12 +668,19 @@ async def _live_session(ws, remote: str) -> None:
         # قراءة حاجبة — نداؤها هون مباشرةً كان بينقل التعثّر من أول جملة لبداية
         # الجلسة، مش بيشيله، والقارئ بيكون عم يخزّن صوت وقتها. بننادي `_resolve`
         # بالمجمّع وبنحطّ الناتج بسياق الحلقة، فالقيمة موجودة قبل أي جملة.
+        #
+        # **التلات قراءات مع بعض، مش ورا بعض.** الاسم، والتعليمات (من الكاش
+        # غالبًا)، وآخر المحادثات مستقلّين — تسلسلهم كان بيجمع وقتهم قبل ما
+        # ينطلب چيميناي، والميكروفون شغّال. آخر المحادثات برّا الكاش عن قصد
+        # (`with_recent_turns`)، فهي قراءة لازمة بكل جلسة، وهون ما بتكلّف إشي.
         _loop = asyncio.get_event_loop()
-        set_voice_speaker_label(
-            await _loop.run_in_executor(None, resolve_speaker_label, _who))
-        system_instruction = await _loop.run_in_executor(
-            None, _build_system_instruction, _who
+        _label, _base, _recent = await asyncio.gather(
+            _loop.run_in_executor(None, resolve_speaker_label, _who),
+            _loop.run_in_executor(None, _build_cached_instruction, _who),
+            _loop.run_in_executor(None, load_recent_turns, _who),
         )
+        set_voice_speaker_label(_label)
+        system_instruction = with_recent_turns(_base, _load_stm_context(_recent))
         live_tools = _build_live_tools(types)
 
         gate_on = _speaker_gate_enabled()

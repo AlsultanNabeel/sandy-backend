@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.tenant_db import scoped
 from app.utils.text_query import contains, equals
@@ -231,48 +231,36 @@ def list_books(status: str = "") -> List[Dict[str, Any]]:
     q: Dict[str, Any] = {}
     if status in {"reading", "done", "wishlist"}:
         q["status"] = status
-    out = []
-    for d in coll.find(q).sort("created_at", -1).limit(100):
-        out.append(
-            {
-                "id": d["_id"],
-                "title": d.get("title", ""),
-                "author": d.get("author", ""),
-                "category": d.get("category", ""),
-                "cover_url": d.get("cover_url", ""),
-                "status": d.get("status", "reading"),
-                "total_pages": d.get("total_pages", 0),
-                "current_page": d.get("current_page", 0),
-                "rating": d.get("rating", 0),
-                "fmt": d.get("fmt", ""),
-                "notes_count": len(d.get("notes", [])),
-                "quotes_count": len(d.get("quotes", [])),
-            }
-        )
-    return out
-
-
-def get_book(title: str) -> Optional[Dict[str, Any]]:
-    """تفاصيل كتاب كاملة مع الملاحظات والاقتباسات."""
-    if _books() is None:
-        return None
-    d = _find_book(title)
-    if not d:
-        return None
-    return {
-        "id": d["_id"],
-        "title": d.get("title", ""),
-        "author": d.get("author", ""),
-        "category": d.get("category", ""),
-        "cover_url": d.get("cover_url", ""),
-        "status": d.get("status", "reading"),
-        "total_pages": d.get("total_pages", 0),
-        "current_page": d.get("current_page", 0),
-        "rating": d.get("rating", 0),
-        "fmt": d.get("fmt", ""),
-        "notes": d.get("notes", []),
-        "quotes": d.get("quotes", []),
-    }
+    # Counted in the database: the list only shows how many notes and quotes a
+    # book has, and a well-read book's arrays are the bulk of its document.
+    pipeline = [
+        {"$match": q},
+        {"$sort": {"created_at": -1}},
+        {"$limit": 100},
+        {"$project": {
+            "title": 1, "author": 1, "category": 1, "cover_url": 1, "status": 1,
+            "total_pages": 1, "current_page": 1, "rating": 1, "fmt": 1,
+            "notes_count": {"$size": {"$ifNull": ["$notes", []]}},
+            "quotes_count": {"$size": {"$ifNull": ["$quotes", []]}},
+        }},
+    ]
+    return [
+        {
+            "id": d["_id"],
+            "title": d.get("title", ""),
+            "author": d.get("author", ""),
+            "category": d.get("category", ""),
+            "cover_url": d.get("cover_url", ""),
+            "status": d.get("status", "reading"),
+            "total_pages": d.get("total_pages", 0),
+            "current_page": d.get("current_page", 0),
+            "rating": d.get("rating", 0),
+            "fmt": d.get("fmt", ""),
+            "notes_count": d.get("notes_count", 0),
+            "quotes_count": d.get("quotes_count", 0),
+        }
+        for d in coll.aggregate(pipeline)
+    ]
 
 
 # ─── الجلسات ─────────────────────────────────────────────────────────────────
@@ -422,30 +410,68 @@ def stop_session(end_page: Optional[int] = None) -> Dict[str, Any]:
     }
 
 
-def reading_stats(days: int = 30) -> Dict[str, Any]:
-    """{sessions, pages, minutes, pages_per_day, streak_days} عبر فترة."""
+# The streak looks back this far. A year of daily reading fits, and the window
+# also covers "since January 1st" for the yearly goal, so one read serves both.
+_STREAK_WINDOW_DAYS = 400
+
+# Only what the aggregates below read — not the whole session document.
+_SESSION_FIELDS = {"start_page": 1, "end_page": 1, "started_at": 1,
+                   "ended_at": 1, "paused_total_sec": 1}
+
+
+def _done_sessions(since: datetime) -> List[Dict[str, Any]]:
+    """Finished sessions that ended at or after ``since``."""
     sess = _sess()
-    empty = {"sessions": 0, "pages": 0, "minutes": 0, "pages_per_day": 0, "streak_days": 0}
     if sess is None:
+        return []
+    # بلا .limit() بالقصد. هون منجمع مش منعرض: سقف ع مجموع بيرجّع رقم أصغر من
+    # الحقيقة وبيبيّن صح، وهاد أسوأ من قراءة بطيئة. المدى محدود بالتاريخ.
+    return list(sess.find({"state": "done", "ended_at": {"$gte": since}}, _SESSION_FIELDS))
+
+
+def _year_start() -> datetime:
+    from app.utils.time import USER_TZ
+
+    now_local = _now().astimezone(USER_TZ)
+    return datetime(now_local.year, 1, 1, tzinfo=USER_TZ).astimezone(timezone.utc)
+
+
+def _session_pages(s: Dict[str, Any]) -> int:
+    return max(0, int(s.get("end_page", 0) or 0) - int(s.get("start_page", 0) or 0))
+
+
+def reading_stats(days: int = 30,
+                  rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """{sessions, pages, minutes, pages_per_day, streak_days} عبر فترة.
+
+    ``rows`` are pre-fetched finished sessions covering at least the streak
+    window (see :func:`reading_overview`); omitted, they are read here — one
+    query for both the period totals and the streak.
+    """
+    empty = {"sessions": 0, "pages": 0, "minutes": 0, "pages_per_day": 0, "streak_days": 0}
+    if _sess() is None:
         return empty
     from datetime import timedelta
 
     from app.utils.time import USER_TZ
 
-    since = _now() - timedelta(days=max(1, days))
+    now = _now()
+    since = now - timedelta(days=max(1, days))
+    if rows is None:
+        rows = _done_sessions(min(since, now - timedelta(days=_STREAK_WINDOW_DAYS)))
     sessions = pages = minutes = 0
     active_dates = set()
-    # بلا .limit() بالقصد. هون منجمع مش منعرض: سقف ع مجموع بيرجّع رقم أصغر
-    # من الحقيقة وبيبيّن صح، وهاد أسوأ من قراءة بطيئة. المدى محدود بالتاريخ
-    # (آخر `days` يوم) وبحساب واحد، فهو مقيّد أصلًا بالإشي اللي بيهم.
-    for s in sess.find({"state": "done", "ended_at": {"$gte": since}}):
-        sessions += 1
-        sp, ep = int(s.get("start_page", 0) or 0), int(s.get("end_page", 0) or 0)
-        pages += max(0, ep - sp)
+    all_dates = set()
+    for s in rows:
         st, en = _aware(s.get("started_at")), _aware(s.get("ended_at"))
         if en:
-            active_dates.add(en.astimezone(USER_TZ).date())
-        if st and en:
+            all_dates.add(en.astimezone(USER_TZ).date())
+        if not en or en < since:
+            continue
+        sessions += 1
+        pages += _session_pages(s)
+        active_dates.add(en.astimezone(USER_TZ).date())
+        if st:
             minutes += max(
                 0, int(((en - st).total_seconds() - int(s.get("paused_total_sec", 0) or 0)) / 60)
             )
@@ -454,30 +480,18 @@ def reading_stats(days: int = 30) -> Dict[str, Any]:
         "pages": pages,
         "minutes": minutes,
         "pages_per_day": round(pages / len(active_dates)) if active_dates else 0,
-        "streak_days": _reading_streak(),
+        "streak_days": _streak_from_days(all_dates),
     }
 
 
-def _reading_streak() -> int:
+def _streak_from_days(days_set: set) -> int:
     """عدد الأيام المتتالية (تنتهي اليوم أو أمس) اللي فيها جلسة قراءة منجزة."""
-    sess = _sess()
-    if sess is None:
+    if not days_set:
         return 0
     from datetime import timedelta
 
     from app.utils.time import USER_TZ
 
-    since = _now() - timedelta(days=400)
-    days_set = set()
-    # بلا سقف: عدّ أيام، وسقف بينقّص العدد بصمت. محدود بأربعمية يوم.
-    for s in sess.find(
-        {"state": "done", "ended_at": {"$gte": since}}, {"ended_at": 1}
-    ):
-        en = _aware(s.get("ended_at"))
-        if en:
-            days_set.add(en.astimezone(USER_TZ).date())
-    if not days_set:
-        return 0
     today = _now().astimezone(USER_TZ).date()
     if today not in days_set and (today - timedelta(days=1)) not in days_set:
         return 0
@@ -487,6 +501,22 @@ def _reading_streak() -> int:
         streak += 1
         cur -= timedelta(days=1)
     return streak
+
+
+def reading_overview(days: int = 30) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """``(reading_stats(days), goal_progress())`` from a single sessions read.
+
+    The books screen asked for both, and between them they scanned the
+    sessions collection three times (period, streak, year).
+    """
+    from datetime import timedelta
+
+    now = _now()
+    since = min(now - timedelta(days=max(1, days)),
+                now - timedelta(days=_STREAK_WINDOW_DAYS),
+                _year_start())
+    rows = _done_sessions(since)
+    return reading_stats(days, rows=rows), goal_progress(rows=rows)
 
 
 def set_reading_goal(books_year: Optional[int] = None,
@@ -513,26 +543,29 @@ def set_reading_goal(books_year: Optional[int] = None,
             "pages_year": int(goal.get("pages_year") or 0)}
 
 
-def goal_progress() -> Dict[str, Any]:
-    """تقدّم هدف السنة الحالية: كتب منجزة + صفحات مقروءة مقابل الهدف."""
+def goal_progress(rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """تقدّم هدف السنة الحالية: كتب منجزة + صفحات مقروءة مقابل الهدف.
+
+    ``rows``: pre-fetched finished sessions reaching back to January 1st at
+    least (see :func:`reading_overview`); omitted, they are read here.
+    """
     uid = current_user_id()
     books = _books()
     sess = _sess()
     meta = _meta()
     if uid is None or books is None or sess is None or meta is None:
         return {"books_year": 0, "pages_year": 0, "books_done": 0, "pages_read": 0}
-    from app.utils.time import USER_TZ
-
     goal = meta.find_one({"_id": f"goal:{uid}"}) or {}
-    now_local = _now().astimezone(USER_TZ)
-    year_start = datetime(now_local.year, 1, 1, tzinfo=USER_TZ).astimezone(timezone.utc)
+    year_start = _year_start()
     books_done = books.count_documents(
         {"status": "done", "finished_at": {"$gte": year_start}}
     )
-    pages_read = 0
-    # بلا سقف: مجموع صفحات السنة. محدود بالسنة.
-    for s in sess.find({"state": "done", "ended_at": {"$gte": year_start}}):
-        pages_read += max(0, int(s.get("end_page", 0) or 0) - int(s.get("start_page", 0) or 0))
+    if rows is None:
+        rows = _done_sessions(year_start)
+    pages_read = sum(
+        _session_pages(s) for s in rows
+        if (_aware(s.get("ended_at")) or year_start) >= year_start
+    )
     return {
         "books_year": int(goal.get("books_year", 0)),
         "pages_year": int(goal.get("pages_year", 0)),

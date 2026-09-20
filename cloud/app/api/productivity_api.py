@@ -56,9 +56,9 @@ def register_productivity_api(app, mongo_db=None):
     def api_list_reminders(claims):
         if _is_guest(claims):
             return jsonify({"items": _DEMO_REMINDERS, "demo": True}), 200
-        from app.features.reminders_store import list_sandy_reminders
+        from app.features.reminders_store import load_reminders
         with active_user_profile_context(build_user_profile(claims)):
-            items = list_sandy_reminders(max_results=50)
+            items = load_reminders(max_results=50)
         slim = [
             {
                 "id": r.get("id", ""),
@@ -173,27 +173,19 @@ def register_productivity_api(app, mongo_db=None):
     @require_tenant
     def api_update_task(task_id, claims):
         body = request.get_json(silent=True) or {}
-        from app.features.tasks_store import (
-            rename_task, complete_task, uncomplete_task,
-            replace_task_note, set_task_priority, set_task_due,
-        )
-        ok = True
+        from app.features.tasks_store import update_task
+
+        # One write for every field present; empty text = leave it unchanged.
         new_text = (body.get("text") or "").strip()
-        if new_text:
-            ok = rename_task(task_id, new_text, mongo_db=mongo_db) and ok
-        if "note" in body:
-            note = (body.get("note") or "").strip()
-            ok = replace_task_note(task_id, note, mongo_db=mongo_db) and ok
-        if "priority" in body:
-            priority = _clean_priority(body.get("priority"))
-            ok = set_task_priority(task_id, priority, mongo_db=mongo_db) and ok
-        if "due" in body:
-            ok = set_task_due(task_id, (body.get("due") or "").strip(), mongo_db=mongo_db) and ok
-        if "done" in body:
-            if body.get("done"):
-                ok = complete_task(task_id, mongo_db=mongo_db) and ok
-            else:
-                ok = uncomplete_task(task_id, mongo_db=mongo_db) and ok
+        ok = update_task(
+            task_id,
+            text=new_text or None,
+            notes=(body.get("note") or "") if "note" in body else None,
+            priority=_clean_priority(body.get("priority")) if "priority" in body else None,
+            due_iso=(body.get("due") or "").strip() if "due" in body else None,
+            done=bool(body.get("done")) if "done" in body else None,
+            mongo_db=mongo_db,
+        )
         return jsonify({"ok": bool(ok)}), (200 if ok else 400)
 
     @app.route("/api/tasks/<task_id>", methods=["DELETE"])

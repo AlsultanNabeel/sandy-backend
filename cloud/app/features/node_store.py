@@ -18,7 +18,7 @@ Collection: sandy_nodes (tenant-scoped via scoped())
   }
 
 Pure data: this module does not talk MQTT. The firmware reports heartbeat/caps
-through the ingest path, which calls set_node_status().
+over MQTT; `integrations/mqtt_ingest.py` hands each one to ingest_status().
 """
 
 from __future__ import annotations
@@ -505,7 +505,8 @@ def _output_namespace(output_id: Any) -> str:
     return head + sep if sep else ""
 
 
-def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]],
+                   current: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Replace only the namespaces this heartbeat speaks for.
 
     Two heartbeats arriving five seconds apart would otherwise take turns wiping
@@ -520,11 +521,15 @@ def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]]) -> List[Dict[st
 
     A heartbeat that declares nothing keeps everything. Silence is not a claim
     that the hardware is gone.
+
+    ``current`` is the node document when the caller already read it.
     """
     fresh = _clean_outputs(incoming)
     claimed = {_output_namespace(o.get("id")) for o in fresh}
 
-    existing = (get_node_any_tenant(node_id) or {}).get("outputs") or []
+    if current is None:
+        current = get_node_any_tenant(node_id) or {}
+    existing = current.get("outputs") or []
     kept = [
         o for o in existing
         if isinstance(o, dict) and _output_namespace(o.get("id")) not in claimed
@@ -532,15 +537,15 @@ def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]]) -> List[Dict[st
     return kept + fresh
 
 
-def _merge_telemetry(node_id: str, incoming: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_telemetry(current: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
     """Update the keys this heartbeat carries; leave the others alone.
 
     A camera heartbeat has no opinion about the microphone levels, and a brain
     heartbeat has none about the camera. Overwriting with silence is not a
-    correction — it is forgetting.
+    correction — it is forgetting. ``current`` is the stored node document.
     """
     fresh = _clean_telemetry(incoming)
-    existing = (get_node_any_tenant(node_id) or {}).get("telemetry") or {}
+    existing = current.get("telemetry") or {}
     if not isinstance(existing, dict):
         existing = {}
     return {**existing, **fresh}
@@ -572,34 +577,37 @@ def ingest_status(node_id: str, online: bool = True,
     if get_db() is None:
         return {"ok": False, "error": "no_store"}
     try:
-        update: Dict[str, Any] = {"online": bool(online), "last_seen": _now()}
-        if capabilities is not None:
-            update["capabilities"] = _clean_caps(capabilities)
-        if isinstance(outputs, list):
-            update["outputs"] = _merge_outputs(node_id, outputs)
-        if firmware_version:
-            update["firmware_version"] = str(firmware_version)[:32]
-        if telemetry is not None:
-            update["telemetry"] = _merge_telemetry(node_id, telemetry)
         node_id = (node_id or "").strip()
-        r = get_db()[_COLL].update_one({"node_id": node_id}, {"$set": update})
-        if r.matched_count == 0:
+        # Read once. Both merges and the provisioning below need this document,
+        # and each used to fetch it for itself — four round trips per heartbeat,
+        # per board, every few seconds.
+        current = get_node_any_tenant(node_id)
+        if current is None:
             # A heartbeat from a board nobody has paired yet. Normal: the robot
             # is powered on and shouting its node_id into the broker, waiting for
             # someone to type its code. Nothing to do until then.
             return {"ok": False}
+        update: Dict[str, Any] = {"online": bool(online), "last_seen": _now()}
+        if capabilities is not None:
+            update["capabilities"] = _clean_caps(capabilities)
+        if isinstance(outputs, list):
+            update["outputs"] = _merge_outputs(node_id, outputs, current)
+        if firmware_version:
+            update["firmware_version"] = str(firmware_version)[:32]
+        if telemetry is not None:
+            update["telemetry"] = _merge_telemetry(current, telemetry)
+        r = get_db()[_COLL].update_one({"node_id": node_id}, {"$set": update})
+        if r.matched_count == 0:
+            return {"ok": False}   # unpaired between the read and the write
 
         # Newly declared outputs become devices its owner can drive. Doing it
         # here — rather than only at pairing — is what makes a firmware upgrade
         # that adds a part show up in the app on its own, with nobody re-pairing
         # anything.
-        if update.get("outputs"):
-            doc = get_db()[_COLL].find_one({"node_id": node_id},
-                                           {"user_id": 1, "label": 1})
-            if doc and doc.get("user_id"):
-                from app.features.node_provision import provision_for_owner
-                provision_for_owner(node_id, str(doc["user_id"]),
-                                    update["outputs"], str(doc.get("label", "")))
+        if update.get("outputs") and current.get("user_id"):
+            from app.features.node_provision import provision_for_owner
+            provision_for_owner(node_id, str(current["user_id"]),
+                                update["outputs"], str(current.get("label", "")))
         return {"ok": True}
     except Exception as e:  # noqa: BLE001
         logger.debug("[NodeStore] ingest_status failed: %s", e)

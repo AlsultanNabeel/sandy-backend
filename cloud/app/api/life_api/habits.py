@@ -51,15 +51,6 @@ def _register_habits(app):
         r = uncheckin(habit_id)
         return jsonify(r), (200 if r.get("ok") else 404)
 
-    @app.route("/api/life/habits/detail", methods=["GET"])
-    @require_tenant
-    def api_habits_detail(claims):
-        habit_id = (request.args.get("id") or "").strip()
-        from app.features.habits_store import habit_history
-
-        r = habit_history(habit_id)
-        return jsonify(r), (200 if r.get("ok") else 404)
-
     @app.route("/api/life/habits/<habit_id>", methods=["PATCH"])
     @require_tenant
     def api_habits_rename(habit_id, claims):

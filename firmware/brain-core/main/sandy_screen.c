@@ -226,10 +226,6 @@ void screen_dismiss(void) {
     unlock();
 }
 
-bool screen_is_showing(void) {
-    return s_showing;
-}
-
 bool screen_image_begin(int total_chunks) {
     if (total_chunks < 1 || total_chunks > MAX_CHUNKS) {
         ESP_LOGW(TAG, "refused: %d chunks is outside 1..%d", total_chunks, MAX_CHUNKS);

@@ -116,17 +116,29 @@ def update_expense(expense_id: str, amount=None, note=None, category=None) -> bo
 
 
 def month_summary(days: int = 30) -> Dict[str, Any]:
-    """{total, count, by_category: {cat: total}, top: [(note, amount)]}"""
-    items = list_expenses(days=days, limit=1000)
-    total = sum(x["amount"] for x in items)
+    """{total, count, by_category: {cat: total}} over the last ``days`` days.
+
+    Summed in the database. It used to list up to a thousand expenses and add
+    them up here — a transfer of every row on each open of the tab, and past
+    the thousandth a total that was quietly short.
+    """
+    coll = _coll()
+    empty = {"total": 0, "count": 0, "by_category": {}}
+    if coll is None:
+        return empty
+    from datetime import timedelta
+
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    rows = list(coll.aggregate([
+        {"$match": {"at": {"$gte": since}}},
+        {"$group": {"_id": "$category", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]))
     by_cat: Dict[str, float] = {}
-    for x in items:
-        cat = x["category"] or "غير مصنف"
-        by_cat[cat] = by_cat.get(cat, 0) + x["amount"]
-    top = sorted(items, key=lambda x: -x["amount"])[:5]
+    for r in rows:
+        cat = r.get("_id") or "غير مصنف"
+        by_cat[cat] = by_cat.get(cat, 0) + float(r.get("total") or 0)
     return {
-        "total": round(total, 2),
-        "count": len(items),
+        "total": round(sum(by_cat.values()), 2),
+        "count": sum(int(r.get("count") or 0) for r in rows),
         "by_category": {k: round(v, 2) for k, v in sorted(by_cat.items(), key=lambda kv: -kv[1])},
-        "top": [(x["note"] or x["category"] or "؟", x["amount"]) for x in top],
     }

@@ -46,10 +46,6 @@ extension WeatherSnapshot {
     var tempDisplay: String { "\(tempC)°" }
 }
 
-// MARK: - APIClient (نداء الطقس)
-
-// MARK: - الستور
-
 // MARK: - الشاشة الكاملة
 
 /// شاشة الطقس الكاملة — لقطة كبيرة + تفاصيل (شعور/رطوبة/عظمى/صغرى/غروب) +

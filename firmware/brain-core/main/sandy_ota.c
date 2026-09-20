@@ -121,7 +121,7 @@ void ota_start_health_watch(void) {
 //   4. switches partitions and restarts. The health watch above rolls back an
 //      image that cannot get back on the network.
 // The signed message is "sandy-fw|<version>|<size>|<sha256>"
-// (features/firmware_store.signed_message). Never a downgrade.
+// (the string scripts/publish_firmware.py signs). Never a downgrade.
 
 extern const char fw_pubkey_pem_start[] asm("_binary_fw_pubkey_pem_start");
 extern const char fw_pubkey_pem_end[]   asm("_binary_fw_pubkey_pem_end");

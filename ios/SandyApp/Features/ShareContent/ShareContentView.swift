@@ -206,8 +206,6 @@ struct ShareContentView: View {
     }
 }
 
-// MARK: - الستور (مصدر الحقيقة للمحتوى المقترح والمحفوظ)
-
 // MARK: - النموذج
 
 /// بطاقة محتوى مقترح أو محفوظ. المقترح بلا `serverId` (لسا ما اتحفظ)؛ المحفوظ
@@ -222,5 +220,3 @@ struct SharedContentItem: Identifiable {
     var displayTitle: String { title.isEmpty ? url : title }
     var link: URL? { url.isEmpty ? nil : URL(string: url) }
 }
-
-// MARK: - نداءات الباك-إند

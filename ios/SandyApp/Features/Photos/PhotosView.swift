@@ -185,10 +185,38 @@ private struct PhotoThumb: View {
         }
         .task(id: photo.id) {
             if image != nil { return }
-            if let data = try? await api.photosFile(id: photo.id), let img = UIImage(data: data) {
-                image = img
+            let key = photo.id as NSString
+            if let cached = Self.cache.object(forKey: key) {
+                image = cached
+                return
             }
+            guard let data = try? await api.photosFile(id: photo.id),
+                  let full = UIImage(data: data) else { return }
+            // The grid shows ~104pt squares: decode a small copy off the main
+            // thread rather than drawing the full-size photo in every cell.
+            let thumb = await full.byPreparingThumbnail(ofSize: Self.thumbSize(for: full.size)) ?? full
+            Self.cache.setObject(thumb, forKey: key)
+            image = thumb
         }
+    }
+
+    /// LazyVGrid drops cells scrolled off screen; without this every scroll
+    /// back re-downloaded and re-decoded the same photos.
+    private static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 300
+        return c
+    }()
+
+    /// Shortest side of a decoded thumbnail, in pixels (3x of the grid cell).
+    private static let thumbPixels: CGFloat = 320
+
+    /// Aspect-preserving size whose shortest side is `thumbPixels`; never upscales.
+    private static func thumbSize(for size: CGSize) -> CGSize {
+        let shortest = min(size.width, size.height)
+        guard shortest > thumbPixels else { return size }
+        let scale = thumbPixels / shortest
+        return CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
     }
 }
 
@@ -299,7 +327,3 @@ struct PhotoAlbum: Identifiable {
     let count: Int
     var id: String { name }
 }
-
-// MARK: - الستور
-
-// MARK: - نداءات الباك-إند (الألبوم)

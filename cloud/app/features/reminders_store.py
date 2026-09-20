@@ -14,8 +14,9 @@ Return contracts mirror the old google_calendar functions so the executor
 handlers keep working with an import swap:
   add_reminder / update_reminder → {"success": bool, "error": ...}
 
-The frontend polls /api/reminders every minute to surface due reminders, so the
-backend stores and serves them only — there is no server-side push poller.
+The phone reads /api/reminders and schedules each one as a local notification
+(repeating ones from their RRULE), so the backend stores and serves them only —
+there is no server-side push poller.
 
 Tenant isolation is enforced by the scoped() layer: _coll() returns None when
 there's no Mongo handle or no active tenant, so each "coll is None" guard fails
@@ -40,6 +41,9 @@ _COLL = "sandy_reminders"
 # How far back the due-check looks. A dyno restart can skip a minute-cron tick
 # or two; anything older than this window is stale enough to drop silently.
 _LOOKBACK_MIN = 15
+
+# Every state a reminder can be in before it has fired for good.
+_UNSENT_STATES = ("pending", "sending", "failed")
 
 
 def init_reminders_store(mongo_db) -> None:
@@ -125,7 +129,12 @@ def _advance_recurring(coll, now: datetime) -> None:
     """
     cutoff = now - timedelta(minutes=_LOOKBACK_MIN)
     # Recurring reminders are few; this touches only the ones that are due.
-    for doc in coll.find({"recurrence": {"$nin": ["", None]},
+    # `send_state` leads the filter so the (user_id, send_state, remind_at)
+    # index serves it — without it every read walked the tenant's whole
+    # history of fired one-shot reminders, which is never pruned. A rule that
+    # has ended is marked "sent" below and must not be re-evaluated each read.
+    for doc in coll.find({"send_state": {"$in": list(_UNSENT_STATES)},
+                          "recurrence": {"$nin": ["", None]},
                           "remind_at": {"$lt": cutoff}}).limit(200):
         first = _as_aware_utc(doc.get("remind_at"))
         try:
@@ -151,7 +160,7 @@ def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
         docs = (
             coll.find(
                 {
-                    "send_state": {"$in": ["pending", "sending", "failed"]},
+                    "send_state": {"$in": list(_UNSENT_STATES)},
                     "remind_at": {"$gte": cutoff},
                 }
             )
@@ -162,11 +171,6 @@ def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"[RemindersStore] load failed: {e}")
         return []
-
-
-# Same data, the name the web API used against Google Calendar.
-def list_sandy_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
-    return load_reminders(max_results=max_results)
 
 
 # ─── Writes ───────────────────────────────────────────────────────────────────

@@ -134,12 +134,7 @@ def _handle_create(
                 mongo_db=mongo_db,
                 tasks_file=tasks_file,
             )
-            if isinstance(conflict_result, str):
-                conflict_alert = conflict_result
-            else:
-                conflict_alert = str(
-                    (conflict_result or {}).get("alert_text", "") or ""
-                )
+            conflict_alert = conflict_result.get("alert_text", "")
             if conflict_alert:
                 reply = f"{reply}\n\n⚠️ {conflict_alert}"
         else:

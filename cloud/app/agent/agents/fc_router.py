@@ -1,10 +1,11 @@
 """Function-calling routing for Sandy.
 
 One native function-calling pass: the model sees every tool as a real tool
-(name + description + JSON-Schema params) and either calls the right one(s) or
-replies in plain text (→ chat). No hand-written example prompt, no JSON-by-string
-parsing — the model picks from the real schemas, which is both faster (one call)
-and more accurate than the old 200-line disambiguation prompt.
+(name + description + JSON-Schema params) and calls the right one(s). Chat is
+a tool too (chat_respond), so the router never writes a reply of its own. No
+hand-written example prompt, no JSON-by-string parsing — the model picks from
+the real schemas, which is both faster (one call) and more accurate than the
+old 200-line disambiguation prompt.
 
 Mood + face are derived from the picked tool via a cheap table (no extra call);
 the actual reply persona still comes from the soul node downstream.
@@ -44,12 +45,12 @@ _FC_DEFAULT_CALL = {"name": "chat_respond", "args": {"type": "general"}}
 
 _ROUTER_SYSTEM = """\
 أنت طبقة فهم النية لمساعدة اسمها Sandy. مهمتك: اقرأ رسالة المستخدم واستدعِ الأداة \
-الصحيحة من الأدوات المتاحة، أو ردّ نصياً عادياً إذا كانت مجرد دردشة.
+الصحيحة من الأدوات المتاحة — ولو كانت مجرد دردشة استدعِ chat_respond.
 
 مبادئ:
 - رسالة فيها فعل + object واضح (اعملي/احذفي/غيّري/اعرضي/ذكّريني + مهمة/موعد/تذكير/صورة…) \
 → استدعِ الأداة المخصصة لها مباشرةً. لا تردّ نصياً في هذه الحالة.
-- تحية أو شكر أو سؤال عام أو كلام بلا طلب تنفيذي → استدعِ chat_respond (أو ردّ نصياً).
+- تحية أو شكر أو سؤال عام أو كلام بلا طلب تنفيذي → استدعِ chat_respond.
 - لا تستنتج من المحادثة القديمة أن المستخدم يريد إعادة طلب سابق — الرسالة الحالية حصراً.
 - إذا الرسالة الحالية وحدها فيها طلبان مستقلان أو أكثر → استدعِ أداة لكل طلب.
 - النفي يقلب المعنى: "ما/مش/بطّلي/الغي + تذكير/موعد" = حذف، وليس إنشاء.
@@ -65,7 +66,7 @@ ask_clarification هي الملاذ الأخير عند الغموض الكام�
 - بقية العمليات الخطيرة (حذف) إذا الهدف غير واضح صراحةً → request_confirmation بدل التنفيذ.
 - إذا في pending نشط ورد المستخدم قصير (تمام/لأ/رقم) → pending_confirm | pending_reject | pending_select.
 
-اختر الأداة من تعريفها الحقيقي. ردودك النصية (عند الدردشة) موجزة ودافئة."""
+اختر الأداة من تعريفها الحقيقي. لا تكتب ردّاً نصياً — الرد بينكتب بعدين."""
 
 
 def _build_native_tools(declarations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -194,14 +195,33 @@ def _build_user_prompt(state: SandyState) -> str:
     return "\n".join(parts)
 
 
+def _device_catalog(state: SandyState) -> str:
+    """The live device list, from the turn's prefetch when it started one.
+
+    `run_graph` starts the read before the STM load, so by the time routing
+    needs it the round trip has already happened off the request thread.
+    """
+    fut = (state.get("soul_prefetch") or {}).get("__devices")
+    if fut is not None:
+        from app.agent.nodes.soul import _collect
+        catalog = _collect("devices", fut)
+        if catalog is not None:
+            return catalog
+    try:
+        from app.agent.tools.schemas.device_tools import build_device_catalog
+        return build_device_catalog()
+    except Exception:  # noqa: BLE001 — never let device lookup break routing
+        logger.debug("ignoring non-critical error", exc_info=True)
+        return ""
+
+
 def route_with_fc(
     state: SandyState,
     declarations: List[Dict[str, Any]],
-    agent_name: str = "specialist",
 ) -> SandyState:
     """Run one native function-calling pass and return state with function_call,
     intent, template, mood, face, and routing_hint. declarations is the tool
-    catalog the model sees; agent_name feeds the Langfuse trace name and tags.
+    catalog the model sees.
     """
     fc: Dict[str, Any] = dict(_FC_DEFAULT_CALL)
     fn_name = "chat_respond"
@@ -224,14 +244,9 @@ def route_with_fc(
         # Volatile suffix kept out of the cached prefix: the live device list goes
         # into the user turn so device_control only picks real, registered devices.
         user_prompt = _build_user_prompt(state)
-        try:
-            from app.agent.tools.schemas.device_tools import build_device_catalog
-
-            device_catalog = build_device_catalog()
-            if device_catalog:
-                user_prompt += "\n\n" + device_catalog
-        except Exception:  # noqa: BLE001 — never let device lookup break routing
-            logger.debug("ignoring non-critical error", exc_info=True)
+        device_catalog = _device_catalog(state)
+        if device_catalog:
+            user_prompt += "\n\n" + device_catalog
 
         # Router backend priority: Gemini → Bedrock (e.g. Qwen3) → Azure. Each is
         # opt-in via its own env var and falls through to the next on failure, so
@@ -250,7 +265,13 @@ def route_with_fc(
             client = AzureIntentClient()
             tools = _build_native_tools(declarations)
             _t = time.perf_counter()
-            msg = client.complete_with_tools(system, user_prompt, tools)
+            # `required`: chat is itself a tool (chat_respond / chat_emotional),
+            # so a chat turn costs a few tokens of tool call instead of a whole
+            # written reply that was thrown away — the real reply is generated
+            # afterwards with the persona. A deployment that rejects the value
+            # has `tool_choice` dropped by the adapter and falls back to auto.
+            msg = client.complete_with_tools(
+                system, user_prompt, tools, tool_choice="required")
             logger.info(f"[fc_router] routing: {(time.perf_counter()-_t)*1000:.0f}ms")
             calls = _parse_tool_message(msg)
 

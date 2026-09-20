@@ -74,22 +74,7 @@ private struct ConversationSearchResponse: Decodable {
     }
 }
 
-/// رد الوكيل غير المُستريم: نص الرد فقط (الحقول الأخرى يتجاهلها الفك).
-private struct AgentReplyResponse: Decodable {
-    let reply: String?
-}
-
 extension APIClient {
-    func sendMessage(_ text: String, conversationId: String? = nil) async throws -> String {
-        // نرسل لغة المستخدم الحالية (عربي/إنجليزي) حتى ترد ساندي بنفس اللغة.
-        let lang = await LanguageManager.shared.lang.rawValue
-        var body: [String: String] = ["message": text, "lang": lang]
-        // سيشن الشات — تخلّي ساندي تتذكّر هالمحادثة لحالها بلا ما تخلط المواضيع.
-        if let cid = conversationId, !cid.isEmpty { body["conversation_id"] = cid }
-        let r: AgentReplyResponse = try await fetch("/api/agent", method: "POST", body: body)
-        return r.reply ?? "…"
-    }
-
     /// نفس /api/agent بس ستريمنغ (SSE) — ينادي onChunk بالنص التراكمي أول
     /// بأول (رد الدردشة العادي بس؛ ردود الأدوات زي "أضف مهمة" ما فيها أجزاء
     /// تتستريم، بترجع دفعة وحدة بآخر حدث). يرجع الرد النهائي + رابط صورة لو في.

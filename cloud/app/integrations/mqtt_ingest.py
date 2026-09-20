@@ -3,8 +3,12 @@
 Counterpart to room_device (which is publish-only). A single background subscriber
 listens for what nodes report and updates the registry:
 
-  sandy/node/<node_id>/status      -> node_store.ingest_status (heartbeat + caps)
-  sandy/node/<node_id>/ir/learned  -> node_store.set_last_ir   (captured IR code)
+  sandy/node/<node_id>/status       -> node_store.ingest_status (brain heartbeat)
+  sandy/node/<node_id>/cam/status   -> node_store.ingest_status (camera, `cam/` outputs)
+  sandy/node/<node_id>/room/status  -> node_store.ingest_status (room node, `room/` outputs)
+  sandy/node/<node_id>/ir/learned   -> node_store.set_last_ir   (captured IR code)
+  sandy/node/<node_id>/cam/snapshot -> camera_client.on_chunk   (photo pieces)
+  sandy/node/<node_id>/cam/event    -> logged only              (capture events)
 
 Runs outside any tenant/request context, so it keys updates by node_id (which the
 firmware derives from its code, matching node_store.code_to_node_id). Safe to start
@@ -137,6 +141,7 @@ _stats = {
     "cam_event": 0,
     "room_status": 0,
     "errors": 0,
+    "dropped": 0,              # messages refused because the ingest queue was full
     "rebuilds": 0,
     "last_disconnect": None,   # why the broker last hung up — its words, not ours
     "last_disconnect_flags": None,
@@ -174,7 +179,7 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
     _stats["last_message_at"] = time.time()
     pending = _INGEST._work_queue.qsize()
     if pending >= _INGEST_MAX_PENDING:
-        _stats["dropped"] = _stats.get("dropped", 0) + 1
+        _stats["dropped"] += 1
         if _stats["dropped"] % 100 == 1:
             logger.warning("[mqtt_ingest] ingest queue full (%d) — dropping "
                            "messages; %d so far", pending, _stats["dropped"])
@@ -412,7 +417,8 @@ def _on_subscribe(client, userdata, mid, reason_codes, properties=None) -> None:
     if any(c >= 128 for c in codes):
         logger.error(
             "[mqtt_ingest] worker %d: broker REFUSED a subscription %s "
-            "(order: status, IR, cam/snapshot, cam/status) — 128 means denied, "
+            "(order: status, IR, cam/snapshot, cam/status, cam/event, "
+            "room/status) — 128 means denied, "
             "usually a credential without permission on that topic",
             os.getpid(), codes)
     else:
@@ -496,55 +502,7 @@ def start_mqtt_ingest() -> None:
         except ValueError:
             port = 8883
         try:
-            # **Unique per process, not per pid.**
-            #
-            # The id was `sandy-ingest-<pid>`. Containers each have their own pid
-            # namespace, so gunicorn's workers get the same small numbers in every
-            # dyno — and Heroku overlaps the new dyno with the old one on deploy.
-            # Two live connections with one client id is a rule the broker settles
-            # by kicking the older off, which reconnects and kicks the newer, for
-            # as long as both exist. Heartbeats survive that (they repeat every
-            # five seconds; one landing is enough). **A photo does not** — it is
-            # seven messages in one burst, and a burst that arrives during a kick
-            # is gone whole. That is the shape of `0/? chunks`.
-            c = mqtt.Client(
-                mqtt.CallbackAPIVersion.VERSION2,
-                client_id=f"sandy-ingest-{os.getpid()}-{uuid.uuid4().hex[:8]}",
-                clean_session=True,
-            )
-            c.username_pw_set(user, password)
-            c.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-            c.on_connect = _on_connect
-            c.on_message = _on_message
-            c.on_disconnect = _on_disconnect
-            c.on_subscribe = _on_subscribe
-            c.reconnect_delay_set(min_delay=1, max_delay=30)
-
-            # **connect_async, not connect.**
-            #
-            # `connect()` resolves DNS and completes the TLS handshake inline, and
-            # raised on failure — which we caught, warned about, and moved on from.
-            # The worker then served traffic for the rest of its life with no
-            # inbound listener at all. Nothing looked broken: the *other* worker's
-            # ingest kept the registry fresh, so the robot showed online with a
-            # current address, and only a request that needed an answer *back*
-            # failed — and only when the load balancer happened to hand it to the
-            # deaf worker. A photo that fails half the time, from a camera that
-            # logs a clean capture, with no server error anywhere.
-            #
-            # Async hands the connect to the network thread, which retries on the
-            # backoff above. A bad minute at boot costs a minute now, not the dyno.
-            # **Thirty seconds, not sixty.**
-            #
-            # The listener shares a gunicorn worker with request handling and
-            # with a live voice WebSocket that streams audio for minutes. paho's
-            # network thread has to be scheduled to send its PINGREQ, and under
-            # that load it may not be — a keepalive the broker measures in wall
-            # clock is being kept by a thread competing for the GIL. Pinging
-            # twice as often halves the window in which a busy stretch looks to
-            # the broker like a dead client, and costs two packets a minute.
-            c.connect_async(host, port, keepalive=MQTT_KEEPALIVE_S)
-            c.loop_start()
+            c = _new_client(host, port, user, password)
             _client = c
             _started = True
             _stats["last_message_at"] = time.time()  # start the watchdog's clock
@@ -554,6 +512,61 @@ def start_mqtt_ingest() -> None:
                              name="mqtt-ingest-watchdog", daemon=True).start()
         except Exception as e:  # noqa: BLE001
             logger.warning("[mqtt_ingest] start failed: %s", e)
+
+
+def _new_client(host: str, port: int, user: str, password: str):
+    """A configured, connecting, looping subscriber — shared by the first start
+    and the watchdog's rebuild so the two can never drift apart."""
+    # **Unique per process, not per pid.**
+    #
+    # The id was `sandy-ingest-<pid>`. Containers each have their own pid
+    # namespace, so gunicorn's workers get the same small numbers in every
+    # dyno — and Heroku overlaps the new dyno with the old one on deploy.
+    # Two live connections with one client id is a rule the broker settles
+    # by kicking the older off, which reconnects and kicks the newer, for
+    # as long as both exist. Heartbeats survive that (they repeat every
+    # five seconds; one landing is enough). **A photo does not** — it is
+    # seven messages in one burst, and a burst that arrives during a kick
+    # is gone whole. That is the shape of `0/? chunks`.
+    c = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"sandy-ingest-{os.getpid()}-{uuid.uuid4().hex[:8]}",
+        clean_session=True,
+    )
+    c.username_pw_set(user, password)
+    c.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+    c.on_connect = _on_connect
+    c.on_message = _on_message
+    c.on_disconnect = _on_disconnect
+    c.on_subscribe = _on_subscribe
+    c.reconnect_delay_set(min_delay=1, max_delay=30)
+
+    # **connect_async, not connect.**
+    #
+    # `connect()` resolves DNS and completes the TLS handshake inline, and
+    # raised on failure — which we caught, warned about, and moved on from.
+    # The worker then served traffic for the rest of its life with no
+    # inbound listener at all. Nothing looked broken: the *other* worker's
+    # ingest kept the registry fresh, so the robot showed online with a
+    # current address, and only a request that needed an answer *back*
+    # failed — and only when the load balancer happened to hand it to the
+    # deaf worker. A photo that fails half the time, from a camera that
+    # logs a clean capture, with no server error anywhere.
+    #
+    # Async hands the connect to the network thread, which retries on the
+    # backoff above. A bad minute at boot costs a minute now, not the dyno.
+    # **Thirty seconds, not sixty.**
+    #
+    # The listener shares a gunicorn worker with request handling and
+    # with a live voice WebSocket that streams audio for minutes. paho's
+    # network thread has to be scheduled to send its PINGREQ, and under
+    # that load it may not be — a keepalive the broker measures in wall
+    # clock is being kept by a thread competing for the GIL. Pinging
+    # twice as often halves the window in which a busy stretch looks to
+    # the broker like a dead client, and costs two packets a minute.
+    c.connect_async(host, port, keepalive=MQTT_KEEPALIVE_S)
+    c.loop_start()
+    return c
 
 
 # ── Watchdog ─────────────────────────────────────────────────────────────────
@@ -611,21 +624,7 @@ def _watchdog(host: str, port: int, user: str, password: str) -> None:
             except Exception:  # noqa: BLE001 — it is already broken
                 pass
 
-            n = mqtt.Client(
-                mqtt.CallbackAPIVersion.VERSION2,
-                client_id=f"sandy-ingest-{os.getpid()}-{uuid.uuid4().hex[:8]}",
-                clean_session=True,
-            )
-            n.username_pw_set(user, password)
-            n.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-            n.on_connect = _on_connect
-            n.on_message = _on_message
-            n.on_disconnect = _on_disconnect
-            n.on_subscribe = _on_subscribe
-            n.reconnect_delay_set(min_delay=1, max_delay=30)
-            n.connect_async(host, port, keepalive=MQTT_KEEPALIVE_S)
-            n.loop_start()
-            _client = n
+            _client = _new_client(host, port, user, password)
             now = time.time()
             _stats["last_message_at"] = now
             _stats["rebuilt_at"] = now

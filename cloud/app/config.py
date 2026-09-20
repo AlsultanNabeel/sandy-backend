@@ -58,8 +58,6 @@ AZURE_OPENAI_API_VERSION = os.getenv(
     "AZURE_OPENAI_API_VERSION", "2024-08-01-preview"
 ).strip()
 AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
-AZURE_OPENAI_VISION_DEPLOYMENT = os.getenv("AZURE_OPENAI_VISION_DEPLOYMENT", "").strip()
-AZURE_OPENAI_STT_DEPLOYMENT = os.getenv("AZURE_OPENAI_STT_DEPLOYMENT", "").strip()
 # Deploy text-embedding-3-small under this name to keep the 1536-dim vector
 # index compatible. When set, semantic memory embeds via Azure instead of the
 # direct OpenAI key.
@@ -75,15 +73,6 @@ AZURE_FLUX_DEPLOYMENT = os.getenv("AZURE_FLUX_DEPLOYMENT", "sandy-flux").strip()
 # TTS, primary: Gemini Flash
 GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Aoede").strip()
 
-# TTS, first fallback: Google Cloud TTS
-GOOGLE_TTS_VOICE = os.getenv("GOOGLE_TTS_VOICE", "ar-XA-Chirp3-HD-Sulafat").strip()
-GOOGLE_TTS_LANGUAGE_CODE = os.getenv("GOOGLE_TTS_LANGUAGE_CODE", "ar-XA").strip()
-
-# TTS, second fallback: Azure Speech
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "").strip()
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "").strip()
-AZURE_SPEECH_VOICE = os.getenv("AZURE_SPEECH_VOICE", "ar-LB-LaylaNeural").strip()
-
 # Google services
 GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY", "").strip()
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
@@ -91,7 +80,6 @@ GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
 
 # Research
 EXA_API_KEY = os.getenv("EXA_API_KEY", "").strip()
-WEB_RESEARCH_PROVIDER = os.getenv("WEB_RESEARCH_PROVIDER", "exa").strip()
 WEB_RESEARCH_MAX_CANDIDATES = int(
     os.getenv("WEB_RESEARCH_MAX_CANDIDATES", "30").strip()
 )

@@ -57,6 +57,12 @@ def _do_get_contents(url: str, exa_api_key: str, timeout: int) -> Dict[str, Any]
     }
 
 
+# For a request someone is waiting on (the app's search box, content cards).
+# The 60 s default suits the agent's research pipeline; on an HTTP route it held
+# a gunicorn worker for a minute whenever Exa was slow.
+INTERACTIVE_TIMEOUT_S = 15
+
+
 def search_exa(
     query: str,
     exa_api_key: str,

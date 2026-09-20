@@ -8,19 +8,26 @@ Endpoints:
   GET    /api/devices                     list devices
   POST   /api/devices                     add  {name,label,control_type,transport,room?,meta?}
   PATCH  /api/devices/<name>              update {label?,room?,control_type?,transport?,meta?}
-  DELETE /api/devices/<name>             delete
+  DELETE /api/devices/<name>              delete
   POST   /api/devices/<name>/control      {action,value?}  -> actuate
+  POST   /api/devices/<name>/image        {image_base64}   -> picture to a display
   POST   /api/devices/<name>/ir-learn     {button,code}    -> store a learned IR code
   GET    /api/nodes                       list paired nodes
   POST   /api/nodes/pair                  {code,label?}    -> pair a node to this tenant
-  PATCH  /api/nodes/<node_id>            {label}
-  DELETE /api/nodes/<node_id>           unpair
+  PATCH  /api/nodes/<node_id>             {label}
+  DELETE /api/nodes/<node_id>             unpair (wipes the board first)
+  POST   /api/nodes/<node_id>/wifi        {ssid,password,board?} -> move to a network
+  POST   /api/nodes/<node_id>/snapshot    take a photo (JPEG, or 202 + ticket)
+  GET    /api/nodes/<node_id>/snapshot/<req_id>  collect a photo by ticket
+  POST   /api/nodes/<node_id>/ir/learn    arm IR learn mode
+  GET    /api/nodes/<node_id>/ir/last     last captured IR code
+  POST   /api/cam/upload                  camera posts a JPEG (HMAC, no session)
+  GET    /api/diagnose                    board / catalogue / device report
 """
 
 from __future__ import annotations
 
 import logging
-
 import time
 
 from flask import Response, jsonify, request
@@ -30,6 +37,8 @@ from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _is_guest(claims) -> bool:
@@ -375,7 +384,7 @@ def register_devices_api(app, mongo_db=None):
         ts = (request.headers.get("X-Sandy-Ts") or "").strip()
         sig = (request.headers.get("X-Sandy-Sig") or "").strip()
         if not (node_id and req_id and ts and sig):
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "[cam] upload rejected: missing headers "
                 "(node=%s req=%s ts=%s sig=%s)",
                 bool(node_id), bool(req_id), bool(ts), bool(sig))
@@ -386,16 +395,15 @@ def register_devices_api(app, mongo_db=None):
         # اللوح بيشوف `400 Bad Request` وبس — والأربع مئة عندها أربعة أسباب
         # مختلفة تمامًا (ترويسة ناقصة، وقت غلط، وقت قديم، مش صورة). بدون هالسطر،
         # اللوح بيقول «انرفض» والخادم بيسكت، والفرق بينهن يوم تشخيص.
-        log = logging.getLogger(__name__)
         try:
             age = abs(time.time() * 1000 - int(ts))
         except ValueError:
-            log.warning("[cam] upload rejected: unreadable timestamp %r", ts[:32])
+            logger.warning("[cam] upload rejected: unreadable timestamp %r", ts[:32])
             return _bad("bad_ts")
         if age > 120_000:
             # السبب الأشيع بفارق كبير: اللوح بيقلع وساعته سنة سبعين، فأول رفع
             # قبل مزامنة الوقت بيبيّن عمره خمسة وخمسين سنة.
-            log.warning("[cam] upload rejected: timestamp is %.0f minutes off — "
+            logger.warning("[cam] upload rejected: timestamp is %.0f minutes off — "
                         "the board's clock is probably not synced", age / 60000)
             return _bad("stale")
 
@@ -409,18 +417,18 @@ def register_devices_api(app, mongo_db=None):
             if record is None:
                 # Un-paired, or the key was never recorded: the camera drops its
                 # key and signs with the shared one until it is paired again.
-                log.warning("[cam] upload rejected: no key on record for %s", node_id)
+                logger.warning("[cam] upload rejected: no key on record for %s", node_id)
                 return _bad("key_unknown", code=401)
             key = record["key"]
         elif record is not None and record["state"] == "confirmed":
-            log.warning("[cam] upload rejected: shared key refused for %s — it "
+            logger.warning("[cam] upload rejected: shared key refused for %s — it "
                         "has its own key", node_id)
             return _bad("auth_fail", code=401)
 
         expected = _hmac.new(key, f"{node_id}{req_id}{ts}".encode(),
                              hashlib.sha256).hexdigest()
         if not _hmac.compare_digest(expected, sig):
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "[cam] upload rejected: bad signature for %s", node_id)
             return _bad("auth_fail", code=401)
         if own_key and record["state"] == "issued":
@@ -431,13 +439,13 @@ def register_devices_api(app, mongo_db=None):
         # body is refused at the door rather than stored and served as a broken
         # image later, which is far harder to trace back to this moment.
         if len(jpeg) < 100 or jpeg[:2] != b"\xff\xd8":
-            log.warning("[cam] upload rejected: not a jpeg (%d bytes, starts %r)",
+            logger.warning("[cam] upload rejected: not a jpeg (%d bytes, starts %r)",
                         len(jpeg), jpeg[:4])
             return _bad("not_a_jpeg")
 
         from app.integrations.camera_client import store_snapshot
         store_snapshot(node_id, req_id, jpeg)
-        logging.getLogger(__name__).info(
+        logger.info(
             "[cam] upload ok: %s %s (%d bytes)", node_id, req_id, len(jpeg))
         reply = {"ok": True, "bytes": len(jpeg)}
         if not own_key:
@@ -448,7 +456,7 @@ def register_devices_api(app, mongo_db=None):
                     if fresh:
                         reply["device_key"] = fresh
             except Exception as exc:  # noqa: BLE001 — enrolment is extra, not a gate
-                log.warning("[cam] key issue failed for %s: %s", node_id, exc)
+                logger.warning("[cam] key issue failed for %s: %s", node_id, exc)
         return jsonify(reply), 200
 
     @app.route("/api/nodes/<node_id>/snapshot/<req_id>", methods=["GET"])

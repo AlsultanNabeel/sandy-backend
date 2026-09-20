@@ -43,3 +43,48 @@ def test_clear_note_writes_an_empty_note():
                                    session_file=None, mongo_db=None, tasks_file=None,
                                    save_session_fn=MagicMock())
     assert deps.replace_task_note.call_args.args[:2] == ("t1", "")
+
+
+def test_task_patch_applies_every_field_in_one_write(monkeypatch):
+    """PATCH /api/tasks/<id> edits text, note, priority, due and done together,
+    and a bad due date refuses the edit instead of applying half of it."""
+    import mongomock
+    from flask import Flask
+
+    from app import db as appdb
+    from app.api.auth_handlers import make_token
+    from app.api.productivity_api import register_productivity_api
+    from app.features import tasks_store
+    from app.utils.user_profiles import active_user_profile_context
+
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    d = mongomock.MongoClient().db
+    appdb.configure(d)
+    try:
+        app = Flask(__name__)
+        register_productivity_api(app, mongo_db=d)
+        c = app.test_client()
+        h = {"Authorization": f"Bearer {make_token('user', user_id='u1')}"}
+        with active_user_profile_context({"chat_id": "u1"}):
+            tid = tasks_store.add_task("old", mongo_db=d)
+        calls = []
+        real = d["sandy_tasks"].update_one
+        monkeypatch.setattr(d["sandy_tasks"], "update_one",
+                            lambda *a, **k: calls.append(a) or real(*a, **k))
+
+        r = c.patch(f"/api/tasks/{tid}", headers=h, json={
+            "text": "new", "note": "n", "priority": "high",
+            "due": "2030-01-02T09:00:00", "done": True})
+        assert r.status_code == 200 and len(calls) == 1
+        doc = d["sandy_tasks"].find_one({"_id": tid})
+        assert (doc["text"], doc["notes"], doc["priority"], doc["due_date"], doc["done"]) == \
+            ("new", "n", "high", "2030-01-02", True)
+
+        r = c.patch(f"/api/tasks/{tid}", headers=h, json={"text": "x", "due": "garbage"})
+        assert r.status_code == 400
+        assert d["sandy_tasks"].find_one({"_id": tid})["text"] == "new"
+
+        other = {"Authorization": f"Bearer {make_token('user', user_id='u2')}"}
+        assert c.patch(f"/api/tasks/{tid}", headers=other, json={"done": False}).status_code == 400
+    finally:
+        appdb.reset()

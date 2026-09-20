@@ -1,7 +1,6 @@
 """voice_ws tools."""
 from __future__ import annotations
 
-import json
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -170,14 +169,55 @@ def _build_system_instruction(user_id: str = "") -> str:
     فالدالة كلها بتشتغل جوّا سياق المستأجر. تمرير المعرّف بيحلّ نصّ المسألة؛
     فتح السياق بيحلّ النصّ التاني.
     """
+    base = _build_cached_instruction(user_id)
+    return with_recent_turns(base, _load_stm_context(_load_stm_history()))
+
+
+def _build_cached_instruction(user_id: str) -> str:
+    """Everything in the instruction **except** the recent turns — the part
+    that is safe to cache per tenant version.
+
+    The session calls this in parallel with `load_recent_turns` and joins the
+    two with `with_recent_turns`, so the fresh read costs no extra round trip.
+
+    **الهوية بتنكتب دايمًا، حتى لو فاضية.** خيط المجمّع بيحتفظ بسياقه بين
+    المهام، فـ`if user_id:` كان بيخلّي لوحًا غير مربوط يورث هوية آخر جلسة مرّت
+    ع نفس الخيط — ويبني تعليماته من ذاكرة زبون تاني.
+    """
     from app.agent.context_builder import build_effective_persona
     from app.utils.user_profiles import active_user_profile_context
 
-    if user_id:
-        set_voice_identity(user_id)
+    set_voice_identity(user_id)
     chat_id = _stm_chat_id()
     with active_user_profile_context(_voice_profile(chat_id) if chat_id else None):
         return _cached_system_instruction(chat_id, build_effective_persona)
+
+
+# The "this is a past record" guard. The recent turns are inserted right before
+# it, so it always covers them. A constant because `with_recent_turns` finds it.
+_PAST_RECORD_NOTE = (
+    "\n"
+    "مهم: كل المحادثات والمعلومات فوق هي سجلّ سابق للاطّلاع فقط — مش كلام قالك "
+    "إياه المستخدم هلّق. لا تكمّلي عليه ولا تردّي عليه، وما تفترضي إنه طلب حالي. "
+    "ردّي فقط على آخر شي بيقوله المستخدم بصوته في هالجلسة."
+)
+
+
+def with_recent_turns(base: str, recent_block: str) -> str:
+    """Put the recent turns into a (possibly cached) instruction.
+
+    **The turns are never cached.** Short-term memory changes every turn and
+    does not move the tenant version (`tenant_version` excludes it on purpose),
+    so a cached instruction that carried them kept serving the turns of the
+    session that built it: say something in the app chat, call the robot, and
+    she did not know — the exact cross-channel amnesia this memory exists to end.
+    """
+    if not recent_block:
+        return base
+    head, sep, tail = base.partition(_PAST_RECORD_NOTE)
+    if not sep:
+        return base + "\n" + recent_block
+    return head + recent_block + "\n" + sep + tail
 
 
 # The whole instruction, cached per tenant version.
@@ -197,6 +237,9 @@ _INSTRUCTION_LOCK = threading.Lock()
 
 
 _PROMPT_COLL = "sandy_prompt_cache"
+# Bumped when the cached text changes shape, so rows written by an older build
+# are never served. Rev 2: the recent turns left the cached text.
+_PROMPT_REV = 2
 
 
 def _shared_get(key: str, version: int) -> Optional[str]:
@@ -215,7 +258,7 @@ def _shared_get(key: str, version: int) -> Optional[str]:
         db = get_db()
         if db is None:
             return None
-        doc = db[_PROMPT_COLL].find_one({"_id": f"{key}:{version}"}, {"text": 1})
+        doc = db[_PROMPT_COLL].find_one({"_id": f"{key}:{version}:r{_PROMPT_REV}"}, {"text": 1})
         return (doc or {}).get("text") or None
     except PyMongoError as exc:
         logger.debug("[voice_ws] shared prompt read skipped: %s", exc)
@@ -232,7 +275,7 @@ def _shared_put(key: str, version: int, text: str) -> None:
         if db is None:
             return
         db[_PROMPT_COLL].update_one(
-            {"_id": f"{key}:{version}"},
+            {"_id": f"{key}:{version}:r{_PROMPT_REV}"},
             {"$set": {"text": text, "user_id": key,
                       "created_at": datetime.now(timezone.utc)}},
             upsert=True,
@@ -295,9 +338,9 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
     every read in here without indenting four hundred lines of prompt.
 
     **Six seconds live between «auth OK» and «memory seed»**, measured on the
-    robot, before Gemini has even been dialled. Four reads run here, one after
-    another, and until now the log gave one line for all four — so the six
-    seconds had no owner. Each is timed on its own now.
+    robot, before Gemini has even been dialled. The reads that remain here
+    (persona, durable context) are timed on their own so the wait has an owner;
+    the recent turns are read outside, in parallel (`load_recent_turns`).
     """
     import time as _t
 
@@ -310,22 +353,15 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
     parts: List[str] = [build_effective_persona(chat_id or None).strip()]
     _took("persona")
 
-    # Legacy per-tenant memory doc (lightweight)
-    try:
-        from app.agent.memory import load_memory
-        from app.db import get_db
-        memory = load_memory(mongo_db=get_db())
-        if memory:
-            parts.append(f"\nذاكرتك:\n{json.dumps(memory, ensure_ascii=False, indent=2)}")
-    except Exception as exc:
-        logger.debug("[voice_ws] memory load skipped: %s", exc)
-    _took("legacy memory")
+    # **No legacy `memory` doc.** Nothing in production writes that collection,
+    # and the app chat never reads it — so for a customer without a row it
+    # seeded `_default_memory()` into every call: an empty log, mood "happy"
+    # and a home city of "October City", stated to the model as her memory of
+    # him. One memory means the voice reads what the chat reads.
 
-    # Rich MongoDB context: persona directives + session state (durable facts
-    # only). No query yet at session start; semantic search happens per-turn via
-    # injection. The short-term turns are read once here and seeded below.
-    stm_history = _load_stm_history()
-    _took("stm")
+    # Rich MongoDB context: persona directives (durable facts only). No query
+    # at session start; facts are recalled mid-call through `memory_recall`,
+    # the same tool the chat has.
     rich_ctx = _voice_memory_context("", include_semantic=False)
     _took("context")
     if rich_ctx:
@@ -339,32 +375,19 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
                      rich_ctx.replace("\n", " ")[:600])
         parts.append(rich_ctx)
 
-    # **وآخر المحادثات — دايمًا، مش لمّا يفشل اللي فوق.**
+    # **وآخر المحادثات — دايمًا، بس مش من الكاش.** بتنحطّ قبل الملاحظة تحت
+    # (`with_recent_turns`) لأنها بتتغيّر كل دور وما بتحرّك نسخة المستأجر.
     #
-    # `_voice_memory_context` بيبني بـ `durable_only=True`، يعني حقائق ثابتة بس
-    # وبيرمي آخر الجُمَل. وهاد كان مقصودًا — النموذج الصوتي كان بياخد آخر سطر
-    # مسجّل ويكمّل عليه كأنه طلب حالي.
+    # `_voice_memory_context` بيبني بـ `durable_only=True`، يعني حقائق ثابتة بس.
+    # وهاد كان مقصودًا — النموذج الصوتي كان بياخد آخر سطر مسجّل ويكمّل عليه كأنه
+    # طلب حالي. بس المالك سألها «شو آخر سؤال سألتك ياه» فقالت ما بعرف. الحلّ:
+    # السطور بترجع، والتحذير («هاد سجلّ سابق، ما تردّي عليه») بيضلّ هو الحارس.
     #
-    # بس الثمن كان أكبر من الفايدة، والمالك لقيه بتجربة وحدة: سألها «شو بتعرفي
-    # عني» فجاوبت تمام (حقائق ثابتة)، وسألها «شو آخر سؤال سألتك ياه» فقالت ما
-    # بعرف — وهي بتعرف، بس السطور انرمت قبل ما توصلها.
-    #
-    # والحلّ مش إرجاعها وبس: التحذير تحت («هاد سجلّ سابق، ما تردّي عليه») هو
-    # اللي بيمنع التكرار، وهو موجود ومكتوب صراحة. فالسطور بترجع، والحارس بيضلّ.
-    stm_context = _load_stm_context(stm_history)
-    if stm_context:
-        parts.append(stm_context)
-
-    # The memory/STM block above is PAST reference, seeded once. Native-audio
+    # The memory block above is PAST reference, seeded once. Native-audio
     # Gemini will otherwise continue the last logged line as if it were the
     # current request — that's how a stale "add eggs" turn becomes a phantom
     # reply. Pin it as history so only live speech drives the answer.
-    parts.append(
-        "\n"
-        "مهم: كل المحادثات والمعلومات فوق هي سجلّ سابق للاطّلاع فقط — مش كلام قالك "
-        "إياه المستخدم هلّق. لا تكمّلي عليه ولا تردّي عليه، وما تفترضي إنه طلب حالي. "
-        "ردّي فقط على آخر شي بيقوله المستخدم بصوته في هالجلسة."
-    )
+    parts.append(_PAST_RECORD_NOTE)
 
     # تمييز أوامر بتتشابه كلماتها — نفس قواعد الراوتر النصّي، مصدر واحد مشترك
     # (command_rules) عشان دماغ الصوت ودماغ النص ما يختلفوا بنفس الأمر.
@@ -507,8 +530,8 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
     from app.agent.tools.dispatcher import DispatchContext
     from app.utils.user_profiles import active_user_profile_context
 
-    if user_id:
-        set_voice_identity(user_id)
+    # Always, even when empty: a pool thread keeps its context between jobs.
+    set_voice_identity(user_id)
 
     # **Routing signals are not actions, and must not be dispatched.**
     #

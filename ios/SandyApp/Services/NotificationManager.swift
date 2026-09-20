@@ -173,18 +173,30 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
 
     /// مُحلِّل ISO متسامح — الباك‑إند قد يرسل بمنطقة زمنية، بكسور ثانية، أو بدون.
-    static func parseISO(_ s: String) -> Date? {
-        if s.isEmpty { return nil }
-        let isoFrac = ISO8601DateFormatter()
-        isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = isoFrac.date(from: s) { return d }
-        let isoPlain = ISO8601DateFormatter()
-        isoPlain.formatOptions = [.withInternetDateTime]
-        if let d = isoPlain.date(from: s) { return d }
-        // بدون منطقة زمنية (مثل "2026-06-05T16:00:00") — نفسّره بالتوقيت المحلي.
+    /// المحلّلات مبنية مرّة وحدة: بناء الـformatter غالي، وهالدالة بتنادى لكل
+    /// صف بالقوائم ولكل جسم عرض. التحليل من عدّة خيوط آمن عليها من iOS 7.
+    private static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    /// بدون منطقة زمنية (مثل "2026-06-05T16:00:00") — نفسّره بالتوقيت المحلي.
+    private static let isoNoTZ: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        return f.date(from: s)
+        return f
+    }()
+
+    static func parseISO(_ s: String) -> Date? {
+        if s.isEmpty { return nil }
+        return isoFrac.date(from: s)
+            ?? isoPlain.date(from: s)
+            ?? isoNoTZ.date(from: s)
     }
 }

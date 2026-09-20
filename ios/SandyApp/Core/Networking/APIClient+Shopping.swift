@@ -60,21 +60,6 @@ extension APIClient {
         try await send("/api/life/shopping/\(id)", method: "DELETE")
     }
 
-    private struct ShoppingPrice: Encodable {
-        let price: Double?
-        let qty: Int?
-        let unit: String?
-    }
-
-    // POST /api/life/shopping/<id>/price body {"price"?,"qty"?,"unit"?} → {"ok":bool}
-    // يحدّد السعر/الكمية بدون ما يشطب — للإجمالي التقديري قبل الشراء.
-    func setShoppingPrice(id: String, price: Double? = nil,
-                          qty: Int? = nil, unit: String? = nil) async throws {
-        guard price != nil || qty != nil || unit != nil else { return }
-        try await send("/api/life/shopping/\(id)/price", method: "POST",
-                       body: ShoppingPrice(price: price, qty: qty, unit: unit))
-    }
-
     private struct LastPriceResponse: Decodable {
         let price: Double?
     }

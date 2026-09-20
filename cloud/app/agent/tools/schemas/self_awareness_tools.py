@@ -15,22 +15,25 @@ if TYPE_CHECKING:
     from app.agent.tools.dispatcher import DispatchContext
 
 
-# Arabic category labels + short Arabic summary for each bucket.
-# الترتيب يحدد ترتيب العرض النهائي للمستخدم.
+# Arabic category labels + short Arabic summary for each bucket. A tool falls in
+# the first bucket with a marker that appears anywhere in its name (so
+# "digital_gift" and "list_photos" match too). الترتيب يحدد ترتيب العرض.
 _CATEGORIES = (
     ("📝 المهام",       ("task_",),                    "إضافة، تعديل، حذف، وإكمال المهام"),
     ("⏰ التذكيرات",     ("reminder_",),                 "تذكير بوقت محدد أو متكرر"),
-    ("🎨 الصور",         ("image_",),                    "توليد صور، تعديلها، ووصف الصور المرفوعة"),
+    ("🎨 الصور",         ("image_", "photo"),            "توليد صور، تعديلها، وصفها، وألبوم صورك"),
     # كانت «الهاردوير» على بادئة `hardware_` وما في ولا أداة بتبدأ فيها، فالبند
     # ما كان بينعرض أبداً. والوصف بيقول «المربوطة بحسابك» لأنّ السجل عام مش
     # لكل مستأجر — يعني هالسطر بينقال حتى لمين ما عنده ولا جهاز.
     ("🛠️ الأجهزة",       ("device_", "scene_"),          "تشغيل وإطفاء الأجهزة المربوطة بحسابك وتطبيق مشاهد الغرفة، إذا عندك أجهزة"),
-    ("🔍 البحث",         ("research_", "exa_"),          "بحث على الويب وتلخيص النتائج"),
-    ("🎁 الهدايا",       ("gift_",),                     "اقتراحات هدايا ومناسبات"),
+    ("🔍 البحث",         ("research_", "fetch_url", "share_interesting"), "بحث على الويب وتلخيص النتائج"),
+    ("🎁 الهدايا",       ("gift",),                      "شعر، نكتة، لغز، أو كلمة حلوة"),
     ("🎯 الأهداف",       ("goal_",),                     "تتبع أهدافك وتقدمك عليها"),
-    ("🔮 رسائل المستقبل", ("future_message_",),          "كتابة رسالة لنفسك يتم تسليمها بوقت لاحق"),
-    ("🤝 المحتوى",       ("content_",),                  "كتابة وتنسيق محتوى عام"),
-    ("🧠 الذاكرة",       ("memory_", "store_", "recall_"), "حفظ معلومات عنك واسترجاعها"),
+    ("🔮 رسائل المستقبل", ("message_to_self",),           "كتابة رسالة لنفسك يتم تسليمها بوقت لاحق"),
+    ("💡 العصف الذهني",  ("brainstorm_",),               "جلسات تخطيط وخطط محفوظة"),
+    ("📚 الحياة اليومية", ("focus_", "book_", "reading_", "habit_", "journal_", "expense_", "shopping_"),
+     "تركيز، كتب، عادات، يوميات، مصاريف، وقائمة تسوّق"),
+    ("🧠 الذاكرة",       ("memory_",),                   "حفظ معلومات عنك واسترجاعها"),
     ("🔧 الدردشة",       ("chat_", "ask_", "request_", "pending_"), "حوار، أسئلة توضيحية، وتأكيدات"),
 )
 
@@ -38,7 +41,7 @@ _CATEGORIES = (
 def _bucket_for(name: str) -> int:
     """يرجع index الـ bucket المناسب — أو -1 إذا ما في تصنيف."""
     for idx, (_label, prefixes, _desc) in enumerate(_CATEGORIES):
-        if any(name.startswith(p) for p in prefixes):
+        if any(p in name for p in prefixes):
             return idx
     return -1
 
@@ -50,8 +53,7 @@ def get_capabilities_handler(
     plus a callout for any that are currently degraded.
 
     Args:
-        scope (str, optional): "all" (default), "degraded", or "category"
-                               to filter the output.
+        scope (str, optional): "all" (default) or "degraded".
     """
     scope = str((args or {}).get("scope") or "all").strip().lower()
     caps = get_registry().describe_capabilities()
@@ -112,11 +114,8 @@ SELF_AWARENESS_TOOLS = [
     {
         "name": "get_capabilities",
         "description": (
-            "🧭 يعرض قائمة قدرات ساندي الحالية + أي قدرة معطّلة من اللي "
-            "اتسجلت. استخدمه لما الأونر يسأل: 'شو بتقدري تعملي؟', 'وريني "
-            "قدراتك', 'في أداة معطّلة؟', 'شو حالة قدراتك؟', 'بتشتغل كل "
-            "ادواتك؟'. الـ data بتيجي من الـ tool registry مباشرة + tool "
-            "health tracker — مصدر واحد، ما في تخمين."
+            "قدرات ساندي وحالتها: 'شو بتقدري تعملي؟'، 'وريني قدراتك'، "
+            "'في أداة معطّلة؟'، 'بتشتغل كل ادواتك؟'."
         ),
         "parameters": {
             "type": "object",
@@ -124,10 +123,7 @@ SELF_AWARENESS_TOOLS = [
                 "scope": {
                     "type": "string",
                     "enum": ["all", "degraded"],
-                    "description": (
-                        "all = كل القدرات مجمّعة بمواضيع. "
-                        "degraded = فقط القدرات اللي عندها مشاكل الآن."
-                    ),
+                    "description": "degraded = المعطّلة بس",
                 },
             },
             "required": [],

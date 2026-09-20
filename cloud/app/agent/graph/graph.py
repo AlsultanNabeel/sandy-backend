@@ -320,7 +320,12 @@ def _stm_save(
         logger.warning("[graph] STM save failed: %s", exc)
 
 
-def recent_turns_for_user(user_id: str, limit: int = 6) -> List[Dict[str, Any]]:
+def recent_turns_for_user(
+    user_id: str,
+    limit: int = 6,
+    *,
+    threads_out: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+) -> List[Dict[str, Any]]:
     """The last few turns this person had, **on any channel**.
 
     Short-term memory is stored per thread, and that is right: a chat should not
@@ -337,6 +342,12 @@ def recent_turns_for_user(user_id: str, limit: int = 6) -> List[Dict[str, Any]]:
     recent turns the same property, without merging the threads themselves —
     each channel keeps its own transcript, and every channel can see the last
     thing that happened anywhere.
+
+    ``threads_out``, when given, is filled with ``{key: history}`` for every
+    thread document this read already fetched. The chat turn uses it to skip
+    reading its own thread a second time: the thread being talked in is almost
+    always among this person's five most recent, so one round trip answers both
+    questions.
     """
     coll = _stm_collection()
     if coll is None or not user_id:
@@ -344,11 +355,13 @@ def recent_turns_for_user(user_id: str, limit: int = 6) -> List[Dict[str, Any]]:
     try:
         docs = coll.find(
             {"user_id": str(user_id)},
-            {"_id": 0, "history": 1, "updated_at": 1},
+            {"_id": 0, "key": 1, "history": 1, "updated_at": 1},
         ).sort("updated_at", -1).limit(5)
         turns: List[Dict[str, Any]] = []
         for d in docs:
             turns.extend(d.get("history") or [])
+            if threads_out is not None and d.get("key"):
+                threads_out[d["key"]] = list(d.get("history") or [])
         # Ordered by their own timestamps, not by which thread they came from:
         # interleaving is the point. A question asked aloud and answered in the
         # app is one conversation, and it should read like one.
@@ -430,7 +443,7 @@ def _route_intent(state: "SandyState") -> "SandyState":
 
     declarations = get_registry().get_function_declarations()
     logger.info("[router] single-call FC routing with %d tools", len(declarations))
-    return route_with_fc(state, declarations, agent_name="router")
+    return route_with_fc(state, declarations)
 
 
 # الـ graph runner
@@ -454,19 +467,49 @@ def run_graph(
         chat_id: معرف المحادثة
         pending_state: pending action نشط (اختياري)
         source: مصدر الرسالة (user / proactive / hardware)
+        image_state / conversation_id: اختياريين
 
     Returns:
         SandyState مع final_response جاهز للإرسال
+
+    The whole turn runs inside one `tenant_version.turn_scope`, so the cache
+    version is read from Mongo once per turn instead of once per cached block.
     """
+    from app.utils.tenant_version import turn_scope
+
+    with turn_scope():
+        return _run_graph(
+            message, user_id, chat_id, pending_state=pending_state, source=source,
+            image_state=image_state, conversation_id=conversation_id)
+
+
+def _run_graph(
+    message: str,
+    user_id: str,
+    chat_id: str,
+    *,
+    pending_state: Optional[Dict[str, Any]] = None,
+    source: str = "user",
+    image_state: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None,
+) -> SandyState:
+    """The body of `run_graph` (which adds the per-turn version scope)."""
     # خيط ذاكرة المحادثة: conversation_id لو موجود (سيشن شات مستقلة) وإلا chat_id
     # (خيط واحد لكل مستخدم — هاردوير أو استدعاء بلا سيشن).
     thread_id = str(conversation_id or chat_id)
 
-    # 1. حمّل conversation history من MongoDB (لهذا الخيط تحديدًا)
-    thread_history = _stm_load(thread_id, user_id)
-    history = thread_history
+    # **Start the prefetch before anything else on the request thread.** It
+    # needs only who is talking and what they said — not the history — so it
+    # now overlaps the STM read as well as the router call.
+    _prefetch = None
+    try:
+        from app.agent.nodes.soul import start_soul_prefetch
+        _prefetch = start_soul_prefetch(
+            chat_id, user_id, message, conversation_id=str(conversation_id or ""))
+    except Exception:
+        logger.debug("ignoring non-critical error", exc_info=True)
 
-    # ثم أضف اللي انقال ع القنوات التانية.
+    # آخر اللي انقال ع كل القنوات — وخيط هالمحادثة نفسه غالبًا بينهم.
     #
     # هالخيط بيشوف حاله بس. والمالك بيحكي مع نفس ساندي بتلات طرق — الروبوت،
     # ومكالمة التطبيق، وشات التطبيق — فسؤال بالصوت وبعده سؤال مكتوب عن نفس
@@ -478,7 +521,15 @@ def run_graph(
     # بلا `try` هون بالقصد: `recent_turns_for_user` بتمسك أخطاءها بنفسها وبترجّع
     # قائمة فاضية. حارس تاني فوقها بيخبّي غلط بالسطور اللي تحت — وهي اللي بتبني
     # السياق، يعني بالضبط المكان اللي غلطة فيه لازم تبيّن.
-    cross = recent_turns_for_user(user_id, limit=6)
+    _threads: Dict[str, List[Dict[str, Any]]] = {}
+    cross = recent_turns_for_user(user_id, limit=6, threads_out=_threads)
+
+    # 1. حمّل conversation history لهذا الخيط تحديدًا — من القراءة اللي فوق لو
+    # الخيط كان بين آخر خمسة (الحالة العادية)، وإلا قراءة لحالها.
+    _thread_key = f"{thread_id}:{user_id}"
+    thread_history = (_threads[_thread_key] if _thread_key in _threads
+                      else _stm_load(thread_id, user_id))
+    history = thread_history
     if cross:
         seen = {(m.get("role"), m.get("content")) for m in history}
         extra = [m for m in cross if (m.get("role"), m.get("content")) not in seen]
@@ -498,25 +549,14 @@ def run_graph(
     if history:
         state = merge_state(state, {"conversation_history": history})
 
-    # 3. شغّل الـ pipeline — per-node latencies moved to Langfuse spans (R5).
-    # Heroku logs نظيفة هلق؛ تفاصيل التوقيت موجودة في Langfuse traces.
-    # نلفّ كل الـ pipeline بـ parent span واحد عشان كل شي (maestro LLM + tool
-    # dispatch + ...) ينزل تحت trace واحد لكل رسالة تيليغرام بدل traces مبعثرة.
+    # 3. شغّل الـ pipeline — التوقيت لكل مرحلة بسطر `[turn]` واحد تحت.
     rid = state["session_id"]
     t_total = time.perf_counter()
 
-    try:
-        # Start soul MongoDB queries in parallel with routing (~1.5s savings)
-        try:
-            from app.agent.nodes.soul import start_soul_prefetch
-            _prefetch = start_soul_prefetch(
-                state["chat_id"], state["user_id"], message,
-                conversation_id=state.get("conversation_id") or "",
-            )
-            state = merge_state(state, {"soul_prefetch": _prefetch})
-        except Exception:
-            logger.debug("ignoring non-critical error", exc_info=True)
+    if _prefetch:
+        state = merge_state(state, {"soul_prefetch": _prefetch})
 
+    try:
         # توجيه: نداء FC واحد على كامل الكتالوج
         _t = time.perf_counter()
         state = _route_intent(state)

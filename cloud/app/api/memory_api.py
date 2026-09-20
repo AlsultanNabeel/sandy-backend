@@ -23,30 +23,26 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
+from app.utils.tenant_db import scoped
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
-    current_user_id,
 )
 
 
-def _bump_persona(user_id: str) -> None:
-    """Mark this tenant's cached persona stale.
+_COLL = "sandy_memories"
 
-    These three routes write `sandy_memories` on a raw handle, so the bump in
-    `ScopedCollection` never sees them — and `sandy_memories` is where the
-    preferences, relationships and lessons in a cached persona come from. A
-    preference saved in the app has to be true in the next reply, not a minute
-    later.
+
+def _facts(mongo_db):
+    """This tenant's memories (keyed on ``chat_id``), or None with no tenant/db.
+
+    Through `scoped()` so the tenant filter cannot be forgotten and every write
+    marks the cached persona stale — `sandy_memories` is where the preferences,
+    relationships and lessons in a cached persona come from, so a fact saved in
+    the app has to be true in the next reply. The bump lands after the write,
+    never before (see `ScopedCollection._note_write`).
     """
-    try:
-        from app.utils.tenant_version import bump_for
-
-        bump_for(str(user_id or ""), collection="sandy_memories")
-    except Exception:  # noqa: BLE001 — a stale cache must not fail the write
-        import logging
-
-        logging.getLogger(__name__).debug("bump skipped", exc_info=True)
+    return scoped(mongo_db, _COLL, field="chat_id")
 
 
 def register_memory_api(app, mongo_db=None):
@@ -56,14 +52,14 @@ def register_memory_api(app, mongo_db=None):
         if mongo_db is None:
             return jsonify({"items": []}), 200
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = _facts(mongo_db)
+            if coll is None:
                 return jsonify({"items": []}), 200
             items = []
             cur = (
-                mongo_db["sandy_memories"]
+                coll
                 .find(
-                    {"chat_id": uid, "label": {"$ne": "conversation_summary"}},
+                    {"label": {"$ne": "conversation_summary"}},
                     {"content": 1, "label": 1},
                 )
                 .sort("created_at", -1)
@@ -91,21 +87,15 @@ def register_memory_api(app, mongo_db=None):
         from datetime import datetime, timezone
 
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = _facts(mongo_db)
+            if coll is None:
                 return jsonify({"ok": False}), 403
             # Same shape the memory_store tool writes (plain user_fact, no embedding).
-            res = mongo_db["sandy_memories"].insert_one({
-                "chat_id": uid,
+            res = coll.insert_one({
                 "label": "user_fact",
                 "content": text,
                 "created_at": datetime.now(timezone.utc),
             })
-            # **After the write, never before.** A bump ahead of the write lets
-            # the other worker rebuild from a database that does not contain it
-            # yet and cache that under the new version — stale until something
-            # unrelated changes, which is worse than the staleness it prevents.
-            _bump_persona(uid)
         return jsonify({"ok": True, "id": str(res.inserted_id)}), 200
 
     @app.route("/api/memory/<fact_id>", methods=["PATCH"])
@@ -124,15 +114,14 @@ def register_memory_api(app, mongo_db=None):
         except (InvalidId, TypeError):
             return jsonify({"ok": False}), 200
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = _facts(mongo_db)
+            if coll is None:
                 return jsonify({"ok": False}), 403
-            # Scoped + never edits an auto summary by id.
-            res = mongo_db["sandy_memories"].update_one(
-                {"_id": oid, "chat_id": uid, "label": {"$ne": "conversation_summary"}},
+            # Never edits an auto summary by id.
+            res = coll.update_one(
+                {"_id": oid, "label": {"$ne": "conversation_summary"}},
                 {"$set": {"content": text}},
             )
-            _bump_persona(uid)
         return jsonify({"ok": res.matched_count > 0}), (200 if res.matched_count else 400)
 
     @app.route("/api/memory/<fact_id>", methods=["DELETE"])
@@ -148,12 +137,11 @@ def register_memory_api(app, mongo_db=None):
         except (InvalidId, TypeError):
             return jsonify({"ok": False}), 200
         with active_user_profile_context(build_user_profile(claims)):
-            uid = current_user_id()
-            if not uid:
+            coll = _facts(mongo_db)
+            if coll is None:
                 return jsonify({"ok": False}), 403
-            # Scoped + never deletes an auto summary by id.
-            res = mongo_db["sandy_memories"].delete_one(
-                {"_id": oid, "chat_id": uid, "label": {"$ne": "conversation_summary"}}
+            # Never deletes an auto summary by id.
+            res = coll.delete_one(
+                {"_id": oid, "label": {"$ne": "conversation_summary"}}
             )
-            _bump_persona(uid)
         return jsonify({"ok": res.deleted_count > 0}), 200

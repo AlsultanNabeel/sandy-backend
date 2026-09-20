@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
+from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import (
     active_user_profile_context,
@@ -99,7 +100,8 @@ def _was_up_late(mongo_db, uid: str) -> bool:
 def _load_summary(mongo_db, uid: str) -> Dict[str, Any]:
     from app.features import reminders_store, tasks_store
     tasks = tasks_store.load_tasks(mongo_db=mongo_db) or []
-    overdue = tasks_store.load_overdue_tasks(mongo_db=mongo_db) or []
+    # From the list just read — `load_overdue_tasks` would read it again.
+    overdue = tasks_store.overdue_among(tasks)
     reminders = reminders_store.load_reminders(max_results=20) or []
     titles = [
         str(t.get("text", "")).strip()
@@ -168,7 +170,10 @@ def get_daily_nudge(mongo_db, uid: str) -> Dict[str, Any]:
     persona read tenant-scoped). Shared by the GET endpoint and the push
     scheduler so the "question vs agenda" logic lives in exactly one place.
     """
-    coll = mongo_db[_COLL] if mongo_db is not None else None
+    # Tenant-scoped like every other per-user row. `bump=False`: the cached
+    # nudge feeds nothing the persona cache is built from, and this write runs
+    # on the first open of every day.
+    coll = scoped(mongo_db, _COLL, bump=False)
     key = f"{uid}:{_today()}"
     if coll is not None:
         cached = coll.find_one({"_id": key})
@@ -185,8 +190,7 @@ def get_daily_nudge(mongo_db, uid: str) -> Dict[str, Any]:
         try:
             coll.update_one(
                 {"_id": key},
-                {"$set": {"user_id": uid, "nudge": nudge,
-                          "created_at": datetime.now(timezone.utc)}},
+                {"$set": {"nudge": nudge, "created_at": datetime.now(timezone.utc)}},
                 upsert=True,
             )
         except Exception as exc:  # noqa: BLE001

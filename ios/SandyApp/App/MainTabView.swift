@@ -93,9 +93,8 @@ struct MainTabView: View {
         // خلفية ساندي تحت الفوتر وهوامشه.
         .background(SandyBackground())
         .task {
-            await state.refreshOnboarding()
-            // نطلب إذن الإشعارات المحلية مرّة عند دخول التطبيق (آمن للتكرار).
-            NotificationManager.shared.requestAuthorization()
+            // إذن الإشعارات بينطلب بـ AppState.setupPush قبل أي وصول لهالشاشة.
+            await state.refreshOnboardingIfNeeded()
         }
         // رصد الكيبورد — نبدّل `keyboardUp` بنعومة فيختفي/يرجع الشريط والرفيق.
         .onReceive(NotificationCenter.default.publisher(

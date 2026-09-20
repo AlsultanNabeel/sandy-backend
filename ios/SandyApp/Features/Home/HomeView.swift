@@ -483,31 +483,29 @@ struct HomeView: View {
     /// وقت نسبي عربي لطيف من ISO (أو فاضي لو ما قدرنا نحلّله).
     private static func relativeTime(_ iso: String) -> String {
         guard !iso.isEmpty, let date = parseISO(iso) else { return "" }
+        return relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let fmt = RelativeDateTimeFormatter()
         fmt.locale = Locale(identifier: "ar")
         fmt.unitsStyle = .full
-        return fmt.localizedString(for: date, relativeTo: Date())
-    }
+        return fmt
+    }()
 
-    /// مُحلِّل ISO متسامح (نفس منطق getHomeSnapshot: مع/بدون منطقة زمنية).
+    private static let dateOnlyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// مُحلِّل ISO متسامح (نفس منطق getHomeSnapshot): المحلّل المشترك + تاريخ بلا وقت.
+    /// كان يبني أربع formatters بكل نداء — وهو بينادى من جسم العرض.
     private static func parseISO(_ s: String) -> Date? {
         if s.isEmpty { return nil }
-        let full = ISO8601DateFormatter()
-        full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        if let d = full.date(from: s) { return d }
-        if let d = plain.date(from: s) { return d }
-        let noTZ = DateFormatter()
-        noTZ.locale = Locale(identifier: "en_US_POSIX")
-        noTZ.timeZone = TimeZone.current
-        noTZ.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        if let d = noTZ.date(from: s) { return d }
-        let dateOnly = DateFormatter()
-        dateOnly.locale = Locale(identifier: "en_US_POSIX")
-        dateOnly.timeZone = TimeZone.current
-        dateOnly.dateFormat = "yyyy-MM-dd"
-        return dateOnly.date(from: s)
+        return NotificationManager.parseISO(s) ?? dateOnlyFormatter.date(from: s)
     }
 }
 

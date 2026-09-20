@@ -301,8 +301,3 @@ void spk_play(sandy_spk_sound_t sound)
     }
     ESP_LOGI(TAG, "played sound %d at volume %d%%", (int)sound, s_volume);
 }
-
-void spk_test_tone(void)
-{
-    spk_play(SPK_BEEP);
-}

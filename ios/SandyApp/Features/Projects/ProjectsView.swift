@@ -407,5 +407,3 @@ private struct EditPlanSheet: View {
         .environment(\.layoutDirection, .rightToLeft)
     }
 }
-
-// MARK: - الستور

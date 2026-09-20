@@ -31,8 +31,10 @@ change every single turn, do not defeat the cache they have nothing to do with.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
-from typing import Optional
+from typing import Dict, Iterator, Optional
 
 from pymongo.errors import PyMongoError
 
@@ -67,6 +69,32 @@ VERSIONED = frozenset({
 # worker stays invisible for the length of the memo, which is "add a task, ask
 # about it, hear that you have none" — the failure the version stamp exists to
 # make impossible. One read per turn, always current.
+#
+# **"Per turn" is meant literally, and `turn_scope` is what makes it so.** A chat
+# turn asked for the same number two or three times within a few hundred
+# milliseconds — the persona block, then the life search on the same thread,
+# then the indexer after the reply — each a round trip to learn what the first
+# had just learnt. Inside a scope the first answer is reused for the rest of that
+# turn and **only** that turn: nothing crosses from one message to the next, so
+# the other-worker case above is exactly as fresh as it was. A write inside the
+# turn (`bump_for`) drops the remembered number, so the turn's own writes are
+# never hidden from its own reads.
+_TURN_MEMO: contextvars.ContextVar[Optional[Dict[str, int]]] = contextvars.ContextVar(
+    "tenant_version_turn_memo", default=None)
+
+
+@contextlib.contextmanager
+def turn_scope() -> Iterator[None]:
+    """Remember each tenant's version for the duration of one turn.
+
+    The memo is a dict held by a context variable, so jobs the turn submits
+    with a copied context (the soul pool, `submit_background`) share it.
+    """
+    token = _TURN_MEMO.set({})
+    try:
+        yield
+    finally:
+        _TURN_MEMO.reset(token)
 
 
 def _coll():
@@ -92,6 +120,10 @@ def version_for(tenant: str) -> int:
     if not key:
         return -1
 
+    memo = _TURN_MEMO.get()
+    if memo is not None and key in memo:
+        return memo[key]
+
     coll = _coll()
     if coll is None:
         return -1
@@ -101,6 +133,8 @@ def version_for(tenant: str) -> int:
     except PyMongoError as exc:
         logger.debug("[tenant_version] read failed: %s", exc)
         return -1
+    if memo is not None:
+        memo[key] = version
     return version
 
 
@@ -133,6 +167,11 @@ def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
         return
     try:
         coll.update_one({"_id": key}, {"$inc": {"v": 1}}, upsert=True)
+        # After the write, not before: a read racing it on another thread of
+        # this turn could otherwise put the old number straight back.
+        memo = _TURN_MEMO.get()
+        if memo is not None:
+            memo.pop(key, None)
         # **Name the collection that moved it.**
         #
         # The voice prompt is cached against this number, and in production it

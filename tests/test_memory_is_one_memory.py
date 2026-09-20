@@ -229,3 +229,122 @@ def test_durable_memory_was_always_keyed_by_person():
     # The two searches became one call — they were embedding the same string
     # twice — but the identity it searches by is still the person.
     assert "search_memory_for_turn(message, chat_id" in ctx
+
+
+# ── Behaviour, not source: one turn, said once, recalled on every channel ─────
+#
+# The source checks above prove the pieces exist. These run them against a real
+# (mongomock) store, the way the three channels actually call them:
+#
+#   robot voice  -> /voice, HMAC hello, identity = node.user_id  (session.py)
+#   app voice    -> /voice, JWT hello,  identity = claims.user_id (session.py;
+#                   GeminiLiveManager.swift opens `/voice`, never Gemini direct)
+#   app chat     -> /api/agent, user_id = claims.user_id          (server.py)
+#
+# All three land on the same id, so what follows uses one id for all of them.
+
+import mongomock  # noqa: E402
+import pytest  # noqa: E402
+
+_UID = "one-memory-user"
+_PROFILE = {"user_id": _UID, "chat_id": _UID, "relation": "user",
+            "permissions": "all", "is_owner": False, "is_guest": False, "name": ""}
+
+
+@pytest.fixture()
+def store(monkeypatch):
+    import app.db as appdb
+    import app.agent.graph.graph as graph
+
+    database = mongomock.MongoClient()["one_memory"]
+    appdb.configure(database)
+    monkeypatch.setattr(graph, "_stm_index_ready", True)  # mongomock: no TTL index
+    extracted = []
+    monkeypatch.setattr(graph, "_save_emotional_async",
+                        lambda state, message: extracted.append(message))
+    try:
+        yield database, extracted
+    finally:
+        appdb.reset()
+
+
+def _robot_says(user_text, reply, uid=_UID):
+    from app.api.voice_ws.memory import _save_voice_turn
+    _save_voice_turn(user_text, reply, uid, "الروبوت")
+
+
+def test_a_sentence_said_to_the_robot_is_known_to_the_app_chat_and_the_app_call(store):
+    from app.agent.graph.graph import recent_turns_for_user
+    from app.api.voice_ws.memory import load_recent_turns
+
+    _robot_says("اسم أخوي محمد", "حلو، تشرّفنا")
+
+    chat_sees = [m["content"] for m in recent_turns_for_user(_UID, limit=6)]
+    assert "اسم أخوي محمد" in chat_sees, "the app chat cannot see the robot's turn"
+
+    call_sees = load_recent_turns(_UID)
+    assert any(m["content"] == "اسم أخوي محمد" and m["via"] == "الروبوت"
+               for m in call_sees), "the app's call cannot see the robot's turn"
+
+
+def test_a_sentence_typed_in_the_app_reaches_the_next_voice_call(store, monkeypatch):
+    """Through the cache — which is where it used to die.
+
+    The instruction is cached per tenant version, and a chat turn does not move
+    the version. So the turns baked into the cached text were the ones from the
+    call that built it: type in the app, call the robot, and she did not know.
+    """
+    import app.api.voice_ws.tools as vt
+    from app.agent.graph.graph import _stm_save
+
+    vt.clear_instruction_cache()
+    monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 3)
+    monkeypatch.setattr(vt, "_shared_get", lambda k, v: None)
+    monkeypatch.setattr(vt, "_shared_put", lambda k, v, t: None)
+    monkeypatch.setattr(vt, "_system_instruction_body",
+                        lambda cid, persona: "persona\n" + vt._PAST_RECORD_NOTE)
+
+    vt._build_system_instruction(_UID)                       # the first call warms the cache
+    _stm_save("conv-7", _UID, "بكرا عندي مقابلة", "بالتوفيق", via="شات التطبيق")
+    text = vt._build_system_instruction(_UID)                # cache hit, same version
+
+    assert "بكرا عندي مقابلة" in text, "the cached instruction froze the recent turns"
+    assert "[شات التطبيق]" in text
+    assert text.index("بكرا عندي مقابلة") < text.index(vt._PAST_RECORD_NOTE), (
+        "the turns must sit above the 'past record, do not reply' guard")
+    vt.clear_instruction_cache()
+
+
+def test_the_voice_learns_from_what_it_hears_like_the_chat_does(store):
+    """The chat extracts relationships, lessons, milestones from every message;
+    the voice saved only the transcript, so the robot never learned anything."""
+    _db, extracted = store
+    _robot_says("اسم أخوي محمد", "حلو")
+    assert extracted == ["اسم أخوي محمد"]
+
+
+def test_a_pool_thread_does_not_lend_one_account_to_the_next(store):
+    """Pool threads keep their context between jobs. With `if user_id:` an
+    unpaired robot's turn was saved into whoever used the thread last."""
+    from app.agent.graph.graph import recent_turns_for_user
+    from app.api.voice_ws.memory import load_recent_turns, set_voice_identity
+
+    set_voice_identity(_UID)            # a previous session on this thread
+    _robot_says("سرّ ما لحدا", "ماشي", uid="")   # an unpaired robot
+    assert recent_turns_for_user(_UID) == [], "the stranger's turn landed in his memory"
+    assert load_recent_turns("") == [], "the stranger was handed his memory"
+    set_voice_identity("")
+
+
+def test_the_voice_seed_invents_nothing(store):
+    """The legacy `memory` doc has no writer and the chat never reads it; for a
+    customer without one, voice seeded a default with a made-up home city."""
+    import app.api.voice_ws.tools as vt
+    from app.api.voice_ws.memory import set_voice_identity
+    from app.utils.user_profiles import active_user_profile_context
+
+    with active_user_profile_context(_PROFILE):
+        set_voice_identity(_UID)
+        text = vt._system_instruction_body(_UID, lambda _uid: "شخصية")
+    set_voice_identity("")
+    assert "October City" not in text and "ذاكرتك:" not in text

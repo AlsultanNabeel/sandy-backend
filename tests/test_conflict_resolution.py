@@ -91,7 +91,8 @@ def test_check_conflicts_detects_overlapping_meetings_same_time():
 def test_task_create_appends_conflict_alert(mock_add_task, mock_conflict):
     set_active_user_profile(_OWNER_PROFILE)
     mock_add_task.return_value = "task_new_1"
-    mock_conflict.return_value = "نبيل، عندك امتحان الخميس ولقيت موعد اجتماع نفس اليوم — بعدّل؟"
+    mock_conflict.return_value = {
+        "alert_text": "نبيل، عندك امتحان الخميس ولقيت موعد اجتماع نفس اليوم — بعدّل؟"}
 
     due = _dt(days_from_now=1, hour=11).isoformat()
     result = handle_task_action(

@@ -81,5 +81,8 @@ def places_to_search_items(
 
 
 def wants_comparison_grounded_in_search(normalized_message: str) -> bool:
-    """Heuristic signal for Planner prompt (comparison without explicit noun)."""
+    """Does a follow-up ask to compare the last results ("which is closest?")?
+
+    Read by ``features.research`` to answer from the stored results instead of
+    searching again."""
     return bool(_COMPARISON_HINT.search(str(normalized_message or "")))

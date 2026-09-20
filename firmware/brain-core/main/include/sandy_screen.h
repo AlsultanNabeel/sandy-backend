@@ -72,9 +72,6 @@ bool screen_image_end(void);
 // Take whatever is up down and give the face back.
 void screen_dismiss(void);
 
-// Is a message currently covering the face?
-bool screen_is_showing(void);
-
 // ── Called by sandy_face only, on the LVGL task ──────────────────────────────
 //
 // These two exist so that every LVGL call in the whole display lives on one

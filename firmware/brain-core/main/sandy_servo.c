@@ -13,8 +13,8 @@ static const char *TAG = "servo";
 #define ARRAY_LEN_S(a) (sizeof(a) / sizeof((a)[0]))
 static uint8_t s_angle = SERVO_DEFAULT_POS;
 
-// Blocks ~20 ms per degree (the easing). Only ever called on the gesture task
-// (and once by servo_init, before that task exists): a caller on the mic task
+// Blocks ~20 ms per degree (the easing). Only ever called on the gesture task —
+// servo_init included, which hands the restore to it: a caller on the mic task
 // stalled audio capture for up to two seconds right after the wake word, and
 // two tasks moving the neck at once raced on s_angle.
 static void _move_blocking(uint8_t angle);
@@ -34,7 +34,8 @@ esp_err_t servo_init(void) {
         .freq_hz         = SERVO_FREQ_HZ,
         .clk_cfg         = LEDC_AUTO_CLK,
     };
-    ESP_ERROR_CHECK(ledc_timer_config(&timer));
+    esp_err_t err = ledc_timer_config(&timer);
+    if (err != ESP_OK) return err;
 
     ledc_channel_config_t ch = {
         .gpio_num   = PIN_SERVO,
@@ -45,13 +46,17 @@ esp_err_t servo_init(void) {
         .hpoint     = 0,
         .flags      = { .output_invert = 0 },
     };
-    ESP_ERROR_CHECK(ledc_channel_config(&ch));
+    err = ledc_channel_config(&ch);
+    if (err != ESP_OK) return err;
 
     uint8_t saved = SERVO_DEFAULT_POS;
     if (nvs_load_servo_angle(&saved) == ESP_OK) {
         ESP_LOGI(TAG, "restored angle=%d from NVS", saved);
     }
-    _move_blocking(saved);
+    // On the gesture task, not here: the easing takes ~20 ms per degree, so a
+    // saved angle at either end held the whole boot (face, voice, wake word)
+    // for up to 1.7 s.
+    servo_move_to(saved);
     return ESP_OK;
 }
 

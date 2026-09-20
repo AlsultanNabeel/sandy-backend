@@ -24,18 +24,22 @@ Endpoints:
 
 from __future__ import annotations
 import logging
-
+import re
 import uuid
 from datetime import datetime, timezone
 
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
+from app.utils.text_query import contains
 
 
 # Longer than any real chat message; short enough that a thread's document stays
 # far from Mongo's 16 MB cap.
 _MAX_MESSAGE_CHARS = 20_000
+
+# Most results one search returns (text and semantic matches together).
+_MAX_SEARCH_RESULTS = 50
 
 
 def _uid(claims) -> str:
@@ -269,22 +273,25 @@ def register_conversations_api(app, mongo_db=None):
         q = (request.args.get("q") or "").strip()
         if not uid or coll is None or not q:
             return jsonify({"items": []}), 200
-        ql = q.lower()
         items = []
         seen = set()
-        # 1) Text match over titles + messages (covers every conversation).
-        for d in coll.find({"user_id": uid}).sort("updated_at", -1).limit(300):
+        # 1) Text match over titles + messages, done by the database. This used
+        #    to pull the 300 newest threads whole — every message of every one —
+        #    to scan them here; now only matching threads come back, each with
+        #    its title and the first matching message.
+        in_title = contains("title", q)
+        in_message = contains("text", q)
+        title_hit = re.compile(in_title["title"]["$regex"], re.IGNORECASE)
+        for d in coll.find(
+            {"user_id": uid, "$or": [in_title, {"messages": {"$elemMatch": in_message}}]},
+            {"title": 1, "updated_at": 1, "messages": {"$elemMatch": in_message}},
+        ).sort("updated_at", -1).limit(_MAX_SEARCH_RESULTS):
             title = d.get("title", "") or ""
-            snippet = ""
-            if ql in title.lower():
+            matched = d.get("messages") or []
+            if title_hit.search(title) or not matched:
                 snippet = title
             else:
-                for m in d.get("messages", []):
-                    if ql in (m.get("text", "") or "").lower():
-                        snippet = m["text"]
-                        break
-                else:
-                    continue
+                snippet = matched[0].get("text", "") or ""
             items.append({
                 "id": str(d["_id"]),
                 "title": title or "محادثة",
@@ -292,16 +299,23 @@ def register_conversations_api(app, mongo_db=None):
                 "updated_at": d.get("updated_at", ""),
             })
             seen.add(str(d["_id"]))
-            if len(items) >= 50:
-                break
 
         # 2) Semantic match over rolling summaries (finds it by meaning, not words).
-        #    Ownership enforced here: we only surface the caller's own conversations.
-        for cid, summary in _semantic_hits(mongo_db, q):
-            if not cid or cid in seen or len(items) >= 50:
-                continue
-            c = coll.find_one({"_id": cid, "user_id": uid}, {"title": 1, "updated_at": 1})
-            if not c:
+        #    Ownership enforced here: we only surface the caller's own conversations,
+        #    looked up in one query rather than one per hit.
+        if len(items) >= _MAX_SEARCH_RESULTS:
+            return jsonify({"items": items}), 200
+        hits = [(cid, s) for cid, s in _semantic_hits(mongo_db, q) if cid and cid not in seen]
+        owned = {
+            str(c["_id"]): c
+            for c in coll.find(
+                {"_id": {"$in": [cid for cid, _ in hits]}, "user_id": uid},
+                {"title": 1, "updated_at": 1},
+            ).limit(len(hits))
+        } if hits else {}
+        for cid, summary in hits:
+            c = owned.get(cid)
+            if c is None or cid in seen or len(items) >= _MAX_SEARCH_RESULTS:
                 continue
             items.append({
                 "id": cid,

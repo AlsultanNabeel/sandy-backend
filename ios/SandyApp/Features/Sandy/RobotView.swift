@@ -128,8 +128,6 @@ struct RobotView: View {
     }
 }
 
-// MARK: - الستور (مصدر الحقيقة للمشاهد)
-
 // MARK: - محرّر مشهد (إضافة/تعديل الأجهزة)
 
 private struct SceneEditorSheet: View {
