@@ -46,6 +46,7 @@ struct MainTabView: View {
 
     /// روابط ساندي (ويدجت / Live Activity / مركز التحكم) — sandy://call|chat|quickadd.
     @ObservedObject private var router = DeepLinkRouter.shared
+    @ObservedObject private var spotlight = SpotlightRouter.shared
     /// مكالمة صوتية مفتوحة من رابط (نفس شاشة زر الصوت بالشات).
     @State private var showLiveCall = false
     /// نافذة الإضافة السريعة مفتوحة من رابط (نفس نافذة الرئيسية).
@@ -135,6 +136,12 @@ struct MainTabView: View {
             router.pending = nil
             open(link)
         }
+        // نتيجة بحث الآيفون بتفتح تبويبها.
+        .onChange(of: spotlight.pendingTab, initial: true) { _, tab in
+            guard let tab else { return }
+            spotlight.pendingTab = nil
+            selection = tab
+        }
         // المكالمة الصوتية الحيّة (جيميني لايف) — نفس عرض زر الصوت بالشات.
         .sheet(isPresented: $showLiveCall) {
             LiveVoiceView()
@@ -170,6 +177,7 @@ struct MainTabView: View {
         case .reminders:  RemindersView()
         case .tasks:      TasksView()
         case .future:     FutureMessagesView()
+        case .insights:   InsightsView()
         case .dailyNudge: EmptyView()   // يُعالَج بـ onChange (تبديل تبويب، لا ورقة)
         }
     }

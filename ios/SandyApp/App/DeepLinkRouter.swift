@@ -12,6 +12,7 @@ enum DeepLink: Equatable {
 /// • sandy://call/end  — end the running call
 /// • sandy://chat      — the Sandy (chat) tab
 /// • sandy://quickadd  — the quick-add window
+/// • sandy://focus/stop — finish the running focus session (Live Activity)
 ///
 /// A link that arrives before the main screen exists (cold launch, sign-in) waits
 /// in `pending` until `MainTabView` appears and consumes it.
@@ -42,6 +43,8 @@ final class DeepLinkRouter: ObservableObject {
             pending = .chat
         case "quickadd":
             pending = .quickAdd
+        case "focus":
+            if path == "/stop" { FocusLiveActivity.shared.stopFromLink() }
         default:
             break
         }

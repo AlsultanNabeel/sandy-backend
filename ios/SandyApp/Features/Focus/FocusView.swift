@@ -89,6 +89,10 @@ private struct TimerSection: View {
             await refresh()
             loaded = true
         }
+        // «إنهاء» من الجزيرة الديناميكية أو شاشة القفل — زامن الشاشة.
+        .onReceive(FocusLiveActivity.shared.changed) { _ in
+            Task { await refresh() }
+        }
     }
 
     // ── جلسة شغّالة: حلقة عدّ تنازلي + الطور + الدورة + أزرار الإنهاء ──────
@@ -210,7 +214,15 @@ private struct TimerSection: View {
     }
 
     private func refresh() async {
-        do { status = try await state.api.getFocusStatus() }
+        do {
+            let wasActive = status.active
+            let next = try await state.api.getFocusStatus()
+            status = next
+            // الجلسة خلصت لحالها (آخر دورة) — مش بكبسة إلغاء: هزّة نجاح.
+            if wasActive && !next.active && !busy { Haptics.play(.success) }
+            // الجزيرة الديناميكية/شاشة القفل تتبع حالة الخادم.
+            FocusLiveActivity.shared.sync(next)
+        }
         catch { /* صامت */ }
     }
 
@@ -234,6 +246,7 @@ private struct TimerSection: View {
         busy = true
         do {
             try await state.api.stopFocus(cancel: cancel)
+            if !cancel { Haptics.play(.success) }
             await refresh()
         } catch {
             notice = lang.s("focus.timer.stopError")

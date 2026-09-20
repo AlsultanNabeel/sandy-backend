@@ -37,6 +37,13 @@ final class RemindersStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "reminders"
+        if !hasSnapshot, let cached = DiskCache.load(CachedList<CachedReminder>.self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            reminders = cached.items.map(\.model)
+            demo = cached.demo
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -44,8 +51,12 @@ final class RemindersStore: LoadableStore {
                 guard isCurrentLoad(gen) else { return }
                 reminders = r.items
                 demo = r.demo
+                markLoaded()
+                DiskCache.save(CachedList(items: r.items.map { CachedReminder($0) }, demo: r.demo),
+                               key: cacheKey, userId: api.currentUserId)
+                if !r.demo { SpotlightIndexer.indexReminders(r.items) }
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("reminders.loadFailed") }
+                failLoad(error, generation: gen) { notify("reminders.loadFailed") }
             }
         }
         loadTask = task

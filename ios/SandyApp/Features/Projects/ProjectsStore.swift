@@ -11,6 +11,13 @@ final class ProjectsStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "plans"
+        // الخطط المنجزة بس بتنحفظ؛ جلسة العصف النشطة حيّة ولازمها اتصال.
+        if !hasSnapshot, let cached = DiskCache.load([CachedPlan].self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            plans = cached.map(\.model)
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -21,8 +28,10 @@ final class ProjectsStore: LoadableStore {
                 guard isCurrentLoad(gen) else { return }
                 plans = p
                 active = a
+                markLoaded()
+                DiskCache.save(p.map { CachedPlan($0) }, key: cacheKey, userId: api.currentUserId)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("projects.errorLoad") }
+                failLoad(error, generation: gen) { notify("projects.errorLoad") }
             }
         }
         loadTask = task

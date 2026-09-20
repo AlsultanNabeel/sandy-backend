@@ -11,6 +11,10 @@ struct RobotView: View {
     /// حياة الشاشة — فالسحب/التنقّل ما يلغي الجلب.
     @StateObject private var store = RobotStore()
 
+    @Environment(\.scenePhase) private var scenePhase
+    /// الشاشة ظاهرة فعلًا — رجوع التطبيق للواجهة ما بيشغّل النبض لتبويب مخفي.
+    @State private var visible = false
+
     @State private var editing: RoomScene?
     @State private var showAdd = false
 
@@ -35,7 +39,17 @@ struct RobotView: View {
         .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.scenes.map(\.id))
         .animation(.easeInOut(duration: 0.25), value: store.notice)
         .task { await store.load(api: state.api) }
-        .refreshable { await store.load(api: state.api) }
+        .refreshable {
+            await store.refreshLive(api: state.api)
+            await store.load(api: state.api)
+        }
+        // نبض حي كل خمس ثواني وهي الشاشة ظاهرة بس — بيوقف لما تختفي أو يروح
+        // التطبيق للخلفية، وبيرجع لما يرجع.
+        .onAppear { visible = true; store.startLive(api: state.api) }
+        .onDisappear { visible = false; store.stopLive() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && visible { store.startLive(api: state.api) } else { store.stopLive() }
+        }
         .sheet(item: $editing) { sc in
             SceneEditorSheet(store: store, scene: sc)
                 .environmentObject(state).environmentObject(lang)
@@ -49,6 +63,8 @@ struct RobotView: View {
     private var content: some View {
         ScrollView {
             VStack(spacing: Theme.Spacing.md) {
+                RobotLiveSection(store: store)
+
                 if store.scenes.isEmpty && !store.loading {
                     Text(lang.s("robot.empty"))
                         .font(Theme.Typography.subheadline)

@@ -9,14 +9,22 @@ final class ShoppingStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "shopping"
+        if !hasSnapshot, let cached = DiskCache.load([CachedShoppingItem].self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            items = cached.map(\.model)
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
                 let r = try await api.getShopping()
                 guard isCurrentLoad(gen) else { return }
                 items = r
+                markLoaded()
+                DiskCache.save(r.map { CachedShoppingItem($0) }, key: cacheKey, userId: api.currentUserId)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("shopping.errorLoad") }
+                failLoad(error, generation: gen) { notify("shopping.errorLoad") }
             }
         }
         loadTask = task

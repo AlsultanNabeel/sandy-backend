@@ -33,6 +33,7 @@ final class TasksStore: LoadableStore {
         NotificationManager.shared.sync(prefix: "task.", items: items)
 
         // لقطة الويدجت: عدد المهام النشطة.
+        WidgetData.setOpenTasks(tasks.filter { !$0.done })
         WidgetData.setActiveTasks(count: tasks.filter { !$0.done }.count)
     }
 
@@ -41,6 +42,19 @@ final class TasksStore: LoadableStore {
     func load(api: APIClient, completed: Bool) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = completed ? "tasks.completed" : "tasks"
+        // وضع بدون إنترنت: أول تحميل (أو تبديل الفلتر) بيعرض النسخة المحفوظة فورًا.
+        if !hasSnapshot || completed != showingCompleted {
+            if let cached = DiskCache.load(CachedList<CachedTask>.self, key: cacheKey,
+                                           userId: api.currentUserId) {
+                showingCompleted = completed
+                tasks = cached.items.map(\.model)
+                demo = cached.demo
+                hasSnapshot = true
+            } else if completed != showingCompleted {
+                hasSnapshot = false
+            }
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -49,8 +63,12 @@ final class TasksStore: LoadableStore {
                 showingCompleted = completed
                 tasks = r.items
                 demo = r.demo
+                markLoaded()
+                DiskCache.save(CachedList(items: r.items.map { CachedTask($0) }, demo: r.demo),
+                               key: cacheKey, userId: api.currentUserId)
+                if !completed && !r.demo { SpotlightIndexer.indexTasks(r.items) }
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("tasks.errorLoad") }
+                failLoad(error, generation: gen) { notify("tasks.errorLoad") }
             }
         }
         loadTask = task

@@ -24,12 +24,20 @@ struct SandyRobot: View {
     var happy: Bool = false
     var animated: Bool = true       // غمزة تلقائية + انجراف نظرة خفيف
     var mouthOpen: CGFloat = 0      // انفتاح الفم (صفر..واحد) — يحرّكه الصوت أثناء الكلام
+    /// مزاج الروبوت الحقيقي (أحد الخمسة وعشرين بـ `SandyMood`) — فاضي = الوجه العادي.
+    /// بيضاف فوق باقي الخصائص: الحواجب، الفم، النظرة، وإغماض العين.
+    var mood: String = ""
 
     // أبعاد الـ viewBox الأصلي (110×172).
     private let vbW: CGFloat = 110
     private let vbH: CGFloat = 172
 
     private var renderedHeight: CGFloat { size * (vbH / vbW) }
+
+    /// تعبير المزاج (قيم محايدة لما `mood` فاضي، فالرسم القديم ما بيتغيّر).
+    private var expr: SandyMoodExpression { SandyMoodExpression(mood: mood) }
+    private var isHappy: Bool { happy || expr.happy }
+    private var openAmount: CGFloat { max(mouthOpen, expr.open) }
 
     var body: some View {
         Group {
@@ -69,10 +77,10 @@ struct SandyRobot: View {
     // MARK: الرسم
 
     private func robotCanvas(autoBlink: Bool, drift: CGSize) -> some View {
-        let isBlinking = blink || autoBlink
-        // النظرة النهائية = نظرة ممرّرة + انجراف خمول (محصورة ضمن مدى معقول).
-        let gx = clampGaze(gaze.width + drift.width)
-        let gy = clampGaze(gaze.height + drift.height)
+        let isBlinking = blink || autoBlink || expr.closed
+        // النظرة النهائية = نظرة ممرّرة + نظرة المزاج + انجراف خمول (محصورة ضمن مدى معقول).
+        let gx = clampGaze(gaze.width + expr.gaze.width + drift.width)
+        let gy = clampGaze(gaze.height + expr.gaze.height + drift.height)
 
         return Canvas { ctx, canvasSize in
             // مقياس من الـ viewBox (110×172) إلى الإطار الفعلي.
@@ -130,10 +138,22 @@ struct SandyRobot: View {
 
         // ── حاجبان ────────────────────────────────────────────────────
         let brow = Color(red: 200/255, green: 240/255, blue: 1.0).opacity(0.65)
-        drawRoundedRect(&ctx, in: CGRect(x: 18, y: 33, width: 26, height: 3),
-                        radius: 1.5, fill: brow, edge: nil)
-        drawRoundedRect(&ctx, in: CGRect(x: 66, y: 33, width: 26, height: 3),
-                        radius: 1.5, fill: brow, edge: nil)
+        if expr.browTilt == 0 && expr.browLift == 0 {
+            drawRoundedRect(&ctx, in: CGRect(x: 18, y: 33, width: 26, height: 3),
+                            radius: 1.5, fill: brow, edge: nil)
+            drawRoundedRect(&ctx, in: CGRect(x: 66, y: 33, width: 26, height: 3),
+                            radius: 1.5, fill: brow, edge: nil)
+        } else {
+            // حاجب مائل: الطرف الداخلي (جهة الأنف) بينزل مع الغضب وبيطلع مع الحزن.
+            let y = 34.5 + expr.browLift
+            var browPath = Path()
+            browPath.move(to: CGPoint(x: 19.5, y: y))
+            browPath.addLine(to: CGPoint(x: 42.5, y: y + expr.browTilt))
+            browPath.move(to: CGPoint(x: 67.5, y: y + expr.browTilt))
+            browPath.addLine(to: CGPoint(x: 90.5, y: y))
+            ctx.stroke(browPath, with: .color(brow),
+                       style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        }
 
         // ── محجرا العينين ─────────────────────────────────────────────
         drawEyeSocket(&ctx, cx: LX, cy: LY)
@@ -151,18 +171,25 @@ struct SandyRobot: View {
         // ── الفم ──────────────────────────────────────────────────────
         // وهي تحكي (mouthOpen > 0) ينفتح الفم كبيضوي يكبر/يصغر على الموجة؛
         // وإلا ابتسامة (happy) أو خط هادئ.
-        if mouthOpen > 0.06 {
-            let open = min(max(mouthOpen, 0), 1)
+        if openAmount > 0.06 {
+            let open = min(max(openAmount, 0), 1)
             let h = 3 + open * 13          // ارتفاع الفتحة 3..16
             let w = 26 - open * 5          // يضيق شوي وهو ينفتح
             let rect = CGRect(x: 55 - w / 2, y: 89 - h / 2, width: w, height: h)
             let cavity = Path(roundedRect: rect, cornerRadius: min(w, h) / 2, style: .continuous)
             ctx.fill(cavity, with: .color(Color(red: 0, green: 5/255, blue: 18/255).opacity(0.92)))
             ctx.stroke(cavity, with: .color(cyan(0.55)), style: StrokeStyle(lineWidth: 2.5))
-        } else if happy {
+        } else if isHappy {
             var mouth = Path()
             mouth.move(to: CGPoint(x: 40, y: 88))
             mouth.addQuadCurve(to: CGPoint(x: 70, y: 88), control: CGPoint(x: 55, y: 96))
+            ctx.stroke(mouth, with: .color(cyan(0.55)),
+                       style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        } else if expr.frown {
+            // تكشيرة: نفس قوس الابتسامة مقلوب.
+            var mouth = Path()
+            mouth.move(to: CGPoint(x: 42, y: 92))
+            mouth.addQuadCurve(to: CGPoint(x: 68, y: 92), control: CGPoint(x: 55, y: 84))
             ctx.stroke(mouth, with: .color(cyan(0.55)),
                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
         } else {
@@ -284,6 +311,52 @@ struct SandyRobot: View {
         lid.addQuadCurve(to: CGPoint(x: x + 17, y: y), control: CGPoint(x: x, y: y - 8))
         ctx.stroke(lid, with: .color(cyan(0.9)),
                    style: StrokeStyle(lineWidth: 3, lineCap: .round))
+    }
+}
+
+// MARK: - المزاج → تعبير الوجه
+
+/// كيف يترجم كل مزاج من الخمسة وعشرين (بنفس ترتيب `MOOD_MAP` بالفيرموير) لوجه
+/// ساندي المرسوم. تقريب أمين، مش نسخة بكسل-ببكسل من شاشة الروبوت.
+struct SandyMoodExpression {
+    var happy = false
+    var frown = false
+    var open: CGFloat = 0
+    /// ميل الحاجب: موجب = الطرف الداخلي نازل (غضب)، سالب = طالع (حزن/قلق).
+    var browTilt: CGFloat = 0
+    /// رفع الحاجب: سالب = لفوق (دهشة).
+    var browLift: CGFloat = 0
+    var closed = false
+    var gaze: CGSize = .zero
+
+    init(mood: String) {
+        switch mood {
+        case "happy":        happy = true
+        case "curious":      gaze = CGSize(width: 4, height: -3); browLift = -2
+        case "sad":          frown = true; browTilt = -4; gaze = CGSize(width: 0, height: 3)
+        case "alert":        open = 0.3; browLift = -3
+        case "surprised":    open = 0.7; browLift = -4
+        case "big_happy":    happy = true; open = 0.45; browLift = -2
+        case "focused":      browTilt = 2
+        case "bored":        gaze = CGSize(width: 0, height: 4); browLift = 1.5
+        case "excited":      happy = true; open = 0.5; browLift = -3
+        case "love":         happy = true; browLift = -1
+        case "angry":        frown = true; browTilt = 4
+        case "confused":     gaze = CGSize(width: -4, height: -2); browTilt = -2
+        case "thinking":     gaze = CGSize(width: -5, height: -5)
+        case "sleepy":       closed = true; browLift = 1
+        case "shy":          happy = true; gaze = CGSize(width: -5, height: 4)
+        case "proud":        happy = true; browLift = -1; gaze = CGSize(width: 0, height: -3)
+        case "worried":      browTilt = -4; gaze = CGSize(width: 2, height: 2)
+        case "playful":      happy = true; gaze = CGSize(width: 5, height: 0)
+        case "calm":         happy = true; closed = true
+        case "grumpy":       frown = true; browTilt = 3
+        case "hopeful":      happy = true; browTilt = -2; gaze = CGSize(width: 0, height: -5)
+        case "grateful":     happy = true; closed = true; browLift = -1
+        case "disappointed": frown = true; browTilt = -2; gaze = CGSize(width: 0, height: 4)
+        case "silly":        open = 0.4; gaze = CGSize(width: 6, height: -4)
+        default:             break   // idle وأي قيمة مش معروفة = الوجه العادي
+        }
     }
 }
 

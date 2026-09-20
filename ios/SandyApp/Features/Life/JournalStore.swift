@@ -10,6 +10,13 @@ final class JournalStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "journal"
+        if !hasSnapshot, let cached = DiskCache.load(CachedList<CachedJournalEntry>.self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            entries = cached.items.map(\.model)
+            demo = cached.demo
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -17,8 +24,12 @@ final class JournalStore: LoadableStore {
                 guard isCurrentLoad(gen) else { return }
                 withAnimation { entries = r.items }
                 demo = r.demo
+                markLoaded()
+                DiskCache.save(CachedList(items: r.items.map { CachedJournalEntry($0) }, demo: r.demo),
+                               key: cacheKey, userId: api.currentUserId)
+                if !r.demo { SpotlightIndexer.indexJournal(r.items) }
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) {
+                failLoad(error, generation: gen) {
                     withAnimation { self.error = LanguageManager.shared.s("life.journal.loadError") }
                 }
             }

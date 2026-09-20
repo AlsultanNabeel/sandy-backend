@@ -13,14 +13,22 @@ final class GoalsStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "goals"
+        if !hasSnapshot, let cached = DiskCache.load([CachedGoal].self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            goals = cached.map(\.model)
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
                 let r = try await api.getGoals()
                 guard isCurrentLoad(gen) else { return }
                 goals = r
+                markLoaded()
+                DiskCache.save(r.map { CachedGoal($0) }, key: cacheKey, userId: api.currentUserId)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("goals.errorLoad") }
+                failLoad(error, generation: gen) { notify("goals.errorLoad") }
             }
         }
         loadTask = task

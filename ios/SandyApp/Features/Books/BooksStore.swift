@@ -11,6 +11,15 @@ final class BooksStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "books"
+        if !hasSnapshot, let cached = DiskCache.load(CachedBooks.self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            books = cached.items.map(\.model)
+            stats = cached.stats
+            goal = cached.goal
+            demo = cached.demo
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -20,8 +29,12 @@ final class BooksStore: LoadableStore {
                 stats = r.stats
                 goal = r.goal
                 demo = r.demo
+                markLoaded()
+                DiskCache.save(CachedBooks(items: r.items, stats: r.stats, goal: r.goal, demo: r.demo),
+                               key: cacheKey, userId: api.currentUserId)
+                if !r.demo { SpotlightIndexer.indexBooks(r.items) }
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("books.errorLoad") }
+                failLoad(error, generation: gen) { notify("books.errorLoad") }
             }
         }
         loadTask = task

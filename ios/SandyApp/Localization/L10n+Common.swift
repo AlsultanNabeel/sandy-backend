@@ -21,6 +21,7 @@ enum L10nCommon {
             "retry":   .text("إعادة المحاولة"),
             "empty":   .text("لا يوجد شيء هنا بعد"),
             "language": .text("اللغة"),
+            "offlineBanner": .text("بدون إنترنت — آخر نسخة محفوظة"),
         ],
         en: [
             "demoData": .text("Demo data"),
@@ -35,6 +36,7 @@ enum L10nCommon {
             "retry":   .text("Retry"),
             "empty":   .text("Nothing here yet"),
             "language": .text("Language"),
+            "offlineBanner": .text("Offline — showing last saved"),
         ]
     )
 }

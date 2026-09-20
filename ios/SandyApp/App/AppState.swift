@@ -180,6 +180,9 @@ final class AppState: ObservableObject {
         }
         NotificationManager.shared.onDeviceToken = nil
         api.token = nil
+        // النسخ المحلية بتروح مع الحساب: مخزن بدون إنترنت وفهرس البحث.
+        DiskCache.clearAll()
+        SpotlightIndexer.deleteAll()
         onboarding = OnboardingData()
         onboardingLoaded = false
         onboardingDoneCached = false

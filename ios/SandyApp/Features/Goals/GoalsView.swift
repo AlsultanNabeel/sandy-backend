@@ -17,6 +17,13 @@ struct GoalsView: View {
         // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
         ZStack {
             VStack(spacing: 0) {
+                // نسخة محفوظة معروضة — نقولها بوضوح بدل ما تبيّن البيانات حيّة.
+                if store.offline {
+                    OfflineBanner()
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.top, Theme.Spacing.sm)
+                }
+
                 if !store.notice.isEmpty {
                     SandyNotice(store.notice, kind: .gentleWarning)
                         .padding(.horizontal, Theme.Spacing.md)

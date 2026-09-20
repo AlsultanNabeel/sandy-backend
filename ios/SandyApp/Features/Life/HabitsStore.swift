@@ -10,6 +10,13 @@ final class HabitsStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "habits"
+        if !hasSnapshot, let cached = DiskCache.load(CachedList<CachedHabit>.self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            habits = cached.items.map(\.model)
+            demo = cached.demo
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -17,8 +24,11 @@ final class HabitsStore: LoadableStore {
                 guard isCurrentLoad(gen) else { return }
                 withAnimation { habits = r.items }
                 demo = r.demo
+                markLoaded()
+                DiskCache.save(CachedList(items: r.items.map { CachedHabit($0) }, demo: r.demo),
+                               key: cacheKey, userId: api.currentUserId)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) {
+                failLoad(error, generation: gen) {
                     withAnimation { self.error = LanguageManager.shared.s("life.habits.loadError") }
                 }
             }

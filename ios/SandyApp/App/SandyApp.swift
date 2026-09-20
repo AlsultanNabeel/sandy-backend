@@ -1,3 +1,4 @@
+import CoreSpotlight
 import OSLog
 import SwiftUI
 import UIKit
@@ -57,6 +58,10 @@ struct SandyApp: App {
                     #if canImport(GoogleSignIn)
                     GIDSignIn.sharedInstance.handle(url)
                     #endif
+                }
+                // نتيجة من بحث الآيفون (Spotlight) — تفتح العنصر بمكانه.
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    SpotlightRouter.shared.handle(activity)
                 }
         }
     }

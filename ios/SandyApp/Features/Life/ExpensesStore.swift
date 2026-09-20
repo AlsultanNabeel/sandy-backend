@@ -11,6 +11,14 @@ final class ExpensesStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "expenses"
+        if !hasSnapshot, let cached = DiskCache.load(CachedExpenses.self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            items = cached.items.map(\.model)
+            summary = ExpensesSummary(total: cached.total, count: cached.count)
+            demo = cached.demo
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -19,8 +27,13 @@ final class ExpensesStore: LoadableStore {
                 withAnimation { items = r.items }
                 summary = r.summary
                 demo = r.demo
+                markLoaded()
+                DiskCache.save(CachedExpenses(items: r.items.map { CachedExpense($0) },
+                                              total: r.summary.total, count: r.summary.count,
+                                              demo: r.demo),
+                               key: cacheKey, userId: api.currentUserId)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) {
+                failLoad(error, generation: gen) {
                     withAnimation { self.error = LanguageManager.shared.s("life.expenses.loadError") }
                 }
             }

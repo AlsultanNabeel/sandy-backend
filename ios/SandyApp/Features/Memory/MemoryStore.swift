@@ -9,14 +9,23 @@ final class MemoryStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        let cacheKey = "memory"
+        if !hasSnapshot, let cached = DiskCache.load([CachedMemoryFact].self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            facts = cached.map(\.model)
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
                 let r = try await api.getMemory()
                 guard isCurrentLoad(gen) else { return }
                 facts = r
+                markLoaded()
+                DiskCache.save(r.map { CachedMemoryFact($0) }, key: cacheKey, userId: api.currentUserId)
+                SpotlightIndexer.indexMemory(r)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("memory.errorLoad") }
+                failLoad(error, generation: gen) { notify("memory.errorLoad") }
             }
         }
         loadTask = task

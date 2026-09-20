@@ -16,6 +16,11 @@ class LoadableStore: ObservableObject {
     @Published var notice = ""
     /// Showing placeholder data because the user is signed out / has no data.
     @Published var demo = false
+    /// آخر جلب فشل بسبب الاتصال، والشاشة بتعرض النسخة المحفوظة (`OfflineBanner`).
+    @Published var offline = false
+    /// في محتوى معروض (من الكاش أو من جلب ناجح) — فخطأ اتصال بيصير «بدون إنترنت»
+    /// بدل رسالة خطأ.
+    var hasSnapshot = false
 
     /// Monotonic token for the latest load. A load that was cancelled and
     /// replaced must not clear the spinner (or write results) of the load that
@@ -48,6 +53,31 @@ class LoadableStore: ObservableObject {
 
     /// Clear any standing notice.
     func clearNotice() { notice = "" }
+
+    // MARK: - وضع بدون إنترنت
+
+    /// الخطأ انقطاع اتصال (مش رد من الخادم) — `APIClient` بيحوّل أخطاء الشبكة لـ`.connection`.
+    static func isConnectionError(_ error: Error) -> Bool {
+        (error as? APIError)?.kind == .connection || error is URLError
+    }
+
+    /// جلب نجح: المعروض صار حيّ.
+    func markLoaded() {
+        hasSnapshot = true
+        offline = false
+    }
+
+    /// جلب فشل: الإلغاء والجلب القديم بيتجاهلوا؛ انقطاع اتصال ومعنا محتوى → `offline`
+    /// ونخلّي النسخة المعروضة؛ غير هيك → `fallback` (رسالة الخطأ المعتادة للستور).
+    func failLoad(_ error: Error, generation: Int, fallback: () -> Void) {
+        guard !error.isCancellation, isCurrentLoad(generation) else { return }
+        if hasSnapshot && Self.isConnectionError(error) {
+            offline = true
+        } else {
+            offline = false
+            fallback()
+        }
+    }
 
     /// Run an optimistic mutation: `apply` updates local state immediately for a
     /// snappy UI, `call` reconciles with the backend in the background, and on

@@ -17,6 +17,9 @@ struct HabitsView: View {
         ZStack {
             VStack(spacing: 0) {
                 if store.demo { DemoBanner() }
+                // نسخة محفوظة معروضة — نقولها بوضوح.
+                if store.offline { OfflineBanner() }
+
 
                 if !store.error.isEmpty {
                     SandyNotice(store.error, kind: .gentleWarning)
