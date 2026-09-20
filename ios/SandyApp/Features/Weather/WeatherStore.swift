@@ -17,14 +17,16 @@ final class WeatherStore: LoadableStore {
     /// جلب الطقس للمدينة الحالية بمهمة يملكها الستور (تُلغى عند إعادة الطلب).
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
-                snapshot = try await api.weatherNow(city: city)
+                let r = try await api.weatherNow(city: city)
+                guard isCurrentLoad(gen) else { return }
+                snapshot = r
                 clearNotice()
             } catch {
-                if !error.isCancellation {
+                if !error.isCancellation, isCurrentLoad(gen) {
                     notify("weather.errorLoad")
                 }
             }

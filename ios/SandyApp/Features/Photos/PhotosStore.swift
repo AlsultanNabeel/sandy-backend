@@ -13,16 +13,19 @@ final class PhotosStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let album = selectedAlbum
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 async let photosRes = api.photosList(album: album)
                 async let albumsRes = api.photosAlbums()
-                photos = try await photosRes
-                albums = try await albumsRes
+                let p = try await photosRes
+                let a = try await albumsRes
+                guard isCurrentLoad(gen) else { return }
+                photos = p
+                albums = a
             } catch {
-                if !error.isCancellation { notify("photos.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("photos.errorLoad") }
             }
         }
         loadTask = task

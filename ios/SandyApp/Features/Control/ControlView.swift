@@ -233,7 +233,7 @@ struct ControlView: View {
                                 Text(node.telemetry?.ssid ?? "")
                                     .font(Theme.Typography.caption)
                                     .foregroundColor(Theme.Colors.tertiaryText)
-                                Image(systemName: "chevron.left")
+                                Image(systemName: "chevron.forward")
                                     .font(.system(size: Theme.Icon.sm, weight: .semibold))
                                     .foregroundColor(Theme.Colors.tertiaryText)
                             }

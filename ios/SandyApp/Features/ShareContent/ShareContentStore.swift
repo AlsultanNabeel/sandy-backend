@@ -10,6 +10,10 @@ final class ShareContentStore: LoadableStore {
 
     private var suggestTask: Task<Void, Never>?
     private var savedTask: Task<Void, Never>?
+    /// Generation tokens: a replaced (cancelled) load must not clear the
+    /// spinner or write results of the load that replaced it.
+    private var suggestGen = 0
+    private var savedGen = 0
 
     /// عنصر محفوظ مسبقًا؟ نطابق بالرابط (أو العنوان لو ما في رابط).
     func isSaved(_ item: SharedContentItem) -> Bool {
@@ -19,15 +23,18 @@ final class ShareContentStore: LoadableStore {
 
     func loadSuggested(api: APIClient) async {
         suggestTask?.cancel()
+        suggestGen += 1
+        let gen = suggestGen
+        loadingSuggested = true
         let task = Task { @MainActor in
-            loadingSuggested = true
-            defer { loadingSuggested = false }
+            defer { if gen == suggestGen { loadingSuggested = false } }
             do {
                 let r = try await api.shareContentSuggest()
+                guard gen == suggestGen else { return }
                 topic = r.topic
                 suggested = r.items
             } catch {
-                if !error.isCancellation { notify("shareContent.error") }
+                if !error.isCancellation, gen == suggestGen { notify("shareContent.error") }
             }
         }
         suggestTask = task
@@ -36,13 +43,17 @@ final class ShareContentStore: LoadableStore {
 
     func loadSaved(api: APIClient) async {
         savedTask?.cancel()
+        savedGen += 1
+        let gen = savedGen
+        loadingSaved = true
         let task = Task { @MainActor in
-            loadingSaved = true
-            defer { loadingSaved = false }
+            defer { if gen == savedGen { loadingSaved = false } }
             do {
-                saved = try await api.shareContentSaved()
+                let r = try await api.shareContentSaved()
+                guard gen == savedGen else { return }
+                saved = r
             } catch {
-                if !error.isCancellation { notify("shareContent.error") }
+                if !error.isCancellation, gen == savedGen { notify("shareContent.error") }
             }
         }
         savedTask = task

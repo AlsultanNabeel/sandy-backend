@@ -10,16 +10,19 @@ final class ProjectsStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 async let plansCall = api.getPlans()
                 async let activeCall = api.getActiveBrainstorm()
-                plans = try await plansCall
-                active = try await activeCall
+                let p = try await plansCall
+                let a = try await activeCall
+                guard isCurrentLoad(gen) else { return }
+                plans = p
+                active = a
             } catch {
-                if !error.isCancellation { notify("projects.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("projects.errorLoad") }
             }
         }
         loadTask = task

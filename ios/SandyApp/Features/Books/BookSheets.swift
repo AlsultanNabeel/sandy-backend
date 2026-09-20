@@ -62,7 +62,7 @@ struct BookAddSheet: View {
                 .opacity(trimmedTitle.isEmpty ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {
@@ -113,7 +113,7 @@ struct BookStatusSheet: View {
                 }
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {
@@ -173,7 +173,7 @@ struct BookMetaSheet: View {
                 }
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     @ViewBuilder
@@ -238,7 +238,7 @@ struct BookNoteSheet: View {
                 .opacity(trimmed.isEmpty ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {
@@ -293,7 +293,7 @@ struct BookQuoteSheet: View {
                 .opacity(trimmed.isEmpty ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {
@@ -356,7 +356,7 @@ struct BookGoalSheet: View {
                 .opacity(booksValue <= 0 ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {

@@ -223,7 +223,7 @@ struct ShoppingSheet: View {
                 .opacity(trimmedText.isEmpty ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {
@@ -305,7 +305,7 @@ private struct ShoppingBuySheet: View {
                 .opacity(priceValue <= 0 ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
         .task {
             // آخر سعر دفعته لنفس الصنف — اقتراح ذكي بدون ما يلزّم.
             lastPrice = await state.api.shoppingLastPrice(text: item.text)

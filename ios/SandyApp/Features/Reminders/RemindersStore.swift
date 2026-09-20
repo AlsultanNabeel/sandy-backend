@@ -36,15 +36,16 @@ final class RemindersStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 let r = try await api.getReminders()
+                guard isCurrentLoad(gen) else { return }
                 reminders = r.items
                 demo = r.demo
             } catch {
-                if !error.isCancellation { notify("reminders.loadFailed") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("reminders.loadFailed") }
             }
         }
         loadTask = task

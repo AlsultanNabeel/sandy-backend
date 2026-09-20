@@ -249,7 +249,7 @@ private struct GiftSheet: View {
             .animation(.easeInOut(duration: 0.25), value: error)
             .animation(.easeInOut(duration: 0.25), value: scheduled)
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private var kindSection: some View {

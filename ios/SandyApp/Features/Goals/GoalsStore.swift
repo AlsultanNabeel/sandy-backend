@@ -12,13 +12,15 @@ final class GoalsStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
-                goals = try await api.getGoals()
+                let r = try await api.getGoals()
+                guard isCurrentLoad(gen) else { return }
+                goals = r
             } catch {
-                if !error.isCancellation { notify("goals.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("goals.errorLoad") }
             }
         }
         loadTask = task

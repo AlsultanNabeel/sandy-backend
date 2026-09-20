@@ -431,7 +431,7 @@ struct HubRowCard: View {
                     .foregroundColor(Theme.Colors.tertiaryText)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.left")
+            Image(systemName: "chevron.forward")
                 .font(.system(size: Theme.Icon.sm, weight: .semibold))
                 .foregroundColor(Theme.Colors.tertiaryText)
         }

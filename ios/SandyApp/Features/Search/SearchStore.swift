@@ -17,22 +17,24 @@ final class SearchStore: LoadableStore {
     func search(api: APIClient, q: String, kind: SearchKind) async {
         guard !q.isEmpty else { return }
         searchTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
             clearNotice()
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 switch kind {
                 case .web:
                     let r = try await api.researchWeb(q: q)
+                    guard isCurrentLoad(gen) else { return }
                     web = r.items; demo = r.demo
                 case .places:
                     let r = try await api.researchPlaces(q: q)
+                    guard isCurrentLoad(gen) else { return }
                     places = r.items; demo = r.demo
                 }
                 hasSearched = true
             } catch {
-                if !error.isCancellation { notify("search.error") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("search.error") }
             }
         }
         searchTask = task

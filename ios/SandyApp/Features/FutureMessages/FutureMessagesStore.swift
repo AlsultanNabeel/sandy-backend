@@ -23,13 +23,15 @@ final class FutureMessagesStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
-                messages = try await api.futureMessagesList()
+                let r = try await api.futureMessagesList()
+                guard isCurrentLoad(gen) else { return }
+                messages = r
             } catch {
-                if !error.isCancellation { notify("futureMessages.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("futureMessages.errorLoad") }
             }
         }
         loadTask = task

@@ -76,7 +76,7 @@ struct ProfileView: View {
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.left")
+                Image(systemName: "chevron.forward")
                     .font(.system(size: Theme.Icon.sm, weight: .semibold))
                     .foregroundColor(Theme.Colors.tertiaryText)
             }
@@ -128,7 +128,7 @@ struct ProfileView: View {
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.left")
+                Image(systemName: "chevron.forward")
                     .font(.system(size: Theme.Icon.sm, weight: .semibold))
                     .foregroundColor(Theme.Colors.tertiaryText)
             }

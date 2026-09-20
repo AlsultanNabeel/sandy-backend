@@ -10,16 +10,17 @@ final class ExpensesStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 let r = try await api.getExpenses()
+                guard isCurrentLoad(gen) else { return }
                 withAnimation { items = r.items }
                 summary = r.summary
                 demo = r.demo
             } catch {
-                if !error.isCancellation {
+                if !error.isCancellation, isCurrentLoad(gen) {
                     withAnimation { self.error = LanguageManager.shared.s("life.expenses.loadError") }
                 }
             }

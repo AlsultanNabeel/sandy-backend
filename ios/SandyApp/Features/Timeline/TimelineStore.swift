@@ -8,13 +8,15 @@ final class TimelineStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
-                events = try await api.getTimeline()
+                let r = try await api.getTimeline()
+                guard isCurrentLoad(gen) else { return }
+                events = r
             } catch {
-                if !error.isCancellation { notify("timeline.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("timeline.errorLoad") }
             }
         }
         loadTask = task

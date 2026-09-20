@@ -298,7 +298,7 @@ private struct CardCell: View {
             .onChanged { g in
                 if !isHeld {
                     onPick()
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    Haptics.play(.drag)
                 }
                 offset = g.translation
                 onMove(g.location)
@@ -326,7 +326,7 @@ private struct CardCell: View {
     private func stepButton(_ icon: String, action: @escaping () -> Void) -> some View {
         Button {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { action() }
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Haptics.play(.drag)
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .bold))

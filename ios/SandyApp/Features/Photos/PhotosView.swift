@@ -272,7 +272,7 @@ private struct PhotoAddSheet: View {
                 .opacity(image == nil ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
         .onChange(of: pickedItem) { _, item in loadPicked(item) }
     }
 

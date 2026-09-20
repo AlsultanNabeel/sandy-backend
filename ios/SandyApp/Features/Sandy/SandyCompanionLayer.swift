@@ -89,7 +89,8 @@ struct SandyCompanionLayer: View {
                 .offset(y: bob ? -5 : 0)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("ساندي")
+            .accessibilityLabel(lang.s("sandy.companion.name"))
+            .accessibilityHint(lang.s("sandy.companion.hint"))
         }
         // حجم ثابت للحاوية حتى يبقى مركز `.position` مستقرًّا أثناء الانتقال.
         .frame(width: companionWidth, alignment: bubbleFrameAlignment)
@@ -218,22 +219,15 @@ struct SandyCompanionLayer: View {
         }
     }
 
-    // MARK: - الرسالة السياقية (قصيرة، لكل تبويب، عربي/إنجليزي)
+    // MARK: - الرسالة السياقية (قصيرة، لكل تبويب، من جداول الترجمة)
 
-    private var isAR: Bool { lang.lang == .ar }
-
-    /// رسالة قصيرة سياقية لكل تبويب. fallback ثنائي اللغة inline (مسموح حسب المهمة
-    /// لأن إضافة namespace جديد يتطلّب تعديل الـ registry خارج ملفاتنا الثلاثة).
+    /// رسالة قصيرة سياقية لكل تبويب — مفاتيح `sandy.companion.*` بـ L10n+Sandy.
     private var message: String {
         switch tab {
-        case .home:
-            return isAR ? "أهلين فيك! 👋" : "Hey there! 👋"
-        case .sandy:
-            return isAR ? "احكيني، أنا سامعة." : "Talk to me, I'm listening."
-        case .daily:
-            return isAR ? "نظّم يومك سوا؟ 🎯" : "Plan your day together? 🎯"
-        case .life:
-            return isAR ? "كيف ماشية حياتك؟" : "How's life going?"
+        case .home:  return lang.s("sandy.companion.home")
+        case .sandy: return lang.s("sandy.companion.sandy")
+        case .daily: return lang.s("sandy.companion.daily")
+        case .life:  return lang.s("sandy.companion.life")
         }
     }
 

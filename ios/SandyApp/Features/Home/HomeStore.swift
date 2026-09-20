@@ -15,10 +15,11 @@ final class HomeStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             let snap = await api.getHomeSnapshot()
+            guard isCurrentLoad(gen) else { return }
             let fullFail = snap.hadError
                 && snap.openTasks == 0
                 && snap.upcomingReminders.isEmpty

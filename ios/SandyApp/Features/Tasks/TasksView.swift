@@ -395,7 +395,7 @@ struct TaskSheet: View {
                 .opacity(canSave ? 1 : 0.5)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     // ── العنوان (إلزامي) ──

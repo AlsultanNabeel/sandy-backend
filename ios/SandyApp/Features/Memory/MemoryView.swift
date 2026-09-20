@@ -181,7 +181,7 @@ struct MemorySheet: View {
                 .opacity(trimmed.isEmpty ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {

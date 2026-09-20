@@ -315,7 +315,7 @@ struct ReminderSheet: View {
             }
             .animation(.easeInOut(duration: 0.25), value: notice)
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     /// بطاقة حقل صغيرة بعنوان فوقها — توحّد شكل الحقول.

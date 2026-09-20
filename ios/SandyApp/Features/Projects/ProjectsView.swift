@@ -269,7 +269,7 @@ private struct StartBrainstormSheet: View {
                 .opacity(trimmed.isEmpty ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 }
 
@@ -334,7 +334,7 @@ private struct ProjectDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
         .fullScreenCover(isPresented: $showEdit) {
             EditPlanSheet { change in
                 let ok = await onUpdate(change)
@@ -394,6 +394,6 @@ private struct EditPlanSheet: View {
                 .opacity(trimmed.isEmpty ? 0.5 : 1)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 }

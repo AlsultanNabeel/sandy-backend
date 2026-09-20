@@ -56,20 +56,21 @@ final class DevicesStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 // نجلب الأجهزة والوحدات بالتوازي.
                 async let devRes = api.getDevices()
                 async let nodeRes = api.getNodes()
                 let dev = try await devRes
                 let nod = try await nodeRes
+                guard isCurrentLoad(gen) else { return }
                 devices = dev.items
                 nodes = nod.items
                 demo = dev.demo || nod.demo
             } catch {
-                if !error.isCancellation {
+                if !error.isCancellation, isCurrentLoad(gen) {
                     notify("control.loadFailed")
                 }
             }

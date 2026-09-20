@@ -40,16 +40,17 @@ final class TasksStore: LoadableStore {
     /// لو انلغى انتظار الواجهة، المهمة المملوكة بتكمّل وبتحدّث الحالة.
     func load(api: APIClient, completed: Bool) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 let r = try await api.getTasks(completed: completed)
+                guard isCurrentLoad(gen) else { return }
                 showingCompleted = completed
                 tasks = r.items
                 demo = r.demo
             } catch {
-                if !error.isCancellation { notify("tasks.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("tasks.errorLoad") }
             }
         }
         loadTask = task

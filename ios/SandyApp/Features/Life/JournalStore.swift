@@ -9,15 +9,16 @@ final class JournalStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 let r = try await api.getJournal()
+                guard isCurrentLoad(gen) else { return }
                 withAnimation { entries = r.items }
                 demo = r.demo
             } catch {
-                if !error.isCancellation {
+                if !error.isCancellation, isCurrentLoad(gen) {
                     withAnimation { self.error = LanguageManager.shared.s("life.journal.loadError") }
                 }
             }

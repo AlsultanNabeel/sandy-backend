@@ -239,7 +239,7 @@ struct HabitSheet: View {
             }
             .animation(.easeInOut(duration: 0.25), value: error)
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     private func save() {

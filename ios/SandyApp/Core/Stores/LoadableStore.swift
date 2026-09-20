@@ -17,6 +17,29 @@ class LoadableStore: ObservableObject {
     /// Showing placeholder data because the user is signed out / has no data.
     @Published var demo = false
 
+    /// Monotonic token for the latest load. A load that was cancelled and
+    /// replaced must not clear the spinner (or write results) of the load that
+    /// replaced it — only the current generation may.
+    private var loadGeneration = 0
+
+    /// Start a new load: bumps the generation, shows the spinner, and returns
+    /// the token the load passes to `isCurrentLoad` / `endLoad`.
+    func beginLoad() -> Int {
+        loadGeneration += 1
+        loading = true
+        return loadGeneration
+    }
+
+    /// True while `generation` is still the most recent load.
+    func isCurrentLoad(_ generation: Int) -> Bool {
+        generation == loadGeneration
+    }
+
+    /// Finish a load: clears `loading` only if no newer load has started.
+    func endLoad(_ generation: Int) {
+        if generation == loadGeneration { loading = false }
+    }
+
     /// Set `notice` to a localized string by key — the
     /// `LanguageManager.shared.s(...)` call every store repeated.
     func notify(_ key: String) {

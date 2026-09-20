@@ -240,7 +240,7 @@ private struct TimelineDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
 
     /// تنسيق وقت ISO بلغة التطبيق.

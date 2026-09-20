@@ -8,13 +8,15 @@ final class GiftsStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
-                gifts = try await api.getGifts()
+                let r = try await api.getGifts()
+                guard isCurrentLoad(gen) else { return }
+                gifts = r
             } catch {
-                if !error.isCancellation { notify("gifts.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("gifts.errorLoad") }
             }
         }
         loadTask = task

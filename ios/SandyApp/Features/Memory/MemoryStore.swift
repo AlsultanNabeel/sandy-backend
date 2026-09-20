@@ -8,13 +8,15 @@ final class MemoryStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
-                facts = try await api.getMemory()
+                let r = try await api.getMemory()
+                guard isCurrentLoad(gen) else { return }
+                facts = r
             } catch {
-                if !error.isCancellation { notify("memory.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("memory.errorLoad") }
             }
         }
         loadTask = task

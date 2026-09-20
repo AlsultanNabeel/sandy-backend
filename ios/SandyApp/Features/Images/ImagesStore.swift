@@ -47,12 +47,13 @@ final class ImagesStore: LoadableStore {
     /// معالجة خطأ موحّدة.
     private func run(_ op: @escaping @MainActor () async throws -> Void) async {
         task?.cancel()
+        let gen = beginLoad()
         let t = Task { @MainActor in
-            loading = true; clearNotice()
-            defer { loading = false }
+            clearNotice()
+            defer { endLoad(gen) }
             do { try await op() }
             catch {
-                if !error.isCancellation { notify("images.error") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("images.error") }
             }
         }
         task = t

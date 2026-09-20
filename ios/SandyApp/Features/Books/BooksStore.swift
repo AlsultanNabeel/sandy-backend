@@ -10,17 +10,18 @@ final class BooksStore: LoadableStore {
 
     func load(api: APIClient) async {
         loadTask?.cancel()
+        let gen = beginLoad()
         let task = Task { @MainActor in
-            loading = true
-            defer { loading = false }
+            defer { endLoad(gen) }
             do {
                 let r = try await api.booksFetch()
+                guard isCurrentLoad(gen) else { return }
                 withAnimation { books = r.items }
                 stats = r.stats
                 goal = r.goal
                 demo = r.demo
             } catch {
-                if !error.isCancellation { notify("books.errorLoad") }
+                if !error.isCancellation, isCurrentLoad(gen) { notify("books.errorLoad") }
             }
         }
         loadTask = task
