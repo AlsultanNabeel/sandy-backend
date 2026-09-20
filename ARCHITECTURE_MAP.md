@@ -18,7 +18,7 @@ number in a document with no way to re-measure it is how a regression gets
 called an improvement — which happened once in this audit already, when a
 feature that had stopped running read as two round trips saved.
 
-Current readings: **30 round trips on a warm turn (47 cold), 1 embedding call per turn**; **RAISED 0,
+Current readings: **28 round trips on a warm turn (36 cold), 1 embedding call per turn**; **RAISED 0,
 NOT-HANDLED 9, OK 71** (the nine are seven routing meta-tools with stub
 handlers and the two image tools, which need a key).
 
@@ -128,7 +128,9 @@ fc_router → soul → router → ┬ pending  ┐
 
 - **`agents/fc_router.py`** — one native function-calling pass. The model sees
   every registered tool as a real tool (name + description + JSON schema) and
-  either calls one or more, or replies in plain text. This replaced a
+  always calls one or more (`tool_choice="required"`; plain conversation is the
+  `chat_respond` tool, so the router never writes a reply that gets thrown away).
+  This replaced a
   ~200-line hand-written disambiguation prompt: one call, more accurate. Mood and
   face are derived from the chosen tool by a cheap lookup, no extra model call.
   The stable prefix (tool catalogue + persona) is sent first and kept byte-identical
@@ -226,14 +228,22 @@ Around them: `interests_tracker`, `style_memory`, `lessons_memory`,
 
 **Nothing that ignores the router waits for it.** `start_soul_prefetch` starts
 the reads that depend only on who is talking — comfort, directives, the semantic
-search, and the emotional context — before routing, so they overlap the model
-call. The emotional context used to be submitted after routing and collected
-alone: one whole serial Atlas round trip on nearly every message. The chat-only
-block (dreams, anniversaries, goals, future messages) stays after routing on
-purpose — it surfaces due scheduled messages, and running it speculatively on a
-task turn would show them to nobody. It only reads; `run_graph` marks them
-delivered after the reply exists, so a read that finishes past the soul deadline
-cannot mark a message delivered that never reached a reply.
+search, the emotional context, the router's device list, session state /
+active brainstorm / persona, and the chat-only block (dreams, anniversaries,
+goals, due future messages) — before routing, so they overlap the model call.
+Only the STM read is still serial before the router. The chat-only block only
+reads; `run_graph` marks due messages delivered after a chat reply actually used
+them, so a speculative read on a task turn delivers nothing.
+
+**One memory across every channel.** App chat (`/api/agent`), the robot's voice
+(`/voice`, HMAC hello → the paired node's `user_id`) and in-app live voice
+(`GeminiLiveManager` → the same `/voice` socket with a JWT hello) all resolve to
+the same `user_id`, read the same `sandy_stm` recent turns and the same persona,
+facts and summaries, and write their turns back to `sandy_stm` with `via`.
+The voice prompt cache (`voice_ws/tools.py`) holds no turns — fresh recent turns
+are added per session (`with_recent_turns`) — so a line typed in chat reaches the
+next call. Voice turns run the same emotional/relationship extraction as chat.
+`tests/test_memory_is_one_memory.py` holds this.
 
 **One embedding per turn, not one per search.** `search_relevant_facts` and
 `search_relevant_summaries` each embedded the query independently — two OpenAI
@@ -430,7 +440,7 @@ paired the code. **A heartbeat cannot nominate its own owner.**
 
 ### 2.9 HTTP surface
 
-148 routes, two of them WebSockets (`/voice`, `/voice/enroll`). All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and those two sockets.
+136 HTTP route handlers on 103 paths, plus two WebSockets (`/voice`, `/voice/enroll`). All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
 Registered by explicit `register_*_api(app, …)` calls in `api/server.py` — there
 are no Flask blueprints, so **route discovery means reading `server.py`'s
 registration block**, not grepping for blueprints.
@@ -440,11 +450,11 @@ Groups: auth (email, Google, Apple) · account (get / reset / delete) · agent (
 journal, books, focus, scenes) · devices + nodes · memory · photos · goals · gifts ·
 future messages · share · timeline · research · images · weather · persona ·
 onboarding · push · subscriptions · features · daily nudge · studio plans · voice TTS ·
-firmware images · unified search · diagnose · camera upload.
+firmware images · diagnose · camera upload.
 
 **Every route that spends money on a provider is metered** through
 `api/metering.py` — the chat routes, image generation and analysis, web and
-place search, page fetch, content suggestions, gift writing, studio summaries
+place search, content suggestions, gift writing, studio summaries
 and photo tagging, one unit each against the caller's tier. A new paid route calls `meter_claims`.
 
 ### 2.10 Auth
@@ -467,7 +477,7 @@ are Google Places. Push is APNs over HTTP/2 (`h2` is in `requirements.txt` for
 exactly this). MQTT is HiveMQ Cloud over TLS.
 
 Circuit breakers (`utils/circuit_breaker.py`) wrap `azure_intent_client` (the
-hottest call), `openai_client`, `exa_client`, `gemini_tts`, `google_tts` and
+hottest call), `openai_client`, `exa_client`, `gemini_tts` and
 `features/weather`. Not wrapped: `azure_flux`, `azure_image`, `gemini_router`,
 `bedrock_router`, `google_places`, `services/apns`, and the embeddings in
 `semantic_memory`.
@@ -892,7 +902,7 @@ so folders are organisation only.
 - `Core/Auth/` — Keychain (`…ThisDeviceOnly`), Google sign-in, auth view.
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
 - `Core/Stores/LoadableStore.swift` — the shared load/error/empty state machine.
-- `Services/` — `GeminiLiveManager` (in-app live voice), `SpeechManager`,
+- `Services/` — `GeminiLiveManager` (in-app live voice), `SpeechManager` (reply playback only),
   `NotificationManager`, `SubscriptionManager`.
 - `Localization/` — one `L10n+<Area>.swift` per feature. Arabic/English, RTL/LTR.
 - `Widgets/` — home-screen widgets.
@@ -949,9 +959,11 @@ Social and delivery: `sandy_photos`, `sandy_photo_files`, `sandy_gifts`,
 `sandy_shared_content`, `sandy_future_messages`, `sandy_push_tokens`,
 `sandy_daily_nudge`, `sandy_nudge_locks`, `sandy_activity`, `sandy_evals`.
 
-Indexes are created at boot on the raw handle, by
-`bootstrap.ensure_indexes()` — one `try` per index, so one failure cannot skip
-the rest. `sandy_stm`'s three are the exception and live in
+Indexes are created at boot on the raw handle — by each store's `init_*`
+(tasks, reminders, devices, nodes, scenes, …) and by `bootstrap.ensure_indexes()`
+for the rest (conversations, focus, habits, journal, reading sessions, scene
+timers, gifts, shared content, goals, …) — one `try` per index, so one failure
+cannot skip the rest. `sandy_stm`'s three are the exception and live in
 `graph.py::_ensure_stm_indexes`, created on first use, same one-try-each rule.
 
 Two of them were added 24 Aug 2026 and are the reason replies stopped getting
@@ -1081,10 +1093,10 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    tells another. It reads `error` rather than `ok` now, so ordinary refusals no
    longer trip it (§2.4), but a genuinely broken upstream is still reported to
    everybody. The fix is a key, not a rewrite.
-3. **A warm chat turn still costs 30 database round trips** (47 cold;
+3. **A warm chat turn still costs 28 database round trips** (36 cold;
    `scripts/audit_turn_cost.py`) even though the persona block is cached per
    tenant version (§2.5). What remains is mostly `sandy_facts` and
-   `sandy_memories` reads and writes, plus the version-stamp reads.
+   `sandy_memories` reads and writes; only one of them is serial before the router.
 4. **A POST is never retried, and the chat send is a POST.** `sendWithRetry`
    guards on GET/HEAD because retrying a write could duplicate it, which is
    right — but it means the one dropped packet that motivated the whole change

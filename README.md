@@ -54,8 +54,8 @@ fc_router  →  soul  →  router  →  ┬ pending  ┐
                                   └ clarify  ┘
 ```
 
-- **fc_router** — a single model call sees all registered tools and either calls
-  one (or several) or replies in plain text.
+- **fc_router** — a single model call sees all registered tools and always calls
+  one or more (plain conversation is the `chat_respond` tool).
 - **soul** — injects the persona, emotional context and wellness signals.
 - **execute** — runs the tool through the dispatcher.
 - **response** — shapes the final reply.
