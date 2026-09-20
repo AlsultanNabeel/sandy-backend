@@ -24,8 +24,9 @@ from app.api.voice_ws._config import (
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
     _BARGE_MIN_MS,
+    _CONTINUE_MIN_MS,
     _CHUNK_BYTES,
-    _HELD_FRAMES_MAX,
+    _HELD_MS_MAX,
     _SILENCE_GAP_S,
     _COMPRESS_TRIGGER_TOKENS,
     _COMPRESS_WINDOW_TOKENS,
@@ -904,6 +905,32 @@ _REPLY_STALE_S = 2.0
 _REPLY_WARMUP_S = 8.0
 
 
+def _she_has_not_spoken_yet(state: Dict[str, Any]) -> bool:
+    """سكّرنا الدور، وهي لسا ما طلع منها ولا صوت."""
+    closed = state.get("turn_closed_at")
+    if closed is None:
+        return False
+    last_out = state.get("last_out_at")
+    return last_out is None or float(last_out) < float(closed)
+
+
+def _barge_bar_ms(state: Dict[str, Any]) -> float:
+    """قدّيش لازم يحكي عشان نوقّف اللي عمّ تعملو ونسمعو.
+
+    **الوقفة جوّا الجملة مش نهايتها.** حدا بيفكّر بنصّ سؤاله بيسكت تسعة أعشار
+    الثانية وبيكمّل، وإحنا بنكون سكّرنا الدور وبعتنا السؤال ناقص — فبتردّ قبل
+    ما يخلص. التكملة هاي غالبًا أقصر من ثانية وخُمس، يعني بتوقع تحت حدّ
+    المقاطعة وبتنرمى، وبتسمع نصّ سؤاله.
+
+    وما في قياس بيفرّق بين تكملة قصيرة وضجّة غرفة قصيرة — التنين كلام بنفس
+    اللحظة بالضبط. بس في **فرق بالكلفة**: ضجّة بتلغي ردًّا هي لسا ما بلّشتو
+    كلفتها إنها بتعيد السؤال؛ وضجّة بتلغي ردًّا نصّو طالع كلفتها إنها بتقطع
+    كلامها بنصّو. فالحدّ بينزل — مش بينفتح — طالما ما طلع منها ولا صوت بعد
+    الإقفال. أوّل ما تبلّش تحكي، بيرجع الحدّ الكامل.
+    """
+    return _CONTINUE_MIN_MS if _she_has_not_spoken_yet(state) else _BARGE_MIN_MS
+
+
 def _she_is_really_answering(state: Dict[str, Any]) -> bool:
     """هل هي فعلًا بصدد الردّ هلّق؟
 
@@ -1013,7 +1040,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
         # milliseconds of quiet that *end* the turn are inside it, and a blip of
         # two frames measured as a second and a half.
         if state.get("replying") and _she_is_really_answering(state) \
-                and speech_ms < _BARGE_MIN_MS:
+                and speech_ms < _barge_bar_ms(state):
             logger.info("[voice_ws] ignoring a %.1fs blip while she is answering "
                         "(last audio from her %.1fs ago)", speech_ms / 1000,
                         time.monotonic() - float(state.get("last_out_at") or 0))
@@ -1183,11 +1210,11 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 if state.get("replying") and _she_is_really_answering(state):
                     held.append(chunk)
                     held_ms += ms
-                    if len(held) > _HELD_FRAMES_MAX:
+                    while held_ms > _HELD_MS_MAX and len(held) > 1:
                         # The dropped frame's time leaves with it, or `held_ms`
                         # overstates and a shorter noise passes the bar below.
                         held_ms -= len(held.pop(0)) / 2 / 16000 * 1000
-                    if held_ms < _BARGE_MIN_MS:
+                    if held_ms < _barge_bar_ms(state):
                         continue
                     logger.info("[voice_ws] %.1fs of speech while she answers — "
                                 "taking it as an interruption", held_ms / 1000)
@@ -1200,6 +1227,10 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 silence_ms = 0.0
                 utter_ms = 0.0
                 await session.send_realtime_input(activity_start=types.ActivityStart())
+                # **فتح الدور بيلغي التوليد — يعني ما عادت ترد.** بدون هالسطر
+                # بتضلّ العلامة مرفوعة، وأول إقفال جاي بينبلع عالحارس تحت
+                # كأنها لسا بتحكي — فالجملة اللي قاطع فيها ما بتوصلها أبدًا.
+                state["replying"] = False
                 for pending in held:
                     await _send_audio(pending)
                 held.clear()

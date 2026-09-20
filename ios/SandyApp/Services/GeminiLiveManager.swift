@@ -194,6 +194,9 @@ private final class LiveAudioBridge: @unchecked Sendable {
     private let playFormat = LiveAudioBridge.makePlayFormat()
 
     private let lock = NSLock()
+    /// هل النظام عم يشيل صوتها من المايك؟ لو آه، منضلّ نبعت وهي بتحكي —
+    /// وهاي اللي بتخلّي المقاطعة ممكنة أصلاً. لو فشل التفعيل، منرجع للتسكير.
+    private var echoCancelled = false
     private var speaking = false
     private var lastPlaybackAt = CFAbsoluteTimeGetCurrent() - 10
     private var pendingBuffers = 0
@@ -206,6 +209,31 @@ private final class LiveAudioBridge: @unchecked Sendable {
         try s.setActive(true)
 
         let input = engine.inputNode
+
+        // **إلغاء الصدى، مش تسكير المايك.**
+        //
+        // كان المايك بينسكّر كلّيًا وهي بتحكي — وهاد بيمنع رجوع صوتها للمايك،
+        // بس بيمنع كمان **المقاطعة**: بالوقت اللي بدّك توقّفها فيه، ما في ولا
+        // إطار طالع من الجهاز، ومنطق المقاطعة عالسيرفر ما بيوصلو شي يحكم عليه.
+        // المقاطعة ما كانت بطيئة ولا حسّاسة — كانت مستحيلة.
+        //
+        // النظام بيعرف يشيل صوت السمّاعة من المايك (نفس اللي بيخلّي مكالمة
+        // عادية تشتغل ع السمّاعة الخارجية). بيتفعّل ع المدخل والمخرج سوا: بدّه
+        // التنين عشان يعرف شو طلع لحتى يشيلو من اللي دخل.
+        var cancelled = false
+        do {
+            try input.setVoiceProcessingEnabled(true)
+            try engine.outputNode.setVoiceProcessingEnabled(true)
+            cancelled = true
+        } catch {
+            // ما زبط — بنرجع للتسكير. أحسن من إنها تقاطع حالها كل جملة.
+            cancelled = false
+        }
+        // تحت القفل زي كل حقل بتقراه خيوط الصوت، حتى لو التابات لسا ما انركبت.
+        lock.lock(); echoCancelled = cancelled; lock.unlock()
+
+        // **بعد التفعيل، مش قبله.** تشغيل معالجة الصوت بيغيّر صيغة المدخل،
+        // وقراءتها قبل بتبني المحوّل ع صيغة ما عادت موجودة.
         let inFormat = input.outputFormat(forBus: 0)
 
         // رسم تشغيل ردّها.
@@ -277,10 +305,11 @@ private final class LiveAudioBridge: @unchecked Sendable {
     private func onMic(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
         let sp = speaking
+        let muted = !echoCancelled
         let since = CFAbsoluteTimeGetCurrent() - lastPlaybackAt
         lock.unlock()
-        // نصف-مزدوج: ما نبعت وهي بتحكي (أو بعدها بقليل) حتى ما يرجع صوتها للمايك.
-        if sp || since < 0.4 { return }
+        // بس لمّا ما يكون في إلغاء صدى: نصف-مزدوج، ما نبعت وهي بتحكي.
+        if muted, sp || since < 0.4 { return }
         guard let frame = convertMic(buffer) else { return }
         send?(frame)
     }

@@ -141,3 +141,61 @@ def test_the_floor_windows_are_times_not_counts():
     assert cfg._VAD_ROOM_MS > cfg._VAD_FLOOR_MS, "نافذة الأمان لازم تكون أطول"
     assert not hasattr(cfg, "_VAD_FLOOR_FRAMES"), (
         "نافذة بعدد الإطارات بتعني مدّة مختلفة بكل جهاز — هاد الخلل نفسه")
+
+
+class _StatefulSession(_Session):
+    """بتسجّل ترتيب الأحداث، عشان نعرف وين وقع الدور مش بس كم مرّة."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.order: list[str] = []
+
+    async def send_realtime_input(self, **kwargs):
+        await super().send_realtime_input(**kwargs)
+        if "activity_start" in kwargs:
+            self.order.append("start")
+        elif "activity_end" in kwargs:
+            self.order.append("end")
+
+
+def _pause(ms: int = 40) -> bytes:
+    return _app_frame(5, ms=ms)
+
+
+def test_a_pause_inside_a_sentence_does_not_end_it(loop):
+    """«بدّي... (يفكّر)... تذكّريني بكرا» — الوقفة بالنصّ سكّرت الدور وردّت ع نصّ
+    السؤال. الكلام اللي إجا بعد الإقفال وقبل ما تقول هي ولا كلمة هو تكملة."""
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    chunks = ([_pause()] * 6 + [_app_frame(2000)] * 30      # نصّ الجملة الأوّل
+              + [_pause()] * 30                              # وقفة تفكير أطول من الحدّ
+              + [_app_frame(2000)] * 23                      # وكمّل — أقصر من حدّ المقاطعة
+              + [_pause()] * 40)                             # وخلص فعلًا
+    session = _StatefulSession()
+    state: dict = {}
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(),
+                        verify=False, live_state=state))
+
+    # الدور الأوّل بينسكّر (الوقفة طويلة فعلًا)، بس التكملة لازم تفتح دورًا
+    # وتوصل — مش تنحجز كأنها مقاطعة لردّ ما بلّش.
+    assert session.order.count("start") == 2, (
+        f"التكملة ما فتحت دور: {session.order}")
+    assert session.order[-1] == "end", "آخر إشي لازم يكون إقفال، وإلا ما بتردّ"
+
+
+def test_the_bar_goes_back_up_once_she_starts_talking(loop):
+    """الفرق كلّو بالكلفة: إلغاء ردّ ما بلّش غير إلغاء ردّ نصّو طالع."""
+    import time as _time
+
+    from app.api.voice_ws import _config as cfg
+    from app.api.voice_ws.session import _barge_bar_ms
+
+    now = _time.monotonic()
+    assert _barge_bar_ms({"turn_closed_at": now}) == cfg._CONTINUE_MIN_MS
+    # قالت كلمة بعد الإقفال ← صار في ردّ يتقاطع، والحدّ بيرجع كامل.
+    assert _barge_bar_ms(
+        {"turn_closed_at": now, "last_out_at": now + 0.2}) == cfg._BARGE_MIN_MS
+    assert cfg._CONTINUE_MIN_MS < cfg._BARGE_MIN_MS
