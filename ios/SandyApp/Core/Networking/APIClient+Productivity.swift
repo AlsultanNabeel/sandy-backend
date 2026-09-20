@@ -133,6 +133,46 @@ extension APIClient {
         try await send("/api/reminders/\(id)", method: "DELETE")
     }
 
+    private struct ReminderActionBody: Encodable {
+        let action: String
+        let minutes: Int?
+    }
+
+    private struct ReminderActionResponse: Decodable {
+        let remind_at: String?
+        let is_recurring: Bool?
+    }
+
+    /// ما صار بالتذكير بعد ما نفّذنا الإجراء: الوقت الجاي (فاضي = خلص وما عاد يرنّ).
+    struct ReminderOutcome {
+        let remindAt: String
+        let isRecurring: Bool
+    }
+
+    /// PATCH /api/reminders/<id> body {"action":"snooze"|"done", "minutes"?}.
+    /// «بعدين» بيعيد تسليحه بلا ما يلمس التكرار، و«تمّ» بيطوي هالمرّة بس —
+    /// التذكير المتكرّر بيرجع بموعده الجاي، واللي مرّة وحدة بيتقاعد.
+    @discardableResult
+    func actOnReminder(id: String, action: String, minutes: Int? = nil) async throws -> ReminderOutcome {
+        let r: ReminderActionResponse = try await fetch(
+            "/api/reminders/\(id)", method: "PATCH",
+            body: ReminderActionBody(action: action, minutes: minutes))
+        return ReminderOutcome(remindAt: r.remind_at ?? "",
+                               isRecurring: r.is_recurring ?? false)
+    }
+
+    /// «ذكّرني بعدين» — تأجيل بعدد دقائق.
+    @discardableResult
+    func snoozeReminder(id: String, minutes: Int) async throws -> ReminderOutcome {
+        try await actOnReminder(id: id, action: "snooze", minutes: minutes)
+    }
+
+    /// «تمّ» — هالمرّة انتهت.
+    @discardableResult
+    func completeReminder(id: String) async throws -> ReminderOutcome {
+        try await actOnReminder(id: id, action: "done")
+    }
+
     // ── العادات ─────────────────────────────────────────────────────────
     private struct HabitsResponse: Decodable {
         let items: [Row]?

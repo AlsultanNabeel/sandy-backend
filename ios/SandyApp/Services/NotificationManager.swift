@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import UserNotifications
 #if canImport(UIKit)
 import UIKit
@@ -27,6 +28,12 @@ struct NotificationItem {
     let date: Date
     /// How it repeats, from the reminder's RRULE. `.none` rings once.
     var repeats: NotificationRepeat = .none
+    /// The action category the notification carries (buttons on the banner /
+    /// lock screen). nil = a plain notification with nothing to press.
+    var category: String? = nil
+    /// Whatever the buttons need to act without the app having been running —
+    /// for a reminder that is its id and its recurrence rule.
+    var userInfo: [String: String] = [:]
 }
 
 /// The repeat patterns a local notification can express by itself. A reminder
@@ -62,12 +69,23 @@ enum NotifRoute: String, Identifiable {
     var id: String { rawValue }
 }
 
+/// الأزرار اللي بتطلع على إشعار التذكير. القيمة الخام هي هوية الإجراء عند النظام.
+enum ReminderNotificationAction: String {
+    case snooze = "SANDY_REMINDER_SNOOZE"
+    case done   = "SANDY_REMINDER_DONE"
+    case delete = "SANDY_REMINDER_DELETE"
+}
+
 final class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
     private let center = UNUserNotificationCenter.current()
 
     /// تُضبط عند النقر على إشعار → الواجهة تفتح شاشتها. تُصفّر بعد الفتح.
     @Published var pendingRoute: NotifRoute?
+
+    /// يزيد كل ما زرّ بإشعار تذكير غيّر شي بالخادم (بعدين/تمّ/احذف)، فشاشة
+    /// التذكيرات — لو كانت مفتوحة — تعيد الجلب بدل ما تعرض وقتًا قديمًا.
+    @Published var remindersChanged = 0
 
     /// يُستدعى بتوكن جهاز APNs (نص hex) عند نجاح التسجيل للدفع البعيد — يضبطه
     /// AppState حتى يرفعه للباك-إند (`/api/push/register`). نخزّن آخر توكن حتى لو
@@ -79,6 +97,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         super.init()
         // مندوب المركز — حتى يطلع الإشعار كبانر والتطبيق مفتوح، ونمسك النقر للتوجيه.
         center.delegate = self
+        // أزرار التذكير لازم تكون مسجّلة قبل ما يوصل أي إشعار — والنظام بيشغّل
+        // التطبيق بالخلفية عشان يسلّمنا ضغطة زر، فهاد أوّل شي بينفّذ وقتها.
+        registerReminderCategory()
         // كل ما يرجع التطبيق للواجهة نعيد جدولة الإشعارات الاستباقية — فإشعار
         // «صارلك يومين» بيتأجّل مع كل فتحة، وما بيطلع إلا لو المستخدم غاب فعلًا.
         #if canImport(UIKit)
@@ -130,6 +151,19 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        // زرّ على تذكير: ننفّذه بدل ما نفتح التطبيق وبس. هالمسار بيشتغل كمان
+        // والتطبيق مو شغّال أصلًا — النظام بيقلّعه بالخلفية ويسلّمنا الرد، و
+        // الـAPIClient تحت بيقرا توكنه من الـKeychain متل الويدجت والاختصارات.
+        if let action = ReminderNotificationAction(rawValue: response.actionIdentifier),
+           let reminderId = response.notification.request.content
+               .userInfo[Self.reminderIdKey] as? String,
+           !reminderId.isEmpty {
+            perform(action, reminderId: reminderId,
+                    notification: response.notification.request,
+                    completion: completionHandler)
+            return
+        }
+
         let id = response.notification.request.identifier
         // الدفع البعيد للتنبيه اليومي يحمل "kind" بالحمولة (agenda/question) — نوجّهه
         // للرئيسية حيث تظهر بطاقة التنبيه. المحلّي يُعرف ببادئة هويته.
@@ -163,7 +197,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             self.center.removePendingNotificationRequests(withIdentifiers: stale)
             for it in items {
                 self.schedule(id: prefix + it.id, title: it.title, body: it.body,
-                              at: it.date, repeats: it.repeats)
+                              at: it.date, repeats: it.repeats,
+                              category: it.category, userInfo: it.userInfo)
             }
         }
         // نتذكّر عناصر كل نوع حتى تنبيهات «بعد ساعة» تنبني منها وتتجنّب التكرار.
@@ -171,6 +206,103 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         knownItems[prefix] = items
         knownLock.unlock()
         scheduleProactiveNudges()
+    }
+
+    // MARK: - Reminder actions (the buttons on a reminder's notification)
+
+    /// The category every reminder notification carries; its buttons are built
+    /// in `registerReminderCategory()`.
+    static let reminderCategory = "SANDY_REMINDER"
+    /// userInfo keys the buttons read back — the two things acting needs.
+    static let reminderIdKey = "reminder_id"
+    static let reminderRecurrenceKey = "reminder_recurrence"
+    /// What «remind me later» means from the lock screen, where there is no room
+    /// to ask. Matches the backend's own default.
+    static let snoozeMinutes = 10
+
+    /// Registers the three buttons. Titles are baked in when the category is
+    /// registered, not when the notification fires, so this runs again whenever
+    /// the app language changes (`LanguageManager.setLang`).
+    func registerReminderCategory() {
+        let lang = AppLocale.lang
+        let snooze = UNNotificationAction(
+            identifier: ReminderNotificationAction.snooze.rawValue,
+            title: translate(lang, "reminders.snooze"),
+            options: [])
+        let done = UNNotificationAction(
+            identifier: ReminderNotificationAction.done.rawValue,
+            title: translate(lang, "reminders.done"),
+            options: [])
+        let remove = UNNotificationAction(
+            identifier: ReminderNotificationAction.delete.rawValue,
+            title: translate(lang, "reminders.delete"),
+            options: [.destructive])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.reminderCategory,
+                                   actions: [snooze, done, remove],
+                                   intentIdentifiers: [],
+                                   options: [])
+        ])
+    }
+
+    /// Runs one button: the backend first, then the local notification is
+    /// re-armed or left cancelled to match, then an open reminders screen is
+    /// told to refetch.
+    ///
+    /// The server is the source of truth for this list, so a failure here is
+    /// recoverable rather than silent: the next time the reminders screen loads,
+    /// `sync(prefix:items:)` rebuilds every reminder notification from it.
+    private func perform(_ action: ReminderNotificationAction,
+                         reminderId: String,
+                         notification: UNNotificationRequest,
+                         completion: @escaping () -> Void) {
+        // The user answered this one — take it down before anything else.
+        let notifId = notification.identifier
+        center.removeDeliveredNotifications(withIdentifiers: [notifId])
+        center.removePendingNotificationRequests(withIdentifiers: [notifId])
+
+        let content = notification.content
+        let recurrence = content.userInfo[Self.reminderRecurrenceKey] as? String ?? ""
+        let info = [Self.reminderIdKey: reminderId,
+                    Self.reminderRecurrenceKey: recurrence]
+
+        Task { [weak self] in
+            guard let self else { completion(); return }
+            let api = APIClient(baseURL: Backend.currentURL)   // التوكن من الـKeychain
+            do {
+                switch action {
+                case .snooze:
+                    let out = try await api.snoozeReminder(id: reminderId,
+                                                           minutes: Self.snoozeMinutes)
+                    // One shot on purpose: a repeating trigger built from the
+                    // snoozed time would ring ten minutes late every day after.
+                    // The series itself is intact on the server and comes back
+                    // with the next load.
+                    if let at = Self.parseISO(out.remindAt) {
+                        self.schedule(id: notifId, title: content.title, body: content.body,
+                                      at: at, category: Self.reminderCategory, userInfo: info)
+                    }
+                case .done:
+                    let out = try await api.completeReminder(id: reminderId)
+                    // A recurring reminder answers with its next occurrence (its
+                    // own hour, not the snoozed one); a one-off answers with
+                    // nothing and stays cancelled.
+                    if let at = Self.parseISO(out.remindAt) {
+                        self.schedule(id: notifId, title: content.title, body: content.body,
+                                      at: at, repeats: NotificationRepeat(rrule: recurrence),
+                                      category: Self.reminderCategory, userInfo: info)
+                    }
+                case .delete:
+                    try await api.deleteReminder(id: reminderId)
+                }
+                DispatchQueue.main.async { self.remindersChanged &+= 1 }
+            } catch {
+                Logger(subsystem: Bundle.main.bundleIdentifier ?? "SandyApp",
+                       category: "reminders")
+                    .error("reminder action failed: \(error.localizedDescription, privacy: .public)")
+            }
+            completion()
+        }
     }
 
     // MARK: - Proactive nudges (local — APNs isn't configured)
@@ -291,12 +423,22 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     /// إشعار واحد بهوية ثابتة (يستبدل أي قديم بنفس الهوية). الماضي يُتجاهل.
     private func schedule(id: String, title: String, body: String, at date: Date,
-                          repeats: NotificationRepeat = .none) {
+                          repeats: NotificationRepeat = .none,
+                          category: String? = nil,
+                          userInfo: [String: String] = [:]) {
         guard date > Date() || repeats != .none else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
+        // الفئة بتجيب معها الأزرار (بعدين/تمّ/احذف)، والحمولة بتخلّي الزرّ يقدر
+        // ينفّذ بلا ما يفتح التطبيق ولا يجيب القائمة.
+        if let category { content.categoryIdentifier = category }
+        if !userInfo.isEmpty {
+            var payload: [AnyHashable: Any] = [:]
+            for (key, value) in userInfo { payload[key] = value }
+            content.userInfo = payload
+        }
         // A repeating reminder used to be scheduled once and never again, so
         // "every day at 8" rang on the first day only. The matching components
         // decide the repeat: time of day, plus weekday or day of month.

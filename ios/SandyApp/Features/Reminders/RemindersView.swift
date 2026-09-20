@@ -12,9 +12,14 @@ struct RemindersView: View {
     @EnvironmentObject var lang: LanguageManager
     /// مصدر الحقيقة للتذكيرات (يملك البيانات + الجلب + التعديلات، مستقل عن الشاشة).
     @StateObject private var store = RemindersStore()
+    /// أزرار الإشعار بتغيّر بالخادم والتطبيق مسكّر — نراقب العدّاد لنعيد الجلب
+    /// لمّا نرجع للشاشة بدل ما نعرض وقتًا قديمًا.
+    @ObservedObject private var notifs = NotificationManager.shared
     @State private var showAdd = false
     /// التذكير الجاري تعديله (nil = ما في ورقة تعديل مفتوحة).
     @State private var editingReminder: ReminderItem?
+    /// التذكير اللي بننتظر تأكيد حذفه — الحذف وحده بيسأل.
+    @State private var pendingDelete: ReminderItem?
 
     var body: some View {
         // الخلفية موحّدة على مستوى MainTabView — لا نكرّرها هون (طبقة مهدورة).
@@ -66,8 +71,23 @@ struct RemindersView: View {
                                        text: text, remindAt: remindAt, note: note)
             }
         }
+        .alert(lang.s("reminders.deleteConfirm"),
+               isPresented: .constant(pendingDelete != nil)) {
+            Button(lang.s("reminders.cancel"), role: .cancel) { pendingDelete = nil }
+            Button(lang.s("reminders.delete"), role: .destructive) {
+                if let doomed = pendingDelete {
+                    store.delete(api: state.api, reminder: doomed)
+                }
+                pendingDelete = nil
+            }
+        } message: {
+            Text(lang.s("reminders.deleteConfirmBody"))
+        }
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
+        .onChange(of: notifs.remindersChanged) { _, _ in
+            Task { await store.load(api: state.api) }
+        }
         .animation(.spring(response: 0.45, dampingFraction: 0.82), value: store.reminders.map(\.id))
         .animation(.easeInOut(duration: 0.25), value: store.notice)
     }
@@ -93,15 +113,29 @@ struct RemindersView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.md,
                                                   bottom: Theme.Spacing.xs, trailing: Theme.Spacing.md))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        // سحب لليسار: تمّ ثم حذف (بسؤال). لليمين: بعدين ثم تعديل.
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             if !store.demo {
                                 Button(role: .destructive) {
-                                    store.delete(api: state.api, reminder: reminder)
+                                    pendingDelete = reminder
                                 } label: { Label(lang.s("reminders.delete"), systemImage: "trash") }
+                                Button {
+                                    store.markDone(api: state.api, reminder: reminder)
+                                } label: {
+                                    Label(lang.s("reminders.done"), systemImage: "checkmark.circle")
+                                }
+                                .tint(Theme.Colors.success)
                             }
                         }
                         .swipeActions(edge: .leading) {
                             if !store.demo {
+                                Button {
+                                    store.snooze(api: state.api, reminder: reminder,
+                                                 minutes: NotificationManager.snoozeMinutes)
+                                } label: {
+                                    Label(lang.s("reminders.snooze"), systemImage: "clock.arrow.circlepath")
+                                }
+                                .tint(Theme.Colors.accentDeep)
                                 Button { editingReminder = reminder } label: {
                                     Label(lang.s("reminders.edit"), systemImage: "pencil")
                                 }
@@ -194,14 +228,54 @@ struct RemindersView: View {
         .onTapGesture { if !store.demo { editingReminder = reminder } }
         .contextMenu {
             if !store.demo {
+                Button {
+                    store.markDone(api: state.api, reminder: reminder)
+                } label: {
+                    Label(lang.s("reminders.done"), systemImage: "checkmark.circle")
+                }
+                // «بعدين» بخيارات — السحب بياخد الافتراضي، القائمة بتعطي المدى.
+                Menu {
+                    ForEach(Self.snoozeChoices) { choice in
+                        Button(lang.s(choice.id)) {
+                            store.snooze(api: state.api, reminder: reminder,
+                                         minutes: choice.minutes)
+                        }
+                    }
+                } label: {
+                    Label(lang.s("reminders.snooze"), systemImage: "clock.arrow.circlepath")
+                }
                 Button { editingReminder = reminder } label: {
                     Label(lang.s("reminders.edit"), systemImage: "pencil")
                 }
                 Button(role: .destructive) {
-                    store.delete(api: state.api, reminder: reminder)
+                    pendingDelete = reminder
                 } label: { Label(lang.s("reminders.delete"), systemImage: "trash") }
             }
         }
+    }
+
+    // ── خيارات «ذكّرني بعدين» ─────────────────────────────────────────────
+
+    /// المدى اللي بتعرضه القائمة: ربع ساعة تقريبًا، ساعة، وهالمسا لمّا يكون
+    /// المسا لسّا جاي — خيار «هالمسا» الساعة تسعة بالليل ما إله معنى.
+    static var snoozeChoices: [SnoozeChoice] {
+        // مفتاح الترجمة هو الهوية: ما في خيارين بنفس المفتاح.
+        var out = [SnoozeChoice(id: "reminders.snooze.10m",
+                                minutes: NotificationManager.snoozeMinutes),
+                   SnoozeChoice(id: "reminders.snooze.1h", minutes: 60)]
+        if let evening = minutesUntilEvening() {
+            out.append(SnoozeChoice(id: "reminders.snooze.evening", minutes: evening))
+        }
+        return out
+    }
+
+    /// دقايق من هلّق لسابعة المسا، أو nil لو المسا خلص (أو قرّب كتير).
+    static func minutesUntilEvening() -> Int? {
+        let cal = Calendar.current
+        guard let evening = cal.date(bySettingHour: 19, minute: 0, second: 0, of: Date())
+        else { return nil }
+        let minutes = Int(evening.timeIntervalSinceNow / 60)
+        return minutes >= 75 ? minutes : nil
     }
 
     // ── أدوات تنسيق الوقت (ثابتة، قابلة لإعادة الاستخدام داخل العرض) ──────
@@ -224,6 +298,12 @@ struct RemindersView: View {
 
 // ─────────────────────────────────────────────────────────────────────────
 // MARK: - الستور (مصدر الحقيقة)
+
+/// خيار تأجيل واحد بقائمة «ذكّرني بعدين» — مفتاح ترجمته وكم دقيقة يعني.
+struct SnoozeChoice: Identifiable {
+    let id: String
+    let minutes: Int
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // MARK: - شيت إضافة تذكير

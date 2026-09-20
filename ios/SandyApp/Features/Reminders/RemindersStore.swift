@@ -18,8 +18,14 @@ final class RemindersStore: LoadableStore {
         let title = isAR ? "تذكير" : "Reminder"
         let items = reminders.compactMap { r -> NotificationItem? in
             guard let date = NotificationManager.parseISO(r.remindAt) else { return nil }
-            return NotificationItem(id: r.id, title: title, body: r.text, date: date,
-                                    repeats: NotificationRepeat(rrule: r.recurrence))
+            // الفئة بتحطّ أزرار «بعدين / تمّ / احذف» على الإشعار، والحمولة بتخلّي
+            // الزرّ ينفّذ حتى لو التطبيق مو شغّال.
+            return NotificationItem(
+                id: r.id, title: title, body: r.text, date: date,
+                repeats: NotificationRepeat(rrule: r.recurrence),
+                category: NotificationManager.reminderCategory,
+                userInfo: [NotificationManager.reminderIdKey: r.id,
+                           NotificationManager.reminderRecurrenceKey: r.recurrence])
         }
         NotificationManager.shared.sync(prefix: "reminder.", items: items)
 
@@ -76,16 +82,91 @@ final class RemindersStore: LoadableStore {
         await load(api: api)
     }
 
+    /// ترتيب بالتاريخ المُحلَّل، مو بالنص: الخادم بيرجّع بتوقيت المستخدم وتخميننا
+    /// المحلي بـUTC، فالمقارنة النصّية بتكذب.
+    private nonisolated static func soonestFirst(_ lhs: ReminderItem, _ rhs: ReminderItem) -> Bool {
+        let a: Date = NotificationManager.parseISOOrDay(lhs.remindAt) ?? .distantFuture
+        let b: Date = NotificationManager.parseISOOrDay(rhs.remindAt) ?? .distantFuture
+        return a < b
+    }
+
     /// حذف تفاؤلي ثم مصالحة مع الباك-إند عند الفشل.
     func delete(api: APIClient, reminder: ReminderItem) {
-        reminders.removeAll { $0.id == reminder.id }
-        Task { @MainActor in
-            do {
-                try await api.deleteReminder(id: reminder.id)
-            } catch {
-                notify("reminders.loadFailed")
-                await load(api: api)
+        guard let idx = reminders.firstIndex(where: { $0.id == reminder.id }) else { return }
+        let removed = reminders[idx]
+        optimistic(
+            "reminders.actionFailed",
+            apply: {
+                self.reminders.remove(at: idx)
+                Haptics.play(.success)
+            },
+            rollback: {
+                self.reminders.insert(removed, at: min(idx, self.reminders.count))
+                Haptics.play(.failure)
+            },
+            call: { try await api.deleteReminder(id: reminder.id) }
+        )
+    }
+
+    /// «ذكّرني بعدين»: نحرّك الوقت محليًا على طول، والخادم بيقول الوقت الحقيقي.
+    /// التكرار ما بينلمس — التذكير اليومي بيرجع لساعته بعد هالمرّة.
+    func snooze(api: APIClient, reminder: ReminderItem, minutes: Int) {
+        guard let idx = reminders.firstIndex(where: { $0.id == reminder.id }) else { return }
+        let previous = reminders[idx].remindAt
+        let guessed = ISO8601DateFormatter().string(
+            from: Date().addingTimeInterval(TimeInterval(minutes) * 60))
+        optimistic(
+            "reminders.actionFailed",
+            apply: {
+                self.reminders[idx].remindAt = guessed
+                Haptics.play(.selection)
+            },
+            rollback: {
+                if let i = self.reminders.firstIndex(where: { $0.id == reminder.id }) {
+                    self.reminders[i].remindAt = previous
+                }
+                Haptics.play(.failure)
+            },
+            call: {
+                let out = try await api.snoozeReminder(id: reminder.id, minutes: minutes)
+                // الخادم بيرجّع الوقت المضبوط — نصلّح تخميننا بلا إعادة جلب.
+                let exact = out.remindAt
+                guard !exact.isEmpty else { return }
+                await MainActor.run {
+                    if let i = self.reminders.firstIndex(where: { $0.id == reminder.id }) {
+                        self.reminders[i].remindAt = exact
+                    }
+                }
             }
-        }
+        )
+    }
+
+    /// «تمّ»: التذكير اللي مرّة وحدة بيختفي، والمتكرّر بيضلّ بس بموعده الجاي.
+    func markDone(api: APIClient, reminder: ReminderItem) {
+        guard let idx = reminders.firstIndex(where: { $0.id == reminder.id }) else { return }
+        let removed = reminders[idx]
+        optimistic(
+            "reminders.actionFailed",
+            apply: {
+                self.reminders.remove(at: idx)
+                Haptics.play(.success)
+            },
+            rollback: {
+                self.reminders.insert(removed, at: min(idx, self.reminders.count))
+                Haptics.play(.failure)
+            },
+            call: {
+                let out = try await api.completeReminder(id: reminder.id)
+                // متكرّر: بيرجع للقائمة بموعده الجاي بدل ما يختفي.
+                let nextAt = out.remindAt
+                guard !nextAt.isEmpty else { return }
+                await MainActor.run {
+                    var next = removed
+                    next.remindAt = nextAt
+                    self.reminders.insert(next, at: min(idx, self.reminders.count))
+                    self.reminders.sort(by: Self.soonestFirst)
+                }
+            }
+        )
     }
 }

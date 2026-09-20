@@ -99,7 +99,7 @@ struct TaskItem: Identifiable {
 struct ReminderItem: Identifiable {
     let id: String
     let text: String
-    let remindAt: String   // ISO أو فاضي
+    var remindAt: String   // ISO أو فاضي — «بعدين» بيحرّكه تفاؤليًا قبل ردّ الخادم
     let isRecurring: Bool
     var recurrence: String = ""   // RRULE من الخادم، مثل "RRULE:FREQ=DAILY"
     var note: String = ""    // ملاحظة اختيارية

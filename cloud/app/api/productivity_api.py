@@ -49,6 +49,36 @@ _DEMO_TASKS_DONE = [
 ]
 
 
+# What "remind me later" means when the caller does not say. Ten minutes is long
+# enough to finish what interrupted you and short enough to still matter.
+_DEFAULT_SNOOZE_MIN = 10
+
+
+def _reminder_action(reminder_id, action, body):
+    """snooze / done on one reminder. Returns the next time so the caller can
+    reschedule its local notification without a round trip to the list."""
+    from app.features.reminders_store import complete_reminder, snooze_reminder
+
+    if action == "snooze":
+        # An absent (or null) "minutes" is "you decide", not a bad request.
+        minutes = body.get("minutes")
+        res = snooze_reminder(
+            reminder_id,
+            minutes=_DEFAULT_SNOOZE_MIN if minutes is None else minutes)
+    elif action == "done":
+        res = complete_reminder(reminder_id)
+    else:
+        return jsonify({"error": "unknown_action"}), 400
+
+    if res.get("success"):
+        return jsonify({
+            "ok": True,
+            "remind_at": res.get("remind_at", ""),
+            "is_recurring": bool(res.get("is_recurring", False)),
+        }), 200
+    return jsonify({"error": res.get("error", "failed")}), 400
+
+
 def register_productivity_api(app, mongo_db=None):
     # Reminders (native store)
     @app.route("/api/reminders", methods=["GET"])
@@ -99,6 +129,15 @@ def register_productivity_api(app, mongo_db=None):
     @require_tenant
     def api_update_reminder(reminder_id, claims):
         body = request.get_json(silent=True) or {}
+
+        # A reminder that just rang is acted on, not edited: {"action":"snooze",
+        # "minutes":10} re-arms it (recurrence intact) and {"action":"done"}
+        # retires this occurrence. Same route, same error shape — the phone's
+        # notification buttons and the row's swipe actions both land here.
+        action = str(body.get("action") or "").strip().lower()
+        if action:
+            return _reminder_action(reminder_id, action, body)
+
         from app.features.reminders_store import update_reminder
         # Empty text/remind_at = leave unchanged; note present (any value) = set it.
         res = update_reminder(

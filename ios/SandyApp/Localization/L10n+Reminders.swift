@@ -21,9 +21,19 @@ enum L10nReminders {
             // Row
             "recurring":    .text("يتكرّر"),
 
-            // إجراءات الصف (قائمة سياقية + سحب)
+            // إجراءات الصف (قائمة سياقية + سحب) وأزرار الإشعار
             "edit":         .text("تعديل"),
             "delete":       .text("حذف"),
+            "done":         .text("تمّ"),
+            "snooze":       .text("ذكّرني بعدين"),
+            "snooze.10m":   .text("بعد ١٠ دقائق"),
+            "snooze.1h":    .text("بعد ساعة"),
+            "snooze.evening": .text("هالمسا"),
+
+            // تأكيد الحذف وحده — «تمّ» و«بعدين» تراجعهم عادي، الحذف لأ.
+            "deleteConfirm":     .text("أحذف هالتذكير؟"),
+            "deleteConfirmBody": .text("رح يروح خالص وما بذكّرك فيه."),
+            "cancel":            .text("خليه"),
 
             // Add/edit sheet
             "sheetTitle":   .text("تذكير جديد"),
@@ -42,6 +52,7 @@ enum L10nReminders {
             "pastGuard":    .text("الوقت اللي اخترته راح خلص. خليه ولو بعد دقيقتين من هلّق وأنا أتكفّل."),
             "savePast":     .text("يبدو إن الوقت صار بالماضي. خلّيه شوي بعد هلّق وأنا أذكّرك فيه."),
             "saveFailed":   .text("تعذّر الحفظ. أعد المحاولة بعد قليل."),
+            "actionFailed": .text("ما ظبطت معي. جرّب كمان مرّة بعد شوي."),
         ],
         en: [
             // Screen + add button
@@ -55,9 +66,19 @@ enum L10nReminders {
             // Row
             "recurring":    .text("Repeats"),
 
-            // row actions (context menu + swipe)
+            // row actions (context menu + swipe) and the notification buttons
             "edit":         .text("Edit"),
             "delete":       .text("Delete"),
+            "done":         .text("Done"),
+            "snooze":       .text("Remind me later"),
+            "snooze.10m":   .text("In 10 minutes"),
+            "snooze.1h":    .text("In an hour"),
+            "snooze.evening": .text("This evening"),
+
+            // delete asks first — done and later are easy to undo, delete isn't
+            "deleteConfirm":     .text("Delete this reminder?"),
+            "deleteConfirmBody": .text("It's gone for good and I won't nudge you about it."),
+            "cancel":            .text("Keep it"),
 
             // Add/edit sheet
             "sheetTitle":   .text("New reminder"),
@@ -76,6 +97,7 @@ enum L10nReminders {
             "pastGuard":    .text("The time you picked has already passed. Set it at least a couple minutes from now and I've got you."),
             "savePast":     .text("Looks like that time is already in the past. Set it a little after now and I'll remind you."),
             "saveFailed":   .text("Couldn't save. Try again in a moment."),
+            "actionFailed": .text("That didn't go through. Try again in a moment."),
         ]
     )
 }

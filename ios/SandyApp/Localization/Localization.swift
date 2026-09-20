@@ -199,6 +199,9 @@ final class LanguageManager: ObservableObject {
         lang = newLang
         storedLang = newLang.rawValue
         WidgetData.syncLanguage()   // الويدجت يتبع لغة التطبيق
+        // أزرار إشعار التذكير بتتسجّل بعناوينها وقت التسجيل، مو وقت ما يرنّ
+        // الإشعار — فلازم تنعاد بلغة جديدة وإلا ظلّت بالقديمة.
+        NotificationManager.shared.registerReminderCategory()
     }
 
     /// Flip ar ↔ en (web toggle).
