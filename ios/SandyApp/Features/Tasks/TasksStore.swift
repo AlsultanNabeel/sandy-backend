@@ -19,7 +19,7 @@ final class TasksStore: LoadableStore {
     /// صباحاً بدل منتصفه. المكتملة والماضية تُتجاهل.
     private func scheduleNotifications() {
         guard !showingCompleted else { return }
-        let isAR = Locale.current.language.languageCode?.identifier == "ar"
+        let isAR = AppLocale.isArabic   // لغة التطبيق، مش لغة الجهاز
         let title = isAR ? "مهمة" : "Task"
         let cal = Calendar.current
         let items = tasks.compactMap { t -> NotificationItem? in

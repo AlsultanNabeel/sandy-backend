@@ -170,7 +170,7 @@ struct BooksView: View {
                     .foregroundColor(Theme.Colors.secondaryText)
                 Spacer(minLength: 0)
                 if store.stats.streakDays > 0 {
-                    Text(String(format: lang.s("books.stats.streakDays"), "\(store.stats.streakDays)"))
+                    Text(String(format: lang.s("books.stats.streakDays"), AppLocale.number(store.stats.streakDays)))
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.accentDeep)
                 }
@@ -187,7 +187,7 @@ struct BooksView: View {
 
     private func statPill(value: Int, label: String) -> some View {
         VStack(spacing: Theme.Spacing.xs) {
-            Text("\(value)")
+            Text(AppLocale.number(value))
                 .font(Theme.Typography.title)
                 .foregroundColor(Theme.Colors.accent)
                 .monospacedDigit()
@@ -241,7 +241,7 @@ struct BooksView: View {
 
     private func goalLine(format: String, done: Int, target: Int) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            Text(String(format: format, "\(done)", "\(target)"))
+            Text(String(format: format, AppLocale.number(done), AppLocale.number(target)))
                 .font(Theme.Typography.callout)
                 .foregroundColor(Theme.Colors.primaryText)
             ProgressView(value: Double(min(done, target)), total: Double(max(target, 1)))
@@ -265,7 +265,7 @@ struct BooksView: View {
                     }
                     if book.totalPages > 0 {
                         Text(String(format: lang.s("books.card.progress"),
-                                    "\(book.currentPage)", "\(book.totalPages)"))
+                                    AppLocale.number(book.currentPage), AppLocale.number(book.totalPages)))
                             .font(Theme.Typography.caption)
                             .foregroundColor(Theme.Colors.accentDeep)
                         ProgressView(value: Double(min(book.currentPage, book.totalPages)),
@@ -279,11 +279,11 @@ struct BooksView: View {
                         HStack(spacing: Theme.Spacing.md) {
                             if book.notesCount > 0 {
                                 metaBadge(icon: "note.text",
-                                          text: String(format: lang.s("books.card.notes"), "\(book.notesCount)"))
+                                          text: String(format: lang.s("books.card.notes"), AppLocale.number(book.notesCount)))
                             }
                             if book.quotesCount > 0 {
                                 metaBadge(icon: "quote.bubble",
-                                          text: String(format: lang.s("books.card.quotes"), "\(book.quotesCount)"))
+                                          text: String(format: lang.s("books.card.quotes"), AppLocale.number(book.quotesCount)))
                             }
                         }
                     }

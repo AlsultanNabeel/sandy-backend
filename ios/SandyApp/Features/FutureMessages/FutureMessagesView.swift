@@ -163,7 +163,7 @@ struct FutureMessageSheet: View {
                                displayedComponents: [.date, .hourAndMinute])
                         .labelsHidden()
                         .datePickerStyle(.compact)
-                        .environment(\.locale, Locale(identifier: "ar"))
+                        .environment(\.locale, AppLocale.locale(for: lang.lang))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
@@ -236,17 +236,9 @@ struct FutureMessage: Identifiable {
     /// نفس المحلّل المشترك اللي بيستعمله الستور لجدولة الإشعار — مكرّر هون كان.
     static func parseISO(_ s: String) -> Date? { NotificationManager.parseISO(s) }
 
-    private static let absoluteFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ar")
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
-
-    /// تسمية مطلقة لطيفة (يوم + ساعة) بالعربية.
+    /// تسمية مطلقة لطيفة (يوم + ساعة) بلغة التطبيق.
     static func absoluteLabel(_ date: Date) -> String {
-        absoluteFormatter.string(from: date)
+        AppLocale.dateTime(date)
     }
 }
 

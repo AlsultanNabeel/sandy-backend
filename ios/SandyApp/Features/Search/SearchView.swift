@@ -191,7 +191,7 @@ private struct PlaceRow: View {
                     if result.rating > 0 {
                         HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: "star.fill")
-                            Text(String(format: "%.1f", result.rating)).monospacedDigit()
+                            Text(AppLocale.number(result.rating, minFraction: 1, maxFraction: 1)).monospacedDigit()
                         }
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.warn)

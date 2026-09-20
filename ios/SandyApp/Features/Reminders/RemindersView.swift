@@ -199,42 +199,19 @@ struct RemindersView: View {
 
     // ── أدوات تنسيق الوقت (ثابتة، قابلة لإعادة الاستخدام داخل العرض) ──────
 
-    /// مُحلِّل ISO متسامح — الباك-إند أحيانًا يرسل بلا منطقة زمنية.
+    /// مُحلِّل ISO متسامح — الباك-إند أحيانًا يرسل بلا منطقة زمنية (المحلّل المشترك).
     static func parseISO(_ s: String) -> Date? {
-        if s.isEmpty { return nil }
-        let isoFull = ISO8601DateFormatter()
-        isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = isoFull.date(from: s) { return d }
-        let isoPlain = ISO8601DateFormatter()
-        isoPlain.formatOptions = [.withInternetDateTime]
-        if let d = isoPlain.date(from: s) { return d }
-        let noTZ = DateFormatter()
-        noTZ.locale = Locale(identifier: "en_US_POSIX")
-        noTZ.timeZone = TimeZone.current
-        noTZ.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        if let d = noTZ.date(from: s) { return d }
-        let dateOnly = DateFormatter()
-        dateOnly.locale = Locale(identifier: "en_US_POSIX")
-        dateOnly.timeZone = TimeZone.current
-        dateOnly.dateFormat = "yyyy-MM-dd"
-        return dateOnly.date(from: s)
+        NotificationManager.parseISOOrDay(s)
     }
 
-    /// تسمية نسبية بالعربية ("بعد ساعتين" / "من 3 دقائق").
+    /// تسمية نسبية بلغة التطبيق ("بعد ساعتين" / "in 2 hours").
     static func relativeLabel(_ date: Date) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.locale = Locale(identifier: "ar")
-        f.unitsStyle = .full
-        return f.localizedString(for: date, relativeTo: Date())
+        AppLocale.relative(date)
     }
 
-    /// تسمية مطلقة لطيفة (يوم + ساعة) بالعربية.
+    /// تسمية مطلقة لطيفة (يوم + ساعة) بلغة التطبيق.
     static func absoluteLabel(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ar")
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f.string(from: date)
+        AppLocale.dateTime(date)
     }
 }
 
@@ -309,7 +286,7 @@ struct ReminderSheet: View {
                                displayedComponents: [.date, .hourAndMinute])
                         .labelsHidden()
                         .datePickerStyle(.compact)
-                        .environment(\.locale, Locale(identifier: "ar"))
+                        .environment(\.locale, AppLocale.locale(for: lang.lang))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 

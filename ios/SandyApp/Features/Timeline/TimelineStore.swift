@@ -75,11 +75,19 @@ final class TimelineStore: LoadableStore {
         return "older"
     }
 
-    private func parseISO(_ iso: String) -> Date? {
+    // مبنيّين مرّة وحدة — كان بيتبنى formatter بكل صف.
+    private static let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: iso) { return d }
+        return f
+    }()
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
-        return f.date(from: iso)
+        return f
+    }()
+
+    private func parseISO(_ iso: String) -> Date? {
+        Self.isoFractional.date(from: iso) ?? Self.isoPlain.date(from: iso)
     }
 }

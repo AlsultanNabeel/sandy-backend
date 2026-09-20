@@ -275,31 +275,10 @@ private struct TaskRow: View {
         }
     }
 
-    /// تنسيق الموعد القادم من الباك-إند (ISO أو بدون منطقة) لعرض عربي لطيف.
+    /// تنسيق الموعد القادم من الباك-إند (ISO أو بدون منطقة) بلغة التطبيق.
     private static func format(_ iso: String) -> String? {
-        guard !iso.isEmpty else { return nil }
-        let parsers: [ISO8601DateFormatter] = {
-            let full = ISO8601DateFormatter()
-            full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let plain = ISO8601DateFormatter()
-            plain.formatOptions = [.withInternetDateTime]
-            return [full, plain]
-        }()
-        var date: Date?
-        for p in parsers where date == nil { date = p.date(from: iso) }
-        if date == nil {
-            let df = DateFormatter()
-            df.locale = Locale(identifier: "en_US_POSIX")
-            df.timeZone = TimeZone.current
-            df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-            date = df.date(from: iso)
-        }
-        guard let d = date else { return nil }
-        let out = DateFormatter()
-        out.locale = Locale(identifier: "ar")
-        out.dateStyle = .medium
-        out.timeStyle = .short
-        return out.string(from: d)
+        guard let d = NotificationManager.parseISO(iso) else { return nil }
+        return AppLocale.dateTime(d)
     }
 }
 
@@ -461,7 +440,7 @@ struct TaskSheet: View {
                                selection: $due,
                                displayedComponents: [.date, .hourAndMinute])
                         .datePickerStyle(.compact)
-                        .environment(\.locale, Locale(identifier: "ar"))
+                        .environment(\.locale, AppLocale.locale(for: lang.lang))
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -493,17 +472,6 @@ struct TaskSheet: View {
 
     /// يفكّ موعد ISO (مع/بدون كسور ثواني/بدون منطقة) لتعبئة المنتقي عند التعديل.
     private static func parseDue(_ iso: String) -> Date? {
-        guard !iso.isEmpty else { return nil }
-        let full = ISO8601DateFormatter()
-        full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = full.date(from: iso) { return d }
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        if let d = plain.date(from: iso) { return d }
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = TimeZone.current
-        df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        return df.date(from: iso)
+        NotificationManager.parseISO(iso)
     }
 }

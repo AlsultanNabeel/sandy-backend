@@ -351,18 +351,8 @@ private struct ProjectDetailSheet: View {
     }
 
     private static func format(_ iso: String) -> String? {
-        guard !iso.isEmpty else { return nil }
-        let full = ISO8601DateFormatter()
-        full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        let date = full.date(from: iso) ?? plain.date(from: iso)
-        guard let d = date else { return nil }
-        let out = DateFormatter()
-        out.locale = Locale(identifier: "ar")
-        out.dateStyle = .medium
-        out.timeStyle = .short
-        return out.string(from: d)
+        guard let d = NotificationManager.parseISO(iso) else { return nil }
+        return AppLocale.dateTime(d)
     }
 }
 

@@ -38,6 +38,8 @@ struct SandyApp: App {
                 .environmentObject(lang)
                 // الاتجاه يتبع اللغة: عربي → RTL، إنجليزي → LTR (يقابل dir بالويب).
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
+                // التواريخ/الأرقام بأدوات النظام (DatePicker، Text(date, style:)) تتبع لغة التطبيق.
+                .environment(\.locale, AppLocale.locale(for: lang.lang))
                 // واجهة داكنة دائماً عشان تطابق باليت الويب الأوبسيديان + تتناسق
                 // أدوات النظام (حقول النص/الأزرار بشاشة الدخول) مع الخلفية الداكنة.
                 .preferredColorScheme(.dark)

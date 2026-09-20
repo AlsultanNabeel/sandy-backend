@@ -185,10 +185,10 @@ struct HomeView: View {
                 GlanceCard(
                     icon: "checklist",
                     tint: Theme.Colors.accent,
-                    value: store.loading && store.snapshot.openTasks == 0 ? "…" : "\(store.snapshot.todayTasks)",
+                    value: store.loading && store.snapshot.openTasks == 0 ? "…" : AppLocale.number(store.snapshot.todayTasks),
                     label: lang.s("home.glance.today.label"),
                     hint: store.snapshot.overdueTasks > 0
-                        ? String(format: lang.s("home.glance.today.overdue"), "\(store.snapshot.overdueTasks)")
+                        ? String(format: lang.s("home.glance.today.overdue"), AppLocale.number(store.snapshot.overdueTasks))
                         : nil
                 ) { selection = .daily }
 
@@ -385,11 +385,11 @@ struct HomeView: View {
         }
         if store.snapshot.overdueTasks > 0 {
             let n = store.snapshot.overdueTasks
-            return String(format: lang.s("home.proactive.overdue"), "\(n)", pluralTasks(n))
+            return String(format: lang.s("home.proactive.overdue"), AppLocale.number(n), pluralTasks(n))
         }
         if store.snapshot.todayTasks > 0 {
             let n = store.snapshot.todayTasks
-            return String(format: lang.s("home.proactive.today"), "\(n)", pluralTasks(n))
+            return String(format: lang.s("home.proactive.today"), AppLocale.number(n), pluralTasks(n))
         }
         if !store.snapshot.nextReminderText.isEmpty {
             return String(format: lang.s("home.proactive.reminder"),
@@ -400,7 +400,7 @@ struct HomeView: View {
         }
         if store.snapshot.openTasks > 0 {
             let n = store.snapshot.openTasks
-            return String(format: lang.s("home.proactive.openTasks"), "\(n)", pluralTasks(n))
+            return String(format: lang.s("home.proactive.openTasks"), AppLocale.number(n), pluralTasks(n))
         }
         // ما في شي عالق — جملة مشجّعة متبدّلة (حسب اليوم حتى تحسّ حيّة).
         let cheers = lang.list("home.encourage")
@@ -466,12 +466,7 @@ struct HomeView: View {
     /// تنسيق مبلغ بصيغة عربية بسيطة (بدون كسور لو رقم صحيح).
     private func amount(_ value: Double) -> String {
         let rounded = (value.rounded() == value)
-        let num: String
-        if rounded {
-            num = String(Int(value))
-        } else {
-            num = String(format: "%.2f", value)
-        }
+        let num = AppLocale.number(value, minFraction: rounded ? 0 : 2, maxFraction: rounded ? 0 : 2)
         return "\(num) \(lang.s("home.currency"))"
     }
 
@@ -483,29 +478,12 @@ struct HomeView: View {
     /// وقت نسبي عربي لطيف من ISO (أو فاضي لو ما قدرنا نحلّله).
     private static func relativeTime(_ iso: String) -> String {
         guard !iso.isEmpty, let date = parseISO(iso) else { return "" }
-        return relativeFormatter.localizedString(for: date, relativeTo: Date())
+        return AppLocale.relative(date)
     }
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let fmt = RelativeDateTimeFormatter()
-        fmt.locale = Locale(identifier: "ar")
-        fmt.unitsStyle = .full
-        return fmt
-    }()
-
-    private static let dateOnlyFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone.current
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
     /// مُحلِّل ISO متسامح (نفس منطق getHomeSnapshot): المحلّل المشترك + تاريخ بلا وقت.
-    /// كان يبني أربع formatters بكل نداء — وهو بينادى من جسم العرض.
     private static func parseISO(_ s: String) -> Date? {
-        if s.isEmpty { return nil }
-        return NotificationManager.parseISO(s) ?? dateOnlyFormatter.date(from: s)
+        NotificationManager.parseISOOrDay(s)
     }
 }
 

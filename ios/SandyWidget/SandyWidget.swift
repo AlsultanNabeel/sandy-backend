@@ -15,6 +15,8 @@ struct SandyEntry: TimelineEntry {
     let reminderText: String?
     let reminderAt: Date?
     let activeTasks: Int
+    /// لغة التطبيق كما كتبها التطبيق بالمساحة المشتركة (افتراضيًا عربي).
+    var isArabic: Bool = true
 }
 
 struct SandyProvider: TimelineProvider {
@@ -40,22 +42,35 @@ struct SandyProvider: TimelineProvider {
         let text = store?.string(forKey: "next_reminder_text")
         let at = store?.double(forKey: "next_reminder_at") ?? 0
         let count = store?.integer(forKey: "active_tasks") ?? 0
+        let lang = store?.string(forKey: "app_lang") ?? "ar"
         return SandyEntry(
             date: Date(),
             reminderText: (text?.isEmpty == false) ? text : nil,
             reminderAt: at > 0 ? Date(timeIntervalSince1970: at) : nil,
-            activeTasks: count)
+            activeTasks: count,
+            isArabic: lang != "en")
     }
 }
 
 struct SandyWidgetEntryView: View {
     var entry: SandyEntry
 
+    /// نفس لغة التطبيق: ar → أرقام عربية وأسماء عربية، en → إنجليزي.
+    private var locale: Locale { Locale(identifier: entry.isArabic ? "ar" : "en") }
+
+    private static let countFormatter = NumberFormatter()
+
+    private var countText: String {
+        let f = Self.countFormatter
+        f.locale = locale
+        return f.string(from: NSNumber(value: entry.activeTasks)) ?? String(entry.activeTasks)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles").foregroundStyle(.cyan)
-                Text("ساندي").font(.caption).bold()
+                Text(entry.isArabic ? "ساندي" : "Sandy").font(.caption).bold()
                 Spacer(minLength: 0)
             }
             if let reminder = entry.reminderText {
@@ -64,14 +79,16 @@ struct SandyWidgetEntryView: View {
                     Text(at, style: .time).font(.caption).foregroundStyle(.secondary)
                 }
             } else {
-                Text("ما في تذكيرات قادمة")
+                Text(entry.isArabic ? "ما في تذكيرات قادمة" : "No upcoming reminders")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            Text("\(entry.activeTasks) مهام نشطة")
+            Text(entry.isArabic ? "\(countText) مهام نشطة" : "\(countText) active tasks")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .environment(\.locale, locale)
+        .environment(\.layoutDirection, entry.isArabic ? .rightToLeft : .leftToRight)
         .containerBackground(for: .widget) { Color.black }
     }
 }

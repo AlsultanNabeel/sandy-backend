@@ -106,7 +106,7 @@ struct ExpensesView: View {
                 Text(lang.s("life.expenses.summaryTitle"))
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondaryText)
-                Text(String(format: "%.0f", animatedTotal))
+                Text(AppLocale.number(animatedTotal, maxFraction: 0))
                     .font(Theme.Typography.largeTitle)
                     .foregroundColor(Theme.Colors.accentDeep)
                     .monospacedDigit()
@@ -117,7 +117,7 @@ struct ExpensesView: View {
             VStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "list.bullet.rectangle")
                     .foregroundColor(Theme.Colors.accent)
-                Text(String(format: lang.s("life.expenses.count"), "\(store.summary.count)"))
+                Text(String(format: lang.s("life.expenses.count"), AppLocale.number(store.summary.count)))
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.tertiaryText)
             }
@@ -155,7 +155,7 @@ struct ExpensesView: View {
                 }
             }
             Spacer(minLength: 0)
-            Text(String(format: "%.0f", item.amount))
+            Text(AppLocale.number(item.amount, maxFraction: 0))
                 .font(Theme.Typography.headline)
                 .foregroundColor(Theme.Colors.primaryText)
                 .monospacedDigit()

@@ -123,7 +123,7 @@ private struct TimerSection: View {
                         .font(Theme.Typography.headline)
                         .foregroundColor(Theme.Colors.primaryText)
                 }
-                Text("\(lang.s("focus.timer.cycle")) \(status.cycleIdx)/\(status.cycles)")
+                Text("\(lang.s("focus.timer.cycle")) \(AppLocale.number(status.cycleIdx))/\(AppLocale.number(status.cycles))")
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondaryText)
 
@@ -206,7 +206,7 @@ private struct TimerSection: View {
     }
 
     private func clock(_ sec: Int) -> String {
-        String(format: "%02d:%02d", max(0, sec) / 60, max(0, sec) % 60)
+        AppLocale.number(max(0, sec) / 60, minDigits: 2) + ":" + AppLocale.number(max(0, sec) % 60, minDigits: 2)
     }
 
     private func refresh() async {
@@ -278,7 +278,7 @@ private struct StatsSection: View {
                             }
                         }
                         Spacer(minLength: 0)
-                        Text("\(h.minutes) \(lang.s("focus.stats.min"))")
+                        Text("\(AppLocale.number(h.minutes)) \(lang.s("focus.stats.min"))")
                             .font(Theme.Typography.headline)
                             .foregroundColor(Theme.Colors.accent)
                             .monospacedDigit()

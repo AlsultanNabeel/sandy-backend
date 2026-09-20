@@ -112,6 +112,7 @@ struct MainTabView: View {
                 .environmentObject(state)
                 .environmentObject(lang)
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
+                .environment(\.locale, AppLocale.locale(for: lang.lang))
         }
         // التنبيه اليومي مش ورقة — بطاقته عالرئيسية، فنبدّل للرئيسية ونصفّر المسار
         // (قبل ما تُعرض ورقة). بيتعامل معه هون بدل routeView.

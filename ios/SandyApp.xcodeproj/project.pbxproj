@@ -592,7 +592,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SandyApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = NabeelSandy;
+				INFOPLIST_KEY_CFBundleDisplayName = Sandy;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ساندي بتسمعك لما تحكيها بصوتك بدل ما تكتب.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "عشان ساندي تفهم كلامك وتحوّله لنص.";
@@ -628,7 +628,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SandyApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = NabeelSandy;
+				INFOPLIST_KEY_CFBundleDisplayName = Sandy;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ساندي بتسمعك لما تحكيها بصوتك بدل ما تكتب.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "عشان ساندي تفهم كلامك وتحوّله لنص.";

@@ -361,7 +361,7 @@ struct ShoppingItem: Identifiable {
 private enum Money {
     static func plain(_ value: Double) -> String {
         value == value.rounded()
-            ? String(Int(value.rounded()))
-            : String(format: "%.2f", value)
+            ? AppLocale.number(value, maxFraction: 0)
+            : AppLocale.number(value, minFraction: 2, maxFraction: 2)
     }
 }

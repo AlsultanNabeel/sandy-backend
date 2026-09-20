@@ -199,4 +199,19 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             ?? isoPlain.date(from: s)
             ?? isoNoTZ.date(from: s)
     }
+
+    /// تاريخ بلا وقت (مثل "2026-06-05") — نفسّره بالتوقيت المحلي.
+    private static let isoDayOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// مثل `parseISO` بس بيقبل كمان تاريخ بلا وقت — للرئيسية والتذكيرات والهدايا.
+    static func parseISOOrDay(_ s: String) -> Date? {
+        if s.isEmpty { return nil }
+        return parseISO(s) ?? isoDayOnly.date(from: s)
+    }
 }

@@ -94,7 +94,10 @@ struct JournalView: View {
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondary)
                 if !entry.date.isEmpty {
-                    Text(entry.date)
+                    // الخادم بيرجّع "YYYY-MM-DD" — نعرضه بلغة التطبيق (أو خام لو ما انفكّ).
+                    Text(NotificationManager.parseISOOrDay(entry.date)
+                            .map { AppLocale.dateTime($0, dateStyle: .medium, timeStyle: .none) }
+                         ?? entry.date)
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.tertiaryText)
                 }
@@ -154,7 +157,7 @@ struct JournalSheet: View {
                 }
                 HStack {
                     Spacer(minLength: 0)
-                    Text(String(format: lang.s("life.journal.sheet.charCount"), "\(trimmed.count)"))
+                    Text(String(format: lang.s("life.journal.sheet.charCount"), AppLocale.number(trimmed.count)))
                         .font(.caption2)
                         .foregroundColor(Theme.Colors.secondaryText)
                 }

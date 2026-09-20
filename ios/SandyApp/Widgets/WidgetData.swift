@@ -17,6 +17,7 @@ enum WidgetData {
         static let reminderText = "next_reminder_text"
         static let reminderAt = "next_reminder_at"   // timeIntervalSince1970
         static let activeTasks = "active_tasks"
+        static let lang = "app_lang"                  // "ar" | "en" — لغة التطبيق للويدجت
     }
 
     /// أقرب تذكير قادم (أو nil لو ما في).
@@ -32,7 +33,14 @@ enum WidgetData {
         reload()
     }
 
+    /// لغة التطبيق تغيّرت — الويدجت يعيد رسم نصوصه وأرقامه ووقته بلغتها.
+    static func syncLanguage() {
+        reload()
+    }
+
     private static func reload() {
+        // كل تحديث بيحمل لغة التطبيق معه، حتى يعرض الويدجت بنفس لغة التطبيق.
+        store?.set(AppLocale.lang.rawValue, forKey: Key.lang)
         WidgetCenter.shared.reloadAllTimelines()
     }
 }

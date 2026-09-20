@@ -12,9 +12,9 @@ final class RemindersStore: LoadableStore {
     private var loadTask: Task<Void, Never>?
 
     /// نجدول إشعارًا محليًا لكل تذكير إله وقت مستقبلي. عنوان الإشعار حسب لغة
-    /// الجهاز (نتجنّب main actor)، ونصّه نص التذكير نفسه. الماضي يُتجاهل تلقائيًا.
+    /// التطبيق (AppLocale، بلا main actor)، ونصّه نص التذكير نفسه. الماضي يُتجاهل تلقائيًا.
     private func scheduleNotifications() {
-        let isAR = Locale.current.language.languageCode?.identifier == "ar"
+        let isAR = AppLocale.isArabic   // لغة التطبيق، مش لغة الجهاز
         let title = isAR ? "تذكير" : "Reminder"
         let items = reminders.compactMap { r -> NotificationItem? in
             guard let date = NotificationManager.parseISO(r.remindAt) else { return nil }

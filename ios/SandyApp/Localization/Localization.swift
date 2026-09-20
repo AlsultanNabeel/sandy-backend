@@ -197,6 +197,7 @@ final class LanguageManager: ObservableObject {
         guard newLang != lang else { return }
         lang = newLang
         storedLang = newLang.rawValue
+        WidgetData.syncLanguage()   // الويدجت يتبع لغة التطبيق
     }
 
     /// Flip ar ↔ en (web toggle).

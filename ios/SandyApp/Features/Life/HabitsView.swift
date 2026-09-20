@@ -116,7 +116,7 @@ struct HabitsView: View {
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.primaryText)
                 HStack(spacing: Theme.Spacing.xs) {
-                    Text(String(format: lang.s("life.habits.streak"), "\(habit.streak)"))
+                    Text(String(format: lang.s("life.habits.streak"), AppLocale.number(habit.streak)))
                         .font(Theme.Typography.caption)
                         .foregroundColor(habit.streak > 0 ? Theme.Colors.accentDeep : Theme.Colors.secondaryText)
                     if habit.doneToday {

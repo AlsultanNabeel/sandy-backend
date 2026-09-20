@@ -97,7 +97,7 @@ struct PhotosView: View {
             HStack(spacing: Theme.Spacing.sm) {
                 albumChip(name: nil, label: lang.s("photos.allAlbums"))
                 ForEach(store.albums) { album in
-                    albumChip(name: album.name, label: "\(album.name) (\(album.count))")
+                    albumChip(name: album.name, label: "\(album.name) (\(AppLocale.number(album.count)))")
                 }
             }
         }

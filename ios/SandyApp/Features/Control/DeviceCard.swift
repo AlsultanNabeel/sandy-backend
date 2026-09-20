@@ -169,7 +169,7 @@ struct DeviceCard: View {
                        })
                     .tint(Theme.Colors.accent)
                     .disabled(store.demo)
-                Text("\(Int(sliderValue))")
+                Text(AppLocale.number(Int(sliderValue)))
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondaryText)
                     .monospacedDigit()
@@ -292,7 +292,7 @@ struct DeviceCard: View {
 
                 // العدّ بالبايتات مش بالحروف: العربي متعدّد البايتات، والحدّ ع
                 // اللوح ٢٥٥ بايت. عدّ الحروف بيوهم إنه في مساحة وما فيش.
-                Text("\(draftText.utf8.count)/\(device.textMaxBytes)")
+                Text("\(AppLocale.number(draftText.utf8.count))/\(AppLocale.number(device.textMaxBytes))")
                     .font(Theme.Typography.caption.monospacedDigit())
                     .foregroundColor(draftText.utf8.count > device.textMaxBytes
                                      ? Theme.Colors.danger : Theme.Colors.tertiaryText)
@@ -442,7 +442,7 @@ struct NodeCard: View {
                     Text("•")
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.tertiaryText)
-                    Text(String(format: lang.s("control.node.outputs"), "\(node.outputs.count)"))
+                    Text(String(format: lang.s("control.node.outputs"), AppLocale.number(node.outputs.count)))
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.tertiaryText)
                 }

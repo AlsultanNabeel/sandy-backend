@@ -123,7 +123,13 @@ struct GiftsView: View {
     private func scheduleLabel(_ gift: DigitalGift) -> String {
         gift.scheduledAt.isEmpty
             ? lang.s("gifts.saved")
-            : String(format: lang.s("gifts.scheduledFor"), gift.scheduledAt)
+            : String(format: lang.s("gifts.scheduledFor"), scheduledDate(gift.scheduledAt))
+    }
+
+    /// تاريخ الجدولة بلغة التطبيق (الخادم بيرجّع "yyyy-MM-dd")؛ لو ما انفكّ نعرضه خام.
+    private func scheduledDate(_ raw: String) -> String {
+        guard let d = NotificationManager.parseISOOrDay(raw) else { return raw }
+        return AppLocale.dateTime(d, dateStyle: .medium, timeStyle: .none)
     }
 
     private var emptyView: some View {
