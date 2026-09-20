@@ -892,6 +892,36 @@ async def _live_session(ws, remote: str) -> None:
             reader.stop()
 
 
+# الردّ بيوصل قطع متلاحقة، فثانيتين بلا ولا قطعة معناها المولّد وقف.
+_REPLY_STALE_S = 2.0
+# ومن لحظة ما يسكت المستخدم لأول قطعة صوت منها في انتظار طبيعي (جيميني + الشبكة).
+# خلال هالمهلة بنعتبرها «عم ترد» حتى لو ما وصل ولا بايت بعد — وإلا أي حركة
+# بالغرفة بهالثواني بتلغي الردّ قبل ما يبلّش.
+_REPLY_WARMUP_S = 8.0
+
+
+def _she_is_really_answering(state: Dict[str, Any]) -> bool:
+    """هل هي فعلًا بصدد الردّ هلّق؟
+
+    العلامة لحالها ما بتكفي: لو الردّ انقطع وما إجت «خلص الدور»، بتضل مرفوعة
+    وبتبلع كل كلام المستخدم بعدها — وهاد بيبيّن كأنها بطّلت ترد خالص. الحقيقة
+    هي آخر قطعة صوت بعتناها، وقبلها مهلة التحضير من لحظة إقفال الدور.
+    """
+    now = time.monotonic()
+    last_out = state.get("last_out_at")
+    if last_out is not None:
+        if now - float(last_out) <= _REPLY_STALE_S:
+            return True
+    else:
+        closed = state.get("turn_closed_at")
+        if closed is not None and now - float(closed) <= _REPLY_WARMUP_S:
+            return True
+    state["replying"] = False          # ساكتة من زمان — الدور خلص عمليًا
+    state.pop("last_out_at", None)
+    state.pop("turn_closed_at", None)
+    return False
+
+
 async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio",
                           *, verify: bool = True,
                           live_state: Optional[Dict[str, Any]] = None) -> None:
@@ -969,9 +999,11 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
         # frame while a turn is open, silence included — so the seven hundred
         # milliseconds of quiet that *end* the turn are inside it, and a blip of
         # two frames measured as a second and a half.
-        if state.get("replying") and speech_ms < _BARGE_MIN_MS:
-            logger.info("[voice_ws] ignoring a %.1fs blip while she is answering",
-                        speech_ms / 1000)
+        if state.get("replying") and _she_is_really_answering(state) \
+                and speech_ms < _BARGE_MIN_MS:
+            logger.info("[voice_ws] ignoring a %.1fs blip while she is answering "
+                        "(last audio from her %.1fs ago)", speech_ms / 1000,
+                        time.monotonic() - float(state.get("last_out_at") or 0))
             speaking = False
             silence_ms = 0.0
             utter_ms = 0.0
@@ -1097,7 +1129,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 # interruption. The frames wait here in the meantime and go up
                 # the moment it qualifies, so a real second question keeps its
                 # beginning and a chair scraping keeps nothing.
-                if state.get("replying"):
+                if state.get("replying") and _she_is_really_answering(state):
                     held.append(chunk)
                     held_ms += ms
                     if len(held) > _HELD_FRAMES_MAX:
@@ -1336,6 +1368,12 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
         # generating — tell the device to dump its buffered audio so she
         # actually goes quiet instead of finishing the stale reply.
         if response.server_content and response.server_content.interrupted:
+            # **ونزّل علامة «عم ترد».** كانت بتنزل بمكان واحد بس، «خلص الدور» —
+            # فأي ردّ انقطع (مقاطعة، أو تعثّر بالاتصال) كان بيخلّيها مرفوعة
+            # للأبد، وبعدها كل جملة قصيرة منك بتنتجاهل كأنها ضجّة. النتيجة
+            # اللي بتحسّها: بترد بالبداية، وبعدين بتبطّل ترد خالص.
+            live_state["replying"] = False
+            live_state.pop("last_out_at", None)
             await send_msg({"type": "interrupted"})
 
         # Audio plus text response: relay the audio, capture the text.
@@ -1345,6 +1383,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                     if not _seen["audio_out"]:
                         logger.info("[voice_ws] first reply audio → device")
                     _seen["audio_out"] += len(part.inline_data.data)
+                    live_state["last_out_at"] = time.monotonic()
                     _turn_audio["n"] += len(part.inline_data.data)
                     # **Where the stutter comes from, measured rather than
                     # guessed.** The reply arrives as chunks and is played as it
@@ -1360,6 +1399,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                     # **أول صوت بعد ما يسكت المستخدم** — الرقم اللي بيحسّه فعلًا.
                     # بينطبع مرة وحدة بكل دور، وبيشمل وقت جيميني والشبكة.
                     _closed = (live_state or {}).pop("turn_closed_at", None)
+                    # القطعة الأولى وصلت: من هلّق الحكم لآخر صوت، مش للمهلة.
                     if _closed is not None:
                         logger.info("[voice_ws] first audio %.0fms after the user stopped",
                                     (_now - _closed) * 1000)
