@@ -58,7 +58,7 @@ enum NotificationRepeat {
 
 /// وجهة النقر على الإشعار — الشاشة اللي نفتحها حسب نوع الإشعار.
 enum NotifRoute: String, Identifiable {
-    case reminders, tasks, future, dailyNudge
+    case reminders, tasks, future, dailyNudge, insights
     var id: String { rawValue }
 }
 
@@ -79,6 +79,16 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         super.init()
         // مندوب المركز — حتى يطلع الإشعار كبانر والتطبيق مفتوح، ونمسك النقر للتوجيه.
         center.delegate = self
+        // كل ما يرجع التطبيق للواجهة نعيد جدولة الإشعارات الاستباقية — فإشعار
+        // «صارلك يومين» بيتأجّل مع كل فتحة، وما بيطلع إلا لو المستخدم غاب فعلًا.
+        #if canImport(UIKit)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { _ in
+            NotificationManager.shared.scheduleProactiveNudges()
+        }
+        #endif
     }
 
     /// نطلب الإذن (تنبيه/صوت/شارة)، وعند الموافقة نسجّل الجهاز للدفع البعيد (APNs).
@@ -124,15 +134,24 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         // الدفع البعيد للتنبيه اليومي يحمل "kind" بالحمولة (agenda/question) — نوجّهه
         // للرئيسية حيث تظهر بطاقة التنبيه. المحلّي يُعرف ببادئة هويته.
         let userInfo = response.notification.request.content.userInfo
-        let route: NotifRoute? =
-            (userInfo["kind"] != nil)  ? .dailyNudge :
-            id.hasPrefix("reminder.")  ? .reminders :
-            id.hasPrefix("task.")      ? .tasks :
-            id.hasPrefix("future.")    ? .future : nil
+        let route: NotifRoute? = (userInfo["kind"] != nil)
+            ? .dailyNudge
+            : Self.route(forIdentifier: id)
         if let route {
             DispatchQueue.main.async { self.pendingRoute = route }
         }
         completionHandler()
+    }
+
+    /// وجهة إشعار محلي من بادئة هويته (nil = يفتح التطبيق بس).
+    static func route(forIdentifier id: String) -> NotifRoute? {
+        if id.hasPrefix(weeklyID) { return .insights }
+        if id.hasPrefix(headsUpPrefix + "task.") { return .tasks }
+        if id.hasPrefix(headsUpPrefix) { return .reminders }
+        if id.hasPrefix("reminder.") { return .reminders }
+        if id.hasPrefix("task.") { return .tasks }
+        if id.hasPrefix("future.") { return .future }
+        return nil
     }
 
     /// نزامن إشعارات نوع كامل بنفس البادئة: نلغي كل المعلّق بهالبادئة ثم نجدول
@@ -147,6 +166,127 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                               at: it.date, repeats: it.repeats)
             }
         }
+        // نتذكّر عناصر كل نوع حتى تنبيهات «بعد ساعة» تنبني منها وتتجنّب التكرار.
+        knownLock.lock()
+        knownItems[prefix] = items
+        knownLock.unlock()
+        scheduleProactiveNudges()
+    }
+
+    // MARK: - Proactive nudges (local — APNs isn't configured)
+
+    /// All proactive identifiers share this root, so they never collide with the
+    /// per-item prefixes above, and a reschedule replaces instead of stacking.
+    static let proactivePrefix = "proactive."
+    static let awayID = "proactive.away"
+    static let weeklyID = "proactive.weekly"
+    static let headsUpPrefix = "proactive.headsUp."
+
+    /// The last items `sync` saw per prefix ("task." / "reminder." / "future.").
+    private var knownItems: [String: [NotificationItem]] = [:]
+    private let knownLock = NSLock()
+
+    /// Reschedules Sandy's proactive local notifications. Safe to call often
+    /// (every app activation and after every task/reminder load):
+    ///  • away — one ping 48h from now; each open pushes it forward again, so it
+    ///    only fires if the user really disappears for two days;
+    ///  • heads-up — 60 minutes before each task/reminder that has a time later
+    ///    today, unless something already rings at that exact time;
+    ///  • weekly — Sunday 19:00 «your week is ready», opening the Insights screen.
+    /// Does nothing (and clears what it scheduled) when notifications are denied.
+    func scheduleProactiveNudges() {
+        knownLock.lock()
+        let known = knownItems
+        knownLock.unlock()
+        center.getNotificationSettings { [weak self] settings in
+            guard let self else { return }
+            let allowed: [UNAuthorizationStatus] = [.authorized, .provisional, .ephemeral]
+            guard allowed.contains(settings.authorizationStatus) else {
+                self.center.getPendingNotificationRequests { reqs in
+                    let ours = reqs.map(\.identifier).filter { $0.hasPrefix(Self.proactivePrefix) }
+                    self.center.removePendingNotificationRequests(withIdentifiers: ours)
+                }
+                return
+            }
+            let lang = AppLocale.lang
+
+            // (a) صارلك يومين ما حكيتني — same id, so this replaces the previous one.
+            self.addProactive(
+                id: Self.awayID,
+                title: translate(lang, "insights.notif.away.title"),
+                body: translate(lang, "insights.notif.away.body"),
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 48 * 3600, repeats: false))
+
+            // (c) Sunday evening — weekday 1 is Sunday in the Gregorian calendar.
+            var sunday = DateComponents()
+            sunday.weekday = 1
+            sunday.hour = 19
+            sunday.minute = 0
+            self.addProactive(
+                id: Self.weeklyID,
+                title: translate(lang, "insights.notif.weekly.title"),
+                body: translate(lang, "insights.notif.weekly.body"),
+                trigger: UNCalendarNotificationTrigger(dateMatching: sunday, repeats: true))
+
+            // (b) heads-up an hour before today's timed tasks/reminders.
+            let heads = Self.headsUps(known: known, now: Date())
+            let wanted = Set(heads.map(\.id))
+            self.center.getPendingNotificationRequests { reqs in
+                let stale = reqs.map(\.identifier).filter {
+                    $0.hasPrefix(Self.headsUpPrefix) && !wanted.contains($0)
+                }
+                self.center.removePendingNotificationRequests(withIdentifiers: stale)
+                for h in heads {
+                    let comps = Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute], from: h.date)
+                    self.addProactive(
+                        id: h.id,
+                        title: translate(lang, "insights.notif.headsUp.title"),
+                        body: String(format: translate(lang, "insights.notif.headsUp.body"), h.text),
+                        trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false))
+                }
+            }
+        }
+    }
+
+    /// The heads-ups to schedule: items later today whose "one hour before" is
+    /// still ahead and doesn't coincide (±1 min) with any notification we
+    /// already schedule. A task with no time was moved to 09:00 by its store,
+    /// so 09:00 sharp on a task is treated as "no time" and skipped.
+    private static func headsUps(known: [String: [NotificationItem]],
+                                 now: Date) -> [HeadsUp] {
+        let cal = Calendar.current
+        let allDates = known.values.flatMap { $0.map(\.date) }
+        var out: [HeadsUp] = []
+        for prefix in ["task.", "reminder."] {
+            for it in known[prefix] ?? [] {
+                guard cal.isDateInToday(it.date) else { continue }
+                let at = it.date.addingTimeInterval(-3600)
+                guard at > now else { continue }
+                if prefix == "task." {
+                    let c = cal.dateComponents([.hour, .minute, .second], from: it.date)
+                    if c.hour == 9 && c.minute == 0 && (c.second ?? 0) == 0 { continue }
+                }
+                if allDates.contains(where: { abs($0.timeIntervalSince(at)) < 60 }) { continue }
+                out.append(HeadsUp(id: headsUpPrefix + prefix + it.id, text: it.body, date: at))
+            }
+        }
+        return out
+    }
+
+    private struct HeadsUp {
+        let id: String
+        let text: String
+        let date: Date
+    }
+
+    private func addProactive(id: String, title: String, body: String,
+                              trigger: UNNotificationTrigger) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 
     /// إشعار واحد بهوية ثابتة (يستبدل أي قديم بنفس الهوية). الماضي يُتجاهل.
