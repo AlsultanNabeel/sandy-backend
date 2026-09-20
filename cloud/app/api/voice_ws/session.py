@@ -30,9 +30,13 @@ from app.api.voice_ws._config import (
     _COMPRESS_TRIGGER_TOKENS,
     _COMPRESS_WINDOW_TOKENS,
     _VAD_FLOOR_FACTOR,
-    _VAD_FLOOR_FRAMES,
     _VAD_FLOOR_MIN_FRAMES,
+    _VAD_FLOOR_MS,
+    _VAD_MAX_UTTER_MS,
+    _VAD_ROOM_MAX,
+    _VAD_ROOM_MS,
     _VAD_RMS_FLOOR,
+    _VAD_STUCK_MS,
     _VAD_MIN_UTTER_MS,
 )
 from app.api.voice_ws.speaker import (
@@ -942,8 +946,17 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     frames = 0
     sent = 0
     heard_ms = 0.0
-    window: "deque[float]" = deque(maxlen=_VAD_FLOOR_FRAMES)
+    # (طول الإطار بالملي, شدّته) — النافذة بتتقصّ بالوقت، فطول الإطار ما بيغيّر
+    # كم ثانية بتغطّي: اللوح والتطبيق بياخدوا نفس التلات ثواني.
+    window: "deque[tuple[float, float]]" = deque()
+    window_ms = 0.0
+    room: "deque[tuple[float, float]]" = deque()
+    room_ms = 0.0
     threshold = float(_VAD_RMS_FLOOR)
+    # قدّيش صار إلنا نسمع صوت وما فتحت البوابة ولا مرّة.
+    quiet_ms = 0.0
+    unstuck = False
+    loudest = 0.0
     consumed = 0
     speech_ms = 0.0
     held: List[bytes] = []
@@ -1070,6 +1083,11 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
             ms = samples.size / 16000 * 1000
             heard_ms += ms
+            if consumed == 1:
+                # طول الإطار بيفرق: كل نوافذ الأرضية والصمت محسوبة بالوقت،
+                # وهاد السطر بيقول من وين إجا الصوت بلا ما نخمّن.
+                logger.info("[voice_ws] first frame from the device: "
+                            "%d bytes, %.0fms, rms %.0f", len(chunk), ms, rms)
 
             # **Speech is louder than the room. It is not louder than a constant.**
             #
@@ -1100,9 +1118,35 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             # utterance the threshold is whatever the room was just before it
             # began, which is the only honest measure of it.
             if not speaking:
-                window.append(rms)
+                window.append((ms, rms))
+                window_ms += ms
+                while window_ms > _VAD_FLOOR_MS and len(window) > _VAD_FLOOR_MIN_FRAMES:
+                    window_ms -= window.popleft()[0]
+                room.append((ms, rms))
+                room_ms += ms
+                while room_ms > _VAD_ROOM_MS and len(room) > _VAD_FLOOR_MIN_FRAMES:
+                    room_ms -= room.popleft()[0]
                 if len(window) >= _VAD_FLOOR_MIN_FRAMES:
-                    threshold = max(min(window) * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR)
+                    quietest = min(r for _, r in window)
+                    if not frames:
+                        # لسا ما فتحت البوابة ولا مرّة — يعني ما عنا قياس
+                        # حقيقي للغرفة بعد، والموجود ممكن يكون صوته هو.
+                        quietest = min(quietest, _VAD_ROOM_MAX)
+                    # شبكة الأمان: صوت واصل من دقيقة وما فتحت البوابة ولا مرّة
+                    # يعني الأرضية اللي حسبناها هي الكلام نفسه. أهدأ لحظة
+                    # بنصّ دقيقة بتكون الغرفة فعلاً.
+                    if quiet_ms >= _VAD_STUCK_MS:
+                        quietest = min(quietest, min(r for _, r in room))
+                        if not unstuck:
+                            unstuck = True
+                            logger.warning(
+                                "[voice_ws] %.0fs of audio and the gate never "
+                                "opened — refloored from %.0f to %.0f "
+                                "(loudest frame %.0f)",
+                                quiet_ms / 1000, threshold,
+                                max(quietest * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR),
+                                loudest)
+                    threshold = max(quietest * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR)
             # **And nothing is speech until the room is known.** Opening a turn
             # on the first frame, before there is anything to compare it to,
             # freezes the threshold at the absolute minimum for the whole
@@ -1112,6 +1156,13 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             # that preroll is the room.
             is_speech = (len(window) >= _VAD_FLOOR_MIN_FRAMES
                          and rms >= threshold)
+            loudest = max(loudest, rms)
+            # بنعدّ الصمت طالما ما فتحت البوابة. أول ما تفتح مرّة، خلص — العتبة
+            # مظبوطة وما في داعي لشبكة الأمان.
+            if is_speech or frames:
+                quiet_ms = 0.0
+            else:
+                quiet_ms += ms
 
             if is_speech and not speaking:
                 # **Opening a turn is what cancels her answer, not closing one.**
@@ -1195,7 +1246,12 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 if draining:
                     continue
 
-                if silence_ms >= _VAD_SILENCE_MS:
+                if utter_ms >= _VAD_MAX_UTTER_MS:
+                    # ربع دقيقة والدور لسا مفتوح: يا إمّا التقدير واطي كتير
+                    # وكل الغرفة صارت كلام، يا إمّا حدا بيحكي بلا وقفة. بأي
+                    # حالة، السؤال لازم يوصلها بدل ما يضلّ مفتوح للأبد.
+                    await _close_turn("long enough to be a question")
+                elif silence_ms >= _VAD_SILENCE_MS:
                     # Kept beside the gap test above, deliberately: a board still
                     # running the old firmware uploads the room without pause, so
                     # no gap ever arrives and this is the only thing that would
@@ -1207,9 +1263,13 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
         if frame_task is not None:
             frame_task.cancel()
 
+    # `consumed` و`heard_ms` مقصودين هون: بلاهم «صفر إطار» بيحتمل معنيين —
+    # ما وصل صوت أصلاً، أو وصل وما عدّى البوابة — وهدول علاجهم مختلف تمامًا.
     logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
-                "%.1fs audio, %d frames dropped",
-                frames, sent, sent / 2 / 16000, reader.dropped)
+                "%.1fs audio, %d frames dropped "
+                "(heard %d frames / %.1fs, loudest %.0f, threshold %.0f)",
+                frames, sent, sent / 2 / 16000, reader.dropped,
+                consumed, heard_ms / 1000, loudest, threshold)
 
 
 async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
