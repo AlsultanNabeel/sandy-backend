@@ -63,6 +63,7 @@
 #include "sandy_wifi.h"
 #include "sandy_status.h"
 #include "sandy_audio_ctl.h"
+#include "sandy_net_busy.h"
 #include <math.h>   // sqrt for the per-mic level meters
 #if ENABLE_BUZZER
 #include "sandy_buzzer.h"
@@ -1870,6 +1871,21 @@ static void voice_task(void *arg) {
         if (!s_session_active) {
             if (s_wake_req) {
                 s_wake_req = false;
+                // One TLS session at a time (sandy_net_busy.h): an update check
+                // holding the network plus a voice handshake ran internal RAM
+                // out and rebooted her. A manifest fetch is over in a second or
+                // two, so wait that long; a download is not, and ends in a
+                // restart anyway, so after the wait the wake is dropped.
+                // Held from here until ws_close — released on every exit below.
+                for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+                if (net_owner() != NET_OWNER_VOICE) {
+                    ESP_LOGW(TAG, "wake ignored: update in progress");
+                    VOICE_FACE(MOOD_IDLE);
+                    VOICE_LED(LED_STATE_IDLE);
+                    continue;
+                }
                 ESP_LOGI(TAG, "opening voice session");
                 // Fresh room, fresh floor. Carrying the last call's noise
                 // history into a different room is how a gate ends up set for
@@ -1900,6 +1916,7 @@ static void voice_task(void *arg) {
                                   "skipping this session rather than failing blind");
                     status_set(SANDY_ST_LOW_MEMORY);
                     s_mn_want = true;
+                    net_release(NET_OWNER_VOICE);
                     continue;
                 }
                 // Largest contiguous block, not just total free: the TLS task
@@ -1944,6 +1961,7 @@ static void voice_task(void *arg) {
                     } else {
                         status_set(SANDY_ST_NO_SERVER);
                     }
+                    net_release(NET_OWNER_VOICE);   // ws_open left no socket behind
 #if ENABLE_COMMANDS
                     // Nothing to clean up — ws_open destroyed it all — but take
                     // the model back so the offline command words keep working
@@ -1972,6 +1990,7 @@ static void voice_task(void *arg) {
             VOICE_SESSION(false);
             s_link_lost_ms = 0;
             ws_close();
+            net_release(NET_OWNER_VOICE);   // socket gone: updates may run again
 #if ENABLE_COMMANDS
             s_mn_want = true;   // the call is over — mic_task reloads the model
 #endif

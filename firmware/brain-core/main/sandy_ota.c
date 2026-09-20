@@ -5,6 +5,7 @@
 
 #include "secrets.h"
 #include "sandy_voice.h"
+#include "sandy_net_busy.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -130,6 +131,9 @@ extern const char fw_pubkey_pem_end[]   asm("_binary_fw_pubkey_pem_end");
 
 #define OTA_FIRST_CHECK_MS   (60 * 1000)
 #define OTA_PERIOD_MS        (6LL * 60 * 60 * 1000)
+// A skipped check (offline, or a voice session holds the network) comes back
+// this soon instead of waiting out the full six hours.
+#define OTA_RETRY_MS         (5LL * 60 * 1000)
 #define OTA_MANIFEST_MAX     1024
 #define OTA_BUF              4096
 
@@ -336,10 +340,27 @@ static void ota_check_once(void) {
 
 static void ota_check_task(void *arg) {
     (void)arg;
-    if (wifi_sandy_is_connected() && !voice_is_connected()) {
-        ota_check_once();
+    // The claim, not voice_is_connected(), is what keeps this off a voice
+    // session: it is taken at the wake word, before the WSS handshake, so a
+    // session that is still opening counts too. Two TLS sessions at once ran
+    // internal RAM out and rebooted the board. Claim first, check the rest
+    // after, so nothing is left holding it on a skip.
+    if (wifi_sandy_is_connected() && net_claim(NET_OWNER_OTA)) {
+        if (!voice_is_connected()) {
+            ota_check_once();   // esp_restart()s on a successful install
+        } else {
+            ESP_LOGI(TAG, "update check skipped (in a call)");
+        }
+        net_release(NET_OWNER_OTA);
     } else {
-        ESP_LOGI(TAG, "update check skipped (offline or in a call)");
+        ESP_LOGI(TAG, "update check skipped (offline or in a call), retrying in %d min",
+                 (int)(OTA_RETRY_MS / 60000));
+        // Next try in minutes, not in six hours. esp_timer_stop fails harmlessly
+        // when the timer is not armed (the MQTT path can land here too).
+        if (s_ota_timer) {
+            esp_timer_stop(s_ota_timer);
+            esp_timer_start_once(s_ota_timer, OTA_RETRY_MS * 1000);
+        }
     }
     s_ota_running = false;
     vTaskDelete(NULL);

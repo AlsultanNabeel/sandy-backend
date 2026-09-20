@@ -12,6 +12,7 @@ idf_component_register(
         "sandy_mic.c"
         "sandy_mqtt.c"
         "sandy_ota.c"
+        "sandy_net_busy.c"
         "sandy_face.c"
         "sandy_voice.c"
         "sandy_ears.c"
