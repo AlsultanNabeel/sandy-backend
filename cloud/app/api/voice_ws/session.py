@@ -674,12 +674,14 @@ async def _live_session(ws, remote: str) -> None:
         # ينطلب چيميناي، والميكروفون شغّال. آخر المحادثات برّا الكاش عن قصد
         # (`with_recent_turns`)، فهي قراءة لازمة بكل جلسة، وهون ما بتكلّف إشي.
         _loop = asyncio.get_event_loop()
+        _t_seed = time.monotonic()
         _label, _base, _recent = await asyncio.gather(
             _loop.run_in_executor(None, resolve_speaker_label, _who),
             _loop.run_in_executor(None, _build_cached_instruction, _who),
             _loop.run_in_executor(None, load_recent_turns, _who),
         )
         set_voice_speaker_label(_label)
+        _ms_seed = (time.monotonic() - _t_seed) * 1000
         system_instruction = with_recent_turns(_base, session_context(_recent))
         live_tools = _build_live_tools(types)
 
@@ -772,7 +774,9 @@ async def _live_session(ws, remote: str) -> None:
                 handle=resume_handle)
             config = types.LiveConnectConfig(**config_kwargs)
 
+            _t_dial = time.monotonic()
             cm, session, model_name, last_error = await _open_live_session(client, config)
+            _ms_dial = (time.monotonic() - _t_dial) * 1000
 
             if not model_name:
                 _send_json(ws, {"type": "error", "msg": "live_model_unavailable"})
@@ -781,9 +785,15 @@ async def _live_session(ws, remote: str) -> None:
 
             remember_live_model(model_name)
             try:
+                # **سطر واحد بيقول وين راح وقت فتح المكالمة.**
+                # المايك شغّال طول هالوقت، فكل مللي ثانية هون بتتحوّل لصوت
+                # مخزّن بيوصل متأخّر. التعليمات من الكاش بتكون عشرات المللي؛
+                # مئات أو آلاف يعني الكاش انكسر (أي كتابة ببيانات المستخدم).
                 logger.info(
-                    "[voice_ws] Gemini Live session opened for %s (gate=%s, model=%s)",
-                    remote, gate_on, model_name
+                    "[voice_ws] session open: seed=%.0fms dial=%.0fms total=%.0fms "
+                    "(model=%s gate=%s cached=%s) %s",
+                    _ms_seed, _ms_dial, _ms_seed + _ms_dial, model_name, gate_on,
+                    "yes" if _ms_seed < 400 else "no", remote,
                 )
 
                 if reader.dropped:
@@ -971,6 +981,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             await _verify_and_inject(session, recent.snapshot())
         await session.send_realtime_input(activity_end=types.ActivityEnd())
         state["replying"] = True
+        # للقياس: من هون لأول صوت منها هو الانتظار اللي بيحسّه المستخدم.
+        state["turn_closed_at"] = time.monotonic()
         logger.info("[voice_ws] turn closed after %.1fs of speech (%s)",
                     utter_ms / 1000, reason)
         speaking = False
@@ -1345,6 +1357,12 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                     # the audio, the robot runs out before the next piece lands.
                     _now = time.monotonic()
                     _wait = _now - _audio["at"]
+                    # **أول صوت بعد ما يسكت المستخدم** — الرقم اللي بيحسّه فعلًا.
+                    # بينطبع مرة وحدة بكل دور، وبيشمل وقت جيميني والشبكة.
+                    _closed = (live_state or {}).pop("turn_closed_at", None)
+                    if _closed is not None:
+                        logger.info("[voice_ws] first audio %.0fms after the user stopped",
+                                    (_now - _closed) * 1000)
                     await send_bytes(part.inline_data.data)
                     _audio["at"] = time.monotonic()
                     _audio["chunks"] += 1
