@@ -212,6 +212,29 @@ private final class LiveAudioBridge {
         try engine.start()
         player.play()
         lock.lock(); started = true; lock.unlock()
+
+        // The call keeps running with the screen locked (UIBackgroundModes:
+        // audio). What can still stop it is an interruption — a phone call,
+        // Siri, an alarm: the system halts the engine. Resume it when that ends
+        // instead of leaving a silent call open.
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: s, queue: .main
+        ) { [weak self] note in
+            self?.handleInterruption(note)
+        }
+    }
+
+    private var interruptionObserver: NSObjectProtocol?
+
+    private func handleInterruption(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+        lock.lock(); let live = started; lock.unlock()
+        guard live else { return }
+        try? AVAudioSession.sharedInstance().setActive(true)
+        if !engine.isRunning { try? engine.start() }
+        player.play()
     }
 
     func stop() {
@@ -220,6 +243,10 @@ private final class LiveAudioBridge {
         started = false
         lock.unlock()
         guard wasStarted else { return }
+        if let o = interruptionObserver {
+            NotificationCenter.default.removeObserver(o)
+            interruptionObserver = nil
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.mainMixerNode.removeTap(onBus: 0)
         player.stop()

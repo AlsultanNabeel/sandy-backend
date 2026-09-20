@@ -36,8 +36,15 @@
 	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
+		<!-- Plain http only on the local network (the robot camera's LAN stream,
+		     a dev server on *.local). Every internet host stays HTTPS-only. -->
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<!-- A live voice call keeps going with the screen locked. -->
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

@@ -12,7 +12,5 @@ import SwiftUI
 struct SandyWidgetBundle: WidgetBundle {
     var body: some Widget {
         SandyWidget()
-        SandyWidgetControl()
-        SandyWidgetLiveActivity()
     }
 }

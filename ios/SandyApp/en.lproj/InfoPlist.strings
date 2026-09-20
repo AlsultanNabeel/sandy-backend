@@ -1,0 +1,3 @@
+/* Permission prompts, English. The Arabic originals are the build settings. */
+"NSMicrophoneUsageDescription" = "Sandy listens when you talk to her instead of typing.";
+"NSLocalNetworkUsageDescription" = "Sandy connects to the robot's camera on your home network to show you the live stream.";
