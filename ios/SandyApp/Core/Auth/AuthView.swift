@@ -13,6 +13,9 @@ struct AuthView: View {
     @State private var email = ""
     @State private var emailPassword = ""
     @State private var emailLoading = false
+    // حالة بصرية فقط (حركة الظهور) — ما إلها علاقة بمنطق الدخول.
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -28,15 +31,31 @@ struct AuthView: View {
 
                     // الهوية: روبوت ساندي + الاسم + الشعار النصي.
                     VStack(spacing: Theme.Spacing.sm) {
-                        SandyAvatar(size: 92, mood: .happy)
+                        // هالة كهربائية ناعمة خلف ساندي — نفس هوية شاشة التعارف.
+                        ZStack {
+                            Circle()
+                                .fill(RadialGradient(
+                                    colors: [Theme.Colors.accent.opacity(0.22), .clear],
+                                    center: .center, startRadius: 0, endRadius: 90))
+                                .frame(width: 180, height: 180)
+                            SandyAvatar(size: 104, mood: .happy)
+                        }
+                        .frame(height: 150)
+                        .accessibilityHidden(true)
+
                         Text(lang.s("auth.title"))
-                            .font(Theme.Typography.largeTitle)
+                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
                             .foregroundColor(Theme.Colors.primaryText)
+                            .multilineTextAlignment(.center)
                         Text(lang.s("auth.tagline"))
-                            .font(Theme.Typography.subheadline)
+                            .font(.body)
                             .foregroundColor(Theme.Colors.secondaryText)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.top, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.lg)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 10)
 
                     // بطاقة الدخول: أبل، جوجل، إيميل.
                     //
@@ -124,11 +143,23 @@ struct AuthView: View {
                             }
                         }
                     }
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 16)
                 }
                 .padding(Theme.Spacing.lg)
                 // عمود محدود العرض موسّط — يتّزن على الآيباد والشاشات العريضة.
                 .frame(maxWidth: 460)
                 .frame(maxWidth: .infinity)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
+        }
+        // دخول هادئ: الهوية ثم البطاقة تطلعان بنعومة (بلا حركة لو «تقليل الحركة»).
+        .onAppear {
+            guard !appeared else { return }
+            if reduceMotion { appeared = true; return }
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.85).delay(0.05)) {
+                appeared = true
             }
         }
     }
