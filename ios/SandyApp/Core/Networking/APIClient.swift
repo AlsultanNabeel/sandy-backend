@@ -43,11 +43,18 @@ final class APIClient: APIClientProtocol {
     static let idempotentMethods: Set<String> = ["GET", "HEAD"]
     static let maxRetries = 2
 
-    var baseURL: String
+    var baseURL: String {
+        // إضافة المشاركة بتقرا العنوان من مجموعة التطبيقات (شوف SharedAuth).
+        didSet { if token != nil { SharedAuth.mirror(token: token, baseURL: baseURL) } }
+    }
     /// توكن الدخول — يُحفظ تلقائياً بالـKeychain عند أي تغيير (وnil = تسجيل خروج).
     /// فالجلسة تستعيد نفسها عند الإقلاع، والنوايا/الويدجت تقدر تصادق بمعزل.
+    /// ونسخة بمجموعة التطبيقات لإضافة المشاركة (SharedAuth) — تنمسح مع الخروج.
     var token: String? {
-        didSet { Keychain.saveToken(token) }
+        didSet {
+            Keychain.saveToken(token)
+            SharedAuth.mirror(token: token, baseURL: baseURL)
+        }
     }
 
     /// Called when an authenticated request gets a 401, so the app can route to login.
@@ -73,6 +80,8 @@ final class APIClient: APIClientProtocol {
         self.baseURL = baseURL
         // نحمّل التوكن المحفوظ (لو في) — التعيين بالـinit ما يشغّل didSet فما يعيد الحفظ.
         self.token = Keychain.loadToken()
+        // حساب مسجّل قبل ما تنضاف إضافة المشاركة: نسخ التوكن مرّة بالإقلاع.
+        SharedAuth.mirror(token: token, baseURL: baseURL)
     }
 
     /// Send, retrying a transient network failure on a safe method.

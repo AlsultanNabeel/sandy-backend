@@ -151,7 +151,15 @@ struct AddJournalIntent: AppIntent {
 // MARK: - مزوّد الاختصارات (يطلّع النوايا بسيري + شورتكتس + سبوتلايت)
 
 struct SandyShortcuts: AppShortcutsProvider {
+    // حد أبل: عشرة اختصارات بالكثير لكل تطبيق — هون صاروا عشرة.
     static var appShortcuts: [AppShortcut] {
+        // اسأل ساندي — الرد بيجي من سيري بدون ما ينفتح التطبيق.
+        AppShortcut(intent: AskSandyIntent(),
+                    phrases: ["اسأل ساندي في \(.applicationName)",
+                              "اسأل \(.applicationName)",
+                              "Ask \(.applicationName)",
+                              "Ask \(.applicationName) a question"],
+                    shortTitle: "Ask Sandy", systemImageName: "questionmark.bubble.fill")
         AppShortcut(intent: AddTaskIntent(),
                     phrases: ["أضف مهمة في \(.applicationName)",
                               "Add a task in \(.applicationName)"],
