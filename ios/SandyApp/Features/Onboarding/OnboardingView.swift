@@ -44,6 +44,7 @@ struct OnboardingView: View {
         Task {
             do {
                 try await state.api.saveOnboarding(preferredName: preferredName, interests: interests)
+                state.onboardingDoneCached = true
                 state.stage = .chat
             } catch { self.error = error.localizedDescription }
             saving = false

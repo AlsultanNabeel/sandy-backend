@@ -42,10 +42,25 @@ final class AppState: ObservableObject {
     /// توكن غير صالح/منتهٍ → نمسحه ونرجّع لشاشة الدخول (fail closed).
     func restoreSession() async {
         guard api.token != nil else { stage = .auth; return }
+
+        // **Open at once when we already know the answer.** The launch used to
+        // wait for GET /api/onboarding before showing anything — a full round
+        // trip to the server (seconds on a cold dyno) spent on a question whose
+        // answer almost never changes. A user who finished onboarding on this
+        // device goes straight in; the check still runs, in the background, and
+        // corrects the screen if it has to (onboarding reset, token revoked).
+        if onboardingDoneCached {
+            stage = .chat
+            setupPush()
+            Task { await verifySessionInBackground() }
+            return
+        }
+
         do {
             let ob = try await api.getOnboarding()
             onboarding = ob
             onboardingLoaded = true
+            onboardingDoneCached = ob.done
             stage = ob.done ? .chat : .onboarding
             setupPush()
         } catch let error as APIError where error.kind != .unauthorized {
@@ -59,8 +74,42 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// The background half of a cached launch: same answers as the blocking
+    /// path, applied after the first frame instead of before it.
+    private func verifySessionInBackground() async {
+        do {
+            let ob = try await api.getOnboarding()
+            onboarding = ob
+            onboardingLoaded = true
+            onboardingDoneCached = ob.done
+            if !ob.done { stage = .onboarding }
+        } catch let error as APIError where error.kind == .unauthorized {
+            signOut()
+        } catch {
+            // Offline or a slow server: stay where we are, like the blocking path.
+        }
+    }
+
+    /// "This user finished onboarding" — remembered per account on this device,
+    /// so a different account on the same phone never inherits it.
+    private static let onboardingDoneKey = "sandy_onboarding_done_for"
+    var onboardingDoneCached: Bool {
+        get {
+            guard let uid = api.currentUserId else { return false }
+            return UserDefaults.standard.string(forKey: Self.onboardingDoneKey) == uid
+        }
+        set {
+            if newValue, let uid = api.currentUserId {
+                UserDefaults.standard.set(uid, forKey: Self.onboardingDoneKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.onboardingDoneKey)
+            }
+        }
+    }
+
     /// After a successful sign-in, go to onboarding (first time) or chat.
     func routeAfterAuth(onboardingDone: Bool) {
+        onboardingDoneCached = onboardingDone
         stage = onboardingDone ? .chat : .onboarding
         setupPush()
     }
@@ -88,6 +137,7 @@ final class AppState: ObservableObject {
         if let data = try? await api.getOnboarding() {
             onboarding = data
             onboardingLoaded = true
+            onboardingDoneCached = data.done
         }
     }
 
@@ -117,6 +167,7 @@ final class AppState: ObservableObject {
         api.token = nil
         onboarding = OnboardingData()
         onboardingLoaded = false
+        onboardingDoneCached = false
         stage = .auth
     }
 }
