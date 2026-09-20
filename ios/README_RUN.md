@@ -1,15 +1,14 @@
 # Running the iOS app
 
-The Xcode project lives on the owner's Mac (it is not in this repository); this
-folder holds the Swift sources (`SandyApp/`) and tests (`SandyAppTests/`).
+Everything lives here: the Xcode project (`SandyApp.xcodeproj`), the app
+sources (`SandyApp/`, including `Info.plist`, entitlements and assets), the
+widget extension (`SandyWidget/`) and the tests (`SandyAppTests/`,
+`SandyAppUITests/`). There is no second copy to sync.
 
 ## Build
 
-1. Run `scripts/sync_ios.sh` to mirror every `*.swift` under `ios/SandyApp/`
-   into the Xcode build copy (default `~/Desktop/SandyApp/SandyApp`, override
-   with `SANDY_IOS_BUILD`). The app target uses synchronized groups, so the
-   files are picked up with no `.xcodeproj` edits; the script exits non-zero if
-   the build copy does not match the repo. Then open that Xcode project.
+1. Open `ios/SandyApp.xcodeproj`. The targets use synchronized groups, so a new
+   file under `SandyApp/` is picked up with no `.xcodeproj` edits.
 2. Signing & Capabilities: your team, plus **Sign in with Apple** and **Push
    Notifications**.
 3. Run on a simulator or a device.

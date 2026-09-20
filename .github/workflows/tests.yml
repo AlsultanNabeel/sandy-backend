@@ -121,11 +121,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Type-check the app sources
-        # There is no .xcodeproj in the repo — the Xcode project lives in the
-        # owner's build copy and the sources are synced into it. So this drives
-        # the Swift compiler over the sources directly: it catches the errors
-        # that actually happen here (a renamed symbol, a wrong type, a missing
-        # argument) without a project file to maintain in two places.
+        # Drives the Swift compiler over the app sources directly (no signing,
+        # no simulator): it catches the errors that actually happen here — a
+        # renamed symbol, a wrong type, a missing argument — at the cost of a
+        # typecheck rather than a full `xcodebuild` of ios/SandyApp.xcodeproj.
         run: |
           find ios/SandyApp -name '*.swift' -not -path '*/ 2/*' > /tmp/sources.txt
           echo "$(wc -l < /tmp/sources.txt) Swift files"

@@ -907,10 +907,9 @@ so folders are organisation only.
 - `Localization/` — one `L10n+<Area>.swift` per feature. Arabic/English, RTL/LTR.
 - `Widgets/` — home-screen widgets.
 
-Sync to the Xcode build copy with `scripts/sync_ios.sh` (rsync of `*.swift`, then prunes build-copy `.swift` files missing from the repo). The
-build copy lives at `~/Desktop/SandyApp/SandyApp`, which is why that folder must
-not be renamed. Build from the Xcode GUI — `xcodebuild` on the CLI hangs on the
-iCloud-synced folder.
+The Xcode project is in the repo (`ios/SandyApp.xcodeproj`, with `SandyWidget/`,
+`SandyAppTests/`, `SandyAppUITests/`); its targets use synchronized groups, so
+there is one copy of the sources and nothing to sync. Build from the Xcode GUI.
 
 ---
 

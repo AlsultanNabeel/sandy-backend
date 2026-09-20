@@ -223,11 +223,11 @@ def test_every_swift_file_is_reachable_from_a_view_that_exists():
 
     This was the actual fault behind an afternoon of "I built it and it isn't
     there": two new screens existed in the repository and had never reached the
-    Xcode build copy, which is a separate folder fed by scripts/sync_ios.sh. The
-    app compiled, ran, and simply did not contain them.
+    separate Xcode build copy the project used to be built from. The app
+    compiled, ran, and simply did not contain them. (The project now lives in
+    the repo, so that half cannot recur.)
 
-    A test here cannot see the build copy — it is outside the repository. What it
-    can do is catch the other half of the same mistake: a view defined and never
+    What this test catches is the other half of the same mistake: a view defined and never
     navigated to. If a `struct X: View` is never mentioned anywhere else, either
     it is dead or somebody forgot to wire it up, and both are worth knowing.
     """

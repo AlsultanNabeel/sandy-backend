@@ -1,0 +1,791 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2AA343F92FF1D66B0024674B /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 2AA343F82FF1D66B0024674B /* GoogleSignIn */; };
+		2AA344032FF1DC990024674B /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2AA344022FF1DC980024674B /* WidgetKit.framework */; };
+		2AA344052FF1DC990024674B /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2AA344042FF1DC990024674B /* SwiftUI.framework */; };
+		2AA344162FF1DC9C0024674B /* SandyWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2AA344002FF1DC980024674B /* SandyWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2AA344142FF1DC9C0024674B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2AD04E5D2FE6A806003941EF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2AA343FF2FF1DC980024674B;
+			remoteInfo = SandyWidgetExtension;
+		};
+		2AD04E732FE6A80D003941EF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2AD04E5D2FE6A806003941EF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2AD04E642FE6A806003941EF;
+			remoteInfo = SandyApp;
+		};
+		2AD04E7D2FE6A80D003941EF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2AD04E5D2FE6A806003941EF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2AD04E642FE6A806003941EF;
+			remoteInfo = SandyApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2AA3441B2FF1DC9C0024674B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				2AA344162FF1DC9C0024674B /* SandyWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		2AA344002FF1DC980024674B /* SandyWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SandyWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		2AA344022FF1DC980024674B /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		2AA344042FF1DC990024674B /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		2AA3441D2FF1DD8C0024674B /* SandyWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SandyWidgetExtension.entitlements; sourceTree = "<group>"; };
+		2AD04E652FE6A806003941EF /* SandyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SandyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2AD04E722FE6A80D003941EF /* SandyAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SandyAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2AD04E7C2FE6A80D003941EF /* SandyAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SandyAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2AA3441A2FF1DC9C0024674B /* Exceptions for "SandyWidget" folder in "SandyWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2AA343FF2FF1DC980024674B /* SandyWidgetExtension */;
+		};
+		2AB66AC12FE6B63E00C3D02D /* Exceptions for "SandyApp" folder in "SandyApp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2AD04E642FE6A806003941EF /* SandyApp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		2AA344062FF1DC990024674B /* SandyWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2AA3441A2FF1DC9C0024674B /* Exceptions for "SandyWidget" folder in "SandyWidgetExtension" target */,
+			);
+			path = SandyWidget;
+			sourceTree = "<group>";
+		};
+		2AD04E672FE6A806003941EF /* SandyApp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2AB66AC12FE6B63E00C3D02D /* Exceptions for "SandyApp" folder in "SandyApp" target */,
+			);
+			path = SandyApp;
+			sourceTree = "<group>";
+		};
+		2AD04E752FE6A80D003941EF /* SandyAppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SandyAppTests;
+			sourceTree = "<group>";
+		};
+		2AD04E7F2FE6A80D003941EF /* SandyAppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SandyAppUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2AA343FD2FF1DC980024674B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2AA344052FF1DC990024674B /* SwiftUI.framework in Frameworks */,
+				2AA344032FF1DC990024674B /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E622FE6A806003941EF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2AA343F92FF1D66B0024674B /* GoogleSignIn in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E6F2FE6A80D003941EF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E792FE6A80D003941EF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2AA344012FF1DC980024674B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				2AA344022FF1DC980024674B /* WidgetKit.framework */,
+				2AA344042FF1DC990024674B /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		2AD04E5C2FE6A806003941EF = {
+			isa = PBXGroup;
+			children = (
+				2AA3441D2FF1DD8C0024674B /* SandyWidgetExtension.entitlements */,
+				2AD04E672FE6A806003941EF /* SandyApp */,
+				2AD04E752FE6A80D003941EF /* SandyAppTests */,
+				2AD04E7F2FE6A80D003941EF /* SandyAppUITests */,
+				2AA344062FF1DC990024674B /* SandyWidget */,
+				2AA344012FF1DC980024674B /* Frameworks */,
+				2AD04E662FE6A806003941EF /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		2AD04E662FE6A806003941EF /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2AD04E652FE6A806003941EF /* SandyApp.app */,
+				2AD04E722FE6A80D003941EF /* SandyAppTests.xctest */,
+				2AD04E7C2FE6A80D003941EF /* SandyAppUITests.xctest */,
+				2AA344002FF1DC980024674B /* SandyWidgetExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2AA343FF2FF1DC980024674B /* SandyWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2AA344172FF1DC9C0024674B /* Build configuration list for PBXNativeTarget "SandyWidgetExtension" */;
+			buildPhases = (
+				2AA343FC2FF1DC980024674B /* Sources */,
+				2AA343FD2FF1DC980024674B /* Frameworks */,
+				2AA343FE2FF1DC980024674B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2AA344062FF1DC990024674B /* SandyWidget */,
+			);
+			name = SandyWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = SandyWidgetExtension;
+			productReference = 2AA344002FF1DC980024674B /* SandyWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		2AD04E642FE6A806003941EF /* SandyApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2AD04E862FE6A80D003941EF /* Build configuration list for PBXNativeTarget "SandyApp" */;
+			buildPhases = (
+				2AD04E612FE6A806003941EF /* Sources */,
+				2AD04E622FE6A806003941EF /* Frameworks */,
+				2AD04E632FE6A806003941EF /* Resources */,
+				2AA3441B2FF1DC9C0024674B /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2AA344152FF1DC9C0024674B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2AD04E672FE6A806003941EF /* SandyApp */,
+			);
+			name = SandyApp;
+			packageProductDependencies = (
+				2AA343F82FF1D66B0024674B /* GoogleSignIn */,
+			);
+			productName = SandyApp;
+			productReference = 2AD04E652FE6A806003941EF /* SandyApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		2AD04E712FE6A80D003941EF /* SandyAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2AD04E892FE6A80D003941EF /* Build configuration list for PBXNativeTarget "SandyAppTests" */;
+			buildPhases = (
+				2AD04E6E2FE6A80D003941EF /* Sources */,
+				2AD04E6F2FE6A80D003941EF /* Frameworks */,
+				2AD04E702FE6A80D003941EF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2AD04E742FE6A80D003941EF /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2AD04E752FE6A80D003941EF /* SandyAppTests */,
+			);
+			name = SandyAppTests;
+			packageProductDependencies = (
+			);
+			productName = SandyAppTests;
+			productReference = 2AD04E722FE6A80D003941EF /* SandyAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		2AD04E7B2FE6A80D003941EF /* SandyAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2AD04E8C2FE6A80D003941EF /* Build configuration list for PBXNativeTarget "SandyAppUITests" */;
+			buildPhases = (
+				2AD04E782FE6A80D003941EF /* Sources */,
+				2AD04E792FE6A80D003941EF /* Frameworks */,
+				2AD04E7A2FE6A80D003941EF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2AD04E7E2FE6A80D003941EF /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2AD04E7F2FE6A80D003941EF /* SandyAppUITests */,
+			);
+			name = SandyAppUITests;
+			packageProductDependencies = (
+			);
+			productName = SandyAppUITests;
+			productReference = 2AD04E7C2FE6A80D003941EF /* SandyAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2AD04E5D2FE6A806003941EF /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					2AA343FF2FF1DC980024674B = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					2AD04E642FE6A806003941EF = {
+						CreatedOnToolsVersion = 16.4;
+						LastSwiftMigration = 1640;
+					};
+					2AD04E712FE6A80D003941EF = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = 2AD04E642FE6A806003941EF;
+					};
+					2AD04E7B2FE6A80D003941EF = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = 2AD04E642FE6A806003941EF;
+					};
+				};
+			};
+			buildConfigurationList = 2AD04E602FE6A806003941EF /* Build configuration list for PBXProject "SandyApp" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 2AD04E5C2FE6A806003941EF;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2AA343F72FF1D66B0024674B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 2AD04E662FE6A806003941EF /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2AD04E642FE6A806003941EF /* SandyApp */,
+				2AD04E712FE6A80D003941EF /* SandyAppTests */,
+				2AD04E7B2FE6A80D003941EF /* SandyAppUITests */,
+				2AA343FF2FF1DC980024674B /* SandyWidgetExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2AA343FE2FF1DC980024674B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E632FE6A806003941EF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E702FE6A80D003941EF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E7A2FE6A80D003941EF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		2AA343FC2FF1DC980024674B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E612FE6A806003941EF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E6E2FE6A80D003941EF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2AD04E782FE6A80D003941EF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2AA344152FF1DC9C0024674B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2AA343FF2FF1DC980024674B /* SandyWidgetExtension */;
+			targetProxy = 2AA344142FF1DC9C0024674B /* PBXContainerItemProxy */;
+		};
+		2AD04E742FE6A80D003941EF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2AD04E642FE6A806003941EF /* SandyApp */;
+			targetProxy = 2AD04E732FE6A80D003941EF /* PBXContainerItemProxy */;
+		};
+		2AD04E7E2FE6A80D003941EF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2AD04E642FE6A806003941EF /* SandyApp */;
+			targetProxy = 2AD04E7D2FE6A80D003941EF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2AA344182FF1DC9C0024674B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = SandyWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6YCWK88UL7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SandyWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SandyWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyApp.SandyWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2AA344192FF1DC9C0024674B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = SandyWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6YCWK88UL7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SandyWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SandyWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyApp.SandyWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2AD04E842FE6A80D003941EF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		2AD04E852FE6A80D003941EF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		2AD04E872FE6A80D003941EF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = SandyApp/SandyApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6YCWK88UL7;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SandyApp/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = NabeelSandy;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ساندي بتسمعك لما تحكيها بصوتك بدل ما تكتب.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "عشان ساندي تفهم كلامك وتحوّله لنص.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2AD04E882FE6A80D003941EF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = SandyApp/SandyApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6YCWK88UL7;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SandyApp/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = NabeelSandy;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ساندي بتسمعك لما تحكيها بصوتك بدل ما تكتب.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "عشان ساندي تفهم كلامك وتحوّله لنص.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2AD04E8A2FE6A80D003941EF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SandyApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SandyApp";
+			};
+			name = Debug;
+		};
+		2AD04E8B2FE6A80D003941EF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SandyApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SandyApp";
+			};
+			name = Release;
+		};
+		2AD04E8D2FE6A80D003941EF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SandyApp;
+			};
+			name = Debug;
+		};
+		2AD04E8E2FE6A80D003941EF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandy.SandyAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SandyApp;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2AA344172FF1DC9C0024674B /* Build configuration list for PBXNativeTarget "SandyWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AA344182FF1DC9C0024674B /* Debug */,
+				2AA344192FF1DC9C0024674B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2AD04E602FE6A806003941EF /* Build configuration list for PBXProject "SandyApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AD04E842FE6A80D003941EF /* Debug */,
+				2AD04E852FE6A80D003941EF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2AD04E862FE6A80D003941EF /* Build configuration list for PBXNativeTarget "SandyApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AD04E872FE6A80D003941EF /* Debug */,
+				2AD04E882FE6A80D003941EF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2AD04E892FE6A80D003941EF /* Build configuration list for PBXNativeTarget "SandyAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AD04E8A2FE6A80D003941EF /* Debug */,
+				2AD04E8B2FE6A80D003941EF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2AD04E8C2FE6A80D003941EF /* Build configuration list for PBXNativeTarget "SandyAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AD04E8D2FE6A80D003941EF /* Debug */,
+				2AD04E8E2FE6A80D003941EF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		2AA343F72FF1D66B0024674B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		2AA343F82FF1D66B0024674B /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2AA343F72FF1D66B0024674B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 2AD04E5D2FE6A806003941EF /* Project object */;
+}
