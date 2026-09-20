@@ -14,7 +14,9 @@
 #include "esp_http_client.h"
 #include "esp_ota_ops.h"
 #include "mbedtls/pk.h"
-#include "mbedtls/sha256.h"
+// SHA-256 through the generic message-digest API: IDF 6 ships mbedtls 4
+// (TF-PSA-Crypto), which no longer exposes the legacy `mbedtls/sha256.h`.
+#include "mbedtls/md.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -204,7 +206,8 @@ static bool signature_ok(const char *version, long size, const char *sha_hex,
     unsigned char hash[32], sig[80];
     size_t sig_len = unhex(sig_hex, sig, sizeof(sig));
     if (!sig_len) return false;
-    mbedtls_sha256((const unsigned char *)msg, n, hash, 0);
+    if (mbedtls_md(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
+                   (const unsigned char *)msg, (size_t)n, hash) != 0) return false;
 
     mbedtls_pk_context pk;
     mbedtls_pk_init(&pk);
@@ -294,26 +297,27 @@ static void ota_check_once(void) {
         return;
     }
     unsigned char *buf = malloc(OTA_BUF);
-    mbedtls_sha256_context sh;
-    mbedtls_sha256_init(&sh);
-    mbedtls_sha256_starts(&sh, 0);
+    mbedtls_md_context_t sh;
+    mbedtls_md_init(&sh);
+    bool fail = buf == NULL ||
+                mbedtls_md_setup(&sh, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0) != 0 ||
+                mbedtls_md_starts(&sh) != 0;
     long total = 0;
-    bool fail = buf == NULL;
     while (!fail && total < size) {
         int n = esp_http_client_read(c, (char *)buf, OTA_BUF);
         if (n <= 0) { fail = true; break; }
         if (total + n > size) { fail = true; break; }   // more than was signed
-        mbedtls_sha256_update(&sh, buf, n);
+        if (mbedtls_md_update(&sh, buf, (size_t)n) != 0) { fail = true; break; }
         if (esp_ota_write(h, buf, n) != ESP_OK) fail = true;
         total += n;
     }
     esp_http_client_cleanup(c);
     free(buf);
 
-    unsigned char digest[32];
+    unsigned char digest[32] = {0};
     char digest_hex[65];
-    mbedtls_sha256_finish(&sh, digest);
-    mbedtls_sha256_free(&sh);
+    if (!fail && mbedtls_md_finish(&sh, digest) != 0) fail = true;
+    mbedtls_md_free(&sh);
     for (int i = 0; i < 32; i++) snprintf(digest_hex + 2 * i, 3, "%02x", digest[i]);
 
     if (fail || total != size || strcasecmp(digest_hex, sha) != 0) {
