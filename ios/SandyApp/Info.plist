@@ -21,6 +21,13 @@
 			<string>Editor</string>
 		</dict>
 	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<!-- Theme.Colors.background (#020508): the system launch screen was white,
+		     a quarter-second flash before the app's dark first frame. -->
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
