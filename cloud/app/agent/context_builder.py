@@ -388,6 +388,19 @@ def _build_directive_blocks(
     rather than came back empty, and the caller must not cache that.
     """
     from app.agent.ltm_crypto import decrypt_field
+
+    # **القياس بيحكي لمّا يكون في شي يستاهل.**
+    #
+    # «تجهيز السياق: أربعة آلاف وتسعمية» بالسجل، وما حدا بيعرف وين راحوا: القراءة
+    # من `sandy_memories`؟ اللقطة عبر تسع مخازن؟ سطر التعريف؟ تلاتة احتمالات
+    # وعلاجهم مختلف. والسطر تحت بيطلع **بس** لمّا يتعدّى ثانية، فما بيوسّخ سجلّ
+    # الشات بسطر لكل رسالة، وبيكون موجود بالضبط لمّا نحتاجه.
+    _t0 = time.monotonic()
+    _spent: Dict[str, float] = {}
+
+    def _mark(what: str) -> None:
+        _spent[what] = (time.monotonic() - _t0) * 1000 - sum(_spent.values())
+
     complete = True
     prefs: List[str] = []
     rels: List[str] = []
@@ -415,6 +428,7 @@ def _build_directive_blocks(
         logger.warning("[context_builder] sandy_memories read failed: %s", exc)
         docs = []
         complete = False
+    _mark("memories")
 
     for d in docs:
         label = d.get("label")
@@ -442,6 +456,7 @@ def _build_directive_blocks(
     # زي «شو بتتوقّعي أكون السنة الجاي؟» ما بينادي ولا أداة — وبتجاوب من
     # شخصيتها وكأنها ما بتعرفه. الوعي هو اللي بتعرفه بلا ما تنسأل.
     snapshot = _safe_life_snapshot()
+    _mark("life snapshot")
     if snapshot is None:
         complete = False
     head = snapshot or ""
@@ -453,6 +468,11 @@ def _build_directive_blocks(
     # (ما بيفتح). فنفس الدالة كانت بتعطي جوابين حسب مين ناداها، والروبوت وقع
     # بالنص الفاضي: المالك كاتب اسمه واهتماماته من أول يوم، وهي بتسأله مين هو.
     onboarding_line = get_onboarding_directive(chat_id)
+    _mark("onboarding")
+    total = sum(_spent.values())
+    if total >= 1000:
+        logger.info("[context_builder] blocks rebuilt in %.0fms (%s)", total,
+                    ", ".join(f"{k} {v:.0f}ms" for k, v in _spent.items()))
     if onboarding_line:
         tail.append(onboarding_line)
     if summaries and include_summaries:

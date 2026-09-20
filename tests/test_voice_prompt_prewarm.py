@@ -111,3 +111,28 @@ def test_the_background_build_reads_the_new_version_not_the_turn_s(db, inline,
         bump_for("u3", collection="sandy_memories")
 
     assert seen == [1], f"التسخين بنى ع نسخة {seen} والقاعدة عندها واحد"
+
+
+def test_the_working_live_model_outlives_the_process(db, monkeypatch):
+    """أربعة أسماء ماتوا مع بعض مرّة، وكل مكالمة دفعت محاولاتهم.
+
+    التثبيت كان بالذاكرة: عامل جديد = من أوّل القائمة من جديد، وهيروكو بيشغّل
+    عاملين وبيعيد تشغيلهم كل يوم.
+    """
+    import app.api.voice_ws._config as cfg
+    import app.utils.thread_pool as tp
+
+    monkeypatch.setattr(tp, "submit_background",
+                        lambda fn, *a, _label=None, **k: fn(*a, **k))
+    cfg._reset_live_model_cache()
+    cfg.remember_live_model("gemini-live-that-works")
+
+    # عامل تاني، عمليّة تانية، نفس القاعدة.
+    cfg._reset_live_model_cache()
+    assert cfg.live_model_candidates()[0] == "gemini-live-that-works"
+
+    # وأول ما يفشل، بينشال — وإلا العامل الجاي بيرجع يثبّتو.
+    cfg.forget_live_model("gemini-live-that-works")
+    cfg._reset_live_model_cache()
+    assert cfg.live_model_candidates()[0] != "gemini-live-that-works"
+    cfg._reset_live_model_cache()

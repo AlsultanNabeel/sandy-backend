@@ -54,6 +54,56 @@ _LIVE_MODEL_CANDIDATES: tuple[str, ...] = (
 _LIVE_MODEL: str = os.environ.get("SANDY_LIVE_MODEL", "")
 
 _live_model_working: str = ""
+# القراءة من القاعدة بتصير مرّة بعمر العمليّة، مش كل مكالمة.
+_live_model_loaded: bool = False
+_LIVE_MODEL_COLL = "sandy_runtime"
+_LIVE_MODEL_ID = "live_model"
+
+
+def _load_pinned_live_model() -> None:
+    """آخر موديل اشتغل فعليًّا — من القاعدة، مرّة وحدة.
+
+    **التثبيت بالذاكرة بيموت مع العمليّة.** هيروكو بيشغّل عاملين وبيعيد تشغيلهم
+    كل يوم، فكل عامل جديد بيرجع يمشي عالقائمة من أوّلها — ولمّا تبوظ الأسماء
+    الأولى (وهاد صار: أربعة أسماء ماتوا مع بعض)، كل مكالمة بتدفع ثانية ونص
+    محاولات فاشلة وتلات تحذيرات، لكل عامل، كل يوم. اللي تعلّمناه لازم يعيش
+    أطول من العمليّة اللي تعلّمته.
+    """
+    global _live_model_working, _live_model_loaded
+    if _live_model_loaded:
+        return
+    _live_model_loaded = True
+    try:
+        from app.db import get_db
+
+        db = get_db()
+        if db is None:
+            return
+        doc = db[_LIVE_MODEL_COLL].find_one({"_id": _LIVE_MODEL_ID}, {"name": 1})
+        name = str((doc or {}).get("name") or "").strip()
+        if name and not _live_model_working:
+            _live_model_working = name
+            logger.info("[voice_ws] last working live model was %s", name)
+    except Exception as exc:  # noqa: BLE001 — تفضيل، مش شرط
+        logger.debug("[voice_ws] pinned model read skipped: %s", exc)
+
+
+def _persist_live_model(name: str) -> None:
+    from datetime import datetime, timezone
+
+    try:
+        from app.db import get_db
+
+        db = get_db()
+        if db is None:
+            return
+        db[_LIVE_MODEL_COLL].update_one(
+            {"_id": _LIVE_MODEL_ID},
+            {"$set": {"name": name, "at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[voice_ws] pinned model write skipped: %s", exc)
 
 
 def live_model_candidates() -> tuple[str, ...]:
@@ -64,6 +114,7 @@ def live_model_candidates() -> tuple[str, ...]:
     that stops working has to be survivable, or it is a single point of failure
     wearing the clothes of a convenience.
     """
+    _load_pinned_live_model()
     order: list[str] = []
     for name in (_LIVE_MODEL, _live_model_working, *_LIVE_MODEL_CANDIDATES):
         if name and name not in order:
@@ -77,6 +128,13 @@ def remember_live_model(name: str) -> None:
     if name and name != _live_model_working:
         _live_model_working = name
         logger.info("[voice_ws] live model settled on %s", name)
+        # بالخلفية: المكالمة صارت مفتوحة وصاحبها بيستنّى، وهاي كتابة للي بعده.
+        try:
+            from app.utils.thread_pool import submit_background
+
+            submit_background(_persist_live_model, name, _label="live-model-pin")
+        except Exception:  # noqa: BLE001
+            logger.debug("[voice_ws] pinned model not saved", exc_info=True)
 
 
 def pinned_live_model() -> str:
@@ -95,6 +153,20 @@ def forget_live_model(name: str) -> None:
     if name and name == _live_model_working:
         _live_model_working = ""
         logger.warning("[voice_ws] live model %s failed in session — unpinned", name)
+        # وبتنشال من القاعدة كمان، وإلا كل عامل جديد بيرجع يثبّتها.
+        try:
+            from app.utils.thread_pool import submit_background
+
+            submit_background(_persist_live_model, "", _label="live-model-unpin")
+        except Exception:  # noqa: BLE001
+            logger.debug("[voice_ws] unpin not saved", exc_info=True)
+
+
+def _reset_live_model_cache() -> None:
+    """للاختبارات: خلّي القراءة من القاعدة تصير من جديد."""
+    global _live_model_working, _live_model_loaded
+    _live_model_working = ""
+    _live_model_loaded = False
 _ANTI_REPLAY_MS: int = 30_000
 
 # Phase 4 (V4.4–V4.6): على المايك (اللابتوب) نتأكد إنه صوت المالك قبل أمر حسّاس.
