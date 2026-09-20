@@ -24,9 +24,15 @@
 	<key>UILaunchScreen</key>
 	<dict>
 		<!-- Theme.Colors.background (#020508): the system launch screen was white,
-		     a quarter-second flash before the app's dark first frame. -->
+		     a quarter-second flash before the app's dark first frame. Sandy sits in
+		     the middle; LaunchHandoff (App/SandyApp.swift) takes over the same image
+		     at the same spot and animates it out. -->
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchMark</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<false/>
 	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>

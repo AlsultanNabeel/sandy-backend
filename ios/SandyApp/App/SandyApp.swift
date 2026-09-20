@@ -55,6 +55,7 @@ struct SandyApp: App {
 
 struct RootView: View {
     @EnvironmentObject var state: AppState
+    @State private var handoffDone = false
 
     var body: some View {
         Group {
@@ -65,9 +66,51 @@ struct RootView: View {
             case .chat:        MainTabView()
             }
         }
+        // The launch screen's Sandy, picked up at the exact same spot and sent
+        // off: she glows, grows a little and fades while the app appears behind
+        // her. It never blocks a touch and never delays the first screen — the
+        // app is already there underneath.
+        .overlay {
+            if !handoffDone {
+                LaunchHandoff { handoffDone = true }
+            }
+        }
         // نحاول استعادة الجلسة مرّة عند الإقلاع (توكن محفوظ → رئيسية مباشرة).
         .task {
             if state.needsSessionRestore { await state.restoreSession() }
+        }
+    }
+}
+
+/// Continues the system launch screen (`UILaunchScreen` in Info.plist: the
+/// `LaunchBackground` color with `LaunchMark` centred at its natural 240 pt) so
+/// the hand-off from the OS to the app has no seam, then animates it away.
+private struct LaunchHandoff: View {
+    let onFinished: () -> Void
+    @State private var leaving = false
+
+    /// LaunchMark@3x.png is 720 px → 240 pt, the size the launch screen draws it.
+    private static let markSize: CGFloat = 240
+
+    var body: some View {
+        ZStack {
+            Color("LaunchBackground")
+                .opacity(leaving ? 0 : 1)
+            Image("LaunchMark")
+                .resizable()
+                .frame(width: Self.markSize, height: Self.markSize)
+                .scaleEffect(leaving ? 1.18 : 1)
+                .brightness(leaving ? 0.12 : 0)
+                .blur(radius: leaving ? 6 : 0)
+                .opacity(leaving ? 0 : 1)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .task {
+            withAnimation(.easeOut(duration: 0.42)) { leaving = true }
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            onFinished()
         }
     }
 }
