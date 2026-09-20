@@ -91,6 +91,9 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
     private func receiveLoop() {
         guard let task = ws else { return }
+        // The receive callback runs off the main actor: take the audio bridge
+        // (thread-safe, see LiveAudioBridge) here, and hop back to re-arm.
+        let audio = self.audio
         task.receive { [weak self, weak task] result in
             guard let self else { return }
             switch result {
@@ -105,10 +108,10 @@ final class GeminiLiveManager: NSObject, ObservableObject {
             case .success(let message):
                 switch message {
                 case .string(let text): Task { @MainActor in self.handleText(text) }
-                case .data(let data):   self.audio.enqueuePlayback(data)
+                case .data(let data):   audio.enqueuePlayback(data)
                 @unknown default: break
                 }
-                self.receiveLoop()
+                Task { @MainActor in self.receiveLoop() }
             }
         }
     }
@@ -150,7 +153,9 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 /// يملك محرّك الصوت: التقاط المايك وتحويله لست عشرة كيلو Int16 وإرساله، وتشغيل
 /// ردّها أربعة وعشرين كيلو، وقياس موجة الخرج لتحريك الفم. كل الحالة المشتركة
 /// محميّة بقفل لأنّ نداءات الـ tap تجي من خيط لحظي.
-private final class LiveAudioBridge {
+/// Unchecked Sendable: every mutable field shared with the audio threads is
+/// guarded by `lock`, and the engine/player are only driven from start/stop.
+private final class LiveAudioBridge: @unchecked Sendable {
     var send: ((Data) -> Void)?
     var onMouth: ((CGFloat) -> Void)?
     var onSpeaking: ((Bool) -> Void)?

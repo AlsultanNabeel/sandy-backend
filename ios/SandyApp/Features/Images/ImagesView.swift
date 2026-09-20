@@ -135,8 +135,10 @@ struct ImagesView: View {
     }
 
     private var pickerButton: some View {
-        PhotosPicker(selection: $pickedItem, matching: .images) {
-            Label(sourceImage == nil ? lang.s("images.pick") : lang.s("images.pickAgain"),
+        // PhotosPicker builds its label off the main actor: resolve the text first.
+        let title = lang.s(sourceImage == nil ? "images.pick" : "images.pickAgain")
+        return PhotosPicker(selection: $pickedItem, matching: .images) {
+            Label(title,
                   systemImage: "photo.on.rectangle")
                 .font(Theme.Typography.button)
                 .foregroundColor(Theme.Colors.secondaryText)

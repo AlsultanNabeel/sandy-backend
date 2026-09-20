@@ -239,8 +239,10 @@ private struct PhotoAddSheet: View {
     var body: some View {
         SandyPopup(title: lang.s("photos.addTitle")) {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                // PhotosPicker builds its label off the main actor: resolve first.
+                let pickTitle = lang.s(image == nil ? "photos.pick" : "photos.pickAgain")
                 PhotosPicker(selection: $pickedItem, matching: .images) {
-                    Label(image == nil ? lang.s("photos.pick") : lang.s("photos.pickAgain"),
+                    Label(pickTitle,
                           systemImage: "photo.on.rectangle")
                         .font(Theme.Typography.button)
                         .foregroundColor(Theme.Colors.accent)

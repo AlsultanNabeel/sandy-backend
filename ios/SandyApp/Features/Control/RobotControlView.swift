@@ -187,13 +187,15 @@ struct RobotControlView: View {
 
                 DeviceCard(device: screen, store: store, onEdit: {})
 
+                // PhotosPicker builds its label off the main actor: resolve first.
+                let pickTitle = lang.s(sendingImage ? "robot.control.image.sending"
+                                                    : "robot.control.image.pick")
                 PhotosPicker(selection: $pickedImage, matching: .images) {
                     HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: sendingImage
                               ? "arrow.triangle.2.circlepath" : "photo.on.rectangle")
                             .font(.system(size: Theme.Icon.md, weight: .semibold))
-                        Text(lang.s(sendingImage ? "robot.control.image.sending"
-                                                 : "robot.control.image.pick"))
+                        Text(pickTitle)
                             .font(Theme.Typography.button)
                     }
                     .foregroundColor(Theme.Colors.accent)

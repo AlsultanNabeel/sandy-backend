@@ -116,7 +116,7 @@ struct MainTabView: View {
         }
         // التنبيه اليومي مش ورقة — بطاقته عالرئيسية، فنبدّل للرئيسية ونصفّر المسار
         // (قبل ما تُعرض ورقة). بيتعامل معه هون بدل routeView.
-        .onChange(of: notifs.pendingRoute) { route in
+        .onChange(of: notifs.pendingRoute) { _, route in
             if route == .dailyNudge {
                 selection = .home
                 notifs.pendingRoute = nil
