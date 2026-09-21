@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import SwiftUI
+import os
 
 /// مكالمة جيميني لايف الحيّة — نفس مسار الروبوت/الويب (`lib/voiceLive.js`):
 /// نفتح ويب-سوكت `/voice`، نوثّق بتوكن المالك ({type:"hello", token})، نبثّ
@@ -190,6 +191,12 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 /// Unchecked Sendable: every mutable field shared with the audio threads is
 /// guarded by `lock`, and the engine/player are only driven from start/stop.
 private final class LiveAudioBridge: @unchecked Sendable {
+    /// What the audio graph actually did, in Xcode's console and Console.app
+    /// (filter: SandyVoice). The phone is the one place the server's log cannot
+    /// see into — «she changed to speaking and nothing came out» has four
+    /// possible causes, and these lines say which one.
+    private static let log = Logger(subsystem: "com.sandy.app", category: "SandyVoice")
+
     var send: ((Data) -> Void)?
     var onMouth: ((CGFloat) -> Void)?
     var onSpeaking: ((Bool) -> Void)?
@@ -228,6 +235,10 @@ private final class LiveAudioBridge: @unchecked Sendable {
     private var generation = 0
     private var started = false
     private var configObserver: NSObjectProtocol?
+    /// Has the mixer rendered anything of the reply now playing? Logged once
+    /// per reply: its absence is the difference between «no sound» and «sound
+    /// going somewhere you cannot hear».
+    private var renderedThisReply = true
 
     func start(duplex: Bool) throws {
         let s = AVAudioSession.sharedInstance()
@@ -249,9 +260,8 @@ private final class LiveAudioBridge: @unchecked Sendable {
         }
         lock.lock(); echoCancelled = cancelled; lock.unlock()
 
-        // رسم تشغيل ردّها.
+        // رسم تشغيل ردّها (بيتوصّل بـ `connectOutput`).
         engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: playFormat)
 
         installMicTap()
         // موجة الخرج لتحريك الفم.
@@ -259,10 +269,12 @@ private final class LiveAudioBridge: @unchecked Sendable {
             self?.onOutput(buf)
         }
 
+        connectOutput()
         engine.prepare()
         try engine.start()
         player.play()
         lock.lock(); started = true; lock.unlock()
+        Self.log.notice("started: echoCancel=\(cancelled) \(self.describe(), privacy: .public)")
 
         // The call keeps running with the screen locked (UIBackgroundModes:
         // audio). What can still stop it is an interruption — a phone call,
@@ -308,14 +320,47 @@ private final class LiveAudioBridge: @unchecked Sendable {
         }
     }
 
+    /// **The output, connected on purpose.**
+    ///
+    /// Echo cancellation swaps the engine's input/output for a voice-processing
+    /// unit with its own format, and a link from the mixer to the output made
+    /// implicitly — by whatever touched `mainMixerNode` first — is not
+    /// guaranteed to match it. The symptom is exactly the report: the call goes
+    /// to «speaking» (her audio arrived and was scheduled) and the mouth never
+    /// moves (the mixer never rendered, so its tap never fired). Connecting it
+    /// explicitly, with the format taken from the output as it is now, removes
+    /// the guess — and it is redone after every configuration change.
+    private func connectOutput() {
+        engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+        engine.connect(engine.mainMixerNode, to: engine.outputNode,
+                       format: engine.outputNode.inputFormat(forBus: 0))
+    }
+
     private func handleConfigurationChange() {
         lock.lock(); let live = started; lock.unlock()
         guard live else { return }
+        Self.log.notice("configuration changed — rewiring: \(self.describe(), privacy: .public)")
         engine.inputNode.removeTap(onBus: 0)
         installMicTap()
+        connectOutput()
         engine.prepare()
-        if !engine.isRunning { try? engine.start() }
+        if !engine.isRunning {
+            do { try engine.start() } catch {
+                Self.log.error("restart after configuration change failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         player.play()
+        Self.log.notice("rewired: \(self.describe(), privacy: .public)")
+    }
+
+    /// Formats, route and running state — everything the four causes differ in.
+    private func describe() -> String {
+        let route = AVAudioSession.sharedInstance().currentRoute.outputs
+            .map { $0.portType.rawValue }.joined(separator: ",")
+        return "running=\(engine.isRunning) playing=\(player.isPlaying) "
+            + "in=\(engine.inputNode.outputFormat(forBus: 0)) "
+            + "mix=\(engine.mainMixerNode.outputFormat(forBus: 0)) "
+            + "out=\(engine.outputNode.inputFormat(forBus: 0)) route=\(route)"
     }
 
     private var interruptionObserver: NSObjectProtocol?
@@ -405,8 +450,12 @@ private final class LiveAudioBridge: @unchecked Sendable {
         if !wasSpeaking { replyStartedAt = lastPlaybackAt }
         speaking = true
         let gen = generation
+        if !wasSpeaking { renderedThisReply = false }
         lock.unlock()
-        if !wasSpeaking { onSpeaking?(true) }
+        if !wasSpeaking {
+            onSpeaking?(true)
+            Self.log.notice("reply arrived: \(self.describe(), privacy: .public)")
+        }
 
         player.scheduleBuffer(buf) { [weak self] in
             guard let self else { return }
@@ -472,7 +521,12 @@ private final class LiveAudioBridge: @unchecked Sendable {
     // MARK: موجة الخرج → الفم
 
     private func onOutput(_ buffer: AVAudioPCMBuffer) {
-        lock.lock(); let sp = speaking; lock.unlock()
+        lock.lock()
+        let sp = speaking
+        let first = sp && !renderedThisReply
+        if first { renderedThisReply = true }
+        lock.unlock()
+        if first { Self.log.notice("output is rendering her reply") }
         guard sp, let ch = buffer.floatChannelData else { return }
         let n = Int(buffer.frameLength)
         guard n > 0 else { return }
