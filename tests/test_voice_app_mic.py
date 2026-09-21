@@ -230,3 +230,29 @@ def test_a_question_whose_transcript_has_no_words_is_not_saved_as_dots():
     assert _HAS_LETTERS.search(". . . .") is None
     assert _HAS_LETTERS.search("اعرف عن المصطلحات") is not None
     assert _HAS_LETTERS.search("what is it") is not None
+
+
+def test_talking_over_her_from_the_app_interrupts_her(loop):
+    """المايك صار مفتوح وهي بتحكي — والمقاطعة بتمرق بحدّها الكامل.
+
+    إطارات التطبيق مع إلغاء الصدى بتوصل مية جزء من الألف. قبل ما يصير سقف
+    الحجز بالوقت، ستّاشر إطار ما كانوا يكفوا يعدّوا الحدّ بأي طول حكي.
+    """
+    import time as _time
+
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    chunks = [_app_frame(30, ms=100)] * 10 + [_app_frame(3000, ms=100)] * 16
+    session = _StatefulSession()
+    # عم تحكي هلّق: آخر صوت منها طلع هلّق، والدور تبعو انسكّر من قبل.
+    now = _time.monotonic()
+    state: dict = {"replying": True, "turn_closed_at": now - 3, "last_out_at": now + 60}
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(),
+                        verify=False, live_state=state))
+
+    assert session.order[:1] == ["start"], (
+        f"حكى ثانية ونص فوقها وما انقطعت: {session.order}")
+    assert state["replying"] is False, "بعد المقاطعة لسا معتبرينها عم تردّ"

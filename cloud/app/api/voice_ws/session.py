@@ -21,6 +21,7 @@ from app.api.voice_ws._config import (
     pinned_live_model,
     remember_live_model,
     _ANTI_REPLAY_MS,
+    _APP_DUPLEX,
     _APP_PREFIX_MS,
     _APP_SILENCE_MS,
     _APP_TURNS_BY_GEMINI,
@@ -226,7 +227,7 @@ def _authenticate(ws, remote: str) -> bool:
                 # `duplex`: افتح المايك وهي بتحكي. القرار عند السيرفر، مش
                 # بالتطبيق، عشان التراجع يكون من إعدادات هيروكو بلا بناء.
                 ws.send(json.dumps({"type": "auth_ok",
-                                    "duplex": _APP_TURNS_BY_GEMINI}))
+                                    "duplex": _APP_DUPLEX}))
                 logger.info("[voice_ws] app voice OK user=%s remote=%s", uid, remote)
                 return True
             ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
