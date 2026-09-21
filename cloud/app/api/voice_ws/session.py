@@ -7,6 +7,7 @@ import hashlib
 import hmac as _hmac
 import json
 import os
+import re
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +21,9 @@ from app.api.voice_ws._config import (
     pinned_live_model,
     remember_live_model,
     _ANTI_REPLAY_MS,
+    _APP_PREFIX_MS,
+    _APP_SILENCE_MS,
+    _APP_TURNS_BY_GEMINI,
     _SENSITIVE_TOOLS,
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
@@ -218,8 +222,11 @@ def _authenticate(ws, remote: str) -> bool:
                     ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
                     return False
                 set_voice_identity(uid)
-                set_voice_channel("مكالمة التطبيق")
-                ws.send(json.dumps({"type": "auth_ok"}))
+                set_voice_channel(_APP_CHANNEL)
+                # `duplex`: افتح المايك وهي بتحكي. القرار عند السيرفر، مش
+                # بالتطبيق، عشان التراجع يكون من إعدادات هيروكو بلا بناء.
+                ws.send(json.dumps({"type": "auth_ok",
+                                    "duplex": _APP_TURNS_BY_GEMINI}))
                 logger.info("[voice_ws] app voice OK user=%s remote=%s", uid, remote)
                 return True
             ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))
@@ -651,6 +658,7 @@ async def _live_session(ws, remote: str) -> None:
     # the executor before `start()` returns, so a raise between the two would
     # leak a pool that nothing holds a reference to.
     reader: Optional["_DeviceReader"] = None
+    _held = ""
     try:
         reader = _DeviceReader(ws).start()
 
@@ -662,6 +670,10 @@ async def _live_session(ws, remote: str) -> None:
         #
         # وتمريره كوسيط بيشيل السؤال من أصله بدل ما يحاول يوصّل السياق.
         _who = get_voice_identity()
+        # التسخين بيستنّى لآخر المكالمة (شوف `prompt_prewarm.hold`).
+        from app.utils import prompt_prewarm
+        prompt_prewarm.hold(_who)
+        _held = _who
         # **والاسم كمان لازم ينحلّ هون، ع الحلقة.**
         #
         # `_speaker_directive` بينشغّل بآخر كل جملة، منتظَر ع نفس الحلقة اللي
@@ -758,9 +770,22 @@ async def _live_session(ws, remote: str) -> None:
         # عنّا كاشف صمت شغّال أصلاً بمسار التحقّق. التحقّق من هوية المتكلّم
         # والتحكّم بنهاية الدور مسألتين منفصلتين، وربطهن ببعض هو الغلط: التحقّق
         # اختياري، ونهاية الدور لأ.
-        config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
-            automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
-        )
+        auto_turns = _APP_TURNS_BY_GEMINI and get_voice_channel() == _APP_CHANNEL
+        if auto_turns:
+            # مكالمة التطبيق: جيميناي بيقرّر — شوف `_APP_TURNS_BY_GEMINI`.
+            config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    disabled=False,
+                    start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_LOW,
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                    prefix_padding_ms=_APP_PREFIX_MS,
+                    silence_duration_ms=_APP_SILENCE_MS,
+                ),
+            )
+        else:
+            config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
+            )
         # **The session outlives the connection.**
         #
         # A Live connection lasts about ten minutes and the server sends
@@ -809,6 +834,9 @@ async def _live_session(ws, remote: str) -> None:
 
                 recent = _RecentAudio()
                 t_in = asyncio.create_task(
+                    _device_to_live_auto(reader, session, recent,
+                                         live_state=live_state)
+                    if auto_turns else
                     _device_to_live(reader, session, recent, verify=gate_on,
                                     live_state=live_state))
                 t_out = asyncio.create_task(
@@ -895,6 +923,9 @@ async def _live_session(ws, remote: str) -> None:
     finally:
         if reader is not None:
             reader.stop()
+        if _held:
+            from app.utils import prompt_prewarm
+            prompt_prewarm.release(_held)
 
 
 # الردّ بيوصل قطع متلاحقة، فثانيتين بلا ولا قطعة معناها المولّد وقف.
@@ -903,6 +934,16 @@ _REPLY_STALE_S = 2.0
 # خلال هالمهلة بنعتبرها «عم ترد» حتى لو ما وصل ولا بايت بعد — وإلا أي حركة
 # بالغرفة بهالثواني بتلغي الردّ قبل ما يبلّش.
 _REPLY_WARMUP_S = 8.0
+
+
+# اسم القناة لمكالمة التطبيق. بينحفظ جنب كل جملة بالذاكرة («قلتلي بالمكالمة»)،
+# وهو كمان اللي بيفرّق مسار التطبيق عن الروبوت بالجلسة.
+_APP_CHANNEL = "مكالمة التطبيق"
+
+# سؤال سمعته وردّت عليه، بس تفريغه النصّي رجع بلا ولا حرف («. . . .»). بينحفظ
+# هيك بدل النقط: الذاكرة بتعرف إنه في سؤال وإنها ردّت، وما بتقرا نقط كأنها كلامه.
+_UNHEARD_QUESTION = "(سؤال صوتي ما انكتب نصّه)"
+_HAS_LETTERS = re.compile(r"[^\W\d_]")
 
 
 def _she_has_not_spoken_yet(state: Dict[str, Any]) -> bool:
@@ -951,6 +992,66 @@ def _she_is_really_answering(state: Dict[str, Any]) -> bool:
     state.pop("last_out_at", None)
     state.pop("turn_closed_at", None)
     return False
+
+
+async def _device_to_live_auto(reader: "_DeviceReader", session,
+                               recent: "_RecentAudio", *,
+                               live_state: Optional[Dict[str, Any]] = None) -> None:
+    """مكالمة التطبيق: كل الصوت لجيميناي، وهو اللي بيقرّر وين الدور.
+
+    ما في بداية دور ولا نهايته من عنّا، ولا حدّ مقاطعة ولا حجز إطارات: كل هاد
+    صار عند كاشفه (شوف `_APP_TURNS_BY_GEMINI`). لمّا تحكي فوقها بيوقّف التوليد
+    وبيبعت «انقطع»، و`_live_to_device` بيوصّلها للتطبيق اللي بيسكّتها فورًا.
+
+    الشدّة لسّا بتنقاس هون، بس **للقياس**: آخر إطار واضح فوق الغرفة هو «آخر ما
+    سمعناك بتحكي»، ومنه بينحسب «أول صوت بعد ما سكت» — نفس الرقم اللي كان.
+    """
+    from google.genai import types
+    import numpy as np
+
+    state: Dict[str, Any] = live_state if live_state is not None else {}
+    frames = 0
+    sent = 0
+    heard_ms = 0.0
+    loudest = 0.0
+    window: "deque[tuple[float, float]]" = deque()
+    window_ms = 0.0
+
+    async for chunk in reader.frames():
+        samples = np.frombuffer(chunk, dtype="<i2")
+        if samples.size == 0:
+            continue
+        rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+        ms = samples.size / 16000 * 1000
+        heard_ms += ms
+        loudest = max(loudest, rms)
+        if frames == 0:
+            logger.info("[voice_ws] first frame from the app: %d bytes, %.0fms, "
+                        "rms %.0f — Gemini decides the turns", len(chunk), ms, rms)
+
+        window.append((ms, rms))
+        window_ms += ms
+        while window_ms > _VAD_FLOOR_MS and len(window) > _VAD_FLOOR_MIN_FRAMES:
+            window_ms -= window.popleft()[0]
+        if len(window) >= _VAD_FLOOR_MIN_FRAMES:
+            room = min(min(r for _, r in window), _VAD_ROOM_MAX)
+            if rms >= max(room * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR):
+                state["turn_closed_at"] = time.monotonic()
+
+        recent.add(chunk)
+        for i in range(0, len(chunk), _CHUNK_BYTES):
+            piece = chunk[i:i + _CHUNK_BYTES]
+            if piece:
+                await session.send_realtime_input(
+                    audio=types.Blob(data=piece, mime_type="audio/pcm;rate=16000"))
+        frames += 1
+        sent += len(chunk)
+
+    logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
+                "%.1fs audio, %d frames dropped (heard %.1fs, loudest %.0f) "
+                "— turns by Gemini",
+                frames, sent, sent / 2 / 16000, reader.dropped,
+                heard_ms / 1000, loudest)
 
 
 async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio",
@@ -1526,6 +1627,13 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
             # said.
             user_text = "".join(_user_buf).strip()
             sandy_text = "".join(_sandy_buf).strip()
+            if user_text and sandy_text and not _HAS_LETTERS.search(user_text):
+                # عشر ثواني حكي رجعوا «. . . .» — هي فهمت وردّت صح، والسجل
+                # كان رح يحفظ النقط كأنها سؤاله ويقراها إلها بعدين.
+                logger.warning("[voice_ws] the transcript of the question came "
+                               "back with no words (%r) — saved as unheard",
+                               user_text[:40])
+                user_text = _UNHEARD_QUESTION
 
             # Save the turn so the app and voice keep sharing one memory. We
             # deliberately do NOT re-inject conversation history back into the
@@ -1570,6 +1678,12 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
 
         # Tool calls: dispatch them and return the result to Live.
         if response.tool_call and dispatcher:
+            # **الصمت وقت البحث مش صمت، هو شغل** — بس ما حدا بيعرف هيك. البحث
+            # بياخد تلات ثواني، والموديل بينادي الأداة قبل ما يحكي أي إشي،
+            # فبتضلّ ساكتة. التطبيق بيورجي «لحظة، عم دوّر» بدل ما تبيّن معلّقة.
+            # للتطبيق بس: اللوح ما بيعرف هالرسالة.
+            if get_voice_channel() == _APP_CHANNEL:
+                await send_msg({"type": "working"})
             fn_responses: List[types.FunctionResponse] = []
             for fc in response.tool_call.function_calls:
                 # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.

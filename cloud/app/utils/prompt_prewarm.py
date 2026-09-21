@@ -36,6 +36,41 @@ _DELAY_S = float(os.getenv("SANDY_PREWARM_DELAY_S", "2"))
 
 _pending: set[str] = set()
 _lock = threading.Lock()
+# مستأجرين عندهم مكالمة مفتوحة بهالعمليّة، وكم وحدة.
+_live: dict[str, int] = {}
+# ومين انكتبله إشي وهو بالمكالمة — بيتسخّن مرّة وحدة لمّا تخلص.
+_dirty: set[str] = set()
+
+
+def hold(tenant: str) -> None:
+    """مكالمة بلّشت — أجّل التسخين لحد ما تخلص.
+
+    **كل دور بالمكالمة بيحفظ ذاكرة، والحفظ بيطلق بناء.** السجل: «نسخة مية وتلاتة
+    وتلاتين»، بناء ثانية كاملة، بنصّ مكالمة شغّالة وعلى نفس السيرفر — لمكالمة لسا
+    ما صارت. عشر أدوار = عشر بناءات، تسعة منهم بينرموا. بناء واحد بالآخر بيكفي.
+    """
+    key = str(tenant or "")
+    if not key:
+        return
+    with _lock:
+        _live[key] = _live.get(key, 0) + 1
+
+
+def release(tenant: str) -> None:
+    """المكالمة خلصت — لو انكتب إشي خلالها، هلّق وقت البناء."""
+    key = str(tenant or "")
+    if not key:
+        return
+    with _lock:
+        left = _live.get(key, 0) - 1
+        if left > 0:
+            _live[key] = left
+            return
+        _live.pop(key, None)
+        dirty = key in _dirty
+        _dirty.discard(key)
+    if dirty:
+        schedule(key)
 
 
 def schedule(tenant: str) -> None:
@@ -47,6 +82,9 @@ def schedule(tenant: str) -> None:
     if not key:
         return
     with _lock:
+        if key in _live:
+            _dirty.add(key)
+            return
         if key in _pending:
             return
         _pending.add(key)

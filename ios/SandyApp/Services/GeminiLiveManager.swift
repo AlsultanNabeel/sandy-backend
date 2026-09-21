@@ -5,7 +5,11 @@ import SwiftUI
 /// مكالمة جيميني لايف الحيّة — نفس مسار الروبوت/الويب (`lib/voiceLive.js`):
 /// نفتح ويب-سوكت `/voice`، نوثّق بتوكن المالك ({type:"hello", token})، نبثّ
 /// صوت المايك ست عشرة كيلو (مونو، Int16)، ونشغّل صوتها أربعة وعشرين كيلو لحظيًا،
-/// ونحرّك الفم على موجة صوتها الفعلية. نصف-مزدوج: نوقف المايك وهي بتحكي.
+/// ونحرّك الفم على موجة صوتها الفعلية.
+///
+/// المايك بيضلّ مفتوح وهي بتحكي (مع إلغاء الصدى) — هيك بتقدر تقاطعها بصوتك زي
+/// أي مساعد صوتي. السيرفر هو اللي بيقرّر بالمصافحة (`duplex`)، ولو قال لأ أو
+/// فشل إلغاء الصدى، بنرجع نسكّر المايك وهي بتحكي.
 @MainActor
 final class GeminiLiveManager: NSObject, ObservableObject {
     enum Phase: Equatable { case idle, connecting, listening, speaking }
@@ -25,6 +29,9 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         }
     }
     @Published var mouthOpen: CGFloat = 0
+    /// She is running a tool (a search, a reminder) — the seconds of silence
+    /// before her answer are work, and the screen says so.
+    @Published var working = false
     @Published var permissionDenied = false
     @Published var errorText = ""
 
@@ -64,6 +71,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         audio.stop()
         phase = .idle
         mouthOpen = 0
+        working = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -96,6 +104,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         audio.onSpeaking = { [weak self] speaking in
             Task { @MainActor in
                 guard let self, self.phase != .idle, self.phase != .connecting else { return }
+                if speaking { self.working = false }
                 self.phase = speaking ? .speaking : .listening
             }
         }
@@ -136,8 +145,11 @@ final class GeminiLiveManager: NSObject, ObservableObject {
               let type = m["type"] as? String else { return }
         switch type {
         case "auth_ok":
+            // المايك مفتوح وهي بتحكي بس لمّا السيرفر يقول — هيك التراجع
+            // بيصير من إعدادات السيرفر بلا ما نبني التطبيق من جديد.
+            let duplex = (m["duplex"] as? Bool) ?? false
             do {
-                try audio.start()
+                try audio.start(duplex: duplex)
                 phase = .listening
             } catch {
                 errorText = "ما قدرت أشغّل الصوت"
@@ -145,6 +157,14 @@ final class GeminiLiveManager: NSObject, ObservableObject {
             }
         case "end_turn":
             audio.markEndTurn()
+            working = false
+        case "interrupted":
+            // قاطعتها: جيميناي وقّف التوليد، وهون لازم تسكت **هلّق** — مش بعد
+            // ما يخلص اللي بالطابور. بدون هاد بتكمّل جملة ما عاد إلها معنى.
+            audio.flushPlayback()
+            working = false
+        case "working":
+            working = true
         case "error":
             errorText = (m["msg"] as? String) ?? "خطأ"
         default:
@@ -194,34 +214,46 @@ private final class LiveAudioBridge: @unchecked Sendable {
     private let playFormat = LiveAudioBridge.makePlayFormat()
 
     private let lock = NSLock()
+    /// Echo cancellation is on: keep sending while she talks — that is the
+    /// whole of what lets you interrupt her. Off: half-duplex, as before.
+    private var echoCancelled = false
     private var speaking = false
     private var lastPlaybackAt = CFAbsoluteTimeGetCurrent() - 10
+    /// When the reply now playing began. The first moments of a reply are when
+    /// the echo canceller has heard the least of it.
+    private var replyStartedAt = CFAbsoluteTimeGetCurrent() - 10
     private var pendingBuffers = 0
+    /// Bumped by `flushPlayback`. A buffer scheduled before a flush belongs to a
+    /// reply that no longer exists; its completion must not count anything down.
+    private var generation = 0
     private var started = false
+    private var configObserver: NSObjectProtocol?
 
-    func start() throws {
+    func start(duplex: Bool) throws {
         let s = AVAudioSession.sharedInstance()
         try s.setCategory(.playAndRecord, mode: .voiceChat,
                           options: [.defaultToSpeaker, .allowBluetooth])
         try s.setActive(true)
 
-        let input = engine.inputNode
-        let inFormat = input.outputFormat(forBus: 0)
+        // **إلغاء الصدى، قبل أي إشي تاني بالمحرّك.** النظام بيشيل صوت السمّاعة
+        // من المايك، فمنقدر نضلّ نبعت وهي بتحكي. تفعيله ع المدخل بيفعّله ع
+        // المخرج لحاله — بدّه التنين عشان يعرف شو طلع ليشيله من اللي دخل.
+        var cancelled = false
+        if duplex {
+            do {
+                try engine.inputNode.setVoiceProcessingEnabled(true)
+                cancelled = true
+            } catch {
+                cancelled = false      // بنرجع لنصف-مزدوج — أحسن من صدى
+            }
+        }
+        lock.lock(); echoCancelled = cancelled; lock.unlock()
 
         // رسم تشغيل ردّها.
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: playFormat)
 
-        // محوّل المايك → ست عشرة كيلو مونو Int16.
-        let outFmt = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000,
-                                   channels: 1, interleaved: true)
-        sendFormat = outFmt
-        if let outFmt { converter = AVAudioConverter(from: inFormat, to: outFmt) }
-
-        // التقاط المايك (نصف-مزدوج: نسكت وهي بتحكي).
-        input.installTap(onBus: 0, bufferSize: 2048, format: inFormat) { [weak self] buf, _ in
-            self?.onMic(buf)
-        }
+        installMicTap()
         // موجة الخرج لتحريك الفم.
         engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buf, _ in
             self?.onOutput(buf)
@@ -242,6 +274,48 @@ private final class LiveAudioBridge: @unchecked Sendable {
         ) { [weak self] note in
             self?.handleInterruption(note)
         }
+        // لمّا يتغيّر شكل الصوت (سمّاعة انوصلت، أو معالجة الصوت أعادت ضبط
+        // المحرّك) المحرّك بيوقف وبيضلّ واقف. هاد بالضبط شكل «إطار واحد وسكت».
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine, queue: .main
+        ) { [weak self] _ in
+            self?.handleConfigurationChange()
+        }
+    }
+
+    /// The microphone as one channel, at whatever rate the hardware runs.
+    ///
+    /// **With echo cancellation on, the input reports five channels and a
+    /// different rate**, and an `AVAudioConverter` fed that format hands back
+    /// silence — the call that sent one frame and then nothing. Asking the tap
+    /// for mono makes the engine do the downmix, which is Apple's own advice;
+    /// the converter below then only changes the rate.
+    private func installMicTap() {
+        let input = engine.inputNode
+        let hw = input.outputFormat(forBus: 0)
+        guard hw.sampleRate > 0,
+              let tapFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                         sampleRate: hw.sampleRate, channels: 1,
+                                         interleaved: false),
+              let outFmt = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000,
+                                         channels: 1, interleaved: true)
+        else { return }
+        sendFormat = outFmt
+        converter = AVAudioConverter(from: tapFmt, to: outFmt)
+        input.installTap(onBus: 0, bufferSize: 2048, format: tapFmt) { [weak self] buf, _ in
+            self?.onMic(buf)
+        }
+    }
+
+    private func handleConfigurationChange() {
+        lock.lock(); let live = started; lock.unlock()
+        guard live else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        installMicTap()
+        engine.prepare()
+        if !engine.isRunning { try? engine.start() }
+        player.play()
     }
 
     private var interruptionObserver: NSObjectProtocol?
@@ -266,6 +340,10 @@ private final class LiveAudioBridge: @unchecked Sendable {
             NotificationCenter.default.removeObserver(o)
             interruptionObserver = nil
         }
+        if let o = configObserver {
+            NotificationCenter.default.removeObserver(o)
+            configObserver = nil
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.mainMixerNode.removeTap(onBus: 0)
         player.stop()
@@ -277,10 +355,19 @@ private final class LiveAudioBridge: @unchecked Sendable {
     private func onMic(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
         let sp = speaking
-        let since = CFAbsoluteTimeGetCurrent() - lastPlaybackAt
+        let duplex = echoCancelled
+        let now = CFAbsoluteTimeGetCurrent()
+        let sinceOut = now - lastPlaybackAt
+        let intoReply = now - replyStartedAt
         lock.unlock()
-        // نصف-مزدوج: ما نبعت وهي بتحكي (أو بعدها بقليل) حتى ما يرجع صوتها للمايك.
-        if sp || since < 0.4 { return }
+        if duplex {
+            // أول ربع ثانية من كل ردّ بس: هون إلغاء الصدى لسا ما سمع شي من
+            // هالردّ، وصدى أول كلمة ممكن ينحسب مقاطعة فتقطع حالها.
+            if sp && intoReply < 0.25 { return }
+        } else {
+            // نصف-مزدوج: ما نبعت وهي بتحكي (أو بعدها بقليل).
+            if sp || sinceOut < 0.4 { return }
+        }
         guard let frame = convertMic(buffer) else { return }
         send?(frame)
     }
@@ -315,13 +402,17 @@ private final class LiveAudioBridge: @unchecked Sendable {
         lastPlaybackAt = CFAbsoluteTimeGetCurrent()
         pendingBuffers += 1
         let wasSpeaking = speaking
+        if !wasSpeaking { replyStartedAt = lastPlaybackAt }
         speaking = true
+        let gen = generation
         lock.unlock()
         if !wasSpeaking { onSpeaking?(true) }
 
         player.scheduleBuffer(buf) { [weak self] in
             guard let self else { return }
             self.lock.lock()
+            // من ردّ انمسح بالمقاطعة — مش إلنا نعدّ عليه.
+            guard gen == self.generation else { self.lock.unlock(); return }
             self.pendingBuffers -= 1
             let drained = self.pendingBuffers <= 0
             if drained { self.speaking = false }
@@ -332,6 +423,22 @@ private final class LiveAudioBridge: @unchecked Sendable {
             }
         }
         if !player.isPlaying { player.play() }
+    }
+
+    /// She was interrupted: drop everything queued so she goes quiet now, not
+    /// at the end of the sentence already sitting in the buffer.
+    func flushPlayback() {
+        lock.lock()
+        guard started else { lock.unlock(); return }
+        generation &+= 1
+        pendingBuffers = 0
+        let was = speaking
+        speaking = false
+        lock.unlock()
+        player.stop()
+        player.play()
+        if was { onSpeaking?(false) }
+        onMouth?(0)
     }
 
     /// الخادم أعلن نهاية الدور — لو القائمة فاضية أصلًا نطفّي الكلام فورًا.

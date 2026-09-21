@@ -136,3 +136,27 @@ def test_the_working_live_model_outlives_the_process(db, monkeypatch):
     cfg._reset_live_model_cache()
     assert cfg.live_model_candidates()[0] != "gemini-live-that-works"
     cfg._reset_live_model_cache()
+
+
+def test_writes_during_a_call_build_once_when_it_ends(db, inline, monkeypatch):
+    """كل دور بالمكالمة بيحفظ ذاكرة، وكان كل حفظ بيطلق بناء — بنصّ المكالمة،
+    ع نفس السيرفر، لمكالمة لسا ما صارت."""
+    import app.api.voice_ws.tools as vt
+    from app.utils.tenant_version import bump_for
+
+    built: list[str] = []
+    monkeypatch.setattr(vt, "_build_cached_instruction", built.append)
+    monkeypatch.setattr(vt, "tenant_uses_voice", lambda t: True)
+
+    inline.hold("u4")
+    for _ in range(3):
+        bump_for("u4", collection="sandy_memories")
+    assert built == [], "بنى بنصّ المكالمة"
+
+    inline.release("u4")
+    assert built == ["u4"], "المكالمة خلصت وما انبنى إشي للجاية"
+
+    # مكالمة بلا كتابات: ما في شي يتبنى.
+    inline.hold("u4")
+    inline.release("u4")
+    assert built == ["u4"]

@@ -401,16 +401,25 @@ def test_the_candidate_list_holds_only_names_that_do_audio_both_ways():
 # racing a clock it had already lost.
 
 
-def test_the_turn_is_always_closed_by_us():
+def test_the_robot_s_turn_is_always_closed_by_us():
     """Speaker verification and turn control are separate questions. Tying them
-    together left the no-verification path with nobody ending the turn."""
+    together left the no-verification path with nobody ending the turn.
+
+    **The robot, specifically.** Automatic detection was switched off because the
+    board streamed the room without pause and Gemini never found the silence that
+    ends a question. The app does not do that, and it now uses Gemini's detector
+    on purpose — it is what lets a pause mid-sentence stay a pause, and what makes
+    interrupting her work the way it does in Gemini's own app. What must never
+    happen is that detector reaching the robot's path again.
+    """
     import pathlib
 
     import app.api.voice_ws.session as session_mod
 
     src = pathlib.Path(session_mod.__file__).read_text(encoding="utf-8")
-    assert "end_of_speech_sensitivity" not in src, \
-        "automatic detection is back on a path that streams the room non-stop"
+    assert ("auto_turns = _APP_TURNS_BY_GEMINI and "
+            "get_voice_channel() == _APP_CHANNEL") in src, \
+        "automatic detection is no longer confined to the app"
     assert src.count("automatic_activity_detection=types.AutomaticActivityDetection("
                      "disabled=True)") == 1
     assert "_device_to_live_fast" not in src, "the bypassed bridge is still here"

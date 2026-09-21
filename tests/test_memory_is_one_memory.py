@@ -132,7 +132,8 @@ def test_every_turn_remembers_which_body_said_it():
     assert 'set_voice_channel("الروبوت")' in session, (
         "the robot no longer tags its turns — it and the app's call share a "
         "socket, so without this they become indistinguishable in the record")
-    assert 'set_voice_channel("مكالمة التطبيق")' in session
+    assert '_APP_CHANNEL = "مكالمة التطبيق"' in session
+    assert "set_voice_channel(_APP_CHANNEL)" in session
 
     assert 'f"[{via}] {role_label}: {content}"' in _VOICE_MEM, (
         "the source is recorded but never shown to her, which is the same as "

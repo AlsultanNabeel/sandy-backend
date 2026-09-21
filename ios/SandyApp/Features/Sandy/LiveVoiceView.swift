@@ -70,6 +70,7 @@ struct LiveVoiceView: View {
             .font(Theme.Typography.title)
             .foregroundColor(Theme.Colors.primaryText)
             .animation(.easeInOut(duration: 0.2), value: live.phase)
+            .animation(.easeInOut(duration: 0.2), value: live.working)
     }
 
     // MARK: - تلميح / خطأ
@@ -125,7 +126,8 @@ struct LiveVoiceView: View {
     private var statusText: String {
         switch live.phase {
         case .idle, .connecting: return lang.s("chat.liveConnecting")
-        case .listening:         return lang.s("chat.liveListening")
+        case .listening:         return live.working ? lang.s("chat.liveThinking")
+                                                     : lang.s("chat.liveListening")
         case .speaking:          return lang.s("chat.liveSpeaking")
         }
     }

@@ -199,3 +199,34 @@ def test_the_bar_goes_back_up_once_she_starts_talking(loop):
     assert _barge_bar_ms(
         {"turn_closed_at": now, "last_out_at": now + 0.2}) == cfg._BARGE_MIN_MS
     assert cfg._CONTINUE_MIN_MS < cfg._BARGE_MIN_MS
+
+
+def test_the_app_hands_every_frame_to_gemini_and_never_ends_a_turn_itself(loop):
+    """مكالمة التطبيق: جيميناي بيقرّر وين الدور — زي تطبيق جيميناي نفسه.
+
+    من عنّا ولا بداية دور ولا نهايته: لو بعتنا وحدة، رجعنا نقطع الجملة ع وقفة
+    التفكير، وهاد بالضبط اللي خلّانا ننقل القرار.
+    """
+    from app.api.voice_ws.session import _device_to_live_auto
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    chunks = ([_pause()] * 10 + [_app_frame(2000)] * 20 + [_pause()] * 30
+              + [_app_frame(2000)] * 20 + [_pause()] * 10)
+    session = _StatefulSession()
+    state: dict = {}
+
+    loop.run_until_complete(
+        _device_to_live_auto(_Reader(chunks), session, _RecentAudio(),
+                             live_state=state))
+
+    assert session.order == [], f"قرّرنا الدور بدل جيميناي: {session.order}"
+    assert session.audio == len(chunks), "في صوت ما وصل — حتى الصمت لازم يوصل"
+    assert "turn_closed_at" in state, "ما في «آخر ما سمعناك» لقياس أول ردّ"
+
+
+def test_a_question_whose_transcript_has_no_words_is_not_saved_as_dots():
+    from app.api.voice_ws.session import _HAS_LETTERS
+
+    assert _HAS_LETTERS.search(". . . .") is None
+    assert _HAS_LETTERS.search("اعرف عن المصطلحات") is not None
+    assert _HAS_LETTERS.search("what is it") is not None
