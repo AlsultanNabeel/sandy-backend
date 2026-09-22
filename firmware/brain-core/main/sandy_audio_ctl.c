@@ -1,6 +1,7 @@
 // Runtime mic/speaker control. Contract and reasoning: include/sandy_audio_ctl.h
 
 #include "sandy_audio_ctl.h"
+#include "config.h"          // VOICE_OUT_RATE — tones share her 24 kHz buffer
 #include "sandy_nvs.h"
 #include "sandy_voice.h"
 
@@ -238,7 +239,10 @@ int16_t spk_apply(int16_t sample)
 // row of beeps into something with rhythm.
 static bool spk_tone(int freq, int ms, int amp)
 {
-    const int SR = 16000, CH = 320;          // 20 ms blocks
+    // Her voice plays at 24 kHz and these go into the same buffer. They were
+    // generated at 16 kHz, so every sound came out half as fast again and a
+    // fifth higher — the 880 Hz test beep was really a 1320 Hz chirp.
+    const int SR = VOICE_OUT_RATE, CH = VOICE_OUT_RATE / 50;   // 20 ms blocks
     const int total = SR * ms / 1000;
     int16_t buf[CH];
     static float phase;                       // continuous across calls, so two

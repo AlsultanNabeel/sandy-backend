@@ -10,12 +10,15 @@
 //      Sandy down: binary PCM, 16-bit LE, 24 kHz mono.
 //      Control frames (text JSON): {"type":"end_turn"} / {"type":"error",...}.
 //
-// Half-duplex: we stop sending the mic while Sandy is talking, otherwise the
-// speaker leaks back into the mic and she answers her own voice.
+// While Sandy talks the mic is gated, not simply muted: the echo canceller
+// strips her voice, and only sustained speech above VOICE_DUPLEX_GATE_LEVEL
+// opens the uplink (see mic_task) — that is what makes barge-in possible without
+// her answering her own voice. Server audio and local sounds share one buffer,
+// 24 kHz, one writer at a time (s_spk_wr_lock).
 
 #include "sandy_voice.h"
 #include "config.h"
-#include "secrets.h"
+#include "sandy_identity.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -35,6 +38,7 @@
 #include "esp_netif_sntp.h"
 #include "driver/i2s_std.h"
 #include "mbedtls/md.h"
+#include "mbedtls/platform_util.h"   // mbedtls_platform_zeroize — key bytes off the stack
 #include "nvs.h"
 #include "esp_heap_caps.h"
 
@@ -146,13 +150,41 @@ static int16_t *s_aec_ref, *s_aec_out;        // aligned per-chunk buffers
 static int16_t *s_aec_frame;                  // processed output for one frame
 #endif
 
+// When the WS dropped mid-session, 0 = up. Outside the wake-word guard: the
+// websocket handler writes it in every build, and an always-on build without
+// the wake word did not compile.
+static volatile int64_t s_link_lost_ms;
+
+// The server refused this device (wrong key, clock outside the replay window).
+// Latched: the websocket's own reconnect used to retry a refused hello every
+// five seconds for as long as the session lasted — and a new wake word opened
+// another one. Now the session ends and no new one opens until the back-off
+// has passed; a key or clock fix gets its chance then, not every five seconds.
+static volatile bool    s_auth_refused;
+static volatile int64_t s_auth_refused_at;
+#define VOICE_AUTH_BACKOFF_MS  (10 * 60 * 1000)
+
+// Preroll bytes the uplink must not trim as "stale". The question someone asks
+// in the same breath as the wake word is exactly the audio the catch-up rule
+// would throw away first — it is the oldest thing in the queue.
+static volatile uint32_t s_tx_protected;
+
+// The pre-roll should go up as soon as the server says yes, not when the next
+// loud frame happens to open the gate: a person who asked everything during the
+// handshake and then waited was never heard at all.
+static volatile bool s_preroll_due;
+
+// Two tasks write the speaker buffer — the websocket (her voice) and local
+// sounds (tones, the speaker test). A FreeRTOS stream buffer allows one writer
+// at a time; two at once corrupted it into static.
+static SemaphoreHandle_t s_spk_wr_lock;
+
 #if ENABLE_WAKEWORD
 // Session is OPEN only between a wake word and the following silence. The WS
 // (and so the paid Gemini link) is connected only while it's open.
 static volatile bool s_session_active;       // WS up + mic streaming
 static volatile bool s_wake_req;             // wake heard; manager should open
 static volatile int64_t s_session_voice_ms;  // last user/Sandy activity while open
-static volatile int64_t s_link_lost_ms;      // when the WS dropped mid-session, 0 = up
 #if ENABLE_COMMANDS
 // The command model stays mic_task's property (it is the only toucher of s_mn);
 // the session manager only asks. s_mn_want is the request, s_mn_loaded the reply.
@@ -409,13 +441,13 @@ static int build_hello(char *out, size_t out_len) {
     int64_t ts = wall_ms();
 
     char signed_msg[96];
-    int n = snprintf(signed_msg, sizeof(signed_msg), "%s%lld", SANDY_DEVICE_ID, ts);
+    int n = snprintf(signed_msg, sizeof(signed_msg), "%s%lld", identity()->device_id, ts);
     if (n <= 0 || n >= (int)sizeof(signed_msg)) return -1;
 
     // The server keys HMAC with the raw bytes behind the hex it issued.
     unsigned char own[DEVKEY_HEX / 2];
-    const unsigned char *key = (const unsigned char *)SANDY_WS_HMAC_KEY;
-    size_t key_len = strlen(SANDY_WS_HMAC_KEY);
+    const unsigned char *key = (const unsigned char *)identity()->hmac_key;
+    size_t key_len = strlen(identity()->hmac_key);
     const bool use_own = s_dev_key[0] != '\0';
     if (use_own) {
         for (int i = 0; i < DEVKEY_HEX / 2; i++) {
@@ -428,19 +460,22 @@ static int build_hello(char *out, size_t out_len) {
 
     unsigned char mac[32];
     const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (mbedtls_md_hmac(md, key, key_len,
-                        (const unsigned char *)signed_msg, n, mac) != 0) {
-        return -1;
-    }
+    const int hr = mbedtls_md_hmac(md, key, key_len,
+                                   (const unsigned char *)signed_msg, n, mac);
+    // The key's raw bytes do not outlive the signature. A stack frame is reused
+    // by whatever runs next, and a crash dump now lands in flash.
+    mbedtls_platform_zeroize(own, sizeof(own));
+    if (hr != 0) return -1;
 
     char hex[65];
     for (int i = 0; i < 32; i++) {
         snprintf(hex + i * 2, 3, "%02x", mac[i]);
     }
+    mbedtls_platform_zeroize(mac, sizeof(mac));
 
     int len = snprintf(out, out_len,
                        "{\"type\":\"hello\",\"device_id\":\"%s\",\"ts\":%lld,\"hmac\":\"%s\"%s}",
-                       SANDY_DEVICE_ID, ts, hex, use_own ? ",\"kv\":2" : "");
+                       identity()->device_id, ts, hex, use_own ? ",\"kv\":2" : "");
     return (len > 0 && len < (int)out_len) ? len : -1;
 }
 
@@ -601,19 +636,27 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         char hello[224];
         int n = build_hello(hello, sizeof(hello));
         if (n <= 0) {
-            ESP_LOGE(TAG, "hello does not fit — check SANDY_DEVICE_ID");
+            ESP_LOGE(TAG, "hello does not fit — check the device id");
             break;
         }
         // ev->client, not s_client: this runs on the WS task, and the session
         // manager may already be swapping s_client for the next session.
-        esp_websocket_client_send_text(ev->client, hello, n, portMAX_DELAY);
-        ESP_LOGI(TAG, "connected, sent hello");
+        // Bounded: portMAX_DELAY on the websocket's own task meant a socket
+        // that stalled right after connecting froze the task that would have
+        // noticed — no events, no reconnect, a session that never started.
+        if (esp_websocket_client_send_text(ev->client, hello, n, pdMS_TO_TICKS(3000)) < 0) {
+            ESP_LOGE(TAG, "hello could not be sent — the client will reconnect");
+        } else {
+            ESP_LOGI(TAG, "connected, sent hello");
+        }
         break;
     }
     case WEBSOCKET_EVENT_DATA:
         if (ev->op_code == 0x1) {  // text control frame
             if (text_has(ev->data_ptr, ev->data_len, "auth_ok")) {
                 s_authed = true;
+                s_auth_refused = false;
+                s_preroll_due = true;       // the words said while we were connecting
                 s_link_lost_ms = 0;         // back on the air, drop the grace timer
                 status_set(SANDY_ST_OK);    // clears any banner from a past failure
                 VOICE_FACE(MOOD_FOCUSED);   // she's listening now
@@ -663,12 +706,16 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 // fix a wrong key or a clock outside the replay window, so say
                 // so on her face instead of reconnecting forever in silence.
                 status_set(SANDY_ST_AUTH_FAILED);
-                ESP_LOGE(TAG, "server refused this device — check the key and the clock");
+                s_auth_refused = true;
+                s_auth_refused_at = now_ms();
+                ESP_LOGE(TAG, "server refused this device — check the key and the clock "
+                              "(no new session for %d min)", VOICE_AUTH_BACKOFF_MS / 60000);
             } else if (text_has(ev->data_ptr, ev->data_len, "error")) {
                 ESP_LOGW(TAG, "server error frame");
             }
         } else if (ev->op_code == 0x2 || ev->op_code == 0x0) {  // binary audio (+ continuation)
-            if (ev->data_len > 0 && now_ms() >= s_squelch_until_ms) {
+            if (ev->data_len > 0 && now_ms() >= s_squelch_until_ms &&
+                xSemaphoreTake(s_spk_wr_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_last_rx_audio_ms = now_ms();
                 const uint8_t *p = (const uint8_t *)ev->data_ptr;
                 size_t len = (size_t)ev->data_len;
@@ -695,6 +742,11 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 size_t n = len < space ? len : space;
                 xStreamBufferSend(s_spk_stream, p, n, 0);
                 if (n < len) s_spk_drop_bytes += len - n;
+                xSemaphoreGive(s_spk_wr_lock);
+            } else if (ev->data_len > 0 && now_ms() >= s_squelch_until_ms) {
+                // A local sound held the buffer for 50 ms: this fragment is lost,
+                // and counted, rather than the websocket task waiting on a beep.
+                s_spk_drop_bytes += (uint32_t)ev->data_len;
             }
         }
         break;
@@ -820,15 +872,39 @@ static void spk_task(void *arg) {
             // Echo reference: exactly what the amp will play (post-volume),
             // downsampled 24k -> 16k (2 out of every 3 samples) to match the
             // mic rate. Static buffer — this task is the only writer.
+            //
+            // Samples that do not make a whole group of three wait for the next
+            // chunk. They used to be dropped: a read that was not a multiple of
+            // three samples shortened the reference by one or two, every time,
+            // and the canceller's alignment walked away from the real echo over
+            // the course of a reply.
             if (s_ref_stream) {
-                static int16_t ref[SPK_CHUNK_BYTES / 3];
+                static int16_t ref[SPK_CHUNK_BYTES / 3 + 2];
+                static int16_t carry[2];
+                static int     carried;
                 int ns = (int)(n / sizeof(int16_t)), k = 0;
-                int16_t *sp = (int16_t *)buf;
-                for (int i = 0; i + 2 < ns; i += 3) {
+                const int16_t *sp = (const int16_t *)buf;
+                int i = 0;
+                if (carried) {
+                    int16_t g[3];
+                    int have = carried;
+                    for (int c = 0; c < carried; c++) g[c] = carry[c];
+                    while (have < 3 && i < ns) g[have++] = sp[i++];
+                    if (have == 3) {
+                        ref[k++] = g[0];
+                        ref[k++] = (int16_t)(((int32_t)g[1] + g[2]) >> 1);
+                        carried = 0;
+                    } else {
+                        for (int c = 0; c < have; c++) carry[c] = g[c];
+                        carried = have;
+                    }
+                }
+                for (; i + 2 < ns; i += 3) {
                     ref[k++] = sp[i];
                     ref[k++] = (int16_t)(((int32_t)sp[i + 1] + sp[i + 2]) >> 1);
                 }
-                xStreamBufferSend(s_ref_stream, ref, k * sizeof(int16_t), 0);
+                for (; i < ns && carried < 2; i++) carry[carried++] = sp[i];
+                if (k) xStreamBufferSend(s_ref_stream, ref, k * sizeof(int16_t), 0);
             }
 #endif
             size_t written = 0;
@@ -869,15 +945,26 @@ static bool wakeword_init(void) {
         ESP_LOGW(TAG, "no wakenet model found");
         return false;
     }
-    s_wn = esp_wn_handle_from_name(name);
-    s_wn_data = s_wn->create(name, DET_MODE_90);
-    s_wn_chunk = s_wn->get_samp_chunksize(s_wn_data);
+    const esp_wn_iface_t *wn = esp_wn_handle_from_name(name);
+    model_iface_data_t *data = wn ? wn->create(name, DET_MODE_90) : NULL;
+    if (!data) {
+        ESP_LOGE(TAG, "wakenet '%s' could not be created", name);
+        return false;
+    }
+    s_wn_chunk = wn->get_samp_chunksize(data);
     s_wn_buf = malloc(s_wn_chunk * sizeof(int16_t));
     s_wn_fill = 0;
+    if (!s_wn_buf) {
+        wn->destroy(data);
+        return false;
+    }
+    // Published last: mic_task checks s_wn, and must never see a half-built one.
+    s_wn_data = data;
+    s_wn = wn;
     ESP_LOGI(TAG, "wakenet '%s' ready (word='%s', chunk=%d, rate=%d)",
              name, esp_wn_wakeword_from_name(name), s_wn_chunk,
              s_wn->get_samp_rate(s_wn_data));
-    return s_wn_buf != NULL;
+    return true;
 }
 
 // Feed mono 16-bit PCM in arbitrary lengths; WakeNet needs exact-chunk feeds, so
@@ -990,6 +1077,11 @@ static bool commands_init(void) {
     s_mn_chunk = s_mn->get_samp_chunksize(s_mn_data);
     s_mn_buf = malloc(s_mn_chunk * sizeof(int16_t));
     s_mn_fill = 0;
+    if (!s_mn_buf) {
+        ESP_LOGE(TAG, "no memory for the command buffer — commands off");
+        commands_unload();
+        return false;
+    }
     ESP_LOGI(TAG, "multinet '%s' ready (chunk=%d, %d commands)",
              name, s_mn_chunk, (int)SANDY_COMMANDS_N);
     return s_mn_buf != NULL;
@@ -1180,7 +1272,7 @@ static void ws_tx_task(void *arg) {
         // accident, mid-word, and told nobody. This one is a written policy with
         // a threshold and a counter.
         size_t queued_now = xStreamBufferBytesAvailable(s_tx_stream);
-        while (queued_now > TX_MAX_LATENCY_BYTES) {
+        while (queued_now > TX_MAX_LATENCY_BYTES + s_tx_protected) {
             size_t drop = xStreamBufferReceive(s_tx_stream, chunk,
                                                TX_CHUNK_BYTES, 0);
             if (drop == 0) break;
@@ -1192,8 +1284,19 @@ static void ws_tx_task(void *arg) {
         // would block a session teardown behind a silent microphone.
         size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES, 0);
         if (n) {
-            esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
-                                          pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
+            s_tx_protected = s_tx_protected > n ? s_tx_protected - (uint32_t)n : 0;
+            if (esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
+                                              pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS)) < 0) {
+                // Counted and said, not ignored: a write that fails is audio the
+                // server never got, and "she didn't hear me" needs a number.
+                s_tx_drop_bytes += n;
+                static int64_t s_last_fail_log;
+                if (now_ms() - s_last_fail_log > 5000) {
+                    s_last_fail_log = now_ms();
+                    ESP_LOGW(TAG, "uplink write failed (%u bytes lost so far)",
+                             (unsigned)s_tx_drop_bytes);
+                }
+            }
         }
         xSemaphoreGive(s_ws_mutex);
         if (n == 0) {
@@ -1351,6 +1454,7 @@ static void preroll_flush(void) {
     size_t n;
     while ((n = xStreamBufferReceive(s_preroll, tmp, sizeof(tmp), 0)) > 0) {
         mic_send(tmp, n);
+        s_tx_protected += (uint32_t)n;   // the catch-up rule leaves these alone
     }
 }
 #endif
@@ -1451,12 +1555,6 @@ static void mic_task(void *arg) {
         ear_l = (ear_l * 3 + (int)(sum_dl / (frames ? frames : 1))) / 4;
         ear_r = (ear_r * 3 + (int)(sum_dr / (frames ? frames : 1))) / 4;
 #endif
-        // Strip steady background noise — the fan, the AC — from the mixed mono
-        // before anything downstream sees it, so the wake word, the VAD and the
-        // cloud all get the same cleaned signal. MIC_FRAME_SAMPLES is 1600, an
-        // exact multiple of the suppressor's 160-sample block, so nothing is
-        // left over. No-op while the level is off.
-        ns_clean(pcm, frames);
 
         // Per-mic RMS, post-gain and post-mute — so the meter shows what the mix
         // is actually getting, not what the hardware captured. That is the whole
@@ -1505,6 +1603,20 @@ static void mic_task(void *arg) {
 #else
         const bool mic_muted = sandy_talking;
 #endif
+
+        // Strip steady background noise — the fan, the AC — so the wake word,
+        // the VAD and the cloud all get the same cleaned signal. **After** the
+        // echo canceller, not before: the suppressor is nonlinear, and an echo
+        // path that changes shape frame by frame is one the canceller's filter
+        // can never converge on — it ran first, and her own voice leaked through.
+        //
+        // So: before the canceller never, and on its output not at all — the
+        // canceller's own nonlinear stage already suppresses what is left, and
+        // its chunks are not whole 160-sample blocks, so a second suppressor
+        // would clean most of each frame and pass a ragged tail through. What is
+        // left is the case that matters most: the idle microphone the wake word
+        // listens on, in whole 1600-sample frames. No-op while the level is off.
+        if (use == pcm) ns_clean(use, frames);
 
         // Re-apply the intended gain now that the canceller has seen a clean,
         // linear signal (saturating ×16 for the default shift of 12). Everything
@@ -1609,6 +1721,12 @@ static void mic_task(void *arg) {
             if (avg > VOICE_SESSION_VAD_LEVEL || sandy_talking) {
                 s_session_voice_ms = now_ms();
             }
+            if (s_authed && s_preroll_due) {
+                // The server just said yes: send what was said while we were
+                // connecting, now, whatever this frame's level is.
+                s_preroll_due = false;
+                preroll_flush();
+            }
             if (s_authed && !mic_muted) {
                 // While she talks, only SUSTAINED real-speech energy opens the
                 // stream: a single over-gate batch could be a residual spike of
@@ -1675,7 +1793,7 @@ static void mic_task(void *arg) {
 // being torn down.
 static bool ws_open(void) {
     esp_websocket_client_config_t cfg = {
-        .uri = SANDY_VOICE_WS_URI,
+        .uri = identity()->voice_uri,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 8192,
         // Above LVGL and the housekeeping tasks (default 5), below the audio
@@ -1704,10 +1822,18 @@ static void ws_close(void) {
     s_authed = false;
     xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     if (s_client) {
-        esp_websocket_client_stop(s_client);
+        // A close frame first, so the server ends the Gemini session now and
+        // stops billing it — a dropped socket it had to time out on its own.
+        // Only if still connected, and bounded; stop() if that fails.
+        if (!esp_websocket_client_is_connected(s_client) ||
+            esp_websocket_client_close(s_client, pdMS_TO_TICKS(1500)) != ESP_OK) {
+            esp_websocket_client_stop(s_client);
+        }
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
     }
+    s_tx_protected = 0;
+    s_preroll_due = false;
     // Clear again AFTER the teardown: a late auth_ok event can land while
     // stop() is mid-flight and flip the flag back on for good (seen live:
     // authed=1 with no session, for minutes).
@@ -1728,11 +1854,32 @@ bool voice_play_local_pcm(const int16_t *pcm, size_t bytes) {
     // sound travels the identical path as her cloud voice: same buffer, same
     // volume, same amp. A test that used its own channel could pass while the
     // real path was broken, which would make it worse than no test.
-    if (!s_spk_stream || !pcm || bytes == 0) return false;
-    if (xStreamBufferSpacesAvailable(s_spk_stream) < bytes) return false;
-    return xStreamBufferSend(s_spk_stream, pcm, bytes, pdMS_TO_TICKS(200)) == bytes;
+    if (!s_spk_stream || !s_spk_wr_lock || !pcm || bytes == 0) return false;
+    if (xSemaphoreTake(s_spk_wr_lock, pdMS_TO_TICKS(200)) != pdTRUE) return false;
+    bool ok = xStreamBufferSpacesAvailable(s_spk_stream) >= bytes &&
+              xStreamBufferSend(s_spk_stream, pcm, bytes, 0) == bytes;
+    xSemaphoreGive(s_spk_wr_lock);
+    return ok;
 }
 
+
+#if ENABLE_WAKEWORD
+// The one way a session ends — idle, or refused by the server. Everything a
+// session took is given back here, in this order: the socket, then the network
+// claim (so an update may run), then the command model, then her face.
+static void session_end(void) {
+    s_session_active = false;
+    VOICE_SESSION(false);
+    s_link_lost_ms = 0;
+    ws_close();
+    net_release(NET_OWNER_VOICE);   // socket gone: updates may run again
+#if ENABLE_COMMANDS
+    s_mn_want = true;   // the call is over — mic_task reloads the model
+#endif
+    VOICE_FACE(MOOD_IDLE);
+    VOICE_LED(LED_STATE_IDLE);
+}
+#endif
 
 static void voice_task(void *arg) {
     // Say so while waiting. Boot no longer blocks on Wi-Fi, so with the router
@@ -1748,7 +1895,8 @@ static void voice_task(void *arg) {
         // single time she started, which teaches the owner to ignore it. Ten
         // half-second passes is five seconds: far longer than a healthy boot,
         // far shorter than a person's patience.
-        if (i >= 10) status_set(SANDY_ST_NO_WIFI);
+        if (i >= 10) status_set(wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
+                                                               : SANDY_ST_NO_WIFI);
         if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
         vTaskDelay(pdMS_TO_TICKS(500));
     }
@@ -1775,6 +1923,12 @@ static void voice_task(void *arg) {
     s_preroll = xStreamBufferCreateWithCaps(PREROLL_BYTES, 1, MALLOC_CAP_SPIRAM);
 #endif
     s_ws_mutex = xSemaphoreCreateMutex();
+    s_spk_wr_lock = xSemaphoreCreateMutex();
+    if (!s_spk_stream || !s_tx_stream || !s_ws_mutex || !s_spk_wr_lock) {
+        ESP_LOGE(TAG, "voice buffers could not be allocated — voice disabled");
+        vTaskDelete(NULL);
+        return;
+    }
 
 #if VOICE_AEC_ENABLE
     // Echo canceller: internal RAM first for speed, PSRAM as the fallback.
@@ -1856,20 +2010,33 @@ static void voice_task(void *arg) {
 
 #if ENABLE_WAKEWORD
     if (!wn_ok) {
-        // No model packed — fall back to an always-on session so voice still
-        // works; just without the cost gate.
-        ESP_LOGW(TAG, "wake word unavailable; voice stays always-on");
-        s_session_active = true;
-        ws_open();
-        vTaskDelete(NULL);
-        return;
+        // **Closed, not open.** This used to fall back to an always-on session:
+        // a missing or broken model meant the microphone streamed the room to
+        // the cloud, all day, with nobody having said her name. A robot that
+        // does not hear its wake word is a robot that needs fixing; one that
+        // listens to everything is a breach. The command words ("hey Sandy")
+        // still open a session if they loaded.
+        ESP_LOGE(TAG, "wake word unavailable — the microphone stays local "
+                      "(sessions open only from a command word)");
     }
 
     // Session manager: the paid Gemini link is connected ONLY between a wake
     // word and the silence that follows it.
     for (;;) {
-        if (!s_session_active) {
-            if (s_wake_req) {
+        if (s_session_active && s_auth_refused) {
+            // Refused: end it now rather than let the client knock again.
+            ESP_LOGW(TAG, "closing the session the server refused");
+            session_end();
+        } else if (!s_session_active) {
+            if (s_wake_req && s_auth_refused &&
+                now_ms() - s_auth_refused_at < VOICE_AUTH_BACKOFF_MS) {
+                s_wake_req = false;
+                ESP_LOGW(TAG, "wake ignored: the server refused this device %d s ago",
+                         (int)((now_ms() - s_auth_refused_at) / 1000));
+                status_set(SANDY_ST_AUTH_FAILED);
+                VOICE_FACE(MOOD_IDLE);
+                VOICE_LED(LED_STATE_IDLE);
+            } else if (s_wake_req) {
                 s_wake_req = false;
                 // One TLS session at a time (sandy_net_busy.h): an update check
                 // holding the network plus a voice handshake ran internal RAM
@@ -1986,16 +2153,7 @@ static void voice_task(void *arg) {
         } else if ((now_ms() - s_session_voice_ms) > VOICE_SESSION_IDLE_MS && !s_playing) {
             ESP_LOGI(TAG, "session idle, closing");
             session_heap_report();
-            s_session_active = false;
-            VOICE_SESSION(false);
-            s_link_lost_ms = 0;
-            ws_close();
-            net_release(NET_OWNER_VOICE);   // socket gone: updates may run again
-#if ENABLE_COMMANDS
-            s_mn_want = true;   // the call is over — mic_task reloads the model
-#endif
-            VOICE_FACE(MOOD_IDLE);
-            VOICE_LED(LED_STATE_IDLE);
+            session_end();
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }

@@ -5,7 +5,7 @@
 #include "sandy_wifi.h"
 #include "sandy_screen.h"
 #include "sandy_status.h"
-#include "secrets.h"
+#include "sandy_identity.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -68,10 +68,10 @@ bool provision_is_active(void) { return s_active; }
 // nothing against everyone who has not.
 static void build_ap_identity(char *ssid, size_t ssid_cap,
                               char *pass, size_t pass_cap) {
-    snprintf(ssid, ssid_cap, "Sandy-%s", SANDY_PAIR_CODE);
+    snprintf(ssid, ssid_cap, "Sandy-%s", identity()->pair_code);
     // WPA2 refuses anything under eight characters, and a short pairing code is
     // common. The prefix is what makes it long enough; it is not a secret.
-    snprintf(pass, pass_cap, "sandy%s", SANDY_PAIR_CODE);
+    snprintf(pass, pass_cap, "sandy%s", identity()->pair_code);
     if (strlen(pass) < 8) snprintf(pass, pass_cap, "sandysetup");
 }
 
@@ -197,7 +197,8 @@ static void form_field(const char *body, const char *key, char *out, size_t cap)
     const char *end = strchr(p, '&');
     size_t len = end ? (size_t)(end - p) : strlen(p);
 
-    char raw[160];
+    // A 64-character password where every byte is percent-encoded is 192.
+    char raw[200];
     if (len >= sizeof(raw)) len = sizeof(raw) - 1;
     memcpy(raw, p, len);
     raw[len] = '\0';
@@ -265,7 +266,10 @@ static esp_err_t provision_post(httpd_req_t *req) {
     }
 
     ESP_LOGW(TAG, "'%s' refused (%d) — staying in setup", ssid, (int)r);
-    screen_show_text("Wrong password?");
+    // Say which failure it was: "wrong password?" for a router that is simply
+    // out of range sends the owner to retype a password that was right.
+    screen_show_text(r == WIFI_SWITCH_BAD_PASSWORD ? "Wrong password"
+                                                  : "Could not reach that network");
     return ESP_OK;
 }
 
@@ -328,8 +332,9 @@ static void start_ap(void) {
     snprintf(msg, sizeof(msg), "Wi-Fi setup — join %s", s_ap_ssid);
     screen_show_text(msg);
 
-    ESP_LOGW(TAG, "setup mode — join '%s' (password '%s') and open http://192.168.4.1",
-             s_ap_ssid, pass);
+    // The password is not logged: the log leaves the board in dev builds, and
+    // the sticker on the box is where the owner reads it.
+    ESP_LOGW(TAG, "setup mode — join '%s' and open http://192.168.4.1", s_ap_ssid);
 }
 
 static void stop_ap(void) {
@@ -347,8 +352,12 @@ static void provision_task(void *arg) {
     // Give the saved network its chance first. A robot that raises a setup
     // network every time the router is slow to wake would be worse than one
     // that never does: the owner would find it in setup mode most mornings.
+    //
+    // Unless there is no saved network at all — a new robot out of the box, or
+    // one just reset. Then there is nothing to wait for, and ninety seconds of
+    // a blank robot is ninety seconds of an owner wondering if it is broken.
     const int step_ms = 500;
-    int waited = 0;
+    int waited = wifi_sandy_ssid()[0] ? 0 : PROVISION_WINDOW_MS;
     while (waited < PROVISION_WINDOW_MS) {
         if (wifi_sandy_is_connected()) {
             ESP_LOGI(TAG, "connected within the window — no setup needed");

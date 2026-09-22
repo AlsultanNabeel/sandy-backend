@@ -60,7 +60,7 @@ def test_the_reconnect_loop_yields_while_the_radio_is_being_driven():
 
 def test_the_access_point_is_named_after_the_box_and_is_not_open():
     prov = _read("firmware/brain-core/main/sandy_provision.c")
-    assert '"Sandy-%s", SANDY_PAIR_CODE' in prov, (
+    assert '"Sandy-%s", identity()->pair_code' in prov, (
         "the setup network has to be identifiable from the sticker on the box")
     assert "WIFI_AUTH_WPA2_PSK" in prov, (
         "an open setup network hands anyone in range the list of networks this "

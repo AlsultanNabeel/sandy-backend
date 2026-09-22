@@ -48,11 +48,14 @@ logger = logging.getLogger(__name__)
 _META = "sandy_firmware"
 _CHUNKS = "sandy_firmware_chunks"
 _CHUNK = 1024 * 1024
-MAX_IMAGE_BYTES = 0x1E0000          # the ota_0/ota_1 partition size
+# The largest slot any board has: the brain's since its table grew to 4 MB.
+# Robots still on the old 1.9 MB table refuse a bigger image themselves
+# (sandy_ota.c checks the slot), so the fleet is safe while it moves.
+MAX_IMAGE_BYTES = 0x400000
 BRAIN = "brain"
 # Board → the size of its OTA slot. The camera ships its own partitions.csv
 # (two 1.9 MB slots); the room node uses the Arduino default (two 1.25 MB).
-BOARD_SLOT_BYTES = {BRAIN: 0x1E0000, "cam": 0x1E0000, "room": 0x140000}
+BOARD_SLOT_BYTES = {BRAIN: 0x400000, "cam": 0x1E0000, "room": 0x140000}
 BOARDS = frozenset(BOARD_SLOT_BYTES)
 _VERSION_RE = re.compile(r"^\d{1,4}(\.\d{1,4}){1,3}$")
 

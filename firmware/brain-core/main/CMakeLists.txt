@@ -4,6 +4,7 @@ idf_component_register(
         "sandy_wifi.c"
         "sandy_provision.c"
         "sandy_nvs.c"
+        "sandy_identity.c"
         "sandy_servo.c"
         "sandy_buzzer.c"
         "sandy_sensor.c"

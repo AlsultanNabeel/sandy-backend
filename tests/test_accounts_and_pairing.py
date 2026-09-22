@@ -261,9 +261,13 @@ def test_selling_a_robot_wipes_it_before_releasing_it():
         "different actions before a sale")
 
     fw = _read("firmware/brain-core/main/sandy_wifi.c")
-    assert "nvs_erase_all" in fw, (
+    assert "nvs_flash_erase()" in fw, (
         "the board erases named keys instead of everything; anything stored "
         "later and forgotten here ships to the next owner")
+    # And the driver's own copy of the network, which erasing ours never touched.
+    assert "esp_wifi_restore()" in fw and "WIFI_STORAGE_RAM" in fw
+    # The robot keeps what it is (pairing code, servers) and forgets its owner.
+    assert "identity_save()" in fw
 
 
 def test_account_deletion_exists_and_frees_the_hardware():

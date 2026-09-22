@@ -30,6 +30,9 @@ typedef enum {
     SANDY_ST_LINK_STALL,
     SANDY_ST_AUTH_FAILED,   // the server refused this device (config problem)
     SANDY_ST_LOW_MEMORY,    // not enough internal RAM to open a session
+    // The router answered and refused the password. Not "NO WI-FI": that one
+    // tells the owner to switch the router on, and the router is on.
+    SANDY_ST_WIFI_BAD_PASS,
     SANDY_ST_COUNT
 } sandy_status_t;
 

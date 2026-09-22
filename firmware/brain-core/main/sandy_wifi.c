@@ -7,12 +7,13 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "esp_system.h"   // esp_restart — factory reset
+#include "nvs_flash.h"    // nvs_flash_erase — factory reset
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
-#include "secrets.h"
+#include "sandy_identity.h"
 
 
 // WPA2 as the floor when there is a password (never downgrade to WEP/WPA);
@@ -30,6 +31,13 @@ static char s_ip[16] = "";   // آخر عنوان أخذناه، للنبضة
 // the AP is simply gone, and there is no cap any more — a router reboot that
 // outlasted the old ten tries left the robot offline until it was power-cycled.
 #define WIFI_RETRY_MS       5000
+// Failing attempts back off to this. A robot whose router is gone used to try
+// every five seconds all night — noise in the log, and a radio that never rests.
+#define WIFI_RETRY_MAX_MS   60000
+// This many "wrong password" answers in a row and we say so, instead of
+// "NO WI-FI". One is not enough: a handshake timeout on a busy router looks the
+// same for a single try.
+#define WIFI_BAD_PASS_AFTER 3
 
 static EventGroupHandle_t s_eg;
 static TaskHandle_t       s_retry_task;
@@ -37,6 +45,18 @@ static TaskHandle_t       s_retry_task;
 // Declared up here, not next to the switch, because the retry task below has to
 // see it: the two run at the same time by definition.
 static volatile bool s_switching;
+static volatile int  s_bad_pass_count;
+static volatile bool s_had_ip_this_try;
+
+// Reason codes that mean "the router is there and refused us", as opposed to
+// "no router": a wrong password shows up as a handshake that never completes.
+static bool reason_is_bad_password(int r) {
+    return r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
+           r == WIFI_REASON_HANDSHAKE_TIMEOUT || r == WIFI_REASON_MIC_FAILURE ||
+           r == WIFI_REASON_AUTH_EXPIRE;
+}
+
+bool wifi_sandy_password_rejected(void) { return s_bad_pass_count >= WIFI_BAD_PASS_AFTER; }
 
 static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT) {
@@ -53,8 +73,14 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // and waking on every one of them is the hard spin the pacing
             // below exists to prevent.
             if (was_up && s_retry_task) xTaskNotifyGive(s_retry_task);
-            ESP_LOGW(TAG, "disconnected (reason=%d) — retrying every %dms",
-                     ev ? ev->reason : -1, WIFI_RETRY_MS);
+            const int reason = ev ? ev->reason : -1;
+            if (reason_is_bad_password(reason)) {
+                if (s_bad_pass_count < 1000) s_bad_pass_count++;
+            } else if (reason == WIFI_REASON_NO_AP_FOUND) {
+                s_bad_pass_count = 0;   // no router at all is a different answer
+            }
+            ESP_LOGW(TAG, "disconnected (reason=%d%s)", reason,
+                     reason_is_bad_password(reason) ? ", password refused" : "");
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
@@ -62,6 +88,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         // نحفظه عشان النبضة تحمله. العنوان بيوزّعه الراوتر وبيتغيّر، وبلاه
         // إيجاد اللوح ع الشبكة بيصير مسح وتخمين — وهاد بالضبط اللي وقّفنا مرة.
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ev->ip_info.ip));
+        s_bad_pass_count = 0;
         xEventGroupSetBits(s_eg, WIFI_CONNECTED_BIT);
     }
 }
@@ -70,30 +97,45 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
 // the event handler) keeps the pacing in one place and keeps the event task free.
 static void _retry_task(void *arg) {
     uint32_t tries = 0;
+    uint32_t wait_ms = WIFI_RETRY_MS;
     for (;;) {
         if (xEventGroupGetBits(s_eg) & WIFI_CONNECTED_BIT) {
             tries = 0;
-        } else if (s_switching
-#if ENABLE_PROVISION
-                   || provision_is_active()
-#endif
-                  ) {
-            // Someone else is driving the radio. A blind reconnect here lands in
-            // the middle of a scan or a credential test and makes both fail —
-            // and the failure looks like a wrong password, which is the one
-            // wrong answer that sends the owner off to reset their router.
+            wait_ms = WIFI_RETRY_MS;
+        } else if (s_switching) {
+            // A credential test is driving the radio. A blind reconnect here
+            // lands in the middle of it and makes it fail — and the failure
+            // looks like a wrong password, which is the one wrong answer that
+            // sends the owner off to reset their router.
             tries = 0;
+#if ENABLE_PROVISION
+        } else if (provision_is_active()) {
+            // Setup mode still tries the saved network, just rarely — every
+            // half minute, so a scan for the setup page mostly has the radio.
+            // It used to stop trying altogether: the router came back after a
+            // power cut and the robot sat in setup mode until someone noticed.
+            wait_ms = WIFI_RETRY_MS;
+            if (++tries % 6 == 0 && wifi_sandy_ssid()[0]) esp_wifi_connect();
+#endif
         } else {
             tries++;
             // First attempt after each drop, then one line a minute: a dead
             // router must not flood the 8KB remote log buffer with retry noise.
             if (tries == 1 || tries % 12 == 0) {
-                ESP_LOGI(TAG, "reconnecting (attempt %lu)", (unsigned long)tries);
+                ESP_LOGI(TAG, "reconnecting (attempt %lu, next in %lus)",
+                         (unsigned long)tries, (unsigned long)(wait_ms / 1000));
             }
             esp_wifi_connect();
+            // Five seconds while it might be a blip, then longer and longer.
+            if (tries > 6 && wait_ms < WIFI_RETRY_MAX_MS) {
+                wait_ms = wait_ms * 2 > WIFI_RETRY_MAX_MS ? WIFI_RETRY_MAX_MS : wait_ms * 2;
+            }
         }
-        // Sleeps WIFI_RETRY_MS, or less when the event handler reports a drop.
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WIFI_RETRY_MS));
+        // Sleeps, or less when the event handler reports a fresh drop.
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms))) {
+            tries = 0;
+            wait_ms = WIFI_RETRY_MS;
+        }
     }
 }
 
@@ -129,13 +171,16 @@ const char *wifi_sandy_ssid(void) { return s_ssid; }
 // بنمسح المساحة كلها مش المفاتيح اللي بنعرفها: أي إشي انحفظ لاحقًا ونُسي هون
 // بيضلّ ع اللوح، والنسيان بهالمكان بالذات معناه تسريب.
 void wifi_sandy_factory_reset(void) {
-    nvs_handle_t h;
-    if (nvs_open(WIFI_NS, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_erase_all(h);
-        nvs_commit(h);
-        nvs_close(h);
-        ESP_LOGW(TAG, "factory reset — saved network erased");
-    }
+    // **الذاكرة كلها، مش مساحة الشبكة بس.** كانت بتنمسح `sandy_wifi` لحالها —
+    // وبيضلّ مفتاح الوسيط الخاص، ومفتاح الصوت، والمزاج، والإعدادات، ونسخة
+    // الشبكة اللي مكتبة الواي فاي نفسها بتحفظها بمساحتها. هلّق بنمسح الكل،
+    // وبنرجّع الهويّة بس (كود العلبة وعناوين الخوادم) — هي للجهاز مش للمالك.
+    esp_wifi_restore();   // the driver's own saved copy (nvs.net80211)
+    esp_err_t e = nvs_flash_erase();
+    if (e == ESP_OK) e = nvs_flash_init();
+    if (e == ESP_OK) e = identity_save();
+    ESP_LOGW(TAG, "factory reset — %s", e == ESP_OK ? "everything erased, identity kept"
+                                                    : esp_err_to_name(e));
     // إعادة تشغيل عشان يقلع بلا بيانات ويطلع بوضع التزويد. تأخير بسيط عشان
     // تلحق تنطبع رسالة الخروج، ويوصل الردّ للتطبيق قبل ما ينقطع الاتصال.
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -148,8 +193,8 @@ static void _nvs_get_str(nvs_handle_t h, const char *key, char *out, size_t cap)
 }
 
 static void _load_creds(void) {
-    snprintf(s_ssid, sizeof(s_ssid), "%s", WIFI_SSID);
-    snprintf(s_pass, sizeof(s_pass), "%s", WIFI_PASS);
+    snprintf(s_ssid, sizeof(s_ssid), "%s", identity()->wifi_ssid);
+    snprintf(s_pass, sizeof(s_pass), "%s", identity()->wifi_pass);
 
     nvs_handle_t h;
     if (nvs_open(WIFI_NS, NVS_READWRITE, &h) != ESP_OK) return;
@@ -159,20 +204,23 @@ static void _load_creds(void) {
     // لو انقطعت الكهربا بنص تجربة شبكة جديدة، بتضل «قيد التجربة» محفوظة —
     // ومن غير هالسطر اللوح بيقلع عليها للأبد ع شبكة ما ثبت إنها بتشتغل. مسحها
     // هون بيضمن إنه أي إقلاع بيصير ع شبكة نجحت فعلًا.
+    //
+    // والشبكة المحفوظة بتنقرا **بالحالتين**: الجديدة ما بتنحفظ إلا لمّا تنجح،
+    // يعني المحفوظ دايمًا آخر شبكة ثبتت. كانت علامة التجربة بتقفز عن القراءة،
+    // فاللوح بيرجع لشبكة المصنع بدل شبكة البيت — وبيضيع.
     uint8_t trying = 0;
     if (nvs_get_u8(h, K_TRYING, &trying) == ESP_OK && trying) {
-        ESP_LOGW(TAG, "a network switch was interrupted — falling back");
+        ESP_LOGW(TAG, "a network switch was interrupted — back on the last good one");
         nvs_erase_key(h, K_TRYING);
-        nvs_commit(h);
-    } else {
-        char ssid[33], pass[65];
-        _nvs_get_str(h, K_SSID, ssid, sizeof(ssid));
-        _nvs_get_str(h, K_PASS, pass, sizeof(pass));
-        if (ssid[0]) {
-            snprintf(s_ssid, sizeof(s_ssid), "%s", ssid);
-            snprintf(s_pass, sizeof(s_pass), "%s", pass);
-            ESP_LOGI(TAG, "using saved network '%s'", s_ssid);
-        }
+        if (nvs_commit(h) != ESP_OK) ESP_LOGW(TAG, "could not clear the switch marker");
+    }
+    char ssid[33], pass[65];
+    _nvs_get_str(h, K_SSID, ssid, sizeof(ssid));
+    _nvs_get_str(h, K_PASS, pass, sizeof(pass));
+    if (ssid[0]) {
+        snprintf(s_ssid, sizeof(s_ssid), "%s", ssid);
+        snprintf(s_pass, sizeof(s_pass), "%s", pass);
+        ESP_LOGI(TAG, "using saved network '%s'", s_ssid);
     }
     nvs_close(h);
 }
@@ -207,11 +255,15 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     // «قيد التجربة» بينكتب قبل ما نلمس الراديو: إذا وقعت الكهربا من هون لجاي،
     // الإقلاع الجاي بيمسحها وبيرجع ع القديمة.
     nvs_handle_t h;
-    if (nvs_open(WIFI_NS, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u8(h, K_TRYING, 1);
-        nvs_commit(h);
-        nvs_close(h);
+    if (nvs_open(WIFI_NS, NVS_READWRITE, &h) != ESP_OK ||
+        nvs_set_u8(h, K_TRYING, 1) != ESP_OK || nvs_commit(h) != ESP_OK) {
+        // Without the marker a power cut mid-trial could boot into a network
+        // nobody proved. Better to refuse the switch than to risk that.
+        ESP_LOGE(TAG, "could not mark the trial — switch refused");
+        s_switching = false;
+        return WIFI_SWITCH_FAILED;
     }
+    nvs_close(h);
 
     ESP_LOGW(TAG, "trying network '%s' (%d s, then back to '%s')",
              ssid, WIFI_TRY_WINDOW_MS / 1000, old_ssid);
@@ -222,6 +274,12 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     cfg.sta.threshold.authmode = auth_threshold(pass);
     cfg.sta.pmf_cfg.capable = true;
 
+    // The old link's "connected" bit and address are still set until the
+    // disconnect event lands — and the wait below used to see them and declare
+    // the new network working after 250 ms, saving a password it never tried.
+    xEventGroupClearBits(s_eg, WIFI_CONNECTED_BIT);
+    s_ip[0] = '\0';
+    s_bad_pass_count = 0;
     esp_wifi_disconnect();
     esp_wifi_set_config(WIFI_IF_STA, &cfg);
     esp_wifi_connect();
@@ -235,16 +293,21 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
         vTaskDelay(pdMS_TO_TICKS(step_ms));
         waited += step_ms;
         if (wifi_sandy_is_connected() && wifi_sandy_ip()[0]) { ok = true; break; }
+        if (wifi_sandy_password_rejected()) break;   // no point waiting it out
     }
+    const bool bad_pass = !ok && wifi_sandy_password_rejected();
 
     if (nvs_open(WIFI_NS, NVS_READWRITE, &h) == ESP_OK) {
+        esp_err_t e = ESP_OK;
         if (ok) {
-            nvs_set_str(h, K_SSID, ssid);
-            nvs_set_str(h, K_PASS, pass ? pass : "");
+            e = nvs_set_str(h, K_SSID, ssid);
+            if (e == ESP_OK) e = nvs_set_str(h, K_PASS, pass ? pass : "");
         }
         nvs_erase_key(h, K_TRYING);
-        nvs_commit(h);
+        if (e == ESP_OK) e = nvs_commit(h);
         nvs_close(h);
+        if (e != ESP_OK) ESP_LOGE(TAG, "the new network works but was not saved: %s",
+                                  esp_err_to_name(e));
     }
 
     if (ok) {
@@ -255,7 +318,11 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
         return WIFI_SWITCH_OK;
     }
 
-    ESP_LOGW(TAG, "'%s' did not come up — going back to '%s'", ssid, old_ssid);
+    ESP_LOGW(TAG, "'%s' %s — going back to '%s'", ssid,
+             bad_pass ? "refused the password" : "did not come up", old_ssid);
+    xEventGroupClearBits(s_eg, WIFI_CONNECTED_BIT);
+    s_ip[0] = '\0';
+    s_bad_pass_count = 0;
     wifi_config_t back = { 0 };
     set_wifi_field(back.sta.ssid, sizeof(back.sta.ssid), old_ssid);
     set_wifi_field(back.sta.password, sizeof(back.sta.password), old_pass);
@@ -265,7 +332,7 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     esp_wifi_set_config(WIFI_IF_STA, &back);
     esp_wifi_connect();
     s_switching = false;
-    return WIFI_SWITCH_FAILED;
+    return bad_pass ? WIFI_SWITCH_BAD_PASSWORD : WIFI_SWITCH_FAILED;
 }
 
 esp_err_t wifi_sandy_start(void) {
@@ -278,6 +345,10 @@ esp_err_t wifi_sandy_start(void) {
 
     wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     WIFI_TRY("wifi init", esp_wifi_init(&init_cfg));
+    // The driver keeps its own copy of the last network in NVS unless told
+    // not to. Ours is in `sandy_wifi` and is the only one we erase and trust;
+    // a second copy is a second place for a seller's password to survive a reset.
+    WIFI_TRY("wifi storage", esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
     WIFI_TRY("wifi events", esp_event_handler_instance_register(
         WIFI_EVENT, ESP_EVENT_ANY_ID, _handler, NULL, NULL));

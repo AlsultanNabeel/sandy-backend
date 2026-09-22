@@ -219,6 +219,14 @@ def main() -> int:
     if b"logsrv\x00" in image:
         sys.exit(f"{IMAGE} still has the LAN upload server (ENABLE_REMOTE) — "
                  "build with: idf.py -B build-retail -DSANDY_RETAIL=1 build")
+    # The retail build compiles secrets.example.h (sandy_identity.c), so a
+    # published image never carries one robot's pairing code or keys to all of
+    # them. Belt and braces: refuse one that somehow does.
+    for secret in _secret_values(FW / "main"):
+        if secret in image:
+            sys.exit("the image contains a value from main/secrets.h — it would be public "
+                     "and every robot would take this one's identity. Rebuild the retail "
+                     "build from a clean build-retail directory.")
     return _sign_and_upload(a, base, token, version, image,
                             f"sandy-fw|{version}|{len(image)}|", "brain")
 

@@ -146,3 +146,9 @@ CONFIG_LV_MEM_CUSTOM_INCLUDE="stdlib.h"
 #    الطالع، واللي بيفيض بيستنى بطابور الذاكرة الخارجية بدل ما يضيع.
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=10
+
+# ── Crash dumps to flash ──────────────────────────────────────────────────────
+# A panic writes its dump to the `coredump` partition and survives the reboot;
+# `idf.py coredump-info` reads it later. Needs the partition table above, and —
+# like every choice here — a fresh sdkconfig (delete it once) to take effect.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y

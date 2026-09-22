@@ -1,13 +1,25 @@
 # Sandy Brain S3 — 16MB flash with dual OTA
+#
+# The app slots grew from 1.9 MB to 4 MB: the image was at 92 % of the old slot,
+# one feature away from not updating at all. A robot still on the old table
+# refuses anything bigger than its slot on its own (sandy_ota.c checks), so the
+# fleet is safe while it moves; the new table itself needs ONE wired flash.
+#
+# NVS stays exactly where it was, so the saved Wi-Fi, the identity and every
+# setting survive the reflash.
 # Name,     Type,  SubType,  Offset,    Size,     Flags
 nvs,        data,  nvs,      0x9000,    0x5000,
 otadata,    data,  ota,      0xe000,    0x2000,
 phy_init,   data,  phy,      0x10000,   0x1000,
-ota_0,      app,   ota_0,    0x20000,   0x1E0000,
-ota_1,      app,   ota_1,    0x200000,  0x1E0000,
-# esp-sr models (srmodels.bin). 4MB holds the wake word (~300KB) PLUS the
-# English MultiNet command model (mn5q8_en, ~2.1MB). ENABLE_COMMANDS is 0 in
-# config.h, so MultiNet is flashed but never loaded — it is packed only because
-# sdkconfig.defaults still selects CONFIG_SR_MN_EN_MULTINET5_*. The old 2MB was
-# wake-word only. Resizing changes the table → needs ONE wired flash (not OTA).
-model,      data,  spiffs,   0x3E0000,  0x400000,
+ota_0,      app,   ota_0,    0x20000,   0x400000,
+ota_1,      app,   ota_1,    0x420000,  0x400000,
+# esp-sr models (srmodels.bin): the wake word (~300KB) plus the English
+# MultiNet command model (mn5q8_en, ~2.1MB). Found by its name, not its offset.
+model,      data,  spiffs,   0x820000,  0x400000,
+# The last crash, kept across the reboot it caused: `idf.py coredump-info`
+# reads it back. Before this a panic in a customer's house left nothing but
+# "it restarted".
+coredump,   data,  coredump, 0xC20000,  0x20000,
+# Per-unit identity written once at production (scripts/provision_brain.py):
+# pairing code, broker login, voice key. Read-only to the firmware.
+fctry,      data,  nvs,      0xC40000,  0x6000,

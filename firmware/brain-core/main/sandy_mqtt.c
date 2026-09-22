@@ -13,14 +13,17 @@
 #include "sandy_audio_ctl.h"
 #include "sandy_wifi.h"
 #include "sandy_ir.h"
+#include "sandy_voice.h"
+#include "sandy_net_busy.h"
 #include "config.h"
-#include "secrets.h"
+#include "sandy_identity.h"
 #include "mqtt_client.h"
 #include "esp_crt_bundle.h"
 #include "nvs.h"          // بيانات دخول الوسيط الخاصة باللوح، لو انحفظت
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -54,7 +57,7 @@ static char s_base[64];        // "sandy/node/<node_id>"
 static char s_topic_status[80];
 
 static void derive_node_id(void) {
-    const char *src = SANDY_PAIR_CODE;
+    const char *src = identity()->pair_code;
     size_t j = 0;
     for (size_t i = 0; src[i] && j < sizeof(s_node_id) - 1; i++) {
         char c = src[i];
@@ -380,12 +383,25 @@ static void _handle_screen_img(const char *val) {
 // One command, fully assembled. Separated from the event handler because a
 // large payload arrives in pieces and must be dispatched exactly once, when the
 // last piece lands — not once per piece.
-static void _dispatch(const char *out, const char *val) {
+// Commands that change the robot for good. A retained copy of one of these is
+// someone's old intent, not a request: the broker hands it to the board on
+// every reconnect, so a single retained "erase" wiped the robot every time it
+// came back on the network, and a retained Wi-Fi change fought the owner's.
+static bool _is_one_shot(const char *out) {
+    return !strcmp(out, "factory_reset") || !strcmp(out, "wifi") ||
+           !strcmp(out, "ota") || !strcmp(out, "ir");
+}
+
+static void _dispatch(const char *out, const char *val, bool retained) {
     // مخارج ألواح تانية ع نفس الشجرة — الكاميرا وعقدة الغرفة. الدماغ مشترك
     // بالشجرة كلها بنجمة، فبتوصله رسايلهن كمان. بلا هالسطر كل أمر كاميرا وكل
     // أمر غرفة كان بيطبع «مخرج مجهول»، وهاد بيخلّي التحذير بلا معنى: لمّا كل
     // شي بيحذّر، ما حدا بيقرا التحذير الحقيقي.
     if (!strncmp(out, "cam/", 4) || !strncmp(out, "room/", 5)) return;
+    if (retained && _is_one_shot(out)) {
+        ESP_LOGW(TAG, "ignoring a retained %s — one-shot commands must be live", out);
+        return;
+    }
 
     if      (!strcmp(out, "mood"))         _handle_mood(val);
     else if (!strcmp(out, "servo"))        _handle_servo(val);
@@ -454,12 +470,44 @@ static char  *s_asm;            // PSRAM, allocated per message
 static size_t s_asm_len;
 static size_t s_asm_total;
 static char   s_asm_out[64];    // the output name, kept from the first event
+static bool   s_asm_retained;   // and whether it was a retained message
 
 static void _asm_reset(void) {
     if (s_asm) free(s_asm);
     s_asm = NULL;
     s_asm_len = s_asm_total = 0;
     s_asm_out[0] = '\0';
+    s_asm_retained = false;
+}
+
+// ─── Reconnect: backoff with jitter ───────────────────────────────────────────
+//
+// esp-mqtt's own reconnect is a fixed interval. A broker restart or a home
+// router coming back then had every robot in the fleet knock at exactly the same
+// five-second beat, forever — and a broker that is refusing us (bad credential)
+// got a TLS handshake every five seconds, all night. Now: 2 s doubling to a
+// minute, each wait jittered by a quarter so a fleet spreads out.
+#define MQTT_BACKOFF_MIN_MS  2000
+#define MQTT_BACKOFF_MAX_MS  60000
+
+static uint32_t           s_backoff_ms;
+static esp_timer_handle_t s_reconnect_timer;
+
+static void _reconnect_cb(void *arg) {
+    (void)arg;
+    if (s_client) esp_mqtt_client_reconnect(s_client);
+}
+
+static void _schedule_reconnect(void) {
+    s_backoff_ms = s_backoff_ms ? s_backoff_ms * 2 : MQTT_BACKOFF_MIN_MS;
+    if (s_backoff_ms > MQTT_BACKOFF_MAX_MS) s_backoff_ms = MQTT_BACKOFF_MAX_MS;
+    uint32_t quarter = s_backoff_ms / 4;
+    uint32_t wait = s_backoff_ms - quarter + (quarter ? esp_random() % (2 * quarter) : 0);
+    ESP_LOGW(TAG, "disconnected — retrying in %lu ms", (unsigned long)wait);
+    if (s_reconnect_timer) {
+        esp_timer_stop(s_reconnect_timer);
+        esp_timer_start_once(s_reconnect_timer, (uint64_t)wait * 1000);
+    }
 }
 
 // ─── MQTT event handler ───────────────────────────────────────────────────────
@@ -469,21 +517,43 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     switch ((esp_mqtt_event_id_t)id) {
         case MQTT_EVENT_CONNECTED: {
             ESP_LOGI(TAG, "connected");
+            s_backoff_ms = 0;
             // One wildcard instead of a subscription per output: adding a new
             // control becomes a case in the dispatch below, with nothing to
             // remember to subscribe to. Forgetting that line is how a handler
             // gets written and never fires.
             char sub[80];
             snprintf(sub, sizeof(sub), "%s/#", s_base);
-            esp_mqtt_client_subscribe(s_client, sub, 1);
-            ESP_LOGI(TAG, "subscribed to %s", sub);
+            if (esp_mqtt_client_subscribe(s_client, sub, 1) < 0) {
+                // Connected and deaf is the worst state a robot can be in: it
+                // looks online in the app and obeys nothing. Start over.
+                ESP_LOGE(TAG, "subscribe to %s could not be sent — reconnecting", sub);
+                esp_mqtt_client_disconnect(s_client);
+                break;
+            }
+            ESP_LOGI(TAG, "subscribing to %s", sub);
+            // The will says "offline" (retained) when we vanish; this clears it.
+            esp_mqtt_client_publish(s_client, s_topic_status, "{\"online\":true}", 0, 1, 1);
             mqtt_publish_status();   // announce what this robot can do, at once
-            buzzer_play(MELODY_BOOT);
+            // No chime here. app_main plays the boot melody once; this one
+            // played it again on every reconnect — a flaky router made the robot
+            // chirp in the night for no reason.
             break;
         }
 
+        case MQTT_EVENT_SUBSCRIBED:
+            // SUBACK carries a return code per filter; 0x80 is "refused" — a
+            // broker credential without permission on this tree.
+            if (ev->data_len > 0 && (uint8_t)ev->data[0] == 0x80) {
+                ESP_LOGE(TAG, "the broker refused our subscription — check this board's "
+                              "credential permissions on %s/#", s_base);
+            } else {
+                ESP_LOGI(TAG, "subscribed");
+            }
+            break;
+
         case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG, "disconnected — will auto-reconnect");
+            _schedule_reconnect();
             break;
 
         case MQTT_EVENT_DATA: {
@@ -509,7 +579,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
                 if (s_asm_len < s_asm_total) break;      // still more to come
 
                 s_asm[s_asm_len] = '\0';
-                _dispatch(s_asm_out, s_asm);
+                _dispatch(s_asm_out, s_asm, s_asm_retained);
                 _asm_reset();
                 break;
             }
@@ -544,8 +614,10 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
                 && ev->data_len < 512) {
                 char val[512] = {0};
                 memcpy(val, ev->data, ev->data_len);
-                ESP_LOGD(TAG, "%s = %s", topic, val);
-                _dispatch(out, val);
+                // A Wi-Fi change carries the password: never in the log, at
+                // any level — the log is mirrored off the board in dev builds.
+                ESP_LOGD(TAG, "%s = %s", topic, strcmp(out, "wifi") ? val : "<redacted>");
+                _dispatch(out, val, ev->retain);
                 break;
             }
 
@@ -561,10 +633,11 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             s_asm_len   = ev->data_len;
             s_asm_total = ev->total_data_len;
             snprintf(s_asm_out, sizeof(s_asm_out), "%s", out);
+            s_asm_retained = ev->retain;
 
             if (s_asm_len >= s_asm_total) {        // single oversized event
                 s_asm[s_asm_len] = '\0';
-                _dispatch(s_asm_out, s_asm);
+                _dispatch(s_asm_out, s_asm, s_asm_retained);
                 _asm_reset();
             }
             break;
@@ -624,7 +697,7 @@ static SemaphoreHandle_t s_status_lock;
 
 // SSIDs are arbitrary bytes. One with a quote or a backslash in it made the
 // whole heartbeat invalid JSON, and the backend then dropped every field of it.
-// Worst case doubles 32 bytes, which the 896-byte buffer below still holds.
+// Worst case doubles 32 bytes, which the 1 KB buffer below still holds.
 static void json_escape(const char *in, char *out, size_t cap) {
     size_t k = 0;
     for (; in && *in && k + 2 < cap; in++) {
@@ -652,15 +725,17 @@ void mqtt_publish_status(void) {
     // what makes sharing it safe. Without it, a connect landing mid-publish
     // would interleave two JSON documents into one and the backend would parse
     // neither.
-    static char buf[896];
+    // 1 KB: the worst case (every output, a 32-byte SSID of quotes) is ~900.
+    static char buf[1024];
     if (xSemaphoreTake(s_status_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
     static char ssid[2 * 32 + 1];   // under the lock, like buf
     json_escape(wifi_sandy_ssid(), ssid, sizeof(ssid));
+    int n =
     // mic_l / mic_r are live input levels, 0..100. They are in the heartbeat and
     // not on a topic of their own so a control screen gets meters by reading the
     // state it already polls — speak, watch which one moves, and you know which
     // mic is which without touching a wire.
-    snprintf(buf, sizeof(buf),
+        snprintf(buf, sizeof(buf),
         // ما في distance: الحسّاس ملغي ومش مركّب (ENABLE_SENSOR=0). حقل بيرسل
         // صفر للأبد بيوهم إنه في قياس.
         "{\"uptime\":%lld,\"heap\":%lu,\"mood\":%d,"
@@ -689,7 +764,13 @@ void mqtt_publish_status(void) {
         spk_get_volume(), (int)ns_get_level(), wifi_sandy_rssi(),
         wifi_sandy_ip(), ssid,
         SANDY_FW_VERSION, OUTPUTS_JSON);
-    esp_mqtt_client_publish(s_client, s_topic_status, buf, 0, 0, 0);
+    // A clipped heartbeat is invalid JSON, and the server drops invalid JSON
+    // whole — the robot would vanish from the app with nothing in any log.
+    if (n < 0 || n >= (int)sizeof(buf)) {
+        ESP_LOGE(TAG, "heartbeat is %d bytes, buffer %u — not sent", n, (unsigned)sizeof(buf));
+    } else {
+        esp_mqtt_client_publish(s_client, s_topic_status, buf, n, 0, 0);
+    }
     xSemaphoreGive(s_status_lock);
 }
 
@@ -726,9 +807,12 @@ bool mqtt_publish_room(const char *out, const char *payload) {
     return mqtt_publish_node(suffix, payload);
 }
 
+static void _apply_pending_credentials(void);
+
 static void _status_task(void *arg) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(MQTT_STATUS_INTERVAL_MS));
+        _apply_pending_credentials();
         mqtt_publish_status();
     }
 }
@@ -747,6 +831,7 @@ static void _status_task(void *arg) {
 #define CREDS_NS "sandy_mqtt"
 
 static char s_user[65], s_pass[129];
+static volatile bool s_creds_pending;
 
 // إعداد العميل بيضل محفوظ لأنّ `esp_mqtt_set_config` **بترجّع أي حقل مش معبّى
 // لقيمته الافتراضية** — مش بتعدّل اللي بتعطيها ياه وبس. تمرير إعداد فيه المفتاح
@@ -755,8 +840,8 @@ static char s_user[65], s_pass[129];
 static esp_mqtt_client_config_t s_cfg;
 
 static void creds_load(void) {
-    snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
-    snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
+    snprintf(s_user, sizeof(s_user), "%s", identity()->mqtt_user);
+    snprintf(s_pass, sizeof(s_pass), "%s", identity()->mqtt_pass);
 
     nvs_handle_t h;
     if (nvs_open(CREDS_NS, NVS_READONLY, &h) != ESP_OK) {
@@ -765,14 +850,14 @@ static void creds_load(void) {
     }
     size_t n = sizeof(s_user);
     if (nvs_get_str(h, "user", s_user, &n) != ESP_OK)
-        snprintf(s_user, sizeof(s_user), "%s", MQTT_USER);
+        snprintf(s_user, sizeof(s_user), "%s", identity()->mqtt_user);
     n = sizeof(s_pass);
     if (nvs_get_str(h, "pass", s_pass, &n) != ESP_OK)
-        snprintf(s_pass, sizeof(s_pass), "%s", MQTT_PASS);
+        snprintf(s_pass, sizeof(s_pass), "%s", identity()->mqtt_pass);
     nvs_close(h);
 
     ESP_LOGI(TAG, "broker credentials: %s",
-             strcmp(s_user, MQTT_USER) ? "per-device (stored)" : "shared (compiled in)");
+             strcmp(s_user, identity()->mqtt_user) ? "per-device (stored)" : "shared (compiled in)");
 }
 
 bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
@@ -800,21 +885,35 @@ bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
     snprintf(s_pass, sizeof(s_pass), "%s", pass);
     ESP_LOGW(TAG, "stored this board's own broker credential (user=%s)", s_user);
 
-    // بنطبّقها هلق مش ع الإقلاع الجاي: لوح حافظ مفتاحه وشغّال ع المشترك بيضل
-    // ثغرة مفتوحة لحدّ ما حدا يطفّيه — وما حدا بيطفّي روبوت.
-    if (s_client) {
-        // s_user/s_pass مؤشّراتهن أصلًا جوّا s_cfg، بس منكتبهن صراحة عشان
-        // السطر يضل صحيح لو انتغيّر شكل البنية.
-        s_cfg.credentials.username = s_user;
-        s_cfg.credentials.authentication.password = s_pass;
-        if (esp_mqtt_set_config(s_client, &s_cfg) == ESP_OK) {
-            esp_mqtt_client_reconnect(s_client);
-            ESP_LOGI(TAG, "reconnecting with the new credential");
-        } else {
-            ESP_LOGW(TAG, "could not apply the new credential live — next boot will");
-        }
-    }
+    // بنطبّقها بهالتشغيلة مش ع الإقلاع الجاي: لوح حافظ مفتاحه وشغّال ع المشترك
+    // بيضل ثغرة مفتوحة لحدّ ما حدا يطفّيه — وما حدا بيطفّي روبوت.
+    //
+    // **بس مش هلّق.** هالنداء بيوصل من مصافحة الصوت، يعني والمكالمة لسا بتفتح.
+    // إعادة الاتصال بالوسيط هي مصافحة مشفّرة تانية بنفس اللحظة — والذاكرة
+    // الداخلية ما بتساع تنتين، وهيك كان اللوح بيعيد التشغيل بنص أول مكالمة.
+    // فبنعلّمها، ومهمّة النبضة بتطبّقها لمّا الشبكة تفضى.
+    s_creds_pending = true;
     return true;
+}
+
+static void _apply_pending_credentials(void) {
+    if (!s_creds_pending || !s_client) return;
+    if (voice_is_connected() || net_owner() != NET_OWNER_NONE) return;   // later
+    s_creds_pending = false;
+    // s_user/s_pass مؤشّراتهن أصلًا جوّا s_cfg، بس منكتبهن صراحة عشان السطر
+    // يضل صحيح لو انتغيّر شكل البنية.
+    s_cfg.credentials.username = s_user;
+    s_cfg.credentials.authentication.password = s_pass;
+    if (esp_mqtt_set_config(s_client, &s_cfg) == ESP_OK) {
+        // Disconnect, not reconnect: the library ignores "reconnect" on a live
+        // connection, so the new credential used to wait for the next network
+        // drop. A clean DISCONNECT also means the broker does not fire our
+        // "offline" will for what is only a key change.
+        esp_mqtt_client_disconnect(s_client);
+        ESP_LOGI(TAG, "reconnecting with the new credential");
+    } else {
+        ESP_LOGW(TAG, "could not apply the new credential live — next boot will");
+    }
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -826,7 +925,7 @@ esp_err_t mqtt_sandy_start(void) {
         // on "sandy/node//…" where nothing is listening. Refuse loudly instead
         // of running as a robot that silently ignores the app.
         ESP_LOGE(TAG, "SANDY_PAIR_CODE is empty or has no alphanumerics — "
-                      "set it in secrets.h to the code printed on the box");
+                      "flash once by cable with it in secrets.h, or provision the factory partition");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -844,7 +943,7 @@ esp_err_t mqtt_sandy_start(void) {
 
     s_cfg = (esp_mqtt_client_config_t){
         .broker = {
-            .address = { .uri = MQTT_BROKER_URI },
+            .address = { .uri = identity()->mqtt_uri },
             // Real TLS via the built-in CA bundle (same as the voice WSS link).
             // skip_cert_common_name_check alone doesn't work here: esp-tls
             // refuses to connect with no verification source at all.
@@ -855,11 +954,27 @@ esp_err_t mqtt_sandy_start(void) {
             .username   = s_user,
             .authentication = { .password = s_pass },
         },
-        .network = { .reconnect_timeout_ms = MQTT_RECONNECT_MS },
+        // Our own reconnect (backoff with jitter, above), not the library's
+        // fixed interval.
+        .network = { .reconnect_timeout_ms = MQTT_RECONNECT_MS,
+                     .disable_auto_reconnect = true },
+        // «راح» محفوظة ع موضوع الحالة لو انقطعنا بلا وداع: التطبيق بيعرف
+        // فورًا، مش بعد ما النبضات تبطّل وحدّ يلاحظ.
+        .session = {
+            .last_will = {
+                .topic  = s_topic_status,
+                .msg    = "{\"online\":false}",
+                .qos    = 1,
+                .retain = 1,
+            },
+        },
     };
 
     s_status_lock = xSemaphoreCreateMutex();
     if (!s_status_lock) return ESP_ERR_NO_MEM;
+
+    const esp_timer_create_args_t rt = { .callback = _reconnect_cb, .name = "mqtt_retry" };
+    if (esp_timer_create(&rt, &s_reconnect_timer) != ESP_OK) return ESP_ERR_NO_MEM;
 
     s_client = esp_mqtt_client_init(&s_cfg);
     if (!s_client) return ESP_FAIL;
@@ -874,6 +989,6 @@ esp_err_t mqtt_sandy_start(void) {
                             MALLOC_CAP_SPIRAM) != pdPASS) {
         xTaskCreate(_status_task, "mqtt_status", 3072, NULL, 4, NULL);
     }
-    ESP_LOGI(TAG, "started → %s", MQTT_BROKER_URI);
+    ESP_LOGI(TAG, "started → %s", identity()->mqtt_uri);
     return ESP_OK;
 }

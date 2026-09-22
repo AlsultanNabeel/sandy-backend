@@ -30,7 +30,12 @@ typedef enum {
     WIFI_SWITCH_FAILED,        // ما اتصلت — رجعنا للقديمة
     WIFI_SWITCH_BUSY,          // في تجربة شغّالة
     WIFI_SWITCH_BAD_ARGS,
+    WIFI_SWITCH_BAD_PASSWORD,  // الراوتر رفض كلمة السر — رجعنا للقديمة
 } wifi_switch_result_t;
+
+// The router refused the password on the last attempts (not "no router").
+// Set from the disconnect reason codes; cleared by a successful connection.
+bool wifi_sandy_password_rejected(void);
 
 // جرّب شبكة جديدة. بتحجز لحدّ ما تخلص التجربة (٢٥ ثانية كحدّ أقصى).
 //

@@ -6,6 +6,7 @@
 #include "config.h"
 #include "sandy_types.h"
 #include "sandy_nvs.h"
+#include "sandy_identity.h"
 #include "sandy_wifi.h"
 #include "sandy_provision.h"
 #include "sandy_ir.h"
@@ -92,6 +93,10 @@ void app_main(void) {
     // ── Core services ─────────────────────────────────────────────────────────
     // NVS only holds the saved neck angle here; losing it costs a default pose.
     TRY_INIT("nvs", nvs_sandy_init());
+    // Who this robot is — pairing code, broker, voice server, first Wi-Fi —
+    // before anything that needs it. See sandy_identity.h for why none of it
+    // lives in the image any more.
+    TRY_INIT("identity", identity_init());
 #if ENABLE_WIFI
     TRY_INIT("wifi", wifi_sandy_start());
 #endif

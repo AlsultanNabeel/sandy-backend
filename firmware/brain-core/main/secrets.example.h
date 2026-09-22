@@ -1,6 +1,12 @@
 #pragma once
 // Copy this file to secrets.h and fill in your values.
 // secrets.h is gitignored — never commit it.
+//
+// These values are written into the board's NVS on the first boot of a cable
+// flash (sandy_identity.c), and the board lives on them from then on. The sale
+// build (-DSANDY_RETAIL=1, the one published over the air) compiles THIS file
+// instead of secrets.h, so an update image carries no robot's identity and no
+// secret. A placeholder ("YOUR_…", "…XXXX…", empty) never overwrites a saved value.
 
 #define WIFI_SSID           "YOUR_WIFI_SSID"
 #define WIFI_PASS           "YOUR_WIFI_PASSWORD"
@@ -28,11 +34,13 @@
 // The device id must equal the node id. A model name here makes every voice
 // session anonymous, and anonymous sessions used to inherit somebody else's
 // memory.
-#define SANDY_DEVICE_ID     "sandy0001"
+// Leave empty: it is then the node id derived from SANDY_PAIR_CODE, which is
+// what it must be anyway.
+#define SANDY_DEVICE_ID     ""
 
 // The pairing code printed on this robot's box — the one its owner types into
 // the app once. The firmware derives its MQTT topics from it (lowercase,
 // alphanumerics only), so every robot answers only on its own tree:
 //   sandy/node/<derived>/mood, /servo, /volume, …
 // Unique per unit. Two robots sharing a code would obey each other's owner.
-#define SANDY_PAIR_CODE     "SANDY-0001"
+#define SANDY_PAIR_CODE     "SANDY-XXXX"

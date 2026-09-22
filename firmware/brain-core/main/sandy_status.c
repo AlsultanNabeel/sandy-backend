@@ -71,6 +71,10 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         MOOD_ALERT, LED_STATE_OFF, "MEMORY",
         "ذاكرتي امتلت. رح أعيد تشغيل حالي.",
     },
+    [SANDY_ST_WIFI_BAD_PASS] = {
+        MOOD_CONFUSED, LED_STATE_OFF, "WI-FI PASSWORD",
+        "الراوتر رفض كلمة السر. غيّرها من التطبيق أو اعمل إعداد من جديد.",
+    },
 };
 
 sandy_status_t status_get(void)
