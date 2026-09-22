@@ -1,8 +1,13 @@
+# Pinned to the minor versions dependencies.lock resolved and the firmware was
+# tested on. "*" let a fresh machine (or a deleted lock) pull whatever was newest
+# that day — a new esp-sr can change the wake word model's memory needs, and the
+# board's internal RAM has no slack for surprises. "~X.Y.Z" still takes patch
+# fixes. Raise one on purpose, build, test, and commit the new lock with it.
 dependencies:
-  espressif/esp-sr: "*"   # WakeNet on-device wake word engine
-  lvgl/lvgl: "~8.3.0"
-  espressif/esp_lcd_ili9341: "*"
-  espressif/esp_websocket_client: "^1.2.0"
+  espressif/esp-sr: "~2.4.6"                  # WakeNet on-device wake word engine
+  lvgl/lvgl: "~8.3.11"
+  espressif/esp_lcd_ili9341: "~2.0.2"
+  espressif/esp_websocket_client: "~1.7.0"
   # esp-mqtt moved out of core IDF into the registry in IDF 6.0.
-  espressif/mqtt: "*"
-  espressif/led_strip: "^3.0.0"   # on-board WS2812 status LED
+  espressif/mqtt: "~1.0.0"
+  espressif/led_strip: "~3.0.3"               # on-board WS2812 status LED
