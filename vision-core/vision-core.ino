@@ -26,33 +26,97 @@
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
 #include "esp_system.h"
-#include "config.h"
+#include "esp_task_wdt.h"
+// **الأسرار قبل الإعدادات.** `config.h` بيعطي قيمًا افتراضية بـ `#ifndef` —
+// والترتيب العكسي كان بيخلّي أي قيمة بالأسرار (زي مفتاح البث المحلي) تيجي
+// متأخرة وتنتهي تحذير «إعادة تعريف» بدل ما تسري.
 #include "secrets.h"
+#include "config.h"
 #include "sandy_ca_roots.h"
 
-// ── Telnet mirror (Serial → WiFi) ───────────────────────────────
+// ── السجل ──────────────────────────────────────────────────────────────────
+//
+// **نسخة التطوير بس بتمرّر السجل ع الشبكة.** مرآة التلنت كانت شغّالة بكل
+// نسخة، بلا كلمة سر، ع منفذ ثلاثة وعشرين — وأي جهاز بالبيت كان بيقرا كل سطر:
+// عناوين، وأوامر، ولحظة تغيير الواي فاي كلمة سرّها كمان. بالنسخة اللي بتنباع
+// السجل ع الكبل وبس.
+#if SANDY_DEV
 WiFiServer g_telnetServer(23);
 WiFiClient g_telnetClient;
+#endif
 
 class MirrorStream : public Print {
  public:
   size_t write(uint8_t c) override {
     Serial.write(c);
+#if SANDY_DEV
     if (g_telnetClient && g_telnetClient.connected()) g_telnetClient.write(c);
+#endif
     return 1;
   }
   size_t write(const uint8_t* buf, size_t n) override {
     Serial.write(buf, n);
+#if SANDY_DEV
     if (g_telnetClient && g_telnetClient.connected()) g_telnetClient.write(buf, n);
+#endif
     return n;
   }
 };
 MirrorStream g_log;
 
+// ── الحارس ─────────────────────────────────────────────────────────────────
+//
+// **ما كان في حارس، وفي عشرة أماكن ممكن تعلّق.** مزامنة الساعة، مصافحة الوسيط،
+// الرفع، تبديل الشبكة، إعادة تشغيل المستشعر، وإيقاف خادم البث وفي حدا بيتفرّج.
+// أي وحدة منهن علقت كانت بتعني لوحًا ميّت لحدّ ما حدا يشيل الفيشة — والفلاش
+// ضايل مشتعل إذا صادف إنه كان شغّال لحظتها، لأنّ مؤقّت الأمان تبعه بيمشي من
+// نفس الحلقة اللي علقت.
+//
+// دقيقة كاملة: أطول انتظار مقصود باللوح (رفع + قراءة الردّ) نصّها. وكل انتظار
+// طويل بيطعم الحارس بنفسه عبر `camWait`، فالحارس ما بيعضّ إلا تعليقًا حقيقيًّا.
+#define CAM_WDT_TIMEOUT_MS 60000
+
+void camWdtFeed() { esp_task_wdt_reset(); }
+
+// `delay` اللي بيطعم الحارس — كل انتظار طويل باللوح لازم يمرق من هون.
+void camWait(unsigned long ms) {
+  unsigned long t0 = millis();
+  while (millis() - t0 < ms) {
+    unsigned long left = ms - (millis() - t0);
+    delay(left > 100 ? 100 : left);
+    esp_task_wdt_reset();
+  }
+}
+
+// ── مخزن الإطار: مستهلك واحد بكل لحظة ────────────────────────────────────
+//
+// المستشعر عنده مخزن إطار **واحد**، وتلات أطراف بتطلبه: الالتقاط بالحلقة،
+// والبث البعيد بالحلقة، وخادم البث المحلي بمهمّته الخاصة. والأخطر: إنعاش
+// المستشعر بيعمل `esp_camera_deinit` — لو صار وخادم البث ماسك إطارًا، الذاكرة
+// بتنسحب من تحت إيده والبورد بيطيح. القفل هون بيخلّي كل واحد ياخد دوره.
+static SemaphoreHandle_t g_camMutex = NULL;
+
+bool camLock(uint32_t waitMs) {
+  if (!g_camMutex) g_camMutex = xSemaphoreCreateMutex();
+  if (!g_camMutex) return false;
+  return xSemaphoreTake(g_camMutex, pdMS_TO_TICKS(waitMs)) == pdTRUE;
+}
+
+void camUnlock() {
+  if (g_camMutex) xSemaphoreGive(g_camMutex);
+}
+
+// **قفل الفلاش بعد انهيار الكهربا — قرار ما بيتغيّر بالإعدادات.**
+//
+// كان بيتطبّق بتصفير وضع الفلاش، وبعد سطرين بترجع الإعدادات المحفوظة وبتكتب
+// فوقه — يعني الحماية كانت بتنلغى قبل أول صورة. علم لحاله ما حدا بيلمسه.
+bool g_flashLockedByBrownout = false;
+
 // ── Cross-file state ────────────────────────────────────────────
 // كل متغيّر بيستعمله أكتر من ملف لازم يكون هون: Arduino بيلزق ملفات الـino
 // ورا بعض أبجدياً بعد الملف الرئيسي، فاللي هون بيسبق الكل.
 void mqttPublishEvent(const char* json);
+bool camValidId(const String& id);
 void flashSet(uint8_t level, unsigned long autoOffMs);
 void flashOff();
 void camRemoteStreamTick();
@@ -134,6 +198,16 @@ void setup() {
   Serial.printf("[BOOT] سبب آخر إقلاع: %s (%d)\n",
                 bootReasonText(g_bootReason), (int)g_bootReason);
 
+  // الحارس قبل أي إشي ممكن يعلّق.
+  esp_task_wdt_config_t wdt = {};
+  wdt.timeout_ms = CAM_WDT_TIMEOUT_MS;
+  wdt.idle_core_mask = 0;
+  wdt.trigger_panic = true;
+  if (esp_task_wdt_reconfigure(&wdt) != ESP_OK) esp_task_wdt_init(&wdt);
+  esp_task_wdt_add(NULL);
+
+  g_camMutex = xSemaphoreCreateMutex();
+
   settingsInit();
   flashInit();
 
@@ -147,7 +221,7 @@ void setup() {
   // فبنقطع الحلقة: أول التقاط بعد الانهيار بيصير بلا فلاش. صورة أعتم أحسن من
   // لوح بيختفي، والمالك بيقرا السبب بالسجل بدل ما يخمّن.
   if (g_bootReason == ESP_RST_BROWNOUT) {
-    g_flashMode = FLASH_MODE_OFF;
+    g_flashLockedByBrownout = true;
     Serial.println("[BOOT] ⚠️ الفلاش متوقّف مؤقّتًا — آخر إقلاع كان انهيار كهربا. "
                    "بدّه مزوّد خمس فولت بأمبيرين ومكثّف ألف ميكرو.");
   }
@@ -176,17 +250,21 @@ void setup() {
   // بتعلّق بلا رسالة خطأ، فمنطبع القياس هون عشان يبان السبب فوراً.
   Serial.printf("[MEM] psram=%s free=%u largest_block=%u\n",
                 psramFound() ? "yes" : "no",
-                ESP.getFreeHeap(),
-                heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
 void loop() {
   ensureWiFiConnected();
   startNetworkServicesIfReady();
 
+  esp_task_wdt_reset();
+
   if (g_networkServicesStarted) {
+#if SANDY_DEV
     ArduinoOTA.handle();
     updateTelnet();
+#endif
     updateMQTT();
     camHttpTick();
     camRemoteStreamTick();
@@ -210,7 +288,9 @@ void loop() {
 
   // سلسلة لقطات: لقطة كل فترة. الدماغ بيلف الرقبة بين الوحدة والتانية،
   // فبتطلع بانوراما بلقطات مرقّمة بنفس المعرّف.
-  if (g_burstRemaining > 0 && millis() >= g_burstNextAtMs) {
+  // مقارنة بالفرق، مش بالقيمة: العدّاد بيلفّ بعد تسعة وأربعين يوم تشغيل،
+  // والمقارنة المباشرة وقتها بتطلق اللقطات كلها مرّة وحدة أو بتوقفها.
+  if (g_burstRemaining > 0 && (long)(millis() - g_burstNextAtMs) >= 0) {
     String frameId = g_burstBaseId + "-" + String(g_burstIndex);
     captureAndPublishSnapshot(frameId, g_snapshotSettleMs, g_snapshotFlash);
     g_burstIndex++;

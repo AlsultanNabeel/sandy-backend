@@ -65,3 +65,39 @@ def test_no_camera_key_outside_the_pairing_window(client):
     d["sandy_device_keys"].delete_many({})
     r = _post(c, SHARED)
     assert r.status_code == 200 and "device_key" not in r.get_json()
+
+
+def _post_v2(c, key, body=JPEG, node="8421", req="live", ts=None, tamper=None):
+    """The current firmware: the body's hash is inside the signature."""
+    ts = ts or str(int(time.time() * 1000))
+    digest = hashlib.sha256(body).hexdigest()
+    sig = hmac.new(key, f"{node}{req}{ts}{digest}".encode(), hashlib.sha256).hexdigest()
+    h = {"X-Sandy-Node": node, "X-Sandy-Req": req, "X-Sandy-Ts": ts,
+         "X-Sandy-Sig": sig, "X-Sandy-Body-Sha256": digest,
+         "Content-Type": "image/jpeg"}
+    return c.post("/api/cam/upload", data=tamper or body, headers=h)
+
+
+def test_the_signature_covers_the_picture(client):
+    """Swap the image on the way and keep the signature: refused."""
+    c, _ = client
+    assert _post_v2(c, SHARED).status_code == 200
+    forged = b"\xff\xd8" + b"y" * 200
+    r = _post_v2(c, SHARED, tamper=forged)
+    assert r.status_code == 401, "a replaced picture passed with the old signature"
+
+
+def test_the_same_upload_twice_is_a_replay(client):
+    c, _ = client
+    ts = str(int(time.time() * 1000))
+    assert _post_v2(c, SHARED, ts=ts).status_code == 200
+    r = _post_v2(c, SHARED, ts=ts)
+    assert r.status_code == 401 and r.get_json()["error"] == "replay"
+
+
+def test_ids_and_size_are_checked_before_anything_else(client):
+    c, _ = client
+    assert _post_v2(c, SHARED, req="a\"b;x").status_code == 400
+    assert _post_v2(c, SHARED, node="../etc").status_code == 400
+    huge = b"\xff\xd8" + b"z" * (600 * 1024)
+    assert _post_v2(c, SHARED, body=huge).status_code == 413

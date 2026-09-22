@@ -85,7 +85,9 @@ def test_each_board_keeps_its_own_signal_strength(db):
     ingest = _read("cloud/app/integrations/mqtt_ingest.py")
     room = ingest[ingest.index("def _ingest_room_status"):]
     assert 'f"room_{k}"' in room, "the room node's telemetry is not namespaced"
-    assert '"rssi"' in room.split("telemetry=")[1][:200]
+    room_fn = room[room.index("def _ingest_room_status"):]
+    assert '"rssi"' in room_fn[:room_fn.index("ingest_status(\n")], (
+        "the room node's signal strength is no longer forwarded")
 
 def test_the_warning_distinguishes_a_weak_radio_from_a_stalled_link():
     """The old single state told the owner to move closer to the router. When

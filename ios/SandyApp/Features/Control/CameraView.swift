@@ -32,6 +32,7 @@ struct CameraView: View {
     /// كل خمس ثواني — فالبثّ كان بيوجّه ع الدماغ نص الوقت، والدماغ ما عنده
     /// خادم صور. فشل مرّة من كل مرّتين بلا سبب ظاهر.
     private var localIP: String { node.telemetry?.camIP ?? "" }
+    private var streamKey: String { node.telemetry?.camStreamKey ?? "" }
 
     var body: some View {
         ScrollView {
@@ -104,7 +105,14 @@ struct CameraView: View {
             }
             photo = image
         } catch {
-            notice = lang.s("robot.control.camera.failed")
+            // الكاميرا صارت تقول ليش ما في صورة. سبب معروف بجملته، والباقي
+            // بالجملة العامة.
+            let code = (error as? APIError)?.code ?? ""
+            let known = ["camera_init_failed_at_boot", "capture_failed",
+                         "upload_failed", "camera_busy"]
+            notice = known.contains(code)
+                ? lang.s("robot.control.camera.error.\(code)")
+                : lang.s("robot.control.camera.failed")
         }
     }
 
@@ -118,11 +126,11 @@ struct CameraView: View {
                 .font(Theme.Typography.caption)
                 .foregroundColor(Theme.Colors.secondaryText)
 
-            if localIP.isEmpty {
-                // ما وصلنا عنوانها بعد. نقولها بدل ما نعرض مربّع أسود بيبيّن
-                // كأن البث خربان.
-                SandyNotice(lang.s("robot.control.camera.stream.noAddress"), kind: .gentleWarning)
-            } else if streaming {
+            // **البعيد ما بيحتاج عنوانًا محليًّا.** كان الشرط هون «ما في عنوان ←
+            // ما في بث»، فكاميرا لسا ما بعتت عنوانها — أو إنت برّا البيت أصلًا —
+            // ما كانت تعرض زرّ البث ولا مرّة، مع إنّ البث عبر الخادم ما إله علاقة
+            // بالعنوان. `LiveView` بيقرّر: محلي لو وصلّه، بعيد غير هيك.
+            if streaming {
                 // **المحلي أولًا، والبعيد لمّا ما توصله.**
                 //
                 // المحلي بيمشي من الكاميرا لتلفونك مباشرة: سلس وبلا تأخير،
@@ -132,7 +140,7 @@ struct CameraView: View {
                 // والاختيار مش عليك. كنّا منعرض المحلي دايمًا، فالمستخدم برّا
                 // البيت بيشوف مربّعًا فاضيًا ويفكّر إنّ الكاميرا خربانة — وهي
                 // شغّالة، بس ع عنوان ما بيوصله من هناك.
-                LiveView(localIP: localIP, nodeId: node.nodeId)
+                LiveView(localIP: localIP, streamKey: streamKey, nodeId: node.nodeId)
                     .environmentObject(state)
                     .aspectRatio(4.0 / 3.0, contentMode: .fit)
                     .cornerRadius(Theme.Radius.card)
@@ -147,9 +155,11 @@ struct CameraView: View {
                     Task { await startStream() }
                 }
                 .disabled(starting)
-                Text(String(format: lang.s("robot.control.camera.stream.address"), localIP))
-                    .font(Theme.Typography.caption.monospacedDigit())
-                    .foregroundColor(Theme.Colors.tertiaryText)
+                if !localIP.isEmpty {
+                    Text(String(format: lang.s("robot.control.camera.stream.address"), localIP))
+                        .font(Theme.Typography.caption.monospacedDigit())
+                        .foregroundColor(Theme.Colors.tertiaryText)
+                }
             }
         }
     }
@@ -199,9 +209,21 @@ struct CameraView: View {
 private struct LiveView: View {
     @EnvironmentObject var state: AppState
     let localIP: String
+    let streamKey: String
     let nodeId: String
 
     @State private var mode: Mode = .probing
+
+    /// عنوان محلي بالمفتاح. الكاميرا بترفض أي طلب بلاه.
+    private func localURL(_ path: String) -> URL? {
+        guard !localIP.isEmpty, !streamKey.isEmpty else { return nil }
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = localIP
+        c.path = path
+        c.queryItems = [URLQueryItem(name: "key", value: streamKey)]
+        return c.url
+    }
     @State private var frame: UIImage?
 
     private enum Mode { case probing, local, remote }
@@ -210,7 +232,7 @@ private struct LiveView: View {
         Group {
             switch mode {
             case .local:
-                MJPEGView(url: URL(string: "http://\(localIP)/stream"))
+                MJPEGView(url: localURL("/stream"))
             case .remote:
                 if let frame {
                     Image(uiImage: frame).resizable().scaledToFit()
@@ -241,16 +263,18 @@ private struct LiveView: View {
     /// هل الكاميرا موصولة من هون؟ سؤال بمهلة قصيرة — الجواب «لأ» بييجي بسرعة
     /// ع شبكة تانية، والمستخدم ما بيستنّى عشان يعرف إنه برّا البيت.
     private func reachable() async -> Bool {
-        guard !localIP.isEmpty,
-              let url = URL(string: "http://\(localIP)/") else { return false }
+        // `/status` بالمفتاح: «ردّ» ما عاد بيكفّي — لازم يردّ **بنعم**. قبل،
+        // أي جواب (حتى «مش موجود») كان بيعدّ وصولًا، فراوتر تاني ع نفس العنوان
+        // بشبكة تانية كان بيخلّي التطبيق يفتح بثًّا محليًّا ع جهاز غلط.
+        guard let url = localURL("/status") else { return false }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2
-        req.httpMethod = "HEAD"
         // The robot on the local network, not the backend — so it keeps the
         // shared session deliberately: `waitsForConnectivity` would hold a
         // reachability probe open instead of answering "not reachable", which
         // is the one thing this call exists to find out.
-        return (try? await URLSession.shared.data(for: req)) != nil
+        guard let (_, resp) = try? await URLSession.shared.data(for: req) else { return false }
+        return (resp as? HTTPURLResponse)?.statusCode == 200
     }
 }
 

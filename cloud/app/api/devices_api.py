@@ -28,6 +28,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from flask import Response, jsonify, request
@@ -43,6 +44,41 @@ logger = logging.getLogger(__name__)
 
 def _is_guest(claims) -> bool:
     return claims.get("role") == "guest"
+
+
+# رفع الكاميرا: شكل المعرّفات، وسقف الحجم، وبصمات التواقيع المستعملة.
+_CAM_NODE_RE = re.compile(r"[a-z0-9]{1,32}")
+_CAM_REQ_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
+_CAM_MAX_UPLOAD_BYTES = 512 * 1024
+_CAM_NONCES = "cam_upload_nonces"
+
+
+def _cam_signature_fresh(sig: str) -> bool:
+    """True the first time a signature is seen within the replay window.
+
+    In the database, not in memory: two workers each keeping their own set
+    would let a replay through on the one that has not seen it. A database
+    that is down does not stop uploads — the timestamp window still holds.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from pymongo.errors import DuplicateKeyError, PyMongoError
+
+    from app.db import get_db
+
+    db = get_db()
+    if db is None:
+        return True
+    try:
+        db[_CAM_NONCES].insert_one({
+            "_id": sig[:80],
+            "expire_at": datetime.now(timezone.utc) + timedelta(minutes=3),
+        })
+        return True
+    except DuplicateKeyError:
+        return False
+    except PyMongoError:
+        return True
 
 
 def _bad(error: str, extra: dict | None = None, code: int = 400):
@@ -309,7 +345,11 @@ def register_devices_api(app, mongo_db=None):
         is more machinery than the wait is worth.
         """
         from app.features.node_store import get_node
-        from app.integrations.camera_client import fetch_snapshot, start_snapshot
+        from app.integrations.camera_client import (
+            fetch_snapshot,
+            fetch_snapshot_error,
+            start_snapshot,
+        )
 
         if get_node(node_id) is None:
             return _bad("not_found", code=404)
@@ -336,6 +376,9 @@ def register_devices_api(app, mongo_db=None):
             jpeg = fetch_snapshot(node_id, req_id)
             if jpeg:
                 return Response(jpeg, mimetype="image/jpeg")
+            failed = fetch_snapshot_error(node_id, req_id)
+            if failed:
+                return jsonify(failed), 502
             time.sleep(0.3)
         return jsonify({"pending": True, "req_id": req_id}), 202
 
@@ -389,6 +432,17 @@ def register_devices_api(app, mongo_db=None):
                 "(node=%s req=%s ts=%s sig=%s)",
                 bool(node_id), bool(req_id), bool(ts), bool(sig))
             return _bad("missing_headers")
+        # الشكل قبل أي إشي تاني: المعرّفات بتنحفظ مفاتيحًا بالصندوق وبتنكتب
+        # بالسجل، ومعرّف بطول كيلو أو فيه رموز بيوصل للاتنين.
+        if not (_CAM_NODE_RE.fullmatch(node_id) and _CAM_REQ_RE.fullmatch(req_id)):
+            logger.warning("[cam] upload rejected: malformed node/request id")
+            return _bad("bad_id")
+        # والحجم قبل ما نقرا الجسم: صورة هالمستشعر عشرات الكيلوبايت، وبلا سقف
+        # أي حدا معه المفتاح المشترك بيقدر يبعت ميغات ويحجز خيط الخادم.
+        if (request.content_length or 0) > _CAM_MAX_UPLOAD_BYTES:
+            logger.warning("[cam] upload rejected: %s bytes is too big",
+                           request.content_length)
+            return _bad("too_large", code=413)
 
         # كل رفض بينكتب بالسجل مع سببه.
         #
@@ -425,16 +479,40 @@ def register_devices_api(app, mongo_db=None):
                         "has its own key", node_id)
             return _bad("auth_fail", code=401)
 
-        expected = _hmac.new(key, f"{node_id}{req_id}{ts}".encode(),
-                             hashlib.sha256).hexdigest()
+        jpeg = request.get_data(cache=False)
+        if len(jpeg) > _CAM_MAX_UPLOAD_BYTES:
+            return _bad("too_large", code=413)
+
+        # **التوقيع بيغطّي الصورة نفسها.** كان بيغطّي المعرّف والوقت بس، فأي
+        # حدا بيلقط رفعة ع الطريق كان بيقدر يبدّل الصورة ويبعتها بنفس التوقيع
+        # خلال الدقيقتين. البرنامج الجديد بيبعت بصمة الجسم ضمن الموقَّع؛ القديم
+        # (بلا بصمة) لسا مقبول لحدّ ما تنحرق كل الكاميرات، وبينكتب تحذير.
+        body_hash = (request.headers.get("X-Sandy-Body-Sha256") or "").strip().lower()
+        if body_hash:
+            if not _hmac.compare_digest(hashlib.sha256(jpeg).hexdigest(), body_hash):
+                logger.warning("[cam] upload rejected: body does not match its hash")
+                return _bad("auth_fail", code=401)
+            signed = f"{node_id}{req_id}{ts}{body_hash}"
+        else:
+            logger.warning("[cam] %s signs without a body hash — old firmware", node_id)
+            signed = f"{node_id}{req_id}{ts}"
+        expected = _hmac.new(key, signed.encode(), hashlib.sha256).hexdigest()
         if not _hmac.compare_digest(expected, sig):
             logger.warning(
                 "[cam] upload rejected: bad signature for %s", node_id)
             return _bad("auth_fail", code=401)
+
+        # **مرّة وحدة لكل توقيع.** نافذة الدقيقتين كانت بتسمح بإعادة نفس الرفعة
+        # الملقوطة قدّ ما بدّك. البصمة بتنحفظ لحدّ ما تطلع من النافذة.
+        # المفتاح = التوقيع + بصمة الجسم: البرنامج القديم ما بيوقّع الجسم ووقته
+        # بدقّة الثانية، فإطارين بنفس الثانية إلهم نفس التوقيع وصورتين مختلفتين
+        # — مش إعادة. الإعادة هي نفس التوقيع ع نفس البايتات.
+        if not _cam_signature_fresh(sig + hashlib.sha256(jpeg).hexdigest()[:16]):
+            logger.warning("[cam] upload rejected: replayed signature for %s", node_id)
+            return _bad("replay", code=401)
         if own_key and record["state"] == "issued":
             confirm_key(kid)
 
-        jpeg = request.get_data(cache=False)
         # A JPEG starts FF D8. Checking it here means a truncated or misrouted
         # body is refused at the door rather than stored and served as a broken
         # image later, which is far harder to trace back to this moment.
@@ -472,13 +550,18 @@ def register_devices_api(app, mongo_db=None):
         waiting for them.
         """
         from app.features.node_store import get_node
-        from app.integrations.camera_client import fetch_snapshot
+        from app.integrations.camera_client import fetch_snapshot, fetch_snapshot_error
 
         if get_node(node_id) is None:
             return _bad("not_found", code=404)
         jpeg = fetch_snapshot(node_id, req_id)
         if jpeg:
             return Response(jpeg, mimetype="image/jpeg")
+        # الكاميرا قالت إنّ الصورة مش جاية — ليش، بكلام بيفهمه صاحبها، بدل
+        # أربعين ثانية انتظار و«ما في صورة».
+        failed = fetch_snapshot_error(node_id, req_id)
+        if failed:
+            return jsonify(failed), 502
         return jsonify({"pending": True, "req_id": req_id}), 202
 
     @app.route("/api/devices/<name>/ir-learn", methods=["POST"])

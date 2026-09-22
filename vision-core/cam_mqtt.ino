@@ -14,9 +14,8 @@ static unsigned long    g_lastMqttAttemptMs = 0;
 static unsigned long g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;
 #define MQTT_BACKOFF_MAX_MS 60000
 
-// Rate limit / safety: حد أدنى للفترة بين طلبات snapshot — حماية من الحرارة + spam
-#define SNAPSHOT_MIN_GAP_MS  1500
-static unsigned long g_lastSnapshotAtMs = 0;
+const char* camStreamKey();
+bool camCommandAllowed();
 
 // ===== هوية العقدة =====
 // المواضيع بتنبنى مرة وحدة عند الإقلاع من كود الاقتران، بنفس التحويل تبع
@@ -69,7 +68,10 @@ static bool handleSimpleOutput(const String& out, const String& value) {
     return true;
   }
   if (out == "flash_level") {
-    handleCamCommand(String("{\"cmd\":\"flash\",\"state\":\"on\",\"level\":") + value + "}");
+    // **الشدّة بس، مش «اشعل».** كل حركة بالمنزلق كانت بتشعل الفلاش تمان ثواني
+    // وبتحفظ القيمة — يعني تضبيط الشدّة كان يعني تشغيله. هلّق بيتحفظ المستوى
+    // للّقطات الجاية، والتشغيل إله زرّه.
+    handleCamCommand(String("{\"cmd\":\"flash_level\",\"level\":") + String(value.toInt()) + "}");
     return true;
   }
   if (out == "flash_mode") {
@@ -77,7 +79,7 @@ static bool handleSimpleOutput(const String& out, const String& value) {
     return true;
   }
   if (out == "snapshot") {
-    handleCamCommand(String("{\"cmd\":\"snapshot\",\"id\":\"") + String(millis()) + "\"}");
+    handleCamCommand(String("{\"cmd\":\"snapshot\",\"id\":\"m") + String(millis()) + "\"}");
     return true;
   }
   if (out == "stream") {
@@ -114,16 +116,17 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String value;
   value.reserve(length);
   for (unsigned int i = 0; i < length; i++) value += (char)payload[i];
-  // مقصوص عند مئة وعشرين حرفًا. سطر السجل نفسه كان جزءًا من البطء: حمولة
-  // القطعة حوالي ألف وأربعمية حرف، وطباعتها كاملة عبر التسلسلي/التلنت بتوقف
-  // الحلقة الرئيسية. وما بتضيف معلومة — أول مئة حرف بتقول أي رسالة هي.
-  if (length > 120) {
-    g_log.printf("[MQTT] %s = %.120s… (%u بايت)\n", topic, value.c_str(), length);
-  } else {
-    g_log.printf("[MQTT] %s = %s\n", topic, value.c_str());
-  }
 
   String t(topic);
+
+  // **رسالة الشبكة ما بتنكتب بالسجل أبدًا** — فيها كلمة سر الواي فاي. كانت
+  // بتنطبع كاملة لأنها قصيرة، وتروح للتسلسلي وللتلنت المفتوح. الباقي بيطلع
+  // مقصوص: أول ستين حرف بيقولوا أي رسالة هي.
+  if (t == g_topicWifi) {
+    g_log.printf("[MQTT] %s (%u بايت، المحتوى مخفي)\n", topic, length);
+  } else {
+    g_log.printf("[MQTT] %s = %.60s%s\n", topic, value.c_str(), length > 60 ? "…" : "");
+  }
 
   // قناة الأوامر: كل قدرات الكاميرا (فلاش، إعدادات، بث، سلسلة لقطات)
   if (t == g_topicWifi) {
@@ -131,8 +134,17 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // ما بيقدر يكون جوّا اسم شبكة ولا كلمة سر.
     int nl = value.indexOf('\n');
     if (nl < 0) { g_log.println("[WIFI] no password line"); return; }
-    g_wifiSsid = value.substring(0, nl);
-    g_wifiPass = value.substring(nl + 1);
+    String ssid = value.substring(0, nl);
+    String pass = value.substring(nl + 1);
+    // حدود المعيار نفسه: اسم الشبكة لحدّ اثنين وثلاثين بايت، وكلمة السر إمّا فاضية
+    // (شبكة مفتوحة) أو من تمانية لأربعة وستّين. غير هيك بنرفض بدل ما نقصّ بصمت.
+    if (ssid.length() == 0 || ssid.length() > 32 || pass.length() > 64 ||
+        (pass.length() > 0 && pass.length() < 8)) {
+      g_log.println("[WIFI] ignored — ssid/password outside the Wi-Fi limits");
+      return;
+    }
+    g_wifiSsid = ssid;
+    g_wifiPass = pass;
     g_wifiPending = true;
     g_log.printf("[WIFI] switch queued -> '%s'\n", g_wifiSsid.c_str());
     return;
@@ -144,33 +156,9 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   }
 
   if (t == g_topicRequest) {
-    g_log.println("[CB] matched cam/request");
-    unsigned long now = millis();
-    if (g_snapshotPending) {
-      g_log.println("[CAM] snapshot already pending — ignoring duplicate request");
-      return;
-    }
-    if (g_lastSnapshotAtMs && now - g_lastSnapshotAtMs < SNAPSHOT_MIN_GAP_MS) {
-      g_log.printf("[CAM] rate-limited — last snap was %lums ago\n", now - g_lastSnapshotAtMs);
-      return;
-    }
-    g_lastSnapshotAtMs = now;
-
-    String id;
-    int idx = value.indexOf("\"id\":\"");
-    if (idx < 0) idx = value.indexOf("\"id\": \"");
-    if (idx >= 0) {
-      int start = value.indexOf("\"", idx + 4) + 1;
-      int end = value.indexOf("\"", start);
-      if (end > start) id = value.substring(start, end);
-    }
-    if (id.length() == 0) id = String(millis());
-    g_currentRequestId = id;
-    // الطلب البسيط بيمشي على الوضع المحفوظ للفلاش وبلا انتظار
-    g_snapshotSettleMs = 0;
-    g_snapshotFlash = g_flashMode;
-    g_snapshotPending = true;
-    g_log.printf("[CAM] snapshot requested id=%s\n", id.c_str());
+    // الصيغة القديمة للطلب — بتمرق بنفس مسار الأوامر، فالحدود والتحقّق واحد.
+    handleCamCommand(String("{\"cmd\":\"snapshot\",\"id\":\"") +
+                     jsonStr(value, "id", String("r") + String(millis())) + "\"}");
   } else {
     // آخر مقطع من الموضوع هو اسم المخرج. النبضة تبعتنا بترجع علينا بنفس
     // الشجرة، فلازم تُتجاهل صراحة وإلا فُسّرت كأمر.
@@ -191,6 +179,10 @@ void setupMQTT() {
   // بنتحقّق من شهادة الوسيط — بلاها أي حدا ع نفس الشبكة بيقدر يعمل حاله
   // الوسيط ويطلب صور، أو يسمع كل إشي.
   g_mqttTcp.setCACert(SANDY_CA_ROOTS);
+  // مصافحة عالقة كانت بتستنّى دقيقتين (الافتراضي) — أطول من الحارس، يعني
+  // إعادة تشغيل بدل إعادة محاولة. خمستعش ثانية بتكفّي أي مصافحة سليمة.
+  g_mqttTcp.setHandshakeTimeout(15);
+  g_mqttTcp.setTimeout(15000);
   g_mqtt.setServer(SANDY_MQTT_HOST, SANDY_MQTT_PORT);
   g_mqtt.setCallback(mqttCallback);
   g_mqtt.setBufferSize(MQTT_BUFFER_SIZE);  // كبير لاستيعاب chunks
@@ -209,8 +201,12 @@ static bool mqttReconnect() {
   camSyncClock();
   if (!camClockReady()) return false;
 
-  String clientId = "sandy-cam-";
-  clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
+  // **المعرّف من العنوان كامل، مش نصّه.** كان من أوطى أربع بايتات، وتلاتة منهم
+  // بادئة المصنّع — يعني بايت واحد بيفرّق، ومئتين وستّة وخمسين قيمة للأسطول
+  // كله. كاميرتين عند زبونين بنفس البايت كانوا بيطردوا بعض من الوسيط بحلقة.
+  char macHex[13];
+  snprintf(macHex, sizeof(macHex), "%012llx", (unsigned long long)ESP.getEfuseMac());
+  String clientId = "sandy-cam-" + camNodeId() + "-" + String(macHex);
 
   // نفرّق بين فشل ترجمة الاسم وفشل المصافحة المشفّرة — الاثنين بيرجّعوا نفس الرقم
   // ملاحظة: hostByName بترجع "نجاح" مع عنوان صفري لو خدمة الأسماء لسا مش جاهزة
@@ -226,13 +222,21 @@ static bool mqttReconnect() {
   g_log.printf("[MQTT] dns ok → %s\n", brokerIp.toString().c_str());
 
   g_log.printf("[MQTT] connecting as %s (free=%u largest=%u) ...\n",
-               clientId.c_str(), ESP.getFreeHeap(),
-               heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  if (g_mqtt.connect(clientId.c_str(), SANDY_MQTT_USER, SANDY_MQTT_PASS)) {
+               clientId.c_str(), (unsigned)ESP.getFreeHeap(),
+               (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  // **وصيّة عند الوسيط:** لو انقطعت الكهربا أو الشبكة، الوسيط بينشر «طفيت»
+  // باسمنا. قبلها التطبيق كان بيشوف الكاميرا متّصلة لحدّ ما يقدم آخر نبض —
+  // وكاميرا مطفية بتبيّن شغّالة هي أسوأ من كاميرا بتقول إنها مطفية.
+  static const char* kWillMsg = "{\"online\":false}";
+  if (g_mqtt.connect(clientId.c_str(), SANDY_MQTT_USER, SANDY_MQTT_PASS,
+                     g_topicStatus.c_str(), 1, true, kWillMsg)) {
     g_log.println("[MQTT] connected");
-    g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
-    g_mqtt.subscribe(g_topicCommand.c_str(), 0);
-    g_mqtt.subscribe(g_topicWifi.c_str(), 0);
+    // الوصيّة محفوظة عند الوسيط، فلازم نمسحها بـ«شغّالة» محفوظة كمان — وإلا أي
+    // مشترك جديد بيلاقي «طفيت» القديمة.
+    g_mqtt.publish(g_topicStatus.c_str(), "{\"online\":true}", true);
+    bool subOk = g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
+    subOk = g_mqtt.subscribe(g_topicCommand.c_str(), 0) && subOk;
+    subOk = g_mqtt.subscribe(g_topicWifi.c_str(), 0) && subOk;
     // مخارج الكاميرا البسيطة — **بالاسم، مش `cam/+`**.
     //
     // الشجرة وحدة: اللوح بينشر تحت `cam/` وبيسمع تحت `cam/`. فاشتراك بنجمة
@@ -246,14 +250,21 @@ static bool mqttReconnect() {
     // ثانية، والخادم بيستنّى خمستعش. وكل إعادة محاولة بتضيف تمن قطع صدى تانية،
     // فالتأخير بيكبر مع كل ضغطة.
     //
-    // ولاحظ: `snapshot` مش هون. اللوح بينشر القطع عليه، فالاشتراك عليه صدى
-    // محض — وكان متجاهلًا أصلًا، يعني ما اشتغل ولا مرّة كزرّ.
+    // والنبضة بتعلن `snapshot` و`quality` كأزرار، فلازم نسمع عليهم — كانوا
+    // معلنين وما حدا سامع، فالتطبيق بيعرض أزرارًا ما بتعمل إشي. الصورة ما عادت
+    // بتنبعت ع `snapshot` (بترتفع للخادم)، فما في صدى.
     static const char* kSimpleOutputs[] = {
-      "flash", "flash_level", "flash_mode", "stream", "framesize"
+      "flash", "flash_level", "flash_mode", "stream", "framesize", "snapshot", "quality"
     };
     String base = String(SANDY_TOPIC_ROOT) + camNodeId() + "/cam/";
     for (const char* out : kSimpleOutputs) {
-      g_mqtt.subscribe((base + out).c_str(), 0);
+      subOk = g_mqtt.subscribe((base + out).c_str(), 0) && subOk;
+    }
+    if (!subOk) {
+      // متّصلة وما بتسمع أوامر أسوأ من مقطوعة: بتبيّن شغّالة. نقطع ونعيد.
+      g_log.println("[MQTT] subscribe refused — reconnecting");
+      g_mqtt.disconnect();
+      return false;
     }
     g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;   // نجحنا → رجّع الانتظار لأصله
     publishFullStatus();                     // أول ما نتصل: عرّف عن حالك كاملة
@@ -302,10 +313,19 @@ static void publishCamStatus() {
   // بدونه، «بتعمل ريستارت» بتحتاج كبل وحظّ: لازم تكون شابك ومتفرّج بالثانية
   // اللي صار فيها. وهي بتنشره كل عشر ثواني، فالسبب بيوصلك وإنت بعيد — والأهمّ
   // إنه بيوصل **بعد** ما يصير، مش وقتها.
-  char buf[600];
-  snprintf(buf, sizeof(buf),
+  // `stream_key`: مفتاح البث المحلي. بيوصل الخادم وبس، والخادم بيعطيه لصاحب
+  // الروبوت — هيك التطبيق بيقدر يفتح البث، وجهاز غريب بالبيت ما بيقدر.
+  // واسم الشبكة بيتهرّب: اسم فيه علامة تنصيص كان بيكسر النبضة كلها.
+  String ssidEsc;
+  for (const char* c = camSsid(); *c; c++) {
+    if (*c == '"' || *c == '\\') ssidEsc += '\\';
+    if ((unsigned char)*c >= 0x20) ssidEsc += *c;
+  }
+  char buf[760];
+  int n = snprintf(buf, sizeof(buf),
            "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"psram\":%u,"
            "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s,\"boot\":%d,"
+           "\"fw\":\"%s\",\"stream_key\":\"%s\",\"online\":true,"
            "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"%s\","
            "\"outputs\":[{\"id\":\"flash\",\"kind\":\"relay\"},"
            "{\"id\":\"flash_level\",\"kind\":\"pwm\"},"
@@ -316,19 +336,24 @@ static void publishCamStatus() {
            "{\"id\":\"quality\",\"kind\":\"pwm\"}]}",
            now / 1000,
            WiFi.RSSI(),
-           ESP.getFreeHeap(),
-           ESP.getFreePsram(),
+           (unsigned)ESP.getFreeHeap(),
+           (unsigned)ESP.getFreePsram(),
            g_cameraReady ? "true" : "false",
            flashIsOn() ? "true" : "false",
            camHttpRunning() ? "true" : "false",
            (int)camBootReason(),
-           WiFi.localIP().toString().c_str(), camSsid(),
+           SANDY_CAM_FW_VERSION, camStreamKey(),
+           WiFi.localIP().toString().c_str(), ssidEsc.c_str(),
            SANDY_CAM_BOARD_ID);
+  if (n <= 0 || n >= (int)sizeof(buf)) {
+    g_log.println("[HB] heartbeat did not fit — skipped");
+    return;
+  }
   g_mqtt.publish(g_topicStatus.c_str(), buf, false);
 
   // heartbeat واضح ع التيلنت — يأكد إنو الـ loop شغّال
   g_log.printf("[HB] up=%lus rssi=%d heap=%u cam=%s mqtt=ok\n",
-               now / 1000, WiFi.RSSI(), ESP.getFreeHeap(),
+               now / 1000, WiFi.RSSI(), (unsigned)ESP.getFreeHeap(),
                g_cameraReady ? "yes" : "NO");
 }
 
@@ -345,21 +370,6 @@ void updateMQTT() {
   if (!g_mqtt.connected()) { mqttReconnect(); return; }
   g_mqtt.loop();
   publishCamStatus();
-}
-
-// دورة واحدة للمكتبة — بتنادى بين قطع الصورة.
-//
-// حلقة النشر بتشتغل خارج `loop()` الرئيسية، يعني `g_mqtt.loop()` ما بينادى
-// طول الإرسال. والمكتبة بتحتاجه: بيفضّي المقبس، وبيردّ ع نبضة الوسيط. بدونه
-// الإرسال بيصير كتابة عمياء لثانية كاملة — والوسيط بيشوف لوحًا سكت فجأة.
-void mqttServiceOnce() {
-  if (g_mqtt.connected()) g_mqtt.loop();
-}
-
-// تُستخدم من cam_capture.ino لنشر chunk
-bool mqttPublishChunk(const char* payload, unsigned int len) {
-  if (!g_mqtt.connected()) return false;
-  return g_mqtt.publish(g_topicSnapshot.c_str(), (const uint8_t*)payload, len, false);
 }
 
 void mqttPublishEvent(const char* json) {

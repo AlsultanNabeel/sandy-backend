@@ -137,6 +137,13 @@ _TELEMETRY_KEYS = {
     # الكاميرا لجهازك، فكان بيوجّه ع الدماغ نص الوقت — والدماغ ما عنده خادم
     # صور. فشل مرّة من كل مرّتين وما إله نمط يفسّره.
     "cam_ip": str, "cam_board": str, "cam_ssid": str,
+    # نسخة برنامج الكاميرا، وهل هي متّصلة (من نبضتها أو من وصيّتها عند الوسيط)،
+    # ومفتاح البث المحلي — عشوائي كل إقلاع، والتطبيق بيحطّه بعنوان البث. من
+    # غيره خادم البث بيرفض أي حدا، وهاد المقصود: جهاز غريب بالبيت ما بيعرفه.
+    "cam_fw": str, "cam_online": bool, "cam_stream_key": str,
+    # نفس الشي لعقدة الغرفة.
+    "room_ip": str, "room_board": str, "room_light": str,
+    "room_fw": str, "room_online": bool, "room_uptime_s": int, "room_heap": int,
     # اسم الشبكة اللي اللوح عليها. بيروح للتطبيق عشان تشوف الوضع قبل ما تغيّره،
     # وعشان النتيجة بعد التغيير تكون مقروءة من نفس المكان: اللوح اللي انتقل
     # بيقول الاسم الجديد، واللي رجع لحاله بيقول القديم. رسالة نجاح منفصلة كانت
@@ -567,13 +574,19 @@ def get_node_any_tenant(node_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def ingest_status(node_id: str, online: bool = True,
+def ingest_status(node_id: str, online: Optional[bool] = True,
                   capabilities: Optional[List[str]] = None,
                   outputs: Optional[List[Dict[str, Any]]] = None,
                   firmware_version: str = "",
                   telemetry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Heartbeat update keyed by node_id (the firmware publishes by node_id, not
-    code). Cross-tenant lookup on the raw collection; best-effort, never raises."""
+    code). Cross-tenant lookup on the raw collection; best-effort, never raises.
+
+    ``online=None`` leaves the node's own online state and ``last_seen`` alone:
+    the camera and the room node report on themselves (``cam_online``,
+    ``room_online``), and only the brain's heartbeat says whether *the robot* is
+    up.
+    """
     if get_db() is None:
         return {"ok": False, "error": "no_store"}
     try:
@@ -587,7 +600,10 @@ def ingest_status(node_id: str, online: bool = True,
             # is powered on and shouting its node_id into the broker, waiting for
             # someone to type its code. Nothing to do until then.
             return {"ok": False}
-        update: Dict[str, Any] = {"online": bool(online), "last_seen": _now()}
+        update: Dict[str, Any] = {}
+        if online is not None:
+            update["online"] = bool(online)
+            update["last_seen"] = _now()
         if capabilities is not None:
             update["capabilities"] = _clean_caps(capabilities)
         if isinstance(outputs, list):
@@ -596,6 +612,8 @@ def ingest_status(node_id: str, online: bool = True,
             update["firmware_version"] = str(firmware_version)[:32]
         if telemetry is not None:
             update["telemetry"] = _merge_telemetry(current, telemetry)
+        if not update:
+            return {"ok": True}
         r = get_db()[_COLL].update_one({"node_id": node_id}, {"$set": update})
         if r.matched_count == 0:
             return {"ok": False}   # unpaired between the read and the write

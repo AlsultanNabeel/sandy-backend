@@ -65,11 +65,55 @@ long jsonInt(const String& src, const char* key, long def) {
   if (p < 0 || p >= (int)src.length()) return def;
   if (src[p] == '"') p++;                       // نقبل الرقم بين علامتين كمان
   bool neg = false;
-  if (src[p] == '-') { neg = true; p++; }
+  if (p < (int)src.length() && src[p] == '-') { neg = true; p++; }
   if (p >= (int)src.length() || !isdigit(src[p])) return def;
   long v = 0;
-  while (p < (int)src.length() && isdigit(src[p])) { v = v * 10 + (src[p] - '0'); p++; }
+  int digits = 0;
+  // تسع خانات بتكفّي كل قيمة عندنا؛ أكتر من هيك بيفيض `long` وبيطلع رقم غريب.
+  while (p < (int)src.length() && isdigit(src[p])) {
+    if (++digits > 9) return def;
+    v = v * 10 + (src[p] - '0');
+    p++;
+  }
   return neg ? -v : v;
+}
+
+// معرّف طلب مقبول: حروف وأرقام وشرطة، لحدّ أربعين. المعرّف بيروح بترويسة طلب
+// الرفع وبـ JSON الأحداث؛ علامة تنصيص أو سطر جديد فيه كانت بتكسر الاتنين —
+// وبتسمح بحقن ترويسة بطلب الرفع.
+bool camValidId(const String& id) {
+  if (id.length() == 0 || id.length() > 40) return false;
+  for (size_t i = 0; i < id.length(); i++) {
+    char c = id[i];
+    if (!(isalnum((unsigned char)c) || c == '-' || c == '_')) return false;
+  }
+  return true;
+}
+
+// هروب لقيمة نصّية جوّا JSON.
+static String jsonEscape(const String& in) {
+  String out;
+  out.reserve(in.length() + 4);
+  for (size_t i = 0; i < in.length(); i++) {
+    char c = in[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if ((unsigned char)c < 0x20) out += ' ';
+    else out += c;
+  }
+  return out;
+}
+
+// **حدّ واحد لكل إشي بيشغّل المستشعر أو الفلاش.** كان في حدّ ع مسار قديم ما
+// حدا بيستعمله، والمسار اللي بيستعمله الخادم (التصوير والسلسلة والبث) كان بلا
+// حدّ — يعني تكرار الطلب مع «فلاش شغّال» بيسخّن اللمبة وبيوقّع الكهربا.
+static unsigned long g_lastHeavyCmdMs = 0;
+static bool g_heavyCmdSeen = false;
+bool camCommandAllowed() {
+  unsigned long now = millis();
+  if (g_heavyCmdSeen && now - g_lastHeavyCmdMs < CAM_COMMAND_MIN_GAP_MS) return false;
+  g_heavyCmdSeen = true;
+  g_lastHeavyCmdMs = now;
+  return true;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -100,21 +144,36 @@ bool flashIsOn() { return g_flashOn; }
 
 // تُنادى من الـ loop — تطفي الفلاش لما يخلص وقته
 void flashTick() {
-  if (g_flashOn && g_flashOffAtMs && millis() >= g_flashOffAtMs) {
+  // بالفرق مش بالقيمة، عشان لفّة العدّاد بعد تسعة وأربعين يوم.
+  if (g_flashOn && g_flashOffAtMs && (long)(millis() - g_flashOffAtMs) >= 0) {
     g_log.println("[FLASH] auto-off (safety timer)");
     flashOff();
   }
 }
 
 // عتمة؟ منقرأها من كسب المستشعر: كل ما زاد الكسب، كل ما كانت الإضاءة أقل.
+//
+// **الكسب الحيّ، مش الإعداد.** `status.agc_gain` هو الكسب اليدوي اللي بينحطّ
+// لمّا الكسب التلقائي مطفي — وهو مشغّل عندنا، فالقيمة ضايلة صفر ووضع «تلقائي»
+// ما كان يشعل الفلاش ولا مرّة، وصور الليل طالعة سودا. مستشعر OV2640 بيحكي
+// كسبه الحالي بسجلّ `GAIN` (بنك المستشعر، العنوان صفر)؛ غير هيك بنرجع للإعداد.
 bool sceneIsDark() {
   sensor_t* s = esp_camera_sensor_get();
   if (!s) return false;
+  if (s->id.PID == OV2640_PID && s->status.agc && s->get_reg) {
+    int g = s->get_reg(s, 0x100 | 0x00, 0xff);
+    // البتات العليا مضاعفات (×٢ لكل بت)، والسفلى كسر. من ×٤ وطالع = عتمة.
+    if (g >= 0) return g >= FLASH_AUTO_GAIN_REG_THRESHOLD;
+  }
   return s->status.agc_gain >= FLASH_AUTO_GAIN_THRESHOLD;
 }
 
 // هل نشعل الفلاش لهاللقطة؟
+extern bool g_flashLockedByBrownout;
+
 bool flashWantedForCapture(FlashMode mode) {
+  // بعد انهيار كهربا ما في فلاش للّقطات، مهما قال الوضع المحفوظ أو الطلب.
+  if (g_flashLockedByBrownout) return false;
   switch (mode) {
     case FLASH_MODE_ON:   return true;
     case FLASH_MODE_OFF:  return false;
@@ -210,7 +269,7 @@ static const SensorSetting kSettings[] = {
   {"vflip",          [](sensor_t* s, int v) { return s->set_vflip(s, v); },          0,   1},
   {"dcw",            [](sensor_t* s, int v) { return s->set_dcw(s, v); },            0,   1},
   {"colorbar",       [](sensor_t* s, int v) { return s->set_colorbar(s, v); },       0,   1},
-  {"framesize",      setFramesizeInt,                                                0,  13},
+  {"framesize",      setFramesizeInt,                                                0,  (int)CAMERA_MAX_FRAME_SIZE},
 };
 static const size_t kSettingCount = sizeof(kSettings) / sizeof(kSettings[0]);
 
@@ -291,7 +350,9 @@ void settingsLoadFromNvs() {
     int v = clampInt(g_prefs.getInt(def.key, readSetting(s, def.key)), def.lo, def.hi);
     if (def.apply(s, v) == 0) restored++;
   }
-  g_flashMode  = (FlashMode)g_prefs.getInt("flash_mode", (int)FLASH_MODE_AUTO);
+  int storedMode = g_prefs.getInt("flash_mode", (int)FLASH_MODE_AUTO);
+  g_flashMode  = (storedMode >= FLASH_MODE_OFF && storedMode <= FLASH_MODE_AUTO)
+                     ? (FlashMode)storedMode : FLASH_MODE_AUTO;
   g_flashLevel = (uint8_t)clampInt(g_prefs.getInt("flash_level", FLASH_DEFAULT_LEVEL), 0, 255);
   g_log.printf("[SET] restored %d settings from NVS (flash=%s level=%u)\n",
                restored, flashModeName(g_flashMode), g_flashLevel);
@@ -336,8 +397,8 @@ void publishFullStatus() {
 }
 
 static void publishAck(const char* cmd, bool ok, const String& detail) {
-  String out = "{\"cmd\":\"" + String(cmd) + "\",\"ok\":" + (ok ? "true" : "false");
-  if (detail.length()) out += ",\"detail\":\"" + detail + "\"";
+  String out = "{\"cmd\":\"" + jsonEscape(String(cmd)) + "\",\"ok\":" + (ok ? "true" : "false");
+  if (detail.length()) out += ",\"detail\":\"" + jsonEscape(detail) + "\"";
   out += "}";
   mqttPublishEvent(out.c_str());
 }
@@ -369,6 +430,17 @@ void handleCamCommand(const String& payload) {
     return;
   }
 
+  if (cmd == "flash_level") {
+    // الشدّة للّقطات الجاية، بلا تشغيل. صفر ما إله معنى كشدّة — الإطفاء إله
+    // وضع «مطفي».
+    g_flashLevel = (uint8_t)clampInt(jsonInt(payload, "level", g_flashLevel), 1, 255);
+    g_prefs.putInt("flash_level", g_flashLevel);
+    // لو شغّال هلّق، بيتغيّر لحظيًّا — المنزلق بيعطي ردّة فعل وإنت عم تحرّكه.
+    if (flashIsOn()) ledcWrite(FLASH_LED_GPIO, g_flashLevel);
+    publishAck("flash_level", true, String(g_flashLevel));
+    return;
+  }
+
   if (cmd == "flash_mode") {
     g_flashMode = parseFlashMode(jsonStr(payload, "mode", "auto"), g_flashMode);
     g_prefs.putInt("flash_mode", (int)g_flashMode);
@@ -377,7 +449,10 @@ void handleCamCommand(const String& payload) {
   }
 
   if (cmd == "snapshot") {
-    String id = jsonStr(payload, "id", String(millis()));
+    String id = jsonStr(payload, "id", String("s") + String(millis()));
+    if (!camValidId(id)) { publishAck("snapshot", false, "bad id"); return; }
+    if (g_snapshotPending) { publishAck("snapshot", false, "busy"); return; }
+    if (!camCommandAllowed()) { publishAck("snapshot", false, "too soon"); return; }
     g_snapshotSettleMs = (unsigned int)clampInt(jsonInt(payload, "settle_ms", 0), 0, CAPTURE_MAX_SETTLE_MS);
     g_snapshotFlash = parseFlashMode(jsonStr(payload, "flash", ""), g_flashMode);
     g_currentRequestId = id;
@@ -387,10 +462,17 @@ void handleCamCommand(const String& payload) {
   }
 
   if (cmd == "burst") {
+    String burstId = jsonStr(payload, "id", String("b") + String(millis()));
+    if (!camValidId(burstId) || burstId.length() > 34) {   // مكان للاحقة «-٢٣»
+      publishAck("burst", false, "bad id");
+      return;
+    }
+    if (g_burstRemaining > 0) { publishAck("burst", false, "busy"); return; }
+    if (!camCommandAllowed()) { publishAck("burst", false, "too soon"); return; }
     long count = clampInt(jsonInt(payload, "count", 3), 1, BURST_MAX_FRAMES);
     long gap   = jsonInt(payload, "interval_ms", 800);
     if (gap < BURST_MIN_INTERVAL_MS) gap = BURST_MIN_INTERVAL_MS;
-    g_burstBaseId      = jsonStr(payload, "id", String(millis()));
+    g_burstBaseId      = burstId;
     g_burstIntervalMs  = (unsigned long)gap;
     g_burstRemaining   = (unsigned int)count;
     g_burstIndex       = 0;
@@ -429,6 +511,7 @@ void handleCamCommand(const String& payload) {
       camRemoteStream(false);
       publishAck("stream", true, "off");
     } else {
+      if (!camCommandAllowed()) { publishAck("stream", false, "too soon"); return; }
       startCamHttp();
       camRemoteStream(true);
       publishAck("stream", camHttpRunning(),

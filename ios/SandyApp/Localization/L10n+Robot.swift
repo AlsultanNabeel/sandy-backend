@@ -74,6 +74,10 @@ enum L10nRobot {
             "control.camera.taking": .text("عم تصوّر…"),
             "control.camera.failed": .text("ما وصلت صورة. الكاميرا يمكن مطفية أو الأمر ما وصلها."),
             "control.camera.badImage": .text("وصلت بيانات بس مش صورة سليمة."),
+            "control.camera.error.camera_init_failed_at_boot": .text("الكاميرا ما اشتغلت من الإقلاع — افحص كبل الكاميرا والكهربا."),
+            "control.camera.error.capture_failed": .text("الكاميرا ما قدرت تصوّر. جرّب كمان مرّة."),
+            "control.camera.error.upload_failed": .text("الصورة انأخذت بس ما قدرت توصل للخادم. تأكد من شبكة الكاميرا."),
+            "control.camera.error.camera_busy": .text("الكاميرا مشغولة بلقطة تانية. ثانية وجرّب."),
             "control.camera.stream": .text("بث مباشر"),
             "control.camera.stream.hint": .text("بيمشي من الكاميرا لجهازك مباشرة — فوري، بس لازم تكون ع نفس شبكة البيت."),
             "control.camera.stream.start": .text("شغّل البث"),
@@ -81,7 +85,6 @@ enum L10nRobot {
             "control.camera.stream.failed": .text("ما قدرت أشغّل خادم الكاميرا. جرّب كمان مرّة."),
             "control.camera.stream.stop": .text("أوقف البث"),
             "control.camera.stream.address": .text("من %@"),
-            "control.camera.stream.noAddress": .text("ما وصلني عنوان الكاميرا بعد. بيجي مع نبضتها — لو ضل فاضي، هي مش متّصلة."),
             "control.card.body": .text("وشها ورقبتها وشاشتها وإضاءتها وكاميرتها"),
 
             // ── الروبوت الحي ──
@@ -237,6 +240,10 @@ enum L10nRobot {
             "control.camera.taking": .text("Taking…"),
             "control.camera.failed": .text("No photo arrived. The camera may be off, or the command did not reach it."),
             "control.camera.badImage": .text("Data arrived, but not a valid image."),
+            "control.camera.error.camera_init_failed_at_boot": .text("The camera didn't start at boot — check its ribbon cable and power."),
+            "control.camera.error.capture_failed": .text("The camera couldn't take the picture. Try again."),
+            "control.camera.error.upload_failed": .text("The photo was taken but couldn't reach the server. Check the camera's Wi-Fi."),
+            "control.camera.error.camera_busy": .text("The camera is busy with another shot. Try again in a moment."),
             "control.camera.stream": .text("Live view"),
             "control.camera.stream.hint": .text("Runs straight from the camera to your phone — instant, but only on the home network."),
             "control.camera.stream.start": .text("Start live view"),
@@ -244,7 +251,6 @@ enum L10nRobot {
             "control.camera.stream.failed": .text("Could not start the camera's server. Try again."),
             "control.camera.stream.stop": .text("Stop"),
             "control.camera.stream.address": .text("From %@"),
-            "control.camera.stream.noAddress": .text("No address from the camera yet. It arrives with its heartbeat — if this stays empty, it is not connected."),
             "control.card.body": .text("Her face, neck, screen, light and camera"),
 
             // ── Live robot ──

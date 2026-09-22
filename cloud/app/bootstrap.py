@@ -163,6 +163,10 @@ def ensure_indexes() -> None:
          lambda: mongo_db.sandy_prompt_cache.create_index(
              "created_at", expireAfterSeconds=60 * 60 * 24 * 30, background=True
          )),
+        # بصمات تواقيع رفع الكاميرا — بتعيش قدّ نافذة الإعادة وبتنمسح لحالها.
+        ("cam_upload_nonces.expire_at_ttl", lambda: mongo_db.cam_upload_nonces.create_index(
+            "expire_at", expireAfterSeconds=0, background=True
+        )),
         ("camera_inbox.expire_at_ttl", lambda: mongo_db.camera_inbox.create_index(
             "expire_at", expireAfterSeconds=0, background=True
         )),

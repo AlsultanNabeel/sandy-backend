@@ -22,7 +22,12 @@ static uint32_t      g_wifiDropCount     = 0;
 
 #include <Preferences.h>
 
-#define WIFI_NS         "sandycam"
+// **مساحة لحالها، مش مساحة الإعدادات.** كانت نفس `sandycam` تبع إعدادات
+// المستشعر، و«رجوع للإعدادات الأصلية» بيمسح المساحة كلها — يعني بيمسح الشبكة
+// كمان، والكاميرا بترجع ع شبكة المصنع وما بتوصل لحدا. تصفير الإعدادات ما لازم
+// يقطع الكاميرا عن البيت.
+#define WIFI_NS         "sandywifi"
+#define WIFI_NS_LEGACY  "sandycam"
 #define WIFI_K_SSID     "ssid"
 #define WIFI_K_PASS     "pass"
 #define WIFI_K_TRYING   "trying"
@@ -34,25 +39,49 @@ static bool   g_switching = false;
 
 const char *camSsid() { return g_ssid.c_str(); }
 
+// نقل لمرّة وحدة: الشبكة المحفوظة بالمساحة القديمة بتنتقل للجديدة، بلا ما
+// المالك يعيد الإعداد بعد الترقية.
+static void migrateLegacyWifi() {
+  Preferences fresh;
+  if (!fresh.begin(WIFI_NS, false)) return;
+  bool have = fresh.getString(WIFI_K_SSID, "").length() > 0;
+  if (!have) {
+    Preferences old;
+    if (old.begin(WIFI_NS_LEGACY, false)) {
+      String s = old.getString(WIFI_K_SSID, "");
+      if (s.length()) {
+        fresh.putString(WIFI_K_SSID, s);
+        fresh.putString(WIFI_K_PASS, old.getString(WIFI_K_PASS, ""));
+        Serial.println("[WIFI] saved network moved to its own namespace");
+      }
+      old.remove(WIFI_K_SSID);
+      old.remove(WIFI_K_PASS);
+      old.remove(WIFI_K_TRYING);
+      old.end();
+    }
+  }
+  fresh.end();
+}
+
 static void loadWifiCreds() {
   g_ssid = SECRET_SSID;
   g_pass = SECRET_OPTIONAL_PASS;
 
+  migrateLegacyWifi();
   Preferences p;
   if (!p.begin(WIFI_NS, false)) return;
 
   if (p.getBool(WIFI_K_TRYING, false)) {
-    // انقطعت الكهربا بنص تجربة. بنمسح العلامة وبنقلع ع القديمة — أي إقلاع
-    // لازم يصير ع شبكة ثبت إنها بتشتغل.
-    Serial.println("[WIFI] a switch was interrupted — falling back");
+    // انقطعت الكهربا بنص تجربة. بنمسح العلامة وبنقلع ع **آخر شبكة ثبتت** —
+    // والمحفوظة هي بالزبط هاي، لأنّ الجديدة ما بتنحفظ إلا بعد ما تنجح.
+    Serial.println("[WIFI] a switch was interrupted — back to the last good network");
     p.remove(WIFI_K_TRYING);
-  } else {
-    String s = p.getString(WIFI_K_SSID, "");
-    if (s.length()) {
-      g_ssid = s;
-      g_pass = p.getString(WIFI_K_PASS, "");
-      Serial.printf("[WIFI] using saved network '%s'\n", g_ssid.c_str());
-    }
+  }
+  String saved = p.getString(WIFI_K_SSID, "");
+  if (saved.length()) {
+    g_ssid = saved;
+    g_pass = p.getString(WIFI_K_PASS, "");
+    Serial.printf("[WIFI] using saved network '%s'\n", g_ssid.c_str());
   }
   p.end();
 }
@@ -80,7 +109,7 @@ bool camSwitchNetwork(const String &ssid, const String &pass) {
   unsigned long t0 = millis();
   bool ok = false;
   while (millis() - t0 < WIFI_TRY_WINDOW_MS) {
-    delay(250);
+    camWait(250);
     if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
       ok = true;
       break;
@@ -121,7 +150,7 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       g_wifiDropCount++;
       Serial.printf("[WIFI] disconnected reason=%d drops=%u\n",
-                    info.wifi_sta_disconnected.reason, g_wifiDropCount);
+                    info.wifi_sta_disconnected.reason, (unsigned)g_wifiDropCount);
       break;
     default: break;
   }
@@ -137,14 +166,24 @@ void connectWiFi() {
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());
 }
 
+// **تباعد متزايد، ومحاولة وحدة بكل مرّة.** كانت كل عشر ثواني تقطع وتبدأ من
+// جديد، فوق إعادة الاتصال التلقائية تبع المكتبة — والاتنين بيتسابقوا، وراوتر
+// بطيء (ربط + عنوان بأكتر من عشر ثواني) ما كان يلحق يكمّل ولا مرّة.
+static unsigned long g_wifiRetryMs = WIFI_RECONNECT_INTERVAL_MS;
+#define WIFI_RETRY_MAX_MS 60000
+
 void ensureWiFiConnected() {
-  if (WiFi.status() == WL_CONNECTED) return;
+  if (WiFi.status() == WL_CONNECTED) {
+    g_wifiRetryMs = WIFI_RECONNECT_INTERVAL_MS;
+    return;
+  }
   unsigned long now = millis();
-  if (now - g_lastWifiAttemptMs < WIFI_RECONNECT_INTERVAL_MS) return;
+  if (now - g_lastWifiAttemptMs < g_wifiRetryMs) return;
   g_lastWifiAttemptMs = now;
   // ما منقاطع تجربة شغّالة: هي بتقطع الاتصال بقصد وبتستنى، وإعادة الاتصال
   // التلقائية كانت بتشدّها للقديمة وتفشّلها كل مرّة.
   if (g_switching) return;
   WiFi.disconnect();
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());
+  g_wifiRetryMs = min(g_wifiRetryMs * 2, (unsigned long)WIFI_RETRY_MAX_MS);
 }

@@ -1,16 +1,14 @@
 // =========================
-// ESP32-CAM — Camera Init + Snapshot Capture + Chunked Publish
+// ESP32-CAM — Camera Init + Snapshot Capture + Upload
 // =========================
-// التقاط: VGA 640x480 JPEG quality=12 → عادة 40-80KB
-// النشر: تقسيم على chunks ~6KB base64 لكل واحد + JSON wrapper
-
-#include "mbedtls/base64.h"
+// التقاط: VGA 640x480 JPEG quality=12 → عادة 40-80KB، وبترتفع بطلب واحد للخادم.
 
 // ── إعلانات من ملفات تانية ──
-bool mqttPublishChunk(const char* payload, unsigned int len);
 void mqttPublishEvent(const char* json);
-void mqttServiceOnce();
 void settingsLoadFromNvs();
+bool camLock(uint32_t waitMs);
+void camUnlock();
+void camWait(unsigned long ms);
 bool uploadSnapshot(const String& id, const uint8_t* data, size_t len);
 bool flashWantedForCapture(FlashMode mode);
 void flashSet(uint8_t level, unsigned long autoOffMs);
@@ -90,19 +88,28 @@ void setupCamera() {
 }
 
 void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMode flash) {
+  char ev[160];
   if (!g_cameraReady) {
     // لا نحاول re-init هنا — esp_camera_init() ممكن يعلّق إذا الهاردوير مش راد
     // (ribbon غير مثبت، باور ناقص). نرسل خطأ فوراً بدل ما نهنّق الـ loop.
     g_log.println("[CAM] not ready — sending error without re-init");
-    char err[100];
-    snprintf(err, sizeof(err),
+    snprintf(ev, sizeof(ev),
              "{\"id\":\"%s\",\"error\":\"camera_init_failed_at_boot\"}", id.c_str());
-    mqttPublishEvent(err);
+    mqttPublishEvent(ev);
     return;
   }
 
   // انتظار ثبات: بعد ما تلف الرقبة، أول إطار بيطلع مهزوز والتعريض لسا ما ضبط
-  if (settleMs > 0) delay(settleMs);
+  if (settleMs > 0) camWait(settleMs);
+
+  // **المستشعر إلنا لحدّ ما نخلص** — بما فيه الإنعاش تحت. بلا القفل، الإنعاش
+  // بيعمل `deinit` وخادم البث المحلي ماسك إطارًا، والذاكرة بتنسحب من تحت إيده.
+  if (!camLock(5000)) {
+    g_log.println("[CAM] المستشعر مشغول — ما قدرنا نصوّر");
+    snprintf(ev, sizeof(ev), "{\"id\":\"%s\",\"error\":\"camera_busy\"}", id.c_str());
+    mqttPublishEvent(ev);
+    return;
+  }
 
   // الفلاش: بيشتعل قبل الالتقاط بلحظة عشان المستشعر يضبط تعريضه على الإضاءة
   bool useFlash = flashWantedForCapture(flash);
@@ -116,19 +123,6 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
   camera_fb_t* stale = esp_camera_fb_get();
   if (stale) esp_camera_fb_return(stale);
 
-  // لو الدقّة المطلوبة أكبر من دقّة التشغيل، بنكبّر هون وبنرجّع بعدين.
-  //
-  // المخزن الكبير بيعيش ثواني بدل ما يحجز الذاكرة الداخلية طول الوقت — وهاي
-  // الذاكرة نفسها اللي بيحتاجها الاتصال المشفّر مع الوسيط. تشغيل دائم ع أعلى
-  // دقّة كان بيخلّي اللوح يصوّر ممتاز **وما يقدر يوصل الخادم**، وكاميرا ما
-  // بتوصل ما إلها قيمة مهما كانت صورتها.
-  sensor_t* sen = esp_camera_sensor_get();
-  framesize_t wanted = sen ? (framesize_t)sen->status.framesize : CAMERA_DEFAULT_FRAME_SIZE;
-  bool raised = false;
-  if (sen && wanted > CAMERA_DEFAULT_FRAME_SIZE) {
-    raised = true;   // بننزّلها بعد الالتقاط
-  }
-
   // التقاط الإطار الحديث
   camera_fb_t* fb = esp_camera_fb_get();
 
@@ -139,12 +133,9 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
     // **محاولة إنعاش قبل الاستسلام.**
     //
     // المستشعر بيعلّق أحيانًا: بعد بثّ طويل، أو بعد ساعات بلا التقاط. والنتيجة
-    // إنّ اللوح بيضلّ ينبض ويقول `cam=yes` — وهو مش قادر يصوّر. وهاد أسوأ من
-    // عطل واضح: كل إشي بيبيّن سليم والصورة ما بتيجي.
-    //
-    // دورة كهربا كاملة للمستشعر بترجّعه بأغلب الحالات، وبتوخذ أقلّ من ثانية.
-    // بنجرّبها مرّة: لو زبطت، المالك ما بيلاحظ إشي غير تأخيرة بسيطة؛ ولو ما
-    // زبطت، بنقول فشلنا بصراحة بدل ما نلحّ.
+    // إنّ اللوح بيضلّ ينبض ويقول `cam=yes` — وهو مش قادر يصوّر. دورة كهربا
+    // كاملة للمستشعر بترجّعه بأغلب الحالات. بنجرّبها مرّة؛ ولو ما زبطت بنقول
+    // فشلنا بصراحة. والقفل معنا، فما حدا ماسك إطارًا وقت الـ`deinit`.
     g_log.println("[CAM] capture failed — بنعيد تشغيل المستشعر");
     esp_camera_deinit();
     delay(120);
@@ -159,96 +150,43 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
   }
 
   if (!fb) {
-    // الرجوع للدقّة المعتادة حتى وقت الفشل — وإلا اللوح بيضلّ ماسك الذاكرة
-    // بعد إخفاق، فالمحاولة الجاية بتفشل كمان وبيصير العطل دائمًا.
-    if (raised && sen) sen->set_framesize(sen, CAMERA_DEFAULT_FRAME_SIZE);
+    camUnlock();
     g_log.println("[CAM] capture failed");
-    char err[80];
-    snprintf(err, sizeof(err), "{\"id\":\"%s\",\"error\":\"capture_failed\"}", id.c_str());
-    mqttPublishEvent(err);
+    snprintf(ev, sizeof(ev), "{\"id\":\"%s\",\"error\":\"capture_failed\"}", id.c_str());
+    mqttPublishEvent(ev);
     return;
   }
 
-  g_log.printf("[CAM] captured %u bytes — uploading...\n", fb->len);
+  // الطول قبل الإرجاع — بعد `fb_return` المخزن مش إلنا، والمشغّل ممكن يعبّيه
+  // بإطار جديد وإحنا بنقرا منه.
+  const size_t bytes = fb->len;
+  g_log.printf("[CAM] captured %u bytes — uploading...\n", (unsigned)bytes);
 
-  // **الرفع مباشرة للخادم.**
+  // **الرفع مباشرة للخادم، ومحاولة تانية بدل مسار احتياطي.**
   //
-  // كانت الصورة بتتقسّم وتتشفّر وتتبعت قطعة قطعة عبر الوسيط — وهاد استعمال
-  // بروتوكول أوامر لنقل ملف. النتيجة: ترميز بيزيد الحجم تلتًا، وقطع بتضيع
-  // بصمت لأنّ النشر ما إله إقرار، وطبقة كاملة من التجميع والتذاكر والمهلات
-  // بنيناها **بس عشان نلتفّ ع هالخطأ**.
-  //
-  // طلب واحد، والبروتوكول بيضمن الوصول بنفسه: إمّا توصل كاملة، أو بيطلع خطأ
-  // نقدر نقراه. والوسيط بيضلّ يحمل الأمر — وهاد اللي بيتقنه.
-  // ننزّل الدقّة **قبل** الرفع: الرفع بيفتح اتصالًا مشفّرًا، وهو بده نفس
-  // الذاكرة اللي المخزن الكبير ماسكها. الترتيب هون هو الفرق بين رفع بينجح
-  // ورفع بيفشل بـ«فشل تخصيص ذاكرة».
-  if (raised && sen) sen->set_framesize(sen, CAMERA_DEFAULT_FRAME_SIZE);
+  // كان في احتياطي: لو الرفع فشل، الصورة بتتقطّع وتنبعت عبر الوسيط. وهاد المسار
+  // كان بلا توقيع — أي حدا بيقدر ينشر ع موضوع الكاميرا كان بيقدر يزرع صورة
+  // مكان صورة البيت — وصور البيت كانت بتمرق ع وسيط طرف تالت. وبنفس الوقت ما كان
+  // بيوصّل إشي فعليًّا: القطع بتضيع بصمت. محاولة تانية بعد ثانية، وبعدها خطأ
+  // صريح بيوصل التطبيق، أحسن من صورة بطيئة ومكشوفة ما بتوصل.
+  bool ok = uploadSnapshot(id, fb->buf, bytes);
+  if (!ok) {
+    g_log.println("[CAM] upload failed — محاولة تانية بعد ثانية");
+    camWait(1000);
+    ok = uploadSnapshot(id, fb->buf, bytes);
+  }
+  esp_camera_fb_return(fb);
+  camUnlock();
 
-  if (uploadSnapshot(id, fb->buf, fb->len)) {
-    esp_camera_fb_return(fb);
-    if (raised && sen) sen->set_framesize(sen, wanted);   // رجّع اختيار المالك
-    char done[120];
-    snprintf(done, sizeof(done),
+  if (ok) {
+    snprintf(ev, sizeof(ev),
              "{\"id\":\"%s\",\"event\":\"uploaded\",\"bytes\":%u}",
-             id.c_str(), (unsigned)fb->len);
-    mqttPublishEvent(done);
+             id.c_str(), (unsigned)bytes);
+    mqttPublishEvent(ev);
     g_log.println("[CAM] upload ok");
     return;
   }
-  g_log.println("[CAM] upload failed — falling back to broker chunks");
-
-  // قسّم على chunks
-  unsigned int total = (fb->len + SNAPSHOT_CHUNK_RAW_BYTES - 1) / SNAPSHOT_CHUNK_RAW_BYTES;
-  unsigned int seq = 0;
-  size_t offset = 0;
-
-  // مؤقت لـ base64: 1024 raw → ~1368 base64
-  char b64buf[1500];
-  char msgbuf[MQTT_BUFFER_SIZE];
-
-  while (offset < fb->len) {
-    size_t rawN = min((size_t)SNAPSHOT_CHUNK_RAW_BYTES, (size_t)(fb->len - offset));
-    size_t b64Len = 0;
-    int rc = mbedtls_base64_encode((unsigned char*)b64buf, sizeof(b64buf), &b64Len,
-                                   fb->buf + offset, rawN);
-    if (rc != 0) {
-      g_log.printf("[CAM] base64 error rc=%d\n", rc);
-      break;
-    }
-    b64buf[b64Len] = '\0';
-
-    int n = snprintf(msgbuf, sizeof(msgbuf),
-                     "{\"id\":\"%s\",\"seq\":%u,\"total\":%u,\"data\":\"%s\"}",
-                     id.c_str(), seq, total, b64buf);
-    if (n <= 0 || n >= (int)sizeof(msgbuf)) {
-      g_log.println("[CAM] msg too big");
-      break;
-    }
-
-    if (!mqttPublishChunk(msgbuf, n)) {
-      g_log.printf("[CAM] publish failed at seq=%u\n", seq);
-      break;
-    }
-
-    seq++;
-    offset += rawN;
-
-    // `loop()` مع الفاصل — التنين لازم، وكل واحد بيعمل إشي مختلف.
-    //
-    // الفاصل بيعطي الوسيط والشبكة وقت يبلعوا القطعة. و`loop()` بيخلّي مكتبة
-    // الرسائل تفضّي مقبسها فعليًّا وتردّ ع نبضات الوسيط — بدونه، انتظار صامت
-    // بس، والمقبس بيضلّ محشور واللوح بيبيّن كأنه اختفى وقت الإرسال.
-    delay(SNAPSHOT_INTER_CHUNK_DELAY_MS);
-    mqttServiceOnce();
-  }
-
-  esp_camera_fb_return(fb);
-
-  // علم انتهاء
-  char done[120];
-  snprintf(done, sizeof(done), "{\"id\":\"%s\",\"event\":\"complete\",\"chunks\":%u}",
-           id.c_str(), seq);
-  mqttPublishEvent(done);
-  g_log.printf("[CAM] snapshot complete — %u chunks\n", seq);
+  snprintf(ev, sizeof(ev), "{\"id\":\"%s\",\"error\":\"upload_failed\"}", id.c_str());
+  mqttPublishEvent(ev);
+  g_log.println("[CAM] upload failed twice — reported");
 }

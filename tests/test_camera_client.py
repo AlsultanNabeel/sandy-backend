@@ -1,17 +1,15 @@
-"""Camera client tests — chunk reassembly without a camera, a broker, or a robot.
+"""Camera client tests — asking for a photo, and hearing why it is not coming.
 
-The camera is a request that expects an answer, which no other control is: the
-board splits a JPEG across many MQTT messages and something has to hold the pieces
-while a different thread waits. Everything that can go wrong there goes wrong
-quietly — a lost chunk, a late chunk, an answer nobody asked for, a stream that
-never ends — so each one has a test.
+The photo itself arrives over signed HTTPS (devices_api /api/cam/upload). What
+lives here is the other half: the command that asks for it, and the camera's
+own failure report becoming the answer the app reads — instead of forty seconds
+of polling and "no photo" for every possible cause.
 """
 
-import base64
 import json
 import os
-import threading
 
+import mongomock
 import pytest
 
 os.environ.setdefault("JWT_SECRET", "test-secret-for-camera")
@@ -21,22 +19,19 @@ from app.integrations import camera_client  # noqa: E402
 NODE = "sandybrain01"
 
 
-@pytest.fixture(autouse=True)
-def clean_state():
-    camera_client._pending.clear()
-    yield
-    camera_client._pending.clear()
+@pytest.fixture()
+def db():
+    import app.db as appdb
 
-
-def chunk(req_id, seq, total, blob):
-    return json.dumps({
-        "id": req_id, "seq": seq, "total": total,
-        "data": base64.b64encode(blob).decode(),
-    })
+    database = mongomock.MongoClient()["t"]
+    appdb.configure(database)
+    try:
+        yield database
+    finally:
+        appdb.reset()
 
 
 def _capture_sent(monkeypatch):
-    """Stand in for the broker; hand back whatever the client tried to publish."""
     sent = []
 
     def fake_send(node_id, command):
@@ -47,106 +42,46 @@ def _capture_sent(monkeypatch):
     return sent
 
 
-def test_chunks_reassemble_in_order_regardless_of_arrival(monkeypatch):
+def test_snapshot_command_shape(monkeypatch):
     sent = _capture_sent(monkeypatch)
-    image = b"\xff\xd8" + b"PHOTO-BYTES" * 20 + b"\xff\xd9"
-    parts = [image[i:i + 20] for i in range(0, len(image), 20)]
-
-    result = {}
-
-    def ask():
-        result["data"] = camera_client.request_snapshot(NODE, timeout_s=5)
-
-    t = threading.Thread(target=ask)
-    t.start()
-    while not sent:
-        pass
-    req_id = sent[0][1]["id"]
-
-    # Out of order on purpose — MQTT gives no ordering guarantee across messages.
-    for seq in (2, 0, 3, 1)[:len(parts)]:
-        if seq < len(parts):
-            camera_client.on_chunk(NODE, chunk(req_id, seq, len(parts), parts[seq]))
-    for seq in range(len(parts)):
-        camera_client.on_chunk(NODE, chunk(req_id, seq, len(parts), parts[seq]))
-
-    t.join(timeout=6)
-    assert result["data"] == image
-
-
-def test_a_missing_chunk_times_out_instead_of_returning_a_broken_image(monkeypatch):
-    sent = _capture_sent(monkeypatch)
-    result = {}
-
-    def ask():
-        result["data"] = camera_client.request_snapshot(NODE, timeout_s=0.4)
-
-    t = threading.Thread(target=ask)
-    t.start()
-    while not sent:
-        pass
-    req_id = sent[0][1]["id"]
-    camera_client.on_chunk(NODE, chunk(req_id, 0, 3, b"aaa"))
-    camera_client.on_chunk(NODE, chunk(req_id, 2, 3, b"ccc"))   # seq 1 never comes
-
-    t.join(timeout=3)
-    # Half a photo is not a photo. Returning the bytes we happen to have would
-    # hand the caller a corrupt JPEG and call it success.
-    assert result["data"] is None
-
-
-def test_chunks_nobody_is_waiting_for_are_dropped():
-    # A late chunk from a timed-out request, or a board talking to a backend that
-    # never asked. Buffering these is how a memory leak starts.
-    camera_client.on_chunk(NODE, chunk("ghost-request", 0, 1, b"x"))
-    assert camera_client._pending == {}
-
-
-def test_a_malformed_chunk_cannot_raise():
-    camera_client.on_chunk(NODE, "not json at all")
-    camera_client.on_chunk(NODE, json.dumps({"id": "x"}))          # no data
-    camera_client.on_chunk(NODE, json.dumps({"seq": 0, "data": "!!"}))  # no id
-    assert camera_client._pending == {}
-
-
-def test_an_oversized_stream_is_abandoned(monkeypatch):
-    sent = _capture_sent(monkeypatch)
-    monkeypatch.setattr(camera_client, "_MAX_IMAGE_BYTES", 100)
-    result = {}
-
-    def ask():
-        result["data"] = camera_client.request_snapshot(NODE, timeout_s=5)
-
-    t = threading.Thread(target=ask)
-    t.start()
-    while not sent:
-        pass
-    req_id = sent[0][1]["id"]
-    # Claims 50 chunks, each bigger than the whole cap.
-    for seq in range(3):
-        camera_client.on_chunk(NODE, chunk(req_id, seq, 50, b"z" * 60))
-
-    t.join(timeout=6)
-    assert result["data"] is None
+    req = camera_client.start_snapshot(NODE, settle_ms=99999, flash="weird")
+    assert req and sent
+    node, cmd = sent[0]
+    assert node == NODE
+    assert cmd["cmd"] == "snapshot" and cmd["id"] == req
+    assert cmd["settle_ms"] == 3000, "settle is not clamped"
+    assert cmd["flash"] == "auto", "an unknown flash mode reached the board"
 
 
 def test_an_undelivered_command_fails_fast(monkeypatch):
-    # send_to_topic refuses when the caller does not own the node. Waiting the
-    # full timeout for an answer we know will never come is just a slow no.
     monkeypatch.setattr(camera_client, "_send", lambda n, c: False)
-    assert camera_client.request_snapshot(NODE, timeout_s=30) is None
-    assert camera_client._pending == {}
+    assert camera_client.start_snapshot(NODE) is None
 
 
-def test_snapshot_command_shape(monkeypatch):
-    sent = _capture_sent(monkeypatch)
-    threading.Thread(target=lambda: camera_client.request_snapshot(
-        NODE, timeout_s=0.2, settle_ms=9999, flash="nonsense")).start()
-    while not sent:
-        pass
-    node_id, cmd = sent[0]
-    assert node_id == NODE
-    assert cmd["cmd"] == "snapshot"
-    assert cmd["settle_ms"] == 3000        # clamped, not passed through
-    assert cmd["flash"] == "auto"          # unknown value falls back, never sent raw
+def test_the_camera_saying_no_becomes_the_answer(db):
+    camera_client.on_event(NODE, json.dumps({"id": "abc123", "error": "upload_failed"}))
+    err = camera_client.fetch_snapshot_error(NODE, "abc123")
+    assert err and err["error"] == "upload_failed"
+    assert err["message"], "the person holding the phone gets no words"
+    assert camera_client.fetch_snapshot(NODE, "abc123") is None
 
+
+def test_a_photo_that_did_arrive_beats_a_late_error(db):
+    camera_client.store_snapshot(NODE, "p1", b"\xff\xd8" + b"x" * 200)
+    camera_client.on_event(NODE, json.dumps({"id": "p1", "error": "capture_failed"}))
+    assert camera_client.fetch_snapshot(NODE, "p1")
+    assert camera_client.fetch_snapshot_error(NODE, "p1") is None
+
+
+def test_events_that_are_not_errors_change_nothing(db):
+    for payload in ("not json", "[]", json.dumps({"id": "q", "event": "uploaded"}),
+                    json.dumps({"error": "capture_failed"}),
+                    json.dumps({"id": "x" * 80, "error": "capture_failed"})):
+        camera_client.on_event(NODE, payload)
+    assert camera_client.fetch_snapshot_error(NODE, "q") is None
+
+
+def test_there_is_no_photo_over_the_broker_path():
+    assert not hasattr(camera_client, "on_chunk"), (
+        "photo pieces over the broker are back — unsigned, through a third "
+        "party, and silently lossy")

@@ -7,8 +7,7 @@ listens for what nodes report and updates the registry:
   sandy/node/<node_id>/cam/status   -> node_store.ingest_status (camera, `cam/` outputs)
   sandy/node/<node_id>/room/status  -> node_store.ingest_status (room node, `room/` outputs)
   sandy/node/<node_id>/ir/learned   -> node_store.set_last_ir   (captured IR code)
-  sandy/node/<node_id>/cam/snapshot -> camera_client.on_chunk   (photo pieces)
-  sandy/node/<node_id>/cam/event    -> logged only              (capture events)
+  sandy/node/<node_id>/cam/event    -> camera_client.on_event   (errors answer a photo request)
 
 Runs outside any tenant/request context, so it keys updates by node_id (which the
 firmware derives from its code, matching node_store.code_to_node_id). Safe to start
@@ -81,8 +80,8 @@ _INGEST_MAX_PENDING = 200
 
 _STATUS_SUB = "sandy/node/+/status"
 _IR_SUB = "sandy/node/+/ir/learned"
-# Photos come back split across many messages; camera_client holds the pieces.
-_CAM_SUB = "sandy/node/+/cam/snapshot"
+# No `cam/snapshot` subscription: photos arrive over HTTPS (/api/cam/upload),
+# signed. The broker path for photo pieces carried no signature and is gone.
 # نبضة الكاميرا. موضوع منفصل بمستويين لأنها لوح تاني بيشارك نفس معرّف الوحدة —
 # الكاميرا جزء من ساندي، مش وحدة تانية. و`+` بتطابق مستوى واحد بس، فاشتراك
 # الحالة العادي `sandy/node/+/status` **ما بيلتقطها أبدًا**.
@@ -137,7 +136,6 @@ _stats = {
     "status": 0,
     "ir": 0,
     "cam_status": 0,
-    "cam_snapshot": 0,
     "cam_event": 0,
     "room_status": 0,
     "errors": 0,
@@ -219,18 +217,12 @@ def _handle_message(topic: str, raw: bytes) -> None:
             return
 
         if topic.endswith("/cam/event"):
-            # صغيرة، ومن نفس اللوح، وبنفس ثانية القطع. لو وصلت هي وضاعت هنّ،
-            # الحجم هو الفرق الوحيد الباقي.
+            # «ما قدرت أصوّر» كان بينكتب بالسجل وبس، والتطبيق بيستنّى أربعين
+            # ثانية وبعدين بيقول «ما في صورة». هلّق الخطأ بيصير جواب الطلب.
             _stats["cam_event"] += 1
             logger.info("[camera] %s event: %s", node_id, payload[:160])
-            return
-
-        if topic.endswith("/cam/snapshot"):
-            _stats["cam_snapshot"] += 1
-            # Straight through, unparsed and unstored: a photo belongs to
-            # whoever asked for it, and nobody may be waiting at all.
-            from app.integrations.camera_client import on_chunk
-            on_chunk(node_id, payload)
+            from app.integrations.camera_client import on_event
+            on_event(node_id, payload)
             return
 
         # status (retained JSON heartbeat)
@@ -284,8 +276,21 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
         except (json.JSONDecodeError, ValueError):
             return
 
+    if not isinstance(data, dict):
+        return
+
+    # **الكاميرا بتحكي عن حالها، ومش عن الروبوت.** كانت كل نبضة منها بتكتب
+    # «الوحدة متّصلة» ع الوحدة كلها — فروبوت دماغه مطفي ضلّ يبيّن شغّالًا طالما
+    # الكاميرا شغّالة. حالتها بحقلها (`cam_online`)، وحالة الوحدة للدماغ.
+    #
+    # `online:false` هي الوصيّة اللي الوسيط بينشرها لمّا تنقطع؛ `online:true`
+    # المحفوظة بتمسحها أول ما ترجع. التنتين بلا مخرجات.
+    online_flag = data.get("online")
     cam_outputs = data.get("outputs")
     if not isinstance(cam_outputs, list):
+        if isinstance(online_flag, bool):
+            ingest_status(node_id, online=None,
+                          telemetry={"cam_online": online_flag})
         return
 
     namespaced = [
@@ -298,9 +303,12 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
     # job, by namespace — this used to re-read them and pass them back in, which
     # meant the merge ran twice over the same list and every brain output came
     # back doubled.
+    telemetry = {f"cam_{k}": v for k, v in data.items()
+                 if k in ("ip", "board", "ssid", "boot", "fw", "stream_key")}
+    telemetry["cam_online"] = True
     ingest_status(
         node_id,
-        online=True,
+        online=None,
         capabilities=None,
         outputs=namespaced,
         firmware_version="",
@@ -318,8 +326,9 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
         #
         # «بتعمل ريستارت» كانت بتحتاج كبل وحظّ — لازم تكون شابك ومتفرّج بالثانية
         # اللي صارت فيها. هيك بتوصل بالنبضة، وبتنقرا من التطبيق بعدها بساعة.
-        telemetry={f"cam_{k}": v for k, v in data.items()
-                   if k in ("ip", "board", "ssid", "boot")},
+        # `stream_key` مفتاح البث المحلي: بيوصل التطبيق من هون بس، مع قائمة
+        # الوحدات تبع صاحبها.
+        telemetry=telemetry,
     )
 
 
@@ -347,8 +356,17 @@ def _ingest_room_status(node_id: str, payload: str) -> None:
         except (json.JSONDecodeError, ValueError):
             return
 
+    if not isinstance(data, dict):
+        return
+
+    # نفس قاعدة الكاميرا: العقدة بتحكي عن حالها بحقلها، والوصيّة (`online:false`)
+    # بتوصل من الوسيط لمّا تنقطع.
+    online_flag = data.get("online")
     room_outputs = data.get("outputs")
     if not isinstance(room_outputs, list):
+        if isinstance(online_flag, bool):
+            ingest_status(node_id, online=None,
+                          telemetry={"room_online": online_flag})
         return
 
     namespaced = [
@@ -357,16 +375,20 @@ def _ingest_room_status(node_id: str, payload: str) -> None:
         if isinstance(o, dict) and o.get("id")
     ]
 
+    telemetry = {f"room_{k}": v for k, v in data.items()
+                 if k in ("ip", "board", "light", "rssi", "fw", "uptime_s", "heap")}
+    telemetry["room_online"] = True
     ingest_status(
         node_id,
-        online=True,
+        online=None,
         capabilities=None,
         outputs=namespaced,
         firmware_version="",
         # `room_` مثل `cam_` بالضبط: التليمتري بتندمج بالمفتاح، ولوّ العقدة
-        # بعتت `ip` كانت بتدهس عنوان الدماغ وبالعكس كل خمس ثواني.
-        telemetry={f"room_{k}": v for k, v in data.items()
-                   if k in ("ip", "board", "light", "rssi")},
+        # بعتت `ip` كانت بتدهس عنوان الدماغ وبالعكس كل خمس ثواني. و`fw`
+        # و`uptime_s` و`heap` كانوا بيوصلوا وبينرموا: ما حدا كان بيعرف أي نسخة
+        # ع عقدة زبون، ولا إذا بتعيد تشغيل حالها.
+        telemetry=telemetry,
     )
 
 
@@ -376,7 +398,7 @@ def _on_connect(client, userdata, flags, reason_code, properties=None) -> None: 
         # QoS 1 would double the round trips on a link the robot already shares
         # with live audio. A lost chunk means one retaken photo, not a lost one.
         client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1),
-                          (_CAM_SUB, 1), (_CAM_STATUS_SUB, 1),
+                          (_CAM_STATUS_SUB, 1),
                           (_CAM_EVENT_SUB, 1), (_ROOM_STATUS_SUB, 1)])
         _stats["connects"] += 1
         # The pid is in the line on purpose. gunicorn runs two workers and each
@@ -417,7 +439,7 @@ def _on_subscribe(client, userdata, mid, reason_codes, properties=None) -> None:
     if any(c >= 128 for c in codes):
         logger.error(
             "[mqtt_ingest] worker %d: broker REFUSED a subscription %s "
-            "(order: status, IR, cam/snapshot, cam/status, cam/event, "
+            "(order: status, IR, cam/status, cam/event, "
             "room/status) — 128 means denied, "
             "usually a credential without permission on that topic",
             os.getpid(), codes)

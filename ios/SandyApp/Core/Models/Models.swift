@@ -361,6 +361,9 @@ struct NodeTelemetry {
     let ssid: String?
     /// شبكة الكاميرا — مفتاح مستقل، زي عنوانها.
     let camSSID: String?
+    /// مفتاح البث المحلي — الكاميرا بتولّده كل إقلاع، والخادم بيعطيه لصاحبها بس.
+    /// بلاه خادم البث بيرفض؛ وهاد المقصود: جهاز غريب ع نفس الشبكة ما بيعرفه.
+    let camStreamKey: String?
 
     /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
     var hasMicReadings: Bool { micLeft != nil || micRight != nil }
@@ -383,6 +386,7 @@ struct NodeTelemetry {
         camBoard      = d["cam_board"] as? String
         ssid          = d["ssid"] as? String
         camSSID       = d["cam_ssid"] as? String
+        camStreamKey  = d["cam_stream_key"] as? String
     }
 }
 

@@ -1,7 +1,18 @@
 // =========================
-// ESP32-CAM — OTA + Telnet
+// ESP32-CAM — OTA + Telnet (نسخة التطوير بس)
 // =========================
+//
+// **الترقية ع الشبكة المحلية والتلنت ما بيطلعوا بالنسخة اللي بتنباع.**
+//
+// الترقية المحلية كانت محمية بكلمة سر وحدة محروقة بالبرنامج نفسه، والصورة
+// اللي بتنرفع ما عليها توقيع. يعني أي حدا بالبيت بيعرف كلمة السر — وبتنقرا من
+// أي لوح انفتح — بيقدر يحطّ برنامجه ع كاميرا بغرفة نوم. والتلنت كان بيعرض
+// السجل كامل لأي حدا بيطلبه. للتطوير الاتنين نعمة؛ ببيت زبون الاتنين باب.
 
+#if SANDY_DEV
+#ifndef SANDY_OTA_PASSWORD
+  #error "SANDY_DEV needs SANDY_OTA_PASSWORD in secrets.h"
+#endif
 void setupOTA() {
   ArduinoOTA.setHostname(SANDY_OTA_HOSTNAME);
   ArduinoOTA.setPassword(SANDY_OTA_PASSWORD);
@@ -43,6 +54,7 @@ void updateTelnet() {
   }
   if (g_telnetClient && !g_telnetClient.connected()) g_telnetClient.stop();
 }
+#endif  // SANDY_DEV
 
 // آخر عنوان انطلقت عليه الخدمات.
 //
@@ -66,14 +78,18 @@ void startNetworkServicesIfReady() {
   if (g_networkServicesStarted) {
     g_log.printf("[NET] العنوان تغيّر %s ← %s — بنعيد تشغيل الخدمات\n",
                  g_servicesIp.toString().c_str(), now.toString().c_str());
+#if SANDY_DEV
     // نقفل التلنت القديم صراحة: المقبس المربوط ع عنوان راح بيضلّ ماسك المنفذ،
     // والربط الجديد بيفشل بصمت.
     if (g_telnetClient) g_telnetClient.stop();
     g_telnetServer.stop();
+#endif
   }
 
+#if SANDY_DEV
   setupOTA();
   setupTelnet();
+#endif
   setupMQTT();
   // الساعة مع باقي الخدمات، مش عند أول صورة.
   //
