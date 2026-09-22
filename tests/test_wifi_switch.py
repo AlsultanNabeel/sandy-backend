@@ -101,8 +101,8 @@ def test_the_service_channel_allows_wifi_and_the_camera_and_nothing_else():
     from app.integrations.room_device import RoomDeviceClient
 
     allowed = RoomDeviceClient._SERVICE_CHANNELS
-    assert "/wifi" in allowed and "/cam/" in allowed
-    assert not any(c in ("/", "sandy/node/") for c in allowed), (
+    assert "wifi" in allowed and "cam/wifi" in allowed and "cam/command" in allowed
+    assert not any(c in ("", "/", "sandy/node/", "cam/") for c in allowed), (
         "a channel this broad authorises everything")
 
 

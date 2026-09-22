@@ -30,13 +30,7 @@ void camUnlock();
 void camWait(unsigned long ms);
 void camWdtFeed();
 
-// نفس مفتاح مقبس الصوت — بينحطّ بـ secrets.h
-#ifndef SANDY_WS_HMAC_KEY
-#define SANDY_WS_HMAC_KEY ""
-#endif
-#ifndef SANDY_UPLOAD_HOST
-#define SANDY_UPLOAD_HOST "sandy-robot-3da0693d32f7.herokuapp.com"
-#endif
+// عنوان الخادم ومفتاح الرفع المشترك: قيمهم الافتراضية بـ config.h.
 
 // مزامنة الساعة — **شرط للرفع، مش رفاهية.**
 //
@@ -135,8 +129,8 @@ static void ownKeyDrop() {
 }
 
 static String hmacHex(const String& msg) {
-  const unsigned char* key = g_hasOwnKey ? g_ownKey : (const unsigned char*)SANDY_WS_HMAC_KEY;
-  size_t keyLen = g_hasOwnKey ? sizeof(g_ownKey) : strlen(SANDY_WS_HMAC_KEY);
+  const unsigned char* key = g_hasOwnKey ? g_ownKey : (const unsigned char*)g_id.sharedKey.c_str();
+  size_t keyLen = g_hasOwnKey ? sizeof(g_ownKey) : g_id.sharedKey.length();
   uint8_t out[32];
   mbedtls_md_context_t ctx;
   mbedtls_md_init(&ctx);
@@ -256,6 +250,11 @@ void camRemoteStreamTick() {
 static WiFiClientSecure g_upClient;
 static bool g_upClientReady = false;
 
+// قبل التحديث: الاتصال المفتوح ماسك ذاكرة تشفير كاملة، والتنزيل بدّه وحدة تانية.
+void camUploadClose() {
+  g_upClient.stop();
+}
+
 static bool upEnsureConnected() {
   if (g_upClient.connected()) return true;
   g_upClient.stop();
@@ -300,7 +299,7 @@ static bool upReadLine(String& out, unsigned long deadline) {
 // بترجّع true لو الخادم استلم الصورة.
 bool uploadSnapshot(const String& id, const uint8_t* data, size_t len) {
   ownKeyLoad();
-  if (!g_hasOwnKey && strlen(SANDY_WS_HMAC_KEY) == 0) {
+  if (!g_hasOwnKey && g_id.sharedKey.length() == 0) {
     g_log.println("[UP] لا يوجد مفتاح توقيع — الرفع معطّل");
     return false;
   }

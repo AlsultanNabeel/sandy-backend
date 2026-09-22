@@ -33,6 +33,11 @@ from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 _ROOT = Path(__file__).resolve().parent.parent
 
 
+# The room node's device table — one row per output, name and kind, and the
+# heartbeat is built from it (`{ "light", "relay", handleLight }`).
+_ROOM_TABLE = re.compile(r'\{\s*"(\w+)",\s*"(\w+)",\s*handle\w+\s*\}')
+
+
 def _read(rel: str) -> str:
     return (_ROOT / rel).read_text(encoding="utf-8")
 
@@ -122,6 +127,7 @@ def test_send_publishes_to_the_callers_own_room(db):
 
     with as_tenant("tenant-a"):
         node_store.pair_node("8421", label="غرفتي")
+        node_store.ingest_status("8421", outputs=[{"id": "room/light", "kind": "relay"}])
         assert client.send("light", "off") is True
         assert published == [("sandy/node/8421/room/light", "off")]
 
@@ -136,6 +142,85 @@ def test_send_publishes_to_the_callers_own_room(db):
         published.clear()
         assert client.send("light", "off") is False
         assert published == []
+
+
+def test_an_output_the_room_never_declared_is_not_sent(db):
+    """A command for hardware nobody announced used to "succeed" into nothing.
+
+    The broker took it, the scene reported it sent, and the room node printed
+    "no handler" to a serial port nobody watches. Only what the board declared
+    in its heartbeat goes out; the rest comes back as skipped.
+    """
+    from app.integrations.room_device import RoomDeviceClient
+
+    client = RoomDeviceClient()
+    published = []
+    client._publish = lambda topic, payload: (   # type: ignore[method-assign]
+        published.append((topic, payload)) or True)
+
+    with as_tenant("tenant-a"):
+        node_store.pair_node("8421", label="غرفتي")
+        # No room board has spoken yet: nothing is sent.
+        assert client.send("light", "on") is False
+        node_store.ingest_status("8421", outputs=[{"id": "room/light", "kind": "relay"}])
+        assert client.send("fan", "on") is False
+        assert client.send("light", "on") is True
+        assert published == [("sandy/node/8421/room/light", "on")]
+        result = client.apply_actions([{"device": "light", "value": "off"},
+                                       {"device": "curtain", "value": "open"}])
+        assert [a["device"] for a in result["sent"]] == ["light"]
+        assert [a["device"] for a in result["skipped"]] == ["curtain"]
+
+
+def test_music_accepts_what_the_player_understands_and_nothing_more():
+    from app.integrations.room_device import normalize_action
+
+    assert normalize_action("music", "vol:30") == "vol:30"
+    assert normalize_action("music", "vol:0") == "vol:0"
+    assert normalize_action("music", "vol:31") is None
+    assert normalize_action("music", "vol:-1") is None
+    assert normalize_action("music", "play:1:1") == "play:1:1"
+    assert normalize_action("music", "play:99:255") == "play:99:255"
+    assert normalize_action("music", "play:0:1") is None
+    assert normalize_action("music", "play:1:256") is None
+    assert normalize_action("music", "play:1") is None
+    assert normalize_action("color", "#a1b2c3") == "#a1b2c3"
+    assert normalize_action("color", "#zzzzzz") is None
+
+
+def test_service_channels_match_exactly():
+    from app.integrations.room_device import RoomDeviceClient
+
+    client = RoomDeviceClient()
+    sent = []
+    client._publish = lambda topic, payload: sent.append(topic) or True  # type: ignore[method-assign]
+    for ok in ("sandy/node/8421/cam/command", "sandy/node/8421/wifi",
+               "sandy/node/8421/cam/wifi", "sandy/node/8421/screen_img",
+               "sandy/node/8421/factory_reset"):
+        assert client.publish_service(ok, "x") is True, ok
+    for bad in ("sandy/node/8421/room/wifi_evil", "sandy/node/8421/cam/anything",
+                "sandy/node/8421/wifi/extra", "sandy/node//wifi",
+                "evil/sandy/node/8421/wifi", "sandy/node/84 21/wifi"):
+        assert client.publish_service(bad, "x") is False, bad
+
+
+def test_a_publish_waits_for_the_broker_and_then_says_no():
+    """Publishing into a client that never connected used to report success."""
+    import app.integrations.room_device as rd
+
+    client = rd.RoomDeviceClient()
+
+    class _Fake:
+        def publish(self, *a, **k):   # pragma: no cover - must not be reached
+            raise AssertionError("published without a connection")
+
+    client._ensure_client = lambda: _Fake()   # type: ignore[method-assign]
+    old = rd._CONNECT_WAIT_S
+    rd._CONNECT_WAIT_S = 0.01
+    try:
+        assert client._publish("sandy/node/8421/room/light", "on") is False
+    finally:
+        rd._CONNECT_WAIT_S = old
 
 
 def test_two_robots_are_refused_rather_than_guessed(db):
@@ -227,7 +312,7 @@ def test_the_room_heartbeat_declares_kinds_the_server_accepts():
     from app.features.node_store import KNOWN_CAPABILITIES
 
     ino = _read("room-node/room-node.ino")
-    kinds = set(re.findall(r'\\"kind\\":\\"(\w+)\\"', ino))
+    kinds = {k for _, k in _ROOM_TABLE.findall(ino)}
     assert kinds, "the room heartbeat declares no outputs at all"
     assert kinds <= set(KNOWN_CAPABILITIES), (
         f"room node declares kinds the server drops: {kinds - set(KNOWN_CAPABILITIES)}")
@@ -238,7 +323,8 @@ def test_every_declared_room_output_has_a_catalogue_entry():
     from app.features.node_provision import PART_CATALOGUE
 
     ino = _read("room-node/room-node.ino")
-    declared = set(re.findall(r'\\"id\\":\\"(\w+)\\"', ino))
+    declared = {name for name, _ in _ROOM_TABLE.findall(ino)}
+    assert declared == {"light", "music"}
     for out in declared:
         assert f"room/{out}" in PART_CATALOGUE, (
             f"the room node declares {out} and the catalogue cannot draw it")
@@ -293,9 +379,12 @@ def test_the_brain_ignores_outputs_that_belong_to_other_boards():
 
 def test_the_room_node_listens_on_its_own_tree():
     ino = _read("room-node/room-node.ino")
-    assert '"sandy/node/" + roomNodeId() + "/room"' in ino
-    assert 'g_topicFilter = g_topicBase + "/#"' in ino
-    assert "g_mqtt.subscribe(g_topicFilter.c_str(), 1)" in ino
+    assert '"sandy/node/" + g_nodeId + "/room"' in ino
+    # One exact topic per declared output — a wildcard also delivered the node's
+    # own heartbeat back to it, and anything anyone wrote under the tree.
+    assert 'String topic = g_topicBase + "/" + DEVICES[i].name;' in ino
+    assert "g_mqtt.subscribe(topic.c_str(), 1)" in ino
+    assert '"/#"' not in ino
     # Its heartbeat moves with it; a status left on the old tree would be one
     # customer's room reporting into everybody's.
     assert 'g_topicStatus = g_topicBase + "/status"' in ino

@@ -7,7 +7,7 @@
 //       cam/request · command · wifi · flash · stream · framesize  ← أوامر داخلة
 //       cam/status  ← حالة الكاميرا (نبضة)،  cam/event ← أحداث
 //     الصورة نفسها ما بتمرّ بالوسيط: بتنرفع بطلب واحد لـ /api/cam/upload.
-//   • OTA + Telnet
+//   • تحديث موقّع من الخادم (sandy_ota_pull.h)؛ الترقية المحلية والتلنت للتطوير بس
 //
 // التقسيم على ملفات .ino — يدمجها Arduino IDE تلقائياً:
 //   vision-core.ino  — globals + setup + loop (هذا الملف)
@@ -33,6 +33,9 @@
 #include "secrets.h"
 #include "config.h"
 #include "sandy_ca_roots.h"
+// الهويّة بذاكرة اللوح، والتحديث الموقّع من الخادم — نفس الملفين بعقدة الغرفة.
+#include "sandy_identity.h"
+#include "sandy_ota_pull.h"
 
 // ── السجل ──────────────────────────────────────────────────────────────────
 //
@@ -138,6 +141,11 @@ void flashTick();
 void flashInit();
 void settingsInit();
 void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMode flash);
+String camNodeId();
+bool camRemoteStreaming();
+void camUploadClose();
+bool mqttIsConnected();
+extern volatile bool g_streamViewerActive;
 
 bool g_networkServicesStarted = false;
 bool g_cameraReady = false;
@@ -189,6 +197,12 @@ static const char* bootReasonText(esp_reset_reason_t r) {
   }
 }
 
+// فاضية للتحديث: ما في التقاط ولا سلسلة ولا بث. التنزيل بيوقف الحلقة ثواني.
+bool camIdleForUpdate() {
+  return !g_snapshotPending && g_burstRemaining == 0 && !g_streamViewerActive &&
+         !camRemoteStreaming();
+}
+
 void setup() {
   Serial.begin(CAMERA_SERIAL_BAUD);
   delay(CAMERA_BOOT_DELAY_MS);
@@ -207,6 +221,10 @@ void setup() {
   esp_task_wdt_add(NULL);
 
   g_camMutex = xSemaphoreCreateMutex();
+
+  // الهويّة قبل الشبكة: الشبكة الأولى ومعرّف العقدة جايين منها.
+  sandyIdentityLoad(SANDY_PAIR_CODE, SANDY_MQTT_HOST, SANDY_MQTT_USER, SANDY_MQTT_PASS,
+                    SANDY_WS_HMAC_KEY, SECRET_SSID, SECRET_OPTIONAL_PASS);
 
   settingsInit();
   flashInit();
@@ -245,6 +263,18 @@ void setup() {
 
   // الإعدادات المحفوظة بترجع بعد ما يجهز المستشعر
   if (g_cameraReady) settingsLoadFromNvs();
+
+  static SandyOtaConfig ota;
+  static String otaDeviceId = "cam-" + camNodeId();
+  ota.board    = "cam";
+  ota.host     = SANDY_UPLOAD_HOST;
+  ota.deviceId = otaDeviceId.c_str();
+  ota.version  = SANDY_CAM_FW_VERSION;
+  ota.caRoots  = SANDY_CA_ROOTS;
+  ota.idle     = camIdleForUpdate;
+  ota.prepare  = []() { camRemoteStream(false); camUploadClose(); };
+  ota.feed     = camWdtFeed;
+  sandyOtaBegin(ota);
 
   // المصافحة المشفّرة مع الوسيط بدها كتلة ذاكرة متّصلة كبيرة. لو الذاكرة ضيقة
   // بتعلّق بلا رسالة خطأ، فمنطبع القياس هون عشان يبان السبب فوراً.
@@ -304,6 +334,8 @@ void loop() {
       mqttPublishEvent(done);
     }
   }
+
+  sandyOtaLoop(g_networkServicesStarted && mqttIsConnected());
 
   delay(1);  // yield للـ TCP/WiFi stacks
 }

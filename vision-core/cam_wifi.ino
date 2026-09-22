@@ -64,8 +64,10 @@ static void migrateLegacyWifi() {
 }
 
 static void loadWifiCreds() {
-  g_ssid = SECRET_SSID;
-  g_pass = SECRET_OPTIONAL_PASS;
+  // الشبكة الأولى من الهويّة المحفوظة (sandy_identity.h)، مش من الصورة: صورة
+  // التحديث فيها أمثلة، وكانت رح ترجّع الكاميرا لشبكة اسمها «YOUR_WIFI_SSID».
+  g_ssid = g_id.wifiSsid;
+  g_pass = g_id.wifiPass;
 
   migrateLegacyWifi();
   Preferences p;

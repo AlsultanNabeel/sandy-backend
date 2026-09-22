@@ -35,7 +35,7 @@ static String g_wifiSsid, g_wifiPass;
 // بيعرف الوحدة فيه. نسخة تانية من نفس التحويل كانت رح تفترق يومًا ما.
 String camNodeId() {
   String out;
-  const char* src = SANDY_PAIR_CODE;
+  const char* src = g_id.pair.c_str();
   for (size_t i = 0; src[i]; i++) {
     char c = src[i];
     if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
@@ -183,12 +183,12 @@ void setupMQTT() {
   // إعادة تشغيل بدل إعادة محاولة. خمستعش ثانية بتكفّي أي مصافحة سليمة.
   g_mqttTcp.setHandshakeTimeout(15);
   g_mqttTcp.setTimeout(15000);
-  g_mqtt.setServer(SANDY_MQTT_HOST, SANDY_MQTT_PORT);
+  g_mqtt.setServer(g_id.mqttHost.c_str(), SANDY_MQTT_PORT);
   g_mqtt.setCallback(mqttCallback);
   g_mqtt.setBufferSize(MQTT_BUFFER_SIZE);  // كبير لاستيعاب chunks
   g_mqtt.setSocketTimeout(15);             // مهلة كافية لـ TLS handshake
   g_mqtt.setKeepAlive(30);                 // keepalive معقول
-  g_log.printf("[MQTT] configured for %s:%d\n", SANDY_MQTT_HOST, SANDY_MQTT_PORT);
+  g_log.printf("[MQTT] configured for %s:%d\n", g_id.mqttHost.c_str(), SANDY_MQTT_PORT);
 }
 
 static bool mqttReconnect() {
@@ -212,7 +212,7 @@ static bool mqttReconnect() {
   // ملاحظة: hostByName بترجع "نجاح" مع عنوان صفري لو خدمة الأسماء لسا مش جاهزة
   // بعد وصل الشبكة. العنوان الصفري فشل، مش نجاح.
   IPAddress brokerIp;
-  bool resolved = WiFi.hostByName(SANDY_MQTT_HOST, brokerIp) &&
+  bool resolved = WiFi.hostByName(g_id.mqttHost.c_str(), brokerIp) &&
                   brokerIp != IPAddress((uint32_t)0);
   if (!resolved) {
     g_log.printf("[MQTT] DNS not ready (%s) — will retry\n",
@@ -228,7 +228,7 @@ static bool mqttReconnect() {
   // باسمنا. قبلها التطبيق كان بيشوف الكاميرا متّصلة لحدّ ما يقدم آخر نبض —
   // وكاميرا مطفية بتبيّن شغّالة هي أسوأ من كاميرا بتقول إنها مطفية.
   static const char* kWillMsg = "{\"online\":false}";
-  if (g_mqtt.connect(clientId.c_str(), SANDY_MQTT_USER, SANDY_MQTT_PASS,
+  if (g_mqtt.connect(clientId.c_str(), g_id.mqttUser.c_str(), g_id.mqttPass.c_str(),
                      g_topicStatus.c_str(), 1, true, kWillMsg)) {
     g_log.println("[MQTT] connected");
     // الوصيّة محفوظة عند الوسيط، فلازم نمسحها بـ«شغّالة» محفوظة كمان — وإلا أي
@@ -378,6 +378,8 @@ void mqttPublishEvent(const char* json) {
 }
 
 // حالة كاملة (كل الإعدادات) — أطول من الحالة الدورية، فبتنشر عند الطلب فقط
+bool mqttIsConnected() { return g_mqtt.connected(); }
+
 bool mqttPublishStatusJson(const char* json) {
   if (!g_mqtt.connected()) return false;
   return g_mqtt.publish(g_topicStatus.c_str(), json, false);

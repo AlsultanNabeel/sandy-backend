@@ -116,8 +116,17 @@
 // خمس دقايق بتغطّي جلسة مشاهدة، وبتنتهي لحالها لو حدا نسي.
 #define CAM_REMOTE_STREAM_MAX_MS   (5UL * 60UL * 1000UL)
 
-// OTA
+// OTA (المحلية — نسخة التطوير بس)
 #define SANDY_OTA_HOSTNAME "sandy-esp32cam"
+
+// الخادم: رفع الصور والتحديثات. ومفتاح الرفع المشترك — فاضي هون، والقيمة
+// الحقيقية بـ secrets.h وقت الحرق بالكيبل، وبعدها بتعيش بذاكرة اللوح.
+#ifndef SANDY_UPLOAD_HOST
+  #define SANDY_UPLOAD_HOST "sandy-robot-3da0693d32f7.herokuapp.com"
+#endif
+#ifndef SANDY_WS_HMAC_KEY
+  #define SANDY_WS_HMAC_KEY ""
+#endif
 
 // ===== Topics =====
 // المواضيع صارت تحت اسم الروبوت مش عامة: sandy/node/<كود>/cam/...

@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import ssl
 import threading
 import uuid
@@ -67,9 +68,20 @@ _DEVICE_OUTPUT = {
 
 VALID_DEVICES = frozenset(_DEVICE_OUTPUT)
 _VALID_COLOR = {"warm", "cool", "white", "red", "green", "blue", "purple", "amber"}
+_HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
+_MUSIC_WORDS = frozenset({"on", "off", "stop", "pause", "resume", "next", "prev"})
+# The DFPlayer's own ranges (handleMusic in room-node.ino): volume 0..30,
+# folder 1..99, track 1..255. Anything else the board would ignore anyway —
+# refusing it here is what lets the caller hear "that did not happen".
+_MUSIC_VOL = re.compile(r"^vol:(\d{1,2})$")
+_MUSIC_PLAY = re.compile(r"^play:(\d{1,2}):(\d{1,3})$")
+# How long the first command waits for the broker before saying no. A publish
+# into a client that is not connected yet was queued and reported as sent —
+# the scene "worked" and the lamp never moved.
+_CONNECT_WAIT_S = 3.0
 
 
-def _caller_node_id() -> Optional[str]:
+def _caller_node() -> Optional[Dict[str, Any]]:
     """The node whose room this caller may drive, or None.
 
     Reads the caller's own nodes, so the answer is scoped to the tenant by
@@ -89,7 +101,29 @@ def _caller_node_id() -> Optional[str]:
             logger.warning("[room_device] %d nodes paired — say which one via the "
                            "device registry", len(nodes))
         return None
-    return str(nodes[0].get("node_id") or "").strip() or None
+    return nodes[0] if str(nodes[0].get("node_id") or "").strip() else None
+
+
+def _caller_node_id() -> Optional[str]:
+    node = _caller_node()
+    return str(node.get("node_id")).strip() if node else None
+
+
+def declared_room_outputs(node: Optional[Dict[str, Any]]) -> frozenset:
+    """The room outputs this node's room board said it has (``light``, ``music``).
+
+    A command for an output nobody declared used to go out anyway: the broker
+    took it, the call reported success, and nothing in the house moved — the
+    room node answered "no handler" to its own serial port. Only what the board
+    announced in its heartbeat is sent now; the rest is reported as skipped.
+    """
+    outs = (node or {}).get("outputs") or []
+    names = set()
+    for o in outs:
+        oid = str((o or {}).get("id") or "") if isinstance(o, dict) else ""
+        if oid.startswith(ROOM_OUTPUT_PREFIX):
+            names.add(oid[len(ROOM_OUTPUT_PREFIX):])
+    return frozenset(names)
 
 
 def room_topic(node_id: str, device: str) -> Optional[str]:
@@ -105,8 +139,9 @@ def normalize_action(device: str, value: str) -> Optional[str]:
     """Return a clean payload for (device, value), or None if invalid.
 
     Light/fan accept on|off or a 0..100 brightness/speed; color accepts a named
-    color or #rrggbb; music accepts on|off and the player's own
-    stop|pause|resume|next|prev (``handleMusic`` in room-node.ino); curtain open|close.
+    color or #rrggbb; music accepts on|off, the player's own
+    stop|pause|resume|next|prev, ``vol:0..30`` and ``play:<folder>:<track>``
+    (``handleMusic`` in room-node.ino); curtain open|close.
     """
     device = (device or "").strip().lower()
     value = str(value or "").strip().lower()
@@ -122,12 +157,18 @@ def normalize_action(device: str, value: str) -> Optional[str]:
     if device == "color":
         if value in _VALID_COLOR:
             return value
-        if value.startswith("#") and len(value) == 7:
-            return value
-        return None
+        return value if _HEX_COLOR.match(value) else None
     if device == "music":
-        return value if value in ("on", "off", "stop", "pause", "resume",
-                                  "next", "prev") else None
+        if value in _MUSIC_WORDS:
+            return value
+        m = _MUSIC_VOL.match(value)
+        if m:
+            return value if int(m.group(1)) <= 30 else None
+        m = _MUSIC_PLAY.match(value)
+        if m:
+            folder, track = int(m.group(1)), int(m.group(2))
+            return value if 1 <= folder <= 99 and 1 <= track <= 255 else None
+        return None
     if device == "curtain":
         return value if value in ("open", "close") else None
     if device == "scene":
@@ -148,6 +189,7 @@ class RoomDeviceClient:
             self._port = 8883
         self._client: Optional[Any] = None
         self._lock = threading.RLock()
+        self._connected = threading.Event()
 
     @property
     def available(self) -> bool:
@@ -171,7 +213,13 @@ class RoomDeviceClient:
                 )
                 c.username_pw_set(self._user, self._pass)
                 c.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-                c.connect(self._host, self._port, keepalive=60)
+                c.on_connect = self._on_connect
+                c.on_disconnect = self._on_disconnect
+                # Async: a blocking connect held the caller's request — a voice
+                # turn — for the whole TLS handshake, and a broker that was down
+                # held it for the socket timeout. The network thread connects
+                # and reconnects on its own; `_publish` waits a bounded moment.
+                c.connect_async(self._host, self._port, keepalive=60)
                 c.loop_start()
                 self._client = c
                 return c
@@ -180,9 +228,23 @@ class RoomDeviceClient:
                 self._client = None
                 return None
 
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:  # noqa: ANN001
+        if getattr(reason_code, "is_failure", False) or (
+                isinstance(reason_code, int) and reason_code != 0):
+            logger.warning("[room_device] broker refused: %s", reason_code)
+            self._connected.clear()
+            return
+        self._connected.set()
+
+    def _on_disconnect(self, client, userdata, *args) -> None:  # noqa: ANN001
+        self._connected.clear()
+
     def _publish(self, topic: str, payload: str) -> bool:
         c = self._ensure_client()
         if c is None:
+            return False
+        if not self._connected.wait(_CONNECT_WAIT_S):
+            logger.warning("[room_device] broker not connected — %s not sent", topic)
             return False
         try:
             return c.publish(topic, payload, qos=1).rc == 0
@@ -217,8 +279,15 @@ class RoomDeviceClient:
     # قائمة صريحة مش نمط: «أي إشي تحت sandy/node/» بيسمح لأي خطأ إملائي يوصل
     # للوح، و«أي إشي فيه cam/» بيمنع أي قناة جديدة بصمت. الاسم الصريح بيخلّي
     # إضافة قناة قرارًا مكتوبًا، وبيخلّي المنع مقروءًا.
-    _SERVICE_CHANNELS = ("/cam/", "/wifi", "/cam/wifi", "/screen_img",
-                         "/factory_reset")
+    #
+    # **مطابقة كاملة للقناة، مش «فيها».** «فيها /wifi» كانت بتمرّق
+    # `sandy/node/x/room/wifi_evil` و«فيها /cam/» كانت بتمرّق أي إشي تحت
+    # الكاميرا. هلّق الموضوع لازم يكون `sandy/node/<معرّف>/<قناة>` حرفيًّا.
+    _SERVICE_CHANNELS = frozenset({
+        "cam/command", "cam/request", "cam/wifi", "wifi", "screen_img",
+        "factory_reset",
+    })
+    _SERVICE_TOPIC = re.compile(r"^sandy/node/([a-z0-9]{1,64})/(.+)$")
 
     def publish_service(self, topic: str, payload: str) -> bool:
         """Publish on a node's service channel (camera, network — not devices).
@@ -235,8 +304,8 @@ class RoomDeviceClient:
         decides, instead of two that can disagree.
         """
         topic = (topic or "").strip()
-        if not topic.startswith("sandy/node/") or not any(
-                c in topic for c in self._SERVICE_CHANNELS):
+        m = self._SERVICE_TOPIC.match(topic)
+        if not m or m.group(2) not in self._SERVICE_CHANNELS:
             logger.warning("[room_device] publish_service refused: %s", topic)
             return False
         return self._publish(topic, str(payload))
@@ -249,12 +318,17 @@ class RoomDeviceClient:
         hardware and only their own: the topic is built from the caller's node,
         so there is nothing to get wrong at a call site.
         """
-        node_id = _caller_node_id()
-        if not node_id:
+        node = _caller_node()
+        if not node:
             logger.warning("[room_device] actuation refused: no node for this caller")
             return False
+        node_id = str(node.get("node_id")).strip()
         payload = normalize_action(device, value)
         if payload is None:
+            return False
+        name = (device or "").strip().lower()
+        if name not in declared_room_outputs(node):
+            logger.info("[room_device] %s skipped: the room board never declared it", name)
             return False
         topic = room_topic(node_id, device)
         if topic is None:
@@ -275,10 +349,15 @@ class RoomDeviceClient:
 
 
 _room_client: Optional[RoomDeviceClient] = None
+_room_client_lock = threading.Lock()
 
 
 def get_room_device_client() -> RoomDeviceClient:
+    # Two request threads racing here each built a client — two broker
+    # connections, one of them never used and never closed.
     global _room_client
     if _room_client is None:
-        _room_client = RoomDeviceClient()
+        with _room_client_lock:
+            if _room_client is None:
+                _room_client = RoomDeviceClient()
     return _room_client
