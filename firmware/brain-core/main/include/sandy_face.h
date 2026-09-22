@@ -6,6 +6,11 @@
 // Phase 0 stub — full LVGL implementation in Phase 0 V0.11
 esp_err_t face_init(void);
 void      face_set_mood(sandy_mood_t mood);
+// A mood the owner chose in the app. It stays — the stuck-expression watchdog
+// is for the robot's own conversational faces, and it used to wipe a "happy"
+// the owner had just picked after six seconds — until FACE_APP_MOOD_TTL_MS,
+// or until the robot has something of its own to say.
+void      face_set_mood_from_app(sandy_mood_t mood);
 
 // Glance the eyes toward a sound. pan: -100 = hard left, 0 = centre, +100 = right.
 // The gaze holds briefly then drifts back to idle on its own.

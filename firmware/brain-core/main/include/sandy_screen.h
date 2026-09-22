@@ -45,6 +45,11 @@ typedef enum {
 
 void screen_show_text(const char *text);
 
+// A QR code with a line under it — for setup: the owner points the phone's
+// camera at her face and joins her network without typing anything. Falls back
+// to the caption alone on a build without the QR widget.
+void screen_show_qr(const char *payload, const char *caption);
+
 // Set the size for this and every later line. Takes effect at once if
 // something is already showing.
 void screen_set_size(sandy_screen_size_t size);

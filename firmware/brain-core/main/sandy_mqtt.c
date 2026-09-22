@@ -100,7 +100,7 @@ static const struct { const char *name; sandy_mood_t mood; } MOOD_MAP[] = {
 static void _handle_mood(const char *val) {
     for (size_t i = 0; i < sizeof(MOOD_MAP)/sizeof(MOOD_MAP[0]); i++) {
         if (!strcmp(val, MOOD_MAP[i].name)) {
-            face_set_mood(MOOD_MAP[i].mood);   // also sets g_current_mood
+            face_set_mood_from_app(MOOD_MAP[i].mood);   // also sets g_current_mood
             return;
         }
     }
@@ -156,7 +156,9 @@ static void _handle_gesture(const char *val) {
         // الإضاءة آخر إشي، و`led_set_effect` بترجّع false وقت الجلسة الحيّة —
         // مؤشّر الخصوصية بيغلب. يعني «ارقصي» وهي بتسمعك بترقص وبتغنّي، وبيضلّ
         // الضوّ يقول إنّ المايك شغّال. وهاد صحيح: الرقصة ما بتلغي التحذير.
-        if (s->fx < LED_FX_COUNT) led_set_effect(s->fx, 0, 0);
+        // The current colour at a middle speed. It passed (0, 0): colour black,
+        // so "scan" pulsed and "sleep" breathed in total darkness.
+        if (s->fx < LED_FX_COUNT) led_set_effect(s->fx, LED_RGB_KEEP, 5);
 
         servo_gesture(s->g);
         return;
@@ -258,7 +260,7 @@ static void _handle_led(const char *val) {
     else if (!strcmp(val, "talking"))   { led_set_state(LED_STATE_TALKING);   return; }
 
     char name[16] = {0};
-    uint32_t rgb = 0x00A0FF;
+    uint32_t rgb = LED_RGB_KEEP;   // no colour in the command keeps the current one
     int speed = 5;
 
     const char *c1 = strchr(val, ':');
@@ -267,9 +269,17 @@ static void _handle_led(const char *val) {
     memcpy(name, val, nlen);
 
     if (c1) {
-        rgb = (uint32_t)strtoul(c1 + 1, NULL, 16);
+        // Exactly six hex digits, or the colour is left alone: "breathe:red"
+        // used to parse as 0 and paint black.
+        char *end = NULL;
+        uint32_t v = (uint32_t)strtoul(c1 + 1, &end, 16);
+        if (end == c1 + 7 && (*end == ':' || *end == '\0')) rgb = v;
         const char *c2 = strchr(c1 + 1, ':');
-        if (c2) speed = atoi(c2 + 1);
+        if (c2) {
+            speed = atoi(c2 + 1);
+            if (speed < 1) speed = 1;
+            if (speed > 10) speed = 10;
+        }
     }
 
     sandy_led_fx_t fx = led_fx_from_name(name);

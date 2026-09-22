@@ -110,6 +110,7 @@ static volatile uint32_t s_tx_drop_bytes;   // captured but the uplink was too f
 static volatile bool s_authed;
 static volatile int64_t s_last_rx_audio_ms;  // last time we got Sandy's audio
 static volatile bool s_playing;              // true only while actively playing audio
+static volatile int  s_out_level;            // 0..100, what the amp plays now (lip sync)
 
 // Playback health counters (cumulative since boot; reported when playback
 // stops). dropped > 0 means the jitter buffer overflowed; gap restarts mean
@@ -864,9 +865,16 @@ static void spk_task(void *arg) {
             // silently breaks echo cancellation.
             {
                 int16_t *v = (int16_t *)buf;
-                for (int i = 0; i < (int)(n / sizeof(int16_t)); i++) {
+                int64_t sum = 0;
+                const int ns = (int)(n / sizeof(int16_t));
+                for (int i = 0; i < ns; i++) {
                     v[i] = spk_apply(v[i]);
+                    sum += v[i] < 0 ? -v[i] : v[i];
                 }
+                // Mean level of this 40 ms, scaled so ordinary speech spans the
+                // range. The face reads it for her mouth.
+                int lvl = ns ? (int)(sum / ns) / 30 : 0;
+                s_out_level = lvl > 100 ? 100 : lvl;
             }
 #if VOICE_AEC_ENABLE
             // Echo reference: exactly what the amp will play (post-volume),
@@ -913,6 +921,7 @@ static void spk_task(void *arg) {
         } else {
             playing = false;
             s_playing = false;
+            s_out_level = 0;
             first_seen = 0;
             last_stop = now_ms();
             // Done talking: back to the listening face while the session is
@@ -2167,6 +2176,10 @@ esp_err_t voice_init(void) {
     // 12KB: aec_create_from_config runs on this stack and goes deep.
     xTaskCreate(voice_task, "voice", 12288, NULL, 5, NULL);
     return ESP_OK;
+}
+
+int voice_output_level(void) {
+    return s_playing ? s_out_level : 0;
 }
 
 bool voice_is_connected(void) {

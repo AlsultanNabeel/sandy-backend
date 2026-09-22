@@ -152,3 +152,7 @@ CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=10
 # `idf.py coredump-info` reads it later. Needs the partition table above, and —
 # like every choice here — a fresh sdkconfig (delete it once) to take effect.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+
+# ── QR code on her face at setup ──────────────────────────────────────────────
+# The phone's camera joins the setup network from her screen in one tap.
+CONFIG_LV_USE_QRCODE=y

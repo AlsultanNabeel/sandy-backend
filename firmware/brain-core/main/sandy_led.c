@@ -15,6 +15,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led_strip.h"
+#if ENABLE_VOICE
+#include "sandy_voice.h"
+#endif
 
 static const char *TAG = "led";
 
@@ -67,9 +70,21 @@ static void paint_state(sandy_led_state_t st) {
     }
 }
 
+// The truth about the microphone, not the last colour someone asked for. The
+// status banner sets LED_STATE_OFF on a network error — mid-session, with the
+// mic still open — and the privacy light went dark while audio could leave.
+static bool session_live(void) {
+#if ENABLE_VOICE
+    return voice_session_is_active();
+#else
+    return false;
+#endif
+}
+
 static void led_task(void *arg) {
     (void)arg;
     int frame = 0;
+    int last_fx = -1;   // an effect restarts from its first frame when it changes
     // The state last painted, or -1 (not a valid state) when the pixel shows
     // something else and the next indicator pass must repaint.
     int last = -1;
@@ -77,12 +92,33 @@ static void led_task(void *arg) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(FRAME_MS));
 
-        if (s_state_owns) {
+        if (s_state_owns || session_live()) {
             // The privacy indicator holds the light. Repaint only on change —
             // refreshing an unchanged pixel fifty times a second is pure noise
-            // on the RMT peripheral.
-            if (last != (int)s_state) { paint_state(s_state); last = (int)s_state; }
+            // on the RMT peripheral. During a session it can only say "live":
+            // nothing turns it dark or idle while the microphone is open.
+            sandy_led_state_t st = s_state;
+            if (session_live() && st != LED_STATE_TALKING) st = LED_STATE_LISTENING;
+            if (st == LED_STATE_IDLE) {
+                // Idle breathes: a slow six-second swell in the same dim blue.
+                // A light that never changes reads as "off" or "stuck"; one
+                // that breathes reads as asleep and fine. Repainted only when
+                // the level changes, which is a few times a second.
+                static int idle_lvl = -1;
+                int t = (int)((xTaskGetTickCount() * portTICK_PERIOD_MS) % 6000);
+                int tri = t < 3000 ? t : 6000 - t;          // 0..3000..0
+                int lvl = 4 + tri * 10 / 3000;               // 4..14
+                if (last != (int)st || lvl != idle_lvl) {
+                    put(0, 0, (uint8_t)lvl);
+                    idle_lvl = lvl;
+                    last = (int)st;
+                }
+            } else if (last != (int)st) {
+                paint_state(st);
+                last = (int)st;
+            }
             frame = 0;
+            last_fx = -1;
             continue;
         }
         // An effect is painting over the indicator. Forget what it last showed:
@@ -94,6 +130,10 @@ static void led_task(void *arg) {
         const uint32_t rgb = s_rgb;
         const uint8_t  cr = (rgb >> 16) & 0xFF, cg = (rgb >> 8) & 0xFF, cb = rgb & 0xFF;
         uint8_t r = 0, g = 0, b = 0;
+        // Frame counts from the effect's own start. It ran on from whatever came
+        // before, so a sunrise asked for after a minute of rainbow had already
+        // "finished" and jumped straight to full brightness.
+        if ((int)s_fx != last_fx) { last_fx = (int)s_fx; frame = 0; }
         frame++;
 
         switch (s_fx) {
@@ -154,7 +194,10 @@ static void led_task(void *arg) {
             int t = frame > steps ? steps : frame;
             r = 20 + t * 235 / steps;
             g = t * 140 / steps;
-            b = t * t / steps / steps * 60;
+            // Blue comes in last and slowly. Integer order matters: t*t/steps/
+            // steps is zero until the final frame, which made the whole climb
+            // blue-less and then flicked blue on at the end.
+            b = (uint8_t)((int32_t)t * t * 60 / ((int32_t)steps * steps));
             if (frame >= steps) { s_fx = LED_FX_SOLID; s_rgb = 0xFF8C3C; }
             break;
         }
@@ -217,12 +260,15 @@ bool led_set_effect(sandy_led_fx_t fx, uint32_t rgb, int speed) {
     // While a session is open the light means "audio is leaving this room" and
     // nothing may paint over it. Refusing is the honest answer; accepting and
     // showing nothing would be worse than either.
-    if (s_state == LED_STATE_LISTENING || s_state == LED_STATE_TALKING) {
+    if (session_live() || s_state == LED_STATE_LISTENING || s_state == LED_STATE_TALKING) {
         ESP_LOGW(TAG, "effect refused — the light is showing a live session");
         return false;
     }
 
-    s_rgb   = rgb;
+    // No colour given keeps the current one: "breathe" after "solid:ff0000"
+    // breathes red. It used to reset to blue, so every effect without a
+    // colour forgot the one the owner had just chosen.
+    if (rgb != LED_RGB_KEEP) s_rgb = rgb & 0xFFFFFF;
     s_speed = speed;
     s_fx    = fx;
     s_state_owns = (fx == LED_FX_OFF);   // "off" hands the light back

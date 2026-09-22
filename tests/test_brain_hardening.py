@@ -90,3 +90,44 @@ def test_wifi_says_wrong_password_and_setup_keeps_trying_home():
         "the switch saw the OLD link's connected bit and saved an untested password")
     prov = _src("sandy_provision.c")
     assert "(password '%s')" not in prov, "the setup password was in the log"
+
+
+def test_the_neck_restores_where_it_was_and_lets_go_when_idle():
+    servo = _src("sandy_servo.c")
+    init = servo[servo.index("esp_err_t servo_init(void)"):]
+    # The saved angle is read before the channel exists, and the channel starts there.
+    assert init.index("nvs_load_servo_angle") < init.index("ledc_channel_config")
+    assert ".duty       = _angle_to_duty(saved)" in servo
+    assert "_relax()" in servo and "SERVO_RELAX_MS" in _src("include/config.h")
+
+
+def test_the_privacy_light_follows_the_microphone_not_the_last_request():
+    led = _src("sandy_led.c")
+    assert "voice_session_is_active()" in led
+    assert "if (s_state_owns || session_live())" in led
+    # A colour-less effect keeps the owner's colour; gestures no longer paint black.
+    assert "LED_RGB_KEEP" in led and "led_set_effect(s->fx, LED_RGB_KEEP, 5)" in _src("sandy_mqtt.c")
+    assert "t * t / steps / steps" not in led, "the sunrise's blue was integer zero"
+
+
+def test_ir_learning_ends_and_long_codes_fit():
+    ir = _src("sandy_ir.c")
+    assert "IR_LEARN_TIMEOUT_MS" in ir and "IR_MAX_TICKS" in ir
+    assert ".flags.with_dma    = true" in ir
+
+
+def test_the_face_survives_a_failed_flush_and_keeps_the_banner_on_top():
+    face = _src("sandy_face.c")
+    assert "lv_disp_flush_ready(drv);" in face[face.index("static void _flush_cb"):]
+    assert "lv_obj_move_foreground(s_banner)" in face
+    assert "if (!s_ready ||" in face
+    assert "face_set_mood_from_app(" in _src("sandy_mqtt.c")
+    for touch in ("breathe_timer_cb", "lipsync_timer_cb", "backlight_step", "MOOD_THINKING"):
+        assert touch in face, touch
+
+
+def test_a_picture_is_swapped_in_whole():
+    scr = _src("sandy_screen.c")
+    assert "s_img_rx" in scr and "s_rx_bytes == IMG_BYTES" in scr
+    assert "screen_show_qr(qr, msg)" in _src("sandy_provision.c")
+    assert "CONFIG_LV_USE_QRCODE=y" in (FW / "sdkconfig.defaults").read_text()

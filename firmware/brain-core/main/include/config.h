@@ -131,8 +131,16 @@
 #define SERVO_RESOLUTION        LEDC_TIMER_14_BIT
 #define SERVO_MIN_US            500             // pulse width at 0°
 #define SERVO_MAX_US            2500            // pulse width at 180°
-#define SERVO_SAFE_MIN          5
-#define SERVO_SAFE_MAX          175
+// The neck's own travel, not the servo's: at the ends of 0..180 the head hits
+// the body and the servo stalls against it — hot, loud, and pulling current the
+// voice path needs. Gestures are offsets from wherever she looks (±55 at most),
+// so 20..160 keeps every one of them inside the range with room to spare.
+// Tune to the build: the smallest angle that does not touch, and the largest.
+#define SERVO_SAFE_MIN          20
+#define SERVO_SAFE_MAX          160
+// Pulses stop this long after the neck comes to rest. A held servo hums, jitters
+// on every noisy pulse and draws current for nothing; the gearing holds the head.
+#define SERVO_RELAX_MS          700
 #define SERVO_DEFAULT_POS       90
 
 // ─── HC-SR04 ─────────────────────────────────────────────────────────────────

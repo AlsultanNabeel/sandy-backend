@@ -14,6 +14,7 @@
 #if ENABLE_FACE
 
 #include "sandy_screen.h"
+#include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -34,6 +35,10 @@ static char     s_text[TEXT_MAX];
 static bool     s_want_text;
 static bool     s_want_image;
 static bool     s_want_dismiss;
+static bool     s_want_qr;
+static char     s_qr_payload[128];
+static lv_obj_t *s_qr;          // built on first use; most robots never need it
+static lv_obj_t *s_qr_caption;
 static bool     s_dirty;
 static bool     s_showing;
 
@@ -71,7 +76,13 @@ static const lv_font_t *font_for(sandy_screen_size_t size) {
 // The image buffer, PSRAM. Allocated on the first transfer and kept: taking and
 // returning 115 KB per picture would fragment PSRAM for no gain, and this board
 // has eight megabytes of it.
-static uint8_t *s_img;
+static uint8_t *s_img;        // what LVGL draws
+// The next picture is received here and swapped in whole. With one buffer, a
+// picture arriving over the one on screen drew half of each, and a transfer
+// that failed halfway left the shown picture overwritten by the start of one
+// that never finished.
+static uint8_t *s_img_rx;
+static size_t   s_rx_bytes;   // bytes of it actually received
 static int      s_expect_chunks;
 // طول القطعة الواحدة — بيجي من القطعة الأولى، مش محسوبًا بالقسمة.
 static size_t   s_chunk_size;
@@ -159,8 +170,41 @@ void screen_lvgl_tick(void) {
     bool want_text    = s_want_text;
     bool want_image   = s_want_image;
     bool want_dismiss = s_want_dismiss;
-    s_want_text = s_want_image = s_want_dismiss = false;
+    bool want_qr      = s_want_qr;
+    s_want_text = s_want_image = s_want_dismiss = s_want_qr = false;
     s_dirty = false;
+
+    // A QR code stays only while it is what is being shown.
+    if ((want_dismiss || want_text || want_image) && s_qr) {
+        lv_obj_add_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_qr_caption, LV_OBJ_FLAG_HIDDEN);
+    }
+#if LV_USE_QRCODE
+    if (want_qr) {
+        if (!s_qr) {
+            s_qr = lv_qrcode_create(s_panel, 170, lv_color_black(), lv_color_white());
+            // A white quiet zone: phones will not read a code that touches black.
+            lv_obj_set_style_border_color(s_qr, lv_color_white(), 0);
+            lv_obj_set_style_border_width(s_qr, 8, 0);
+            lv_obj_align(s_qr, LV_ALIGN_TOP_MID, 0, 14);
+            s_qr_caption = lv_label_create(s_panel);
+            lv_obj_set_width(s_qr_caption, TFT_WIDTH - 16);
+            lv_obj_set_style_text_align(s_qr_caption, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_text_color(s_qr_caption, lv_color_white(), 0);
+            lv_obj_align(s_qr_caption, LV_ALIGN_BOTTOM_MID, 0, -10);
+        }
+        lv_qrcode_update(s_qr, s_qr_payload, strlen(s_qr_payload));
+        lv_label_set_text(s_qr_caption, s_text);
+        lv_obj_clear_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_qr_caption, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_img_obj, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_panel, LV_OBJ_FLAG_HIDDEN);
+        s_showing = true;
+    }
+#else
+    if (want_qr) want_text = true;   // no widget in this build: the caption alone
+#endif
 
     if (want_dismiss) {
         lv_obj_add_flag(s_panel, LV_OBJ_FLAG_HIDDEN);
@@ -218,6 +262,18 @@ void screen_show_text(const char *text) {
     ESP_LOGI(TAG, "text queued (%d chars)", (int)strlen(s_text));
 }
 
+void screen_show_qr(const char *payload, const char *caption) {
+    if (!payload || !*payload) return;
+    if (!lock()) return;
+    snprintf(s_qr_payload, sizeof(s_qr_payload), "%s", payload);
+    snprintf(s_text, sizeof(s_text), "%s", caption ? caption : "");
+    s_want_qr    = true;
+    s_want_text  = false;
+    s_want_image = false;
+    s_dirty      = true;
+    unlock();
+}
+
 void screen_dismiss(void) {
     if (!lock()) return;
     s_want_dismiss = true;
@@ -233,17 +289,18 @@ bool screen_image_begin(int total_chunks) {
     }
     if (!lock()) return false;
 
-    if (!s_img) {
+    if (!s_img_rx) {
         // PSRAM, never internal. Internal RAM is what the voice session needs,
         // and a picture must not be the reason she cannot talk.
-        s_img = heap_caps_malloc(IMG_BYTES, MALLOC_CAP_SPIRAM);
-        if (!s_img) {
+        s_img_rx = heap_caps_malloc(IMG_BYTES, MALLOC_CAP_SPIRAM);
+        if (!s_img_rx) {
             unlock();
             ESP_LOGE(TAG, "no PSRAM for a %d-byte image", IMG_BYTES);
             return false;
         }
     }
     memset(s_have_mask, 0, sizeof(s_have_mask));
+    s_rx_bytes      = 0;
     s_have_count    = 0;
     s_chunk_size    = 0;      // تتحدّد من القطعة الأولى
     s_expect_chunks = total_chunks;
@@ -259,7 +316,7 @@ void screen_image_chunk(int seq, const uint8_t *data, size_t len) {
     // Every one of these is a refusal, not a clamp. The payload arrives over a
     // shared broker from something nobody authenticated, so a piece that does
     // not fit where it claims to go is dropped rather than trimmed to fit.
-    if (!s_img || s_expect_chunks <= 0) { unlock(); return; }
+    if (!s_img_rx || s_expect_chunks <= 0) { unlock(); return; }
     if (seq < 0 || seq >= s_expect_chunks) { unlock(); return; }
     if (chunk_seen(seq)) { unlock(); return; }
 
@@ -279,35 +336,54 @@ void screen_image_chunk(int seq, const uint8_t *data, size_t len) {
     // هي آخر وحدة، وما في إشي بعدها بيتزحلق.
     if (seq == 0) s_chunk_size = len;
     if (s_chunk_size == 0) { unlock(); return; }
+    // Only the last piece may be shorter. A middle piece of another size would
+    // be written where the next one belongs.
+    if (seq < s_expect_chunks - 1 && len != s_chunk_size) {
+        ESP_LOGW(TAG, "chunk %d is %u bytes, the first was %u — refused",
+                 seq, (unsigned)len, (unsigned)s_chunk_size);
+        unlock();
+        return;
+    }
 
     size_t offset = (size_t)seq * s_chunk_size;
-    if (offset >= IMG_BYTES) { unlock(); return; }
-    size_t room = IMG_BYTES - offset;
-    if (len > room) len = room;
+    if (offset >= IMG_BYTES || len > IMG_BYTES - offset) {
+        ESP_LOGW(TAG, "chunk %d does not fit the picture — refused", seq);
+        unlock();
+        return;
+    }
 
-    memcpy(s_img + offset, data, len);
+    memcpy(s_img_rx + offset, data, len);
     chunk_mark(seq);
     s_have_count++;
+    s_rx_bytes += len;
     unlock();
 }
 
 bool screen_image_end(void) {
     if (!lock()) return false;
-    bool complete = (s_expect_chunks > 0 && s_have_count >= s_expect_chunks);
+    // Every piece *and* every byte: a count alone passed a picture whose pieces
+    // were short, and the rest of the buffer was whatever was there before.
+    bool complete = (s_expect_chunks > 0 && s_have_count >= s_expect_chunks &&
+                     s_rx_bytes == IMG_BYTES);
     if (complete) {
+        uint8_t *shown = s_img;   // swap: the new picture goes on screen whole,
+        s_img = s_img_rx;         // and the old buffer takes the next one
+        s_img_rx = shown;
         s_want_image   = true;
         s_want_text    = false;
         s_want_dismiss = false;
         s_dirty        = true;
     }
     int have = s_have_count, want = s_expect_chunks;
+    size_t bytes = s_rx_bytes;
     s_expect_chunks = 0;
     unlock();
 
     if (!complete) {
         // Naming the shortfall matters: "it did not appear" and "eleven of
         // twelve pieces arrived" send you to completely different places.
-        ESP_LOGW(TAG, "image incomplete — %d of %d chunks; nothing drawn", have, want);
+        ESP_LOGW(TAG, "image incomplete — %d of %d chunks, %u of %d bytes; nothing drawn",
+                 have, want, (unsigned)bytes, IMG_BYTES);
         return false;
     }
     ESP_LOGI(TAG, "image complete (%d chunks)", have);

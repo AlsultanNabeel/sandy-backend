@@ -13,6 +13,7 @@
 #include "driver/rmt_encoder.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -33,9 +34,17 @@ static rmt_channel_handle_t s_tx;
 static rmt_channel_handle_t s_rx;
 static rmt_encoder_handle_t s_copy;
 
+// An RMT symbol stores each half in 15 bits: 32767 ticks, 32.7 ms here. A longer
+// number in a code wrapped round to a short one and the replay was garbage.
+#define IR_MAX_TICKS       32767
+// Learn mode ends by itself. It used to wait for ever — and while it waited
+// every button in the app was refused ("still in learn mode").
+#define IR_LEARN_TIMEOUT_MS 20000
+
 static rmt_symbol_word_t s_rx_buf[IR_MAX_SYMBOLS];
 static QueueHandle_t     s_rx_q;
 static volatile bool     s_learning;
+static volatile int64_t  s_learn_until_ms;
 
 // ─── Receive ─────────────────────────────────────────────────────────────────
 
@@ -86,7 +95,18 @@ static void ir_rx_task(void *arg) {
     (void)arg;
     ir_frame_t f;
     for (;;) {
-        if (xQueueReceive(s_rx_q, &f, portMAX_DELAY) != pdTRUE) continue;
+        if (xQueueReceive(s_rx_q, &f, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            if (s_learning && esp_timer_get_time() / 1000 > s_learn_until_ms) {
+                s_learning = false;
+                // Abort the pending receive, or the next "learn" finds the
+                // channel busy.
+                rmt_disable(s_rx);
+                rmt_enable(s_rx);
+                ESP_LOGW(TAG, "learn mode timed out after %d s — nothing received",
+                         IR_LEARN_TIMEOUT_MS / 1000);
+            }
+            continue;
+        }
         if (!s_learning) continue;          // stray press outside learn mode
 
         if (f.n < 4) {
@@ -134,6 +154,7 @@ static void ir_send_text(const char *code) {
         unsigned long v = strtoul(p, &end, 10);
         if (end == p) break;                 // not a number: stop, don't guess
         p = end;
+        if (v > IR_MAX_TICKS) v = IR_MAX_TICKS;   // 15-bit field; a gap this long is a gap
         dur[slot++] = (unsigned)v;
         if (slot == 2) {
             // Even index is the mark — carrier on. This is the one line that
@@ -180,8 +201,16 @@ void ir_handle(const char *payload) {
     if (!payload || !*payload) return;
 
     if (!strcmp(payload, "learn")) {
+        if (s_learning) {
+            ESP_LOGI(TAG, "already learning");
+            return;
+        }
+        s_learn_until_ms = esp_timer_get_time() / 1000 + IR_LEARN_TIMEOUT_MS;
+        if (rmt_receive(s_rx, s_rx_buf, sizeof(s_rx_buf), &RX_CFG) != ESP_OK) {
+            ESP_LOGE(TAG, "the receiver would not arm");
+            return;
+        }
         s_learning = true;
-        rmt_receive(s_rx, s_rx_buf, sizeof(s_rx_buf), &RX_CFG);
         ESP_LOGW(TAG, "learn mode — point a remote at her and press once");
         return;
     }
@@ -233,9 +262,22 @@ esp_err_t ir_init(void) {
         .gpio_num          = PIN_IR_RX,
         .clk_src           = RMT_CLK_SRC_DEFAULT,
         .resolution_hz     = IR_RESOLUTION_HZ,
-        .mem_block_symbols = 128,
+        // DMA, so a long frame lands whole. Without it the channel's own
+        // memory held 128 symbols and an air conditioner's 200-symbol code was
+        // cut short — learned, stored, replayed, and ignored by the unit.
+        .mem_block_symbols = IR_MAX_SYMBOLS,
+        .flags.with_dma    = true,
     };
     e = rmt_new_rx_channel(&rx_cfg, &s_rx);
+    if (e != ESP_OK) {
+        // Some boards cannot give the receiver a DMA channel; fall back to the
+        // channel memory and say so — long codes may then be cut.
+        ESP_LOGW(TAG, "rx with DMA unavailable (%s) — long codes may be cut",
+                 esp_err_to_name(e));
+        rx_cfg.flags.with_dma = false;
+        rx_cfg.mem_block_symbols = 128;
+        e = rmt_new_rx_channel(&rx_cfg, &s_rx);
+    }
     if (e != ESP_OK) { ESP_LOGE(TAG, "rx channel: %s", esp_err_to_name(e)); return e; }
 
     rmt_rx_event_callbacks_t cbs = { .on_recv_done = on_rx_done };

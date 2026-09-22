@@ -24,6 +24,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
+#include <math.h>
+#if ENABLE_VOICE
+#include "sandy_voice.h"
+#endif
 
 static const char *TAG = "face";
 
@@ -83,7 +87,8 @@ static lv_obj_t *s_iris_l, *s_iris_r;        // iris (carries pupil + gloss)
 static lv_obj_t *s_brow_l, *s_brow_r;
 static lv_obj_t *s_mouth_arc;                // smile / frown
 static lv_obj_t *s_mouth_bar;                // neutral / flat
-static lv_obj_t *s_mouth_o;                  // open (surprised)
+static lv_obj_t *s_mouth_o;                  // open (surprised) — and her speaking mouth
+static lv_obj_t *s_mouth_o_in;
 static lv_obj_t *s_blush_l, *s_blush_r;
 
 static volatile sandy_mood_t s_mood = MOOD_IDLE;
@@ -122,6 +127,15 @@ static volatile int64_t s_last_active_ms; // last interaction, for the sleep tim
 // stay, because those are states in their own right.
 static volatile int64_t s_mood_set_ms;    // when the current expression started
 static volatile bool    s_session_live;   // a voice session is genuinely open
+static volatile bool    s_mood_from_app;  // the owner chose it; the watchdog leaves it
+// The face exists. Everything that touches an LVGL object checks this: a display
+// that failed to initialise left the mutex created and the objects NULL, and the
+// first glance toward a sound dereferenced them.
+static volatile bool    s_ready;
+
+// An app mood lasts half an hour. Long enough to be a choice, short enough that
+// "sad" picked on Monday is not still on her face on Wednesday.
+#define FACE_APP_MOOD_TTL_MS (30 * 60 * 1000)
 
 // Generous on purpose: the normal gap between hearing the wake word and the
 // session opening is a second or two, and a slow network can stretch it. Six
@@ -134,6 +148,8 @@ static bool mood_is_transient(sandy_mood_t m) {
 
 // ─── Mood → look ──────────────────────────────────────────────────────────────
 typedef enum { MO_NEUTRAL, MO_SMILE, MO_BIG_SMILE, MO_FROWN, MO_OPEN, MO_FLAT, MO_SMIRK } mouth_t;
+static mouth_t s_look_mouth = MO_NEUTRAL;
+static void show_mouth(mouth_t m);
 
 typedef struct {
     uint8_t  openness;   // 30-100 → eye height
@@ -179,7 +195,13 @@ static bool _on_flush_ready(esp_lcd_panel_io_handle_t io,
     return false;
 }
 static void _flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *map) {
-    esp_lcd_panel_draw_bitmap(s_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, map);
+    // A transfer that never starts never finishes, and LVGL waits for "ready"
+    // before drawing anything again: one failed SPI queue froze her face for
+    // good. Tell it now instead; the next frame repaints the area.
+    if (esp_lcd_panel_draw_bitmap(s_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1,
+                                  map) != ESP_OK) {
+        lv_disp_flush_ready(drv);
+    }
 }
 static void _tick_cb(void *arg) { lv_tick_inc(LVGL_TICK_PERIOD_MS); }
 
@@ -223,9 +245,11 @@ static void eye_h_cb(void *obj, int32_t h) {
     lv_obj_set_y(e, EYE_CY - h / 2);
 }
 
-static void anim_eye_h(lv_obj_t *e, int32_t from, int32_t to, uint16_t t, uint16_t playback) {
+static void anim_eye_h_delayed(lv_obj_t *e, int32_t from, int32_t to, uint16_t t,
+                               uint16_t playback, uint32_t delay) {
     lv_anim_t a;
     lv_anim_init(&a);
+    lv_anim_set_delay(&a, delay);
     lv_anim_set_var(&a, e);
     lv_anim_set_exec_cb(&a, eye_h_cb);
     lv_anim_set_values(&a, from, to);
@@ -235,12 +259,54 @@ static void anim_eye_h(lv_obj_t *e, int32_t from, int32_t to, uint16_t t, uint16
     lv_anim_start(&a);
 }
 
+static void anim_eye_h(lv_obj_t *e, int32_t from, int32_t to, uint16_t t, uint16_t playback) {
+    anim_eye_h_delayed(e, from, to, t, playback, 0);
+}
+
+// People do not blink like a metronome. Speed varies a little, and now and then
+// comes a double blink — the small irregularity is most of what reads as alive.
+// Asleep, she does not blink at all.
 static void blink_timer_cb(lv_timer_t *t) {
+    if (s_mood == MOOD_SLEEPY) {
+        lv_timer_set_period(t, 3000);
+        return;
+    }
     int h = s_eye_target_h;
-    anim_eye_h(s_eye_l, h, 8, 90, 90);
-    anim_eye_h(s_eye_r, h, 8, 90, 90);
+    uint16_t speed = 70 + (uint16_t)(esp_random() % 45);
+    anim_eye_h(s_eye_l, h, 8, speed, speed);
+    anim_eye_h(s_eye_r, h, 8, speed, speed);
+    if (esp_random() % 100 < 15) {   // a double blink, now and then
+        uint32_t gap = 2u * speed + 70;
+        anim_eye_h_delayed(s_eye_l, h, 8, speed, speed, gap);
+        anim_eye_h_delayed(s_eye_r, h, 8, speed, speed, gap);
+    }
     // schedule next blink at a natural, slightly random interval
     lv_timer_set_period(t, 2200 + (esp_random() % 2600));
+}
+
+// ─── Breathing ───────────────────────────────────────────────────────────────
+// The whole face rises and falls two pixels on a slow four-second cycle — the
+// difference between a picture of a face and a face at rest. A separate style
+// offset (translate), so it never fights the blink or the glance, which set the
+// real position. Deeper and slower when she sleeps; still during a call, when
+// the audio tasks share the core and the face has better things to show.
+static void breathe_timer_cb(lv_timer_t *t) {
+    (void)t;
+    static int last = 99;
+    int off = 0;
+    if (!s_session_live) {
+        const bool asleep = (s_mood == MOOD_SLEEPY);
+        const float period = asleep ? 6500.0f : 4200.0f;
+        const float depth  = asleep ? 3.0f : 2.0f;
+        float ph = (float)(esp_timer_get_time() / 1000 % (int64_t)period) / period;
+        off = (int)lroundf(depth * sinf(2.0f * (float)M_PI * ph));
+    }
+    if (off == last) return;       // repaint only when a pixel actually moves
+    last = off;
+    lv_obj_t *parts[] = { s_eye_l, s_eye_r, s_brow_l, s_brow_r };
+    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
+        lv_obj_set_style_translate_y(parts[i], off, 0);
+    }
 }
 
 // ─── Idle eye drift (glides the iris within the eye → alive, no twitch) ────────
@@ -271,6 +337,12 @@ static void drift_timer_cb(lv_timer_t *t) {
     }
     int dx = 5 - (int)(esp_random() % 11);   // -5..+5
     int dy = 3 - (int)(esp_random() % 7);    // -3..+3
+    // Thinking looks up and to the side, the way people search for a word —
+    // and holds there longer than an idle glance.
+    if (s_mood == MOOD_THINKING) {
+        dx = 5 + (int)(esp_random() % 3);
+        dy = -6 - (int)(esp_random() % 2);
+    }
     int ix = (EYE_W - IRIS_D) / 2 + dx;
     int iy = (EYE_H - IRIS_D) / 2 + dy;
     anim_axis(s_iris_l, set_x_cb, lv_obj_get_x(s_iris_l), ix, 380);
@@ -284,7 +356,7 @@ static void drift_timer_cb(lv_timer_t *t) {
 void face_look(int pan) {
     if (pan < -100) pan = -100;
     else if (pan > 100) pan = 100;
-    if (!s_mutex || xSemaphoreTake(s_mutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
+    if (!s_ready || !s_mutex || xSemaphoreTake(s_mutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
 
     int eoff = pan * 16 / 100;                       // whole-eye slide
     int ioff = pan * 6 / 100;                        // iris within the eye
@@ -317,11 +389,24 @@ static void apply_look(sandy_mood_t mood) {
     lv_obj_set_style_transform_angle(s_brow_l,  l->brow_deg * 10, 0);
     lv_obj_set_style_transform_angle(s_brow_r, -l->brow_deg * 10, 0);
 
-    // Mouth: show the right shape, hide the others.
+    s_look_mouth = l->mouth;
+    show_mouth(l->mouth);
+
+    if (l->blush) {
+        lv_obj_clear_flag(s_blush_l, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_blush_r, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_blush_l, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_blush_r, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// The mouth a mood asks for: the right shape shown, the others hidden.
+static void show_mouth(mouth_t m) {
     lv_obj_add_flag(s_mouth_arc, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_mouth_bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_mouth_o,   LV_OBJ_FLAG_HIDDEN);
-    switch (l->mouth) {
+    switch (m) {
     case MO_SMILE:
         lv_obj_clear_flag(s_mouth_arc, LV_OBJ_FLAG_HIDDEN);
         lv_arc_set_angles(s_mouth_arc, 30, 150);          // bottom arc = smile
@@ -356,14 +441,61 @@ static void apply_look(sandy_mood_t mood) {
         lv_obj_set_width(s_mouth_bar, 46);
         break;
     }
+}
 
-    if (l->blush) {
-        lv_obj_clear_flag(s_blush_l, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(s_blush_r, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(s_blush_l, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_blush_r, LV_OBJ_FLAG_HIDDEN);
+// ─── Her mouth follows her voice ─────────────────────────────────────────────
+// While the speaker plays, the mouth is an open oval whose height follows the
+// loudness of what is coming out, 20 times a second. Not phonemes — the eye
+// reads rhythm, and a mouth that opens on the stressed syllables looks like
+// speech. When she stops, the mood's own mouth comes back.
+static void lipsync_timer_cb(lv_timer_t *t) {
+    (void)t;
+#if ENABLE_VOICE
+    int lvl = voice_output_level();
+#else
+    int lvl = 0;
+#endif
+    static bool open;
+    static int  shown_h;
+    if (lvl > 6) {
+        int h = 10 + lvl * 26 / 100;               // 10..36 px
+        if (!open) {
+            open = true;
+            lv_obj_add_flag(s_mouth_arc, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_mouth_bar, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(s_mouth_o, LV_OBJ_FLAG_HIDDEN);
+        }
+        // Ease toward the target so the mouth moves, not flickers.
+        h = shown_h ? (shown_h + h) / 2 : h;
+        if (h != shown_h) {
+            shown_h = h;
+            lv_obj_set_size(s_mouth_o, 36, h);
+            lv_obj_set_size(s_mouth_o_in, 22, h > 14 ? h - 12 : 2);
+            lv_obj_center(s_mouth_o_in);
+            lv_obj_align(s_mouth_o, LV_ALIGN_CENTER, 0, 90);
+        }
+    } else if (open) {
+        open = false;
+        shown_h = 0;
+        lv_obj_set_size(s_mouth_o, 34, 34);
+        lv_obj_set_size(s_mouth_o_in, 20, 20);
+        lv_obj_center(s_mouth_o_in);
+        lv_obj_align(s_mouth_o, LV_ALIGN_CENTER, 0, 90);
+        show_mouth(s_look_mouth);
     }
+}
+
+// ─── Backlight: dims as she falls asleep ─────────────────────────────────────
+#define BL_AWAKE   200
+#define BL_ASLEEP  24
+static void backlight_step(void) {
+    static int duty = BL_AWAKE;
+    const int target = (s_mood == MOOD_SLEEPY) ? BL_ASLEEP : BL_AWAKE;
+    if (duty == target) return;
+    // Falling asleep takes a few seconds; waking is at once.
+    duty = target > duty ? target : (duty - 4 < target ? target : duty - 4);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
 }
 
 static void mood_timer_cb(lv_timer_t *t) {
@@ -372,6 +504,7 @@ static void mood_timer_cb(lv_timer_t *t) {
         last = s_mood;
         apply_look(last);
     }
+    backlight_step();
 }
 
 // Show the focus ring for ~5 s, then the face for ~5 s, repeating, while a
@@ -389,6 +522,14 @@ static void mood_timer_cb(lv_timer_t *t) {
 // be something nobody has thought of yet, and this catches that one too.
 static void stuck_face_timer_cb(lv_timer_t *t) {
     (void)t;
+    if (s_mood_from_app) {
+        int64_t now = esp_timer_get_time() / 1000;
+        if (now - s_mood_set_ms > FACE_APP_MOOD_TTL_MS) {
+            ESP_LOGI(TAG, "the app's mood has had its half hour — back to idle");
+            face_set_mood(MOOD_IDLE);
+        }
+        return;
+    }
     if (s_session_live) return;
     if (!mood_is_transient(s_mood)) return;
 
@@ -418,6 +559,11 @@ static void banner_timer_cb(lv_timer_t *t) {
     }
     lv_label_set_text(s_banner, s_banner_text);
     lv_obj_clear_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
+    // In front of everything, every time it shows: the owner's picture panel
+    // and the focus ring are both full-screen and were built later, so a
+    // "NO WI-FI" banner sat hidden behind a photo — the one moment the robot
+    // most needed to say why it had gone quiet.
+    lv_obj_move_foreground(s_banner);
 }
 
 
@@ -583,6 +729,7 @@ static void build_face(void) {
     lv_obj_t *o_in = lv_obj_create(s_mouth_o);
     style_circle(o_in, 20, C_BG);
     lv_obj_center(o_in);
+    s_mouth_o_in = o_in;
 
     // Blush
     s_blush_l = lv_obj_create(lv_scr_act());
@@ -658,12 +805,15 @@ static void build_face(void) {
     lv_timer_create(sleep_timer_cb, 10000, NULL);
     lv_timer_create(focus_timer_cb, 250, NULL);
     lv_timer_create(banner_timer_cb, 200, NULL);
+    lv_timer_create(breathe_timer_cb, 120, NULL);
+    lv_timer_create(lipsync_timer_cb, 50, NULL);
 
     // The owner's text/picture panel. Built here, as a sibling of the face and
     // on top of it, and ticked from this same timer loop — so every LVGL call
     // on this board happens on one task and there is one rule to remember
     // instead of two.
     screen_lvgl_build(lv_scr_act());
+    lv_obj_move_foreground(s_banner);   // above the picture panel too
     lv_timer_create(screen_timer_cb, 100, NULL);
     lv_timer_create(stuck_face_timer_cb, 500, NULL);
 #if FACE_DEMO
@@ -740,15 +890,27 @@ esp_err_t face_init(void) {
     _lvgl_init();
     if (xSemaphoreTake(s_mutex, portMAX_DELAY)) {
         build_face();
+        s_ready = true;
         xSemaphoreGive(s_mutex);
     }
-    xTaskCreatePinnedToCore(_lvgl_task, "lvgl", LVGL_TASK_STACK, NULL, LVGL_TASK_PRIORITY, NULL, 1);
+    if (xTaskCreatePinnedToCore(_lvgl_task, "lvgl", LVGL_TASK_STACK, NULL,
+                                LVGL_TASK_PRIORITY, NULL, 1) != pdPASS) {
+        ESP_LOGE(TAG, "no memory for the display task — the face will not move");
+        return ESP_ERR_NO_MEM;
+    }
     ESP_LOGI(TAG, "ready — ST7789, LVGL object face");
     return ESP_OK;
 }
 
+void face_set_mood_from_app(sandy_mood_t mood) {
+    if (mood >= MOOD_COUNT) return;
+    face_set_mood(mood);
+    s_mood_from_app = (mood != MOOD_IDLE);
+}
+
 void face_set_mood(sandy_mood_t mood) {
     if (mood < MOOD_COUNT) {
+        s_mood_from_app = false;   // the robot's own expression takes over
         s_mood = mood;
         g_current_mood = mood;
         // Any expressed mood counts as interaction and resets the sleep clock

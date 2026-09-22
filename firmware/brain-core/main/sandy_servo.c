@@ -26,7 +26,39 @@ static uint32_t _angle_to_duty(uint8_t angle) {
     return (pw_us * ((1 << 14) - 1)) / 20000;
 }
 
+static TaskHandle_t s_gesture_task;
+static bool _ensure_task(void);
+
+// Pulses off / back on. The duty is the last position, so re-arming never jumps.
+static bool s_relaxed;
+
+static void _relax(void) {
+    if (s_relaxed) return;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CH_SERVO, 0);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CH_SERVO);
+    s_relaxed = true;
+}
+
+static void _arm(void) {
+    if (!s_relaxed) return;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CH_SERVO, _angle_to_duty(s_angle));
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CH_SERVO);
+    s_relaxed = false;
+}
+
 esp_err_t servo_init(void) {
+    // Where the head was when it was last saved — read first, so the very first
+    // pulse already says that angle. The channel used to start at 90 and then
+    // ease to the saved angle: every boot, the head snapped to centre and
+    // crept back, which looks like a robot correcting itself.
+    uint8_t saved = SERVO_DEFAULT_POS;
+    if (nvs_load_servo_angle(&saved) == ESP_OK) {
+        ESP_LOGI(TAG, "restored angle=%d from NVS", saved);
+    }
+    if (saved < SERVO_SAFE_MIN) saved = SERVO_SAFE_MIN;
+    if (saved > SERVO_SAFE_MAX) saved = SERVO_SAFE_MAX;
+    s_angle = saved;
+
     ledc_timer_config_t timer = {
         .speed_mode      = LEDC_LOW_SPEED_MODE,
         .duty_resolution = SERVO_RESOLUTION,
@@ -42,27 +74,23 @@ esp_err_t servo_init(void) {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .channel    = LEDC_CH_SERVO,
         .timer_sel  = LEDC_TIMER_SERVO,
-        .duty       = _angle_to_duty(SERVO_DEFAULT_POS),
+        .duty       = _angle_to_duty(saved),
         .hpoint     = 0,
         .flags      = { .output_invert = 0 },
     };
     err = ledc_channel_config(&ch);
     if (err != ESP_OK) return err;
 
-    uint8_t saved = SERVO_DEFAULT_POS;
-    if (nvs_load_servo_angle(&saved) == ESP_OK) {
-        ESP_LOGI(TAG, "restored angle=%d from NVS", saved);
-    }
-    // On the gesture task, not here: the easing takes ~20 ms per degree, so a
-    // saved angle at either end held the whole boot (face, voice, wake word)
-    // for up to 1.7 s.
-    servo_move_to(saved);
+    // Hold it long enough to settle, then let go (the gesture task relaxes an
+    // idle neck).
+    if (_ensure_task()) xTaskNotifyGive(s_gesture_task);
     return ESP_OK;
 }
 
 static void _move_blocking(uint8_t angle) {
     if (angle < SERVO_SAFE_MIN) angle = SERVO_SAFE_MIN;
     if (angle > SERVO_SAFE_MAX) angle = SERVO_SAFE_MAX;
+    _arm();
     if (angle == s_angle) return;
 
     // Sine ease in-out: smooth motion between s_angle → angle
@@ -128,14 +156,17 @@ static const gesture_def_t GESTURES[GESTURE_COUNT] = {
 
 static volatile sandy_gesture_t s_pending = GESTURE_NONE;
 static volatile int16_t         s_goto = -1;    // pending absolute move, or -1
-static TaskHandle_t             s_gesture_task;
 
 static void _gesture_task(void *arg) {
     (void)arg;
     for (;;) {
         // Wait to be poked rather than polling: a task spinning on a flag for a
         // neck that moves twice an hour is a core doing nothing, expensively.
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // Nothing asked for SERVO_RELAX_MS after the last move: stop the pulses.
+        if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(SERVO_RELAX_MS))) {
+            _relax();
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        }
 
         // A plain "go to this angle" (the voice path turning toward whoever
         // called, the app's slider). Taken and cleared first; if a gesture was

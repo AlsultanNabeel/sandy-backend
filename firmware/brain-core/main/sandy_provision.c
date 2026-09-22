@@ -328,9 +328,15 @@ static void start_ap(void) {
     // The instruction goes on her face. A robot that needs setup and says
     // nothing is indistinguishable from a robot that is broken, and the owner's
     // next move is the box, not the phone.
-    char msg[96];
-    snprintf(msg, sizeof(msg), "Wi-Fi setup — join %s", s_ap_ssid);
-    screen_show_text(msg);
+    //
+    // As a QR code: the phone's camera joins the setup network in one tap, no
+    // typing a password off a sticker. The same line underneath for anyone
+    // doing it by hand. The code holds the setup password — which is printed on
+    // the box anyway, and shown only to whoever is standing in front of her.
+    char msg[96], qr[128];
+    snprintf(msg, sizeof(msg), "Scan to set up — or join %s", s_ap_ssid);
+    snprintf(qr, sizeof(qr), "WIFI:T:WPA;S:%s;P:%s;;", s_ap_ssid, pass);
+    screen_show_qr(qr, msg);
 
     // The password is not logged: the log leaves the board in dev builds, and
     // the sticker on the box is where the owner reads it.
@@ -341,6 +347,9 @@ static void stop_ap(void) {
     if (s_httpd) { httpd_stop(s_httpd); s_httpd = NULL; }
     esp_wifi_set_mode(WIFI_MODE_STA);
     s_active = false;
+    // Take the setup code off her face: it stayed up after the home network
+    // came back, telling the owner to set up a robot that already was.
+    screen_dismiss();
     ESP_LOGI(TAG, "network found — setup mode off");
 }
 

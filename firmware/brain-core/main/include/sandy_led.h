@@ -47,6 +47,9 @@ typedef enum {
 
 esp_err_t led_init(void);
 
+// Pass as `rgb` to keep the colour already set.
+#define LED_RGB_KEEP 0xFFFFFFFFu
+
 // The privacy indicator. Always wins: calling this cancels any running effect.
 void      led_set_state(sandy_led_state_t state);
 
