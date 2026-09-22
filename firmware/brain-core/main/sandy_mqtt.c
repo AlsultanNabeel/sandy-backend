@@ -399,8 +399,41 @@ static void _handle_screen_img(const char *val) {
 // came back on the network, and a retained Wi-Fi change fought the owner's.
 static bool _is_one_shot(const char *out) {
     return !strcmp(out, "factory_reset") || !strcmp(out, "wifi") ||
-           !strcmp(out, "ota") || !strcmp(out, "ir");
+           !strcmp(out, "ota") || !strcmp(out, "ir") || !strcmp(out, "pair_code");
 }
+
+#if ENABLE_FACE
+// ── Proof of presence ────────────────────────────────────────────────────────
+// Someone asked to pair this robot with the code on her box. The server sends
+// six digits here and she shows them; whoever types them into the app is
+// standing in front of her. A photo of the sticker is no longer a robot.
+// Five minutes, like the code itself on the server, then the face comes back.
+static esp_timer_handle_t s_pair_timer;
+
+static void _pair_code_expired(void *arg) {
+    (void)arg;
+    screen_dismiss();
+}
+
+static void _handle_pair_code(const char *val) {
+    if (strlen(val) != 6) { ESP_LOGW(TAG, "pair code: not six digits"); return; }
+    for (int i = 0; i < 6; i++) {
+        if (val[i] < '0' || val[i] > '9') { ESP_LOGW(TAG, "pair code: not digits"); return; }
+    }
+    char text[64];
+    // Spaced in two groups of three: read aloud and typed without a slip.
+    snprintf(text, sizeof(text), "رمز الربط\n\n%.3s  %.3s", val, val + 3);
+    screen_show_text(text);
+    buzzer_play(MELODY_NOTIFY);
+    if (!s_pair_timer) {
+        const esp_timer_create_args_t a = { .callback = _pair_code_expired, .name = "pair_code" };
+        if (esp_timer_create(&a, &s_pair_timer) != ESP_OK) return;
+    }
+    esp_timer_stop(s_pair_timer);
+    esp_timer_start_once(s_pair_timer, 5ULL * 60 * 1000 * 1000);
+    ESP_LOGW(TAG, "showing a pairing code — someone is pairing this robot");
+}
+#endif
 
 static void _dispatch(const char *out, const char *val, bool retained) {
     // مخارج ألواح تانية ع نفس الشجرة — الكاميرا وعقدة الغرفة. الدماغ مشترك
@@ -437,6 +470,7 @@ static void _dispatch(const char *out, const char *val, bool retained) {
     else if (!strcmp(out, "noise"))        _handle_ns(val);
     else if (!strcmp(out, "screen"))       _handle_screen(val);
 #if ENABLE_FACE
+    else if (!strcmp(out, "pair_code"))    _handle_pair_code(val);
     else if (!strcmp(out, "screen_size"))  _handle_screen_size(val);
     else if (!strcmp(out, "screen_img"))   _handle_screen_img(val);
 #endif

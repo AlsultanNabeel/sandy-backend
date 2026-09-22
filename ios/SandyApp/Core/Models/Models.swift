@@ -394,6 +394,10 @@ struct NodeTelemetry {
 struct PairResult {
     let nodeId: String
     let already: Bool
+    /// الوحدة حرّة، والربط بدّه الرمز اللي ظهر ع شاشتها (إثبات الحضور).
+    var needsPresence: Bool = false
+    /// الخادم قدر يوصّل الرمز للوحدة — لو لأ، غالبًا هي مطفية أو مش ع النت.
+    var sent: Bool = true
 }
 
 /// التنبيه اليومي (المرحلة السابعة): إمّا سؤال تعارف (`question` + `qid`)، أو جملة

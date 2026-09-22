@@ -64,9 +64,14 @@ struct ControlView: View {
             .environmentObject(lang)
         }
         .fullScreenCover(isPresented: $showPairNode) {
-            NodePairSheet { code, label in
-                try await store.pair(api: state.api, code: code, label: label)
-            }
+            NodePairSheet(
+                onPair: { code, label in
+                    try await store.pair(api: state.api, code: code, label: label)
+                },
+                onConfirm: { code, presence, label in
+                    try await store.confirmPair(api: state.api, code: code,
+                                                presence: presence, label: label)
+                })
             .environmentObject(lang)
         }
         .fullScreenCover(item: $renamingNode) { node in

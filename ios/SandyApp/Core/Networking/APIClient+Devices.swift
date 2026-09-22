@@ -74,10 +74,13 @@ private enum TelemetryValue: Decodable {
 private struct PairNodeResponse: Decodable {
     let nodeId: String?
     let already: Bool?
+    let needsPresence: Bool?
+    let sent: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case already
+        case already, sent
         case nodeId = "node_id"
+        case needsPresence = "needs_presence"
     }
 }
 
@@ -294,14 +297,31 @@ extension APIClient {
         return ListResult(items: parsed, demo: r.demo ?? false)
     }
 
-    // POST /api/nodes/pair {code,label?} → {ok,node_id,already}
+    // POST /api/nodes/pair {code,label?}
+    //   → {ok,node_id,already}                      وحدة إلك من قبل
+    //   → {ok,needs_presence,node_id,sent} (202)    وحدة حرّة: الرمز ع شاشتها
     @discardableResult
     func pairNode(code: String, label: String? = nil) async throws -> PairResult {
         var body: [String: String] = ["code": code]
         if let label, !label.isEmpty { body["label"] = label }
         let r: PairNodeResponse = try await fetch("/api/nodes/pair", method: "POST", body: body)
         return PairResult(nodeId: r.nodeId ?? "",
-                          already: r.already ?? false)
+                          already: r.already ?? false,
+                          needsPresence: r.needsPresence ?? false,
+                          sent: r.sent ?? true)
+    }
+
+    // POST /api/nodes/pair/confirm {code,presence,label?} → {ok,node_id}
+    //
+    // الخطوة التانية: الأرقام الستّة اللي ظهرت ع وجهها. أخطاؤها رموز
+    // (`presence_wrong`، `presence_expired`، `presence_locked`) بتوصل بـ
+    // `APIError.code` عشان الشيت يقول الجملة الصح.
+    @discardableResult
+    func confirmPairNode(code: String, presence: String, label: String? = nil) async throws -> PairResult {
+        var body: [String: String] = ["code": code, "presence": presence]
+        if let label, !label.isEmpty { body["label"] = label }
+        let r: PairNodeResponse = try await fetch("/api/nodes/pair/confirm", method: "POST", body: body)
+        return PairResult(nodeId: r.nodeId ?? "", already: r.already ?? false)
     }
 
     // PATCH /api/nodes/<node_id> {label} → {ok}

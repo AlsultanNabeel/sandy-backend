@@ -285,7 +285,7 @@ class RoomDeviceClient:
     # الكاميرا. هلّق الموضوع لازم يكون `sandy/node/<معرّف>/<قناة>` حرفيًّا.
     _SERVICE_CHANNELS = frozenset({
         "cam/command", "cam/request", "cam/wifi", "wifi", "screen_img",
-        "factory_reset",
+        "factory_reset", "pair_code",
     })
     _SERVICE_TOPIC = re.compile(r"^sandy/node/([a-z0-9]{1,64})/(.+)$")
 

@@ -154,9 +154,19 @@ final class DevicesStore: LoadableStore {
     }
 
     // ── الوحدات: ربط/تسمية/فكّ ──
-    func pair(api: APIClient, code: String, label: String?) async throws {
+    /// الخطوة الأولى. لو رجعت `needsPresence` الشيت بيطلب الرمز اللي ع شاشتها
+    /// وبينادي `confirmPair`؛ غير هيك الربط خلص هون.
+    @discardableResult
+    func pair(api: APIClient, code: String, label: String?) async throws -> PairResult {
         let res = try await api.pairNode(code: code, label: label)
+        if res.needsPresence { return res }
         if res.already { notify("control.node.already") }
+        await load(api: api)
+        return res
+    }
+
+    func confirmPair(api: APIClient, code: String, presence: String, label: String?) async throws {
+        _ = try await api.confirmPairNode(code: code, presence: presence, label: label)
         await load(api: api)
     }
 

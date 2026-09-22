@@ -170,6 +170,15 @@ def ensure_indexes() -> None:
         ("camera_inbox.expire_at_ttl", lambda: mongo_db.camera_inbox.create_index(
             "expire_at", expireAfterSeconds=0, background=True
         )),
+        # رموز إثبات الحضور للربط — خمس دقايق وبتروح لحالها.
+        ("node_pair_challenges.expires_at_ttl",
+         lambda: mongo_db.node_pair_challenges.create_index(
+             "expires_at", expireAfterSeconds=0, background=True
+         )),
+        ("node_pair_challenges.node_tenant",
+         lambda: mongo_db.node_pair_challenges.create_index(
+             [("node_id", 1), ("tenant", 1)], unique=True, background=True
+         )),
         # Popped on every chat message (passive delivery of due messages).
         ("sandy_future_messages.chat_id+delivered+deliver_at",
          lambda: mongo_db.sandy_future_messages.create_index(

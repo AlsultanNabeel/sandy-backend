@@ -24,6 +24,9 @@ struct AccountView: View {
     @State private var confirmingDelete = false
     @State private var confirmingReset = false
     @State private var sellNode: NodeItem?
+    /// الكود اللي بدّه خطوة الرمز ع شاشتها (إثبات الحضور)، وهل الشيت مفتوح.
+    @State private var presenceCode = ""
+    @State private var askingPresence = false
 
     var body: some View {
         ScrollView {
@@ -127,6 +130,20 @@ struct AccountView: View {
                 confirmingDelete = true
             }
         }
+        .fullScreenCover(isPresented: $askingPresence) {
+            NodePairSheet(
+                onPair: { code, label in
+                    try await state.api.pairNode(code: code, label: label)
+                },
+                onConfirm: { code, presence, label in
+                    _ = try await state.api.confirmPairNode(code: code, presence: presence,
+                                                            label: label)
+                    await reload()
+                },
+                initialCode: presenceCode,
+                startAtPresence: true)
+            .environmentObject(lang)
+        }
         .alert(lang.s("account.delete.confirm"), isPresented: $confirmingDelete) {
             Button(lang.s("common.cancel"), role: .cancel) {}
             Button(lang.s("account.delete"), role: .destructive) {
@@ -155,8 +172,14 @@ struct AccountView: View {
         busy = true; notice = ""
         defer { busy = false }
         do {
-            _ = try await state.api.pairNode(
-                code: code.trimmingCharacters(in: .whitespaces), label: nil)
+            let trimmed = code.trimmingCharacters(in: .whitespaces)
+            let res = try await state.api.pairNode(code: trimmed, label: nil)
+            if res.needsPresence {
+                // الوحدة حرّة: الربط بيكمل بالرمز اللي ع شاشتها.
+                presenceCode = trimmed
+                askingPresence = true
+                return
+            }
             code = ""
             await reload()
         } catch {

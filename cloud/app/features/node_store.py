@@ -242,6 +242,29 @@ def _is_legacy_owner(user_id: Any) -> bool:
         return False
 
 
+def pair_precheck(code: str) -> Dict[str, Any]:
+    """Where a pairing stands before anything is written.
+
+    ``ours`` — this account already has it (pairing again is a refresh, no
+    proof needed); ``claimed`` — another account has it; ``free`` — nobody
+    does, and claiming it needs the robot's own code (features/pair_presence).
+    """
+    code = (code or "").strip()
+    node_id = code_to_node_id(code)
+    if len(code) < 4 or not node_id:
+        return {"state": "bad_code"}
+    coll = _coll()
+    if coll is None:
+        return {"state": "no_store"}
+    if coll.find_one({"code_hash": _hash_code(code)}) is not None:
+        return {"state": "ours", "node_id": node_id}
+    if get_db() is not None:
+        claimed = get_db()[_COLL].find_one({"node_id": node_id})
+        if claimed is not None and not _is_legacy_owner(claimed.get("user_id")):
+            return {"state": "claimed", "node_id": node_id}
+    return {"state": "free", "node_id": node_id}
+
+
 def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     """Bind a factory pairing code to the current tenant.
 

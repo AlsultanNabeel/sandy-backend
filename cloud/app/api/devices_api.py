@@ -13,7 +13,8 @@ Endpoints:
   POST   /api/devices/<name>/image        {image_base64}   -> picture to a display
   POST   /api/devices/<name>/ir-learn     {button,code}    -> store a learned IR code
   GET    /api/nodes                       list paired nodes
-  POST   /api/nodes/pair                  {code,label?}    -> pair a node to this tenant
+  POST   /api/nodes/pair                  {code,label?}    -> pair (or start proof of presence)
+  POST   /api/nodes/pair/confirm          {code,presence,label?} -> finish with the code on her face
   PATCH  /api/nodes/<node_id>             {label}
   DELETE /api/nodes/<node_id>             unpair (wipes the board first)
   POST   /api/nodes/<node_id>/wifi        {ssid,password,board?} -> move to a network
@@ -48,6 +49,10 @@ def _is_guest(claims) -> bool:
 
 # رفع الكاميرا: شكل المعرّفات، وسقف الحجم، وبصمات التواقيع المستعملة.
 _CAM_NODE_RE = re.compile(r"[a-z0-9]{1,32}")
+# A free robot is claimed only with the code she shows on her own screen
+# (features/pair_presence). A constant, not a switch: turning it off means a
+# photo of the box is enough to take somebody's robot.
+PAIR_NEEDS_PRESENCE = True
 _CAM_REQ_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _CAM_MAX_UPLOAD_BYTES = 512 * 1024
 _CAM_NONCES = "cam_upload_nonces"
@@ -606,12 +611,63 @@ def register_devices_api(app, mongo_db=None):
             return _bad("too_many_attempts", code=429)
 
         body = request.get_json(silent=True) or {}
-        r = pair_node(body.get("code", ""), body.get("label", ""))
+        code = str(body.get("code", ""))
+        # **The printed code starts pairing; it no longer finishes it.** A free
+        # robot answers with a code on her own face (features/pair_presence),
+        # and /pair/confirm takes it. Re-pairing your own robot needs no proof.
+        from app.features.node_store import pair_precheck
+
+        pre = pair_precheck(code)
+        state = pre.get("state")
+        if state == "claimed":
+            # Its own code, not a generic failure: "this robot belongs to another
+            # account" is a sentence the owner can act on (factory reset it).
+            return _bad("already_claimed")
+        if state in ("bad_code", "no_store"):
+            return _bad(state)
+        if state == "free" and PAIR_NEEDS_PRESENCE:
+            from app.features import pair_presence
+
+            tenant = str(claims.get("user_id") or "")
+            ch = pair_presence.start(pre["node_id"], tenant)
+            if not ch.get("ok"):
+                return _bad(ch.get("error", "pair_failed"))
+            return jsonify({"ok": True, "needs_presence": True, "node_id": pre["node_id"],
+                            "sent": ch.get("sent", False),
+                            "expires_in": ch.get("expires_in")}), 202
+        r = pair_node(code, body.get("label", ""))
         if not r.get("ok"):
-            # `already_claimed` is deliberately its own code and not folded into
-            # a generic failure: "this robot belongs to another account" is a
-            # sentence the owner can act on (factory reset it), and "pairing
-            # failed" is not.
+            return _bad(r.get("error", "pair_failed"))
+        return jsonify(r), 200
+
+    @app.route("/api/nodes/pair/confirm", methods=["POST"])
+    @require_tenant
+    def api_nodes_pair_confirm(claims):
+        """Finish pairing with the six digits shown on the robot's screen."""
+        from app.api.auth_handlers import check_rate_limit
+        from app.features import pair_presence
+        from app.features.node_store import pair_node, pair_precheck
+
+        who = str(claims.get("user_id") or "") or request.remote_addr or "unknown"
+        allowed, _ = check_rate_limit(who, scope="node_pair_confirm")
+        if not allowed:
+            return _bad("too_many_attempts", code=429)
+
+        body = request.get_json(silent=True) or {}
+        code = str(body.get("code", ""))
+        pre = pair_precheck(code)
+        if pre.get("state") == "claimed":
+            return _bad("already_claimed")
+        if pre.get("state") not in ("free", "ours"):
+            return _bad(pre.get("state") or "bad_code")
+        if pre.get("state") == "free":
+            ok = pair_presence.confirm(pre["node_id"], str(claims.get("user_id") or ""),
+                                       str(body.get("presence", "")))
+            if not ok.get("ok"):
+                return jsonify({"ok": False, "error": ok.get("error"),
+                                "tries_left": ok.get("tries_left")}), 400
+        r = pair_node(code, body.get("label", ""))
+        if not r.get("ok"):
             return _bad(r.get("error", "pair_failed"))
         return jsonify(r), 200
 
