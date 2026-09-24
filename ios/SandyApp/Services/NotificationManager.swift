@@ -208,6 +208,29 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         scheduleProactiveNudges()
     }
 
+    /// Tears down everything this device holds for the account signing out.
+    ///
+    /// Every notification here was scheduled from one account's data: their
+    /// reminders, their tasks, the heads-up an hour before something only they
+    /// have. None of it is re-checked at fire time — a local notification just
+    /// rings — so without this the next person to sign in on this phone gets
+    /// the previous account's reminders, by name, for as long as they were
+    /// scheduled ahead. `knownItems` goes with them: it is what
+    /// `scheduleProactiveNudges` rebuilds from, so leaving it would put the old
+    /// account's items straight back on the next sync.
+    ///
+    /// `removeAllPending…` rather than a prefix sweep: the point is that
+    /// nothing scheduled before this moment survives it, and a prefix list is
+    /// one forgotten prefix away from being wrong.
+    func clearForSignOut() {
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
+        knownLock.lock()
+        knownItems.removeAll()
+        knownLock.unlock()
+        onDeviceToken = nil
+    }
+
     // MARK: - Reminder actions (the buttons on a reminder's notification)
 
     /// The category every reminder notification carries; its buttons are built

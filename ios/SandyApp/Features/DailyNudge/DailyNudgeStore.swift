@@ -17,6 +17,16 @@ final class DailyNudgeStore: ObservableObject {
 
     private var loaded = false
 
+    /// Which account the two stored days below belong to.
+    ///
+    /// They are written to `UserDefaults`, which is one store for the whole
+    /// device and outlives the account. Keyed by day alone, the second person
+    /// to sign in on this phone inherited the first one's day: their card was
+    /// already dismissed, or already answered, before they had seen it — and
+    /// the get-to-know-you question they never saw was the one thing that day's
+    /// card existed to ask.
+    private var userScope = ""
+
     /// اليوم اللي انسكّرت فيه البطاقة — محفوظ ع الجهاز.
     ///
     /// **كان `dismissed` بالذاكرة وبس.** تسكّر البطاقة، تطلع من التطبيق،
@@ -34,6 +44,11 @@ final class DailyNudgeStore: ObservableObject {
     // بتضلّ معروضة لأنها انبنت قبل ما تجاوب.
     private static let answerKey = "sandy.nudge.answeredOn"
 
+    /// The stored value carries the account with the day, so a value written by
+    /// another account can never match. Keeping it in the value rather than the
+    /// key means `dismiss()` needs no `APIClient` to build it.
+    private var scopedToday: String { userScope + "|" + todayKey }
+
     private var todayKey: String {
         // مفتاح تخزين مش نص معروض: تقويم ميلادي وأرقام لاتينية ثابتة، حتى ما
         // يتغيّر المفتاح لو المستخدم بدّل لغة الجهاز أو تقويمه بنص اليوم.
@@ -46,17 +61,25 @@ final class DailyNudgeStore: ObservableObject {
 
     /// يجلب تنبيه اليوم مرّة (بصمت — التنبيه ميزة لطيفة مش حرجة، فأي فشل بينخفي).
     func loadIfNeeded(api: APIClient) async {
+        // A different account is a reload, whatever this store loaded before.
+        let uid = api.currentUserId ?? ""
+        if uid != userScope {
+            userScope = uid
+            loaded = false
+            nudge = nil
+            answer = ""
+        }
         guard !loaded else { return }
         loaded = true
-        dismissed = UserDefaults.standard.string(forKey: Self.dismissKey) == todayKey
-        answered = UserDefaults.standard.string(forKey: Self.answerKey) == todayKey
+        dismissed = UserDefaults.standard.string(forKey: Self.dismissKey) == scopedToday
+        answered = UserDefaults.standard.string(forKey: Self.answerKey) == scopedToday
         nudge = try? await api.getDailyNudge()
     }
 
     /// إغلاق بيدوم. البطاقة ما بترجع اليوم، وبترجع بكرا بمحتوى جديد.
     func dismiss() {
         dismissed = true
-        UserDefaults.standard.set(todayKey, forKey: Self.dismissKey)
+        UserDefaults.standard.set(scopedToday, forKey: Self.dismissKey)
     }
 
     /// يرسل جواب سؤال التعارف ويخفي البطاقة (اليوم خلص).
@@ -68,7 +91,7 @@ final class DailyNudgeStore: ObservableObject {
         do {
             try await api.answerDailyNudge(qid: n.qid, answer: answer)
             answered = true
-            UserDefaults.standard.set(todayKey, forKey: Self.answerKey)
+            UserDefaults.standard.set(scopedToday, forKey: Self.answerKey)
         } catch {
             // فشل الإرسال — نخلّي البطاقة حتى يعيد المحاولة.
         }

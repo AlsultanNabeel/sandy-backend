@@ -123,7 +123,17 @@ def test_every_request_builder_goes_through_the_retry():
         src = (IOS / rel).read_text(encoding="utf-8")
         assert "APIClient.session.data(for:" not in src, \
             f"{rel} sends straight at the session, skipping the retry"
-        assert "sendWithRetry" in src
+        # Either calling the retry itself, or — better — going through the
+        # shared surfaces that call it. The photo routes moved to `request` /
+        # `rawGet`, which is what this test wanted all along: the retry was the
+        # visible half of `perform`, and the half it could not see is the 401
+        # policy. An extension holding its own copy of one and not the other is
+        # exactly the half-applied policy in the docstring above, so the check
+        # is now "does it use the shared client", not "does it name one call".
+        assert ("sendWithRetry" in src
+                or "await rawGet(" in src
+                or "await request(" in src), \
+            f"{rel} builds requests outside the shared client"
 
     chat = (IOS / "Core/Networking/APIClient+Chat.swift").read_text(encoding="utf-8")
     assert "APIClient.session.bytes(for: req)" in chat

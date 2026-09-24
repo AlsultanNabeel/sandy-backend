@@ -1,6 +1,16 @@
 import SwiftUI
 import PhotosUI
 
+// The album used to build its own `URLRequest`s so it would not have to touch
+// the shared client. That bought it a second, quieter idea of what a failure is:
+// `perform` treats a 401 on an authenticated request as the session dying and
+// calls `onUnauthorized` — which is what signs the user out and shows the login
+// screen — and it reads the server's `message` for the human and `error` for the
+// code. The album did neither. An expired session browsing photos got
+// «تعذّر جلب الصورة (401)» over an empty grid and stayed signed in, on a token
+// the server had already stopped accepting, until they happened to tap
+// something else. Two policies for one product is how that happens; there is
+// one now.
 extension APIClient {
     /// GET /api/photos[?album=&q=] → {"items":[{id,name,caption,tags,created_at}]}
     func photosList(album: String? = nil) async throws -> [AlbumPhoto] {
@@ -8,7 +18,7 @@ extension APIClient {
         if let album, !album.isEmpty {
             path += "?album=\(photosEncode(album))"
         }
-        let r = try await photosRequest(path)
+        let r = try await request(path)
         return (r["items"] as? [[String: Any]] ?? []).map {
             AlbumPhoto(id: $0["id"] as? String ?? "",
                        name: $0["name"] as? String ?? "",
@@ -20,7 +30,7 @@ extension APIClient {
 
     /// GET /api/photos/albums → {"items":[{name,count}]}
     func photosAlbums() async throws -> [PhotoAlbum] {
-        let r = try await photosRequest("/api/photos/albums")
+        let r = try await request("/api/photos/albums")
         return (r["items"] as? [[String: Any]] ?? []).compactMap {
             guard let name = $0["name"] as? String, !name.isEmpty else { return nil }
             return PhotoAlbum(name: name, count: ($0["count"] as? NSNumber)?.intValue ?? 0)
@@ -32,45 +42,29 @@ extension APIClient {
         var body: [String: Any] = ["image": image.base64EncodedString()]
         if !name.isEmpty { body["name"] = name }
         if !album.isEmpty { body["album"] = album }
-        _ = try await photosRequest("/api/photos", method: "POST", body: body)
+        // Sixty seconds: the body is a base64 photo, which is the one
+        // request in the app that can legitimately outrun the default.
+        _ = try await request("/api/photos", method: "POST", body: body, timeout: 60)
     }
 
     /// DELETE /api/photos/<id> → {"ok":bool}
     func photosDelete(id: String) async throws {
-        _ = try await photosRequest("/api/photos/\(id)", method: "DELETE")
+        _ = try await request("/api/photos/\(photosPathEscape(id))", method: "DELETE")
     }
 
     /// GET /api/photos/<id>/file → raw image bytes (JPEG). صورة خام، مش JSON.
+    ///
+    /// Thirty seconds rather than `rawGet`'s fifteen: this is a full-size photo,
+    /// and the album is the screen most likely to be opened on a weak signal.
     func photosFile(id: String) async throws -> Data {
-        guard let url = URL(string: baseURL + "/api/photos/\(id)/file") else {
-            throw APIError(message: "عنوان غير صالح")
-        }
-        var req = URLRequest(url: url)
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-        // Through the retry, not straight at the session: this is a GET for a
-        // JPEG on cellular, the exact request the retry exists for.
-        let (data, resp) = try await APIClient.sendWithRetry(req, method: "GET")
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code >= 400 { throw APIError(message: "تعذّر جلب الصورة (\(code))") }
-        return data
+        try await rawGet("/api/photos/\(photosPathEscape(id))/file", timeout: 30)
     }
 
-    /// نسخة JSON من نداء الباك-إند خاصة بالألبوم (نفس عقد `request`) — معرّفة هون
-    /// حتى تبقى نداءات الألبوم مكتفية بملفها بدون تعديل ملف APIClient المشترك.
-    private func photosRequest(_ path: String,
-                               method: String = "GET",
-                               body: [String: Any]? = nil) async throws -> [String: Any] {
-        guard let url = URL(string: baseURL + path) else { throw APIError(message: "عنوان غير صالح") }
-        var req = URLRequest(url: url)
-        req.httpMethod = method
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-        if let body { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
-        let (data, resp) = try await APIClient.sendWithRetry(req, method: method)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        if code >= 400 { throw APIError(message: (json["error"] as? String) ?? "خطأ \(code)") }
-        return json
+    /// One percent-encoding for a path segment. `urlQueryAllowed` (used for the
+    /// album above) lets `/` and `?` through, which is right in a query string
+    /// and wrong in the middle of a path.
+    private func photosPathEscape(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
     }
 
     private func photosEncode(_ s: String) -> String {

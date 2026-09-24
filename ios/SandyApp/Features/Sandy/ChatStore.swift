@@ -17,10 +17,37 @@ final class ChatStore: ObservableObject {
     /// Bumped per send. A superseded send's cleanup must not clear `sending`
     /// for the send that replaced it.
     private var sendGeneration = 0
-    private let currentKey = "sandy_current_conv"
+
+    /// Which account this store is showing. `UserDefaults` is one store for the
+    /// whole device, so a bare `"sandy_current_conv"` is the *previous*
+    /// account's conversation id sitting there when the next one signs in. It
+    /// never leaked a message — the server scopes conversations and would
+    /// refuse the read — but it did decide whether the new account's latest
+    /// conversation opened on its own, from an id that was not theirs.
+    private var userScope = ""
+    private var currentKey: String { "sandy_current_conv." + userScope }
+
+    /// Called at the top of `bootstrap`. When the account has changed, nothing
+    /// on screen or in this store belongs to the one now signed in.
+    private func adoptScope(_ api: APIClient) {
+        let uid = api.currentUserId ?? ""
+        guard uid != userScope else { return }
+        userScope = uid
+        sendTask?.cancel()
+        sendGeneration += 1
+        messages = []
+        conversations = []
+        currentID = nil
+        errorMessage = ""
+        sending = false
+    }
 
     /// عند فتح التبويب: يحمّل السجل، ويستكمل آخر محادثة من اليوم أو يبدأ نظيفة.
     func bootstrap(api: APIClient) async {
+        // Before the early return below, not after: a different account signing
+        // in on this phone is exactly the case where there *is* a conversation
+        // on screen and it must not be kept.
+        adoptScope(api)
         // لو في محادثة معروضة أصلًا (رجعنا للتبويب) لا نعيد شيئًا — ولا حتى
         // القائمة: ورقة السجل بتحمّلها بنفسها لما تنفتح.
         if currentID != nil || !messages.isEmpty { return }
@@ -121,7 +148,16 @@ final class ChatStore: ObservableObject {
                         // ردود الأدوات (زي "أضف مهمة") ما فيها قطع، بترجع دفعة وحدة بالنهاية.
                         try await api.sendMessageStreaming(text, conversationId: cid,
                                                            clientMsgId: clientMsgID) { [weak self] partial in
-                            guard let self, !Task.isCancelled else { return }
+                            // Generation as well as cancellation. Cancellation
+                            // is cooperative and observed at the next check, so
+                            // between `sendTask?.cancel()` and this closure
+                            // noticing, a chunk of the old conversation's reply
+                            // can still arrive — and by then `messages` is the
+                            // new conversation's. The generation is set
+                            // synchronously by whoever superseded this send, so
+                            // it is already false on the very first late chunk.
+                            guard let self, !Task.isCancelled,
+                                  generation == self.sendGeneration else { return }
                             if partial.count > bestPartial.count { bestPartial = partial }
                             if let id = sandyID, let idx = self.messages.firstIndex(where: { $0.id == id }) {
                                 self.messages[idx].text = partial

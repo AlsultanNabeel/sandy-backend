@@ -53,6 +53,26 @@ enum WidgetData {
         reload()
     }
 
+    /// Wipes the snapshot on sign-out.
+    ///
+    /// The App Group outlives the account. Everything above is the *previous*
+    /// user's data — their next reminder, their task count, the text of their
+    /// open tasks — and the home screen is the one surface that keeps drawing
+    /// it while nobody is signed in, because a widget never asks whether the
+    /// app still has a session. Signing in as somebody else on the same phone
+    /// left the first account's reminder on the lock screen.
+    ///
+    /// Not `removePersistentDomain`: the suite is shared with `SharedAuth` and
+    /// with whatever else is added to it later, so this clears the keys it
+    /// owns, by name.
+    static func clearAll() {
+        guard let store else { return }
+        for key in [Key.reminderText, Key.reminderAt, Key.activeTasks, Key.openTasks] {
+            store.removeObject(forKey: key)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
     private static func reload() {
         // كل تحديث بيحمل لغة التطبيق معه، حتى يعرض الويدجت بنفس لغة التطبيق.
         store?.set(AppLocale.lang.rawValue, forKey: Key.lang)

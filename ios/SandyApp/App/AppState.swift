@@ -49,6 +49,14 @@ final class AppState: ObservableObject {
     /// still has to run once for push setup and the background check.
     private var launchedFromCache = false
 
+    /// Which sign-in the app is currently on. Bumped by every sign-out and
+    /// every sign-in, so work started for one account can tell that it came
+    /// back to a different one.
+    private var sessionGeneration = 0
+    /// The background verify started by a cached launch. Held so sign-out can
+    /// cancel it instead of letting it land later.
+    private var verifyTask: Task<Void, Never>?
+
     /// Whether the launch still owes a `restoreSession` call.
     var needsSessionRestore: Bool { stage == .launching || launchedFromCache }
 
@@ -67,7 +75,11 @@ final class AppState: ObservableObject {
         if onboardingDoneCached {
             stage = .chat
             setupPush()
-            Task { await verifySessionInBackground() }
+            verifyTask?.cancel()
+            verifyTask = Task { [weak self, generation = sessionGeneration] in
+                guard let self else { return }
+                await self.verifySessionInBackground(generation: generation)
+            }
             return
         }
 
@@ -91,14 +103,27 @@ final class AppState: ObservableObject {
 
     /// The background half of a cached launch: same answers as the blocking
     /// path, applied after the first frame instead of before it.
-    private func verifySessionInBackground() async {
+    ///
+    /// **It has to prove it is still answering for the account that asked.**
+    /// This request is the one thing in the launch that outlives the screen it
+    /// was started from: a slow or cold server holds it for seconds, and the
+    /// user can sign out and sign in as somebody else inside that window. Its
+    /// two outcomes are both destructive if they land late — a 401 for the
+    /// account that already left calls `signOut()` on the account that just
+    /// arrived, and a successful `done: false` sends them to onboarding they
+    /// have already finished. The generation captured at the start is compared
+    /// after the await; the cancel in `signOut` is the fast path, this is the
+    /// one that closes the race.
+    private func verifySessionInBackground(generation: Int) async {
         do {
             let ob = try await api.getOnboarding()
+            guard generation == sessionGeneration else { return }
             onboarding = ob
             onboardingLoaded = true
             onboardingDoneCached = ob.done
             if !ob.done { stage = .onboarding }
         } catch let error as APIError where error.kind == .unauthorized {
+            guard generation == sessionGeneration else { return }
             signOut()
         } catch {
             // Offline or a slow server: stay where we are, like the blocking path.
@@ -124,6 +149,11 @@ final class AppState: ObservableObject {
 
     /// After a successful sign-in, go to onboarding (first time) or chat.
     func routeAfterAuth(onboardingDone: Bool) {
+        // A sign-in ends the previous account's generation as surely as a
+        // sign-out does — this is the path a second account arrives on.
+        sessionGeneration &+= 1
+        verifyTask?.cancel()
+        verifyTask = nil
         onboardingDoneCached = onboardingDone
         stage = onboardingDone ? .chat : .onboarding
         setupPush()
@@ -178,11 +208,27 @@ final class AppState: ObservableObject {
             let apiRef = api
             Task { try? await apiRef.unregisterPushToken(deviceToken, bearer: session) }
         }
-        NotificationManager.shared.onDeviceToken = nil
+        // End this generation before anything else: in-flight work for the
+        // account leaving must not apply its result to the one arriving.
+        sessionGeneration &+= 1
+        verifyTask?.cancel()
+        verifyTask = nil
+
         api.token = nil
         // النسخ المحلية بتروح مع الحساب: مخزن بدون إنترنت وفهرس البحث.
         DiskCache.clearAll()
         SpotlightIndexer.deleteAll()
+
+        // **What the account left outside the app, too.** The two surfaces
+        // below are not redrawn by signing out, because neither one asks the
+        // app whether there is still a session: a home-screen widget keeps
+        // showing the snapshot in the App Group, and a local notification
+        // scheduled from this account's reminders rings on its own. Both
+        // therefore survived sign-out and greeted the next account with the
+        // previous one's data.
+        NotificationManager.shared.clearForSignOut()
+        WidgetData.clearAll()
+
         onboarding = OnboardingData()
         onboardingLoaded = false
         onboardingDoneCached = false

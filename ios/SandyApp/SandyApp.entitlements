@@ -6,5 +6,26 @@
 	<array>
 		<string>group.com.sandy.app</string>
 	</array>
+	<!-- Sign in with Apple. AuthView.swift runs a real ASAuthorizationAppleIDProvider
+	     request (.fullName, .email) and /api/auth/apple verifies the identity token it
+	     returns — but without this entitlement the request fails on device before any
+	     of that, with ASAuthorizationError 1000 ("unknown"), which reads like a bug in
+	     our own code and is a missing capability. -->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+	<!-- Push. NotificationManager registers for remote notifications and uploads the
+	     APNs device token to /api/push; the backend delivers reminders and the daily
+	     nudge over APNs (h2 is in requirements.txt for exactly this). Without the
+	     entitlement, registerForRemoteNotifications fails with "no valid aps-environment"
+	     and no token is ever produced, so every one of those deliveries is silently a
+	     no-op.
+
+	     "development" is the value that belongs in the source file: TestFlight and the
+	     App Store re-sign the build with the production profile, which sets it to
+	     "production". Hardcoding "production" here breaks push on every debug build. -->
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>
