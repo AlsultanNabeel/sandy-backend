@@ -1062,6 +1062,12 @@ static const sandy_cmd_t SANDY_COMMANDS[] = {
 #define CMD_TIMEOUT_MS    5760    // window to finish one phrase once speech starts
 #define CMD_DET_THRESHOLD 0.50f   // 0..0.9999; raise to reduce false triggers
 
+// Defined below, beside the session-manager code that is its other caller.
+// commands_init()'s own out-of-memory path unloads the model, so the call sits
+// above the definition -- an implicit declaration that scripts/check_c_decl_order.py
+// has been reporting and that a stricter compiler default would reject outright.
+static void commands_unload(void);
+
 // Load the English MultiNet model and register the phrases. Returns false (and
 // commands stay off) if the model isn't packed in the 'model' partition.
 static bool commands_init(void) {
@@ -1474,7 +1480,16 @@ static void mic_task(void *arg) {
     int32_t *raw = malloc(MIC_FRAME_SAMPLES * 2 * sizeof(int32_t));
     int16_t *pcm = malloc(MIC_FRAME_SAMPLES * sizeof(int16_t));
     if (!raw || !pcm) {
+        // Free whichever one came back. These two allocations fail
+        // independently, so the usual case is that one of them succeeded --
+        // and deleting the task without freeing it loses that block for the
+        // life of the process, on the board where internal RAM is the scarce
+        // thing and on the one path that only runs when it is already tight.
+        // free(NULL) is defined and does nothing, so no branch is needed.
+        free(raw);
+        free(pcm);
         ESP_LOGE(TAG, "mic buffers alloc failed");
+        status_set(SANDY_ST_LOW_MEMORY);   // S4.2: no subsystem fails silently
         vTaskDelete(NULL);
         return;
     }
@@ -1968,7 +1983,20 @@ static void voice_task(void *arg) {
         s_aec_frame = heap_caps_malloc((MIC_FRAME_SAMPLES + s_aec_chunk) * sizeof(int16_t),
                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!s_aec_stage || !s_aec_ref || !s_aec_out || !s_aec_frame) {
+            // aec_destroy frees the canceller. It does not free these four,
+            // and three of them are internal RAM -- so the fallback that
+            // exists because memory ran short was itself holding the memory,
+            // for the life of the process. Free every one that succeeded and
+            // null them, because the read paths test the pointers.
             ESP_LOGE(TAG, "AEC buffer alloc failed — half-duplex fallback");
+            heap_caps_free(s_aec_stage);
+            heap_caps_free(s_aec_ref);
+            heap_caps_free(s_aec_out);
+            heap_caps_free(s_aec_frame);
+            s_aec_stage = NULL;
+            s_aec_ref   = NULL;
+            s_aec_out   = NULL;
+            s_aec_frame = NULL;
             aec_destroy(s_aec);
             s_aec = NULL;
         } else {
@@ -1977,6 +2005,17 @@ static void voice_task(void *arg) {
         }
     } else {
         ESP_LOGW(TAG, "AEC create failed — half-duplex fallback");
+    }
+
+    // Half-duplex now, by either route above. The echo reference has exactly
+    // one reader, the canceller, so leaving the buffer alive means spk_task
+    // downsamples every chunk it plays into a queue nothing drains: 32 KB of
+    // PSRAM held and the work done, for the life of the process. Deleting it
+    // turns the `if (s_ref_stream)` guard on that path into the switch that
+    // skips it.
+    if (!s_aec && s_ref_stream) {
+        vStreamBufferDeleteWithCaps(s_ref_stream);
+        s_ref_stream = NULL;
     }
 #endif
 
@@ -2009,12 +2048,34 @@ static void voice_task(void *arg) {
     // the scarce thing on this board — it is what the TLS task needs to open a
     // voice session at all. This task does one stream read and one send call; it
     // does not go deep.
-    if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 3072, NULL, 6, NULL, 1) != pdPASS ||
-        xTaskCreatePinnedToCore(spk_task, "voice_spk", 4096, NULL, 9, NULL, 1) != pdPASS ||
-        xTaskCreatePinnedToCore(mic_task, "voice_mic", 5120, NULL, 8, NULL, 1) != pdPASS) {
-        ESP_LOGE(TAG, "audio task create FAILED (heap_int free=%u largest=%u)",
+    // One `if` each, not three chained with `||`. Short-circuiting meant the
+    // first failure stopped the other two from even being attempted -- so an
+    // out-of-memory uplink task also cost the microphone and the speaker, and
+    // the single log line could not say which of the three was missing. Three
+    // different partial states look identical from outside the board, and
+    // telling them apart is the whole job of S4.2.
+    int audio_task_fail = 0;
+    if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 3072, NULL, 6, NULL, 1) != pdPASS) {
+        audio_task_fail++;
+        ESP_LOGE(TAG, "audio task voice_tx create FAILED");
+    }
+    if (xTaskCreatePinnedToCore(spk_task, "voice_spk", 4096, NULL, 9, NULL, 1) != pdPASS) {
+        audio_task_fail++;
+        ESP_LOGE(TAG, "audio task voice_spk create FAILED");
+    }
+    if (xTaskCreatePinnedToCore(mic_task, "voice_mic", 5120, NULL, 8, NULL, 1) != pdPASS) {
+        audio_task_fail++;
+        ESP_LOGE(TAG, "audio task voice_mic create FAILED");
+    }
+    if (audio_task_fail) {
+        // Task stacks come out of internal RAM, so this is what exhaustion
+        // looks like from here. Logging alone left a robot that boots, shows
+        // her face, and never answers -- with nothing on screen to say why.
+        ESP_LOGE(TAG, "%d of 3 audio tasks did not start (heap_int free=%u largest=%u)",
+                 audio_task_fail,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        status_set(SANDY_ST_LOW_MEMORY);
     }
 
 #if ENABLE_WAKEWORD
