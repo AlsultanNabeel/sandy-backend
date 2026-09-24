@@ -1,0 +1,28 @@
+# Test and lint tooling, pinned.
+#
+# CI used to `pip install pytest pytest-cov pytest-subtests mongomock bandit ruff`
+# with no versions, so every run resolved whatever was newest that morning. Two
+# things follow from that, and both have happened to projects on this shape of
+# workflow: a green build turning red with no commit behind it, and — worse — a
+# `ruff` release adding a rule that fails a file nobody touched, which reads as
+# "my change broke the build".
+#
+# These are the versions the suite is known to pass on. Raise them deliberately,
+# in a commit whose only job is raising them, so a tooling change is never mixed
+# into a change in the code.
+
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-subtests==0.15.0
+mongomock==4.3.0
+bandit==1.9.4
+ruff==0.16.9
+
+# Not a test tool, and not optional.
+#
+# Collection dies before the first test without it — every module that imports
+# pymongo fails with `AttributeError: module 'lib' has no attribute ...`, which
+# is `cryptography` and the ambient `pyOpenSSL` disagreeing about an OpenSSL
+# symbol. ARCHITECTURE_MAP.md §9 has carried this as a sentence telling the next
+# person to install it by hand; a line in a file does it instead.
+pyOpenSSL>=23.2.0

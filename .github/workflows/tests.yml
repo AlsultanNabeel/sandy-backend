@@ -24,20 +24,37 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        # Both files, both pinned. The tool versions used to be resolved fresh on
+        # every run (`pip install pytest ruff ...` with no versions), so the same
+        # commit could pass in the morning and fail after lunch because `ruff`
+        # shipped a new rule — a red build with no change behind it, which is the
+        # fastest way to teach a team to stop reading CI.
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-subtests mongomock bandit ruff
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests with coverage
+        # `--cov-fail-under` is the point of measuring it. Without a floor the
+        # coverage number was decoration: it could fall for twenty commits and
+        # nothing would say so. 55 is set just under the current 57 — close
+        # enough that deleting a tested module is caught, loose enough that an
+        # ordinary refactor is not. Raise it when it earns raising; never lower
+        # it to make a build pass.
         run: |
-          pytest tests/ -q --cov=cloud/app --cov-report=xml
+          pytest tests/ -q --cov=cloud/app --cov-report=xml --cov-fail-under=55
 
       - name: Upload coverage to Codecov
+        # Not on a fork. `secrets` are not given to a workflow triggered from a
+        # forked repository, so the token is empty there and the upload fails —
+        # failing the build over a report, on exactly the contributions that
+        # arrive from outside. `fail_ci_if_error: false` covers the rest: Codecov
+        # being down is not this repository being broken.
+        if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+          fail_ci_if_error: false
 
       - name: Security scan (bandit)
         run: |

@@ -1017,8 +1017,13 @@ service-account JSON is ever tracked.
 
 Android has no gate because there is no Android (§7).
 
-Running the backend tests needs `pyOpenSSL>=23.2.0` alongside `pymongo`, or
-collection dies on an OpenSSL symbol mismatch.
+Test and lint tooling is pinned in `requirements-dev.txt`, which CI installs
+alongside `requirements.txt`. It carries `pyOpenSSL>=23.2.0` — without it
+collection dies before the first test on an OpenSSL symbol mismatch
+(`AttributeError: module 'lib' has no attribute ...`), which this paragraph used
+to ask the next person to fix by hand. Coverage has a floor
+(`--cov-fail-under=55`, currently ~58%), and the Codecov upload is skipped on
+forks, where `secrets` are not available and it could only fail.
 
 ---
 
