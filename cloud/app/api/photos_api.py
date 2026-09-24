@@ -50,6 +50,19 @@ logger = logging.getLogger(__name__)
 # search the way the agent's query-based helpers do.
 _FILES_COLLECTION = "sandy_photo_files"
 
+# أكبر صورة بيقبلها الرفع (ثمن ميغا للبايتات الأصلية).
+#
+# جسم الطلب ككل مسقوف بـ MAX_CONTENT_LENGTH (١٦ ميغا)، بس هاد السقف موجود
+# للأجسام الضخمة مش لهالمسار: ست عشرة ميغا base64 يعني ست عشرة ميغا نص بالذاكرة
+# زائد اتناش ميغا بعد الفكّ، وgunicorn عندنا ستة عشر طلب متوازي (§2.1) — فرفعات
+# متزامنة لحالها بتاكل الدينو. الكاميرا عندها نفس الحارس ونفس السبب
+# (`devices_api._CAM_MAX_UPLOAD_BYTES`)، والفرق إنه هون صورة من تلفون مش من
+# مستشعر، فالسقف أعلى.
+_MAX_PHOTO_BYTES = 8 * 1024 * 1024
+# نفس السقف بحساب base64، بنقيسه **قبل** الفكّ: base64 بتكبّر الحجم أربعة على
+# تلاتة، وقياس النص بعد ما نفكّه معناه إنّا خصّصنا الذاكرة اللي عم نحاول نمنعها.
+_MAX_PHOTO_B64_CHARS = (_MAX_PHOTO_BYTES // 3 + 1) * 4
+
 
 def _is_guest(claims) -> bool:
     return claims.get("role") == "guest"
@@ -166,12 +179,21 @@ def register_photos_api(app, mongo_db=None):
         # Accept a bare base64 string or a "data:image/...;base64,XXXX" data URI.
         if "," in image_b64 and image_b64.lstrip().startswith("data:"):
             image_b64 = image_b64.split(",", 1)[1]
+        # القياس قبل الفكّ، مش بعده — شوف _MAX_PHOTO_B64_CHARS فوق.
+        if len(image_b64) > _MAX_PHOTO_B64_CHARS:
+            logger.warning("[photos_api] upload rejected: %s base64 chars is too big",
+                           len(image_b64))
+            return jsonify({"error": "image_too_large"}), 413
         try:
             image_bytes = base64.b64decode(image_b64, validate=True)
         except (ValueError, TypeError):
             return jsonify({"error": "bad_image"}), 400
         if not image_bytes:
             return jsonify({"error": "bad_image"}), 400
+        if len(image_bytes) > _MAX_PHOTO_BYTES:
+            # حزام وحمّالات: النصّ ممكن يكون فيه فراغات أو أسطر فيمرق من قياس
+            # الحروف فوق ويطلع أكبر بعد الفكّ.
+            return jsonify({"error": "image_too_large"}), 413
 
         name = (body.get("name") or "").strip() or None
         album = (body.get("album") or "").strip()

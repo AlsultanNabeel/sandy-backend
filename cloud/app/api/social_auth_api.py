@@ -27,7 +27,6 @@ routes; the app factory wires it up.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import Optional
 
@@ -35,6 +34,7 @@ import jwt  # PyJWT
 from flask import jsonify, request
 
 from app.api.auth_handlers import make_token, role_for_email
+from app.config import APP_ENV, APPLE_BUNDLE_ID, GOOGLE_OAUTH_CLIENT_ID
 from app.features import users_store
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,10 @@ def _verify_id_token(
     JWKS can't be fetched — that's an availability problem, not a bad token. A
     forged/expired/malformed token returns None (mapped to 401).
 
-    ``audience`` may be None: when the expected client id / bundle id env var is
-    unset we skip the audience check (and log a warning) rather than reject — so
-    such a sign-in never earns the owner tier (see `_issue_for_identity`).
+    ``audience`` may be None, which skips the audience check. Only
+    `_expected_audience` decides that, and only outside prod — in prod the route
+    refuses before reaching here. A skipped check also never earns the owner
+    tier (see `_issue_for_identity`).
     """
     try:
         signing_key = _get_jwks_client(jwks_url).get_signing_key_from_jwt(id_token)
@@ -109,11 +110,9 @@ def _verify_id_token(
     }
     if audience:
         decode_kwargs["audience"] = audience
-    else:
-        logger.warning(
-            "[social_auth] %s audience check SKIPPED (expected-aud env unset)",
-            provider,
-        )
+    # No `else` branch: `_expected_audience` is the one place that decides to
+    # skip, and it logs there. Warning in both left two lines per sign-in saying
+    # the same thing.
 
     try:
         return jwt.decode(id_token, signing_key.key, **decode_kwargs)
@@ -121,6 +120,39 @@ def _verify_id_token(
         # Expired, wrong issuer/audience, bad signature, malformed — all 401.
         logger.info("[social_auth] %s token rejected: %s", provider, exc)
         return None
+
+
+class _AudienceNotConfigured(RuntimeError):
+    """Raised in prod when the provider's expected audience is not configured."""
+
+
+def _expected_audience(configured: str, provider: str) -> Optional[str]:
+    """The audience this provider's tokens must carry, or None to skip the check.
+
+    **The skip is a development affordance, and it used to be the production
+    behaviour.** Signature and issuer together prove only that a token is a
+    genuine Google (or Apple) token; the audience is the single claim that says
+    it was minted for *this* app. With the check skipped, an ID token that any
+    other Google-signed-in app holds for the same person verifies here — and the
+    caller of that app can sign in as them. Nothing in the flow looks wrong; the
+    token really is valid, just not for us.
+
+    The old behaviour narrowed the damage — such a sign-in never got the owner
+    role — but the account it opens is still somebody's account, with their
+    chats, their memory and their robot behind it. So in prod a missing value is
+    a refusal to answer, not a check to drop. Outside prod it warns and skips,
+    because a backend on a laptop should still sign in before an OAuth client
+    exists.
+    """
+    if configured:
+        return configured
+    if APP_ENV == "prod":
+        raise _AudienceNotConfigured(provider)
+    logger.warning(
+        "[social_auth] %s audience check SKIPPED (expected-aud env unset, APP_ENV=%s)",
+        provider, APP_ENV,
+    )
+    return None
 
 
 def register_social_auth_api(app):
@@ -131,7 +163,13 @@ def register_social_auth_api(app):
         if not id_token:
             return jsonify({"error": "invalid_token"}), 401
 
-        audience = os.getenv("GOOGLE_OAUTH_CLIENT_ID") or None
+        try:
+            audience = _expected_audience(GOOGLE_OAUTH_CLIENT_ID, "google")
+        except _AudienceNotConfigured:
+            logger.error("[social_auth] GOOGLE_OAUTH_CLIENT_ID unset in prod — "
+                         "refusing rather than accepting any app's token")
+            return jsonify({"error": "auth_not_configured"}), 503
+
         try:
             claims = _verify_id_token(
                 id_token,
@@ -166,7 +204,13 @@ def register_social_auth_api(app):
         if not id_token:
             return jsonify({"error": "invalid_token"}), 401
 
-        audience = os.getenv("APPLE_BUNDLE_ID") or None
+        try:
+            audience = _expected_audience(APPLE_BUNDLE_ID, "apple")
+        except _AudienceNotConfigured:
+            logger.error("[social_auth] APPLE_BUNDLE_ID unset in prod — "
+                         "refusing rather than accepting any app's token")
+            return jsonify({"error": "auth_not_configured"}), 503
+
         try:
             claims = _verify_id_token(
                 id_token,

@@ -37,6 +37,13 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_users"
 
+# Every ``source_key`` the onboarding mirror owns in ``sandy_memories``.
+# _mirror_onboarding_to_memory writes the subset the profile currently fills and
+# deletes the rest, so this tuple is the whole definition of what the mirror owns:
+# a key added to the writer and not to this list would be written once and never
+# cleaned up again.
+_MIRROR_SOURCE_KEYS = ("onboarding_name", "onboarding_interests", "onboarding_notes")
+
 
 def init_users_store(mongo_db) -> None:
     """يُستدعى مرّة عند الإقلاع."""
@@ -281,14 +288,34 @@ def _mirror_onboarding_to_memory(user_id: str) -> None:
                           "created_at": datetime.now(timezone.utc)}},
                 upsert=True,
             )
+
+        # **Clearing a field has to clear its row.** The docstring above promises
+        # replacement, and the loop alone only ever delivered the half of it that
+        # adds: a user who removed their interests, or emptied the note they had
+        # written about themselves, kept the deleted text in `sandy_memories`
+        # for ever. It stayed searchable, so the profile said one thing and
+        # «شو اهتماماتي؟» answered with what they had just taken out — the exact
+        # two-sources-of-truth split this function exists to prevent, arrived at
+        # from the other direction.
+        stale = [k for k in _MIRROR_SOURCE_KEYS if k not in {key for key, _ in lines}]
+        removed = 0
+        if stale:
+            removed = db["sandy_memories"].delete_many(
+                {"chat_id": user_id, "source_key": {"$in": stale}}
+            ).deleted_count
+
         # One bump, after the whole mirror is written. It used to fire before
         # each `update_one`, so the last bump always preceded the last write and
         # a concurrent read on the other worker could cache the state one line
-        # short of finished, under the finished version.
-        if lines:
+        # short of finished, under the finished version. A deletion changes what
+        # the cached blocks read exactly as much as a write does, so it counts.
+        if lines or removed:
             _bump(user_id, "sandy_memories")
     except Exception as exc:  # noqa: BLE001 — نسخة مساعدة، ما بتوقّف حفظ التعارف
-        logger.debug("[UsersStore] onboarding mirror skipped: %s", exc)
+        # Warning, not debug: the mirror now carries deletions too, so a failure
+        # here is not a missing convenience — it is the user's removed interests
+        # staying searchable after the profile write they asked for succeeded.
+        logger.warning("[UsersStore] onboarding mirror failed for %s: %s", user_id, exc)
 
 
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:

@@ -44,13 +44,43 @@ def test_cosine_identical_and_orthogonal():
     assert abs(sid._cosine(o1, o2)) < 1e-6
 
 
-def test_profile_encode_decode_roundtrip_without_key(monkeypatch):
+def test_a_voiceprint_is_never_stored_without_the_key(monkeypatch):
+    """No key is a refusal, not a plaintext write.
+
+    This used to assert the opposite — that `_encode_profile` falls back to
+    base64 — and the fallback reads like graceful degradation right up until you
+    say what it degrades to. base64 is a transport encoding. The row it wrote
+    held the raw voiceprint, and a voiceprint is the one credential a person
+    cannot rotate after a database is copied: it is their voice, for life. There
+    is nothing to degrade to, so the write refuses and `enroll_speaker` says so
+    instead of answering «تمام! صرت أعرف صوتك ✅» over a row that is not there.
+    """
     monkeypatch.delenv("SANDY_BIO_KEY", raising=False)
     importlib.reload(sid)
     raw = np.array([0.1, -0.2, 0.3], dtype="float32").tobytes()
-    encoded = sid._encode_profile(raw)
-    assert not encoded.startswith("enc:")
-    assert sid._decode_profile(encoded) == raw
+    assert sid._encode_profile(raw) is None
+
+    # And the refusal reaches the user rather than being swallowed into a tick.
+    monkeypatch.setattr(sid, "is_available", lambda: True)
+    monkeypatch.setattr(sid, "_get_extractor", lambda: object())
+    monkeypatch.setattr(sid, "_embed", lambda _b: sid._normalize(
+        np.array([1.0, 0.0, 0.0], dtype="float32")))
+    monkeypatch.setattr(sid, "get_db", lambda: {}, raising=False)
+    ok, n, message = sid.enroll_speaker(7, [b"x" * 32])
+    assert ok is False and n == 0 and message
+    importlib.reload(sid)
+
+
+def test_a_legacy_plaintext_voiceprint_is_still_readable(monkeypatch):
+    """Rows enrolled before the refusal existed are plaintext base64, and
+    locking those owners out of their own robot is not a security improvement —
+    `get_profile_vector` re-encrypts them on the next read instead."""
+    monkeypatch.delenv("SANDY_BIO_KEY", raising=False)
+    importlib.reload(sid)
+    import base64
+    raw = np.array([0.1, -0.2, 0.3], dtype="float32").tobytes()
+    legacy = base64.b64encode(raw).decode("ascii")
+    assert sid._decode_profile(legacy) == raw
 
 
 def test_profile_encode_decode_roundtrip_with_key(monkeypatch):

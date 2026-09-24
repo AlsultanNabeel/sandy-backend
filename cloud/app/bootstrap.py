@@ -291,20 +291,45 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     except Exception as exc:
         logger.warning("[Bootstrap] summary migration failed: %s", exc)
 
-    # Daily push nudge — stays idle until APNs is configured (paid Apple keys).
-    try:
-        from app.db import get_db
-        from app.services.nudge_scheduler import start_nudge_scheduler
-        start_nudge_scheduler(get_db())
-    except Exception as exc:
-        logger.warning("[Bootstrap] nudge scheduler start failed: %s", exc)
+    # ── The periodic jobs: one worker on this dyno, not every worker ─────────
+    #
+    # `bootstrap()` runs in each gunicorn worker (two of them — see the
+    # Procfile), so both of these used to start twice on one dyno. Neither ever
+    # *acted* twice — the nudge send claims an atomic per-day lock and each
+    # scene revert is claimed with a find-and-delete — but the scans that lead to
+    # those claims are not guarded by anything, so `users_with_due_timers` swept
+    # the collection once a minute in each worker, for ever, to let one of the
+    # two throw its result away.
+    #
+    # `claim_leadership` is a kernel file lock on this machine, so exactly one
+    # worker starts them and the lock is released by the kernel if that worker
+    # dies — gunicorn's replacement claims it on its own `bootstrap()`. The
+    # per-day and per-timer claims stay exactly where they are: they are what
+    # makes this safe across *dynos*, which a per-machine lock says nothing
+    # about, and they are the reason losing this election costs nothing.
+    #
+    # **`mqtt_ingest` is deliberately not elected.** It looks like the same
+    # shape and is not: `/api/diagnose` reports the listener per worker, and a
+    # single subscriber is a redundancy decision about the path every heartbeat
+    # from every board arrives on. That is a product call with no staging
+    # environment to make it in (ARCHITECTURE_MAP §12.6), not a cleanup.
+    from app.utils.process_leader import claim_leadership
 
-    # Scene timed reverts ("movie for two hours, then lights on") — once a minute.
-    try:
-        from app.db import get_db
-        from app.services.scene_timer_runner import start_scene_timer_runner
-        start_scene_timer_runner(get_db())
-    except Exception as exc:
-        logger.warning("[Bootstrap] scene timer runner start failed: %s", exc)
+    if claim_leadership("schedulers"):
+        # Daily push nudge — stays idle until APNs is configured (paid Apple keys).
+        try:
+            from app.db import get_db
+            from app.services.nudge_scheduler import start_nudge_scheduler
+            start_nudge_scheduler(get_db())
+        except Exception as exc:
+            logger.warning("[Bootstrap] nudge scheduler start failed: %s", exc)
+
+        # Scene timed reverts ("movie for two hours, then lights on") — once a minute.
+        try:
+            from app.db import get_db
+            from app.services.scene_timer_runner import start_scene_timer_runner
+            start_scene_timer_runner(get_db())
+        except Exception as exc:
+            logger.warning("[Bootstrap] scene timer runner start failed: %s", exc)
 
     logger.debug("[Bootstrap] Startup complete (env=%s)", app_env)

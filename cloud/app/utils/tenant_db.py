@@ -126,16 +126,69 @@ class ScopedCollection:
                 f"update would only remove the tenant field {self._field!r}")
         return out
 
+    # The stages MongoDB allows in an aggregation-pipeline update, and the
+    # three of them this guard can make safe. The other three cannot be
+    # rewritten into something safe — see `_guard_stage`.
+    _PIPELINE_STAGES_GUARDED = ("$set", "$addFields", "$unset")
+
     def _guard_stage(self, stage: Mapping[str, Any]) -> Dict[str, Any]:
+        """Guard one stage of a pipeline update, or refuse the whole update.
+
+        **An allowlist, not a denylist.** This used to rewrite the three stages
+        below and pass anything else through untouched, which is the wrong
+        default for this file: MongoDB also allows `$project`, `$replaceRoot`
+        and `$replaceWith` in an update pipeline, and each one can rewrite the
+        whole document — `{"$replaceWith": {...}}` can hand it to another tenant
+        as surely as `{"$set": {"user_id": ...}}` can, and `$project` can drop
+        the tenant field and orphan it. Neither can be corrected the way a `$set`
+        can: there is no field to rewrite, only an expression whose result is not
+        known until the server runs it.
+
+        So they are refused. Nothing in the codebase builds a pipeline update at
+        all today, so this costs nothing now and is the whole point later: the
+        next caller to reach for one gets an error naming the stage, instead of
+        the silence that is how a cross-tenant write gets written.
+        """
         out = dict(stage)
         for op in ("$set", "$addFields"):
             if isinstance(out.get(op), Mapping) and self._field in out[op]:
                 out[op] = {**out[op], self._field: self._tenant}
-        unset = out.get("$unset")
-        if unset == self._field:
-            del out["$unset"]
-        elif isinstance(unset, list) and self._field in unset:
-            out["$unset"] = [f for f in unset if f != self._field]
+
+        if "$unset" in out:
+            unset = out["$unset"]
+            # Three shapes reach here. A bare string and a list are what the
+            # aggregation stage takes; the mapping is the *update operator's*
+            # spelling, which is not legal in a pipeline — but a caller who
+            # confuses the two should be corrected by the driver's error about
+            # the shape, never by this guard having quietly let the tenant field
+            # through on the way past.
+            if isinstance(unset, str):
+                remaining: Any = None if unset == self._field else unset
+            elif isinstance(unset, list):
+                kept = [f for f in unset if f != self._field]
+                remaining = kept or None
+            elif isinstance(unset, Mapping):
+                kept_map = {k: v for k, v in unset.items() if k != self._field}
+                remaining = kept_map or None
+            else:
+                remaining = unset
+            if remaining is None:
+                del out["$unset"]
+            else:
+                out["$unset"] = remaining
+
+        unknown = [op for op in out if op not in self._PIPELINE_STAGES_GUARDED]
+        if unknown:
+            raise ValueError(
+                f"pipeline stage(s) {unknown!r} cannot be tenant-guarded; express "
+                f"the change with $set/$addFields/$unset only, so {self._field!r} "
+                f"stays under this collection's control")
+        if stage and not out:
+            # Same reasoning as `_guard_operators`: the whole stage was an
+            # attempt to strip the tenant, and an empty stage is a driver error
+            # that would name the wrong cause.
+            raise ValueError(
+                f"pipeline stage would only remove the tenant field {self._field!r}")
         return out
 
     # ── reads ────────────────────────────────────────────────────────────────

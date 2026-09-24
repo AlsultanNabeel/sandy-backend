@@ -31,21 +31,83 @@ _GUARD_CONFIRMED_FLAG = "_destructive_confirmed"
 # Short Arabic action phrase per guarded tool, for the confirmation prompt.
 # بس اللي لسا محروس. تشغيل جهاز وتطبيق مشهد وشيل عنصر من قائمة التسوّق
 # انشالوا من الحراسة — مش تدمير، وكل واحد فيهن بينعكس بجملة.
+# One entry per tool in `guards.DESTRUCTIVE_TOOLS`. Three of the four were
+# missing, so «متأكد إنك بدك تنفّذ هذه العملية؟» was the sentence standing between
+# a customer and every one of their tasks.
 _GUARD_SUMMARY = {
     "delete_photo": "تحذف الصورة",
+    "task_delete": "تحذف المهمة",
+    "reminder_delete": "تحذف التذكير",
+    "brainstorm_delete": "تحذف الخطة",
 }
+
+# The "everything" variants. These must never be able to read like the
+# single-item sentence: `task_delete` with `all=true` and `task_delete` with one
+# title are the same tool and are not remotely the same question.
+_GUARD_SUMMARY_ALL = {
+    "task_delete": "تحذف كل المهام",
+    "reminder_delete": "تحذف كل التذكيرات",
+}
+
+_GUARD_SUMMARY_MANY = {
+    "task_delete": "تحذف هالمهام",
+}
+
+# The argument each destructive tool actually names its target with, as its own
+# schema declares it.
+#
+# **The old list matched none of them.** It looked for `label`/`name`/`title`/
+# `item`/`device`, and the four guarded tools identify their target with
+# `query` (delete_photo, brainstorm_delete), `reference`/`references`
+# (task_delete) and `text`/`reminder_id` (reminder_delete). So the hint was
+# always empty and every confirmation asked about an unnamed something. The
+# generic keys are kept at the end for any tool added to the guard set later.
+_GUARD_HINT_KEYS = (
+    "query", "reference", "text", "reminder_id",
+    "label", "name", "title", "item", "device",
+)
+
+
+def _is_true(value: Any) -> bool:
+    """A model may send `all` as a boolean or as the string "true"."""
+    return value is True or str(value).strip().lower() in ("true", "1", "yes")
 
 
 def _guard_summary(tool_name: str, args: Dict[str, Any]) -> str:
-    """Human confirmation phrase, enriched with a key arg when present."""
+    """The sentence the user is asked to confirm before something irreversible.
+
+    It is the only thing they see. `DESTRUCTIVE_TOOLS` is defined as the set
+    that loses what you cannot get back, so a confirmation that does not say
+    *what* is being lost is a yes/no question with the content removed — and the
+    two cases it most needs to tell apart, one item and all of them, were
+    reaching the user as the same words.
+    """
+    args = args or {}
+
+    # Scope first: whatever else is in the args, "all" is the headline.
+    if _is_true(args.get("all")):
+        wide = _GUARD_SUMMARY_ALL.get(tool_name)
+        if wide:
+            return wide
+    if tool_name == "task_delete" and str(args.get("scope") or "").strip() == "completed":
+        return "تحذف كل المهام المكتملة"
+
     base = _GUARD_SUMMARY.get(tool_name, "تنفّذ هذه العملية")
-    hint = ""
-    for key in ("label", "name", "title", "item", "device"):
-        val = str((args or {}).get(key, "")).strip()
+
+    named = [str(r).strip() for r in (args.get("references") or [])
+             if isinstance(args.get("references"), (list, tuple)) and str(r).strip()]
+    if len(named) > 1:
+        shown = "» و«".join(named[:3])
+        more = f" وكمان {len(named) - 3}" if len(named) > 3 else ""
+        return f"{_GUARD_SUMMARY_MANY.get(tool_name, base)} «{shown}»{more}"
+    if len(named) == 1:
+        return f"{base} «{named[0]}»"
+
+    for key in _GUARD_HINT_KEYS:
+        val = str(args.get(key, "")).strip()
         if val:
-            hint = f" «{val}»"
-            break
-    return base + hint
+            return f"{base} «{val}»"
+    return base
 
 
 @dataclass

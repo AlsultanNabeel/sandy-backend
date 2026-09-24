@@ -4,6 +4,20 @@ Not a pytest file on purpose (see pytest.ini): it is a manual probe. Run it as
 ``python3 scripts/audit_all_tools.py`` from the repo root. For each tool it
 dispatches a plausible argument set, records whether the call raised, and prints
 one line per tool so a broken handler is visible by name rather than by symptom.
+
+**It reads all three answers, not just `handled`.** It used to print
+``handled ? OK : NOT-HANDLED``, and that is the one classification this probe
+cannot afford: `handled` means "this tool owns the turn and here is its answer",
+which a tool that caught its own exception and replied with a friendly sentence
+says just as truthfully as one that worked. So the exact fault the probe exists
+to find — `executor/dispatch.py::_guard` swallowing a real exception — was
+counted in the OK column, and a report saying "OK: 71" was the evidence that
+nothing was wrong. CONVENTIONS.md C10 and ARCHITECTURE_MAP.md §2.4 have the full
+contract; `app/agent/tool_result.py` has the two readers used below.
+
+A refusal gets its own column rather than being folded into either side: a tool
+that ran and answered "no" is working, and calling that a failure is how three
+customers mistyping a shopping item turn into "the shopping tool is broken".
 """
 from __future__ import annotations
 
@@ -15,6 +29,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [_ROOT, os.path.join(_ROOT, "cloud")]
 
 import mongomock  # noqa: E402
+
+from app.agent.tool_result import result_failed, result_ok  # noqa: E402
 
 os.environ.setdefault("JWT_SECRET", "audit-secret")
 
@@ -82,7 +98,15 @@ for name in names:
         with user_profiles.active_user_profile_context(profile):
             out = ToolDispatcher().dispatch(name, args, ctx)
         reply = str(out.get("reply") or "")[:70].replace("\n", " ")
-        results.append((name, "handled" if out.get("handled") else "NOT-HANDLED", reply))
+        if result_failed(out):
+            status = "ERROR"          # the tool itself broke, friendly sentence or not
+        elif not out.get("handled"):
+            status = "NOT-HANDLED"    # a routing signal, not breakage
+        elif not result_ok(out):
+            status = "REFUSED"        # it ran; the answer is no
+        else:
+            status = "OK"
+        results.append((name, status, reply))
     except Exception as exc:  # noqa: BLE001 — this probe exists to see them all
         results.append((name, "RAISED", f"{type(exc).__name__}: {exc}"))
         traceback.print_exc(limit=3)
@@ -93,6 +117,11 @@ print("=" * 100)
 for name, status, reply in results:
     print(f"{status:12} | {name:32} | {reply}")
 
-raised = [r for r in results if r[1] == "RAISED"]
-unhandled = [r for r in results if r[1] == "NOT-HANDLED"]
-print(f"\nRAISED: {len(raised)}   NOT-HANDLED: {len(unhandled)}   OK: {len(results) - len(raised) - len(unhandled)}")
+counts = {k: sum(1 for r in results if r[1] == k)
+          for k in ("RAISED", "ERROR", "NOT-HANDLED", "REFUSED", "OK")}
+print("\n" + "   ".join(f"{k}: {v}" for k, v in counts.items()))
+# RAISED and ERROR are the two that mean something is broken. The others are a
+# tool doing its job: declining to own the turn, or owning it and saying no.
+if counts["RAISED"] or counts["ERROR"]:
+    print(f"\n{counts['RAISED'] + counts['ERROR']} tool(s) are broken, "
+          f"not merely refusing — see the lines above.")

@@ -154,6 +154,20 @@ OWNER_ADDRESS_NOTE: str = os.getenv("SANDY_OWNER_ADDRESS_NOTE", "").strip()
 # call today.
 SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
 
+# ── Native social sign-in (api/social_auth_api) ──────────────────────────────
+#
+# The audience an ID token must be minted for: our own OAuth client id / bundle
+# id. Verifying the signature and the issuer only proves the token is *a* real
+# Google or Apple token; the audience is the only claim that says it was minted
+# for **this** app. Without it, an ID token any other Google app obtained for
+# the same person is accepted here as that person signing in.
+#
+# So in prod an empty value refuses the sign-in route outright rather than
+# skipping the check (`_expected_audience`). Outside prod it warns and skips, so
+# a local backend still works before the OAuth client exists.
+GOOGLE_OAUTH_CLIENT_ID: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID", "").strip()
+
 # Firmware releases (features/firmware_store, api/firmware_api). The token lets
 # the publish script upload a release; unset means nobody can publish. It only
 # guards the upload — robots trust a release because of its signature, which
@@ -190,6 +204,21 @@ def validate_config() -> tuple[list[str], list[str]]:
     if APP_ENV == "prod":
         if not JWT_SECRET:
             warnings.append("JWT_SECRET is empty in prod (tokens are insecure).")
+        # Not fatal: the app has plenty to do with one provider misconfigured,
+        # and refusing to boot over it would take chat, voice and the robot down
+        # with it. Loud, though — the route itself now refuses, so the symptom
+        # is customers who cannot sign in at all, and this is the line that says
+        # why.
+        if not GOOGLE_OAUTH_CLIENT_ID:
+            warnings.append(
+                "GOOGLE_OAUTH_CLIENT_ID is empty in prod — /api/auth/google will "
+                "refuse every sign-in (a token cannot be proved to be for this app)."
+            )
+        if not APPLE_BUNDLE_ID:
+            warnings.append(
+                "APPLE_BUNDLE_ID is empty in prod — /api/auth/apple will refuse "
+                "every sign-in (a token cannot be proved to be for this app)."
+            )
 
     return fatal, warnings
 

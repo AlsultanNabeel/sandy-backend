@@ -153,22 +153,42 @@ with active_user_profile_context(PROFILE):
 # measured 40 one hour and 42 the next, which is worse than useless for a number
 # whose whole job is to be compared against a later reading. Draining is exact.
 import time  # noqa: E402
+from app.agent.nodes.soul import _SOUL_POOL  # noqa: E402
 from app.utils.thread_pool import sandy_executor  # noqa: E402
 
-# `qsize() == 0` means the last job was *dequeued*, not that it finished, so the
-# quiet period below is still part of the condition — it is a bound on how long
-# a job may keep writing after being picked up, not a guess at total duration.
-# This drains `sandy_executor` only; `_SOUL_POOL` jobs the request abandoned may
-# still be running, and their writes land after this print.
-_deadline = time.monotonic() + 30.0
-while time.monotonic() < _deadline:
-    if sandy_executor._work_queue.qsize() == 0:
-        time.sleep(0.25)
-        if sandy_executor._work_queue.qsize() == 0:
-            break
-    time.sleep(0.05)
-else:
-    print("WARNING: background pool did not drain in 30s — total is a lower bound")
+# **Both pools, or the number is a lower bound and does not say so.**
+#
+# `sandy_executor` carries fire-and-forget work; `_SOUL_POOL` carries the
+# prefetches the turn starts before routing and stops waiting for after
+# `_SOUL_WAIT_S` (ARCHITECTURE_MAP §12). The abandoned ones keep running and
+# keep reading, so draining only the first printed a total with an unknown
+# number of round trips still in flight behind it — and this script exists
+# precisely so a later reading can be compared to this one. A measurement that
+# is sometimes short by three is worse than one that is honestly slower.
+_POOLS = (("sandy_executor", sandy_executor), ("soul", _SOUL_POOL))
+
+
+def _drain_pools(timeout: float = 30.0) -> bool:
+    """Wait until every pool is quiet. Returns False if one did not settle.
+
+    `qsize() == 0` means the last job was *dequeued*, not that it finished, so
+    the quiet period is part of the condition — a bound on how long a job may
+    keep writing after being picked up, not a guess at total duration.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if all(pool._work_queue.qsize() == 0 for _, pool in _POOLS):
+            time.sleep(0.25)
+            if all(pool._work_queue.qsize() == 0 for _, pool in _POOLS):
+                return True
+        time.sleep(0.05)
+    busy = [name for name, pool in _POOLS if pool._work_queue.qsize()]
+    print(f"WARNING: {', '.join(busy) or 'a pool'} did not drain in {timeout:.0f}s "
+          f"— every total below is a LOWER BOUND, not a measurement")
+    return False
+
+
+_drained_first = _drain_pools()
 
 first = OPS.copy()
 
@@ -182,13 +202,7 @@ first = OPS.copy()
 OPS.clear()
 with active_user_profile_context(PROFILE):
     run_graph("والحمدلله تمام", user_id=USER, chat_id=USER, source="web")
-_drain = time.monotonic() + 30.0
-while time.monotonic() < _drain:
-    if sandy_executor._work_queue.qsize() == 0:
-        time.sleep(0.25)
-        if sandy_executor._work_queue.qsize() == 0:
-            break
-    time.sleep(0.05)
+_drained_second = _drain_pools()
 second = OPS.copy()
 
 print(f"\nSeeded life items: {seeded}")
@@ -201,7 +215,8 @@ for op, n in first.most_common():
     print(f"{n:5}  {op}")
     total += n
 print("-" * 74)
-print(f"{total:5}  TOTAL round trips (first turn, cold cache)")
+print(f"{total:5}  TOTAL round trips (first turn, cold cache)"
+      f"{'' if _drained_first else '   [LOWER BOUND — a pool never drained]'}")
 print()
 print("=" * 74)
 print("MONGO ROUND TRIPS FOR THE SECOND TURN (warm cache) — the one to watch")
@@ -209,7 +224,8 @@ print("=" * 74)
 for op, n in second.most_common():
     print(f"{n:5}  {op}")
 print("-" * 74)
-print(f"{sum(second.values()):5}  TOTAL round trips")
+print(f"{sum(second.values()):5}  TOTAL round trips"
+      f"{'' if _drained_second else '   [LOWER BOUND — a pool never drained]'}")
 print()
 print("=" * 74)
 print("EXTERNAL CALLS")

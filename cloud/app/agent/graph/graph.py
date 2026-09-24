@@ -48,8 +48,9 @@ _STM_COLL = "sandy_stm"
 _stm_index_ready = False
 
 
-def _ensure_stm_indexes(coll) -> None:
-    """Create the STM indexes, **each one independently**.
+def _ensure_stm_indexes(coll) -> bool:
+    """Create the STM indexes, **each one independently**. Returns whether all
+    of them are now in place, so the caller knows whether to stop retrying.
 
     They used to share a single `try`. One index failing therefore skipped every
     index after it, and the ready-flag was set anyway — so the skip was
@@ -81,11 +82,14 @@ def _ensure_stm_indexes(coll) -> None:
         ("user_id+updated_at", lambda: coll.create_index(
             [("user_id", 1), ("updated_at", -1)], background=True)),
     )
+    ok = True
     for label, job in jobs:
         try:
             job()
         except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+            ok = False
             logger.warning("[graph] STM index %s failed: %s", label, exc)
+    return ok
 
 
 def _stm_collection():
@@ -99,8 +103,20 @@ def _stm_collection():
             return None
         coll = mongo_db[_STM_COLL]
         if not _stm_index_ready:
-            _ensure_stm_indexes(coll)
-            _stm_index_ready = True
+            # **Only a success ends the attempts.** The flag used to be set
+            # whatever happened, so one failure — a Mongo blip during the first
+            # chat turn after a deploy, a `STM_TTL` change conflicting with the
+            # index already in the database — meant this process never tried
+            # again. The one it is most likely to lose is `(user_id,
+            # updated_at)`, which is what stops `recent_turns_for_user` scanning
+            # every conversation on the server; losing it makes one person's
+            # reply get slower as everybody else's history grows. That is a
+            # fault nobody reports as a bug, because nothing breaks.
+            #
+            # Retrying costs a `create_index` per STM read until it works, and
+            # `create_index` on an index that already exists is a no-op — so the
+            # cost is paid only while something is actually wrong.
+            _stm_index_ready = _ensure_stm_indexes(coll)
         return coll
     except Exception as exc:
         logger.warning("[graph] STM collection unavailable: %s", exc)

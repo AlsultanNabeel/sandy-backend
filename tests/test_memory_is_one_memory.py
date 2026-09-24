@@ -213,8 +213,25 @@ def test_the_profile_is_searchable_without_becoming_a_second_truth():
     assert '"source_key": key' in src and "upsert=True" in src, (
         "the mirror appends instead of replacing — every settings edit leaves "
         "the previous answer behind, and she will recite both")
-    assert "insert_one" not in src.split("_mirror_onboarding_to_memory")[1], (
+
+    # The function body, not "everything after the name is first mentioned".
+    # The old slice started at the call site, so a later, unrelated `insert_one`
+    # in this module counted against the mirror — and a comment added near the
+    # top of the file that happened to name the function moved the slice to the
+    # whole file. A test that a comment can fail teaches the next reader to
+    # delete comments.
+    body = src.split("def _mirror_onboarding_to_memory")[1].split("\ndef ")[0]
+    assert "insert_one" not in body, (
         "an insert in the mirror means duplicates accumulate per save")
+
+    # **Replacement is both halves.** Upserting the fields that are present was
+    # only ever the adding half: clear your interests in settings and the row
+    # stayed, so the profile said one thing and the memory search answered with
+    # what you had just removed — the same two-sources-of-truth split this
+    # function exists to prevent, reached from the other side.
+    assert "delete_many" in body and "_MIRROR_SOURCE_KEYS" in body, (
+        "the mirror never removes a field the user cleared — deleted interests "
+        "stay searchable for ever")
 
 
 def test_durable_memory_was_always_keyed_by_person():

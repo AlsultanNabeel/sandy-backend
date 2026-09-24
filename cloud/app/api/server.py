@@ -23,6 +23,15 @@ _MAX_MESSAGE_CHARS = 6000
 # الضخمة مبكراً (413) قبل قراءتها للذاكرة — حاجز إغراق.
 _MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 
+# سقف نص وصف الصورة (توليد وتعديل) قبل ما ينبعت للمزوّد.
+#
+# الرسالة النصية فوق عندها سقفها، وجسم الطلب ككل مسقوف — بس وصف الصورة ما كان
+# عليه ولا واحد منهن يخصّه: بتقدر تبعت ميغا نص جوا حقل `prompt` فيمرق (أصغر من
+# سقف الجسم) ويوصل للمزوّد كما هو، فندفع كلفة نداء بيرفضه المزوّد بعد ثانية
+# ثانية. الرفض لازم يصير هون، مجّاناً وفوراً. ألفين حرف أطول بمرّات من أي وصف
+# صورة حقيقي، وتحت حدود المزوّدين.
+_MAX_IMAGE_PROMPT_CHARS = 2000
+
 
 # أقصى عدد رسائل بنحفظه من سجل شات الويب — الأحدث بس.
 _MAX_HISTORY_MESSAGES = 500
@@ -620,6 +629,8 @@ def create_app(
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
             return jsonify({"error": "no prompt"}), 400
+        if len(prompt) > _MAX_IMAGE_PROMPT_CHARS:
+            return jsonify({"error": "prompt_too_long"}), 413
 
         gate = _media_gate(claims)
         if gate is not None:
@@ -646,6 +657,8 @@ def create_app(
         image_b64 = (body.get("image") or "").strip()
         if not prompt or not image_b64:
             return jsonify({"error": "no prompt or image"}), 400
+        if len(prompt) > _MAX_IMAGE_PROMPT_CHARS:
+            return jsonify({"error": "prompt_too_long"}), 413
 
         gate = _media_gate(claims)
         if gate is not None:

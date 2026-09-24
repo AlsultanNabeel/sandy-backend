@@ -14,7 +14,9 @@ CAM++ (عبر sherpa-onnx) بيشتغل محلياً على السيرفر، ONN
 لو sherpa-onnx مش منصّبة أو ما قدر ينزّل النموذج بتتجاهَل الميزة بهدوء.
 
 التشفير: بصمة الصوت بيانات حيوية فبتتشفّر بـ Fernet عبر مفتاح مستقل
-SANDY_BIO_KEY. بدون المفتاح تُخزَّن base64 خام مع تحذير.
+SANDY_BIO_KEY. **بدون المفتاح ما بتنحفظ ولا بصمة** — التسجيل بيرفض ويقول
+السبب، بدل ما يخزّن بيانات حيوية بترميز مش تشفير. القراءة بتضل تقبل
+الصفوف القديمة المخزّنة base64 وبتعيد كتابتها مشفّرة أول ما تنقرا.
 """
 
 from __future__ import annotations
@@ -198,7 +200,8 @@ def enroll_speaker(chat_id: int, pcm_samples: List[bytes]) -> Tuple[bool, int, s
     mean = _normalize(np.mean(embeddings, axis=0))
     if mean is None:
         return False, 0, "صار خلل ببناء البصمة."
-    _save_profile(chat_id, mean.astype("float32").tobytes(), len(embeddings))
+    if not _save_profile(chat_id, mean.astype("float32").tobytes(), len(embeddings)):
+        return False, 0, "ما قدرت أحفظ بصمة صوتك بأمان هلق — جرّب بعدين."
     return True, len(embeddings), f"تمام! صرت أعرف صوتك ✅ ({len(embeddings)} مقاطع)"
 
 
@@ -237,10 +240,24 @@ def _get_fernet():
     return _fernet
 
 
-def _encode_profile(profile_bytes: bytes) -> str:
+def _encode_profile(profile_bytes: bytes) -> Optional[str]:
+    """The encrypted blob, or ``None`` when it cannot be encrypted.
+
+    **Fails closed.** This used to fall back to ``base64`` and carry on, which
+    reads like a graceful degradation and is not one: base64 is a transport
+    encoding, not a cipher, so the fallback stored the raw voiceprint and the
+    only thing lost was the protection. A voiceprint is biometric data — it
+    identifies one person, for life, and unlike a password they cannot change
+    it after a database is copied. There is nothing to degrade to. C6 puts it
+    the same way: config that is missing disables its own feature, and the
+    feature here is *storing a voiceprint*, not *protecting* one.
+    """
     f = _get_fernet()
     if f is None:
-        return base64.b64encode(profile_bytes).decode("ascii")
+        logger.error(
+            "[speaker_id] SANDY_BIO_KEY مش متاح — رفضت أحفظ بصمة صوت بدون تشفير"
+        )
+        return None
     return _ENC_PREFIX + f.encrypt(profile_bytes).decode("ascii")
 
 
@@ -260,18 +277,29 @@ def _decode_profile(stored: str) -> Optional[bytes]:
         return None
 
 
-def _save_profile(chat_id: int, vector_bytes: bytes, n_samples: int) -> None:
+def _save_profile(chat_id: int, vector_bytes: bytes, n_samples: int) -> bool:
+    """Store the voiceprint. Returns whether it was actually stored.
+
+    It used to return ``None`` on every path, so the two ways it can fail — no
+    database, and now no key — reached ``enroll_speaker`` as the same silence
+    it used for success, and the user was told «تمام! صرت أعرف صوتك ✅» over a
+    row that does not exist. C10: a handler says whether the change happened.
+    """
     if get_db() is None:
         logger.warning("[speaker_id] Mongo غير متاح — لم تُحفظ البصمة")
-        return
+        return False
+    blob = _encode_profile(vector_bytes)
+    if blob is None:
+        return False   # _encode_profile already said why
     doc = {
         "_id": str(chat_id),
         "chat_id": chat_id,
-        "profile": _encode_profile(vector_bytes),
+        "profile": blob,
         "n_samples": n_samples,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     get_db()[_COLLECTION].replace_one({"_id": str(chat_id)}, doc, upsert=True)
+    return True
 
 
 def get_profile_vector(chat_id: int):
@@ -288,6 +316,21 @@ def get_profile_vector(chat_id: int):
     raw = _decode_profile(doc["profile"])
     if not raw:
         return None
+    # Legacy rows from before encryption failed closed are still plaintext.
+    # Reading one is the moment both halves are in hand, so rewrite it — the
+    # alternative is telling the owner it is encrypted while the rows enrolled
+    # before the key existed sit there in the clear for ever.
+    if not str(doc["profile"]).startswith(_ENC_PREFIX):
+        upgraded = _encode_profile(raw)
+        if upgraded:
+            try:
+                get_db()[_COLLECTION].update_one(
+                    {"_id": str(chat_id)}, {"$set": {"profile": upgraded}}
+                )
+                logger.info("[speaker_id] voiceprint re-encrypted for %s", chat_id)
+            except Exception as e:  # noqa: BLE001 — a failed upgrade must not
+                                    # break the verification that asked for it
+                logger.warning("[speaker_id] voiceprint re-encrypt failed: %s", e)
     import numpy as np
     return np.frombuffer(raw, dtype="float32").copy()
 

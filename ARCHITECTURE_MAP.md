@@ -96,6 +96,15 @@ dyno and no job queue.** Long work — research pipelines, image generation — 
 inside the request under a 120-second cap. If you add anything slower than that,
 you are adding a queue first.
 
+Every worker runs `bootstrap()`, so the periodic jobs used to start twice per
+dyno. They are now behind `utils/process_leader.claim_leadership` — a `flock` on
+the local filesystem, released by the kernel if the holder dies, so gunicorn's
+replacement claims it on its own boot. The per-day nudge lock and the
+per-timer find-and-delete stay: they are what makes this safe across *dynos*,
+which a per-machine lock says nothing about. `mqtt_ingest` is deliberately
+**not** elected — one subscriber for every board's heartbeat is a redundancy
+decision, and `/api/diagnose` reports that listener per worker.
+
 `wsgi.py` is production; `serve_api.py` is the local dev runner. Both build the
 same app: `configure_logging()` → `init_runtime()` → `create_app()` → `bootstrap()`. Nothing connects to
 a database at *import* time — that is deliberate, and it is what lets the whole

@@ -5,7 +5,28 @@ from typing import Any, Optional, Tuple
 
 import certifi
 
+from app.config import APP_ENV
+
 logger = logging.getLogger(__name__)
+
+# There is no second store to fall back to.
+#
+# Three of the log lines below used to end "using JSON memory for now" / "falling
+# back to JSON memory". That store was removed: `app.db.configure(None)` leaves
+# `get_db()` returning None, and every feature store guards on it and returns its
+# empty default. So the fallback is not another database — it is Sandy running
+# with no memory at all, answering reads with nothing and accepting writes that
+# go nowhere, while `/health` is the only place that says so.
+#
+# On a laptop that is the right behaviour: the package imports and the tests run
+# with no credentials, deliberately (§2.1). In production it is the worst kind of
+# outage — the silent one — and it is exactly what C6 means by critical config
+# failing fast at boot. Production is also what the robot on the desk is talking
+# to (§1), so "up but knows nothing" is a robot that has forgotten its owner.
+_NO_DB_IN_PROD = (
+    "No database connection in prod. Refusing to start: the app would serve "
+    "empty reads and silently discard every write. See the error above."
+)
 
 try:
     from pymongo import MongoClient
@@ -43,11 +64,17 @@ def init_mongo_connection(
 ) -> Tuple[Optional[Any], Optional[Any]]:
     """Initialize MongoDB connection and return (mongo_client, mongo_db)."""
     if not MONGODB_AVAILABLE:
-        logger.warning("[MongoDB] PyMongo not installed, using JSON memory for now")
+        logger.error("[MongoDB] PyMongo is not installed")
+        if APP_ENV == "prod":
+            raise RuntimeError(_NO_DB_IN_PROD)
+        logger.warning("[MongoDB] APP_ENV=%s — starting with no database", APP_ENV)
         return None, None
 
     if not mongodb_uri:
-        logger.warning("[MongoDB] MONGODB_URI not set, using JSON memory for now")
+        logger.error("[MongoDB] MONGODB_URI is not set")
+        if APP_ENV == "prod":
+            raise RuntimeError(_NO_DB_IN_PROD)
+        logger.warning("[MongoDB] APP_ENV=%s — starting with no database", APP_ENV)
         return None, None
 
     try:
@@ -72,5 +99,10 @@ def init_mongo_connection(
         logger.error(
             "[MongoDB] Hint: check Atlas Network Access allowlist and URI credentials"
         )
-        logger.error("[MongoDB] Falling back to JSON memory")
+        if APP_ENV == "prod":
+            # Crash the worker. Heroku restarts it, which is the retry — and a
+            # dyno that will not come up is a page. A dyno that came up without
+            # a database is a week of "Sandy forgot everything I told her".
+            raise RuntimeError(_NO_DB_IN_PROD) from connect_error
+        logger.warning("[MongoDB] APP_ENV=%s — starting with no database", APP_ENV)
         return None, None
