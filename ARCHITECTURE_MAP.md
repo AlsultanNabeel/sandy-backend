@@ -135,6 +135,15 @@ fc_router → soul → router → ┬ pending  ┐
                             └ clarify  ┘
 ```
 
+- **`fast_path.py`** — tried first, and usually not taken. A bare device command
+  («شغّل الضو») is matched *whole* against the caller's own registered devices and
+  answered with no model call at all — the turn's two serial model calls (§12.5)
+  drop to zero, because `response_node` passes a handler's reply straight
+  through. It only picks the tool; `apply_routing_decision` derives everything
+  else so the two routes cannot drift, and the dispatcher, `command_payload` and
+  `tenant_owns_topic` run underneath it unchanged. Its four conditions, and why
+  it is not the thing C8 bans, are in `CONVENTIONS.md` C8b. `SANDY_FAST_PATH=0`
+  turns it off.
 - **`agents/fc_router.py`** — one native function-calling pass. The model sees
   every registered tool as a real tool (name + description + JSON schema) and
   always calls one or more (`tool_choice="required"`; plain conversation is the
@@ -1115,6 +1124,12 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    than voice: voice injects memory once at session start and then only streams.
    Merging them, or streaming the reply before routing finishes, is the open
    question. The `[turn]` log line (§2.11) now gives the split per message.
+   *Partly closed 25 Sep 2026 for one class of turn:* `agent/fast_path.py` (§2.3)
+   answers a bare device command with **neither** call — it picks the tool by
+   matching the whole utterance against the caller's own registered devices, and
+   `response_node` passes the handler's reply straight through. It fires only on
+   a short order naming one registered device and nothing else; everything else
+   still pays for both. `[turn] … route 0 (fast)` marks the ones that did not.
 
 ### Real, but nobody hits it today
 

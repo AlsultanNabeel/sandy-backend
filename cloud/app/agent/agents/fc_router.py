@@ -332,6 +332,48 @@ def route_with_fc(
         except Exception:
             logger.debug("ignoring non-critical error", exc_info=True)
 
+    return apply_routing_decision(
+        state, fc,
+        multi_fcs=multi_fcs,
+        intent=intent,
+        routing_hint=routing_hint,
+        requires_clarification=requires_clarification,
+        clarification_question=clarification_q,
+        error=error,
+    )
+
+
+def apply_routing_decision(
+    state: SandyState,
+    fc: Dict[str, Any],
+    *,
+    multi_fcs: Optional[List[Dict[str, Any]]] = None,
+    intent: Optional[str] = None,
+    routing_hint: Optional[str] = None,
+    requires_clarification: bool = False,
+    clarification_question: Optional[str] = None,
+    error: Optional[str] = None,
+    routed_by: str = "fc_router",
+) -> SandyState:
+    """Turn a chosen tool call into the state the rest of the graph reads.
+
+    **Extracted so there is one definition of it, not two.** `agent/fast_path.py`
+    answers a bare device command without a model call, and it has to hand the
+    graph exactly what this function-calling pass would have handed it: the
+    intent, the routing hint, her face and mood, the response template, the
+    persona intensity. Copying those six lookups into the fast path would have
+    worked on the day it was written and drifted the first time one of them
+    changed — and the symptom of that drift is Sandy wearing the wrong
+    expression for a command she carried out correctly, which nobody files as a
+    bug and nobody ever tracks back to here.
+
+    So the fast path calls this with nothing but the tool call, and every
+    derived field is derived in one place, for both callers.
+    """
+    fn_name = str(fc.get("name") or "chat_respond")
+    intent = intent or _fn_to_intent(fn_name)
+    routing_hint = routing_hint or _fn_to_routing_hint(fn_name)
+
     face_mood = _derive_face_mood(fn_name)
     persona_intensity = face_mood["persona_intensity"]
 
@@ -349,9 +391,10 @@ def route_with_fc(
         "urgency": None,
         "requires_clarification": requires_clarification,
         "routing_hint": routing_hint,
-        "clarification_question": clarification_q,
+        "clarification_question": clarification_question,
         "persona_intensity": persona_intensity,
         "persona_snippet": None,
         "response_template": template or None,
         "error": error,
+        "routed_by": routed_by,
     })

@@ -453,7 +453,23 @@ def _route_intent(state: "SandyState") -> "SandyState":
         بيختاره الـ FC كـ chat_respond بدل نداء تصنيف منفصل.
 
     (الـ RouterAgent القديم + الـ specialists انحذفوا — ما عاد إلهم دور.)
+
+    **وقبل الكل: الموجّه السريع.** جملة زي «شغّل الضو» إلها قراءة وحدة، وكانت
+    بتدفع نداء نموذج كامل عشان نوصلها — والمستخدم واقف بالعتمة بينتظر رحلة
+    لأزور تقرّر إنّ «شغّل الضو» يعني نشغّل الضو. `fast_path.try_fast_route`
+    بيرجّع نفس الـ`function_call` اللي الراوتر كان رح يطلّعه، أو `None` وبكمل
+    الطريق العادي. هو بس بيختار — التنفيذ والتحقق من الملكية بيضلّوا كما هنّ
+    بالكامل تحته. اقرا `agent/fast_path.py` للشروط ولعلاقتها بقاعدة C8.
     """
+    from app.agent.agents.fc_router import apply_routing_decision
+    from app.agent.fast_path import try_fast_route
+
+    fast = try_fast_route(state)
+    if fast is not None:
+        # Same shape the model's answer would have taken — `apply_routing_decision`
+        # derives every other field, so the two paths cannot drift.
+        return apply_routing_decision(state, fast, routed_by="fast_path")
+
     from app.agent.agents.fc_router import route_with_fc
     from app.agent.tools.registry import get_registry
 
@@ -600,8 +616,9 @@ def _run_graph(
         # interleaved with every other request on the worker — this is the
         # line to grep when chat feels slow.
         logger.info(
-            "[turn] %.0fms total — route %.0f · soul %.0f · %s %.0f (%s)",
+            "[turn] %.0fms total — route %.0f%s · soul %.0f · %s %.0f (%s)",
             (time.perf_counter() - t_total) * 1000, t_route * 1000,
+            " (fast)" if state.get("routed_by") == "fast_path" else "",
             t_soul * 1000, next_node, t_exec * 1000,
             (state.get("function_call") or {}).get("name", ""),
         )

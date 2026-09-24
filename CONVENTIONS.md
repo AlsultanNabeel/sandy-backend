@@ -52,6 +52,37 @@ Rules every change in this codebase follows. Tests and code comments cite them b
   function-calling decision; keyword lists may only *rank* or *tie-break*
   already-structured data, never trigger an action on their own.
 
+### C8b — The one deterministic route, and the four conditions on it
+
+`agent/fast_path.py` picks a tool without asking a model. That is the shape C8
+exists to stop, so it is written down here rather than argued in a commit
+message, and it is allowed **only** while all four of these hold. Anything that
+wants to join it satisfies all four or it does not go in.
+
+1. **The candidates are structured, per-tenant data.** Not a phrase list in the
+   source — the caller's own `sandy_devices` rows, and their actions as
+   `device_store.command_payload` validates them. This is the "rank or tie-break
+   already-structured data" that C8 already permits; a phrase the fast path can
+   match does not exist until a user registers the device it names.
+2. **The match consumes the whole utterance.** A verb and a device label are
+   removed and *nothing may be left*. This is the condition that answers C8's own
+   objection: a keyword search finds "شغل الضو" inside a story about somebody
+   else saying it, and a whole-utterance match does not, because the other
+   eleven words have nowhere to go.
+3. **It only picks; it never acts.** It returns the same `function_call` the
+   router would have produced and the ordinary chain runs underneath it —
+   dispatcher, `command_payload`, `tenant_owns_topic`. It can be wrong about
+   intent and still cannot be wrong about permission. Nothing in
+   `guards.DESTRUCTIVE_TOOLS` is reachable, and nothing whose real-world effect
+   is not a closed reversible set (`ir`, `text`, `enum`) is either.
+4. **It fails open.** Every uncertainty — a leftover word, two devices matching
+   the same label, an action the device refuses, any exception — returns `None`
+   and the model decides. A route that fails *closed* would be C8's failure mode
+   with extra steps.
+
+The kill switch is `SANDY_FAST_PATH=0` (`app/config.py`), so it can be ruled out
+in one variable while diagnosing something else.
+
 ## C9 — Inline imports
 Function-level imports exist to break real circular dependencies and are
 acceptable where that's the reason. For NEW code, prefer module-top imports;

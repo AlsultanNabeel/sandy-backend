@@ -45,6 +45,7 @@ class SandyState(TypedDict):
     # function call
     function_call: Optional[dict]        # {"name": str, "args": dict} من maestro FC
     function_calls: Optional[List[dict]] # [{"name": str, "args": dict}, ...] multi-tool
+    routed_by: Optional[str]             # "fc_router" | "fast_path" — من اختار الأداة
 
     # التنفيذ
     execution_result: Optional[Any]
@@ -108,6 +109,7 @@ def create_initial_state(
         pending_archived=[],
         function_call=None,
         function_calls=None,
+        routed_by=None,
         execution_result=None,
         response_template=None,
         final_response=None,

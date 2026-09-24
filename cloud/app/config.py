@@ -154,6 +154,16 @@ OWNER_ADDRESS_NOTE: str = os.getenv("SANDY_OWNER_ADDRESS_NOTE", "").strip()
 # call today.
 SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
 
+# ── The fast path (agent/fast_path.py) ──────────────────────────────────────
+#
+# Answers a bare device command («شغّل الضو») with no model call, by matching the
+# whole utterance against the caller's own registered devices. On by default,
+# because a path that is off is a path that rots untested; set SANDY_FAST_PATH=0
+# to send every turn through the router again, which is the one-variable way to
+# rule it out while diagnosing something else.
+SANDY_FAST_PATH: bool = os.getenv("SANDY_FAST_PATH", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+
 # ── Native social sign-in (api/social_auth_api) ──────────────────────────────
 #
 # The audience an ID token must be minted for: our own OAuth client id / bundle
