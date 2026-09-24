@@ -223,11 +223,9 @@ final class APIClient: APIClientProtocol {
     func request(_ path: String,
                  method: String = "GET",
                  body: [String: Any]? = nil,
-                 auth: Bool = true,
-                 timeout: TimeInterval = 30) async throws -> [String: Any] {
+                 auth: Bool = true) async throws -> [String: Any] {
         let bodyData = try body.map { try JSONSerialization.data(withJSONObject: $0) }
-        let data = try await perform(path, method: method, bodyData: bodyData,
-                                     auth: auth, timeout: timeout)
+        let data = try await perform(path, method: method, bodyData: bodyData, auth: auth)
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     }
 

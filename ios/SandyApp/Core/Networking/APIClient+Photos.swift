@@ -42,9 +42,12 @@ extension APIClient {
         var body: [String: Any] = ["image": image.base64EncodedString()]
         if !name.isEmpty { body["name"] = name }
         if !album.isEmpty { body["album"] = album }
-        // Sixty seconds: the body is a base64 photo, which is the one
-        // request in the app that can legitimately outrun the default.
-        _ = try await request("/api/photos", method: "POST", body: body, timeout: 60)
+        // The default budget, not a longer one. `timeoutInterval` bounds *idle*
+        // time, not the length of the transfer (see the note on `session` in
+        // APIClient.swift), so thirty seconds here means thirty seconds during
+        // which an upload in progress moved no bytes at all — which is a dead
+        // connection, whatever the size of the photo.
+        _ = try await request("/api/photos", method: "POST", body: body)
     }
 
     /// DELETE /api/photos/<id> → {"ok":bool}
