@@ -20,9 +20,6 @@ from typing import Any, Dict, List, Optional
 
 from app.utils.thread_pool import submit_background
 
-STM_TTL = 60 * 60 * 24 * 30  # drives the Mongo TTL index on STM docs
-MAX_STM_MESSAGES = 10
-
 from app.agent.graph.state import SandyState, create_initial_state, merge_state
 from app.agent.nodes.soul import soul_node
 from app.agent.nodes.router import router_node, route_after_router
@@ -30,6 +27,9 @@ from app.agent.nodes.pending import pending_node
 from app.agent.nodes.execute import execute_node
 from app.agent.nodes.clarify import clarify_node
 from app.agent.nodes.response import response_node
+
+STM_TTL = 60 * 60 * 24 * 30  # drives the Mongo TTL index on STM docs
+MAX_STM_MESSAGES = 10
 
 logger = logging.getLogger(__name__)
 

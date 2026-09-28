@@ -1,12 +1,6 @@
-"""Bedrock Converse routing — an alternative router backend to Azure.
+"""Optional Bedrock Converse router backend, enabled by BEDROCK_ROUTER_MODEL_ID.
 
-Enabled when ``BEDROCK_ROUTER_MODEL_ID`` is set. Uses the Converse API's unified
-tool-use, so any Bedrock model (e.g. Qwen3) routes with the same tool specs the
-Azure path uses. Auth is the Bedrock API key in ``AWS_BEARER_TOKEN_BEDROCK``,
-which boto3 reads on its own.
-
-Returns a list of {name, args} calls (empty = the model chose to chat), or None
-to signal the caller to fall back to the Azure router.
+Auth: AWS_BEARER_TOKEN_BEDROCK (read by boto3).
 """
 
 from __future__ import annotations
@@ -26,7 +20,6 @@ _client = None
 
 
 def bedrock_enabled() -> bool:
-    """True when a Bedrock router model is configured."""
     return bool(_MODEL_ID)
 
 
@@ -36,8 +29,7 @@ def _get_client():
         import boto3
         from botocore.config import Config
 
-        # boto3's defaults are 60 s to connect, 60 s to read, plus retries —
-        # minutes on a request path that Heroku cuts at 30 s.
+        # boto3 defaults (60s + retries) exceed Heroku's 30s request cut.
         _client = boto3.client(
             "bedrock-runtime", region_name=_REGION,
             config=Config(connect_timeout=3, read_timeout=12,
@@ -47,7 +39,6 @@ def _get_client():
 
 
 def _to_tool_config(specs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Convert our name/description/JSON-Schema specs to Converse toolConfig."""
     tools = []
     seen = set()
     for d in specs:
@@ -69,7 +60,7 @@ def _to_tool_config(specs: List[Dict[str, Any]]) -> Dict[str, Any]:
 def route_with_bedrock(
     system: str, user: str, specs: List[Dict[str, Any]]
 ) -> Optional[List[Dict[str, Any]]]:
-    """Route one turn through Bedrock Converse. None on failure (→ Azure)."""
+    """List of {name, args} ([] = chat), or None on failure (→ Azure)."""
     try:
         client = _get_client()
         _t = time.perf_counter()
@@ -94,7 +85,7 @@ def route_with_bedrock(
                     "name": str(tool_use["name"]),
                     "args": tool_use.get("input") or {},
                 })
-        return calls  # empty list = model replied as chat (no tool)
-    except Exception as exc:  # noqa: BLE001 — any failure falls back to Azure
+        return calls
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"[bedrock_router] failed, falling back to Azure: {exc}")
         return None

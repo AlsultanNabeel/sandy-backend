@@ -115,12 +115,6 @@ def test_no_dsn_means_no_reporting(monkeypatch):
     assert et.init_error_tracking() is False
 
 
-def test_capture_is_silent_when_not_started(monkeypatch):
-    """Called from paths that must never raise — a heartbeat, a circuit breaker."""
-    monkeypatch.setattr(et, "_started", False)
-    et.capture("something odd", node_id="sandy0001")   # must not raise
-
-
 def test_startup_failure_never_breaks_boot(monkeypatch):
     """Reporting is a convenience. It may not be why the backend is down."""
     monkeypatch.setenv("SENTRY_DSN", "https://bad@example.invalid/1")

@@ -1,11 +1,4 @@
-"""Gemini TTS — primary voice synthesis for Sandy.
-
-Model:  gemini-3.1-flash-tts (Preview)
-Voice:  Aoede (Female)
-Language: Arabic (World)
-Tone:   controlled via style instruction built from current mood
-Output: LINEAR16 PCM @ 22050 Hz, wrapped in WAV
-"""
+"""Gemini TTS (voice Aoede, style from mood) → 22.05 kHz mono WAV."""
 
 import base64
 import os
@@ -23,23 +16,17 @@ _cb = CircuitBreaker(name="gemini_tts", failure_threshold=3, recovery_timeout=12
 _GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts")
 _GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Aoede")
 
-# Request timeout (ms) so a hung synthesis fails fast instead of blocking voice.
-# Floor of 10s: Gemini rejects anything shorter outright with "Manually set
-# deadline 8s is too short", so the old 8s default made every single synthesis
-# fail with a 400 and the app lost its voice completely.
+# Gemini rejects deadlines under 10s with a 400.
 _GEMINI_TTS_MIN_TIMEOUT_MS = 10000
 _GEMINI_TTS_TIMEOUT_MS = max(
     int(os.getenv("GEMINI_TTS_TIMEOUT_MS", "12000")), _GEMINI_TTS_MIN_TIMEOUT_MS
 )
 
-# Module-level cached client (lazy singleton) — building genai.Client per call
-# redoes TLS/handshake setup. Cached on first use and reused, keyed by api_key.
 _genai_client = None
 _genai_client_key: Optional[str] = None
 
 
 def _get_genai_client(api_key: str):
-    """Return a cached genai.Client, creating it on first call (or key change)."""
     global _genai_client, _genai_client_key
     if _genai_client is None or _genai_client_key != api_key:
         from google import genai
@@ -53,12 +40,9 @@ _SAMPLE_RATE = 22050
 _CHANNELS = 1
 _SAMPLE_WIDTH = 2  # 16-bit / LINEAR16
 
-# نبرة افتراضية محايدة عامة لكل المودات (override عبر SANDY_TTS_STYLE_BASE).
-# المالك يضبط الذوق المطلوب من Heroku — الكود يبقى عاماً.
 _DEFAULT_BASE = os.getenv("SANDY_TTS_STYLE_BASE", "Speak natural Palestinian Arabic dialect. ")
 
-# يمكن تخصيص كل مود عبر env var: SANDY_TTS_STYLE_<MOOD>
-# الـ defaults قصيرة وحيادية — الـ env override يعطيك المرونة الكاملة.
+# كل مود قابل للتخصيص عبر SANDY_TTS_STYLE_<MOOD>.
 _MOOD_INSTRUCTIONS: dict = {
     "neutral": os.getenv("SANDY_TTS_STYLE_NEUTRAL") or (_DEFAULT_BASE + "Neutral mood."),
     "calm": os.getenv("SANDY_TTS_STYLE_CALM") or (_DEFAULT_BASE + "Calm mood."),
@@ -89,14 +73,13 @@ def _do_synthesize(text: str, mood: str, api_key: str) -> Optional[bytes]:
     style = _MOOD_INSTRUCTIONS.get(mood) or _MOOD_INSTRUCTIONS["neutral"]
     client = _get_genai_client(api_key)
 
-    # TTS models don't support system_instruction — style goes inside contents
+    # TTS models don't support system_instruction.
     styled_text = f"{style}\n\n{text}"
 
     response = client.models.generate_content(
         model=_GEMINI_TTS_MODEL,
         contents=styled_text,
         config=types.GenerateContentConfig(
-            # Per-request HTTP timeout (ms) — fail fast on a hung call.
             http_options=types.HttpOptions(timeout=_GEMINI_TTS_TIMEOUT_MS),
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
@@ -131,7 +114,7 @@ def synthesize_voice_with_gemini(
     mood: str = "neutral",
     api_key: str = "",
 ) -> Optional[bytes]:
-    """Synthesize speech via Gemini TTS. Returns WAV bytes or None on failure."""
+    """WAV bytes or None on failure."""
     if not text:
         return None
 

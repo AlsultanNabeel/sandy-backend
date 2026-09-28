@@ -1,14 +1,6 @@
-"""Azure OpenAI image generation/editing — fallback لما Replicate Flux يفشل.
+"""Azure OpenAI image fallback: DALL-E 3 generate, gpt-image-1 edit.
 
-- توليد: DALL-E 3 (deployment name من AZURE_OPENAI_IMAGE_DEPLOYMENT)
-- تعديل: gpt-image-1 (deployment name من AZURE_OPENAI_IMAGE_EDIT_DEPLOYMENT)
-
-Env vars:
-- AZURE_OPENAI_ENDPOINT
-- AZURE_OPENAI_API_KEY
-- AZURE_OPENAI_API_VERSION
-- AZURE_OPENAI_IMAGE_DEPLOYMENT       (للتوليد، عادة "dall-e-3")
-- AZURE_OPENAI_IMAGE_EDIT_DEPLOYMENT  (للتعديل، عادة "gpt-image-1")
+Deployments: AZURE_OPENAI_IMAGE_DEPLOYMENT, AZURE_OPENAI_IMAGE_EDIT_DEPLOYMENT (falls back to the first).
 """
 
 from __future__ import annotations
@@ -39,17 +31,13 @@ def _client():
 
 @functools.lru_cache(maxsize=2)
 def _cached_client(endpoint: str, api_key: str, api_version: str):
-    """One client per credential set. Building one per call leaked a
-    connection pool each time and never reused a warm connection."""
     try:
         from openai import AzureOpenAI
         return AzureOpenAI(
             api_key=api_key,
             api_version=api_version,
             azure_endpoint=endpoint,
-            max_retries=0,  # fail fast — image calls are already slow; don't triple that
-            # The SDK default is ten minutes; an image that has not come back
-            # in a minute is not coming back to this request.
+            max_retries=0,  # image calls are already slow
             timeout=_IMAGE_TIMEOUT_S,
         )
     except Exception as e:
@@ -58,7 +46,6 @@ def _cached_client(endpoint: str, api_key: str, api_version: str):
 
 
 def _decode_image_response(response) -> Optional[bytes]:
-    """Azure DALL-E/gpt-image-1 يرجع data[0].url أو data[0].b64_json."""
     try:
         item = response.data[0]
     except (AttributeError, IndexError):
@@ -106,7 +93,6 @@ def generate_image_with_azure_dalle(prompt: str, *, size: str = "1024x1024") -> 
 def edit_image_with_azure_gptimg(image_bytes: bytes, prompt: str, *, size: str = "1024x1024") -> Optional[bytes]:
     if not image_bytes or not prompt:
         return None
-    # نفول back ع IMAGE_DEPLOYMENT لو ما في إديت منفصل (gpt-image-1 بيعمل التنين)
     deployment = (
         os.getenv("AZURE_OPENAI_IMAGE_EDIT_DEPLOYMENT", "").strip()
         or os.getenv("AZURE_OPENAI_IMAGE_DEPLOYMENT", "").strip()
