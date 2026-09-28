@@ -1,18 +1,4 @@
-"""Typed error taxonomy for the backend.
-
-Before this, a failure was either a bare ``raise RuntimeError(...)`` or an ad-hoc
-``return jsonify({"error": "..."}), code`` copied per endpoint. This gives one
-base — :class:`SandyError` — carrying an HTTP status and a stable machine code,
-plus a small set of subtypes for the common failure shapes. Raise one of these
-from anywhere on a request path and the Flask handler registered in
-``create_app`` turns it into a consistent ``{"error": <code>}`` response with the
-right status.
-
-Broad ``except Exception`` still has its place — optional integrations,
-background jobs, index creation — where the right move is log-and-continue, not
-surface. This taxonomy is for the failures the caller *should* see, so those
-sites can raise intent instead of hand-rolling a status code.
-"""
+"""Typed application errors; create_app turns them into {"error": <code>} with their HTTP status."""
 
 from __future__ import annotations
 
@@ -20,12 +6,7 @@ from typing import Optional
 
 
 class SandyError(Exception):
-    """Base for every typed application error.
-
-    Carries the HTTP ``http_status`` and a stable machine-readable ``code`` the
-    client can branch on. Subclasses set sensible defaults; either can be
-    overridden per-raise.
-    """
+    """Base error: an HTTP ``http_status`` and a stable ``code``, both overridable per raise."""
 
     http_status: int = 500
     code: str = "internal_error"
@@ -80,8 +61,7 @@ class RateLimitError(SandyError):
 
 
 class ConfigError(SandyError):
-    """A required secret/credential/config is missing — the app or a feature
-    cannot run. 503: retry once the operator fixes configuration."""
+    """Required config is missing (503: retry once configured)."""
 
     http_status = 503
     code = "not_configured"
