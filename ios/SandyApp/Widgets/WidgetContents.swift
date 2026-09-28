@@ -1,12 +1,6 @@
 import SwiftUI
 
-// Live, interactive mini-views shown INSIDE an enlarged widget tile — the
-// iPhone-widget "big card shows real content you can act on" idea. This file is
-// the home for per-feature widget content; TasksWidget is the worked example,
-// the rest of the catalog gets its own here next.
-
-/// Tasks widget: shows your open tasks and lets you check them off in place.
-/// It measures its own height and fills it — the bigger the tile, the more rows.
+/// Open tasks you can check off in place; shows as many rows as the tile fits.
 struct TasksWidget: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
@@ -20,7 +14,6 @@ struct TasksWidget: View {
 
     var body: some View {
         GeometryReader { geo in
-            // How many rows actually fit in the space this tile gives us.
             let capacity = max(1, Int(geo.size.height / rowHeight))
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 if loading {

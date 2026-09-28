@@ -1,12 +1,7 @@
 import ActivityKit
 import Foundation
 
-/// The live voice call on the Lock Screen and in the Dynamic Island.
-///
-/// `GeminiLiveManager` reports every real phase transition here: the activity
-/// starts when the call starts connecting (the app is in the foreground then, as
-/// ActivityKit requires), is updated when the phase changes, and ends — dismissed
-/// immediately — the moment the call goes idle (user stop, error, dropped socket).
+/// The call's Live Activity, driven by `GeminiLiveManager` phase changes; dismissed at once when idle.
 @MainActor
 final class CallLiveActivity {
     static let shared = CallLiveActivity()
@@ -15,8 +10,7 @@ final class CallLiveActivity {
     private var lastPhase: SandyCallAttributes.Phase?
     private var startedAt = Date()
 
-    /// True while a call is connecting or connected (independent of whether
-    /// Live Activities are allowed), so a second `sandy://call` is ignored.
+    /// Connecting or connected (even if Live Activities are off), so a second `sandy://call` is ignored.
     private(set) var isCallRunning = false
 
     func phaseChanged(_ phase: GeminiLiveManager.Phase) {
@@ -51,7 +45,6 @@ final class CallLiveActivity {
             pushType: nil)
     }
 
-    /// Ends the call's activity right away (no lingering banner).
     func end() {
         lastPhase = nil
         guard let activity else { return }
@@ -59,8 +52,7 @@ final class CallLiveActivity {
         Task { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 
-    /// At launch no call is running: anything still on screen was left behind
-    /// by a previous run that was killed mid-call.
+    /// A killed run can leave a call activity on screen; no call runs at launch.
     static func endStale() {
         Task {
             for stale in Activity<SandyCallAttributes>.activities {

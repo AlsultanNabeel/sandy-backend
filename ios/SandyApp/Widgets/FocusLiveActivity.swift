@@ -2,26 +2,18 @@ import ActivityKit
 import Combine
 import Foundation
 
-/// جلسة التركيز على شاشة القفل والجزيرة الديناميكية.
-///
-/// مصدر الحقيقة هو الخادم (`/api/life/focus`)؛ شاشة المؤقّت بتنادي `sync` بعد كل
-/// جلب، وهاد بيبدأ النشاط، أو بيحدّثه لما يتغيّر الطور/الدورة، أو بينهيه لما
-/// تخلص الجلسة. العدّ التنازلي نفسه بيرسمه النظام من مدى زمني، فبيضل يمشي
-/// والتطبيق نايم.
-///
-/// ملاحظة: iOS ما بيسمح لتطبيق يشغّل وضع «التركيز» تبع النظام — هاد عرض بس.
+/// جلسة التركيز على شاشة القفل؛ الخادم مصدر الحقيقة وشاشة المؤقّت بتنادي `sync` بعد كل جلب.
+/// iOS ما بيسمح لتطبيق يشغّل وضع «التركيز» تبع النظام — هاد عرض بس.
 @MainActor
 final class FocusLiveActivity {
     static let shared = FocusLiveActivity()
 
-    /// بتنطلق لما الجلسة تتغيّر من برّا الشاشة (زر «إنهاء» بالجزيرة) — شاشة
-    /// المؤقّت بتسمعها وبتعيد الجلب.
+    /// الجلسة تغيّرت من برّا الشاشة (زر «إنهاء» بالجزيرة)، فشاشة المؤقّت بتعيد الجلب.
     let changed = PassthroughSubject<Void, Never>()
 
     private var activity: Activity<SandyFocusAttributes>?
     private var lastState: SandyFocusAttributes.ContentState?
 
-    /// يطابق النشاط مع حالة الجلسة من الخادم.
     func sync(_ status: FocusStatus) {
         guard status.active, !status.demo else { end(); return }
 
@@ -36,7 +28,7 @@ final class FocusLiveActivity {
             cycle: status.cycleIdx,
             cycles: status.cycles)
 
-        // نفس الطور والدورة ونفس النهاية تقريبًا (فرق ثواني الشبكة)؟ ما في داعي نحدّث.
+        // نفس الطور والدورة والنهاية تقريبًا؟ ما في داعي نحدّث.
         if let last = lastState, activity != nil,
            last.isBreak == state.isBreak, last.cycle == state.cycle,
            abs(last.phaseEndsAt.timeIntervalSince(state.phaseEndsAt)) < 3 {
@@ -60,7 +52,7 @@ final class FocusLiveActivity {
             pushType: nil)
     }
 
-    /// ينهي النشاط فورًا (وأي نشاط تركيز متروك من تشغيل سابق).
+    /// وأي نشاط تركيز متروك من تشغيل سابق.
     func end() {
         lastState = nil
         activity = nil
@@ -71,11 +63,10 @@ final class FocusLiveActivity {
         }
     }
 
-    /// `sandy://focus/stop` من زر الجزيرة/شاشة القفل: ينهي الجلسة بالخادم
-    /// (كجلسة مكتملة، مش ملغاة) ويشيل النشاط.
+    /// ينهي الجلسة بالخادم كمكتملة (مش ملغاة) ويشيل النشاط.
     func stopFromLink() {
         Task {
-            let api = APIClient(baseURL: Backend.currentURL)   // التوكن من الـKeychain
+            let api = APIClient(baseURL: Backend.currentURL)
             do {
                 try await api.stopFocus(cancel: false)
                 Haptics.play(.success)
