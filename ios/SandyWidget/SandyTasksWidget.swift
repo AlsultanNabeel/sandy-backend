@@ -102,14 +102,14 @@ struct CompleteTaskIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         guard let removed = WidgetTaskCache.remove(taskId) else { return .result() }
-        WidgetCenter.shared.reloadTimelines(ofKind: SandyTasksWidget.kind)
+        await WidgetCenter.shared.reloadTimelines(ofKind: SandyTasksWidget.kind)
 
         let ok = await Self.markDone(taskId)
         if !ok {
             WidgetTaskCache.restore(removed.task, at: removed.index)
         }
         // المهمة انقفلت من برّا التطبيق — ويدجت ساندي الأساسي يحدّث عدّاده كمان.
-        WidgetCenter.shared.reloadAllTimelines()
+        await WidgetCenter.shared.reloadAllTimelines()
         return .result()
     }
 
