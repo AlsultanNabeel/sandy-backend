@@ -15,8 +15,7 @@
 			</array>
 		</dict>
 		<dict>
-			<!-- sandy:// — widgets, Live Activity and Control Center open the app
-			     straight into a call / chat / quick add (App/DeepLinkRouter.swift). -->
+			<!-- sandy:// deep links (App/DeepLinkRouter.swift). -->
 			<key>CFBundleURLName</key>
 			<string>com.sandy.app.deeplink</string>
 			<key>CFBundleTypeRole</key>
@@ -32,10 +31,7 @@
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict>
-		<!-- Theme.Colors.background (#020508): the system launch screen was white,
-		     a quarter-second flash before the app's dark first frame. Sandy sits in
-		     the middle; LaunchHandoff (App/SandyApp.swift) takes over the same image
-		     at the same spot and animates it out. -->
+		<!-- Dark (#020508) to avoid a white flash; LaunchHandoff in App/SandyApp.swift takes over the mark. -->
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 		<key>UIImageName</key>
@@ -45,8 +41,7 @@
 	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Plain http only on the local network (the robot camera's LAN stream,
-		     a dev server on *.local). Every internet host stays HTTPS-only. -->
+		<!-- Plain http only on the local network (camera LAN stream); internet stays HTTPS-only. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
