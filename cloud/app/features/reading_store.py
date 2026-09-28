@@ -1,38 +1,21 @@
-"""وضع القراءة — تتبع كامل للكتب والجلسات والصفحات (على طراز Bookly).
+"""وضع القراءة: كتب (sandy_books)، جلسات (sandy_reading_sessions)، وهدف سنوي (sandy_reading_meta).
 
-Collections:
-  sandy_books
-    {_id, title, author, category, cover_url, total_pages, current_page,
-     rating: 0..5, fmt: "paper"|"ebook"|"audio"|"",
-     status: "reading"|"done"|"wishlist",
-     notes: [{text, at}], quotes: [{text, page, at}],
-     started_at, created_at, finished_at}
-  sandy_reading_sessions
-    {_id, book_id, started_at, ended_at, paused_at, paused_total_sec,
-     start_page, end_page, state: "active"|"paused"|"done"}
-  sandy_reading_meta
-    {_id: "goal", books_year, pages_year}   # هدف القراءة السنوي
-
-الدورة: «بديت أقرا» → جلسة نشطة (وحدة بس بكل وقت) → «توقف مؤقت» يجمّد
-العداد → «كمل» يرجّعه → «وقفت» يسكّر الجلسة ويسأل «وين وصلت؟» — صفحة
-التوقف بتحدّث الكتاب وبتنحسب صفحات الجلسة ومدتها.
-
-عزل المستأجرين مفروض من طبقة scoped(): _books()/_sess()/_meta() ترجع None لو ما
-في مستأجر. خانة الهدف (goal) بتضمّن معرّف المستأجر في الـ _id، فبنحتاج
-current_user_id() لبناء المفتاح فقط — والعزل نفسه من scoped().
+الدورة: «بديت أقرا» → جلسة نشطة (وحدة بس) → «توقف مؤقت» / «كمل» → «وقفت»
+بيسأل «وين وصلت؟» وبيحدّث الكتاب. مفتاح الهدف فيه معرّف المستأجر.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.tenant_db import scoped
 from app.utils.text_query import contains, equals
+from app.utils.time import USER_TZ
 from app.utils.user_profiles import current_user_id
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +42,14 @@ def init_reading_store(mongo_db) -> None:
 
 
 def _books():
-    """Tenant-scoped books collection, or None when no db / no active tenant."""
     return scoped(get_db(), _BOOKS)
 
 
 def _sess():
-    """Tenant-scoped reading-sessions collection, or None when no db / no tenant."""
     return scoped(get_db(), _SESS)
 
 
 def _meta():
-    """Tenant-scoped reading-meta collection, or None when no db / no tenant."""
     return scoped(get_db(), _META)
 
 
@@ -88,7 +68,7 @@ def _find_book(title: str) -> Optional[Dict[str, Any]]:
     coll = _books()
     if not tl or coll is None:
         return None
-    # تطابق كامل أول، بعدين احتواء — والتنين بالقاعدة، انظر text_query.
+    # تطابق كامل أول، بعدين احتواء.
     exact = coll.find_one(equals("title", tl))
     if exact is not None:
         return exact
@@ -148,7 +128,7 @@ def set_book_meta(
     total_pages: Optional[int] = None,
     current_page: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """تحديث جزئي لميتاداتا الكتاب — أي حقل None بينحفظ زي ما هو."""
+    """تحديث جزئي — أي حقل None بينحفظ زي ما هو."""
     coll = _books()
     if coll is None:
         return {"ok": False, "error": "unauthorized"}
@@ -231,8 +211,7 @@ def list_books(status: str = "") -> List[Dict[str, Any]]:
     q: Dict[str, Any] = {}
     if status in {"reading", "done", "wishlist"}:
         q["status"] = status
-    # Counted in the database: the list only shows how many notes and quotes a
-    # book has, and a well-read book's arrays are the bulk of its document.
+    # Counts computed in the database; the note/quote arrays are most of the document.
     pipeline = [
         {"$match": q},
         {"$sort": {"created_at": -1}},
@@ -285,7 +264,6 @@ def start_session(title: str = "") -> Dict[str, Any]:
     if book is None:
         reading = list_books(status="reading")
         if title and not book:
-            # كتاب جديد بالاسم المعطى — منضيفه قيد القراءة ومنبلش
             r = add_book(title, status="reading")
             if not r.get("ok"):
                 return {"ok": False, "error": "no_book"}
@@ -357,8 +335,7 @@ def resume_session() -> Dict[str, Any]:
 
 
 def stop_session(end_page: Optional[int] = None) -> Dict[str, Any]:
-    """«وقفت» — يسكّر الجلسة. لو end_page مش معطى يرجّع needs_page=True
-    (ساندي بتسأل «وين وصلت؟») والنداء التالي بمرر الصفحة."""
+    """«وقفت» — يسكّر الجلسة؛ بلا end_page بيرجّع needs_page=True (ساندي بتسأل «وين وصلت؟»)."""
     books = _books()
     sess = _sess()
     if books is None or sess is None:
@@ -410,28 +387,22 @@ def stop_session(end_page: Optional[int] = None) -> Dict[str, Any]:
     }
 
 
-# The streak looks back this far. A year of daily reading fits, and the window
-# also covers "since January 1st" for the yearly goal, so one read serves both.
+# Covers a year of streak and "since January 1st", so one read serves both.
 _STREAK_WINDOW_DAYS = 400
 
-# Only what the aggregates below read — not the whole session document.
 _SESSION_FIELDS = {"start_page": 1, "end_page": 1, "started_at": 1,
                    "ended_at": 1, "paused_total_sec": 1}
 
 
 def _done_sessions(since: datetime) -> List[Dict[str, Any]]:
-    """Finished sessions that ended at or after ``since``."""
     sess = _sess()
     if sess is None:
         return []
-    # بلا .limit() بالقصد. هون منجمع مش منعرض: سقف ع مجموع بيرجّع رقم أصغر من
-    # الحقيقة وبيبيّن صح، وهاد أسوأ من قراءة بطيئة. المدى محدود بالتاريخ.
+    # بلا .limit() بالقصد: سقف ع مجموع بيرجّع رقم أصغر من الحقيقة. المدى محدود بالتاريخ.
     return list(sess.find({"state": "done", "ended_at": {"$gte": since}}, _SESSION_FIELDS))
 
 
 def _year_start() -> datetime:
-    from app.utils.time import USER_TZ
-
     now_local = _now().astimezone(USER_TZ)
     return datetime(now_local.year, 1, 1, tzinfo=USER_TZ).astimezone(timezone.utc)
 
@@ -444,17 +415,11 @@ def reading_stats(days: int = 30,
                   rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """{sessions, pages, minutes, pages_per_day, streak_days} عبر فترة.
 
-    ``rows`` are pre-fetched finished sessions covering at least the streak
-    window (see :func:`reading_overview`); omitted, they are read here — one
-    query for both the period totals and the streak.
+    ``rows``: pre-fetched finished sessions covering the streak window (see reading_overview).
     """
     empty = {"sessions": 0, "pages": 0, "minutes": 0, "pages_per_day": 0, "streak_days": 0}
     if _sess() is None:
         return empty
-    from datetime import timedelta
-
-    from app.utils.time import USER_TZ
-
     now = _now()
     since = now - timedelta(days=max(1, days))
     if rows is None:
@@ -488,10 +453,6 @@ def _streak_from_days(days_set: set) -> int:
     """عدد الأيام المتتالية (تنتهي اليوم أو أمس) اللي فيها جلسة قراءة منجزة."""
     if not days_set:
         return 0
-    from datetime import timedelta
-
-    from app.utils.time import USER_TZ
-
     today = _now().astimezone(USER_TZ).date()
     if today not in days_set and (today - timedelta(days=1)) not in days_set:
         return 0
@@ -504,12 +465,7 @@ def _streak_from_days(days_set: set) -> int:
 
 
 def reading_overview(days: int = 30) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """``(reading_stats(days), goal_progress())`` from a single sessions read.
-
-    The books screen asked for both, and between them they scanned the
-    sessions collection three times (period, streak, year).
-    """
-    from datetime import timedelta
+    """``(reading_stats(days), goal_progress())`` from one sessions read."""
 
     now = _now()
     since = min(now - timedelta(days=max(1, days)),
@@ -521,11 +477,7 @@ def reading_overview(days: int = 30) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 def set_reading_goal(books_year: Optional[int] = None,
                      pages_year: Optional[int] = None) -> Dict[str, Any]:
-    """هدف القراءة السنوي — عدد كتب و/أو عدد صفحات.
-
-    Only the parts given are changed: setting a book count used to write
-    ``pages_year=0`` and erase a page goal set earlier.
-    """
+    """هدف القراءة السنوي (كتب و/أو صفحات)؛ بس الأجزاء المعطاة بتتغيّر."""
     uid = current_user_id()
     if uid is None:
         return {"ok": False}
@@ -544,11 +496,7 @@ def set_reading_goal(books_year: Optional[int] = None,
 
 
 def goal_progress(rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    """تقدّم هدف السنة الحالية: كتب منجزة + صفحات مقروءة مقابل الهدف.
-
-    ``rows``: pre-fetched finished sessions reaching back to January 1st at
-    least (see :func:`reading_overview`); omitted, they are read here.
-    """
+    """تقدّم هدف السنة: كتب منجزة + صفحات مقروءة مقابل الهدف (``rows`` مثل reading_stats)."""
     uid = current_user_id()
     books = _books()
     sess = _sess()

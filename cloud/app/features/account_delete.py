@@ -1,17 +1,7 @@
-"""Erasing a person completely.
+"""Erase a person completely (Apple requires in-app account deletion).
 
-Apple requires any app that can create an account to be able to delete one, and
-they reject for it. But the rule is not why this exists — a Sandy account holds
-a voiceprint, a journal, photos, spending, and a transcript of everything its
-owner has ever said to her. Somebody who wants that gone is entitled to have it
-gone, from the account screen, without emailing anyone.
-
-**The list below is the whole design.** Data is spread across roughly twenty
-collections, and a delete that misses one is worse than no delete at all: it
-reports success while keeping the diary. So the names are written out here
-explicitly rather than discovered at runtime — a collection added later will not
-quietly opt itself out of deletion, because adding one means editing this list,
-and this file says so.
+The collection list is written out on purpose: a new collection must be added
+here, or its data survives deletion.
 """
 
 from __future__ import annotations
@@ -20,26 +10,11 @@ import logging
 import re
 from typing import Any, Dict, List
 
-try:
-    from pymongo.errors import PyMongoError
-except ImportError:  # pragma: no cover — the driver is optional for import
-    class PyMongoError(Exception):
-        pass
+from pymongo.errors import PyMongoError
 
 logger = logging.getLogger(__name__)
 
-# **Both keys, because the database uses both.**
-#
-# `scoped()` filters on `user_id` by default and on `chat_id` where a store
-# passes `field="chat_id"` — `sandy_facts`, `sandy_conversations`,
-# `sandy_memories` and `sandy_activity` do. Deleting only by `user_id` left all
-# four behind: a person's facts, their conversation turns, their emotional
-# memory and their activity log survived a full account delete, and this
-# module's own docstring says a delete that misses one is worse than no delete
-# at all.
-#
-# The filter is an `$or` on both fields rather than two lists, so a collection
-# that changes its key does not silently stop being erased.
+# Deleted by `$or` on user_id and chat_id: some stores scope on chat_id.
 _BY_USER: List[str] = [
     "sandy_nodes",
     "sandy_devices",
@@ -66,12 +41,10 @@ _BY_USER: List[str] = [
     "sandy_activity",
     "sandy_usage",
     "memory",
-    # Keyed by chat_id — the semantic memory layer and everything beside it.
     "sandy_facts",
     "sandy_conversations",
     "sandy_context_metadata",
     "sandy_vector_index",
-    # Owned by the account and previously untouched by either path.
     "sandy_books",
     "sandy_reading_sessions",
     "sandy_reading_meta",
@@ -86,54 +59,31 @@ _BY_USER: List[str] = [
     "sandy_usage_daily",
     "sandy_usage_rl",
     "sandy_active_user_profile",
-    # The built voice prompt, keyed by tenant and version. It holds the user's
-    # name, interests and lists verbatim — a forgotten account must not leave a
-    # copy of its own prompt behind.
+    # Cached voice prompt: holds the user's name and lists verbatim.
     "sandy_prompt_cache",
-    # Every chat thread in the app — title and full transcript. No `sandy_`
-    # prefix, which is how it stayed off this list while being the most
-    # complete record of what a person said.
+    # Chat threads (no `sandy_` prefix).
     "conversations",
 ]
 
-# Short-term memory keys its documents `"<thread>:<user>"` and also carries a
-# `user_id` field (added when memory became cross-channel). Both are cleared:
-# the field catches everything written since, the suffix catches what came
-# before, and a conversation that survived a deletion would be the single worst
-# thing this module could leave behind.
+# STM docs are keyed "<thread>:<user>" and also carry user_id; both are cleared.
 _STM = "sandy_stm"
 
 
 def _id_forms(user_id: str) -> List[Any]:
-    """Every shape this id appears in, because Mongo equality is type-strict.
-
-    Legacy documents carry the owner's Telegram id as an **integer** —
-    `api/studio_api.py::_brainstorm_chat_ids` exists only to read them and
-    queries `{"$in": [uid, int(uid)]}` for exactly this reason. A delete that
-    compares the string form alone walks straight past them, and the whole point
-    of this module is that a delete which misses one is worse than none.
-    """
+    """Every type this id appears in; legacy docs store the owner's id as an int."""
     forms: List[Any] = [user_id]
     if user_id.isdigit():
         forms.append(int(user_id))
     return forms
 
 
-# Photo bytes live in GridFS under this prefix, i.e. in
-# `sandy_photo_files.files` + `sandy_photo_files.chunks` — neither has a user
-# field, so the `$or` delete below cannot reach them. They are removed through
-# the `grid_id` on each `sandy_photos` row, before those rows go.
+# GridFS photo bytes have no user field; removed via each sandy_photos row's grid_id.
 _PHOTO_BUCKET = "sandy_photo_files"
 
 
 def _erase_photo_blobs(db, forms: List[Any]) -> int:
-    """Delete the GridFS files behind this user's photos. Returns how many.
-
-    Done on the two GridFS collections directly (what ``GridFS.delete`` does):
-    chunks first, so an interruption leaves an orphan file header rather than
-    orphan image bytes.
-    """
-    # بلا سقف: a capped read here would leave the rest of the photos behind.
+    """Delete this user's GridFS photo files (chunks first); returns how many."""
+    # بلا سقف: a capped read would leave photos behind.
     ids = [row["grid_id"] for row in db["sandy_photos"].find(
         {"$or": [{"user_id": {"$in": forms}}, {"chat_id": {"$in": forms}}]},
         {"grid_id": 1}) if row.get("grid_id") is not None]
@@ -144,12 +94,7 @@ def _erase_photo_blobs(db, forms: List[Any]) -> int:
 
 
 def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
-    """Clear `names` plus short-term memory for one user. Shared by both paths.
-
-    One implementation on purpose. Two erase routines drift, and the way they
-    drift is that one of them stops covering a collection — which is invisible,
-    because both still report success.
-    """
+    """Clear `names` plus STM for one user. Shared by wipe and delete so they can't drift."""
     from app.db import get_db
 
     user_id = (user_id or "").strip()
@@ -176,8 +121,6 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
                          {"chat_id": {"$in": forms}}]})
             if r.deleted_count:
                 removed[name] = r.deleted_count
-        # مجموعة وحدة فشلت ما بتوقّف الباقي — والفشل بينسجّل بـ«ناقص واحد»
-        # بالنتيجة، فالمالك بيعرف إنّ في إشي ما انمسح بدل ما نقوله «تمام».
         except PyMongoError as exc:
             logger.warning("[erase] %s failed for %s: %s", name, user_id, exc)
             removed[name] = -1
@@ -185,8 +128,6 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     try:
         r = db[_STM].delete_many({"user_id": {"$in": forms}})
         n = r.deleted_count
-        # Escaped: an id is interpolated into a pattern here, and this is the
-        # path the module calls the worst thing it could leave behind.
         r2 = db[_STM].delete_many(
             {"key": {"$regex": f":{re.escape(user_id)}$"}})
         n += r2.deleted_count
@@ -196,9 +137,7 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
         logger.warning("[erase] stm failed for %s: %s", user_id, exc)
         removed[_STM] = -1
 
-    # The web chat transcript, keyed by `_id` alone (`web_chat_<user_id>`) with
-    # no user field — so the `$or` above walked past it and a deleted person's
-    # whole web conversation survived the delete.
+    # Web chat transcript is keyed by `_id` only.
     try:
         r = db["web_chat_history"].delete_one({"_id": f"web_chat_{user_id}"})
         if r.deleted_count:
@@ -208,37 +147,20 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
         removed["web_chat_history"] = -1
 
     logger.info("[erase] %s cleared: %s", user_id, removed)
-    # **Not "ok" when something was left behind.** A collection that failed is
-    # recorded as -1 and the loop carries on so one outage does not block the
-    # rest — but this used to report ok regardless, and `delete_account` then
-    # removed the account row: the leftover data stranded with no owner and no
-    # button left to press. A partial erase says so, and the caller stops.
+    # A partial erase is not ok: the caller must not then delete the account row.
     if any(n < 0 for n in removed.values()):
         return {"ok": False, "error": "partial", "removed": removed}
     return {"ok": True, "removed": removed}
 
 
 def wipe_account_data(user_id: str, keep_nodes: bool = True) -> Dict[str, Any]:
-    """Empty an account without destroying it — "start over".
-
-    Deleting and starting over look the same from the data's side and are not
-    the same request at all. Someone who wants a clean slate still wants his
-    sign-in, his subscription, and above all **his robot**: making him delete
-    the account to clear a conversation would cost him the hardware, because a
-    node released by a deleted account has to be paired again from scratch.
-
-    So this clears everything the account *holds* and keeps what it *is*.
-    """
+    """Clear everything the account holds but keep the account (and, by default, its robot)."""
     names = [n for n in _BY_USER if not (keep_nodes and n in ("sandy_nodes", "sandy_devices"))]
     return _erase(user_id, names)
 
 
 def delete_account(user_id: str) -> Dict[str, Any]:
-    """Remove every trace of one person. Returns what was removed, per collection.
-
-    The counts are returned rather than swallowed because "it worked" is not a
-    checkable claim and this is the one operation nobody can undo to verify.
-    """
+    """Remove every trace of one person; returns per-collection counts."""
     r = _erase(user_id, _BY_USER)
     if not r.get("ok"):
         return r
@@ -247,10 +169,7 @@ def delete_account(user_id: str) -> Dict[str, Any]:
     from app.db import get_db
     db = get_db()
 
-    # The account row goes last, on purpose. If anything above fails hard, the
-    # user still exists and can press the button again — whereas deleting the
-    # account first would strand their remaining data with no owner and no way
-    # to reach it.
+    # Account row last, so a failure above leaves a user who can retry.
     try:
         db["sandy_users"].delete_one({"_id": user_id})
         removed["sandy_users"] = 1
@@ -258,9 +177,7 @@ def delete_account(user_id: str) -> Dict[str, Any]:
         logger.warning("[delete] user row failed for %s: %s", user_id, exc)
         return {"ok": False, "error": "partial", "removed": removed}
 
-    # And the cache stamp, which is keyed by the id rather than by a scope field
-    # and so is invisible to `_erase`. It is one integer, but it is one integer
-    # belonging to a person who asked to be forgotten.
+    # The cache stamp is keyed by id, not a scope field.
     from app.agent.context_builder import clear_directives_cache
     from app.agent.life_snapshot import clear_lists_cache
     from app.utils.tenant_version import forget
@@ -272,7 +189,7 @@ def delete_account(user_id: str) -> Dict[str, Any]:
         from app.api.voice_ws.tools import clear_instruction_cache
 
         clear_instruction_cache()
-    except Exception:  # noqa: BLE001 — voice is optional; the erase is not
+    except Exception:  # noqa: BLE001
         logger.debug("[delete] voice instruction cache not cleared", exc_info=True)
 
     logger.info("[delete] account %s erased: %s", user_id, removed)

@@ -1,53 +1,14 @@
+"""Image generation/edit flow: plan the action, generate, keep the session's image state."""
+
 import json
+import logging
 import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
 from app.utils.user_profiles import address_instruction
-import logging
 
 logger = logging.getLogger(__name__)
-
-
-def _lazy_plan_image_action(user_message, *, session, create_chat_completion_fn):
-    from app.features.image_planner import plan_image_action_with_ai
-
-    return plan_image_action_with_ai(
-        user_message,
-        session=session,
-        create_chat_completion_fn=create_chat_completion_fn,
-    )
-
-
-_PHOTO_EDIT_KEYWORDS = [
-    "عدل",
-    "حط",
-    "شيل",
-    "اشيل",
-    "اشيلي",
-    "حطي",
-    "غيري",
-    "عدلي",
-    "اضف",
-    "أضف",
-    "زود",
-    "زودي",
-    "اجعل",
-    "اجعلي",
-    "خلي",
-    "خليها",
-    "خليه",
-    "اعمل",
-    "اعملي",
-    "ابعد",
-    "احذف",
-    "امسح",
-    "لون",
-    "لوني",
-    "إطار",
-    "اطار",
-]
-
 
 def _default_image_state() -> Dict[str, Any]:
     return {
@@ -70,17 +31,6 @@ def ensure_image_state(session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     image_state.setdefault("history", [])
     image_state.setdefault("pending_image_action", None)
     return image_state
-
-
-_ARABIC_DIACRITICS = re.compile(r"[ً-ٟؐ-ؚ]")
-
-
-def is_photo_edit_caption(caption: str) -> bool:
-    """Return True if the photo caption is requesting an edit (not just description)."""
-    text = _ARABIC_DIACRITICS.sub("", (caption or "").strip())
-    if not text:
-        return False
-    return any(kw in text for kw in _PHOTO_EDIT_KEYWORDS)
 
 
 def _recent_image_history_text(image_state: Optional[Dict[str, Any]]) -> str:
@@ -176,8 +126,11 @@ def handle_image_message(
     azure_openai_image_deployment: Optional[str],
     size: str = "1024x1024",
 ) -> Dict[str, Any]:
+    # Lazy: image_planner imports this module.
+    from app.features.image_planner import plan_image_action_with_ai
+
     image_state = ensure_image_state(session)
-    plan = _lazy_plan_image_action(
+    plan = plan_image_action_with_ai(
         user_message,
         session=session,
         create_chat_completion_fn=create_chat_completion_fn,
@@ -293,7 +246,7 @@ def handle_image_message(
         image_state["history"] = [current_entry]
 
     image_state["active_image"] = current_entry
-    # احفظ الـ bytes كذلك حتى يقدر تعديل الصورة لاحقاً يجد المصدر
+    # احفظ الـ bytes عشان التعديل اللاحق يلاقي المصدر
     image_state["active_image_bytes"] = image_bytes
     image_state["pending_image_action"] = None
 

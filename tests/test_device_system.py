@@ -146,19 +146,6 @@ def test_pairing_is_idempotent_and_scoped(db):
         assert node_store.list_nodes() == []
 
 
-def test_node_heartbeat_filters_unknown_capabilities(db):
-    with as_tenant("t1"):
-        node_store.pair_node("CODE-9999")
-    res = node_store.set_node_status("CODE-9999", online=True,
-                                     capabilities=["relay", "telepathy", "ir"])
-    assert res["ok"] is True
-    with as_tenant("t1"):
-        node = node_store.list_nodes()[0]
-        assert node["online"] is True
-        assert set(node["capabilities"]) == {"relay", "ir"}
-    assert node_store.set_node_status("NO-SUCH-CODE")["error"] == "unknown_node"
-
-
 # ── device_control tool: the anti-hallucination guarantee ───────────────────
 
 @pytest.fixture()

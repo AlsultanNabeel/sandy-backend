@@ -1,14 +1,8 @@
-"""اليوميات — ساندي بتدوّن أحداث يومك وبتفتش فيها لاحقاً.
-
-Collection: sandy_journal
-  {_id, date "YYYY-MM-DD", text, at (datetime UTC)}
-
-كل تدوينة سطر مستقل (مش مستند واحد باليوم) — أسهل للبحث والعرض الزمني.
-عزل المستأجرين مفروض من طبقة scoped(): _coll() ترجع None لو ما في مستأجر.
-"""
+"""اليوميات (sandy_journal): كل تدوينة مستند مستقل {_id, date, text, at}."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -17,7 +11,6 @@ from app.utils.tenant_db import scoped
 from app.utils.text_query import contains
 from app.utils.time import USER_TZ
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +29,6 @@ def init_journal_store(mongo_db) -> None:
 
 
 def _coll():
-    """Tenant-scoped journal collection, or None when no db / no active tenant."""
     return scoped(get_db(), _COLL)
 
 
@@ -82,16 +74,13 @@ def recent_entries(limit: int = 30) -> List[Dict[str, Any]]:
 
 
 def search_entries(query: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """بحث نصي بسيط (احتواء) — «إيمتى آخر مرة رحت عالطبيب؟»"""
+    """بحث نصي بالقاعدة (احتواء) — «إيمتى آخر مرة رحت عالطبيب؟»"""
     coll = _coll()
     if coll is None:
         return []
     q = str(query or "").strip()
     if not q:
         return []
-    # Matched by the database (escaped, case-insensitive — see text_query), so
-    # only hits cross the network; this used to read the newest 2000 entries
-    # and compare them here.
     return [
         {"id": doc["_id"], "date": doc["date"], "text": doc.get("text", "")}
         for doc in coll.find(contains("text", q)).sort("at", -1).limit(limit)
@@ -106,7 +95,7 @@ def delete_entry(entry_id: str) -> bool:
 
 
 def update_entry(entry_id: str, text: str) -> bool:
-    """Edit a journal entry's text. Empty text is rejected."""
+    """Empty text is rejected."""
     coll = _coll()
     if coll is None or not entry_id:
         return False

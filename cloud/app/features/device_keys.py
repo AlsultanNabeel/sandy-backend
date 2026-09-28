@@ -1,35 +1,10 @@
-"""Each board's own voice key — so one opened robot does not unlock the fleet.
+"""Each board's own voice HMAC key, so one opened robot doesn't unlock the fleet.
 
-Until now every brain and camera signed its voice hello with the same
-``SANDY_WS_HMAC_KEY``, compiled in. The handshake then acts as whatever
-``device_id`` the board names: it takes the owner's identity and hands out that
-board's private broker login. Reading the key out of one robot's flash was
-enough to speak to Sandy as any customer and take over their robot's topics.
-
-**How a board gets its own key.** Once a board is paired, its next hello signed
-with the shared key is answered with ``auth_ok`` plus a fresh random key for
-that board (``issued``). The board stores it and signs every later hello with it
-(``"kv": 2``); the first such hello marks the key ``confirmed``. From then on the
-shared key is refused for that board — the key is the board's, and only the
-board has it.
-
-**The enrolment window.** A key is handed out only in the
-``ENROL_WINDOW_MIN`` minutes after the owner pairs the board in the app (pairing
-the same code again reopens it — that is how a board that missed its window, or
-one un-paired and re-paired, gets back in). Outside that window a shared-key
-hello still works as before, it just never carries a key.
-
-Without the window, anyone holding the shared key could ask for any board's key
-at any time before that board enrolled — and a board whose owner never updated
-it would stay claimable forever. With it, they would have to act in the same few
-minutes the owner is pairing, as that board's id. After confirmation the shared
-key no longer impersonates the board at all. Closing the window completely needs
-the key written at flash time instead (see ARCHITECTURE_MAP §12); this table is
-also where that would store it.
-
-Keys are stored encrypted when ``SANDY_LTM_KEY`` is set (``ltm_crypto``).
-Keyed by device id, across tenants: this is device infrastructure, read on the
-handshake before any tenant exists.
+After pairing, a shared-key hello is answered with a fresh per-board key
+(``issued``); the board's first hello signed with it (``"kv": 2``) marks it
+``confirmed`` and the shared key is refused for that board from then on. Keys
+are only handed out within ENROL_WINDOW_MIN of pairing. Stored encrypted when
+SANDY_LTM_KEY is set; keyed by device id (read before any tenant exists).
 """
 
 from __future__ import annotations
@@ -49,9 +24,7 @@ ENROL_WINDOW_MIN = 15    # how long after pairing a board may collect its key
 
 
 def cam_key_id(node_id: str) -> str:
-    """The camera's own record. It shares the robot's node id (same pairing
-    code), so it needs a separate key id — one opened camera must not yield the
-    robot's key, nor the other way round."""
+    """Camera's key id: shares the node id, but must not share the robot's key."""
     return f"{(node_id or '').strip()}:cam"
 
 
@@ -81,12 +54,7 @@ def get_key(device_id: str) -> Optional[Dict[str, Any]]:
 
 
 def issue_key(device_id: str) -> Optional[str]:
-    """The board's pending key (a new one if none is pending), as hex.
-
-    A key that is already ``issued`` is handed out again rather than replaced:
-    a board that dropped the reply before storing it must get the same key on
-    its next try, or two tries could leave the board and the server disagreeing.
-    """
+    """The board's pending key as hex (re-sent, not replaced, if already issued)."""
     coll = _coll()
     device_id = (device_id or "").strip()
     if coll is None or not device_id:
@@ -96,32 +64,24 @@ def issue_key(device_id: str) -> Optional[str]:
         return None
     if coll.find_one({"_id": device_id,
                       "enrol_until": {"$gt": datetime.now(timezone.utc)}}) is None:
-        # No pairing just happened. Not an error — the board keeps working on
-        # the shared key and collects its own the next time it is paired.
         return None
     if current:
         return current["hex"]
     from app.agent.ltm_crypto import encrypt_field
 
     hex_key = secrets.token_hex(32)
-    # Only fills a record that has no key yet: a concurrent issue that won
-    # keeps its key, and the re-read below returns that one.
+    # Only fills a keyless record, so a concurrent issue keeps its key.
     coll.update_one(
         {"_id": device_id, "key": {"$exists": False}},
         {"$set": {"key": encrypt_field(hex_key), "state": "issued",
                   "issued_at": datetime.now(timezone.utc)}},
     )
-    # Re-read: a concurrent issue may have won the upsert.
     stored = get_key(device_id)
     return stored["hex"] if stored and stored["state"] == "issued" else None
 
 
 def open_enrolment(device_id: str, minutes: int = ENROL_WINDOW_MIN) -> None:
-    """The owner just paired this board: it may collect its key for a while.
-
-    A board that already has a confirmed key is left alone — pairing again must
-    not hand a second copy of a key the board is already using.
-    """
+    """Owner just paired: open the key window (never for an already-confirmed key)."""
     coll = _coll()
     device_id = (device_id or "").strip()
     if coll is None or not device_id:

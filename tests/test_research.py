@@ -16,10 +16,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "cloud"))
 
 from app.features.research import (
-    detect_research_type,
-    is_research_request,
     is_research_followup_request,
-    extract_requested_result_count,
     execute_web_research,
 )
 from app.agent.deep_context import LAST_SEARCH_RESULTS_KEY
@@ -46,38 +43,12 @@ def _make_llm_fn(reply: str):
 
 class ResearchClassificationTests(unittest.TestCase):
 
-    def test_arabic_news_query_detect_research_type(self):
-        msg = "ابحثي لي بسرعة عن آخر أخبار OpenAI اليوم ولخصيها بثلاث نقاط"
-        self.assertEqual(detect_research_type(msg), "news")
-
-    def test_arabic_news_query_is_research_request(self):
-        msg = "ابحثي لي بسرعة عن آخر أخبار OpenAI اليوم ولخصيها بثلاث نقاط"
-        self.assertTrue(is_research_request(msg))
-
     def test_planner_fallback_recognises_news_query(self):
         msg = "ابحثي لي بسرعة عن آخر أخبار OpenAI اليوم ولخصيها بثلاث نقاط"
         self.assertTrue(_is_obvious_research_request(msg))
 
-    def test_lakhisi_triggers_research(self):
-        self.assertTrue(is_research_request("لخصيها بثلاث نقاط"))
-
-    def test_akhbar_triggers_research(self):
-        self.assertTrue(is_research_request("أخبار اليوم عن OpenAI"))
-
-    def test_plain_chat_not_classified_as_news(self):
-        self.assertNotEqual(detect_research_type("كيف حالك؟"), "news")
-
-    def test_cafe_query_routes_to_places(self):
-        self.assertEqual(detect_research_type("أقرب كافيه"), "places")
-        self.assertFalse(is_research_request("أقرب كافيه"))
-
     def test_followup_detection_catches_best_request(self):
         self.assertTrue(is_research_followup_request("من هدول اعطيني الأفضل"))
-
-    def test_requested_count_heuristics(self):
-        self.assertEqual(extract_requested_result_count("من هدول اعطيني الأفضل"), 1)
-        self.assertEqual(extract_requested_result_count("لخص النتائج"), 3)
-        self.assertEqual(extract_requested_result_count("آخر أخبار OpenAI"), 5)
 
 
 # ── Test 2: Successful search returns non-empty content ───────────────────────

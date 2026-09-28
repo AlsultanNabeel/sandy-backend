@@ -1,19 +1,7 @@
-"""Device push tokens — the address book for remote notifications (Phase 7).
+"""APNs device tokens → user_id, for the daily-nudge scheduler.
 
-Every install that grants notification permission POSTs its APNs device token to
-``/api/push/register``; we keep the token → user_id mapping so the daily-nudge
-scheduler knows where to deliver each user's morning line.
-
-A token is globally unique to one device, so it IS the ``_id``: re-registering
-the same token just refreshes its owner + timestamp (a device can be handed to a
-new account). Tokens that APNs later reports as gone (410 / BadDeviceToken) are
-pruned by the sender.
-
-Collection: sandy_push_tokens
-  {_id: device_token, user_id, platform ("ios"), created_at, updated_at}
-
-Infra, not per-tenant user data: keyed by the physical token and stamped with
-its owner, so it is intentionally NOT a scoped() collection.
+The token is the ``_id`` (re-registering refreshes its owner). Infrastructure,
+keyed by the physical token, so intentionally not a scoped() collection.
 """
 
 from __future__ import annotations
@@ -29,7 +17,6 @@ _COLL = "sandy_push_tokens"
 
 
 def init_push_tokens_store(mongo_db) -> None:
-    """Called once at boot (same pattern as the other stores)."""
     configure(mongo_db)
     if mongo_db is None:
         return
@@ -41,13 +28,11 @@ def init_push_tokens_store(mongo_db) -> None:
 
 
 def _coll():
-    # Written as `get_db()[...]` on purpose: tests/test_tenant_scoping_guard.py
-    # finds raw (unscoped) access by that exact shape.
+    # Kept in this exact shape: tests/test_tenant_scoping_guard.py looks for it.
     return get_db()[_COLL] if get_db() is not None else None
 
 
 def register_token(user_id: str, token: str, platform: str = "ios") -> bool:
-    """Bind a device token to a user (upsert; the token is the key)."""
     coll = _coll()
     token = (token or "").strip()
     if coll is None or not user_id or not token:
@@ -68,13 +53,7 @@ def register_token(user_id: str, token: str, platform: str = "ios") -> bool:
 
 
 def unregister_token(token: str, user_id: str | None = None) -> bool:
-    """Drop a token (on logout, or when APNs reports it gone).
-
-    ``user_id`` restricts the delete to a token that caller owns — the API path
-    passes it, so one account cannot switch off another's notifications by
-    sending their token. The APNs pruning path passes none: a token Apple says
-    is dead is dead whoever registered it.
-    """
+    """Drop a token. With ``user_id``, only if that caller owns it; APNs pruning passes none."""
     coll = _coll()
     token = (token or "").strip()
     if coll is None or not token:
@@ -92,12 +71,11 @@ def unregister_token(token: str, user_id: str | None = None) -> bool:
         return False
 
 
-# أجهزة الشخص الواحد. رقم كبير ع الواقع — عشان يمسك خلل بالتسجيل، مش يحدّ حدا.
+# سقف أمان لأجهزة الشخص الواحد.
 MAX_TOKENS_PER_USER = 50
 
 
 def tokens_for_user(user_id: str) -> List[str]:
-    """All device tokens currently registered to a user."""
     coll = _coll()
     if coll is None or not user_id:
         return []
@@ -110,7 +88,6 @@ def tokens_for_user(user_id: str) -> List[str]:
 
 
 def user_ids_with_tokens() -> List[str]:
-    """Distinct users who have at least one device registered (scheduler fan-out)."""
     coll = _coll()
     if coll is None:
         return []

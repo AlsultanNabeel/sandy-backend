@@ -1,24 +1,8 @@
-"""Native task store — MongoDB, no external provider.
+"""Native task store (sandy_tasks).
 
-Drop-in replacement for the old Google Tasks feature module: every function
-keeps the exact signature and return contract of its google_tasks twin, so the
-executor handlers, formatters, matchers and the web API work unchanged. The
-storage quirks Google forced on us are gone though — the exact due time lives
-in a real field instead of a [SANDY_DUE_AT:...] marker buried in the notes.
-
-Collection: sandy_tasks
-  {_id, text, notes, done, created_at, completed_at,
-   due_date ("YYYY-MM-DD" or ""), due_at (datetime or None — exact time),
-   priority ("" | "high" | "normal" | "low"), project ("")}
-
-Normalized dict (what every consumer sees — same shape google_tasks emitted):
-  {id, text, done, created_at, completed_at, due, notes, due_at,
-   priority, project, raw}
-
-Wired at boot via init_tasks_store(mongo_db) — same pattern as brainstorm.
-Tenant isolation is enforced by the scoped() data layer: _coll() returns None
-when there's no Mongo handle OR no authenticated tenant, so every "coll is None"
-guard fails closed, and user_id is injected on every read/write automatically.
+Consumers see {id, text, done, created_at, completed_at, due, notes, due_at,
+priority, project, raw} — the shape the old Google Tasks module emitted.
+``tasks_file`` params are unused legacy (see CLEANUP_FILES.md).
 """
 
 from __future__ import annotations
@@ -38,7 +22,6 @@ _COLL = "sandy_tasks"
 
 
 def init_tasks_store(mongo_db) -> None:
-    """يُستدعى مرّة عند الإقلاع."""
     configure(mongo_db)
     if mongo_db is None:
         return
@@ -63,7 +46,6 @@ def _db(mongo_db=None):
 
 
 def _coll(mongo_db=None):
-    """Tenant-scoped tasks collection, or None when no db / no active tenant."""
     return scoped(_db(mongo_db), _COLL)
 
 
@@ -76,7 +58,7 @@ def _iso(dt: Optional[datetime]) -> str:
 
 
 def _parse_iso(value: str) -> Optional[datetime]:
-    """ISO string → aware datetime in USER_TZ. None on garbage."""
+    """ISO string → aware datetime in USER_TZ, or None."""
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         return dt.replace(tzinfo=USER_TZ) if dt.tzinfo is None else dt.astimezone(USER_TZ)
@@ -85,7 +67,6 @@ def _parse_iso(value: str) -> Optional[datetime]:
 
 
 def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Mongo doc → the exact dict shape google_tasks used to emit."""
     due_date = doc.get("due_date") or ""
     return {
         "id": doc.get("_id", ""),
@@ -93,7 +74,7 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         "done": bool(doc.get("done")),
         "created_at": _iso(doc.get("created_at")),
         "completed_at": _iso(doc.get("completed_at")) or None,
-        # Google stored the due DATE here in this exact shape; keep it.
+        # Google-era shape for the due date.
         "due": f"{due_date}T00:00:00.000Z" if due_date else None,
         "notes": doc.get("notes", "") or "",
         "due_at": _iso(doc.get("due_at")),
@@ -105,8 +86,7 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 # ─── Reads ────────────────────────────────────────────────────────────────────
 
-# سقف المهام المفتوحة اللي بترجع بنداء واحد. المنجزة عندها سقف مية من زمان؛
-# المفتوحة كانت بلا سقف، وهي بالضبط اللي بتتراكم.
+# سقف أمان للمهام المفتوحة.
 MAX_OPEN_TASKS = 500
 
 
@@ -139,9 +119,7 @@ def load_completed_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]
 
 
 def overdue_among(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """The tasks in ``tasks`` whose due moment has passed (exact time, else end
-    of due day). For a caller that already holds the open tasks, so it does not
-    read them a second time."""
+    """Tasks in ``tasks`` whose due moment has passed (exact time, else end of due day)."""
     now = datetime.now(USER_TZ)
     today = now.date().isoformat()
     overdue: List[Dict[str, Any]] = []
@@ -158,7 +136,6 @@ def overdue_among(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def load_overdue_tasks(mongo_db=None, tasks_file=None) -> List[Dict[str, Any]]:
-    """Active tasks whose due moment has passed (exact time, else end of due day)."""
     try:
         return overdue_among(load_tasks(mongo_db=mongo_db, tasks_file=tasks_file))
     except Exception as e:
@@ -177,7 +154,7 @@ def add_task(
     priority: str = "",
     project: str = "",
 ) -> str:
-    """Returns the new task id, or "" on failure (incl. past due) — same as before."""
+    """New task id, or "" on failure (including a past due time)."""
     try:
         coll = _coll(mongo_db)
         if coll is None:
@@ -265,11 +242,7 @@ def update_task_due_date(
         if not current:
             return {"ok": False, "reason": "missing"}
 
-        # A task with an exact time keeps its time of day on the new date.
-        # (Task creation always sets a time, so refusing these — as this used
-        # to — meant no dated task could ever be moved.)
-        # Stored datetimes come back naive-UTC from Mongo; `_iso` is the one
-        # place that knows that.
+        # An exact-time task keeps its time of day on the new date (stored naive-UTC).
         raw_at = current.get("due_at")
         old_at = _parse_iso(_iso(raw_at) if isinstance(raw_at, datetime) else raw_at) \
             if raw_at else None
@@ -401,13 +374,10 @@ def update_task(
     done: Optional[bool] = None,
     mongo_db=None,
 ) -> bool:
-    """Edit several fields of one task in a single write. ``None`` = unchanged.
+    """Edit several fields in one write; ``None`` = unchanged.
 
-    For the app's edit sheet, which sends whatever changed at once; it used to
-    be one update (and one cache bump) per field. ``text`` must be non-empty,
-    ``priority`` one of ``_PRIORITIES``; ``due_iso`` empty clears the due date
-    and, unlike creation, may be in the past (a reschedule is the user's call).
-    An invalid value refuses the whole edit rather than applying part of it.
+    ``due_iso`` empty clears the due date and may be in the past; any invalid value
+    refuses the whole edit.
     """
     try:
         coll = _coll(mongo_db)
@@ -448,13 +418,12 @@ def update_task(
 # ─── Bulk operations ─────────────────────────────────────────────────────────
 
 def active_task_ids(mongo_db=None) -> List[str]:
-    """Ids of every open task — for cleaning up their reminders in bulk ops."""
+    """Ids of every open task (for bulk reminder cleanup)."""
     try:
         coll = _coll(mongo_db)
         if coll is None:
             return []
-        # بلا سقف: a bulk complete/delete touches every open task, so its
-        # reminder cleanup must see every one of them.
+        # بلا سقف: bulk ops must clean up every open task's reminders.
         return [str(d["_id"]) for d in coll.find({"done": False}, {"_id": 1})]
     except Exception as e:
         logger.warning("[TasksStore] active ids failed: %s", e)
@@ -504,8 +473,7 @@ def delete_completed_tasks(mongo_db=None, tasks_file=None) -> int:
 
 
 def clear_all_tasks(mongo_db=None) -> int:
-    """Delete every task. The explicit operation that the google-era
-    save_tasks([]) wipe used to hide. Returns how many were deleted."""
+    """Delete every task; returns how many."""
     try:
         coll = _coll(mongo_db)
         if coll is None:
@@ -518,17 +486,7 @@ def clear_all_tasks(mongo_db=None) -> int:
         return 0
 
 
-def save_tasks(tasks: List[Dict[str, Any]], mongo_db=None, tasks_file=None):
-    """Compatibility shim from the Google era. Only the clear-all case (an empty
-    list) is supported, and it just delegates to clear_all_tasks(); a non-empty
-    list is ignored (partial sync was never supported)."""
-    if tasks != []:
-        logger.warning("[TasksStore] save_tasks ignored (partial sync unsupported)")
-        return
-    clear_all_tasks(mongo_db)
-
-
-# Re-exports — same convenience surface google_tasks offered.
+# Re-exports used by the task handlers (tests patch them here).
 from app.features.tasks_matcher import (  # noqa: E402, F401
     resolve_task_reference_for_write,
     resolve_task_references_for_write,
@@ -539,5 +497,4 @@ from app.features.tasks_formatter import (  # noqa: E402, F401
     build_task_display,
     build_completed_task_display,
     build_all_tasks_display,
-    format_tasks_for_briefing,
 )

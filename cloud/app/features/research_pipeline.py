@@ -1,18 +1,10 @@
-"""Research data pipeline — URL normalization, AI extraction, dedup, filter, rank.
-
-Public API:
-  run_research_pipeline(...)  -> List[dict]
-  deduplicate_research_results(results) -> List[dict]
-  filter_research_results(results, preference) -> List[dict]
-  rank_research_results(results, preference) -> List[dict]
-  is_official_source_url(url, research_type) -> bool
-"""
+"""Research pipeline: Exa search, source filter, LLM page extraction, dedup."""
 
 import json
+import logging
 import re
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +128,7 @@ def is_official_source_url(url: str, research_type: str = "general") -> bool:
                 "ikea.",
             ]
         )
-    if research_type == "news":
-        # News accepts any non-blocked source: the blocked list above already
-        # drops aggregators and social. The old .com/.org/.net test let through
-        # virtually everything, so it was a no-op — say so explicitly.
-        return True
+    # Any other non-blocked source (news included) is accepted.
     return True
 
 
@@ -243,8 +231,7 @@ def extract_structured_page_data(
         }
 
 
-# Institution hints → (country, city). A small data table instead of hand-written
-# if-blocks: add a row (name/url substrings, country, city) to cover a new school.
+# (name/url substrings, country, city)
 _EDU_INSTITUTION_HINTS = [
     (("valencia", "universitat politècnica de valència", "upv.es"), "Spain", "Valencia"),
     (("universidad de alicante", "ua.es"), "Spain", "Alicante"),

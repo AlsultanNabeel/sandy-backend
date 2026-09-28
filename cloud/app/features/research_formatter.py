@@ -1,11 +1,6 @@
-"""Research result formatting — converts structured research data to Arabic display strings.
-
-Public API:
-  summarize_research_results(results, requested_count) -> str
-"""
-import logging
-
+"""Structured research results → Arabic display text."""
 import json
+import logging
 from typing import Any, Dict, List
 
 

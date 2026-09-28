@@ -1,11 +1,14 @@
+"""Current weather from wttr.in, cached per city for 10 minutes."""
+
+import logging
 import threading
 import time
-import requests
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
 
+import requests
+
 from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +16,7 @@ _cb = CircuitBreaker(name="weather", failure_threshold=5, recovery_timeout=60.0)
 _RETRY_ATTEMPTS = 2
 _RETRY_DELAY = 1.0
 
-# Conditions for a city are shared by everyone asking about it and change on
-# the scale of an hour. Without this every open of the app — and every agent
-# turn that mentions the weather — paid a round trip to wttr.in, up to eleven
-# seconds when it is slow. Successful answers only: a failure is retried next time.
+# Only successful answers are cached.
 _CACHE_TTL_S = 600
 _cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _cache_lock = threading.Lock()

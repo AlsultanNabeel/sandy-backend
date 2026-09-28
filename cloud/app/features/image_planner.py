@@ -1,17 +1,13 @@
-"""AI image-action planner for Sandy.
-
-Decides whether a user message is requesting a new image, an edit, a variation,
-a description, clarification, or nothing image-related at all.
-"""
+"""LLM planner: is a message a new image, an edit, a variation, a description, a clarification, or none?"""
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Dict, Optional
 
 from app.features.image_agent import ensure_image_state, _recent_image_history_text
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +33,6 @@ def _safe_json_loads(text: str) -> Dict[str, Any]:
 
 def _extract_direct_command_prompt(user_message: str) -> str:
     return _DIRECT_COMMAND_RE.sub("", (user_message or "").strip()).strip()
-
-
-def _fallback_new_image_prompt(text: str) -> str:
-    return (text or "").strip()
 
 
 def _fallback_edit_image_prompt(
@@ -167,13 +159,8 @@ def plan_image_action_with_ai(
     followup_question = str(payload.get("followup_question", "") or "").strip()
 
     if handled:
-        if (
-            action == "generate_new"
-            and not generation_prompt
-            and text
-            and len(text.split()) >= 2
-        ):
-            generation_prompt = _fallback_new_image_prompt(text)
+        if action == "generate_new" and not generation_prompt and len(text.split()) >= 2:
+            generation_prompt = text
             short_caption_ar = short_caption_ar or text
             needs_followup = False
             followup_question = ""
@@ -186,7 +173,7 @@ def plan_image_action_with_ai(
                 followup_question = (
                     "ما عندي صورة سابقة أعدل عليها. ابعت وصف صورة جديدة."
                 )
-            elif not generation_prompt and text:
+            elif not generation_prompt:
                 generation_prompt = _fallback_edit_image_prompt(text, active_image)
                 short_caption_ar = short_caption_ar or text
                 needs_followup = False

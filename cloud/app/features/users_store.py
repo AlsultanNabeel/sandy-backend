@@ -1,25 +1,9 @@
-"""Native multi-user account store — MongoDB.
+"""User accounts (sandy_users): identity, onboarding profile, persona, subscription.
 
-The first brick of the multi-user product (the mobile app): Sandy was built
-around a single owner; this store gives every user a stable identity, an
-onboarding profile (preferred name / interests), and a subscription status,
-all isolated per ``user_id``.
-
-This module is purely additive — it does not touch the existing owner flow.
-Other stores get keyed by the ``user_id`` it mints in later steps.
-
-Collection: sandy_users
-  {_id: user_id (uuid str),
-   provider ("google" | "apple"), provider_sub (OAuth subject, stable),
-   email, name, picture, locale,
-   onboarding: {done: bool, preferred_name: str, interests: [str], notes: str},
-   persona: {dialect: str (app.agent.context_builder.DIALECT_PRESETS key),
-             custom_instructions: str} — absent means the defaults,
-   subscription: {status: "none"|"trialing"|"active"|"expired",
-                  plan: str, trial_ends_at, current_period_end, source},
-   created_at, last_seen_at}
-
-Wired at boot via init_users_store(mongo_db) — same pattern as the other stores.
+{_id: user_id, provider, provider_sub, email, name, picture, locale,
+ onboarding: {done, preferred_name, interests, notes, nudge_answers},
+ persona: {dialect, custom_instructions}, subscription: {status, plan,
+ trial_ends_at, current_period_end, source}, created_at, last_seen_at}
 """
 
 from __future__ import annotations
@@ -37,16 +21,11 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_users"
 
-# Every ``source_key`` the onboarding mirror owns in ``sandy_memories``.
-# _mirror_onboarding_to_memory writes the subset the profile currently fills and
-# deletes the rest, so this tuple is the whole definition of what the mirror owns:
-# a key added to the writer and not to this list would be written once and never
-# cleaned up again.
+# Every sandy_memories ``source_key`` the onboarding mirror owns (and cleans up).
 _MIRROR_SOURCE_KEYS = ("onboarding_name", "onboarding_interests", "onboarding_notes")
 
 
 def init_users_store(mongo_db) -> None:
-    """يُستدعى مرّة عند الإقلاع."""
     configure(mongo_db)
     if mongo_db is None:
         return
@@ -65,14 +44,7 @@ def is_available() -> bool:
 
 
 def _bump(user_id: str, collection: str = "sandy_users") -> None:
-    """Mark this tenant's cached persona stale.
-
-    **This module is why the first attempt at that cache had to be cut.** It
-    writes on the raw collection — `_coll()` below returns `get_db()[_COLL]`,
-    not a `ScopedCollection` — so a bump that lived only in the tenant wrapper
-    never saw the onboarding name or the persona change, and Sandy would keep
-    saying she did not know you for a minute after you told her.
-    """
+    """Mark this tenant's cached persona stale (this module writes on the raw collection)."""
     try:
         from app.utils.tenant_version import bump_for
 
@@ -90,7 +62,7 @@ def _now() -> datetime:
 
 
 def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
-    """Mongo returns naive datetimes that are actually UTC — fix that."""
+    """Mongo returns naive datetimes that are actually UTC."""
     if dt is None:
         return None
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
@@ -115,11 +87,7 @@ def upsert_from_oauth(
     picture: str = "",
     locale: str = "ar",
 ) -> Optional[Dict[str, Any]]:
-    """Find-or-create a user from a verified OAuth identity.
-
-    Returns the full user document (with a stable ``_id`` == user_id). The first
-    sign-in mints a new uuid; later sign-ins refresh the profile + last_seen.
-    """
+    """Find-or-create a user from a verified OAuth identity; later sign-ins refresh the profile."""
     coll = _coll()
     if coll is None or not provider or not provider_sub:
         return None
@@ -155,8 +123,7 @@ def upsert_from_oauth(
     try:
         coll.insert_one(doc)
     except DuplicateKeyError:
-        # Two first sign-ins raced; the unique (provider, provider_sub) index
-        # let one through. Return that account instead of a 500.
+        # Two first sign-ins raced; return the one that won.
         return coll.find_one({"provider": provider, "provider_sub": provider_sub})
     return doc
 
@@ -173,9 +140,7 @@ def get_email_user(email: str) -> Optional[Dict[str, Any]]:
 def create_email_user(
     email: str, password_hash: str, name: str = ""
 ) -> Optional[Dict[str, Any]]:
-    """Create a new email/password user (same doc shape as OAuth users, plus
-    ``password_hash``). Returns the doc, or None if the email is already taken
-    or the store is down. The normalized email is the stable ``provider_sub``."""
+    """New email/password user, or None if the email is taken or the store is down."""
     coll = _coll()
     e = (email or "").strip().lower()
     if coll is None or not e or not password_hash:
@@ -208,10 +173,7 @@ def create_email_user(
 
 
 def get_or_create_owner(name: str = "") -> Optional[str]:
-    """The owner is user #1 — a stable account keyed by provider='owner'.
-
-    Returns the owner's stable ``user_id`` (or None if Mongo is unavailable).
-    """
+    """The owner's stable user_id (provider='owner'), or None without Mongo."""
     import os
     sub = (os.getenv("OWNER_CHAT_ID") or os.getenv("SANDY_USER_CHAT_ID") or "owner").strip() or "owner"
     user = upsert_from_oauth("owner", sub, name=name)
@@ -244,18 +206,9 @@ def set_onboarding(
 
 
 def _mirror_onboarding_to_memory(user_id: str) -> None:
-    """اكتب الاسم والاهتمامات بالذاكرة كمان — **باستبدال، مش بإضافة**.
+    """انسخ الاسم والاهتمامات لذاكرة البحث باستبدال (مفتاح ثابت)، عشان «شو اهتماماتي؟» تلاقيهم.
 
-    الملف الشخصي بينحقن بالتعليمات، فهي بتعرفه بلا ما تدوّر. بس المالك بيسأل
-    «شو اهتماماتي؟» ككلام عادي، والسؤال هيك بيمرق ع البحث بالذاكرة — ولو ما
-    كانوا هناك، بتردّ «ما في ذكريات محفوظة» وهي عارفتهن. نفس المعلومة، وجوابين
-    متناقضين حسب صيغة السؤال.
-
-    والخطر الواضح إنه يصير مصدرين للحقيقة: تعدّل اهتماماتك بالإعدادات، والنسخة
-    القديمة تضلّ بالذاكرة وتناقض الجديدة. عشان هيك السجلّ **مفتاحه ثابت
-    وبينستبدل** كل مرّة — نسخة وحدة بتتحدّث، مش تاريخ بيتراكم.
-
-    الملف الشخصي بيضلّ المصدر؛ هاي نسخة مقروءة للبحث بتتولّد منه.
+    الملف الشخصي بيضلّ المصدر؛ الحقل الفاضي بينمسح صفّه.
     """
     try:
         from datetime import datetime, timezone
@@ -289,14 +242,6 @@ def _mirror_onboarding_to_memory(user_id: str) -> None:
                 upsert=True,
             )
 
-        # **Clearing a field has to clear its row.** The docstring above promises
-        # replacement, and the loop alone only ever delivered the half of it that
-        # adds: a user who removed their interests, or emptied the note they had
-        # written about themselves, kept the deleted text in `sandy_memories`
-        # for ever. It stayed searchable, so the profile said one thing and
-        # «شو اهتماماتي؟» answered with what they had just taken out — the exact
-        # two-sources-of-truth split this function exists to prevent, arrived at
-        # from the other direction.
         stale = [k for k in _MIRROR_SOURCE_KEYS if k not in {key for key, _ in lines}]
         removed = 0
         if stale:
@@ -304,23 +249,15 @@ def _mirror_onboarding_to_memory(user_id: str) -> None:
                 {"chat_id": user_id, "source_key": {"$in": stale}}
             ).deleted_count
 
-        # One bump, after the whole mirror is written. It used to fire before
-        # each `update_one`, so the last bump always preceded the last write and
-        # a concurrent read on the other worker could cache the state one line
-        # short of finished, under the finished version. A deletion changes what
-        # the cached blocks read exactly as much as a write does, so it counts.
+        # One bump after the whole mirror (deletions count too).
         if lines or removed:
             _bump(user_id, "sandy_memories")
     except Exception as exc:  # noqa: BLE001 — نسخة مساعدة، ما بتوقّف حفظ التعارف
-        # Warning, not debug: the mirror now carries deletions too, so a failure
-        # here is not a missing convenience — it is the user's removed interests
-        # staying searchable after the profile write they asked for succeeded.
         logger.warning("[UsersStore] onboarding mirror failed for %s: %s", user_id, exc)
 
 
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:
-    """The user's stored daily-nudge question answers ({qid: answer}) — used to
-    pick the next unanswered get-to-know-you question."""
+    """{qid: answer} for the daily-nudge questions."""
     coll = _coll()
     if coll is None or not user_id:
         return {}
@@ -329,7 +266,6 @@ def get_nudge_answers(user_id: str) -> Dict[str, Any]:
 
 
 def record_nudge_answer(user_id: str, qid: str, answer: str) -> bool:
-    """Save one daily-nudge question answer (feeds the evolving profile)."""
     coll = _coll()
     qid = (qid or "").strip()
     answer = (answer or "").strip()[:300]
@@ -347,8 +283,7 @@ _DEFAULT_PERSONA: Dict[str, Any] = {"dialect": "palestinian", "custom_instructio
 
 
 def get_persona(user_id: str) -> Dict[str, Any]:
-    """The user's dialect + custom instructions, or the defaults (Palestinian
-    dialect, no override) if unset or the store is unavailable."""
+    """Dialect + custom instructions, or the defaults."""
     coll = _coll()
     if coll is None or not user_id:
         return dict(_DEFAULT_PERSONA)
@@ -365,8 +300,7 @@ def set_persona(
     dialect: Optional[str] = None,
     custom_instructions: Optional[str] = None,
 ) -> bool:
-    """Save dialect and/or custom instructions. Pass ``""`` for
-    ``custom_instructions`` to reset to the default persona."""
+    """Pass ``""`` for custom_instructions to reset it."""
     coll = _coll()
     if coll is None or not user_id:
         return False
@@ -390,7 +324,6 @@ def set_subscription(
     current_period_end: Optional[datetime] = None,
     source: str = "",
 ) -> bool:
-    """Update subscription state (called later by the RevenueCat webhook)."""
     coll = _coll()
     if coll is None or not user_id:
         return False
@@ -407,12 +340,11 @@ def set_subscription(
 
 
 def is_subscriber(user_id: str) -> bool:
-    """True while the user has paid or trial access (gates premium features)."""
+    """True while the user has paid or trial access."""
     return has_live_subscription(get_user(user_id))
 
 
 def has_live_subscription(user: Optional[Dict[str, Any]]) -> bool:
-    """:func:`is_subscriber` for a user document the caller already holds."""
     if not user:
         return False
     sub = user.get("subscription") or {}

@@ -1,15 +1,6 @@
-"""ألبوم الصور (Photo Album).
+"""ألبوم الصور: البايتات في GridFS (sandy_photo_files) والميتاداتا في sandy_photos.
 
-ساندي تحفظ الصور اللي بتوصلها من التطبيق، تعمل لها وصف ووسوم ذكية
-(عبر Vision)، وتقدر ترجّعها لاحقاً بالاسم أو الوسم أو الوصف.
-
-التخزين:
-  بايتات الصورة في GridFS (مجموعة sandy_photo_files) عشان يتحمّل أي حجم.
-  الميتاداتا في مجموعة sandy_photos:
-    {chat_id, name, grid_id, file_unique_id, user_caption, ai_caption, tags[], created_at}
-
-لو Mongo مش متاح كل دالة بترجّع فاضي بهدوء.
-العرض عبر التطبيق.
+وصف ووسوم ذكية عبر Vision؛ الاسترجاع بالاسم أو الوسم أو الوصف.
 """
 
 from __future__ import annotations
@@ -24,15 +15,13 @@ logger = logging.getLogger(__name__)
 
 _META = "sandy_photos"
 _FILES_COLLECTION = "sandy_photo_files"
-# How many recent photos a text search or the album counts look through.
+# Recent photos a text search or tag count looks through.
 _SEARCH_WINDOW = 500
 
 _gridfs = None
 
 
-# إعداد المخزن
 def init_photo_album(mongo_db) -> None:
-    """يُستدعى مرّة عند الإقلاع (زي init_speaker_store)."""
     global _gridfs
     configure(mongo_db)
     if mongo_db is None:
@@ -52,7 +41,6 @@ def is_available() -> bool:
     return get_db() is not None and _gridfs is not None
 
 
-# الحفظ
 def save_photo(
     chat_id: Any,
     image_bytes: bytes,
@@ -61,16 +49,11 @@ def save_photo(
     name: Optional[str] = None,
     user_caption: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """يخزّن صورة (بايتات + ميتاداتا). يتجاهل التكرار حسب file_unique_id.
-
-    الوسوم/الوصف الذكي يتعمّلوا لاحقاً عبر `set_ai_metadata` (ممكن بالخلفية).
-    يرجّع الميتاداتا المخزّنة، أو None لو فشل/تكرار.
-    """
+    """يخزّن صورة؛ بيرجّع الموجودة لو نفس file_unique_id، أو None لو فشل."""
     if not is_available() or not image_bytes:
         return None
     cid = str(chat_id)
 
-    # تجاهل لو نفس الصورة محفوظة (نفس المستخدم)
     if file_unique_id:
         existing = get_db()[_META].find_one(
             {"chat_id": cid, "file_unique_id": file_unique_id}
@@ -107,7 +90,7 @@ def _default_name(caption: str) -> str:
 
 
 def set_ai_metadata(photo_id: Any, caption: str, tags: List[str]) -> None:
-    """يحدّث الوصف + الوسوم الذكية بعد توليدها (ممكن من thread بالخلفية)."""
+    """يحدّث الوصف + الوسوم الذكية (ممكن من الخلفية)."""
     if not is_available():
         return
     update: Dict[str, Any] = {}
@@ -163,7 +146,6 @@ def generate_tags(image_bytes: bytes, create_chat_completion_fn) -> Tuple[str, L
         return "", []
 
 
-# الاسترجاع
 def _matches(doc: Dict[str, Any], query: str) -> bool:
     q = query.lower()
     hay = " ".join([
@@ -188,12 +170,9 @@ def find_photos(
     mongo_filter: Dict[str, Any] = {"chat_id": cid}
     if tag:
         mongo_filter["tags"] = tag.strip()
-    # A text query is matched here in Python, so it needs a window of recent
-    # photos to search; without one the database can stop at `limit` itself.
+    # Text queries are matched in Python, so search a window of recent photos.
     cap = _SEARCH_WINDOW if query and query.strip() else max(1, min(limit, _SEARCH_WINDOW))
     try:
-        # السقف بنفس السلسلة مش ع متغيّر بعدين: بيقرا أوضح، وفحص «كل قراءة
-        # قائمة إلها سقف» بيمشي ع التعبير نفسه فما بيشوف سقف بمتغيّر تاني.
         docs = list(
             get_db()[_META].find(mongo_filter).sort("created_at", -1).limit(cap)
         )
@@ -206,8 +185,7 @@ def find_photos(
 
 
 def tag_counts(chat_id: Any) -> Dict[str, int]:
-    """How many of the user's recent photos carry each tag, counted in the
-    database — the albums screen used to pull every photo document to do this."""
+    """Per-tag counts over the user's recent photos, computed in the database."""
     if not is_available():
         return {}
     try:

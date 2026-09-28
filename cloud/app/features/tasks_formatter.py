@@ -1,14 +1,7 @@
-"""Task display formatting — converts task dicts to human-readable Arabic strings.
-
-Public API:
-  build_task_display(mongo_db, tasks_file) -> (str, aliases_dict)
-  build_completed_task_display(mongo_db, tasks_file) -> (str, aliases_dict)
-  build_all_tasks_display(mongo_db, tasks_file) -> (str, active_aliases, completed_aliases)
-  format_tasks_for_briefing(tasks) -> str
-"""
+"""Task lists → Arabic display text, plus T1/CT1 aliases for later references."""
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from app.utils.time import USER_TZ
 
@@ -54,30 +47,6 @@ def _format_task_due_text(task: Dict[str, Any]) -> str:
 
     return "بدون موعد"
 
-
-def format_tasks_for_briefing(
-    tasks: List[Dict[str, Any]], *, max_lines: int = 28
-) -> str:
-    """Describe all active tasks for the morning briefing."""
-    active_tasks = [t for t in (tasks or []) if not t.get("done", False)]
-    if not active_tasks:
-        return "لا توجد مهام نشطة حالياً."
-
-    lines: List[str] = []
-    for i, task in enumerate(active_tasks[:max_lines], 1):
-        text = (task.get("text") or "").strip()
-        ordinal = _task_ordinal_ar(i)
-
-        due_text = _format_task_due_text(task)
-
-        lines.append(f"المهمة {ordinal}: {text or '(بدون نص)'} — الموعد: {due_text}")
-
-    overflow = len(active_tasks) - max_lines
-    if overflow > 0:
-        lines.append(
-            f"... و{overflow} مهمة نشطة أخرى (تحقّق من التطبيق للقائمة الكاملة)."
-        )
-    return "\n".join(lines)
 
 
 def build_task_display(mongo_db=None, tasks_file=None):

@@ -1,11 +1,4 @@
-"""Task reference resolution — maps user-facing labels (T1, ordinals, fuzzy text) to task IDs.
-
-Public API:
-  resolve_task_reference_for_write(ref, ...) -> dict
-  resolve_task_references_for_write(refs, ...) -> dict
-  resolve_completed_task_reference_for_write(ref, ...) -> dict
-  resolve_completed_task_references_for_write(refs, ...) -> dict
-"""
+"""Resolve task references (T1, ordinals, fuzzy text) to task ids."""
 
 import re
 from difflib import SequenceMatcher

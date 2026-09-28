@@ -1,19 +1,8 @@
-"""Weekly insights — the last seven days next to the seven before them.
+"""Weekly insights: the last seven days next to the seven before them.
 
-One read per source, each covering both weeks at once (fourteen days), split
-into "this week" / "last week" in memory. The sources are independent, so they
-run together through :func:`app.utils.thread_pool.gather`, which carries the
-caller's tenant into every job — every collection below is reached through
-``scoped()``, never with a hand-written ``user_id`` filter.
-
-Each read is capped (``_CAP``): a summary that has to scan a person's whole
-history to say "12 tasks this week" is a bug waiting for a heavy user.
-
-Sandy's sentence about the week is written by the model once per user per ISO
-week (and language) and cached in ``sandy_weekly_insights``. The model call has
-a hard timeout; on any failure a warm template sentence is returned instead,
-and that fallback is cached only briefly so a later open can still get the real
-one.
+One capped read per source covering both weeks, run in parallel with the
+caller's tenant. Sandy's sentence is generated once per user per ISO week and
+cached; a template fallback is cached only briefly.
 """
 
 from __future__ import annotations
@@ -30,17 +19,12 @@ logger = logging.getLogger(__name__)
 
 CACHE_COLL = "sandy_weekly_insights"
 
-# Most rows any single source read may return.
 _CAP = 2000
-# Chat threads looked at (each one holds a bounded short-term history).
 _STM_THREADS = 20
-# The model gets this long, and the wait on it a little more.
 _LLM_TIMEOUT_S = 8.0
 _LLM_WAIT_S = 10.0
-# A template fallback is re-tried after this long instead of sticking all week.
 _FALLBACK_TTL = timedelta(hours=1)
 
-# The order the app shows the cards in.
 METRIC_KEYS = (
     "tasks_completed", "reminders_done", "focus_minutes", "habit_checkins",
     "expenses_total", "journal_entries", "reading_pages", "reading_sessions",
@@ -58,14 +42,12 @@ class Windows:
         self.cur_start = self.now - timedelta(days=7)
         self.prev_start = self.now - timedelta(days=14)
         today = self.now.astimezone(USER_TZ).date()
-        # Day-keyed sources (habit check-ins) use local calendar days: today and
-        # the six before it are this week, the seven before those last week.
+        # Day-keyed sources use local calendar days.
         self.cur_days = {(today - timedelta(days=i)).isoformat() for i in range(7)}
         self.prev_days = {(today - timedelta(days=i)).isoformat() for i in range(7, 14)}
         self.first_day = (today - timedelta(days=13)).isoformat()
 
     def bucket(self, when: Any) -> Optional[str]:
-        """``"cur"`` / ``"prev"`` / None for a datetime (or ISO string)."""
         dt = _to_dt(when)
         if dt is None or dt > self.now:
             return None
@@ -108,8 +90,7 @@ def _coll(name: str):
 def _count_by(name: str, field: str, query: Dict[str, Any], w: Windows,
               weight: Optional[Callable[[Dict[str, Any]], float]] = None,
               projection: Optional[Dict[str, int]] = None) -> Dict[str, float]:
-    """Sum ``weight(doc)`` (default 1) per window for docs whose ``field`` falls
-    in the fourteen days."""
+    """Sum ``weight(doc)`` (default 1) per window over the fourteen days."""
     out = _pair()
     coll = _coll(name)
     if coll is None:
@@ -129,8 +110,7 @@ def _tasks(w: Windows):
 
 
 def _reminders(w: Windows):
-    # A reminder whose time came inside the window has been delivered (or is
-    # recurring and moved on) — "done" from the person's point of view.
+    # A reminder whose time came inside the window counts as done.
     return _count_by("sandy_reminders", "remind_at", {}, w)
 
 
@@ -187,7 +167,7 @@ def _habits(w: Windows):
     try:
         from app.features.habits_store import list_habits
         best = max((int(h.get("streak") or 0) for h in list_habits()), default=0)
-    except Exception:  # noqa: BLE001 — the streak is a bonus, not the summary
+    except Exception:  # noqa: BLE001
         logger.debug("[insights] streaks unavailable", exc_info=True)
     return {"checkins": checkins, "best_streak": best}
 
@@ -253,7 +233,7 @@ def _values(metrics: List[Dict[str, Any]]) -> Dict[str, Tuple[float, float]]:
 
 
 def template_sentence(metrics: List[Dict[str, Any]], lang: str = "ar") -> str:
-    """A warm sentence built from the numbers alone — the model-free fallback."""
+    """Model-free fallback sentence."""
     v = _values(metrics)
     tasks, prev_tasks = v.get("tasks_completed", (0, 0))
     focus = v.get("focus_minutes", (0, 0))[0]
@@ -286,7 +266,6 @@ _LABELS_AR = {
 
 def _llm_sentence(uid: str, metrics: List[Dict[str, Any]], best_streak: int,
                   lang: str) -> Optional[str]:
-    """One or two warm sentences from the model, or None on any failure/timeout."""
     from app.agent.facade import agent as facade
     fn = facade.create_chat_completion
     if fn is None:
@@ -318,7 +297,7 @@ def _llm_sentence(uid: str, metrics: List[Dict[str, Any]], best_streak: int,
     except FutTimeout:
         logger.warning("[insights] model timed out; using template")
         return None
-    except Exception as exc:  # noqa: BLE001 — external call edge
+    except Exception as exc:  # noqa: BLE001
         logger.warning("[insights] model failed; using template: %s", exc)
         return None
     try:
@@ -331,7 +310,7 @@ def _llm_sentence(uid: str, metrics: List[Dict[str, Any]], best_streak: int,
 
 def weekly_sentence(uid: str, metrics: List[Dict[str, Any]], best_streak: int,
                     w: Windows, lang: str = "ar") -> Dict[str, str]:
-    """``{"text", "source"}`` — cached per user per ISO week per language."""
+    """``{"text", "source"}``, cached per user, ISO week and language."""
     coll = scoped(get_db(), CACHE_COLL, bump=False)
     key = f"{uid}:{w.iso_week()}:{lang}"
     if coll is not None:
@@ -362,7 +341,7 @@ def weekly_sentence(uid: str, metrics: List[Dict[str, Any]], best_streak: int,
 
 
 def weekly_summary(uid: str, lang: str = "ar", now: Optional[datetime] = None) -> Dict[str, Any]:
-    """The full payload for ``GET /api/insights/weekly``. Runs in the tenant."""
+    """Payload for ``GET /api/insights/weekly``; runs in the tenant."""
     w = Windows(now)
     data = collect(w)
     sentence = weekly_sentence(uid, data["metrics"], data["best_streak"], w, lang)
@@ -379,7 +358,7 @@ def weekly_summary(uid: str, lang: str = "ar", now: Optional[datetime] = None) -
 
 
 def demo_summary(lang: str = "ar") -> Dict[str, Any]:
-    """Obviously-sample numbers for guests, same shape as the real payload."""
+    """Sample numbers for guests, same shape as the real payload."""
     sample = {
         "tasks_completed": (12, 9), "reminders_done": (7, 8), "focus_minutes": (240, 180),
         "habit_checkins": (15, 11), "expenses_total": (86.5, 120.0),
@@ -396,6 +375,3 @@ def demo_summary(lang: str = "ar") -> Dict[str, Any]:
         "sentence": text, "sentence_source": "template",
     }
 
-
-__all__ = ["weekly_summary", "demo_summary", "template_sentence", "Windows",
-           "collect", "CACHE_COLL", "METRIC_KEYS"]
