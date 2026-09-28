@@ -1,4 +1,4 @@
-"""voice_ws memory."""
+"""Voice session memory: identity/channel context vars, STM history, and the memory seed."""
 from __future__ import annotations
 
 import contextvars
@@ -10,32 +10,13 @@ from app.api.voice_ws._config import (
     _VOICE_CTX_TTL_S,
 )
 
-# chat_id -> (built_at, text). **Bounded.** A plain dict here grows one entry
-# per customer who has ever used voice and never sheds one: the TTL below makes
-# a stale entry unused, not gone. Oldest-first eviction, same shape as the
-# persona cache in `context_builder`.
+# chat_id -> (built_at, text); bounded LRU (the TTL only makes stale entries unused).
 _VOICE_CTX_MAX = 128
 _voice_ctx_cache: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
 
-# أي جسم بيحكي — الروبوت اللي بالغرفة ولا مكالمة التطبيق.
-#
-# التنين بيدخلوا من نفس المقبس وبيشاركوا نفس الذاكرة، وهاد صح. بس المالك بيسأل
-# «إيمتى قلتلك؟»، والفرق بين «حكيتيلي وإنتي واقفة قدّامي» و«حكيتيلي بالمكالمة»
-# فرق حقيقي عنده — زي ما أي حدا بيتذكّر إذا الكلام صار وجهًا لوجه ولا ع الهاتف.
-#
-# **متغيّرات سياق، مش ذاكرة خيط.**
-#
-# كانت `threading.local`، والنتيجة إنّ الهوية بتنحفظ ع خيط المصافحة وما حدا
-# بيشوفها: `run_in_executor` بيشغّل الدوال ع خيوط تانية. والسجل قال القصّة
-# بسطرين متلاصقين — `auth OK owner=1f69b997…` وبعده مباشرة
-# `unidentified session`. يعني الهوية انحلّت صح، وانحفظت بمكان اللي بيحتاجها
-# ما بيوصله.
-#
-# ومتغيّر عام كان بيصير أسوأ من الاتنين: جلستين بنفس اللحظة بيدهسوا بعض، وواحد
-# بياخد ذاكرة التاني. متغيّر السياق بينسخ لكل مهمة غير متزامنة لحالها.
-#
-# وبيضلّ ما بيعبر لخيوط المجمّع — عشان هيك اللي بيشتغل هناك بياخد الهوية
-# **كوسيط صريح** بدل ما يدوّر عليها.
+# Session identity, channel (robot vs app call) and speaker name live in context
+# variables: per async task, safe across concurrent sessions. They don't reach
+# pool threads, so pool functions take the identity as an explicit argument.
 _identity: contextvars.ContextVar[str] = contextvars.ContextVar(
     "sandy_voice_user", default="")
 _channel_name: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -54,21 +35,9 @@ def get_voice_channel() -> str:
 
 
 def set_voice_identity(user_id: str) -> None:
-    """مين بيحكي بهالجلسة.
-
-    **دالة وحدة، ومتغيّر واحد** — بتنادى عند المصافحة، وبتنادى تاني بأول كل
-    دالة بتشتغل ع خيط مجمّع (الوسيط جايي معها). كان في تنين: وحدة للجلسة
-    ووحدة «تجاوز» للمجمّع، ومعلومة وحدة بمكانين بتفترق يومًا ما.
-    خيط المجمّع بيبلّش بسياق نظيف، فالكتابة عليه ما بتلمس الجلسة.
-
-
-    قبل هيك كانت الذاكرة الصوتية بتنادي «المالك» من متغيّر بيئة: حساب واحد
-    ثابت لكل جلسة صوت بالنظام. اشتغل لأنه كان في شخص واحد. وأول ما صار في
-    تسجيل دخول بأبل وجوجل، صار معناها إنّ **كل زبون بيحكي مع ذاكرة زبون تاني**
-    — وهاد مش خلل واجهة، هاد تسريب.
-    """
+    """مين بيحكي بهالجلسة — بالمصافحة، وبأول كل دالة بتشتغل ع خيط مجمّع."""
     _identity.set((user_id or "").strip())
-    _speaker_name.set("")   # re-resolved lazily — see voice_speaker_label
+    _speaker_name.set("")   # re-resolved lazily
 
 
 def get_voice_identity() -> str:
@@ -76,15 +45,7 @@ def get_voice_identity() -> str:
 
 
 def voice_speaker_label() -> str:
-    """The session owner's display name, resolved **once** per session.
-
-    `_speaker_directive` runs at the end of every utterance, awaited directly on
-    the event loop that is relaying audio — the same loop `_verify_owner` is
-    pushed off with `run_in_executor`, and `_save_voice_turn` is pushed off with
-    a comment about the pause being audible. A synchronous `find_one` there is
-    one stall per sentence, so the lookup happens once and everything after it
-    reads a context variable.
-    """
+    """The session owner's display name, resolved once (runs on the audio loop; no per-sentence DB read)."""
     cached = _speaker_name.get()
     if cached:
         return cached
@@ -94,63 +55,30 @@ def voice_speaker_label() -> str:
 
 
 def resolve_speaker_label(user_id: str = "") -> str:
-    """The blocking half — a Mongo read. **Never call this on the audio loop.**"""
+    """The blocking half — a Mongo read. Never call this on the audio loop."""
     from app.utils.user_profiles import speaker_label
 
     return speaker_label(user_id or get_voice_identity() or None)
 
 
 def set_voice_speaker_label(name: str) -> None:
-    """Store a name resolved elsewhere (a pool thread) into *this* context."""
+    """Store a name resolved on a pool thread into this context."""
     _speaker_name.set(name or "")
 
 
 def _stm_chat_id() -> str:
-    """Whose memory this session is talking to.
-
-    **The identity of the connection, not a global one.** It is set once at the
-    handshake — from the app's token, or from the robot's pairing record — and
-    everything this session reads or writes is scoped to it.
-
-    It used to resolve `users_store.get_or_create_owner()`: a single account,
-    from an environment variable, for every voice session on the server. That
-    was invisible while there was one user and catastrophic the moment there
-    were two — a second customer would have been handed the first one's diary.
-
-    The fallback below is for a robot nobody has paired yet. It keeps the old
-    single-owner behaviour for an existing install, and returns empty for a
-    fresh one, which makes her memoryless rather than someone else's.
-    """
+    """Whose memory this session talks to: the connection's identity, set at the handshake."""
     ident = get_voice_identity()
     if ident:
         return ident
 
-    # **ما في احتياطي. مجهول يعني بلا ذاكرة — مش ذاكرة حدا تاني.**
-    #
-    # كان هون رجوع لـ`get_or_create_owner()`، ونيّته إنّ لوحًا غير مربوط يضلّ
-    # يشتغل. وهاد اللي صار فعليًّا: اللوح بيعرّف عن حاله باسم جهاز
-    # (`sandy-brain-s3`) مش بمعرّف الوحدة، فالبحث عن صاحبه بيرجع فاضي، وبيقع
-    # عالاحتياطي — **فحكى للمالك الجديد باسم القديم، وعدّد عليه مهامه**.
-    #
-    # وبمنتج فيه أكتر من زبون، نفس السطر بيعطي زبونًا يوميات زبون تاني.
-    #
-    # الاحتياطي كان بيجاوب سؤالًا غلط. السؤال مش «مين على الأغلب؟» — السؤال
-    # «مين بالتأكيد؟»، وجوابه لمّا ما نعرف هو **لا أحد**.
+    # No fallback: unidentified means no memory, never someone else's.
     logger.warning("[voice_ws] unidentified session — starting with no memory")
     return ""
 
 
 def _load_stm_history() -> List[Dict[str, Any]]:
-    """Recent turns from **every** channel, not just the voice thread.
-
-    The voice thread and the app's chat threads are separate documents, so
-    reading only this one meant the robot could not remember a conversation the
-    owner had in the app a minute earlier — and the app could not remember what
-    he had just said out loud. Three doors into the same house, three memories.
-
-    The voice thread's own turns are still in here; they are simply no longer
-    the only ones.
-    """
+    """Recent turns from every channel (voice, app chat), not just the voice thread."""
     chat_id = _stm_chat_id()
     if not chat_id:
         return []
@@ -159,9 +87,7 @@ def _load_stm_history() -> List[Dict[str, Any]]:
         shared = recent_turns_for_user(chat_id, limit=10)
         if shared:
             return shared
-        # Older documents predate the user_id field and cannot be found by it.
-        # Falling back keeps memory working through the deploy rather than
-        # starting the owner from nothing.
+        # Legacy docs without user_id.
         return _stm_load(chat_id, chat_id)
     except Exception as exc:
         logger.debug("[voice_ws] STM load skipped: %s", exc)
@@ -169,19 +95,11 @@ def _load_stm_history() -> List[Dict[str, Any]]:
 
 
 def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
-    """آخر المحادثات من كل القنوات، وكل جملة مكتوب جنبها من وين إجت.
-
-    المصدر مش زينة. المالك بيحكي مع نفس ساندي بتلات طرق، ومنطقي يسأل «إيمتى
-    قلتلك هيك؟» — والجواب «بالمكالمة» غير «وإنت واقف قدّامي». بلا الوسم، الذاكرة
-    الموحّدة بتصير كومة جُمَل بلا مكان، وهي ما بتقدر تجاوب عن سؤال هي حاضرة فيه.
-    """
-    # يُمرَّر من فوق لمّا يكون محمّل أصلاً، عشان ما تنقرا الذاكرة القصيرة مرّتين
-    # بكل بداية مكالمة.
+    """آخر المحادثات من كل القنوات، وكل جملة موسومة بقناتها ووقتها."""
+    # بيتمرّر من فوق لمّا يكون محمّل، عشان ما تنقرا مرّتين.
     history = _load_stm_history() if history is None else history
     if not history:
         return ""
-    # كل دور للمستخدم كان موسوم باسم المالك — يعني الموديل بيقرا محادثة زبون
-    # وكل جملة فيها منسوبة لشخص ما إله علاقة فيها.
     from app.utils.time_awareness import turn_stamp
 
     user_label = voice_speaker_label()
@@ -194,7 +112,6 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
         via = str(m.get("via") or "").strip()
         line = (f"[{via}] {role_label}: {content}" if via
                 else f"{role_label}: {content}")
-        # متى، مش بس وين: «(قبل ساعتين) [الروبوت] …».
         ago = turn_stamp({"timestamp": m.get("timestamp")})
         turns.append(f"({ago}) {line}" if ago else line)
     if turns:
@@ -203,9 +120,7 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
 
 
 def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
-    """What a voice session learns fresh at its start: the clock, how long since
-    they last spoke (on any channel), and the recent turns — never cached, since
-    all three change between sessions (see `with_recent_turns`)."""
+    """Fresh per-session context: the clock, time since the last message, and recent turns (never cached)."""
     from app.utils.time_awareness import time_awareness_block
 
     history = _load_stm_history() if history is None else history
@@ -213,25 +128,15 @@ def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
             + _load_stm_context(history))
 
 
-# Tiny in-process cache for the durable session-start seed. The seed is built
-# with durable_only=True (stable facts only), so reusing it for a few seconds
-# makes reconnects/rapid re-opens effectively instant without staleness risk.
 
 
 def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[str]:
-    """Shared rich-context builder for the voice helpers.
-
-    Returns the voice-formatted memory context for the owner chat, or ``None``
-    if there's no owner or the context builder is unavailable (caller decides
-    the fallback). Centralizes the context_builder/mongo_db imports that used to
-    be repeated across the voice helpers.
-    """
+    """Voice-formatted memory context for the session owner, or None (caller falls back)."""
     chat_id = _stm_chat_id()
     if not chat_id:
         return None
 
-    # Only the session-start seed (empty message, no semantic) is cacheable —
-    # per-turn semantic context is query-specific and must never be reused.
+    # Only the session-start seed is cacheable; per-turn semantic context is query-specific.
     cacheable = message == "" and not include_semantic
     if cacheable:
         cached = _voice_ctx_cache.get(chat_id)
@@ -242,17 +147,13 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
         from app.agent.context_builder import build_memory_context, format_for_voice
         from app.db import get_db
         mongo_db = get_db()
-        # No STM here: `durable_only` drops the turns anyway. The session
-        # builder reads them once and seeds them itself (`_load_stm_context`).
         ctx = build_memory_context(
             chat_id=chat_id,
             user_id=chat_id,
             message=message,
             mongo_db=mongo_db,
             include_semantic=include_semantic,
-            # Voice seed = stable facts only. Recent topics/summaries/STM turns
-            # are the exact text that resurfaces as phantom replies on the
-            # native-audio model, which can't be told to ignore them.
+            # Stable facts only: recent turns resurface as phantom replies on native audio.
             durable_only=True,
         )
         text = format_for_voice(ctx)
@@ -269,16 +170,11 @@ def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[s
 
 def _save_voice_turn(user_text: str, sandy_text: str,
                      user_id: str = "", channel: str = "") -> None:
-    """Save voice turn to STM (MongoDB) + update cross-session state.
+    """Save a voice turn to STM and run the same durable extraction as chat.
 
-    الهوية **والقناة** بيوصلوا من الجلسة: هالدالة بتشتغل ع خيط مجمّع مشترك،
-    وسياق الجلسة ما بيوصله. بلا الهوية بتنحفظ المحادثة لحساب غلط أو لولا حساب،
-    وبلا القناة بتنحفظ كلمة «الصوت» مكان «الروبوت» أو «مكالمة التطبيق» —
-    فالمالك يسأل «إيمتى قلتلك؟» وياخد جوابًا عامًّا.
+    Identity and channel come in as arguments (this runs on a pool thread).
     """
-    # Always, even when empty: a pool thread keeps its context between jobs, so
-    # `if user_id:` let an unpaired robot's turn land in whichever account last
-    # used this thread.
+    # Always set, even empty: pool threads keep context between jobs.
     set_voice_identity(user_id)
     set_voice_channel(channel)
     chat_id = _stm_chat_id()
@@ -287,12 +183,7 @@ def _save_voice_turn(user_text: str, sandy_text: str,
     try:
         from app.agent.graph.graph import _save_emotional_async, _stm_save
         _stm_save(chat_id, chat_id, user_text, sandy_text, via=get_voice_channel())
-        # **Same durable extraction as the chat turn.** The chat pulls
-        # relationships, lessons, milestones, style corrections and interests
-        # out of every message; the voice saved only the transcript. "My
-        # brother is Mohammad" said to the robot was forgotten the moment the
-        # short-term window rolled over, and the app never learned it at all.
-        # No mood on this path, so the emotional-moment half is skipped.
+        # Same durable extraction as the chat turn (no mood on this path).
         from app.api.voice_ws.tools import _voice_profile
         from app.utils.user_profiles import active_user_profile_context
         with active_user_profile_context(_voice_profile(chat_id)):
@@ -304,11 +195,10 @@ def _save_voice_turn(user_text: str, sandy_text: str,
         from app.agent.session_state import update_session_state
         update_session_state(chat_id, get_db(), platform="voice")
     except Exception:
-        logger.debug("ignoring non-critical error", exc_info=True)
+        logger.debug("[voice_ws] session state update skipped", exc_info=True)
 
 
 def load_recent_turns(user_id: str) -> List[Dict[str, Any]]:
-    """`_load_stm_history` for a pool thread: the identity travels as an
-    argument, and is written even when empty (see `_save_voice_turn`)."""
+    """_load_stm_history for a pool thread (identity as an argument)."""
     set_voice_identity(user_id)
     return _load_stm_history()

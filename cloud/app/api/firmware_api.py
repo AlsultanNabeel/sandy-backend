@@ -1,16 +1,10 @@
-"""Firmware update endpoints (see ``features/firmware_store``).
+"""Firmware update endpoints (features/firmware_store); ``board`` = brain (default), cam or room.
 
   GET  /api/firmware/manifest?device_id=&v=[&board=]   what this board should run (204 = nothing)
-  GET  /api/firmware/image/<version>[?board=]           the signed image, streamed
+  GET  /api/firmware/image/<version>[?board=]          the signed image, streamed
+  POST /api/firmware/publish | /api/firmware/rollout   Bearer SANDY_FIRMWARE_TOKEN
 
-``board`` is ``brain`` (the default — every robot in the field asks without it),
-``cam`` or ``room``.
-  POST /api/firmware/publish                   upload a release  (Bearer SANDY_FIRMWARE_TOKEN)
-  POST /api/firmware/rollout                   widen/narrow it   (Bearer SANDY_FIRMWARE_TOKEN)
-
-The two GETs are public on purpose: a robot has no account, and nothing here is
-secret — the image is useless without being signed by the owner's key, and the
-board verifies that signature before it installs anything.
+The GETs are public: robots have no account, and boards verify the signature.
 """
 
 from __future__ import annotations
@@ -57,8 +51,7 @@ def register_firmware_api(app):
         chunks = firmware_store.image_chunks(version, board)
         if chunks is None:
             return jsonify({"error": "not_found"}), 404
-        # The length of *this* release, not only the latest: the small boards
-        # read exactly Content-Length bytes and have no chunked decoder.
+        # Small boards read exactly Content-Length bytes (no chunked decoder).
         rel = firmware_store.release(version, board)
         size = rel.get("size") if rel else None
         headers = {"Content-Length": str(size)} if size else {}

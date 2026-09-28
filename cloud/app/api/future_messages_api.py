@@ -1,17 +1,10 @@
-"""Future Messages API — schedule a message to your future self.
+"""Future messages to yourself, over the same tenant-scoped store as the agent tool.
 
-User-facing view over the SAME store the agent's ``schedule_message_to_self`` tool
-writes to (``app.agent.future_messages``). Every read and write goes through that
-module's tenant-scoped handle, so the stored shape never diverges and a caller
-only ever sees their own messages. ``text`` is encrypted at rest, and delivery is
-passive — Sandy surfaces a message in her next reply once ``deliver_at`` passes.
+``text`` is encrypted at rest; Sandy surfaces a message in her next reply after ``deliver_at``.
 
-Guests (no tenant) get nothing.
-
-Endpoints:
-  GET    /api/future-messages            this user's upcoming scheduled messages
-  POST   /api/future-messages            schedule a new message (text + deliver_at)
-  DELETE /api/future-messages/<msg_id>   cancel one scheduled message
+  GET    /api/future-messages            upcoming messages
+  POST   /api/future-messages            schedule {text, deliver_at}
+  DELETE /api/future-messages/<msg_id>   cancel one
 """
 
 from __future__ import annotations
@@ -34,11 +27,7 @@ from app.utils.user_profiles import (
 
 
 def _parse_deliver_at(raw: str) -> datetime | None:
-    """Parse an ISO datetime from the client into an aware UTC datetime.
-
-    The app sends ISO 8601 (e.g. ``2027-05-16T09:00:00`` or with a ``Z``). A naive
-    value is treated as UTC so it matches how ``schedule_future_message`` stores it.
-    """
+    """ISO datetime from the client → aware UTC (naive counts as UTC), or None."""
     raw = (raw or "").strip()
     if not raw:
         return None

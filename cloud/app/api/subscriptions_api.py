@@ -1,23 +1,10 @@
-"""Web API for subscription state — RevenueCat-backed.
+"""Subscription state mirrored from RevenueCat (the billing source of truth).
 
-The mobile app sells a monthly subscription through RevenueCat (on the iOS
-side). RevenueCat is the source of truth for billing; this backend just mirrors
-each user's status so premium features can be gated server-side.
+  POST /webhook/revenuecat  machine caller; Authorization must equal REVENUECAT_WEBHOOK_AUTH.
+                            Always 200 after auth so RevenueCat doesn't retry-storm.
+  GET  /api/subscription    the signed-in user's status.
 
-Two endpoints:
-
-  POST /webhook/revenuecat  — RevenueCat's server-to-server webhook. No JWT
-      (it's a machine caller); instead, when ``REVENUECAT_WEBHOOK_AUTH`` is set
-      we require the ``Authorization`` header to equal it. We're deliberately
-      lenient about the body and ALWAYS answer 200 (except on a failed auth
-      check) so RevenueCat doesn't retry-storm us over a single bad event.
-
-  GET /api/subscription  — the signed-in user's current status, for the app to
-      show/hide premium UI. Mirrors what ``is_subscriber`` gates on.
-
-The webhook maps RevenueCat event ``type`` → our subscription status and writes
-it via ``users_store.set_subscription``. ``app_user_id`` from RevenueCat is our
-own ``user_id`` (the app sets it when configuring the RevenueCat SDK).
+RevenueCat's ``app_user_id`` is our ``user_id``.
 """
 
 from __future__ import annotations
@@ -35,17 +22,13 @@ from app.features import users_store
 
 logger = logging.getLogger(__name__)
 
-# RevenueCat event type → our subscription status.
-#   active   — paid (or still inside a cancelled period that hasn't expired yet)
-#   expired  — access has lapsed
-# A trial flag on the event overrides this to "trialing" (handled below).
+# RevenueCat event type → status; a trial period overrides to "trialing".
 _ACTIVE_EVENTS = {
     "INITIAL_PURCHASE",
     "RENEWAL",
     "UNCANCELLATION",
     "PRODUCT_CHANGE",
-    # CANCELLATION means auto-renew was turned off but the user keeps access
-    # until current_period_end, so it stays "active" too.
+    # Auto-renew off, but access lasts until the period ends.
     "CANCELLATION",
 }
 _EXPIRED_EVENTS = {
@@ -55,7 +38,7 @@ _EXPIRED_EVENTS = {
 
 
 def _dt_from_ms(ms: object) -> Optional[datetime]:
-    """RevenueCat timestamps are epoch milliseconds → aware UTC datetime."""
+    """Epoch milliseconds → aware UTC datetime."""
     try:
         if ms in (None, ""):
             return None
@@ -65,8 +48,6 @@ def _dt_from_ms(ms: object) -> Optional[datetime]:
 
 
 def _is_trial(event: dict) -> bool:
-    """RevenueCat signals a trial via a 'TRIAL' period type (field naming
-    varies across payload versions, so check the common spots)."""
     period = str(
         event.get("period_type")
         or event.get("periodType")
@@ -78,10 +59,7 @@ def _is_trial(event: dict) -> bool:
 def register_subscriptions_api(app):
     @app.route("/webhook/revenuecat", methods=["POST"])
     def revenuecat_webhook():
-        # Shared-secret auth (RevenueCat sends it in the Authorization header).
-        # Fail CLOSED when the secret is unset: without it we can't tell
-        # RevenueCat from an attacker POSTing a fake INITIAL_PURCHASE to grant
-        # themselves (or anyone) a free subscription. Same posture as JWT_SECRET.
+        # Fail closed without the secret, or anyone could grant a free subscription.
         expected = os.getenv("REVENUECAT_WEBHOOK_AUTH", "")
         if not expected:
             logger.error("[revenuecat] REVENUECAT_WEBHOOK_AUTH not set; refusing webhook")
@@ -91,8 +69,7 @@ def register_subscriptions_api(app):
             logger.warning("[revenuecat] webhook auth failed")
             return jsonify({"error": "unauthorized"}), 401
 
-        # From here on, never raise: RevenueCat retries non-2xx aggressively, so
-        # we swallow anything malformed and still answer 200.
+        # Never raise from here: RevenueCat retries non-2xx aggressively.
         try:
             body = request.get_json(silent=True) or {}
             event = body.get("event") or {}
@@ -125,8 +102,7 @@ def register_subscriptions_api(app):
             elif event_type in _EXPIRED_EVENTS:
                 status = "expired"
             else:
-                # Unknown / non-subscription event (e.g. TEST, TRANSFER): ack
-                # without touching state.
+                # Non-subscription event (TEST, TRANSFER, ...): ack only.
                 logger.info("[revenuecat] ignoring event type %s", event_type or "<none>")
                 return jsonify({"ok": True}), 200
 
@@ -155,6 +131,5 @@ def register_subscriptions_api(app):
         return jsonify({
             "status": sub.get("status", "none"),
             "plan": sub.get("plan", ""),
-            # From the document just read, not a second read of the same user.
             "is_subscriber": users_store.has_live_subscription(user),
         }), 200

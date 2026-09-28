@@ -1,31 +1,9 @@
-"""Photos API — the user-facing photo album (the "ألبوم" tool screen).
+"""Photo album API over features/photo_album (bytes in GridFS, metadata in sandy_photos).
 
-Reads/writes the SAME store the agent's photo tools use: photo bytes live in
-GridFS (``sandy_photo_files``) and metadata in ``sandy_photos`` (one flat,
-per-user collection keyed by ``chat_id``, with fields ``name``, ``grid_id``,
-``user_caption``, ``ai_caption``, ``tags[]``, ``created_at``). We reuse
-``app.features.photo_album`` end to end — no new schema.
+A tag is an album. Scoped to the caller; guests get nothing.
 
-Telegram decoupling: the storage layer is already Telegram-free (raw bytes in
-GridFS), so every route here works purely over REST. The OLD coupling lived only
-in the agent tools (they pulled the "last image" out of a Telegram session and
-handed bytes back for the bot to send). Here the app uploads bytes as base64 and
-fetches them back from a plain GET-bytes route. ``file_unique_id`` (a Telegram
-dedup key) is optional and simply left unset for app uploads.
-
-"Albums" are not a separate collection in this schema — a photo is tagged, and a
-tag is an album. ``GET /api/photos/albums`` therefore returns the distinct tags
-(each with a count); filtering by ``album`` filters by that tag.
-
-Scoped to the caller's own ``user_id`` via ``active_user_profile_context`` so
-each user only ever sees their own photos; guests get nothing (fail-closed).
-
-Endpoints:
-  GET    /api/photos                 this user's photos (optional ?album= / ?q=)
-  GET    /api/photos/albums          this user's tags (album name + count)
-  GET    /api/photos/<photo_id>/file the photo bytes (JPEG/PNG) for display
-  POST   /api/photos                 add a photo (base64 image + optional name/album)
-  DELETE /api/photos/<photo_id>      forget one photo (metadata + bytes)
+  GET /api/photos (?album= ?q=) · GET /api/photos/albums · GET /api/photos/<id>/file
+  POST /api/photos (base64 image + optional name/album) · DELETE /api/photos/<id>
 """
 
 from __future__ import annotations
@@ -44,23 +22,12 @@ from app.utils.user_profiles import (
 
 logger = logging.getLogger(__name__)
 
-# The GridFS bucket photo_album stores the raw bytes in (see
-# app.features.photo_album._FILES_COLLECTION). We read/delete a photo's bytes by
-# its grid id directly here so the by-id routes don't have to re-run a text
-# search the way the agent's query-based helpers do.
+# Same GridFS bucket as photo_album; by-id routes read it directly.
 _FILES_COLLECTION = "sandy_photo_files"
 
-# أكبر صورة بيقبلها الرفع (ثمن ميغا للبايتات الأصلية).
-#
-# جسم الطلب ككل مسقوف بـ MAX_CONTENT_LENGTH (١٦ ميغا)، بس هاد السقف موجود
-# للأجسام الضخمة مش لهالمسار: ست عشرة ميغا base64 يعني ست عشرة ميغا نص بالذاكرة
-# زائد اتناش ميغا بعد الفكّ، وgunicorn عندنا ستة عشر طلب متوازي (§2.1) — فرفعات
-# متزامنة لحالها بتاكل الدينو. الكاميرا عندها نفس الحارس ونفس السبب
-# (`devices_api._CAM_MAX_UPLOAD_BYTES`)، والفرق إنه هون صورة من تلفون مش من
-# مستشعر، فالسقف أعلى.
+# سقف الرفع (8 ميغا): حد الطلب العام 16 ميغا كبير لهالمسار مع 16 طلب متوازي.
 _MAX_PHOTO_BYTES = 8 * 1024 * 1024
-# نفس السقف بحساب base64، بنقيسه **قبل** الفكّ: base64 بتكبّر الحجم أربعة على
-# تلاتة، وقياس النص بعد ما نفكّه معناه إنّا خصّصنا الذاكرة اللي عم نحاول نمنعها.
+# نفس السقف بحروف base64، بنقيسه قبل الفكّ عشان ما نخصّص الذاكرة.
 _MAX_PHOTO_B64_CHARS = (_MAX_PHOTO_BYTES // 3 + 1) * 4
 
 
@@ -90,7 +57,6 @@ def _delete_bytes(mongo_db, grid_id) -> None:
 
 
 def _serialize(doc) -> dict:
-    """Map a ``sandy_photos`` doc to the app's flat photo shape (no bytes)."""
     return {
         "id": str(doc.get("_id", "")),
         "name": (doc.get("name") or "").strip(),
@@ -103,9 +69,7 @@ def _serialize(doc) -> dict:
 def register_photos_api(app, mongo_db=None):
     from app.features import photo_album
 
-    # The album singleton is normally primed when the agent facade imports; prime
-    # it here too so the API works even if registered before that import. Safe to
-    # call again (idempotent) — it just rebinds the same GridFS handle.
+    # Prime the album store in case the agent facade hasn't yet (idempotent).
     if mongo_db is not None and not photo_album.is_available():
         photo_album.init_photo_album(mongo_db)
 
@@ -126,8 +90,7 @@ def register_photos_api(app, mongo_db=None):
     @app.route("/api/photos/albums", methods=["GET"])
     @require_auth
     def get_albums(claims):
-        """Distinct tags for this user, each with how many photos carry it.
-        A tag is an album in this flat schema."""
+        """Distinct tags for this user with photo counts."""
         if _is_guest(claims):
             return jsonify({"items": []}), 200
         with active_user_profile_context(build_user_profile(claims)):
@@ -144,8 +107,7 @@ def register_photos_api(app, mongo_db=None):
     @app.route("/api/photos/<photo_id>/file", methods=["GET"])
     @require_auth
     def get_photo_file(claims, photo_id):
-        """Stream a single photo's bytes for display. Scoped: the lookup matches
-        only photos owned by this user, so one user can't read another's file."""
+        """Stream one photo's bytes; the lookup only matches this user's photos."""
         if _is_guest(claims) or mongo_db is None:
             return jsonify({"error": "not_found"}), 404
         from bson import ObjectId
@@ -170,16 +132,13 @@ def register_photos_api(app, mongo_db=None):
     @app.route("/api/photos", methods=["POST"])
     @require_tenant
     def add_photo(claims):
-        """Add a photo from the app: base64 image bytes + optional name/album.
-        Smart caption/tags are generated in the background (don't block the add)."""
+        """Add a base64 photo (or data URI); caption/tags are generated in the background."""
         body = request.get_json(silent=True) or {}
         image_b64 = (body.get("image") or "").strip()
         if not image_b64:
             return jsonify({"error": "image_required"}), 400
-        # Accept a bare base64 string or a "data:image/...;base64,XXXX" data URI.
         if "," in image_b64 and image_b64.lstrip().startswith("data:"):
             image_b64 = image_b64.split(",", 1)[1]
-        # القياس قبل الفكّ، مش بعده — شوف _MAX_PHOTO_B64_CHARS فوق.
         if len(image_b64) > _MAX_PHOTO_B64_CHARS:
             logger.warning("[photos_api] upload rejected: %s base64 chars is too big",
                            len(image_b64))
@@ -191,8 +150,7 @@ def register_photos_api(app, mongo_db=None):
         if not image_bytes:
             return jsonify({"error": "bad_image"}), 400
         if len(image_bytes) > _MAX_PHOTO_BYTES:
-            # حزام وحمّالات: النصّ ممكن يكون فيه فراغات أو أسطر فيمرق من قياس
-            # الحروف فوق ويطلع أكبر بعد الفكّ.
+            # Whitespace can slip past the character check.
             return jsonify({"error": "image_too_large"}), 413
 
         name = (body.get("name") or "").strip() or None
@@ -201,7 +159,6 @@ def register_photos_api(app, mongo_db=None):
         uid = current_user_id()
         if not uid:
             return jsonify({"error": "forbidden"}), 403
-        # A paid provider call — one unit of the caller's quota (`api/metering`).
         from app.api.metering import meter_claims
         refusal = meter_claims(claims)
         if refusal:
@@ -219,7 +176,6 @@ def register_photos_api(app, mongo_db=None):
     @app.route("/api/photos/<photo_id>", methods=["DELETE"])
     @require_auth
     def delete_photo(claims, photo_id):
-        """Forget one photo (metadata + GridFS bytes), scoped to this user."""
         if _is_guest(claims) or mongo_db is None:
             return jsonify({"ok": False}), (403 if _is_guest(claims) else 200)
         from bson import ObjectId
@@ -243,8 +199,7 @@ def register_photos_api(app, mongo_db=None):
 
 
 def _start_ai_tagging(photo_id, image_bytes, album) -> None:
-    """Generate the smart caption + tags off the request path (Vision is slow).
-    A user-chosen album is just a tag we make sure ends up on the photo."""
+    """Caption + tag the photo off the request path; a chosen album becomes a tag."""
     from app.agent.facade.agent import create_chat_completion
     from app.features import photo_album
 

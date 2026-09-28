@@ -1,19 +1,6 @@
-"""Goals API — the user-facing view of the goals Sandy tracks for you.
+"""The goals Sandy tracks (sandy_goals, same shape as the goal tools write).
 
-Reads the SAME store the agent's goal tools write to: ``sandy_goals`` (see
-``app/agent/tools/schemas/goal_tools.py``). Each goal doc is keyed by ``chat_id``
-(the user's own id) and carries ``text``, an optional ``deadline``, a ``status``
-of ``active``/``done``, plus ``created_at`` / ``updated_at`` timestamps. No new
-schema is invented here — add/edit/done mirror exactly what the tools persist.
-
-Scoped to the caller's own user_id (isolated); guests get nothing and every
-mutating route is fail-closed, just like memory_api / life_api.
-
-Endpoints:
-  GET    /api/goals             this user's goals (active + done)
-  POST   /api/goals             set a new goal
-  PATCH  /api/goals/<goal_id>   edit text / deadline / status (mark done or reopen)
-  DELETE /api/goals/<goal_id>   drop a goal
+  GET /api/goals · POST /api/goals · PATCH|DELETE /api/goals/<goal_id>
 """
 
 from __future__ import annotations
@@ -100,7 +87,6 @@ def register_goals_api(app, mongo_db=None):
         from bson.errors import InvalidId
 
         body = request.get_json(silent=True) or {}
-        # Only set fields that were sent; absent field = leave unchanged.
         changes = {}
         if "text" in body:
             text = (body.get("text") or "").strip()

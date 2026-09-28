@@ -1,17 +1,7 @@
-"""Auth for the apps: JWT access control.
+"""App auth: JWT issue/verify, route decorators, and login rate limiting.
 
-Owner tokens last a week, guest tokens two days. Logins are rate limited per IP,
-with an in-process sliding window as the fallback so brute-force protection
-survives a database outage. ``JWT_SECRET`` has no default — an empty secret would
-let anyone forge a token, so this refuses to issue rather than degrade.
-
-There is no visitor-approval flow, and the code for one is gone rather than
-dormant. It used to run over Telegram; when that channel was removed, the store
-and status halves survived and the approve/deny halves were left with nothing
-calling them. What that left behind was worse than dead code — a visitor could
-file a request and poll a status endpoint forever, because no path existed that
-could ever change the answer. A feature that cannot succeed should not be
-reachable. People sign in with email or a social account instead.
+``JWT_SECRET`` has no default: an empty secret would let anyone forge tokens.
+Rate limits live in Mongo with an in-process fallback during a DB outage.
 """
 from __future__ import annotations
 
@@ -25,26 +15,23 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
-import jwt  # PyJWT
+import jwt
 from flask import jsonify, request
 
 logger = logging.getLogger(__name__)
 
 _JWT_ALGO = "HS256"
-AUTH_TOKEN_HOURS = 24 * 7    # 7 days — any authenticated user (owner + signed-in)
-GUEST_TOKEN_HOURS = 48        # 2 days — visitors
+AUTH_TOKEN_HOURS = 24 * 7    # any signed-in user
+GUEST_TOKEN_HOURS = 48
 _RATE_WINDOW = 900            # 15 minutes
 _RATE_MAX = 5                 # max login attempts per window
 
-# Per-process sliding-window store used as a fail-closed fallback when Mongo is
-# unavailable, so brute-force protection survives a DB outage.
+# In-process fallback when Mongo is unavailable.
 _ip_hits: dict[str, deque] = {}
 _ip_hits_lock = threading.Lock()
 
 
 def _memory_rate_check(ip: str, scope: str = "login") -> Tuple[bool, int]:
-    """Per-process sliding-window fallback used when Mongo is unavailable.
-    Bounds brute force even during a DB outage (fail-closed-ish)."""
     now = time.monotonic()
     cutoff = now - _RATE_WINDOW
     key = f"{scope}:{ip}"
@@ -59,8 +46,6 @@ def _memory_rate_check(ip: str, scope: str = "login") -> Tuple[bool, int]:
 
 
 def _jwt_secret() -> str:
-    # No fallback: an empty secret means anyone could forge a token, so we
-    # refuse to sign or verify until JWT_SECRET is set.
     secret = os.getenv("JWT_SECRET", "")
     if not secret:
         raise RuntimeError("JWT_SECRET is not set; refusing to issue or verify tokens")
@@ -68,18 +53,7 @@ def _jwt_secret() -> str:
 
 
 def role_for_email(email: str) -> str:
-    """``owner`` for the addresses named in ``SANDY_OWNER_EMAILS``, else ``user``.
-
-    **Nobody was ever the owner.** Both login routes minted `role="user"`, and
-    the only other way to the top quota tier is `is_subscriber`, which the
-    owner's own account is not — so his phone ran on the free tier: forty
-    requests a day. An afternoon of testing spent it, and every message after
-    that came back "تعذر". The product's own line is that the owner is tenant
-    number one; this is the one place that was missing.
-
-    Comma-separated, compared case-insensitively. Unset means nobody is owner,
-    which is the right default for a multi-tenant product.
-    """
+    """``owner`` for addresses in SANDY_OWNER_EMAILS (comma-separated, case-insensitive), else ``user``."""
     from app.config import SANDY_OWNER_EMAILS
 
     wanted = {e.strip().lower() for e in SANDY_OWNER_EMAILS.split(",") if e.strip()}
@@ -107,13 +81,11 @@ def verify_token(token: str) -> Optional[dict]:
     except jwt.InvalidTokenError:
         return None
     except RuntimeError:
-        # JWT_SECRET missing: reject every token instead of failing open.
         return None
 
 
 def _claims_from_request() -> Optional[dict]:
-    """Extract + verify a token from the Authorization header, falling back to a
-    ``token`` field in the JSON body (same precedence the endpoints used inline)."""
+    """Verified claims from the Authorization header, else a ``token`` field in the JSON body."""
     auth_header = request.headers.get("Authorization", "")
     token_str = auth_header.removeprefix("Bearer ").strip()
     if not token_str:
@@ -125,10 +97,7 @@ def _claims_from_request() -> Optional[dict]:
 
 
 def require_auth(view):
-    """Reject the request with 401 unless a valid token is present.
-
-    On success the decoded claims are passed to the view as ``claims=``.
-    """
+    """401 unless a valid token is present; passes the claims as ``claims=``."""
 
     @functools.wraps(view)
     def _wrapped(*args, **kwargs):
@@ -141,20 +110,7 @@ def require_auth(view):
 
 
 def require_tenant(view):
-    """Auth + tenant scoping for a *mutating* endpoint (the common write path).
-
-    Composes on top of :func:`require_auth`: an unauthenticated request is
-    rejected with 401, a guest with 403 (guests get read-only demo tabs, never
-    writes), and the view then runs inside
-    ``active_user_profile_context(build_user_profile(claims))`` so every store
-    call resolves ``current_user_id()`` to THIS caller and stays tenant-scoped.
-    The view still receives ``claims=`` exactly as under :func:`require_auth`.
-
-    This replaces the per-endpoint boilerplate — ``if _is_guest(claims): return
-    403`` followed by ``with active_user_profile_context(build_user_profile(
-    claims)):`` — that was copied across every write handler, where one omission
-    was a guest-write hole or an unscoped (cross-tenant) call.
-    """
+    """Auth for a mutating endpoint: 401 without a token, 403 for guests, then runs in the caller's tenant context."""
 
     @functools.wraps(view)
     def _inner(*args, claims, **kwargs):
@@ -170,15 +126,12 @@ def require_tenant(view):
     return require_auth(_inner)
 
 
-# Auth state (login rate limit) lives in MongoDB. It used
-# to be in Redis, but we dropped Redis/Upstash. One collection, `sandy_auth`, with
-# a TTL index on `expire_at` (absolute expiry datetime) so entries self-clean.
+# Login rate-limit state: sandy_auth, TTL-indexed on expire_at.
 _AUTH_COLL = "sandy_auth"
 _auth_index_ready = False
 
 
 def _auth_coll():
-    """MongoDB collection for auth state, or None if Mongo isn't wired up."""
     global _auth_index_ready
     try:
         from app.db import get_db
@@ -198,12 +151,7 @@ def _auth_coll():
 
 
 def check_rate_limit(ip: str, scope: str = "login") -> Tuple[bool, int]:
-    """Returns (allowed, attempts_remaining). Falls back to an in-memory
-    per-process limiter when Mongo is unavailable (fail-closed-ish).
-
-    ``scope`` separates independent limiters (e.g. "login" vs "access" vs
-    "email") so spamming one endpoint can't consume another's budget.
-    """
+    """(allowed, attempts_remaining); ``scope`` keeps limiters independent."""
     coll = _auth_coll()
     if coll is None:
         logger.warning(

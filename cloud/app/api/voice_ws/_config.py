@@ -7,44 +7,11 @@ import os
 logger = logging.getLogger(__name__)
 
 _HMAC_KEY: bytes = os.environ.get("SANDY_WS_HMAC_KEY", "").encode()
-_LEGACY_SECRET: str = os.environ.get("ROBOT_WS_SECRET", "")          # backward compat
-# **The Live model, and why this is a list.**
-#
-# `gemini-2.5-flash-native-audio-latest` was the configured default and the
-# service refused every session with
-#
-#     1007 — The audio content type (CONTENT_TYPE_AUDIO) is not supported
-#            for this model configuration.
-#
-# — the handshake succeeded, the memory seed went out, and the first audio frame
-# closed the socket. Nothing in this repo was wrong; the alias no longer names a
-# model that accepts audio input on the Live API, and Google renames these
-# faster than a deploy cycle.
-#
-# So the session tries these in order and keeps the first that connects, for the
-# life of the process (`_config.live_model()`). A pinned name that goes stale
-# takes voice down completely and silently; a list degrades to "the newest one
-# that still works" and says in the log which that was.
-#
-# `SANDY_LIVE_MODEL` goes **first**, and does not exclude the rest. It used to be
-# the only entry when set, which turned the escape hatch into a trap: the config
-# var held `gemini-2.5-flash-native-audio-latest`, that name refuses audio input,
-# and because it was the whole list there was nothing to fall through to. Voice
-# was down with the fallback logic sitting right there, disabled by a setting
-# whose purpose was to help.
-# **These are the names the service itself reported**, on 2026-08-29, filtered
-# to the ones that take audio in and give audio back. The three that were here
-# before were all dead — every session spent about a second and a half failing
-# through them before discovery found a live one, and printed three warnings
-# doing it.
-#
-# Left out on purpose, from the same listing:
-#   gemini-3.5-transcribe-live        refuses the AUDIO response modality
-#   gemini-3.5-live-translate-preview a translator, not a conversation
-#   gemini-robotics-er-2-streaming    a different product entirely
-#
-# When these go stale too — and they will — `_discover_live_models` asks the API
-# and the log names what it found. This list is the fast path, not the truth.
+_LEGACY_SECRET: str = os.environ.get("ROBOT_WS_SECRET", "")
+# Live model candidates, tried in order; the first that connects is pinned (and
+# persisted) so later sessions skip dead names. SANDY_LIVE_MODEL goes first but
+# never excludes the rest: Google renames these faster than a deploy cycle, and
+# _discover_live_models asks the API when all of these are stale.
 _LIVE_MODEL_CANDIDATES: tuple[str, ...] = (
     "gemini-2.5-flash-native-audio-latest",
     "gemini-2.5-flash-native-audio-preview-12-2025",
@@ -54,21 +21,14 @@ _LIVE_MODEL_CANDIDATES: tuple[str, ...] = (
 _LIVE_MODEL: str = os.environ.get("SANDY_LIVE_MODEL", "")
 
 _live_model_working: str = ""
-# القراءة من القاعدة بتصير مرّة بعمر العمليّة، مش كل مكالمة.
+# تثبيت آخر موديل اشتغل بيعيش بالقاعدة؛ بينقرا مرّة بعمر العمليّة.
 _live_model_loaded: bool = False
 _LIVE_MODEL_COLL = "sandy_runtime"
 _LIVE_MODEL_ID = "live_model"
 
 
 def _load_pinned_live_model() -> None:
-    """آخر موديل اشتغل فعليًّا — من القاعدة، مرّة وحدة.
-
-    **التثبيت بالذاكرة بيموت مع العمليّة.** هيروكو بيشغّل عاملين وبيعيد تشغيلهم
-    كل يوم، فكل عامل جديد بيرجع يمشي عالقائمة من أوّلها — ولمّا تبوظ الأسماء
-    الأولى (وهاد صار: أربعة أسماء ماتوا مع بعض)، كل مكالمة بتدفع ثانية ونص
-    محاولات فاشلة وتلات تحذيرات، لكل عامل، كل يوم. اللي تعلّمناه لازم يعيش
-    أطول من العمليّة اللي تعلّمته.
-    """
+    """آخر موديل اشتغل فعليًّا — من القاعدة، مرّة وحدة (العمّال بيتعاد تشغيلهم كل يوم)."""
     global _live_model_working, _live_model_loaded
     if _live_model_loaded:
         return
@@ -84,7 +44,7 @@ def _load_pinned_live_model() -> None:
         if name and not _live_model_working:
             _live_model_working = name
             logger.info("[voice_ws] last working live model was %s", name)
-    except Exception as exc:  # noqa: BLE001 — تفضيل، مش شرط
+    except Exception as exc:  # noqa: BLE001
         logger.debug("[voice_ws] pinned model read skipped: %s", exc)
 
 
@@ -107,13 +67,7 @@ def _persist_live_model(name: str) -> None:
 
 
 def live_model_candidates() -> tuple[str, ...]:
-    """What to try, in order: the preferred one first, then everything else.
-
-    Preference is the env var if set, otherwise whichever name last worked in
-    this process. Neither one removes the others from the list — a preference
-    that stops working has to be survivable, or it is a single point of failure
-    wearing the clothes of a convenience.
-    """
+    """Preferred model (env var, else last working) first, then every other candidate."""
     _load_pinned_live_model()
     order: list[str] = []
     for name in (_LIVE_MODEL, _live_model_working, *_LIVE_MODEL_CANDIDATES):
@@ -123,12 +77,12 @@ def live_model_candidates() -> tuple[str, ...]:
 
 
 def remember_live_model(name: str) -> None:
-    """Pin the one that worked, so later sessions do not re-walk the list."""
+    """Pin the model that worked."""
     global _live_model_working
     if name and name != _live_model_working:
         _live_model_working = name
         logger.info("[voice_ws] live model settled on %s", name)
-        # بالخلفية: المكالمة صارت مفتوحة وصاحبها بيستنّى، وهاي كتابة للي بعده.
+        # بالخلفية: المكالمة مفتوحة وصاحبها بيستنّى.
         try:
             from app.utils.thread_pool import submit_background
 
@@ -143,17 +97,12 @@ def pinned_live_model() -> str:
 
 
 def forget_live_model(name: str) -> None:
-    """Unpin a model that has just failed in a live session.
-
-    The probe cannot catch everything, and a name that worked yesterday can stop
-    working today. Without this, one bad answer would be repeated for the life
-    of the dyno, because the failing model stays the preferred one.
-    """
+    """Unpin a model that just failed in a live session, so it isn't retried for the dyno's life."""
     global _live_model_working
     if name and name == _live_model_working:
         _live_model_working = ""
         logger.warning("[voice_ws] live model %s failed in session — unpinned", name)
-        # وبتنشال من القاعدة كمان، وإلا كل عامل جديد بيرجع يثبّتها.
+        # وبتنشال من القاعدة كمان.
         try:
             from app.utils.thread_pool import submit_background
 
@@ -163,131 +112,64 @@ def forget_live_model(name: str) -> None:
 
 
 def _reset_live_model_cache() -> None:
-    """للاختبارات: خلّي القراءة من القاعدة تصير من جديد."""
+    """للاختبارات."""
     global _live_model_working, _live_model_loaded
     _live_model_working = ""
     _live_model_loaded = False
+
+
 _ANTI_REPLAY_MS: int = 30_000
 
-# Phase 4 (V4.4–V4.6): على المايك (اللابتوب) نتأكد إنه صوت المالك قبل أمر حسّاس.
-# على التلي/الموقع الهوية معروفة، فالتحقّق هون فقط. مفعّل بـ SANDY_REQUIRE_SPEAKER_AUTH=1.
+# على المايك نتأكد إنه صوت المالك قبل أمر حسّاس (SANDY_REQUIRE_SPEAKER_AUTH=1).
 _SENSITIVE_TOOLS = {
     "task_delete", "reminder_delete",
     "schedule_message_to_self",
 }
-# نحتفظ بآخر ~5 ثوانٍ من صوت الجهاز (16kHz·16bit·mono = 32KB/s) للتحقّق عند أمر حسّاس.
+# آخر ~5 ثوانٍ من صوت الجهاز (16kHz·16bit·mono = 32KB/s) للتحقّق عند أمر حسّاس.
 _RECENT_AUDIO_MAX_BYTES = 160_000
-# أقل صوت كافٍ لتحقّق موثوق ≈ 0.5s (16kHz·16bit = 32KB/s → 16KB).
+# أقل صوت لتحقّق موثوق ≈ 0.5s.
 _MIN_VERIFY_BYTES = 16_000
 
-# كشف الكلام عندنا (VAD) — نتحكّم بنهاية الدور عشان نتحقّق من الصوت قبل ما تردّ ساندي.
-# **الكلام أعلى من الغرفة، مش أعلى من رقم.**
-#
-# رقم ثابت ما بيزبط بغرفتين. عالي كتير: البوابة ما بتفتح وجيميناي بيوصله صمت.
-# واطي كتير أو في مروحة: كل إطار بيصير كلام، والصمت اللي بينهي الدور ما
-# بيتجمّع أبداً، وما حدا بيقول لجيميناي إنّ السؤال خلص — وهاي اللي صارت.
-#
-# فالأرضية بتنقاس: بتنزل فوراً لأي لحظة أهدى وبترجع تطلع ببطء — هيك بتتصرّف
-# الغرفة. والكلام هو اللي بيعلى عنها بفرق واضح، مع حد أدنى مطلق عشان غرفة
-# ساكتة ما تخلّي حفيف ضجّة جملة.
+# VAD عندنا بيحدّد نهاية الدور. العتبة نسبة فوق أرضية الغرفة المقاسة (بتنزل
+# فوراً للحظة أهدى وبتطلع ببطء)، مع حد أدنى مطلق.
 _VAD_FLOOR_FACTOR = 2.5
 _VAD_RMS_FLOOR = 120.0
-# نافذة الأرضية: أهدأ لحظة خلال آخر تلات ثواني. ومنستنى شوية إطارات قبل ما
-# نصدّقها — قبلها منستعمل الحد الأدنى.
-#
-# **بالوقت، مش بعدد الإطارات.** كانت أربعة وعشرين إطارًا، وهاد رقم صحيح للوح
-# لحاله: إطاره مية وتمانية وعشرين جزء من الألف، يعني تلات ثواني، وبهالمدة
-# أكيد في شهقة أو سكتة بتكون هي الغرفة. التطبيق بيبعت إطارًا كل أربعين جزء
-# تقريبًا، فنفس الأربعة وعشرين صاروا **ثانية وحدة** — وثانية من نصّ جملة ما
-# فيها ولا سكتة، فأهدأ لحظة فيها هي أهدأ **كلمة**، والعتبة بتطلع فوق الصوت
-# وبتضلّ فوقه. النتيجة بالسجل: مكالمة واحد وتلاتين ثانية، الإطارات واصلة،
-# و«من الجهاز للبث: صفر إطار» — البوابة ما فتحت ولا مرّة.
+# أرضية الغرفة: أهدأ لحظة بآخر تلات ثواني — بالوقت مش بعدد الإطارات، لأنّ
+# إطار التطبيق 40ms وإطار اللوح 128ms.
 _VAD_FLOOR_MS = 3000.0
 _VAD_FLOOR_MIN_FRAMES = 4
-# نافذة تانية أطول، بتشتغل شبكة أمان: لو ضلّينا نسمع صوت ولا فتحت البوابة ولا
-# مرّة لهالمدة، معناها العتبة غلط — فمنرجع نحسبها من أهدأ لحظة بنص دقيقة، وهاي
-# بأي مكالمة حقيقية بتكون الغرفة. أحسن من الرجوع للحد الأدنى المطلق، لأنّ غرفة
-# فيها مروحة بيخلّي البوابة مفتوحة ع طول والدور ما بينتهي — نفس الصمت، سبب تاني.
+# شبكة أمان: لو ما فتحت البوابة لهالمدة مع وجود صوت، العتبة غلط؛ منعيد الحساب من أهدأ لحظة بنص دقيقة.
 _VAD_ROOM_MS = 30000.0
 _VAD_STUCK_MS = 3000.0
-# سقف لتقدير الغرفة **قبل ما تفتح البوابة ولا مرّة**.
-#
-# أول ثانية بالمكالمة هي أخطر لحظة للتقدير: اللي بالطابور وقت ما بلّشنا ممكن
-# يكون صوت صاحبه نفسه — بيحكي وهو لسا بيفتح المكالمة — فأهدأ إطار موجود هو
-# أهدأ **كلمة**، والعتبة بتنبني فوق صوته وما بتفتح أبدًا. وغرفة ساكنة شدّتها
-# نادرًا بتعدّي هالرقم، فالسقف بيمنع الخطأ هاد وبس. بعد ما تفتح البوابة مرّة،
-# صار عنا قياس حقيقي للغرفة بين الجُمَل، والسقف بيرتفع.
+# سقف تقدير الغرفة قبل أول فتح للبوابة: أول ثانية ممكن تكون صوت صاحبها نفسه.
 _VAD_ROOM_MAX = 600.0
-# سقف لطول الدور الواحد. لو صار التقدير واطي كتير، كل إطار بيصير كلام، والصمت
-# اللي بينهي الدور ما بيتجمّع أبدًا — والتطبيق ما بيوقف الإرسال، فحتى الفجوة ما
-# بتجي. ربع دقيقة كلام متواصل معناها في خلل، مش سؤال.
+# سقف طول الدور الواحد: ربع دقيقة كلام متواصل معناها خلل.
 _VAD_MAX_UTTER_MS = 15000.0
 
-# حجم القطعة اللي بتنبعت لجيميناي. توثيقهم بيطلب من عشرين لأربعين جزء من الألف؛
-# اللوح بيبعت مية وتمانية وعشرين. أربعين × ستاشر ألف عيّنة × بايتين = ١٢٨٠ بايت.
+# توثيق جيميناي بيطلب قطع 20–40ms: 40ms × 16kHz × 2 بايت = 1280.
 _CHUNK_BYTES = 1280
 
 
-# حدود الجلسة من توثيق جوجل: الصوت بيتجمّع حوالي خمسة وعشرين رمز بالثانية،
-# فبنضغط عند خمسة وعشرين ألف وبنخلّي نافذة تمن آلاف. بدونها الجلسة بتموت عند
-# ربع ساعة، والاتصال نفسه عمره حوالي عشر دقايق.
+# ضغط سياق الجلسة (وإلا بتموت عند ربع ساعة).
 _COMPRESS_TRIGGER_TOKENS = 25_000
 _COMPRESS_WINDOW_TOKENS = 8_000
-# صمت ينهي الدور. سبعمية كانت قصيرة: وقفة تفكير بنصّ جملة بتعدّيها، فبتوصل
-# جيميناي نص السؤال وبتردّ قبل ما يخلص. وتطويلها لحالها بيأخّر كل ردّ —
-# فمعها `_still_the_same_sentence`، اللي بيرجّع الدور لو كمّل بعد الإقفال
-# وقبل ما تكون قالت إشي.
+# صمت ينهي الدور (مع `_still_the_same_sentence` اللي بيرجّع الدور لو كمّل جملته).
 _VAD_SILENCE_MS = int(os.getenv("SANDY_VAD_SILENCE_MS", "900"))
-_VAD_MIN_UTTER_MS = int(os.getenv("SANDY_VAD_MIN_MS", "300"))      # أقصر من هيك = نتجاهله
-# اللوح صار يوقف الإرسال لمّا حدا يبطّل يحكي، فنهاية السؤال بتوصل **كلا-وصول**.
-# نفس مدة الصمت: فجوة بهالطول معناها الدور خلص.
+_VAD_MIN_UTTER_MS = int(os.getenv("SANDY_VAD_MIN_MS", "300"))      # أقصر = نتجاهله
+# اللوح بيوقف الإرسال لمّا يسكت؛ فجوة بطول الصمت معناها الدور خلص.
 _SILENCE_GAP_S = _VAD_SILENCE_MS / 1000.0
-# قدّيش لازم يحكي عشان نعتبرها مقاطعة حقيقية وهي عم تردّ. أقصر من هيك بيصير
-# ضجّة، وكل «نهاية دور» بتلغي الردّ اللي قبلها.
+# أقل كلام يعتبر مقاطعة وهي عم تردّ (أقصر = ضجّة).
 _BARGE_MIN_MS = 1200
-# ونفس الحدّ، بس لمّا تكون لسا ما قالت ولا كلمة من وقت ما سكّر الدور: هون اللي
-# بيتلغي توليد ما طلع منه صوت، فالكلفة أخفّ، والحالة الشائعة هي إنه بيكمّل
-# جملته. شوف `_barge_bar_ms`.
+# نفس الحدّ لمّا ما قالت ولا كلمة بعد إقفال الدور (غالبًا بيكمّل جملته). شوف `_barge_bar_ms`.
 _CONTINUE_MIN_MS = 800
-# سقف للكلام المحجوز قبل ما نقرّر إنها مقاطعة — ثانيتين، كفاية للجملة اللي بدها
-# تقاطع، وما بتخلّي الذاكرة تكبر لو الغرفة ضجّة متواصلة.
-#
-# **بالوقت، مش بعدد الإطارات** — نفس الخلل يلّي كان بنافذة الأرضية، ومكان تاني.
-# ستّاشر إطار من اللوح تنتين ثانية؛ ستّاشر إطار من التطبيق **ستّمية وأربعين جزء
-# من الألف** — أقصر من حدّ المقاطعة نفسه. يعني الإطارات المحجوزة ما كانت تكفي
-# تعدّي الحدّ ولا مرّة، وبأي طول حكي: المقاطعة من التطبيق كانت مستحيلة حسابيًّا،
-# حتى لو المايك كان مفتوح.
+# سقف الكلام المحجوز قبل قرار المقاطعة — بالوقت، مش بعدد الإطارات.
 _HELD_MS_MAX = 2000.0
-# كم إطار مسموح يكون بالطابور ولسا منعتبر إنّا حيّ. بثّ بالوقت الحقيقي بيخلّي
-# الطابور صفر أو واحد؛ أكتر من هيك معناها في كلام مخزون لسا ما مرّ.
+# أكتر من هيك بالطابور معناها في كلام مخزون لسا ما مرّ.
 _BACKLOG_FRAMES = 2
-# **مين بيقرّر إنك خلصت حكي، بمكالمة التطبيق.**
-#
-# كاشفنا بيقيس **الشدّة**: الصوت أعلى من الغرفة = كلام، وتسعمية جزء من الألف
-# تحتها = خلص. وهاد بالضبط اللي بيقطعك: وقفة تفكير بنصّ جملة ما بتفرق عنده عن
-# آخر الجملة، لأنه ما بيسمع **كلام**، بيسمع **صوت**.
-#
-# جيميناي نفسه عنده كاشف مبني ع نموذج، وهو اللي شغّال بتطبيق جيميناي — والوقفات
-# هناك ما بتقطع السؤال، لأنه مصمّم للحوار. وكمان هو اللي بيقرّر المقاطعة وبيبعت
-# «انقطع»، فالمقاطعة بتصير زي عندهم بالضبط بدل ما نعيد اختراعها.
-#
-# ليش كان مطفّى: **الروبوت**، مش التطبيق. اللوح القديم كان يبثّ الغرفة بلا
-# توقّف، وكاشف جيميناي ما لقى صمتًا يعتبره نهاية. فالروبوت بيضلّ عكاشفنا، وهاد
-# للتطبيق بس. والحساسية «واطية» بالطرفين: بطيء يعتبر ضجّة بداية كلام، وبطيء
-# يعتبر وقفة نهاية كلام — العكس تمامًا من اللي كان بيزعجك.
-#
-# **وجرّبناه، وما زبط — فرجع الافتراضي لكاشفنا.** أول مكالمة حقيقية عليه:
-# اثنين وعشرين ثانية حكي قبل ما يعتبر إنه في دور أصلاً، وبعد الدور الوحيد
-# أربعين ثانية حكي عالي (أعلى إطار ستة آلاف ومية) وما ردّ ولا مرّة. والتفريغ
-# طلع «Bra, hết.» و«Hi, how are you?» لكلام عربي — يعني كان بيلقط فتافيت من
-# الجمل. كاشفنا بالمكالمات اللي قبل ردّ كل مرّة، وتفريغه عربي صحيح.
-#
-# `SANDY_APP_TURNS=gemini` بيرجّع التجربة بلا بناء تطبيق.
+# مين بيقرّر نهاية الدور بمكالمة التطبيق: كاشفنا افتراضيًا. كاشف جيميناي
+# (SANDY_APP_TURNS=gemini) انجرّب وما زبط (تأخير وتفريغ غلط للعربي).
 _APP_TURNS_BY_GEMINI: bool = os.getenv("SANDY_APP_TURNS", "ours").strip().lower() == "gemini"
-# **والمايك المفتوح قرار لحاله، مش جزء من اللي فوق.** هو اللي بيخلّي المقاطعة
-# ممكنة، وبيشتغل مع كاشفنا: حدّ المقاطعة وحجز الإطارات هون من الأول، وكانوا
-# بس ما بيوصلهم صوت وهي بتحكي. السيرفر بيقولو للتطبيق بالمصافحة، فالتراجع
-# (`SANDY_APP_DUPLEX=0`) كمان من إعدادات هيروكو بلا بناء.
+# المايك المفتوح بالتطبيق (بيخلّي المقاطعة ممكنة)؛ SANDY_APP_DUPLEX=0 للتراجع.
 _APP_DUPLEX: bool = os.getenv("SANDY_APP_DUPLEX", "1").strip().lower() not in {"0", "false", "off", "no"}
 _APP_SILENCE_MS = 900
 _APP_PREFIX_MS = 300

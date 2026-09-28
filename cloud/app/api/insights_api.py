@@ -1,12 +1,4 @@
-"""Insights API — the weekly summary screen.
-
-  GET /api/insights/weekly?lang=ar|en
-      this week (last 7 days) vs the 7 before it: tasks, reminders, focus,
-      habits, expenses, journal, reading, chat — plus one warm sentence from
-      Sandy (model-written once per ISO week, template fallback).
-
-Guests get an obviously-sample payload (``demo: true``) like the other tabs.
-"""
+"""GET /api/insights/weekly?lang=ar|en — this week vs last; guests get a demo payload."""
 
 from __future__ import annotations
 

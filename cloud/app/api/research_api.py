@@ -1,16 +1,6 @@
-"""External web-research API: web search + place search.
+"""GET /api/research?q=...&kind=web|places — raw Exa / Google Places results for the iOS Search tab.
 
-A direct REST surface over the same engines the agent's research_web /
-research_places tools use (Exa + Google Places) — but returns
-structured results (titles / urls / snippets) with no LLM summarization and no
-agent session, for the iOS Search tab.
-
-Guest/authenticated split like the rest of the product: guests get a tiny static
-demo payload (so visitors see the shape without burning Exa/Places quota); every
-authenticated user runs a real search.
-
-Endpoints:
-  GET /api/research?q=...&kind=web|places   structured search results
+Guests get a static demo payload so they don't spend quota.
 """
 
 from __future__ import annotations
@@ -29,7 +19,6 @@ def _is_guest(claims) -> bool:
     return claims.get("role", "guest") == "guest"
 
 
-# Tiny static samples so visitors see the result shape without spending quota.
 _DEMO_WEB = [
     {
         "title": "نتيجة بحث تجريبية",
@@ -68,7 +57,6 @@ def register_research_api(app):
             demo = _DEMO_WEB if kind == "web" else _DEMO_PLACES
             return jsonify({"kind": kind, "items": demo, "demo": True}), 200
 
-        # A paid provider call — one unit of the caller's quota (`api/metering`).
         from app.api.metering import meter_claims
         refusal = meter_claims(claims)
         if refusal:
@@ -81,9 +69,7 @@ def register_research_api(app):
             try:
                 items = search_places(q, key, max_results=8)
             except PlacesUnavailable as exc:
-                # 503, not an empty 200. An empty result set is an answer; a
-                # search that never ran is not, and the app must be able to tell
-                # its user which of the two it is looking at.
+                # 503, not an empty 200: "search didn't run" isn't "nothing found".
                 logger.error("[research] places unavailable: %s", exc)
                 return jsonify({"error": "places_unavailable"}), 503
             return jsonify({"kind": "places", "items": items, "demo": False}), 200

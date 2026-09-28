@@ -1,3 +1,5 @@
+"""Flask app factory: health, chat/agent (plain + SSE), image routes, and every API module."""
+
 import base64
 import json
 import logging
@@ -15,32 +17,23 @@ from app.agent.semantic_memory import semantic_memory_stats
 logger = logging.getLogger(__name__)
 
 
-# سقف طول الرسالة النصية قبل أي استدعاء نموذج — يمنع انفجار التوكنات/الكلفة.
-# (حجم جسم الطلب ككل مسقوف بـ MAX_CONTENT_LENGTH داخل create_app.)
+# سقف طول الرسالة النصية قبل أي استدعاء نموذج (كلفة/توكنات).
 _MAX_MESSAGE_CHARS = 6000
 
-# سقف حجم جسم الطلب (١٦ ميغابايت): يسمح بصور base64 المعقولة ويرفض الأجسام
-# الضخمة مبكراً (413) قبل قراءتها للذاكرة — حاجز إغراق.
+# سقف جسم الطلب: يرفض الأجسام الضخمة (413) قبل ما تنقرا للذاكرة.
 _MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 
-# سقف نص وصف الصورة (توليد وتعديل) قبل ما ينبعت للمزوّد.
-#
-# الرسالة النصية فوق عندها سقفها، وجسم الطلب ككل مسقوف — بس وصف الصورة ما كان
-# عليه ولا واحد منهن يخصّه: بتقدر تبعت ميغا نص جوا حقل `prompt` فيمرق (أصغر من
-# سقف الجسم) ويوصل للمزوّد كما هو، فندفع كلفة نداء بيرفضه المزوّد بعد ثانية
-# ثانية. الرفض لازم يصير هون، مجّاناً وفوراً. ألفين حرف أطول بمرّات من أي وصف
-# صورة حقيقي، وتحت حدود المزوّدين.
+# سقف وصف الصورة: نرفض هون مجّاناً بدل ما ندفع نداء المزوّد بيرفضه.
 _MAX_IMAGE_PROMPT_CHARS = 2000
 
 
-# أقصى عدد رسائل بنحفظه من سجل شات الويب — الأحدث بس.
+# أقصى عدد رسائل بنحفظه من سجل شات الويب (الأحدث).
 _MAX_HISTORY_MESSAGES = 500
 
 # مدة بقاء سجل شات الزائر قبل انتهائه (٤٨ ساعة).
 _GUEST_CHAT_TTL = timedelta(hours=48)
 
-# A retried send (same `client_msg_id`) whose first run is still going: the
-# stream route waits this long for that run's reply before giving up.
+# A retried send whose first run is still going waits this long on the stream route.
 _DUPLICATE_WAIT_S = 120
 _STILL_PROCESSING = {
     "error": "still_processing",
@@ -53,31 +46,23 @@ def create_app(
     mongo_db=None,
     semantic_memory_stats_fn=semantic_memory_stats,
 ):
-    # Imported here (not at module top) so importing this module stays free of
-    # the PyJWT dependency until the app is actually built. The decorators below
-    # are applied when this factory runs, which is after import.
-    # `check_owner_password`, `check_rate_limit` و`make_token` انشالوا من هون:
-    # كانوا موجودين للمسار `/api/auth` تبع كلمة سرّ المالك، وهو انحذف. لسا
-    # مستعملين بمكانهم الصحيح — تسجيل الدخول بأبل وجوجل والإيميل.
+    # Imported here so importing this module doesn't need PyJWT.
     from app.api.auth_handlers import require_auth
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = _MAX_CONTENT_LENGTH
-    from app.config import APP_ENV, RELEASE_ID  # already defined in config.py
+    from app.config import APP_ENV, RELEASE_ID
     _frontend = os.getenv("FRONTEND_URL", "").strip()
     if _frontend:
         _cors_origins = _frontend
     elif APP_ENV != "prod":
-        _cors_origins = "*"            # dev convenience only
+        _cors_origins = "*"            # dev only
     else:
         logger.error("[server] FRONTEND_URL not set in prod; CORS restricted to same-origin")
-        _cors_origins = []             # deny cross-origin rather than allow all
+        _cors_origins = []
     CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
 
-    # Typed application errors (app.errors.SandyError) become a consistent
-    # {"error": <code>} response with the right status, so handlers can raise
-    # intent (ValidationError, ForbiddenError, ConfigError, ...) instead of
-    # hand-rolling a jsonify+status per site. Server-side (5xx) causes are logged.
+    # Typed errors (app.errors.SandyError) become {"error": <code>} with their status.
     from app.errors import SandyError
 
     @app.errorhandler(SandyError)
@@ -96,8 +81,7 @@ def create_app(
                     {"ok": True, "database": getattr(mongo_db, "name", None)}
                 )
             except Exception as exc:  # noqa: BLE001 — a health probe reports, never raises
-                # The type, not the message: this endpoint is public, and a
-                # driver error names the cluster host. The log has the detail.
+                # Type only: this endpoint is public and driver errors name the host.
                 logger.warning("[health] mongo ping failed: %s", exc)
                 mongo_status["error"] = type(exc).__name__
 
@@ -116,11 +100,7 @@ def create_app(
         return jsonify(
             {
                 "ok": bool(overall_ok),
-                # Which build is actually serving. Without it, "did my fix reach
-                # production?" is unanswerable from outside — the same question
-                # the firmware version field exists to answer for the board, and
-                # for the same reason: a deploy that silently did not happen
-                # looks exactly like a fix that did not work.
+                # Which build is serving.
                 "release": RELEASE_ID,
                 "mongo": mongo_status,
                 "chroma": chroma_status,
@@ -208,32 +188,12 @@ def create_app(
     from app.api.firmware_api import register_firmware_api
     register_firmware_api(app)
 
-    # Auth endpoints
-    #
-    # `POST /api/auth` — the shared owner password — is gone.
-    #
-    # It logged anyone who knew one password into an account called "owner",
-    # minted from an environment variable rather than belonging to a person.
-    # That was workable while there was exactly one user and unfixable the
-    # moment there were two: everybody who typed the password became the *same*
-    # person, sharing one journal, one set of expenses and one voiceprint.
-    #
-    # It also could not be deleted, recovered, or handed to a second customer —
-    # so every question about selling a robot ended here.
-    #
-    # Sign-in is Apple, Google, or email now. Each mints a real account with its
-    # own id, and every read and write in the system is already scoped to it.
-
-    # The tier quota lives in `app.api.metering`, shared with every other route
-    # that spends money on a provider.
+    # Sign-in is Apple, Google or email (the shared owner-password /api/auth is gone).
     from app.api.metering import limit_response as _limit_response
     from app.api.metering import meter_or_error as _meter_or_error
 
     def _guest_media_gate(claims):
-        """Meter one shared guest unit for the image/vision endpoints and, if the
-        guest is over-limit or blocked, return a ready ``(body, status)`` tuple;
-        otherwise None. No-op for authenticated users (metered in /api/agent).
-        Centralizes the visitor-approval boilerplate the media endpoints repeated."""
+        """Charge one shared guest unit; a ready ``(body, status)`` refusal, or None."""
         if claims.get("role") != "guest":
             return None
         from app.agent.guest_usage import check_and_increment, guest_label
@@ -256,16 +216,7 @@ def create_app(
         return None
 
     def _media_gate(claims):
-        """Meter one image-model call for whoever is asking.
-
-        **Signed-in users were not metered here at all.** The three image
-        endpoints below said "authenticated users are metered in /api/agent" —
-        but they are separate routes, so a free account calling them directly
-        generated and analysed images, each a paid Azure call, with no quota
-        whatsoever. Guests go through the visitor budget as before; everyone
-        else is charged against the same tier quota as a chat message.
-        Returns a ready ``(body, status)`` refusal, or None to proceed.
-        """
+        """Meter one image-model call (guest budget or tier quota); a ``(body, status)`` refusal, or None."""
         if claims.get("role") == "guest":
             return _guest_media_gate(claims)
         over = _meter_or_error(claims.get("role", "user"), claims.get("user_id") or "")
@@ -274,8 +225,7 @@ def create_app(
         return None
 
     def _decode_image(image_b64: str):
-        """Client base64 → bytes, or None when it is not base64 at all (a 400,
-        not the 500 an uncaught `binascii.Error` used to become)."""
+        """Client base64 → bytes, or None (→ 400)."""
         import binascii
 
         try:
@@ -283,10 +233,8 @@ def create_app(
         except (binascii.Error, ValueError):
             return None
 
-    # Web chat history (MongoDB)
     def _chat_history_key(claims):
-        # Authenticated users (owner + signed-in) key history by their stable
-        # user_id; only guests fall back to the per-token jti.
+        # Signed-in users key by user_id; guests by token jti.
         if claims.get("role") != "guest":
             return f"web_chat_{claims.get('user_id', '')}"
         return f"web_chat_{claims.get('jti', 'guest')}"
@@ -309,9 +257,7 @@ def create_app(
         messages = body.get("messages", [])
         if not isinstance(messages, list):
             return jsonify({"error": "invalid_request"}), 400
-        # The newest ones only. The request cap is 16 MB and so is a Mongo
-        # document — a client that kept appending got a 500 on the write that
-        # finally crossed it, and lost the save.
+        # Newest only: Mongo documents cap at 16 MB.
         messages = messages[-_MAX_HISTORY_MESSAGES:]
         key = _chat_history_key(claims)
         expire_at = None if claims.get("role") != "guest" else \
@@ -322,15 +268,10 @@ def create_app(
         mongo_db.web_chat_history.replace_one({"_id": key}, doc, upsert=True)
         return jsonify({"ok": True}), 200
 
-    # Web agent endpoint: full SA pipeline, shared memory.
     def _run_authenticated_agent(claims: dict, body: dict) -> dict:
-        """The full per-user LangGraph pipeline for an owner/user request:
-        builds the profile, runs the graph, saves pending state, formats the
-        reply. Synchronous — shared by ``/api/agent`` (calls it directly) and
-        ``/api/agent/stream`` (calls it inside a worker thread, with stream
-        hooks set just before the call in that same thread), so the two
-        routes can't drift on metering/graph logic. Raises on failure; the
-        caller decides how to report it (JSON error vs. an SSE error event).
+        """Run the per-user graph pipeline and format the reply.
+
+        Shared by /api/agent and /api/agent/stream (inside its worker thread). Raises on failure.
         """
         from app.agent.graph.graph import run_graph, get_final_reply
         from app.agent.pending_store import load_pending_state, save_pending_state
@@ -340,27 +281,15 @@ def create_app(
         role = claims.get("role", "guest")
         message = (body.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
 
-        # The active profile scopes data to THIS user via current_user_id().
-        # Every authenticated user (owner included) gets full CRUD on their
-        # own data; isolation is by scope.
         _profile = build_user_profile(claims)
-        # **لغة الردّ من الرسالة، مش من لغة الواجهة.**
-        #
-        # كان بينحقن سطر بالرسالة نفسها بيقول «ردّي بالإنجليزي» لأنّ الواجهة
-        # إنجليزية — سياسة على مستوى الجلسة كلها. وهاد بيناقض قاعدة اللغة اللي
-        # صارت بالشخصية: واحد بواجهة إنجليزية بيكتب بالعربي كان بيوصله ردّ
-        # إنجليزي على رسالته العربية. القاعدة بتشوف الرسالة، وهي الأدقّ.
-        graph_message = message
-        # سيشن الشات (اختياري): يفصل ذاكرة كل محادثة على حدة. غيابه =
-        # السلوك القديم (خيط واحد لكل مستخدم).
+        # Optional chat session: each conversation gets its own memory thread.
         conversation_id = (body.get("conversation_id") or "").strip()
-        # نفس مفتاح الخيط اللي run_graph نفسه بيستخدمه (thread_id) —
-        # لازم يتطابق تماماً عشان الـ pending يتحمّل ويترجع لنفس المحادثة.
+        # Must match run_graph's thread_id so pending state round-trips.
         thread_id = conversation_id or user_id
         loaded_pending = load_pending_state(thread_id, user_id, mongo_db)
         with active_user_profile_context(_profile):
             state = run_graph(
-                graph_message,
+                message,
                 user_id=user_id,
                 chat_id=user_id,
                 source="web",
@@ -382,10 +311,7 @@ def create_app(
                                            release_turn, turn_status, valid_client_id)
 
     def _conversation_refusal(user_id: str, body: dict):
-        """A named conversation must be the caller's. A new chat's id is picked
-        by the app, so the first turn that names it creates it (no POST round
-        trip before the first token); an id owned by someone else is refused —
-        never read, never written, never used as a graph thread."""
+        """A named conversation must be the caller's; the first turn naming a new app-chosen id creates it."""
         cid = (body.get("conversation_id") or "").strip()
         if not cid or mongo_db is None:
             return None
@@ -406,16 +332,10 @@ def create_app(
         if not message:
             return jsonify({"error": "no message"}), 400
 
-        # The site language no longer picks the reply language — the message
-        # does, per message (`context_builder.LANGUAGE_RULE`), so `lang` is not
-        # read on this route any more.
-
         role = claims.get("role", "guest")
-        # Identity from the token: every authenticated user has a stable
-        # user_id (minted in users_store). The owner is just user #1 — no
-        # owner-id fallback, so a token without a user_id gets an empty scope.
         user_id = claims.get("user_id") or ""
 
+        # A retried send (same client_msg_id) is answered from the ledger, never re-run or re-metered.
         # Idempotency: a retried send (same client_msg_id) is answered from
         # the ledger — never run, never metered twice.
         cmid = ""
@@ -431,9 +351,7 @@ def create_app(
                 if turn == "processing":
                     return jsonify(_STILL_PROCESSING), 409
 
-        # Cost control: meter every authenticated request per user. The owner is
-        # tenant #1 / operator, so he shares the top (subscriber) tier; free
-        # users get a modest quota. Guests use demo data — skip.
+        # Meter every authenticated request (owner shares the subscriber tier).
         if role != "guest":
             _over = _meter_or_error(role, user_id)
             if _over:
@@ -441,8 +359,6 @@ def create_app(
                     release_turn(mongo_db, user_id, cmid)
                 return jsonify(_limit_response(_over)), 429
 
-        # Authenticated users (owner + signed-in users) get the full per-user
-        # pipeline; only true guests fall through to the basic demo chat.
         if role in ("owner", "user"):
             try:
                 result = _run_authenticated_agent(claims, body)
@@ -455,10 +371,9 @@ def create_app(
                 finish_turn(mongo_db, user_id, cmid, result)
             return jsonify(result), 200
 
-        # Guest path: rate-limit check, then a friendly basic chat.
+        # Guest path: shared visitor budget, then a basic chat.
         from app.agent.guest_usage import check_and_increment, guest_label
         jti = claims.get("jti", "")
-        # One shared budget for guests across chat, search, voice and images.
         chat_type = "all"
         guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
         status, count, limit = check_and_increment(jti, guest_name, chat_type, mongo_db)
@@ -480,20 +395,13 @@ def create_app(
             from app.agent.context_builder import LANGUAGE_RULE
             from app.agent.facade.agent import create_chat_completion
             history = body.get("history") or []
-            # نفس قاعدة اللغة اللي بتوصل كل قناة تانية.
-            #
-            # هون كانت السياسة مختلفة: بتتبع لغة **الواجهة** لكل الجلسة، بينما
-            # المسجّلين بتتبع لغة **آخر رسالة**. يعني زائر بواجهة عربية بيكتب
-            # بالإنجليزي كان يوصله ردّ عربي — سياستين لنفس المنتج، والزائر
-            # واخد الأقدم.
+            # Same language rule as every other channel.
             guest_system = GUEST_PERSONALITY + LANGUAGE_RULE
             messages = [{"role": "system", "content": guest_system}]
             for h in history[-6:]:
                 r = "user" if h.get("role") == "user" else "assistant"
                 messages.append({"role": r, "content": h.get("text", "")})
             messages.append({"role": "user", "content": message})
-            # Route through the shared chat-completion helper so guest chat gets
-            # the same circuit breaker + timeouts as the rest of the pipeline.
             resp = create_chat_completion(messages=messages, max_tokens=300)
             return jsonify({"reply": resp.choices[0].message.content, "role": "guest"}), 200
         except Exception:
@@ -503,13 +411,7 @@ def create_app(
     @app.route("/api/agent/stream", methods=["POST"])
     @require_auth
     def web_agent_stream(claims):
-        """Same pipeline as /api/agent, but streams the chat_respond LLM
-        reply token-by-token over SSE as it's generated, so the app can show
-        text arriving instead of waiting for the full reply. Only helps the
-        plain-chat path (routing + tool actions like adding a task still run
-        to completion before anything streams — there's no partial output to
-        show there). Owner/signed-in users only; guests use plain /api/agent.
-        """
+        """/api/agent with the chat reply streamed token by token over SSE (accounts only)."""
         from app.agent.nodes.execute import clear_stream_hooks, set_stream_hooks
 
         body = request.get_json(silent=True) or {}
@@ -532,9 +434,7 @@ def create_app(
         def _sse(obj) -> str:
             return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
-        # A retry of a send the network cut (same client_msg_id): don't run the
-        # turn again. Finished → the stored reply as the `done` event; still
-        # running → wait for it here (keep-alives), then the same.
+        # A retry of a send the network cut: replay the stored reply, or wait for the running one.
         cmid = _client_msg_id(body)
         if cmid:
             turn, cached = claim_turn(mongo_db, user_id, cmid)
@@ -572,9 +472,7 @@ def create_app(
         outcome: dict = {}
 
         def _worker():
-            # Hooks + active profile are thread-local — both must be set
-            # HERE, inside the worker thread, not the request thread that
-            # spawned it (they don't cross threads).
+            # Stream hooks and the profile are thread-local: set them in this thread.
             set_stream_hooks(on_start=lambda: None, on_chunk=chunk_queue.put)
             try:
                 outcome["result"] = _run_authenticated_agent(claims, body)
@@ -589,12 +487,8 @@ def create_app(
                 clear_stream_hooks()
                 chunk_queue.put(None)  # sentinel: no more chunks
 
-        # **مش «أطلقها وانساها»، فمش اللي بتحكمه قاعدة C3.**
-        #
-        # الطلب نفسه بيستنّى هالخيط: بيقرا القطع من الطابور وبيبثّها للمتصفّح،
-        # وبيخلص لمّا يخلص. حطّه ع مجمّع الخلفية المشترك بيصير أسوأ — الوظيفة
-        # بتمسك عاملاً طول الدور كله (ثواني)، فعشر بثّات متزامنة بتجوّع كل شغل
-        # الخلفية بالعملية. وعدد الخيوط هون محدود أصلاً بعدد خيوط جونيكورن.
+        # Not fire-and-forget (C3b): the request waits on this thread, and a
+        # shared-pool worker per stream would starve background work.
         threading.Thread(target=_worker, daemon=True).start()
 
         def _generate():
@@ -602,9 +496,7 @@ def create_app(
                 try:
                     item = chunk_queue.get(timeout=10)
                 except queue.Empty:
-                    # No chunk yet (routing/tool call still running). Emit an SSE
-                    # comment so Heroku's router sees the request is alive and
-                    # doesn't kill a slow-but-working turn (H12 at ~30s of silence).
+                    # SSE comment so Heroku's router doesn't kill a slow turn (H12).
                     yield ": keep-alive\n\n"
                     continue
                 if item is None:
@@ -682,12 +574,10 @@ def create_app(
     @app.route("/api/guest-usage/status", methods=["GET"])
     @require_auth
     def guest_usage_status(claims):
-        """Read-only poll so the web UI can tell a guest when the owner
-        approved or rejected their pending request. Does NOT consume usage."""
+        """Read-only poll of a guest's visitor budget (does not consume usage)."""
         from app.agent.guest_usage import get_usage_doc
         if claims.get("role") != "guest":
             return jsonify({"state": "approved", "count": 0, "limit": 0}), 200
-        # unified budget → always read the shared "all" doc, whatever type the UI polls
         jti = claims.get("jti", "")
         doc = get_usage_doc(jti, "all", mongo_db) or {}
         return jsonify({
@@ -699,15 +589,12 @@ def create_app(
     @app.route("/api/analyze-image", methods=["POST"])
     @require_auth
     def web_analyze_image(claims):
-        """Analyze an image (base64) via Azure Vision and return Sandy's description."""
+        """Describe a base64 image in Sandy's voice."""
         body = request.get_json(silent=True) or {}
 
         image_b64 = (body.get("image") or "").strip()
         question = (body.get("question") or "صف هذه الصورة بتفصيل").strip()
-        # لغة الردّ من السؤال نفسه، مش من لغة الواجهة — نفس القاعدة اللي بكل
-        # القنوات. كان هون نسخة تانية من التجاوز اللي انشال من مسار الوكيل:
-        # واحد بواجهة إنجليزية بيسأل «شو في بالصورة؟» كان يوصله أمر يردّ
-        # إنجليزي على سؤاله العربي.
+        # لغة الردّ من السؤال نفسه، نفس القاعدة بكل القنوات.
         from app.agent.context_builder import LANGUAGE_RULE as _lang_rule
         question = f"{question}{_lang_rule}"
         if not image_b64:
@@ -720,10 +607,6 @@ def create_app(
 
         try:
             from app.features.vision import analyze_image_with_azure
-            # analyze_image_with_azure needs the bound chat-completion fn (the
-            # one with the Azure/OpenAI clients and circuit breaker) that the
-            # chat pipeline uses. Without it the call raised TypeError and
-            # every web image analysis failed.
             from app.agent.facade.agent import create_chat_completion
             img_bytes = _decode_image(image_b64)
             if img_bytes is None:
@@ -746,5 +629,3 @@ def create_app(
         return jsonify({'status': 'Sandy API running'}), 200
 
     return app
-
-

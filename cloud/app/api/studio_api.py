@@ -1,27 +1,17 @@
-"""Studio web APIs: project plans (brainstorm).
+"""Brainstorm project plans. Guests see demo payloads; mutating routes need an account.
 
-Guest/authenticated split everywhere, same as productivity_api: guests see
-demo payloads with `demo: true`; every authenticated user gets their own data,
-scoped to current_user_id() inside their profile context. The brainstorm
-mutating routes require a real account — guests can't start/edit/delete plans.
-
-Endpoints:
-  GET    /api/plans                     saved (finished) project plans
-  GET    /api/plans/active              the in-progress brainstorm session, if any
-  POST   /api/plans/start               {topic} → start a new session
-  POST   /api/plans/active/points       {point} → add an idea to the active session
-  POST   /api/plans/active/finish       synthesize the active session into a plan
-  POST   /api/plans/active/cancel       abandon the active session
-  PATCH  /api/plans/<id>                {change} → revise a saved plan
-  DELETE /api/plans/<id>                delete a saved plan
+  GET /api/plans · GET /api/plans/active · POST /api/plans/start {topic}
+  POST /api/plans/active/points {point} · POST /api/plans/active/finish · POST /api/plans/active/cancel
+  PATCH /api/plans/<id> {change} · DELETE /api/plans/<id>
 """
 
 from __future__ import annotations
 
+import logging
+
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +21,7 @@ def _is_guest(claims) -> bool:
 
 
 def _brainstorm_chat_ids(claims) -> list:
-    """The caller's brainstorm chat_id, both string and int forms (legacy docs
-    stored numeric Telegram ids)."""
+    """The caller's id as string and int (legacy docs stored numeric Telegram ids)."""
     uid = str(claims.get("user_id") or "")
     ids = [uid]
     if uid.isdigit():
@@ -41,7 +30,6 @@ def _brainstorm_chat_ids(claims) -> list:
 
 
 def register_studio_api(app, mongo_db=None):
-    # ── Brainstorm plans ─────────────────────────────────────────────────
     @app.route("/api/plans", methods=["GET"])
     @require_auth
     def api_list_plans(claims):
@@ -140,7 +128,6 @@ def register_studio_api(app, mongo_db=None):
         from app.features import brainstorm
         from app.agent.facade.agent import create_chat_completion
 
-        # A paid provider call — one unit of the caller's quota (`api/metering`).
         from app.api.metering import meter_claims
         refusal = meter_claims(claims)
         if refusal:
@@ -180,7 +167,6 @@ def register_studio_api(app, mongo_db=None):
             oid = ObjectId(plan_id)
         except (InvalidId, TypeError):
             return jsonify({"error": "not_found"}), 404
-        # A paid provider call — one unit of the caller's quota (`api/metering`).
         from app.api.metering import meter_claims
         refusal = meter_claims(claims)
         if refusal:

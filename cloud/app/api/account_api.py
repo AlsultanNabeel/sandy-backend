@@ -1,18 +1,6 @@
-"""Account lifecycle: know yourself, erase yourself.
+"""GET /api/account, POST /api/account/reset {confirm:"RESET"}, DELETE /api/account {confirm:"DELETE"}.
 
-Endpoints:
-  GET    /api/account          -> {user_id, email, provider, created_at, nodes}
-  DELETE /api/account          {confirm:"DELETE"}  -> erase everything
-
-The delete is a real delete, not a flag. A Sandy account holds a voiceprint, a
-journal, photos, spending and a transcript of every conversation its owner has
-had with her — "deactivated" is not an honest answer to someone asking for that
-to be gone.
-
-It also unpairs their robots on the way out, which matters for a reason that is
-easy to miss: a node claimed by a deleted account would stay claimed forever,
-and the hardware would be permanently unpairable by anyone, including the person
-holding it.
+Delete is a real delete, and unpairs the user's robots so the hardware stays reusable.
 """
 
 from __future__ import annotations
@@ -50,17 +38,7 @@ def register_account_api(app):
     @app.route("/api/account/reset", methods=["POST"])
     @require_tenant
     def api_account_reset(claims):
-        """Empty the account without destroying it. "Start over."
-
-        Distinct from delete for a reason the owner ran into immediately: he
-        wanted a clean slate, not a new identity. Deleting the account would
-        also drop his sign-in, his subscription, and his paired hardware — so
-        "start fresh" would cost him the robot as well as the data.
-
-        This clears everything the account *holds* — conversations, memory,
-        tasks, journal, photos, voiceprint — and leaves the account and its
-        robots exactly where they were.
-        """
+        """Clear everything the account holds but keep the account and its robots."""
         body = request.get_json(silent=True) or {}
         if str(body.get("confirm") or "") != "RESET":
             return jsonify({"error": "confirm_required"}), 400
@@ -70,18 +48,12 @@ def register_account_api(app):
 
         from app.features.account_delete import wipe_account_data
         r = wipe_account_data(uid)
-        # Same contract as delete: a partial wipe is not a 200.
         return jsonify(r), (200 if r.get("ok") else 500)
 
     @app.route("/api/account", methods=["DELETE"])
     @require_tenant
     def api_account_delete(claims):
-        """Erase the account. Requires an explicit confirmation string.
-
-        The confirmation is not ceremony. This is the one call in the API with
-        no undo, and it is reachable by any client holding a valid token — a
-        mistyped path or a stray retry must not be able to trigger it.
-        """
+        """Erase the account; the confirmation string guards the one call with no undo."""
         body = request.get_json(silent=True) or {}
         if str(body.get("confirm") or "") != "DELETE":
             return jsonify({"error": "confirm_required"}), 400
@@ -90,12 +62,9 @@ def register_account_api(app):
         if not uid:
             return jsonify({"error": "no_user"}), 400
 
-        # Release the hardware first. If the wipe below fails halfway, a robot
-        # that is already free can be re-paired; a robot still claimed by a
-        # half-deleted account is a brick.
+        # Release the hardware first: a half-deleted account must not keep a robot claimed.
         from app.features.node_store import list_nodes, unpair_node
         for n in list_nodes() or []:
-            # `unpair_node` بترجّع خطأ بالقاموس ما بترمي — فما في داعي لحارس.
             unpair_node(str(n.get("node_id") or ""))
 
         from app.features.account_delete import delete_account

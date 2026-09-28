@@ -1,4 +1,4 @@
-"""voice_ws tools."""
+"""Voice tools: system-instruction build/cache, tool dispatch, and pending confirmations."""
 from __future__ import annotations
 
 import threading
@@ -22,24 +22,20 @@ from app.api.voice_ws.speaker import (
 )
 
 
-# Tools that only tell the text pipeline which branch to take. They have no
-# effect and a stub handler; `execute_node` filters them the same way. Kept as a
-# literal list rather than imported from meta_tools so that adding a real tool
-# there can never silently make it unreachable by voice.
+# Tools that only steer the text pipeline (stub handlers). A literal list, so a
+# real tool added to meta_tools can never silently become unreachable by voice.
 _ROUTING_SIGNAL_TOOLS = frozenset({
     "chat_respond", "chat_emotional",
     "ask_clarification", "request_confirmation",
     "pending_confirm", "pending_reject", "pending_select",
 })
 
-# The three that are answers rather than routing: something was held back for a
-# confirmation, and these decide its fate. See _resolve_pending.
+# Answers to a held confirmation; see _resolve_pending.
 _PENDING_SIGNAL_TOOLS = frozenset({
     "pending_confirm", "pending_reject", "pending_select",
 })
 
-# One thread per identity for voice, so a held action survives between turns and
-# is the same one the app would see.
+# One pending thread per identity, shared with the app.
 _VOICE_THREAD = "voice"
 
 
@@ -53,30 +49,8 @@ def _pending_words(name: str) -> str:
 def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
     """Carry out — or drop — the action the previous turn held for confirmation.
 
-    **This is what "she said ok and nothing changed" was.**
-
-    A destructive tool does not act; it stores a pending action and asks. On the
-    text path that pending is persisted and `pending_node` runs it when the
-    answer comes. The voice path built a **fresh empty session dict for every
-    tool call**, so the pending was written into a throwaway and vanished the
-    moment the call returned — and the confirmation that followed had nothing
-    left to confirm.
-
-    The observed sequence, exactly:
-
-        tool task_update ok: متأكد بدك تعدّل اسم المهمة؟
-                             من: إرسال الجيب (السيارة)
-                             إلى: غسيل السيارة
-        …user says "اه متأكد"…
-        pending_confirm …
-        (nothing)
-
-    She was telling the truth about what she was about to do, and then no one
-    did it.
-
-    Persisting through `pending_store` rather than a local dict is deliberate:
-    it is the same store the text path uses, so a confirmation begun by voice
-    can be answered in the app and the other way round.
+    Uses pending_store (same as the text path), so a confirmation begun by voice
+    can be answered in the app and vice versa.
     """
     from app.agent.executor.pending.dispatch import execute_pending_action
     from app.agent.pending_store import load_pending_state, save_pending_state
@@ -92,8 +66,6 @@ def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
                 "reply": "ما في إشي مستني تأكيد."}
 
     session: Dict[str, Any] = {"pending_action": pending}
-    # Same profile as the rest of the voice path — a second hand-written copy is
-    # how the two drift, which is the reason `_voice_profile` exists.
     profile = _voice_profile(chat_id)
     try:
         with active_user_profile_context(profile):
@@ -116,8 +88,7 @@ def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
 
     logger.info("[voice_ws] pending %s → ok=%s reply=%.80s",
                 name, result_ok(result), result.get("reply") or "")
-    # نفس وسمَي `_dispatch_tool`. وكلام الرفض بيمرّ معه — الجملة العامّة كانت
-    # تبلع «سجّل دخولك» وتخلّي چيميناي تخترع سبب.
+    # Same two tags as `_dispatch_tool`; the refusal text passes through.
     broke = result_failed(result) or not result.get("handled")
     if broke or not result_ok(result):
         text = str(result.get("reply") or "").strip()
@@ -128,19 +99,9 @@ def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
 
 
 def _voice_profile(chat_id: str) -> Dict[str, Any]:
-    """The tenant profile a voice session works under.
+    """The tenant profile a voice session works under (one definition for instruction and dispatch).
 
-    One definition, used by both the instruction build and tool dispatch. They
-    had a copy each, and two copies of an identity rule drift.
-
-    **`relation` is `user`, not `owner`.** Whoever reaches this socket has
-    authenticated — a device HMAC or an owner JWT — so `permissions: "all"` is
-    right: it is their own tenant, and `chat_id` is what scopes every read and
-    write. What was wrong was the word: `owner` said "this caller is tenant #1",
-    which is true for exactly one customer and was being handed to all of them.
-    `build_user_profile` has called an authenticated caller `user` since the
-    multi-tenant migration, and one identity vocabulary is the point of having
-    this function at all.
+    ``relation`` is ``user``: the caller authenticated, and chat_id scopes everything.
     """
     return {
         "chat_id": chat_id,
@@ -152,37 +113,18 @@ def _voice_profile(chat_id: str) -> Dict[str, Any]:
 
 
 def _build_system_instruction(user_id: str = "") -> str:
-    """Build system instruction: Sandy's personality + full memory context + STM.
+    """Sandy's personality + durable memory + recent turns, built in the user's tenant context.
 
-    `user_id` بيوصل من الجلسة لأنّ هالدالة بتشتغل ع خيط مجمّع، وسياق الجلسة ما
-    بيعبر لهناك. من غيره بتبني تعليمات لشخص مجهول — بلا اسم ولا اهتمامات ولا
-    ذاكرة — وهي عارفة مين هو من ثانية المصافحة.
-
-    **وتمرير المعرّف وحده ما كان بيكفي.**
-
-    كل قراءة تحت بتمرّ من `scoped()`، و`scoped()` بيسأل `current_user_id()` —
-    وهاد بيقرا من متغيّر سياق ما بيعبر لخيط المجمّع. فالمعرّف كان بيوصل، وبيتحطّ
-    بمتغيّر الهوية الصوتية، وبعدين كل مخزن بينسأل بيرجع فاضي: `load_memory`
-    بترجّع الافتراضي، ولقطة الحياة والبحث فيها بيرجعوا فاضيين. ولا خطأ، ولا سطر
-    بالسجل — بس ساندي بتحكي وكأنها ما بتعرفه.
-
-    فالدالة كلها بتشتغل جوّا سياق المستأجر. تمرير المعرّف بيحلّ نصّ المسألة؛
-    فتح السياق بيحلّ النصّ التاني.
+    `user_id` is passed in because this runs on a pool thread without the session context.
     """
     base = _build_cached_instruction(user_id)
     return with_recent_turns(base, session_context(_load_stm_history()))
 
 
 def _build_cached_instruction(user_id: str) -> str:
-    """Everything in the instruction **except** the recent turns — the part
-    that is safe to cache per tenant version.
+    """The instruction minus the recent turns — the part cached per tenant version.
 
-    The session calls this in parallel with `load_recent_turns` and joins the
-    two with `with_recent_turns`, so the fresh read costs no extra round trip.
-
-    **الهوية بتنكتب دايمًا، حتى لو فاضية.** خيط المجمّع بيحتفظ بسياقه بين
-    المهام، فـ`if user_id:` كان بيخلّي لوحًا غير مربوط يورث هوية آخر جلسة مرّت
-    ع نفس الخيط — ويبني تعليماته من ذاكرة زبون تاني.
+    Identity is always written, even empty: pool threads keep context between jobs.
     """
     from app.agent.context_builder import build_effective_persona
     from app.utils.user_profiles import active_user_profile_context
@@ -193,8 +135,7 @@ def _build_cached_instruction(user_id: str) -> str:
         return _cached_system_instruction(chat_id, build_effective_persona)
 
 
-# The "this is a past record" guard. The recent turns are inserted right before
-# it, so it always covers them. A constant because `with_recent_turns` finds it.
+# The "past record" guard; recent turns go right before it (see with_recent_turns).
 _PAST_RECORD_NOTE = (
     "\n"
     "مهم: كل المحادثات والمعلومات فوق هي سجلّ سابق للاطّلاع فقط — مش كلام قالك "
@@ -204,14 +145,7 @@ _PAST_RECORD_NOTE = (
 
 
 def with_recent_turns(base: str, recent_block: str) -> str:
-    """Put the recent turns into a (possibly cached) instruction.
-
-    **The turns are never cached.** Short-term memory changes every turn and
-    does not move the tenant version (`tenant_version` excludes it on purpose),
-    so a cached instruction that carried them kept serving the turns of the
-    session that built it: say something in the app chat, call the robot, and
-    she did not know — the exact cross-channel amnesia this memory exists to end.
-    """
+    """Insert the recent turns (never cached: STM doesn't move the tenant version)."""
     if not recent_block:
         return base
     head, sep, tail = base.partition(_PAST_RECORD_NOTE)
@@ -220,38 +154,19 @@ def with_recent_turns(base: str, recent_block: str) -> str:
     return head + recent_block + "\n" + sep + tail
 
 
-# The whole instruction, cached per tenant version.
-#
-# It cost between six and nine seconds to build, measured on the robot, and the
-# robot is *recording the user the entire time* — so every one of those seconds
-# became a second of audio queued behind a session that had not opened yet. What
-# came out the other end was not a delay, it was a mess: the backlog drained at
-# machine speed, our turn detector saw four questions in two seconds, and each
-# new turn cut off the reply to the one before. `replied=0 chars`, four times.
-#
-# Caching the persona block underneath helped one layer. This caches the answer.
-# Same key as everything else — a write anywhere moves the tenant's version and
-# the next call rebuilds — so it cannot go stale on a memory the user just saved.
+# The whole instruction, cached per tenant version (it took 6–9 s to build while
+# the robot kept recording). Any tenant write moves the version and forces a rebuild.
 _INSTRUCTION_CACHE: Dict[str, tuple] = {}
 _INSTRUCTION_LOCK = threading.Lock()
 
 
 _PROMPT_COLL = "sandy_prompt_cache"
-# Bumped when the cached text changes shape, so rows written by an older build
-# are never served. Rev 2: the recent turns left the cached text.
+# Bump when the cached text changes shape. Rev 2: recent turns left the cache.
 _PROMPT_REV = 2
 
 
 def _shared_get(key: str, version: int) -> Optional[str]:
-    """The same instruction, from whichever worker built it last.
-
-    **A cache in one process is a coin toss when there are two.** `Procfile`
-    runs two gunicorn workers and the robot lands on whichever is free, so a
-    per-process cache missed about half the time — and every miss is the four
-    seconds of database reads that the microphone spends recording into a
-    buffer nobody can use. The instruction is a pure function of the tenant and
-    its version, which is exactly the shape that belongs in shared storage.
-    """
+    """The instruction from whichever worker built it last (per-process caches miss half the time)."""
     try:
         from app.db import get_db
 
@@ -280,9 +195,7 @@ def _shared_put(key: str, version: int, text: str) -> None:
             {"$set": {"text": text, "user_id": key, "created_at": now}},
             upsert=True,
         )
-        # علامة «هاد المستأجر بيستعمل الصوت» — عشان التسخين المسبق ما يبني
-        # تعليمات صوت لكل زبون بيضيف مهمّة وهو ما فتح مكالمة بحياته. بتتجدّد
-        # كل بناء، فبتنتهي صلاحيتها لحالها لمين بطّل يستعمل الصوت.
+        # «هاد المستأجر بيستعمل الصوت» — عشان التسخين المسبق يتجاهل اللي ما فتح مكالمة.
         db[_PROMPT_COLL].update_one(
             {"_id": _voice_marker_id(key)},
             {"$set": {"user_id": key, "created_at": now}},
@@ -297,10 +210,7 @@ def _voice_marker_id(key: str) -> str:
 
 
 def tenant_uses_voice(tenant: str) -> bool:
-    """هل فتح هالمستأجر مكالمة صوت من قبل — بقراءة مفتاح واحد.
-
-    بترجع `True` لو ما قدرنا نقرا: تسخين زيادة أرخص من مكالمة باردة.
-    """
+    """هل فتح هالمستأجر مكالمة صوت من قبل؛ `True` لو ما قدرنا نقرا (تسخين زيادة أرخص)."""
     key = str(tenant or "")
     if not key:
         return False
@@ -339,10 +249,7 @@ def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
             _INSTRUCTION_CACHE[key] = (version, shared)
         return shared
 
-    # Say why, not just that it missed. A cache that never hits has exactly two
-    # explanations — the row was not there, or the version moved between calls —
-    # and they need opposite fixes. Guessing between them costs a round trip to
-    # the owner and a night.
+    # Log why it missed: no row vs a moved version need opposite fixes.
     logger.info("[voice_ws] instruction rebuilt (version %d, shared row %s)",
                 version, "absent" if shared is None else "empty")
 
@@ -354,27 +261,19 @@ def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
             _INSTRUCTION_CACHE[key] = (version, text)
         from app.utils.thread_pool import submit_background
 
-        # Off the connection path: the caller already has the text, and the
-        # robot is waiting. Whoever comes next benefits, not this call.
+        # Off the connection path; the next caller benefits.
         submit_background(_shared_put, key, version, text, _label="prompt-cache")
     return text
 
 
 def clear_instruction_cache() -> None:
-    """Test-only, and used by account deletion."""
+    """Tests and account deletion."""
     with _INSTRUCTION_LOCK:
         _INSTRUCTION_CACHE.clear()
 
 
 def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
-    """The instruction text itself. Split out so the tenant context above wraps
-    every read in here without indenting four hundred lines of prompt.
-
-    **Six seconds live between «auth OK» and «memory seed»**, measured on the
-    robot, before Gemini has even been dialled. The reads that remain here
-    (persona, durable context) are timed on their own so the wait has an owner;
-    the recent turns are read outside, in parallel (`load_recent_turns`).
-    """
+    """The instruction text itself; each read is timed (the wait before dialling Gemini)."""
     import time as _t
 
     _t0 = _t.perf_counter()
@@ -386,50 +285,25 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
     parts: List[str] = [build_effective_persona(chat_id or None).strip()]
     _took("persona")
 
-    # **No legacy `memory` doc.** Nothing in production writes that collection,
-    # and the app chat never reads it — so for a customer without a row it
-    # seeded `_default_memory()` into every call: an empty log, mood "happy"
-    # and a home city of "October City", stated to the model as her memory of
-    # him. One memory means the voice reads what the chat reads.
-
-    # Rich MongoDB context: persona directives (durable facts only). No query
-    # at session start; facts are recalled mid-call through `memory_recall`,
-    # the same tool the chat has.
+    # Durable facts only; mid-call facts come through `memory_recall`.
     rich_ctx = _voice_memory_context("", include_semantic=False)
     _took("context")
     if rich_ctx:
-        # Proof line: this is the EXACT memory text seeded into the voice prompt.
-        # If a phantom reply ("focus session", "eggs") shows up, grep this to see
-        # whether the topic was actually injected or came from elsewhere.
-        # The size at INFO, the text at DEBUG: this is a customer's personal
-        # memory, and INFO is what production keeps. Set LOG_LEVEL=DEBUG to see it.
+        # Size at INFO, text at DEBUG: it's the customer's personal memory.
         logger.info("[voice_ws] memory seed (%d chars)", len(rich_ctx))
         logger.debug("[voice_ws] memory seed text: %s",
                      rich_ctx.replace("\n", " ")[:600])
         parts.append(rich_ctx)
 
-    # **وآخر المحادثات — دايمًا، بس مش من الكاش.** بتنحطّ قبل الملاحظة تحت
-    # (`with_recent_turns`) لأنها بتتغيّر كل دور وما بتحرّك نسخة المستأجر.
-    #
-    # `_voice_memory_context` بيبني بـ `durable_only=True`، يعني حقائق ثابتة بس.
-    # وهاد كان مقصودًا — النموذج الصوتي كان بياخد آخر سطر مسجّل ويكمّل عليه كأنه
-    # طلب حالي. بس المالك سألها «شو آخر سؤال سألتك ياه» فقالت ما بعرف. الحلّ:
-    # السطور بترجع، والتحذير («هاد سجلّ سابق، ما تردّي عليه») بيضلّ هو الحارس.
-    #
-    # The memory block above is PAST reference, seeded once. Native-audio
-    # Gemini will otherwise continue the last logged line as if it were the
-    # current request — that's how a stale "add eggs" turn becomes a phantom
-    # reply. Pin it as history so only live speech drives the answer.
+    # Past-record guard: native-audio Gemini otherwise continues the last logged
+    # line as a live request. Recent turns are inserted before it, uncached.
     parts.append(_PAST_RECORD_NOTE)
 
-    # تمييز أوامر بتتشابه كلماتها — نفس قواعد الراوتر النصّي، مصدر واحد مشترك
-    # (command_rules) عشان دماغ الصوت ودماغ النص ما يختلفوا بنفس الأمر.
+    # نفس قواعد التمييز تبع الراوتر النصّي (مصدر واحد: command_rules).
     from app.agent.command_rules import DISAMBIGUATION_RULES_AR
     parts.append("\n" + DISAMBIGUATION_RULES_AR)
 
-    # ردّان مقصودان لكنهما مضبوطان: جملة قصيرة جداً قبل التنفيذ (إقرار فوري يحسّسه
-    # إنها سمعت — زي «تمام» بسيري)، وجملة قصيرة بعد ما ترجع نتيجة الأداة (تأكيد).
-    # الموديل الأصلي بيحكي قبل وبعد أصلاً؛ هون منشكّل الإيقاع بدل ما نمنعه.
+    # إقرار قصير قبل التنفيذ وتأكيد قصير بعده.
     parts.append(
         "\n"
         "إيقاع تنفيذ أي أمر (أي أداة) — التزمي فيه بالضبط:\n"
@@ -447,16 +321,7 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
         "الجملة. نفس الإيقاع لكل الأدوات (إضاءة، مروحة، موسيقى، تركيز، تذكير...)."
     )
 
-    # الاستثناء اللي كان ناقص.
-    #
-    # «جملة أو جملتين كحد أقصى» قاعدة صح للأوامر: «طفّي الضو» جوابه «طفّيت»، وأي
-    # كلمة زيادة حشو. بس هي كانت مطبّقة ع كل إشي — فلما المالك طلب جلسة عصف ذهني،
-    # ساندي شغّلت الأداة وسكتت. ما قدرت تلخّص ولا تعطي نقاط، **مش لأنها ما بتعرف،
-    # بل لأننا منعناها**. ونفس الإشي كان بيصير مع كل طلب محتواه هو الجواب: تلخيص،
-    # قراءة يوميات، شرح.
-    #
-    # الفرق مش بالطول، الفرق بنوع الطلب: **أمر** جوابه تأكيد، و**طلب محتوى**
-    # جوابه المحتوى. وحدّ الجملتين بيصير حشوًا بالحالة الأولى وحذفًا بالتانية.
+    # الأوامر جوابها تأكيد؛ طلبات المحتوى (تلخيص، عصف ذهني، قراءة) جوابها المحتوى.
     parts.append(
         "\n"
         "استثناء مهم من قاعدة «جملة أو جملتين»:\n"
@@ -474,19 +339,11 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
     )
 
     # اسم صاحب الجهاز من ملفّه، مش مكتوب بالكود.
-    #
-    # **هاي كانت أخطر جملة بالنظام.** روبوت كل زبون بالعالم كان بينقال إله إنه
-    # بحكي مع نبيل — بأول جملة من كل مكالمة، وهو الشي الوحيد اللي بيعرفه عن
-    # الشخص الواقف قدّامه.
     from app.utils.user_profiles import (
         HAS_NO_NAME, address_instruction, speaker_label,
     )
 
-    # **نفس القاعدة اللي بـ`speaker.py`، والدفعة كتبتها بالخريطة وكسرتها هون.**
-    # الجمل تحت بتميّز — «مش X»، «ادّعى إنه X» — والبديل بلا اسم بيخلّيها
-    # «مش المستخدم» و«أنا المستخدم»، وهاد نفي بلا معنى بنصّ أمني. وأسوأ: الملاحظة
-    # اللحظية بـ`speaker.py` بتقول «صاحب الحساب»، فبتصير جملتين بمرجعين مختلفين
-    # بنفس الجلسة، والموديل لازم يقرّر إذا هما نفس الشخص قبل ما يقرّر يسلّم ذكريات.
+    # بلا اسم منستعمل «صاحب الحساب» (نفس speaker.py) عشان جمل التمييز الأمنية يكون إلها معنى.
     _resolved = speaker_label(chat_id or None)
     owner_name = f"«{_resolved}»" if _resolved != HAS_NO_NAME else "صاحب الحساب"
 
@@ -523,7 +380,7 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
 
 
 def _build_live_tools(types) -> Optional[List]:
-    """Return tools list for LiveConnectConfig from the global ToolRegistry."""
+    """Tools for LiveConnectConfig from the global ToolRegistry."""
     try:
         from app.agent.tools.registry import get_registry
         from app.agent.tools.setup import register_all_tools
@@ -548,17 +405,10 @@ def _make_dispatcher():
 
 def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
                    user_id: str = "") -> Dict[str, Any]:
-    """Sync tool dispatch with the caller's profile (called via run_in_executor).
+    """Dispatch one tool call in the caller's tenant (runs via run_in_executor).
 
-    ``chat_id`` must be the calling user's id — every store a tool touches
-    (tasks, reminders, habits, ...) scopes to ``current_user_id()``, so a
-    mismatch here means voice-added data lands in a tenant the app can't see.
-
-    ``user_id`` is passed in because this runs on a pool thread, and the
-    session's context does not reach it. Without it the profile is built with an
-    empty tenant: every scoped write goes nowhere, every scoped read comes back
-    empty, and the model — which was told the call succeeded — cheerfully
-    reports that it did.
+    ``user_id`` is passed in because the pool thread lacks the session context;
+    without it every scoped read/write goes nowhere.
     """
     from app.agent.tools.dispatcher import DispatchContext
     from app.utils.user_profiles import active_user_profile_context
@@ -566,30 +416,8 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
     # Always, even when empty: a pool thread keeps its context between jobs.
     set_voice_identity(user_id)
 
-    # **Routing signals are not actions, and must not be dispatched.**
-    #
-    # `pending_confirm`, `chat_respond` and the rest of the meta tools exist to
-    # tell the *text* pipeline which branch to take. Their handler is a stub that
-    # returns `{"handled": False, "reply": ""}` and its comment says it is never
-    # called, because `execute_node` filters them out by name before dispatch.
-    #
-    # The voice path had no such filter. So when the model answered a
-    # confirmation — the owner said "أي والله متأكد" — Gemini reported
-    # `pending_confirm`, this dispatched it, the stub declined, and the log read
-    #
-    #     [voice_ws] tool pending_confirm did not run:
-    #
-    # with nothing after the colon, because the stub's reply is an empty string.
-    # The model was then handed "[فشل التنفيذ] الأداة ما اشتغلت" for an answer
-    # that had in fact been given, which is a bad thing to tell a model in the
-    # middle of a confirmation: the next turn is built on the belief that the
-    # user's "yes" failed.
-    #
-    # On this path the routing has already happened — Gemini decides what to
-    # call — so the honest response is that there was nothing to run, and to say
-    # so as information rather than as a failure.
-    # `pending_*` are answers to a question the previous turn asked, and they
-    # have real work behind them. The rest are pure routing.
+    # Routing signals are not actions: answer them as information, not failure.
+    # `pending_*` resolve the held confirmation.
     if name in _PENDING_SIGNAL_TOOLS:
         return _resolve_pending(name, user_id)
 
@@ -600,32 +428,11 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
                 "reply": "تمام، كمّلي عادي — ما في إشي لازم ينفّذ هون."}
 
     owner_profile = _voice_profile(_stm_chat_id())
-    # **`state` و`mongo_db` مش اختياريين — بدونهن أغلب الأدوات بتفشل بصمت.**
-    #
-    # هاد كان أخطر عطل بالنظام كله. الصوت كان يبني السياق بدون التنين، والأدوات
-    # بتقرا منهن: `ctx.state["chat_id"]` بترجع `"default"` بدل حسابك، و
-    # `ctx.mongo_db` بترجع `None`.
-    #
-    # فالمذكّرة بتنكتب لحساب اسمه «default» — موجود بمكان ما بالقاعدة وما بيشوفه
-    # لا التطبيق ولا التلي — والعصف الذهني بياخد معرّفًا فاضي فما بيلاقي جلسته،
-    # والأهداف بترجع `None` وبتوقف.
-    #
-    # وليش «بتهلوس إنها نفّذت»: التعليمات بتخليها تقول «هلأ بطفّي» **قبل**
-    # التنفيذ. فالإقرار بيطلع دايمًا، حتى لما الأداة بعده بتفشل — وإنت بتسمع
-    # التأكيد وبتشوف إنه ما صار إشي.
-    #
-    # والدليل اللي فرز: **فلاش الكاميرا اشتغل**، وهو الوحيد اللي ما بيلمس لا
-    # حسابًا ولا قاعدة. اللي بيشتغل بيقول عن اللي ما بيشتغل أكتر من العكس.
+    # `state` and `mongo_db` are required: tools read chat_id and the db from them.
     from app.db import get_db
 
     chat_id = _stm_chat_id()
-    # **The session dict is not scratch space — a held action lives in it.**
-    #
-    # A destructive tool stores its pending in `context.session["pending_action"]`
-    # and asks instead of acting. This used to pass a fresh `{}` on every call,
-    # so the pending was written into a throwaway that was discarded a line
-    # later. She asked "متأكد؟", the owner said yes, and there was nothing left
-    # to say yes to.
+    # A destructive tool stores its held action in this session dict.
     session: Dict[str, Any] = {}
     ctx = DispatchContext(
         user_message="",
@@ -642,38 +449,19 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
         return {"handled": False,
                 "reply": f"ما قدرت أنفّذ {name} — صار خطأ عند الخادم."}
 
-    # If the tool held something back for confirmation, persist it so the next
-    # turn's "اه" can find it. **Before the failure branch below**, which used to
-    # sit above this and could swallow a pending a refusing handler had stored.
+    # Persist a held action before the failure branch, so "اه" can find it next turn.
     held = session.get("pending_action")
     if held:
         from app.agent.pending_store import save_pending_state
         save_pending_state(_VOICE_THREAD, _stm_chat_id() or user_id, get_db(), held)
         logger.info("[voice_ws] %s is waiting for a confirmation", name)
 
-    # **اللي ما صار لازم يوصل الموديل موسوماً — بس بالكلمة الصح.**
-    #
-    # چيميناي بتقرأ ردّ الأداة كنصّ. من غير وسم بتفترض إنه نجح وبتأكّد للمستخدم
-    # شغل ما صار، وهاد نصّ شكوى «بتقول إنها عملتها». فكل نتيجة ما نفّذت
-    # بتتوسم — بس الوسم مش واحد:
-    #
-    # `[فشل التنفيذ]` للعطل: الأداة رمت، أو ما انلاقت (`handled=False`)، أو
-    # بلعت استثناءها وصرّحت بـ`error`. `[لم يُنفَّذ]` للرفض: «سجّل دخولك»،
-    # «ما لقيت جهاز بهالاسم، أي واحد تقصد؟». التنتين بيمنعوا افتراض النجاح،
-    # بس تسمية سؤال توضيحي «فشل» بتخلّيها تتخلّى عن مسار المستخدم بدل ما تسأل.
+    # ما صار لازم يوصل الموديل موسوماً، وإلا بتأكّد إنها نفّذت:
+    # `[فشل التنفيذ]` للعطل (رمت، ما انلاقت، أو `error`)، `[لم يُنفَّذ]` للرفض أو سؤال توضيحي.
     handled_flag = bool(result.get("handled"))
     broke = result_failed(result) or not handled_flag
     if broke or not result_ok(result):
-        # **The whole result, not just `reply`.**
-        #
-        # A refusal often carries its reason in `error`, or in nothing at all —
-        # and the line used to print `reply` only. The log then read
-        #
-        #     [voice_ws] tool pending_confirm did not run:
-        #
-        # with nothing after the colon, which is the least useful thing a
-        # failure can say: it proves something went wrong and hides what. Same
-        # mistake as the broker's disconnect reason, in a different file.
+        # Log the whole result: a refusal's reason is often in `error`, not `reply`.
         text = result.get("reply") or ""
         why = result.get("error") or result.get("reason") or ""
         logger.warning("[voice_ws] tool %s did not run — broke=%s error=%s "
@@ -684,8 +472,6 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
         return {"handled": handled_flag, "ok": False,
                 "reply": f"{tag} {text or why or 'الأداة ما اشتغلت.'}"}
 
-    # A tool that ran is worth one line too. "Did the update actually apply?"
-    # had no answer in the log: the call was printed, the outcome never was.
     logger.info("[voice_ws] tool %s ok: %.120s",
                 name, result.get("reply") or "")
     return result
