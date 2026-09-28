@@ -1,32 +1,8 @@
-"""One number per tenant, bumped whenever anything they own changes.
+"""One version number per tenant, bumped whenever anything they own changes.
 
-`get_persona_directives` is the most expensive thing in a chat turn — measured
-at 32 of the 41 database round trips a user waits for, and roughly four of the
-nine seconds a reply took in production. It rebuilds "what Sandy knows about
-you" from scratch on every message: tasks, habits, books, journal, shopping,
-preferences, relationships, lessons, summaries, onboarding.
-
-Caching it is obvious. **Getting the invalidation wrong is what makes it a
-lie**, and a first attempt at this was cut from the audit for exactly that:
-
-* a plain TTL means "add a task" then "what are my tasks" answers from before
-  the task existed;
-* `Procfile` runs two workers, so a process-local invalidation reaches one of
-  them and the next message lands on whichever is free;
-* and most writes never touch the agent at all — the phone app writes tasks and
-  habits through `api/*_api.py`, `users_store` writes the onboarding profile on
-  a raw handle, `api/memory_api.py` writes preferences the same way.
-
-A version stamp answers all three, because the question moves into the database
-where every process and every path sees the same answer. One small read per turn
-tells a worker whether what it holds is still current; that is one round trip
-against thirty-two.
-
-**The bump has to sit where the write is.** `ScopedCollection` covers most of
-them, and `bump_for` is called directly by the handful that reach past it — the
-places the first attempt assumed did not exist. Only collections a cached block
-is actually built from count, so short-term memory and the usage counters, which
-change every single turn, do not defeat the cache they have nothing to do with.
+Cached persona/context blocks are keyed on it. It lives in the database so
+both gunicorn workers and writes that bypass the agent (the app's API routes)
+all invalidate the same cache; a TTL alone would serve stale data.
 """
 
 from __future__ import annotations
@@ -42,9 +18,7 @@ logger = logging.getLogger(__name__)
 
 _STAMPS = "sandy_cache_stamps"
 
-# The collections a cached persona block is built from. `build_life_snapshot`
-# and `search_life` read the life stores; `get_persona_directives` reads
-# `sandy_memories`; the onboarding line comes from `sandy_users`.
+# Collections the cached persona block is built from.
 VERSIONED = frozenset({
     "sandy_memories",
     "sandy_users",
@@ -63,44 +37,20 @@ VERSIONED = frozenset({
     "sandy_focus_meta",
 })
 
-# **No read-through memo.** There was one, holding the version for a few seconds
-# so a burst of turns would not each pay the lookup. It saves exactly one small
-# round trip and costs the only thing this design has: a write on the other
-# worker stays invisible for the length of the memo, which is "add a task, ask
-# about it, hear that you have none" — the failure the version stamp exists to
-# make impossible. One read per turn, always current.
-#
-# **"Per turn" is meant literally, and `turn_scope` is what makes it so.** A chat
-# turn asked for the same number two or three times within a few hundred
-# milliseconds — the persona block, then the life search on the same thread,
-# then the indexer after the reply — each a round trip to learn what the first
-# had just learnt. Inside a scope the first answer is reused for the rest of that
-# turn and **only** that turn: nothing crosses from one message to the next, so
-# the other-worker case above is exactly as fresh as it was. A write inside the
-# turn (`bump_for`) drops the remembered number, so the turn's own writes are
-# never hidden from its own reads.
+# Memo lives for one turn only (turn_scope); a cross-turn memo would hide
+# writes made on the other worker.
 _TURN_MEMO: contextvars.ContextVar[Optional[Dict[str, int]]] = contextvars.ContextVar(
     "tenant_version_turn_memo", default=None)
 
 
 def detach_turn_memo() -> None:
-    """انسَ نسخ هالدور — لمهمّة خلفية ورثت سياقه.
-
-    `submit_background` بينسخ سياق اللي نادى، وفيه ذاكرة الدور: قاموس فيه رقم
-    نسخة كل مستأجر **وقت ما بلّش الدور**. المهمّة اللي بتشتغل بعد الكتابة
-    بتقرا من هالقاموس رقمًا قديمًا، وبتبني وبتحفظ تحته — يعني بتسخّن مفتاحًا
-    ما حدا رح يسأل عنه، والمفتاح الصحيح بيضلّ بارد. سطر واحد بيفكّها.
-    """
+    """انسَ نسخ هالدور — لمهمّة خلفية ورثت سياقه (وإلا بتقرا رقم نسخة قديم)."""
     _TURN_MEMO.set(None)
 
 
 @contextlib.contextmanager
 def turn_scope() -> Iterator[None]:
-    """Remember each tenant's version for the duration of one turn.
-
-    The memo is a dict held by a context variable, so jobs the turn submits
-    with a copied context (the soul pool, `submit_background`) share it.
-    """
+    """Remember each tenant's version for one turn (shared by jobs with a copied context)."""
     token = _TURN_MEMO.set({})
     try:
         yield
@@ -116,17 +66,7 @@ def _coll():
 
 
 def version_for(tenant: str) -> int:
-    """Current version for a tenant, or ``-1`` when it cannot be read.
-
-    ``-1`` is never stored, so a version that cannot be read never matches a
-    cached one and the caller rebuilds. Degrading costs round trips, never
-    accuracy — the right direction for a cache.
-
-    A tenant with no stamp document is ``0``, which **is** cacheable: an account
-    that has not written anything yet is the commonest case on a fresh install,
-    and refusing to cache it would exempt exactly the accounts with the least
-    data from the saving.
-    """
+    """Current version, 0 if never bumped, or -1 (never matches a cache) when unreadable."""
     key = str(tenant or "")
     if not key:
         return -1
@@ -150,22 +90,9 @@ def version_for(tenant: str) -> int:
 
 
 def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
-    """Mark a tenant's cached context stale, for every worker.
+    """Mark a tenant's cache stale for every worker. Synchronous on purpose.
 
-    `collection` is the name that was written; anything outside `VERSIONED` is
-    ignored, so the per-turn stores do not invalidate a cache they have nothing
-    to do with. Pass `None` to force a bump when the caller knows something
-    changed but not which collection. A writer inside a versioned collection
-    that still runs every turn opts out at the call site instead — see
-    `scoped(..., bump=False)`.
-
-    **Both halves are synchronous, and that is the whole point.** The bump was
-    on the background pool at first, which leaves a window: add a task on one
-    worker, ask about it on the other a moment later, and the second worker
-    reads a version the first has not written yet and answers from the cache —
-    "you have no tasks", about a task that exists. A cache that can do that is
-    worse than no cache. The cost is one small upsert on a write path that has
-    already paid for a round trip; reads outnumber writes by a wide margin here.
+    Writes to collections outside VERSIONED are ignored; ``collection=None`` forces a bump.
     """
     key = str(tenant or "")
     if not key:
@@ -178,43 +105,21 @@ def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
         return
     try:
         coll.update_one({"_id": key}, {"$inc": {"v": 1}}, upsert=True)
-        # After the write, not before: a read racing it on another thread of
-        # this turn could otherwise put the old number straight back.
+        # After the write: a racing read could otherwise re-memo the old number.
         memo = _TURN_MEMO.get()
         if memo is not None:
             memo.pop(key, None)
-        # **Name the collection that moved it.**
-        #
-        # The voice prompt is cached against this number, and in production it
-        # went from fifty-five to fifty-six between two calls — so the cache
-        # missed and the session paid six seconds of reads again. Which write
-        # did it is not guessable from the outside: there are fifteen versioned
-        # collections and several paths into each. One line here ends the
-        # question the first time it happens.
         logger.info("[tenant_version] %s bumped by %s", key, collection or "?")
     except PyMongoError as exc:
         logger.debug("[tenant_version] bump failed: %s", exc)
         return
-    # **والنسخة الجديدة بدها تعليمات جديدة — بالخلفية، هلّق.**
-    #
-    # هالسطر هو اللي بيخلّي الإبطال فوق مجّانيًّا للصوت. بدونه، كل مكالمة بتحفظ
-    # اللي انحكى بآخرها، والحفظ بيحرّك الرقم، والمكالمة الجاية بتدفع خمس ثواني
-    # قراءات وصاحبها ساكت بيستنّى. البناء نفسه ما تغيّر — بس صار وقته وقت
-    # الكتابة، مش وقت السؤال.
-    try:
-        from app.utils.prompt_prewarm import schedule
+    from app.utils.prompt_prewarm import schedule
 
-        schedule(key)
-    except Exception:  # noqa: BLE001 — تسخين، مش شرط صحّة
-        logger.debug("[tenant_version] prewarm skipped", exc_info=True)
+    schedule(key)
 
 
 def forget(tenant: str) -> None:
-    """Drop a tenant's stamp entirely — for account deletion.
-
-    Left behind, it is a row keyed by the id of an account that no longer
-    exists, and it would hand a stale version to whoever reuses that id.
-    """
+    """Drop a tenant's stamp (account deletion)."""
     key = str(tenant or "")
     if not key:
         return

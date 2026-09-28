@@ -1,31 +1,7 @@
-"""Pick exactly one process on this machine to run a periodic job.
+"""Pick one process per machine to run a periodic job (gunicorn runs 2 workers).
 
-`Procfile` runs gunicorn with two workers, and every worker runs `bootstrap()`,
-so every periodic job starts twice on one dyno. Correctness was never the
-problem — the nudge send claims an atomic per-day lock and each scene revert is
-claimed with a find-and-delete, and both modules say so — but the *scans* are
-not claimed: `users_with_due_timers` sweeps the collection once a minute in each
-worker, for ever, and half of that work exists only because a process was
-forked.
-
-**A file lock, not a database lease.** The workers sharing the problem also
-share a filesystem — they are processes on one dyno — so this needs no
-coordination protocol, no TTL, and no clock. `flock(LOCK_EX | LOCK_NB)` on a
-path under the temp directory is decided by the kernel, and the lock is released
-by the kernel when the holder exits *however* it exits: crash, OOM kill,
-`SIGKILL` from a platform recycling the dyno. A database lease has to guess that
-with a timeout, and the guess is the part that goes wrong — too short and two
-workers run, too long and nothing runs after a crash.
-
-So failover is free: gunicorn replaces a dead worker, the replacement runs
-`bootstrap()`, and its claim succeeds because the dead worker's lock is already
-gone. Nothing polls and nothing expires.
-
-**The scope is one machine.** Two dynos would each elect a leader, and that is
-the right reading of this file's name — it picks one process per host, not one
-in the world. Everything it currently guards is idempotent across hosts anyway
-(that is what the per-day and per-timer claims are for); anything that is not
-needs a real distributed lock, not this.
+A kernel flock is released however the holder dies, so a replacement worker
+takes over with no TTL. Scope is one host; guarded jobs are idempotent across hosts.
 """
 
 from __future__ import annotations
@@ -36,20 +12,14 @@ import tempfile
 
 logger = logging.getLogger(__name__)
 
-# The open file descriptors, kept for the life of the process. Closing one (or
-# letting it be garbage collected) releases its lock, which would silently let a
-# second worker in — so they are held here on purpose and never closed.
+# Held open for the process lifetime: closing (or GC) would release the lock.
 _held: dict[str, object] = {}
 
 
 def claim_leadership(job: str) -> bool:
-    """True if this process should run ``job`` — exactly one on this machine.
+    """True if this process should run ``job``.
 
-    Returns True unconditionally on a platform without ``fcntl`` (Windows), and
-    if the lock file cannot be opened at all. Both are the safe direction: the
-    jobs this guards are each individually claimed before they act, so running
-    twice costs duplicated reads, while running zero times means the reminders
-    never go out.
+    Fails open (True) when locking is unavailable: running twice is safe, zero times is not.
     """
     if job in _held:
         return True
@@ -69,7 +39,6 @@ def claim_leadership(job: str) -> bool:
     try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        # Another worker on this dyno holds it. Expected on every worker but one.
         handle.close()
         logger.info("[leader] %s is owned by another worker; not starting it here", job)
         return False

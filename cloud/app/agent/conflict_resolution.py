@@ -327,7 +327,7 @@ def run_conflict_check_after_task_add(
         from app.utils.user_profiles import resolve_display_name
 
         tasks = load_tasks(mongo_db=mongo_db, tasks_file=tasks_file)
-        owner_name = resolve_display_name(mongo_db=mongo_db, default="")
+        owner_name = resolve_display_name(default="")
         result = check_conflicts(
             {
                 "id": task_id,

@@ -17,7 +17,6 @@ from app.utils.arabic_days import (
     find_day_in_text,
     has_explicit_time,
     next_weekday_date,
-    parse_arabic_day_name,
     resolve_day_name_to_iso,
 )
 
@@ -97,22 +96,6 @@ class TestWeekdayToArName(unittest.TestCase):
             self.assertIn(name, DAY_NAME_TO_WEEKDAY,
                           f"Canonical name '{name}' missing from DAY_NAME_TO_WEEKDAY")
             self.assertEqual(DAY_NAME_TO_WEEKDAY[name], wd)
-
-
-class TestParseArabicDayName(unittest.TestCase):
-    def test_exact_tokens(self):
-        self.assertEqual(parse_arabic_day_name("الجمعة"), 4)
-        self.assertEqual(parse_arabic_day_name("خميس"), 3)
-        self.assertEqual(parse_arabic_day_name("الاربعا"), 2)
-        self.assertEqual(parse_arabic_day_name("تلاتا"), 1)
-
-    def test_strips_whitespace(self):
-        self.assertEqual(parse_arabic_day_name("  السبت  "), 5)
-
-    def test_unknown_returns_none(self):
-        self.assertIsNone(parse_arabic_day_name("مرحبا"))
-        self.assertIsNone(parse_arabic_day_name(""))
-        self.assertIsNone(parse_arabic_day_name("يوم"))
 
 
 class TestFindDayInText(unittest.TestCase):

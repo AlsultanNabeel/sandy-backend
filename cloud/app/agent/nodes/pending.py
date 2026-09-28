@@ -16,9 +16,9 @@ import logging
 from typing import Any, Dict
 
 from app.agent.graph.state import SandyState, merge_state
+from app.agent.graph.state import build_session_from_state as _build_session_from_state
 from app.agent.tool_result import result_ok
 from app.agent.executor.pending_execution import execute_pending_action
-from app.utils.session import build_session_from_state as _build_session_from_state
 
 logger = logging.getLogger(__name__)
 

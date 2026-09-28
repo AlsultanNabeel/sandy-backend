@@ -20,6 +20,9 @@ from typing import Any, Dict, List, Optional
 
 from app.utils.thread_pool import submit_background
 
+STM_TTL = 60 * 60 * 24 * 30  # drives the Mongo TTL index on STM docs
+MAX_STM_MESSAGES = 10
+
 from app.agent.graph.state import SandyState, create_initial_state, merge_state
 from app.agent.nodes.soul import soul_node
 from app.agent.nodes.router import router_node, route_after_router
@@ -65,8 +68,6 @@ def _ensure_stm_indexes(coll) -> bool:
     break a feature, it just makes everything slower forever, which is exactly
     the kind of fault that needs to be visible to be found.
     """
-    from app.utils.stm_config import STM_TTL
-
     jobs = (
         ("key", lambda: coll.create_index("key", unique=True, background=True)),
         ("updated_at_ttl", lambda: coll.create_index(
@@ -296,7 +297,6 @@ def _stm_save(
     if coll is None:
         return
     try:
-        from app.utils.stm_config import MAX_STM_MESSAGES
         from datetime import datetime
 
         key = f"{chat_id}:{user_id}"
