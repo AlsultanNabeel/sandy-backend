@@ -1,42 +1,9 @@
 import SwiftUI
 
-// MARK: - دليل الاستدعاء (لباقي الـ agents — وقّعوا المكوّنات بالضبط كذا)
-//
-//  مكوّنات ساندي القابلة لإعادة الاستخدام. كلها RTL-aware ومتوافقة iOS 16.
-//
-//  1) SandyButton — زر إجراء أساسي جميل (مرجاني، حواف، أيقونة + نص).
-//     SandyButton(title: String,
-//                 systemImage: String? = nil,
-//                 style: SandyButton.Style = .primary,   // .primary | .secondary
-//                 isLoading: Bool = false,
-//                 fillWidth: Bool = false,
-//                 action: () -> Void)
-//     مثال:  SandyButton(title: "إضافة", systemImage: "plus") { add() }
-//            SandyButton(title: "إلغاء", systemImage: nil, style: .secondary) { cancel() }
-//
-//  2) SandyCard — حاوية البطاقة القياسية (سطح + ظل + حواف).
-//     SandyCard { content }                       // padding افتراضي
-//     SandyCard(padding: CGFloat) { content }
-//     مثال:  SandyCard { Text("محتوى") }
-//
-//  3) SandyNotice — تنبيه/خطأ دافئ بصوت ساندي (مو سطر أحمر).
-//     SandyNotice(_ message: String,
-//                 kind: SandyNotice.Kind = .info)   // .info | .gentleWarning
-//     مثال:  SandyNotice("معلش، صار خطأ بسيط — جرّب كمان مرة.", kind: .gentleWarning)
-//
-//  4) FloatingSandy — رفيق ساندي العائم (overlay) مع فقاعة كلام اختيارية.
-//     FloatingSandy(message: String? = nil,
-//                   corner: FloatingSandy.Corner = .bottomTrailing,  // أو .bottomLeading
-//                   onTap: (() -> Void)? = nil)
-//     الاستعمال:  SomeView().overlay(alignment: .bottomTrailing) { FloatingSandy(message: "أهلين!") }
-//                 أو بدون رسالة: FloatingSandy()
-//
-// ─────────────────────────────────────────────────────────────────────────
 
 // MARK: - 1) SandyButton
 
-/// زر إجراء أساسي بنمط ساندي: تعبئة مرجانية، حواف ناعمة، أيقونة + نص واضح.
-/// له نمطان: أساسي (مملوء) وثانوي (محدّد). يدعم حالة تحميل.
+/// زر إجراء أساسي بنمطين: أساسي (مملوء) وثانوي (زجاجي)، مع حالة تحميل.
 struct SandyButton: View {
     enum Style { case primary, secondary }
 
@@ -93,7 +60,6 @@ struct SandyButton: View {
         .opacity(isLoading ? 0.85 : 1)
     }
 
-    // ألوان حسب النمط
     private var foreground: Color {
         style == .primary ? Theme.Colors.onAccent : Theme.Colors.accentDeep
     }
@@ -104,7 +70,7 @@ struct SandyButton: View {
                 colors: [Theme.Colors.accent, Theme.Colors.accentDeep],
                 startPoint: .topLeading, endPoint: .bottomTrailing)
         case .secondary:
-            // ثانوي = زجاج سائل: سطح مموّه + لمسة أزرق خفيفة.
+            // ثانوي = زجاج سائل.
             ZStack {
                 Rectangle().fill(.ultraThinMaterial)
                 Rectangle().fill(Theme.Colors.accent.opacity(0.08))
@@ -118,8 +84,7 @@ struct SandyButton: View {
 
 // MARK: - 2) SandyCard
 
-/// حاوية البطاقة القياسية: سطح أبيض + حواف + ظل خفيف + حدّ رفيع.
-/// تلفّ أي محتوى — تستعمل بكل الواجهات بدل تكرار الخلفيات يدويًا.
+/// حاوية البطاقة القياسية بدل تكرار الخلفيات يدويًا.
 struct SandyCard<Content: View>: View {
     var padding: CGFloat = Theme.Spacing.md
     @ViewBuilder var content: () -> Content
@@ -138,16 +103,9 @@ struct SandyCard<Content: View>: View {
     }
 }
 
-// MARK: - 2.5) SandyPopup — نافذة منبثقة بالنص
+// MARK: - 2.5) SandyPopup
 
-/// نافذة منبثقة مركزية (مش مغطية كل الشاشة): خلفية معتّمة تُغلق بالنقر + بطاقة
-/// بالوسط بعرض محدود وارتفاع يتكيّف (قابلة للتمرير). تُقدَّم عبر `.fullScreenCover`
-/// مع خلفية شفافة فتبان طافية بالنص. تعتمد `@Environment(\.dismiss)` للإغلاق.
-///
-/// الاستعمال:
-///   .fullScreenCover(item: $editing) { item in
-///       SandyPopup(title: "تعديل") { …الحقول + زر الحفظ… }
-///   }
+/// نافذة منبثقة بالنص؛ تُقدَّم عبر `.fullScreenCover` بخلفية شفافة وتقفل بـ `dismiss`.
 struct SandyPopup<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
@@ -160,13 +118,11 @@ struct SandyPopup<Content: View>: View {
 
     var body: some View {
         ZStack {
-            // خلفية معتّمة تقفل بالنقر خارج البطاقة.
             Color.black.opacity(0.55)
                 .ignoresSafeArea()
                 .onTapGesture { dismiss() }
 
             VStack(spacing: 0) {
-                // ترويسة: العنوان + زر إغلاق.
                 HStack {
                     Text(title)
                         .font(Theme.Typography.headline)
@@ -183,7 +139,7 @@ struct SandyPopup<Content: View>: View {
 
                 Divider().overlay(Theme.Colors.surface)
 
-                // المحتوى قابل للتمرير حتى لو طال — يبقى الارتفاع محدودًا.
+                // المحتوى قابل للتمرير حتى يبقى الارتفاع محدودًا.
                 ScrollView {
                     content()
                         .padding(Theme.Spacing.md)
@@ -206,8 +162,7 @@ struct SandyPopup<Content: View>: View {
 
 // MARK: - 3) SandyNotice
 
-/// تنبيه/خطأ دافئ بصوت ساندي: فقاعة ناعمة فيها أيقونة ساندي صغيرة + نص لطيف.
-/// يحلّ محل سطر الخطأ الأحمر بكل مكان. النوع يغيّر اللون فقط (معلومة / تنبيه ودّي).
+/// تنبيه/خطأ دافئ بصوت ساندي بدل سطر الخطأ الأحمر.
 struct SandyNotice: View {
     enum Kind { case info, gentleWarning }
 
@@ -221,8 +176,7 @@ struct SandyNotice: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
-            // زينة بحتة: بتعطي دفا بصريًا وما بتضيف معلومة. بلا إخفائها، قارئ
-            // الشاشة بيعلن «صورة» قبل كل رسالة.
+            // زينة بحتة؛ بلا إخفائها قارئ الشاشة بيعلن «صورة» قبل كل رسالة.
             SandyAvatar(size: 28, mood: kind == .gentleWarning ? .soft : .happy)
                 .accessibilityHidden(true)
             Text(message)
@@ -261,8 +215,7 @@ struct SandyNotice: View {
 
 // MARK: - 4) FloatingSandy
 
-/// رفيق ساندي العائم (يقابل SandyCompanion بالويب): أفاتار صغير مثبّت بزاوية،
-/// يقدر يطلّع فقاعة كلام قصيرة، وقابل للنقر. مصمّم ليُستعمل كـ overlay.
+/// رفيق ساندي العائم: أفاتار بزاوية مع فقاعة كلام اختيارية، يُستعمل كـ overlay.
 struct FloatingSandy: View {
     enum Corner { case bottomLeading, bottomTrailing }
 
@@ -283,13 +236,11 @@ struct FloatingSandy: View {
 
     var body: some View {
         VStack(alignment: bubbleAlignment, spacing: Theme.Spacing.xs) {
-            // فقاعة الكلام — فوق الأفاتار، تطلع بنعومة
             if let message, !message.isEmpty, showBubble {
                 speechBubble(message)
                     .transition(.scale(scale: 0.7, anchor: .bottom).combined(with: .opacity))
             }
 
-            // الأفاتار العائم — يطفو لأعلى/أسفل، قابل للنقر
             Button {
                 if message != nil {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
@@ -298,7 +249,6 @@ struct FloatingSandy: View {
                 }
                 onTap?()
             } label: {
-                // الشخصية = روبوت ساندي الكامل (SandyRobot) — يطفو ويغمز.
                 SandyRobot(size: 56, happy: true, animated: true)
                     .shadow(color: Theme.Shadow.liftColor,
                             radius: Theme.Shadow.liftRadius, x: 0, y: Theme.Shadow.liftY)
@@ -310,7 +260,7 @@ struct FloatingSandy: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { bob = true }
             if message != nil {
-                // تطلّع الفقاعة لحالها بعد لحظة (مثل ترحيب الويب)
+                // تطلّع الفقاعة لحالها بعد لحظة.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) { showBubble = true }
                 }
@@ -318,7 +268,7 @@ struct FloatingSandy: View {
         }
     }
 
-    // محاذاة الفقاعة حسب الزاوية (RTL: leading/trailing تنقلب تلقائيًا)
+    // RTL: leading/trailing تنقلب تلقائيًا.
     private var bubbleAlignment: HorizontalAlignment {
         corner == .bottomTrailing ? .trailing : .leading
     }
@@ -337,11 +287,9 @@ struct FloatingSandy: View {
     }
 }
 
-// MARK: - SandyAvatar (وجه ساندي الروبوت — منقول من RobotFace.jsx بالويب)
+// MARK: - SandyAvatar
 
-/// أفاتار ساندي: روبوت ساندي نفسه (SandyRobot) — أزرق كهربائي بهالة وغمزة لطيفة،
-/// نفس "وجه الروبوت" بالويب. `size` هو القطر؛ نلائم ارتفاع الروبوت داخله.
-/// التوقيع العام `SandyAvatar(size:mood:)` ثابت — كل المستدعين يظلّون يشتغلون.
+/// روبوت ساندي داخل إطار مربّع؛ `size` هو القطر.
 struct SandyAvatar: View {
     enum Mood { case happy, soft }
 
@@ -349,8 +297,7 @@ struct SandyAvatar: View {
     var mood: Mood = .happy
 
     var body: some View {
-        // الروبوت أطول من عرضه (172/110)؛ نقيس عرضه عشان طوله يدخل ضمن `size`،
-        // ثم نوسّطه في إطار مربّع `size×size` (يقابل دائرة الأفاتار القديمة).
+        // الروبوت أطول من عرضه (172/110): نقيس عرضه حتى طوله يدخل ضمن `size`.
         SandyRobot(size: size * (110.0 / 172.0),
                    blink: false,
                    happy: mood == .happy,
@@ -360,10 +307,9 @@ struct SandyAvatar: View {
     }
 }
 
-// MARK: - HubList (لوحة هَب: صفوف تفتح شاشات فرعية)
+// MARK: - HubList
 
-/// وصف صف هَب — أيقونة/مفتاح عنوان/مفتاح وصف/لون. نخزّن مفاتيح l10n لا النص
-/// نفسه حتى تتبدّل اللغة بدون إعادة بناء المصفوفة.
+/// نخزّن مفاتيح l10n لا النص حتى تتبدّل اللغة بدون إعادة بناء المصفوفة.
 struct HubRowSpec: Identifiable {
     let id = UUID()
     let icon: String
@@ -372,18 +318,14 @@ struct HubRowSpec: Identifiable {
     let tint: Color
 }
 
-/// لوحة هَب — قائمة بطاقات، كل بطاقة NavigationLink لشاشة فرعية، بدخول متدرّج
-/// لطيف. هاد نمط "يومي/حياتي": تبويب يجمّع شاشات بدل زحمة تبويبات. تمرّر مصفوفة
-/// الأوصاف + باني الوجهة حسب الترتيب.
+/// قائمة بطاقات NavigationLink لشاشات فرعية بدخول متدرّج.
 struct HubList<Destination: View>: View {
     let rows: [HubRowSpec]
     @ViewBuilder let destination: (Int) -> Destination
 
-    /// نتحكّم بظهور البطاقات لعمل دخول متدرّج لطيف عند فتح اللوحة.
     @State private var appeared = false
 
     var body: some View {
-        // الخلفية موحّدة على مستوى MainTabView — الهَب شفّاف يبيّنها (لا تكرار).
         ScrollView {
             VStack(spacing: Theme.Spacing.md) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, spec in
@@ -393,7 +335,6 @@ struct HubList<Destination: View>: View {
                         HubRowCard(spec: spec)
                     }
                     .buttonStyle(.plain)
-                    // دخول متدرّج: كل بطاقة تطلع بنعومة بتأخير بسيط حسب ترتيبها.
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 16)
                     .animation(.spring(response: 0.5, dampingFraction: 0.8)
@@ -407,7 +348,6 @@ struct HubList<Destination: View>: View {
     }
 }
 
-/// بطاقة صف هَب — أيقونة داخل دائرة ملوّنة خفيفة + عنوان + وصف + chevron.
 struct HubRowCard: View {
     @EnvironmentObject private var lang: LanguageManager
     let spec: HubRowSpec

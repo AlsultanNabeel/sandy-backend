@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// شريط صغير «بدون إنترنت — آخر نسخة محفوظة» فوق القوائم لمّا الستور بيعرض
-/// نسخة الكاش. الاستعمال:  `if store.offline { OfflineBanner() }`
+/// «بدون إنترنت — آخر نسخة محفوظة»:  `if store.offline { OfflineBanner() }`
 struct OfflineBanner: View {
     @EnvironmentObject var lang: LanguageManager
 
