@@ -1,18 +1,13 @@
 import CoreSpotlight
 import Foundation
 
-/// يفتح التطبيق على المكان الصح لمّا المستخدم ينقر نتيجة ساندي ببحث النظام.
-///
-/// • مهمة / تذكير → نفس ورقة الإشعار (`NotificationManager.pendingRoute`) —
-///   `MainTabView` بيعرضها أصلًا، فما بدها ربط إضافي.
-/// • كتاب → تبويب ساندي (فيه رف الكتب) عبر `DeepLinkRouter` (.chat).
-/// • خاطرة → تبويب «حياتي»، ذاكرة → الرئيسية (منها الملف الشخصي) عبر `pendingTab`
-///   هون — `MainTabView` لازم يراقبه (راجع التقرير لسطور الربط).
+/// مهمة/تذكير → ورقة `NotificationManager.pendingRoute`؛ كتاب → تبويب ساندي؛
+/// خاطرة/ذاكرة → `pendingTab` اللي `MainTabView` بيراقبه.
 @MainActor
 final class SpotlightRouter: ObservableObject {
     static let shared = SpotlightRouter()
 
-    /// تبويب مطلوب من نتيجة بحث — `MainTabView` بيبدّل له ويصفّره.
+    /// `MainTabView` بيبدّل له ويصفّره.
     @Published var pendingTab: MainTab?
 
     /// يرجّع false لو النشاط مش نتيجة بحث من ساندي.

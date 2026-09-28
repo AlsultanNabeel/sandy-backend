@@ -1,43 +1,28 @@
 import AppIntents
 import Foundation
 
-// ─────────────────────────────────────────────────────────────────────────
-//  SandyIntents — نوايا App Intents: تظهر بسيري + تطبيق شورتكتس + سبوتلايت.
-//
-//  كل نية تنشئ APIClient خاص فيها (التوكن يتحمّل من الـKeychain تلقائياً، وعنوان
-//  الخادم من UserDefaults أو الافتراضي)، فتقدر تصادق الباك‑إند وهي شغّالة بمعزل
-//  عن واجهة التطبيق. لو ما في توكن (مش مسجّل دخول) ترمي رسالة ودّية.
-//
-//  لا تحتاج تارجت جديد — تعيش بتارجت التطبيق. التطبيق هدفه iOS 18.5 فـ App Intents
-//  (iOS 16+) متاحة دايمًا.
-// ─────────────────────────────────────────────────────────────────────────
+// كل نية بتنشئ APIClient خاص (التوكن من الـKeychain) فبتشتغل بمعزل عن واجهة التطبيق.
 
-/// أدوات مشتركة للنوايا — بناء عميل مصادَق + حارس الدخول.
 enum IntentAPI {
     static func make() throws -> APIClient {
-        // نفس المصدر اللي بيقرا منه التطبيق — لو غيّر المستخدم الخادم من
-        // الإعدادات، الاختصارات بتمشي معه بلا ما نتذكّر نحدّث مكان تاني.
-        let api = APIClient(baseURL: Backend.currentURL)   // التوكن يتحمّل من الـKeychain بالـinit
+        // نفس مصدر التطبيق حتى الاختصارات تتبع أي تغيير للخادم.
+        let api = APIClient(baseURL: Backend.currentURL)
         guard api.token != nil else { throw SandyIntentError.notSignedIn }
         return api
     }
 
-    /// مُنسّق ISO للموعد (تذكير) — نفس ما يفهمه الباك‑إند.
     static func iso(_ date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
     }
 
-    /// هل لغة الجهاز عربي؟ — لاختيار لغة ردّ سيري.
     static var isArabic: Bool {
         Locale.current.language.languageCode?.identifier == "ar"
     }
 
-    /// يختار النص حسب لغة الجهاز (لرسائل الأخطاء).
     static func say(_ ar: String, _ en: String) -> LocalizedStringResource {
         LocalizedStringResource(stringLiteral: isArabic ? ar : en)
     }
 
-    /// نفس الفكرة بس يرجّع حوار سيري (لردود النوايا).
     static func dialog(_ ar: String, _ en: String) -> IntentDialog {
         IntentDialog(stringLiteral: isArabic ? ar : en)
     }
@@ -45,9 +30,7 @@ enum IntentAPI {
 
 enum SandyIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notSignedIn
-    /// الأمر ما بيناسب نوع الجهاز (مثلاً إطفاء ستارة).
     case commandNotSupported(String)
-    /// زر ريموت ما تعلّمته الوحدة بعد.
     case buttonNotLearned(String, String)
 
     var localizedStringResource: LocalizedStringResource {
@@ -148,12 +131,11 @@ struct AddJournalIntent: AppIntent {
     }
 }
 
-// MARK: - مزوّد الاختصارات (يطلّع النوايا بسيري + شورتكتس + سبوتلايت)
+// MARK: - مزوّد الاختصارات
 
 struct SandyShortcuts: AppShortcutsProvider {
     // حد أبل: عشرة اختصارات بالكثير لكل تطبيق — هون صاروا عشرة.
     static var appShortcuts: [AppShortcut] {
-        // اسأل ساندي — الرد بيجي من سيري بدون ما ينفتح التطبيق.
         AppShortcut(intent: AskSandyIntent(),
                     phrases: ["اسأل ساندي في \(.applicationName)",
                               "اسأل \(.applicationName)",
@@ -180,7 +162,6 @@ struct SandyShortcuts: AppShortcutsProvider {
                     phrases: ["أضف خاطرة في \(.applicationName)",
                               "Add a journal note in \(.applicationName)"],
                     shortTitle: "Add Journal Note", systemImageName: "book.closed.fill")
-        // أجهزة البيت — الجهاز بارامتر كيان، فسيري بتكمّل أي جهاز مضاف بالتطبيق.
         AppShortcut(intent: ControlDeviceIntent(command: .on),
                     phrases: ["شغّل \(\.$device) في \(.applicationName)",
                               "Turn on \(\.$device) in \(.applicationName)"],

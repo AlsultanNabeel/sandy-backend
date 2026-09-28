@@ -2,12 +2,8 @@ import CoreSpotlight
 import Foundation
 import UniformTypeIdentifiers
 
-/// يفهرس محتوى ساندي ببحث النظام (Spotlight): المهام، التذكيرات، الخواطر،
-/// الكتب، والذاكرة. كل نوع إله نطاق (domain) خاص، والمعرّف `sandy:<type>:<id>`.
-///
-/// الستورات بتنادي `replace` بعد كل جلب ناجح (مش بيانات تجربة): بنمسح نطاق
-/// النوع كامل وبنفهرس القائمة الجديدة — فاللي انحذف بيختفي من البحث تلقائيًا.
-/// النداءات متسلسلة (كل وحدة بتستنّى اللي قبلها) فما بيتداخل مسح مع فهرسة.
+/// يفهرس محتوى ساندي بـ Spotlight؛ المعرّف `sandy:<type>:<id>`، ونطاق لكل نوع.
+/// `replace` بيمسح نطاق النوع ويعيد فهرسته، والنداءات متسلسلة فما بيتداخل مسح مع فهرسة.
 @MainActor
 enum SpotlightIndexer {
     enum Kind: String, CaseIterable {
@@ -21,12 +17,10 @@ enum SpotlightIndexer {
         let detail: String
     }
 
-    /// آخر عملية فهرسة — التالية بتستنّاها.
     private static var chain: Task<Void, Never>?
 
     static func identifier(_ kind: Kind, _ id: String) -> String { "sandy:\(kind.rawValue):\(id)" }
 
-    /// يستبدل كل عناصر النوع بالقائمة المعطاة.
     static func replace(_ kind: Kind, with entries: [Entry]) {
         let previous = chain
         let rows = entries.filter { !$0.id.isEmpty && !$0.title.isEmpty }
@@ -47,7 +41,6 @@ enum SpotlightIndexer {
         }
     }
 
-    /// يمسح فهرس ساندي كامل — يُنادى عند تسجيل الخروج.
     static func deleteAll() {
         let previous = chain
         chain = Task { @MainActor in
@@ -56,9 +49,8 @@ enum SpotlightIndexer {
         }
     }
 
-    // MARK: - تحويل النماذج
 
-    /// سطر عنوان قصير من نص طويل (أول سطر، أقصى ٨٠ حرف).
+    /// أول سطر، أقصى ٨٠ حرف.
     private static func headline(_ text: String) -> String {
         let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
         let trimmed = first.trimmingCharacters(in: .whitespaces)

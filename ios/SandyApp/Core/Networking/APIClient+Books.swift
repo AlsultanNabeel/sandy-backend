@@ -1,8 +1,7 @@
 import SwiftUI
 
 extension APIClient {
-    /// All fields optional so a missing key (e.g. the guest payload omits `goal`)
-    /// decodes to nil and falls back to the same defaults the old dictionary reads used.
+    /// All optional: the guest payload omits e.g. `goal`, which falls back to defaults.
     private struct BooksResponse: Decodable {
         let items: [Row]?
         let stats: Stats?
@@ -36,7 +35,6 @@ extension APIClient {
         }
     }
 
-    /// GET /api/life/books → {"items":[…], "stats":{…}, "goal":{…}, "demo":bool}
     func booksFetch() async throws -> BooksResult {
         let r: BooksResponse = try await fetch("/api/life/books")
         let items = (r.items ?? []).compactMap { row -> BookItem? in
@@ -70,8 +68,6 @@ extension APIClient {
         return BooksResult(items: items, stats: stats, goal: goal, demo: r.demo ?? false)
     }
 
-    /// Optional fields omit themselves when nil (encodeIfPresent), matching the
-    /// old "only send non-empty keys" dictionary build.
     private struct BookAdd: Encodable {
         let title: String
         let status: String
@@ -80,7 +76,6 @@ extension APIClient {
         let category: String?
     }
 
-    /// POST /api/life/books {title,status,total_pages,author,category} → {"ok":bool}
     func booksAdd(title: String, status: String, author: String,
                   category: String, totalPages: Int) async throws {
         try await send("/api/life/books", method: "POST",
@@ -95,7 +90,6 @@ extension APIClient {
         let status: String
     }
 
-    /// POST /api/life/books/status {title,status} → {"ok":bool}
     func booksSetStatus(title: String, status: String) async throws {
         try await send("/api/life/books/status", method: "POST",
                        body: BookStatusBody(title: title, status: status))
@@ -109,8 +103,7 @@ extension APIClient {
         let cover_url: String?
     }
 
-    /// POST /api/life/books/meta {title, author?,category?,total_pages?,cover_url?} → {"ok":bool}
-    /// الباك-إند يعتبر الحقل الغائب = بلا تغيير — القيم nil تُحذف من الـJSON.
+    /// الحقل الغائب = بلا تغيير.
     func booksSetMeta(title: String, author: String?, category: String?,
                       totalPages: Int?, coverURL: String?) async throws {
         guard author != nil || category != nil || totalPages != nil || coverURL != nil else { return }
@@ -124,7 +117,6 @@ extension APIClient {
         let text: String
     }
 
-    /// POST /api/life/books/note {title,text} → {"ok":bool}
     func booksAddNote(title: String, text: String) async throws {
         try await send("/api/life/books/note", method: "POST",
                        body: BookNote(title: title, text: text))
@@ -136,7 +128,6 @@ extension APIClient {
         let page: Int
     }
 
-    /// POST /api/life/books/quote {title,text,page} → {"ok":bool}
     func booksAddQuote(title: String, text: String, page: Int) async throws {
         try await send("/api/life/books/quote", method: "POST",
                        body: BookQuote(title: title, text: text, page: page))
@@ -147,7 +138,6 @@ extension APIClient {
         let pages_year: Int
     }
 
-    /// POST /api/life/books/goal {books_year,pages_year} → {"ok":bool}
     func booksSetGoal(booksYear: Int, pagesYear: Int) async throws {
         try await send("/api/life/books/goal", method: "POST",
                        body: BookGoalBody(books_year: booksYear, pages_year: pagesYear))

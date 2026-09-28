@@ -1,14 +1,7 @@
 import Foundation
 
-/// كاش صغير على القرص لوضع «بدون إنترنت»: ملف JSON لكل (مستخدم × ستور) تحت
-/// Application Support/SandyCache/<userId>/<key>.json.
-///
-/// القراءة متزامنة (ملفات صغيرة، بتنقرا مرّة وحدة قبل الجلب)، والكتابة على
-/// طابور تسلسلي بالخلفية. المفتاح بيتضمّن هوية المستخدم فحساب تاني على نفس
-/// الجهاز ما بيشوف نسخة غيره أبدًا، و`clearAll()` بيمسح الكل عند تسجيل الخروج.
-///
-/// المستدعي بيمرّر `api.currentUserId` **لحظة الحفظ** (بعد الـawait): جلب كان
-/// طاير وقت تسجيل الخروج بيلاقي التوكن nil فما بيكتب إشي.
+/// كاش «بدون إنترنت»: Application Support/SandyCache/<userId>/<key>.json.
+/// المستدعي بيمرّر `currentUserId` لحظة الحفظ (بعد الـawait) حتى جلب طاير وقت الخروج ما يكتب.
 enum DiskCache {
     private static let queue = DispatchQueue(label: "sandy.diskcache", qos: .utility)
 
@@ -17,7 +10,6 @@ enum DiskCache {
             .appendingPathComponent("SandyCache", isDirectory: true)
     }
 
-    /// اسم ملف آمن: حروف/أرقام و - _ . فقط.
     private static func safe(_ s: String) -> String {
         String(s.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." })
     }
@@ -31,14 +23,13 @@ enum DiskCache {
                    .appendingPathComponent(name + ".json")
     }
 
-    /// النسخة المحفوظة (أو nil لو ما في / ما انفكّت / ما في مستخدم).
     static func load<T: Decodable>(_ type: T.Type, key: String, userId: String?) -> T? {
         guard let url = fileURL(key: key, userId: userId),
               let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
     }
 
-    /// يحفظ نسخة جديدة بالخلفية (كتابة ذرّية). فشل الحفظ صامت — الكاش تحسين، مش مصدر حقيقة.
+    /// فشل الحفظ صامت — الكاش تحسين، مش مصدر حقيقة.
     static func save<T: Encodable>(_ value: T, key: String, userId: String?) {
         guard let url = fileURL(key: key, userId: userId),
               let data = try? JSONEncoder().encode(value) else { return }
@@ -49,7 +40,6 @@ enum DiskCache {
         }
     }
 
-    /// يمسح كل النسخ المحفوظة لكل المستخدمين — يُنادى عند تسجيل الخروج.
     /// على نفس الطابور التسلسلي، فأي حفظ سبقه بينكتب ثم بينمسح.
     static func clearAll() {
         guard let root else { return }

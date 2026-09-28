@@ -14,7 +14,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/life/shopping → {"items":[{id,text,done,category,price,qty,unit}], "demo":bool}
     func getShopping() async throws -> [ShoppingItem] {
         let r: ShoppingResponse = try await fetch("/api/life/shopping")
         return (r.items ?? []).compactMap { row in
@@ -35,27 +34,24 @@ extension APIClient {
         let category: String
     }
 
-    // POST /api/life/shopping body {"text","category"} → {"ok":bool} (للمالك فقط)
+    // (للمالك فقط)
     func addShopping(text: String, category: String = "") async throws {
         try await send("/api/life/shopping", method: "POST",
                        body: ShoppingCreate(text: text, category: category))
     }
 
-    // Optional fields omit themselves from JSON when nil (encodeIfPresent), so a
-    // nil price/qty is "not provided" exactly like the old dictionary build.
+    // nil fields are omitted from the JSON ("not provided").
     private struct ShoppingCheck: Encodable {
         let price: Double?
         let qty: Int?
     }
 
-    // PATCH /api/life/shopping/<id> body {"price"?,"qty"?} → {"ok":bool,...}
     // يشطب الغرض كـ"انشترى"؛ لو فيه سعر بيضيفه لمصاريفك تلقائياً.
     func checkShopping(id: String, price: Double? = nil, qty: Int? = nil) async throws {
         try await send("/api/life/shopping/\(id)", method: "PATCH",
                        body: ShoppingCheck(price: price, qty: qty))
     }
 
-    // DELETE /api/life/shopping/<id> → {"ok":bool}
     func deleteShopping(id: String) async throws {
         try await send("/api/life/shopping/\(id)", method: "DELETE")
     }
@@ -64,8 +60,7 @@ extension APIClient {
         let price: Double?
     }
 
-    // GET /api/life/shopping/last-price?text= → {"price":number}
-    // آخر سعر مدفوع لصنف بنفس الاسم. لا يرمي — يرجّع 0 عند أي فشل (اقتراح فقط).
+    // آخر سعر لصنف بنفس الاسم؛ بيرجّع 0 عند أي فشل (اقتراح فقط).
     func shoppingLastPrice(text: String) async -> Double {
         let q = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let r: LastPriceResponse = try? await fetch("/api/life/shopping/last-price?text=\(q)")

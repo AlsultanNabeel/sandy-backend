@@ -1,13 +1,7 @@
 import AppIntents
 import Foundation
 
-// ─────────────────────────────────────────────────────────────────────────
-//  AskSandyIntent — «اسأل ساندي» من سيري بدون ما ينفتح التطبيق.
-//
-//  السؤال بيروح لنفس الدردشة (POST /api/agent غير الستريمنغ، جسمه
-//  {"message": …}) بنفس خيط المستخدم، فساندي بتتذكّر السؤال بعدين بالتطبيق.
-//  الرد بيرجع كحوار سيري (بتحكيه بصوت) وكقيمة نصية للاختصارات.
-// ─────────────────────────────────────────────────────────────────────────
+// «اسأل ساندي» من سيري بدون فتح التطبيق؛ بيروح لـ POST /api/agent بنفس خيط المستخدم.
 
 private struct AskSandyRequestBody: Encodable {
     let message: String
@@ -22,7 +16,7 @@ struct AskSandyIntent: AppIntent {
     static var description = IntentDescription("Ask Sandy anything and hear her answer.")
     static var openAppWhenRun: Bool = false
 
-    // اختياري: عبارة سيري ما فيها نص حر، فسيري بتسأل عنه لما يكون فاضي.
+    // اختياري: عبارة سيري ما فيها نص حر، فسيري بتسأل عنه.
     @Parameter(title: "Question") var question: String?
 
     static var parameterSummary: some ParameterSummary {
@@ -36,12 +30,11 @@ struct AskSandyIntent: AppIntent {
                                                              "What do you want to ask Sandy?"))
         }
         let api = try IntentAPI.make()
-        // الوكيل ممكن ياخد وقت (أدوات، بحث) — مهلة أطول من الافتراضي.
         let res: AskSandyResponse = try await api.fetch("/api/agent",
                                                         method: "POST",
                                                         body: AskSandyRequestBody(message: q),
                                                         timeout: 60)
-        // سيري بتقرا علامات الماركداون حرفياً — منشيل الأكثر شيوعاً.
+        // سيري بتقرا علامات الماركداون حرفياً.
         let reply = (res.reply ?? "")
             .replacingOccurrences(of: "**", with: "")
             .replacingOccurrences(of: "__", with: "")

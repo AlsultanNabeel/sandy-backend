@@ -39,13 +39,13 @@ extension APIClient {
         let category: String
     }
 
-    // POST /api/life/expenses body {"amount","note","category"} → {"ok":bool} (للمالك فقط)
+    // (للمالك فقط)
     func addExpense(amount: Double, note: String, category: String) async throws {
         try await send("/api/life/expenses", method: "POST",
                        body: ExpenseCreate(amount: amount, note: note, category: category))
     }
 
-    // ── اليوميات ────────────────────────────────────────────────────────
+    // ── اليوميات ──
     private struct JournalResponse: Decodable {
         let items: [Row]?
         let demo: Bool?
@@ -56,7 +56,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/life/journal → {"items":[{id,date,text}], "demo":bool}
     func getJournal() async throws -> ListResult<JournalEntry> {
         let r: JournalResponse = try await fetch("/api/life/journal")
         let parsed: [JournalEntry] = (r.items ?? []).compactMap { row in
@@ -72,17 +71,14 @@ extension APIClient {
         let text: String
     }
 
-    // POST /api/life/journal body {"text"} → {"ok":bool} (للمالك فقط)
+    // (للمالك فقط)
     func addJournalEntry(text: String) async throws {
         try await send("/api/life/journal", method: "POST", body: JournalCreate(text: text))
     }
 
-    // ── لقطة الشاشة الرئيسية ─────────────────────────────────────────────
-    /// تجميع خفيف وذكي للشاشة الرئيسية: يجلب المهام + التذكيرات + المصاريف
-    /// بالتوازي، ويتحمّل فشل كل قسم وحده (لا يرمي خطأ — يرجّع لقطة جزئية).
-    /// مبني بالكامل من نداءات GET الموجودة، بدون أي نقطة نهاية جديدة.
+    // ── لقطة الشاشة الرئيسية ──
+    /// يجلب المهام والتذكيرات والمصاريف بالتوازي؛ كل قسم يتحمّل فشله وحده (لقطة جزئية).
     func getHomeSnapshot() async -> HomeSnapshot {
-        // نجلب الثلاثة بالتوازي؛ كل واحد محاط بـ try? فلا يُسقط البقية.
         async let tasksRes = try? getTasks()
         async let remindersRes = try? getReminders()
         async let expensesRes = try? getExpenses()
@@ -92,13 +88,11 @@ extension APIClient {
         let expenses = await expensesRes
 
         var snap = HomeSnapshot()
-        // hadError = فشل قسم واحد على الأقل (رجّع nil).
         snap.hadError = (tasks == nil) || (reminders == nil) || (expenses == nil)
 
         let now = Date()
         let cal = Calendar.current
-        // مُحلِّل ISO متسامح: ISO8601 يتطلّب منطقة زمنية، لكن الباك-إند يرسل
-        // أحيانًا بلا منطقة (مثل "2026-06-05T16:00:00")، فنرجع لـ DateFormatter.
+        // الباك-إند أحيانًا بيبعت ISO بلا منطقة زمنية، فبنرجع لـ DateFormatter.
         let isoFull = ISO8601DateFormatter()
         isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let isoPlain = ISO8601DateFormatter()
@@ -132,7 +126,6 @@ extension APIClient {
                     snap.todayTasks += 1
                 }
             }
-            // عيّنة حتى 3 نصوص للعرض (مفتوحة، نتجاهل الفاضي).
             snap.sampleTaskTexts = open
                 .map { $0.text }
                 .filter { !$0.isEmpty }
@@ -143,7 +136,7 @@ extension APIClient {
         // ── التذكيرات ──
         if let reminders {
             if reminders.demo { snap.demo = true }
-            // القادمة فقط (وقتها ≥ الآن)، مرتّبة بالأقرب، حتى 3.
+            // القادمة فقط، بالأقرب، حتى 3.
             let upcoming = reminders.items
                 .compactMap { r -> (ReminderItem, Date)? in
                     guard let at = parseISO(r.remindAt), at >= now else { return nil }
@@ -161,9 +154,8 @@ extension APIClient {
         // ── المصاريف ──
         if let expenses {
             if expenses.demo { snap.demo = true }
-            // إجمالي المدى (الملخّص) ≈ مصاريف الأسبوع/الشهر حسب نطاق الـ GET.
+            // إجمالي الملخّص حسب نطاق الـ GET.
             snap.weekExpenseTotal = expenses.summary.total
-            // مجموع مصاريف اليوم من العناصر التي وقتها اليوم.
             var todaySum = 0.0
             for e in expenses.items {
                 if let at = parseISO(e.at), cal.isDateInToday(at) {

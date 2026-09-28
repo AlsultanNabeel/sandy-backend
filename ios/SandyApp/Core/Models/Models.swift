@@ -3,21 +3,18 @@ import Foundation
 struct ChatMessage: Identifiable {
     let id = UUID()
     let role: String   // "user" | "sandy"
-    // var (not let): streaming updates a "sandy" bubble's text in place as
-    // chunks arrive, found by its id (ChatStore.send).
+    // var: streaming updates the bubble's text in place.
     var text: String
 }
 
-// ── سجل المحادثات (متعدد السيشنات) — تطابق /api/conversations ───────────────
+// ── سجل المحادثات — /api/conversations ──
 
-/// سطر بقائمة سجل المحادثات.
 struct ConversationMeta: Identifiable {
     let id: String
-    var title: String       // قابل للتعديل (إعادة تسمية متفائلة)
+    var title: String
     let updatedAt: String   // ISO
 }
 
-/// نتيجة بحث بالسجل — عنوان + مقتطف المطابقة.
 struct ConversationHit: Identifiable {
     let id: String
     let title: String
@@ -25,28 +22,26 @@ struct ConversationHit: Identifiable {
     let updatedAt: String
 }
 
-// ── الذاكرة (اللي ساندي متذكّراه عنك) — تطابق /api/memory ───────────────────
+// ── الذاكرة — /api/memory ──
 
-/// حقيقة محفوظة عن المستخدم — نص + تصنيف اختياري.
 struct MemoryFact: Identifiable {
     let id: String
     let text: String
     let type: String
 }
 
-// ── الخط الزمني (سجل النشاط الموحّد) — تطابق /api/timeline ──────────────────
+// ── الخط الزمني — /api/timeline ──
 
-/// حدث بالخط الزمني — يحمل نوعه ومعرّفه ليقدر التطبيق يحذفه من مصدره.
+/// يحمل نوعه ومعرّفه ليقدر التطبيق يحذفه من مصدره.
 struct TimelineEvent: Identifiable {
     let id: String
     let type: String      // task | reminder | expense | journal
     let title: String
     let subtitle: String
     let ts: String        // ISO
-    var done: Bool        // قابل للتعديل (تعليم منجز متفائل للمهام)
+    var done: Bool
 }
 
-/// خطة عصف ذهني منجزة (من /api/plans).
 struct ProjectPlan: Identifiable {
     let id: String
     let topic: String
@@ -55,7 +50,6 @@ struct ProjectPlan: Identifiable {
     var planText: String     // النص الكامل بصيغة Markdown — قابل للتعديل بعد المراجعة
 }
 
-/// جلسة عصف ذهني نشطة (من /api/plans/active) — موضوع + نقاط مسجّلة لحد الآن.
 struct ActiveBrainstorm {
     let topic: String
     var points: [String]
@@ -69,23 +63,20 @@ struct OnboardingData {
     var name: String = ""
 }
 
-/// خيار لهجة متاح (من GET /api/persona) — المفتاح التقني + التسمية بالعربي.
 struct DialectOption: Identifiable {
     var id: String { key }
     let key: String
     let label: String
 }
 
-/// شخصية ساندي المخصّصة لهذا المستخدم: لهجة + تعليمات مخصّصة (فاضية = الافتراضي
-/// اللطيف العام). هويتها الفلسطينية ثابتة دايماً وما بتنعرض هون لأنها غير قابلة للتغيير.
+/// شخصية ساندي: لهجة + تعليمات مخصّصة (فاضية = الافتراضي).
 struct PersonaData {
     var dialect: String = "palestinian"
     var customInstructions: String = ""
     var availableDialects: [DialectOption] = []
 }
 
-// مهمة — تطابق مفاتيح GET /api/tasks: id, text, done, due_at, note, priority
-// note و priority إضافيان واختياريان من الباك-إند — نعطيهما قيمًا افتراضية لو غابا.
+// note و priority اختياريان من الباك-إند.
 struct TaskItem: Identifiable {
     let id: String
     let text: String
@@ -95,17 +86,15 @@ struct TaskItem: Identifiable {
     var priority: String = "normal"   // "low" | "normal" | "high"
 }
 
-// تذكير — تطابق مفاتيح GET /api/reminders: id, text, remind_at, is_recurring, note
 struct ReminderItem: Identifiable {
     let id: String
     let text: String
-    var remindAt: String   // ISO أو فاضي — «بعدين» بيحرّكه تفاؤليًا قبل ردّ الخادم
+    var remindAt: String  // ISO أو فاضي
     let isRecurring: Bool
     var recurrence: String = ""   // RRULE من الخادم، مثل "RRULE:FREQ=DAILY"
-    var note: String = ""    // ملاحظة اختيارية
+    var note: String = ""
 }
 
-// عادة — تطابق مفاتيح GET /api/life/habits: id, name, streak, done_today
 struct HabitItem: Identifiable {
     let id: String
     let name: String
@@ -113,7 +102,6 @@ struct HabitItem: Identifiable {
     var doneToday: Bool
 }
 
-// مصروف — تطابق مفاتيح GET /api/life/expenses items[]: id, amount, note, category, at
 struct ExpenseItem: Identifiable {
     let id: String
     let amount: Double
@@ -122,59 +110,48 @@ struct ExpenseItem: Identifiable {
     let at: String   // ISO أو فاضي
 }
 
-// ملخّص المصاريف — تطابق summary: total, count
 struct ExpensesSummary {
     let total: Double
     let count: Int
 }
 
-// تدوينة يوميات — تطابق مفاتيح GET /api/life/journal: id, date, text
 struct JournalEntry: Identifiable {
     let id: String
     let date: String
     let text: String
 }
 
-/// نتيجة قائمة مع علامة بيانات التجربة (demo) — لعرض شريط "بيانات تجربة".
 struct ListResult<T> {
     let items: [T]
     let demo: Bool
 }
 
-/// نتيجة المصاريف: عناصر + ملخّص + علامة التجربة.
 struct ExpensesResult {
     let items: [ExpenseItem]
     let summary: ExpensesSummary
     let demo: Bool
 }
 
-/// لقطة الشاشة الرئيسية — تجميع خفيف من نداءات GET الموجودة (مهام/تذكيرات/مصاريف).
-/// تُبنى بالكامل من البيانات المتاحة، بدون أي نقطة نهاية جديدة بالباك-إند.
-/// كل قسم يتحمّل الفشل وحده: لو فشل قسم تبقى بقية الأقسام شغّالة.
+/// لقطة الرئيسية من نداءات GET الموجودة؛ كل قسم يتحمّل الفشل وحده.
 struct HomeSnapshot {
-    // المهام
-    var overdueTasks: Int = 0        // مهام فات موعدها (due_at < الآن) وغير منجزة
-    var todayTasks: Int = 0          // مهام موعدها اليوم وغير منجزة
-    var openTasks: Int = 0           // إجمالي المهام المفتوحة (غير منجزة)
-    var sampleTaskTexts: [String] = []   // عيّنة نصوص (حتى 3) للعرض
+    var overdueTasks: Int = 0  // due_at < الآن وغير منجزة
+    var todayTasks: Int = 0
+    var openTasks: Int = 0
+    var sampleTaskTexts: [String] = []  // حتى 3
 
-    // التذكيرات
-    var nextReminderText: String = ""    // أقرب تذكير قادم (فاضي لو ما في)
-    var nextReminderAt: String = ""      // وقته ISO (فاضي لو ما في)
-    var upcomingReminders: [ReminderItem] = []   // عيّنة قادمة (حتى 3)
+    var nextReminderText: String = ""
+    var nextReminderAt: String = ""
+    var upcomingReminders: [ReminderItem] = []  // حتى 3
 
-    // المصاريف
-    var todayExpenseTotal: Double = 0    // مجموع مصاريف اليوم
-    var weekExpenseTotal: Double = 0     // مجموع مصاريف آخر 7 أيام (أو ملخّص المدى)
+    var todayExpenseTotal: Double = 0
+    var weekExpenseTotal: Double = 0  // آخر 7 أيام
 
-    // الحالة العامة
-    var demo: Bool = false               // أي قسم رجّع بيانات تجربة
-    var hadError: Bool = false           // فشل قسم واحد على الأقل (نعرض بهدوء)
+    var demo: Bool = false
+    var hadError: Bool = false
 }
 
-// ── الفوكس (بومودورو) + مشاهد الغرفة ──────────────────────────────────────
+// ── الفوكس + مشاهد الغرفة ──
 
-/// حالة جلسة فوكس — تطابق GET /api/life/focus.
 struct FocusStatus {
     var active: Bool = false
     var label: String = ""
@@ -190,14 +167,12 @@ struct FocusStatus {
     var isBreak: Bool { phase == "break" }
 }
 
-/// فعل ضمن مشهد — جهاز + قيمة (مثلاً light=60، music=on).
 struct SceneAction: Identifiable, Equatable {
     var id = UUID()
     var device: String
     var value: String
 }
 
-/// مشهد غرفة — تطابق عناصر GET /api/life/scenes.
 struct RoomScene: Identifiable {
     let name: String
     var label: String
@@ -206,7 +181,6 @@ struct RoomScene: Identifiable {
     var id: String { name }
 }
 
-/// سطر تاريخ جلسة فوكس — تطابق عناصر GET /api/life/focus/history.
 struct FocusSession: Identifiable {
     let id = UUID()
     let label: String
@@ -215,9 +189,8 @@ struct FocusSession: Identifiable {
     let startedAt: String
 }
 
-// ── البحث الخارجي (الويب/الأماكن) — تطابق GET /api/research ─────────────────
+// ── البحث الخارجي — /api/research ──
 
-/// نتيجة بحث ويب — تطابق عناصر kind=web: title, url, text, published_date.
 struct WebResult: Identifiable {
     let id = UUID()
     let title: String
@@ -226,7 +199,6 @@ struct WebResult: Identifiable {
     let publishedDate: String
 }
 
-/// نتيجة مكان — تطابق عناصر kind=places من Google Places.
 struct PlaceResult: Identifiable {
     let id = UUID()
     let name: String
@@ -240,17 +212,15 @@ struct PlaceResult: Identifiable {
     let mapsUrl: String
 }
 
-// ── التحكّم بالبيت (الأجهزة + الوحدات) — تطابق /api/devices و /api/nodes ──────
+// ── الأجهزة والوحدات — /api/devices و /api/nodes ──
 
-/// طريقة وصل الجهاز — إمّا موضوع MQTT خام، أو مخرج على وحدة ساندي مربوطة.
-/// نحفظ القيم الخام كما يرجّعها/يطلبها الباك-إند تحت مفتاح `transport`.
+/// موضوع MQTT خام، أو مخرج على وحدة ساندي مربوطة.
 struct DeviceTransport: Equatable {
     let kind: String        // "mqtt" | "node"
     let topic: String       // عند mqtt
     let nodeId: String      // عند node
     let output: String      // عند node
 
-    /// يبني خريطة الـ transport بالشكل اللي يتوقّعه الباك-إند (بلا حقول فاضية).
     var asDict: [String: Any] {
         switch kind {
         case "node":
@@ -269,70 +239,55 @@ struct DeviceTransport: Equatable {
     }
 }
 
-/// جهاز قابل للتحكّم — تطابق عناصر GET /api/devices.
 /// `controlType` ∈ switch | dimmer | enum | media | cover | ir.
 /// `meta` نحفظه كقاموس خام (values, min/max, buttons) ونقرأ منه بحذر.
 struct DeviceItem: Identifiable {
-    let name: String                 // المعرّف الثابت (id من الباك-إند)
+    let name: String  // id من الباك-إند
     var label: String
     var room: String
     var controlType: String
     var transport: DeviceTransport
     var meta: [String: Any]
-    var state: String                // الحالة الحالية (on/off/قيمة) إن توفّرت
+    var state: String
     var online: Bool
     let lastSeen: String             // ISO أو فاضي
 
     var id: String { name }
 
-    // ── قراءات meta المريحة (بحذر، مع قيم افتراضية) ──
-    /// خيارات نوع enum.
     var enumValues: [String] {
         (meta["values"] as? [String]) ?? []
     }
-    /// حدّا الـ dimmer (افتراضي 0..100).
     var dimmerMin: Int { (meta["min"] as? NSNumber)?.intValue ?? 0 }
     var dimmerMax: Int {
         let m = (meta["max"] as? NSNumber)?.intValue ?? 100
         return m > dimmerMin ? m : 100
     }
-    /// أزرار الريموت (اسم → كود).
     var irButtons: [String: String] {
         (meta["buttons"] as? [String: String]) ?? [:]
     }
-    /// أسماء أزرار الريموت مرتّبة (للعرض الثابت).
     var irButtonNames: [String] { irButtons.keys.sorted() }
 
     // ── نوع text (الشاشة) ──
-    /// النص الباهت جوا الحقل قبل ما تكتب.
     var textPlaceholder: String { (meta["placeholder"] as? String) ?? "" }
-    /// الحدّ الأقصى **بالبايتات**، مش بالحروف.
-    ///
-    /// العربي متعدّد البايتات بيونيكود: مية حرف عربي = مئتين بايت. ومخزن اللوح
-    /// ٢٥٦ بايت. عدّ الحروف بيخلي الحقل يوهم إنه في مساحة، واللوح بيقصّ الجملة
-    /// بنص حرف — فالعدّ بالبايتات هو الوحيد اللي بيقول الصح.
+    /// بالبايتات مش بالحروف: الحرف العربي بايتين ومخزن اللوح ٢٥٦ بايت.
     var textMaxBytes: Int { (meta["max_bytes"] as? NSNumber)?.intValue ?? 255 }
 }
 
-/// وحدة ساندي مربوطة — تطابق عناصر GET /api/nodes.
 struct NodeItem: Identifiable {
     let nodeId: String
     var label: String
     let capabilities: [String]
-    let outputs: [String]            // المخارج المتاحة (لربط الأجهزة عليها)
+    let outputs: [String]
     let firmwareVersion: String
     var online: Bool
     let lastSeen: String             // ISO أو فاضي
     let pairedAt: String             // ISO أو فاضي
-    /// قراءات حيّة من آخر نبضة — مستوى كل مايك، والمكسب، والصوت.
-    /// فاضية للوحدات اللي ما بتبعث تليمتري (عقدة الغرفة مثلًا).
     let telemetry: NodeTelemetry?
 
     var id: String { nodeId }
 }
 
-/// قراءات لحظية من اللوح. كلها اختيارية: النبضة بتكبر مع نسخ الفيرموير،
-/// والتطبيق لازم يشتغل مع لوح أقدم منه بلا ما يفشل.
+/// كلها اختيارية حتى يشتغل التطبيق مع فيرموير أقدم.
 struct NodeTelemetry {
     let micLeft: Int?          // ٠..١٠٠ — المستوى اللحظي
     let micRight: Int?
@@ -342,27 +297,18 @@ struct NodeTelemetry {
     let micRightMuted: Bool?
     let volume: Int?           // ٠..١٠٠
     let noise: Int?            // ٠ مطفي، ١ خفيف، ٢ متوسط، ٣ قوي
-    /// عنوان اللوح ع الشبكة المحلية — بيقوله اللوح بكل نبضة.
-    /// بيتغيّر كل ما الراوتر يعيد التوزيع، فبلاه إيجاده بيصير مسح شبكة.
+    /// عنوان اللوح ع الشبكة المحلية، بيتغيّر مع الراوتر فبيجي بكل نبضة.
     let ip: String?
-    /// أي لوح: `sandy-brain-s3` أو الكاميرا أو عقدة الغرفة. تلات ألواح ع نفس
-    /// الشبكة وتلات ملفات ما بتتبادل — واللبس بينهم بيحرق لوح.
+    /// أي لوح: `sandy-brain-s3` أو الكاميرا أو عقدة الغرفة (اللبس بينهم بيحرق لوح).
     let board: String?
-    /// عنوان الكاميرا هي — مفتاح مستقل عن `ip`.
-    ///
-    /// اللوحين تحت معرّف وحدة واحد، فحقل عنوان واحد بينقلب بينهم كل خمس
-    /// ثواني. البثّ بيروح مباشرة من الكاميرا، فلازم عنوانها هي بالذات.
+    /// عنوان الكاميرا مستقل عن `ip`: اللوحين تحت معرّف واحد والبث بيروح من الكاميرا مباشرة.
     let camIP: String?
     let camBoard: String?
-    /// اسم الشبكة اللي اللوح عليها الآن — بيجي بالنبضة.
-    ///
-    /// بيروح للتطبيق عشان تشوف الوضع قبل ما تغيّره، وعشان تعرف بعد التغيير إذا
-    /// نجح: اللوح اللي انتقل بيقول الاسم الجديد، واللي رجع لحاله بيقول القديم.
+    /// اسم الشبكة الحالية؛ بعد التغيير بيبيّن إذا اللوح انتقل أو رجع.
     let ssid: String?
-    /// شبكة الكاميرا — مفتاح مستقل، زي عنوانها.
+    /// شبكة الكاميرا — مستقلة زي عنوانها.
     let camSSID: String?
-    /// مفتاح البث المحلي — الكاميرا بتولّده كل إقلاع، والخادم بيعطيه لصاحبها بس.
-    /// بلاه خادم البث بيرفض؛ وهاد المقصود: جهاز غريب ع نفس الشبكة ما بيعرفه.
+    /// مفتاح البث المحلي — الكاميرا بتولّده كل إقلاع والخادم بيعطيه لصاحبها بس.
     let camStreamKey: String?
 
     /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
@@ -390,7 +336,6 @@ struct NodeTelemetry {
     }
 }
 
-/// نتيجة ربط وحدة — المعرّف + هل كانت مربوطة من قبل.
 struct PairResult {
     let nodeId: String
     let already: Bool
@@ -400,8 +345,7 @@ struct PairResult {
     var sent: Bool = true
 }
 
-/// التنبيه اليومي (المرحلة السابعة): إمّا سؤال تعارف (`question` + `qid`)، أو جملة
-/// مهام مولّدة بشخصية ساندي (`agenda`)، أو لا شيء (`none` — ضيف/بلا محتوى اليوم).
+/// التنبيه اليومي: سؤال تعارف (`question` + `qid`)، أو `agenda`، أو `none`.
 struct DailyNudge {
     enum Kind: String { case question, agenda, none }
     let kind: Kind
@@ -412,7 +356,7 @@ struct DailyNudge {
     var hasContent: Bool { kind != .none && !text.isEmpty }
 }
 
-/// حالة اشتراك المستخدم كما يراها الباك-إند (مصدره RevenueCat عبر الويبهوك).
+/// حالة الاشتراك من الباك-إند (مصدرها RevenueCat).
 struct SubscriptionStatus {
     let status: String        // none | trialing | active | expired
     let plan: String
@@ -423,23 +367,14 @@ enum APIErrorKind { case connection, unauthorized, server, decoding, unknown }
 
 struct APIError: LocalizedError {
     let message: String
-    /// رمز الخطأ الآلي من الخادم (`error`) — للتفريع بالكود، مش للعرض.
-    ///
-    /// كان الرمز والجملة نفس الحقل، فالشاشات كانت تفرّع على `message`. وهاد
-    /// اشتغل بالصدفة: الخادم كان يبعت الرمز لحاله بهالمسارات. أول ما ينضاف
-    /// `message` عربي لأي منها — وهاد بالضبط الاتجاه الصح — كانت المطابقات
-    /// تفشل بصمت وتوقع ع الحالة العامة، وبيصير المستخدم يشوف جملة عامة مكان
-    /// جملة تخصّ حالته.
-    ///
-    /// الحقلان منفصلان هلق: `message` للإنسان، و`code` للكود.
+    /// رمز الخطأ الآلي (`error`) للتفريع بالكود؛ `message` للعرض.
     var code: String? = nil
-    var kind: APIErrorKind = .unknown          // default keeps old initializers working
+    var kind: APIErrorKind = .unknown
     var errorDescription: String? { message }
 }
 
 extension Error {
-    /// طلب اتلغى (سحب-للريفرش انتهى، أو المستخدم طلع من الشاشة) — هاد سلوك طبيعي
-    /// من النظام، مش فشل شبكة. أي معالج خطأ بالتطبيق لازم يتجاهله ولا يعرضه.
+    /// طلب اتلغى (ريفرش انتهى أو المستخدم طلع) — مش فشل، لازم يتجاهله أي معالج خطأ.
     var isCancellation: Bool {
         self is CancellationError || (self as? URLError)?.code == .cancelled
     }
