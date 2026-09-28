@@ -2,9 +2,8 @@ import Foundation
 
 /// Talks to the Sandy backend; endpoints live in the `APIClient+<Feature>` extensions.
 final class APIClient: APIClientProtocol {
-    /// `waitsForConnectivity` is OFF on purpose: with it on, per-request timeouts are ignored
-    /// while offline (endless spinner); `sendWithRetry` handles Wi-Fi/cellular handover instead.
-    /// Not private: the per-feature extensions must send through the same session.
+    /// `waitsForConnectivity` OFF on purpose: with it on, timeouts are ignored offline (endless
+    /// spinner); `sendWithRetry` handles handover. Not private: the extensions send through it.
     static let session: URLSession = URLSession(configuration: .default)
 
     /// Retries for idempotent methods only: retrying a POST could create a task twice.

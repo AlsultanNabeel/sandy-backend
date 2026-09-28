@@ -271,9 +271,8 @@ private final class LiveAudioBridge: @unchecked Sendable {
         }
     }
 
-    /// Connect the output explicitly with its current format: echo cancellation swaps in a
-    /// voice-processing unit and an implicit mixer link may not match (mixer never renders).
-    /// Redone after every configuration change.
+    /// Connect the output explicitly with its current format (redone on every config change):
+    /// echo cancellation swaps in a voice-processing unit an implicit mixer link may not match.
     private func connectOutput() {
         engine.connect(player, to: engine.mainMixerNode, format: playFormat)
         engine.connect(engine.mainMixerNode, to: engine.outputNode,
