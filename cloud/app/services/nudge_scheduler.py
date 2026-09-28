@@ -1,14 +1,6 @@
-"""Daily-nudge delivery scheduler (Phase 7).
+"""Daily-nudge push scheduler; runs only when APNs is configured.
 
-Once a day, in the user's morning, generate each user's nudge and push it to
-their registered devices. This is the ONLY thing that turns the in-app card into
-a notification that arrives with the app closed — so it starts only when APNs is
-configured (paid Apple account). Without keys it stays completely idle: no
-thread, no cost, and the free in-app-card path is unaffected.
-
-Runs in-process (no extra dyno). Under gunicorn each worker would start its own
-scheduler, so the actual send is guarded by an atomic per-day lock in Mongo —
-whichever worker claims ``send:<date>`` first does the fan-out; the rest skip.
+Each gunicorn worker may start one; an atomic per-day Mongo lock makes only one send.
 """
 
 from __future__ import annotations
@@ -34,7 +26,7 @@ def _profile_for(uid: str) -> dict:
 
 
 def _claim_daily_lock(mongo_db) -> bool:
-    """Atomically claim today's send so only one worker fans out. True if we won."""
+    """Atomically claim today's send so only one worker fans out."""
     coll = mongo_db[_LOCK_COLL] if mongo_db is not None else None
     if coll is None:
         return True  # single-process/dev: no contention
@@ -51,8 +43,7 @@ def _claim_daily_lock(mongo_db) -> bool:
 
 
 def run_daily_send(mongo_db) -> int:
-    """Generate + push today's nudge to every user with a device. Returns the
-    number of notifications delivered. Safe to call directly (tests/manual)."""
+    """Push today's nudge to every user with a device; returns how many were delivered."""
     from app.api.daily_nudge_api import get_daily_nudge
     from app.features import push_tokens_store
 
@@ -84,8 +75,7 @@ def run_daily_send(mongo_db) -> int:
 
 
 def start_nudge_scheduler(mongo_db) -> bool:
-    """Start the once-a-day push job. No-op (returns False) unless APNs is
-    configured, so paying is the only switch needed to turn delivery on."""
+    """Start the daily push job; no-op unless APNs is configured."""
     global _started, _scheduler
     if _started:
         return True
@@ -94,7 +84,7 @@ def start_nudge_scheduler(mongo_db) -> bool:
         return False
 
     if mongo_db is not None:
-        try:  # auto-clean old daily locks
+        try:
             mongo_db[_LOCK_COLL].create_index(
                 "created_at", expireAfterSeconds=60 * 60 * 24 * 2, background=True
             )
