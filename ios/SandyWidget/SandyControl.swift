@@ -1,9 +1,4 @@
-//
-//  SandyControl.swift — زر «تكلّم مع ساندي» بمركز التحكم (iOS 18).
-//
-//  ينفّذ TalkToSandyIntent (SandyCallAttributes.swift) اللي بيفتح التطبيق على
-//  مكالمة صوتية مباشرة عبر sandy://call.
-//
+// زر «تكلّم مع ساندي» بمركز التحكم (iOS 18): مكالمة صوتية عبر sandy://call.
 
 import AppIntents
 import SwiftUI
@@ -12,7 +7,7 @@ import WidgetKit
 struct TalkToSandyControl: ControlWidget {
     static let kind = "com.sandy.app.control.talk"
 
-    /// App language as the app last wrote it to the App Group (default Arabic).
+    /// As the app last wrote it to the App Group (default Arabic).
     private var isArabic: Bool {
         UserDefaults(suiteName: SandyLinks.appGroup)?.string(forKey: "app_lang") != "en"
     }
