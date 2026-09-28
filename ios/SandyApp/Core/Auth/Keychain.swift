@@ -8,11 +8,22 @@ import Security
 //  `AfterFirstUnlockThisDeviceOnly`: النوايا/الويدجت تقرأه بالخلفية بعد أول فتح،
 //  و`ThisDeviceOnly` تمنعه من الرجوع لجهاز ثاني عبر نسخة احتياطية مشفّرة.
 //
-//  لاحقًا لمشاركته مع تارجت الويدجت: نضيف `kSecAttrAccessGroup` (مجموعة تطبيقات).
+//  **مجموعة الوصول = مجموعة التطبيقات.** العنصر بينحفظ بـ`group.com.sandy.app`،
+//  فالويدجت وإضافة المشاركة بيقروه من هون مباشرة. قبل كانت في نسخة منه بـ
+//  UserDefaults المشتركة، وهاد ملف plist عادي مش مشفّر، فالسرّ كان مكشوف لأي
+//  تارجت بالمجموعة وبالنسخ الاحتياطية. مجموعة التطبيقات بتنفع كمجموعة وصول
+//  للـKeychain بدون استحقاق `keychain-access-groups`، فما تغيّر شي بالاستحقاقات.
+//
+//  القراءة والمسح بدون مجموعة: بيلاقوا العنصر وين ما كان، فالتوكن اللي انحفظ
+//  قبل هالتغيير بينقرا، و`APIClient` بيعيد حفظه بالمجموعة بأول إقلاع.
+//
+//  لازم الخدمة والحساب يضلّوا مطابقين لـ SandyWidget/SandyTasksWidget.swift
+//  و SandyShareExtension/ShareAPI.swift.
 // ─────────────────────────────────────────────────────────────────────────
 enum Keychain {
     private static let service = "com.sandy.app"
     private static let account = "auth.token"
+    private static let accessGroup = "group.com.sandy.app"
 
     /// يحفظ التوكن (أو يمسحه لو nil).
     static func saveToken(_ value: String?) {
@@ -26,6 +37,7 @@ enum Keychain {
         guard let value, let data = value.data(using: .utf8) else { return }
         var add = base
         add[kSecValueData as String] = data
+        add[kSecAttrAccessGroup as String] = accessGroup
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }

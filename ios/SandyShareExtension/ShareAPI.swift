@@ -1,11 +1,12 @@
 import Foundation
+import Security
 
 // ─────────────────────────────────────────────────────────────────────────
 //  ShareAPI — عميل صغير للباك‑إند خاص بإضافة المشاركة.
 //
-//  الإضافة ما بتشوف كود التطبيق، فهاد نسخة مصغّرة: التوكن والعنوان بيجوا من
-//  مجموعة التطبيقات (التطبيق بيكتبهم بـ Core/Shared/SharedAuth.swift).
-//  المفاتيح لازم تضل مطابقة لهداك الملف.
+//  الإضافة ما بتشوف كود التطبيق، فهاد نسخة مصغّرة: التوكن من الـKeychain
+//  بمجموعة الوصول المشتركة (Core/Auth/Keychain.swift)، والعنوان من مجموعة
+//  التطبيقات (Core/Shared/SharedAuth.swift). المفاتيح لازم تضل مطابقة.
 // ─────────────────────────────────────────────────────────────────────────
 
 enum ShareText {
@@ -46,7 +47,9 @@ enum ShareError: LocalizedError {
 }
 
 struct ShareAPI {
-    static let tokenKey = "share_auth_token"
+    /// نفس عنصر الـKeychain بـ SandyApp/Core/Auth/Keychain.swift.
+    static let keychainService = "com.sandy.app"
+    static let keychainAccount = "auth.token"
     static let baseURLKey = "share_base_url"
     /// نفس الافتراضي بـ SandyApp/Core/Networking/Backend.swift.
     static let defaultURL = "https://sandy-robot-3da0693d32f7.herokuapp.com"
@@ -56,8 +59,19 @@ struct ShareAPI {
 
     /// nil = المستخدم مش مسجّل دخول بالتطبيق (أو ما فتحه من وقت ما انضافت الإضافة).
     static func load() -> ShareAPI? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrAccessGroup as String: ShareText.appGroup,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let token = String(data: data, encoding: .utf8), !token.isEmpty else { return nil }
         let store = UserDefaults(suiteName: ShareText.appGroup)
-        guard let token = store?.string(forKey: tokenKey), !token.isEmpty else { return nil }
         let saved = store?.string(forKey: baseURLKey) ?? ""
         return ShareAPI(baseURL: saved.isEmpty ? defaultURL : saved, token: token)
     }

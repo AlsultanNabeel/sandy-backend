@@ -3,11 +3,13 @@
 //  بيكمّل المهمة من الويدجت نفسه بلا ما يفتح التطبيق.
 //
 //  البيانات: التطبيق بيكتب القائمة بمجموعة التطبيقات (WidgetData.setOpenTasks،
-//  مفتاح `open_tasks`)، ونسخة التوكن والعنوان بيكتبها `SharedAuth` من APIClient
-//  (مفاتيح `share_auth_token` و`share_base_url`). لازم المفاتيح تضل مطابقة.
+//  مفتاح `open_tasks`)، والعنوان بيكتبه `SharedAuth` (مفتاح `share_base_url`).
+//  التوكن من الـKeychain بمجموعة الوصول المشتركة (Core/Auth/Keychain.swift).
+//  لازم المفاتيح تضل مطابقة.
 //
 
 import AppIntents
+import Security
 import SwiftUI
 import WidgetKit
 
@@ -17,8 +19,9 @@ private enum TaskKeys {
     static let openTasks = "open_tasks"          // SandyApp/Widgets/WidgetData.swift
     static let activeTasks = "active_tasks"
     static let lang = "app_lang"
-    static let token = "share_auth_token"        // SandyApp/Core/Shared/SharedAuth.swift
-    static let baseURL = "share_base_url"
+    static let keychainService = "com.sandy.app" // SandyApp/Core/Auth/Keychain.swift
+    static let keychainAccount = "auth.token"
+    static let baseURL = "share_base_url"        // SandyApp/Core/Shared/SharedAuth.swift
     /// نفس الافتراضي بـ SandyApp/Core/Networking/Backend.swift.
     static let defaultURL = "https://sandy-robot-3da0693d32f7.herokuapp.com"
 }
@@ -71,8 +74,21 @@ private enum WidgetTaskCache {
 
     static var isArabic: Bool { store?.string(forKey: TaskKeys.lang) != "en" }
 
+    /// من الـKeychain بمجموعة الوصول المشتركة — نفس العنصر اللي بيكتبه
+    /// SandyApp/Core/Auth/Keychain.swift.
     static var token: String? {
-        guard let t = store?.string(forKey: TaskKeys.token), !t.isEmpty else { return nil }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: TaskKeys.keychainService,
+            kSecAttrAccount as String: TaskKeys.keychainAccount,
+            kSecAttrAccessGroup as String: SandyLinks.appGroup,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let t = String(data: data, encoding: .utf8), !t.isEmpty else { return nil }
         return t
     }
 

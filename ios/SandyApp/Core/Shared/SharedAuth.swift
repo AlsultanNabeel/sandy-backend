@@ -1,32 +1,27 @@
 import Foundation
 
 // ─────────────────────────────────────────────────────────────────────────
-//  SharedAuth — نسخة من توكن الدخول وعنوان الخادم بمجموعة التطبيقات المشتركة،
-//  عشان إضافة المشاركة (SandyShare) تقدر تكلّم الباك‑إند.
+//  SharedAuth — عنوان الخادم بمجموعة التطبيقات المشتركة، عشان الويدجت وإضافة
+//  المشاركة يعرفوا وين يبعتوا.
 //
-//  ليش مش الـKeychain؟ مشاركة عنصر الـKeychain بين التطبيق والإضافة بدها
-//  مجموعة وصول (keychain-access-groups) بالاستحقاقات للتارجتين. مجموعة
-//  التطبيقات موجودة أصلاً (group.com.sandy.app)، فالنسخة هون أبسط وما بتغيّر
-//  استحقاقات التطبيق. الـKeychain بيضل هو المصدر الأساسي للتطبيق.
+//  التوكن نفسه مش هون: بيقروه من الـKeychain بمجموعة الوصول المشتركة (شوف
+//  Core/Auth/Keychain.swift). العنوان مش سرّ، فمكانه الطبيعي UserDefaults.
 //
-//  الكتابة بتصير من `APIClient` لما يتغيّر التوكن (دخول/خروج) أو العنوان، ومرّة
-//  بالإقلاع لحساب مسجّل من قبل. تسجيل الخروج (توكن nil) بيمسح النسخة.
+//  الكتابة بتصير من `APIClient` لما يتغيّر العنوان، ومرّة بالإقلاع.
 //
-//  لازم المفاتيح تضل مطابقة لـ ios/SandyShare/ShareAPI.swift.
+//  لازم المفتاح يضل مطابق لـ SandyShareExtension/ShareAPI.swift
+//  و SandyWidget/SandyTasksWidget.swift.
 // ─────────────────────────────────────────────────────────────────────────
 enum SharedAuth {
     static let appGroup = "group.com.sandy.app"
-    static let tokenKey = "share_auth_token"
     static let baseURLKey = "share_base_url"
+    /// نسخة التوكن القديمة (مكشوفة) من قبل ما ينتقل للـKeychain المشترك.
+    private static let legacyTokenKey = "share_auth_token"
 
-    /// يكتب التوكن + العنوان للإضافة، أو يمسح التوكن لو nil/فاضي.
-    static func mirror(token: String?, baseURL: String) {
+    static func mirror(baseURL: String) {
         guard let store = UserDefaults(suiteName: appGroup) else { return }
-        if let token, !token.isEmpty {
-            store.set(token, forKey: tokenKey)
-            store.set(baseURL, forKey: baseURLKey)
-        } else {
-            store.removeObject(forKey: tokenKey)
-        }
+        store.set(baseURL, forKey: baseURLKey)
+        // جهاز حدّث من نسخة كانت تكتب التوكن هون: نمسحه، ما بينقرا من هون بعد اليوم.
+        store.removeObject(forKey: legacyTokenKey)
     }
 }
