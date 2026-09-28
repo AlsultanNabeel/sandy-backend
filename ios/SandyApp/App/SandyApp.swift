@@ -6,10 +6,7 @@ import UIKit
 import GoogleSignIn
 #endif
 
-/// مندوب التطبيق — نحتاجه فقط لمسك توكن جهاز APNs عند التسجيل للدفع البعيد
-/// ونمرّره لـ NotificationManager (اللي بدوره يرفعه للباك-إند). بدون مفاتيح آبل
-/// بالسيرفر هالمسار حميد: التسجيل بينجح والتوكن بينحفظ، بس ما بيوصل دفع لحد ما
-/// تُضاف المفاتيح.
+/// بس لمسك توكن جهاز APNs وتمريره لـ NotificationManager.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -25,8 +22,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        // os.Logger مش print: بينضم لسجل النظام مع وسم وتصنيف، فبينقرا من
-        // Console ع جهاز حقيقي — وprint ما بتطلع أصلًا ببناء الإصدار.
         Logger(subsystem: Bundle.main.bundleIdentifier ?? "SandyApp", category: "push")
             .error("APNs registration failed: \(error.localizedDescription, privacy: .public)")
     }
@@ -36,7 +31,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct SandyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var state = AppState()
-    /// مدير اللغة المشترك — يقود اتجاه الواجهة (RTL/LTR) لكل التطبيق ويزوّد الترجمة.
     @StateObject private var lang = LanguageManager.shared
 
     var body: some Scene {
@@ -44,22 +38,16 @@ struct SandyApp: App {
             RootView()
                 .environmentObject(state)
                 .environmentObject(lang)
-                // الاتجاه يتبع اللغة: عربي → RTL، إنجليزي → LTR (يقابل dir بالويب).
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
-                // التواريخ/الأرقام بأدوات النظام (DatePicker، Text(date, style:)) تتبع لغة التطبيق.
                 .environment(\.locale, AppLocale.locale(for: lang.lang))
-                // واجهة داكنة دائماً عشان تطابق باليت الويب الأوبسيديان + تتناسق
-                // أدوات النظام (حقول النص/الأزرار بشاشة الدخول) مع الخلفية الداكنة.
+                // داكنة دائماً حتى تتناسق أدوات النظام مع خلفية التطبيق.
                 .preferredColorScheme(.dark)
-                // استقبال رابط رجوع جوجل بعد المصادقة.
                 .onOpenURL { url in
-                    // روابط ساندي (ويدجت / Live Activity / مركز التحكم) أولاً.
                     if DeepLinkRouter.shared.handle(url) { return }
                     #if canImport(GoogleSignIn)
                     GIDSignIn.sharedInstance.handle(url)
                     #endif
                 }
-                // نتيجة من بحث الآيفون (Spotlight) — تفتح العنصر بمكانه.
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
                     SpotlightRouter.shared.handle(activity)
                 }
@@ -81,29 +69,23 @@ struct RootView: View {
             case .chat:        MainTabView()
             }
         }
-        // The launch screen's Sandy, picked up at the exact same spot and sent
-        // off: she glows, grows a little and fades while the app appears behind
-        // her. It never blocks a touch and never delays the first screen — the
-        // app is already there underneath.
+        // Launch-screen mark fades out over the already-rendered app; never blocks touches.
         .overlay {
             if !handoffDone {
                 LaunchHandoff { handoffDone = true }
             }
         }
-        // نحاول استعادة الجلسة مرّة عند الإقلاع (توكن محفوظ → رئيسية مباشرة).
         .task {
             if state.needsSessionRestore { await state.restoreSession() }
         }
-        // زر «تكلّم مع ساندي» بمركز التحكم بيترك الرابط بالمساحة المشتركة احتياطًا.
+        // زر مركز التحكم بيترك الرابط بالمساحة المشتركة احتياطًا.
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active { DeepLinkRouter.shared.consumeSharedPending() }
         }
     }
 }
 
-/// Continues the system launch screen (`UILaunchScreen` in Info.plist: the
-/// `LaunchBackground` color with `LaunchMark` centred at its natural 240 pt) so
-/// the hand-off from the OS to the app has no seam, then animates it away.
+/// Continues the system launch screen (Info.plist `UILaunchScreen`) seamlessly, then fades it.
 private struct LaunchHandoff: View {
     let onFinished: () -> Void
     @State private var leaving = false
@@ -134,7 +116,7 @@ private struct LaunchHandoff: View {
     }
 }
 
-/// شاشة إقلاع قصيرة أثناء استعادة الجلسة — تتفادى وميض شاشة الدخول.
+/// تتفادى وميض شاشة الدخول أثناء استعادة الجلسة.
 struct LaunchView: View {
     var body: some View {
         ZStack {

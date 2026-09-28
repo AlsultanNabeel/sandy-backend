@@ -1,15 +1,7 @@
 import SwiftUI
 
-/// تبويبات ساندي الأربعة (Core-4). الترتيب ثابت ومرتبط بـ `selection` حتى نقدر
-/// نبدّل التبويب برمجيًّا (مثلاً HomeView يقفز لتبويب ساندي).
-///
-/// • الرئيسية — مدخل ساندي الحيّ ولوحة المعلومات.
-/// • ساندي    — مركز الذكاء الموحّد (محادثة + بحث + صور بمكان واحد).
-/// • يومي     — التخطيط (المهام + التذكيرات + العادات + الفوكس).
-/// • حياتي    — المعنى والذكريات (اليوميات + المصاريف).
-///
-/// ملاحظة: الحساب (ProfileView) مش تبويب — نوصله من زر أفاتار بالرئيسية،
-/// وفيه أرشيف ساندي (الذاكرة + الخط الزمني + الروبوت).
+/// الترتيب ثابت ومرتبط بـ `selection` حتى نقدر نبدّل التبويب برمجيًّا.
+/// الحساب (ProfileView) مش تبويب — نوصله من زر الأفاتار بالرئيسية.
 enum MainTab: Int, Hashable, CaseIterable {
     case home, sandy, daily, life
 
@@ -32,34 +24,24 @@ enum MainTab: Int, Hashable, CaseIterable {
     }
 }
 
-/// الواجهة الرئيسية بعد الدخول — أربعة تبويبات (الرئيسية مدخل ساندي الحيّ).
-/// نخفي شريط آبل المصمت ونستبدله بشريط ساندي الزجاجي الطافي بالأسفل.
+/// شريط آبل مخفي ومستبدل بشريط ساندي الزجاجي الطافي.
 struct MainTabView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
 
-    /// التبويب المختار — مصدر الحقيقة للتبديل البرمجي.
     @State private var selection: MainTab = .home
 
-    /// مدير الإشعارات — نراقب `pendingRoute` حتى يفتح النقر على إشعار شاشته.
     @ObservedObject private var notifs = NotificationManager.shared
 
-    /// روابط ساندي (ويدجت / Live Activity / مركز التحكم) — sandy://call|chat|quickadd.
     @ObservedObject private var router = DeepLinkRouter.shared
     @ObservedObject private var spotlight = SpotlightRouter.shared
-    /// مكالمة صوتية مفتوحة من رابط (نفس شاشة زر الصوت بالشات).
     @State private var showLiveCall = false
-    /// نافذة الإضافة السريعة مفتوحة من رابط (نفس نافذة الرئيسية).
     @State private var showQuickAdd = false
 
-    /// هل الكيبورد طالع؟ لما يطلع نخفي شريط التبويبات والرفيق العائم حتى ما
-    /// يزدحموا فوق الكيبورد (يبقى حقل الكتابة وحده فوقه). نرصده عبر إشعارات
-    /// النظام (iOS 16-safe، بدون أي API أحدث).
+    /// لما يطلع الكيبورد نخفي شريط التبويبات والرفيق العائم حتى ما يزدحموا فوقه.
     @State private var keyboardUp = false
 
     var body: some View {
-        // فوتر حقيقي: التبويبات بصف فوق، وشريط ساندي بصف تحت — فما في إشي
-        // (حقل كتابة، أزرار) بيجي وراه. الشريط نفسه كبسولة زجاجية بهوامش فتحسّها طايفة.
         VStack(spacing: 0) {
             TabView(selection: $selection) {
                 NavigationStack { HomeView(selection: $selection) }
@@ -78,8 +60,6 @@ struct MainTabView: View {
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.life)
             }
-            // رفيق ساندي العائم — فوق منطقة المحتوى فقط (مش فوق الفوتر). نخفيه مع
-            // الكيبورد حتى ما يزاحم حقل الكتابة.
             .overlay {
                 if !keyboardUp {
                     SandyCompanionLayer(tab: selection) {
@@ -91,20 +71,15 @@ struct MainTabView: View {
                 }
             }
 
-            // الفوتر: لما يطلع الكيبورد نخفيه تمامًا (ينزل من الشاشة) فيبقى حقل
-            // الكتابة وحده فوق الكيبورد بلا ازدحام. لما يختفي الكيبورد يرجع.
             if !keyboardUp {
                 FloatingTabBar(selection: $selection)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        // خلفية ساندي تحت الفوتر وهوامشه.
         .background(SandyBackground())
         .task {
-            // إذن الإشعارات بينطلب بـ AppState.setupPush قبل أي وصول لهالشاشة.
             await state.refreshOnboardingIfNeeded()
         }
-        // رصد الكيبورد — نبدّل `keyboardUp` بنعومة فيختفي/يرجع الشريط والرفيق.
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillShowNotification)) { _ in
             withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { keyboardUp = true }
@@ -113,7 +88,6 @@ struct MainTabView: View {
             for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { keyboardUp = false }
         }
-        // النقر على إشعار يفتح شاشته المحدّدة كورقة (تذكير/مهمة/رسالة مستقبلية).
         .sheet(item: $notifs.pendingRoute) { route in
             NavigationStack { routeView(route) }
                 .background(SandyBackground())
@@ -122,27 +96,24 @@ struct MainTabView: View {
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
                 .environment(\.locale, AppLocale.locale(for: lang.lang))
         }
-        // التنبيه اليومي مش ورقة — بطاقته عالرئيسية، فنبدّل للرئيسية ونصفّر المسار
-        // (قبل ما تُعرض ورقة). بيتعامل معه هون بدل routeView.
+        // التنبيه اليومي مش ورقة: بطاقته عالرئيسية، فنبدّل للرئيسية ونصفّر المسار.
         .onChange(of: notifs.pendingRoute) { _, route in
             if route == .dailyNudge {
                 selection = .home
                 notifs.pendingRoute = nil
             }
         }
-        // رابط ساندي — `initial` يلتقط رابطًا وصل قبل ما تنبني هالشاشة (إقلاع بارد/دخول).
+        // `initial` يلتقط رابطًا وصل قبل ما تنبني هالشاشة.
         .onChange(of: router.pending, initial: true) { _, link in
             guard let link else { return }
             router.pending = nil
             open(link)
         }
-        // نتيجة بحث الآيفون بتفتح تبويبها.
         .onChange(of: spotlight.pendingTab, initial: true) { _, tab in
             guard let tab else { return }
             spotlight.pendingTab = nil
             selection = tab
         }
-        // المكالمة الصوتية الحيّة (جيميني لايف) — نفس عرض زر الصوت بالشات.
         .sheet(isPresented: $showLiveCall) {
             LiveVoiceView()
                 .environmentObject(state)
@@ -150,7 +121,6 @@ struct MainTabView: View {
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
                 .environment(\.locale, AppLocale.locale(for: lang.lang))
         }
-        // الإضافة السريعة — تطفو بالنص زي ما تفتحها الرئيسية.
         .fullScreenCover(isPresented: $showQuickAdd) {
             QuickAddSheet()
                 .environmentObject(state)
@@ -158,7 +128,6 @@ struct MainTabView: View {
         }
     }
 
-    /// يفتح وجهة رابط ساندي: تبويب الشات، أو المكالمة، أو الإضافة السريعة.
     private func open(_ link: DeepLink) {
         switch link {
         case .chat:
@@ -170,7 +139,6 @@ struct MainTabView: View {
         }
     }
 
-    /// شاشة الوجهة حسب نوع الإشعار المنقور (الأنواع اللي تُفتح كورقة فقط).
     @ViewBuilder
     private func routeView(_ route: NotifRoute) -> some View {
         switch route {
@@ -178,17 +146,12 @@ struct MainTabView: View {
         case .tasks:      TasksView()
         case .future:     FutureMessagesView()
         case .insights:   InsightsView()
-        case .dailyNudge: EmptyView()   // يُعالَج بـ onChange (تبديل تبويب، لا ورقة)
+        case .dailyNudge: EmptyView()
         }
     }
 }
 
-// MARK: - شريط التبويبات الزجاجي الطافي (ليكويد جلاس)
-
-/// شريط تبويبات يطفو فوق المحتوى — كبسولة زجاجية مموّهة بحافة لمعان وظل يرفعها
-/// عن الشاشة (تحسّها طايفة بالهوا). مع أربعة تبويبات بس، كلهن ظاهرين دفعة وحدة
-/// بصف ثابت (بلا تمرير) — نقرة وحدة لأي تبويب. المختار يصير كبسولة أزرق فيها
-/// أيقونة + اسم، والباقي أيقونات هادئة.
+// MARK: - FloatingTabBar
 struct FloatingTabBar: View {
     @Binding var selection: MainTab
     @EnvironmentObject var lang: LanguageManager
@@ -201,7 +164,6 @@ struct FloatingTabBar: View {
             }
         }
         .padding(6)
-        // كبسولة زجاج سائل (نفس معدِّن البطاقات) + ظل رفع قوي ليطفو.
         .liquidGlass(cornerRadius: Theme.Radius.pill, tint: 0.08)
         .shadow(color: Theme.Shadow.liftColor,
                 radius: Theme.Shadow.liftRadius, x: 0, y: Theme.Shadow.liftY)
@@ -218,7 +180,6 @@ struct FloatingTabBar: View {
             HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 17, weight: .semibold))
-                // الاسم يظهر فقط للتبويب المختار (كبسولة تتمدّد).
                 if selected {
                     Text(lang.s(tab.titleKey))
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -239,11 +200,9 @@ struct FloatingTabBar: View {
             }
             .clipShape(Capsule())
         }
-        // نبضة الزجاج المائي عند اللمس (تغوص وترتدّ كقطرة ماء).
         .liquidGlassPress()
         .accessibilityLabel(lang.s(tab.titleKey))
-        // بلا هاد، قارئ الشاشة بيقرا التبويبات الأربعة بنفس الطريقة وما بيقول
-        // أي واحد انت واقف عليه — يعني المستخدم الأعمى بيضيع بين الشاشات.
+        // بدونها قارئ الشاشة ما بيقول أي تبويب مختار.
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }
