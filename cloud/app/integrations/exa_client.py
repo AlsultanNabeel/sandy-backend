@@ -1,4 +1,4 @@
-"""Exa search client with circuit breaker and async wrappers."""
+"""Exa search client behind a circuit breaker."""
 
 import logging
 from typing import Any, Dict, List
@@ -57,9 +57,7 @@ def _do_get_contents(url: str, exa_api_key: str, timeout: int) -> Dict[str, Any]
     }
 
 
-# For a request someone is waiting on (the app's search box, content cards).
-# The 60 s default suits the agent's research pipeline; on an HTTP route it held
-# a gunicorn worker for a minute whenever Exa was slow.
+# For HTTP routes; the 60s default is for the research pipeline.
 INTERACTIVE_TIMEOUT_S = 15
 
 
@@ -69,7 +67,6 @@ def search_exa(
     num_results: int = 10,
     timeout: int = 60,
 ) -> List[Dict[str, Any]]:
-    """Search Exa and return simplified results. Protected by circuit breaker."""
     if not exa_api_key:
         logger.warning("[Exa] EXA_API_KEY missing")
         return []
@@ -90,7 +87,6 @@ def get_exa_page_content(
     exa_api_key: str,
     timeout: int = 60,
 ) -> Dict[str, Any]:
-    """Fetch page contents from Exa. Protected by circuit breaker."""
     if not exa_api_key:
         logger.warning("[Exa] EXA_API_KEY missing")
         return {}

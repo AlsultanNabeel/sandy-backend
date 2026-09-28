@@ -1,22 +1,15 @@
-"""متتبع المصاريف — «صرفت عشرين ع غدا» وملخص آخر الشهر.
-
-Collection: sandy_expenses
-  {_id, amount (float), note, category, at (datetime UTC)}
-
-التصنيف اختياري وبسيط؛ الملخص بجمع حسب التصنيف لو موجود.
-عزل المستأجرين مفروض من طبقة scoped(): _coll() ترجع None لو ما في مستأجر.
-"""
+"""متتبع المصاريف (sandy_expenses): {_id, amount, note, category, at (UTC)}."""
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +28,6 @@ def init_expenses_store(mongo_db) -> None:
 
 
 def _coll():
-    """Tenant-scoped expenses collection, or None when no db / no active tenant."""
     return scoped(get_db(), _COLL)
 
 
@@ -65,8 +57,6 @@ def list_expenses(days: int = 30, limit: int = 100) -> List[Dict[str, Any]]:
     coll = _coll()
     if coll is None:
         return []
-    from datetime import timedelta
-
     since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
     out = []
     for d in coll.find({"at": {"$gte": since}}).sort("at", -1).limit(limit):
@@ -93,7 +83,7 @@ def delete_expense(expense_id: str) -> bool:
 
 
 def update_expense(expense_id: str, amount=None, note=None, category=None) -> bool:
-    """Edit an existing expense. None = leave that field unchanged."""
+    """None = leave that field unchanged."""
     coll = _coll()
     if coll is None or not expense_id:
         return False
@@ -116,18 +106,11 @@ def update_expense(expense_id: str, amount=None, note=None, category=None) -> bo
 
 
 def month_summary(days: int = 30) -> Dict[str, Any]:
-    """{total, count, by_category: {cat: total}} over the last ``days`` days.
-
-    Summed in the database. It used to list up to a thousand expenses and add
-    them up here — a transfer of every row on each open of the tab, and past
-    the thousandth a total that was quietly short.
-    """
+    """{total, count, by_category} over the last ``days`` days, summed in the database."""
     coll = _coll()
     empty = {"total": 0, "count": 0, "by_category": {}}
     if coll is None:
         return empty
-    from datetime import timedelta
-
     since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
     rows = list(coll.aggregate([
         {"$match": {"at": {"$gte": since}}},

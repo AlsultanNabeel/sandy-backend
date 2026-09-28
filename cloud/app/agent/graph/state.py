@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 
 class SandyState(TypedDict):
@@ -131,3 +131,20 @@ def merge_state(base: SandyState, updates: dict) -> SandyState:
     merged = dict(base)
     merged.update(updates)
     return SandyState(**merged)
+
+
+def build_session_from_state(state: SandyState) -> Dict[str, Any]:
+    """Temporary session dict for handlers and pending execution."""
+    pending = state.get("pending_state") or {}
+    session: Dict[str, Any] = {
+        "pending_action": pending if pending else None,
+        "archived_pending": state.get("pending_archived") or [],
+        "user_id": state.get("user_id"),
+        "chat_id": state.get("chat_id"),
+        "messages": state.get("conversation_history") or [],
+    }
+    image_state = state.get("image_state")
+    if image_state:
+        session["image_state"] = image_state
+        session["last_image_bytes"] = image_state.get("active_image_bytes")
+    return session

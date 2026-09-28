@@ -1,31 +1,13 @@
-"""Native reminder store — MongoDB, no external provider.
+"""Native reminder store (sandy_reminders).
 
-Replaces the Google Calendar "invisible event" hack: reminders used to be
-calendar events with private props that a poller scraped back out. Now they
-are plain Mongo documents and the same poller contract reads them directly.
-
-Collection: sandy_reminders
-  {_id, text, remind_at (datetime UTC), series_at (datetime UTC | None),
-   recurrence ("RRULE:FREQ=..." or ""),
-   kind ("reminder" | "event_followup"), parent_summary, note (""),
-   linked_task_id, send_state ("pending" | "sending" | "sent" | "failed"),
-   created_at, sent_at, last_error}
-
-Return contracts mirror the old google_calendar functions so the executor
-handlers keep working with an import swap:
-  add_reminder / update_reminder → {"success": bool, "error": ...}
-
-The phone reads /api/reminders and schedules each one as a local notification
-(repeating ones from their RRULE), so the backend stores and serves them only —
-there is no server-side push poller.
-
-Tenant isolation is enforced by the scoped() layer: _coll() returns None when
-there's no Mongo handle or no active tenant, so each "coll is None" guard fails
-closed, and user_id is injected on every read/write automatically.
+The phone reads /api/reminders and schedules local notifications (repeating ones
+from their RRULE); there is no server-side push poller. Recurring reminders are
+advanced on read. add/update return {"success": bool, "error": ...}.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -33,22 +15,18 @@ from typing import Any, Dict, List, Optional
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_reminders"
 
-# How far back the due-check looks. A dyno restart can skip a minute-cron tick
-# or two; anything older than this window is stale enough to drop silently.
+# A dyno restart can skip a tick or two; older than this is dropped.
 _LOOKBACK_MIN = 15
 
-# Every state a reminder can be in before it has fired for good.
 _UNSENT_STATES = ("pending", "sending", "failed")
 
 
 def init_reminders_store(mongo_db) -> None:
-    """يُستدعى مرّة عند الإقلاع."""
     configure(mongo_db)
     if mongo_db is None:
         return
@@ -66,7 +44,6 @@ def is_available() -> bool:
 
 
 def _coll():
-    """Tenant-scoped collection (request path). None when no db / no tenant."""
     return scoped(get_db(), _COLL)
 
 
@@ -83,14 +60,13 @@ def _to_utc(dt: datetime) -> datetime:
 
 
 def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
-    """Mongo returns naive datetimes that are actually UTC — fix that."""
+    """Mongo returns naive datetimes that are actually UTC."""
     if dt is None:
         return None
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
 def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Mongo doc → the dict shape the handlers and the web UI already expect."""
     remind_at = _as_aware_utc(doc.get("remind_at"))
     return {
         "id": doc.get("_id", ""),
@@ -108,12 +84,10 @@ def _normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
 # ─── Reads ────────────────────────────────────────────────────────────────────
 
 def _next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optional[datetime]:
-    """The first occurrence of ``recurrence`` (an RRULE anchored at ``first``)
-    strictly after ``after``; None when the rule has ended (UNTIL/COUNT)."""
+    """First occurrence of the RRULE (anchored at ``first``) strictly after ``after``; None when it ended."""
     from dateutil.rrule import rrulestr
 
-    # Anchored in the user's zone, so "every day at 8" stays at 8 local time
-    # across a daylight-saving change instead of drifting by an hour in UTC.
+    # Anchored in local time so "every day at 8" survives DST changes.
     start = first.astimezone(USER_TZ)
     rule = rrulestr(recurrence.removeprefix("RRULE:"), dtstart=start)
     nxt = rule.after(after.astimezone(USER_TZ), inc=False)
@@ -121,31 +95,14 @@ def _next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optio
 
 
 def _series_anchor(doc: Dict[str, Any]) -> Optional[datetime]:
-    """The time the RRULE is anchored at — `series_at` when a snooze moved the
-    reminder off its own occurrence, `remind_at` otherwise.
-
-    A snooze rewrites `remind_at`, and the rule is anchored at it, so without
-    this a daily reminder snoozed ten minutes would drift ten minutes later
-    every single day. `series_at` remembers the occurrence the snooze left,
-    and is cleared again the moment the series rolls forward on its own.
-    """
+    """The RRULE anchor: `series_at` while a snooze has moved `remind_at`, else `remind_at`."""
     return _as_aware_utc(doc.get("series_at")) or _as_aware_utc(doc.get("remind_at"))
 
 
 def _advance_recurring(coll, now: datetime) -> None:
-    """Move every recurring reminder whose time has passed to its next time.
-
-    Nothing advanced them: the phone schedules a notification from `remind_at`,
-    and once that was more than `_LOOKBACK_MIN` in the past the reminder fell
-    out of every list — a daily reminder rang once and then vanished. Done on
-    read, so the next time anyone looks (the app, Sandy) the list is current.
-    """
+    """Roll every past-due recurring reminder to its next time (done on read)."""
     cutoff = now - timedelta(minutes=_LOOKBACK_MIN)
-    # Recurring reminders are few; this touches only the ones that are due.
-    # `send_state` leads the filter so the (user_id, send_state, remind_at)
-    # index serves it — without it every read walked the tenant's whole
-    # history of fired one-shot reminders, which is never pruned. A rule that
-    # has ended is marked "sent" below and must not be re-evaluated each read.
+    # `send_state` leads the filter so the (user_id, send_state, remind_at) index serves it.
     for doc in coll.find({"send_state": {"$in": list(_UNSENT_STATES)},
                           "recurrence": {"$nin": ["", None]},
                           "remind_at": {"$lt": cutoff}}).limit(200):
@@ -158,14 +115,13 @@ def _advance_recurring(coll, now: datetime) -> None:
         if nxt is None:
             coll.update_one({"_id": doc["_id"]}, {"$set": {"send_state": "sent"}})
         else:
-            # Back on its own occurrence, so any snooze anchor is spent.
             coll.update_one({"_id": doc["_id"]},
                             {"$set": {"remind_at": nxt, "send_state": "pending",
                                       "series_at": None}})
 
 
 def load_reminders(max_results: int = 50) -> List[Dict[str, Any]]:
-    """Upcoming (not yet sent) reminders, soonest first."""
+    """Upcoming unsent reminders, soonest first."""
     try:
         coll = _coll()
         if coll is None:
@@ -261,8 +217,7 @@ def update_reminder(
             updates["remind_at"] = _to_utc(new_dt)
             updates["send_state"] = "pending"
             updates["sent_at"] = None
-            # An explicit new time *is* the series now — a leftover snooze
-            # anchor would drag the rule back to the old one.
+            # An explicit new time is the series now; drop any snooze anchor.
             updates["series_at"] = None
         if recurrence is not None:
             updates["recurrence"] = str(recurrence).strip()
@@ -280,26 +235,15 @@ def update_reminder(
         return {"success": False, "error": str(e)}
 
 
-# ─── Acting on a reminder that just fired ─────────────────────────────────────
-#
-# Snooze and done are verbs, not field edits: `update_reminder` would happily
-# express either one, but the caller would then have to know that a recurring
-# reminder needs its rule re-evaluated — and the notification action on the
-# phone, which is where these are used, has no business knowing that.
+# ─── Acting on a reminder that just fired (phone notification actions) ───────
 
-# Bounds for a snooze, in minutes. Under a minute is a no-op the user cannot
-# see; past a week it is a new reminder, not a snooze.
+# Snooze bounds in minutes.
 _MIN_SNOOZE_MIN = 1
 _MAX_SNOOZE_MIN = 7 * 24 * 60
 
 
 def snooze_reminder(reminder_id: str, minutes: int = 10) -> Dict[str, Any]:
-    """Re-arm a reminder ``minutes`` from now, leaving its recurrence intact.
-
-    The recurring case is the interesting one: the reminder rings again shortly,
-    and the series still rolls to *its own* next occurrence afterwards — a daily
-    eight o'clock snoozed by ten minutes is back at eight tomorrow, not 8:10.
-    """
+    """Re-arm ``minutes`` from now; a recurring series still returns to its own schedule."""
     try:
         coll = _coll()
         if coll is None or not reminder_id:
@@ -321,8 +265,7 @@ def snooze_reminder(reminder_id: str, minutes: int = 10) -> Dict[str, Any]:
             "send_state": "pending",
             "sent_at": None,
         }
-        # Remember the occurrence being left, once — snoozing twice must not
-        # move the anchor along with it.
+        # Remember the occurrence being left, once (snoozing twice must not move it).
         if doc.get("recurrence") and doc.get("series_at") is None:
             updates["series_at"] = _as_aware_utc(doc.get("remind_at"))
         coll.update_one({"_id": reminder_id}, {"$set": updates})
@@ -337,12 +280,9 @@ def snooze_reminder(reminder_id: str, minutes: int = 10) -> Dict[str, Any]:
 
 
 def complete_reminder(reminder_id: str) -> Dict[str, Any]:
-    """Mark a reminder handled — it stops firing.
+    """Mark handled: a one-off retires, a recurring one moves to its next occurrence.
 
-    A one-off retires for good. A recurring one loses only *this* occurrence and
-    moves to the next, so "done" on today's eight o'clock still leaves
-    tomorrow's. ``remind_at`` in the result is the next time, or empty when
-    there is nothing left to ring (a one-off, or a rule that has run out).
+    ``remind_at`` in the result is the next time, or "" when nothing is left.
     """
     try:
         coll = _coll()
@@ -358,8 +298,7 @@ def complete_reminder(reminder_id: str) -> Dict[str, Any]:
         if recurrence:
             anchor = _series_anchor(doc)
             current = _as_aware_utc(doc.get("remind_at")) or now
-            # Strictly after the occurrence being dismissed, so tapping "done"
-            # early skips today rather than handing today's back.
+            # Strictly after the dismissed occurrence, so an early "done" skips today.
             after = max(now, current)
             try:
                 nxt = _next_occurrence(recurrence, anchor, after) if anchor else None

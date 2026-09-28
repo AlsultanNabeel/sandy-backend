@@ -1,16 +1,6 @@
-"""Feature visibility — the owner's central on/off switch (Phase 7).
+"""GET /api/features → {"hidden": [...]}: features the owner hid app-wide via SANDY_HIDDEN_FEATURES.
 
-Every optional feature (tabs/tools/archive entries) can be hidden app-wide from
-here without a deploy of the client: set the ``SANDY_HIDDEN_FEATURES`` env var to
-a comma-separated list of feature keys and they vanish from every app — and from
-each user's in-app settings too (a user can only toggle features the owner still
-allows). The client keeps ALL the code; this just decides what's shown.
-
-  GET /api/features → {"hidden": ["habits","gifts",...]}
-
-The key list is the client's contract (the `key`s filtered in `Features/Daily/DailyView.swift` on iOS); the
-backend stays dumb on purpose — it just relays the owner's hidden set — so adding
-a new feature never needs a backend change.
+Keys are the iOS client's contract (Features/Daily/DailyView.swift); the backend only relays them.
 """
 
 from __future__ import annotations
@@ -24,7 +14,6 @@ from app.api.auth_handlers import require_auth
 
 def _hidden_features() -> list:
     raw = os.getenv("SANDY_HIDDEN_FEATURES", "")
-    # comma or whitespace separated, tolerant of stray spaces / empties
     return sorted({p.strip() for p in raw.replace("\n", ",").split(",") if p.strip()})
 
 

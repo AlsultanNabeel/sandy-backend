@@ -1,13 +1,4 @@
-"""Gemini routing — an alternative router backend, tried before Bedrock/Azure.
-
-Enabled when ``GEMINI_ROUTER_MODEL`` is set (e.g. ``gemini-flash-lite-latest``).
-Uses the same google-genai SDK already installed for the voice path
-(``app/api/voice_ws/``), with native function-calling so it consumes the same
-tool specs as the other router backends.
-
-Returns a list of {name, args} calls (empty = the model chose to chat), or None
-to signal the caller to fall back to the next router backend.
-"""
+"""Optional Gemini router backend (tried before Bedrock/Azure), enabled by GEMINI_ROUTER_MODEL."""
 
 from __future__ import annotations
 
@@ -22,15 +13,12 @@ logger = logging.getLogger(__name__)
 
 _MODEL_ID = os.getenv("GEMINI_ROUTER_MODEL", "").strip()
 _MAX_TOKENS = int(os.getenv("GEMINI_ROUTER_MAX_TOKENS", "700"))
-# This call is on the chat request path and runs before the Azure router; with
-# no deadline a hung call held the request until Heroku's 30 s cut-off.
 _TIMEOUT_MS = int(float(os.getenv("GEMINI_ROUTER_TIMEOUT_S", "12")) * 1000)
 
 _client = None
 
 
 def gemini_enabled() -> bool:
-    """True when a Gemini router model + API key are configured."""
     return bool(_MODEL_ID and GEMINI_API_KEY)
 
 
@@ -48,12 +36,6 @@ def _get_client():
 
 
 def _to_gemini_tools(specs: List[Dict[str, Any]]):
-    """Convert our name/description/JSON-Schema specs to a Gemini Tool.
-
-    ``parameters_json_schema`` takes a raw JSON-Schema dict directly (no need to
-    build the SDK's ``types.Schema`` object), matching the specs used by every
-    other router backend.
-    """
     from google.genai import types
 
     decls = []
@@ -61,7 +43,7 @@ def _to_gemini_tools(specs: List[Dict[str, Any]]):
     for d in specs:
         name = d.get("name")
         if not name or name in seen:
-            continue  # Bedrock/OpenAI both reject duplicate tool names; stay consistent
+            continue  # duplicate names are rejected
         seen.add(name)
         params = d.get("parameters") or {"type": "object", "properties": {}}
         decls.append(types.FunctionDeclaration(
@@ -75,7 +57,7 @@ def _to_gemini_tools(specs: List[Dict[str, Any]]):
 def route_with_gemini(
     system: str, user: str, specs: List[Dict[str, Any]]
 ) -> Optional[List[Dict[str, Any]]]:
-    """Route one turn through Gemini. None on failure (→ next backend)."""
+    """List of {name, args} ([] = chat), or None on failure (→ next backend)."""
     try:
         from google.genai import types
 
@@ -108,7 +90,7 @@ def route_with_gemini(
             fc = getattr(part, "function_call", None)
             if fc and getattr(fc, "name", None):
                 calls.append({"name": str(fc.name), "args": fc.args or {}})
-        return calls  # empty list = model replied as chat (no tool)
-    except Exception as exc:  # noqa: BLE001 — any failure falls back to next backend
+        return calls
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"[gemini_router] failed, falling back: {exc}")
         return None

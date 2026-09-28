@@ -72,12 +72,7 @@ from app.api.voice_ws.tools import (
 )
 
 
-# How long a reply may keep going after the robot stops sending audio.
-#
-# This is the gap between "she finished the question" and "she finished the
-# answer", and it is normal — Gemini streams the reply while the device is
-# silent. Twenty seconds covers any real answer; past that the stream is stuck
-# and holding the session open only delays the next question.
+# How long a reply may keep streaming after the robot stops sending audio.
 _REPLY_DRAIN_S = 20
 
 # Enough for a generous enrolment (16 kHz · 16-bit · mono = 32 KB/s → ~2 min).
@@ -149,9 +144,7 @@ def _enroll_session(ws, remote: str) -> None:
         if frame is None:
             break
         if isinstance(frame, (bytes, bytearray)):
-            # Bounded. Every frame was kept, and the 120 s timeout resets on each
-            # one — so a client that kept streaming held a gunicorn thread and
-            # grew this buffer for as long as it liked.
+            # Bounded, or a client that kept streaming held a thread and grew this forever.
             total += len(frame)
             if total > _ENROLL_MAX_BYTES:
                 _send_json(ws, {"type": "enroll_result", "ok": False, "msg": "too_long"})
@@ -198,9 +191,7 @@ def _authenticate(ws, remote: str) -> bool:
         ws.send("AUTH_OK")
         return True
 
-    # Web (browser) handshake via JWT: {"type":"hello","token":"<jwt>"}.
-    # Live voice is the owner experience (full persona and shared memory), so
-    # we only accept an owner token here and turn guests away.
+    # Browser/app handshake via JWT: {"type":"hello","token":"<jwt>"}; guests are refused.
     if isinstance(raw, str) and raw.lstrip().startswith("{"):
         try:
             _m = json.loads(raw)
@@ -209,14 +200,7 @@ def _authenticate(ws, remote: str) -> bool:
         if isinstance(_m, dict) and _m.get("type") == "hello" and _m.get("token"):
             from app.api.auth_handlers import verify_token
             claims = verify_token(str(_m.get("token")))
-            # **أي حساب مسجّل، مش «المالك» وبس.**
-            #
-            # كان مقبولًا لمّا كان في مستخدم واحد ومتغيّر بيئة اسمه المالك. ومع
-            # الدخول بأبل وجوجل، «المالك» بطّل يكون شخصًا — صار حسابًا قديمًا
-            # ما حدا بيدخل فيه، والمكالمة الصوتية بتنرفض لكل زبون جديد.
-            #
-            # والعزل ما ضعف: الهوية بتنحفظ للجلسة، وكل قراءة وكتابة بعدها
-            # بتنقيّد فيها. يعني كل واحد بيحكي مع ساندي تبعته وذاكرته هو.
+            # أي حساب مسجّل (مش «المالك» بس)؛ الهوية بتقيّد كل قراءة وكتابة بالجلسة.
             if claims and claims.get("role") in ("owner", "user"):
                 uid = str(claims.get("user_id") or "")
                 if not uid:
@@ -224,8 +208,7 @@ def _authenticate(ws, remote: str) -> bool:
                     return False
                 set_voice_identity(uid)
                 set_voice_channel(_APP_CHANNEL)
-                # `duplex`: افتح المايك وهي بتحكي. القرار عند السيرفر، مش
-                # بالتطبيق، عشان التراجع يكون من إعدادات هيروكو بلا بناء.
+                # `duplex`: افتح المايك وهي بتحكي؛ القرار بالسيرفر عشان التراجع يكون بلا بناء.
                 ws.send(json.dumps({"type": "auth_ok",
                                     "duplex": _APP_DUPLEX}))
                 logger.info("[voice_ws] app voice OK user=%s remote=%s", uid, remote)
@@ -250,18 +233,15 @@ def _authenticate(ws, remote: str) -> bool:
                 ws.send(json.dumps({"type": "error", "msg": "replay"}))
                 return False
 
-            # **Which key signs this hello.** A board that has its own key
-            # says so (`kv` 2) and is checked against it alone. The shared key
-            # is refused for a board whose own key is confirmed — otherwise
-            # the per-board key would protect nothing (features/device_keys).
+            # A board with its own key says so (`kv` 2) and is checked against it
+            # alone; the shared key is refused once its own key is confirmed.
             from app.features.device_keys import (
                 KEY_VERSION, confirm_key, get_key, issue_key,
             )
             record = get_key(device_id)
             if kv == KEY_VERSION:
                 if not record:
-                    # Revoked (un-paired) or never issued: the board drops its
-                    # key and re-enrols with the shared one.
+                    # Revoked or never issued: the board re-enrols with the shared key.
                     logger.warning("[voice_ws] %s signed with a key we do not hold",
                                    device_id)
                     ws.send(json.dumps({"type": "error", "msg": "key_unknown"}))
@@ -287,14 +267,7 @@ def _authenticate(ws, remote: str) -> bool:
             if kv == KEY_VERSION and record["state"] == "issued":
                 confirm_key(device_id)
 
-            # **الروبوت بيحكي باسم صاحبه.**
-            #
-            # المفتاح بيثبت إنه لوح حقيقي، مش مين صاحبه. والصاحب مكتوب بالوحدة
-            # من ساعة الربط — فمنسأل الوحدة بدل ما نفترض إنه في مالك واحد
-            # بمتغيّر بيئة، وهي فرضية بتنكسر عند تاني زبون.
-            #
-            # ولوح ما حدا ربطه بيحكي، بس بلا ذاكرة شخص — لأنه فعلًا ما إله
-            # شخص بعد. وهاد أحسن من إنه ياخد ذاكرة حدا تاني.
+            # الروبوت بيحكي باسم صاحبه المسجّل بالوحدة؛ لوح غير مربوط بيحكي بلا ذاكرة شخص.
             from app.features.node_store import get_node_any_tenant
             node = get_node_any_tenant(device_id) or {}
             owner = str(node.get("user_id") or "")
@@ -304,16 +277,8 @@ def _authenticate(ws, remote: str) -> bool:
                 logger.warning("[voice_ws] device %s is not paired to anyone", device_id)
             set_voice_channel("الروبوت")
 
-            # **هون بيتسلّم اللوح مفتاحه الخاص بالوسيط.**
-            #
-            # كل لوح لسا بينباع بنفس مستخدم وكلمة سرّ الوسيط، مكتوبين بالكود —
-            # يعني أي زبون بيقدر يسمع مواضيع أي زبون تاني. هاي المصافحة هي
-            # المكان الصح للتسليم لأنها موثّقة بمفتاح **مش** مفتاح الوسيط، فهي
-            # بتضل شغّالة بعد ما ينلغي المفتاح المشترك. تسليمه ع الوسيط نفسه
-            # كان بيخلّي المفتاح المشترك لازم للأبد.
-            #
-            # ولوح ما إله سطر بالجدول ما بياخد إشي وبيضل ع مفتاحه الحالي: إعداد
-            # ناقص لازم يخلّي الروبوتات الشغّالة شغّالة، مش يوقّفها.
+            # هون بيتسلّم اللوح بيانات الوسيط الخاصة فيه: المصافحة موثّقة بمفتاح غير
+            # مفتاح الوسيط المشترك. بلا سطر بالجدول بيضلّ ع بياناته الحالية.
             reply: Dict[str, Any] = {"type": "auth_ok"}
             try:
                 from app.features.broker_creds import creds_for_device
@@ -321,13 +286,11 @@ def _authenticate(ws, remote: str) -> bool:
                 if creds:
                     reply["broker"] = creds
             except (ImportError, ValueError, TypeError, AttributeError) as exc:
-                # التسليم إضافة ع المصافحة، مش شرط فيها. عطل هون بيخلّي اللوح
-                # ع مفتاحه القديم — وهاد أهون بكتير من جلسة صوت بتفشل.
+                # إضافة ع المصافحة، مش شرط فيها.
                 logger.warning("[voice_ws] broker credential lookup failed for %s: %s",
                                device_id, exc)
 
-            # A paired board still on the shared key gets its own key here, in
-            # the same authenticated reply that carries its broker login.
+            # A paired board still on the shared key gets its own key in this reply.
             if kv != KEY_VERSION and owner:
                 try:
                     own = issue_key(device_id)
@@ -349,8 +312,7 @@ def _authenticate(ws, remote: str) -> bool:
             ws.send(json.dumps({"type": "error", "msg": "bad_handshake"}))
             return False
 
-    # No auth configured. Stay closed unless an explicit dev flag opts in,
-    # so a missing env var in prod can't leave the socket wide open.
+    # No auth configured: stay closed unless an explicit dev flag opts in.
     if not _HMAC_KEY and not _LEGACY_SECRET:
         if os.environ.get("SANDY_WS_ALLOW_OPEN") == "1":
             logger.warning("[voice_ws] no auth configured, open access (dev) from %s", remote)
@@ -366,48 +328,20 @@ def _authenticate(ws, remote: str) -> bool:
 # Gemini Live session
 
 class _DeviceReader:
-    """Drains the device socket from the moment the session starts.
+    """Drain the device socket from the moment the session starts.
 
-    The robot streams audio the instant it is authenticated, but opening the Live
-    session first has to build the system instruction, pull memory and hand-shake
-    with Gemini — several seconds during which nothing was reading the socket. Its
-    frames piled up, the robot's own write blocked past its one-second timeout,
-    and it tore the call down before a single word got through. So reading starts
-    here, immediately, and the buffered audio is handed over once Live is up.
-
-    The buffer is bounded and drops the OLDEST frame when full: if setup runs long
-    the recent words matter, stale ones don't.
+    Opening Live takes seconds; unread frames would block the robot's writes and it
+    would hang up. The buffer is bounded and drops the oldest frame when full.
     """
 
     _FRAME_MS = 20  # the robot sends ~20ms of PCM per frame
 
-    # How long one blocking read is allowed to wait before coming up for air.
-    #
-    # **This number is why sessions stopped hanging.** The read used to have no
-    # deadline at all, and a read with no deadline returns only when the device
-    # sends something or the socket breaks. A robot that has finished speaking
-    # and is waiting for an answer sends nothing — so the read sat there, and
-    # the worker thread behind it sat there with it.
-    #
-    # asyncio.run() is what turned that into an outage. On the way out it calls
-    # loop.shutdown_default_executor(), which waits for every executor thread to
-    # finish. Measured: a session whose work ended in 0.2s did not return for a
-    # full 6s, purely waiting on that one parked thread. In production the wait
-    # is not six seconds — it is until the robot speaks again or TCP gives up.
-    #
-    # gunicorn runs 2 workers x 8 threads. Every hung session holds one of the
-    # sixteen. Enough of them and a new voice connection has nowhere to land:
-    # the robot connects, waits, gets nothing, and reboots itself. That is
-    # exactly "it answers once and then ignores me twice".
-    #
-    # A quarter second is short enough that a stopped reader is gone before
-    # anyone notices, and long enough that idle polling costs nothing.
+    # Each blocking read waits at most this long, so a stopped reader exits
+    # promptly: a parked executor thread stalls asyncio.run() shutdown and holds
+    # one of gunicorn's 16 threads.
     _POLL_S = 0.25
 
-    # Returned by the read helper when the socket is gone, so a real close is
-    # never confused with a quiet quarter second. simple_websocket returns None
-    # on timeout and raises ConnectionClosed on close — two very different
-    # things that the old code, having no timeout, could treat as one.
+    # Returned on close, so a real close isn't confused with a quiet poll.
     _CLOSED = object()
 
     def __init__(self, ws, buffer_ms: int = 8000):
@@ -415,17 +349,10 @@ class _DeviceReader:
         self._q: asyncio.Queue = asyncio.Queue(maxsize=buffer_ms // self._FRAME_MS)
         self._task: Optional[asyncio.Task] = None
         self._stop = False
-        # True once the device's socket is gone. The reconnect decision needs to
-        # know the difference between "Gemini hung up" and "the robot did".
+        # True once the device's socket is gone ("robot hung up" vs "Gemini did").
         self.finished = False
-        # Its own thread, not the shared default executor.
-        #
-        # Two reasons. asyncio.run() only waits for the *default* executor, so a
-        # reader on its own pool can never stall shutdown again even if this
-        # code grows a new way to block. And audio going out to the device also
-        # needs a thread — sharing one pool meant every outbound chunk queued
-        # behind however many readers were parked, which is what made her voice
-        # arrive in pieces.
+        # Own single-thread pool: asyncio.run() only waits on the default executor,
+        # and outbound audio shouldn't queue behind parked readers.
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-rx")
         self.dropped = 0
 
@@ -470,14 +397,7 @@ class _DeviceReader:
         self._q.put_nowait(None)
 
     def pending(self) -> int:
-        """Frames waiting to be read — how far behind the bridge is, exactly.
-
-        Timing cannot answer this. A first attempt compared the audio clock to
-        the wall clock, and a device streaming in real time keeps whatever lead
-        it started with forever, so the "still catching up" test was true for
-        the whole call and no turn was ever closed. The queue knows: empty means
-        live, anything else means there is stored speech still to hand over.
-        """
+        """Frames waiting to be read: empty means live, anything else is stored speech."""
         return self._q.qsize()
 
     async def frames(self):
@@ -492,35 +412,16 @@ class _DeviceReader:
         self._stop = True
         if self._task:
             self._task.cancel()
-        # wait=False on purpose: the reader thread notices `_stop` within
-        # _POLL_S and exits by itself. Blocking here would put back the very
-        # stall this class was rewritten to remove.
+        # wait=False: the reader notices `_stop` within _POLL_S and exits by itself.
         self._pool.shutdown(wait=False)
 
 
-# How long a refusal is given to come back before a candidate counts as good.
-#
-# **A send that returns is not a send that was accepted.** The 1007 is a close
-# frame that arrives afterwards, so the first probe declared the model healthy,
-# handed it a working session, and the real audio hit the same refusal eight
-# seconds later. Waiting and then sending a second frame is the whole test: if
-# the first was refused, the socket is shut and the second raises.
+# How long a refusal (a close frame arriving later) gets before a candidate counts as good.
 _PROBE_SETTLE_S = 0.6
 
 
 def _discover_live_models(client) -> tuple[str, ...]:
-    """Ask the API which models actually do bidirectional audio, right now.
-
-    **The list in `_config` went stale all at once.** Every name in it came back
-    `1008 ... is not found for API version v1beta, or is not supported for
-    bidiGenerateContent`, and the one in the config var connected and then
-    refused audio. Google renames these faster than anyone deploys, so a
-    hardcoded list is a countdown, not a fix — it works until it does not, and
-    when it stops, voice stops with it and nothing says why.
-
-    The service knows the answer. This asks for it, and the static list becomes
-    what it should always have been: a fast path, not the only path.
-    """
+    """Ask the API which models do bidirectional audio right now (fallback when the static list is stale)."""
     try:
         models = list(client.models.list())
     except Exception as exc:  # noqa: BLE001 — discovery is a bonus, never a gate
@@ -548,18 +449,10 @@ def _discover_live_models(client) -> tuple[str, ...]:
 async def _open_live_session(client, config):
     """Open the first Live model that actually accepts audio.
 
-    **`connect()` succeeding proves nothing.** The refusal that took voice down
-    in production — `1007 CONTENT_TYPE_AUDIO is not supported` — arrived at the
-    *first audio frame*, long after the handshake and the memory seed had been
-    logged as fine. So the probe is a real one: send a frame of silence, and
-    treat a close as "this model is not it".
-
-    Returns ``(cm, session, model_name, last_error)``. **The caller owns the
-    manager and must `__aexit__` it — it is entered here, exactly once.** The
-    first cut of this kept the already-opened manager and then wrote
-    ``async with cm:`` over it. `contextlib` deletes the arguments it needs on
-    the first entry, so the second raised ``'_AsyncGeneratorContextManager'
-    object has no attribute 'args'`` and every call died right after the seed.
+    connect() succeeding proves nothing (1007 arrives at the first audio frame), so
+    each candidate is probed with real silence. Returns ``(cm, session,
+    model_name, last_error)``; the manager is entered here once and the caller
+    must ``__aexit__`` it.
     """
     from google.genai import types
 
@@ -567,17 +460,7 @@ async def _open_live_session(client, config):
     trusted = pinned_live_model()
     last_error: Exception | None = None
 
-    # The known names first — they are usually right and cost nothing to try.
-    # Whatever the service itself reports as live-capable goes after them, so a
-    # list that has gone stale costs one round of failures rather than the
-    # feature.
-    # **Discovery is the fallback, so it is not run until it is the fallback.**
-    #
-    # Building the list eagerly called `models.list()` on every single call —
-    # about seven hundred milliseconds of network before the first candidate had
-    # even been tried, on a path where the microphone is recording into a buffer
-    # the whole time. The known names go first, and the service is only asked
-    # when every one of them has refused.
+    # Known names first; discovery (a ~700 ms models.list()) runs only once they all refused.
     tried: set[str] = set()
     queue = list(live_model_candidates())
     asked = False
@@ -598,24 +481,14 @@ async def _open_live_session(client, config):
             session = await probe.__aenter__()
             await session.send_realtime_input(audio=silence)
             if candidate != trusted:
-                # A model a real session already proved skips the wait; anything
-                # else pays for the answer. `forget_live_model` takes the pin
-                # away again the moment a proven one stops working, so trusting
-                # it cannot outlive the evidence.
+                # A model a real session already proved skips the wait (unpinned if it fails).
                 await asyncio.sleep(_PROBE_SETTLE_S)
                 await session.send_realtime_input(audio=silence)
         except Exception as exc:  # noqa: BLE001 — any refusal means "try the next"
             last_error = exc
             logger.warning("[voice_ws] live model %s refused: %s", candidate, exc)
-            # A refused candidate can still hold an open socket — the refusal
-            # lands after the handshake. Close it, or every retry leaks one.
-            #
-            # **Closed, not blamed.** Passing the exception in re-raises it
-            # inside the SDK's generator, which then does not stop, and
-            # `contextlib` turns that into `RuntimeError: generator didn't stop
-            # after athrow()` — a second, invented failure on top of the real
-            # one, printed with a traceback that points at the cleanup instead
-            # of the cause.
+                # A refused candidate may hold an open socket; close it (without
+                # passing the exception, which would raise a bogus RuntimeError).
             try:
                 await probe.__aexit__(None, None, None)
             except Exception:  # noqa: BLE001 — already failing; nothing to add
@@ -637,60 +510,28 @@ async def _live_session(ws, remote: str) -> None:
 
     from app.config import GEMINI_API_KEY, GEMINI_TTS_VOICE
 
-    # Checked before the reader starts, not after: there is no point owning a
-    # thread in order to discover a config value.
+    # Checked before the reader starts.
     if not GEMINI_API_KEY:
         logger.error("[voice_ws] GEMINI_API_KEY not set")
         _send_json(ws, {"type": "error", "msg": "server_error"})
         return
 
-    # Start listening BEFORE the slow setup below — see _DeviceReader.
-    #
-    # **Everything from here down is inside one try/finally.** The reader owns a
-    # thread and a single-worker executor the moment `start()` returns, and the
-    # `finally` that gives them back used to begin much lower, at the Live
-    # connect. So any return or raise in between — the missing key above, or a
-    # `_build_system_instruction` that threw — leaked one thread and one
-    # executor per connection *attempt*, and a robot that retries after a
-    # failure leaks one per retry. Gunicorn has sixteen threads in total. That
-    # is "she answers once and then ignores me", arriving by a second route.
-    #
-    # Bound to None first, and constructed *inside* the try: `__init__` builds
-    # the executor before `start()` returns, so a raise between the two would
-    # leak a pool that nothing holds a reference to.
+    # Start listening BEFORE the slow setup (see _DeviceReader). Everything below
+    # is inside one try/finally so the reader's thread is never leaked; bound to
+    # None first and constructed inside the try.
     reader: Optional["_DeviceReader"] = None
     _held = ""
     try:
         reader = _DeviceReader(ws).start()
 
-        # **الهوية بتسافر مع النداء، مش بتنستنّى بالخيط.**
-        #
-        # `run_in_executor` بيشغّل هالدالة ع خيط تاني، ومتغيّر السياق ما بيعبر
-        # لهناك. فلو دوّرت عليه هناك بتلاقيه فاضي — وهاد اللي صار حرفيًّا: المصافحة
-        # حلّت المالك صح، وبناء التعليمات ع خيط تاني قال «جلسة مجهولة».
-        #
-        # وتمريره كوسيط بيشيل السؤال من أصله بدل ما يحاول يوصّل السياق.
+        # الهوية بتتمرّر كوسيط: متغيّر السياق ما بيعبر لخيط المجمّع.
         _who = get_voice_identity()
         # التسخين بيستنّى لآخر المكالمة (شوف `prompt_prewarm.hold`).
         from app.utils import prompt_prewarm
         prompt_prewarm.hold(_who)
         _held = _who
-        # **والاسم كمان لازم ينحلّ هون، ع الحلقة.**
-        #
-        # `_speaker_directive` بينشغّل بآخر كل جملة، منتظَر ع نفس الحلقة اللي
-        # بتمرّر الصوت. حلّ الاسم كسول، ولو انحلّ جوّا `run_in_executor` بينحفظ
-        # بسياق خيط المجمّع — والحلقة بتضلّ فاضية، فبتدفع قراءة قاعدة بيانات
-        # بأول جملة بالضبط: قبل أول ردّ، بأسوأ مكان ممكن. سطر هون بيخلّيه محلول
-        # قبل ما تبلّش أي جملة.
-        # **بالمجمّع، مش ع الحلقة.** `voice_speaker_label` بتقرا من مونغو، وهاي
-        # قراءة حاجبة — نداؤها هون مباشرةً كان بينقل التعثّر من أول جملة لبداية
-        # الجلسة، مش بيشيله، والقارئ بيكون عم يخزّن صوت وقتها. بننادي `_resolve`
-        # بالمجمّع وبنحطّ الناتج بسياق الحلقة، فالقيمة موجودة قبل أي جملة.
-        #
-        # **التلات قراءات مع بعض، مش ورا بعض.** الاسم، والتعليمات (من الكاش
-        # غالبًا)، وآخر المحادثات مستقلّين — تسلسلهم كان بيجمع وقتهم قبل ما
-        # ينطلب چيميناي، والميكروفون شغّال. آخر المحادثات برّا الكاش عن قصد
-        # (`with_recent_turns`)، فهي قراءة لازمة بكل جلسة، وهون ما بتكلّف إشي.
+        # الاسم والتعليمات وآخر المحادثات بيتقرّوا بالتوازي بالمجمّع (قراءات حاجبة)،
+        # والاسم بينحطّ بسياق الحلقة قبل أول جملة.
         _loop = asyncio.get_event_loop()
         _t_seed = time.monotonic()
         _label, _base, _recent = await asyncio.gather(
@@ -717,60 +558,24 @@ async def _live_session(ws, remote: str) -> None:
                 role="user",
             ),
             tools=live_tools or [],
-            # بدون هدول، التفريغ النصي ما بيوصل أبداً → _save_voice_turn ما بينحفظ
-            # → محادثات الصوت ما بتظهر بذاكرة التلي/الويب (الذاكرة الموحدة).
+            # بدون هدول التفريغ ما بيوصل، فالمحادثات الصوتية ما بتنحفظ بالذاكرة.
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
 
-            # **A call that lasts is a call that survives the connection.**
-            #
-            # Google's own limits, and none of them were handled here: a Live
-            # connection lives about ten minutes, an audio session dies at
-            # fifteen without compression, and the server sends `GoAway` shortly
-            # before it hangs up. So a long conversation ended by itself, mid
-            # sentence, with nothing in the log that looked like a failure —
-            # which is the same thing the owner reports as "she stops answering".
-            #
-            # Resumption keeps the session's state server-side for a day and
-            # hands back a token to reconnect with; compression slides a window
-            # over the oldest turns instead of hitting the wall. Together they
-            # are what makes "always answers" a property rather than a hope.
+            # Resumption (reconnect after GoAway with state intact) and context
+            # compression keep long calls alive past Google's ~10/15-minute limits.
             context_window_compression=types.ContextWindowCompressionConfig(
                 trigger_tokens=_COMPRESS_TRIGGER_TOKENS,
                 sliding_window=types.SlidingWindow(
                     target_tokens=_COMPRESS_WINDOW_TOKENS),
             ),
         )
-        # **ما بدها تفكّر، بدها تردّ.**
-        #
-        # الموديل بيعمل تفكير ممتد قبل ما يحكي، وهاد ظهر بالمسبار المحلي:
-        # أول صوت بيوصل **بعد ست ثواني ونص** من نهاية السؤال، ونصّ «تفكيره»
-        # بينزل بالترجمة (`**Analyzing the Inquiry**`). واللوح بيستنى تمان
-        # ثواني بس بعد آخر كلمة — فالردّ كان بيوصل لسمّاعة سكّرت، أو بيلحق
-        # بالكاد. بإطفائه صار أول صوت بعد **تلاتة وسبعة من عشرة**.
-        #
-        # وهاي محادثة صوتية: ما حدا بيستنّى تلات ثواني زيادة عشان الجواب يطلع
-        # أذكى شوي. التفكير للشات، مش للحكي.
+        # بلا تفكير: كان بيأخّر أول صوت ست ثواني ونص (صار ~3.7). التفكير للشات، مش للحكي.
         config_kwargs["thinking_config"] = types.ThinkingConfig(
             thinking_budget=0, include_thoughts=False)
 
-        # **نهاية الدور بتتقرّر عنا، دايمًا.**
-        #
-        # كان الكشف التلقائي شغّال لمّا التحقّق مطفّى، وهاد بالضبط اللي خلّاها
-        # «ما بتردّ». اللوح بيبثّ صوت الغرفة بلا توقّف، فما بيوصل جيميناي صمت
-        # يعتبره نهاية كلام — وبيضلّ مستني. باللوج ظهر إنّ أوّل ردّ منه بيجي
-        # **ثانية ونص بعد ما اللوح سكّر الاتصال**، مش بعد ما المستخدم سكت:
-        #
-        #     21:22:41.96  device→live done        ← اللوح قطع
-        #     21:22:43.53  first response from Gemini
-        #     21:22:46.02  first reply audio → device
-        #
-        # واللوح بيستنّى تمان ثواني بس بعد آخر كلمة (`VOICE_SESSION_IDLE_MS`)،
-        # فالردّ كان بيوصل لسمّاعة مسكّرة — كل مرة، من غير استثناء.
-        #
-        # عنّا كاشف صمت شغّال أصلاً بمسار التحقّق. التحقّق من هوية المتكلّم
-        # والتحكّم بنهاية الدور مسألتين منفصلتين، وربطهن ببعض هو الغلط: التحقّق
-        # اختياري، ونهاية الدور لأ.
+        # نهاية الدور بتتقرّر عنا دايمًا (إلا بمكالمة التطبيق مع SANDY_APP_TURNS=gemini):
+        # كاشف جيميناي ما بيلاقي صمت ببثّ الروبوت، فالردّ كان يوصل بعد ما اللوح سكّر.
         auto_turns = _APP_TURNS_BY_GEMINI and get_voice_channel() == _APP_CHANNEL
         if auto_turns:
             # مكالمة التطبيق: جيميناي بيقرّر — شوف `_APP_TURNS_BY_GEMINI`.
@@ -787,14 +592,7 @@ async def _live_session(ws, remote: str) -> None:
             config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
             )
-        # **The session outlives the connection.**
-        #
-        # A Live connection lasts about ten minutes and the server sends
-        # `GoAway` shortly before it closes one. Nothing here listened, so a
-        # long conversation simply stopped — mid sentence, with a clean-looking
-        # log — and from the room that is indistinguishable from her deciding
-        # to ignore him. The handle Google hands back reconnects to the same
-        # session with its memory intact, so the reconnect is invisible.
+        # The session outlives the connection: on GoAway we reconnect with the resumption handle.
         resume_handle: Optional[str] = None
         live_state: Dict[str, Any] = {"resume": None, "goaway": False}
         client = genai.Client(api_key=GEMINI_API_KEY)
@@ -816,10 +614,7 @@ async def _live_session(ws, remote: str) -> None:
 
             remember_live_model(model_name)
             try:
-                # **سطر واحد بيقول وين راح وقت فتح المكالمة.**
-                # المايك شغّال طول هالوقت، فكل مللي ثانية هون بتتحوّل لصوت
-                # مخزّن بيوصل متأخّر. التعليمات من الكاش بتكون عشرات المللي؛
-                # مئات أو آلاف يعني الكاش انكسر (أي كتابة ببيانات المستخدم).
+                # وين راح وقت فتح المكالمة (المايك شغّال طول الوقت؛ مئات المللي = الكاش انكسر).
                 logger.info(
                     "[voice_ws] session open: seed=%.0fms dial=%.0fms total=%.0fms "
                     "(model=%s gate=%s cached=%s) %s",
@@ -848,23 +643,9 @@ async def _live_session(ws, remote: str) -> None:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
-                # The two directions are not equals, and treating them as equals is
-                # what cut her off mid-sentence.
-                #
-                # device→live ending means the robot stopped sending audio. That is
-                # the *normal* end of a question — and Gemini is very often still
-                # speaking the answer when it happens. Cancelling the other side
-                # right there threw away a reply that was already on its way, which
-                # the owner heard as her starting a sentence and vanishing. The log
-                # line for it read "device→live ended cleanly, closing session",
-                # which sounded like success.
-                #
-                # So when the input side finishes we let the output side finish
-                # too, up to a bounded wait. A reply longer than this is a stuck
-                # stream, not a long answer.
-                #
-                # live→device ending is the opposite: Gemini is done or has failed,
-                # and there is nothing left to wait for.
+                # When the robot stops sending (the normal end of a question), let
+                # the reply finish, up to a bounded wait. When Gemini's side ends,
+                # there's nothing left to wait for.
                 if t_in in done and t_out in pending:
                     try:
                         await asyncio.wait_for(t_out, timeout=_REPLY_DRAIN_S)
@@ -884,10 +665,7 @@ async def _live_session(ws, remote: str) -> None:
                         await t
                     except (asyncio.CancelledError, Exception):  # noqa: BLE001
                         logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
-                # Name which side ended and why. Without this a silent clean exit on
-                # either bridge looked identical to a crash: the only thing in the log
-                # was the CancelledError of the OTHER task, which is a symptom, never
-                # the cause.
+                # Name which side ended and why (otherwise only the other task's CancelledError shows).
                 for t in done:
                     side = "device→live" if t is t_in else "live→device"
                     if t.cancelled():
@@ -896,20 +674,16 @@ async def _live_session(ws, remote: str) -> None:
                         exc = t.exception()
                         logger.error("[voice_ws] %s failed: %r", side, exc,
                                      exc_info=exc)
-                        # A refusal that got past the probe must not be repeated for
-                        # the life of the dyno. Unpin, and the next call re-walks.
+                        # A refusal that got past the probe: unpin so the next call re-walks.
                         if "CONTENT_TYPE_AUDIO" in str(exc) or "1007" in str(exc):
                             forget_live_model(model_name)
                     else:
                         logger.info("[voice_ws] %s ended cleanly, closing session", side)
             finally:
-                # What `async with` would have done. Not suppressing anything: an
-                # error in the bridge belongs in the handler below, not swallowed here.
+                # What `async with` would have done.
                 await cm.__aexit__(None, None, None)
 
-            # Reconnect only when Gemini asked us to, the device is still
-            # there, and we hold a handle to come back with. Any other ending
-            # is the call being over.
+            # Reconnect only if Gemini asked, the device is still there, and we have a handle.
             resume_handle = live_state.get("resume") or resume_handle
             if not (live_state.get("goaway") and resume_handle
                     and reader is not None and not reader.finished):
@@ -931,18 +705,14 @@ async def _live_session(ws, remote: str) -> None:
 
 # الردّ بيوصل قطع متلاحقة، فثانيتين بلا ولا قطعة معناها المولّد وقف.
 _REPLY_STALE_S = 2.0
-# ومن لحظة ما يسكت المستخدم لأول قطعة صوت منها في انتظار طبيعي (جيميني + الشبكة).
-# خلال هالمهلة بنعتبرها «عم ترد» حتى لو ما وصل ولا بايت بعد — وإلا أي حركة
-# بالغرفة بهالثواني بتلغي الردّ قبل ما يبلّش.
+# من سكوت المستخدم لأول صوت منها، بنعتبرها «عم ترد» حتى لو ما وصل بايت.
 _REPLY_WARMUP_S = 8.0
 
 
-# اسم القناة لمكالمة التطبيق. بينحفظ جنب كل جملة بالذاكرة («قلتلي بالمكالمة»)،
-# وهو كمان اللي بيفرّق مسار التطبيق عن الروبوت بالجلسة.
+# اسم القناة لمكالمة التطبيق: بينحفظ مع كل جملة وبيفرّق مسار التطبيق عن الروبوت.
 _APP_CHANNEL = "مكالمة التطبيق"
 
-# سؤال سمعته وردّت عليه، بس تفريغه النصّي رجع بلا ولا حرف («. . . .»). بينحفظ
-# هيك بدل النقط: الذاكرة بتعرف إنه في سؤال وإنها ردّت، وما بتقرا نقط كأنها كلامه.
+# سؤال ردّت عليه بس تفريغه رجع فاضي: بينحفظ هيك بدل النقط.
 _UNHEARD_QUESTION = "(سؤال صوتي ما انكتب نصّه)"
 _HAS_LETTERS = re.compile(r"[^\W\d_]")
 
@@ -957,29 +727,16 @@ def _she_has_not_spoken_yet(state: Dict[str, Any]) -> bool:
 
 
 def _barge_bar_ms(state: Dict[str, Any]) -> float:
-    """قدّيش لازم يحكي عشان نوقّف اللي عمّ تعملو ونسمعو.
+    """قدّيش لازم يحكي عشان نعتبرها مقاطعة.
 
-    **الوقفة جوّا الجملة مش نهايتها.** حدا بيفكّر بنصّ سؤاله بيسكت تسعة أعشار
-    الثانية وبيكمّل، وإحنا بنكون سكّرنا الدور وبعتنا السؤال ناقص — فبتردّ قبل
-    ما يخلص. التكملة هاي غالبًا أقصر من ثانية وخُمس، يعني بتوقع تحت حدّ
-    المقاطعة وبتنرمى، وبتسمع نصّ سؤاله.
-
-    وما في قياس بيفرّق بين تكملة قصيرة وضجّة غرفة قصيرة — التنين كلام بنفس
-    اللحظة بالضبط. بس في **فرق بالكلفة**: ضجّة بتلغي ردًّا هي لسا ما بلّشتو
-    كلفتها إنها بتعيد السؤال؛ وضجّة بتلغي ردًّا نصّو طالع كلفتها إنها بتقطع
-    كلامها بنصّو. فالحدّ بينزل — مش بينفتح — طالما ما طلع منها ولا صوت بعد
-    الإقفال. أوّل ما تبلّش تحكي، بيرجع الحدّ الكامل.
+    الحدّ بينزل (مش بينفتح) طالما ما طلع منها ولا صوت بعد إقفال الدور: وقفة التفكير
+    بنصّ الجملة غالبًا أقصر من الحدّ الكامل، ومقاطعة ردّ ما بلّش أرخص.
     """
     return _CONTINUE_MIN_MS if _she_has_not_spoken_yet(state) else _BARGE_MIN_MS
 
 
 def _she_is_really_answering(state: Dict[str, Any]) -> bool:
-    """هل هي فعلًا بصدد الردّ هلّق؟
-
-    العلامة لحالها ما بتكفي: لو الردّ انقطع وما إجت «خلص الدور»، بتضل مرفوعة
-    وبتبلع كل كلام المستخدم بعدها — وهاد بيبيّن كأنها بطّلت ترد خالص. الحقيقة
-    هي آخر قطعة صوت بعتناها، وقبلها مهلة التحضير من لحظة إقفال الدور.
-    """
+    """هل هي فعلًا بتردّ هلّق؟ (آخر قطعة صوت بعتناها، أو مهلة التحضير بعد إقفال الدور.)"""
     now = time.monotonic()
     last_out = state.get("last_out_at")
     if last_out is not None:
@@ -998,14 +755,9 @@ def _she_is_really_answering(state: Dict[str, Any]) -> bool:
 async def _device_to_live_auto(reader: "_DeviceReader", session,
                                recent: "_RecentAudio", *,
                                live_state: Optional[Dict[str, Any]] = None) -> None:
-    """مكالمة التطبيق: كل الصوت لجيميناي، وهو اللي بيقرّر وين الدور.
+    """مكالمة التطبيق بكاشف جيميناي: كل الصوت إله وهو بيقرّر الدور والمقاطعة.
 
-    ما في بداية دور ولا نهايته من عنّا، ولا حدّ مقاطعة ولا حجز إطارات: كل هاد
-    صار عند كاشفه (شوف `_APP_TURNS_BY_GEMINI`). لمّا تحكي فوقها بيوقّف التوليد
-    وبيبعت «انقطع»، و`_live_to_device` بيوصّلها للتطبيق اللي بيسكّتها فورًا.
-
-    الشدّة لسّا بتنقاس هون، بس **للقياس**: آخر إطار واضح فوق الغرفة هو «آخر ما
-    سمعناك بتحكي»، ومنه بينحسب «أول صوت بعد ما سكت» — نفس الرقم اللي كان.
+    الشدّة بتنقاس هون للقياس بس («أول صوت بعد ما سكت»).
     """
     from google.genai import types
     import numpy as np
@@ -1058,12 +810,9 @@ async def _device_to_live_auto(reader: "_DeviceReader", session,
 async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudio",
                           *, verify: bool = True,
                           live_state: Optional[Dict[str, Any]] = None) -> None:
-    """Read PCM frames from the device and stream to Live with manual turn control.
+    """Stream device PCM to Live with manual turn control (our own VAD).
 
-    We run our own VAD: on speech we open an activity, and on about 700ms of
-    silence we close it. Before closing we first verify who spoke and inject
-    their persona, so Sandy replies with the right personality from the very
-    first sentence (owner vs guest).
+    Before closing a turn we verify the speaker and inject their persona.
     """
     from google.genai import types
     import numpy as np
@@ -1075,8 +824,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     frames = 0
     sent = 0
     heard_ms = 0.0
-    # (طول الإطار بالملي, شدّته) — النافذة بتتقصّ بالوقت، فطول الإطار ما بيغيّر
-    # كم ثانية بتغطّي: اللوح والتطبيق بياخدوا نفس التلات ثواني.
+    # (مدة الإطار بالملي، شدّته): النافذة بالوقت، فاللوح والتطبيق بيغطّوا نفس المدة.
     window: "deque[tuple[float, float]]" = deque()
     window_ms = 0.0
     room: "deque[tuple[float, float]]" = deque()
@@ -1097,16 +845,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                     "not several", backlog)
 
     async def _send_audio(chunk: bytes) -> None:
-        """Forward one device frame, split to the size Google asks for.
-
-        **The board sends a hundred and twenty-eight milliseconds at a time;
-        the Live API documentation asks for twenty to forty.** A big frame is a
-        coarse frame: the earliest the far end can notice speech starting or
-        stopping is the boundary of whichever one it is inside, so every turn
-        begins and ends late by up to a frame. Splitting costs nothing — it is
-        the same bytes, in more messages — and it is the cheapest latency in the
-        whole path.
-        """
+        """Forward one device frame split to 20–40 ms chunks, so turns start and end earlier."""
         nonlocal frames, sent
         for i in range(0, len(chunk), _CHUNK_BYTES):
             piece = chunk[i:i + _CHUNK_BYTES]
@@ -1125,22 +864,13 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     state: Dict[str, Any] = live_state if live_state is not None else {}
 
     async def _close_turn(reason: str) -> None:
-        """End the user's turn and tell Gemini so. The one thing that must
-        happen for an answer to exist at all.
+        """End the user's turn and tell Gemini.
 
-        **Except while she is already answering.** Every `activity_end` starts a
-        generation, and a second one cancels the first — so a cough, a chair, a
-        second of room noise between the question and the reply threw the answer
-        away. The log said it plainly: turn closed, first response from Gemini,
-        turn closed again nine hundred milliseconds later, `replied=0 chars`.
-        A real interruption is still honoured; it just has to be long enough to
-        be a sentence rather than a noise.
+        While she is already answering, only a real interruption (long enough to be
+        speech) closes it: every activity_end cancels the generation in progress.
         """
         nonlocal speaking, silence_ms, utter_ms, speech_ms
-        # **Measured in speech, not in elapsed time.** `utter_ms` counts every
-        # frame while a turn is open, silence included — so the seven hundred
-        # milliseconds of quiet that *end* the turn are inside it, and a blip of
-        # two frames measured as a second and a half.
+        # Measured in speech, not elapsed time (the closing silence is inside utter_ms).
         if state.get("replying") and _she_is_really_answering(state) \
                 and speech_ms < _barge_bar_ms(state):
             logger.info("[voice_ws] ignoring a %.1fs blip while she is answering "
@@ -1164,37 +894,20 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
         utter_ms = 0.0
         speech_ms = 0.0
 
-    # **Pulled with a deadline, not iterated.**
-    #
-    # The board no longer uploads the room — it sends while somebody is talking
-    # and stops when they stop. So the end of a question arrives as *nothing
-    # arriving*, and a plain `async for` waits for that forever. The frame is
-    # awaited with a timeout instead, and a gap is an answer.
-    #
-    # The task is never cancelled on timeout: cancelling `__anext__` of an async
-    # generator closes the generator, which would end the call at the first pause
-    # instead of ending the turn.
+    # Frames are pulled with a timeout, not iterated: the board stops sending when
+    # the user stops, so a gap ends the turn. Never cancel the pull on timeout
+    # (that would close the generator and end the call).
     stream = reader.frames().__aiter__()
     frame_task: Optional[asyncio.Task] = None
-    # **The pull task never outlives this bridge.**
-    #
-    # `asyncio.wait` does not cancel what it was given, so a cancel from
-    # outside — which is what a GoAway reconnect does to this task — left a
-    # pending `__anext__` on the shared queue. The next bridge opened a
-    # second reader over the same queue and the orphan, being first in line,
-    # ate a frame; worse, it could eat the end-of-stream marker, after which
-    # the new bridge never finished and held a worker thread for ten minutes.
+    # The pull task must never outlive this bridge, or an orphan eats frames
+    # (or end-of-stream) from the next bridge after a reconnect.
     try:
         while True:
             if frame_task is None:
                 frame_task = asyncio.ensure_future(stream.__anext__())
             finished_now, _ = await asyncio.wait({frame_task}, timeout=_SILENCE_GAP_S)
             if not finished_now:
-                # Nothing for a whole gap. If a turn is open, it is over — and
-                # **this is not conditional on the backlog.** It was, which put
-                # the one detector built as a safety net behind the very flag it
-                # exists to catch. A device that has stopped sending has stopped
-                # sending; by definition there is no backlog left to drain.
+                # A full gap with a turn open ends it, backlog or not.
                 draining = False
                 if speaking:
                     await _close_turn("device went quiet")
@@ -1213,39 +926,14 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             ms = samples.size / 16000 * 1000
             heard_ms += ms
             if consumed == 1:
-                # طول الإطار بيفرق: كل نوافذ الأرضية والصمت محسوبة بالوقت،
-                # وهاد السطر بيقول من وين إجا الصوت بلا ما نخمّن.
+                # مدة الإطار بتقول من وين إجا الصوت (لوح أو تطبيق).
                 logger.info("[voice_ws] first frame from the device: "
                             "%d bytes, %.0fms, rms %.0f", len(chunk), ms, rms)
 
-            # **Speech is louder than the room. It is not louder than a constant.**
-            #
-            # A fixed number cannot be right in two rooms. Set it too high and the
-            # gate never opens — Gemini gets silence for the whole call. Set it too
-            # low, or stand the robot near a fan, and every frame counts as speech:
-            # the silence that ends a turn never accumulates, nobody ever tells
-            # Gemini the question is over, and she says nothing at all. That second
-            # one is what production did, for a whole day, with a threshold of 350
-            # in a room whose floor was above it.
-            #
-            # So the floor is measured: **the quietest moment in the last few
-            # seconds is the room.** Nobody talks continuously, so that minimum is
-            # the room and nothing else — and unlike a decaying average it cannot be
-            # dragged upward by a long sentence. Speech is what stands above it by a
-            # clear margin, with an absolute minimum underneath so a silent room
-            # cannot promote a hiss to a sentence.
-            # **The floor is learned between sentences, not during them.**
-            #
-            # Taking the minimum of the last few seconds works only while room
-            # frames keep arriving. The board now gates its uplink and sends
-            # speech alone, so a window that keeps updating fills with speech,
-            # the floor climbs to the quietest *word*, and the threshold sits
-            # above the voice: the second question of a call was never forwarded
-            # at all, and a long first one closed a dozen times mid-sentence.
-            #
-            # So the window only takes frames while no turn is open. Inside an
-            # utterance the threshold is whatever the room was just before it
-            # began, which is the only honest measure of it.
+            # Speech = clearly above the room floor (with an absolute minimum). The
+            # floor is the quietest moment in recent seconds, learned only while no
+            # turn is open: the board now sends speech alone, so learning during
+            # an utterance would raise the floor to the quietest word.
             if not speaking:
                 window.append((ms, rms))
                 window_ms += ms
@@ -1258,12 +946,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 if len(window) >= _VAD_FLOOR_MIN_FRAMES:
                     quietest = min(r for _, r in window)
                     if not frames:
-                        # لسا ما فتحت البوابة ولا مرّة — يعني ما عنا قياس
-                        # حقيقي للغرفة بعد، والموجود ممكن يكون صوته هو.
+                        # ما فتحت البوابة ولا مرّة: الموجود ممكن يكون صوته هو.
                         quietest = min(quietest, _VAD_ROOM_MAX)
-                    # شبكة الأمان: صوت واصل من دقيقة وما فتحت البوابة ولا مرّة
-                    # يعني الأرضية اللي حسبناها هي الكلام نفسه. أهدأ لحظة
-                    # بنصّ دقيقة بتكون الغرفة فعلاً.
+                    # شبكة الأمان: صوت متواصل بلا فتح بوابة معناها الأرضية هي الكلام نفسه.
                     if quiet_ms >= _VAD_STUCK_MS:
                         quietest = min(quietest, min(r for _, r in room))
                         if not unstuck:
@@ -1276,70 +961,43 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                                 max(quietest * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR),
                                 loudest)
                     threshold = max(quietest * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR)
-            # **And nothing is speech until the room is known.** Opening a turn
-            # on the first frame, before there is anything to compare it to,
-            # freezes the threshold at the absolute minimum for the whole
-            # utterance — after which the room itself never falls below it and
-            # the turn cannot close. Half a second of listening first costs
-            # nothing: the board sends its preroll ahead of the first word, and
-            # that preroll is the room.
+            # Nothing is speech until the room is known (the board's preroll is the room).
             is_speech = (len(window) >= _VAD_FLOOR_MIN_FRAMES
                          and rms >= threshold)
             loudest = max(loudest, rms)
-            # بنعدّ الصمت طالما ما فتحت البوابة. أول ما تفتح مرّة، خلص — العتبة
-            # مظبوطة وما في داعي لشبكة الأمان.
+            # عدّ الصمت بس لحد أول فتح للبوابة.
             if is_speech or frames:
                 quiet_ms = 0.0
             else:
                 quiet_ms += ms
 
             if is_speech and not speaking:
-                # **Opening a turn is what cancels her answer, not closing one.**
-                #
-                # `activity_start` interrupts whatever the model is generating.
-                # The log: turn closed at 54.7 with the whole question in it,
-                # `turn_complete` at 55.4 with zero bytes — half a second is not
-                # long enough to generate anything, so it was cancelled, by an
-                # onset our own detector raised on the room a moment after the
-                # question ended. She never got to say a word. Once, she got two
-                # words out and stopped, which is the same thing arriving a
-                # little later.
-                #
-                # So while she is answering, an onset has to earn the
-                # interruption. The frames wait here in the meantime and go up
-                # the moment it qualifies, so a real second question keeps its
-                # beginning and a chair scraping keeps nothing.
+                # Opening a turn cancels her answer (activity_start interrupts), so
+                # while she answers an onset must earn it; frames are held meanwhile.
                 if state.get("replying") and _she_is_really_answering(state):
                     held.append(chunk)
                     held_ms += ms
                     while held_ms > _HELD_MS_MAX and len(held) > 1:
-                        # The dropped frame's time leaves with it, or `held_ms`
-                        # overstates and a shorter noise passes the bar below.
+                        # The dropped frame's time leaves with it.
                         held_ms -= len(held.pop(0)) / 2 / 16000 * 1000
                     if held_ms < _barge_bar_ms(state):
                         continue
                     logger.info("[voice_ws] %.1fs of speech while she answers — "
                                 "taking it as an interruption", held_ms / 1000)
 
-                # Speech onset, open a manual activity. We do NOT clear `recent`
-                # here: verification needs a few seconds of audio for a reliable
-                # CAM++ embedding, so we keep a rolling window (last ~5s of speech,
-                # which is dominated by this speaker).
+                # Speech onset: open an activity. Keep `recent` (verification needs a few seconds).
                 speaking = True
                 silence_ms = 0.0
                 utter_ms = 0.0
                 await session.send_realtime_input(activity_start=types.ActivityStart())
-                # **فتح الدور بيلغي التوليد — يعني ما عادت ترد.** بدون هالسطر
-                # بتضلّ العلامة مرفوعة، وأول إقفال جاي بينبلع عالحارس تحت
-                # كأنها لسا بتحكي — فالجملة اللي قاطع فيها ما بتوصلها أبدًا.
+                # فتح الدور بيلغي التوليد، فنزّل العلامة وإلا الإقفال الجاي بينبلع.
                 state["replying"] = False
                 for pending in held:
                     await _send_audio(pending)
                 held.clear()
                 held_ms = 0.0
             elif not speaking and held:
-                # The noise died before it became a sentence. Drop it with the
-                # claim it was making.
+                # The noise died before it became a sentence.
                 held.clear()
                 held_ms = 0.0
 
@@ -1351,26 +1009,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                     speech_ms += ms
                 silence_ms = 0.0 if is_speech else silence_ms + ms
 
-                # **A startup backlog is one question, not four.**
-                #
-                # The robot records from the wake word and the session behind it
-                # takes seconds to open, so speech sits in the buffer and then
-                # drains at machine speed — and the pauses inside one sentence look
-                # like the ends of four questions, each turn cancelling the reply
-                # to the last. So no turn closes until the frames that were queued
-                # when the call began have gone through.
-                #
-                # Two ways this went wrong, both of which left `speaking` true for
-                # the whole call and her silent:
-                #   • it asked "is the queue deep *now*" every frame — a device
-                #     sending every 130 ms always has a frame in flight, so that
-                #     test never came back false;
-                #   • it compared `backlog` (every queued frame) with `frames`
-                #     (only the ones forwarded) — room audio below the threshold is
-                #     consumed, not forwarded, so one quiet frame in the queue kept
-                #     the hold up for ever.
-                # Hence: checked against the startup count, counted in *consumed*
-                # frames, and lifted once for good.
+                # A startup backlog is one question, not four: no turn closes until
+                # the frames queued at call start are consumed (counted once, in
+                # consumed frames, then lifted for good).
                 if draining and consumed >= backlog:
                     draining = False
                     if backlog:
@@ -1380,24 +1021,17 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                     continue
 
                 if utter_ms >= _VAD_MAX_UTTER_MS:
-                    # ربع دقيقة والدور لسا مفتوح: يا إمّا التقدير واطي كتير
-                    # وكل الغرفة صارت كلام، يا إمّا حدا بيحكي بلا وقفة. بأي
-                    # حالة، السؤال لازم يوصلها بدل ما يضلّ مفتوح للأبد.
+                    # ربع دقيقة والدور مفتوح: خلّي السؤال يوصل بدل ما يضلّ مفتوح.
                     await _close_turn("long enough to be a question")
                 elif silence_ms >= _VAD_SILENCE_MS:
-                    # Kept beside the gap test above, deliberately: a board still
-                    # running the old firmware uploads the room without pause, so
-                    # no gap ever arrives and this is the only thing that would
-                    # close a turn. Either detector alone leaves one of the two
-                    # boards mute.
+                    # Kept beside the gap test: old firmware streams the room with no gaps.
                     await _close_turn("quiet frames")
             # Idle silence before any speech: don't forward it, saves bandwidth.
     finally:
         if frame_task is not None:
             frame_task.cancel()
 
-    # `consumed` و`heard_ms` مقصودين هون: بلاهم «صفر إطار» بيحتمل معنيين —
-    # ما وصل صوت أصلاً، أو وصل وما عدّى البوابة — وهدول علاجهم مختلف تمامًا.
+    # `consumed` و`heard_ms` بيفرّقوا «ما وصل صوت» عن «وصل وما عدّى البوابة».
     logger.info("[voice_ws] device→live done: %d frames, %d bytes, "
                 "%.1fs audio, %d frames dropped "
                 "(heard %d frames / %.1fs, loudest %.0f, threshold %.0f)",
@@ -1407,11 +1041,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
 
 async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                           live_state: Optional[Dict[str, Any]] = None) -> None:
-    """Read Gemini Live responses, relay audio to the device, handle tool calls.
+    """Relay Gemini Live responses to the device and handle tool calls.
 
-    `live_state` carries two things back to the caller that decide whether the
-    call survives: the latest resumption handle, and whether the server has said
-    it is about to hang up.
+    `live_state` carries back the latest resumption handle and whether the server said it's hanging up.
     """
     if live_state is None:
         live_state = {}
@@ -1421,54 +1053,15 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
     loop = asyncio.get_event_loop()
     gate_on = _speaker_gate_enabled()
 
-    # One thread, ours, for everything written to the device.
-    #
-    # Two things were wrong with using the shared default executor here.
-    #
-    # It was contended: the same pool held the parked reader threads, so every
-    # audio chunk queued behind them. Her voice arrived in bursts and gaps, and
-    # the more sessions had been left hanging, the worse it got — which is why
-    # the choppiness came and went with no pattern anyone could see.
-    #
-    # And it was not ordered. A pool with several threads gives no guarantee
-    # about which write lands first. It happens to work today only because each
-    # send is awaited before the next is queued; that is one refactor away from
-    # shuffling audio frames, and shuffled audio does not sound broken, it
-    # sounds like a bad connection.
-    #
-    # One worker gives strict FIFO by construction and cannot be starved.
+    # One thread for everything written to the device: strict FIFO, never starved.
     tx = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-tx")
 
-    # وتنفيذ الأدوات كمان بمجمعه.
-    #
-    # «شغّلي الكشاف» بيروح للوسيط وبيستنى، و«شو الطقس» بيروح للإنترنت. هدول
-    # كانوا ع المجمع المشترك، فكل أداة بتنتظر مكان جنب القراءات والإرسال —
-    # وأبطأ أداة كانت بتأخّر الصوت اللي بعدها.
-    #
-    # اتنين مش واحد: ساندي بتقدر تستدعي أداتين بنفس الدور (طفّي الضو وشغّل
-    # المروحة)، ووحدة بتصير تستنى التانية بلا سبب.
+    # الأدوات بمجمعها (اتنين: ممكن أداتين بنفس الدور) عشان ما تأخّر الصوت.
     tools_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="voice-tool")
 
     # ── Keeping the socket alive ─────────────────────────────────────────────
-    #
-    # **Heroku's router closes any connection that carries fewer than about
-    # fifty bytes in fifty-five seconds**, and logs it as H15. That is not a
-    # setting we can change.
-    #
-    # A voice session goes quiet all the time and for entirely healthy reasons:
-    # the owner is thinking, or the robot is listening and nobody has spoken
-    # yet. Nothing flows in either direction, the rolling window runs out, and
-    # the router hangs up on a session that was working perfectly.
-    #
-    # What that looked like from the outside was the worst part. The session
-    # died mid-thought, so the reply never came and any tool call in flight —
-    # `ask_clarification`, a reminder, the flash — was cut off before it ran.
-    # It read as "she ignores me sometimes" and as "the tools do not work", and
-    # neither is what happened: **the connection was closed under her.**
-    #
-    # Twenty seconds is deliberately well inside the window. This costs a
-    # handful of bytes a minute and removes a failure that presents as a dozen
-    # different bugs.
+    # Heroku's router closes a connection with <~50 bytes in 55 s (H15); healthy
+    # voice sessions go quiet that long all the time.
     _KEEPALIVE_S = 20.0
     _last_send = time.monotonic()
 
@@ -1483,12 +1076,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
         await loop.run_in_executor(tx, _send_json, ws, obj)
 
     async def _keepalive() -> None:
-        """Send something small whenever the socket has been quiet too long.
-
-        Only when quiet: during a reply the audio itself keeps the window open,
-        and an extra frame in the middle of that is one more thing for the
-        device's parser to step around.
-        """
+        """Send a tiny frame only when the socket has been quiet too long."""
         while True:
             await asyncio.sleep(_KEEPALIVE_S / 2)
             if time.monotonic() - _last_send >= _KEEPALIVE_S:
@@ -1500,40 +1088,27 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
 
-    # The other half of the missing evidence. `_first` fires on the very first
-    # message of any kind from Gemini — a transcript fragment, an audio part, a
-    # tool call — which is the moment that separates "she is slow" from "the
-    # sentence never became a turn". `_audio_out` is what actually reached the
-    # speaker; a session that heard, thought, and sent nothing looks the same
-    # from the board as one that never heard anything.
+    # `_first`: first message of any kind from Gemini; `_audio_out`: what reached the speaker.
     _seen = {"any": False, "user_text": False, "audio_out": 0}
     _audio = {"at": time.monotonic(), "chunks": 0, "wait": 0.0,
               "send": 0.0, "worst": 0.0}
     _turn_audio = {"n": 0}
 
     async def _handle(response) -> bool:
-        """Process one Live response; return True to stop the session.
-
-        Speaker identification + persona injection happen in _device_to_live at
-        end-of-utterance (manual turn control), so this side just relays audio,
-        saves STM, and gates sensitive tools.
-        """
+        """Process one Live response; True stops the session. Relays audio, saves STM, gates tools."""
 
         if not _seen["any"]:
             _seen["any"] = True
             logger.info("[voice_ws] first response from Gemini")
 
-        # **The handle, kept every time it changes.** It is what makes the
-        # reconnect invisible: the same session, with everything said so far
-        # still in it. Without one, a reconnect is a stranger asking who you are.
+        # Keep the resumption handle every time it changes.
         update = getattr(response, "session_resumption_update", None)
         if update is not None and getattr(update, "resumable", False):
             handle = getattr(update, "new_handle", "")
             if handle:
                 live_state["resume"] = handle
 
-        # And the warning that the connection is ending. Ten minutes is the
-        # documented lifetime; this arrives before the end, with the time left.
+        # The warning that the connection is ending.
         away = getattr(response, "go_away", None)
         if away is not None:
             live_state["goaway"] = True
@@ -1550,21 +1125,15 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                                 "transcript fragment)")
                 _user_buf.append(t)
 
-        # Capture Sandy's speech transcript (native-audio models don't put
-        # text in model_turn parts, so this is the only reliable source).
+        # Sandy's transcript (native-audio models put no text in model_turn parts).
         if response.server_content and response.server_content.output_transcription:
             t = response.server_content.output_transcription.text
             if t:
                 _sandy_buf.append(t)
 
-        # Barge-in: Gemini noticed the user talking over Sandy and stopped
-        # generating — tell the device to dump its buffered audio so she
-        # actually goes quiet instead of finishing the stale reply.
+        # Barge-in: tell the device to drop its buffered audio.
         if response.server_content and response.server_content.interrupted:
-            # **ونزّل علامة «عم ترد».** كانت بتنزل بمكان واحد بس، «خلص الدور» —
-            # فأي ردّ انقطع (مقاطعة، أو تعثّر بالاتصال) كان بيخلّيها مرفوعة
-            # للأبد، وبعدها كل جملة قصيرة منك بتنتجاهل كأنها ضجّة. النتيجة
-            # اللي بتحسّها: بترد بالبداية، وبعدين بتبطّل ترد خالص.
+            # ونزّل علامة «عم ترد» هون كمان، وإلا بتضلّ مرفوعة وبتنبلع كل جملة بعدها.
             live_state["replying"] = False
             live_state.pop("last_out_at", None)
             await send_msg({"type": "interrupted"})
@@ -1578,19 +1147,11 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                     _seen["audio_out"] += len(part.inline_data.data)
                     live_state["last_out_at"] = time.monotonic()
                     _turn_audio["n"] += len(part.inline_data.data)
-                    # **Where the stutter comes from, measured rather than
-                    # guessed.** The reply arrives as chunks and is played as it
-                    # arrives, so a gap anywhere becomes a gap in her voice — and
-                    # there are three places it can open: Gemini producing slowly,
-                    # this dyno being busy, or the link to the robot. `wait` is
-                    # how long we sat with nothing to send; `send` is how long
-                    # handing it over took. Their sum against the audio's own
-                    # duration says which of the three it is: if the sum exceeds
-                    # the audio, the robot runs out before the next piece lands.
+                    # `wait` (nothing to send) + `send` vs the audio's duration
+                    # shows whether stutter is Gemini, this dyno, or the link.
                     _now = time.monotonic()
                     _wait = _now - _audio["at"]
-                    # **أول صوت بعد ما يسكت المستخدم** — الرقم اللي بيحسّه فعلًا.
-                    # بينطبع مرة وحدة بكل دور، وبيشمل وقت جيميني والشبكة.
+                    # أول صوت بعد ما يسكت المستخدم (مرة بكل دور).
                     _closed = (live_state or {}).pop("turn_closed_at", None)
                     # القطعة الأولى وصلت: من هلّق الحكم لآخر صوت، مش للمهلة.
                     if _closed is not None:
@@ -1609,68 +1170,27 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
         if response.server_content and response.server_content.turn_complete:
             live_state["replying"] = False
             await send_msg({"type": "end_turn"})
-            # **Concatenated, not space-joined.**
-            #
-            # Gemini streams a transcript as a run of fragments, and a fragment
-            # is not a word — it is whatever part of one was ready. The pieces
-            # already carry their own spaces. Putting a space between them adds
-            # one inside every word it split:
-            #
-            #     heard='اه لي ها و خ لي ها  الا ولو يه  بت اعت ها  عاليه'
-            #
-            # which is "اهليها وخليها الا ولويه بتاعتها عاليه" with the seams
-            # showing. Arabic makes it obvious because the letters join; in
-            # English it reads as a typo and had been going unnoticed.
-            #
-            # This is not only a log cosmetic. This text is what gets written to
-            # short- and long-term memory, so every voice turn has been stored
-            # shredded — and read back to her later as though it were what was
-            # said.
+            # Concatenated, not space-joined: fragments aren't words and carry
+            # their own spaces (this text is stored as memory).
             user_text = "".join(_user_buf).strip()
             sandy_text = "".join(_sandy_buf).strip()
             if user_text and sandy_text and not _HAS_LETTERS.search(user_text):
-                # عشر ثواني حكي رجعوا «. . . .» — هي فهمت وردّت صح، والسجل
-                # كان رح يحفظ النقط كأنها سؤاله ويقراها إلها بعدين.
+                # التفريغ رجع نقط: ما منحفظ النقط كأنها سؤاله.
                 logger.warning("[voice_ws] the transcript of the question came "
                                "back with no words (%r) — saved as unheard",
                                user_text[:40])
                 user_text = _UNHEARD_QUESTION
 
-            # Save the turn so the app and voice keep sharing one memory. We
-            # deliberately do NOT re-inject conversation history back into the
-            # live session: Gemini's native-audio model treats an injected text
-            # turn as live input and does not reliably honor a "don't reply" tag
-            # (confirmed upstream), so replaying past turns made her answer the
-            # OLD topic — "turn off the light" → "I added the eggs". The live
-            # session keeps its own in-session context; long-term memory is
-            # seeded once in the system instruction at session start.
-            # Proof line for the "she didn't reply" case: did Gemini transcribe
-            # the user, and did it produce any reply? heard=non-empty + replied=0
-            # means she heard but stayed silent (turn/VAD issue); heard empty
-            # means the audio never made it (mic/device side — check serial).
-            # **Characters were the wrong thing to count.**
-            #
-            # `replied=0 chars` was read for days as "she said nothing", and it
-            # does not mean that: the reply is audio, and the text beside it is
-            # a transcript that often has not arrived by the time the turn
-            # completes. A turn that produced a second of speech and no
-            # transcript logged identically to one that produced silence — two
-            # completely different faults wearing one line.
+            # Save the turn for shared memory; never re-inject history into the live
+            # session (native audio answers injected turns). heard vs replied_audio
+            # separates "heard but silent" from "never heard".
             logger.info("[voice_ws] turn done: heard=%r replied=%d chars, "
                         "%d bytes of audio (%.1fs)",
                         user_text[:120], len(sandy_text), _turn_audio["n"],
                         _turn_audio["n"] / 2 / 24000)
             _turn_audio["n"] = 0
             if user_text and sandy_text:
-                # مش `await`.
-                #
-                # هاد كتابة ع قاعدة البيانات، وكان موقوف عليه بنص حلقة الردّ —
-                # يعني كل نهاية دور بتوقف بثّ الصوت لحدّ ما تخلص الكتابة. لو
-                # القاعدة تأخّرت لحظة، بتسمعها سكتة بآخر كل جملة، وما في إشي
-                # ع الشاشة بيربط السكتة بالحفظ.
-                #
-                # الذاكرة مش ع المسار الحرج: فشلها بيخسّر سطر بالسجل، وتأخيرها
-                # ما بيجوز يخسّر مقطع صوت. بنطلقها وبنكمّل.
+                # مش `await`: كتابة القاعدة ما لازم توقف بثّ الصوت.
                 loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text,
                                      get_voice_identity(), get_voice_channel())
 
@@ -1679,10 +1199,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
 
         # Tool calls: dispatch them and return the result to Live.
         if response.tool_call and dispatcher:
-            # **الصمت وقت البحث مش صمت، هو شغل** — بس ما حدا بيعرف هيك. البحث
-            # بياخد تلات ثواني، والموديل بينادي الأداة قبل ما يحكي أي إشي،
-            # فبتضلّ ساكتة. التطبيق بيورجي «لحظة، عم دوّر» بدل ما تبيّن معلّقة.
-            # للتطبيق بس: اللوح ما بيعرف هالرسالة.
+            # للتطبيق بس: «لحظة، عم دوّر» وقت الأداة بدل ما تبيّن معلّقة.
             if get_voice_channel() == _APP_CHANNEL:
                 await send_msg({"type": "working"})
             fn_responses: List[types.FunctionResponse] = []
@@ -1701,24 +1218,8 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                             )},
                         ))
                         continue
-                # No spoken confirmation step. Owner's decision, and it was the
-                # right one.
-                #
-                # Every gated call cost a full extra round trip — the model had
-                # to ask, wait for an answer, and call again — so a sentence that
-                # should light a lamp in under a second took several and ended in
-                # "are you sure?". For an assistant you talk to, that is the
-                # difference between a device and a nuisance.
-                #
-                # Most of what was gated was never destructive anyway; that list
-                # has been cut back to real, irreversible data loss (see
-                # agent/guards.py). Deletes now happen when asked, immediately.
-                # The speaker gate above still stands where it is enabled: it
-                # answers "is this the owner", which is a different question and
-                # the one actually worth asking.
-                # الهوية بتسافر مع الأداة. الأدوات بتكتب بقاعدة البيانات، والكتابة
-                # مقيّدة بالحساب — فأداة بتشتغل بلا هوية بتكتب لحساب غلط أو
-                # بتفشل بصمت، وساندي بتقول «تمام عملتها».
+                # No spoken confirmation step (owner's decision; guards.py lists the
+                # truly destructive tools). The identity travels with the tool call.
                 result = await loop.run_in_executor(
                     tools_pool, _dispatch_tool, dispatcher, fc.name,
                     dict(fc.args or {}), get_voice_identity()
@@ -1738,15 +1239,8 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
             return True
         return False
 
-    # session.receive() yields one turn then ends, so we loop to keep the
-    # conversation going across turns (the session itself stays open). We exit
-    # on go_away, an error, or the device closing.
-    #
-    # try/finally, not a bare loop: this task gets cancelled whenever the other
-    # side finishes first, and a cancelled task still has to give its thread
-    # back. A pool leaked once per session is the same failure this file was
-    # just rewritten to remove — one thread each, quietly, until the worker runs
-    # out and the robot stops being answered.
+    # receive() yields one turn then ends, so loop across turns; try/finally so
+    # a cancelled task still returns its threads.
     ka = asyncio.create_task(_keepalive())
     try:
         while True:
@@ -1764,10 +1258,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                     "(heard user=%s, any response=%s, reply audio=%d bytes)",
                     exc, _seen["user_text"], _seen["any"], _seen["audio_out"])
                 if _audio["chunks"]:
-                    # 24 kHz, 16-bit: two bytes a sample. If `audio` is less
-                    # than `wait`, she is being played faster than she is
-                    # arriving, and that is exactly what a listener hears as a
-                    # bad line.
+                    # 24 kHz 16-bit: if `audio` < `wait`, the listener hears a bad line.
                     logger.info(
                         "[voice_ws] reply timing: %d chunks, %.1fs audio, "
                         "%.1fs waiting (worst gap %.2fs), %.2fs sending",

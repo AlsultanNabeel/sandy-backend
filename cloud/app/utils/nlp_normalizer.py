@@ -1,8 +1,4 @@
-"""User message normalization pipeline.
-
-Public API: normalize_user_message(text) -> str
-Basic sanitization only — Gemini Flash handles all datetime/duration/recurrence parsing.
-"""
+"""Light text cleanup before the LLM sees a message; parsing is left to the model."""
 
 import re
 
@@ -11,13 +7,10 @@ _EASTERN_ARABIC_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 
 
 def normalize_user_message(text: str) -> str:
-    """Basic sanitization without destroying human context. The LLM handles the rest."""
     text = str(text or "").strip()
     if not text:
         return ""
 
     normalized = text.translate(_ARABIC_INDIC_DIGITS).translate(_EASTERN_ARABIC_DIGITS)
     normalized = normalized.replace("،", ",").replace("؟", "?").replace("ـ", "")
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-
-    return normalized
+    return re.sub(r"\s+", " ", normalized).strip()

@@ -186,7 +186,7 @@ def build_memory_context(
         "durable_only": durable_only,
         # Resolved once here (where user_id + mongo_db exist) so the formatter
         # can label user turns by the real name instead of a hardcoded one.
-        "user_display_name": resolve_display_name(user_id, mongo_db, default="المستخدم"),
+        "user_display_name": resolve_display_name(user_id, default="المستخدم"),
     }
 
     if mongo_db is not None and chat_id:

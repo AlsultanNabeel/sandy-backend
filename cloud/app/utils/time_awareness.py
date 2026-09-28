@@ -1,20 +1,7 @@
-"""Sandy's sense of *when* — the same few lines for every channel.
+"""Time context for prompts: now, the gap since the last message, per-turn stamps.
 
-A reply written without the clock is written from nowhere: the model does not
-know it is 5 pm, that it is Sunday, or that the person last spoke to her three
-days ago. Two things followed from that. Small ones — "good morning" at night,
-no reaction to someone coming back after a week. And a real bug: the router
-fills a tool's ISO date field itself, and without today's date it picked a date
-from its training years, so "remind me at 5 pm" came back "that time is in the
-past".
-
-Every turn now carries three facts, built here once:
-
-- **now** — weekday, date, time and the ISO timestamp (for tool arguments);
-- **the gap** — how long since the previous message, on which channel;
-- **per-turn stamps** — for transcripts shown to the model ("قبل ساعتين · الروبوت").
-
-Latin digits on purpose: this text is read by a model, never shown to a person.
+Without today's date the router guessed ISO dates from its training years.
+Latin digits on purpose: this text is read by the model, not shown to users.
 """
 
 from __future__ import annotations
@@ -34,7 +21,6 @@ def _now(now: Optional[datetime] = None) -> datetime:
 
 
 def _clock(dt: datetime) -> str:
-    """`5:07 م` — 12-hour Arabic clock."""
     h = dt.hour % 12 or 12
     return f"{h}:{dt.minute:02d} {'ص' if dt.hour < 12 else 'م'}"
 
@@ -55,7 +41,7 @@ def parse_ts(value: Any) -> Optional[datetime]:
 
 
 def ago_ar(delta: timedelta) -> str:
-    """`قبل 3 ساعات و10 دقائق` — coarse on purpose; precision is noise here."""
+    """`قبل 3 ساعات و10 دقائق` — coarse on purpose."""
     secs = int(delta.total_seconds())
     if secs < 90:
         return "قبل لحظات"
@@ -103,7 +89,6 @@ def _last_turn(history: Optional[Iterable[Dict[str, Any]]]) -> Optional[Dict[str
 
 def last_contact_line(history: Optional[Iterable[Dict[str, Any]]],
                       now: Optional[datetime] = None) -> str:
-    """How long since the previous message, and where it happened."""
     last = _last_turn(history)
     if last is None:
         return "ما في محادثة قريبة محفوظة قبل هاي الرسالة."
@@ -116,8 +101,7 @@ def last_contact_line(history: Optional[Iterable[Dict[str, Any]]],
 
 def time_awareness_block(history: Optional[Iterable[Dict[str, Any]]] = None,
                          now: Optional[datetime] = None) -> str:
-    """The block every reply prompt carries. Tells her *how* to use it, too —
-    a clock she recites in every answer is worse than no clock."""
+    """The time block every reply prompt carries."""
     return (
         f"[{now_line(now)}]\n[{last_contact_line(history, now)}]\n"
         "استعملي إدراك الوقت بشكل طبيعي: التحية حسب الوقت، ولو غاب فترة طويلة "
@@ -136,12 +120,7 @@ def turn_stamp(m: Dict[str, Any], now: Optional[datetime] = None) -> str:
 
 
 def plausible_future_iso(iso: str, now: Optional[datetime] = None) -> bool:
-    """Is a model-supplied ISO time one to trust as-is?
-
-    True only for a parseable time that is in the future and within about a
-    year. Anything else — the past, or a date from another decade — is the
-    router guessing, and the caller should re-read the user's own words.
-    """
+    """True for a parseable model-supplied time in the future and within ~a year; else it's a guess."""
     if not iso:
         return False
     try:
@@ -155,7 +134,6 @@ def plausible_future_iso(iso: str, now: Optional[datetime] = None) -> bool:
         return False
     local = dt.astimezone(USER_TZ)
     if (local.hour, local.minute, local.second) == (0, 0, 0):
-        # Date only ("today", "Friday"): the callers fill in a default hour,
-        # so a date of today is still the user's date, not a past time.
+        # Date only: callers add a default hour, so today still counts.
         return local.date() >= now.date()
     return dt > now

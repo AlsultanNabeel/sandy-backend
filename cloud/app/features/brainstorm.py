@@ -1,15 +1,4 @@
-"""ميزة العصف الذهني / التخطيط.
-
-ساندي تصير شريكة تفكير: تختار هدف، تنظّم الأفكار خطوة خطوة، تجمّع النقاط،
-وبالآخر تطلّع خطة كاملة تتحفظ في Mongo
-عشان ترجعلها لاحقاً.
-
-التخزين: مجموعة sandy_brainstorms:
-  {chat_id, topic, status: active|done, points[], plan_text,
-   started_at, finished_at}
-
-بدون Mongo كل دالة بترجّع فاضي بهدوء.
-"""
+"""العصف الذهني / التخطيط: جلسة نقاط بتنتهي بخطة محفوظة في sandy_brainstorms."""
 
 from __future__ import annotations
 
@@ -27,12 +16,10 @@ _PENDING = "sandy_bs_pending"
 def _extract_summary(plan_text: str) -> str:
     """ملخص سطرين: سطر «> ملخص:»، وإلا قسم «الهدف»، وإلا أول سطر مش عنوان. ~180 حرف."""
     lines = [ln.strip() for ln in (plan_text or "").splitlines()]
-    # 1) سطر الملخص الصريح (blockquote)
     for ln in lines:
         low = ln.lstrip("> ").strip()
         if low.startswith("ملخص"):
             return low.split(":", 1)[-1].strip()[:180] or low[:180]
-    # 2) قسم الهدف
     goal: List[str] = []
     in_goal = False
     for ln in lines:
@@ -45,7 +32,6 @@ def _extract_summary(plan_text: str) -> str:
             goal.append(ln)
     if goal:
         return " ".join(goal)[:180]
-    # 3) أول سطر مش عنوان
     for ln in lines:
         if ln and not ln.startswith("#") and not ln.startswith(">"):
             return ln[:180]
@@ -53,7 +39,6 @@ def _extract_summary(plan_text: str) -> str:
 
 
 def init_brainstorm(mongo_db) -> None:
-    """يُستدعى مرّة عند الإقلاع."""
     configure(mongo_db)
     if mongo_db is None:
         return
@@ -73,7 +58,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# الجلسة النشطة
 def get_active(chat_id: Any) -> Optional[Dict[str, Any]]:
     if not is_available():
         return None
@@ -88,7 +72,6 @@ def start_session(chat_id: Any, topic: str) -> Optional[Dict[str, Any]]:
     if not is_available():
         return None
     cid = str(chat_id)
-    # أي جلسة نشطة سابقة → ملغاة
     get_db()[_COLL].update_many(
         {"chat_id": cid, "status": "active"},
         {"$set": {"status": "abandoned", "finished_at": _now()}},
@@ -131,7 +114,6 @@ def cancel_session(chat_id: Any) -> bool:
     return True
 
 
-# التلخيص والحفظ
 def _synthesize_plan(
     topic: str, points: List[str], create_chat_completion_fn, conversation: str = ""
 ) -> str:
@@ -165,7 +147,6 @@ def _synthesize_plan(
             return out
     except Exception as e:  # noqa: BLE001
         logger.warning("[brainstorm] synthesize failed: %s", e)
-    # fallback بسيط بدون LLM
     return (
         f"# خطة: {topic}\n\n## النقاط\n" + (points_block or "- (لا نقاط)")
     )
@@ -181,14 +162,11 @@ def finish_session(
     topic = active.get("topic", "جلسة عصف")
     points = [p.get("text", "") for p in active.get("points", []) if p.get("text")]
 
-    # نصّ النقاش من STM — هو الأساس للتلخيص (مش بس النقاط المسجّلة)
     conversation = ""
     try:
         from app.agent.graph.graph import load_stm
         cid = str(chat_id)
         msgs = load_stm(cid, cid)
-        # الاسم من ملفّه — كل دور للمستخدم كان موسوم باسم المالك، فالموديل
-        # بيقرا نقاش زبون تاني وكل جملة فيه منسوبة لشخص ما إله علاقة.
         from app.utils.user_profiles import speaker_label
         user_label = speaker_label(cid)
         lines = []
@@ -212,11 +190,9 @@ def finish_session(
             "finished_at": _now(),
         }},
     )
-    # الرابط الفاضي بظل بالعقد القديم للتوافق (كان رابط Notion قبل ما نشيله).
     return plan_text, "", topic
 
 
-# التعديل (مبني على فهم الخطة الحالية)
 def _revise_plan(current_plan: str, change: str, create_chat_completion_fn) -> str:
     """LLM يعيد كتابة الخطة كاملة بعد تطبيق التعديل المطلوب فقط — بدون اختراع."""
     prompt = (
@@ -245,37 +221,21 @@ def _revise_plan(current_plan: str, change: str, create_chat_completion_fn) -> s
             return out
     except Exception as e:  # noqa: BLE001
         logger.warning("[brainstorm] revise failed: %s", e)
-    return current_plan  # فشل التعديل → نرجّع الأصل بدون تخريب
+    return current_plan  # فشل التعديل → نرجّع الأصل
 
 
-def update_plan(
-    chat_id: Any, query: str, change: str, create_chat_completion_fn
-) -> Optional[Tuple[str, str, str]]:
-    """يعدّل خطة محفوظة بناءً على فهم محتواها الحالي. يرجّع (الخطة الجديدة، الرابط، الموضوع)."""
-    p = get_plan(chat_id, query)
-    if not p:
-        return None
-    current = p.get("plan_text", "")
-    if not current:
-        return None
-    revised = _revise_plan(current, change, create_chat_completion_fn)
-
+def _save_revision(plan_id: Any, revised: str) -> None:
     get_db()[_COLL].update_one(
-        {"_id": p["_id"]},
+        {"_id": plan_id},
         {"$set": {"plan_text": revised, "summary": _extract_summary(revised),
                   "updated_at": _now()}},
     )
-    return revised, "", p.get("topic", "")
 
 
 def update_plan_by_id(
     chat_ids: List[Any], plan_id: Any, change: str, create_chat_completion_fn
 ) -> Optional[str]:
-    """نسخة REST من update_plan — تبحث بـ _id بدل نص وصفي.
-
-    ``chat_ids`` بصيغة/معرّفات المستخدم كلها (نص + رقمي legacy) — نفس نطاق
-    الفلترة اللي بتستخدمه بقية مسارات /api/plans. يرجّع الخطة الجديدة أو None.
-    """
+    """يعدّل خطة بـ _id ضمن ``chat_ids`` (نص + رقمي legacy). يرجّع الخطة الجديدة أو None."""
     if not is_available():
         return None
     try:
@@ -288,15 +248,10 @@ def update_plan_by_id(
     if not current:
         return None
     revised = _revise_plan(current, change, create_chat_completion_fn)
-    get_db()[_COLL].update_one(
-        {"_id": p["_id"]},
-        {"$set": {"plan_text": revised, "summary": _extract_summary(revised),
-                  "updated_at": _now()}},
-    )
+    _save_revision(p["_id"], revised)
     return revised
 
 
-# الاسترجاع
 def list_plans(chat_id: Any, limit: int = 10) -> List[Dict[str, Any]]:
     if not is_available():
         return []
@@ -317,14 +272,12 @@ _AR_NORM = str.maketrans({
 
 
 def _norm(text: str) -> str:
-    """تطبيع للمطابقة: حروف صغيرة + توحيد الألف/الهمزة/التاء المربوطة + إزالة التشكيل."""
     import re as _re
     t = str(text or "").lower().translate(_AR_NORM)
     t = _re.sub(r"[ً-ْ]", "", t)  # تشكيل
     return t
 
 
-# تأكيد قبل التعديل/الحذف
 def _set_pending(chat_id: Any, op: str, plan_id: Any, change: str = "") -> None:
     if not is_available():
         return
@@ -381,27 +334,19 @@ def confirm_pending(
     if pend["op"] == "edit":
         revised = _revise_plan(doc.get("plan_text", ""), pend.get("change", ""),
                                create_chat_completion_fn)
-        get_db()[_COLL].update_one(
-            {"_id": doc["_id"]},
-            {"$set": {"plan_text": revised, "summary": _extract_summary(revised),
-                      "updated_at": _now()}},
-        )
+        _save_revision(doc["_id"], revised)
         return "edit", {"ok": True, "topic": topic, "plan_text": revised}
     return pend.get("op", ""), {"ok": False, "topic": topic}
 
 
 def get_plan(chat_id: Any, query: str) -> Optional[Dict[str, Any]]:
-    """يرجّع أفضل خطة مطابقة للوصف (يبحث بالعنوان + المحتوى مع تطبيع عربي).
-
-    query فاضي → الأحدث. لا تطابق → None (ما نرجّع خطة غلط — مهم للحذف/التعديل).
-    """
+    """أفضل خطة مطابقة للوصف (عنوان + محتوى)؛ query فاضي → الأحدث، لا تطابق → None."""
     plans = list_plans(chat_id, limit=50)
     if not plans:
         return None
     q = _norm(query).strip()
     if not q:
         return plans[0]
-    # توكنات لها معنى (طول ≥ 2)، نتجاهل كلمات حشو شائعة
     stop = {"خطه", "خطة", "ال", "عن", "تاع", "تبع", "بتاع", "حق"}
     tokens = [t for t in q.split() if len(t) >= 2 and t not in stop]
     if not tokens:

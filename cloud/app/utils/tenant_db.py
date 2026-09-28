@@ -1,37 +1,9 @@
 """Tenant-scoped data access — the single enforced isolation boundary.
 
-Multi-tenant isolation used to live as a hand-written ``{"user_id": uid}`` filter
-inside every store function. That is fragile by construction: one forgotten
-filter is a cross-tenant leak (exactly the class of bug that let a non-owner
-drive the owner's room). This module removes the choice — every data operation
-goes through a :class:`ScopedCollection` that stamps the caller's tenant onto the
-query and the inserted document automatically, so no store *can* read or write
-outside its tenant.
-
-How it fails closed
--------------------
-``scoped(mongo_db, name)`` returns ``None`` when there is no Mongo handle **or no
-active tenant** (``current_user_id()`` is None — an unauthenticated context).
-Every store already guards ``if coll is None: return <safe default>``, so that
-one guard now covers *both* "no database" and "no tenant" — a context without an
-authenticated user reads nothing and writes nothing.
-
-Usage (drop-in for a raw pymongo collection on the data path)::
-
-    from app.utils.tenant_db import scoped
-
-    def _coll():
-        return scoped(_mongo_db, _COLL)   # None when no db / no tenant
-
-    coll = _coll()
-    if coll is None:
-        return []
-    coll.find({"done": False})            # user_id injected automatically
-    coll.insert_one({"text": "..."})      # user_id stamped automatically
-
-Index creation stays on the raw handle (``mongo_db[name].create_index``), in
-``bootstrap.ensure_indexes`` or a store's ``init_*``: it runs before any request
-sets a tenant, and every index leads with the scope field.
+Every data operation goes through a ScopedCollection that forces the caller's
+tenant onto filters and inserted documents. ``scoped()`` returns None with no
+database or no authenticated tenant, so the store's ``if coll is None`` guard
+fails closed. Indexes are created on the raw handle at boot, before any tenant.
 """
 
 from __future__ import annotations
@@ -42,16 +14,10 @@ from app.utils.user_profiles import current_user_id
 
 
 class ScopedCollection:
-    """A pymongo collection that auto-scopes every operation to one tenant.
+    """A pymongo collection whose every operation is forced onto one tenant.
 
-    Constructed only when a tenant is present (see :func:`scoped`), so
-    ``self._tenant`` is always a non-empty id. Every filter gets the scope
-    field (``user_id`` by default; some legacy collections key on ``chat_id``
-    instead — pass ``field=`` to match) forced to that tenant, and every
-    inserted document gets it stamped on — a caller cannot widen the scope or
-    write to another tenant even by passing an explicit value for that field
-    (the tenant value always wins) — including through an update operator
-    (see :meth:`_guard_update`).
+    The tenant value always wins over a caller-supplied scope field, in filters,
+    inserts and update operators alike.
     """
 
     __slots__ = ("_raw", "_tenant", "_field", "_bump")
@@ -65,41 +31,26 @@ class ScopedCollection:
 
     @property
     def tenant(self) -> str:
-        """The tenant id this collection is scoped to — for the rare caller
-        that needs it directly (e.g. embedding it in a ``$vectorSearch``
-        filter, which must run against the raw collection)."""
+        """For a ``$vectorSearch`` filter, which must run on the raw collection."""
         return self._tenant
 
     def _scope(self, filter: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-        """Force this tenant onto a query filter (overriding any passed value)."""
         scoped = dict(filter or {})
         scoped[self._field] = self._tenant
         return scoped
 
     def _stamp(self, doc: Mapping[str, Any]) -> Dict[str, Any]:
-        """Stamp this tenant onto a document being inserted."""
         stamped = dict(doc)
         stamped[self._field] = self._tenant
         return stamped
 
-    # Operators that assign a field, and ones that take it away.
     _ASSIGN_OPS = ("$set", "$setOnInsert")
     _REMOVE_OPS = ("$unset", "$rename")
 
     def _guard_update(self, update: Any) -> Any:
-        """Keep an update from moving a document out of this tenant.
+        """Stop an update from reassigning or removing the scope field.
 
-        The filter is scoped, so an update can only *reach* this tenant's
-        documents — but until this existed it could still carry
-        ``{"$set": {"user_id": <someone else>}}`` and hand the document to
-        another tenant, or ``$unset`` the field and orphan it where no tenant
-        can see it. The class docstring promised neither could happen; this is
-        what makes that true. An assignment of the scope field is rewritten to
-        this tenant (several stores set it deliberately on upsert, always to
-        themselves), and a removal or rename of it is dropped.
-
-        Handles both update shapes pymongo accepts: an operator document, and
-        an aggregation-pipeline update (a list of stages).
+        Assignments are rewritten to this tenant; $unset/$rename of it are dropped.
         """
         if isinstance(update, Mapping):
             return self._guard_operators(update)
@@ -119,35 +70,18 @@ class ScopedCollection:
                 if not out[op]:
                     del out[op]
         if update and not out:
-            # The whole update was an attempt to strip the tenant. Doing nothing
-            # silently would hide the bug; sending `{}` would be a driver error
-            # that names the wrong cause.
+            # The whole update only stripped the tenant; fail loudly.
             raise ValueError(
                 f"update would only remove the tenant field {self._field!r}")
         return out
 
-    # The stages MongoDB allows in an aggregation-pipeline update, and the
-    # three of them this guard can make safe. The other three cannot be
-    # rewritten into something safe — see `_guard_stage`.
     _PIPELINE_STAGES_GUARDED = ("$set", "$addFields", "$unset")
 
     def _guard_stage(self, stage: Mapping[str, Any]) -> Dict[str, Any]:
-        """Guard one stage of a pipeline update, or refuse the whole update.
+        """Guard one pipeline-update stage; allowlist only.
 
-        **An allowlist, not a denylist.** This used to rewrite the three stages
-        below and pass anything else through untouched, which is the wrong
-        default for this file: MongoDB also allows `$project`, `$replaceRoot`
-        and `$replaceWith` in an update pipeline, and each one can rewrite the
-        whole document — `{"$replaceWith": {...}}` can hand it to another tenant
-        as surely as `{"$set": {"user_id": ...}}` can, and `$project` can drop
-        the tenant field and orphan it. Neither can be corrected the way a `$set`
-        can: there is no field to rewrite, only an expression whose result is not
-        known until the server runs it.
-
-        So they are refused. Nothing in the codebase builds a pipeline update at
-        all today, so this costs nothing now and is the whole point later: the
-        next caller to reach for one gets an error naming the stage, instead of
-        the silence that is how a cross-tenant write gets written.
+        $project/$replaceRoot/$replaceWith can rewrite the whole document and
+        cannot be made safe, so they are refused.
         """
         out = dict(stage)
         for op in ("$set", "$addFields"):
@@ -156,12 +90,7 @@ class ScopedCollection:
 
         if "$unset" in out:
             unset = out["$unset"]
-            # Three shapes reach here. A bare string and a list are what the
-            # aggregation stage takes; the mapping is the *update operator's*
-            # spelling, which is not legal in a pipeline — but a caller who
-            # confuses the two should be corrected by the driver's error about
-            # the shape, never by this guard having quietly let the tenant field
-            # through on the way past.
+            # A mapping is illegal here, but still must not let the field through.
             if isinstance(unset, str):
                 remaining: Any = None if unset == self._field else unset
             elif isinstance(unset, list):
@@ -184,9 +113,6 @@ class ScopedCollection:
                 f"the change with $set/$addFields/$unset only, so {self._field!r} "
                 f"stays under this collection's control")
         if stage and not out:
-            # Same reasoning as `_guard_operators`: the whole stage was an
-            # attempt to strip the tenant, and an empty stage is a driver error
-            # that would name the wrong cause.
             raise ValueError(
                 f"pipeline stage would only remove the tenant field {self._field!r}")
         return out
@@ -205,20 +131,12 @@ class ScopedCollection:
         return self._raw.distinct(key, self._scope(filter), *args, **kwargs)
 
     def aggregate(self, pipeline: List[Mapping[str, Any]], *args, **kwargs):
-        # Force a tenant $match as the first stage so no later stage can surface
-        # another tenant's documents. NOTE: not usable for a $vectorSearch
-        # pipeline — Atlas requires $vectorSearch to be stage one, so that case
-        # must filter inside the $vectorSearch stage itself and aggregate on
-        # the raw collection (use `.tenant` to source the id consistently).
+        # Not usable for $vectorSearch (must be stage one); filter inside it on the raw collection.
         scoped_pipeline = [{"$match": {self._field: self._tenant}}, *(pipeline or [])]
         return self._raw.aggregate(scoped_pipeline, *args, **kwargs)
 
     # ── writes ───────────────────────────────────────────────────────────────
-    #
-    # Every write marks the tenant's cached context stale — see
-    # `utils/tenant_version.py`. Here because this class is what most tenant
-    # writes already pass through; the handful that reach past it call
-    # `bump_for` themselves, and those are named in that module.
+    # Every write marks the tenant's cached context stale (utils/tenant_version.py).
     def _note_write(self) -> None:
         if not self._bump:
             return
@@ -251,7 +169,6 @@ class ScopedCollection:
         return out
 
     def replace_one(self, filter: Mapping[str, Any], replacement, *args, **kwargs):
-        # Keep the tenant on the replacement too — a replace must not strip it.
         out = self._raw.replace_one(
             self._scope(filter), self._stamp(replacement), *args, **kwargs
         )
@@ -269,8 +186,7 @@ class ScopedCollection:
         return out
 
     def find_one_and_update(self, filter: Mapping[str, Any], update, *args, **kwargs):
-        # On upsert, pymongo seeds the new doc from the filter's equality terms,
-        # so scoping the filter also stamps the tenant onto an upserted document.
+        # On upsert the scoped filter also stamps the tenant onto the new doc.
         out = self._raw.find_one_and_update(
             self._scope(filter), self._guard_update(update), *args, **kwargs
         )
@@ -283,32 +199,10 @@ class ScopedCollection:
         return out
 
     def insert_missing(self, documents: List[Mapping[str, Any]]) -> int:
-        """Insert each document if its ``_id`` is absent — **one round trip**.
-        Returns how many were actually new.
+        """Insert documents whose ``_id`` is new, in one round trip; returns the count inserted.
 
-        There was no bulk write on this class at all, which was safe by accident
-        rather than by design: an unscoped one is precisely the hole this class
-        exists to close, and it was closed by `AttributeError`. But "one document
-        per round trip" is a real cost, and the caller that hit it
-        (`semantic_memory.load_facts_to_chroma`) was re-indexing a person's whole
-        life an item at a time on a path that runs every message.
-
-        **Deliberately not a general `bulk_write`.** Scoping arbitrary pymongo
-        operation objects means reading their private attributes to rebuild them,
-        which ties the isolation boundary — the most important code in the repo —
-        to internals that change between driver releases. This takes plain
-        documents and builds the operations itself, so there is nothing to
-        misread and no way to hand it an operation it does not understand.
-
-        Each document keeps its own ``_id`` and is stamped with the tenant, so a
-        batch cannot write outside its tenant any more than ``insert_one`` could.
-
-        Built on ``insert_many(ordered=False)`` rather than a bulk upsert:
-        "insert what is missing" is what the caller means, and an unordered
-        insert already has the right behaviour for the race — if another writer
-        got there first, that one document is refused as a duplicate key and the
-        rest still land. `ordered=False` is what makes the batch continue past
-        it instead of stopping at the first collision.
+        Not a general bulk_write: scoping arbitrary pymongo ops would depend on
+        driver internals. Unordered, so duplicate keys from a race skip only themselves.
         """
         docs = [self._stamp(d) for d in documents if d.get("_id") is not None]
         if not docs:
@@ -320,9 +214,6 @@ class ScopedCollection:
             self._note_write()
             return len(getattr(result, "inserted_ids", None) or [])
         except BulkWriteError as exc:
-            # A duplicate key here is the expected outcome of a race, not a
-            # failure: someone else inserted the same id between our existence
-            # check and this write. Any other write error still propagates.
             errors = (exc.details or {}).get("writeErrors") or []
             if errors and all(e.get("code") == 11000 for e in errors):
                 return len(docs) - len(errors)
@@ -331,19 +222,10 @@ class ScopedCollection:
 
 def scoped(mongo_db: Any, name: str, field: str = "user_id",
            bump: bool = True) -> Optional[ScopedCollection]:
-    """Return a tenant-scoped view of ``mongo_db[name]``, or ``None`` when there
-    is no database handle or no active tenant (fail-closed). Callers already
-    guard ``if coll is None`` — that guard now also blocks unauthenticated access.
+    """Tenant-scoped ``mongo_db[name]``, or None with no db or no tenant (fail closed).
 
-    ``field`` is the scope field to stamp/filter on. Defaults to ``user_id``;
-    pass ``field="chat_id"`` for the older collections (semantic memory) that
-    predate that naming.
-
-    ``bump=False`` opts a caller out of the cache-invalidation stamp described
-    in `utils/tenant_version.py`. **Only for a writer that runs every single
-    turn and feeds nothing the cached persona block is built from** — the
-    interest counter is the one, and left bumping it invalidated the cache on
-    every message, which is a cache that costs a round trip and returns nothing.
+    ``field="chat_id"`` for older collections. ``bump=False`` only for per-turn
+    writers that feed nothing cached (else the cache is invalidated every message).
     """
     if mongo_db is None:
         return None

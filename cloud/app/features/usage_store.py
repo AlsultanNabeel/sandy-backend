@@ -1,26 +1,17 @@
-"""Per-user usage metering + rate limits — MongoDB.
+"""Per-user usage metering and rate limits.
 
-Cost control from day one: every authenticated request is counted per user per
-day, and short bursts are throttled. Limits scale with subscription — the owner
-is exempt (no rejection, still counted), a subscriber gets a generous quota, a
-free user gets a modest one.
-
-Collections:
-  sandy_usage_daily  {_id: "<user_id>:<YYYY-MM-DD>", user_id, date, count, updated_at}
-                     TTL on updated_at self-cleans old days.
-  sandy_usage_rl     {_id: "<user_id>:<epoch_minute>", user_id, count, expire_at}
-                     TTL on expire_at self-cleans the per-minute burst windows.
-
-A limit value of 0 means "no limit" (used for the owner): the request is still
-counted for analytics but never rejected. Fails open if Mongo is unavailable.
+sandy_usage_daily counts requests per user per day; sandy_usage_rl holds
+per-minute burst windows. Both self-clean via TTL. A limit of 0 means
+"count but never reject" (the owner). Fails open if Mongo is unavailable.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +20,6 @@ _RL = "sandy_usage_rl"
 
 
 def init_usage_store(mongo_db) -> None:
-    """يُستدعى مرّة عند الإقلاع."""
     configure(mongo_db)
     if mongo_db is None:
         return
@@ -48,8 +38,7 @@ def _now() -> datetime:
 
 
 def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> Optional[str]:
-    """Count one request and return a rejection reason if the user is over a
-    limit, else None. A limit of 0 disables that limit. Fails open on errors."""
+    """Count one request; a rejection reason if over a limit, else None (fails open)."""
     if get_db() is None or not user_id:
         return None
     from pymongo import ReturnDocument

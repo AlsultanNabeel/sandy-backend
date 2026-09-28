@@ -1,15 +1,12 @@
-"""AI-powered time expression parser for reminders and calendar entries.
-
-Public API: parse_reminder_time_ai(user_message, create_chat_completion_fn, return_json)
-"""
+"""LLM time-expression parser for reminders, with a deterministic weekday fast path."""
 
 import json
+import logging
 from datetime import datetime
 
 from app.utils.arabic_days import resolve_day_name_to_iso, parse_date_from_text
 from app.utils.nlp_normalizer import normalize_user_message
 from app.utils.time import USER_TZ
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +16,9 @@ def parse_reminder_time_ai(
     create_chat_completion_fn=None,
     return_json: bool = False,
 ):
-    """Parse a user time expression into an ISO datetime string or structured JSON.
+    """User time expression → ISO datetime string (or None).
 
-    Backwards compatible: by default returns an ISO datetime string (or None on failure).
-    If `return_json=True` returns a dict with keys:
-      - success: bool
-      - remind_at_iso: str | None
-      - intent: str (e.g. "reminder"/"calendar"/"task"/"unknown")
-      - reason: str (explain failure)
-      - original_text: str
+    With ``return_json=True``: {success, remind_at_iso, intent, reason, original_text}.
     """
     if create_chat_completion_fn is None:
         suggested = parse_date_from_text(
@@ -51,8 +42,7 @@ def parse_reminder_time_ai(
     if not normalized_text:
         return None
 
-    # Deterministic fast-path: if text names an Arabic weekday with no explicit
-    # clock time, resolve it without calling the AI.
+    # A weekday name with no clock time resolves without the model.
     det_iso = resolve_day_name_to_iso(normalized_text)
     if det_iso:
         now_check = datetime.now(USER_TZ)

@@ -1,13 +1,6 @@
-"""Scene timed-revert runner.
+"""Once-a-minute runner for scene timed reverts ("for 30 min, then X").
 
-A scene action can say "for 30 minutes, then X" (``for_min`` / ``then``).
-`apply_scene` stores those reverts in ``sandy_scene_timers``; this job is what
-actually fires them. Before it existed nothing called `run_due_timers`, so a
-"movie for two hours, then lights back on" scene never came back on.
-
-Runs in-process once a minute. Under gunicorn each worker starts its own copy;
-that is safe because every timer is claimed with an atomic find-and-delete
-before it is sent, so a revert fires exactly once whichever worker gets it.
+Safe across workers: each timer is claimed with an atomic find-and-delete.
 """
 
 from __future__ import annotations
@@ -28,11 +21,7 @@ def _profile_for(uid: str) -> dict:
 
 
 def run_all_due(mongo_db) -> int:
-    """Fire every owner's due reverts. Returns how many commands were sent.
-
-    Safe to call directly (tests / manual). One owner's failure never stops
-    the others.
-    """
+    """Fire every owner's due reverts; returns how many commands were sent."""
     from app.features import scene_store
 
     total = 0
@@ -49,7 +38,6 @@ def run_all_due(mongo_db) -> int:
 
 
 def start_scene_timer_runner(mongo_db) -> bool:
-    """Start the once-a-minute job. No-op without a database."""
     global _started, _scheduler
     if _started:
         return True

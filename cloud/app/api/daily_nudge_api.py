@@ -1,17 +1,7 @@
-"""Daily nudge — one smart, per-user notification a day (Phase 7).
+"""Daily nudge: alternates a get-to-know-you question with an LLM agenda line, cached per day.
 
-Alternates by day: every other day a short get-to-know-you QUESTION (builds the
-profile gradually instead of a first-open onboarding wall); on the in-between
-days a fresh, LLM-written AGENDA line about today's load — a gentle "don't slack,
-today's packed" when it's heavy, reassurance when it's light. The agenda line is
-generated in the user's own persona and cached once per day (not on every poll),
-so it's never a repeated template and costs one LLM call per user per day.
-
-  GET  /api/daily-nudge         → today's nudge (cached per day)
-  POST /api/daily-nudge/answer  → {qid, answer} save a question answer
-
-The backend only DECIDES + WRITES the content. Actually delivering it as a device
-notification (APNs registration + a daily scheduler) is separate Phase 7 infra.
+  GET  /api/daily-nudge         today's nudge
+  POST /api/daily-nudge/answer  {qid, answer}
 """
 
 from __future__ import annotations
@@ -35,9 +25,7 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_daily_nudge"
 
-# Get-to-know-you questions — the CONTENT is fixed (each builds one profile
-# facet) and asked in order; the "smart, never repeats" character lives in the
-# agenda days, which are the majority.
+# Asked in order, every other day.
 _QUESTIONS: List[Dict[str, str]] = [
     {"id": "unwind", "text": "شو أكتر إشي بيريّحك بعد يوم طويل؟"},
     {"id": "peak", "text": "إنت أنشط الصبح ولا الليل؟"},
@@ -53,10 +41,7 @@ _AGENDA_INSTRUCTION = (
     "يتقاعس وحمّسيه يبلّش؛ لو خفيف طمّنيه وشجّعيه ياخد نفَس. "
     "بلا قوائم ولا رموز نقطية — جملة طبيعية دافئة."
 )
-# The address line is appended per call from the active profile
-# (`address_instruction`), not fixed here: this used to say «خاطبيه بصيغة
-# المذكر» to every customer, which is the owner's default typed into a
-# product-wide prompt — §2.5b of the map.
+# The address line is added per call from the active profile (address_instruction).
 
 
 def _today() -> str:
@@ -78,9 +63,7 @@ def _next_question(uid: str) -> Optional[Dict[str, str]]:
 
 
 def _was_up_late(mongo_db, uid: str) -> bool:
-    """True if the user was active in the small hours (local 00:00–04:59) within
-    the last ~18h — so this morning's line can warmly ask about the late night.
-    Sourced from session_state.last_active_at (written after every turn)."""
+    """True if the user was active 00:00–04:59 local recently (from session_state.last_active_at)."""
     try:
         from app.agent.session_state import get_session_state
         ss = get_session_state(uid, mongo_db) or {}
@@ -100,7 +83,6 @@ def _was_up_late(mongo_db, uid: str) -> bool:
 def _load_summary(mongo_db, uid: str) -> Dict[str, Any]:
     from app.features import reminders_store, tasks_store
     tasks = tasks_store.load_tasks(mongo_db=mongo_db) or []
-    # From the list just read — `load_overdue_tasks` would read it again.
     overdue = tasks_store.overdue_among(tasks)
     reminders = reminders_store.load_reminders(max_results=20) or []
     titles = [
@@ -118,8 +100,7 @@ def _load_summary(mongo_db, uid: str) -> Dict[str, Any]:
 
 
 def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
-    """An LLM-written agenda line in the user's persona; templated fallback so the
-    endpoint never fails the notification."""
+    """LLM agenda line in the user's persona, with a template fallback."""
     load_line = (
         f"مهام نشطة: {summary['tasks']}، متأخرة: {summary['overdue']}، "
         f"تذكيرات: {summary['reminders']}."
@@ -164,15 +145,8 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
 
 
 def get_daily_nudge(mongo_db, uid: str) -> Dict[str, Any]:
-    """Today's nudge for one user, generated once and cached for the day.
-
-    Assumes the user's profile context is already active (so the load summary and
-    persona read tenant-scoped). Shared by the GET endpoint and the push
-    scheduler so the "question vs agenda" logic lives in exactly one place.
-    """
-    # Tenant-scoped like every other per-user row. `bump=False`: the cached
-    # nudge feeds nothing the persona cache is built from, and this write runs
-    # on the first open of every day.
+    """Today's nudge, generated once per day; needs the user's profile context. Shared with the push scheduler."""
+    # bump=False: the nudge feeds nothing the persona cache is built from.
     coll = scoped(mongo_db, _COLL, bump=False)
     key = f"{uid}:{_today()}"
     if coll is not None:
@@ -210,7 +184,6 @@ def register_daily_nudge_api(app, mongo_db=None):
     @app.route("/api/daily-nudge", methods=["GET"])
     @require_auth
     def api_daily_nudge(claims):
-        # Guests have no profile to build and no data to summarize.
         if claims.get("role") == "guest":
             return jsonify({"kind": "none"}), 200
         with active_user_profile_context(build_user_profile(claims)):

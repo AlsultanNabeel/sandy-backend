@@ -1,8 +1,4 @@
-"""One-time startup initialization for Sandy.
-
-Call bootstrap() once at the top of main() before anything else runs.
-All functions here are idempotent — safe to call multiple times.
-"""
+"""One-time, idempotent startup: config check, logging, Sentry, indexes, schedulers."""
 
 import logging
 import os
@@ -19,8 +15,7 @@ _QUIET_LOGGERS = (
     "httpx",
     "httpcore",
     "urllib3",
-    # Gemini Live's transport: at DEBUG it logs EVERY audio frame (thousands of
-    # lines per voice session). Pinned to WARNING even when LOG_LEVEL=DEBUG.
+    # Logs every audio frame at DEBUG; pinned to WARNING.
     "websockets",
     "websockets.client",
     "websockets.protocol",
@@ -39,9 +34,7 @@ _QUIET_LOGGERS = (
     "bedrock-runtime",
 )
 
-# Endpoints the frontend polls on a timer — their werkzeug access lines are pure
-# noise (once a minute, forever). We can only drop our half; Heroku's router logs
-# the same request and that's outside the app.
+# Polled on a timer: drop their access-log lines.
 _QUIET_ACCESS_PATHS = ("/api/reminders",)
 
 
@@ -68,19 +61,13 @@ def configure_logging(log_level: str = "INFO") -> None:
 
 
 def write_google_credentials() -> None:
-    """Write GOOGLE_CREDENTIALS_JSON env var to a key file on disk.
-
-    Heroku can't store key files, so the JSON is stored as an env var and
-    written to disk on startup so Google SDK can find it via
-    GOOGLE_APPLICATION_CREDENTIALS.
-    """
+    """Write GOOGLE_CREDENTIALS_JSON to a key file (Heroku can't store files) for GOOGLE_APPLICATION_CREDENTIALS."""
     creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON", "").strip()
     if not creds_json:
         return
     key_path = "sandy-gcloud-key.json"
     try:
-        # Owner-only (0600): this is a service-account private key, and `open(…,
-        # "w")` made it world-readable on any machine with a normal umask.
+        # 0600: it's a service-account private key.
         fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(creds_json)
@@ -100,16 +87,7 @@ def ensure_data_dirs() -> None:
 
 
 def ensure_indexes() -> None:
-    """Create every boot-time index, each one independently.
-
-    Lifted out of ``bootstrap()`` so it can be called on its own and asserted
-    against — an index that quietly failed to be created is invisible from the
-    outside and shows up only as everything being slower, which is the least
-    debuggable shape a fault can take.
-
-    Runs on the raw handle by design: this is boot, before any request has set a
-    tenant. Every index leads with the field the tenant scoping filters on.
-    """
+    """Create every boot-time index independently (on the raw handle, before any tenant)."""
     from app.agent.health_monitor import ensure_ttl_index
     from app.db import get_db
 
@@ -121,8 +99,7 @@ def ensure_indexes() -> None:
     if mongo_db is None:
         return
 
-    # Each index is created independently so one failure doesn't silently
-    # skip the rest. (label, callable) pairs keep the logging cheap.
+    # One failure must not skip the rest.
     index_jobs = [
         ("web_chat_history.expire_at", lambda: mongo_db.web_chat_history.create_index(
             "expire_at", expireAfterSeconds=0, background=True
@@ -145,20 +122,11 @@ def ensure_indexes() -> None:
         ("sandy_pending_state.updated_at_ttl", lambda: mongo_db.sandy_pending_state.create_index(
             "updated_at", expireAfterSeconds=60 * 60, background=True
         )),
-        # `sandy_memories` had no index at all, and it is the collection that
-        # grows fastest — every conversation summary, fact, relationship and
-        # lesson lands here and nothing expires. Both of its hot readers scanned
-        # the whole thing on every message:
-        # `context_builder.get_persona_directives` (filters chat_id + label,
-        # sorts created_at) and the keyword fallback in
-        # `semantic_memory.search_relevant_summaries`. This is the index that
-        # stops Sandy getting slower the longer she is used.
+        # Hot on every message (persona directives, summary search); grows fastest.
         ("sandy_memories.chat_id+label+created_at", lambda: mongo_db.sandy_memories.create_index(
             [("chat_id", 1), ("label", 1), ("created_at", -1)], background=True
         )),
-        # صفّ لكل (مستأجر، نسخة)، والنسخة بتتحرّك مع كل كتابة — يعني الصفوف
-        # بتتراكم وما في مين يشيلها. الصفّ اللي عمره شهر ما إلو مين يسأل عنه:
-        # نسخته راحت من زمان.
+        # صفّ لكل (مستأجر، نسخة) بيتراكم؛ القديم ما حدا بيسأل عنه.
         ("sandy_prompt_cache.created_at_ttl",
          lambda: mongo_db.sandy_prompt_cache.create_index(
              "created_at", expireAfterSeconds=60 * 60 * 24 * 30, background=True
@@ -184,16 +152,11 @@ def ensure_indexes() -> None:
          lambda: mongo_db.sandy_future_messages.create_index(
              [("chat_id", 1), ("delivered", 1), ("deliver_at", 1)], background=True
          )),
-        # Read twice on every chat reply (`dreams_engine.get_dreams_context` and
-        # `proactive_goals.get_goals_followup_context`, both chat_id + status),
-        # and no module created an index for it — each read scanned every
-        # goal on the server.
+        # Read on every chat reply (chat_id + status).
         ("sandy_goals.chat_id+status+updated_at", lambda: mongo_db.sandy_goals.create_index(
             [("chat_id", 1), ("status", 1), ("updated_at", 1)], background=True
         )),
-        # Found by the 19 Sep 2026 audit: each query below filtered or sorted on
-        # fields no index covered, so it scanned the whole collection.
-        # the conversation list and search
+        # The conversation list and search.
         ("conversations.user_id+updated_at", lambda: mongo_db.conversations.create_index(
             [("user_id", 1), ("updated_at", -1)], background=True
         )),
@@ -238,14 +201,7 @@ def ensure_indexes() -> None:
 
 
 def bootstrap(app_env: str = "prod", app=None) -> None:
-    """Run all one-time startup tasks.
-
-    Call this once at the top of main(), before starting the bot runtime.
-
-    Args:
-        app_env: Runtime environment name ('dev' | 'prod').
-        app:     Flask app instance, forwarded to Sentry for FlaskIntegration.
-    """
+    """Run all one-time startup tasks (app_env: 'dev'|'prod'; app: Flask app for Sentry)."""
     from app.config import LOG_LEVEL, validate_config
 
     configure_logging(LOG_LEVEL)
@@ -261,8 +217,7 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     write_google_credentials()
     ensure_data_dirs()
 
-    # Before anything that can fail, so the first thing that breaks is reported
-    # rather than swallowed. A no-op when SENTRY_DSN is unset.
+    # First, so the first failure is reported. No-op without SENTRY_DSN.
     try:
         from app.integrations.error_tracking import init_error_tracking
 
@@ -291,28 +246,9 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     except Exception as exc:
         logger.warning("[Bootstrap] summary migration failed: %s", exc)
 
-    # ── The periodic jobs: one worker on this dyno, not every worker ─────────
-    #
-    # `bootstrap()` runs in each gunicorn worker (two of them — see the
-    # Procfile), so both of these used to start twice on one dyno. Neither ever
-    # *acted* twice — the nudge send claims an atomic per-day lock and each
-    # scene revert is claimed with a find-and-delete — but the scans that lead to
-    # those claims are not guarded by anything, so `users_with_due_timers` swept
-    # the collection once a minute in each worker, for ever, to let one of the
-    # two throw its result away.
-    #
-    # `claim_leadership` is a kernel file lock on this machine, so exactly one
-    # worker starts them and the lock is released by the kernel if that worker
-    # dies — gunicorn's replacement claims it on its own `bootstrap()`. The
-    # per-day and per-timer claims stay exactly where they are: they are what
-    # makes this safe across *dynos*, which a per-machine lock says nothing
-    # about, and they are the reason losing this election costs nothing.
-    #
-    # **`mqtt_ingest` is deliberately not elected.** It looks like the same
-    # shape and is not: `/api/diagnose` reports the listener per worker, and a
-    # single subscriber is a redundancy decision about the path every heartbeat
-    # from every board arrives on. That is a product call with no staging
-    # environment to make it in (ARCHITECTURE_MAP §12.6), not a cleanup.
+    # ── Periodic jobs: one worker per machine (kernel file lock) ─────────────
+    # Per-day / per-timer claims still make them safe across dynos. mqtt_ingest
+    # is deliberately not elected: each worker keeps its own listener.
     from app.utils.process_leader import claim_leadership
 
     if claim_leadership("schedulers"):

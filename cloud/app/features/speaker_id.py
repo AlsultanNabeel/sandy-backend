@@ -1,22 +1,8 @@
-"""Speaker Verification (تمييز صوت المتكلّم).
+"""تمييز صوت المتكلّم: نموذج CAM++ عبر sherpa-onnx محلياً على السيرفر.
 
-تتأكد ساندي إنّ اللي بيحكي هو صاحبها قبل تنفيذ أمر حسّاس. نستعمل نموذج
-CAM++ (عبر sherpa-onnx) بيشتغل محلياً على السيرفر، ONNX بدون torch،
-مجاني وبدون أي حساب أو مفتاح.
-
-التدفّق:
-  1. التسجيل (enroll): المالك يبعت كم تسجيل صوتي ونطلّع منهم بصمة صوت
-     (متّجه أرقام) ونخزّنها مشفّرة في Mongo (sandy_voiceprints).
-  2. التحقّق (verify): ناخد مقطع، نطلّع بصمته، ونقارنها بالمخزّنة بالـ cosine
-     لنحصل على (تطابق؟، درجة 0..1).
-
-النموذج (~28 ميجا) بيتنزّل مرة وحدة وقت أول استخدام وبيتخزّن محلياً.
-لو sherpa-onnx مش منصّبة أو ما قدر ينزّل النموذج بتتجاهَل الميزة بهدوء.
-
-التشفير: بصمة الصوت بيانات حيوية فبتتشفّر بـ Fernet عبر مفتاح مستقل
-SANDY_BIO_KEY. **بدون المفتاح ما بتنحفظ ولا بصمة** — التسجيل بيرفض ويقول
-السبب، بدل ما يخزّن بيانات حيوية بترميز مش تشفير. القراءة بتضل تقبل
-الصفوف القديمة المخزّنة base64 وبتعيد كتابتها مشفّرة أول ما تنقرا.
+التسجيل بيطلّع بصمة (متّجه) ويخزّنها مشفّرة في sandy_voiceprints؛ التحقّق
+بيقارن بالـ cosine. النموذج بيتنزّل أول استخدام. بدون SANDY_BIO_KEY ما بتنحفظ
+ولا بصمة؛ الصفوف القديمة (base64) بتنقرا وبتنعاد كتابتها مشفّرة.
 """
 
 from __future__ import annotations
@@ -34,12 +20,12 @@ logger = logging.getLogger(__name__)
 _COLLECTION = "sandy_voiceprints"
 _ENC_PREFIX = "enc:"
 
-# درجة التطابق الدنيا للقبول (cosine بين البصمتين، 0..1). قابلة للضبط.
+# درجة التطابق الدنيا (cosine، 0..1).
 _MATCH_THRESHOLD = float(os.getenv("SANDY_SPEAKER_THRESHOLD", "0.5"))
-# أقل طول مقطع مقبول (نصف ثانية عند 16kHz) — أقصر من هيك ما بيطلّع بصمة موثوقة.
+# نصف ثانية عند 16kHz — أقصر ما بيطلّع بصمة موثوقة.
 _MIN_SAMPLES = 8000
 
-# النموذج: CAM++ (English VoxCeleb) — بصمة الصوت لغة-مستقلة فالعربي تمام.
+# CAM++ (English VoxCeleb) — البصمة مستقلة عن اللغة.
 _DEFAULT_MODEL_URL = (
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
     "speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
@@ -53,22 +39,19 @@ _extractor_init = False
 _model_lock = threading.Lock()
 
 
-# إعداد المخزن
 def init_speaker_store(mongo_db) -> None:
-    """يُستدعى مرّة عند الإقلاع (زي init_mongo_memory)."""
     configure(mongo_db)
     if mongo_db is not None:
         try:
             mongo_db[_COLLECTION].create_index([("chat_id", 1)], background=True)
         except Exception as e:  # noqa: BLE001
             logger.debug("[speaker_id] index create skipped: %s", e)
-    # تسخين النموذج بالخلفية عشان أول تحقّق ما ينتظر التنزيل (لا يعطّل الإقلاع).
+    # تسخين النموذج بالخلفية (خيط مفرد طويل العمر، C3b).
     if is_available():
         threading.Thread(target=_get_extractor, daemon=True).start()
 
 
 def is_available() -> bool:
-    """جاهزة لو مكتبة sherpa-onnx منصّبة (تنزيل النموذج يصير لاحقاً عند الحاجة)."""
     try:
         import sherpa_onnx  # noqa: F401
         return True
@@ -76,9 +59,8 @@ def is_available() -> bool:
         return False
 
 
-# النموذج
 def _ensure_model() -> Optional[str]:
-    """يرجّع مسار ملف النموذج، ينزّله مرّة وحدة لو مش موجود."""
+    """مسار ملف النموذج؛ بينزّله مرّة وحدة لو مش موجود."""
     path = os.getenv("SANDY_SPEAKER_MODEL_PATH", _DEFAULT_MODEL_PATH)
     if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
         return path
@@ -105,7 +87,6 @@ def _ensure_model() -> Optional[str]:
 
 
 def _get_extractor():
-    """Lazy singleton: يبني مُستخرِج البصمات مرّة وحدة."""
     global _extractor, _extractor_init
     if _extractor_init:
         return _extractor
@@ -126,14 +107,8 @@ def _get_extractor():
     return _extractor
 
 
-# أدوات الصوت والمتّجهات
 def _pcm_to_float(pcm_bytes: bytes):
-    """PCM 16-bit little-endian → numpy float32 في [-1, 1].
-
-    البايتس بتيجي جاهزة من وصلة الصوت: اللوح بيبعت PCM بستّاشر كيلوهرتز
-    مباشرة، فما في تحويل ولا ffmpeg بالطريق. الوصف القديم كان بيقول «من ffmpeg»
-    وهاد ضل صحيح لحد ما راح تيليجرام — وبعدها ضل مكتوب سنة.
-    """
+    """PCM 16-bit little-endian (16 kHz من اللوح) → numpy float32 في [-1, 1]."""
     import numpy as np
     if len(pcm_bytes) % 2:
         pcm_bytes = pcm_bytes[:-1]
@@ -141,7 +116,7 @@ def _pcm_to_float(pcm_bytes: bytes):
 
 
 def _embed(pcm_bytes: bytes):
-    """يطلّع بصمة صوت مُطبَّعة (unit vector) من مقطع PCM، أو None."""
+    """بصمة صوت مُطبَّعة من مقطع PCM، أو None."""
     ext = _get_extractor()
     if ext is None:
         return None
@@ -169,17 +144,12 @@ def _normalize(vec):
 
 
 def _cosine(a, b) -> float:
-    """تشابه جيب التمام بين متّجهين مُطبَّعين → جداء نقطي."""
     import numpy as np
     return float(np.dot(a, b))
 
 
-# التسجيل (enroll)
 def enroll_speaker(chat_id: int, pcm_samples: List[bytes]) -> Tuple[bool, int, str]:
-    """يبني بصمة صوت من كم مقطع PCM (يأخذ المتوسط) ويخزّنها.
-
-    يرجّع (تمّ التخزين؟، عدد المقاطع المقبولة، رسالة عربية للمستخدم).
-    """
+    """يبني بصمة من متوسّط المقاطع ويخزّنها؛ يرجّع (تمّ؟، عدد المقاطع المقبولة، رسالة للمستخدم)."""
     if not is_available():
         return False, 0, "تمييز الصوت غير مفعّل (مكتبة sherpa-onnx ناقصة)."
     if not pcm_samples:
@@ -205,9 +175,8 @@ def enroll_speaker(chat_id: int, pcm_samples: List[bytes]) -> Tuple[bool, int, s
     return True, len(embeddings), f"تمام! صرت أعرف صوتك ✅ ({len(embeddings)} مقاطع)"
 
 
-# التحقّق (verify)
 def verify_speaker(chat_id: int, pcm_bytes: bytes) -> Tuple[bool, float]:
-    """يقارن مقطع صوتي ببصمة المالك المخزّنة → (تطابق؟، درجة 0..1)."""
+    """(تطابق؟، درجة 0..1) مقابل البصمة المخزّنة."""
     if not is_available():
         return False, 0.0
     stored = get_profile_vector(chat_id)
@@ -220,7 +189,6 @@ def verify_speaker(chat_id: int, pcm_bytes: bytes) -> Tuple[bool, float]:
     return score >= _MATCH_THRESHOLD, score
 
 
-# التشفير والتخزين
 def _get_fernet():
     global _fernet, _fernet_init
     if _fernet_init:
@@ -241,17 +209,7 @@ def _get_fernet():
 
 
 def _encode_profile(profile_bytes: bytes) -> Optional[str]:
-    """The encrypted blob, or ``None`` when it cannot be encrypted.
-
-    **Fails closed.** This used to fall back to ``base64`` and carry on, which
-    reads like a graceful degradation and is not one: base64 is a transport
-    encoding, not a cipher, so the fallback stored the raw voiceprint and the
-    only thing lost was the protection. A voiceprint is biometric data — it
-    identifies one person, for life, and unlike a password they cannot change
-    it after a database is copied. There is nothing to degrade to. C6 puts it
-    the same way: config that is missing disables its own feature, and the
-    feature here is *storing a voiceprint*, not *protecting* one.
-    """
+    """Encrypted blob, or None: fails closed (base64 is not encryption, and a voiceprint is biometric)."""
     f = _get_fernet()
     if f is None:
         logger.error(
@@ -278,19 +236,13 @@ def _decode_profile(stored: str) -> Optional[bytes]:
 
 
 def _save_profile(chat_id: int, vector_bytes: bytes, n_samples: int) -> bool:
-    """Store the voiceprint. Returns whether it was actually stored.
-
-    It used to return ``None`` on every path, so the two ways it can fail — no
-    database, and now no key — reached ``enroll_speaker`` as the same silence
-    it used for success, and the user was told «تمام! صرت أعرف صوتك ✅» over a
-    row that does not exist. C10: a handler says whether the change happened.
-    """
+    """Store the voiceprint; returns whether it was actually stored (C10)."""
     if get_db() is None:
         logger.warning("[speaker_id] Mongo غير متاح — لم تُحفظ البصمة")
         return False
     blob = _encode_profile(vector_bytes)
     if blob is None:
-        return False   # _encode_profile already said why
+        return False
     doc = {
         "_id": str(chat_id),
         "chat_id": chat_id,
@@ -303,7 +255,7 @@ def _save_profile(chat_id: int, vector_bytes: bytes, n_samples: int) -> bool:
 
 
 def get_profile_vector(chat_id: int):
-    """يرجّع بصمة المالك كمتّجه numpy مُطبَّع، أو None."""
+    """بصمة المالك كمتّجه numpy مُطبَّع، أو None."""
     if get_db() is None:
         return None
     try:
@@ -316,10 +268,7 @@ def get_profile_vector(chat_id: int):
     raw = _decode_profile(doc["profile"])
     if not raw:
         return None
-    # Legacy rows from before encryption failed closed are still plaintext.
-    # Reading one is the moment both halves are in hand, so rewrite it — the
-    # alternative is telling the owner it is encrypted while the rows enrolled
-    # before the key existed sit there in the clear for ever.
+    # Legacy plaintext row: re-encrypt it now that we have both halves.
     if not str(doc["profile"]).startswith(_ENC_PREFIX):
         upgraded = _encode_profile(raw)
         if upgraded:
@@ -328,8 +277,7 @@ def get_profile_vector(chat_id: int):
                     {"_id": str(chat_id)}, {"$set": {"profile": upgraded}}
                 )
                 logger.info("[speaker_id] voiceprint re-encrypted for %s", chat_id)
-            except Exception as e:  # noqa: BLE001 — a failed upgrade must not
-                                    # break the verification that asked for it
+            except Exception as e:  # noqa: BLE001 — must not break the verification
                 logger.warning("[speaker_id] voiceprint re-encrypt failed: %s", e)
     import numpy as np
     return np.frombuffer(raw, dtype="float32").copy()

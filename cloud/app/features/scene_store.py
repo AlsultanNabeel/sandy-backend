@@ -1,46 +1,27 @@
-"""Room scenes — named automations described as a list of actions (data).
+"""Room scenes (sandy_scenes): a label plus a list of {device, value} actions.
 
-A scene is a label + a list of actions. Starting a focus mode
-(study/read/relax/sleep/movie/brainstorm/morning) applies its scene; ending it
-applies the `off` scene. Scenes live in Mongo so the owner can customise every
-mode's behaviour from the web. The built-in set is seeded once on first boot
-and flagged `builtin` (resettable, not deletable).
-
-Collection: sandy_scenes
-  {_id, name, label, icon, actions: [{device, value}], builtin, updated_at}
-
-This is a pure data store: `apply_scene` no longer actuates any hardware —
-it returns the scene's stored action list so an app (e.g. iPhone Shortcuts)
-can execute it. `actions` use the device vocabulary
-(light/color/music/fan/curtain) defined locally below.
-
-Tenant isolation is enforced by the scoped() layer: _coll()/_timers() return
-None when there's no Mongo handle or no active tenant, and user_id is injected
-on every read/write so each user only ever sees and seeds their own scenes.
+Built-ins are seeded per user and resettable, not deletable. apply_scene sends
+each action to the owner's registered devices and also returns the list.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
-# Scene action vocabulary (data only — nothing here drives hardware).
+# Legacy room vocabulary for scene actions.
 VALID_DEVICES = frozenset({"light", "color", "music", "fan", "curtain", "scene"})
 _VALID_COLOR = {"warm", "cool", "white", "red", "green", "blue", "purple", "amber"}
 
 
 def normalize_action(device: str, value: str) -> Optional[str]:
-    """Return a clean payload for (device, value), or None if invalid.
-
-    Light/fan accept on|off or a 0..100 brightness/speed; color accepts a named
-    color or #rrggbb; music accepts on|off|pause; curtain open|close.
-    """
+    """Clean payload for (device, value), or None if invalid."""
     device = (device or "").strip().lower()
     value = str(value or "").strip().lower()
     if device not in VALID_DEVICES or not value:
@@ -68,15 +49,13 @@ def normalize_action(device: str, value: str) -> Optional[str]:
 
 _COLL = "sandy_scenes"
 
-# سقف أمان، مش حد منتج — ما حدا بيوصله بالاستعمال العادي. موجود عشان
-# خلل بالكتابة أو حساب دخل عليه إشي غريب ما يتحوّل لنداء بيسحب المجموعة
-# كلها ويوقّع الطلب.
+# سقف أمان، مش حد منتج.
 MAX_SCENES = 200
 MAX_DUE_TIMERS = 100
 MAX_TIMER_TRIES = 5
-_TIMERS = "sandy_scene_timers"   # timed reverts: {fire_at, device, value}
+_TIMERS = "sandy_scene_timers"   # timed reverts: {fire_at, device, value, tries}
 
-# name → (label, icon, default actions). Seeded once; the owner can edit freely.
+# Seeded once per user; the owner can edit freely.
 _BUILTIN: Dict[str, Dict[str, Any]] = {
     "study":      {"label": "دراسة",     "icon": "📚", "actions": [
         {"device": "light", "value": "85"}, {"device": "color", "value": "cool"},
@@ -123,12 +102,10 @@ def init_scene_store(mongo_db) -> None:
 
 
 def _coll():
-    """Tenant-scoped scenes collection, or None when no db / no active tenant."""
     return scoped(get_db(), _COLL)
 
 
 def _timers():
-    """Tenant-scoped scene-timers collection, or None when no db / no tenant."""
     return scoped(get_db(), _TIMERS)
 
 
@@ -137,7 +114,6 @@ def _now():
 
 
 def _seed_builtins() -> None:
-    """Insert any built-in scene this user doesn't have yet (idempotent)."""
     coll = _coll()
     if coll is None:
         return
@@ -154,15 +130,11 @@ def _seed_builtins() -> None:
 
 
 def _clean_actions(actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Keep only valid, normalized actions.
+    """Keep only valid actions.
 
-    An action is {device, value} plus two optional timing fields:
-      for_min — run `value` now, then auto-revert after N minutes
-      then    — what to send on revert (default "off")
-    e.g. {device: music, value: on, for_min: 30}  → music on, off after 30 min.
-
-    `device` may be a **registry device name** (validated at apply time) or a legacy
-    room-vocab device (light/color/music/fan/curtain, normalized here for back-compat).
+    An action is {device, value} plus optional `for_min` (revert after N minutes)
+    and `then` (revert value, default "off"). `device` is a registry device name
+    (validated on apply) or a legacy room word (normalized here).
     """
     out: List[Dict[str, Any]] = []
     for a in actions or []:
@@ -175,7 +147,7 @@ def _clean_actions(actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if payload is None:
                 continue
         else:
-            payload = raw_val  # registry device — validated against the registry on apply
+            payload = raw_val
         item: Dict[str, Any] = {"device": dev, "value": payload}
         try:
             for_min = int(a.get("for_min", 0) or 0)
@@ -204,7 +176,7 @@ def list_scenes() -> List[Dict[str, Any]]:
     coll = _coll()
     if coll is None:
         return []
-    _seed_builtins()   # ensure this user has the default set
+    _seed_builtins()
     return [_public(d) for d in coll.find({}).sort("builtin", -1).limit(MAX_SCENES)]
 
 
@@ -218,7 +190,7 @@ def get_scene(name: str) -> Optional[Dict[str, Any]]:
 
 
 def set_scene_actions(name: str, actions: List[Dict[str, str]]) -> Dict[str, Any]:
-    """Customise what a scene does to the room. Works for built-ins too."""
+    """Works for built-ins too."""
     coll = _coll()
     if coll is None:
         return {"ok": False}
@@ -273,12 +245,9 @@ def delete_scene(name: str) -> Dict[str, Any]:
 
 
 def apply_scene(name: str) -> Dict[str, Any]:
-    """Return a scene's stored actions (data) for an app to execute.
+    """Run a scene on the owner's devices and return its actions (callers like Shortcuts may run them).
 
-    No hardware is actuated — the action list is returned as-is so a caller
-    (e.g. iPhone Shortcuts) can run it. Re-applying any scene cancels timed
-    reverts still pending from the previous one, then schedules this scene's
-    own `for_min` reverts as data.
+    Re-applying any scene cancels pending reverts and schedules this scene's `for_min` ones.
     """
     sc = get_scene(name)
     if not sc:
@@ -287,7 +256,6 @@ def apply_scene(name: str) -> Dict[str, Any]:
     timers = 0
     tcoll = _timers()
     if tcoll is not None:
-        # new scene supersedes this user's old reverts
         tcoll.delete_many({})
         now = _now()
         docs = [
@@ -298,14 +266,6 @@ def apply_scene(name: str) -> Dict[str, Any]:
         if docs:
             tcoll.insert_many(docs)
             timers = len(docs)
-    # **ونشغّلها فعلًا.**
-    #
-    # كانت بترجّع قائمة الأوامر كبيانات وبس، والتعليق فوق مكتوب فيه «ما في عتاد
-    # بينشغّل». يعني «شغّلي مشهد الدراسة» بترد «تمام» وما بيصير ولا إشي —
-    # وهاد أسوأ نوع فشل: بيبلّغ نجاحًا ما صار.
-    #
-    # القائمة ضلّت بترجع كمان، لأنّ في زبون (اختصارات الآيفون) بينفّذها بنفسه،
-    # والأجهزة اللي مش عند هالمالك بتفشل بهدوء — كل أمر لحاله.
     sent, missed = _actuate(sc["actions"])
 
     return {
@@ -320,14 +280,7 @@ def apply_scene(name: str) -> Dict[str, Any]:
 
 
 def _actuate(actions: List[Dict[str, Any]]) -> tuple:
-    """Send each action to its device. Returns (sent, names that do not exist).
-
-    `missed` is returned rather than swallowed because a scene naming a device
-    the owner does not own is a **setup** problem, not a runtime one — and the
-    only way he ever finds out is if something says so. The built-in scenes ship
-    with generic names (`light`, `fan`, `curtain`) that match a room node, so on
-    a robot-only setup most of them will land here until he edits the scene.
-    """
+    """Send each action to its device; returns (sent, names that were missed)."""
     from app.features.device_store import (
         command_payload, device_topic, get_devices, set_state,
     )
@@ -337,7 +290,7 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
     # Every device the scene names, in one read.
     try:
         devices = get_devices([str(a.get("device") or "") for a in actions or []])
-    except Exception as exc:  # noqa: BLE001 — reported below as missed devices
+    except Exception as exc:  # noqa: BLE001
         logger.debug("[SceneStore] device lookup failed: %s", exc)
         devices = {}
     for a in actions or []:
@@ -350,9 +303,7 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
             if device is None:
                 missed.append(name)
                 continue
-            # نفس بوّابة التحقّق اللي بتستعملها أداة الأجهزة — مش مسار تاني.
-            # مسارين بيتحقّقوا من نفس الأمر بيفترقوا يوم ما، وساعتها بيصير في
-            # طريق بيقبل قيمة الطريق التاني بيرفضها.
+            # Same validation gate as the device tool.
             res = command_payload(device, value, value)
             if not res.get("ok"):
                 res = command_payload(device, "set", value)
@@ -365,28 +316,22 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
                 sent += 1
             else:
                 missed.append(name)
-        except Exception as exc:  # noqa: BLE001 — one bad device is not a bad scene
+        except Exception as exc:  # noqa: BLE001
             logger.debug("[SceneStore] %s failed: %s", name, exc)
             missed.append(name)
     return sent, missed
 
 
 def run_due_timers() -> Dict[str, Any]:
-    """Fire the active user's timed reverts whose moment has come.
+    """Fire the active user's due reverts, each claimed by an atomic find-and-delete.
 
-    Each due timer is **claimed** with an atomic find-and-delete before it is
-    sent, so two workers (or two overlapping ticks) can never fire the same
-    revert twice; a claimed timer whose device is gone is dropped, not retried —
-    retrying a device that does not exist would fire forever.
-
-    Returns ``{"due": [...], "sent": n, "missed": [...]}``. Runs inside the
-    active user's profile context, so it only ever touches that user's timers.
+    Missed ones are retried a minute later, up to MAX_TIMER_TRIES.
     """
     tcoll = _timers()
     if tcoll is None:
         return {"due": [], "sent": 0, "missed": []}
     due: List[Dict[str, str]] = []
-    # سقف لكل دورة: اللي فوق السقف بيضل بالمجموعة وبيوصل بالدورة الجاي.
+    # Capped per tick; the rest stay for the next one.
     for _ in range(MAX_DUE_TIMERS):
         t = tcoll.find_one_and_delete({"fire_at": {"$lte": _now()}},
                                       sort=[("fire_at", 1)])
@@ -397,9 +342,6 @@ def run_due_timers() -> Dict[str, Any]:
     if not due:
         return {"due": [], "sent": 0, "missed": []}
     sent, missed = _actuate(due)
-    # اللي ما وصل (الوسيط واقع، أو الجهاز فاصل) بيرجع للطابور بعد دقيقة، لحد
-    # MAX_TIMER_TRIES محاولات — عشان «ضوّي بعد الفيلم» ما تضيع لأنّ الشبكة
-    # رمشت لحظتها. السقف موجود عشان جهاز انشال ما يضل يتجرّب للأبد.
     retry = []
     for a in due:
         name = str(a["device"]).strip().lower()
@@ -413,11 +355,7 @@ def run_due_timers() -> Dict[str, Any]:
 
 
 def users_with_due_timers(mongo_db, limit: int = 500) -> List[str]:
-    """Owners that have at least one revert due now (raw, cross-tenant read).
-
-    Only ids leave this function — the timers themselves are then read and
-    claimed through the scoped view inside each owner's own context.
-    """
+    """Owners with a revert due now (raw cross-tenant read; only ids leave)."""
     if mongo_db is None:
         return []
     try:

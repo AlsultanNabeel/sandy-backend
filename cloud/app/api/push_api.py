@@ -1,11 +1,4 @@
-"""Device push-token registration (Phase 7).
-
-The app calls these after the user grants notification permission, so the daily
-scheduler knows where to deliver. Guests can't register (nothing to notify).
-
-  POST /api/push/register    {token, platform?}  bind this device to the user
-  POST /api/push/unregister  {token}             drop it (logout / opt-out)
-"""
+"""Push-token registration: POST /api/push/register {token, platform?}, /api/push/unregister {token}."""
 
 from __future__ import annotations
 

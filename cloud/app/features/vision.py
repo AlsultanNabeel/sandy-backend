@@ -1,6 +1,8 @@
+"""Image vision (Azure GPT-4o-mini) and image generation/editing (FLUX, DALL-E fallback)."""
+
 import base64
-from typing import Any, Callable, Optional
 import logging
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 

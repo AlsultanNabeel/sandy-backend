@@ -1,18 +1,13 @@
-"""Central config. Every env var the app reads lives here.
-
-Import from this module instead of calling os.getenv directly.
-load_dotenv runs at import time, so importing this anywhere is safe.
-"""
+"""Central config: env vars are read here (C6); load_dotenv runs at import."""
 
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# cloud/ directory
 BASE_DIR = Path(__file__).resolve().parents[1]
 
-# Load .env for local dev. Heroku sets vars directly; override=False keeps them.
+# Local .env; override=False keeps platform-set vars.
 load_dotenv(BASE_DIR.parent / ".env", override=False)
 load_dotenv(BASE_DIR / ".env", override=False)
 
@@ -20,26 +15,16 @@ load_dotenv(BASE_DIR / ".env", override=False)
 APP_ENV = os.getenv("APP_ENV", "prod").lower()
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# Owner identity (legacy single-owner ids — the owner becomes tenant #1; these
-# get folded into a tenant role in Phase 3 of the product migration).
+# Legacy single-owner id.
 SANDY_USER_CHAT_ID = os.getenv("SANDY_USER_CHAT_ID", "").strip()
 
-# The addresses that sign in as the operator rather than as a customer.
-# Comma-separated. Unset means nobody is — the dangerous default would be the
-# other one, where an empty setting matches everybody and puts every customer
-# on the operator's quota. See `api/auth_handlers.role_for_email`.
+# Operator addresses (comma-separated). Unset means nobody (never "everybody").
 SANDY_OWNER_EMAILS: str = os.getenv("SANDY_OWNER_EMAILS", "")
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
 
-# Auth secret — exposed here so validate_config can check it. (There is no owner
-# password any more: the owner signs in with Google, and is named by
-# SANDY_OWNER_EMAILS above.)
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 
-# ── Error reporting (optional) ────────────────────────────────────────────────
-# Empty DSN = reporting off and the app behaves exactly as before. The release
-# tag comes from the platform so a report says which build produced it — on a
-# host that redeploys on every push, "which version broke?" is asked often.
+# ── Error reporting (optional; empty DSN = off) ───────────────────────────────
 SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
 SENTRY_TRACES_RATE = os.getenv("SENTRY_TRACES_RATE", "0.1").strip()
 RELEASE_COMMIT = os.getenv("HEROKU_SLUG_COMMIT", "").strip()[:12]
@@ -52,15 +37,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 # Azure OpenAI (chat + vision)
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-# Single canonical default — keep azure_intent_client / azure_image
-# fallbacks in sync with this value (they read the env late on purpose).
 AZURE_OPENAI_API_VERSION = os.getenv(
     "AZURE_OPENAI_API_VERSION", "2024-08-01-preview"
 ).strip()
 AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
-# Deploy text-embedding-3-small under this name to keep the 1536-dim vector
-# index compatible. When set, semantic memory embeds via Azure instead of the
-# direct OpenAI key.
+# text-embedding-3-small deployment (1536-dim index); set = embed via Azure.
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv(
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", ""
 ).strip()
@@ -80,9 +61,6 @@ GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
 
 # Research
 EXA_API_KEY = os.getenv("EXA_API_KEY", "").strip()
-WEB_RESEARCH_MAX_CANDIDATES = int(
-    os.getenv("WEB_RESEARCH_MAX_CANDIDATES", "30").strip()
-)
 
 # Database
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
@@ -92,12 +70,8 @@ MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "sany-db").strip()
 DATA_DIR = BASE_DIR.parent / "data"
 TASKS_DIR = DATA_DIR / "tasks"
 
-# Default personality for guests / new users. Warm and friendly WITHOUT
-# romantic pet names (no حبيبي/روحي/عمري) — playful-friendly terms like يا
-# عيوني/يا برو/يا صاحبي are fine. A signed-in user's dialect choice and/or
-# custom instructions (context_builder.build_effective_persona) replace this
-# tone text; SANDY_IDENTITY_LOCK below still always applies on top.
-# The SANDY_PERSONALITY config var (Heroku / .env) overrides it.
+# Default personality for guests / new users: warm, no romantic pet names. A user's
+# dialect/custom instructions replace it; SANDY_IDENTITY_LOCK still applies on top.
 SANDY_PERSONALITY: str = os.getenv(
     "SANDY_PERSONALITY",
     """
@@ -109,12 +83,8 @@ SANDY_PERSONALITY: str = os.getenv(
 """,
 ).strip()
 
-# The one thing no per-user customization can ever override: Sandy's
-# Palestinian identity and who built her. context_builder.build_effective_persona
-# appends this unconditionally, AFTER any custom instructions a user set, so
-# their override text can never talk her out of it.
-# The SANDY_IDENTITY_LOCK config var (Heroku / .env) overrides the wording
-# (owner-only knob — never exposed to per-user customization).
+# Sandy's Palestinian identity and creator, appended after any custom instructions
+# so no user can override it (owner-only env override).
 SANDY_IDENTITY_LOCK: str = os.getenv(
     "SANDY_IDENTITY_LOCK",
     """
@@ -123,76 +93,32 @@ SANDY_IDENTITY_LOCK: str = os.getenv(
 """,
 ).strip()
 
-# Public/guest persona for the web chat. The guest Sandy knows her name and who
-# built her but never uses the owner's private flavor (pet names, intimate
-# stories). Identity yes, intimacy no.
+# Web guest persona: identity yes, intimacy no.
 GUEST_PERSONALITY: str = os.getenv(
     "SANDY_GUEST_PERSONALITY",
     "أنتِ ساندي، مساعدة ذكية فلسطينية طوّرك نبيل السلطان. إذا سُئلتِ «من أنتِ؟» ردي بابتسامة: «أنا ساندي، من تطوير نبيل السلطان، ومهمتي أكون مساعدتك الذكية.. شو بقدر أقدم لك اليوم؟». أسلوبك ودود، مهذب، وعفوي، بتستخدمي اللهجة الفلسطينية بلمسات خفيفة وتلقائية بتعطي دفا للمحادثة. التزمي بالاختصار، خلي ردودك دايماً مفيدة، وإذا ما عندك معلومة قوليها بكل صراحة وبساطة بدون أي تكلف أو تأليف.",
 ).strip()
 
-SYSTEM_PROMPT_ADDITION: str = os.getenv(
-    "SYSTEM_PROMPT_ADDITION",
-    """
-التزمي بالدقة المطلقة، ولا تدّعي معلومات غير مؤكدة.
-عند الحديث عن مطورك (نبيل السلطان)، استخدمي نبرة تقدير تعكس إبداعه في تطويرك.
-في الأسئلة البسيطة أو الاجتماعية، جاوبي بشكل طبيعي وقصير جداً من دون حشو أو "كليشيهات" جاهزة.
-""",
-).strip()
 
-# Address the owner as male/female. Set from an env var.
-# The owner writes a short line about himself: "أنا ذكر، استخدمي صياغة المذكر دائماً"
-# or "أنا أنثى، استخدمي صياغة المؤنث", or leaves it empty.
-OWNER_ADDRESS_NOTE: str = os.getenv("SANDY_OWNER_ADDRESS_NOTE", "").strip()
-
-# ── Per-board broker credentials ──────────────────────────────────────────────
-# A JSON object keyed by device id: {"sandy0001": {"user": …, "pass": …}}.
-# Each board is handed its own broker login on the voice handshake, so one
-# customer's key stops working on another customer's topics. Empty means every
-# board keeps the shared credential compiled into it — see
-# app/features/broker_creds.py for why this is a config table and not an API
-# call today.
+# ── Per-board broker credentials (features/broker_creds.py) ───────────────────
+# JSON keyed by device id: {"sandy0001": {"user": …, "pass": …}}.
 SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
 
-# ── The fast path (agent/fast_path.py) ──────────────────────────────────────
-#
-# Answers a bare device command («شغّل الضو») with no model call, by matching the
-# whole utterance against the caller's own registered devices. On by default,
-# because a path that is off is a path that rots untested; set SANDY_FAST_PATH=0
-# to send every turn through the router again, which is the one-variable way to
-# rule it out while diagnosing something else.
+# ── The fast path (agent/fast_path.py); SANDY_FAST_PATH=0 turns it off ──────
 SANDY_FAST_PATH: bool = os.getenv("SANDY_FAST_PATH", "1").strip().lower() not in (
     "0", "false", "no", "off")
 
-# ── Native social sign-in (api/social_auth_api) ──────────────────────────────
-#
-# The audience an ID token must be minted for: our own OAuth client id / bundle
-# id. Verifying the signature and the issuer only proves the token is *a* real
-# Google or Apple token; the audience is the only claim that says it was minted
-# for **this** app. Without it, an ID token any other Google app obtained for
-# the same person is accepted here as that person signing in.
-#
-# So in prod an empty value refuses the sign-in route outright rather than
-# skipping the check (`_expected_audience`). Outside prod it warns and skips, so
-# a local backend still works before the OAuth client exists.
+# ── Native social sign-in: the audience an ID token must be minted for ──────
+# (empty in prod refuses sign-in; outside prod the check is skipped).
 GOOGLE_OAUTH_CLIENT_ID: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
 APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID", "").strip()
 
-# Firmware releases (features/firmware_store, api/firmware_api). The token lets
-# the publish script upload a release; unset means nobody can publish. It only
-# guards the upload — robots trust a release because of its signature, which
-# is made with a private key that never leaves the owner's machine.
+# Guards firmware uploads only; robots trust a release by its offline signature.
 SANDY_FIRMWARE_TOKEN: str = os.getenv("SANDY_FIRMWARE_TOKEN", "").strip()
 
 
 def validate_config() -> tuple[list[str], list[str]]:
-    """Check config at boot. Return (fatal, warnings) lists of messages.
-
-    Fatal = the app cannot function (no database, or no brain at all). The
-    caller (bootstrap) should log these and refuse to start. Warnings =
-    security gaps in a prod deploy that should be loud but are not fatal (local
-    dev may legitimately omit them). This function never logs or raises.
-    """
+    """(fatal, warnings) at boot: fatal = no database or no chat brain; warnings = prod security gaps."""
     fatal: list[str] = []
     warnings: list[str] = []
 
@@ -214,11 +140,7 @@ def validate_config() -> tuple[list[str], list[str]]:
     if APP_ENV == "prod":
         if not JWT_SECRET:
             warnings.append("JWT_SECRET is empty in prod (tokens are insecure).")
-        # Not fatal: the app has plenty to do with one provider misconfigured,
-        # and refusing to boot over it would take chat, voice and the robot down
-        # with it. Loud, though — the route itself now refuses, so the symptom
-        # is customers who cannot sign in at all, and this is the line that says
-        # why.
+        # Not fatal (chat/voice/robot still work), but sign-in will be refused.
         if not GOOGLE_OAUTH_CLIENT_ID:
             warnings.append(
                 "GOOGLE_OAUTH_CLIENT_ID is empty in prod — /api/auth/google will "
@@ -233,28 +155,10 @@ def validate_config() -> tuple[list[str], list[str]]:
     return fatal, warnings
 
 
-# ── Which build is running ───────────────────────────────────────────────────
-#
-# Served on /health. Without it, "did my fix reach production?" cannot be
-# answered from outside the server — and a deploy that silently did not happen
-# looks exactly like a fix that did not work. That is the same question the
-# firmware version field answers for the board, and it cost an afternoon there
-# before the field existed.
-#
-# Resolved once at import: the answer cannot change while the process lives, and
-# running git on every health check would be a subprocess per uptime ping.
+# ── Which build is running (served on /health), resolved once at import ─────
 def _resolve_release() -> str:
-    """Heroku's own markers first, then git, then an honest "unknown".
-
-    Never invents a version. A wrong release id is worse than none, because it
-    makes a stale deploy look current — which is precisely the failure this is
-    meant to expose.
-    """
-    # Written into the slug at build time by bin/post_compile. This is the one
-    # source that works with no Heroku configuration: SOURCE_VERSION exists
-    # during the build and not at runtime, and the slug carries no .git — so
-    # unless the build writes it down, a running server genuinely cannot say
-    # which commit it is.
+    """Build stamp, then Heroku/git env, then git, else "unknown" (never invented)."""
+    # Written by bin/post_compile: the slug has no .git and SOURCE_VERSION is build-time only.
     stamp = Path(__file__).resolve().parent / "_release.txt"
     try:
         val = stamp.read_text(encoding="utf-8").strip()

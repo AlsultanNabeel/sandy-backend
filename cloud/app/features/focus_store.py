@@ -1,19 +1,11 @@
-"""وضع التركيز — مؤقت دراسة/شغل (بومودورو).
+"""وضع التركيز (بومودورو) في sandy_focus؛ الأطوار بتتقدّم عند القراءة، بلا مؤقّت بالسيرفر.
 
-Collection: sandy_focus
-  {_id, label, minutes, started_at, ends_at, state: active|done|cancelled,
-   reminder_id}
-
-الأطوار بتتقدّم عند القراءة (focus_status / start_focus)، فالحالة المخزّنة
-بتضل صحيحة بلا مؤقّت بالسيرفر.
-
-عزل المستأجرين مفروض من طبقة scoped(): _coll()/_meta() ترجع None لو ما في
-مستأجر. خانات الميتا (sounds/goals) بتضمّن معرّف المستأجر في الـ _id لأنه
-مفرد لكل مستأجر، فبنحتاج current_user_id() لبناء المفتاح فقط — والعزل نفسه من scoped().
+خانات الميتا (sounds/goals) مفتاحها فيه معرّف المستأجر لأنها مفردة لكل مستأجر.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -22,14 +14,12 @@ from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import current_user_id
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_focus"
-_META = "sandy_focus_meta"   # {_id: "sounds", start, break, end}  أصوات قابلة للتغيير
+_META = "sandy_focus_meta"
 
-# الأصوات الافتراضية لكل حدث — مخزّنة كبيانات فقط (تستهلكها الواجهة/التطبيق).
 _DEFAULT_SOUNDS = {"start": "focus_start", "break": "focus_break", "end": "focus_end"}
 
 
@@ -40,17 +30,14 @@ def init_focus_store(mongo_db) -> None:
 
 
 def _coll():
-    """Tenant-scoped focus-session collection, or None when no db / no tenant."""
     return scoped(get_db(), _COLL)
 
 
 def _meta():
-    """Tenant-scoped focus-meta collection, or None when no db / no tenant."""
     return scoped(get_db(), _META)
 
 
 def get_focus_sounds() -> Dict[str, str]:
-    """صوت البازر المضبوط لكل حدث (start/break/end) فوق الافتراضي."""
     out = dict(_DEFAULT_SOUNDS)
     uid = current_user_id()
     meta = _meta()
@@ -63,7 +50,7 @@ def get_focus_sounds() -> Dict[str, str]:
 
 
 def set_focus_sound(event: str, melody: str) -> Dict[str, Any]:
-    """غيّر صوت حدث (start|break|end) — مخزّن كبيانات تستهلكها الواجهة/التطبيق."""
+    """غيّر صوت حدث (start|break|end)."""
     uid = current_user_id()
     if uid is None:
         return {"ok": False}
@@ -85,7 +72,6 @@ def set_focus_sound(event: str, melody: str) -> Dict[str, Any]:
 
 
 def _phase_total_sec(s: Dict[str, Any]) -> int:
-    """Total length of the current phase in seconds (for the countdown ring)."""
     if s.get("phase", "focus") == "break":
         return int(s.get("break_min", 0)) * 60
     return int(s.get("focus_min", s.get("minutes", 0))) * 60
@@ -100,13 +86,7 @@ def active_focus() -> Optional[Dict[str, Any]]:
 
 def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
                 cycles: int = 1, scene: str = "", end_scene: str = "") -> Dict[str, Any]:
-    """يبدأ جلسة تركيز/بومودورو ويشغّل مشهد الغرفة المربوط فيها.
-
-    focus_min/break_min/cycles كلها يحددها المالك. `scene` بيتطبّق عند البداية.
-    `end_scene` (اختياري) بيتطبّق لما تخلص الجلسة كلها — وبدونه الغرفة بتضل
-    على حالها فما يطفّي إشي وإنت لسا موجود. انتقالات الأطوار بتمر عبر
-    advance_focus_phase()، وبتنحسب عند كل قراءة (`_catch_up`).
-    """
+    """يبدأ جلسة تركيز/بومودورو؛ `scene` عند البداية و`end_scene` (اختياري) عند الإنجاز."""
     coll = _coll()
     if coll is None:
         return {"ok": False}
@@ -144,7 +124,6 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
     return {
         "ok": True, "focus_min": focus_min, "break_min": break_min,
         "cycles": cycles, "label": label, "scene": scene,
-        # Stored action list of the applied scene (data for an app to execute).
         "scene_actions": (scene_result or {}).get("actions", []),
     }
 
@@ -156,8 +135,7 @@ def _aware(dt):
 
 
 def stop_focus(completed: bool = True) -> Dict[str, Any]:
-    """ينهي الجلسة. completed=True إنجاز (احتفال)، False = إلغاء.
-    لو الجلسة مربوط فيها end_scene بيتطبّق عند الإنجاز."""
+    """ينهي الجلسة: completed=True إنجاز (وبيطبّق end_scene)، False إلغاء."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_session"}
@@ -169,9 +147,7 @@ def stop_focus(completed: bool = True) -> Dict[str, Any]:
     started = _aware(s["started_at"])
     elapsed_min = max(0, int((now - started).total_seconds() / 60))
 
-    # Focused minutes actually earned — what the stats and goals count. Full
-    # completion = all focus cycles; a cancel counts the cycles finished plus
-    # however far into the current focus phase we got (breaks don't count).
+    # Earned focus minutes: breaks don't count; a cancel counts finished cycles plus the partial one.
     focus_min = int(s.get("focus_min", 0))
     cycle_idx = int(s.get("cycle_idx", 1))
     if completed:
@@ -206,12 +182,7 @@ def stop_focus(completed: bool = True) -> Dict[str, Any]:
 
 
 def advance_focus_phase() -> Optional[Dict[str, Any]]:
-    """تنقل جلسة البومودورو لطورها التالي لو خلص وقت الطور الحالي.
-
-    بترجع حدث {event: focus|break|done, ...} للجدولة تبعت إشعاره، أو None لو ما
-    في شي مستحق. عند الرجوع للتركيز بتعيد تطبيق المشهد (لأن الراحة أو مؤقت
-    داخل المشهد ممكن يكون غيّر الغرفة).
-    """
+    """ينقل الجلسة لطورها التالي لو خلص وقته؛ بيرجّع حدث {event: focus|break|done} أو None."""
     coll = _coll()
     if coll is None:
         return None
@@ -230,16 +201,13 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
     break_min = int(s.get("break_min", 0))
     label = s.get("label", "")
 
-    # خلص آخر طور تركيز → إنهاء الجلسة كلها
     if phase == "focus" and cycle_idx >= cycles:
         r = stop_focus(completed=True)
         return {"event": "done", "label": label, "cycles": cycles,
                 "minutes": r.get("minutes", 0)}
 
-    # خلص تركيز وفي راحة → ادخل طور الراحة
     if phase == "focus" and break_min > 0:
-        # From the moment the phase ended, not from now: a session caught up
-        # late (see `_catch_up`) must keep its real timeline.
+        # From when the phase ended, not now, so a late catch-up keeps the real timeline.
         coll.update_one(
             {"_id": s["_id"]},
             {"$set": {"phase": "break", "phase_ends_at": pe + timedelta(minutes=break_min)}},
@@ -247,7 +215,6 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
         return {"event": "break", "break_min": break_min,
                 "cycle_idx": cycle_idx, "cycles": cycles, "label": label}
 
-    # خلصت راحة (أو تركيز بدون راحة) → دورة تركيز جديدة
     cycle_idx += 1
     new_end = pe + timedelta(minutes=focus_min)
     coll.update_one(
@@ -255,8 +222,7 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
         {"$set": {"phase": "focus", "cycle_idx": cycle_idx,
                   "phase_ends_at": new_end}},
     )
-    # Re-apply the room scene only for a phase that is actually running now,
-    # not for every cycle skipped over while catching up.
+    # Re-apply the scene only for a phase running now, not ones skipped while catching up.
     if s.get("scene") and new_end > now:
         try:
             from app.features.scene_store import apply_scene
@@ -268,13 +234,7 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
 
 
 def _catch_up() -> None:
-    """Advance the session through every phase that has already ended.
-
-    Nothing calls ``advance_focus_phase`` on a timer, so a pomodoro never left
-    its first phase: it stayed "active" forever and every new start answered
-    ``already_active``. Advancing on read makes the stored state true whenever
-    anyone looks at it.
-    """
+    """Advance through every phase that already ended (nothing does it on a timer)."""
     for _ in range(64):  # 12 cycles × 2 phases, with room to spare
         if advance_focus_phase() is None:
             return
@@ -298,7 +258,6 @@ def focus_status() -> Dict[str, Any]:
         "focus_min": int(s.get("focus_min", s.get("minutes", 0))),
         "break_min": int(s.get("break_min", 0)),
         "remaining_min": remaining_sec // 60,
-        # seconds-precise fields for the live countdown ring (web/app):
         "remaining_sec": remaining_sec,
         "total_sec": _phase_total_sec(s),
         "phase_ends_at_ms": int(pe.timestamp() * 1000) if pe else 0,
@@ -311,7 +270,7 @@ _GOAL_KEYS = ("day", "week", "month", "year")
 
 
 def focus_history(limit: int = 50) -> List[Dict[str, Any]]:
-    """Finished sessions, newest first — the review list."""
+    """Finished sessions, newest first."""
     coll = _coll()
     if coll is None:
         return []
@@ -379,8 +338,7 @@ def set_focus_goal(period: str, minutes: int) -> Dict[str, Any]:
 
 
 def _period_starts() -> Dict[str, datetime]:
-    """UTC datetimes for the start of today/week/month/year in the user's tz.
-    The week starts on Saturday (local convention)."""
+    """UTC starts of today/week/month/year in the user's tz; the week starts Saturday."""
     local = datetime.now(timezone.utc).astimezone(USER_TZ)
     today = local.replace(hour=0, minute=0, second=0, microsecond=0)
     week = today - timedelta(days=(local.weekday() - 5) % 7)
@@ -393,7 +351,6 @@ def _period_starts() -> Dict[str, datetime]:
 
 
 def focus_stats() -> Dict[str, Any]:
-    """Focused-minute totals + session counts + goal progress per period."""
     coll = _coll()
     empty = {k: {"minutes": 0, "sessions": 0, "goal_min": 0, "pct": 0} for k in _GOAL_KEYS}
     if coll is None:
@@ -402,10 +359,7 @@ def focus_stats() -> Dict[str, Any]:
     starts = _period_starts()
     minutes_in = {k: 0 for k in starts}
     sessions_in = {k: 0 for k in starts}
-    # One read for all four periods (it was one aggregate per period): every
-    # session since the earliest start — the week can begin before January 1st
-    # — counted into each period it falls in.
-    # بلا سقف: مجموع، وسقف بيرجّع رقم أصغر من الحقيقة. محدود بسنة.
+    # One read for all periods. بلا سقف: it's a sum, bounded to a year by the filter.
     for d in coll.find({"state": {"$in": ["done", "cancelled"]},
                         "ended_at": {"$gte": min(starts.values())}},
                        {"ended_at": 1, "focused_min": 1}):

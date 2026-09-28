@@ -1,19 +1,8 @@
-"""Proof of presence: pairing a robot needs someone standing in front of it.
+"""Proof of presence: pairing needs someone standing in front of the robot.
 
-The code printed on the box was the whole of pairing. It is four characters,
-it is on a sticker, and a photo of the box — a resale listing, a review, an
-unboxing video — was enough to claim somebody's robot before they did, and
-from then on to listen through it.
-
-Now the printed code only *starts* pairing. The server makes a six-digit code,
-sends it to that robot, and she shows it on her face; the account that types it
-back has proven it can see her. The code lives five minutes, is compared in
-constant time, and five wrong tries end it. Nothing is stored in clear: the
-challenge is kept as a hash, bound to the node and the account that asked.
-
-A robot that is off or not yet online never shows the code — the app says so,
-and the owner tries again once she is up. That is the one cost, and it is the
-point: pairing a robot you cannot see should not work.
+The printed box code only starts pairing (a photo of the box was enough to claim
+it). The server sends a six-digit code to the robot's face; the account must
+type it back. Hashed, bound to node+account, 5 minutes, 5 tries, constant-time compare.
 """
 
 from __future__ import annotations
@@ -56,14 +45,13 @@ def _publish(node_id: str, code: str) -> bool:
 
         return bool(get_room_device_client().publish_service(
             f"sandy/node/{node_id}/pair_code", code))
-    except Exception as exc:  # noqa: BLE001 — the owner retries; never raise here
+    except Exception as exc:  # noqa: BLE001 — the owner retries
         logger.warning("[pair_presence] could not reach %s: %s", node_id, exc)
         return False
 
 
 def start(node_id: str, tenant: str) -> Dict[str, Any]:
-    """Make a code for (node, account), send it to the robot. Replaces any
-    earlier one for the same pair, so "send again" is just calling this again."""
+    """Make and send a code for (node, account), replacing any earlier one."""
     db = get_db()
     if db is None or not node_id or not tenant:
         return {"ok": False, "error": "no_store"}

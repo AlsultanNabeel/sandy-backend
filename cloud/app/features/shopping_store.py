@@ -1,17 +1,11 @@
-"""قائمة التسوق — Mongo، متاحة من الشات والصوت والويب.
+"""قائمة التسوق (sandy_shopping): {text, category, done, price, qty, created_at, bought_at}.
 
-Collection: sandy_shopping
-  {_id, text, category, done (انشترى؟), price, qty, created_at, bought_at}
-
-ضيف (بتصنيف)، اعرض، اشطب (انشترى — ولو فيه سعر بنضيفه للمصاريف تلقائياً)،
-احذف، فضّي المشتراة.
-
-عزل المستأجرين مفروض من طبقة scoped(): _coll() ترجع None لو ما في مستأجر،
-فكل حارس "coll is None" يفشل مغلقاً، وuser_id ينحقن تلقائياً بكل قراءة/كتابة.
+الشطب مع سعر بيضيف المصروف تلقائياً.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -19,7 +13,6 @@ from typing import Any, Dict, List
 from app.utils.tenant_db import scoped
 from app.utils.text_query import contains, equals
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +33,10 @@ def init_shopping_store(mongo_db) -> None:
 
 
 def _coll():
-    """Tenant-scoped shopping collection, or None when no db / no active tenant."""
     return scoped(get_db(), _COLL)
 
 
 def is_available() -> bool:
-    """True when there is a database and a tenant to write the list for."""
     return _coll() is not None
 
 
@@ -57,7 +48,7 @@ def add_item(text: str, category: str = "") -> bool:
     text = str(text or "").strip()
     if not text:
         return False
-    # منع التكرار: نسأل القاعدة عن تطابق كامل بدل ما نسحب القائمة كلها ونقارن.
+    # منع التكرار بتطابق كامل بالقاعدة.
     if coll.find_one({"done": False, **equals("text", text)}) is not None:
         return False
     coll.insert_one(
@@ -136,8 +127,7 @@ def remove_item(text: str) -> str:
 
 
 def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
-    """يشطب عنصر (انشترى). لو فيه سعر (ممرّر الآن أو محفوظ) بنضيفه تلقائياً
-    للمصاريف بتصنيف العنصر. يرجّع {ok, expense_added}."""
+    """يشطب عنصر (انشترى)؛ لو فيه سعر بنضيفه للمصاريف بتصنيفه. يرجّع {ok, expense_added}."""
     coll = _coll()
     if coll is None or not item_id:
         return {"ok": False, "expense_added": False}
@@ -160,8 +150,7 @@ def check_item_by_id(item_id: str, price=None, qty=None) -> Dict[str, Any]:
             set_fields["qty"] = eff_qty
         except (TypeError, ValueError):
             logger.debug("ignoring non-critical error", exc_info=True)
-    # Only an item still on the list can be bought: re-ticking a bought item
-    # (or a double tap) used to add its expense a second time.
+    # Only an unbought item: re-ticking must not add the expense twice.
     if coll.update_one({"_id": item_id, "done": False},
                        {"$set": set_fields}).matched_count == 0:
         return {"ok": True, "expense_added": False}

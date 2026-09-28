@@ -1,16 +1,11 @@
-"""متتبع العادات — سلاسل إنجاز يومية على Mongo.
+"""متتبع العادات: sandy_habits + sandy_habit_log (تسجيلة وحدة باليوم).
 
-Collections:
-  sandy_habits   {_id, name, created_at, archived}
-  sandy_habit_log {_id, habit_id, date "YYYY-MM-DD"}  ← تسجيلة واحدة باليوم
-
-السلسلة (streak) تتحسب وقت القراءة من السجل — بدون عدادات تتعفن.
-عزل المستأجرين مفروض من طبقة scoped(): _habits()/_log() ترجع None لو ما في مستأجر.
+السلسلة (streak) بتنحسب وقت القراءة من السجل.
 """
 
 from __future__ import annotations
 
-
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -19,7 +14,6 @@ from app.utils.tenant_db import scoped
 from app.utils.text_query import contains
 from app.utils.time import USER_TZ
 from app.db import configure, get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -40,18 +34,15 @@ def init_habits_store(mongo_db) -> None:
         logger.warning(f"[HabitsStore] index skipped: {e}")
 
 
-# سقف لأطول قائمة ممكن نرجّعها. مش حد منتج — حد أمان: بلاه، صف واحد بايظ
-# بيتحوّل لنداء بيسحب كل شي.
+# سقف أمان، مش حد منتج.
 MAX_HABITS = 200
 
 
 def _habits():
-    """Tenant-scoped habits collection, or None when no db / no active tenant."""
     return scoped(get_db(), _HABITS)
 
 
 def _log():
-    """Tenant-scoped habit-log collection, or None when no db / no active tenant."""
     return scoped(get_db(), _LOG)
 
 
@@ -60,7 +51,7 @@ def _today() -> str:
 
 
 def _find_habit(name: str) -> Optional[Dict[str, Any]]:
-    """أقرب عادة نشطة لاسم معطى. البحث بيصير بالقاعدة — انظر _contains."""
+    """أقرب عادة نشطة لاسم معطى."""
     nl = str(name or "").strip()
     coll = _habits()
     if not nl or coll is None:
@@ -129,34 +120,19 @@ def _streak_from_dates(dates: set) -> int:
 
 
 def _streak(habit_id: str) -> int:
-    """سلسلة عادة وحدة. للنداءات المفردة؛ `list_habits` بتحمّل الكل دفعة."""
+    """سلسلة عادة وحدة؛ `list_habits` بتحمّل الكل دفعة."""
     log = _log()
     if log is None:
         return 0
     return _streak_from_dates({
         d["date"]
-        # Newest first, so the cap drops the oldest days, never the ones the
-        # streak is counted from.
+        # Newest first, so the cap drops the oldest days.
         for d in log.find({"habit_id": habit_id}, {"date": 1}).sort("date", -1).limit(2000)
     })
 
 
 def list_habits() -> List[Dict[str, Any]]:
-    """العادات النشطة مع سلسلة كل وحدة وهل انعملت اليوم.
-
-    محدودة بـ MAX_HABITS. حد ما بينوصلّه بالاستعمال العادي، بس بيمنع نداء واحد
-    يسحب المجموعة كلها لو صار خلل بالكتابة أو حساب دخل عليه إشي غريب.
-
-    **استعلامان، مهما كان عدد العادات.**
-
-    كانت تلاتة لكل عادة: وحدة للعادات، وبعدين لكل وحدة `find_one` لليوم و`find`
-    لكل سجلّاتها. عشر عادات = واحد وعشرين رحلة لقاعدة البيانات، وهي دالة بتنقرا
-    من لقطة الحياة اللي بتمرّ بكل رسالة — فالعدّ بينضرب بعدد مرّات القراءة.
-
-    هلّق: استعلام للعادات، واستعلام واحد لكل سجلّاتهن مع بعض، والباقي حساب
-    بالذاكرة. «انعملت اليوم» صارت تُقرأ من نفس التواريخ بدل استعلام لحالها —
-    نفس المعلومة كانت تُجلب مرّتين.
-    """
+    """العادات النشطة مع السلسلة و«انعملت اليوم» — استعلامين مهما كان عددها."""
     habits = _habits()
     log = _log()
     if habits is None or log is None:
@@ -170,10 +146,7 @@ def list_habits() -> List[Dict[str, Any]]:
 
     ids = [h["_id"] for h in rows]
     dates_by_habit: Dict[str, set] = {hid: set() for hid in ids}
-    # 5000 = MAX_HABITS × the per-habit cap that used to apply, so the ceiling
-    # is the one this always had rather than a new one introduced by batching.
-    # Newest first for the same reason as `_streak`: the cap must cut history,
-    # not today.
+    # 5000 = MAX_HABITS × old per-habit cap; newest first so the cap cuts history, not today.
     for d in (log.find({"habit_id": {"$in": ids}}, {"habit_id": 1, "date": 1})
               .sort("date", -1).limit(5000)):
         bucket = dates_by_habit.get(d.get("habit_id"))

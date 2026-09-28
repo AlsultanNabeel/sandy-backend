@@ -1,21 +1,6 @@
-"""Memory API — what Sandy remembers about you (the user-facing memory view).
+"""What Sandy remembers about you: user facts in sandy_memories (auto conversation summaries excluded).
 
-Reads the SAME store the agent's `memory_store` tool writes to: the user's saved
-facts in `sandy_memories` (chat_id == user_id, field `content`). It EXCLUDES the
-automatic rolling conversation summaries (label `conversation_summary`) — those are
-internal plumbing, not user-facing facts. Real data only; no demo payloads.
-
-Scoped to the caller's own user_id (isolated); guests get nothing.
-
-User facts are stored plainly (no embedding — only the rolling
-`conversation_summary` docs are vector-indexed), so add/edit are a simple
-insert/update mirroring the `memory_store` tool's shape.
-
-Endpoints:
-  GET    /api/memory            this user's saved facts
-  POST   /api/memory            remember a new fact
-  PATCH  /api/memory/<fact_id>  edit one fact's text
-  DELETE /api/memory/<fact_id>  forget one fact
+  GET /api/memory · POST /api/memory · PATCH|DELETE /api/memory/<fact_id>
 """
 
 from __future__ import annotations
@@ -34,14 +19,7 @@ _COLL = "sandy_memories"
 
 
 def _facts(mongo_db):
-    """This tenant's memories (keyed on ``chat_id``), or None with no tenant/db.
-
-    Through `scoped()` so the tenant filter cannot be forgotten and every write
-    marks the cached persona stale — `sandy_memories` is where the preferences,
-    relationships and lessons in a cached persona come from, so a fact saved in
-    the app has to be true in the next reply. The bump lands after the write,
-    never before (see `ScopedCollection._note_write`).
-    """
+    """This tenant's memories via scoped(), so writes also mark the cached persona stale."""
     return scoped(mongo_db, _COLL, field="chat_id")
 
 
@@ -90,7 +68,7 @@ def register_memory_api(app, mongo_db=None):
             coll = _facts(mongo_db)
             if coll is None:
                 return jsonify({"ok": False}), 403
-            # Same shape the memory_store tool writes (plain user_fact, no embedding).
+            # Same shape as the memory_store tool (plain user_fact, no embedding).
             res = coll.insert_one({
                 "label": "user_fact",
                 "content": text,

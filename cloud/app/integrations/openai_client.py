@@ -1,4 +1,4 @@
-"""OpenAI / Azure OpenAI chat completion client with circuit breaker."""
+"""OpenAI / Azure OpenAI chat completion (Azure first) behind a circuit breaker."""
 
 import os
 from typing import Any, Callable, Dict, List, Optional
@@ -7,10 +7,7 @@ from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 
 _cb = CircuitBreaker(name="openai", failure_threshold=5, recovery_timeout=60.0)
 
-# Default per-request timeout (seconds) when a caller doesn't pass one — so a
-# hung upstream fails fast into the existing fallbacks instead of blocking the
-# whole turn. Upper bound for hangs, not a latency target. An explicit `timeout=`
-# from the caller always wins. openai SDK supports per-request `timeout=`.
+# Hang ceiling when the caller passes no timeout.
 DEFAULT_CHAT_TIMEOUT_S = float(os.getenv("OPENAI_CHAT_TIMEOUT_S", "15"))
 
 
@@ -22,7 +19,6 @@ def _chat_client_and_model(
     prefer_azure: bool = True,
     model_hint: Optional[str] = None,
 ) -> tuple:
-    """Select chat client/model with Azure-first strategy when configured."""
     if prefer_azure and azure_openai_client is not None:
         model_name = model_hint or azure_chat_deployment or openai_model
         return azure_openai_client, model_name
@@ -63,20 +59,14 @@ def create_chat_completion(
     }
     if response_format is not None:
         kwargs["response_format"] = response_format
-    # Explicit caller timeout wins; otherwise apply the hang ceiling.
     kwargs["timeout"] = timeout if timeout is not None else DEFAULT_CHAT_TIMEOUT_S
     if stream:
         kwargs["stream"] = True
 
-    # Same per-model parameter adaptation as the router: a deployment that
-    # rejects `max_tokens` or `temperature` (gpt-5 / o-series) used to fail the
-    # reply, fail the non-stream retry, and fall to OpenAI direct — three calls
-    # for one answer, and never streamed. Imported here, not at module top:
-    # azure_intent_client is the heavier module and this one is on every path.
+    # Same per-model param adaptation as the router.
     from app.integrations.azure_intent_client import _create_chat_adapting
 
     try:
-        # Stream or not, the breaker wraps only the initial call.
         return _cb.call(_create_chat_adapting, client, kwargs)
     except CircuitOpenError:
         raise RuntimeError("[OpenAI] Circuit OPEN — AI service temporarily unavailable")
@@ -88,7 +78,6 @@ def make_chat_completion_fn(
     openai_model: Optional[str] = None,
     azure_chat_deployment: Optional[str] = None,
 ) -> Callable[..., Any]:
-    """Return a bound create_chat_completion function with pre-configured clients."""
 
     def _bound(
         messages: List[Dict[str, Any]],

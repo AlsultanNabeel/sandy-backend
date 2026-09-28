@@ -1,24 +1,8 @@
-"""Node registry — paired Sandy nodes (the pre-flashed ESP boxes we sell).
+"""Node registry (sandy_nodes): paired Sandy boards, bound to a tenant by the code on the box.
 
-A node is one physical ESP running the generic firmware. The customer powers it,
-then **pairs** it in the app by entering the code printed on the box. Pairing binds
-that code to the tenant; from then on the node's devices live under that tenant.
-
-Collection: sandy_nodes (tenant-scoped via scoped())
-  {
-    _id, user_id (injected by scoped),
-    node_id,           # our stable id for the node (generated at pairing)
-    label,             # "صندوق الصالة"
-    code_hash,         # sha256 of the factory pairing code (never store raw)
-    capabilities,      # ["relay","pwm","servo","buzzer","ir","audio"] (node-reported)
-    outputs,           # [{id:"relay1", kind:"relay"}, ...] (node-reported)
-    firmware_version,
-    online, last_seen, # heartbeat, for the diagnosis layer
-    paired_at,
-  }
-
-Pure data: this module does not talk MQTT. The firmware reports heartbeat/caps
-over MQTT; `integrations/mqtt_ingest.py` hands each one to ingest_status().
+Stores node_id, label, code_hash (never the raw code), capabilities, outputs,
+firmware_version, online/last_seen, telemetry, paired_at. Pure data: heartbeats
+arrive via integrations/mqtt_ingest.py → ingest_status().
 """
 
 from __future__ import annotations
@@ -38,12 +22,9 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_nodes"
 
-# سقف أمان، مش حد منتج — ما حدا بيوصله بالاستعمال العادي. موجود عشان
-# خلل بالكتابة أو حساب دخل عليه إشي غريب ما يتحوّل لنداء بيسحب المجموعة
-# كلها ويوقّع الطلب.
+# سقف أمان، مش حد منتج.
 MAX_NODES = 100
 
-# Capabilities a node may advertise. Validated so a bad heartbeat can't inject junk.
 KNOWN_CAPABILITIES = frozenset({"relay", "pwm", "servo", "buzzer", "ir", "audio"})
 
 
@@ -57,9 +38,7 @@ def init_node_store(mongo_db) -> None:
         )
         # Heartbeat ingest looks nodes up by code hash across tenants.
         mongo_db[_COLL].create_index([("code_hash", 1)], background=True)
-        # One owner per board, enforced by the database: the claim check in
-        # `pair_node` reads then inserts, and two accounts pairing the same
-        # code at the same moment both passed it.
+        # One owner per board, enforced by the database (the read-then-insert check races).
         mongo_db[_COLL].create_index(
             [("node_id", 1)], unique=True, background=True, name="node_id_owner_unique"
         )
@@ -69,7 +48,6 @@ def init_node_store(mongo_db) -> None:
 
 
 def _coll():
-    """Tenant-scoped nodes collection, or None when no db / no active tenant."""
     return scoped(get_db(), _COLL)
 
 
@@ -86,12 +64,7 @@ def _hash_code(code: str) -> str:
 
 
 def code_to_node_id(code: str) -> str:
-    """Deterministic node_id from the printed pairing code: lowercase alphanumerics.
-
-    The node is flashed with its code and derives the SAME id, so it knows its MQTT
-    topic (sandy/node/<node_id>/...) before it is ever paired — no provisioning
-    handshake needed. The firmware must apply this identical transform.
-    """
+    """node_id from the printed pairing code (lowercase alphanumerics); the firmware applies the same transform."""
     return re.sub(r"[^a-z0-9]", "", (code or "").strip().lower())
 
 
@@ -105,60 +78,27 @@ def _public(d: Dict[str, Any]) -> Dict[str, Any]:
         "online": bool(d.get("online", False)),
         "last_seen": _iso(d.get("last_seen")),
         "paired_at": _iso(d.get("paired_at")),
-        # Live readings from the last heartbeat — mic levels, current gains,
-        # volume. A control screen needs these to draw a meter, and polling the
-        # node list it already polls beats inventing a second endpoint.
         "telemetry": d.get("telemetry", {}),
     }
 
 
-# What a heartbeat is allowed to report about itself. An allowlist, not a
-# passthrough: the payload arrives over a shared broker from a device nobody has
-# authenticated, so it may not write arbitrary keys into the node document.
+# Allowlist: heartbeats come from unauthenticated devices over a shared broker.
 _TELEMETRY_KEYS = {
     "mic_l": int, "mic_r": int,
     "mic_l_gain": int, "mic_r_gain": int,
     "mic_l_muted": bool, "mic_r_muted": bool,
     "volume": int, "noise": int,
     "uptime": int, "heap": int, "mood": int,
-    # ما في "distance": حسّاس المسافة ملغي بقرار المالك ومش مركّب. قراءة
-    # لجهاز غير موجود بتضل صفر للأبد، وبعد شهر حدا بيسأل ليش الروبوت لازق
-    # بالحيط — فحذف الحقل أصدق من تركه.
-    # نصوص قصيرة: عنوان اللوح ع الشبكة المحلية، واسم اللوح. العنوان بيتغيّر كل
-    # ما الراوتر يعيد التوزيع، وبلا ما اللوح يقوله، إيجاده بيصير مسح وتخمين.
+    # Boards share a node id, so each board's fields get their own prefix.
     "ip": str, "board": str,
-    # سبب آخر إقلاع للكاميرا (رقم من اللوح). سبعة معناها انهيار كهربا — وهاد
-    # الفرق بين «بدّها مزوّد أقوى» و«في خلل بالكود»، وهو فرق ما كان إله جواب.
     "cam_boot": int,
-    # وعنوان الكاميرا بمفتاح مستقل.
-    #
-    # اللوحين بيشاركوا معرّف الوحدة والتليمتري بتندمج بالمفتاح، فحقل `ip` واحد
-    # كان بينقلب بين الدماغ والكاميرا كل خمس ثواني. البثّ بيروح مباشرة من
-    # الكاميرا لجهازك، فكان بيوجّه ع الدماغ نص الوقت — والدماغ ما عنده خادم
-    # صور. فشل مرّة من كل مرّتين وما إله نمط يفسّره.
     "cam_ip": str, "cam_board": str, "cam_ssid": str,
-    # نسخة برنامج الكاميرا، وهل هي متّصلة (من نبضتها أو من وصيّتها عند الوسيط)،
-    # ومفتاح البث المحلي — عشوائي كل إقلاع، والتطبيق بيحطّه بعنوان البث. من
-    # غيره خادم البث بيرفض أي حدا، وهاد المقصود: جهاز غريب بالبيت ما بيعرفه.
+    # cam_stream_key: random per boot; the app needs it to open the local stream.
     "cam_fw": str, "cam_online": bool, "cam_stream_key": str,
-    # نفس الشي لعقدة الغرفة.
     "room_ip": str, "room_board": str, "room_light": str,
     "room_fw": str, "room_online": bool, "room_uptime_s": int, "room_heap": int,
-    # اسم الشبكة اللي اللوح عليها. بيروح للتطبيق عشان تشوف الوضع قبل ما تغيّره،
-    # وعشان النتيجة بعد التغيير تكون مقروءة من نفس المكان: اللوح اللي انتقل
-    # بيقول الاسم الجديد، واللي رجع لحاله بيقول القديم. رسالة نجاح منفصلة كانت
-    # بتصير مصدرًا تانيًا لنفس الحقيقة، والاتنين بيفترقوا يوم ما.
     "ssid": str,
-    # قوّة الإشارة بالديسيبل ملّي واط — رقم سالب، وكل ما اقترب من الصفر أحسن.
-    #
-    # **الرقم الوحيد اللي بيفسّر «صوتي ما عم يوصل».** لهالعرض تلات أسباب بتبيّن
-    # متطابقة ع وش الروبوت: رابط لاسلكي ضعيف، وخادم مشغول، ولوح ما بيلحق يرمّز.
-    # الأول بينفصل عن التنتين بهالرقم لحاله — تحت خمسة وسبعين ناقص الوصلة ما
-    # بتحمل صوتًا حيًّا مهما كان الباقي سليمًا.
-    #
-    # الكاميرا وعقدة الغرفة كانوا بيبعتوه، والدماغ لأ — وهو الوحيد اللي بيمرّر
-    # صوتًا حيًّا. `room_rssi` بمفتاح مستقل لنفس سبب `cam_ip`: تلات ألواح تحت
-    # معرّف واحد، وحقل واحد بينقلب بيناتهن كل خمس ثواني.
+    # dBm; below about -75 the link can't carry live voice.
     "rssi": int, "room_rssi": int,
 }
 
@@ -174,12 +114,12 @@ def _clean_telemetry(data: Any) -> Dict[str, Any]:
             if kind is bool:
                 out[key] = bool(data[key])
             elif kind is str:
-                # مقصوص: النبضة بتيجي من وسيط مشترك، فما منخزّن نص طويل بلا حد.
+                # Capped: untrusted input.
                 out[key] = str(data[key])[:32]
             else:
                 out[key] = int(data[key])
         except (TypeError, ValueError):
-            continue   # a garbled field drops out; the rest still lands
+            continue
     return out
 
 
@@ -190,10 +130,7 @@ def _clean_caps(caps: Any) -> List[str]:
 
 
 def _clean_outputs(outputs: Any) -> List[Dict[str, Any]]:
-    """Validate node-reported outputs before storing them — a heartbeat is an
-    untrusted, cross-tenant input (see mqtt_ingest), so a malformed/hostile
-    payload can't inject arbitrary output definitions into the registry. Keep
-    only well-formed {id, kind} entries with a known kind, and cap the count."""
+    """Keep only well-formed {id, kind} outputs with a known kind (untrusted heartbeat input)."""
     if not isinstance(outputs, list):
         return []
     clean: List[Dict[str, Any]] = []
@@ -210,13 +147,7 @@ def _clean_outputs(outputs: Any) -> List[Dict[str, Any]]:
 # ── Pairing ─────────────────────────────────────────────────────────────────
 
 def _provision(node_id: str, outputs: Any, label: str = "") -> None:
-    """Create the devices for a node's declared outputs, in the current tenant.
-
-    Best-effort and never raises: pairing must succeed even if provisioning does
-    not. A robot that paired but has no devices yet is recoverable — the next
-    heartbeat provisions it. A pairing that failed because provisioning threw
-    would leave the customer with a robot the app does not know about at all.
-    """
+    """Create devices for declared outputs in the current tenant; never fails a pairing."""
     if not isinstance(outputs, list) or not outputs:
         return
     try:
@@ -227,28 +158,19 @@ def _provision(node_id: str, outputs: Any, label: str = "") -> None:
 
 
 def _is_legacy_owner(user_id: Any) -> bool:
-    """هل هالحساب هو حساب «المالك» القديم اللي ما عاد فيه دخول؟
-
-    منفصلة عن مكان استعمالها لأنها **سؤال أمني**، وسؤال أمني لازم يكون مقروءًا
-    لحاله: أي توسيع بالإجابة هون بيوسّع مين بيقدر ياخد روبوت حدا تاني.
-    """
+    """هل هالحساب هو حساب «المالك» القديم (ما عاد فيه دخول)؟ سؤال أمني: أي توسيع بيسمح بأخذ روبوت حدا تاني."""
     if not user_id:
         return False
     try:
         from app.features import users_store
         owner = users_store.get_user(str(user_id)) or {}
         return str(owner.get("provider") or "") == "owner"
-    except Exception:  # noqa: BLE001 — ما بنعرف يعني لأ، والافتراض الآمن الرفض
+    except Exception:  # noqa: BLE001 — الافتراض الآمن الرفض
         return False
 
 
 def pair_precheck(code: str) -> Dict[str, Any]:
-    """Where a pairing stands before anything is written.
-
-    ``ours`` — this account already has it (pairing again is a refresh, no
-    proof needed); ``claimed`` — another account has it; ``free`` — nobody
-    does, and claiming it needs the robot's own code (features/pair_presence).
-    """
+    """Pairing state before writing: ``ours``, ``claimed`` by another account, or ``free``."""
     code = (code or "").strip()
     node_id = code_to_node_id(code)
     if len(code) < 4 or not node_id:
@@ -266,11 +188,7 @@ def pair_precheck(code: str) -> Dict[str, Any]:
 
 
 def pair_node(code: str, label: str = "") -> Dict[str, Any]:
-    """Bind a factory pairing code to the current tenant.
-
-    The raw code is hashed (never stored). Re-pairing the same code under the same
-    tenant is a no-op that returns the existing node, so the flow is idempotent.
-    """
+    """Bind a factory pairing code to the current tenant (idempotent for the same tenant)."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_store"}
@@ -281,49 +199,25 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
 
     existing = coll.find_one({"code_hash": code_hash})
     if existing is not None:
-        # Already ours. Still provision: the first pairing may have happened
-        # before the board ever sent a heartbeat, so this is where a robot that
-        # was paired offline finally gets its parts.
+        # Already ours; still provision (it may have paired before any heartbeat).
         _provision(existing["node_id"], existing.get("outputs"),
                    existing.get("label", ""))
         _open_key_enrolment(existing["node_id"])
         return {"ok": True, "node_id": existing["node_id"], "already": True}
 
-    # node_id = the code itself (slugified) so the firmware's topic is deterministic.
     node_id = code_to_node_id(code)
     if not node_id:
         return {"ok": False, "error": "bad_code"}
 
-    # **مطالَبة مرّة وحدة — عبر كل الحسابات.**
-    #
-    # الفحص اللي فوق مقيّد بحساب المستخدم الحالي، يعني كان بيشوف «هل أنا ربطت
-    # هالكود قبل؟» وبس. فحسابان مختلفان كانوا يقدروا يربطوا **نفس الروبوت**،
-    # وكل واحد بياخد نسخته منه — والاتنين بيسمعوا نفس المواضيع.
-    #
-    # وهاد مش احتمال بعيد: الكود أربع خانات، يعني عشرة آلاف احتمال. أول حساب
-    # بيربط بيملك، وبعدها اللوح مقفول لحدّ ما يترجع لضبط المصنع — زي أي جهاز
-    # منزلي بينباع.
+    # مطالَبة مرّة وحدة عبر كل الحسابات: أول حساب بيربط بيملك.
     if get_db() is not None:
-        # لو فشلت القراءة ما بنكمل الربط: «ما قدرت أتأكد» لازم يوقف مطالبة
-        # ملكية، مش يمرّرها. الفشل هون بيوقّف زبونًا صادقًا دقيقة، والعكس
-        # بيعطي روبوتًا لحدا تاني.
+        # لو فشلت القراءة ما بنكمل: «ما قدرت أتأكد» لازم يوقف المطالبة.
         claimed = get_db()[_COLL].find_one({"node_id": node_id})
         if claimed is not None and not _is_legacy_owner(claimed.get("user_id")):
             logger.warning("[NodeStore] %s already claimed — refusing", node_id)
             return {"ok": False, "error": "already_claimed"}
         if claimed is not None:
-            # **استثناء واحد: الحساب القديم اللي ما عاد فيه دخول.**
-            #
-            # قبل الحسابات الحقيقية، كل إشي كان تحت حساب اسمه «المالك» بيتصنع
-            # من متغيّر بيئة، وبينداخل عليه بكلمة سرّ مشتركة. الكلمة انحذفت مع
-            # مسار الدخول — يعني هالحساب صار **ما فيه طريقة تسجّل دخول عليه**.
-            #
-            # وبلا هالسطر، أول مالك بينقفل برّا روبوته للأبد: الروبوت مطالَب
-            # بحساب ما بيقدر يوصله، وما في زرّ يفكّه. صاحب الجهاز بيخسره
-            # بترقية.
-            #
-            # ضيّق بالقصد: بيمرّ بس لو المالك السابق هو ذاك الحساب تحديدًا.
-            # أي حساب حقيقي تاني بيضلّ محميًّا.
+            # استثناء ضيّق: الحساب «المالك» القديم ما فيه دخول، فبدونه صاحب الروبوت بينقفل برّاه.
             logger.info("[NodeStore] %s was held by the pre-accounts owner — "
                         "handing it to its new account", node_id)
             get_db()[_COLL].delete_one({"_id": claimed["_id"]})
@@ -347,8 +241,7 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
 
 
 def _open_key_enrolment(node_id: str) -> None:
-    """Pairing is the one moment the owner vouches for the board: let it collect
-    its own voice key now (features/device_keys). Never fails a pairing."""
+    """Pairing is when the owner vouches for the board: open its voice-key enrolment."""
     try:
         from app.features.device_keys import cam_key_id, open_enrolment
         open_enrolment(node_id)
@@ -399,21 +292,10 @@ def _wipe_board(node_id: str) -> bool:
 
 
 def unpair_node(node_id: str) -> Dict[str, Any]:
-    """Release a node **and everything that reaches the world through it.**
+    """Release a node and every device that actuates through it.
 
-    Deleting the node row alone left the account still controlling the robot.
-    A device row carries its own transport — `{"kind": "node", "node_id": …}` —
-    and §2.7's boundary asks "does this topic actuate a device in the calling
-    tenant's registry?", not "does the tenant still own the node". So the light
-    and the neck and the face stayed in the app, stayed switchable, and kept
-    publishing to a board that had just been sold.
-
-    The board is not listening for permission either: its topics come from the
-    pairing code compiled into it, so it obeys whatever arrives. Which is why
-    this has to be a delete and not a flag.
-
-    Returns the device count too — "unpaired" is not a checkable claim on its
-    own, and this is the operation somebody performs while selling hardware.
+    The board obeys any topic built from its code, so its devices must be deleted,
+    not flagged. Returns the device count and whether the board was wiped.
     """
     coll = _coll()
     if coll is None:
@@ -422,41 +304,21 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
     if not coll.find_one({"node_id": node_id}, {"_id": 1}):
         return {"ok": False, "error": "not_found"}
 
-    # **Devices first, node row second.**
-    #
-    # `ingest_status` looks the node up and *then* provisions from the outputs
-    # it declared. A heartbeat that passed that lookup a moment before the node
-    # row went away would run `provision_from_outputs` afterwards and rebuild
-    # the whole robot in the registry of the account that had just released it.
-    # Boards heartbeat every few seconds and provisioning is many round trips,
-    # so the window is real. Deleting the devices while the node is still there
-    # closes it: once the row is gone, `ingest_status` returns early and there
-    # is nothing left to re-create.
-    # **And wipe the board itself, while it is still addressable.**
-    #
-    # The publish path checks that the caller owns the node, and one line below
-    # they will not — so this has to happen first. It also has to happen *here*
-    # rather than in the endpoint, because deleting an account releases every
-    # node by calling this function directly: the strongest erase a person can
-    # ask for was producing the weakest hardware erase, leaving the seller's
-    # Wi-Fi name and password in a board somebody else is about to power on.
-    #
-    # An offline board does not block the release: the account must not be stuck
-    # owning hardware it no longer has. `board_wiped` says which of the two
-    # happened, because "sold it while it was unplugged" and "wiped it properly"
-    # are different states and only one of them needs a manual reset.
+    # Wipe the board first, while the caller still owns it (account deletion also
+    # comes through here). An offline board doesn't block the release.
     board_wiped = _wipe_board(node_id)
 
     from app.features.device_store import delete_devices_for_node
 
+    # Devices before the node row, so a racing heartbeat can't re-provision them.
+
     devices_removed = delete_devices_for_node(node_id)
-    # The board's voice key goes with it: a sold robot must enrol afresh for
-    # its next owner, not keep a key the old account's era issued.
+    # A sold robot must enrol a fresh voice key.
     try:
         from app.features.device_keys import cam_key_id, revoke_key
         revoke_key(node_id)
         revoke_key(cam_key_id(node_id))
-    except Exception as exc:  # noqa: BLE001 — the release must not hinge on it
+    except Exception as exc:  # noqa: BLE001
         logger.warning("[NodeStore] could not revoke the voice key of %s: %s",
                        node_id, exc)
     r = coll.delete_one({"node_id": node_id})
@@ -467,69 +329,12 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
             "devices_removed": devices_removed, "board_wiped": board_wiped}
 
 
-# ── Heartbeat ingest (called by the firmware-facing path, not tenant-scoped) ──
-
-def set_node_status(code: str, online: bool = True,
-                    capabilities: Optional[List[str]] = None,
-                    outputs: Optional[List[Dict[str, Any]]] = None,
-                    firmware_version: str = "") -> Dict[str, Any]:
-    """Update a node's heartbeat by its pairing code (firmware speaks code, not
-    node_id). Looked up across tenants by code hash. Best-effort; never raises."""
-    if get_db() is None:
-        return {"ok": False, "error": "no_store"}
-    try:
-        update: Dict[str, Any] = {"online": bool(online), "last_seen": _now()}
-        if capabilities is not None:
-            update["capabilities"] = _clean_caps(capabilities)
-        if isinstance(outputs, list):
-            # This path is keyed by pairing code, not node id, so the merge needs
-            # the id looked up first — the same two-boards-one-node rule applies
-            # here as on the heartbeat path, and having one of them replace while
-            # the other merges is exactly the kind of split that produces a bug
-            # nobody can reproduce.
-            existing = get_db()[_COLL].find_one({"code_hash": _hash_code(code)},
-                                                {"node_id": 1})
-            update["outputs"] = _merge_outputs(
-                str((existing or {}).get("node_id", "")), outputs)
-        if firmware_version:
-            update["firmware_version"] = str(firmware_version)[:32]
-        r = get_db()[_COLL].update_one(
-            {"code_hash": _hash_code(code)}, {"$set": update}
-        )
-        if r.matched_count == 0:
-            return {"ok": False, "error": "unknown_node"}
-        return {"ok": True}
-    except Exception as e:  # noqa: BLE001
-        logger.debug("[NodeStore] set_node_status failed: %s", e)
-        return {"ok": False, "error": "exception"}
-
-
-# ── MQTT ingest (firmware speaks node_id in the topic; runs outside a tenant) ──
-
-# ── Two boards, one node ─────────────────────────────────────────────────────
-#
-# The brain and the camera share a node id: the camera is part of Sandy, not a
-# second box. So two different heartbeats arrive five seconds apart, each
-# describing a different half of the same robot.
-#
-# Replacing on write made them erase each other in a loop. The brain's heartbeat
-# wiped every `cam/` output; the camera's wiped the microphone levels and the
-# brain's address; five seconds later the brain wiped the camera's. Whatever you
-# asked for was there roughly half the time, and which half depended on when you
-# looked — so "the camera has no address" and "the address is fine" were both
-# true, minutes apart, with nothing changed in between.
-#
-# So both merge. A heartbeat now says what its own board has and stays silent
-# about the other's, which is all it ever knew anyway.
+# ── Heartbeat ingest (firmware-facing, runs outside a tenant) ────────────────
+# Several boards share one node id; each heartbeat merges only its own board's
+# outputs and telemetry, or they erase each other in a loop.
 
 def _output_namespace(output_id: Any) -> str:
-    """Which board a declared output belongs to.
-
-    Several boards answer under one node id — they are one robot, not three
-    boxes — and each writes in its own prefix: the camera under ``cam/``, the
-    room node under ``room/``, the brain in the bare namespace. The prefix is
-    the boundary, so this is the one place that reads it.
-    """
+    """The board prefix of an output id: ``cam/``, ``room/``, or "" for the brain."""
     oid = str(output_id or "")
     head, sep, _ = oid.partition("/")
     return head + sep if sep else ""
@@ -537,20 +342,7 @@ def _output_namespace(output_id: Any) -> str:
 
 def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]],
                    current: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """Replace only the namespaces this heartbeat speaks for.
-
-    Two heartbeats arriving five seconds apart would otherwise take turns wiping
-    each other out, and the app would flicker between a robot with a neck and a
-    robot with a flash.
-
-    This used to be a boolean — camera or not — which was right while there were
-    exactly two boards and silently wrong the moment a third arrived: the room
-    node's outputs counted as "not camera", so every brain heartbeat deleted the
-    room and every room heartbeat deleted the brain. Namespaces are what the rule
-    was always about; the boolean was a two-board shortcut.
-
-    A heartbeat that declares nothing keeps everything. Silence is not a claim
-    that the hardware is gone.
+    """Replace only the namespaces this heartbeat declares; declaring nothing keeps everything.
 
     ``current`` is the node document when the caller already read it.
     """
@@ -568,12 +360,7 @@ def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]],
 
 
 def _merge_telemetry(current: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
-    """Update the keys this heartbeat carries; leave the others alone.
-
-    A camera heartbeat has no opinion about the microphone levels, and a brain
-    heartbeat has none about the camera. Overwriting with silence is not a
-    correction — it is forgetting. ``current`` is the stored node document.
-    """
+    """Update only the keys this heartbeat carries."""
     fresh = _clean_telemetry(incoming)
     existing = current.get("telemetry") or {}
     if not isinstance(existing, dict):
@@ -582,13 +369,7 @@ def _merge_telemetry(current: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[
 
 
 def get_node_any_tenant(node_id: str) -> Optional[Dict[str, Any]]:
-    """One node by id, from the raw collection, ignoring tenant scope.
-
-    Only for the ingest path, which runs on the MQTT thread with no tenant
-    context — the same reason ingest_status reads raw. Never expose this to a
-    request handler: it can see every tenant's nodes, and that is exactly what
-    the scoped reads exist to prevent.
-    """
+    """One node by id across tenants — ingest path only, never a request handler."""
     if get_db() is None:
         return None
     try:
@@ -602,26 +383,18 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
                   outputs: Optional[List[Dict[str, Any]]] = None,
                   firmware_version: str = "",
                   telemetry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Heartbeat update keyed by node_id (the firmware publishes by node_id, not
-    code). Cross-tenant lookup on the raw collection; best-effort, never raises.
+    """Heartbeat update by node_id, cross-tenant; best-effort, never raises.
 
-    ``online=None`` leaves the node's own online state and ``last_seen`` alone:
-    the camera and the room node report on themselves (``cam_online``,
-    ``room_online``), and only the brain's heartbeat says whether *the robot* is
-    up.
+    ``online=None`` leaves online/last_seen alone (camera and room node report their own).
     """
     if get_db() is None:
         return {"ok": False, "error": "no_store"}
     try:
         node_id = (node_id or "").strip()
-        # Read once. Both merges and the provisioning below need this document,
-        # and each used to fetch it for itself — four round trips per heartbeat,
-        # per board, every few seconds.
+        # Read once; both merges and provisioning use it.
         current = get_node_any_tenant(node_id)
         if current is None:
-            # A heartbeat from a board nobody has paired yet. Normal: the robot
-            # is powered on and shouting its node_id into the broker, waiting for
-            # someone to type its code. Nothing to do until then.
+            # Not paired yet.
             return {"ok": False}
         update: Dict[str, Any] = {}
         if online is not None:
@@ -641,10 +414,7 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
         if r.matched_count == 0:
             return {"ok": False}   # unpaired between the read and the write
 
-        # Newly declared outputs become devices its owner can drive. Doing it
-        # here — rather than only at pairing — is what makes a firmware upgrade
-        # that adds a part show up in the app on its own, with nobody re-pairing
-        # anything.
+        # New outputs become devices, so a firmware upgrade shows up without re-pairing.
         if update.get("outputs") and current.get("user_id"):
             from app.features.node_provision import provision_for_owner
             provision_for_owner(node_id, str(current["user_id"]),
@@ -656,8 +426,7 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
 
 
 def set_last_ir(node_id: str, code: str) -> Dict[str, Any]:
-    """Record the most recent IR code a node captured in learn mode, so the app can
-    poll for it and bind it to a button. Keyed by node_id, cross-tenant."""
+    """Record the last IR code a node captured in learn mode (cross-tenant)."""
     if get_db() is None:
         return {"ok": False, "error": "no_store"}
     try:
@@ -672,7 +441,7 @@ def set_last_ir(node_id: str, code: str) -> Dict[str, Any]:
 
 
 def get_last_ir(node_id: str) -> Dict[str, Any]:
-    """The last captured IR code for a node (tenant-scoped read for the app)."""
+    """The last captured IR code for a node (tenant-scoped)."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_store"}

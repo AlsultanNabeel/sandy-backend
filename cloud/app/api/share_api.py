@@ -1,26 +1,6 @@
-"""Share API — interesting content Sandy surfaces from your own interests.
+"""Content cards from the user's top interest (Exa results, no LLM step), and saved cards.
 
-The REST face of the agent's ``share_interesting_content`` tool
-(``app.agent.tools.schemas.content_share_tools``): that tool picks a topic from
-the user's top tracked interests (``interests_tracker.get_top_interests``) and
-hands it to ``research_web`` for a chatty, LLM-summarized reply inside an agent
-session. A REST surface can't reuse that summarized reply (it needs a live
-``DispatchContext`` + agent run), so — exactly like ``research_api`` does for the
-Search tab — we reuse the tool's *logic* (same interest selection) but return the
-underlying structured Exa results as content cards, with no LLM step.
-
-Saved cards live in a small per-user store, ``sandy_shared_content`` (one doc per
-saved item, ``chat_id`` == user_id, mirroring ``memory_api``'s shape). Real data
-only; guests are fail-closed (empty / forbidden).
-
-Endpoints:
-  GET    /api/share/suggest        suggested content for the user's top interest
-  GET    /api/share/saved          this user's saved content cards
-  POST   /api/share/saved          save one card
-  DELETE /api/share/saved/<id>     remove one saved card
-
-Caveat: the agent tool's social-posting cousins (actually *sending* content to a
-platform) are out of scope here — this surface only suggests, saves and removes.
+  GET /api/share/suggest · GET|POST /api/share/saved · DELETE /api/share/saved/<id>
 """
 
 from __future__ import annotations
@@ -45,13 +25,12 @@ def _is_guest(claims) -> bool:
 
 
 def _topic_for(mongo_db, explicit):
-    """Same selection the tool uses: explicit topic, else the top interest."""
+    """Explicit topic, else the user's top tracked interest."""
     topic = (explicit or "").strip()
     if topic or mongo_db is None:
         return topic
     from app.agent.interests_tracker import get_top_interests
 
-    # In REST the active profile's chat_id is the user_id for both keys.
     tops = get_top_interests(limit=1)
     return tops[0] if tops else ""
 
@@ -60,7 +39,6 @@ def register_share_api(app, mongo_db=None):
     @app.route("/api/share/suggest", methods=["GET"])
     @require_auth
     def api_share_suggest(claims):
-        # Guests have no tracked interests — fail closed with an empty payload.
         if _is_guest(claims):
             return jsonify({"topic": "", "items": [], "demo": True}), 200
         if mongo_db is None:
@@ -74,16 +52,13 @@ def register_share_api(app, mongo_db=None):
             topic = _topic_for(mongo_db, explicit)
 
         if not topic:
-            # No interests tracked yet — let the client show its warm hint.
             return jsonify({"topic": "", "items": []}), 200
 
-        # A paid provider call — one unit of the caller's quota (`api/metering`).
         from app.api.metering import meter_claims
         refusal = meter_claims(claims)
         if refusal:
             return jsonify(refusal[0]), refusal[1]
 
-        # Reuse the tool's query shape, but return structured cards (no LLM).
         from app.integrations.exa_client import INTERACTIVE_TIMEOUT_S, search_exa
 
         key = os.getenv("EXA_API_KEY", "").strip()

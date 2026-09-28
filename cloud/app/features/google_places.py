@@ -1,6 +1,9 @@
-import requests
-from typing import Any, Dict, List, Optional
+"""Google Places text search."""
+
 import logging
+from typing import Any, Dict, List, Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -8,18 +11,7 @@ PLACES_API_URL = "https://places.googleapis.com/v1/places:searchText"
 
 
 class PlacesUnavailable(RuntimeError):
-    """The search could not be performed — as opposed to finding nothing.
-
-    **These two were the same value and they are not the same fact.**
-
-    A rejected key returned `[]`, which every caller rendered as "ما لقيت أماكن
-    تطابق..." — so a broken configuration was reported to the owner, in her
-    voice, as a confident statement about the world. He goes looking for another
-    greengrocer; there was never a search.
-
-    The log had the truth all along (`403 Client Error: Forbidden`) and the user
-    was told the opposite. Distinguishing them costs one exception.
-    """
+    """The search could not run (no key, refused) — unlike finding nothing."""
 
 
 def search_places(
@@ -30,8 +22,7 @@ def search_places(
 ) -> List[Dict[str, Any]]:
     """ابحث عن أماكن عبر Google Places API.
 
-    Raises PlacesUnavailable when the search itself could not run — no key, or
-    the API refused us. An empty list means the search ran and found nothing.
+    Raises PlacesUnavailable when the search could not run; [] means it found nothing.
     """
     if not api_key:
         raise PlacesUnavailable("no Google Places API key configured")
@@ -96,9 +87,6 @@ def search_places(
         return results
 
     except requests.HTTPError as e:
-        # 403 is the one worth naming: the key is rejected, disabled, or the
-        # project has no billing. It looked identical to "nothing nearby" for as
-        # long as both returned an empty list.
         status = getattr(e.response, "status_code", 0)
         logger.error("[Places] refused (%s) for %r — the search did not run",
                      status, query)
@@ -111,7 +99,6 @@ def search_places(
 def format_places_for_reply(
     places: List[Dict[str, Any]], recommended: bool = True
 ) -> str:
-    """حوّل النتائج لرد منظم"""
     if not places:
         return "ما لقيت نتائج قريبة منك."
 
@@ -143,7 +130,6 @@ def format_places_for_reply(
             lines.append(f"   📞 {phone}")
         lines.append("")
 
-    # التوصية بأعلى تقييم
     if recommended and places:
         best = max(
             places, key=lambda x: (x.get("rating", 0), x.get("reviews_count", 0))

@@ -1,14 +1,6 @@
-"""Web research orchestration — entry point for Sandy's research feature.
+"""Web research: places via Google, news/general via Exa + summary, else the full pipeline."""
 
-Delegates to:
-  research_intent.py   — query classification
-  research_pipeline.py — data extraction, dedup, filter, rank
-  research_formatter.py — Arabic result formatting
-
-Public API (also re-exported for backward compat):
-  execute_web_research(query, user_message, ...) -> (str, list)
-"""
-
+import logging
 import os
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -18,24 +10,34 @@ from app.agent.deep_context import (
     places_to_search_items,
     wants_comparison_grounded_in_search,
 )
-from app.features.research_intent import (  # noqa: F401
-    detect_research_type,
-    extract_requested_result_count,
-    is_research_request,
-    is_research_followup_request,
-)
 from app.features.google_places import format_places_for_reply, search_places
-from app.features.research_pipeline import (  # noqa: F401
-    run_research_pipeline,
-    deduplicate_research_results,
-    is_official_source_url,
-)
-from app.features.research_formatter import (  # noqa: F401
-    summarize_research_results,
-)
-import logging
+from app.features.research_pipeline import run_research_pipeline
+from app.features.research_formatter import summarize_research_results
 
 logger = logging.getLogger(__name__)
+
+_FOLLOWUP_TRIGGERS = [
+    "من هدول",
+    "من بينهم",
+    "من النتائج",
+    "فيهم",
+    "منهم",
+    "الأفضل",
+    "افضل",
+    "الأحسن",
+    "احسن",
+    "best",
+    "top",
+    "which of these",
+    "from these",
+    "among them",
+    "among these",
+]
+
+
+def is_research_followup_request(message: str) -> bool:
+    text = str(message or "").strip().lower()
+    return any(t in text for t in _FOLLOWUP_TRIGGERS)
 
 
 def _research_context_items_from_exa(
@@ -100,7 +102,7 @@ def execute_web_research(
     exa_api_key: str = "",
     session: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
-    """Run web research. Returns (Arabic reply, structured items for session buffer)."""
+    """Returns (Arabic reply, structured items for the session's search buffer)."""
 
     sess = session if isinstance(session, dict) else {}
 
@@ -151,13 +153,7 @@ def execute_web_research(
         if not places_api_key:
             return "خدمة الأماكن غير متوفرة حالياً.", []
 
-        # **"Could not search" and "found nothing" must not share a sentence.**
-        #
-        # A rejected API key used to come back as an empty list, and the line
-        # below turned it into "ما لقيت أماكن تطابق..." — a confident claim
-        # about the world, in her voice, when no search had happened at all.
-        # The owner heard it and went looking elsewhere; the log said
-        # `403 Forbidden` the whole time.
+        # "Could not search" must not sound like "found nothing".
         from app.features.google_places import PlacesUnavailable
         try:
             places = search_places(

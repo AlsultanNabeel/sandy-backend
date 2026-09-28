@@ -1,15 +1,7 @@
-"""Web API for per-user personality customization.
+"""GET/POST /api/persona: each user's dialect and custom instructions for Sandy.
 
-Every signed-in user (any tenant, not just the owner) can pick Sandy's dialect
-and/or write custom instructions for her tone. Her Palestinian identity is NOT
-part of this — it's appended unconditionally by
-``app.agent.context_builder.build_effective_persona`` and can't be touched
-here.
-
-Two routes, both ``@require_auth`` (every signed-in user manages their own):
-  GET  /api/persona → current dialect + custom instructions + available dialects
-  POST /api/persona → save dialect and/or custom instructions
-                       ({"custom_instructions": ""} resets to the default persona)
+Her Palestinian identity lock is added separately and can't be changed here.
+{"custom_instructions": ""} resets to the default persona.
 """
 
 from __future__ import annotations

@@ -1,8 +1,4 @@
-"""Azure OpenAI adapter for intent routing (FC mode) — يحلّ محل GeminiFlashClient.
-
-يستخدم Azure GPT-4o-mini مع JSON mode، بنفس الواجهة العامة للـ GeminiFlashClient
-ليكون الاستبدال drop-in في fc_router.py و gift_tools.py.
-"""
+"""Azure OpenAI client for intent routing (native function calling) and JSON mode."""
 
 from __future__ import annotations
 
@@ -15,52 +11,38 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Routing can run on its own fast/cheap deployment (e.g. Azure model-router or a
-# mini model). Falls back to the full chat deployment when unset, so behaviour is
-# unchanged until AZURE_OPENAI_ROUTER_DEPLOYMENT is provided.
 DEFAULT_AZURE_INTENT_DEPLOYMENT = (
     os.getenv("AZURE_OPENAI_ROUTER_DEPLOYMENT", "").strip()
     or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "sandy-chat")
 )
 
-# Per-request timeout (seconds) so a hung intent/router call fails fast into the
-# existing fallbacks instead of blocking the whole turn. Upper bound for hangs,
-# not a latency target — intent calls normally return in <2s.
+# Upper bound for a hung call, not a latency target.
 AZURE_INTENT_TIMEOUT_S = float(os.getenv("AZURE_INTENT_TIMEOUT_S", "12"))
 
-# Singleton client — يُبنى مرة واحدة عند أول استدعاء ويُعاد استخدامه.
-# منع memory leak من إنشاء AzureOpenAI client + httpx pool كل رسالة.
 _CACHED_AZURE_CLIENT: Any = None
 _CACHED_CLIENT_KEY: tuple = ()
 
 
 def _get_azure_client(api_key: str, api_version: str, endpoint: str) -> Any:
-    """يعيد client مُخزّن أو يبنيه أول مرة."""
     global _CACHED_AZURE_CLIENT, _CACHED_CLIENT_KEY
     key = (api_key, api_version, endpoint)
     if _CACHED_AZURE_CLIENT is not None and _CACHED_CLIENT_KEY == key:
         return _CACHED_AZURE_CLIENT
 
     from openai import AzureOpenAI
-    AzureOpenAICls = AzureOpenAI
 
-    _CACHED_AZURE_CLIENT = AzureOpenAICls(
+    _CACHED_AZURE_CLIENT = AzureOpenAI(
         api_key=api_key,
         api_version=api_version,
         azure_endpoint=endpoint,
-        # The SDK retries transient errors (incl. timeouts) twice by default,
-        # silently tripling our explicit per-call timeout — exactly what
-        # AZURE_INTENT_TIMEOUT_S's "fail fast" comment above says NOT to do.
-        # We already have our own fallback chain (Azure → OpenAI → template),
-        # so let it fail fast and fall through instead of retrying here.
+        # SDK retries would triple the timeout; we have our own fallback chain.
         max_retries=0,
     )
     _CACHED_CLIENT_KEY = key
     return _CACHED_AZURE_CLIENT
 
 
-# Params a model may reject; scanned by name so we never mis-read 'error' (the
-# dict key in the error repr) as the offending parameter.
+# Scanned by name so 'error' in the error repr is never mistaken for a param.
 _TUNABLE_PARAMS = (
     "max_tokens", "max_completion_tokens", "temperature", "top_p",
     "frequency_penalty", "presence_penalty", "logprobs", "tool_choice",
@@ -69,7 +51,6 @@ _TUNABLE_PARAMS = (
 
 
 def _rejected_param(exc: Exception) -> Optional[str]:
-    """Pull the offending parameter name out of an Azure 400 error."""
     param = getattr(exc, "param", None)
     if param:
         return str(param)
@@ -79,7 +60,6 @@ def _rejected_param(exc: Exception) -> Optional[str]:
         param = (err.get("param") if isinstance(err, dict) else None) or body.get("param")
         if param:
             return str(param)
-    # Last resort: scan the message for a known tunable param, not any quoted word.
     msg = str(exc)
     for name in _TUNABLE_PARAMS:
         if f"'{name}'" in msg:
@@ -87,27 +67,8 @@ def _rejected_param(exc: Exception) -> Optional[str]:
     return None
 
 
-# The breaker for the hottest external call in the system.
-#
-# `ARCHITECTURE_MAP` said everything external went through `circuit_breaker`.
-# Five clients did; this one — the router, called on every single message — did
-# not. When Azure is slow every request pays the full `AZURE_INTENT_TIMEOUT_S`
-# before falling through, and sixteen threads each parked for twelve seconds is
-# an outage, not a degradation.
-#
-# **Errors only — deliberately no `timeout=`.**
-#
-# The class supports one, and it looks like the obvious other half. It is not:
-# `_invoke` enforces it by submitting to a shared eight-worker pool and waiting
-# on the future, so *queue* time counts against the call's own deadline and the
-# resulting timeout is scored as a failure. Switch it on across every client and
-# load alone can open a breaker in front of a provider that is answering
-# perfectly. `future.cancel()` cannot stop a running job either, so the slow
-# calls keep their slots exactly when the queue is longest.
-#
-# The SDK's own `timeout=AZURE_INTENT_TIMEOUT_S` per request is the deadline
-# that matters here, and it needs no pool. A model that is slow past that raises,
-# and raising is what this breaker counts.
+# Errors only, no breaker `timeout=`: its shared pool would count queue time as
+# failure under load. The SDK's per-request timeout is the deadline.
 _cb = CircuitBreaker(
     name="azure_intent",
     failure_threshold=5,
@@ -116,35 +77,18 @@ _cb = CircuitBreaker(
 
 
 def _create_chat_resilient(client: Any, kwargs: Dict[str, Any]) -> Any:
-    """create() through the breaker, adapting to per-model parameter quirks.
+    """create() through the breaker, remapping/dropping params a model rejects (400).
 
-    gpt-5 / o-series reject ``max_tokens`` (want ``max_completion_tokens``) and a
-    fixed ``temperature``; older models want ``max_tokens``. Try the call, and on
-    an unsupported-parameter 400 remap or drop that one param and retry, so the
-    same code works across deployments without a config flag.
-
-    A rejected-parameter 400 is a *contract* mismatch, not the service being
-    down, so the remap loop sits inside one breaker call: four remaps of the same
-    request must count as one attempt, or a deployment with two quirky params
-    would trip the breaker on its own working traffic.
+    The remap loop is one breaker call, so param quirks don't trip the breaker.
     """
     return _cb.call(_create_chat_adapting, client, kwargs)
 
 
-# **What each deployment refused, remembered for the life of the process.**
-#
-# The adaptation below used to be relearned on every call. The router sends
-# `reasoning_effort` so a reasoning model does not think for seconds before
-# picking a tool — and an ordinary model rejects it with a 400. Nothing kept
-# that answer, so on a non-reasoning deployment **every message** paid one
-# refused request, a full network round trip to Azure, before the one that
-# worked. A deployment does not change its parameter contract between calls;
-# it is learned once per model name.
+# Params each model refused, learned once per process to avoid a 400 round trip per call.
 _ADAPTED: Dict[str, Dict[str, Optional[str]]] = {}
 
 
 def _apply_known_quirks(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    """Rewrite kwargs with what this model already refused: renamed or dropped."""
     for param, renamed in _ADAPTED.get(str(kwargs.get("model", "")), {}).items():
         if param in kwargs:
             value = kwargs.pop(param)
@@ -177,30 +121,7 @@ def _create_chat_adapting(client: Any, kwargs: Dict[str, Any]) -> Any:
 
 
 def _log_azure_usage(response: Any) -> None:
-    """Log token usage + cache hit + est cost (no message text) for Heroku logs.
-
-    R3: Azure auto-caches stable prompt prefixes ≥1024 tokens, billed at half.
-    Keeping the big tool/persona prefix first is what lets cached_tokens stay high.
-
-    **A cost log must never be able to fail a turn.**
-
-    This ran `logger.info(..., flush=True)` — and `Logger.info` takes no such
-    keyword, so it raised `TypeError` on the way out of a call that had already
-    *succeeded*. `route_with_fc` caught it as a routing failure and dropped to
-    the two-intent fallback in `model_fallback`, so every tool except tasks and
-    reminders became plain chat.
-
-    Two things hid it. The branch only runs when `cached_tokens > 0`, which is
-    the *normal* case here by design — the tool catalogue is a ~9k-token stable
-    prefix built to be cached — so message one of a session worked and every
-    message after it did not. And `Logger.info` returns before `_log` when INFO
-    is disabled, so the suite (WARNING) never reached the line that production
-    (`LOG_LEVEL` defaults to INFO) reaches every time.
-
-    The keyword is gone. The guard below is the part that generalises: telemetry
-    sits after the work is done and has nothing to contribute to the caller, so
-    it swallows its own failures rather than converting them into the caller's.
-    """
+    """Log token usage, cache hits and estimated cost. Must never fail the turn."""
     try:
         usage = getattr(response, "usage", None)
         if not usage:
@@ -218,10 +139,7 @@ def _log_azure_usage(response: Any) -> None:
         cost = (
             non_cached_in * rate_in + cached * rate_cached + out_tok * rate_out
         ) / 1_000_000
-        # %s for the counts, not %d: a non-numeric field would make `%d` fail
-        # inside the handler's own formatting, where this `except` cannot see it
-        # — the line would be lost to a stderr "Logging error" instead of
-        # degrading. %s renders whatever it is given.
+        # %s not %d: a non-numeric field would fail inside the log handler, past this except.
         if cached:
             pct = (cached / in_tok * 100) if in_tok else 0
             logger.info(
@@ -231,41 +149,17 @@ def _log_azure_usage(response: Any) -> None:
         else:
             logger.info("[Azure] in=%s out=%s ~$%.5f", in_tok, out_tok, cost)
     except (TypeError, ValueError, AttributeError) as exc:
-        # Narrow on purpose, and these three are the whole surface: a usage
-        # object whose fields are not numbers, a cost rate that will not parse,
-        # or a logging call that is malformed — which is exactly the family the
-        # `flush` keyword belonged to. A usage log has nothing to contribute to
-        # the caller, so it keeps its own failures.
-        #
-        # **warning, not debug.** The original bug survived precisely because
-        # production runs at INFO and anything below it is invisible there; a
-        # guard that reports at DEBUG would hide its successor the same way.
         logger.warning("[Azure] usage log skipped: %s", exc)
 
 
 class AzureIntentClient:
-    """Azure OpenAI adapter لتحليل النية وعمليات JSON-mode الأخرى.
+    """Azure OpenAI client for routing and small JSON/text generations."""
 
-    واجهة متوافقة مع GeminiFlashClient القديمة:
-    - ``_generate_with_gemini(prompt, response_mime_type, system_instruction, ...)``
-        احتُفظ بالاسم رغم أنه Azure الآن — لتقليل تغييرات الـ call sites.
-    """
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model_name: Optional[str] = None,
-        model: Any = None,
-    ):
-        self.api_key = (
-            api_key if api_key is not None else os.getenv("AZURE_OPENAI_API_KEY", "")
-        ).strip()
+    def __init__(self):
+        self.api_key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
         self.api_version = AZURE_OPENAI_API_VERSION
-        self.model_name = (
-            model_name if model_name is not None else DEFAULT_AZURE_INTENT_DEPLOYMENT
-        ).strip()
-        self._model = model  # for test mocks
+        self.model_name = DEFAULT_AZURE_INTENT_DEPLOYMENT.strip()
 
     def _generate_with_gemini(
         self,
@@ -273,45 +167,22 @@ class AzureIntentClient:
         *,
         response_mime_type: str | None = None,
         max_output_tokens: int | None = None,
-        system_instruction: str | None = None,
         temperature: float | None = None,
-        response_schema: dict | None = None,
     ) -> str:
-        """يولّد ردّ من Azure OpenAI — اسم الميثود مُحتفظ به للتوافق الخلفي.
-
-        - ``response_mime_type='application/json'`` → JSON mode عبر response_format
-        - ``system_instruction`` → system role message
-        - ``response_schema`` يُتجاهل (gpt-4o-mini يستخدم json_object العام)
-        """
-        if self._model:
-            # test mock — يحاكي السلوك القديم
-            response = self._model.generate_content(prompt)
-            text = getattr(response, "text", None)
-            return str(text).strip() if text else ""
-
+        """One-shot completion (name kept from the old Gemini client); JSON mode unless text/plain."""
         if not (self.api_key and self.endpoint):
             raise RuntimeError(
                 "Azure OpenAI not configured: AZURE_OPENAI_API_KEY/ENDPOINT missing"
             )
 
-        try:
-            client = _get_azure_client(self.api_key, self.api_version, self.endpoint)
-        except ImportError as exc:
-            raise RuntimeError(
-                "openai package required: pip install openai"
-            ) from exc
-
-        messages = []
-        if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
-        messages.append({"role": "user", "content": prompt})
+        client = _get_azure_client(self.api_key, self.api_version, self.endpoint)
+        messages = [{"role": "user", "content": prompt}]
 
         kwargs: Dict[str, Any] = {
             "model": self.model_name,
             "messages": messages,
             "temperature": temperature if temperature is not None else 0,
             "max_tokens": max_output_tokens or 600,
-            # Fail fast on a hung upstream — openai SDK supports per-request timeout.
             "timeout": AZURE_INTENT_TIMEOUT_S,
         }
         if (response_mime_type or "application/json") == "application/json":
@@ -336,16 +207,10 @@ class AzureIntentClient:
         temperature: float = 0.0,
         max_tokens: int = 700,
     ) -> Any:
-        """Native function-calling: the model either calls one/more tools or
-        replies in plain text. Returns the raw message object (``.content`` +
-        ``.tool_calls``), or None on failure.
+        """Native function calling; returns the raw message (``.content``/``.tool_calls``) or None.
 
-        ``system`` is the stable prefix (persona + rules) and ``tools`` the stable
-        catalog — both come first so Azure prompt caching keeps biting; only the
-        per-turn ``user`` block varies.
+        ``system`` and ``tools`` are the stable, cached prefix; only ``user`` varies.
         """
-        if self._model:  # test mock — no native tool support, signal fallback
-            return None
         if not (self.api_key and self.endpoint):
             raise RuntimeError(
                 "Azure OpenAI not configured: AZURE_OPENAI_API_KEY/ENDPOINT missing"
@@ -361,10 +226,7 @@ class AzureIntentClient:
             "tool_choice": tool_choice,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            # gpt-5 / o-series are reasoning models — without this they "think"
-            # for seconds before picking a tool. Routing needs none of that;
-            # minimal effort makes them fast. Non-reasoning models reject this
-            # param and _create_chat_resilient strips it.
+            # Reasoning models otherwise think for seconds; others reject it and it gets dropped.
             "reasoning_effort": "minimal",
             "timeout": AZURE_INTENT_TIMEOUT_S,
         })

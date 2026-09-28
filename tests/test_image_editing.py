@@ -1,58 +1,6 @@
 """Tests for image editing features: image_agent.py + vision.py"""
 
-from app.features.image_agent import (
-    _PHOTO_EDIT_KEYWORDS,
-    ensure_image_state,
-    is_photo_edit_caption,
-)
-
-
-class TestIsPhotoEditCaption:
-    def test_empty_caption_returns_false(self):
-        assert is_photo_edit_caption("") is False
-
-    def test_none_caption_returns_false(self):
-        assert is_photo_edit_caption(None) is False
-
-    def test_edit_keyword_عدلي_returns_true(self):
-        assert is_photo_edit_caption("عدلي الخلفية زرقاء") is True
-
-    def test_edit_keyword_غيري_returns_true(self):
-        assert is_photo_edit_caption("غيري اللون") is True
-
-    def test_edit_keyword_حطي_returns_true(self):
-        assert is_photo_edit_caption("حطي إطار ذهبي") is True
-
-    def test_edit_keyword_شيل_returns_true(self):
-        assert is_photo_edit_caption("شيل الخلفية") is True
-
-    def test_edit_keyword_اشيلي_returns_true(self):
-        assert is_photo_edit_caption("اشيلي الشخص من اليمين") is True
-
-    def test_edit_keyword_زودي_returns_true(self):
-        assert is_photo_edit_caption("زودي ألوان") is True
-
-    def test_edit_keyword_اجعلي_returns_true(self):
-        assert is_photo_edit_caption("اجعلي الوجه يبتسم") is True
-
-    def test_edit_keyword_خليها_returns_true(self):
-        assert is_photo_edit_caption("خليها بالأسود والأبيض") is True
-
-    def test_edit_keyword_لوني_returns_true(self):
-        assert is_photo_edit_caption("لوني الصورة") is True
-
-    def test_plain_description_returns_false(self):
-        assert is_photo_edit_caption("شو في الصورة") is False
-
-    def test_analyze_request_returns_false(self):
-        assert is_photo_edit_caption("حللي الصورة") is False
-
-    def test_question_returns_false(self):
-        assert is_photo_edit_caption("وصفيها") is False
-
-    def test_all_keywords_covered(self):
-        for kw in _PHOTO_EDIT_KEYWORDS:
-            assert is_photo_edit_caption(f"{kw} شيء") is True, f"Keyword '{kw}' not detected"
+from app.features.image_agent import ensure_image_state
 
 
 class TestEnsureImageState:

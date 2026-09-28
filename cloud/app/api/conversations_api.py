@@ -1,38 +1,17 @@
-"""Chat conversations API — multi-conversation history per user.
+"""Chat conversations: many per user, each with a title and messages, plus the turn ledger.
 
-The chat used to be one flat blob (`web_chat_history`, GET/PUT replace). This is
-the real model: many conversations per user, each with its own title + messages,
-auto-saved, browsable, searchable. Phase A (foundation): CRUD + text search +
-auto title from the first user message. Phase B will add rolling summaries,
-topic segmentation and semantic search on top of the same documents.
+Collection `conversations`: {_id, user_id, title, created_at, updated_at, messages:[{role,text,ts}]}
 
-Every read/write is scoped to the caller's user_id and fails closed when there's
-no user (guests get an empty list, never another user's chats).
+  GET/POST /api/conversations · GET/PATCH/DELETE /api/conversations/<cid>
+  POST /api/conversations/<cid>/messages · GET /api/conversations/search?q=
 
-Collection `conversations`:
-  {_id: uuid-hex, user_id, title, created_at, updated_at, messages:[{role,text,ts}]}
-
-Endpoints:
-  GET    /api/conversations                  list (id/title/timestamps), newest first
-  POST   /api/conversations                  create → {id}
-  GET    /api/conversations/<cid>            one conversation with messages
-  PATCH  /api/conversations/<cid>            rename {title}
-  DELETE /api/conversations/<cid>            delete
-  POST   /api/conversations/<cid>/messages   append {role,text}; sets title if empty
-  GET    /api/conversations/search?q=        text search over titles + messages
-
-A conversation can also be created implicitly: the app picks the id itself
-(a uuid hex) for a new chat and the first write that names it — the chat
-stream route or the message append — creates it for the caller
-(`ensure_conversation`). That removes a round trip before the first token.
-An id that already belongs to another user is refused, never written into.
-
-Turn ledger (`agent_turns`): the chat routes take an optional idempotency key
-`client_msg_id` per user message so the app can retry a send cut off by the
-network without running the turn twice (`claim_turn` / `finish_turn`).
+The app may pick a new chat's id itself; the first write creates it
+(`ensure_conversation`), and an id belonging to another user is refused.
+`agent_turns` makes chat sends idempotent per `client_msg_id` (claim_turn / finish_turn).
 """
 
 from __future__ import annotations
+
 import logging
 import re
 import threading
@@ -51,28 +30,23 @@ from app.utils.text_query import contains
 logger = logging.getLogger(__name__)
 
 
-# Longer than any real chat message; short enough that a thread's document stays
-# far from Mongo's 16 MB cap.
+# Keeps a thread's single document far from Mongo's 16 MB cap.
 _MAX_MESSAGE_CHARS = 20_000
 
-# Most results one search returns (text and semantic matches together).
 _MAX_SEARCH_RESULTS = 50
 
 
-# A client-chosen conversation id / message key: uuid hex (or dashed uuid),
-# nothing that could smuggle an operator or a path.
+# Client-chosen ids: nothing that could smuggle an operator or a path.
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
-# Turn ledger: how long a processed `client_msg_id` is remembered (Mongo TTL),
-# and after how long a turn still marked "processing" is presumed abandoned
-# (worker died with the process) and may be claimed again.
+# Processed ids are remembered for _TURN_TTL_S; a "processing" turn older than
+# _TURN_STALE_S is presumed abandoned and may be claimed again.
 _TURNS = "agent_turns"
 _TURN_TTL_S = 600
 _TURN_STALE_S = 180
 
 _turn_index_lock = threading.Lock()
-# id(db) -> db. The handle is held so its id can't be recycled by a new
-# database object (tests build many) that would then skip index creation.
+# id(db) -> db; holding the handle stops its id being recycled (tests build many).
 _turn_index_ready: dict = {}
 
 
@@ -81,9 +55,7 @@ def valid_client_id(value: Any) -> bool:
 
 
 def _scoped_for(mongo_db, uid: str, name: str) -> Optional[ScopedCollection]:
-    """`tenant_db.scoped` for `uid` (the route's caller) — every filter gets
-    user_id=uid, every insert is stamped with it. bump=False: a chat thread
-    and a turn record feed nothing the cached persona block is built from."""
+    """scoped() for the route's caller; bump=False (threads and turns feed no cached persona)."""
     with active_user_profile_context({"chat_id": uid}):
         return scoped(mongo_db, name, bump=False)
 
@@ -93,12 +65,7 @@ def _conversations(mongo_db, uid: str) -> Optional[ScopedCollection]:
 
 
 def ensure_conversation(mongo_db, uid: str, cid: str) -> bool:
-    """Make sure `cid` is one of `uid`'s conversations, creating it (empty,
-    untitled — the first user message titles it, as with POST) when no such id
-    exists. False when the id is malformed or belongs to someone else: `_id` is
-    unique across users, so the insert fails and the scoped re-read finds
-    nothing — another user's thread is never read or written.
-    """
+    """True if `cid` is (or has just become) one of `uid`'s conversations; False if malformed or another user's."""
     if mongo_db is None or not uid or not valid_client_id(cid):
         return False
     coll = _conversations(mongo_db, uid)
@@ -118,8 +85,7 @@ def ensure_conversation(mongo_db, uid: str, cid: str) -> bool:
         })
         return True
     except DuplicateKeyError:
-        # Either a concurrent create of our own (the stream and the append
-        # race on a new chat's first message) or someone else's id.
+        # A concurrent create of our own, or someone else's id.
         return coll.find_one({"_id": cid}, {"_id": 1}) is not None
 
 
@@ -128,8 +94,7 @@ def _turns(mongo_db, uid: str) -> ScopedCollection:
     if _turn_index_ready.get(key) is not mongo_db:
         with _turn_index_lock:
             if _turn_index_ready.get(key) is not mongo_db:
-                # Index management stays on the raw handle (tenant_db's rule);
-                # both indexes lead with / are independent of the tenant.
+                # Indexes on the raw handle (tenant_db's rule).
                 raw = mongo_db[_TURNS]
                 try:
                     raw.create_index([("user_id", 1), ("client_msg_id", 1)],
@@ -153,12 +118,9 @@ def _age_s(ts) -> float:
 def claim_turn(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
     """Claim the turn for (uid, client_msg_id).
 
-    Returns ("new", None) — the caller runs the turn and must `finish_turn`;
-    ("done", result) — already answered, return the stored reply;
-    ("processing", None) — another request is running it right now.
-    A turn whose earlier run failed, or that has sat in "processing" past
-    `_TURN_STALE_S`, is claimed again (compare-and-set on `attempt`, so only
-    one retry wins). Without a db, a user or a valid key there is no ledger.
+    ("new", None): run it and call finish_turn · ("done", result): already answered ·
+    ("processing", None): running elsewhere. A failed or stale turn is re-claimed by
+    compare-and-set on `attempt`. No db/user/valid key → no ledger.
     """
     if mongo_db is None or not uid or not valid_client_id(cmid):
         return "new", None
@@ -171,7 +133,7 @@ def claim_turn(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
     except DuplicateKeyError:
         pass
     d = coll.find_one({"client_msg_id": cmid})
-    if d is None:  # expired between the insert and the read — take it fresh
+    if d is None:  # expired between insert and read
         try:
             coll.insert_one({"client_msg_id": cmid, "status": "processing",
                              "attempt": 1, "created_at": now})
@@ -193,8 +155,7 @@ def claim_turn(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
 
 
 def turn_status(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
-    """Current ledger state: ("done", result) / ("processing", None) /
-    ("error", None) / ("missing", None)."""
+    """("done", result) / ("processing"|"error"|"missing", None)."""
     if mongo_db is None or not uid or not valid_client_id(cmid):
         return "missing", None
     d = _turns(mongo_db, uid).find_one({"client_msg_id": cmid})
@@ -206,8 +167,7 @@ def turn_status(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
 
 def finish_turn(mongo_db, uid: str, cmid: str, result: Optional[dict] = None,
                 error: bool = False) -> None:
-    """Record how a claimed turn ended. Best-effort: a failed write only
-    costs a retry its shortcut (it re-runs after the stale window)."""
+    """Record how a claimed turn ended (best-effort)."""
     if mongo_db is None or not uid or not valid_client_id(cmid):
         return
     coll = _turns(mongo_db, uid)
@@ -218,8 +178,7 @@ def finish_turn(mongo_db, uid: str, cmid: str, result: Optional[dict] = None,
         if error or "image_url" not in (result or {}):
             logger.warning("[turns] finish failed", exc_info=True)
             return
-        # A big generated image can push the record past Mongo's cap; the
-        # text alone still spares the retry a second run.
+        # A big generated image can exceed Mongo's cap; the text alone still helps a retry.
         try:
             slim = {k: v for k, v in (result or {}).items() if k != "image_url"}
             coll.update_one({"client_msg_id": cmid},
@@ -239,7 +198,7 @@ def release_turn(mongo_db, uid: str, cmid: str) -> None:
 
 
 def _uid(claims) -> str:
-    """Caller's user id, or '' which every query treats as fail-closed."""
+    """Caller's user id, or '' (every query then fails closed)."""
     return str(claims.get("user_id") or "")
 
 
@@ -248,15 +207,13 @@ def _now() -> str:
 
 
 def _title_from(text: str) -> str:
-    """A short fallback title from the first user message (used until the LLM
-    title lands, and if the LLM is unavailable)."""
+    """Fallback title from the first user message, until the LLM title lands."""
     t = " ".join((text or "").split())
     return t[:40] if t else "محادثة جديدة"
 
 
 def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
-    """Generate a short smart title from the first exchange and store it. Runs in
-    a background thread (a small LLM call) so it never slows the message append."""
+    """Small LLM title from the first exchange; runs in the background."""
     try:
         from app.config import (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
                                  AZURE_OPENAI_API_VERSION, AZURE_OPENAI_CHAT_DEPLOYMENT)
@@ -268,13 +225,12 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
             api_key=AZURE_OPENAI_API_KEY,
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_version=AZURE_OPENAI_API_VERSION,
-            max_retries=0,  # fail fast — the SDK's default retries silently triple any timeout
+            max_retries=0,
         )
         from app.integrations.azure_intent_client import _create_chat_resilient
         from app.integrations.openai_client import DEFAULT_CHAT_TIMEOUT_S
 
-        # Adapter, breaker and a deadline — this runs on the shared background
-        # pool, where a hung call would hold a worker indefinitely.
+        # Breaker + deadline: this runs on the shared background pool.
         resp = _create_chat_resilient(client, {
             "model": AZURE_OPENAI_CHAT_DEPLOYMENT,
             "messages": [
@@ -292,7 +248,7 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
             coll.update_one({"_id": cid, "user_id": uid},
                             {"$set": {"title": title[:60], "title_generated": True}})
     except Exception:  # noqa: BLE001 — العنوان تحسين، فشله يترك عنوان أول رسالة
-        logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
+        logger.debug("[conversations] title generation failed", exc_info=True)
 
 
 def _generate_title_async(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
@@ -303,12 +259,9 @@ def _generate_title_async(coll, cid: str, uid: str, user_msg: str, reply: str) -
 
 
 def _semantic_hits(mongo_db, query: str, limit: int = 30):
-    """Conversation ids whose rolling summary is semantically close to the query —
-    reuses the agent's vector-indexed LTM (`sandy_memories`, label
-    `conversation_summary`, keyed by chat_id == conversation_id). Returns
-    [(conversation_id, summary)]; ownership is enforced by the caller's lookup in
-    `conversations`. Best-effort: any failure (no embeddings / no vector index)
-    yields [] and the text search alone still answers.
+    """[(conversation_id, summary)] whose rolling summary matches the query by meaning.
+
+    Ownership is checked by the caller; any failure yields [] (text search still answers).
     """
     if mongo_db is None:
         return []
@@ -332,7 +285,7 @@ def _semantic_hits(mongo_db, query: str, limit: int = 30):
             (str(d.get("chat_id", "")), d.get("summary", ""))
             for d in mongo_db["sandy_memories"].aggregate(pipeline)
         ]
-    except Exception:  # noqa: BLE001 — semantic is additive; text search is the floor
+    except Exception:  # noqa: BLE001 — text search is the floor
         return []
 
 
@@ -433,9 +386,7 @@ def register_conversations_api(app, mongo_db=None):
         text = (body.get("text") or "").strip()
         if role not in ("user", "sandy") or not text:
             return jsonify({"error": "bad_message"}), 400
-        # One message, bounded. Every message is pushed onto a single document,
-        # and Mongo caps a document at 16 MB — one oversized append was enough
-        # to make every later write to the thread fail.
+        # Bounded: every message is pushed onto one document (16 MB cap).
         text = text[:_MAX_MESSAGE_CHARS]
 
         d = coll.find_one(
@@ -443,9 +394,7 @@ def register_conversations_api(app, mongo_db=None):
             {"title": 1, "title_generated": 1, "messages": {"$slice": -1}},
         )
         if not d:
-            # A new chat whose id the app chose: the append may land before
-            # the chat stream created it. Create it for this user — or 404
-            # when the id is someone else's.
+            # A new chat whose id the app chose; 404 if the id is someone else's.
             if not ensure_conversation(mongo_db, uid, cid):
                 return jsonify({"error": "not_found"}), 404
             d = {}
@@ -454,12 +403,12 @@ def register_conversations_api(app, mongo_db=None):
             "$push": {"messages": {"role": role, "text": text, "ts": _now()}},
             "$set": {"updated_at": _now()},
         }
-        # First user message becomes the fallback title until the smart one lands.
+        # First user message is the fallback title.
         if role == "user" and not (d.get("title") or "").strip():
             update["$set"]["title"] = _title_from(text)
         coll.update_one({"_id": cid, "user_id": uid}, update)
 
-        # On the first Sandy reply, generate a smart title from the first exchange.
+        # First Sandy reply: generate a smart title from the first exchange.
         if role == "sandy" and not d.get("title_generated"):
             last = (d.get("messages") or [])
             last_user = last[-1].get("text", "") if last and last[-1].get("role") == "user" else ""
@@ -476,10 +425,7 @@ def register_conversations_api(app, mongo_db=None):
             return jsonify({"items": []}), 200
         items = []
         seen = set()
-        # 1) Text match over titles + messages, done by the database. This used
-        #    to pull the 300 newest threads whole — every message of every one —
-        #    to scan them here; now only matching threads come back, each with
-        #    its title and the first matching message.
+        # 1) Text match over titles + messages, in the database.
         in_title = contains("title", q)
         in_message = contains("text", q)
         title_hit = re.compile(in_title["title"]["$regex"], re.IGNORECASE)
@@ -501,9 +447,7 @@ def register_conversations_api(app, mongo_db=None):
             })
             seen.add(str(d["_id"]))
 
-        # 2) Semantic match over rolling summaries (finds it by meaning, not words).
-        #    Ownership enforced here: we only surface the caller's own conversations,
-        #    looked up in one query rather than one per hit.
+        # 2) Semantic match over rolling summaries, limited to the caller's own threads.
         if len(items) >= _MAX_SEARCH_RESULTS:
             return jsonify({"items": items}), 200
         hits = [(cid, s) for cid, s in _semantic_hits(mongo_db, q) if cid and cid not in seen]

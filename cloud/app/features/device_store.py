@@ -1,35 +1,10 @@
-"""Device registry — the single source of truth for controllable devices.
+"""Device registry — per-tenant controllable devices as data, not code.
 
-Devices are **data, not code**. Each tenant owns a list of devices; the brain,
-the scenes, and the app all read from this one registry. Adding a new device is a
-row here (plus, for IR, a one-time learn step) — never new code per device.
-
-This is what ends the "turn the light on -> applied the off scene" hallucination:
-the control layer may only act on a **registered** device with a **validated**
-action; anything unknown is refused (the caller asks), never guessed.
-
-Collection: sandy_devices (tenant-scoped via scoped())
-  {
-    _id, user_id (injected by scoped),
-    name,          # stable slug, unique per tenant ("living_light")
-    label,         # human label ("ضوء الصالة")
-    room,          # optional grouping ("salon")
-    control_type,  # switch | dimmer | enum | media | cover | ir | text
-    transport,     # how to reach it: {"kind": "node", "node_id": …, "output": …}
-                   #                  or {"kind": "mqtt", "topic": …} for a
-                   #                  device that is not on one of our boards
-    meta,          # type-specific: {values:[...]} for enum, {min,max} for dimmer,
-                   #                 {buttons:{name: code}} for ir
-    state,         # last known payload we sent ("" until first command)
-    online,        # last heartbeat seen (bool) — for diagnosis
-    last_seen,     # ISO of last heartbeat
-    builtin,       # seeded default (resettable, not deletable)
-    updated_at,
-  }
-
-Pure data + validation: this module does NOT actuate hardware. `command_payload`
-returns the validated payload string; the caller (device_control tool / API)
-routes it to the transport.
+Only registered devices with validated actions can be actuated; unknown ones are
+refused, never guessed. Pure data + validation: ``command_payload`` returns the
+payload, the caller sends it. Collection ``sandy_devices``: name (slug), label,
+room, control_type, transport ({"kind": "node", node_id, output} or
+{"kind": "mqtt", topic}), meta, state, online, last_seen, updated_at.
 """
 
 from __future__ import annotations
@@ -48,21 +23,11 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_devices"
 
-# سقف أمان، مش حد منتج — ما حدا بيوصله بالاستعمال العادي. موجود عشان
-# خلل بالكتابة أو حساب دخل عليه إشي غريب ما يتحوّل لنداء بيسحب المجموعة
-# كلها ويوقّع الطلب.
+# Safety cap, not a product limit.
 MAX_DEVICES = 500
 
-# ── Control types ───────────────────────────────────────────────────────────
-# Each control_type defines the actions it accepts. Validation is centralized in
-# command_payload() so no caller can invent an action/value.
-#
-#   switch  — on | off
-#   dimmer  — on | off | <int in [min,max]>           (meta.min/max, default 0..100)
-#   enum    — set one of meta.values (or pass the value directly)
-#   media   — on | off | pause
-#   cover   — open | close | stop
-#   ir      — send a learned button in meta.buttons (learn flow adds buttons)
+# switch: on|off · dimmer: on|off|int in meta.min..max · enum: meta.values ·
+# media: on|off|pause · cover: open|close|stop · ir: learned meta.buttons · text: free text
 CONTROL_TYPES = frozenset({"switch", "dimmer", "enum", "media", "cover", "ir", "text"})
 
 _MEDIA_ACTIONS = {"on", "off", "pause"}
@@ -70,9 +35,6 @@ _COVER_ACTIONS = {"open", "close", "stop"}
 _SWITCH_ACTIONS = {"on", "off"}
 
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
-
-# No devices are seeded from code. The registry starts empty per tenant; the owner
-# adds every device from the app. This keeps hardware fully decoupled from code.
 
 
 def init_device_store(mongo_db) -> None:
@@ -89,7 +51,6 @@ def init_device_store(mongo_db) -> None:
 
 
 def _coll():
-    """Tenant-scoped devices collection, or None when no db / no active tenant."""
     return scoped(get_db(), _COLL)
 
 
@@ -112,11 +73,9 @@ def _coerce_int(value: Any) -> Optional[int]:
 
 def command_payload(device: Dict[str, Any], action: str,
                     value: Any = "") -> Dict[str, Any]:
-    """Validate (action, value) for a device. The ONLY place commands are vetted.
+    """Validate (action, value) for a device — the only place commands are vetted.
 
-    Returns {"ok": True, "payload": "<mqtt payload>"} on success, or
-    {"ok": False, "error": "<code>", "allowed": [...]} on failure — the caller
-    surfaces `allowed` and asks instead of guessing.
+    {"ok": True, "payload": ...} or {"ok": False, "error": code, "allowed": [...]}.
     """
     ctype = str(device.get("control_type", "")).strip().lower()
     meta = device.get("meta") or {}
@@ -131,7 +90,6 @@ def command_payload(device: Dict[str, Any], action: str,
     if ctype == "dimmer":
         if action in _SWITCH_ACTIONS:
             return {"ok": True, "payload": action}
-        # "set"/"level" with a value, or the action itself being a number.
         lo = _coerce_int(meta.get("min", 0)) or 0
         hi = _coerce_int(meta.get("max", 100))
         hi = 100 if hi is None else hi
@@ -154,21 +112,15 @@ def command_payload(device: Dict[str, Any], action: str,
         return {"ok": False, "error": "bad_action", "allowed": sorted(_COVER_ACTIONS)}
 
     if ctype == "text":
-        # Free text, because what goes on her face is whatever the owner types.
-        # Not lower-cased and not matched against a list — those are exactly the
-        # transformations that would ruin a sentence.
+        # Free text: not lower-cased or matched against a list.
         text = str(value if value not in (None, "") else action)
         text = text.strip()
         if text.lower() in ("dismiss", "clear", ""):
             return {"ok": True, "payload": "dismiss"}
-        # Measured in bytes, not characters: Arabic is multi-byte in UTF-8, and
-        # the firmware's buffer is 256 bytes. Refusing here beats the board
-        # cutting a word in half.
+        # Bytes, not chars: the firmware buffer is 256 bytes and Arabic is multi-byte.
         limit = _coerce_int(meta.get("max_bytes", 255)) or 255
         if len(text.encode("utf-8")) > limit:
             return {"ok": False, "error": "too_long", "allowed": [f"<= {limit} bytes"]}
-        # Newlines would break the single-line MQTT payload; a space reads the
-        # same on a 240-pixel display.
         text = text.replace("\n", " ").replace("\r", " ")
         return {"ok": True, "payload": "text:" + text}
 
@@ -183,7 +135,6 @@ def command_payload(device: Dict[str, Any], action: str,
         buttons = {str(k).strip().lower(): v for k, v in (meta.get("buttons") or {}).items()}
         btn = raw if raw in buttons else (action if action in buttons else "")
         if btn:
-            # The MQTT payload is the learned code; the node replays it.
             return {"ok": True, "payload": str(buttons[btn]), "button": btn}
         return {"ok": False, "error": "not_learned", "allowed": sorted(buttons)}
 
@@ -235,7 +186,6 @@ def get_devices(names: List[str]) -> Dict[str, Dict[str, Any]]:
 def add_device(name: str, label: str, control_type: str,
                transport: Dict[str, Any], room: str = "",
                meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Register a new device. Validates name/type/transport; refuses duplicates."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_store"}
@@ -267,7 +217,6 @@ def add_device(name: str, label: str, control_type: str,
 
 
 def update_device(name: str, **fields: Any) -> Dict[str, Any]:
-    """Patch label/room/control_type/transport/meta. Unknown keys ignored."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_store"}
@@ -301,7 +250,6 @@ def update_device(name: str, **fields: Any) -> Dict[str, Any]:
 
 
 def delete_device(name: str) -> Dict[str, Any]:
-    """Delete a device the owner added."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_store"}
@@ -313,7 +261,7 @@ def delete_device(name: str) -> Dict[str, Any]:
 
 
 def set_state(name: str, payload: str) -> None:
-    """Record the last payload we sent to a device (best-effort, never raises)."""
+    """Record the last payload sent (best-effort, never raises)."""
     coll = _coll()
     if coll is None:
         return
@@ -325,7 +273,6 @@ def set_state(name: str, payload: str) -> None:
 
 
 def learn_ir_button(name: str, button: str, code: str) -> Dict[str, Any]:
-    """Store a learned IR code under a button name for an `ir` device."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_store"}
@@ -347,13 +294,7 @@ def learn_ir_button(name: str, button: str, code: str) -> Dict[str, Any]:
 
 
 def delete_devices_for_node(node_id: str) -> int:
-    """Remove every device in this tenant that reaches the world through a node.
-
-    Called by `node_store.unpair_node`, because releasing a robot has to release
-    what it actuates. Tenant-scoped like everything else here, so unpairing
-    cannot touch another account's rows even if two of them somehow shared a
-    node id.
-    """
+    """Remove this tenant's devices that go through a node (on unpair)."""
     coll = _coll()
     node_id = (node_id or "").strip()
     if coll is None or not node_id:
@@ -369,8 +310,7 @@ def delete_devices_for_node(node_id: str) -> int:
 
 
 def device_topic(device: Dict[str, Any]) -> Optional[str]:
-    """The MQTT topic to actuate a device, derived from its transport. One source
-    of truth shared by the FC tool and the REST API."""
+    """MQTT topic for a device, from its transport."""
     t = device.get("transport") or {}
     kind = str(t.get("kind", "")).strip().lower()
     if kind == "mqtt":
@@ -384,18 +324,9 @@ def device_topic(device: Dict[str, Any]) -> Optional[str]:
 
 
 def _topic_query(topic: str) -> Dict[str, Any]:
-    """The transport that would produce ``topic`` — device_topic() run backwards.
+    """device_topic() run backwards, so ownership is one indexed lookup.
 
-    This exists so the ownership check is a lookup and not a scan. It runs on
-    every actuation, and the version before it read every device the tenant owned
-    and derived each one's topic in Python to see if any matched. Correct, and
-    linear in the size of the account: somebody with forty devices paid forty
-    documents to press one button.
-
-    If the two ever disagree, this returns nothing and the actuation is refused.
-    That direction matters: a mismatch costs a button that does not work, not a
-    tenant reaching somebody else's hardware. The equivalence is pinned by a
-    test that builds a device, derives its topic, and asserts this finds it.
+    If the two ever disagree the actuation is refused (a test pins them equal).
     """
     if topic.startswith("sandy/node/"):
         rest = topic[len("sandy/node/"):]
@@ -409,15 +340,7 @@ def _topic_query(topic: str) -> Dict[str, Any]:
 
 
 def tenant_owns_topic(topic: str) -> bool:
-    """True when ``topic`` actuates a device registered to the CURRENT tenant.
-
-    The actuation boundary calls this instead of asking "is the caller the
-    owner?" — that older question had exactly one right answer and it was the
-    wrong shape for a product other people buy. Here the tenant-scoped read *is*
-    the enforcement: a topic that belongs to somebody else's device is simply not
-    in this tenant's collection, so it comes back False. No tenant, no database,
-    or no matching device all fail closed the same way.
-    """
+    """True when ``topic`` actuates a device of the current tenant (the scoped read is the check)."""
     coll = _coll()
     if coll is None:
         return False
@@ -437,9 +360,7 @@ def _valid_transport(transport: Any) -> bool:
     kind = str(transport.get("kind", "")).strip().lower()
     if kind == "mqtt":
         topic = str(transport.get("topic", "")).strip()
-        # The sandy/node/... namespace is reserved for the ownership-checked
-        # "node" transport. A raw mqtt topic must NOT target it, else a tenant
-        # could aim a device at another tenant's node via a free-form topic.
+        # sandy/node/... is reserved for the ownership-checked "node" transport.
         return bool(topic) and not topic.startswith("sandy/node/")
     if kind == "node":
         return bool(str(transport.get("node_id", "")).strip()) and bool(
@@ -451,11 +372,7 @@ def _valid_transport(transport: Any) -> bool:
 
 
 def _transport_owned(transport: Any) -> bool:
-    """For a ``node`` transport, the node_id must be one THIS tenant paired.
-
-    Runs inside the caller's tenant context, so the scoped node lookup only sees
-    the caller's own nodes — pointing a device at another tenant's node_id is
-    refused. Non-node transports have nothing to own here (True)."""
+    """A ``node`` transport must point at a node this tenant paired."""
     t = transport if isinstance(transport, dict) else {}
     if str(t.get("kind", "")).strip().lower() != "node":
         return True
@@ -465,6 +382,6 @@ def _transport_owned(transport: Any) -> bool:
     try:
         from app.features import node_store
         return node_store.get_node(node_id) is not None
-    except Exception as e:  # noqa: BLE001 — treat a lookup failure as not-owned
+    except Exception as e:  # noqa: BLE001
         logger.warning("[DeviceStore] node ownership check failed: %s", e)
         return False

@@ -166,10 +166,6 @@ def test_an_output_the_room_never_declared_is_not_sent(db):
         assert client.send("fan", "on") is False
         assert client.send("light", "on") is True
         assert published == [("sandy/node/8421/room/light", "on")]
-        result = client.apply_actions([{"device": "light", "value": "off"},
-                                       {"device": "curtain", "value": "open"}])
-        assert [a["device"] for a in result["sent"]] == ["light"]
-        assert [a["device"] for a in result["skipped"]] == ["curtain"]
 
 
 def test_music_accepts_what_the_player_understands_and_nothing_more():

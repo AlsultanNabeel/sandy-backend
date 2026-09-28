@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Production WSGI entrypoint for gunicorn.
-
-``serve_api.py`` is the local dev runner (Flask's built-in werkzeug server, single
-process — fine for a laptop, but it serializes requests and chokes when a screen
-fires several calls at once). In production we run this module under gunicorn with
-multiple workers/threads so requests are served concurrently:
-
-    gunicorn --chdir cloud wsgi:app --workers 2 --threads 8 --timeout 120
-
-It builds the SAME app as ``serve_api.main()`` but exposes a module-level ``app``
-object for gunicorn to import. The ``/voice`` WebSocket (flask-sock) runs inside a
-worker thread, which the threaded worker handles fine.
-"""
+"""Production WSGI entrypoint: gunicorn --chdir cloud wsgi:app --workers 2 --threads 8 --timeout 120."""
 
 from __future__ import annotations
 
@@ -28,13 +16,8 @@ from app.api.server import create_app  # noqa: E402
 from app.config import APP_ENV, LOG_LEVEL  # noqa: E402
 from app.db import get_db  # noqa: E402
 
-# Logging first: `init_runtime` connects Mongo and logs what it found, and
-# before this those lines went to Python's last-resort handler (WARNING and up)
-# — the connection report was the one thing silenced. `bootstrap` calls it
-# again; `basicConfig` makes the second call a no-op.
+# Logging first, so init_runtime's Mongo connection report isn't swallowed.
 configure_logging(LOG_LEVEL)
-# Explicit runtime init (no import-time side effects): connect Mongo, register the
-# shared handle on app.db, initialize the feature stores, start ingest.
 init_runtime()
 app = create_app(mongo_db=get_db())
 bootstrap(app_env=APP_ENV, app=app)

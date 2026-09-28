@@ -1,14 +1,4 @@
-"""Timeline API — one unified, time-ordered activity log across the user's data.
-
-Aggregates the user's tasks, reminders, expenses and journal entries into a single
-stream of events (newest first), each carrying its source type + id so the app can
-act on it (delete via the source's own endpoint, jump to its tab to edit). Real
-data only, scoped to the caller. No new storage — reads the existing per-feature
-stores inside the caller's profile context.
-
-Endpoint:
-  GET /api/timeline   unified activity events {type,id,title,subtitle,ts,done}
-"""
+"""GET /api/timeline: the user's tasks, reminders, expenses and journal as one newest-first stream."""
 
 from __future__ import annotations
 
@@ -75,7 +65,6 @@ def _journal_events():
     } for j in recent_entries(limit=100)]
 
 
-# Most events one response carries.
 _MAX_EVENTS = 300
 
 
@@ -85,10 +74,7 @@ def register_timeline_api(app):
     def get_timeline(claims):
         from app.utils.thread_pool import gather
 
-        # The four sources are independent, so they are read at the same time
-        # rather than one after another; `gather` carries the caller's tenant
-        # into each job, and a source that fails contributes nothing (logged
-        # there) instead of failing the whole timeline.
+        # Read in parallel; a failing source contributes nothing.
         with active_user_profile_context(build_user_profile(claims)):
             parts = gather({
                 "tasks": _task_events,

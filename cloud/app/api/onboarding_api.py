@@ -1,19 +1,4 @@
-"""Web API for first-open onboarding — native multi-user store.
-
-A brand-new user opening the app for the first time answers a tiny
-get-to-know-you flow (preferred name + interests). The answers live in the
-``onboarding`` sub-doc of their ``sandy_users`` record (see
-``app.features.users_store``) and feed straight into Sandy's per-user context so
-she greets them by name and knows what they care about.
-
-Two routes, both ``@require_auth`` (every signed-in user manages their own):
-  GET  /api/onboarding → current onboarding state (empty defaults if unset)
-  POST /api/onboarding → save preferred name + interests (+ optional notes)
-
-Follows the same module shape as ``productivity_api`` — a single
-``register_onboarding_api(app)`` that defines the routes. The app factory wires
-it up; this module never registers itself.
-"""
+"""GET/POST /api/onboarding: first-open preferred name, interests and notes (sandy_users.onboarding)."""
 
 from __future__ import annotations
 
@@ -23,8 +8,7 @@ from app.api.auth_handlers import require_auth
 from app.features import users_store
 
 _MAX_INTERESTS = 20
-# These go straight into every prompt Sandy is given, so they are bounded like
-# the persona's custom instructions are.
+# Bounded: these go into every prompt.
 _MAX_NAME = 60
 _MAX_INTEREST = 60
 _MAX_NOTES = 2000

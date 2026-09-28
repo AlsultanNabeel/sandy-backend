@@ -1,15 +1,4 @@
-"""Web API for reminders and tasks — native MongoDB stores.
-
-Every signed-in user (owner or regular app user) gets real CRUD against
-sandy_reminders/sandy_tasks, scoped to their own ``user_id`` — the same
-collections the chat and the voice channel use. A guest (visitor page)
-sees the same tabs but with obviously-fake demo data, so the page looks alive
-without exposing anything private.
-
-All store calls run inside ``active_user_profile_context(build_user_profile(...))``
-so the stores' ``current_user_id()`` resolves to THIS caller and every read/write
-is isolated per user. It's the same wiring the web chat pipeline uses.
-"""
+"""Reminders and tasks REST API over the same stores as chat and voice; guests get demo data."""
 
 from __future__ import annotations
 
@@ -18,7 +7,7 @@ from flask import jsonify, request
 from app.api.auth_handlers import require_auth, require_tenant
 from app.utils.user_profiles import active_user_profile_context, build_user_profile
 
-# Allowed task priorities; anything else falls back to "normal".
+# Anything else falls back to "normal".
 _PRIORITIES = {"low", "normal", "high"}
 
 
@@ -31,9 +20,7 @@ def _is_guest(claims) -> bool:
     return claims.get("role") == "guest"
 
 
-# Fake data so a visitor's tab mirrors the owner's layout without leaking the
-# real reminders/tasks. The frontend hides every add/edit/delete control when
-# ``demo`` is true.
+# Fake data for visitors; the app hides edit controls when ``demo`` is true.
 _DEMO_REMINDERS = [
     {"id": "demo-r1", "text": "موعد طبيب الأسنان", "remind_at": "2026-06-05T16:00:00", "is_recurring": False},
     {"id": "demo-r2", "text": "اتصل بأحمد بخصوص المشروع", "remind_at": "2026-06-06T11:30:00", "is_recurring": False},
@@ -49,18 +36,15 @@ _DEMO_TASKS_DONE = [
 ]
 
 
-# What "remind me later" means when the caller does not say. Ten minutes is long
-# enough to finish what interrupted you and short enough to still matter.
+# Default snooze when the caller doesn't say.
 _DEFAULT_SNOOZE_MIN = 10
 
 
 def _reminder_action(reminder_id, action, body):
-    """snooze / done on one reminder. Returns the next time so the caller can
-    reschedule its local notification without a round trip to the list."""
+    """snooze / done on one reminder; returns the next time so the phone can reschedule locally."""
     from app.features.reminders_store import complete_reminder, snooze_reminder
 
     if action == "snooze":
-        # An absent (or null) "minutes" is "you decide", not a bad request.
         minutes = body.get("minutes")
         res = snooze_reminder(
             reminder_id,
@@ -80,7 +64,6 @@ def _reminder_action(reminder_id, action, body):
 
 
 def register_productivity_api(app, mongo_db=None):
-    # Reminders (native store)
     @app.route("/api/reminders", methods=["GET"])
     @require_auth
     def api_list_reminders(claims):
@@ -95,8 +78,7 @@ def register_productivity_api(app, mongo_db=None):
                 "text": r.get("text", ""),
                 "remind_at": r.get("remind_at", ""),
                 "is_recurring": bool(r.get("is_recurring", False)),
-                # The RRULE, so the phone can schedule a repeating notification
-                # instead of one that rings once.
+                # The RRULE, so the phone can schedule a repeating notification.
                 "recurrence": r.get("recurrence", "") or "",
                 "note": r.get("note", "") or "",
             }
@@ -130,10 +112,7 @@ def register_productivity_api(app, mongo_db=None):
     def api_update_reminder(reminder_id, claims):
         body = request.get_json(silent=True) or {}
 
-        # A reminder that just rang is acted on, not edited: {"action":"snooze",
-        # "minutes":10} re-arms it (recurrence intact) and {"action":"done"}
-        # retires this occurrence. Same route, same error shape — the phone's
-        # notification buttons and the row's swipe actions both land here.
+        # {"action": "snooze", "minutes": 10} or {"action": "done"} act on a reminder that rang.
         action = str(body.get("action") or "").strip().lower()
         if action:
             return _reminder_action(reminder_id, action, body)
@@ -157,7 +136,6 @@ def register_productivity_api(app, mongo_db=None):
         ok = delete_reminder(reminder_id)
         return jsonify({"ok": bool(ok)}), (200 if ok else 400)
 
-    # Tasks (native store)
     @app.route("/api/tasks", methods=["GET"])
     @require_auth
     def api_list_tasks(claims):

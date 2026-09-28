@@ -1,11 +1,4 @@
-"""Voice TTS endpoint — Sandy's natural Gemini voice (WAV) for given text.
-
-The iOS app fetches this to play Sandy's real voice and drive her mouth from the
-audio amplitude (lip-sync), instead of the phone's robotic on-device synthesizer.
-
-Output: ``audio/wav`` (LINEAR16 PCM @ 22050 Hz, mono) — exactly what
-``synthesize_voice_with_gemini`` returns.
-"""
+"""POST /api/voice/tts: Sandy's Gemini voice as WAV, for the app's lip-synced playback."""
 
 from __future__ import annotations
 
@@ -15,7 +8,6 @@ from app.api.auth_handlers import require_auth
 
 
 def register_voice_api(app) -> None:
-    """Attach ``POST /api/voice/tts`` to an existing Flask app."""
 
     @app.route("/api/voice/tts", methods=["POST"])
     @require_auth
@@ -26,7 +18,7 @@ def register_voice_api(app) -> None:
         if not text:
             return jsonify({"error": "text_required"}), 400
 
-        # حد أمان للطول — ما نطوّل التوليد بلا داعٍ (الردود الصوتية قصيرة عادة).
+        # حد أمان للطول.
         text = text[:1200]
 
         from app.integrations.gemini_tts import synthesize_voice_with_gemini

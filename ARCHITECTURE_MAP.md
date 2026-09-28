@@ -400,7 +400,7 @@ Now:
 - **`room_device.send_to_topic()`** gates on that. Every registry-driven path goes
   through it: the `device_control` tool, `/api/devices/<name>/control`, IR learn,
   and scene actuation.
-- **`room_device.send()` / `apply_actions()`** take a device *name* and resolve the
+- **`room_device.send()`** takes a device *name* and resolves the
   node from the **caller**, so a call site cannot address another tenant's room by
   getting an argument wrong — there is no argument for it. Two nodes paired is
   refused rather than guessed: guessing wrong turns off the wrong light in
