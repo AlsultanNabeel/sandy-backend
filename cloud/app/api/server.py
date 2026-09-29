@@ -287,8 +287,12 @@ def create_app(
         # Must match run_graph's thread_id so pending state round-trips.
         thread_id = conversation_id or user_id
         loaded_pending = load_pending_state(thread_id, user_id, mongo_db)
+        from app.brain import enabled as _new_agent_enabled
+        runner = run_graph
+        if _new_agent_enabled():
+            from app.brain.loop import run_turn as runner
         with active_user_profile_context(_profile):
-            state = run_graph(
+            state = runner(
                 message,
                 user_id=user_id,
                 chat_id=user_id,

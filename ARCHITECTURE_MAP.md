@@ -125,7 +125,8 @@ package import in a test with no credentials. Do not add import-time side effect
 | `app/integrations/` | Clients for everything external. |
 | `app/services/` | Push delivery (APNs), the nudge scheduler, and the scene-timer runner (once a minute). |
 | `app/utils/` | Tenancy (+ `tenant_version`), circuit breaker, background thread pool, profiles, time, text. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
-| `app/blocks/` | Phase 1 of the rebuild, not wired in yet — log / lists / schedules + the kinds table (§2.12). |
+| `app/blocks/` | The rebuild's data layer — log / lists / schedules + the kinds table (§2.12). |
+| `app/brain/` | Phase 2 of the rebuild: the one-call agent on the blocks, behind `SANDY_NEW_AGENT` (§2.13). |
 
 ### 2.3 The agent graph
 
@@ -535,10 +536,11 @@ owner's machine, not in a sandbox.
 **Where a chat turn's time goes** is one log line: `[turn] …ms total — route ·
 soul · <node> (<tool>)`, from `run_graph`. Grep it before theorising.
 
-### 2.12 `app/blocks/` — Phase 1 of the rebuild: not wired in yet
+### 2.12 `app/blocks/` — Phase 1 of the rebuild
 
-Nothing imports this package outside its own tests and the migration script; the
-agent, tools, API, voice path and bootstrap still use the feature stores above.
+Only `app/brain/` (§2.13, behind a flag that defaults off), its own tests and the
+migration script use this package; with the flag off, the agent, tools, API,
+voice path and bootstrap still use the feature stores above.
 It is the replacement for them: every feature becomes a row in one of three
 collections instead of its own store + tools + routes.
 
@@ -564,6 +566,72 @@ write, `--user <id>` for one tenant. Every written doc has `migrated_from:
 {collection, id}` and an `_id` derived from it, so a re-run skips what is
 already there. It only reads the old collections. The mapping table is in its
 `SOURCES`; its docstring lists what is deliberately not migrated.
+
+### 2.13 `app/brain/` — Phase 2 of the rebuild: one agent, behind `SANDY_NEW_AGENT`
+
+`SANDY_NEW_AGENT=1` (`app/config.py`, default **off**) switches chat and voice
+from the graph (§2.3) and the 80-tool registry (§2.4) to this package. The flag
+is read at call time through `brain.enabled()`. With it off nothing below runs.
+
+**Entry points (the only places that check the flag):**
+- `api/server.py::_run_authenticated_agent`: `run_graph` or `brain.loop.run_turn`.
+  Same arguments, and the result carries the keys the route reads
+  (`final_response`, `pending_state`, `execution_result`), so `/api/agent` and
+  `/api/agent/stream` are otherwise unchanged. Pending load/save, metering and the
+  turn ledger stay as they are.
+- `api/voice_ws/tools.py`: `_build_live_tools` declares `brain.voice.declarations()`,
+  `_make_dispatcher` returns a marker, `_dispatch_tool` calls `brain.voice.dispatch`
+  in the caller's tenant.
+
+**The turn** (`loop.py`): fast path first (`agent/fast_path.py`, unchanged; a bare
+device command costs no model call) → a held confirmation is resolved →
+`context.build_system` → at most **6** model calls with native tools
+(model → tool calls → results → model, until it answers in text) → STM save through
+`graph._stm_save`. The model call (`model.py`) is the old chat reply's client:
+the Azure chat deployment via `execute._get_chat_completion_fn` (breaker + param
+quirks), then OpenAI direct (`OPENAI_MODEL`). The Gemini/Bedrock router options
+are not used. Text streams through the same thread-local hooks
+(`execute.set_stream_hooks`), cumulative, as the old chat reply did.
+
+**Context** (`context.py`), built once per turn: `build_effective_persona`
+(so `SANDY_PERSONALITY` and custom instructions still apply) + `address_instruction`,
+the newest 40 `fact` entries (decrypted with `ltm_crypto` when `data.encrypted`),
+the top 8 non-fact entries by cosine over their `embedding` (the newest 400 are
+scored in Python, since there is no Atlas index on `sandy_entries`; text search
+when embeddings are off), the time block (`time_awareness_block`), and the recent
+turns from the same cross-channel STM read as `run_graph`.
+
+**Tools** (`tools.py`, 12; voice adds `confirm`). Enums come from `kinds.KINDS`, so a new kind
+needs no tool change.
+
+| Tool | Does |
+|---|---|
+| `remember` | `entries.add(kind, text, data)` |
+| `recall` | entries + items + pending schedules, filtered by kind / list / since / until / query words; compact rows |
+| `list_add` | `items.add`; `due` parsed like `when` |
+| `list_update` | by `id` or `match_text` (the `tasks_matcher` ladder, `matching.py`): done / text / due / delete |
+| `schedule` | `schedules.add`; `when` = ISO, else `time_parser` + `arabic_days` |
+| `schedule_update` | move / rename / cancel (status `cancelled`) |
+| `summarize` | the period's entries, items and schedules as rows; the model writes the summary, nothing is stored |
+| `device_control`, `scene_apply` | the old handlers, so `command_payload` / `tenant_owns_topic` are still the gate |
+| `web_search`, `weather`, `image` | the old `research_web` / `get_weather` / `image_generate` handlers |
+
+**Confirmation** (`confirm.py`): deletes, cancels and multi-row changes return
+`needs_confirmation`; the loop stores a `brain_confirm` pending
+(`agent/pending.py` lifecycle, `pending_store`) and asks
+«متأكد إنك بدك …؟ (اه/لأ)» without a second model call. The next turn is read
+by `executor/helpers.is_cancellation` then `_is_quick_confirmation` (the resolver
+the router and pending dispatch share). Yes runs the held call, no cancels,
+anything else drops the hold and is a normal turn. On voice there is no text turn
+to read, so the `confirm(answer)` tool passes the user's words to the same resolver,
+and holds go to the `voice` pending thread as before. The speaker gate
+(`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) lists old tool names only, so it does not
+guard the brain's tools yet.
+
+**Known gap until phase 3/4:** the iPhone app reads reminders from `/api/reminders`
+(`sandy_reminders`) and schedules local notifications from it. With the flag on,
+reminders made in chat live in `sandy_schedules` and do **not** ring on the phone.
+Nothing fires `sandy_schedules` yet either.
 
 ---
 
@@ -1025,7 +1093,7 @@ database.
 
 ## 9. Tests and CI
 
-89 test files, pytest + mongomock, no hardware and no live credentials needed.
+110 test files, pytest + mongomock, no hardware and no live credentials needed.
 `tests/test_device_system.py` carries the headline guarantee: the brain may only
 act on a **registered** device with a **validated** action, and refuses with the
 allowed list rather than guessing.
