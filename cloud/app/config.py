@@ -108,6 +108,10 @@ SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
 SANDY_FAST_PATH: bool = os.getenv("SANDY_FAST_PATH", "1").strip().lower() not in (
     "0", "false", "no", "off")
 
+# ── The rebuilt agent (app/brain/); SANDY_NEW_AGENT=1 switches chat + voice to it ──
+SANDY_NEW_AGENT: bool = os.getenv("SANDY_NEW_AGENT", "0").strip().lower() in (
+    "1", "true", "yes", "on")
+
 # ── Native social sign-in: the audience an ID token must be minted for ──────
 # (empty in prod refuses sign-in; outside prod the check is skipped).
 GOOGLE_OAUTH_CLIENT_ID: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()

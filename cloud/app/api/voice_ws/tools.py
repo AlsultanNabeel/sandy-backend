@@ -380,7 +380,11 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
 
 
 def _build_live_tools(types) -> Optional[List]:
-    """Tools for LiveConnectConfig from the global ToolRegistry."""
+    """Tools for LiveConnectConfig from the global ToolRegistry (or the brain's, behind the flag)."""
+    from app.brain import enabled as _new_agent_enabled
+    if _new_agent_enabled():
+        from app.brain.voice import declarations
+        return [types.Tool(function_declarations=declarations())]
     try:
         from app.agent.tools.registry import get_registry
         from app.agent.tools.setup import register_all_tools
@@ -394,7 +398,14 @@ def _build_live_tools(types) -> Optional[List]:
         return None
 
 
+# Stands in for the ToolDispatcher when the brain runs voice; session.py only checks it is set.
+_BRAIN_DISPATCHER = "brain"
+
+
 def _make_dispatcher():
+    from app.brain import enabled as _new_agent_enabled
+    if _new_agent_enabled():
+        return _BRAIN_DISPATCHER
     try:
         from app.agent.tools.dispatcher import ToolDispatcher
         return ToolDispatcher()
@@ -415,6 +426,17 @@ def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
 
     # Always, even when empty: a pool thread keeps its context between jobs.
     set_voice_identity(user_id)
+
+    from app.brain import enabled as _new_agent_enabled
+    if _new_agent_enabled():
+        from app.brain.voice import dispatch as _brain_dispatch
+        chat_id = _stm_chat_id() or user_id
+        try:
+            with active_user_profile_context(_voice_profile(chat_id)):
+                return _brain_dispatch(name, args, chat_id)
+        except Exception as exc:  # noqa: BLE001 — same boundary as the dispatcher below
+            logger.error("[voice_ws] brain tool %s failed: %s", name, exc, exc_info=True)
+            return {"handled": False, "reply": f"[فشل التنفيذ] ما قدرت أنفّذ {name}."}
 
     # Routing signals are not actions: answer them as information, not failure.
     # `pending_*` resolve the held confirmation.

@@ -40,6 +40,7 @@ def create_chat_completion(
     model_hint: Optional[str] = None,
     timeout: Optional[float] = None,
     stream: bool = False,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ) -> Any:
     """Unified chat completion with Azure-first routing and circuit breaker."""
     client, model_name = _chat_client_and_model(
@@ -62,6 +63,8 @@ def create_chat_completion(
     kwargs["timeout"] = timeout if timeout is not None else DEFAULT_CHAT_TIMEOUT_S
     if stream:
         kwargs["stream"] = True
+    if tools:
+        kwargs["tools"] = tools
 
     # Same per-model param adaptation as the router.
     from app.integrations.azure_intent_client import _create_chat_adapting
@@ -88,6 +91,7 @@ def make_chat_completion_fn(
         model_hint: Optional[str] = None,
         timeout: Optional[float] = None,
         stream: bool = False,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Any:
         return create_chat_completion(
             messages=messages,
@@ -102,6 +106,7 @@ def make_chat_completion_fn(
             model_hint=model_hint,
             timeout=timeout,
             stream=stream,
+            tools=tools,
         )
 
     return _bound
