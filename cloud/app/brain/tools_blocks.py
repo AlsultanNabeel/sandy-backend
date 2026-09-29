@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from datetime import timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.agent.ltm_crypto import decrypt_field, encrypt_field
 from app.blocks import entries, items, schedules
-from app.blocks.kinds import LOG, SCHEDULE, KindError, get_kind
+from app.blocks.kinds import LIST, LOG, SCHEDULE, KindError, by_alias, get_kind, names
 from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
 from app.brain.matching import match_rows
@@ -94,22 +94,48 @@ def remember(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         else refused("not saved")
 
 
+def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:
+    """(log/schedule kind, list, the rest of the query): «شو مهامي» is the tasks list,
+    not the text «مهامي» — matched as text it filtered every task out."""
+    kind = list_name = None
+    rest = []
+    for word in _task_match_key(query).split():
+        hit = None
+        for form in (word, word[2:] if word.startswith("ال") else "", word.rstrip("ي")):
+            hit = hit or (by_alias(form) if form else None)
+        if hit is not None and hit.block == LIST and list_name is None:
+            list_name = hit.name
+        elif hit is not None and hit.block != LIST and kind is None:
+            kind = hit.name
+        else:
+            rest.append(word)
+    return kind, list_name, " ".join(rest)
+
+
 def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     query = str(args.get("query") or "")
     kind = str(args.get("kind") or "") or None
     list_name = _list_name(args) or None
+    if kind is None and list_name is None:
+        kind, list_name, query = _alias_filters(query)
     since = W.parse_bound(args.get("since"))
     until = W.parse_bound(args.get("until"), end=True)
     rows: List[Dict[str, Any]] = []
     if not list_name and (kind is None or get_kind(LOG, kind)):
-        rows += [_entry_row(e) for e in entries.list_entries(
-            kind, since=since, until=until, limit=SUMMARY_ROWS)]
+        # Chat summaries are most of the log; they only come back when asked for.
+        for k in [kind] if kind else [k for k in names(LOG) if k not in ("summary", "fact")]:
+            rows += [_entry_row(e) for e in entries.list_entries(
+                k, since=since, until=until, limit=SUMMARY_ROWS)]
     if not kind:
-        rows += [_item_row(i) for i in items.list_items(list_name, limit=SUMMARY_ROWS)]
+        found = items.list_items(list_name, limit=SUMMARY_ROWS)
+        rows += [_item_row(i) for i in sorted(found, key=lambda i: bool(i.get("done")))]
     if not list_name and (kind is None or get_kind(SCHEDULE, kind)):
         rows += [_schedule_row(s) for s in schedules.list_schedules(
             kind, status="pending", since=since, until=until, limit=SUMMARY_ROWS)]
-    rows = [r for r in rows if _matches_query(r, query)]
+    narrowed = [r for r in rows if _matches_query(r, query)]
+    # A filter already chose the rows; leftover words ("هالشهر") must not empty them.
+    if narrowed or not (kind or list_name):
+        rows = narrowed
     return {"ok": True, "count": len(rows), "rows": rows[:MAX_ROWS]}
 
 
@@ -148,6 +174,14 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     name, text = _list_name(args), str(args.get("text") or "").strip()
     if not text:
         return refused("text is empty")
+    if get_kind(LOG, name) and not get_kind(LIST, name):
+        return refused(f"«{name}» is something that happened, not a list: "
+                       f"call remember with kind={name}")
+    same = _task_match_key(text)
+    for row in items.list_items(name, done=False):
+        if _task_match_key(row.get("text", "")) == same:
+            return {"ok": True, "id": row["id"], "already": True,
+                    "reply": f"«{text}» موجودة أصلاً بالقائمة"}
     due = None
     if args.get("due"):
         due = W.parse_when(args["due"])
@@ -174,8 +208,9 @@ def _pick(args: Dict[str, Any], rows: List[Dict[str, Any]], getter) -> Dict[str,
     if m["status"] == "ambiguous":
         if args.get("all_matching"):
             return {"rows": m["matches"]}
-        return refused("ambiguous", candidates=[{"id": r["id"], "text": r["text"]}
-                                                for r in m["matches"][:8]])
+        return refused("ambiguous", needs_choice=True, candidates=[
+            {"id": r["id"], "text": r["text"], **({"due": W.iso(r["due"])} if r.get("due") else {})}
+            for r in m["matches"][:8]])
     return refused("not found" if m["status"] == "not_found" else "say which one")
 
 

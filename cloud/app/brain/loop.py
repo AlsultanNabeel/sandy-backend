@@ -70,23 +70,61 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
         for call in reply.tool_calls:
             used.append(call.name)
             result = tools.execute(call.name, call.args, ctx)
-            if result.get("needs_confirmation") and pending is None:
-                pending = confirm.hold(call.name, call.args, result["summary"])
+            if pending is None:
+                pending = _hold_if_asked(call.name, call.args, result)
             if result.get("reply"):
                 replies.append(result["reply"])
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": _for_model(result)})
         if pending is not None:
             # Deterministic question, no second call: the model cannot talk past it.
-            return {"text": confirm.question(pending["summary"]), "pending": pending,
-                    "tools": used}
+            return {"text": _ask(pending), "pending": pending, "tools": used}
     logger.warning("[brain] step cap (%d) reached; tools=%s", MAX_STEPS, used)
     return {"text": "\n".join(replies) or GAVE_UP_REPLY, "pending": None, "tools": used}
+
+
+def _hold_if_asked(name: str, args: Dict[str, Any],
+                   result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A pending when the tool is waiting on the user (a yes, or which one), else None."""
+    if result.get("needs_confirmation"):
+        return confirm.hold(name, args, result["summary"])
+    if result.get("needs_choice"):
+        return confirm.hold_choice(name, args, result["candidates"])
+    return None
+
+
+def _ask(pending: Dict[str, Any]) -> str:
+    if pending.get("action") == confirm.CHOOSE:
+        return confirm.choice_question(pending["candidates"])
+    return confirm.question(pending["summary"])
+
+
+def _resolve_choice(pending: Dict[str, Any], message: str,
+                    ctx: TurnCtx) -> Optional[Dict[str, Any]]:
+    if confirm.answer(message) == "no":
+        return {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
+    ids = confirm.pick(message, pending.get("candidates") or [])
+    if ids is None:
+        return None
+    args = {k: v for k, v in (pending.get("args") or {}).items() if k != "match_text"}
+    if len(ids) == 1:
+        args["id"] = ids[0]
+    else:
+        args["match_text"] = (pending.get("args") or {}).get("match_text", "")
+        args["all_matching"] = True
+    name = pending.get("tool", "")
+    result = tools.execute(name, args, ctx)
+    held = _hold_if_asked(name, args, result)
+    if held is not None:
+        return {"text": _ask(held), "pending": held, "tools": [name]}
+    return {"text": result.get("reply") or GAVE_UP_REPLY, "pending": None, "tools": [name]}
 
 
 def _resolve_pending(pending: Dict[str, Any], message: str,
                      ctx: TurnCtx) -> Optional[Dict[str, Any]]:
     """The turn's outcome when the message answers a held action, else None."""
+    if pending.get("action") == confirm.CHOOSE:
+        return _resolve_choice(pending, message, ctx)
     said = confirm.answer(message)
     if said == "no":
         return {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}

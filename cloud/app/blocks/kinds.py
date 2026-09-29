@@ -32,6 +32,8 @@ class Kind:
     en: str
     icon: str
     fields: Mapping[str, Any] = field(default_factory=dict)
+    # Words a user says for this kind ("مهامي", "مصاريف"); recall turns them into a filter.
+    aliases: Tuple[str, ...] = ()
 
 
 _S, _I, _F, _B, _L, _D, _T = str, int, float, bool, list, dict, datetime
@@ -41,47 +43,53 @@ KINDS: Tuple[Kind, ...] = (
     Kind("fact", LOG, "معلومة", "Fact", "brain", {
         "subtype": _S, "category": _S, "relation": _S, "name": _S,
         "count": _I, "source_message": _S, "signal": _S, "event_date": _S,
-        "last_seen": _T, "encrypted": _B}),
+        "last_seen": _T, "encrypted": _B}, ("معلومات", "عني")),
     Kind("reading", LOG, "جلسة قراءة", "Reading session", "book", {
         "book_item_id": _S, "book": _S, "start_page": _I, "end_page": _I,
-        "pages": _I, "paused_total_sec": _I, "state": _S, "ended_at": _T}),
+        "pages": _I, "paused_total_sec": _I, "state": _S, "ended_at": _T},
+        ("قراءه", "قريت", "قرات")),
     Kind("expense", LOG, "مصروف", "Expense", "creditcard", {
-        "amount": _F, "category": _S, "note": _S}),
+        "amount": _F, "category": _S, "note": _S},
+        ("مصروف", "مصاريف", "مصروفات", "صرفت", "صرفيات", "دفعت")),
     Kind("habit", LOG, "عادة", "Habit check-in", "checkmark.circle", {
         "habit_item_id": _S, "date": _S}),
     Kind("mood", LOG, "مزاج", "Mood", "face.smiling", {
-        "mood": _S, "encrypted": _B}),
-    Kind("journal", LOG, "يوميات", "Journal", "book.closed", {"date": _S}),
+        "mood": _S, "encrypted": _B}, ("مزاج", "مشاعر", "مزاجي")),
+    Kind("journal", LOG, "يوميات", "Journal", "book.closed", {"date": _S},
+         ("يوميات", "يومياتي")),
     Kind("health", LOG, "صحة", "Health", "heart", {
-        "metric": _S, "value": _F, "unit": _S}),
+        "metric": _S, "value": _F, "unit": _S}, ("صحه", "صحتي")),
     Kind("photo", LOG, "صورة", "Photo", "photo", {
         "name": _S, "grid_id": _S, "file_unique_id": _S, "user_caption": _S,
-        "ai_caption": _S, "tags": _L}),
-    Kind("note", LOG, "ملاحظة", "Note", "note.text"),
+        "ai_caption": _S, "tags": _L}, ("صور", "صوري")),
+    Kind("note", LOG, "ملاحظة", "Note", "note.text", {}, ("ملاحظات", "ملاحظاتي")),
     Kind("summary", LOG, "ملخص", "Summary", "text.alignleft", {
         "thread_id": _S, "source_turns": _I}),
 
     # ── LISTS (sandy_items) ──────────────────────────────────────────────────
     Kind("tasks", LIST, "المهام", "Tasks", "checklist", {
-        "notes": _S, "project": _S, "due_date": _S}),
+        "notes": _S, "project": _S, "due_date": _S}, ("مهام", "مهامي", "شغلات")),
     Kind("shopping", LIST, "التسوق", "Shopping", "cart", {
-        "category": _S, "price": _F, "qty": _F, "unit": _S}),
+        "category": _S, "price": _F, "qty": _F, "unit": _S},
+        ("تسوق", "مشتريات", "اغراض", "اغراضي")),
     Kind("goals", LIST, "الأهداف", "Goals", "target", {
-        "status": _S, "deadline": _S}),
+        "status": _S, "deadline": _S}, ("اهداف", "هدف", "اهدافي")),
     Kind("reading", LIST, "القراءة", "Reading list", "books.vertical", {
         "author": _S, "category": _S, "cover_url": _S, "total_pages": _I,
         "current_page": _I, "rating": _F, "fmt": _S, "status": _S,
-        "notes": _L, "quotes": _L, "started_at": _T}),
-    Kind("habits", LIST, "العادات", "Habits", "repeat", {"archived": _B}),
+        "notes": _L, "quotes": _L, "started_at": _T}, ("كتب", "كتاب", "كتبي")),
+    Kind("habits", LIST, "العادات", "Habits", "repeat", {"archived": _B},
+         ("عادات", "عاداتي")),
     Kind("plans", LIST, "الخطط", "Plans", "lightbulb", {
         "status": _S, "points": _L, "plan_text": _S, "summary": _S,
-        "started_at": _T}),
+        "started_at": _T}, ("خطط", "خططي", "مشاريع")),
     Kind("project:", LIST, "مشروع", "Project", "folder"),
 
     # ── SCHEDULES (sandy_schedules) ──────────────────────────────────────────
     Kind("reminder", SCHEDULE, "تذكير", "Reminder", "bell", {
         "note": _S, "linked_task_id": _S, "parent_summary": _S,
-        "source_kind": _S, "series_at": _T, "sent_at": _T, "last_error": _S}),
+        "source_kind": _S, "series_at": _T, "sent_at": _T, "last_error": _S},
+        ("تذكير", "تذكيرات", "مواعيد", "مواعيدي", "منبهات")),
     Kind("message_to_future_self", SCHEDULE, "رسالة للمستقبل",
          "Message to future self", "envelope", {
              "encrypted": _B, "delivered_at": _T}),
@@ -94,6 +102,12 @@ KINDS: Tuple[Kind, ...] = (
 )
 
 _BY_KEY: Dict[Tuple[str, str], Kind] = {(k.block, k.name): k for k in KINDS}
+_BY_ALIAS: Dict[str, Kind] = {a: k for k in KINDS for a in k.aliases}
+
+
+def by_alias(word: str) -> Optional[Kind]:
+    """The kind a normalized word names, or None (see `aliases`)."""
+    return _BY_ALIAS.get(word)
 
 
 def names(block: str) -> Tuple[str, ...]:
