@@ -1,28 +1,18 @@
 import Combine
 import Foundation
 
-/// Where a `sandy://` link wants to go.
 enum DeepLink: Equatable {
     case call, chat, quickAdd
 }
 
-/// Routes `sandy://` URLs from the widgets, the Live Activity and Control Center.
-///
-/// • sandy://call      — open the live voice call
-/// • sandy://call/end  — end the running call
-/// • sandy://chat      — the Sandy (chat) tab
-/// • sandy://quickadd  — the quick-add window
-/// • sandy://focus/stop — finish the running focus session (Live Activity)
-///
-/// A link that arrives before the main screen exists (cold launch, sign-in) waits
-/// in `pending` until `MainTabView` appears and consumes it.
+/// Routes sandy://call, call/end, chat, quickadd, focus/stop.
+/// A link arriving before the main screen exists waits in `pending` for `MainTabView`.
 @MainActor
 final class DeepLinkRouter: ObservableObject {
     static let shared = DeepLinkRouter()
 
     @Published var pending: DeepLink?
 
-    /// Fires when a link asks to end the running call; `LiveVoiceView` listens.
     let endCall = PassthroughSubject<Void, Never>()
 
     /// Returns false for URLs that are not ours (e.g. Google sign-in).
@@ -51,8 +41,7 @@ final class DeepLinkRouter: ObservableObject {
         return true
     }
 
-    /// Picks up a link left in the App Group by the Control Center intent
-    /// (only if recent — a stale one must not start a call days later).
+    /// Link left by the Control Center intent; ignored if stale so it can't start a call days later.
     func consumeSharedPending() {
         let store = UserDefaults(suiteName: SandyLinks.appGroup)
         guard let raw = store?.string(forKey: SandyLinks.pendingKey) else { return }

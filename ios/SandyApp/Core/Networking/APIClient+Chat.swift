@@ -1,6 +1,5 @@
 import Foundation
 
-/// رد قائمة الذاكرة: عناصر {id, text, type}.
 private struct MemoryListResponse: Decodable {
     let items: [Row]?
 
@@ -11,7 +10,6 @@ private struct MemoryListResponse: Decodable {
     }
 }
 
-/// رد الخط الزمني: أحداث موحّدة {type, id, title, subtitle, ts, done}.
 private struct TimelineListResponse: Decodable {
     let items: [Row]?
 
@@ -25,7 +23,6 @@ private struct TimelineListResponse: Decodable {
     }
 }
 
-/// رد قائمة المحادثات: عناصر {id, title, updated_at}.
 private struct ConversationListResponse: Decodable {
     let items: [Row]?
 
@@ -41,12 +38,10 @@ private struct ConversationListResponse: Decodable {
     }
 }
 
-/// رد إنشاء محادثة: المعرّف الجديد.
 private struct CreateConversationResponse: Decodable {
     let id: String?
 }
 
-/// رد فتح محادثة: العنوان + الرسائل {role, text}.
 private struct ConversationDetailResponse: Decodable {
     let title: String?
     let messages: [Row]?
@@ -57,7 +52,6 @@ private struct ConversationDetailResponse: Decodable {
     }
 }
 
-/// رد بحث المحادثات: عناصر {id, title, snippet, updated_at}.
 private struct ConversationSearchResponse: Decodable {
     let items: [Row]?
 
@@ -75,15 +69,8 @@ private struct ConversationSearchResponse: Decodable {
 }
 
 extension APIClient {
-    /// نفس /api/agent بس ستريمنغ (SSE) — ينادي onChunk بالنص التراكمي أول
-    /// بأول (رد الدردشة العادي بس؛ ردود الأدوات زي "أضف مهمة" ما فيها أجزاء
-    /// تتستريم، بترجع دفعة وحدة بآخر حدث). يرجع الرد النهائي + رابط صورة لو في.
-    ///
-    /// `clientMsgId` is the message's idempotency key: a retry with the same
-    /// key gets the first run's reply instead of running the turn again. Every
-    /// failure of the connection itself (connect, drop mid-stream, cut before
-    /// `done`) comes out as `APIError(kind: .connection)` — the only kind the
-    /// caller may retry; anything the server said is `.server`/`.unauthorized`.
+    /// نفس /api/agent بس SSE: `onChunk` بياخد النص التراكمي (ردود الأدوات بتيجي دفعة وحدة).
+    /// `clientMsgId` is the idempotency key; only `.connection` errors are retryable.
     func sendMessageStreaming(
         _ text: String,
         conversationId: String? = nil,
@@ -109,15 +96,11 @@ extension APIClient {
         let bytes: URLSession.AsyncBytes
         let resp: URLResponse
         do {
-            // No retry on a stream in here: a reply that is half-delivered must
-            // not be started over by the transport. The caller retries the whole
-            // send with the same `clientMsgId`, so the server never runs it twice.
+            // No transport retry mid-stream; the caller resends with the same `clientMsgId`.
             // `req.timeoutInterval` is the idle bound here.
             (bytes, resp) = try await APIClient.session.bytes(for: req)
         } catch let urlError as URLError {
-            // Cancellation keeps its identity — a send superseded by a newer
-            // one is a decision, not a failure, and collapsing it here is the
-            // spurious "couldn't load" notice `perform` has a comment about.
+            // Cancellation keeps its identity (see `perform`).
             if urlError.code == .cancelled { throw urlError }
             throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
         }
@@ -132,7 +115,6 @@ extension APIClient {
             var data = Data()
             for try await byte in bytes { data.append(byte) }
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            // `message` is the sentence for people, `error` the code for branching.
             throw APIError(message: (json["message"] as? String) ?? (json["error"] as? String) ?? "خطأ \(code)",
                            code: json["error"] as? String, kind: .server)
         }
@@ -162,22 +144,18 @@ extension APIClient {
                 }
             }
         } catch let urlError as URLError {
-            // The connection dropped mid-stream (timeout, network handover).
             if urlError.code == .cancelled { throw urlError }
             throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
         }
-        // A stream cut before `done` (router timeout, server restart) is a
-        // connection failure: the caller retries with the same key and gets
-        // the whole reply, and keeps what arrived only if every try fails.
+        // A stream cut before `done` is a connection failure: the caller retries with the same key.
         if !sawDone {
             throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
         }
         return (finalReply, imageURL)
     }
 
-    // MARK: - سجل المحادثات (متعدد السيشنات)
+    // MARK: - سجل المحادثات
 
-    // GET /api/conversations → {"items":[{id,title,updated_at}]}
     func listConversations() async throws -> [ConversationMeta] {
         let r: ConversationListResponse = try await fetch("/api/conversations")
         return (r.items ?? []).map {
@@ -187,7 +165,6 @@ extension APIClient {
         }
     }
 
-    // POST /api/conversations → {"id"}
     func createConversation() async throws -> String {
         let r: CreateConversationResponse = try await fetch("/api/conversations", method: "POST",
                                                             body: [String: String]())
@@ -197,7 +174,6 @@ extension APIClient {
         return id
     }
 
-    // GET /api/conversations/<id> → {"title","messages":[{role,text,ts}]}
     func getConversation(id: String) async throws -> (title: String, messages: [ChatMessage]) {
         let r: ConversationDetailResponse = try await fetch("/api/conversations/\(id)")
         let msgs = (r.messages ?? []).compactMap { m -> ChatMessage? in
@@ -207,24 +183,20 @@ extension APIClient {
         return (r.title ?? "", msgs)
     }
 
-    // POST /api/conversations/<id>/messages {role,text}
     func appendMessage(cid: String, role: String, text: String) async throws {
         try await send("/api/conversations/\(cid)/messages", method: "POST",
                        body: ["role": role, "text": text])
     }
 
-    // PATCH /api/conversations/<id> {title} → {"ok":true} — إعادة تسمية المحادثة.
     func renameConversation(id: String, title: String) async throws {
         try await send("/api/conversations/\(id)", method: "PATCH",
                        body: ["title": title])
     }
 
-    // DELETE /api/conversations/<id>
     func deleteConversation(id: String) async throws {
         try await send("/api/conversations/\(id)", method: "DELETE")
     }
 
-    // GET /api/conversations/search?q= → {"items":[{id,title,snippet,updated_at}]}
     func searchConversations(q: String) async throws -> [ConversationHit] {
         let r: ConversationSearchResponse = try await fetch("/api/conversations/search?q=\(enc(q))")
         return (r.items ?? []).map {
@@ -235,9 +207,8 @@ extension APIClient {
         }
     }
 
-    // MARK: - الذاكرة (اللي ساندي متذكّراه عنك)
+    // MARK: - الذاكرة
 
-    // GET /api/memory → {"items":[{id,text,type}]}
     func getMemory() async throws -> [MemoryFact] {
         let r: MemoryListResponse = try await fetch("/api/memory")
         return (r.items ?? []).map {
@@ -247,24 +218,20 @@ extension APIClient {
         }
     }
 
-    // POST /api/memory {text} → {"ok":true,"id"} — احفظ معلومة جديدة عنك.
     func addMemory(text: String) async throws {
         try await send("/api/memory", method: "POST", body: ["text": text])
     }
 
-    // PATCH /api/memory/<id> {text} → {"ok":bool} — عدّل نص معلومة.
     func updateMemory(id: String, text: String) async throws {
         try await send("/api/memory/\(id)", method: "PATCH", body: ["text": text])
     }
 
-    // DELETE /api/memory/<id>
     func deleteMemory(id: String) async throws {
         try await send("/api/memory/\(id)", method: "DELETE")
     }
 
-    // MARK: - الخط الزمني (سجل النشاط الموحّد)
+    // MARK: - الخط الزمني
 
-    // GET /api/timeline → {"items":[{type,id,title,subtitle,ts,done}]}
     func getTimeline() async throws -> [TimelineEvent] {
         let r: TimelineListResponse = try await fetch("/api/timeline")
         return (r.items ?? []).map {

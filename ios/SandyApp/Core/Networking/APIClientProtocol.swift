@@ -1,14 +1,6 @@
 import Foundation
 
-/// The transport seam every backend call routes through.
-///
-/// The concrete `APIClient` owns the URL session, the Keychain-backed token, and
-/// the one `request(_:)` primitive; each feature's endpoints live in an
-/// `APIClient+<Feature>` extension that builds on that primitive. Declaring the
-/// core surface here lets call sites — and, once an iOS test target exists, a
-/// mock — depend on an interface instead of the concrete singleton. The
-/// per-domain surface can be grown onto this protocol incrementally without
-/// touching call sites, since `APIClient` already satisfies it.
+/// Core transport surface of `APIClient`, so call sites and mocks can depend on an interface.
 protocol APIClientProtocol: AnyObject {
     var baseURL: String { get set }
     var token: String? { get set }

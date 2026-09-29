@@ -1,18 +1,10 @@
 import XCTest
 @testable import SandyApp
 
-/// First unit tests for the app. They cover the network-free logic in the
-/// networking core — the JWT payload decode `APIClient.currentUserId` does with
-/// no server, no Keychain round-trip and no async — so the suite runs fast and
-/// deterministically. This is the seed target: as stores adopt `APIClientProtocol`
-/// (see `APIClientProtocol.swift`), their optimistic-update paths get mocked and
-/// added here.
+/// Network-free tests for the JWT payload decode behind `APIClient.currentUserId`.
 final class APIClientTests: XCTestCase {
 
-    /// Build an unsigned JWT (header.payload.sig) whose middle segment is the
-    /// given JSON, base64url-encoded exactly the way a real token is. The client
-    /// only *decodes* the payload for display; it never verifies the signature,
-    /// so a dummy "sig" segment is enough.
+    /// Unsigned JWT with the given JSON payload; the client never verifies the signature.
     private func makeJWT(payloadJSON: String) -> String {
         func b64url(_ s: String) -> String {
             Data(s.utf8).base64EncodedString()
@@ -47,9 +39,7 @@ final class APIClientTests: XCTestCase {
         XCTAssertNil(client.currentUserId)
     }
 
-    /// The payload is base64URL with the padding stripped (real tokens do this);
-    /// currentUserId must re-pad before decoding. A single-char user_id makes the
-    /// payload length land on a non-multiple of 4, exercising that path.
+    /// Unpadded base64URL payload (length not a multiple of 4) must be re-padded.
     func testCurrentUserIdHandlesUnpaddedBase64URL() {
         let client = APIClient(baseURL: "https://example.test")
         client.token = makeJWT(payloadJSON: "{\"user_id\":\"x\"}")

@@ -1,21 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// بطاقة على لوح.
-///
-/// **المحتوى بيتبنى حسب المقاس، ما بينصغّر.**
-///
-/// النسخة اللي قبل رسمت البطاقة بعرض كامل وبعدين صغّرتها كصورة. المالك وصف
-/// المطلوب بدقّة: بطاقة فيها مفتاح، لما تصغر، بتصير **مفتاح واسمه فوقه وبخط
-/// كبير** — تصميم تاني، مش نفس التصميم مصغّر. فالمحتوى بياخد `CardMetrics`
-/// وبيقرّر هو.
+/// المحتوى بيتبنى حسب المقاس (`CardMetrics`)، ما بينصغّر.
 struct BoardCard: Identifiable, BoardIdentifiable {
     let id: String
     let titleKey: String
     let icon: String
     let defaultSize: CardSize
-    /// كم عالي لازم تكون بمقاس `large` — الصغير والوسط بياخدوا ارتفاعهم من
-    /// محتواهم.
+    /// الارتفاع بمقاس `large`؛ الصغير والوسط من محتواهم.
     let largeHeight: CGFloat
     let content: (CardMetrics) -> AnyView
 
@@ -72,12 +64,7 @@ private struct BoardWidthKey: PreferenceKey {
     }
 }
 
-/// لوح بطاقات — كل بطاقة بمقاس ودجة، وبأي ترتيب.
-///
-/// **البطاقة واجهة مستقلة، وهاد سبب إنه السحب بيشتغل.** نسخ سابقة حطّت حالة
-/// السحب ع اللوح، واللوح جوّاه `ScrollViewReader`، فكل حركة إصبع كانت تعيد بناء
-/// الشجرة — بما فيها الواجهة اللي ماسكة الإيماءة. سويفت‌يو‌آي بتلغي الإيماءة
-/// ساعتها، فكانت البطاقة تتحرّك شوي وترجع.
+/// حالة السحب ع البطاقة مش ع اللوح: لو ع اللوح كل حركة إصبع بتعيد بناء الشجرة وبتلغي الإيماءة.
 struct CardBoard: View {
     @EnvironmentObject var lang: LanguageManager
     @StateObject private var store: BoardStore
@@ -105,7 +92,6 @@ struct CardBoard: View {
         ScrollViewReader { proxy in
             ScrollView {
                 if store.editing {
-                    // ميزة ما حدا بيعرف كيف يستعملها هي ميزة مش موجودة.
                     Text(lang.s("board.hint"))
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.secondaryText)
@@ -136,7 +122,7 @@ struct CardBoard: View {
                 }
                 .padding(gap)
 
-                Color.clear.frame(height: 96)   // مساحة تحت ساندي العائمة
+                Color.clear.frame(height: 96)  // مساحة تحت ساندي العائمة
             }
             .background(
                 GeometryReader { g in
@@ -156,7 +142,6 @@ struct CardBoard: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { editButton } }
     }
 
-    // ── الترتيب ──────────────────────────────────────────────────────────────
 
     private func hover(_ point: CGPoint, held: String) {
         guard let target = frames.first(where: { $0.value.contains(point) })?.key,
@@ -168,7 +153,6 @@ struct CardBoard: View {
         store.setOrderLive(ids)
     }
 
-    // ── التمرير من الأطراف ───────────────────────────────────────────────────
 
     private func edgeScroll(at point: CGPoint, held: String) {
         let screenH: CGFloat = UIScreen.main.bounds.height
@@ -221,12 +205,8 @@ struct CardBoard: View {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 
-/// بطاقة وحدة على اللوح.
-///
-/// بتملك موقعها وهي بإيدك. هاد شرط عمل مش تنظيم: لو الحالة ع اللوح، كل حركة
-/// إصبع بتعيد بناء اللوح كله وبتلغي الإيماءة.
+/// بتملك موقعها وهي بإيدك، حتى ما تنلغي الإيماءة.
 private struct CardCell: View {
     @EnvironmentObject var lang: LanguageManager
 
@@ -243,8 +223,7 @@ private struct CardCell: View {
     private var size: CardSize { store.size(card.id, default: card.defaultSize) }
 
     private var metrics: CardMetrics {
-        // ناقص نص الفراغ: بطاقتان صغيرتان جنب بعض لازم يوسعوا السطر مع الفراغ
-        // اللي بيناتهن، مش يزيدوا عنه بفراغ كامل.
+        // ناقص نص الفراغ: بطاقتان صغيرتان جنب بعض بيملوا السطر مع الفراغ اللي بيناتهن.
         let w: CGFloat = size == .small
             ? (boardWidth - Theme.Spacing.md) / 2
             : boardWidth
@@ -291,7 +270,6 @@ private struct CardCell: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: size)
     }
 
-    // ── السحب لإعادة الترتيب ─────────────────────────────────────────────────
 
     private var reorder: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .global)
@@ -309,12 +287,8 @@ private struct CardCell: View {
             }
     }
 
-    // ── المقاس ───────────────────────────────────────────────────────────────
 
-    /// زرّان. **مش إيماءة، عن قصد.**
-    ///
-    /// أربع نسخ اعتمدت ع سحب من الزاوية وكل مرّة انلغت الإيماءة لسبب مختلف. الزرّ
-    /// ما إله إحداثيات ولا مساحة لمس ولا منافس: بتدوس، بيصير.
+    /// زرّان مش إيماءة، عن قصد: السحب من الزاوية انلغى بأربع نسخ.
     private var sizeControls: some View {
         HStack(spacing: 2) {
             stepButton("minus") { store.setSize(size.previous(), for: card.id) }

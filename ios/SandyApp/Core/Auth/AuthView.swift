@@ -1,19 +1,14 @@
 import SwiftUI
 import AuthenticationServices
 
-/// شاشة الدخول — مبنيّة بالكامل على نظام تصميم ساندي (خلفية أوبسيديان + بطاقة
-/// زجاجية + أزرار/تنبيهات ساندي) بدل أدوات النظام المصمتة. الهيكل بسيط ومتدفّق
-/// داخل `ScrollView` فيتصرّف سليم بكل المقاسات ومع ظهور الكيبورد (ما في عناصر
-/// تتداخل ولا Spacers تطفو بلا اتزان).
+/// شاشة الدخول بنظام تصميم ساندي، داخل `ScrollView` حتى تتصرّف سليم مع الكيبورد.
 struct AuthView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @State private var error = ""
-    // دخول/تسجيل بالإيميل.
     @State private var email = ""
     @State private var emailPassword = ""
     @State private var emailLoading = false
-    // حالة بصرية فقط (حركة الظهور) — ما إلها علاقة بمنطق الدخول.
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -23,15 +18,12 @@ struct AuthView: View {
 
             ScrollView {
                 VStack(spacing: Theme.Spacing.lg) {
-                    // أعلى الشاشة: مبدّل اللغة على الحافة الخلفية.
                     HStack {
                         Spacer()
                         LanguageToggle().frame(width: 120)
                     }
 
-                    // الهوية: روبوت ساندي + الاسم + الشعار النصي.
                     VStack(spacing: Theme.Spacing.sm) {
-                        // هالة كهربائية ناعمة خلف ساندي — نفس هوية شاشة التعارف.
                         ZStack {
                             Circle()
                                 .fill(RadialGradient(
@@ -57,18 +49,8 @@ struct AuthView: View {
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 10)
 
-                    // بطاقة الدخول: أبل، جوجل، إيميل.
-                    //
-                    // حقل «عنوان الخادم» انشال. كان أداة تطوير — بتخلّيني أوجّه
-                    // التطبيق ع خادم محلي — وضلّ ظاهر لكل مستخدم بأول شاشة.
-                    //
-                    // وهاد مش بس مش مرتّب. حرف واحد غلط فيه بيخلّي كل إشي يفشل
-                    // بلا سبب ظاهر، **والأسوأ**: بيقدر يوجّه التطبيق كله — مع
-                    // كلمات السرّ والصوت — ع خادم مش إلنا. حقل نصّ مفتوح بيقرّر
-                    // ع مين بتنبعت بياناتك، وهو مكشوف قبل الدخول.
-                    //
-                    // العنوان محفوظ بـ`Backend` وبينقرا من هناك. أي تجريب محلي
-                    // بيصير من متغيّر بالبناء، مش من شاشة الزبون.
+                    // بطاقة الدخول: أبل، جوجل، إيميل. حقل «عنوان الخادم» انشال عمدًا: كان بيقدر
+                    // يوجّه كلمات السرّ والصوت ع خادم مش إلنا، وهو مكشوف قبل الدخول.
                     SandyCard {
                         VStack(spacing: Theme.Spacing.md) {
                             SignInWithAppleButton(.signIn,
@@ -79,7 +61,6 @@ struct AuthView: View {
                                                             style: .continuous))
                                 .signInWithAppleButtonStyle(.white)
 
-                            // الدخول بجوجل.
                             Button { googleSignIn() } label: {
                                 HStack(spacing: Theme.Spacing.sm) {
                                     Image(systemName: "g.circle.fill")
@@ -96,7 +77,6 @@ struct AuthView: View {
                             }
                             .buttonStyle(.plain)
 
-                            // فاصل "أو بالإيميل".
                             dividerLabel(lang.lang == .ar ? "أو بالإيميل" : "or with email")
 
                             TextField(lang.lang == .ar ? "الإيميل" : "Email", text: $email)
@@ -127,17 +107,7 @@ struct AuthView: View {
                                             fillWidth: true) { emailAuth(isSignUp: true) }
                             }
 
-                            // «دخول المطوّر» انحذف من هون.
-                            //
-                            // كان حقل كلمة سرّ بيدخّلك ع حساب اسمه «المالك» —
-                            // حساب جاي من متغيّر بيئة، مش شخص. يعني أي حدا
-                            // بيعرف الكلمة كان بيصير **نفس** الشخص: نفس
-                            // اليوميات، ونفس المصاريف، ونفس بصمة الصوت.
-                            //
-                            // اشتغل لأنه كان في مستخدم واحد. وما بيتوسّع
-                            // لتاني واحد بأي شكل.
 
-                            // الخطأ بصوت ساندي الدافئ بدل سطر أحمر صارخ.
                             if !error.isEmpty {
                                 SandyNotice(error, kind: .gentleWarning)
                             }
@@ -147,14 +117,12 @@ struct AuthView: View {
                     .offset(y: appeared ? 0 : 16)
                 }
                 .padding(Theme.Spacing.lg)
-                // عمود محدود العرض موسّط — يتّزن على الآيباد والشاشات العريضة.
                 .frame(maxWidth: 460)
                 .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollDismissesKeyboard(.interactively)
         }
-        // دخول هادئ: الهوية ثم البطاقة تطلعان بنعومة (بلا حركة لو «تقليل الحركة»).
         .onAppear {
             guard !appeared else { return }
             if reduceMotion { appeared = true; return }
@@ -164,14 +132,14 @@ struct AuthView: View {
         }
     }
 
-    /// خطّ شعري رفيع لفاصل "أو دخول المطوّر".
+    /// خطّ شعري رفيع للفاصل.
     private var hairline: some View {
         Rectangle()
             .fill(Theme.Colors.border)
             .frame(height: 1)
     }
 
-    /// فاصل نصّي بخطّين رفيعين حوله (يُستعمل لـ "أو بالإيميل" / "أو دخول المطوّر").
+    /// فاصل نصّي بخطّين رفيعين حوله.
     private func dividerLabel(_ text: String) -> some View {
         HStack(spacing: Theme.Spacing.sm) {
             hairline
@@ -183,7 +151,6 @@ struct AuthView: View {
         }
     }
 
-    /// الدخول بجوجل — يفتح نافذة جوجل، ياخد id token، ويبعته للباك‑إند.
     private func googleSignIn() {
         error = ""
         Task {
@@ -197,7 +164,6 @@ struct AuthView: View {
         }
     }
 
-    /// دخول أو إنشاء حساب بالإيميل — نفس الحقول، يقرّرها `isSignUp`.
     private func emailAuth(isSignUp: Bool) {
         let mail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !emailLoading, !mail.isEmpty, !emailPassword.isEmpty else { return }
@@ -215,11 +181,7 @@ struct AuthView: View {
         }
     }
 
-    /// يترجم رموز خطأ الباك‑إند لرسائل ودّية حسب اللغة.
-    ///
-    /// بتفرّع على `code` — الرمز الآلي — مش على `message`. كانت تفرّع على
-    /// النص لأنّ الحقلين كانوا واحد، فأي جملة عربية بيبعتها الخادم كانت
-    /// بتوقّع كل الحالات وبتنزل ع الافتراضي.
+    /// بتفرّع على `code` مش `message` لأن الرسالة نص عربي بيتغيّر.
     private func friendlyAuthError(_ error: Error) -> String {
         let ar = lang.lang == .ar
         let apiError = error as? APIError
@@ -257,9 +219,7 @@ struct AuthView: View {
 }
 
 // MARK: - حقل إدخال بنمط ساندي
-
-/// خلفية/حدّ موحّد لحقول الإدخال (يقابل سطح الحقول بباقي الواجهات): سطح داكن +
-/// حدّ كهربائي خفيف + حواف ناعمة. يُستعمل مع `.textFieldStyle(.plain)`.
+/// سطح داكن + حدّ خفيف؛ يُستعمل مع `.textFieldStyle(.plain)`.
 private struct SandyField: ViewModifier {
     func body(content: Content) -> some View {
         content

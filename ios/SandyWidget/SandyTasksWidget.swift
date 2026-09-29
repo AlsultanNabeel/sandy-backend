@@ -1,12 +1,5 @@
-//
-//  SandyTasksWidget.swift — ويدجت المهام التفاعلي: أوّل تلات مهام مفتوحة، وزر ✓
-//  بيكمّل المهمة من الويدجت نفسه بلا ما يفتح التطبيق.
-//
-//  البيانات: التطبيق بيكتب القائمة بمجموعة التطبيقات (WidgetData.setOpenTasks،
-//  مفتاح `open_tasks`)، والعنوان بيكتبه `SharedAuth` (مفتاح `share_base_url`).
-//  التوكن من الـKeychain بمجموعة الوصول المشتركة (Core/Auth/Keychain.swift).
-//  لازم المفاتيح تضل مطابقة.
-//
+// ويدجت المهام: زر ✓ بيكمّل المهمة بلا ما يفتح التطبيق. المفاتيح تحت لازم تطابق
+// WidgetData و SharedAuth و Keychain بالتطبيق.
 
 import AppIntents
 import Security
@@ -32,7 +25,6 @@ struct WidgetTask: Codable, Hashable, Identifiable {
     var priority: String?
 }
 
-/// قراءة/كتابة قائمة المهام المفتوحة بمجموعة التطبيقات.
 private enum WidgetTaskCache {
     static var store: UserDefaults? { UserDefaults(suiteName: SandyLinks.appGroup) }
 
@@ -48,7 +40,7 @@ private enum WidgetTaskCache {
         }
     }
 
-    /// يشيل المهمة (متفائلًا) ويرجّعها مع مكانها عشان نقدر نرجّعها لو فشل الخادم.
+    /// متفائلًا؛ بيرجّع المكان حتى نرجّعها لو فشل الخادم.
     static func remove(_ id: String) -> (task: WidgetTask, index: Int)? {
         var all = load()
         guard let i = all.firstIndex(where: { $0.id == id }) else { return nil }
@@ -66,7 +58,7 @@ private enum WidgetTaskCache {
         adjustCount(1)
     }
 
-    /// عدّاد «المهام النشطة» بويدجت ساندي الأساسي يضل متّسق.
+    /// حتى عدّاد ويدجت ساندي الأساسي يضل متّسق.
     private static func adjustCount(_ delta: Int) {
         let n = store?.integer(forKey: TaskKeys.activeTasks) ?? 0
         store?.set(max(0, n + delta), forKey: TaskKeys.activeTasks)
@@ -74,8 +66,7 @@ private enum WidgetTaskCache {
 
     static var isArabic: Bool { store?.string(forKey: TaskKeys.lang) != "en" }
 
-    /// من الـKeychain بمجموعة الوصول المشتركة — نفس العنصر اللي بيكتبه
-    /// SandyApp/Core/Auth/Keychain.swift.
+    /// نفس عنصر الـKeychain اللي بيكتبه التطبيق.
     static var token: String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -100,8 +91,7 @@ private enum WidgetTaskCache {
 
 // MARK: - النيّة: كمّل مهمة
 
-/// بتشتغل بعملية الويدجت: بتشيل المهمة من الكاش فورًا، بتبعت PATCH للخادم،
-/// ولو فشل بترجّعها مكانها.
+/// بتشيل المهمة من الكاش فورًا وبتبعت PATCH؛ لو فشل بترجّعها مكانها.
 struct CompleteTaskIntent: AppIntent {
     static let title: LocalizedStringResource = "Complete task"
     static let description = IntentDescription("Marks a Sandy task as done.")
@@ -124,12 +114,12 @@ struct CompleteTaskIntent: AppIntent {
         if !ok {
             WidgetTaskCache.restore(removed.task, at: removed.index)
         }
-        // المهمة انقفلت من برّا التطبيق — ويدجت ساندي الأساسي يحدّث عدّاده كمان.
+        // ويدجت ساندي الأساسي يحدّث عدّاده كمان.
         await WidgetCenter.shared.reloadAllTimelines()
         return .result()
     }
 
-    /// PATCH /api/tasks/<id> {"done": true} — نفس نداء التطبيق (setTaskDone).
+    /// نفس نداء التطبيق (setTaskDone).
     private static func markDone(_ id: String) async -> Bool {
         guard let token = WidgetTaskCache.token,
               let safe = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),

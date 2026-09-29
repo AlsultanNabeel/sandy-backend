@@ -2,27 +2,19 @@ import AVFoundation
 import Combine
 import Foundation
 
-/// يقرأ ردود ساندي بالشات بصوتها: WAV اللي يرجّعه الخادم (صوت جيميني) بـ
-/// `AVAudioPlayer`، ولو ما توفّر نرجع لصوت الجهاز الاحتياطي.
-///
-/// كان هون كمان استماع حيّ (`SFSpeechRecognizer`) وفم بيتحرّك على موجة الصوت.
-/// المكالمة الحيّة صارت بـ `GeminiLiveManager`، فهداك النص ما حدا كان يناديه —
-/// بس فمّه المنشور كان يتحدّث عشرين مرّة بالثانية، و`ChatView` ماسك هالكائن
-/// كـ `@StateObject`، فكانت شاشة الشات كلها تنرسم من جديد طول ما ساندي تحكي.
-/// لهيك ما في ولا خاصية منشورة هون، عن قصد.
+/// يقرأ ردود ساندي: WAV الخادم (جيميني) بـ `AVAudioPlayer`، وإلا صوت الجهاز.
+/// ما في خاصية منشورة عن قصد: `ChatView` ماسكه كـ `@StateObject` وأي نشر بيعيد رسم الشات.
 @MainActor
 final class SpeechManager: NSObject, ObservableObject {
 
-    private let synth = AVSpeechSynthesizer()      // صوت احتياطي على الجهاز
-    private var player: AVAudioPlayer?             // صوت جيميني الحقيقي
+    private let synth = AVSpeechSynthesizer()
+    private var player: AVAudioPlayer?
 
-    /// يشغّل رد ساندي: صوت جيميني (`wav`) لو متاح، وإلا صوت الجهاز كاحتياط.
     func playReply(wav: Data?, fallbackText: String, localeID: String) {
         if let wav, playAudio(wav) { return }
         speakFallback(fallbackText, localeID: localeID)
     }
 
-    /// يسكّت أي رد عم ينقرا.
     func stopSpeaking() {
         player?.stop()
         player = nil
@@ -68,7 +60,7 @@ final class SpeechManager: NSObject, ObservableObject {
     }
 }
 
-// MARK: - نهاية صوت جيميني — نحرّر المشغّل
+// MARK: - AVAudioPlayerDelegate
 
 extension SpeechManager: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {

@@ -1,19 +1,10 @@
 import AppIntents
 import Foundation
 
-// ─────────────────────────────────────────────────────────────────────────
-//  DeviceIntents — التحكّم بأجهزة البيت من سيري وتطبيق الاختصارات.
-//
-//  الجهاز هون "كيان" (AppEntity) مش نص مكتوب بالكود: الاستعلام بيجيب أجهزة
-//  الحساب من الباك‑إند وقت التشغيل، فأي جهاز بتضيفه من شاشة التحكّم بيطلع
-//  لحاله بسيري وبالاختصارات وبسبوتلايت بدون ما نلمس الكود.
-//
-//  المسارات المستعملة: GET /api/devices للقائمة، و
-//  POST /api/devices/<name>/control للأمر. التحقّق من الأمر (شو مسموح لكل نوع)
-//  بيصير بالباك‑إند، فما منكرّره هون.
-// ─────────────────────────────────────────────────────────────────────────
+// الأجهزة كيانات بتنجاب من الباك‑إند وقت التشغيل، فأي جهاز جديد بيطلع بسيري لحاله.
+// التحقّق من الأمر بالباك‑إند، فما منكرّره هون.
 
-/// جهاز واحد كما يشوفه سيري — المعرّف هو `name` الثابت بالباك‑إند.
+/// المعرّف هو `name` الثابت بالباك‑إند.
 struct DeviceEntity: AppEntity {
     let id: String
     let label: String
@@ -21,8 +12,7 @@ struct DeviceEntity: AppEntity {
     let controlType: String
     let state: String
 
-    // مُولّد بيانات النوايا بيقرأ هالنصوص وقت البناء، فلازم تكون حرفية — ما بيقبل
-    // قيمة مبنية من دالة. الترجمة بتصير عبر كتالوج نصوص النظام، مش بالكود.
+    // مُولّد بيانات النوايا بيقرأها وقت البناء، فلازم تكون نصوص حرفية.
     static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Device")
 
     var displayRepresentation: DisplayRepresentation {
@@ -40,15 +30,12 @@ struct DeviceEntity: AppEntity {
     }
 }
 
-/// مصدر الأجهزة لسيري: اقتراحات + بحث بالاسم المنطوق + استرجاع بالمعرّف.
 struct DeviceQuery: EntityStringQuery {
-    /// استرجاع بالمعرّف — لما يكون الاختصار محفوظ بجهاز مختار مسبقاً.
     func entities(for identifiers: [DeviceEntity.ID]) async throws -> [DeviceEntity] {
         let wanted = Set(identifiers)
         return try await devices().filter { wanted.contains($0.id) }
     }
 
-    /// مطابقة الاسم المنطوق — بنطابق على التسمية والغرفة والمعرّف.
     func entities(matching string: String) async throws -> [DeviceEntity] {
         let needle = string.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return try await devices() }
@@ -59,21 +46,17 @@ struct DeviceQuery: EntityStringQuery {
         }
     }
 
-    /// القائمة اللي بتظهر بتطبيق الاختصارات لما تختار الجهاز يدوياً.
     func suggestedEntities() async throws -> [DeviceEntity] {
         try await devices()
     }
 
-    /// أجهزة الحساب الحالي. البيانات التجريبية بتنستثنى — ما بدنا سيري تسمّي
-    /// أجهزة وهمية ولا تحاول تشغّلها.
+    /// البيانات التجريبية بتنستثنى حتى ما تحاول سيري تشغّل أجهزة وهمية.
     private func devices() async throws -> [DeviceEntity] {
         let res = try await IntentAPI.make().getDevices()
         return res.demo ? [] : res.items.map(DeviceEntity.init)
     }
 }
 
-/// الأوامر اللي بيفهمها الباك‑إند: تشغيل/إطفاء للمفاتيح والإضاءة والوسائط،
-/// وفتح/إغلاق/إيقاف للستائر، وتعليق للوسائط.
 enum DeviceCommand: String, AppEnum {
     case on, off, open, close, stop, pause
 
@@ -88,7 +71,6 @@ enum DeviceCommand: String, AppEnum {
         .pause: DisplayRepresentation(title: "Pause"),
     ]
 
-    /// جملة التأكيد اللي سيري بتقولها بعد ما ينفّذ الأمر.
     func doneDialog(_ label: String) -> IntentDialog {
         switch self {
         case .on:    return IntentAPI.dialog("شغّلت \(label)", "Turned on \(label)")
@@ -112,7 +94,6 @@ struct ControlDeviceIntent: AppIntent {
 
     init() {}
 
-    /// تُستعمل بمزوّد الاختصارات لتثبيت الأمر بالعبارة (شغّل/طفّي/افتح/سكّر).
     init(command: DeviceCommand) {
         self.command = command
     }
@@ -127,7 +108,6 @@ struct ControlDeviceIntent: AppIntent {
             try await api.controlDevice(name: device.id, action: command.rawValue)
         } catch let e as APIError where e.kind == .server {
             // الباك‑إند بيرفض الأمر اللي ما بيناسب نوع الجهاز (ستارة ما بتنطفي).
-            // أخطاء الشبكة والجلسة بتطلع برسالتها الأصلية.
             throw SandyIntentError.commandNotSupported(device.label)
         }
         return .result(dialog: command.doneDialog(device.label))
@@ -173,7 +153,6 @@ struct PressDeviceButtonIntent: AppIntent {
         do {
             try await api.controlDevice(name: device.id, action: "send", value: button)
         } catch let e as APIError where e.kind == .server {
-            // زر مش متعلَّم بعد، أو الجهاز مش ريموت.
             throw SandyIntentError.buttonNotLearned(button, device.label)
         }
         return .result(dialog: IntentAPI.dialog("بعثت \(button) لـ\(device.label)",

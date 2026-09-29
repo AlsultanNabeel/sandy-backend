@@ -1,9 +1,4 @@
-//
-//  SandyCallLiveActivity.swift — مكالمة ساندي الصوتية على شاشة القفل والجزيرة الديناميكية.
-//
-//  يبدأها التطبيق (App/Widgets/CallLiveActivity.swift) لما تبلّش المكالمة، ويحدّثها
-//  مع كل تغيّر بالطور، وينهيها فورًا لما تخلص. اللغة والاتجاه من `isArabic`.
-//
+// مكالمة ساندي على شاشة القفل والجزيرة؛ يبدأها التطبيق (SandyApp/Widgets/CallLiveActivity.swift).
 
 import ActivityKit
 import SwiftUI
@@ -44,7 +39,6 @@ private struct SandyGlyph: View {
     }
 }
 
-/// The running call time, counting up from the call start.
 private struct CallTimer: View {
     let startedAt: Date
     var body: some View {
@@ -53,7 +47,7 @@ private struct CallTimer: View {
     }
 }
 
-/// End-call button: opens `sandy://call/end`, which ends the call in the app.
+/// Opens `sandy://call/end`, which ends the call in the app.
 private struct EndCallLink: View {
     let arabic: Bool
     var compact = false
@@ -77,7 +71,6 @@ private struct EndCallLink: View {
 struct SandyCallLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SandyCallAttributes.self) { context in
-            // شاشة القفل / البانر.
             let ar = context.attributes.isArabic
             HStack(spacing: 12) {
                 SandyGlyph(size: 44)

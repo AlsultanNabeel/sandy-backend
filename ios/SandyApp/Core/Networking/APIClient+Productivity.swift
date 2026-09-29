@@ -30,8 +30,7 @@ extension APIClient {
         return ListResult(items: parsed, demo: r.demo ?? false)
     }
 
-    /// Optional fields omit themselves from JSON when nil (encodeIfPresent), so a
-    /// nil note/priority is "not provided" exactly like the old dictionary build.
+    /// nil fields are omitted from the JSON ("not provided").
     private struct TaskCreate: Encodable {
         let text: String
         let due: String
@@ -39,7 +38,6 @@ extension APIClient {
         let priority: String?
     }
 
-    // POST /api/tasks body {"text","due","note"?,"priority"?} → {"ok":true,"id":...}
     func addTask(text: String, due: String = "",
                  note: String? = nil, priority: String? = nil) async throws {
         try await send("/api/tasks", method: "POST",
@@ -50,7 +48,7 @@ extension APIClient {
         let done: Bool
     }
 
-    // PATCH /api/tasks/<id> body {"done":bool} (للمالك فقط)
+    // (للمالك فقط)
     func setTaskDone(id: String, done: Bool) async throws {
         try await send("/api/tasks/\(id)", method: "PATCH", body: TaskDone(done: done))
     }
@@ -63,7 +61,7 @@ extension APIClient {
         let due: String?
     }
 
-    // PATCH /api/tasks/<id> — تعديل شامل: نص/إنجاز/ملاحظة/أولوية. الغائب = بلا تغيير.
+    // الغائب = بلا تغيير.
     func updateTask(id: String, text: String? = nil, done: Bool? = nil,
                     note: String? = nil, priority: String? = nil, due: String? = nil) async throws {
         guard text != nil || done != nil || note != nil || priority != nil || due != nil else { return }
@@ -71,9 +69,9 @@ extension APIClient {
                        body: TaskUpdate(text: text, done: done, note: note, priority: priority, due: due))
     }
 
-    // DELETE /api/tasks/<id> — deleteTask معرّف بقسم الخط الزمني.
+    // deleteTask معرّف بقسم الخط الزمني.
 
-    // ── التذكيرات ───────────────────────────────────────────────────────
+    // ── التذكيرات ──
     private struct RemindersResponse: Decodable {
         let items: [Row]?
         let demo: Bool?
@@ -87,7 +85,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/reminders → {"items":[{id,text,remind_at,is_recurring,note?}], "demo":bool}
     func getReminders() async throws -> ListResult<ReminderItem> {
         let r: RemindersResponse = try await fetch("/api/reminders")
         let parsed: [ReminderItem] = (r.items ?? []).compactMap { row in
@@ -108,7 +105,7 @@ extension APIClient {
         let note: String?
     }
 
-    // POST /api/reminders body {"text","remind_at","note"?} → {"ok":true} (للمالك فقط)
+    // (للمالك فقط)
     func addReminder(text: String, remindAt: String, note: String? = nil) async throws {
         try await send("/api/reminders", method: "POST",
                        body: ReminderCreate(text: text, remind_at: remindAt, note: note))
@@ -120,7 +117,7 @@ extension APIClient {
         let note: String?
     }
 
-    // PATCH /api/reminders/<id> — تعديل: نص/وقت/ملاحظة. الغائب = بلا تغيير.
+    // الغائب = بلا تغيير.
     func updateReminder(id: String, text: String? = nil,
                         remindAt: String? = nil, note: String? = nil) async throws {
         guard text != nil || remindAt != nil || note != nil else { return }
@@ -128,7 +125,7 @@ extension APIClient {
                        body: ReminderUpdate(text: text, remind_at: remindAt, note: note))
     }
 
-    // DELETE /api/reminders/<id> → {"ok":true} (للمالك فقط)
+    // (للمالك فقط)
     func deleteReminder(id: String) async throws {
         try await send("/api/reminders/\(id)", method: "DELETE")
     }
@@ -143,15 +140,13 @@ extension APIClient {
         let is_recurring: Bool?
     }
 
-    /// ما صار بالتذكير بعد ما نفّذنا الإجراء: الوقت الجاي (فاضي = خلص وما عاد يرنّ).
+    /// الوقت الجاي (فاضي = خلص وما عاد يرنّ).
     struct ReminderOutcome {
         let remindAt: String
         let isRecurring: Bool
     }
 
-    /// PATCH /api/reminders/<id> body {"action":"snooze"|"done", "minutes"?}.
-    /// «بعدين» بيعيد تسليحه بلا ما يلمس التكرار، و«تمّ» بيطوي هالمرّة بس —
-    /// التذكير المتكرّر بيرجع بموعده الجاي، واللي مرّة وحدة بيتقاعد.
+    /// «بعدين» بيعيد تسليحه بلا ما يلمس التكرار؛ «تمّ» بيطوي هالمرّة بس (المتكرّر بيرجع بموعده الجاي).
     @discardableResult
     func actOnReminder(id: String, action: String, minutes: Int? = nil) async throws -> ReminderOutcome {
         let r: ReminderActionResponse = try await fetch(
@@ -161,19 +156,17 @@ extension APIClient {
                                isRecurring: r.is_recurring ?? false)
     }
 
-    /// «ذكّرني بعدين» — تأجيل بعدد دقائق.
     @discardableResult
     func snoozeReminder(id: String, minutes: Int) async throws -> ReminderOutcome {
         try await actOnReminder(id: id, action: "snooze", minutes: minutes)
     }
 
-    /// «تمّ» — هالمرّة انتهت.
     @discardableResult
     func completeReminder(id: String) async throws -> ReminderOutcome {
         try await actOnReminder(id: id, action: "done")
     }
 
-    // ── العادات ─────────────────────────────────────────────────────────
+    // ── العادات ──
     private struct HabitsResponse: Decodable {
         let items: [Row]?
         let demo: Bool?
@@ -185,7 +178,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/life/habits → {"items":[{id,name,streak,done_today}], "demo":bool}
     func getHabits() async throws -> ListResult<HabitItem> {
         let r: HabitsResponse = try await fetch("/api/life/habits")
         let parsed: [HabitItem] = (r.items ?? []).compactMap { row in
@@ -202,22 +194,20 @@ extension APIClient {
         let name: String
     }
 
-    // POST /api/life/habits body {"name"} → {"ok":bool} (للمالك فقط)
+    // (للمالك فقط)
     func addHabit(name: String) async throws {
         try await send("/api/life/habits", method: "POST", body: HabitName(name: name))
     }
 
-    // PATCH /api/life/habits/<id> body {"name"} → {"ok":bool} — إعادة تسمية العادة.
     func renameHabit(id: String, name: String) async throws {
         try await send("/api/life/habits/\(id)", method: "PATCH", body: HabitName(name: name))
     }
 
-    // DELETE /api/life/habits/<id> → {"ok":bool} — حذف العادة.
     func deleteHabit(id: String) async throws {
         try await send("/api/life/habits/\(id)", method: "DELETE")
     }
 
-    // POST /api/life/habits/checkin body {"name"} → {"ok":bool} (للمالك فقط)
+    // (للمالك فقط)
     func checkinHabit(name: String) async throws {
         try await send("/api/life/habits/checkin", method: "POST", body: HabitName(name: name))
     }
@@ -226,12 +216,12 @@ extension APIClient {
         let id: String
     }
 
-    // POST /api/life/habits/uncheckin body {"id"} → {"ok":bool} (للمالك فقط)
+    // (للمالك فقط)
     func uncheckinHabit(id: String) async throws {
         try await send("/api/life/habits/uncheckin", method: "POST", body: HabitId(id: id))
     }
 
-    // ── الفوكس (بومودورو) ───────────────────────────────────────────────
+    // ── الفوكس (بومودورو) ──
     private struct FocusStatusResponse: Decodable {
         let active: Bool?
         let label: String?
@@ -246,7 +236,6 @@ extension APIClient {
         let demo: Bool?
     }
 
-    // GET /api/life/focus → حالة الجلسة الحالية.
     func getFocusStatus() async throws -> FocusStatus {
         let r: FocusStatusResponse = try await fetch("/api/life/focus")
         return FocusStatus(
@@ -272,7 +261,7 @@ extension APIClient {
         let label: String
     }
 
-    // POST /api/life/focus/start (للمالك فقط)
+    // (للمالك فقط)
     func startFocus(focusMin: Int, breakMin: Int, cycles: Int,
                     scene: String, endScene: String, label: String) async throws {
         try await send("/api/life/focus/start", method: "POST",
@@ -284,7 +273,7 @@ extension APIClient {
         let cancel: Bool
     }
 
-    // POST /api/life/focus/stop body {"cancel":bool} (للمالك فقط)
+    // (للمالك فقط)
     func stopFocus(cancel: Bool) async throws {
         try await send("/api/life/focus/stop", method: "POST", body: FocusStop(cancel: cancel))
     }
@@ -299,7 +288,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/life/focus/history?limit=
     func getFocusHistory(limit: Int = 30) async throws -> [FocusSession] {
         let r: FocusHistoryResponse = try await fetch("/api/life/focus/history?limit=\(limit)")
         return (r.sessions ?? []).map { row in

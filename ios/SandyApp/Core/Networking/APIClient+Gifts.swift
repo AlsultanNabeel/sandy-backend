@@ -13,7 +13,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/gifts → {"items":[{id,kind,recipient,occasion,content,scheduled_at}]}
     func getGifts() async throws -> [DigitalGift] {
         let r: GiftsResponse = try await fetch("/api/gifts")
         return (r.items ?? []).compactMap { row in
@@ -36,7 +35,6 @@ extension APIClient {
         let scheduled_at: String
     }
 
-    // POST /api/gifts {kind,recipient,occasion,content,scheduled_at} → {"ok","id"}
     func addGift(kind: String, recipient: String, occasion: String,
                  content: String, scheduledAt: String) async throws {
         try await send("/api/gifts", method: "POST",
@@ -54,7 +52,7 @@ extension APIClient {
         let content: String?
     }
 
-    // POST /api/gifts/generate {kind,recipient,occasion} → {"content"} — توليد نص (بلا حفظ).
+    // توليد نص بلا حفظ.
     func giftsGenerate(kind: String, recipient: String, occasion: String) async throws -> String {
         let r: GiftContentResponse = try await fetch(
             "/api/gifts/generate", method: "POST",
@@ -62,7 +60,6 @@ extension APIClient {
         return r.content ?? ""
     }
 
-    // DELETE /api/gifts/<id>
     func deleteGift(id: String) async throws {
         try await send("/api/gifts/\(id)", method: "DELETE")
     }

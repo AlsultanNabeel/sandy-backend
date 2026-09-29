@@ -1,8 +1,7 @@
 import SwiftUI
 
 extension APIClient {
-    /// رد الطقس. المفاتيح كلها نصوص (wttr.in يرجّع الأرقام نصوصًا)، وكلها اختيارية
-    /// لتحمّل أي مفتاح غائب. أسماء الحقول snake_case لتطابق مفاتيح الـJSON مباشرة.
+    /// كل المفاتيح نصوص اختيارية (wttr.in بيرجّع الأرقام نصوصًا).
     private struct WeatherResponse: Decodable {
         let city: String?
         let description: String?
@@ -14,7 +13,7 @@ extension APIClient {
         let sunset: String?
     }
 
-    /// GET /api/weather?city= → لقطة طقس اليوم. مدينة فاضية = افتراضي الباك-إند.
+    /// مدينة فاضية = افتراضي الباك-إند.
     func weatherNow(city: String) async throws -> WeatherSnapshot {
         let trimmed = city.trimmingCharacters(in: .whitespacesAndNewlines)
         let q = trimmed.isEmpty

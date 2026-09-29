@@ -11,7 +11,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/share/suggest → {"topic","items":[{title,url,text,published_date}]}
     func shareContentSuggest() async throws -> (topic: String, items: [SharedContentItem]) {
         let r: ShareSuggestResponse = try await fetch("/api/share/suggest")
         let items = (r.items ?? []).map { row in
@@ -33,7 +32,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/share/saved → {"items":[{id,title,url,text,topic}]}
     func shareContentSaved() async throws -> [SharedContentItem] {
         let r: ShareSavedResponse = try await fetch("/api/share/saved")
         return (r.items ?? []).compactMap { row in
@@ -52,13 +50,11 @@ extension APIClient {
         let topic: String
     }
 
-    // POST /api/share/saved {title,url,text,topic} → {"ok":true,"id"}
     func shareContentSave(item: SharedContentItem, topic: String) async throws {
         try await send("/api/share/saved", method: "POST",
                        body: ShareSave(title: item.title, url: item.url, text: item.text, topic: topic))
     }
 
-    // DELETE /api/share/saved/<id>
     func shareContentDelete(id: String) async throws {
         try await send("/api/share/saved/\(id)", method: "DELETE")
     }

@@ -241,3 +241,153 @@ Working features that may not be worth keeping. Nothing here was removed.
 - `api/share_api.py` (+ content_share_tools.py, agent/interests_tracker.py) — interest-based content cards. Lose: the share/suggest screen.
 - `api/timeline_api.py` — unified activity timeline. Lose: the timeline screen (data stays in each store).
 - For the agent rewrite, experimental persona memory modules: anomaly_detector, dreams_engine, emotional_ltm, health_monitor, lessons_memory, proactive_comfort, proactive_goals, relationships_memory, shared_history, style_memory. Lose: the extra "she remembers/notices" prompt context each adds.
+
+
+---
+
+# ios/ file justification
+
+Scope: ios/ only, excluding `ios/SandyApp/Features/` and `ios/SandyApp/Localization/`
+(scheduled for rewrite). Swift cannot be compiled here, so no ios file was moved,
+merged or deleted and no code changed: only comments shrank. MERGE / DELETE verdicts
+below are proposals for the owner to apply in Xcode.
+
+Totals (.swift files in scope): 9735 lines before → 8483 after.
+
+file | lines before | lines after | what it does | verdict
+---|---|---|---|---
+ios/README_RUN.md | 26 | 26 | build and run notes | KEEP
+ios/SandyApp.xcodeproj/project.pbxproj | 941 | 941 | Xcode project, targets | KEEP
+ios/SandyApp.xcodeproj/project.xcworkspace/contents.xcworkspacedata | 7 | 7 | Xcode workspace stub | KEEP
+ios/SandyApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved | 78 | 78 | pinned Swift package versions | KEEP
+ios/SandyApp.xcodeproj/xcshareddata/xcschemes/SandyApp.xcscheme | 29 | 29 | app build scheme | KEEP
+ios/SandyApp.xcodeproj/xcshareddata/xcschemes/SandyShareExtension.xcscheme | 96 | 96 | share extension scheme | KEEP
+ios/SandyApp.xcodeproj/xcshareddata/xcschemes/SandyWidgetExtension.xcscheme | 112 | 112 | widget extension scheme | KEEP
+ios/SandyApp/App/AppState.swift | 237 | 183 | session, base URL, api | KEEP
+ios/SandyApp/App/DeepLinkRouter.swift | 65 | 54 | handles sandy:// deep links | KEEP
+ios/SandyApp/App/MainTabView.swift | 249 | 208 | tab shell and tab bar | KEEP
+ios/SandyApp/App/SandyApp.swift | 148 | 130 | app entry, launch, delegate | KEEP
+ios/SandyApp/Assets.xcassets/AccentColor.colorset/Contents.json | 11 | 11 | accent color asset | KEEP
+ios/SandyApp/Assets.xcassets/AppIcon.appiconset/Contents.json | 37 | 37 | app icon manifest | KEEP
+ios/SandyApp/Assets.xcassets/AppIcon.appiconset/SandyAppIcon-dark.png | 1093 | 1093 | dark app icon | KEEP
+ios/SandyApp/Assets.xcassets/AppIcon.appiconset/SandyAppIcon-tinted.png | 561 | 561 | tinted app icon | KEEP
+ios/SandyApp/Assets.xcassets/AppIcon.appiconset/SandyAppIcon.png | 941 | 941 | app icon | KEEP
+ios/SandyApp/Assets.xcassets/Contents.json | 6 | 6 | asset catalog manifest | KEEP
+ios/SandyApp/Assets.xcassets/LaunchBackground.colorset/Contents.json | 20 | 20 | launch screen color | KEEP
+ios/SandyApp/Assets.xcassets/LaunchMark.imageset/Contents.json | 13 | 13 | launch mark manifest | KEEP
+ios/SandyApp/Assets.xcassets/LaunchMark.imageset/LaunchMark@3x.png | 844 | 844 | launch screen image | KEEP
+ios/SandyApp/Core/Auth/AuthView.swift | 276 | 236 | sign-in screen | KEEP
+ios/SandyApp/Core/Auth/GoogleAuth.swift | 72 | 47 | Google sign-in flow | KEEP
+ios/SandyApp/Core/Auth/Keychain.swift | 60 | 40 | token storage in Keychain | KEEP
+ios/SandyApp/Core/Cache/CacheModels.swift | 140 | 138 | offline cache record types | KEEP
+ios/SandyApp/Core/Cache/DiskCache.swift | 58 | 48 | JSON cache on disk | KEEP
+ios/SandyApp/Core/Intents/AskSandyIntent.swift | 54 | 47 | Siri "ask Sandy" intent | KEEP
+ios/SandyApp/Core/Intents/DeviceIntents.swift | 182 | 161 | Siri device control intents | ASK OWNER
+ios/SandyApp/Core/Intents/SandyIntents.swift | 201 | 182 | Siri quick-add shortcuts | KEEP
+ios/SandyApp/Core/Models/Models.swift | 446 | 381 | shared API model types | KEEP
+ios/SandyApp/Core/Networking/APIClient+Auth.swift | 203 | 177 | auth/profile/onboarding endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+Books.swift | 155 | 145 | books endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+Chat.swift | 279 | 246 | chat/conversation endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+Content.swift | 226 | 216 | images/search/insights endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+Devices.swift | 355 | 299 | devices/nodes/scenes endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+FutureMessages.swift | 41 | 37 | future messages endpoints | KEEP (per-domain extension is the documented pattern)
+ios/SandyApp/Core/Networking/APIClient+Gifts.swift | 69 | 66 | gifts endpoints | KEEP (per-domain extension is the documented pattern)
+ios/SandyApp/Core/Networking/APIClient+Goals.swift | 62 | 56 | goals endpoints | KEEP (per-domain extension is the documented pattern)
+ios/SandyApp/Core/Networking/APIClient+Life.swift | 178 | 170 | habits/expenses/journal endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+Photos.swift | 76 | 54 | photos endpoints | KEEP (per-domain extension is the documented pattern)
+ios/SandyApp/Core/Networking/APIClient+Productivity.swift | 312 | 300 | tasks/reminders/focus endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+Projects.swift | 156 | 146 | projects endpoints | KEEP
+ios/SandyApp/Core/Networking/APIClient+ShareContent.swift | 65 | 61 | shared content endpoints | KEEP (per-domain extension is the documented pattern)
+ios/SandyApp/Core/Networking/APIClient+Shopping.swift | 75 | 70 | shopping endpoints | KEEP (per-domain extension is the documented pattern)
+ios/SandyApp/Core/Networking/APIClient+Weather.swift | 34 | 33 | weather endpoint | KEEP (per-domain extension is the documented pattern)
+ios/SandyApp/Core/Networking/APIClient.swift | 259 | 175 | HTTP client core, token | KEEP
+ios/SandyApp/Core/Networking/APIClientProtocol.swift | 24 | 16 | unused mocking protocol | ASK OWNER (nothing uses it as a type; DELETE + drop conformance)
+ios/SandyApp/Core/Networking/Backend.swift | 26 | 16 | server URL source | KEEP
+ios/SandyApp/Core/Shared/SharedAuth.swift | 27 | 17 | base URL for extensions | MERGE INTO Core/Networking/Backend.swift
+ios/SandyApp/Core/Spotlight/SpotlightIndexer.swift | 97 | 89 | index items into Spotlight | ASK OWNER
+ios/SandyApp/Core/Spotlight/SpotlightRouter.swift | 37 | 32 | open tapped Spotlight results | MERGE INTO Core/Spotlight/SpotlightIndexer.swift
+ios/SandyApp/Core/Stores/LoadableStore.swift | 103 | 79 | shared load/error state | KEEP
+ios/SandyApp/DesignSystem/Board/BoardStore.swift | 111 | 86 | board card order persistence | KEEP
+ios/SandyApp/DesignSystem/Board/CardBoard.swift | 399 | 373 | draggable resizable card board | KEEP
+ios/SandyApp/DesignSystem/Board/CardMetrics.swift | 72 | 49 | card size environment values | MERGE INTO DesignSystem/Board/CardBoard.swift
+ios/SandyApp/DesignSystem/Components.swift | 440 | 380 | shared UI components | KEEP (contains unused HubList, see report)
+ios/SandyApp/DesignSystem/Haptics.swift | 55 | 42 | haptic feedback helpers | KEEP
+ios/SandyApp/DesignSystem/OfflineBanner.swift | 25 | 24 | offline notice banner | MERGE INTO DesignSystem/Components.swift
+ios/SandyApp/DesignSystem/Theme.swift | 304 | 244 | colors, fonts, glass styles | KEEP
+ios/SandyApp/Info.plist | 59 | 54 | app Info.plist | KEEP
+ios/SandyApp/PrivacyInfo.xcprivacy | 97 | 97 | App Store privacy manifest | KEEP
+ios/SandyApp/SandyApp.entitlements | 16 | 12 | app entitlements | KEEP
+ios/SandyApp/Services/GeminiLiveManager.swift | 541 | 475 | in-app live voice call | KEEP
+ios/SandyApp/Services/NotificationManager.swift | 524 | 449 | local and push notifications | KEEP
+ios/SandyApp/Services/SpeechManager.swift | 82 | 74 | reply audio playback | KEEP
+ios/SandyApp/Services/SubscriptionManager.swift | 96 | 88 | StoreKit subscription state | KEEP
+ios/SandyApp/Widgets/CallLiveActivity.swift | 71 | 63 | starts call Live Activity | KEEP
+ios/SandyApp/Widgets/FocusLiveActivity.swift | 89 | 80 | starts focus Live Activity | KEEP
+ios/SandyApp/Widgets/SandyCallAttributes.swift | 64 | 53 | call activity attributes (copy) | MERGE: byte-identical to SandyWidget/SandyCallAttributes.swift; share one file via Xcode target membership
+ios/SandyApp/Widgets/SandyFocusAttributes.swift | 41 | 27 | focus activity attributes (copy) | MERGE: byte-identical to SandyWidget/SandyFocusAttributes.swift; share one file via Xcode target membership
+ios/SandyApp/Widgets/WidgetContents.swift | 79 | 72 | in-app tasks board tile | KEEP
+ios/SandyApp/Widgets/WidgetData.swift | 81 | 58 | writes data for home widgets | KEEP
+ios/SandyApp/ar.lproj/InfoPlist.strings | 3 | 3 | Arabic app name | KEEP
+ios/SandyApp/en.lproj/InfoPlist.strings | 3 | 3 | English app name | KEEP
+ios/SandyAppTests/APIClientTests.swift | 58 | 48 | JWT decode unit tests | KEEP
+ios/SandyAppTests/README.md | 25 | 25 | how to run unit tests | KEEP
+ios/SandyAppUITests/SandyAppUITests.swift | 41 | 24 | Xcode template UI tests | ASK OWNER (template, asserts nothing)
+ios/SandyAppUITests/SandyAppUITestsLaunchTests.swift | 33 | 23 | launch screenshot UI test | ASK OWNER (template)
+ios/SandyShareExtension/Info.plist | 29 | 29 | share extension Info.plist | KEEP
+ios/SandyShareExtension/SandyShareExtension.entitlements | 10 | 10 | share extension entitlements | KEEP
+ios/SandyShareExtension/ShareAPI.swift | 105 | 100 | share extension HTTP calls | KEEP (separate target, cannot reuse APIClient)
+ios/SandyShareExtension/ShareViewController.swift | 376 | 363 | share sheet UI | ASK OWNER
+ios/SandyWidget/Assets.xcassets/AccentColor.colorset/Contents.json | 11 | 11 | widget accent color | KEEP
+ios/SandyWidget/Assets.xcassets/AppIcon.appiconset/Contents.json | 35 | 35 | widget icon manifest | KEEP
+ios/SandyWidget/Assets.xcassets/Contents.json | 6 | 6 | asset catalog manifest | KEEP
+ios/SandyWidget/Assets.xcassets/WidgetBackground.colorset/Contents.json | 11 | 11 | widget background color | KEEP
+ios/SandyWidget/Info.plist | 11 | 11 | widget Info.plist | KEEP
+ios/SandyWidget/PrivacyInfo.xcprivacy | 23 | 23 | widget privacy manifest | KEEP
+ios/SandyWidget/SandyCallAttributes.swift | 64 | 53 | call activity attributes | KEEP (see app copy)
+ios/SandyWidget/SandyCallLiveActivity.swift | 147 | 140 | call Lock Screen/Island UI | KEEP
+ios/SandyWidget/SandyControl.swift | 32 | 27 | Control Center talk button | KEEP
+ios/SandyWidget/SandyFocusAttributes.swift | 41 | 27 | focus activity attributes | KEEP (see app copy)
+ios/SandyWidget/SandyFocusLiveActivity.swift | 191 | 182 | focus Lock Screen/Island UI | KEEP
+ios/SandyWidget/SandyTasksWidget.swift | 285 | 275 | interactive tasks home widget | KEEP
+ios/SandyWidget/SandyWidget.swift | 221 | 216 | main Sandy home widget | KEEP
+ios/SandyWidget/SandyWidgetBundle.swift | 20 | 13 | registers all widgets | KEEP
+ios/SandyWidgetExtension.entitlements | 10 | 10 | widget entitlements | KEEP
+ios/SandyApp/Features/Books/ (4 files) | 979 | 979 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Control/ (11 files) | 2691 | 2691 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Daily/ (1 files) | 73 | 73 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/DailyNudge/ (2 files) | 180 | 180 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Focus/ (1 files) | 307 | 307 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/FutureMessages/ (2 files) | 312 | 312 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Gifts/ (2 files) | 427 | 427 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Goals/ (2 files) | 349 | 349 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Home/ (4 files) | 675 | 675 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Images/ (2 files) | 287 | 287 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Insights/ (2 files) | 269 | 269 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Life/ (7 files) | 1066 | 1066 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Memory/ (2 files) | 274 | 274 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Onboarding/ (1 files) | 650 | 650 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Paywall/ (1 files) | 124 | 124 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Photos/ (2 files) | 410 | 410 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Profile/ (2 files) | 714 | 714 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Projects/ (2 files) | 525 | 525 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/QuickAdd/ (1 files) | 170 | 170 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Reminders/ (2 files) | 626 | 626 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Sandy/ (11 files) | 2665 | 2665 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Search/ (2 files) | 291 | 291 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/ShareContent/ (2 files) | 306 | 306 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Shopping/ (2 files) | 459 | 459 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Tasks/ (2 files) | 629 | 629 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Timeline/ (2 files) | 346 | 346 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Features/Weather/ (2 files) | 369 | 369 | feature screens | SKIPPED: scheduled for rewrite
+ios/SandyApp/Localization/ (37 files) | 3352 | 3352 | L10n strings per area | SKIPPED: scheduled for rewrite
+
+## ios ASK OWNER
+
+Working features that may not be worth keeping. Nothing here was removed.
+
+- `Core/Networking/APIClientProtocol.swift` — protocol meant for mocking; nothing uses it as a type. Lose: nothing today (the planned test seam).
+- `Core/Spotlight/` (indexer + router) — puts tasks/reminders etc. into iOS Spotlight search. Lose: finding Sandy items from the home-screen search.
+- `Core/Intents/DeviceIntents.swift` — Siri/Shortcuts control of registered devices. Lose: "Hey Siri, turn on …" without opening the app (the in-app Control screen stays).
+- `SandyShareExtension/` — share sheet that sends text/links from other apps to Sandy. Lose: "Share → Sandy" from Safari and other apps.
+- `SandyAppUITests/` — Xcode template UI tests (launch + screenshot, no assertions). Lose: a launch smoke test.
+

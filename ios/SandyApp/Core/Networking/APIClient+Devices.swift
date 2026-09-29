@@ -1,6 +1,5 @@
 import Foundation
 
-/// رد قائمة الوحدات: عناصر الوحدة + علم البيانات التجريبية.
 private struct NodeListResponse: Decodable {
     let items: [Row]?
     let demo: Bool?
@@ -33,11 +32,9 @@ private struct NodeListResponse: Decodable {
             online = try c.decodeIfPresent(Bool.self, forKey: .online)
             lastSeen = try c.decodeIfPresent(String.self, forKey: .lastSeen)
             pairedAt = try c.decodeIfPresent(String.self, forKey: .pairedAt)
-            // الباك يرسل outputs كمصفوفة كائنات {id, kind}، مش نصوص. نتساهل فنرجّع
-            // فاضي بدل ما نرمي — نفس سلوك (as? [String] ?? []) قبل التطبيع.
+            // الباك بيرسل outputs ككائنات {id, kind} مش نصوص: نرجّع فاضي بدل ما نرمي.
             outputs = (try? c.decode([String].self, forKey: .outputs)) ?? []
-            // قاموس أرقام وبوليان مختلطين — Decodable ما بيهضمه مباشرة، فبنفكّه
-            // يدويًا. غيابه مش خطأ: عقدة الغرفة ما بتبعث تليمتري أصلًا.
+            // قاموس مختلط الأنواع بينفكّ يدويًا. غيابه مش خطأ: عقدة الغرفة ما بتبعث تليمتري.
             if let raw = try? c.decode([String: TelemetryValue].self, forKey: .telemetry) {
                 telemetry = raw.mapValues { $0.any }
             } else {
@@ -47,8 +44,7 @@ private struct NodeListResponse: Decodable {
     }
 }
 
-/// قيمة تليمتري وحدة — رقم أو بوليان. لازمنا وسيط لأن Swift ما بيفكّ
-/// قاموسًا مختلط الأنواع لحاله.
+/// رقم أو بوليان — وسيط لأن Swift ما بيفكّ قاموسًا مختلط الأنواع لحاله.
 private enum TelemetryValue: Decodable {
     case int(Int), bool(Bool), string(String)
 
@@ -62,7 +58,7 @@ private enum TelemetryValue: Decodable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
-        // البوليان أولًا: بلغة سويفت، true بينفكّ كـ Int(1) لو جرّبنا الرقم قبله.
+        // البوليان أولًا: true بينفكّ كـ Int(1) لو جرّبنا الرقم قبله.
         if let b = try? c.decode(Bool.self)   { self = .bool(b);   return }
         if let i = try? c.decode(Int.self)    { self = .int(i);    return }
         if let s = try? c.decode(String.self) { self = .string(s); return }
@@ -70,7 +66,6 @@ private enum TelemetryValue: Decodable {
     }
 }
 
-/// رد ربط وحدة: المعرّف + هل كانت مربوطة سابقاً.
 private struct PairNodeResponse: Decodable {
     let nodeId: String?
     let already: Bool?
@@ -84,7 +79,6 @@ private struct PairNodeResponse: Decodable {
     }
 }
 
-/// رد آخر كود أشعة التقطته الوحدة.
 private struct NodeIrLastResponse: Decodable {
     let code: String?
     let at: String?
@@ -97,9 +91,7 @@ extension APIClient {
         let parsed: [DeviceItem] = items.compactMap { row in
             guard let name = row["name"] as? String, !name.isEmpty else { return nil }
             let transport = DeviceTransport.from(row["transport"] as? [String: Any] ?? [:])
-            // الحالة قد ترجع نصًّا أو رقمًا (أو بوليان JSON) — نوحّدها لنص. نفحص
-            // النص أولًا؛ البوليان والأرقام كلاهما يجسر لـ NSNumber، ونميّز البوليان
-            // بنوع قيمته (Bool) حتى نحوّله on/off بدل 1/0.
+            // نص أو رقم أو بوليان → نص؛ البوليان بيتحوّل on/off بدل 1/0.
             let state: String
             if let s = row["state"] as? String {
                 state = s
@@ -125,8 +117,7 @@ extension APIClient {
         return ListResult(items: parsed, demo: r["demo"] as? Bool ?? false)
     }
 
-    // POST /api/devices {name,label,control_type,transport,room?,meta?} → {ok,name} | {error,allowed?}
-    // نولّد `name` معرّفًا ثابتًا من التسمية حتى يبقى مستقرًّا (الباك-إند يقبله كـ id).
+    // `name` معرّف ثابت مولّد من التسمية.
     @discardableResult
     func addDevice(name: String, label: String, controlType: String,
                    transport: DeviceTransport, room: String = "",
@@ -143,8 +134,7 @@ extension APIClient {
         return r["name"] as? String ?? name
     }
 
-    // PATCH /api/devices/<name> {label?,room?,control_type?,transport?,meta?} → {ok}
-    // نمرّر فقط الحقول غير nil حتى لا نمسح قيمة قائمة بالخطأ.
+    // بس الحقول غير nil حتى ما نمسح قيمة قائمة بالخطأ.
     func updateDevice(name: String, label: String? = nil, room: String? = nil,
                       controlType: String? = nil, transport: DeviceTransport? = nil,
                       meta: [String: Any]? = nil) async throws {
@@ -158,36 +148,24 @@ extension APIClient {
         _ = try await request("/api/devices/\(enc(name))", method: "PATCH", body: body)
     }
 
-    // DELETE /api/devices/<name> → {ok}
     func deleteDevice(name: String) async throws {
         try await send("/api/devices/\(enc(name))", method: "DELETE")
     }
 
-    // POST /api/devices/<name>/control {action,value?} → {ok,sent,payload}
-    // أفعال حسب النوع: switch on|off؛ dimmer on|off أو set+قيمة رقمية؛
-    // cover open|close|stop؛ media on|off|pause؛ enum set+قيمة؛ ir send+اسم زر.
+    // الأفعال: switch on|off؛ dimmer on|off|set؛ cover open|close|stop؛ media on|off|pause؛ enum set؛ ir send.
     func controlDevice(name: String, action: String, value: String? = nil) async throws {
         var body: [String: String] = ["action": action]
         if let value, !value.isEmpty { body["value"] = value }
         try await send("/api/devices/\(enc(name))/control", method: "POST", body: body)
     }
 
-    // POST /api/devices/<name>/image {image_base64} → {ok,chunks,bytes}
-    //
-    // منفصل عن /control لأنه الصورة مش أمر: التحكّم بياخد نص قصير وبينشره،
-    // وهاد بياخد صورة، بيصغّرها ع ٢٤٠×٢٤٠، بيحوّلها لصيغة بكسلات الشاشة
-    // بالضبط، وبينشرها ع عشرين رسالة. كل هاد بيصير ع الخادم — اللوح ما بيفك
-    // ولا صيغة، لأن فاكّ الصور بياكل رام داخلية هي اللي بتخلّيها تحكي.
+    // الخادم بيصغّر الصورة ع ٢٤٠×٢٤٠ وبيحوّلها لصيغة الشاشة: فكّ الصور بياكل رام اللوح.
     func sendDeviceImage(name: String, jpegData: Data) async throws {
         try await send("/api/devices/\(enc(name))/image", method: "POST",
                        body: ["image_base64": jpegData.base64EncodedString()])
     }
 
-    // GET /api/nodes/<id>/snapshot/live → آخر إطار من البثّ البعيد.
-    //
-    // نفس نقطة سحب الصورة العادية — الكاميرا بترفع الإطار بمعرّف ثابت `live`،
-    // فالجديد بيستبدل القديم. بترجّع `nil` لو ما في إطار جاهز بعد، وهاد فرق
-    // مهم عن الخطأ: بثّ لسا ما بلّش مش بثّ خربان.
+    // آخر إطار من البثّ البعيد؛ `nil` = ما في إطار بعد (مش خطأ).
     func liveFrame(nodeId: String) async throws -> Data? {
         let r = try await rawGet("/api/nodes/\(enc(nodeId))/snapshot/live", timeout: 8)
         guard r.count > 2, r[r.startIndex] == 0xFF,
@@ -195,39 +173,26 @@ extension APIClient {
         return r
     }
 
-    // POST /api/account/reset — يفضّي الحساب وبيخلّيه.
-    //
-    // منفصل عن الحذف لأنّ «بدّي أبدأ من جديد» و«بدّي أمشي» مش نفس الطلب:
-    // اللي بدّه يبدأ من جديد بدّه يضلّ يملك **روبوته**. لو خلّيناه يحذف حسابه
-    // عشان يمسح محادثة، بيخسر الجهاز معها.
+    // يفضّي الحساب بس بيخلّيه (والروبوت يضل ملكه) — منفصل عن الحذف.
     func resetAccountData() async throws {
         struct Reply: Decodable { let ok: Bool? }
         let _: Reply = try await fetch("/api/account/reset", method: "POST",
                                        body: ["confirm": "RESET"])
     }
 
-    // DELETE /api/account — حذف نهائي. شرط إلزامي بمتجر أبل، ومطلوب أخلاقيًا:
-    // الحساب فيه بصمة صوت ويوميات وصور ومصاريف.
+    // حذف نهائي — شرط إلزامي بمتجر أبل.
     func deleteAccount() async throws {
         struct Reply: Decodable { let ok: Bool? }
         let _: Reply = try await fetch("/api/account", method: "DELETE",
                                        body: ["confirm": "DELETE"])
     }
 
-    // POST /api/nodes/<id>/snapshot → إمّا الصورة، أو تذكرة نرجع فيها.
-    //
-    // **اللوح ما إله سرعة ثابتة.** بيردّ بثانية وهو فاضي، وبأكتر من عشرين وهو
-    // مشغول. وكل نسخة سابقة حاولت تخبّي هالفرق جوّا نداء واحد: تحطّ مهلة، فإمّا
-    // تكون قصيرة فترمي صورة وصلت سليمة، أو طويلة فتوقّف خيط خادم نص دقيقة —
-    // والخادم عنده ستّة عشر خيط بس، يعني تلات ناس بيصوّروا سوا بيوقّفوا التطبيق
-    // كلّه.
-    //
-    // فالخادم بيرجّع تذكرة، والصورة بتنحفظ عنده لمّا توصل، وإحنا منسأل عنها.
-    // اللوح بياخد وقته، وما في مهلة لازم يلحقها حدا.
+    // بيرجّع الصورة أو تذكرة منسأل عنها: اللوح ممكن ياخد +٢٠ ثانية، ومهلة طويلة
+    // كانت بتوقّف خيط خادم (عنده ١٦ بس).
     func cameraSnapshot(nodeId: String) async throws -> Data {
         let data = try await rawPost("/api/nodes/\(enc(nodeId))/snapshot", timeout: 20)
 
-        // الرد صورة؟ خلصنا. JPEG بتبدأ بـ FF D8.
+        // JPEG بتبدأ بـ FF D8.
         if data.count > 2, data[data.startIndex] == 0xFF,
            data[data.index(after: data.startIndex)] == 0xD8 {
             return data
@@ -237,8 +202,7 @@ extension APIClient {
             throw APIError(message: "no_photo")
         }
 
-        // نسأل عنها. أربعين ثانية بتغطّي أبطأ ردّ شفناه بفرق كبير، والسؤال
-        // نفسه رخيص — نداء صغير كل ثانية ونصف، مش خيط واقف مستنّي.
+        // ٤٠ ثانية بتغطّي أبطأ ردّ شفناه؛ السؤال رخيص (كل ثانية ونص).
         let deadline = Date().addingTimeInterval(40)
         while Date() < deadline {
             try await Task.sleep(nanoseconds: 1_500_000_000)
@@ -251,16 +215,11 @@ extension APIClient {
         throw APIError(message: "no_photo")
     }
 
-    // POST /api/nodes/<node_id>/wifi {ssid,password} → {ok, window_s}
-    //
-    // بترجع أول ما ينبعت الطلب، مش لما تنجح الشبكة. اللوح بده لحدّ خمسة وعشرين
-    // ثانية يجرّب ويرجع للقديمة لو فشلت، والنتيجة الحقيقية بتوصل بنبضته الجاية
-    // بحقل `ssid`.
+    // بترجع أول ما ينبعت الطلب؛ النتيجة الحقيقية بحقل `ssid` بالنبضة الجاية (اللوح بياخد لحد ٢٥ ث).
     @discardableResult
     func switchNodeWiFi(nodeId: String, ssid: String, password: String,
                         board: String = "brain") async throws -> Int {
-        // أسماء الحقول مطابقة لرد الخادم حرفيًا (`window_s`)، عشان ما يصير
-        // مكانان بيسمّوا نفس الإشي وبيفترقوا.
+        // أسماء الحقول مطابقة لرد الخادم حرفيًا (`window_s`).
         struct Body: Encodable { let ssid: String; let password: String; let board: String }
         struct Reply: Decodable { let ok: Bool?; let window_s: Int? }
         let r: Reply = try await fetch("/api/nodes/\(enc(nodeId))/wifi",
@@ -270,16 +229,13 @@ extension APIClient {
         return r.window_s ?? 35
     }
 
-    // POST /api/devices/<name>/ir-learn {button,code} → {ok}
-    // التقاط الكود الحقيقي يجي مع تحديث الوحدة لاحقًا — هلّق نحفظ اسم الزر (وكود إن توفّر).
+    // هلّق نحفظ اسم الزر (وكود إن توفّر).
     func irLearn(name: String, button: String, code: String = "") async throws {
         try await send("/api/devices/\(enc(name))/ir-learn", method: "POST",
                        body: ["button": button, "code": code])
     }
 
-    // ── التحكّم بالبيت: وحدات ساندي (الربط) ──────────────────────────────────
-    // GET /api/nodes → {"items":[{node_id,label,capabilities,outputs,
-    //                            firmware_version,online,last_seen,paired_at}], "demo":bool}
+    // ── وحدات ساندي (الربط) ──
     func getNodes() async throws -> ListResult<NodeItem> {
         let r: NodeListResponse = try await fetch("/api/nodes")
         let parsed: [NodeItem] = (r.items ?? []).compactMap { row in
@@ -297,9 +253,7 @@ extension APIClient {
         return ListResult(items: parsed, demo: r.demo ?? false)
     }
 
-    // POST /api/nodes/pair {code,label?}
-    //   → {ok,node_id,already}                      وحدة إلك من قبل
-    //   → {ok,needs_presence,node_id,sent} (202)    وحدة حرّة: الرمز ع شاشتها
+    // POST /api/nodes/pair → {ok,node_id,already} لوحدة إلك، أو {needs_presence,...} (202) لوحدة حرّة.
     @discardableResult
     func pairNode(code: String, label: String? = nil) async throws -> PairResult {
         var body: [String: String] = ["code": code]
@@ -311,11 +265,7 @@ extension APIClient {
                           sent: r.sent ?? true)
     }
 
-    // POST /api/nodes/pair/confirm {code,presence,label?} → {ok,node_id}
-    //
-    // الخطوة التانية: الأرقام الستّة اللي ظهرت ع وجهها. أخطاؤها رموز
-    // (`presence_wrong`، `presence_expired`، `presence_locked`) بتوصل بـ
-    // `APIError.code` عشان الشيت يقول الجملة الصح.
+    // الخطوة التانية: الرمز اللي ظهر ع الشاشة. أخطاؤها بـ `APIError.code`.
     @discardableResult
     func confirmPairNode(code: String, presence: String, label: String? = nil) async throws -> PairResult {
         var body: [String: String] = ["code": code, "presence": presence]
@@ -324,17 +274,12 @@ extension APIClient {
         return PairResult(nodeId: r.nodeId ?? "", already: r.already ?? false)
     }
 
-    // PATCH /api/nodes/<node_id> {label} → {ok}
     func renameNode(nodeId: String, label: String) async throws {
         try await send("/api/nodes/\(enc(nodeId))", method: "PATCH",
                        body: ["label": label])
     }
 
-    // DELETE /api/nodes/<node_id> → {ok, board_wiped}
-    //
-    // بترجّع هل اللوح **انمسح** فعلًا، مش بس هل انفكّ الربط. التنين مش نفس
-    // الإشي: لو كان مطفي وقت الطلب، الملكية بتتحرّر بس اسم شبكتك وكلمة سرّها
-    // بيضلّوا محفوظين جوّاه — وبينباع فيهن.
+    // `board_wiped`: لو اللوح مطفي وقت الفك، بيضل فيه اسم شبكتك وكلمة سرّها.
     @discardableResult
     func unpairNode(nodeId: String) async throws -> Bool {
         struct Reply: Decodable { let board_wiped: Bool? }
@@ -342,12 +287,11 @@ extension APIClient {
         return r.board_wiped ?? false
     }
 
-    // POST /api/nodes/<node_id>/ir/learn → تضع الوحدة بوضع التعلّم (تلتقط الضغطة القادمة)
+    // تضع الوحدة بوضع التعلّم (تلتقط الضغطة القادمة).
     func nodeIrLearnStart(nodeId: String) async throws {
         try await send("/api/nodes/\(enc(nodeId))/ir/learn", method: "POST", body: [String: String]())
     }
 
-    // GET /api/nodes/<node_id>/ir/last → {code, at} — آخر كود أشعة التقطته الوحدة
     func nodeIrLast(nodeId: String) async throws -> (code: String, at: String) {
         let r: NodeIrLastResponse = try await fetch("/api/nodes/\(enc(nodeId))/ir/last")
         return (r.code ?? "", r.at ?? "")

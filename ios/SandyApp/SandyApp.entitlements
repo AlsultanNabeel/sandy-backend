@@ -6,11 +6,7 @@
 	<array>
 		<string>group.com.sandy.app</string>
 	</array>
-	<!-- Sign in with Apple (com.apple.developer.applesignin) and push (aps-environment)
-	     are left out on purpose while the app is signed with a free personal team: a
-	     personal team can't issue a profile carrying either one, so the build fails.
-	     Until they're back, Apple sign-in fails on device with ASAuthorizationError 1000
-	     and registerForRemoteNotifications produces no token. Put both back (see commit
-	     1f0da04) as soon as the paid developer account is active. -->
+	<!-- Apple sign-in and aps-environment are left out while signing with a free personal team
+	     (it cannot issue them). Restore both (commit 1f0da04) once the paid account is active. -->
 </dict>
 </plist>

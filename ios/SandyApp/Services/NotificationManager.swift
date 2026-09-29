@@ -5,53 +5,35 @@ import UserNotifications
 import UIKit
 #endif
 
-// ─────────────────────────────────────────────────────────────────────────
-//  NotificationManager — مدير الإشعارات المحلية المركزي.
-//
-//  يطلب الإذن مرّة، ويجدول إشعارًا لكل عنصر إله وقت مستقبلي (تذكير/رسالة
-//  مستقبلية…). هوية الإشعار = بادئة النوع + هوية العنصر، فإعادة الجدولة تستبدل
-//  القديم بلا تكرار، والمواعيد الماضية تُتجاهل.
-//
-//  الإشعار المحلي بيوصل والتطبيق مسكّر/مقفول (النظام يطلّعه) طالما تجدول مسبقًا
-//  والإذن مُعطى. هاد أساس مستقل تمامًا عن الدفع البعيد (APNs) — لاحقًا بنركّب
-//  الدفع فوقه (تسجيل توكن + إرسال من الباك‑إند) بلا ما نلمس هالكود.
-//
-//  iOS 16-safe — UserNotifications فقط. الصنف thread-safe (UNUserNotificationCenter
-//  آمن للنداء من أي خيط) فما نعزله بـ main actor.
-// ─────────────────────────────────────────────────────────────────────────
+// هوية الإشعار = بادئة النوع + هوية العنصر، فإعادة الجدولة تستبدل القديم بلا تكرار.
+// UNUserNotificationCenter آمن من أي خيط، فما نعزل الصنف بـ main actor.
 
-/// عنصر قابل للجدولة — يبنيه الستور من بياناته.
 struct NotificationItem {
     let id: String
     let title: String
     let body: String
     let date: Date
-    /// How it repeats, from the reminder's RRULE. `.none` rings once.
+    /// From the reminder's RRULE. `.none` rings once.
     var repeats: NotificationRepeat = .none
-    /// The action category the notification carries (buttons on the banner /
-    /// lock screen). nil = a plain notification with nothing to press.
+    /// Action category (banner buttons); nil = plain notification.
     var category: String? = nil
-    /// Whatever the buttons need to act without the app having been running —
-    /// for a reminder that is its id and its recurrence rule.
+    /// What the buttons need to act without the app running (reminder id + rule).
     var userInfo: [String: String] = [:]
 }
 
-/// The repeat patterns a local notification can express by itself. A reminder
-/// that repeats in a way this cannot express rings at its next occurrence, and
-/// the server moves it forward the next time the list is loaded.
+/// Repeats one calendar trigger can express; anything else rings once and the
+/// server moves it forward on the next load.
 enum NotificationRepeat {
     case none, daily, weekly, monthly
 
     init(rrule: String) {
-        // "RRULE:FREQ=WEEKLY;BYDAY=MO" → ["FREQ": "WEEKLY", "BYDAY": "MO"]
         var parts: [String: String] = [:]
         let body = rrule.uppercased().replacingOccurrences(of: "RRULE:", with: "")
         for pair in body.split(separator: ";") {
             let kv = pair.split(separator: "=", maxSplits: 1).map(String.init)
             if kv.count == 2 { parts[kv[0]] = kv[1] }
         }
-        // Only what one calendar trigger can express: every single day, one day
-        // a week, or one day a month. "Every 2 days" or "Mon and Wed" cannot.
+        // Daily, one weekday, or one day a month. "Every 2 days" or "Mon and Wed" cannot.
         if let n = parts["INTERVAL"], n != "1" { self = .none; return }
         let days = parts["BYDAY"].map { $0.split(separator: ",").count } ?? 0
         switch parts["FREQ"] {
@@ -63,13 +45,12 @@ enum NotificationRepeat {
     }
 }
 
-/// وجهة النقر على الإشعار — الشاشة اللي نفتحها حسب نوع الإشعار.
 enum NotifRoute: String, Identifiable {
     case reminders, tasks, future, dailyNudge, insights
     var id: String { rawValue }
 }
 
-/// الأزرار اللي بتطلع على إشعار التذكير. القيمة الخام هي هوية الإجراء عند النظام.
+/// القيمة الخام هي هوية الإجراء عند النظام.
 enum ReminderNotificationAction: String {
     case snooze = "SANDY_REMINDER_SNOOZE"
     case done   = "SANDY_REMINDER_DONE"
@@ -80,28 +61,23 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     static let shared = NotificationManager()
     private let center = UNUserNotificationCenter.current()
 
-    /// تُضبط عند النقر على إشعار → الواجهة تفتح شاشتها. تُصفّر بعد الفتح.
+    /// النقر على إشعار → الواجهة تفتح شاشتها وتصفّره.
     @Published var pendingRoute: NotifRoute?
 
-    /// يزيد كل ما زرّ بإشعار تذكير غيّر شي بالخادم (بعدين/تمّ/احذف)، فشاشة
-    /// التذكيرات — لو كانت مفتوحة — تعيد الجلب بدل ما تعرض وقتًا قديمًا.
+    /// يزيد كل ما زرّ بإشعار تذكير غيّر شي بالخادم، فشاشة التذكيرات تعيد الجلب.
     @Published var remindersChanged = 0
 
-    /// يُستدعى بتوكن جهاز APNs (نص hex) عند نجاح التسجيل للدفع البعيد — يضبطه
-    /// AppState حتى يرفعه للباك-إند (`/api/push/register`). نخزّن آخر توكن حتى لو
-    /// وصل قبل ما يُضبط المستمع، فنقدر نرفعه أول ما يجهز.
+    /// آخر توكن APNs (hex) محفوظ حتى لو وصل قبل ما يُضبط المستمع.
     var onDeviceToken: ((String) -> Void)?
     private(set) var lastDeviceToken: String?
 
     private override init() {
         super.init()
-        // مندوب المركز — حتى يطلع الإشعار كبانر والتطبيق مفتوح، ونمسك النقر للتوجيه.
+        // حتى يطلع الإشعار كبانر والتطبيق مفتوح، ونمسك النقر.
         center.delegate = self
-        // أزرار التذكير لازم تكون مسجّلة قبل ما يوصل أي إشعار — والنظام بيشغّل
-        // التطبيق بالخلفية عشان يسلّمنا ضغطة زر، فهاد أوّل شي بينفّذ وقتها.
+        // أزرار التذكير لازم تتسجّل قبل أي إشعار: النظام ممكن يشغّل التطبيق بالخلفية لضغطة زر.
         registerReminderCategory()
-        // كل ما يرجع التطبيق للواجهة نعيد جدولة الإشعارات الاستباقية — فإشعار
-        // «صارلك يومين» بيتأجّل مع كل فتحة، وما بيطلع إلا لو المستخدم غاب فعلًا.
+        // مع كل رجوع للواجهة نعيد الجدولة، فإشعار «صارلك يومين» بيتأجّل.
         #if canImport(UIKit)
         NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
@@ -112,7 +88,6 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         #endif
     }
 
-    /// نطلب الإذن (تنبيه/صوت/شارة)، وعند الموافقة نسجّل الجهاز للدفع البعيد (APNs).
     /// آمن للنداء المتكرّر — النظام يعرض الطلب مرّة، والتسجيل idempotent.
     func requestAuthorization() {
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
@@ -125,21 +100,19 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
-    /// يستقبله AppDelegate عند نجاح التسجيل: نحوّل بايتات التوكن لـ hex ونمرّرها
-    /// للمستمع (لرفعها للباك-إند). لو ما في مستمع بعد، نحتفظ فيه لآخر.
+    /// لو ما في مستمع بعد، نحتفظ بالتوكن لآخر.
     func handleDeviceToken(_ deviceToken: Data) {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
         lastDeviceToken = hex
         onDeviceToken?(hex)
     }
 
-    /// يربط المستمع ويرفع أي توكن وصل مسبقًا (لو التسجيل سبق ضبط المستمع).
+    /// يرفع أي توكن وصل قبل ضبط المستمع.
     func bindDeviceToken(_ handler: @escaping (String) -> Void) {
         onDeviceToken = handler
         if let t = lastDeviceToken { handler(t) }
     }
 
-    /// التطبيق مفتوح: نعرض الإشعار كبانر + صوت + ضمن قائمة الإشعارات.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler:
@@ -147,13 +120,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         completionHandler([.banner, .sound, .list])
     }
 
-    /// النقر على الإشعار: نقرأ نوعه من بادئة الهوية ونوجّه الواجهة لشاشته.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        // زرّ على تذكير: ننفّذه بدل ما نفتح التطبيق وبس. هالمسار بيشتغل كمان
-        // والتطبيق مو شغّال أصلًا — النظام بيقلّعه بالخلفية ويسلّمنا الرد، و
-        // الـAPIClient تحت بيقرا توكنه من الـKeychain متل الويدجت والاختصارات.
+        // زرّ على تذكير: بيشتغل حتى لو التطبيق مش شغّال (بيقلع بالخلفية، والتوكن من الـKeychain).
         if let action = ReminderNotificationAction(rawValue: response.actionIdentifier),
            let reminderId = response.notification.request.content
                .userInfo[Self.reminderIdKey] as? String,
@@ -165,8 +135,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
 
         let id = response.notification.request.identifier
-        // الدفع البعيد للتنبيه اليومي يحمل "kind" بالحمولة (agenda/question) — نوجّهه
-        // للرئيسية حيث تظهر بطاقة التنبيه. المحلّي يُعرف ببادئة هويته.
+        // الدفع البعيد للتنبيه اليومي بيحمل "kind" → الرئيسية. المحلّي بيُعرف ببادئة هويته.
         let userInfo = response.notification.request.content.userInfo
         let route: NotifRoute? = (userInfo["kind"] != nil)
             ? .dailyNudge
@@ -177,7 +146,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         completionHandler()
     }
 
-    /// وجهة إشعار محلي من بادئة هويته (nil = يفتح التطبيق بس).
+    /// nil = يفتح التطبيق بس.
     static func route(forIdentifier id: String) -> NotifRoute? {
         if id.hasPrefix(weeklyID) { return .insights }
         if id.hasPrefix(headsUpPrefix + "task.") { return .tasks }
@@ -188,8 +157,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         return nil
     }
 
-    /// نزامن إشعارات نوع كامل بنفس البادئة: نلغي كل المعلّق بهالبادئة ثم نجدول
-    /// العناصر المستقبلية. البادئة تفصل الأنواع فما يتعارضوا (تذكير/رسالة/…).
+    /// نلغي كل المعلّق بالبادئة ثم نجدول العناصر المستقبلية.
     func sync(prefix: String, items: [NotificationItem]) {
         center.getPendingNotificationRequests { [weak self] reqs in
             guard let self else { return }
@@ -201,27 +169,15 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                               category: it.category, userInfo: it.userInfo)
             }
         }
-        // نتذكّر عناصر كل نوع حتى تنبيهات «بعد ساعة» تنبني منها وتتجنّب التكرار.
+        // عناصر كل نوع، منها بتنبني تنبيهات «بعد ساعة».
         knownLock.lock()
         knownItems[prefix] = items
         knownLock.unlock()
         scheduleProactiveNudges()
     }
 
-    /// Tears down everything this device holds for the account signing out.
-    ///
-    /// Every notification here was scheduled from one account's data: their
-    /// reminders, their tasks, the heads-up an hour before something only they
-    /// have. None of it is re-checked at fire time — a local notification just
-    /// rings — so without this the next person to sign in on this phone gets
-    /// the previous account's reminders, by name, for as long as they were
-    /// scheduled ahead. `knownItems` goes with them: it is what
-    /// `scheduleProactiveNudges` rebuilds from, so leaving it would put the old
-    /// account's items straight back on the next sync.
-    ///
-    /// `removeAllPending…` rather than a prefix sweep: the point is that
-    /// nothing scheduled before this moment survives it, and a prefix list is
-    /// one forgotten prefix away from being wrong.
+    /// Local notifications ring without re-checking the session, so clear everything (and
+    /// `knownItems`, which nudges rebuild from) or the next account gets these reminders.
     func clearForSignOut() {
         center.removeAllPendingNotificationRequests()
         center.removeAllDeliveredNotifications()
@@ -231,21 +187,16 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         onDeviceToken = nil
     }
 
-    // MARK: - Reminder actions (the buttons on a reminder's notification)
+    // MARK: - Reminder actions
 
-    /// The category every reminder notification carries; its buttons are built
-    /// in `registerReminderCategory()`.
     static let reminderCategory = "SANDY_REMINDER"
-    /// userInfo keys the buttons read back — the two things acting needs.
+    /// userInfo keys the buttons read back.
     static let reminderIdKey = "reminder_id"
     static let reminderRecurrenceKey = "reminder_recurrence"
-    /// What «remind me later» means from the lock screen, where there is no room
-    /// to ask. Matches the backend's own default.
+    /// «Remind me later» from the lock screen; matches the backend default.
     static let snoozeMinutes = 10
 
-    /// Registers the three buttons. Titles are baked in when the category is
-    /// registered, not when the notification fires, so this runs again whenever
-    /// the app language changes (`LanguageManager.setLang`).
+    /// Titles are baked in at registration, so this reruns on language change.
     func registerReminderCategory() {
         let lang = AppLocale.lang
         let snooze = UNNotificationAction(
@@ -268,18 +219,12 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         ])
     }
 
-    /// Runs one button: the backend first, then the local notification is
-    /// re-armed or left cancelled to match, then an open reminders screen is
-    /// told to refetch.
-    ///
-    /// The server is the source of truth for this list, so a failure here is
-    /// recoverable rather than silent: the next time the reminders screen loads,
-    /// `sync(prefix:items:)` rebuilds every reminder notification from it.
+    /// Backend first, then re-arm or leave cancelled, then tell an open reminders screen to refetch.
+    /// On failure the next reminders load rebuilds notifications from the server.
     private func perform(_ action: ReminderNotificationAction,
                          reminderId: String,
                          notification: UNNotificationRequest,
                          completion: @escaping () -> Void) {
-        // The user answered this one — take it down before anything else.
         let notifId = notification.identifier
         center.removeDeliveredNotifications(withIdentifiers: [notifId])
         center.removePendingNotificationRequests(withIdentifiers: [notifId])
@@ -289,29 +234,23 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let info = [Self.reminderIdKey: reminderId,
                     Self.reminderRecurrenceKey: recurrence]
 
-        // المدير كائن واجهة (ObservableObject) — بننفّذ ع الخيط الرئيسي بدل ما
-        // نمرّره لإغلاق متوازٍ.
+        // ObservableObject: ننفّذ ع الخيط الرئيسي.
         Task { @MainActor [weak self] in
             guard let self else { completion(); return }
-            let api = APIClient(baseURL: Backend.currentURL)   // التوكن من الـKeychain
+            let api = APIClient(baseURL: Backend.currentURL)
             do {
                 switch action {
                 case .snooze:
                     let out = try await api.snoozeReminder(id: reminderId,
                                                            minutes: Self.snoozeMinutes)
-                    // One shot on purpose: a repeating trigger built from the
-                    // snoozed time would ring ten minutes late every day after.
-                    // The series itself is intact on the server and comes back
-                    // with the next load.
+                    // One shot on purpose: repeating from the snoozed time would ring late every day after.
                     if let at = Self.parseISO(out.remindAt) {
                         self.schedule(id: notifId, title: content.title, body: content.body,
                                       at: at, category: Self.reminderCategory, userInfo: info)
                     }
                 case .done:
                     let out = try await api.completeReminder(id: reminderId)
-                    // A recurring reminder answers with its next occurrence (its
-                    // own hour, not the snoozed one); a one-off answers with
-                    // nothing and stays cancelled.
+                    // Recurring answers with its next occurrence; a one-off stays cancelled.
                     if let at = Self.parseISO(out.remindAt) {
                         self.schedule(id: notifId, title: content.title, body: content.body,
                                       at: at, repeats: NotificationRepeat(rrule: recurrence),
@@ -330,27 +269,20 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
-    // MARK: - Proactive nudges (local — APNs isn't configured)
+    // MARK: - Proactive nudges (local)
 
-    /// All proactive identifiers share this root, so they never collide with the
-    /// per-item prefixes above, and a reschedule replaces instead of stacking.
+    /// Shared root so they never collide with per-item prefixes, and reschedule replaces.
     static let proactivePrefix = "proactive."
     static let awayID = "proactive.away"
     static let weeklyID = "proactive.weekly"
     static let headsUpPrefix = "proactive.headsUp."
 
-    /// The last items `sync` saw per prefix ("task." / "reminder." / "future.").
+    /// The last items `sync` saw per prefix.
     private var knownItems: [String: [NotificationItem]] = [:]
     private let knownLock = NSLock()
 
-    /// Reschedules Sandy's proactive local notifications. Safe to call often
-    /// (every app activation and after every task/reminder load):
-    ///  • away — one ping 48h from now; each open pushes it forward again, so it
-    ///    only fires if the user really disappears for two days;
-    ///  • heads-up — 60 minutes before each task/reminder that has a time later
-    ///    today, unless something already rings at that exact time;
-    ///  • weekly — Sunday 19:00 «your week is ready», opening the Insights screen.
-    /// Does nothing (and clears what it scheduled) when notifications are denied.
+    /// Safe to call often: away ping 48h ahead (pushed on each open), heads-up 60 min before
+    /// today's timed items, weekly Sunday 19:00. Clears them when notifications are denied.
     func scheduleProactiveNudges() {
         knownLock.lock()
         let known = knownItems
@@ -367,14 +299,14 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             }
             let lang = AppLocale.lang
 
-            // (a) صارلك يومين ما حكيتني — same id, so this replaces the previous one.
+            // (a) صارلك يومين — same id, replaces the previous one.
             self.addProactive(
                 id: Self.awayID,
                 title: translate(lang, "insights.notif.away.title"),
                 body: translate(lang, "insights.notif.away.body"),
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 48 * 3600, repeats: false))
 
-            // (c) Sunday evening — weekday 1 is Sunday in the Gregorian calendar.
+            // (c) weekday 1 is Sunday in the Gregorian calendar.
             var sunday = DateComponents()
             sunday.weekday = 1
             sunday.hour = 19
@@ -406,10 +338,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
-    /// The heads-ups to schedule: items later today whose "one hour before" is
-    /// still ahead and doesn't coincide (±1 min) with any notification we
-    /// already schedule. A task with no time was moved to 09:00 by its store,
-    /// so 09:00 sharp on a task is treated as "no time" and skipped.
+    /// Skips heads-ups that are past or coincide (±1 min) with another notification.
+    /// A task at 09:00 sharp means "no time" (its store's default) and is skipped.
     private static func headsUps(known: [String: [NotificationItem]],
                                  now: Date) -> [HeadsUp] {
         let cal = Calendar.current
@@ -446,7 +376,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 
-    /// إشعار واحد بهوية ثابتة (يستبدل أي قديم بنفس الهوية). الماضي يُتجاهل.
+    /// هوية ثابتة بتستبدل القديم. الماضي يُتجاهل.
     private func schedule(id: String, title: String, body: String, at date: Date,
                           repeats: NotificationRepeat = .none,
                           category: String? = nil,
@@ -456,17 +386,14 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         content.title = title
         content.body = body
         content.sound = .default
-        // الفئة بتجيب معها الأزرار (بعدين/تمّ/احذف)، والحمولة بتخلّي الزرّ يقدر
-        // ينفّذ بلا ما يفتح التطبيق ولا يجيب القائمة.
+        // الحمولة بتخلّي الزرّ ينفّذ بلا ما يفتح التطبيق.
         if let category { content.categoryIdentifier = category }
         if !userInfo.isEmpty {
             var payload: [AnyHashable: Any] = [:]
             for (key, value) in userInfo { payload[key] = value }
             content.userInfo = payload
         }
-        // A repeating reminder used to be scheduled once and never again, so
-        // "every day at 8" rang on the first day only. The matching components
-        // decide the repeat: time of day, plus weekday or day of month.
+        // The matching components decide the repeat: time of day, plus weekday or day of month.
         let fields: Set<Calendar.Component>
         switch repeats {
         case .none:    fields = [.year, .month, .day, .hour, .minute]
@@ -479,9 +406,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 
-    /// مُحلِّل ISO متسامح — الباك‑إند قد يرسل بمنطقة زمنية، بكسور ثانية، أو بدون.
-    /// المحلّلات مبنية مرّة وحدة: بناء الـformatter غالي، وهالدالة بتنادى لكل
-    /// صف بالقوائم ولكل جسم عرض. التحليل من عدّة خيوط آمن عليها من iOS 7.
+    /// متسامح: بمنطقة زمنية، بكسور ثانية، أو بدون. المحلّلات مبنية مرّة (غالية، وآمنة بين الخيوط).
     private static let isoFrac: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -492,7 +417,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
-    /// بدون منطقة زمنية (مثل "2026-06-05T16:00:00") — نفسّره بالتوقيت المحلي.
+    /// بدون منطقة زمنية — بالتوقيت المحلي.
     private static let isoNoTZ: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -507,7 +432,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             ?? isoNoTZ.date(from: s)
     }
 
-    /// تاريخ بلا وقت (مثل "2026-06-05") — نفسّره بالتوقيت المحلي.
+    /// تاريخ بلا وقت — بالتوقيت المحلي.
     private static let isoDayOnly: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -516,7 +441,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         return f
     }()
 
-    /// مثل `parseISO` بس بيقبل كمان تاريخ بلا وقت — للرئيسية والتذكيرات والهدايا.
+    /// مثل `parseISO` بس بيقبل كمان تاريخ بلا وقت.
     static func parseISOOrDay(_ s: String) -> Date? {
         if s.isEmpty { return nil }
         return parseISO(s) ?? isoDayOnly.date(from: s)

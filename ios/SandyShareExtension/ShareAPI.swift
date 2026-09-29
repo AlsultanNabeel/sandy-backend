@@ -1,18 +1,13 @@
 import Foundation
 import Security
 
-// ─────────────────────────────────────────────────────────────────────────
-//  ShareAPI — عميل صغير للباك‑إند خاص بإضافة المشاركة.
-//
-//  الإضافة ما بتشوف كود التطبيق، فهاد نسخة مصغّرة: التوكن من الـKeychain
-//  بمجموعة الوصول المشتركة (Core/Auth/Keychain.swift)، والعنوان من مجموعة
-//  التطبيقات (Core/Shared/SharedAuth.swift). المفاتيح لازم تضل مطابقة.
-// ─────────────────────────────────────────────────────────────────────────
+// الإضافة ما بتشوف كود التطبيق: التوكن من الـKeychain المشترك والعنوان من مجموعة
+// التطبيقات. المفاتيح لازم تطابق Keychain.swift و SharedAuth.swift بالتطبيق.
 
 enum ShareText {
     static let appGroup = "group.com.sandy.app"
 
-    /// لغة التطبيق (بيكتبها التطبيق للويدجت)، وإلا لغة الجهاز.
+    /// لغة التطبيق (بيكتبها للويدجت)، وإلا لغة الجهاز.
     static var isArabic: Bool {
         if let lang = UserDefaults(suiteName: appGroup)?.string(forKey: "app_lang") {
             return lang != "en"
@@ -57,7 +52,7 @@ struct ShareAPI {
     let baseURL: String
     let token: String
 
-    /// nil = المستخدم مش مسجّل دخول بالتطبيق (أو ما فتحه من وقت ما انضافت الإضافة).
+    /// nil = مش مسجّل دخول (أو ما فتح التطبيق من وقت ما انضافت الإضافة).
     static func load() -> ShareAPI? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -76,7 +71,7 @@ struct ShareAPI {
         return ShareAPI(baseURL: saved.isEmpty ? defaultURL : saved, token: token)
     }
 
-    /// POST بجسم JSON، بيرجّع الرد كقاموس. رموز الحالة بتتحوّل لـ ShareError.
+    /// رموز الحالة بتتحوّل لـ ShareError.
     func post(_ path: String, _ body: [String: Any], timeout: TimeInterval = 60) async throws -> [String: Any] {
         guard let url = URL(string: baseURL + path) else { throw ShareError.server(nil) }
         var req = URLRequest(url: url)

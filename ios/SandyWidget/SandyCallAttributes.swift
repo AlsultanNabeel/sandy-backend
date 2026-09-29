@@ -1,13 +1,5 @@
-//
-//  SandyCallAttributes.swift — shared between the app and the widget extension.
-//
-//  KEEP IDENTICAL: this file exists twice, byte for byte —
-//    ios/SandyApp/Widgets/SandyCallAttributes.swift   (app target)
-//    ios/SandyWidget/SandyCallAttributes.swift        (widget target)
-//  ActivityKit matches a Live Activity to its UI by the attributes type, and the
-//  Control Center intent must be a member of both targets. Edit one, copy it
-//  over the other.
-//
+// KEEP IDENTICAL: copied in SandyApp/Widgets/ and SandyWidget/. ActivityKit matches by
+// attributes type, and the Control Center intent must be in both targets.
 
 import ActivityKit
 import AppIntents
@@ -15,10 +7,9 @@ import Foundation
 
 // MARK: - Deep links
 
-/// The `sandy://` URLs the widgets, Live Activity and Control Center open.
 enum SandyLinks {
     static let appGroup = "group.com.sandy.app"
-    /// Written by `TalkToSandyIntent`, read (once) by the app when it becomes active.
+    /// Written by `TalkToSandyIntent`, read once by the app when it becomes active.
     static let pendingKey = "pending_link"
     static let pendingAtKey = "pending_link_at"
 
@@ -28,7 +19,7 @@ enum SandyLinks {
     static let quickAdd = URL(string: "sandy://quickadd")!
 }
 
-// MARK: - Live voice call (Live Activity + Dynamic Island)
+// MARK: - Live voice call
 
 struct SandyCallAttributes: ActivityAttributes {
     enum Phase: String, Codable, Hashable {
@@ -37,19 +28,17 @@ struct SandyCallAttributes: ActivityAttributes {
 
     struct ContentState: Codable, Hashable {
         var phase: Phase
-        /// When the call started — drives the running call timer.
+        /// Drives the running call timer.
         var startedAt: Date
     }
 
-    /// App language at call start: Arabic text + right-to-left, or English.
+    /// App language at call start (Arabic + RTL, or English).
     var isArabic: Bool
 }
 
 // MARK: - Control Center: Talk to Sandy
 
-/// Opens Sandy straight into a live voice call. Runs in the app (openAppWhenRun),
-/// which opens `sandy://call`; the App Group flag is a fallback the app picks up
-/// when it becomes active, in case the URL itself is not delivered.
+/// Opens `sandy://call`; the App Group flag is a fallback in case the URL isn't delivered.
 struct TalkToSandyIntent: AppIntent {
     static let title: LocalizedStringResource = "Talk to Sandy"
     static let description = IntentDescription("Opens Sandy in a live voice call.")

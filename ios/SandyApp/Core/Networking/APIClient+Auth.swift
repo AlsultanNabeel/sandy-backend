@@ -1,7 +1,6 @@
 import Foundation
 
-/// رد نقاط المصادقة الموحّد: توكن الجلسة + هل خلص التعارف. الحقول الزائدة
-/// (role/user_id) يتجاهلها الفك تلقائياً.
+/// رد نقاط المصادقة: توكن الجلسة + هل خلص التعارف.
 private struct AuthResponse: Decodable {
     let token: String?
     let onboardingDone: Bool?
@@ -12,7 +11,6 @@ private struct AuthResponse: Decodable {
     }
 }
 
-/// رد نقطة الشخصية: اللهجة الحالية + التعليمات المخصّصة + اللهجات المتاحة.
 private struct PersonaResponse: Decodable {
     let dialect: String?
     let customInstructions: String?
@@ -30,7 +28,6 @@ private struct PersonaResponse: Decodable {
     }
 }
 
-/// رد نقطة الاشتراك: الحالة + الخطة + هل المستخدم مشترك.
 private struct SubscriptionResponse: Decodable {
     let status: String?
     let plan: String?
@@ -42,14 +39,12 @@ private struct SubscriptionResponse: Decodable {
     }
 }
 
-/// رد التنبيه اليومي: النوع + معرّف السؤال + النص.
 private struct DailyNudgeResponse: Decodable {
     let kind: String?
     let qid: String?
     let text: String?
 }
 
-/// رد التعارف: هل خلص + الاسم المفضّل + الاهتمامات + الاسم.
 private struct OnboardingResponse: Decodable {
     let done: Bool?
     let preferredName: String?
@@ -62,7 +57,6 @@ private struct OnboardingResponse: Decodable {
     }
 }
 
-/// جسم حفظ التعارف: الاسم المفضّل + الاهتمامات (قيم مختلطة → نوع مطبوع).
 private struct OnboardingSaveBody: Encodable {
     let preferredName: String
     let interests: [String]
@@ -73,21 +67,13 @@ private struct OnboardingSaveBody: Encodable {
     }
 }
 
-/// رد الميزات: أسماء الميزات المخفية مركزياً.
 private struct FeaturesResponse: Decodable {
     let hidden: [String]?
 }
 
 extension APIClient {
-    // `devLogin` انحذفت.
-    //
-    // كانت بتدخّلك بكلمة سر وحدة ع حساب اسمه «المالك» — حساب من متغيّر بيئة،
-    // مش شخص. اشتغلت لأنه كان في مستخدم واحد، وما كانت بتتوسّع لتاني واحد:
-    // كل من بيعرف الكلمة بيصير **نفس** الشخص، بنفس اليوميات ونفس بصمة الصوت.
-    //
-    // ثلاث طرق دخول وبس، وكلها بتعطي حسابًا حقيقيًا: أبل، جوجل، إيميل.
+    // لا `devLogin`: كل طرق الدخول (أبل، جوجل، إيميل) بتعطي حسابًا حقيقيًا.
 
-    // تسجيل دخول آبل — يرجّع هل التعارف خلص.
     func signInApple(idToken: String, name: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/apple", method: "POST",
                                               body: ["id_token": idToken, "name": name], auth: false)
@@ -96,7 +82,6 @@ extension APIClient {
         return r.onboardingDone ?? false
     }
 
-    // تسجيل دخول جوجل — نمرّر id token من حزمة GoogleSignIn، يرجّع هل التعارف خلص.
     func signInGoogle(idToken: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/google", method: "POST",
                                               body: ["id_token": idToken], auth: false)
@@ -105,7 +90,6 @@ extension APIClient {
         return r.onboardingDone ?? false
     }
 
-    // إنشاء حساب بالإيميل والباسوورد — يرجّع هل التعارف خلص.
     func signUpEmail(email: String, password: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/email/register", method: "POST",
                                               body: ["email": email, "password": password], auth: false)
@@ -114,7 +98,6 @@ extension APIClient {
         return r.onboardingDone ?? false
     }
 
-    // تسجيل دخول بالإيميل والباسوورد — يرجّع هل التعارف خلص.
     func signInEmail(email: String, password: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/email/login", method: "POST",
                                               body: ["email": email, "password": password], auth: false)
@@ -123,9 +106,8 @@ extension APIClient {
         return r.onboardingDone ?? false
     }
 
-    // ── التنبيه اليومي + الدفع (المرحلة السابعة) ─────────────────────────────
+    // ── التنبيه اليومي + الدفع ──
 
-    // GET /api/daily-nudge → {kind:"question",qid,text} | {kind:"agenda",text} | {kind:"none"}
     func getDailyNudge() async throws -> DailyNudge {
         let r: DailyNudgeResponse = try await fetch("/api/daily-nudge")
         let kind = DailyNudge.Kind(rawValue: r.kind ?? "none") ?? .none
@@ -134,34 +116,28 @@ extension APIClient {
                           text: r.text ?? "")
     }
 
-    // POST /api/daily-nudge/answer {qid,answer} → {ok:true}
     func answerDailyNudge(qid: String, answer: String) async throws {
         try await send("/api/daily-nudge/answer", method: "POST",
                        body: ["qid": qid, "answer": answer])
     }
 
-    // POST /api/push/register {token,platform} — نربط توكن جهاز APNs بالمستخدم
-    // حتى يقدر الباك-إند يبعتله الدفع البعيد. آمن للنداء المتكرّر (upsert).
+    // آمن للنداء المتكرّر (upsert).
     func registerPushToken(_ token: String) async throws {
         try await send("/api/push/register", method: "POST",
                        body: ["token": token, "platform": "ios"])
     }
 
-    // POST /api/push/unregister {token} — عند تسجيل الخروج نلغي توكن هالجهاز.
-    /// `bearer`: the session to act for — sign-out passes the token it is
-    /// about to clear, since this request is sent after it is gone.
+    /// `bearer`: sign-out passes the token it is about to clear.
     func unregisterPushToken(_ token: String, bearer: String? = nil) async throws {
         try await send("/api/push/unregister", method: "POST",
                        body: ["token": token], bearer: bearer)
     }
 
-    // GET /api/features → {hidden:[...]} — الميزات اللي أخفاها المالك مركزياً.
     func getFeatures() async throws -> Set<String> {
         let r: FeaturesResponse = try await fetch("/api/features")
         return Set(r.hidden ?? [])
     }
 
-    // GET /api/subscription → {status,plan,is_subscriber}
     func getSubscription() async throws -> SubscriptionStatus {
         let r: SubscriptionResponse = try await fetch("/api/subscription")
         return SubscriptionStatus(status: r.status ?? "none",
@@ -169,9 +145,7 @@ extension APIClient {
                                   isSubscriber: r.isSubscriber ?? false)
     }
 
-    /// مهلة قصيرة: الإقلاع مستنّي هالطلب، وفشل الاتصال أصلًا بيدخّل المستخدم
-    /// عالرئيسية بالتوكن المحفوظ. مع إعادتين عند انتهاء المهلة، ثلاثين ثانية
-    /// الافتراضية كانت بتعني دقيقة ونص قدّام شاشة الإقلاع؛ هيك أقصاها حوالي خمسة وعشرين ثانية.
+    /// مهلة قصيرة لأن الإقلاع مستنّي هالطلب؛ مع إعادتين أقصاها حوالي ٢٥ ثانية.
     func getOnboarding() async throws -> OnboardingData {
         let r: OnboardingResponse = try await fetch("/api/onboarding", timeout: 8)
         return OnboardingData(done: r.done ?? false,
@@ -195,7 +169,7 @@ extension APIClient {
                            availableDialects: dialects)
     }
 
-    /// يحفظ اللهجة و/أو التعليمات المخصّصة. تعليمات فاضية = رجوع للشخصية الافتراضية.
+    /// تعليمات فاضية = رجوع للشخصية الافتراضية.
     func savePersona(dialect: String, customInstructions: String) async throws {
         try await send("/api/persona", method: "POST",
                        body: ["dialect": dialect, "custom_instructions": customInstructions])

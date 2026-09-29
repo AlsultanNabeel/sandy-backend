@@ -1,10 +1,4 @@
-//
-//  SandyFocusLiveActivity.swift — جلسة التركيز على شاشة القفل والجزيرة الديناميكية.
-//
-//  يبدأها التطبيق (SandyApp/Widgets/FocusLiveActivity.swift) لما تبلّش الجلسة،
-//  ويحدّثها مع كل تغيّر طور، وينهيها لما تخلص. العدّ التنازلي بيرسمه النظام من
-//  المدى الزمني، فبيمشي والتطبيق نايم. اللغة والاتجاه من `isArabic`.
-//
+// جلسة التركيز على شاشة القفل؛ يبدأها التطبيق (SandyApp/Widgets/FocusLiveActivity.swift).
 
 import ActivityKit
 import SwiftUI
@@ -17,7 +11,7 @@ private extension SandyFocusAttributes.ContentState {
     var tint: Color { isBreak ? breakAmber : focusCyan }
     var icon: String { isBreak ? "cup.and.saucer.fill" : "brain.head.profile" }
 
-    /// مدى العدّ — مضمون مرتّب حتى لو وصلت أرقام غريبة.
+    /// مضمون مرتّب حتى لو وصلت أرقام غريبة.
     var range: ClosedRange<Date> {
         phaseStartedAt <= phaseEndsAt ? phaseStartedAt...phaseEndsAt : phaseEndsAt...phaseEndsAt
     }
@@ -44,7 +38,6 @@ private extension SandyFocusAttributes {
     }
 }
 
-/// العدّ التنازلي للطور الحالي.
 private struct FocusCountdown: View {
     let state: SandyFocusAttributes.ContentState
     var body: some View {
@@ -54,7 +47,7 @@ private struct FocusCountdown: View {
     }
 }
 
-/// زر الإنهاء: يفتح `sandy://focus/stop`، والتطبيق بينهي الجلسة.
+/// يفتح `sandy://focus/stop`، والتطبيق بينهي الجلسة.
 private struct StopFocusLink: View {
     let arabic: Bool
     var compact = false
@@ -75,7 +68,6 @@ private struct StopFocusLink: View {
     }
 }
 
-/// أيقونة الطور على قرص ملوّن.
 private struct FocusGlyph: View {
     let state: SandyFocusAttributes.ContentState
     var size: CGFloat
@@ -93,7 +85,6 @@ private struct FocusGlyph: View {
 struct SandyFocusLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SandyFocusAttributes.self) { context in
-            // شاشة القفل / البانر.
             let ar = context.attributes.isArabic
             let st = context.state
             VStack(spacing: 10) {

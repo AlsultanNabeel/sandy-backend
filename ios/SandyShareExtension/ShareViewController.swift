@@ -2,17 +2,10 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-// ─────────────────────────────────────────────────────────────────────────
-//  SandyShare — «شارك مع ساندي» من أي تطبيق: رابط، نص، أو صورة وحدة.
-//
-//  تلات أفعال:
-//   • لخّصلي     → نص/رابط: POST /api/agent · صورة: POST /api/analyze-image
-//   • احفظه      → نص: POST /api/memory · رابط: /api/share/saved + /api/memory
-//                  · صورة: POST /api/photos (ألبوم الصور)
-//   • حوّله لمهمة → POST /api/tasks (الصورة بتنوصف أول بسطر قصير)
-//
-//  الإضافة تارجت منفصل ما بيشوف كود التطبيق — شوف README.md بهالمجلّد.
-// ─────────────────────────────────────────────────────────────────────────
+// «شارك مع ساندي» من أي تطبيق: رابط، نص، أو صورة وحدة. الأفعال:
+//  • لخّصلي     → نص/رابط: POST /api/agent · صورة: POST /api/analyze-image
+//  • احفظه      → نص: /api/memory · رابط: /api/share/saved + /api/memory · صورة: /api/photos
+//  • حوّله لمهمة → POST /api/tasks (الصورة بتنوصف أول بسطر قصير)
 
 final class ShareViewController: UIViewController {
     private var model: ShareModel?
@@ -40,7 +33,6 @@ final class ShareViewController: UIViewController {
     }
 }
 
-// MARK: - الحالة
 
 enum ShareAction {
     case summarize, save, task
@@ -66,7 +58,6 @@ final class ShareModel: ObservableObject {
         imageData != nil || url != nil || !(text ?? "").isEmpty
     }
 
-    // MARK: قراءة اللي انشارك
 
     func loadInput() async {
         let items = (context?.inputItems as? [NSExtensionItem]) ?? []
@@ -88,7 +79,7 @@ final class ShareModel: ObservableObject {
                 }
             }
         }
-        // نص هو بالأصل رابط (بعض التطبيقات بتشارك هيك).
+        // بعض التطبيقات بتشارك الرابط كنص.
         if foundURL == nil, let t = foundText?.trimmingCharacters(in: .whitespacesAndNewlines),
            !t.contains(" "), let u = URL(string: t), let scheme = u.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
@@ -125,7 +116,7 @@ final class ShareModel: ObservableObject {
         return nil
     }
 
-    /// الصورة كـ JPEG مصغّرة — إضافات المشاركة ذاكرتها محدودة، والرفع أسرع.
+    /// JPEG مصغّرة: ذاكرة إضافات المشاركة محدودة.
     private static func loadImage(_ provider: NSItemProvider) async -> Data? {
         let value = await loadItem(provider, .image)
         var image: UIImage?
@@ -148,9 +139,7 @@ final class ShareModel: ObservableObject {
         }
     }
 
-    // MARK: الأفعال
 
-    /// النص اللي منبعته للوكيل: الرابط + أي نص رافقه.
     private var contentLine: String {
         var parts: [String] = []
         if let t = text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { parts.append(t) }
@@ -241,14 +230,12 @@ final class ShareModel: ObservableObject {
         return ShareText.t("ضفت المهمة: ", "Added task: ") + title
     }
 
-    // MARK: الإغلاق
 
     func close() {
         context?.completeRequest(returningItems: nil, completionHandler: nil)
     }
 }
 
-// MARK: - الواجهة
 
 private enum SharePalette {
     static let background = Color(red: 0.008, green: 0.020, blue: 0.031)   // #020508

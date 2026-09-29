@@ -1,9 +1,7 @@
 import Foundation
 
 extension APIClient {
-    /// A JSON value that may arrive as a string or a number, always surfaced as a
-    /// String — mirrors the old `as? String ?? (as? NSNumber)?.stringValue` read
-    /// for scene action values (the room sends brightness as "85" or 85).
+    /// A value that arrives as string or number, surfaced as String (the room sends brightness as "85" or 85).
     private struct FlexString: Decodable {
         let value: String
         init(from decoder: Decoder) throws {
@@ -59,7 +57,6 @@ extension APIClient {
         let online: Bool?
     }
 
-    // POST /api/life/scenes/apply body {"name"} → {"ok":bool,"online":bool}
     // ok = طُبّق المشهد، online = وصل لـ room-node فعليًا.
     @discardableResult
     func applyScene(name: String) async throws -> (ok: Bool, online: Bool) {
@@ -75,7 +72,7 @@ extension APIClient {
         let actions: [SceneActionBody]
     }
 
-    // POST /api/life/scenes body {"name","label","icon","actions"} (للمالك فقط)
+    // (للمالك فقط)
     func addScene(name: String, label: String, icon: String, actions: [SceneAction]) async throws {
         try await send("/api/life/scenes", method: "POST",
                        body: SceneCreate(name: name, label: label, icon: icon,
@@ -87,7 +84,6 @@ extension APIClient {
         let actions: [SceneActionBody]
     }
 
-    // POST /api/life/scenes/actions body {"name","actions"} (للمالك فقط)
     func setSceneActions(name: String, actions: [SceneAction]) async throws {
         try await send("/api/life/scenes/actions", method: "POST",
                        body: SceneActionsBody(name: name,
@@ -96,7 +92,6 @@ extension APIClient {
                                               }))
     }
 
-    // POST /api/life/scenes/delete body {"name"} (للمالك فقط)
     func deleteScene(name: String) async throws {
         try await send("/api/life/scenes/delete", method: "POST", body: SceneName(name: name))
     }
@@ -118,7 +113,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/research?q=&kind=web → {"kind","items":[{title,url,text,published_date}],"demo"}
     func researchWeb(q: String) async throws -> ListResult<WebResult> {
         let r: WebResearchResponse = try await fetch("/api/research?kind=web&q=\(enc(q))")
         let items = (r.items ?? []).map { row in
@@ -146,7 +140,6 @@ extension APIClient {
         }
     }
 
-    // GET /api/research?q=&kind=places → {"kind","items":[{name,address,rating,...}],"demo"}
     func researchPlaces(q: String) async throws -> ListResult<PlaceResult> {
         let r: PlacesResponse = try await fetch("/api/research?kind=places&q=\(enc(q))")
         let items = (r.items ?? []).map { row in
@@ -186,7 +179,6 @@ extension APIClient {
         let url: String?
     }
 
-    // POST /api/image {prompt} → {url:"data:image/png;base64,..."}
     func generateImage(prompt: String) async throws -> Data {
         let r: ImageURLResponse = try await fetch("/api/image", method: "POST",
                                                   body: ImagePrompt(prompt: prompt))
@@ -196,7 +188,6 @@ extension APIClient {
         return data
     }
 
-    // POST /api/image/edit {prompt, image(b64)} → {url:"data:..."}
     func editImage(image: Data, prompt: String) async throws -> Data {
         let r: ImageURLResponse = try await fetch("/api/image/edit", method: "POST",
                                                   body: ImageEdit(prompt: prompt, image: image.base64EncodedString()))
@@ -215,7 +206,6 @@ extension APIClient {
         let reply: String?
     }
 
-    // POST /api/analyze-image {image(b64), question} → {reply}
     func describeImage(image: Data, question: String = "") async throws -> String {
         let r: ReplyResponse = try await fetch(
             "/api/analyze-image", method: "POST",

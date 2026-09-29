@@ -1,9 +1,4 @@
-//
-//  SandyWidget.swift — ويدجت ساندي: التذكير الجاي + عدد المهام النشطة.
-//
-//  يقرأ لقطة صغيرة كتبها التطبيق بمساحة مجموعة التطبيقات المشتركة (App Group).
-//  بلا شبكة ولا توكن. التطبيق يطلب إعادة البناء فورًا عند أي تغيير.
-//
+// التذكير الجاي + عدد المهام النشطة من لقطة التطبيق بمجموعة التطبيقات (بلا شبكة ولا توكن).
 
 import WidgetKit
 import SwiftUI
@@ -15,7 +10,7 @@ struct SandyEntry: TimelineEntry {
     let reminderText: String?
     let reminderAt: Date?
     let activeTasks: Int
-    /// لغة التطبيق كما كتبها التطبيق بالمساحة المشتركة (افتراضيًا عربي).
+    /// افتراضيًا عربي.
     var isArabic: Bool = true
 }
 
@@ -56,7 +51,7 @@ struct SandyWidgetEntryView: View {
     var entry: SandyEntry
     @Environment(\.widgetFamily) private var family
 
-    /// نفس لغة التطبيق: ar → أرقام عربية وأسماء عربية، en → إنجليزي.
+    /// ar → أرقام وأسماء عربية، en → إنجليزي.
     private var locale: Locale { Locale(identifier: entry.isArabic ? "ar" : "en") }
 
     private static let countFormatter = NumberFormatter()
@@ -75,7 +70,7 @@ struct SandyWidgetEntryView: View {
         content
             .environment(\.locale, locale)
             .environment(\.layoutDirection, entry.isArabic ? .rightToLeft : .leftToRight)
-            // نقرة على الويدجت (خارج الأزرار) تفتح الشات مباشرة.
+            // نقرة خارج الأزرار تفتح الشات.
             .widgetURL(SandyLinks.chat)
             .containerBackground(for: .widget) {
                 isAccessory ? Color.clear : Color.black
@@ -123,7 +118,7 @@ struct SandyWidgetEntryView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// أزرار تفتح التطبيق مباشرة على الوجهة: مكالمة صوتية، شات، إضافة سريعة.
+    /// مكالمة صوتية، شات، إضافة سريعة.
     private var actions: some View {
         VStack(spacing: 6) {
             actionButton(SandyLinks.call, icon: "waveform",
