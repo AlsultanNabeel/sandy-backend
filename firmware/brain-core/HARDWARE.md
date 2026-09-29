@@ -22,18 +22,18 @@ A subsystem set to 0 is not present in the binary. It is not broken and not hidd
 | `ENABLE_MOTORS` | off |  |
 | `ENABLE_TOUCH` | off |  |
 | `ENABLE_MIC` | off | MAX9814 clap mic |
-| `ENABLE_EARS` | off | stereo sound-direction (temp off; merging into VOICE next) |
-| `ENABLE_OTA` | on | needs WIFI — pulls signed releases from the server (sandy_ota.c) |
-| `ENABLE_MQTT` | on | needs WIFI — cloud body control (mood/servo/buzzer/base) |
+| `ENABLE_EARS` | off | stereo sound direction (off for now) |
+| `ENABLE_OTA` | on | needs WIFI — signed releases from the server |
+| `ENABLE_MQTT` | on | needs WIFI — cloud body control |
 | `ENABLE_VOICE` | on | needs WIFI |
-| `ENABLE_WAKEWORD` | on | local WakeNet gate for the voice session (needs VOICE) |
+| `ENABLE_WAKEWORD` | on | local WakeNet gate for voice (needs VOICE) |
 | `ENABLE_COMMANDS` | off | local MultiNet "Sandy ..." command words (needs WAKEWORD) |
-| `ENABLE_SPK_TEST` | off | temporary: triple-beep to verify amp + speaker |
+| `ENABLE_SPK_TEST` | off | triple-beep amp + speaker check |
 | `ENABLE_REMOTE` | off |  |
-| `ENABLE_REMOTE` | on | cable-free dev: OTA upload + serial log over WiFi (needs WIFI) |
+| `ENABLE_REMOTE` | on | OTA upload + serial log over WiFi (needs WIFI) |
 | `ENABLE_PROVISION` | on | needs WIFI — SoftAP setup page when no network answers |
 | `ENABLE_IR` | on | needs MQTT — IR learn + replay over RMT |
-| `ENABLE_LED` | on | on-board WS2812: idle blue / listening white / talking amber |
+| `ENABLE_LED` | on | on-board WS2812 status LED |
 
 ## Reachable from the app
 

@@ -1,7 +1,7 @@
-// Runtime mic/speaker control. Contract and reasoning: include/sandy_audio_ctl.h
+// Runtime mic/speaker control (see sandy_audio_ctl.h).
 
 #include "sandy_audio_ctl.h"
-#include "config.h"          // VOICE_OUT_RATE — tones share her 24 kHz buffer
+#include "config.h"          // VOICE_OUT_RATE
 #include "sandy_nvs.h"
 #include "sandy_voice.h"
 
@@ -18,18 +18,14 @@
 static const char *TAG = "audio_ctl";
 static const char *NVS_NS = "sandy_audio";
 
-// Read every sample by the mic task and written by the MQTT task. int/bool on
-// this core are atomic for these widths, and a control change landing one frame
-// late is inaudible — so no lock. A lock here would put the MQTT task in the
-// audio path, which is the thing worth avoiding.
+// Read by the mic task, written by MQTT. Word-sized and atomic here; no lock, so
+// MQTT stays out of the audio path.
 static volatile int  s_gain[MIC_COUNT] = { AUDIO_GAIN_UNITY, AUDIO_GAIN_UNITY };
 static volatile bool s_muted[MIC_COUNT] = { false, false };
 static volatile int  s_level[MIC_COUNT] = { 0, 0 };
 static volatile int  s_volume = 100;
 
-// Declared up here with the rest of the state, not down in the noise-suppression
-// section where they are used: audio_ctl_init() touches them and it is defined
-// before that section.
+// Declared here because audio_ctl_init() uses them before their section.
 static ns_handle_t       s_ns;
 static sandy_ns_level_t  s_ns_level = NS_OFF;
 static SemaphoreHandle_t s_ns_lock;   // rebuild vs. process
@@ -41,9 +37,7 @@ static int clamp_gain(int v)
     return v;
 }
 
-// Queued, not written. A slider dragged across its range used to be one flash
-// commit per pixel — dozens of erases in a second, each stopping both CPUs.
-// Now it is one write, of wherever the finger stopped. See sandy_nvs.h.
+// Deferred: a slider drag becomes one flash write (sandy_nvs.h).
 static void save_i32(const char *key, int32_t v)
 {
     nvs_save_deferred(NVS_NS, key, NVS_VAL_I32, v);
@@ -69,8 +63,7 @@ void audio_ctl_init(void)
     if (s_volume < 0)   s_volume = 0;
     if (s_volume > 100) s_volume = 100;
 
-    // Both muted would mean a deaf robot with no way to say why. If NVS somehow
-    // holds that, un-mute the left one rather than boot into silence.
+    // Never boot with both mics muted.
     if (s_muted[MIC_LEFT] && s_muted[MIC_RIGHT]) {
         s_muted[MIC_LEFT] = false;
         save_i32("mute_l", 0);
@@ -86,7 +79,7 @@ void audio_ctl_init(void)
              (int)s_ns_level);
 }
 
-// ── Microphones ──────────────────────────────────────────────────────────────
+// ── Microphones ──
 
 void mic_set_gain(sandy_mic_ch_t ch, int percent)
 {
@@ -104,7 +97,7 @@ int mic_get_gain(sandy_mic_ch_t ch)
 bool mic_set_muted(sandy_mic_ch_t ch, bool muted)
 {
     if (ch >= MIC_COUNT) return false;
-    // Refuse the mute that would leave her with no ears at all.
+    // Refuse the mute that would leave her deaf.
     if (muted) {
         sandy_mic_ch_t other = (ch == MIC_LEFT) ? MIC_RIGHT : MIC_LEFT;
         if (s_muted[other]) {
@@ -130,21 +123,18 @@ int mic_get_level(sandy_mic_ch_t ch)
 
 void mic_report_levels(int rms_l, int rms_r)
 {
-    // Map RMS to 0..100 against a reference that puts ordinary speech near the
-    // middle of the meter. A linear map on the raw value would sit pinned at the
-    // bottom and tell you nothing, which is the usual failing of level meters.
+    // Reference puts ordinary speech mid-meter.
     const int REF = 3000;
     int l = rms_l * 100 / REF;
     int r = rms_r * 100 / REF;
     if (l > 100) l = 100;
     if (r > 100) r = 100;
-    // Fast attack, slow release — a meter that snaps up and eases down is
-    // readable by eye; one that follows the signal exactly is a blur.
+    // Fast attack, slow release.
     s_level[MIC_LEFT]  = l > s_level[MIC_LEFT]  ? l : (s_level[MIC_LEFT]  * 3 + l) / 4;
     s_level[MIC_RIGHT] = r > s_level[MIC_RIGHT] ? r : (s_level[MIC_RIGHT] * 3 + r) / 4;
 }
 
-// ── Noise suppression ────────────────────────────────────────────────────────
+// ── Noise suppression ──
 
 // ns_pro_create's mode: 0 mild, 1 medium, 2 aggressive.
 static int ns_mode_for(sandy_ns_level_t l)
@@ -161,9 +151,7 @@ void ns_set_level(sandy_ns_level_t level)
 {
     if (level >= NS_LEVEL_COUNT) return;
 
-    // The instance carries the mode, so changing level means building a new one.
-    // Under a lock: the mic task is calling ns_clean() on the old handle roughly
-    // every 100 ms, and freeing it underneath that is a crash, not a glitch.
+    // A new level needs a new instance; lock so the mic task never uses a freed handle.
     if (s_ns_lock) xSemaphoreTake(s_ns_lock, portMAX_DELAY);
     if (s_ns) {
         ns_destroy(s_ns);
@@ -174,9 +162,7 @@ void ns_set_level(sandy_ns_level_t level)
     if (mode >= 0) {
         s_ns = ns_pro_create(10, mode, 16000);   // 10 ms frames, 16 kHz
         if (!s_ns) {
-            // Out of memory, most likely. Fall back to off rather than pretend:
-            // silently doing nothing while the app shows "aggressive" is worse
-            // than saying it is off.
+            // Probably out of memory: report off rather than pretend.
             s_ns_level = NS_OFF;
             ESP_LOGE(TAG, "noise suppression failed to start (out of memory?)");
         }
@@ -195,9 +181,7 @@ sandy_ns_level_t ns_get_level(void)
 void ns_clean(int16_t *pcm, int samples)
 {
     if (!s_ns || !pcm || samples < NS_FRAME_SAMPLES) return;
-    // Non-blocking: if a level change is mid-flight, skip cleaning this buffer
-    // rather than stall the mic loop. One uncleaned 100 ms block is inaudible;
-    // a stalled mic loop stops the wake word.
+    // Don't block the mic loop mid-change; skip cleaning this buffer instead.
     if (s_ns_lock && xSemaphoreTake(s_ns_lock, 0) != pdTRUE) return;
     if (s_ns) {
         int16_t out[NS_FRAME_SAMPLES];
@@ -211,7 +195,7 @@ void ns_clean(int16_t *pcm, int samples)
     if (s_ns_lock) xSemaphoreGive(s_ns_lock);
 }
 
-// ── Speaker ──────────────────────────────────────────────────────────────────
+// ── Speaker ──
 
 void spk_set_volume(int percent)
 {
@@ -235,13 +219,10 @@ int16_t spk_apply(int16_t sample)
     return (int16_t)(((int32_t)sample * v) / 100);
 }
 
-// One tone into the speaker buffer. freq=0 is a rest, which is what turns a
-// row of beeps into something with rhythm.
+// freq=0 is a rest.
 static bool spk_tone(int freq, int ms, int amp)
 {
-    // Her voice plays at 24 kHz and these go into the same buffer. They were
-    // generated at 16 kHz, so every sound came out half as fast again and a
-    // fifth higher — the 880 Hz test beep was really a 1320 Hz chirp.
+    // Must match her 24 kHz buffer, or tones play fast and sharp.
     const int SR = VOICE_OUT_RATE, CH = VOICE_OUT_RATE / 50;   // 20 ms blocks
     const int total = SR * ms / 1000;
     int16_t buf[CH];
@@ -264,8 +245,7 @@ static bool spk_tone(int freq, int ms, int amp)
     return true;
 }
 
-// A rising sweep exercises the whole range rather than one frequency — a
-// speaker with a dead driver can still pass a single 880 Hz beep.
+// A sweep catches a dead driver that a single beep would pass.
 static void spk_sweep(int from_hz, int to_hz, int ms, int amp)
 {
     const int STEP_MS = 25;
@@ -278,9 +258,7 @@ static void spk_sweep(int from_hz, int to_hz, int ms, int amp)
 
 void spk_play(sandy_spk_sound_t sound)
 {
-    // Amplitudes stay well under full scale: this is a small speaker a few
-    // centimetres from two microphones, and a sound loud enough to clip is also
-    // loud enough to deafen the echo canceller for the next second.
+    // Stay well under full scale: clipping this close to the mics blinds the AEC.
     switch (sound) {
     case SPK_CHIME:
         spk_tone(880, 140, 9000); spk_tone(1175, 260, 9000);

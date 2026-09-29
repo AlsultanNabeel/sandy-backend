@@ -13,18 +13,15 @@ static const char *TAG      = "nvs";
 static const char *NVS_NS   = "sandy";
 static const char *KEY_SERVO = "servo_pos";
 
-// ── Deferred writes ──────────────────────────────────────────────────────────
-// Rationale in sandy_nvs.h. In short: an NVS commit stops both CPUs for as long
-// as the erase takes, and doing that on every neck movement is what has been
-// resetting this board.
+// ── Deferred writes (see sandy_nvs.h) ──
 
 #define DEFER_SLOTS      8       // more keys than this project has settings
-#define DEFER_QUIET_MS   4000    // stillness required before anything is written
+#define DEFER_QUIET_MS   4000    // stillness required before writing
 #define DEFER_TICK_MS    500
 
 typedef struct {
     const char     *ns;          // namespace; string literal, never freed
-    const char     *key;         // string literal from the caller; never freed
+    const char     *key;         // caller's string literal; never freed
     nvs_val_kind_t  kind;
     int32_t         value;
     int64_t         changed_ms;
@@ -36,9 +33,7 @@ static SemaphoreHandle_t s_slots_lock;
 
 static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
 
-// Write one slot. Reads first and skips an identical value: the cheapest commit
-// is the one that does not happen, and re-saving 90 degrees over 90 degrees
-// still erases a sector.
+// Skip identical values: re-saving the same value still erases a sector.
 static void flush_slot(defer_slot_t *sl) {
     nvs_handle_t h;
     if (nvs_open(sl->ns, NVS_READWRITE, &h) != ESP_OK) return;
@@ -68,9 +63,7 @@ static void defer_task(void *arg) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(DEFER_TICK_MS));
         for (int i = 0; i < DEFER_SLOTS; i++) {
-            // Copy under the lock, write outside it: a commit can take hundreds
-            // of milliseconds, and holding a lock that long would push the stall
-            // onto whichever task next changes a setting.
+            // Copy under the lock, commit outside it (commits can take hundreds of ms).
             defer_slot_t copy;
             if (xSemaphoreTake(s_slots_lock, pdMS_TO_TICKS(100)) != pdTRUE) break;
             bool due = s_slots[i].pending &&
@@ -90,8 +83,7 @@ void nvs_save_deferred(const char *ns, const char *key,
     for (int i = 0; i < DEFER_SLOTS; i++) {
         if (s_slots[i].key && strcmp(s_slots[i].key, key) == 0 &&
             strcmp(s_slots[i].ns, ns) == 0) {
-            // Same setting again: replace the pending value and restart the
-            // quiet period. This is what turns a slider drag into one write.
+            // Replace and restart the quiet period: a slider drag becomes one write.
             s_slots[i].value = value;
             s_slots[i].kind  = kind;
             s_slots[i].changed_ms = now_ms();
@@ -104,8 +96,6 @@ void nvs_save_deferred(const char *ns, const char *key,
     if (free_slot >= 0) {
         s_slots[free_slot] = (defer_slot_t){ ns, key, kind, value, now_ms(), true };
     } else {
-        // Out of slots. Say so rather than dropping a setting silently — this
-        // only happens if somebody adds settings without raising DEFER_SLOTS.
         ESP_LOGW(TAG, "no deferred slot for %s/%s — setting will not persist", ns, key);
     }
     xSemaphoreGive(s_slots_lock);
@@ -123,7 +113,6 @@ void nvs_flush_deferred(void) {
     }
 }
 
-
 esp_err_t nvs_sandy_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -133,15 +122,8 @@ esp_err_t nvs_sandy_init(void) {
     }
     if (err == ESP_OK) {
         s_slots_lock = xSemaphoreCreateMutex();
-        // 2560, and every byte is internal RAM — the scarce kind, the kind the
-        // voice session's TLS needs. This task sleeps, compares integers and
-        // calls nvs_commit; it holds no buffers of its own. The stack cannot go
-        // in PSRAM: nvs_commit runs with the cache disabled, and a task whose
-        // stack lives in PSRAM cannot execute at that moment.
-        //
-        // Priority 1, below everything that matters. A setting arriving a second
-        // late costs nothing; a setting written during a wake word cost six
-        // months.
+        // Small stack in internal RAM; it can't be PSRAM because nvs_commit runs with the
+        // cache disabled. Lowest priority: late settings cost nothing.
         xTaskCreate(defer_task, "nvs_defer", 2560, NULL, 1, NULL);
     }
     return err;

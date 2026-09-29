@@ -1,46 +1,24 @@
 #pragma once
-// Copy this file to secrets.h and fill in your values.
-// secrets.h is gitignored — never commit it.
-//
-// These values are written into the board's NVS on the first boot of a cable
-// flash (sandy_identity.c), and the board lives on them from then on. The sale
-// build (-DSANDY_RETAIL=1, the one published over the air) compiles THIS file
-// instead of secrets.h, so an update image carries no robot's identity and no
-// secret. A placeholder ("YOUR_…", "…XXXX…", empty) never overwrites a saved value.
+// Copy to secrets.h (gitignored) and fill in. Saved to NVS on the first cable-flash
+// boot. The retail OTA build compiles this file instead, so images carry no secrets;
+// placeholders ("YOUR_…", "…XXXX…", empty) never overwrite a saved value.
 
 #define WIFI_SSID           "YOUR_WIFI_SSID"
 #define WIFI_PASS           "YOUR_WIFI_PASSWORD"
 
-// HiveMQ Cloud — format: mqtts://xxxx.s1.eu.hivemq.cloud:8883
+// Format: mqtts://xxxx.s1.eu.hivemq.cloud:8883
 #define MQTT_BROKER_URI     "mqtts://YOUR_BROKER.hivemq.cloud:8883"
-// آخر مفتاح مشترك: بس للإقلاع الأول، قبل ما اللوح ياخد مفتاحه الخاص من مصافحة
-// الصوت ويحفظه بذاكرته. بعدها المحفوظ هو المستعمل، والمكتوب هون ما بينقرا.
-// انظر docs/مفاتيح-الوسيط.md
+// للإقلاع الأول فقط، بعدها اللوح بيستعمل مفتاحه الخاص من مصافحة الصوت.
 #define MQTT_USER           "YOUR_MQTT_USER"
 #define MQTT_PASS           "YOUR_MQTT_PASS"
 
-// Voice link to the cloud (/voice). The HMAC key must match the server's
-// SANDY_WS_HMAC_KEY config var.
+// The HMAC key must match the server's SANDY_WS_HMAC_KEY.
 #define SANDY_VOICE_WS_URI  "wss://YOUR_APP.herokuapp.com/voice"
 #define SANDY_WS_HMAC_KEY   "YOUR_WS_HMAC_KEY"
-// **يجب أن يساوي معرّف الوحدة** — أي `SANDY_PAIR_CODE` تحت، بحروف صغيرة
-// وأرقام فقط. ليس اسم موديل.
-//
-// المقبس الصوتي يأخذ هذه القيمة ويسأل بها: «من يملك هذه الوحدة؟» — ليعرف ذاكرة
-// من يفتح. واسم الموديل ليس وحدة، فالبحث يرجع فارغًا، وكانت النتيجة أنّ ساندي
-// تحدّثت مع مالكها الجديد وهي تحمل ذاكرة المالك القديم: نادته باسمه، وعدّدت
-// عليه مهامه.
-//
-// The device id must equal the node id. A model name here makes every voice
-// session anonymous, and anonymous sessions used to inherit somebody else's
-// memory.
-// Leave empty: it is then the node id derived from SANDY_PAIR_CODE, which is
-// what it must be anyway.
+// يجب أن يساوي معرّف الوحدة (SANDY_PAIR_CODE بحروف صغيرة)، لا اسم موديل.
+// Leave empty to derive it from SANDY_PAIR_CODE; a wrong id makes voice sessions anonymous.
 #define SANDY_DEVICE_ID     ""
 
-// The pairing code printed on this robot's box — the one its owner types into
-// the app once. The firmware derives its MQTT topics from it (lowercase,
-// alphanumerics only), so every robot answers only on its own tree:
-//   sandy/node/<derived>/mood, /servo, /volume, …
-// Unique per unit. Two robots sharing a code would obey each other's owner.
+// The code on the box; MQTT topics derive from it (lowercase alphanumerics).
+// Must be unique per unit.
 #define SANDY_PAIR_CODE     "SANDY-XXXX"

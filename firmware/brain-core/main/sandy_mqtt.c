@@ -19,7 +19,7 @@
 #include "sandy_identity.h"
 #include "mqtt_client.h"
 #include "esp_crt_bundle.h"
-#include "nvs.h"          // بيانات دخول الوسيط الخاصة باللوح، لو انحفظت
+#include "nvs.h"          // بيانات دخول الوسيط الخاصة باللوح
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
@@ -34,24 +34,10 @@
 static const char *TAG = "mqtt";
 static esp_mqtt_client_handle_t s_client = NULL;
 
-// ─── Node identity ────────────────────────────────────────────────────────────
-//
-// Every robot answers on its own topics: sandy/node/<node_id>/<output>.
-//
-// It used to be the bare strings sandy/cmd/mood, sandy/cmd/servo and so on —
-// which works exactly as long as there is one robot in the world. Two on the
-// same broker and each one obeys the other's owner. That is not a bug you find
-// in testing; it is a bug the second customer finds.
-//
-// node_id is derived from the pairing code printed on the box, with the SAME
-// transform the backend uses (node_store.code_to_node_id): lowercase, keep
-// alphanumerics only. Deriving it rather than provisioning it means the board
-// knows its own topics on first boot, before it has ever been paired with an
-// account — no handshake, no server round-trip, nothing to go wrong at the
-// customer's house.
-//
-// Keep this in lockstep with node_store.code_to_node_id. If one side changes the
-// transform, the robot goes quiet and nothing says why.
+// ─── Node identity ───
+// Every robot answers on sandy/node/<node_id>/<output>. node_id comes from the
+// box's pairing code with the SAME transform as the backend's
+// node_store.code_to_node_id (lowercase, alphanumerics only). Keep them in lockstep.
 static char s_node_id[33];
 static char s_base[64];        // "sandy/node/<node_id>"
 static char s_topic_status[80];
@@ -70,16 +56,14 @@ static void derive_node_id(void) {
     ESP_LOGI(TAG, "node id = %s", s_node_id);
 }
 
-// The part of an incoming topic after "sandy/node/<id>/", or NULL if the topic
-// is not ours. Comparing the prefix rather than the whole string is what lets
-// one wildcard subscription serve every output.
+// Suffix after "sandy/node/<id>/", or NULL if not ours (one wildcard serves every output).
 static const char *topic_suffix(const char *topic) {
     size_t n = strlen(s_base);
     if (strncmp(topic, s_base, n) != 0 || topic[n] != '/') return NULL;
     return topic + n + 1;
 }
 
-// ─── Topic handlers ───────────────────────────────────────────────────────────
+// ─── Topic handlers ───
 
 static const struct { const char *name; sandy_mood_t mood; } MOOD_MAP[] = {
     {"idle",        MOOD_IDLE},       {"happy",       MOOD_HAPPY},
@@ -112,18 +96,8 @@ static void _handle_servo(const char *val) {
     if (angle >= 0 && angle <= 180) servo_move_to((uint8_t)angle);
 }
 
-// حركة = الجسم كله، مش الرقبة لحالها.
-//
-// كانت الحركة بتنادي المحرّك وبس. يعني «ارقصي» بتهزّ رقبتها بوش محايد وبسكوت
-// وبإضاءة زرقا عادية — والنتيجة بتبيّن عطل مش رقصة، مع إنّ كل قطعة كانت شغّالة
-// تمامًا لحالها.
-//
-// وكل اللي كان ناقص هالجدول. التعبير موجود، والنغمة موجودة، والتأثير موجود —
-// تلاتتهن مبرمجين ومختبَرين ومستنيين حدا يناديهن سوا.
-//
-// `MOOD_COUNT` معناها «لا تلمس الوش»، و`MELODY_COUNT` «لا تعزف»، و`LED_FX_COUNT`
-// «لا تغيّر الإضاءة» — لأنّ «بصّي ع الشمال» مش لازم يعزف نغمة، والحركة الصامتة
-// خيار مقصود مش نسيان.
+// حركة = الجسم كله: رقبة + وش + نغمة + إضاءة.
+// `MOOD_COUNT` / `MELODY_COUNT` / `LED_FX_COUNT` معناها «لا تغيّر هالجزء».
 typedef struct {
     const char      *name;
     sandy_gesture_t  g;
@@ -153,11 +127,8 @@ static void _handle_gesture(const char *val) {
 
         if (s->mood < MOOD_COUNT) face_set_mood(s->mood);   // sets g_current_mood too
         if (s->melody < MELODY_COUNT) buzzer_play(s->melody);
-        // الإضاءة آخر إشي، و`led_set_effect` بترجّع false وقت الجلسة الحيّة —
-        // مؤشّر الخصوصية بيغلب. يعني «ارقصي» وهي بتسمعك بترقص وبتغنّي، وبيضلّ
-        // الضوّ يقول إنّ المايك شغّال. وهاد صحيح: الرقصة ما بتلغي التحذير.
-        // The current colour at a middle speed. It passed (0, 0): colour black,
-        // so "scan" pulsed and "sleep" breathed in total darkness.
+        // `led_set_effect` بترجّع false وقت الجلسة الحيّة، فمؤشّر الخصوصية بيغلب.
+        // Keep the current colour at mid speed (0 meant black).
         if (s->fx < LED_FX_COUNT) led_set_effect(s->fx, LED_RGB_KEEP, 5);
 
         servo_gesture(s->g);
@@ -187,8 +158,7 @@ static void _handle_buzzer(const char *val) {
     else ESP_LOGW(TAG, "unknown melody: %s", val);
 }
 
-// Live focus-session state (compact JSON from focus_store._focus_payload).
-// Hand-parsed — no cJSON dependency for three fields.
+// Focus state (compact JSON from focus_store._focus_payload); hand-parsed, three fields.
 static void _handle_focus(const char *val) {
     int phase = 0;   // 0 off, 1 focus, 2 break
     if      (strstr(val, "\"phase\":\"focus\"")) phase = 1;
@@ -209,19 +179,15 @@ static void _handle_base(const char *val) {
     else ESP_LOGW(TAG, "unknown base cmd: %s", val);
 }
 
-// ─── Audio handlers ───────────────────────────────────────────────────────────
-//
-// Deliberately plain payloads — "on", "off", a bare number — because the backend
-// validates them in device_store.command_payload and sends the payload string
-// straight through. Parsing JSON here would mean two validators disagreeing.
+// ─── Audio handlers ───
+// Plain payloads ("on", "off", a number), validated by the backend's device_store.command_payload.
 
 static void _handle_mic_gain(sandy_mic_ch_t ch, const char *val) {
     mic_set_gain(ch, atoi(val));
 }
 
 static void _handle_mic_mute(sandy_mic_ch_t ch, const char *val) {
-    // "on" means the mic is ON, so muted is the opposite. Reading it the other
-    // way round is the obvious mistake here and it would be silent.
+    // "on" = mic on, so muted is the opposite.
     bool on = !strcmp(val, "on");
     mic_set_muted(ch, !on);
 }
@@ -248,19 +214,15 @@ static void _handle_ns(const char *val) {
     else ESP_LOGW(TAG, "unknown noise level: %s", val);
 }
 
-// The light has two layers and this routes between them. The four state names
-// are the privacy indicator and always win; everything else is an effect, which
-// the LED module refuses while a session is live. See sandy_led.h.
-//
-// An effect may carry a colour and a speed: "breathe:ff0044:7". Both optional,
-// because "breathe" alone should work.
+// State names drive the privacy indicator (always wins); anything else is an
+// effect, optionally "name:rrggbb:speed". See sandy_led.h.
 static void _handle_led(const char *val) {
     if      (!strcmp(val, "idle"))      { led_set_state(LED_STATE_IDLE);      return; }
     else if (!strcmp(val, "listening")) { led_set_state(LED_STATE_LISTENING); return; }
     else if (!strcmp(val, "talking"))   { led_set_state(LED_STATE_TALKING);   return; }
 
     char name[16] = {0};
-    uint32_t rgb = LED_RGB_KEEP;   // no colour in the command keeps the current one
+    uint32_t rgb = LED_RGB_KEEP;   // no colour keeps the current one
     int speed = 5;
 
     const char *c1 = strchr(val, ':');
@@ -269,8 +231,7 @@ static void _handle_led(const char *val) {
     memcpy(name, val, nlen);
 
     if (c1) {
-        // Exactly six hex digits, or the colour is left alone: "breathe:red"
-        // used to parse as 0 and paint black.
+        // Exactly six hex digits, or leave the colour alone.
         char *end = NULL;
         uint32_t v = (uint32_t)strtoul(c1 + 1, &end, 16);
         if (end == c1 + 7 && (*end == ':' || *end == '\0')) rgb = v;
@@ -284,17 +245,13 @@ static void _handle_led(const char *val) {
 
     sandy_led_fx_t fx = led_fx_from_name(name);
     if (fx == LED_FX_COUNT) { ESP_LOGW(TAG, "unknown led value: %s", val); return; }
-    // "off" is the one name in both layers: it means darkness AND hands the
-    // light back to the indicator, so it goes through led_set_state.
+    // "off" hands the light back to the indicator.
     if (fx == LED_FX_OFF) { led_set_state(LED_STATE_OFF); return; }
     led_set_effect(fx, rgb, speed);
 }
 
-// ── The display ──────────────────────────────────────────────────────────────
-//
-// "text:..." puts a line up, "dismiss" takes it down. Anything else is an image
-// chunk, which arrives as "img:<seq>:<total>:<base64>" — see sandy_screen.h for
-// why a picture is chunked and pre-converted rather than decoded here.
+// ── The display ──
+// "text:..." shows a line, "dismiss" clears it, "img:<seq>:<total>:<base64>" is an image chunk.
 static void _handle_screen(const char *val) {
 #if ENABLE_FACE
     if (!strncmp(val, "text:", 5))     { screen_show_text(val + 5); return; }
@@ -307,29 +264,16 @@ static void _handle_screen(const char *val) {
 }
 
 #if ENABLE_FACE
-// One piece of a picture: "img:<seq>:<total>:<base64>".
-//
-// seq 0 starts the transfer and seq total-1 finishes it, so the app sends one
-// kind of message and the board needs no separate begin/end commands to get out
-// of step with.
-// تغيير الشبكة. الحمولة: "<اسم>\n<كلمة السر>"
-//
-// سطر جديد فاصلًا مش فاصلة: أسماء الشبكات وكلمات السر فيها فواصل ونقطتين
-// وكل علامة ترقيم بتخطر ع بالك، والسطر الجديد هو الحرف الوحيد اللي ما بيقدر
-// يكون جوّاهن.
-//
-// **هالنداء بيحجز لحدّ خمسة وعشرين ثانية** — بيجرّب الشبكة وبيرجع للقديمة لو
-// فشلت. عشان هيك بيتنفّذ ع مهمّة لحاله: معالج أحداث MQTT ما بيجوز ينام، وإذا
-// نام بتتكدّس الرسائل ويسقط الاتصال.
+// Image chunk: seq 0 begins, seq total-1 ends; no separate begin/end commands.
+// تغيير الشبكة. الحمولة: "<اسم>\n<كلمة السر>" (السطر الجديد الحرف الوحيد اللي ما بيكون جوّاهن).
+// بيحجز لحدّ ٢٥ ثانية، فبيتنفّذ ع مهمّة لحاله: معالج MQTT ما لازم ينام.
 typedef struct { char ssid[33]; char pass[65]; } wifi_req_t;
 
 static void _wifi_switch_task(void *arg) {
     wifi_req_t *req = (wifi_req_t *)arg;
     wifi_switch_result_t r = wifi_sandy_switch(req->ssid, req->pass);
     free(req);
-    // النتيجة بتوصل بالنبضة الجاية — لو الشبكة الجديدة اشتغلت، النبضة بتطلع
-    // منها وباسمها. ولو فشلت، بتطلع من القديمة، والتطبيق بيشوف إنه الاسم ما
-    // تغيّر. مش لازم رسالة خاصة: الحقيقة موجودة بالنبضة أصلًا.
+    // النتيجة بتبيّن بالنبضة الجاية (اسم الشبكة).
     ESP_LOGI(TAG, "wifi switch result=%d", (int)r);
     vTaskDelete(NULL);
 }
@@ -366,8 +310,7 @@ static void _handle_screen_img(const char *val) {
 
     if (seq == 0 && !screen_image_begin(total)) return;
 
-    // Decoded into PSRAM: a chunk is a few kilobytes and internal RAM is what
-    // the voice session needs.
+    // PSRAM: internal RAM is for voice.
     size_t out_len = 0;
     mbedtls_base64_decode(NULL, 0, &out_len, (const unsigned char *)b64, b64_len);
     if (out_len == 0 || out_len > 16384) {
@@ -388,26 +331,20 @@ static void _handle_screen_img(const char *val) {
 }
 #endif
 
-// ─── Dispatch ─────────────────────────────────────────────────────────────────
+// ─── Dispatch ───
 
-// One command, fully assembled. Separated from the event handler because a
-// large payload arrives in pieces and must be dispatched exactly once, when the
-// last piece lands — not once per piece.
-// Commands that change the robot for good. A retained copy of one of these is
-// someone's old intent, not a request: the broker hands it to the board on
-// every reconnect, so a single retained "erase" wiped the robot every time it
-// came back on the network, and a retained Wi-Fi change fought the owner's.
+// Dispatch a fully reassembled command, exactly once.
+// One-shot commands: a retained copy is stale intent (a retained "erase" wiped
+// the robot on every reconnect), so retained ones are ignored.
 static bool _is_one_shot(const char *out) {
     return !strcmp(out, "factory_reset") || !strcmp(out, "wifi") ||
            !strcmp(out, "ota") || !strcmp(out, "ir") || !strcmp(out, "pair_code");
 }
 
 #if ENABLE_FACE
-// ── Proof of presence ────────────────────────────────────────────────────────
-// Someone asked to pair this robot with the code on her box. The server sends
-// six digits here and she shows them; whoever types them into the app is
-// standing in front of her. A photo of the sticker is no longer a robot.
-// Five minutes, like the code itself on the server, then the face comes back.
+// ── Proof of presence ──
+// Pairing shows six server-sent digits on her face; typing them proves you're in front of her.
+// Five minutes, like the server's code, then the face returns.
 static esp_timer_handle_t s_pair_timer;
 
 static void _pair_code_expired(void *arg) {
@@ -421,7 +358,7 @@ static void _handle_pair_code(const char *val) {
         if (val[i] < '0' || val[i] > '9') { ESP_LOGW(TAG, "pair code: not digits"); return; }
     }
     char text[64];
-    // Spaced in two groups of three: read aloud and typed without a slip.
+    // Two groups of three, easy to read and type.
     snprintf(text, sizeof(text), "رمز الربط\n\n%.3s  %.3s", val, val + 3);
     screen_show_text(text);
     buzzer_play(MELODY_NOTIFY);
@@ -436,10 +373,7 @@ static void _handle_pair_code(const char *val) {
 #endif
 
 static void _dispatch(const char *out, const char *val, bool retained) {
-    // مخارج ألواح تانية ع نفس الشجرة — الكاميرا وعقدة الغرفة. الدماغ مشترك
-    // بالشجرة كلها بنجمة، فبتوصله رسايلهن كمان. بلا هالسطر كل أمر كاميرا وكل
-    // أمر غرفة كان بيطبع «مخرج مجهول»، وهاد بيخلّي التحذير بلا معنى: لمّا كل
-    // شي بيحذّر، ما حدا بيقرا التحذير الحقيقي.
+    // مخارج الكاميرا وعقدة الغرفة ع نفس الشجرة؛ منتجاهلها بدل تحذير «مخرج مجهول».
     if (!strncmp(out, "cam/", 4) || !strncmp(out, "room/", 5)) return;
     if (retained && _is_one_shot(out)) {
         ESP_LOGW(TAG, "ignoring a retained %s — one-shot commands must be live", out);
@@ -451,8 +385,7 @@ static void _dispatch(const char *out, const char *val, bool retained) {
     else if (!strcmp(out, "gesture"))      _handle_gesture(val);
     else if (!strcmp(out, "buzzer"))       _handle_buzzer(val);
     else if (!strcmp(out, "factory_reset")) {
-        // كلمة وحدة بالضبط. الموضوع بينشر عليه الخادم بس، بس أمر ما إله رجعة
-        // ما بيستاهل يعتمد ع حارس واحد — أي حمولة تانية بتنتجاهل.
+        // كلمة وحدة بالضبط: أمر ما إله رجعة ما بيعتمد ع حارس واحد.
         if (!strcmp(val, "erase")) {
             ESP_LOGW(TAG, "factory reset requested — erasing");
             wifi_sandy_factory_reset();   // بتمسح وبتعيد التشغيل، ما بترجع
@@ -478,42 +411,25 @@ static void _dispatch(const char *out, const char *val, bool retained) {
         ESP_LOGI(TAG, "autonomous=%s (TODO)", val);
     else if (!strcmp(out, "wifi"))         _handle_wifi(val);
 #if ENABLE_IR
-    // "learn" arms the receiver; anything else is a recorded code to replay.
-    // One output rather than two because the backend already models it that
-    // way — a button on an `ir` device carries the code as its payload.
+    // "learn" arms the receiver; anything else is a code to replay.
     else if (!strcmp(out, "ir"))           ir_handle(val);
 #endif
     else if (!strcmp(out, "ota"))
-        ota_check_now();   // never a URL from the message: only signed releases
+        ota_check_now();   // never a URL from the message
     else
         ESP_LOGW(TAG, "unknown output: %s", out);
 }
 
-// ─── Reassembly ───────────────────────────────────────────────────────────────
-//
-// A payload larger than CONFIG_MQTT_BUFFER_SIZE (1 KB here) does not arrive as
-// one event. esp-mqtt delivers it as a run of MQTT_EVENT_DATA events, each
-// carrying `data_len` bytes at `current_data_offset` of a `total_data_len`
-// whole — and the topic is present **only on the first one**.
-//
-// This code did not know that. It copied 255 bytes out of whichever event it
-// saw and dispatched. For every short command that was right, and so it looked
-// right for months. For a picture it was catastrophic: a 6 KB chunk becomes 8 KB
-// of base64, arrives in eight events, and about 190 bytes of the first one got
-// decoded — three per cent of a chunk. The board reported the picture as
-// incomplete because it genuinely was, and said so correctly every time.
-//
-// Raising the MQTT buffer instead would have been the smaller diff and the
-// worse fix: that buffer is internal RAM, the one memory that is actually
-// scarce, and it would have to be sized for the largest message anyone ever
-// sends. Reassembling into PSRAM costs no internal RAM and has no ceiling worth
-// worrying about.
-#define ASM_MAX (32 * 1024)     // an image chunk is 8 KB; this is room to spare
+// ─── Reassembly ───
+// Payloads over CONFIG_MQTT_BUFFER_SIZE (1 KB) arrive as several MQTT_EVENT_DATA
+// events, with the topic only on the first. Reassembled in PSRAM rather than
+// growing the internal-RAM MQTT buffer.
+#define ASM_MAX (32 * 1024)     // an image chunk is 8 KB
 
 static char  *s_asm;            // PSRAM, allocated per message
 static size_t s_asm_len;
 static size_t s_asm_total;
-static char   s_asm_out[64];    // the output name, kept from the first event
+static char   s_asm_out[64];    // output name from the first event
 static bool   s_asm_retained;   // and whether it was a retained message
 
 static void _asm_reset(void) {
@@ -524,13 +440,8 @@ static void _asm_reset(void) {
     s_asm_retained = false;
 }
 
-// ─── Reconnect: backoff with jitter ───────────────────────────────────────────
-//
-// esp-mqtt's own reconnect is a fixed interval. A broker restart or a home
-// router coming back then had every robot in the fleet knock at exactly the same
-// five-second beat, forever — and a broker that is refusing us (bad credential)
-// got a TLS handshake every five seconds, all night. Now: 2 s doubling to a
-// minute, each wait jittered by a quarter so a fleet spreads out.
+// ─── Reconnect: backoff with jitter ───
+// 2 s doubling to a minute, ±25% jitter, so a fleet doesn't reconnect in lockstep.
 #define MQTT_BACKOFF_MIN_MS  2000
 #define MQTT_BACKOFF_MAX_MS  60000
 
@@ -554,7 +465,7 @@ static void _schedule_reconnect(void) {
     }
 }
 
-// ─── MQTT event handler ───────────────────────────────────────────────────────
+// ─── MQTT event handler ───
 
 static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)data;
@@ -562,32 +473,25 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_CONNECTED: {
             ESP_LOGI(TAG, "connected");
             s_backoff_ms = 0;
-            // One wildcard instead of a subscription per output: adding a new
-            // control becomes a case in the dispatch below, with nothing to
-            // remember to subscribe to. Forgetting that line is how a handler
-            // gets written and never fires.
+            // One wildcard subscription: new outputs only need a dispatch case.
             char sub[80];
             snprintf(sub, sizeof(sub), "%s/#", s_base);
             if (esp_mqtt_client_subscribe(s_client, sub, 1) < 0) {
-                // Connected and deaf is the worst state a robot can be in: it
-                // looks online in the app and obeys nothing. Start over.
+                // Connected but unsubscribed obeys nothing: start over.
                 ESP_LOGE(TAG, "subscribe to %s could not be sent — reconnecting", sub);
                 esp_mqtt_client_disconnect(s_client);
                 break;
             }
             ESP_LOGI(TAG, "subscribing to %s", sub);
-            // The will says "offline" (retained) when we vanish; this clears it.
+            // Clears the retained "offline" will.
             esp_mqtt_client_publish(s_client, s_topic_status, "{\"online\":true}", 0, 1, 1);
             mqtt_publish_status();   // announce what this robot can do, at once
-            // No chime here. app_main plays the boot melody once; this one
-            // played it again on every reconnect — a flaky router made the robot
-            // chirp in the night for no reason.
+            // No chime: it played on every reconnect.
             break;
         }
 
         case MQTT_EVENT_SUBSCRIBED:
-            // SUBACK carries a return code per filter; 0x80 is "refused" — a
-            // broker credential without permission on this tree.
+            // SUBACK 0x80 = refused (no permission on this tree).
             if (ev->data_len > 0 && (uint8_t)ev->data[0] == 0x80) {
                 ESP_LOGE(TAG, "the broker refused our subscription — check this board's "
                               "credential permissions on %s/#", s_base);
@@ -603,14 +507,11 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_DATA: {
             if (!ev->data) break;
 
-            // ── A continuation of a message already in progress ──────────────
-            // No topic on these events, so the output name is the one kept from
-            // the first.
+            // ── Continuation: no topic, use the name kept from the first event ──
             if (ev->current_data_offset > 0) {
                 if (!s_asm) break;                 // not one of ours; ignore
                 if (ev->current_data_offset != s_asm_len) {
-                    // Out of order or a piece lost. Half a picture is worse than
-                    // none, so abandon the whole message rather than draw it.
+                    // Out of order or lost: drop the whole message.
                     ESP_LOGW(TAG, "%s: piece out of order (%d, expected %u)",
                              s_asm_out, (int)ev->current_data_offset,
                              (unsigned)s_asm_len);
@@ -628,7 +529,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
                 break;
             }
 
-            // ── The first (or only) event of a message ───────────────────────
+            // ── First (or only) event of a message ──
             if (!ev->topic) break;
             _asm_reset();                          // drop any abandoned message
 
@@ -637,35 +538,27 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             memcpy(topic, ev->topic, tlen);
 
             const char *out = topic_suffix(topic);
-            if (!out) {           // the wildcard can only deliver our own tree,
+            if (!out) {           // the wildcard only delivers our own tree,
                 break;            // but never trust that on a shared broker
             }
-            // Our own status echoing back (retained, or a second robot's) must
-            // not be parsed as a command.
+            // Our own status echoing back is not a command.
             if (!strcmp(out, "status")) break;
 
-            // فرع الكاميرا. اللوحين بيشاركوا معرّف الوحدة — الكاميرا جزء من
-            // ساندي مش صندوق تاني — واشتراكنا `#` بيوصّلنا كل شي تحته. أي
-            // موضوع فيه شرطة مش إلنا، فبنتجاهله بصمت بدل ما نحذّر منه: تحذير
-            // بيتكرر كل خمس ثواني بيعلّمك تتخطّى التحذيرات.
+            // فرع الكاميرا (نفس معرّف الوحدة، واشتراك `#`): أي موضوع فيه شرطة مش إلنا، بصمت.
             if (strchr(out, '/')) break;
 
-            // Arrived whole and short: the common case, and it stays on the
-            // stack. 512 rather than 256 because a full-length display line is
-            // 255 bytes *plus* the "text:" prefix, and the old buffer clipped
-            // the last few letters off a long Arabic sentence.
+            // Whole and short: stays on the stack. 512 fits a 255-byte line plus "text:".
             if ((size_t)ev->total_data_len == (size_t)ev->data_len
                 && ev->data_len < 512) {
                 char val[512] = {0};
                 memcpy(val, ev->data, ev->data_len);
-                // A Wi-Fi change carries the password: never in the log, at
-                // any level — the log is mirrored off the board in dev builds.
+                // Never log the Wi-Fi password (dev builds mirror the log off the board).
                 ESP_LOGD(TAG, "%s = %s", topic, strcmp(out, "wifi") ? val : "<redacted>");
                 _dispatch(out, val, ev->retain);
                 break;
             }
 
-            // Long: reassemble in PSRAM across the events still to come.
+            // Long: reassemble in PSRAM.
             if (ev->total_data_len <= 0 || ev->total_data_len > ASM_MAX) {
                 ESP_LOGW(TAG, "%s: %d bytes is more than we accept",
                          out, (int)ev->total_data_len);
@@ -696,23 +589,11 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     }
 }
 
-// ─── Status publisher ─────────────────────────────────────────────────────────
+// ─── Status publisher ───
 
-// The parts this robot ships with, declared by the robot itself.
-//
-// The buyer should open the app and find her face, her neck and her mics already
-// there — not an empty list and a manual "add device" form for hardware that came
-// in the box. But hardcoding that list in the backend would be a lie the moment a
-// board ships without a servo, and it breaks the registry's own rule that devices
-// are data rather than code.
-//
-// So the hardware declares itself and the backend provisions what it hears. Each
-// entry's `id` is the topic suffix above, so a declared output is by construction
-// an output that has a handler.
-//
-// `kind` must be one of node_store.KNOWN_CAPABILITIES — relay, pwm, servo,
-// buzzer, ir, audio — or the backend drops the entry on validation. That set is
-// the contract; widen it there first, not here.
+// Parts this robot declares, so the backend provisions them. Each `id` is a topic
+// suffix handled above; `kind` must be in node_store.KNOWN_CAPABILITIES or the
+// backend drops it.
 static const char *OUTPUTS_JSON =
     "["
       "{\"id\":\"mood\",\"kind\":\"pwm\"},"
@@ -734,14 +615,10 @@ static const char *OUTPUTS_JSON =
       "{\"id\":\"screen_size\",\"kind\":\"pwm\"}"
     "]";
 
-// Guards the heartbeat buffer below. Created in mqtt_sandy_start, before the
-// client or the status task exist: creating it lazily on first use let the
-// status task and a connect event both see NULL and each make their own.
+// Created in mqtt_sandy_start before either user exists (lazy init raced).
 static SemaphoreHandle_t s_status_lock;
 
-// SSIDs are arbitrary bytes. One with a quote or a backslash in it made the
-// whole heartbeat invalid JSON, and the backend then dropped every field of it.
-// Worst case doubles 32 bytes, which the 1 KB buffer below still holds.
+// SSIDs can hold quotes/backslashes; worst case doubles 32 bytes.
 static void json_escape(const char *in, char *out, size_t cap) {
     size_t k = 0;
     for (; in && *in && k + 2 < cap; in++) {
@@ -755,46 +632,24 @@ static void json_escape(const char *in, char *out, size_t cap) {
 
 void mqtt_publish_status(void) {
     if (!s_client || !s_status_lock) return;
-    // static, not on the stack.
-    //
-    // This buffer grew from 256 to 896 bytes when the heartbeat started carrying
-    // the outputs, the mic levels and the address — and the task that calls this
-    // has a 3 KB stack. 896 bytes of it, plus snprintf's own frame, overflowed
-    // it and panicked the board mid-conversation. FreeRTOS caught it and said so
-    // exactly, which is the only reason this took minutes to find rather than
-    // days.
-    //
-    // A static buffer costs no stack at all. Two tasks can reach this — the
-    // status timer and the MQTT event handler on connect — so s_status_lock is
-    // what makes sharing it safe. Without it, a connect landing mid-publish
-    // would interleave two JSON documents into one and the backend would parse
-    // neither.
-    // 1 KB: the worst case (every output, a 32-byte SSID of quotes) is ~900.
+    // Static, not on the 3 KB task stack (it overflowed); s_status_lock guards it
+    // since the status timer and connect handler both publish. Worst case ~900 bytes.
     static char buf[1024];
     if (xSemaphoreTake(s_status_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
     static char ssid[2 * 32 + 1];   // under the lock, like buf
     json_escape(wifi_sandy_ssid(), ssid, sizeof(ssid));
     int n =
-    // mic_l / mic_r are live input levels, 0..100. They are in the heartbeat and
-    // not on a topic of their own so a control screen gets meters by reading the
-    // state it already polls — speak, watch which one moves, and you know which
-    // mic is which without touching a wire.
+    // Live mic levels 0..100, in the heartbeat so the app's meters need no extra topic.
         snprintf(buf, sizeof(buf),
-        // ما في distance: الحسّاس ملغي ومش مركّب (ENABLE_SENSOR=0). حقل بيرسل
-        // صفر للأبد بيوهم إنه في قياس.
+        // ما في distance: الحسّاس مش مركّب (ENABLE_SENSOR=0).
         "{\"uptime\":%lld,\"heap\":%lu,\"mood\":%d,"
         "\"mic_l\":%d,\"mic_r\":%d,"
         "\"mic_l_gain\":%d,\"mic_r_gain\":%d,"
         "\"mic_l_muted\":%s,\"mic_r_muted\":%s,"
         "\"volume\":%d,\"noise\":%d,\"online\":true,"
-        // قوّة الإشارة. الكاميرا وعقدة الغرفة بيبعتوها من زمان والدماغ ما كان
-        // — وهو اللوح الوحيد اللي بيمرّر صوتًا حيًّا، يعني الوحيد اللي بيهمّه.
-        // «النت بطيء» بلا هالرقم بيخلّي التشخيص تخمينًا بين الراوتر والخادم.
+        // قوّة الإشارة: لتشخيص «النت بطيء».
         "\"rssi\":%d,"
-        // Key names are the backend's, not ours: mqtt_ingest reads
-        // "firmware_version", "capabilities" and "outputs" by those exact
-        // spellings and silently ignores anything else. A heartbeat that looks
-        // right and registers nothing is the failure mode to avoid here.
+        // Exact backend key names (mqtt_ingest ignores anything else).
         "\"capabilities\":[\"servo\",\"pwm\",\"buzzer\",\"audio\"],"
         "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"" SANDY_BOARD_ID "\","
         "\"firmware_version\":\"%s\",\"outputs\":%s}",
@@ -808,8 +663,7 @@ void mqtt_publish_status(void) {
         spk_get_volume(), (int)ns_get_level(), wifi_sandy_rssi(),
         wifi_sandy_ip(), ssid,
         SANDY_FW_VERSION, OUTPUTS_JSON);
-    // A clipped heartbeat is invalid JSON, and the server drops invalid JSON
-    // whole — the robot would vanish from the app with nothing in any log.
+    // Clipped JSON gets dropped whole by the server.
     if (n < 0 || n >= (int)sizeof(buf)) {
         ESP_LOGE(TAG, "heartbeat is %d bytes, buffer %u — not sent", n, (unsigned)sizeof(buf));
     } else {
@@ -818,15 +672,7 @@ void mqtt_publish_status(void) {
     xSemaphoreGive(s_status_lock);
 }
 
-// Publish to the room node, which lives on this robot's own topic tree.
-//
-// `out` is the bare output name ("light", "fan", "music") and this builds
-// `sandy/node/<id>/room/<out>`. It used to take the whole topic and publish it
-// raw, on a global `room/cmd/*` tree shared by every customer — so one person's
-// "lights off" reached everybody's room node. It also made the permission
-// unwritable: the brain needed its own tree *and* a global one, and a broker
-// credential on the free plan carries a single topic filter. One tree fixes
-// both.
+// Publish under sandy/node/<id>/…, never a global tree shared across customers.
 bool mqtt_publish_node(const char *suffix, const char *payload) {
     if (!s_client || !suffix || !payload) return false;
     if (s_base[0] == '\0') {
@@ -836,9 +682,7 @@ bool mqtt_publish_node(const char *suffix, const char *payload) {
     char topic[96];
     snprintf(topic, sizeof(topic), "%s/%s", s_base, suffix);
     int id = esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 0);
-    // The payload is truncated in the log on purpose: a learned IR code is a few
-    // hundred characters of timings and would push everything else out of the
-    // 8 KB remote log buffer.
+    // Truncated: IR codes would flood the 8 KB remote log buffer.
     ESP_LOGI(TAG, "publish %s = %.60s%s (%s)", topic, payload,
              strlen(payload) > 60 ? "…" : "", id < 0 ? "FAIL" : "ok");
     return id >= 0;
@@ -861,26 +705,16 @@ static void _status_task(void *arg) {
     }
 }
 
-// ─── Broker credentials ───────────────────────────────────────────────────────
-//
-// **كل لوح بينباع فيه نفس المستخدم ونفس كلمة السرّ، مكتوبين بالكود.** يعني أي
-// زبون بيقدر يشترك بمواضيع أي زبون تاني: صوت بيته، صور كاميرته، أوامره. ولوح
-// واحد بينفتح بينكشف معه كل الزباين — وما في طريقة تسحب مفتاحًا واحدًا بدون حرق
-// كل الأجهزة اللي بالسوق.
-//
-// الحلّ نصّين: اللوح يقدر ياخد مفتاحه ويحفظه، والخادم يعطيه ياه. هدول الاثنين
-// هون: `creds_load` بتقرا المحفوظ وبتقع ع المكتوب بالكود، و
-// `mqtt_sandy_set_credentials` بتستقبل المفتاح الخاص من مصافحة الصوت وبتحفظه.
+// ─── Broker credentials ───
+// كل لوح بياخد مفتاح وسيط خاص فيه: `creds_load` بتقرا المحفوظ وإلا المكتوب بالكود،
+// و`mqtt_sandy_set_credentials` بتحفظ المفتاح اللي بيجي من مصافحة الصوت.
 
 #define CREDS_NS "sandy_mqtt"
 
 static char s_user[65], s_pass[129];
 static volatile bool s_creds_pending;
 
-// إعداد العميل بيضل محفوظ لأنّ `esp_mqtt_set_config` **بترجّع أي حقل مش معبّى
-// لقيمته الافتراضية** — مش بتعدّل اللي بتعطيها ياه وبس. تمرير إعداد فيه المفتاح
-// لحاله كان بيمسح عنوان الوسيط والتحقّق المشفّر ومعرّف العميل، ويرجع اللوح
-// يحاول يتصل بلا مكان يروح عليه. فمنعدّل نسخة كاملة ومنمرّرها كلها.
+// نسخة كاملة من الإعداد: `esp_mqtt_set_config` بترجّع أي حقل ناقص للافتراضي.
 static esp_mqtt_client_config_t s_cfg;
 
 static void creds_load(void) {
@@ -907,8 +741,7 @@ static void creds_load(void) {
 bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
     if (!user || !pass || !*user || !*pass) return false;
 
-    // نفس اللي عنا؟ ما منكتب. المصافحة بتصير كل جلسة صوت، وكتابة بكل مصافحة
-    // بتآكل الذاكرة الوامضة مقابل لا شي.
+    // نفس المفتاح؟ ما منكتب (توفيرًا للذاكرة الوامضة).
     if (!strcmp(user, s_user) && !strcmp(pass, s_pass)) return false;
 
     nvs_handle_t h;
@@ -929,13 +762,8 @@ bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
     snprintf(s_pass, sizeof(s_pass), "%s", pass);
     ESP_LOGW(TAG, "stored this board's own broker credential (user=%s)", s_user);
 
-    // بنطبّقها بهالتشغيلة مش ع الإقلاع الجاي: لوح حافظ مفتاحه وشغّال ع المشترك
-    // بيضل ثغرة مفتوحة لحدّ ما حدا يطفّيه — وما حدا بيطفّي روبوت.
-    //
-    // **بس مش هلّق.** هالنداء بيوصل من مصافحة الصوت، يعني والمكالمة لسا بتفتح.
-    // إعادة الاتصال بالوسيط هي مصافحة مشفّرة تانية بنفس اللحظة — والذاكرة
-    // الداخلية ما بتساع تنتين، وهيك كان اللوح بيعيد التشغيل بنص أول مكالمة.
-    // فبنعلّمها، ومهمّة النبضة بتطبّقها لمّا الشبكة تفضى.
+    // منطبّقها بهالتشغيلة، بس مش هلّق: إعادة الاتصال فوق مصافحة الصوت بتخلّص الرام
+    // الداخلية. مهمّة النبضة بتطبّقها لمّا الشبكة تفضى.
     s_creds_pending = true;
     return true;
 }
@@ -944,15 +772,12 @@ static void _apply_pending_credentials(void) {
     if (!s_creds_pending || !s_client) return;
     if (voice_is_connected() || net_owner() != NET_OWNER_NONE) return;   // later
     s_creds_pending = false;
-    // s_user/s_pass مؤشّراتهن أصلًا جوّا s_cfg، بس منكتبهن صراحة عشان السطر
-    // يضل صحيح لو انتغيّر شكل البنية.
+    // مؤشّرات أصلًا جوّا s_cfg، بس منكتبهن صراحة.
     s_cfg.credentials.username = s_user;
     s_cfg.credentials.authentication.password = s_pass;
     if (esp_mqtt_set_config(s_client, &s_cfg) == ESP_OK) {
-        // Disconnect, not reconnect: the library ignores "reconnect" on a live
-        // connection, so the new credential used to wait for the next network
-        // drop. A clean DISCONNECT also means the broker does not fire our
-        // "offline" will for what is only a key change.
+        // Disconnect, not reconnect: the library ignores reconnect on a live link, and a
+        // clean DISCONNECT doesn't fire the "offline" will.
         esp_mqtt_client_disconnect(s_client);
         ESP_LOGI(TAG, "reconnecting with the new credential");
     } else {
@@ -960,37 +785,28 @@ static void _apply_pending_credentials(void) {
     }
 }
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// ─── Init ───
 
 esp_err_t mqtt_sandy_start(void) {
     derive_node_id();
     if (s_node_id[0] == '\0') {
-        // No usable pairing code means no topics, and every command would land
-        // on "sandy/node//…" where nothing is listening. Refuse loudly instead
-        // of running as a robot that silently ignores the app.
+        // No pairing code, no topics: refuse loudly.
         ESP_LOGE(TAG, "SANDY_PAIR_CODE is empty or has no alphanumerics — "
                       "flash once by cable with it in secrets.h, or provision the factory partition");
         return ESP_ERR_INVALID_STATE;
     }
 
-    // بيانات دخول الوسيط — من الذاكرة أول، ومن الكود لو ما في. التفصيل فوق.
+    // بيانات الدخول: المحفوظة أول، وإلا المكتوبة بالكود.
     creds_load();
 
-    // **معرّف العميل لازم يكون خاص باللوح.**
-    //
-    // كان مكتوب ثابت بالكود، ونفس القيمة بتنحرق ع كل لوح. والوسيط بيسمح
-    // بمعرّف واحد بس لكل عميل: أول ما لوحين يتصلوا بنفس المعرّف بيفصل كل واحد
-    // التاني، لفّة بلا نهاية. وهاد بيصير حتى لو كل واحد بمفتاح خاص فيه — يعني
-    // إصدار المفاتيح لحاله ما بينفع بدون هالسطر.
+    // معرّف العميل خاص باللوح: الوسيط بيفصل عميلين بنفس المعرّف.
     static char s_client_id[48];
     snprintf(s_client_id, sizeof(s_client_id), "sandy-brain-%s", s_node_id);
 
     s_cfg = (esp_mqtt_client_config_t){
         .broker = {
             .address = { .uri = identity()->mqtt_uri },
-            // Real TLS via the built-in CA bundle (same as the voice WSS link).
-            // skip_cert_common_name_check alone doesn't work here: esp-tls
-            // refuses to connect with no verification source at all.
+            // Real TLS via the CA bundle; esp-tls refuses with no verification source.
             .verification = { .crt_bundle_attach = esp_crt_bundle_attach },
         },
         .credentials = {
@@ -998,12 +814,10 @@ esp_err_t mqtt_sandy_start(void) {
             .username   = s_user,
             .authentication = { .password = s_pass },
         },
-        // Our own reconnect (backoff with jitter, above), not the library's
-        // fixed interval.
+        // Our backoff, not the library's fixed interval.
         .network = { .reconnect_timeout_ms = MQTT_RECONNECT_MS,
                      .disable_auto_reconnect = true },
-        // «راح» محفوظة ع موضوع الحالة لو انقطعنا بلا وداع: التطبيق بيعرف
-        // فورًا، مش بعد ما النبضات تبطّل وحدّ يلاحظ.
+        // وصيّة «offline» محفوظة، عشان التطبيق يعرف فورًا.
         .session = {
             .last_will = {
                 .topic  = s_topic_status,
@@ -1026,9 +840,7 @@ esp_err_t mqtt_sandy_start(void) {
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, _handler, NULL);
     esp_mqtt_client_start(s_client);
 
-    // Stack in PSRAM: this task only formats and publishes (no flash access,
-    // which a PSRAM stack must never do), and 3 KB of internal RAM held for a
-    // five-second heartbeat is 3 KB the voice session's TLS cannot have.
+    // Stack in PSRAM (no flash access), to spare internal RAM for voice TLS.
     if (xTaskCreateWithCaps(_status_task, "mqtt_status", 3072, NULL, 4, NULL,
                             MALLOC_CAP_SPIRAM) != pdPASS) {
         xTaskCreate(_status_task, "mqtt_status", 3072, NULL, 4, NULL);

@@ -29,11 +29,7 @@
 
 static const char *TAG = "main";
 
-// A part that fails to come up must not take the robot with it. ESP_ERROR_CHECK
-// around these turned a loose display ribbon, a clashing LEDC timer or an
-// unplugged sensor into an abort — i.e. a boot loop with no face, no wake word
-// and no log of what actually went wrong. Same principle as buzzer_play going
-// quiet when the buzzer isn't fitted, one level up: log it, skip it, keep going.
+// Log and continue: a failed part must not boot-loop the whole robot.
 #define TRY_INIT(name, call)                                                   \
     do {                                                                       \
         esp_err_t _e = (call);                                                 \
@@ -43,13 +39,10 @@ static const char *TAG = "main";
         }                                                                      \
     } while (0)
 
-// Global mood state — written by MQTT/touch/mic, read by face/buzzer
 volatile sandy_mood_t g_current_mood = MOOD_IDLE;
 
 #if ENABLE_SENSOR && ENABLE_FACE
-// Permanent behaviour: when something comes close, Sandy looks surprised.
-// Hands off while a voice conversation is running — the voice link drives the
-// face then (listening/talking), and this loop would stomp it every 300ms.
+// Look surprised when something comes close, except during a voice session.
 static void _proximity_task(void *arg) {
     bool was_near = false;
     for (;;) {
@@ -61,9 +54,7 @@ static void _proximity_task(void *arg) {
 #endif
         uint32_t d = sensor_get_distance_cm();
         bool near = (d > 0 && d < 25);
-        // Edge-triggered, not level-triggered: the old "set IDLE every 300ms"
-        // stomped every mood that came from anywhere else (MQTT mood commands
-        // appeared broken because of this) and would never let her fall asleep.
+        // Edge-triggered so it doesn't stomp moods set elsewhere.
         if (near && !was_near) face_set_mood(MOOD_SURPRISED);
         if (!near && was_near) face_set_mood(MOOD_IDLE);
         was_near = near;
@@ -73,9 +64,7 @@ static void _proximity_task(void *arg) {
 #endif
 
 #if ENABLE_MQTT
-// MQTT joins ~20s late on purpose: its TLS handshake right at boot stacked a
-// power peak on top of the WiFi/display/voice bring-up and browned out weaker
-// supplies (power bank / laptop USB). Body control can afford to be late.
+// MQTT starts ~20 s late: its TLS at boot browned out weak supplies.
 static void _mqtt_late_start(void *arg) {
     vTaskDelay(pdMS_TO_TICKS(20000));
     if (mqtt_sandy_start() != ESP_OK) {
@@ -86,64 +75,44 @@ static void _mqtt_late_start(void *arg) {
 #endif
 
 void app_main(void) {
-    // reset_reason separates a brownout from a panic from a plain power-on at
-    // a glance — the first thing to check when the board reboots on its own.
+    // Tells brownout from panic from power-on.
     ESP_LOGI(TAG, "Sandy Brain S3 — booting (reset_reason=%d)", (int)esp_reset_reason());
 
-    // ── Core services ─────────────────────────────────────────────────────────
-    // NVS only holds the saved neck angle here; losing it costs a default pose.
+    // ── Core services ──
     TRY_INIT("nvs", nvs_sandy_init());
-    // Who this robot is — pairing code, broker, voice server, first Wi-Fi —
-    // before anything that needs it. See sandy_identity.h for why none of it
-    // lives in the image any more.
+    // See sandy_identity.h.
     TRY_INIT("identity", identity_init());
 #if ENABLE_WIFI
     TRY_INIT("wifi", wifi_sandy_start());
 #endif
 #if ENABLE_IR
-    // Before MQTT: the `ir` output is dispatched from the MQTT task, and a
-    // "learn" arriving at a driver that does not exist yet is a crash rather
-    // than a missed press.
+    // Before MQTT, which dispatches the `ir` output.
     TRY_INIT("ir", ir_init());
 #endif
 #if ENABLE_PROVISION
-    // After wifi_sandy_start, which returns as soon as the radio is up: this
-    // watches whether an association actually happens and raises the setup
-    // access point if none does. Starting it here rather than inside the Wi-Fi
-    // module keeps that module about one thing — the radio — and this one about
-    // the thing that has to keep working when the radio has nowhere to go.
+    // Raises the setup AP if no association happens.
     TRY_INIT("provision", provision_init());
 #endif
 #if ENABLE_REMOTE
     TRY_INIT("remote", remote_init());   // OTA + remote log over WiFi
-    // Repeat the reset reason now that the remote log buffer exists — the
-    // line at the top of app_main is UART-only (printed before the buffer).
+    // Again for the remote log (the first line was UART-only).
     ESP_LOGI(TAG, "reset_reason=%d (9=brownout 4=panic 1=power-on)", (int)esp_reset_reason());
 #endif
 
-    // Outside the ENABLE_REMOTE guard on purpose. The bootloader marks a fresh
-    // image PENDING_VERIFY whether or not this build has an update server, so an
-    // image that never runs this call would roll back on every single reboot,
-    // forever — turning a config flag into a brick. The function itself decides
-    // what "healthy" can mean in this build.
-    //
-    // Here and not later: it only has to prove the board can still be *reached*,
-    // and Wi-Fi plus the update server are up by now. Tying it to the peripherals
-    // would let a dead servo roll back firmware you could otherwise fix remotely.
+    // Outside ENABLE_REMOTE: without this call a PENDING_VERIFY image would roll back
+    // on every reboot. Early, because health only means "still reachable".
     ota_start_health_watch();
 
-    // ── Peripherals ───────────────────────────────────────────────────────────
+    // ── Peripherals ──
 #if ENABLE_FACE
     TRY_INIT("face", face_init());
 #endif
 #if ENABLE_LED
-    led_init();   // already non-fatal: a dead status LED shouldn't stop the robot
+    led_init();   // non-fatal
 #endif
-    // After the face and the LED, because it drives both: from here on every
-    // failure in any subsystem has somewhere to show itself.
+    // After face and LED, which it drives.
     status_init();
-    // Before the mic and voice tasks start reading the gains, and before MQTT
-    // can be told to change them.
+    // Before mic, voice and MQTT use the gains.
     audio_ctl_init();
 #if ENABLE_SERVO
     TRY_INIT("servo", servo_init());
@@ -174,12 +143,12 @@ void app_main(void) {
     ota_updates_start();
 #endif
 
-    // ── Network ───────────────────────────────────────────────────────────────
+    // ── Network ──
 #if ENABLE_MQTT
     xTaskCreate(_mqtt_late_start, "mqtt_late", 4096, NULL, 3, NULL);
 #endif
 
-    // ── Voice link (waits for Wi-Fi, then connects to /voice) ───────────────────
+    // ── Voice link ──
 #if ENABLE_VOICE
     TRY_INIT("voice", voice_init());
 #endif
@@ -187,7 +156,6 @@ void app_main(void) {
     ESP_LOGI(TAG, "all systems go");
 
 #if ENABLE_BUZZER
-    // Short startup chime so we know the board booted.
     buzzer_play(MELODY_BOOT);
 #endif
 
@@ -195,7 +163,7 @@ void app_main(void) {
     xTaskCreate(_proximity_task, "proximity", 3072, NULL, 3, NULL);
 #endif
 
-    // Watchdog on main task (5s — configured in sdkconfig.defaults)
+    // 5 s, set in sdkconfig.defaults
     esp_task_wdt_add(NULL);
     for (;;) {
         esp_task_wdt_reset();

@@ -1,5 +1,4 @@
-// Cable-free dev: OTA upload over HTTP + remote serial log over TCP.
-// Both are dev conveniences — keep behind ENABLE_REMOTE.
+// Dev only (ENABLE_REMOTE): OTA upload over HTTP + serial log over TCP.
 
 #include "config.h"
 #if ENABLE_REMOTE
@@ -26,19 +25,15 @@ static const char *TAG = "remote";
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
-// ─── Remote serial log (TCP, port 3333) ─────────────────────────────────────
+// ─── Remote serial log (TCP, port 3333) ───
 #define LOG_PORT       3333
 #define LOG_BUF_BYTES  8192
 
 static StreamBufferHandle_t s_logbuf;
 static vprintf_like_t       s_old_vprintf;
 
-// Tee every esp_log line: to UART (as before) and into a buffer the log task
-// drains to the TCP client. We buffer ALWAYS (not just while connected): when
-// full, new lines are dropped, so the buffer holds the OLDEST ~8KB since the
-// last drain — exactly the boot/init lines, which are still there when a
-// client connects a few seconds after reset instead of being lost over WiFi.
-// Re-entrant-safe (just vsnprintf + stream buffer).
+// Tee esp_log to UART and a buffer. Always buffered; when full, new lines drop,
+// so boot lines survive until a client connects.
 static int log_vprintf(const char *fmt, va_list ap) {
     va_list cp;
     va_copy(cp, ap);
@@ -67,17 +62,13 @@ static void log_server_task(void *arg) {
     for (;;) {
         int c = accept(srv, NULL, NULL);
         if (c < 0) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
-        // TCP keepalive so a vanished client (closed laptop, dropped WiFi) is
-        // detected even when no logs are flowing — otherwise this single-client
-        // server stays wedged on a half-open connection and never accepts a
-        // new one. Dead after ~5s idle + 3 probes 5s apart.
+        // Keepalive so a vanished client doesn't wedge this single-client server.
         int ka = 1, idle = 5, intvl = 5, cnt = 3;
         setsockopt(c, SOL_SOCKET,  SO_KEEPALIVE,  &ka,    sizeof(ka));
         setsockopt(c, IPPROTO_TCP, TCP_KEEPIDLE,  &idle,  sizeof(idle));
         setsockopt(c, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
         setsockopt(c, IPPROTO_TCP, TCP_KEEPCNT,   &cnt,   sizeof(cnt));
-        // Keep whatever boot/init logs are already buffered (don't reset) so the
-        // client sees them on connect.
+        // Keep the buffered boot logs for the new client.
         ESP_LOGI(TAG, "log client connected");
         char buf[256];
         for (;;) {
@@ -85,8 +76,7 @@ static void log_server_task(void *arg) {
             if (n > 0) {
                 if (send(c, buf, n, 0) < 0) break;
             } else {
-                // Idle: peek so a graceful close (or a keepalive-declared death)
-                // is noticed without waiting for the next log line to fail.
+                // Peek so a close is noticed without waiting for the next log line.
                 char tmp[8];
                 int pk = recv(c, tmp, sizeof(tmp), MSG_DONTWAIT | MSG_PEEK);
                 if (pk == 0) break;                                       // peer closed
@@ -97,16 +87,10 @@ static void log_server_task(void *arg) {
     }
 }
 
-// ─── OTA upload (HTTP) ──────────────────────────────────────────────────────
+// ─── OTA upload (HTTP) ───
 static esp_err_t root_get(httpd_req_t *req) {
-    // The board says which board it is, in a string nothing else in this project
-    // serves. Three ESP boards live on the same network — the S3 brain, the
-    // classic ESP32 room node, and the ESP32-CAM — and they take three different
-    // binaries. Pushing brain firmware at the wrong one is not a mistake you
-    // notice until the board stops booting, so the flash script matches this
-    // exact marker before it sends anything.
-    //
-    // Keep SANDY_BOARD_ID in step with the script if it ever changes.
+    // The flash script matches this marker before sending, so brain firmware never
+    // reaches the room node or the camera. Keep SANDY_BOARD_ID in step with it.
     static char page[240];
     snprintf(page, sizeof(page),
              "<h3>Sandy brain-core &middot; ESP32-S3</h3>"
@@ -132,16 +116,7 @@ static esp_err_t update_post(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // PSRAM, taken for the upload and given back after.
-    //
-    // It was on the stack (a 1460-byte frame on a 4 KB task — the shape that
-    // panicked mqtt_status). Moving it to `static` fixed the stack and created a
-    // worse problem: 1460 bytes of INTERNAL RAM held forever, for something used
-    // once. Internal RAM is the scarce one here — it is what the voice session's
-    // TLS needs, and starving it stopped her talking.
-    //
-    // So: PSRAM (plentiful, eight megabytes), allocated when an upload starts and
-    // freed when it ends. Not on the stack, not permanent, not internal.
+    // PSRAM, only for the upload: not the stack (overflow) nor a static (internal RAM voice needs).
     char *buf = heap_caps_malloc(1460, MALLOC_CAP_SPIRAM);
     if (!buf) {
         esp_ota_abort(h);
@@ -175,10 +150,7 @@ static esp_err_t update_post(httpd_req_t *req) {
         return ESP_FAIL;
     }
     httpd_resp_sendstr(req, "OK — rebooting into new firmware\n");
-    // Settings wait a few seconds of stillness before they touch flash (see
-    // sandy_nvs.h). A deliberate restart is the one moment we know that wait
-    // will never finish, so anything queued goes out now — otherwise flashing
-    // silently discards a volume the owner set a moment earlier.
+    // Flush deferred settings before the restart or they are lost.
     nvs_flush_deferred();
     ESP_LOGI(TAG, "OTA done — rebooting");
     vTaskDelay(pdMS_TO_TICKS(400));
@@ -187,16 +159,8 @@ static esp_err_t update_post(httpd_req_t *req) {
 }
 
 static void start_http(void) {
-    // Wait for an address before binding.
-    //
-    // wifi_sandy_start() returns as soon as the radio is up — associating
-    // happens in the background — so this used to bind while the interface had
-    // no address at all. The server reported itself started and then answered
-    // nothing, which is the worst way to fail: "remote ready" in the log, and a
-    // flash script that cannot find the board it is looking straight at.
-    //
-    // Cost of waiting: nothing. Anyone flashing over the network needs the
-    // network anyway.
+    // Wait for an address: wifi_sandy_start() returns before association, and a
+    // server bound too early answered nothing.
     for (int i = 0; i < 120 && !wifi_sandy_is_connected(); i++) {
         if (i % 20 == 0) ESP_LOGW(TAG, "http: waiting for an IP before binding");
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -209,10 +173,7 @@ static void start_http(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 20;
-    // Left at the default 4 KB. It was raised to 6 KB when the upload buffer
-    // lived on this stack; the buffer is in PSRAM now, so the extra 2 KB of
-    // internal RAM was pure cost — and internal RAM is exactly what the voice
-    // session ran out of.
+    // Default 4 KB stack; internal RAM is scarce.
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     httpd_uri_t root = { .uri = "/",       .method = HTTP_GET,  .handler = root_get };
@@ -227,33 +188,17 @@ static void http_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-
 esp_err_t remote_init(void) {
-    // PSRAM. Eight kilobytes of internal RAM for a development convenience is a
-    // bad trade on a board where internal RAM is what the voice session's TLS
-    // needs — and where it running out is what stops her talking. The voice path
-    // already puts its megabyte buffers here for the same reason.
-    //
-    // Safe: this is written from esp_log, which is not callable from an ISR or
-    // with the cache disabled, so the buffer is never touched at a moment when
-    // PSRAM is unreachable.
+    // PSRAM, to spare internal RAM. Safe: esp_log never writes with the cache disabled.
     s_logbuf = xStreamBufferCreateWithCaps(LOG_BUF_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_old_vprintf = esp_log_set_vprintf(log_vprintf);
-    // Stack in PSRAM: sockets and a stream buffer only, never flash, and a dev
-    // convenience has no claim on the internal RAM the voice session needs.
-    // The name "logsrv" is load-bearing: publish_firmware.py looks for it to
-    // prove a retail image left this server out.
+    // Stack in PSRAM (no flash access). The name "logsrv" is load-bearing:
+    // publish_firmware.py checks retail images leave it out.
     if (xTaskCreateWithCaps(log_server_task, "logsrv", 4096, NULL, 4, NULL,
                             MALLOC_CAP_SPIRAM) != pdPASS) {
         xTaskCreate(log_server_task, "logsrv", 4096, NULL, 4, NULL);
     }
-    // On its own task, because start_http() now waits for an address and this
-    // runs on the boot path — blocking here would hold up the face, the voice
-    // link and everything after them for as long as the router takes.
-    // 2560: it waits in a loop then calls httpd_start once and deletes itself.
-    // Every byte here is internal RAM, and internal RAM is what the voice
-    // session needs to open at all — this task must not be holding any of it
-    // by the time the first wake word lands.
+    // Own task so waiting for an address doesn't hold up boot. Small stack (internal RAM).
     xTaskCreate(http_task, "http_up", 2560, NULL, 4, NULL);
     ESP_LOGI(TAG, "remote ready — OTA: http://<ip>/update   logs: nc <ip> %d", LOG_PORT);
     return ESP_OK;

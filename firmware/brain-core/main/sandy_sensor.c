@@ -22,13 +22,11 @@ static uint32_t _measure_once(void) {
     esp_rom_delay_us(10);
     gpio_set_level(PIN_SENSOR_TRIG, 0);
 
-    // Wait for echo HIGH
     int64_t t0 = esp_timer_get_time();
     while (!gpio_get_level(PIN_SENSOR_ECHO)) {
         if (esp_timer_get_time() - t0 > SENSOR_TIMEOUT_US) return 0;
     }
 
-    // Measure echo HIGH duration
     int64_t t1 = esp_timer_get_time();
     while (gpio_get_level(PIN_SENSOR_ECHO)) {
         if (esp_timer_get_time() - t1 > SENSOR_TIMEOUT_US) return 0;

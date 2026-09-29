@@ -1,25 +1,14 @@
-# Sandy Brain S3 — 16MB flash with dual OTA
-#
-# The app slots grew from 1.9 MB to 4 MB: the image was at 92 % of the old slot,
-# one feature away from not updating at all. A robot still on the old table
-# refuses anything bigger than its slot on its own (sandy_ota.c checks), so the
-# fleet is safe while it moves; the new table itself needs ONE wired flash.
-#
-# NVS stays exactly where it was, so the saved Wi-Fi, the identity and every
-# setting survive the reflash.
+# Sandy Brain S3 — 16MB flash with dual OTA.
+# Changing this table needs a wired flash; keep NVS at 0x9000 so saved settings survive.
 # Name,     Type,  SubType,  Offset,    Size,     Flags
 nvs,        data,  nvs,      0x9000,    0x5000,
 otadata,    data,  ota,      0xe000,    0x2000,
 phy_init,   data,  phy,      0x10000,   0x1000,
 ota_0,      app,   ota_0,    0x20000,   0x400000,
 ota_1,      app,   ota_1,    0x420000,  0x400000,
-# esp-sr models (srmodels.bin): the wake word (~300KB) plus the English
-# MultiNet command model (mn5q8_en, ~2.1MB). Found by its name, not its offset.
+# esp-sr models (wake word + MultiNet); found by name, not offset.
 model,      data,  spiffs,   0x820000,  0x400000,
-# The last crash, kept across the reboot it caused: `idf.py coredump-info`
-# reads it back. Before this a panic in a customer's house left nothing but
-# "it restarted".
+# Last crash, read back with `idf.py coredump-info`.
 coredump,   data,  coredump, 0xC20000,  0x20000,
-# Per-unit identity written once at production (scripts/provision_brain.py):
-# pairing code, broker login, voice key. Read-only to the firmware.
+# Per-unit identity written at production (scripts/provision_brain.py); read-only.
 fctry,      data,  nvs,      0xC40000,  0x6000,

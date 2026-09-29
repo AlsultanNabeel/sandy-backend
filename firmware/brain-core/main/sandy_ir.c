@@ -20,13 +20,10 @@
 
 static const char *TAG = "ir";
 
-// One microsecond per tick. IR timings are tens to thousands of microseconds, so
-// this is the natural unit and the recorded code reads as the real thing.
+// 1 µs per tick.
 #define IR_RESOLUTION_HZ   1000000
 
-// A recorded code is a list of durations in microseconds, alternating mark and
-// space, **starting with a mark**. That ordering is the whole format: without it
-// a replay inverts every pulse and the appliance sees silence.
+// A code is µs durations alternating mark/space, starting with a mark.
 #define IR_MAX_DURATIONS   400
 #define IR_MAX_SYMBOLS     (IR_MAX_DURATIONS / 2)
 
@@ -34,11 +31,9 @@ static rmt_channel_handle_t s_tx;
 static rmt_channel_handle_t s_rx;
 static rmt_encoder_handle_t s_copy;
 
-// An RMT symbol stores each half in 15 bits: 32767 ticks, 32.7 ms here. A longer
-// number in a code wrapped round to a short one and the replay was garbage.
+// RMT symbol halves are 15 bits: 32767 ticks = 32.7 ms.
 #define IR_MAX_TICKS       32767
-// Learn mode ends by itself. It used to wait for ever — and while it waited
-// every button in the app was refused ("still in learn mode").
+// Learn mode times out; while it waits, app buttons are refused.
 #define IR_LEARN_TIMEOUT_MS 20000
 
 static rmt_symbol_word_t s_rx_buf[IR_MAX_SYMBOLS];
@@ -46,7 +41,7 @@ static QueueHandle_t     s_rx_q;
 static volatile bool     s_learning;
 static volatile int64_t  s_learn_until_ms;
 
-// ─── Receive ─────────────────────────────────────────────────────────────────
+// ─── Receive ───
 
 typedef struct {
     size_t n;
@@ -56,8 +51,7 @@ typedef struct {
 static bool IRAM_ATTR on_rx_done(rmt_channel_handle_t ch,
                                  const rmt_rx_done_event_data_t *ev, void *arg) {
     BaseType_t woken = pdFALSE;
-    // Copied out here rather than passed by pointer: the driver reuses its
-    // buffer for the next frame the moment this returns.
+    // Copy out: the driver reuses its buffer.
     static ir_frame_t frame;
     frame.n = ev->num_symbols < IR_MAX_SYMBOLS ? ev->num_symbols : IR_MAX_SYMBOLS;
     memcpy(frame.sym, ev->received_symbols, frame.n * sizeof(rmt_symbol_word_t));
@@ -66,25 +60,20 @@ static bool IRAM_ATTR on_rx_done(rmt_channel_handle_t ch,
 }
 
 static const rmt_receive_config_t RX_CFG = {
-    // Below this is electrical noise, not a pulse from a remote.
+    // Shorter is electrical noise.
     .signal_range_min_ns = 1250,
-    // Silence longer than this ends the frame. Generous on purpose: air
-    // conditioners send long frames with long gaps, and cutting one in half
-    // yields a code that stores, replays, and does nothing.
+    // Generous: air conditioners send long frames with long gaps.
     .signal_range_max_ns = 12000000,
 };
 
-// The captured frame as text: "9000,4500,560,560,…" — marks at the even
-// indices. Stored in the device's button map exactly like this and handed back
-// on replay, so what the appliance receives is what it sent.
+// "9000,4500,560,560,…" (marks at even indices), stored and replayed as is.
 static void frame_to_text(const ir_frame_t *f, char *out, size_t cap) {
     size_t k = 0;
     out[0] = '\0';
     for (size_t i = 0; i < f->n && k + 16 < cap; i++) {
         k += snprintf(out + k, cap - k, "%s%u", k ? "," : "",
                       (unsigned)f->sym[i].duration0);
-        // The last symbol's trailing space is the gap before the next frame, not
-        // part of this one. Recording it would add a pause to every replay.
+        // Skip the trailing gap, or every replay gets an extra pause.
         if (i + 1 < f->n && k + 16 < cap) {
             k += snprintf(out + k, cap - k, ",%u", (unsigned)f->sym[i].duration1);
         }
@@ -98,8 +87,7 @@ static void ir_rx_task(void *arg) {
         if (xQueueReceive(s_rx_q, &f, pdMS_TO_TICKS(1000)) != pdTRUE) {
             if (s_learning && esp_timer_get_time() / 1000 > s_learn_until_ms) {
                 s_learning = false;
-                // Abort the pending receive, or the next "learn" finds the
-                // channel busy.
+                // Abort the pending receive, or the next "learn" finds the channel busy.
                 rmt_disable(s_rx);
                 rmt_enable(s_rx);
                 ESP_LOGW(TAG, "learn mode timed out after %d s — nothing received",
@@ -116,9 +104,7 @@ static void ir_rx_task(void *arg) {
             continue;
         }
 
-        // PSRAM, for the moment of one publish: 2.8 KB of internal RAM held
-        // forever for a button that is learned a handful of times a year was
-        // the wrong trade on a board whose internal RAM is what runs out.
+        // PSRAM, just for this publish.
         const size_t text_cap = IR_MAX_DURATIONS * 7;
         char *text = heap_caps_malloc(text_cap, MALLOC_CAP_SPIRAM);
         s_learning = false;
@@ -130,15 +116,13 @@ static void ir_rx_task(void *arg) {
 
         ESP_LOGW(TAG, "learned %u symbols (%u chars)", (unsigned)f.n,
                  (unsigned)strlen(text));
-        // The backend stores this against the node and the app binds it to a
-        // button. Publishing on its own subtopic keeps it out of the command
-        // path — a learned code is a report, not an instruction.
+        // Its own subtopic: a learned code is a report, not a command.
         mqtt_publish_node("ir/learned", text);   // the client copies it
         free(text);
     }
 }
 
-// ─── Transmit ────────────────────────────────────────────────────────────────
+// ─── Transmit ───
 
 static void ir_send_text(const char *code) {
     static rmt_symbol_word_t sym[IR_MAX_SYMBOLS];
@@ -157,9 +141,7 @@ static void ir_send_text(const char *code) {
         if (v > IR_MAX_TICKS) v = IR_MAX_TICKS;   // 15-bit field; a gap this long is a gap
         dur[slot++] = (unsigned)v;
         if (slot == 2) {
-            // Even index is the mark — carrier on. This is the one line that
-            // depends on the format's ordering, and inverting it produces a
-            // replay that looks perfect on a scope and does nothing in the room.
+            // Even index = mark (carrier on).
             sym[nsym].level0    = 1;
             sym[nsym].duration0 = dur[0] ? dur[0] : 1;
             sym[nsym].level1    = 0;
@@ -168,9 +150,7 @@ static void ir_send_text(const char *code) {
             slot = 0;
         }
     }
-    // An odd count means the code ended on a mark. Give it a short space to
-    // close on; a symbol with a zero-length second half is rejected by the
-    // driver and the whole frame would be dropped.
+    // Odd count ended on a mark: add a short space (zero-length halves are rejected).
     if (slot == 1 && nsym < IR_MAX_SYMBOLS) {
         sym[nsym].level0    = 1;
         sym[nsym].duration0 = dur[0] ? dur[0] : 1;
@@ -195,7 +175,7 @@ static void ir_send_text(const char *code) {
     ESP_LOGI(TAG, "sent %u symbols", (unsigned)nsym);
 }
 
-// ─── The one output ──────────────────────────────────────────────────────────
+// ─── The one output ───
 
 void ir_handle(const char *payload) {
     if (!payload || !*payload) return;
@@ -215,8 +195,7 @@ void ir_handle(const char *payload) {
         return;
     }
 
-    // Learning and sending at the same moment would have her record her own
-    // LED. Cheap to prevent, confusing to debug.
+    // Don't learn and send at once (she'd record her own LED).
     if (s_learning) {
         ESP_LOGW(TAG, "still in learn mode — ignoring a send");
         return;
@@ -224,7 +203,7 @@ void ir_handle(const char *payload) {
     ir_send_text(payload);
 }
 
-// ─── Init ────────────────────────────────────────────────────────────────────
+// ─── Init ───
 
 esp_err_t ir_init(void) {
     s_rx_q = xQueueCreate(2, sizeof(ir_frame_t));
@@ -240,9 +219,7 @@ esp_err_t ir_init(void) {
     esp_err_t e = rmt_new_tx_channel(&tx_cfg, &s_tx);
     if (e != ESP_OK) { ESP_LOGE(TAG, "tx channel: %s", esp_err_to_name(e)); return e; }
 
-    // 38 kHz is what the receivers in consumer gear are tuned to, and the
-    // carrier is what makes a pulse train visible to them at all — without it
-    // the LED flashes and nothing in the room reacts.
+    // 38 kHz carrier: what consumer IR receivers are tuned to.
     rmt_carrier_config_t carrier = {
         .duty_cycle          = 0.33f,
         .frequency_hz        = 38000,
@@ -250,9 +227,7 @@ esp_err_t ir_init(void) {
     };
     rmt_apply_carrier(s_tx, &carrier);
 
-    // `= {}` and not `= { 0 }`: this config struct is **empty** in IDF, so a
-    // zero initialiser is one element too many and -Werror stops the build.
-    // Matches what IDF's own RMT examples do.
+    // `= {}`, not `= { 0 }`: the struct is empty in IDF and -Werror rejects the zero.
     rmt_copy_encoder_config_t copy_cfg = {};
     e = rmt_new_copy_encoder(&copy_cfg, &s_copy);
     if (e != ESP_OK) { ESP_LOGE(TAG, "encoder: %s", esp_err_to_name(e)); return e; }
@@ -262,16 +237,13 @@ esp_err_t ir_init(void) {
         .gpio_num          = PIN_IR_RX,
         .clk_src           = RMT_CLK_SRC_DEFAULT,
         .resolution_hz     = IR_RESOLUTION_HZ,
-        // DMA, so a long frame lands whole. Without it the channel's own
-        // memory held 128 symbols and an air conditioner's 200-symbol code was
-        // cut short — learned, stored, replayed, and ignored by the unit.
+        // DMA so long frames (e.g. 200-symbol AC codes) aren't cut at 128 symbols.
         .mem_block_symbols = IR_MAX_SYMBOLS,
         .flags.with_dma    = true,
     };
     e = rmt_new_rx_channel(&rx_cfg, &s_rx);
     if (e != ESP_OK) {
-        // Some boards cannot give the receiver a DMA channel; fall back to the
-        // channel memory and say so — long codes may then be cut.
+        // No DMA channel: fall back to channel memory.
         ESP_LOGW(TAG, "rx with DMA unavailable (%s) — long codes may be cut",
                  esp_err_to_name(e));
         rx_cfg.flags.with_dma = false;
@@ -284,8 +256,7 @@ esp_err_t ir_init(void) {
     rmt_rx_register_event_callbacks(s_rx, &cbs, NULL);
     rmt_enable(s_rx);
 
-    // Stack in PSRAM: the task waits on a queue, formats text and publishes —
-    // never flash — so its 4 KB need not come out of internal RAM.
+    // Stack in PSRAM (no flash access).
     if (xTaskCreateWithCaps(ir_rx_task, "ir_rx", 4096, NULL, 4, NULL,
                             MALLOC_CAP_SPIRAM) != pdPASS &&
         xTaskCreate(ir_rx_task, "ir_rx", 4096, NULL, 4, NULL) != pdPASS) {

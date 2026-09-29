@@ -1,20 +1,11 @@
-// Real-time voice link: I2S mic/speaker <-> /voice WebSocket (Gemini Live).
-//
+// Real-time voice link: I2S mic/speaker <-> /voice WebSocket.
 // Protocol (matches cloud/app/api/voice_ws/session.py):
-//   1. Connect (WSS) and send a hello frame:
-//        {"type":"hello","device_id":"...","ts":<unix_ms>,"hmac":"<hex>"[,"kv":2]}
-//        hmac = HMAC-SHA256(key, device_id + str(ts)); key = this board's own
-//        key once it has one ("kv":2), else the shared SANDY_WS_HMAC_KEY.
+//   1. WSS connect, send {"type":"hello","device_id":"...","ts":<unix_ms>,"hmac":"<hex>"[,"kv":2]}
+//      hmac = HMAC-SHA256(key, device_id + str(ts)); key = own key ("kv":2) or shared SANDY_WS_HMAC_KEY.
 //   2. Wait for {"type":"auth_ok"}.
-//   3. Mic up: binary PCM, 16-bit LE, 16 kHz mono.
-//      Sandy down: binary PCM, 16-bit LE, 24 kHz mono.
-//      Control frames (text JSON): {"type":"end_turn"} / {"type":"error",...}.
-//
-// While Sandy talks the mic is gated, not simply muted: the echo canceller
-// strips her voice, and only sustained speech above VOICE_DUPLEX_GATE_LEVEL
-// opens the uplink (see mic_task) — that is what makes barge-in possible without
-// her answering her own voice. Server audio and local sounds share one buffer,
-// 24 kHz, one writer at a time (s_spk_wr_lock).
+//   3. Up: PCM 16-bit LE 16 kHz mono. Down: PCM 16-bit LE 24 kHz mono.
+//      Control frames: {"type":"end_turn"} / {"type":"error",...}.
+// While she talks the mic is gated (AEC + VOICE_DUPLEX_GATE_LEVEL), not muted, so she can be interrupted.
 
 #include "sandy_voice.h"
 #include "config.h"
@@ -38,7 +29,7 @@
 #include "esp_netif_sntp.h"
 #include "driver/i2s_std.h"
 #include "mbedtls/md.h"
-#include "mbedtls/platform_util.h"   // mbedtls_platform_zeroize — key bytes off the stack
+#include "mbedtls/platform_util.h"   // zeroize key bytes
 #include "nvs.h"
 #include "esp_heap_caps.h"
 
@@ -55,9 +46,7 @@
 #include "esp_mn_speech_commands.h"
 #endif
 
-// خارج حارس الأوامر بالقصد. كان مضمّنًا جوّاه لأنّ الاستعمال الوحيد كان أوامر
-// الغرفة — وصار في استعمال تاني: مصافحة الصوت بتسلّم اللوح مفتاح الوسيط، وهاد
-// ما إله علاقة بأوامر الصوت. لوح مطفّي عنده الأوامر لازم ياخد مفتاحه كمان.
+// برّا حارس الأوامر: مصافحة الصوت بتسلّم مفتاح الوسيط كمان.
 #include "sandy_mqtt.h"
 
 #if VOICE_AEC_ENABLE
@@ -79,12 +68,10 @@
 #include "sandy_servo.h"
 #endif
 
-// Face states tied to the conversation, all local (no cloud round-trip):
-// listening while the session is open, happy while she speaks, idle after.
+// Local face states: listening while open, happy while speaking, idle after.
 #if ENABLE_FACE
 #define VOICE_FACE(mood) face_set_mood(mood)
-// تخبير الوش إذا في جلسة فعلًا. الحارس عنده بيستعمله يقرر إذا تعبير عابر
-// (فضول/تركيز/كلام) قاعد أطول من عمره — وساعتها بيرجّعه لحاله.
+// الحارس بالوش بيرجّع التعبير العابر اللي طوّل أكتر من الجلسة.
 #define VOICE_SESSION(on) face_set_session_active(on)
 #else
 #define VOICE_FACE(mood) do {} while (0)
@@ -106,42 +93,31 @@ static i2s_chan_handle_t s_rx_chan;   // INMP441 mic
 static i2s_chan_handle_t s_tx_chan;   // MAX98357 amp
 static StreamBufferHandle_t s_spk_stream;   // server audio waiting to play
 static StreamBufferHandle_t s_tx_stream;    // mic audio waiting to go up
-static volatile uint32_t s_tx_drop_bytes;   // captured but the uplink was too far behind
+static volatile uint32_t s_tx_drop_bytes;   // uplink too far behind
 static volatile bool s_authed;
 static volatile int64_t s_last_rx_audio_ms;  // last time we got Sandy's audio
 static volatile bool s_playing;              // true only while actively playing audio
 static volatile int  s_out_level;            // 0..100, what the amp plays now (lip sync)
 
-// Playback health counters (cumulative since boot; reported when playback
-// stops). dropped > 0 means the jitter buffer overflowed; gap restarts mean
-// audible mid-reply dropouts — both point at delivery, not at the I2S side.
+// Playback counters since boot: dropped > 0 = jitter overflow, gaps = mid-reply dropouts.
 static volatile uint32_t s_spk_rx_bytes;     // audio received from the cloud
 static volatile uint32_t s_spk_drop_bytes;   // received but didn't fit the buffer
 static uint32_t s_spk_play_bytes;            // actually written to the amp
 static int s_spk_gaps;                       // playback restarts within 2s
 
-// Barge-in plumbing. flush: dump whatever is buffered and stop playing.
-// squelch: drop INCOMING audio briefly too — after a local interrupt the
-// server may still be streaming the stale reply's tail. Time-bounded, not
-// flag-bounded: Gemini usually finished the turn long before she finishes
-// SPEAKING it (it generates faster than realtime), so an "until end_turn"
-// squelch would wait for a signal that already passed and eat her NEXT
-// reply instead.
+// Barge-in: flush dumps the buffer; squelch drops incoming stale audio for a
+// fixed time (end_turn usually arrives long before she finishes speaking).
 static volatile bool s_spk_flush;
 static volatile int64_t s_squelch_until_ms;
 #define SPK_SQUELCH_MS  1500
 
-// One spare byte so the jitter buffer only ever holds WHOLE 16-bit samples.
-// WS fragments split at arbitrary (odd) byte offsets; if an odd byte count
-// ever slipped in around a drop or a squelch window, every later sample read
-// byte-shifted — that's the static that appears out of nowhere and sticks.
+// Carry an odd byte across WS fragments so the buffer holds only whole samples
+// (a shifted stream plays as static).
 static uint8_t s_rx_carry;
 static volatile bool s_rx_has_carry;
 
 #if VOICE_AEC_ENABLE
-// Echo canceller: spk_task writes a 16k copy of everything the amp plays into
-// s_ref_stream; mic_task pulls it in lockstep and aec_process() strips it from
-// the mic signal. With that working, the mic stays OPEN while Sandy talks.
+// AEC: spk_task writes a 16 kHz copy of what the amp plays; mic_task subtracts it.
 static aec_handle_t *s_aec;
 static StreamBufferHandle_t s_ref_stream;     // 16k mono reference (PSRAM)
 static int s_aec_chunk;                       // samples per aec_process() call
@@ -151,44 +127,31 @@ static int16_t *s_aec_ref, *s_aec_out;        // aligned per-chunk buffers
 static int16_t *s_aec_frame;                  // processed output for one frame
 #endif
 
-// When the WS dropped mid-session, 0 = up. Outside the wake-word guard: the
-// websocket handler writes it in every build, and an always-on build without
-// the wake word did not compile.
+// When the WS dropped mid-session (0 = up). Outside the wake-word guard: always written.
 static volatile int64_t s_link_lost_ms;
 
-// The server refused this device (wrong key, clock outside the replay window).
-// Latched: the websocket's own reconnect used to retry a refused hello every
-// five seconds for as long as the session lasted — and a new wake word opened
-// another one. Now the session ends and no new one opens until the back-off
-// has passed; a key or clock fix gets its chance then, not every five seconds.
+// Server refused this device (key or clock). Latched until the back-off passes,
+// instead of retrying every five seconds.
 static volatile bool    s_auth_refused;
 static volatile int64_t s_auth_refused_at;
 #define VOICE_AUTH_BACKOFF_MS  (10 * 60 * 1000)
 
-// Preroll bytes the uplink must not trim as "stale". The question someone asks
-// in the same breath as the wake word is exactly the audio the catch-up rule
-// would throw away first — it is the oldest thing in the queue.
+// Preroll bytes the uplink must not trim as stale (the question said with the wake word).
 static volatile uint32_t s_tx_protected;
 
-// The pre-roll should go up as soon as the server says yes, not when the next
-// loud frame happens to open the gate: a person who asked everything during the
-// handshake and then waited was never heard at all.
+// Send the preroll as soon as auth_ok arrives, not on the next loud frame.
 static volatile bool s_preroll_due;
 
-// Two tasks write the speaker buffer — the websocket (her voice) and local
-// sounds (tones, the speaker test). A FreeRTOS stream buffer allows one writer
-// at a time; two at once corrupted it into static.
+// Two writers (websocket, local sounds); a stream buffer allows one at a time.
 static SemaphoreHandle_t s_spk_wr_lock;
 
 #if ENABLE_WAKEWORD
-// Session is OPEN only between a wake word and the following silence. The WS
-// (and so the paid Gemini link) is connected only while it's open.
+// The WS (paid link) is up only between a wake word and the following silence.
 static volatile bool s_session_active;       // WS up + mic streaming
 static volatile bool s_wake_req;             // wake heard; manager should open
 static volatile int64_t s_session_voice_ms;  // last user/Sandy activity while open
 #if ENABLE_COMMANDS
-// The command model stays mic_task's property (it is the only toucher of s_mn);
-// the session manager only asks. s_mn_want is the request, s_mn_loaded the reply.
+// mic_task alone touches s_mn; the session manager only requests.
 static volatile bool s_mn_want = true;       // should the model be resident?
 static volatile bool s_mn_loaded;            // mic_task's answer
 #endif
@@ -199,12 +162,10 @@ static int s_wn_chunk;                        // samples per detect() call
 static int16_t *s_wn_buf;                     // accumulates mic to chunk size
 static int s_wn_fill;                         // samples currently in s_wn_buf
 
-static srmodel_list_t *s_models;              // shared esp-sr model list (wake + commands)
+static srmodel_list_t *s_models;              // shared esp-sr model list
 
 #if ENABLE_COMMANDS
-// MultiNet: offline "Sandy ..." command words, on the same idle mic audio as
-// the wake spotter. A hit either fires a room action over MQTT or opens the
-// cloud voice session (see the SANDY_COMMANDS table further down).
+// MultiNet offline command words, on the idle mic audio (see SANDY_COMMANDS).
 static const esp_mn_iface_t *s_mn;
 static model_iface_data_t *s_mn_data;
 static int s_mn_chunk;
@@ -212,149 +173,81 @@ static int16_t *s_mn_buf;
 static int s_mn_fill;
 #endif
 
-// Pre-roll: mic audio captured between the wake word and auth_ok. The WSS
-// handshake takes ~1.2s and people ask their question in the same breath as
-// the wake word — without this, those words never reach Gemini and Sandy
-// stays silent. Flushed (in order) before the first live frame. When full,
-// the OLDEST audio is kept — the question, not the trailing room noise.
+// Pre-roll: audio between wake word and auth_ok (~1.2 s handshake), sent first.
+// When full, the OLDEST audio is kept (the question).
 static StreamBufferHandle_t s_preroll;
 #define PREROLL_BYTES   (96 * 1024)   // 3 s at 16 kHz / 16-bit
 #else
 static const bool s_session_active = true;    // no gate: always streaming
 #endif
 
-// ~100 ms frames at 16 kHz keep WebSocket overhead low without adding latency.
+// ~100 ms frames at 16 kHz.
 #define MIC_FRAME_SAMPLES   1600
 
-// Below this much contiguous internal RAM, a failed open is out of memory rather
-// than off the network — the difference decides what her face says.
-//
-// 20000 was a guess and it was wrong: a session opened cleanly with the largest
-// free block at 6144, which means the TLS task takes its buffers from PSRAM
-// (CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC) and needs far less contiguous internal
-// memory than assumed. A threshold set above what actually works turns a network
-// problem into a memory accusation, and sends whoever reads it looking in the
-// wrong place — which is precisely what it did.
-//
-// 4096 is under every observed success and still catches a genuinely exhausted
-// heap. Measured, not guessed: the "before open" log line prints this number on
-// every session, so raising or lowering it is an observation away.
+// Below this largest internal block, a failed open is out-of-memory, not network.
+// Measured: sessions open fine at 6144 (TLS uses PSRAM); the "before open" log prints it.
 #define WS_TASK_MIN_BLOCK   4096
 
-// Uplink buffer. 128 KB of PSRAM ≈ 4 seconds of 16 kHz 16-bit mono, which is
-// how long a stall may last before audio starts being dropped. Sized from the
-// observed failures: the link stalls for about a second at a time here.
+// 128 KB PSRAM ≈ 4 s of uplink audio before drops (link stalls ~1 s here).
 #define TX_STREAM_BYTES        (128 * 1024)
 #define TX_CHUNK_BYTES         4096
-// Generous on purpose — this runs on its own task, so waiting costs nothing that
-// has to stay real-time, and riding out a stall keeps the call alive.
+// Own task, so waiting out a stall costs nothing real-time.
 #define TX_SEND_TIMEOUT_MS     4000
-// Half the buffer still queued means we are losing the race with real time.
-// Uplink backlog that means the link is not keeping up with real-time audio.
-// 64 KB is two seconds of 16 kHz mono — a genuinely stalled link, not a blip.
+// Backlog of 2 s: the link isn't keeping up.
 #define TX_BACKLOG_WARN_BYTES  (TX_STREAM_BYTES / 2)
-// ...and the level it has to fall back to before we say it recovered. Without a
-// gap between the two, a link hovering at the threshold flips the status every
-// couple of seconds: in one captured call "slow net" was announced and withdrawn
-// six times while the person was mid-sentence. Her face changed each time.
-//
-// A status that flaps is not information, it is flicker — the reader learns to
-// ignore it, which is the opposite of the point. So it has to fall to a quarter
-// of the buffer to clear, and it has to hold there.
+// Hysteresis: must fall to 1/8 to clear, or the status flaps mid-sentence.
 #define TX_BACKLOG_CLEAR_BYTES (TX_STREAM_BYTES / 8)
-// And it must stay bad this long before she says anything at all. A two-second
-// backlog that drains by itself needed no announcement.
+// Must stay bad this long before she says anything.
 #define TX_BACKLOG_WARN_MS     3000
-// Once said, it stands at least this long. Otherwise the recovery message
-// arrives before the person has finished reading the warning.
+// Once said, it stands at least this long.
 #define TX_BACKLOG_HOLD_MS     5000
 
-// تحت هالرقم الوصلة اللاسلكية ما بتحمل صوتًا حيًّا، مهما كان النت ورا الراوتر
-// سريعًا. وفوقه، تأخّر الصوت سببه إشي تاني — والتفريق هو الفرق بين نصيحة
-// بتنفع ونصيحة بتوديه يصلّح الراوتر الشغّال.
+// تحت هالرقم الوصلة اللاسلكية ما بتحمل صوت حيّ؛ فوقه السبب إشي تاني.
 #define TX_WEAK_RSSI_DBM       (-75)
 
-// **سقف التأخير — وهاد الفرق بين حوار وتسجيل.**
-//
-// المخزن مية وتمنية وعشرين كيلو، يعني بيقدر يجمّع أربع ثواني صوت. وشوهد فعليًّا
-// واحد وتسعين كيلو متراكمة: يعني اللي بتحكيه هلّق بيوصل الخادم بعد تلات ثواني،
-// وهي بتردّ ع كلام انتهى. **صوت حيّ متأخّر تلات ثواني مش صوت حيّ، هو تسجيل** —
-// وما إله أي قيمة بمحادثة.
-//
-// فوق هالحدّ منرمي **الأقدم** ومنكمّل من الجديد. الرمي هون قرار مكتوب وممعدود،
-// مش حادث: الغلطة اللي صلّحناها قبل كانت رمي عشوائي بنص كلمة وبلا ما حدا يعرف.
-// وهاي إعادة مزامنة مقصودة، وبتنطبع.
-//
-// ثانية وحدة (اثنين وتلاتين كيلو ع ستّتعش كيلوهرتز، ستّتعش بت، أحادي): تحتها
-// المحادثة بتضل طبيعية، وفوقها بتبلّش تحسّ إنها بتسمعك متأخّرة.
+// سقف التأخير: فوق ثانية (٣٢ كيلو) منرمي الأقدم ومنكمّل من الجديد، وبنطبعه.
+// صوت متأخّر تلات ثواني مش محادثة.
 #define TX_MAX_LATENCY_BYTES   (32 * 1024)
 
-// كم بايت انرمى عشان نلحق الوقت الحقيقي.
+// بايتات انرمت عشان نلحق الوقت الحقيقي.
 static volatile uint32_t s_tx_stale_bytes;
 
-// كم مرّة كان المقبس مشغولًا وقت ما بدنا نرسل. صار **عدّاد تأخير مش ضياع**:
-// من بعد ما صار القفل بينتاخد قبل قراءة الصوت، ما بيضيع مقطع — بس رقم بيكبر
-// معناه المنافسة ع المقبس شغّالة، وهي أصل التأخير. صفر معناه السبب برّا اللوح.
+// كم مرّة كان المقبس مشغول (تأخير، مش ضياع). صفر = السبب برّا اللوح.
 static volatile uint32_t s_tx_lock_drops;
 #define SPK_CHUNK_BYTES     1920    // ~40 ms at 24 kHz / 16-bit
-// Jitter buffer — **adaptive, because one number cannot serve both jobs.**
-//
-// This is how much audio to hold before starting playback. Hold too little and
-// a slow moment underruns the I2S and her voice breaks up. Hold too much and
-// every reply starts late, on every network, forever.
-//
-// It was fixed at 300 ms, chosen for the worst case. So a good link paid 300 ms
-// on every single reply to insure against a bad one — and the owner's link is a
-// weak one, where 300 ms was sometimes not enough anyway. A fixed cushion is
-// wrong twice: too slow when the network is fine, too small when it is not.
-//
-// So it starts short and earns its size. Every audible gap raises it by a step;
-// a run of clean replies lowers it. On a good link it settles near the floor and
-// she answers fast; on a bad one it climbs until she stops stuttering and stays
-// there.
-//
-// 24 kHz · 16-bit = 48000 B/s, so the numbers below are 120 ms, 480 ms and steps
-// of 90 ms.
+// Adaptive jitter buffer: starts short, grows a step on every audible gap, shrinks
+// after a run of clean replies. 24 kHz 16-bit = 48000 B/s: 120 ms min, 480 ms max, 90 ms steps.
 #define SPK_PREBUF_MIN      5760
 #define SPK_PREBUF_MAX      23040
 #define SPK_PREBUF_STEP     4320
-// كم ردّ نظيف بالصف قبل ما ننزل درجة. النزول أبطأ من الطلوع بقصد: كلفة الطلوع
-// تأخير بتحسّه مرّة، وكلفة النزول بدري تقطيع بتحسّه بنص الجملة.
+// النزول أبطأ من الطلوع بقصد: التقطيع أسوأ من التأخير.
 #define SPK_CALM_REPLIES    4
 
 static size_t s_prebuf = SPK_PREBUF_MIN;
 static int    s_calm_replies;
-// Output volume = sample × MUL >> SHIFT. 3>>3 = 0.375 of full scale — a notch
-// below half: loud enough across the room, no longer harsh up close.
+// 3>>3 = 0.375 of full scale.
 #define SPK_VOL_MUL         3
 #define SPK_VOL_SHIFT       3
 
-
-// Real calendar time. Only the HMAC handshake needs this — the server checks the
-// timestamp against its own clock, so it has to be the wall clock.
+// Wall clock: only for the HMAC timestamp.
 static int64_t wall_ms(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
 
-// Every timeout in this file measures a DURATION, and durations must never come
-// off the wall clock: SNTP steps it, and one step forward makes an open session
-// look hours idle, so the call gets hung up in the middle of a sentence. This
-// clock only ever moves forward, at one speed.
+// Durations use the monotonic clock: SNTP steps the wall clock.
 static int64_t now_ms(void) {
     return esp_timer_get_time() / 1000;
 }
 
-// True once the wall clock is real (post-2023), i.e. SNTP has set it.
+// SNTP has set the clock (post-2023).
 static bool clock_is_set(void) {
     return time(NULL) > 1700000000;  // ~2023-11
 }
 
-// Block until SNTP sets the clock — the hello timestamp must land inside the
-// server's 30s replay window, so connecting with a 1970 clock just gets us
-// rejected. Wait up to ~60s; if it never syncs we proceed anyway and rely on
-// the websocket's auto-reconnect to retry once the clock catches up.
+// Wait up to ~60 s for SNTP: the hello must fall inside the server's 30 s replay
+// window. Proceed anyway after that; the WS auto-reconnect retries.
 static void sync_clock(void) {
     esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     if (esp_netif_sntp_init(&cfg) != ESP_OK) {
@@ -371,20 +264,11 @@ static void sync_clock(void) {
     }
 }
 
-// ── This board's own voice key ───────────────────────────────────────────────
-//
-// Every board ships signing its hello with the same compiled-in key, so reading
-// it out of one robot was enough to speak as any other. In the minutes after
-// the owner pairs this board in the app, the server answers a shared-key hello
-// with a key of its own ("device_key"); it is kept here and signs every later
-// hello ("kv":2). A board that misses that window keeps working on the shared
-// key and collects its key the next time it is paired. After
-// the first such hello the server refuses the shared key for this board.
-// "key_unknown" (un-paired, key revoked) drops it and the board re-enrols.
-//
-// Read and written only on the voice task and the websocket task, which never
-// run a handshake at the same time. Written at most once per pairing, so the
-// flash commit on this path does not recur (see sandy_nvs.h).
+// ── This board's own voice key ──
+// Right after pairing, the server answers a shared-key hello with "device_key";
+// it is saved and signs later hellos ("kv":2), after which the shared key is
+// refused for this board. "key_unknown" drops it and the board re-enrols.
+// Only the voice and websocket tasks touch it, never at once; written once per pairing.
 #define DEVKEY_NS  "sandy_vkey"
 #define DEVKEY_HEX 64
 static char s_dev_key[DEVKEY_HEX + 1];   // hex; "" = use the shared key
@@ -410,7 +294,6 @@ static void devkey_load(void) {
     ESP_LOGI(TAG, "voice key: %s", s_dev_key[0] ? "own" : "shared (not enrolled yet)");
 }
 
-// `hex` NULL or "" forgets the key.
 static void devkey_store(const char *hex) {
     nvs_handle_t h;
     if (nvs_open(DEVKEY_NS, NVS_READWRITE, &h) != ESP_OK) {
@@ -435,9 +318,7 @@ static int hex_nibble(char c) {
     return (c >= 'a' && c <= 'f') ? c - 'a' + 10 : 0;
 }
 
-// Build the HMAC handshake frame into `out`. Returns the string length, or -1
-// when it does not fit (a truncated frame must never be sent: it reads past
-// what was written and the server would refuse it anyway).
+// Returns the length, or -1 if it doesn't fit (never send a truncated frame).
 static int build_hello(char *out, size_t out_len) {
     int64_t ts = wall_ms();
 
@@ -445,7 +326,7 @@ static int build_hello(char *out, size_t out_len) {
     int n = snprintf(signed_msg, sizeof(signed_msg), "%s%lld", identity()->device_id, ts);
     if (n <= 0 || n >= (int)sizeof(signed_msg)) return -1;
 
-    // The server keys HMAC with the raw bytes behind the hex it issued.
+    // HMAC key is the raw bytes behind the issued hex.
     unsigned char own[DEVKEY_HEX / 2];
     const unsigned char *key = (const unsigned char *)identity()->hmac_key;
     size_t key_len = strlen(identity()->hmac_key);
@@ -463,8 +344,7 @@ static int build_hello(char *out, size_t out_len) {
     const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     const int hr = mbedtls_md_hmac(md, key, key_len,
                                    (const unsigned char *)signed_msg, n, mac);
-    // The key's raw bytes do not outlive the signature. A stack frame is reused
-    // by whatever runs next, and a crash dump now lands in flash.
+    // Don't leave key bytes on the stack (crash dumps land in flash).
     mbedtls_platform_zeroize(own, sizeof(own));
     if (hr != 0) return -1;
 
@@ -480,11 +360,7 @@ static int build_hello(char *out, size_t out_len) {
     return (len > 0 && len < (int)out_len) ? len : -1;
 }
 
-
-// Every step is checked and reported instead of asserted: voice_task already
-// has a "voice disabled, carry on" path for a failed audio bring-up, and
-// ESP_ERROR_CHECK in here made that path unreachable — a mis-wired mic aborted
-// the board instead of leaving the display and the room commands working.
+// Checked, not asserted: a mis-wired mic must disable voice, not abort the board.
 #define I2S_TRY(what, call)                                                    \
     do {                                                                       \
         err = (call);                                                          \
@@ -497,10 +373,8 @@ static int build_hello(char *out, size_t out_len) {
 static esp_err_t i2s_start(void) {
     esp_err_t err;
 
-    // Mic: two INMP441 on I2S_NUM_0, RX only, 32-bit STEREO (one mic per slot).
-    // We read both slots — same as the proven sound-direction path — then mix
-    // them down to mono for the cloud. Mono mode here read the wrong/empty slot
-    // and only picked up a constant noise floor.
+    // Mic: two INMP441 on I2S_NUM_0, RX, 32-bit STEREO (one per slot), mixed to mono.
+    // Mono mode read the empty slot.
     i2s_chan_config_t rx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     I2S_TRY("mic channel", i2s_new_channel(&rx_cfg, NULL, &s_rx_chan));
     i2s_std_config_t rx_std = {
@@ -519,17 +393,11 @@ static esp_err_t i2s_start(void) {
     I2S_TRY("mic std mode", i2s_channel_init_std_mode(s_rx_chan, &rx_std));
     I2S_TRY("mic enable", i2s_channel_enable(s_rx_chan));
 
-    // Speaker: MAX98357 on I2S_NUM_1, TX only, 16-bit at 24 kHz (Gemini output).
+    // Speaker: MAX98357 on I2S_NUM_1, TX, 16-bit 24 kHz.
     i2s_chan_config_t tx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
-    // Underrun must play SILENCE. With auto-clear off (the default) the DMA
-    // replays its last block over and over on every starved moment — that's a
-    // machine-gun trill layered on Sandy's voice, not a clean dropout.
+    // Underrun plays silence, not a repeat of the last DMA block.
     tx_cfg.auto_clear_after_cb = true;
-    // 6 desc × 240 frames ≈ 60 ms at 24 kHz mono. Kept SMALL on purpose: the
-    // echo canceller's reference is aligned to this depth, and the depth ramps
-    // from zero at each reply start — a small cushion keeps that ramp inside
-    // what the adaptive filter can absorb (and makes barge-in cut faster).
-    // Delivery jitter is the big PSRAM buffer's job, not the DMA's.
+    // ~60 ms DMA, kept small: the AEC reference is aligned to this depth. Jitter is PSRAM's job.
     tx_cfg.dma_frame_num = 240;
     I2S_TRY("amp channel", i2s_new_channel(&tx_cfg, &s_tx_chan, NULL));
     i2s_std_config_t tx_std = {
@@ -546,9 +414,7 @@ static esp_err_t i2s_start(void) {
         },
     };
     I2S_TRY("amp std mode", i2s_channel_init_std_mode(s_tx_chan, &tx_std));
-    // Preload silence so the first DMA cycle doesn't blast whatever happened
-    // to be in those buffers — the static heard at the first reply after a
-    // power-on.
+    // Preload silence so the first DMA cycle isn't stale buffer contents.
     {
         static const uint8_t zeros[1440] = {0};
         size_t loaded = 0, w = 0;
@@ -561,9 +427,7 @@ static esp_err_t i2s_start(void) {
     return ESP_OK;
 
 fail:
-    // Hand both channels back so a later retry (or another owner of the bus)
-    // isn't blocked by a half-built one. disable() may complain that a channel
-    // was never enabled — harmless, and we're already on the failure path.
+    // Release both channels so a retry isn't blocked; disable() may warn, harmless.
     if (s_tx_chan) {
         i2s_channel_disable(s_tx_chan);
         i2s_del_channel(s_tx_chan);
@@ -578,8 +442,7 @@ fail:
 }
 #undef I2S_TRY
 
-
-// Plain substring check is enough for the small fixed control frames.
+// Substring check, enough for small fixed control frames.
 static bool text_has(const char *data, int len, const char *needle) {
     static char buf[128];
     int n = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
@@ -588,25 +451,19 @@ static bool text_has(const char *data, int len, const char *needle) {
     return strstr(buf, needle) != NULL;
 }
 
-// قيمة نصّية من إطار تحكّم صغير. مكتوبة بالإيد زي باقي المشروع — تبعية محلّل
-// جيسون كاملة مقابل حقلين ما بتستاهل.
-//
-// **بتقرا الإطار كله مش أول مئة وثمانية وعشرين بايت**، بعكس `text_has`: مفتاح
-// الوسيط بيجي بآخر المصافحة، فتحديد الطول كان بيقصّه بصمت — والنتيجة لوح
-// بيقول «تصادقت» وبيضل ع المفتاح المشترك بلا ما يبيّن السبب.
+// قيمة نصّية من إطار تحكّم، بالإيد بلا محلّل JSON.
+// بتقرا الإطار كله (بعكس `text_has`): مفتاح الوسيط بيجي بآخر المصافحة.
 static bool json_str_field(const char *data, int len, const char *key,
                            char *out, size_t cap) {
     if (!data || len <= 0 || cap == 0) return false;
     out[0] = '\0';
 
-    // بلا الاقتباس اللي بعد النقطتين: مكتبة الخادم بتحط فراغ بعدهن
-    // (`"user": "x"`)، ونمط ملزوق كان بيفشل بصمت — واللوح بيقول «تصادقت» وبيضل
-    // ع المفتاح المشترك بلا ما يبيّن السبب. منقبل الشكلين.
+    // منقبل `"key":"x"` و`"key": "x"` (الخادم بيحط فراغ).
     char pat[24];
     int pn = snprintf(pat, sizeof(pat), "\"%s\":", key);
     if (pn <= 0 || pn >= (int)sizeof(pat)) return false;
 
-    // الإطار مش منتهي بصفر بالضرورة — منقيّد البحث بالطول.
+    // الإطار مش منتهي بصفر بالضرورة.
     const char *end = data + len;
     const char *p = NULL;
     for (int i = 0; i + pn <= len; i++) {
@@ -623,8 +480,7 @@ static bool json_str_field(const char *data, int len, const char *key,
         if (*p == '\\' && p + 1 < end) p++;   // \" و \\ بيمرّوا كما هنّ
         out[j++] = *p++;
     }
-    // اقتباس ناقص = إطار مقصوص. أنصاف القيم أسوأ من لا شي هون: كلمة سرّ مقصوصة
-    // بتنحفظ وبتفشل، وما بيضل مفتاح تاني ترجعله.
+    // اقتباس ناقص = إطار مقصوص؛ ما منحفظ نص قيمة.
     if (p >= end || *p != '"') return false;
     out[j] = '\0';
     return j > 0;
@@ -640,11 +496,8 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
             ESP_LOGE(TAG, "hello does not fit — check the device id");
             break;
         }
-        // ev->client, not s_client: this runs on the WS task, and the session
-        // manager may already be swapping s_client for the next session.
-        // Bounded: portMAX_DELAY on the websocket's own task meant a socket
-        // that stalled right after connecting froze the task that would have
-        // noticed — no events, no reconnect, a session that never started.
+        // ev->client: s_client may already be the next session's. Bounded wait so a
+        // stalled socket can't freeze the WS task.
         if (esp_websocket_client_send_text(ev->client, hello, n, pdMS_TO_TICKS(3000)) < 0) {
             ESP_LOGE(TAG, "hello could not be sent — the client will reconnect");
         } else {
@@ -664,10 +517,8 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 VOICE_LED(LED_STATE_LISTENING);
                 ESP_LOGI(TAG, "auth ok, streaming");
 
-                // المصافحة بتحمل مفتاح الوسيط الخاص باللوح، لو الخادم أصدر إله
-                // واحد. هون بالضبط لأنه هالمسار موثّق بتوقيع **مش** بمفتاح
-                // الوسيط — فبيضل شغّال بعد ما ينلغي المفتاح المشترك، وهاد شرط
-                // إنه الإلغاء يصير أصلًا.
+                // مفتاح الوسيط الخاص بيوصل هون لأنّ المسار موثّق بالتوقيع مش بمفتاح الوسيط،
+                // فبيضل شغّال بعد إلغاء المشترك.
 #if ENABLE_MQTT
                 {
                     char bu[65], bp[129];
@@ -686,8 +537,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                     }
                 }
             } else if (text_has(ev->data_ptr, ev->data_len, "interrupted")) {
-                // Server-side barge-in confirmation: stale audio dies here,
-                // whatever comes next belongs to the NEW turn.
+                // Server confirmed barge-in: drop stale audio.
                 s_spk_flush = true;
                 s_squelch_until_ms = 0;
                 s_rx_has_carry = false;
@@ -696,16 +546,13 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 s_squelch_until_ms = 0;   // stale turn fully drained server-side
                 ESP_LOGD(TAG, "end of Sandy's turn");
             } else if (text_has(ev->data_ptr, ev->data_len, "key_unknown")) {
-                // Our key was revoked (un-paired) or never recorded: drop it and
-                // enrol again with the shared key on the next session.
+                // Key revoked or unknown: re-enrol with the shared key next session.
                 devkey_store(NULL);
             } else if (text_has(ev->data_ptr, ev->data_len, "auth_fail") ||
                        text_has(ev->data_ptr, ev->data_len, "auth_not_configured") ||
                        text_has(ev->data_ptr, ev->data_len, "bad_handshake") ||
                        text_has(ev->data_ptr, ev->data_len, "replay")) {
-                // A configuration problem, not a network one: retrying will not
-                // fix a wrong key or a clock outside the replay window, so say
-                // so on her face instead of reconnecting forever in silence.
+                // Config problem (key/clock): show it instead of reconnecting forever.
                 status_set(SANDY_ST_AUTH_FAILED);
                 s_auth_refused = true;
                 s_auth_refused_at = now_ms();
@@ -721,8 +568,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 const uint8_t *p = (const uint8_t *)ev->data_ptr;
                 size_t len = (size_t)ev->data_len;
                 s_spk_rx_bytes += len;
-                // Re-pair a byte carried from the previous fragment so the
-                // buffer only ever sees whole samples.
+                // Re-pair the byte carried from the previous fragment.
                 if (s_rx_has_carry) {
                     uint8_t pair[2] = { s_rx_carry, p[0] };
                     s_rx_has_carry = false;
@@ -745,22 +591,17 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 if (n < len) s_spk_drop_bytes += len - n;
                 xSemaphoreGive(s_spk_wr_lock);
             } else if (ev->data_len > 0 && now_ms() >= s_squelch_until_ms) {
-                // A local sound held the buffer for 50 ms: this fragment is lost,
-                // and counted, rather than the websocket task waiting on a beep.
+                // A local sound held the buffer: drop and count this fragment rather than wait.
                 s_spk_drop_bytes += (uint32_t)ev->data_len;
             }
         }
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
         s_authed = false;
-        // A stalled upload (one slow socket write) drops the link mid-sentence.
-        // The client reconnects and re-sends hello on its own; note when we lost
-        // it so the session manager waits for that instead of hanging up.
+        // Stalled upload dropped the link; the client reconnects itself, so the
+        // session manager waits instead of hanging up.
         if (s_session_active && !s_link_lost_ms) s_link_lost_ms = now_ms();
-        // Two different stories wear the same event. Mid-conversation it is a
-        // dropped link and she should say the call died; before ever getting
-        // authed it is a server we cannot reach at all. Telling them apart is
-        // the difference between "the net cut out" and "check your internet".
+        // Mid-conversation: dropped link. Before auth: server unreachable.
         status_set(s_session_active ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
         ESP_LOGW(TAG, "disconnected");
         break;
@@ -769,17 +610,14 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
     }
 }
 
-
-// Drain server audio into the speaker. Runs whether or not we're authed; it just
-// idles when there's nothing to play.
+// Drain server audio into the speaker; idles when there's nothing to play.
 static void spk_task(void *arg) {
     uint8_t buf[SPK_CHUNK_BYTES];
     bool playing = false;
     int64_t first_seen = 0;   // when data first appeared while idle
     int64_t last_stop = 0;    // when playback last went idle
     for (;;) {
-        // Barge-in: dump everything buffered and go quiet. The ~180ms already
-        // inside the I2S DMA plays out, then auto-clear feeds silence.
+        // Barge-in: dump the buffer; the DMA tail plays out, then silence.
         if (s_spk_flush) {
             s_spk_flush = false;
             while (xStreamBufferReceive(s_spk_stream, buf, sizeof(buf), 0) > 0) {}
@@ -797,26 +635,19 @@ static void spk_task(void *arg) {
             if (avail == 0) {
                 first_seen = 0;
                 s_playing = false;
-                // ≥ 2 ticks. At FREERTOS_HZ=100 a delay under 10ms rounds to
-                // ZERO ticks and this loop busy-spins — at priority 9 on core 1
-                // that silently starves the mic task and kills the wake word
-                // (IDLE1 watchdog is off in sdkconfig, so nothing ever warned).
+                // ≥ 2 ticks: under 10 ms rounds to 0 at 100 Hz and busy-spins, starving the mic task.
                 vTaskDelay(pdMS_TO_TICKS(20));
                 continue;
             }
             if (first_seen == 0) first_seen = now_ms();
-            // Start once we have a cushion — or after 250ms even if it's a short
-            // reply, so a small chunk never gets stuck unplayed (which would
-            // keep the mic muted forever via half-duplex).
+            // Start once cushioned, or after 250 ms so a short reply never sticks (half-duplex would stay muted).
             if (avail >= s_prebuf || (now_ms() - first_seen) > 250) {
                 playing = true;
                 s_playing = true;
                 VOICE_FACE(MOOD_HAPPY);     // talking face
                 VOICE_LED(LED_STATE_TALKING);
 #if VOICE_AEC_ENABLE
-                // Fresh playback: pre-fill the reference with silence equal to
-                // the TX DMA depth, so the reference lines up with the moment
-                // her audio actually leaves the speaker.
+                // Fresh playback: pre-fill the reference with silence equal to the TX DMA depth.
                 if (s_ref_stream && xStreamBufferIsEmpty(s_ref_stream)) {
                     static const int16_t zeros[320] = {0};   // 20ms pieces
                     for (int ms = 0; ms < VOICE_AEC_REF_DELAY_MS; ms += 20) {
@@ -824,12 +655,10 @@ static void spk_task(void *arg) {
                     }
                 }
 #endif
-                // Restarting right after a stop = an audible mid-reply gap.
+                // Restart right after a stop = audible mid-reply gap.
                 if (last_stop && (now_ms() - last_stop) < 2000) {
                     s_spk_gaps++;
-                    // انقطعت بنص الرد — المخزن صغير ع هالشبكة. بنكبّره فورًا،
-                    // مش بعد ما نجمع إحصاء: التقطيع اللي بتسمعه مرّة بتسمعه
-                    // كل رد لحد ما نتصرّف.
+                    // انقطعت بنص الرد: بنكبّر المخزن فورًا.
                     s_calm_replies = 0;
                     if (s_prebuf < SPK_PREBUF_MAX) {
                         s_prebuf += SPK_PREBUF_STEP;
@@ -850,7 +679,7 @@ static void spk_task(void *arg) {
                 continue;
             }
         }
-        // 300ms tolerance: brief mid-reply WiFi gaps don't re-arm the cushion.
+        // 300 ms tolerance so brief gaps don't re-arm the cushion.
         size_t n = xStreamBufferReceive(s_spk_stream, buf, sizeof(buf), pdMS_TO_TICKS(300));
         if (n) {
 #if SPK_VOL_SHIFT
@@ -859,10 +688,7 @@ static void spk_task(void *arg) {
                 s[i] = (int16_t)(((int32_t)s[i] * SPK_VOL_MUL) >> SPK_VOL_SHIFT);
             }
 #endif
-            // Runtime volume, on top of the compile-time trim above. Applied
-            // BEFORE the echo reference is taken, so the canceller sees what the
-            // amp will actually play — take it after and every volume change
-            // silently breaks echo cancellation.
+            // Runtime volume BEFORE taking the echo reference, so the AEC sees what the amp plays.
             {
                 int16_t *v = (int16_t *)buf;
                 int64_t sum = 0;
@@ -871,21 +697,13 @@ static void spk_task(void *arg) {
                     v[i] = spk_apply(v[i]);
                     sum += v[i] < 0 ? -v[i] : v[i];
                 }
-                // Mean level of this 40 ms, scaled so ordinary speech spans the
-                // range. The face reads it for her mouth.
+                // Mean level of these 40 ms, for the mouth.
                 int lvl = ns ? (int)(sum / ns) / 30 : 0;
                 s_out_level = lvl > 100 ? 100 : lvl;
             }
 #if VOICE_AEC_ENABLE
-            // Echo reference: exactly what the amp will play (post-volume),
-            // downsampled 24k -> 16k (2 out of every 3 samples) to match the
-            // mic rate. Static buffer — this task is the only writer.
-            //
-            // Samples that do not make a whole group of three wait for the next
-            // chunk. They used to be dropped: a read that was not a multiple of
-            // three samples shortened the reference by one or two, every time,
-            // and the canceller's alignment walked away from the real echo over
-            // the course of a reply.
+            // Echo reference: post-volume, 24k→16k (2 of every 3 samples). Leftover samples
+            // wait for the next chunk; dropping them drifted the AEC alignment.
             if (s_ref_stream) {
                 static int16_t ref[SPK_CHUNK_BYTES / 3 + 2];
                 static int16_t carry[2];
@@ -924,14 +742,12 @@ static void spk_task(void *arg) {
             s_out_level = 0;
             first_seen = 0;
             last_stop = now_ms();
-            // Done talking: back to the listening face while the session is
-            // open (the session manager sets idle when it closes).
+            // Done talking: listening face while the session is open.
             if (s_session_active) {
                 VOICE_FACE(MOOD_FOCUSED);
                 VOICE_LED(LED_STATE_LISTENING);
             }
-            // One line per reply: the health of the whole delivery chain.
-            // rx≈played & dropped=0 & gaps=0 is a clean run.
+            // Per-reply health: rx≈played, dropped=0, gaps=0 is clean.
             ESP_LOGI(TAG, "playback report: rx=%u played=%u dropped=%u gaps=%d",
                      (unsigned)s_spk_rx_bytes, (unsigned)s_spk_play_bytes,
                      (unsigned)s_spk_drop_bytes, s_spk_gaps);
@@ -940,8 +756,7 @@ static void spk_task(void *arg) {
 }
 
 #if ENABLE_WAKEWORD
-// Load the WakeNet model packed into the "model" flash partition. Returns false
-// if no model is present (caller then falls back to an always-on session).
+// WakeNet model from the "model" partition. False if absent (always-on fallback).
 static bool wakeword_init(void) {
     if (!s_models) s_models = esp_srmodel_init("model");
     srmodel_list_t *models = s_models;
@@ -967,7 +782,7 @@ static bool wakeword_init(void) {
         wn->destroy(data);
         return false;
     }
-    // Published last: mic_task checks s_wn, and must never see a half-built one.
+    // Published last: mic_task must never see a half-built model.
     s_wn_data = data;
     s_wn = wn;
     ESP_LOGI(TAG, "wakenet '%s' ready (word='%s', chunk=%d, rate=%d)",
@@ -976,9 +791,7 @@ static bool wakeword_init(void) {
     return true;
 }
 
-// Feed mono 16-bit PCM in arbitrary lengths; WakeNet needs exact-chunk feeds, so
-// we buffer up to s_wn_chunk and detect on each full chunk. Returns true if the
-// wake word fired in this call.
+// WakeNet needs exact chunks: buffer to s_wn_chunk. True if the wake word fired.
 static bool wakeword_feed(const int16_t *pcm, int n) {
     if (!s_wn) return false;
     bool hit = false;
@@ -999,44 +812,28 @@ static bool wakeword_feed(const int16_t *pcm, int n) {
 #endif  // ENABLE_WAKEWORD
 
 #if ENABLE_COMMANDS
-// ─── Local command words ("Sandy ...") ────────────────────────────────────────
-//
-// HOW TO ADD OR CHANGE A COMMAND (no model training — just edit the table):
-//   1. Get the phoneme string for your phrase (the English model matches sounds,
-//      not text). From firmware/brain-core, run:
-//          python tools/gen_phonemes.py "SANDY YOUR PHRASE"
-//      → prints e.g.  SANDY YOUR PHRASE  ->  "SaNDm Yek Frd"
-//   2. Add a row to SANDY_COMMANDS:
-//        { id, "SANDY YOUR PHRASE", "<phonemes>", action, "topic", "payload" }
-//      • id       : any unique small integer (order doesn't matter).
-//      • phrase   : the English text, for logs. Starts with SANDY, 2–4 words.
-//                   Keep phrases distinct in SOUND (avoid e.g. LIGHT vs NIGHT).
-//      • phonemes : the string from step 1 (this is what's actually matched).
-//      • action   : CMD_ROOM   → publishes payload to the MQTT topic (room node)
-//                   CMD_ALLOFF → turns light+fan+music off (no topic/payload)
-//                   CMD_OPEN   → opens the cloud voice session (free conversation)
-//      • output   : CMD_ROOM only — the bare output name: light, fan, music,
-//                   color, curtain. NOT a full topic: mqtt_publish_room builds
-//                   sandy/node/<id>/room/<output> around it. Else NULL.
-//      • payload  : CMD_ROOM only — "on" / "off" / "0".."100". Else NULL.
-//   3. Rebuild + flash (OTA is fine now; only the one-time partition resize
-//      needed a wired flash).
-//   • Keep the list short (a handful). More phrases = more chance of mix-ups.
-//   • Raise CMD_DET_THRESHOLD toward 0.9 if it ever fires by accident.
+// ─── Local command words ("Sandy ...") ───
+// To add one: get phonemes with `python tools/gen_phonemes.py "SANDY YOUR PHRASE"`
+// and add a row { id, phrase, phonemes, action, output, payload }:
+//   id: unique small int; phrase: for logs, SANDY + 2–4 words, distinct in sound;
+//   action: CMD_ROOM (publish payload to room/<output>), CMD_ALLOFF, CMD_OPEN (voice session);
+//   output: bare room output name (not a topic) for CMD_ROOM, else NULL;
+//   payload: "on" / "off" / "0".."100" for CMD_ROOM, else NULL.
+// Keep the list short; raise CMD_DET_THRESHOLD toward 0.9 on false hits.
 
 typedef enum { CMD_ROOM, CMD_ALLOFF, CMD_OPEN } cmd_act_t;
 
 typedef struct {
     int          id;
-    const char  *phrase;    // English, starts with "SANDY", ALL CAPS (for logs)
-    const char  *phonemes;  // ESP-SR phoneme string — generate with tools/gen_phonemes.py
+    const char  *phrase;    // English, "SANDY ...", ALL CAPS
+    const char  *phonemes;  // from tools/gen_phonemes.py
     cmd_act_t    act;
-    const char  *output;    // bare room output name for CMD_ROOM, else NULL
+    const char  *output;    // bare room output for CMD_ROOM, else NULL
     const char  *payload;   // MQTT payload for CMD_ROOM, else NULL
 } sandy_cmd_t;
 
 static const sandy_cmd_t SANDY_COMMANDS[] = {
-    // ── Room control: fully local over MQTT, no cloud ──
+    // ── Room control: local over MQTT ──
     {  1, "SANDY TURN ON THE LIGHT",   "SaNDm TkN nN jc LiT",     CMD_ROOM,   "light",   "on"  },
     {  2, "SANDY TURN OFF THE LIGHT",  "SaNDm TkN eF jc LiT",     CMD_ROOM,   "light",   "off" },
     {  3, "SANDY TURN ON THE FAN",     "SaNDm TkN nN jc FaN",     CMD_ROOM,   "fan",     "on"  },
@@ -1045,9 +842,7 @@ static const sandy_cmd_t SANDY_COMMANDS[] = {
     {  6, "SANDY TURN OFF MUSIC",      "SaNDm TkN eF MYoZgK",     CMD_ROOM,   "music",   "off" },
     {  7, "SANDY TURN EVERYTHING OFF", "SaNDm TkN fVRmvgl eF",    CMD_ALLOFF, NULL,      NULL  },  // light+fan+music off
 
-    // ── Need the cloud (focus sessions / spoken answers). For NOW these just
-    //    open the voice session so you can talk. TODO phase 2: send an intent
-    //    over the voice WS so Sandy does the action / speaks the answer herself.
+    // ── Need the cloud: for now these just open the voice session ──
     {  8, "SANDY WHAT TIME IS IT",     "SaNDm WcT TiM gZ gT",     CMD_OPEN, NULL, NULL },  // → tell the time
     {  9, "SANDY GOOD MORNING",        "SaNDm GwD MeRNgl",        CMD_OPEN, NULL, NULL },  // → morning briefing
     { 10, "SANDY LETS READ",           "SaNDm LfTS RfD",          CMD_OPEN, NULL, NULL },  // → reading focus
@@ -1059,17 +854,13 @@ static const sandy_cmd_t SANDY_COMMANDS[] = {
 };
 #define SANDY_COMMANDS_N (sizeof(SANDY_COMMANDS) / sizeof(SANDY_COMMANDS[0]))
 
-#define CMD_TIMEOUT_MS    5760    // window to finish one phrase once speech starts
+#define CMD_TIMEOUT_MS    5760    // window to finish a phrase once speech starts
 #define CMD_DET_THRESHOLD 0.50f   // 0..0.9999; raise to reduce false triggers
 
-// Defined below, beside the session-manager code that is its other caller.
-// commands_init()'s own out-of-memory path unloads the model, so the call sits
-// above the definition -- an implicit declaration that scripts/check_c_decl_order.py
-// has been reporting and that a stricter compiler default would reject outright.
+// Forward declaration: commands_init()'s OOM path calls it.
 static void commands_unload(void);
 
-// Load the English MultiNet model and register the phrases. Returns false (and
-// commands stay off) if the model isn't packed in the 'model' partition.
+// Load English MultiNet and register phrases; false if the model isn't packed.
 static bool commands_init(void) {
     if (!s_models) s_models = esp_srmodel_init("model");
     if (!s_models) { ESP_LOGW(TAG, "no models for commands"); return false; }
@@ -1102,7 +893,7 @@ static bool commands_init(void) {
     return s_mn_buf != NULL;
 }
 
-// Run one recognized command. Returns true if it should OPEN the voice session.
+// Returns true if it should open the voice session.
 static bool commands_dispatch(int id) {
     for (size_t i = 0; i < SANDY_COMMANDS_N; i++) {
         if (SANDY_COMMANDS[i].id != id) continue;
@@ -1130,25 +921,12 @@ static bool commands_dispatch(int id) {
     return false;
 }
 
-// Free the MultiNet model + its buffers, handing its ~70KB of internal SRAM back
-// to the system. The command model and the cloud voice link both want that tiny
-// internal RAM and it can't hold both — so we unload the model while a session
-// is open (they never run at the same time) and commands_init() reloads it once
-// the call ends. Runs in mic_task only, so no lock is needed around s_mn.
+// Free MultiNet (~70 KB internal SRAM) while a session is open; commands_init()
+// reloads it after. mic_task only, so no lock around s_mn.
 static void commands_unload(void) {
     if (!s_mn) return;
-    // esp_mn_commands_free() prints an ERROR here every single time, and the
-    // error is expected. multinet's set_speech_commands() takes ownership of the
-    // phrase list and frees it once it has applied the phrases to the model —
-    // confirmed, not assumed: `nm libmultinet.a` shows the library importing
-    // esp_mn_commands_free. So by the time we get here the list is already gone
-    // and clear() reports "not initialized". Freeing NULL is safe (the library
-    // null-checks), so the call stays: it is correct whether or not a future
-    // version keeps taking ownership, and dropping it to silence a log would
-    // trade a cosmetic problem for a real one.
-    //
-    // Silenced rather than tolerated because a red ERROR that appears on every
-    // wake word teaches you to skim past red ERRORs.
+    // multinet already freed the phrase list (it takes ownership), so this logs an
+    // expected ERROR; silence it so real ERRORs stay visible. The call stays for safety.
     esp_log_level_t prev = esp_log_level_get("MN_COMMAND");
     esp_log_level_set("MN_COMMAND", ESP_LOG_NONE);
     esp_mn_commands_free();
@@ -1159,8 +937,7 @@ static void commands_unload(void) {
     ESP_LOGI(TAG, "multinet unloaded for the voice session");
 }
 
-// Feed idle mic audio; returns true if a command asked to open the voice session.
-// Same exact-chunk buffering as wakeword_feed (detect() needs full chunks).
+// Same exact-chunk buffering as wakeword_feed. True if a command opens the session.
 static bool commands_feed(const int16_t *pcm, int n) {
     if (!s_mn || !s_mn_buf) return false;
     bool open = false;
@@ -1186,22 +963,9 @@ static bool commands_feed(const int16_t *pcm, int n) {
 }
 #endif  // ENABLE_COMMANDS
 
-// Queue one chunk of mic audio for the uplink. Never blocks and never touches
-// the socket.
-//
-// It used to write straight to the websocket from the mic loop with a one-second
-// patience, and that is what killed conversations on a weak link: the moment the
-// uplink stalled for longer than a second, esp_websocket_client declared the
-// transport dead ("transport_poll_write(0)"), tore the whole connection down and
-// waited five seconds to reconnect — longer than her eight-second listening
-// window, so the call was over before it came back. A one-second network hiccup
-// should cost a few milliseconds of audio, not the conversation.
-//
-// So the mic hands audio to a buffer and walks away. ws_tx_task drains it with a
-// patience the mic loop could never afford. When the buffer fills — a stall
-// longer than the buffer is deep — we drop the NEWEST audio and keep what is
-// already queued, because playing her the first half of a sentence in order
-// beats a jumbled second half.
+// Queue mic audio for the uplink; never blocks or touches the socket (a
+// blocking write on a weak link made esp_websocket_client drop the whole call).
+// When full, drop the NEWEST audio so what is queued stays in order.
 static void mic_send(const void *pcm, size_t bytes) {
     if (!s_tx_stream || !s_authed) return;
     size_t room = xStreamBufferSpacesAvailable(s_tx_stream);
@@ -1212,10 +976,7 @@ static void mic_send(const void *pcm, size_t bytes) {
     xStreamBufferSend(s_tx_stream, pcm, bytes, 0);
 }
 
-
-// Drains the uplink buffer onto the socket. Its own task, so a slow write blocks
-// nothing that has to stay real-time — not the mic, not the wake word, not her
-// face.
+// Drains the uplink buffer on its own task, so slow writes block nothing real-time.
 static void ws_tx_task(void *arg) {
     (void)arg;
     uint8_t *chunk = heap_caps_malloc(TX_CHUNK_BYTES, MALLOC_CAP_SPIRAM);
@@ -1225,44 +986,16 @@ static void ws_tx_task(void *arg) {
         return;
     }
     for (;;) {
-        // **The socket first, the audio second.**
-        //
-        // This used to read a chunk and then try for the socket, and give up on
-        // the chunk if the socket was busy. But the read had already removed it
-        // from the buffer, so giving up did not delay that audio — it deleted
-        // it, and the sentence reached the server with a hole in the middle of a
-        // word. On a fast network, with nothing logged, and looking for all the
-        // world like a network fault.
-        //
-        // Taking the lock first means nothing leaves the buffer that cannot be
-        // sent. A busy socket now costs latency, which the queue absorbs and the
-        // backlog warning below reports — instead of costing words, which
-        // nothing could report because they were gone.
+        // Lock the socket BEFORE reading: audio read and then not sent is deleted mid-word.
         if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
             s_tx_lock_drops++;   // now a delay counter, not a loss counter
             continue;
         }
-        // **Ask the client, do not trust our own flag — and ask before reading.**
-        //
-        // `s_authed` says "the server accepted us", and it is cleared on the
-        // DISCONNECTED event. But the socket can be gone while that event has
-        // not arrived, and then this loop pushed a chunk at a dead client ten
-        // times a second, each one printing
-        //
-        //     E websocket_client: Websocket client is not connected
-        //
-        // which is the flood that buries every other line in the 8 KB remote
-        // log. Worse than the noise: the board went on believing it was in a
-        // call. `authed=1` with nothing reaching anyone is exactly how "she
-        // stopped mid-sentence and never came back" looks from the inside.
-        //
-        // The check sits above the read for the same reason the lock does:
-        // audio taken out of the buffer and then not sent is audio deleted.
+        // Ask the client (not s_authed) and ask before reading: the socket can be gone
+        // before DISCONNECTED arrives, and pushing at it floods the log.
         const bool live = s_client && esp_websocket_client_is_connected(s_client);
         if (s_authed && !live) {
-            // Reconcile once, quietly, and hand it to the machinery that already
-            // knows what to do: the grace timer waits for the auto-reconnect and
-            // hangs up only if it never comes.
+            // Hand it to the grace timer, which waits for the auto-reconnect.
             s_authed = false;
             if (s_session_active && !s_link_lost_ms) s_link_lost_ms = now_ms();
             ESP_LOGW(TAG, "socket gone without a disconnect event — "
@@ -1274,18 +1007,7 @@ static void ws_tx_task(void *arg) {
             continue;            // nothing read, so nothing lost
         }
 
-        // **Catch up to real time before sending anything.**
-        //
-        // A backlog is not just slowness, it is age: audio queued behind three
-        // seconds of other audio describes a sentence the person finished
-        // saying three seconds ago, and she answers it as though it were now.
-        // Sending it faithfully is worse than not sending it — it is what makes
-        // her feel stuck rather than slow.
-        //
-        // So the oldest goes. This is the same operation as the bug fixed
-        // earlier and the opposite decision: that one deleted a chunk by
-        // accident, mid-word, and told nobody. This one is a written policy with
-        // a threshold and a counter.
+        // Catch up to real time: drop the oldest past TX_MAX_LATENCY_BYTES, counted and logged.
         size_t queued_now = xStreamBufferBytesAvailable(s_tx_stream);
         while (queued_now > TX_MAX_LATENCY_BYTES + s_tx_protected) {
             size_t drop = xStreamBufferReceive(s_tx_stream, chunk,
@@ -1295,15 +1017,13 @@ static void ws_tx_task(void *arg) {
             queued_now -= drop;
         }
 
-        // Zero timeout, inside the lock: waiting for audio while holding it
-        // would block a session teardown behind a silent microphone.
+        // Zero timeout inside the lock, so teardown never waits on a silent mic.
         size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES, 0);
         if (n) {
             s_tx_protected = s_tx_protected > n ? s_tx_protected - (uint32_t)n : 0;
             if (esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
                                               pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS)) < 0) {
-                // Counted and said, not ignored: a write that fails is audio the
-                // server never got, and "she didn't hear me" needs a number.
+                // Count failed writes.
                 s_tx_drop_bytes += n;
                 static int64_t s_last_fail_log;
                 if (now_ms() - s_last_fail_log > 5000) {
@@ -1319,9 +1039,7 @@ static void ws_tx_task(void *arg) {
             continue;
         }
 
-        // A buffer that stays deep means the link cannot keep up with real-time
-        // audio. Say so — "slow net" is a different problem from "no net" and
-        // the person standing in front of her can act on it.
+        // A persistently deep buffer means the link can't keep up.
         size_t queued = xStreamBufferBytesAvailable(s_tx_stream);
         const int64_t t = now_ms();
         static int64_t s_backlog_since;   // when the queue first went deep
@@ -1332,29 +1050,12 @@ static void ws_tx_task(void *arg) {
             const bool already = (status_get() == SANDY_ST_NET_SLOW ||
                                   status_get() == SANDY_ST_LINK_STALL);
             if (t - s_backlog_since > TX_BACKLOG_WARN_MS && !already) {
-                // **Which fault this is, decided by measurement.**
-                //
-                // A backed-up queue is a symptom with more than one cause, and
-                // the old code named one of them on her face: "slow net, move me
-                // closer to the router". When the signal is strong that is worse
-                // than saying nothing — it sends the owner to fix the only part
-                // that is working, and the robot looks wrong about its own house.
+                // Pick the fault by signal strength: "move closer" is wrong advice on a strong link.
                 const int rssi = wifi_sandy_rssi();
                 const bool weak = (rssi != 0 && rssi < TX_WEAK_RSSI_DBM);
                 status_set(weak ? SANDY_ST_NET_SLOW : SANDY_ST_LINK_STALL);
                 s_warned_at = t;
-                // **The two numbers that tell you which problem this is.**
-                //
-                // "her voice isn't getting out" has at least three causes that
-                // look identical on her face: a weak radio link, a busy server,
-                // and a board that cannot encode fast enough. The signal
-                // strength separates the first from the other two immediately —
-                // below about -75 dBm the link simply cannot carry real-time
-                // audio, and no amount of reading server logs will say so.
-                //
-                // Printing it here rather than leaving it to the heartbeat
-                // matters: the heartbeat is a five-second average of a moment
-                // that has already passed, and this is the moment.
+                // Log RSSI with the backlog: below ~-75 dBm the radio can't carry real-time audio.
                 ESP_LOGW(TAG, "audio backing up: %u bytes queued, rssi=%d dBm "
                               "(%s), socket busy %lu times, %lu bytes dropped "
                               "as stale",
@@ -1370,24 +1071,13 @@ static void ws_tx_task(void *arg) {
                 status_set(SANDY_ST_OK);
             }
         }
-        // Between the two thresholds: leave it exactly as it is. That gap is the
-        // whole mechanism — neither raising nor clearing while the link is
-        // merely wobbling is what stops the flicker.
+        // Between thresholds: leave the status alone (hysteresis).
     }
 }
 
 #if ENABLE_WAKEWORD
-// Internal SRAM at the end of every call, next to the same number from the
-// first call. One line that answers "is this leaking?" instead of a log you
-// have to read with a calculator.
-//
-// It exists because two sessions in one capture ended 1004 bytes apart at the
-// same point in the cycle, which is the shape of a leak and also the shape of
-// ordinary fragmentation — and two points cannot tell them apart. A leak keeps
-// falling; fragmentation settles. Ten calls make that obvious at a glance.
-//
-// Internal SRAM specifically: PSRAM is plentiful, and it is the ~30 KB of
-// internal RAM that decides whether the next call can open at all.
+// Internal SRAM after every call vs. the first call: a leak keeps falling,
+// fragmentation settles.
 static void session_heap_report(void) {
     static uint32_t s_first_free;
     static uint32_t s_sessions;
@@ -1404,29 +1094,13 @@ static void session_heap_report(void) {
 #endif
 
 #if ENABLE_WAKEWORD
-// ── Uplink squelch: send speech, not the room ────────────────────────────────
-//
-// **The link carries a quarter of a megabit a second, continuously, and almost
-// all of it is nothing.** The mic streams sixteen kilohertz sixteen-bit PCM the
-// entire time the session is open — while he thinks, while the room is empty,
-// while nobody has said a word. On a strong link that is merely wasteful. On a
-// weak one it is the whole problem: the uplink saturates, and because the radio
-// is shared, *her voice coming back stutters* — the reply is queued behind the
-// silence we insisted on uploading.
-//
-// The floor is measured rather than assumed, for the same reason the server
-// stopped assuming it: a fixed number cannot be right in two rooms. The quietest
-// thing seen in the last few seconds is the room, because nobody talks without
-// pausing. Speech is what stands clear of it.
-//
-// Nothing of the sentence is lost. Below the gate the audio still goes into the
-// preroll buffer that already exists for the barge-in gate, so the syllable
-// before the gate opened arrives with the rest. And the gate stays open for a
-// hangover after the last loud frame, so a quiet word at the end of a sentence
-// is not clipped off.
+// ── Uplink squelch: send speech, not the room ──
+// Continuous silence saturates a weak uplink and stutters her reply. The floor is
+// the quietest level in the last few seconds; below the gate audio goes to the
+// preroll (so onsets aren't lost), and a hangover keeps trailing words.
 #define TX_FLOOR_SLOTS      24      // ~3 s of history at 128 ms a batch
 #define TX_FLOOR_FACTOR     5       // speech is this many halves above the floor
-#define TX_FLOOR_MIN        250     // absolute floor: a silent room is not speech
+#define TX_FLOOR_MIN        250     // absolute floor
 #define TX_HANGOVER_MS      900     // keep sending this long after the last word
 
 static int   s_tx_floor_ring[TX_FLOOR_SLOTS];
@@ -1434,7 +1108,7 @@ static int   s_tx_floor_at;
 static int   s_tx_floor_n;
 static int64_t s_tx_open_until;
 
-// True while this batch should go up the wire.
+// True if this batch should be sent.
 static bool tx_gate(int avg) {
     s_tx_floor_ring[s_tx_floor_at] = avg;
     s_tx_floor_at = (s_tx_floor_at + 1) % TX_FLOOR_SLOTS;
@@ -1444,7 +1118,7 @@ static bool tx_gate(int avg) {
     for (int i = 0; i < s_tx_floor_n; i++) {
         if (s_tx_floor_ring[i] < floor) floor = s_tx_floor_ring[i];
     }
-    // Half-steps, so the factor can be 2.5 without floating point.
+    // Half-steps: factor 2.5 without floats.
     int gate = (floor * TX_FLOOR_FACTOR) / 2;
     if (gate < TX_FLOOR_MIN) gate = TX_FLOOR_MIN;
 
@@ -1461,8 +1135,7 @@ static void tx_gate_reset(void) {
     s_tx_open_until = 0;
 }
 
-// Send whatever was captured while the session was still connecting, before
-// the live frame, so the first words arrive in order.
+// Send audio captured while connecting before the live frame.
 static void preroll_flush(void) {
     if (!s_preroll) return;
     uint8_t tmp[1024];
@@ -1474,18 +1147,13 @@ static void preroll_flush(void) {
 }
 #endif
 
-// Read the mic, convert to 16-bit PCM, and stream it up while Sandy is quiet.
+// Read the mic, convert to 16-bit PCM, stream it up.
 static void mic_task(void *arg) {
-    // Stereo read: 2 int32 slots per frame. pcm holds the mono mix.
+    // Stereo: 2 int32 slots per frame; pcm holds the mono mix.
     int32_t *raw = malloc(MIC_FRAME_SAMPLES * 2 * sizeof(int32_t));
     int16_t *pcm = malloc(MIC_FRAME_SAMPLES * sizeof(int16_t));
     if (!raw || !pcm) {
-        // Free whichever one came back. These two allocations fail
-        // independently, so the usual case is that one of them succeeded --
-        // and deleting the task without freeing it loses that block for the
-        // life of the process, on the board where internal RAM is the scarce
-        // thing and on the one path that only runs when it is already tight.
-        // free(NULL) is defined and does nothing, so no branch is needed.
+        // The allocations fail independently; free both (free(NULL) is a no-op).
         free(raw);
         free(pcm);
         ESP_LOGE(TAG, "mic buffers alloc failed");
@@ -1494,58 +1162,42 @@ static void mic_task(void *arg) {
         return;
     }
 
-    // One-pole DC blocker (high-pass): removes the INMP441's constant offset so
-    // VAD sees real silence between words. y[n] = x[n] - x[n-1] + R*y[n-1].
+    // One-pole DC blocker: y[n] = x[n] - x[n-1] + R*y[n-1].
     int32_t dc_x1 = 0, dc_y1 = 0;
     int64_t last_diag = 0;
     bool first_frame = true;
     int gate_run = 0;   // consecutive over-gate batches while she talks
 #if ENABLE_SERVO
-    // Per-mic first-difference energy (diff kills each mic's DC offset).
-    // Smoothed over ~400ms; the L/R balance says which side the voice is on.
+    // Per-mic first-difference energy (~400 ms smoothing) for L/R direction.
     int32_t ear_prev_l = 0, ear_prev_r = 0;
     int ear_l = 0, ear_r = 0;
 #endif
 
     for (;;) {
         size_t bytes_read = 0;
-        // Bounded wait (not portMAX_DELAY): if I2S ever wedges, the task stays
-        // observable instead of vanishing into an infinite block.
+        // Bounded wait so a wedged I2S stays observable.
         if (i2s_channel_read(s_rx_chan, raw, MIC_FRAME_SAMPLES * 2 * sizeof(int32_t),
                              &bytes_read, pdMS_TO_TICKS(1000)) != ESP_OK) {
             continue;
         }
         if (first_frame) {
             first_frame = false;
-            // One-shot "the mic path is alive" marker: if this line is missing
-            // from a boot log, I2S RX is delivering nothing — look at wiring or
-            // channel config, not at the cloud.
+            // Missing from a boot log = I2S RX delivers nothing (wiring/config).
             ESP_LOGI(TAG, "mic up (first frame, %u bytes)", (unsigned)bytes_read);
         }
         int frames = bytes_read / (2 * sizeof(int32_t));
 
-        // INMP441 gives 24-bit data left-justified in a 32-bit slot. Mix the two
-        // mics at FULL headroom (>>16 = the top 16 of the 24 data bits — cannot
-        // clip, ever), then DC-block. The wanted gain (VOICE_MIC_GAIN_SHIFT) is
-        // applied AFTER the echo canceller: applying it here used to saturate
-        // her own speaker blasting the mics from a few cm away, and a clipped
-        // echo is nonlinear — the AEC cancelled nothing (measured live:
-        // residual avg 8000-15000 against a gate of 1500, so the cloud heard
-        // her voice as the user and she kept answering herself).
+        // 24-bit data left-justified in 32-bit slots: mix at full headroom (>>16, never
+        // clips), then DC-block. Gain comes AFTER the AEC: clipped echo defeats it.
 #if ENABLE_SERVO
         int64_t sum_dl = 0, sum_dr = 0;
 #endif
-        // Snapshot the per-mic controls once per frame, not once per sample: a
-        // setting that changes mid-frame would split one 100 ms block between two
-        // gains and click. Reading them here also keeps the inner loop branch-free
-        // on anything another task can write.
+        // Snapshot controls once per frame so a change can't split a block.
         const int  gain_l  = mic_get_gain(MIC_LEFT);
         const int  gain_r  = mic_get_gain(MIC_RIGHT);
         const bool mute_l  = mic_is_muted(MIC_LEFT);
         const bool mute_r  = mic_is_muted(MIC_RIGHT);
-        // Both channels feed the mix; a muted one contributes nothing, so the
-        // divisor has to follow or muting one mic would halve the volume of the
-        // other instead of isolating it.
+        // Divisor follows the live mic count, so muting one isolates the other.
         const int  live    = (mute_l ? 0 : 1) + (mute_r ? 0 : 1);
         int64_t sum_sq_l = 0, sum_sq_r = 0;   // per-mic level, for the meters
 
@@ -1555,9 +1207,7 @@ static void mic_task(void *arg) {
             sum_sq_l += (int64_t)l * l;
             sum_sq_r += (int64_t)r * r;
 #if ENABLE_SERVO
-            // Ears keep the old higher-gain view: they only matter for the wake
-            // utterance (she's silent then, no clipping) and the extra bits
-            // keep the L/R balance from quantizing away.
+            // Ears keep the higher-gain view for L/R resolution (she's silent during the wake word).
             int32_t le = raw[2 * i]     >> VOICE_MIC_GAIN_SHIFT;
             int32_t re = raw[2 * i + 1] >> VOICE_MIC_GAIN_SHIFT;
             sum_dl += (le > ear_prev_l) ? (le - ear_prev_l) : (ear_prev_l - le);
@@ -1580,11 +1230,7 @@ static void mic_task(void *arg) {
         ear_r = (ear_r * 3 + (int)(sum_dr / (frames ? frames : 1))) / 4;
 #endif
 
-        // Per-mic RMS, post-gain and post-mute — so the meter shows what the mix
-        // is actually getting, not what the hardware captured. That is the whole
-        // point when you are testing one mic at a time: mute the left, speak, and
-        // only the right meter should move. If both move, they are cross-wired;
-        // if neither does, that mic is dead.
+        // Per-mic RMS post-gain/mute, so testing one mic at a time shows the truth.
         if (frames > 0) {
             mic_report_levels((int)sqrt((double)(sum_sq_l / frames)),
                               (int)sqrt((double)(sum_sq_r / frames)));
@@ -1593,14 +1239,11 @@ static void mic_task(void *arg) {
         bool sandy_talking = s_playing ||
                              (now_ms() - s_last_rx_audio_ms) < VOICE_HALF_DUPLEX_TAIL_MS;
 
-        // What downstream (wake word, VAD, cloud) hears: raw mic by default,
-        // echo-cancelled when the AEC is up and a session is running.
+        // Raw mic by default; echo-cancelled when AEC and a session are up.
         int16_t *use = pcm;
 #if VOICE_AEC_ENABLE
         if (s_aec && s_session_active) {
-            // Chunk the mono mic through the canceller, pulling the speaker
-            // reference in lockstep (zeros when she's quiet). Output lands in
-            // its own buffer; sample count can differ by < one chunk per loop.
+            // Run the canceller in chunks with the speaker reference (zeros when quiet).
             int out_n = 0;
             for (int i = 0; i < frames; i++) {
                 s_aec_stage[s_aec_fill++] = pcm[i];
@@ -1619,7 +1262,7 @@ static void mic_task(void *arg) {
             frames = out_n;
         }
 #if VOICE_AEC_FULL_DUPLEX
-        // Full duplex: with the echo gone the mic stays open while she talks.
+        // With AEC the mic stays open while she talks.
         bool mic_muted = s_aec ? false : sandy_talking;
 #else
         bool mic_muted = sandy_talking;
@@ -1628,26 +1271,13 @@ static void mic_task(void *arg) {
         const bool mic_muted = sandy_talking;
 #endif
 
-        // Strip steady background noise — the fan, the AC — so the wake word,
-        // the VAD and the cloud all get the same cleaned signal. **After** the
-        // echo canceller, not before: the suppressor is nonlinear, and an echo
-        // path that changes shape frame by frame is one the canceller's filter
-        // can never converge on — it ran first, and her own voice leaked through.
-        //
-        // So: before the canceller never, and on its output not at all — the
-        // canceller's own nonlinear stage already suppresses what is left, and
-        // its chunks are not whole 160-sample blocks, so a second suppressor
-        // would clean most of each frame and pass a ragged tail through. What is
-        // left is the case that matters most: the idle microphone the wake word
-        // listens on, in whole 1600-sample frames. No-op while the level is off.
+        // Noise suppression only on the idle raw mic (whole 1600-sample frames): never
+        // before the AEC (nonlinear, breaks convergence), and the AEC output is already
+        // suppressed. No-op when off.
         if (use == pcm) ns_clean(use, frames);
 
-        // Re-apply the intended gain now that the canceller has seen a clean,
-        // linear signal (saturating ×16 for the default shift of 12). Everything
-        // downstream — wake word, VAD level, duplex gate, what Gemini hears —
-        // keeps the exact scale all its thresholds were tuned on. avg doubles
-        // as the VAD level and MUST come from the cleaned signal, or her own
-        // voice would hold the session open forever now that the mic stays live.
+        // Re-apply gain after the canceller (saturating) so thresholds keep their scale.
+        // avg is also the VAD level and must come from the cleaned signal.
         int64_t sum_abs = 0;
         for (int i = 0; i < frames; i++) {
             int32_t v = (int32_t)use[i] << (16 - VOICE_MIC_GAIN_SHIFT);
@@ -1659,11 +1289,8 @@ static void mic_task(void *arg) {
         int avg = (int)(sum_abs / (frames ? frames : 1));
 
 #if ENABLE_COMMANDS
-        // Hand the command model's internal SRAM to the cloud voice link and
-        // take it back when the call ends. The session manager sets s_mn_want;
-        // doing the work here keeps s_mn single-owner, so no lock is needed.
-        // s_mn_loaded follows the request even when commands_init() fails —
-        // otherwise a failed load would retry on every single frame.
+        // Swap the command model's SRAM with the voice link on request; s_mn stays
+        // single-owner. s_mn_loaded follows even on failure, to avoid retrying every frame.
         if (s_mn_want != s_mn_loaded) {
             if (s_mn_want) commands_init();
             else           commands_unload();
@@ -1674,8 +1301,7 @@ static void mic_task(void *arg) {
 #if ENABLE_WAKEWORD
         if (!s_session_active) {
 #if VOICE_AEC_ENABLE
-            // Stale reference from the closed session would wreck the next
-            // one's alignment; this task is the reader, so draining is safe.
+            // Drain the stale reference from the closed session (this task is the reader).
             if (s_ref_stream && !xStreamBufferIsEmpty(s_ref_stream)) {
                 while (xStreamBufferReceive(s_ref_stream, s_aec_ref,
                                             (size_t)s_aec_chunk * sizeof(int16_t), 0) > 0) {}
@@ -1683,24 +1309,19 @@ static void mic_task(void *arg) {
             }
 #endif
 #if ENABLE_COMMANDS
-            // Offline command words on the same idle audio: "Sandy turn on the
-            // light" fires a room action over MQTT; an "I need you"-style phrase
-            // opens the cloud session just like the wake word does.
+            // Offline command words on the idle audio.
             if (!sandy_talking && commands_feed(pcm, frames)) {
                 ESP_LOGI(TAG, "command opened a voice session");
                 if (s_preroll) xStreamBufferReset(s_preroll);
                 s_wake_req = true;
             }
 #endif
-            // Idle: listen locally for the wake word, stream nothing up. The
-            // session manager opens the WS when it sees s_wake_req.
+            // Idle: local wake word only; the session manager opens the WS on s_wake_req.
             if (!sandy_talking && wakeword_feed(pcm, frames)) {
                 ESP_LOGI(TAG, "wake word detected");
                 if (s_preroll) xStreamBufferReset(s_preroll);  // fresh capture
                 s_wake_req = true;
-                // Local "I heard you" cue — fires on detection, before any cloud
-                // connection, so it confirms the wake word independently of the
-                // network and the (flaky) remote log.
+                // Local "heard you" cue, independent of the network.
 #if ENABLE_BUZZER
                 buzzer_play(MELODY_CURIOUS);
 #endif
@@ -1708,10 +1329,7 @@ static void mic_task(void *arg) {
                 face_set_mood(MOOD_CURIOUS);
 #endif
 #if ENABLE_SERVO
-                // Look toward whoever called: the wake utterance is still in
-                // the smoothed L/R energies. Two close mics only differ by a
-                // few percent, so ±10% imbalance already means full swing
-                // (live tests showed bal≈4 for an off-center caller).
+                // Turn toward the caller: ±10% L/R imbalance already means full swing.
                 int tot = ear_l + ear_r;
                 if (tot > 0) {
                     int bal = ((ear_r - ear_l) * 100) / tot;   // -100 .. +100
@@ -1726,9 +1344,7 @@ static void mic_task(void *arg) {
 #endif
             }
         } else {
-            // Barge-in: the wake-word spotter keeps running while she talks —
-            // on the echo-cancelled signal when AEC is up (hears you over her
-            // easily), on the raw mic otherwise (works when you're close/loud).
+            // Barge-in: the spotter keeps running while she talks (on AEC output when available).
             if (sandy_talking && wakeword_feed(use, frames)) {
                 ESP_LOGI(TAG, "barge-in: wake word during playback");
                 s_squelch_until_ms = now_ms() + SPK_SQUELCH_MS;  // stale tail only
@@ -1740,24 +1356,18 @@ static void mic_task(void *arg) {
                 buzzer_play(MELODY_CURIOUS);
 #endif
             }
-            // Hold the session alive on user speech or Sandy's own audio; the
-            // manager closes it once this goes quiet for VOICE_SESSION_IDLE_MS.
+            // Speech or her own audio keeps the session alive.
             if (avg > VOICE_SESSION_VAD_LEVEL || sandy_talking) {
                 s_session_voice_ms = now_ms();
             }
             if (s_authed && s_preroll_due) {
-                // The server just said yes: send what was said while we were
-                // connecting, now, whatever this frame's level is.
+                // auth_ok just arrived: send the preroll now.
                 s_preroll_due = false;
                 preroll_flush();
             }
             if (s_authed && !mic_muted) {
-                // While she talks, only SUSTAINED real-speech energy opens the
-                // stream: a single over-gate batch could be a residual spike of
-                // her own echo, VOICE_DUPLEX_GATE_RUN in a row (~100ms) is a
-                // human. Pending batches stash in the (idle during playback)
-                // preroll, so the interruption's onset still arrives once the
-                // run qualifies — nothing of the user's sentence is lost.
+                // While she talks, only VOICE_DUPLEX_GATE_RUN consecutive loud batches (~100 ms)
+                // open the stream; pending batches wait in the preroll so the onset still arrives.
                 if (!sandy_talking) gate_run = 0;
                 if (!sandy_talking || avg > VOICE_DUPLEX_GATE_LEVEL) {
                     if (sandy_talking && ++gate_run < VOICE_DUPLEX_GATE_RUN) {
@@ -1769,21 +1379,17 @@ static void mic_task(void *arg) {
                         preroll_flush();
                         mic_send(use, frames * sizeof(int16_t));
                     } else if (s_preroll) {
-                        // Below the gate: hold it, do not send it. The preroll
-                        // is what makes that safe — when the gate opens, this
-                        // goes up first and the sentence keeps its beginning.
+                        // Below the gate: stash in the preroll, sent first when the gate opens.
                         xStreamBufferSend(s_preroll, use,
                                           frames * sizeof(int16_t), 0);
                     }
                 } else if (gate_run) {
-                    // The spike died before qualifying — it was echo, not a
-                    // voice. Drop the stash with it.
+                    // The spike was echo: drop the stash.
                     gate_run = 0;
                     if (s_preroll) xStreamBufferReset(s_preroll);
                 }
             } else if (!s_authed && s_preroll) {
-                // Still connecting (or mid-session reconnect): capture instead
-                // of dropping, and flush once the link is authed again.
+                // Connecting or reconnecting: capture, flush once authed.
                 xStreamBufferSend(s_preroll, use, frames * sizeof(int16_t), 0);
             }
         }
@@ -1809,20 +1415,14 @@ static void mic_task(void *arg) {
     }
 }
 
-
-// One WS client per session: stop()+start() on the same client proved
-// unreliable (after the first session closed, the next start never reconnected
-// and voice went silent until reboot), so every session gets a fresh init and
-// ends with a full destroy. s_ws_mutex keeps mic_send() off a client that is
-// being torn down.
+// Fresh WS client per session (stop()+start() failed to reconnect); s_ws_mutex
+// keeps mic_send() off a client being torn down.
 static bool ws_open(void) {
     esp_websocket_client_config_t cfg = {
         .uri = identity()->voice_uri,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 8192,
-        // Above LVGL and the housekeeping tasks (default 5), below the audio
-        // pair (8/9): TLS decrypt keeps up and audio arrives smoothly instead
-        // of in starved bursts.
+        // Above LVGL/housekeeping (5), below the audio pair (8/9).
         .task_prio = 7,
         .reconnect_timeout_ms = 5000,
         .network_timeout_ms = 10000,
@@ -1846,9 +1446,7 @@ static void ws_close(void) {
     s_authed = false;
     xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     if (s_client) {
-        // A close frame first, so the server ends the Gemini session now and
-        // stops billing it — a dropped socket it had to time out on its own.
-        // Only if still connected, and bounded; stop() if that fails.
+        // Send a close frame so the server ends the paid Gemini session now; bounded.
         if (!esp_websocket_client_is_connected(s_client) ||
             esp_websocket_client_close(s_client, pdMS_TO_TICKS(1500)) != ESP_OK) {
             esp_websocket_client_stop(s_client);
@@ -1858,12 +1456,9 @@ static void ws_close(void) {
     }
     s_tx_protected = 0;
     s_preroll_due = false;
-    // Clear again AFTER the teardown: a late auth_ok event can land while
-    // stop() is mid-flight and flip the flag back on for good (seen live:
-    // authed=1 with no session, for minutes).
+    // Clear again after teardown: a late auth_ok can land during stop().
     s_authed = false;
-    // Whatever is still queued belongs to the call that just ended. Sending it
-    // into the next one would open the conversation with the tail of the last.
+    // Drop audio queued from the call that just ended.
     if (s_tx_stream) xStreamBufferReset(s_tx_stream);
     if (s_tx_drop_bytes) {
         ESP_LOGW(TAG, "uplink dropped %u bytes this session (link too slow)",
@@ -1874,10 +1469,7 @@ static void ws_close(void) {
 }
 
 bool voice_play_local_pcm(const int16_t *pcm, size_t bytes) {
-    // Straight into the buffer spk_task already drains, so a locally generated
-    // sound travels the identical path as her cloud voice: same buffer, same
-    // volume, same amp. A test that used its own channel could pass while the
-    // real path was broken, which would make it worse than no test.
+    // Same buffer as the cloud voice, so a local sound proves the real path.
     if (!s_spk_stream || !s_spk_wr_lock || !pcm || bytes == 0) return false;
     if (xSemaphoreTake(s_spk_wr_lock, pdMS_TO_TICKS(200)) != pdTRUE) return false;
     bool ok = xStreamBufferSpacesAvailable(s_spk_stream) >= bytes &&
@@ -1886,11 +1478,9 @@ bool voice_play_local_pcm(const int16_t *pcm, size_t bytes) {
     return ok;
 }
 
-
 #if ENABLE_WAKEWORD
-// The one way a session ends — idle, or refused by the server. Everything a
-// session took is given back here, in this order: the socket, then the network
-// claim (so an update may run), then the command model, then her face.
+// The one way a session ends. Releases, in order: socket, network claim,
+// command model, face.
 static void session_end(void) {
     s_session_active = false;
     VOICE_SESSION(false);
@@ -1898,7 +1488,7 @@ static void session_end(void) {
     ws_close();
     net_release(NET_OWNER_VOICE);   // socket gone: updates may run again
 #if ENABLE_COMMANDS
-    s_mn_want = true;   // the call is over — mic_task reloads the model
+    s_mn_want = true;   // mic_task reloads the model
 #endif
     VOICE_FACE(MOOD_IDLE);
     VOICE_LED(LED_STATE_IDLE);
@@ -1906,27 +1496,15 @@ static void session_end(void) {
 #endif
 
 static void voice_task(void *arg) {
-    // Say so while waiting. Boot no longer blocks on Wi-Fi, so with the router
-    // down this task is the only thing still waiting — silently, until now, it
-    // looked exactly like a robot that had crashed.
+    // Report while waiting for Wi-Fi (boot doesn't block on it).
     for (int i = 0; !wifi_sandy_is_connected(); i++) {
-        // Say it on her face, not just here: "waiting for wifi" in a log nobody
-        // is reading is indistinguishable from a robot that has crashed.
-        //
-        // But not straight away. Associating and then waiting on DHCP takes a
-        // couple of seconds on an ordinary boot, and announcing "NO WI-FI" in
-        // that window is simply false — it put the banner on her face every
-        // single time she started, which teaches the owner to ignore it. Ten
-        // half-second passes is five seconds: far longer than a healthy boot,
-        // far shorter than a person's patience.
+        // After ~5 s: a normal boot's DHCP takes a couple of seconds.
         if (i >= 10) status_set(wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
                                                                : SANDY_ST_NO_WIFI);
         if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
         vTaskDelay(pdMS_TO_TICKS(500));
     }
-    // Wi-Fi is up. Clear the banner now rather than waiting for a successful
-    // call: leaving "NO WI-FI" on screen after the router came back is its own
-    // kind of lie.
+    // Wi-Fi is up: clear the banner.
     status_set(SANDY_ST_OK);
     sync_clock();
     devkey_load();
@@ -1937,10 +1515,7 @@ static void voice_task(void *arg) {
         return;
     }
 
-    // Big buffer in PSRAM so a fast burst of Sandy's reply isn't dropped.
-    // 1 MB ≈ 21 s of 24 kHz/16-bit audio: Gemini streams a long reply faster
-    // than realtime, and the old 192 KB (~4 s) overflowed on them — the
-    // overflow drops chopped whole pieces out of her sentences.
+    // 1 MB PSRAM ≈ 21 s at 24 kHz: Gemini streams faster than realtime (192 KB overflowed).
     s_spk_stream = xStreamBufferCreateWithCaps(1024 * 1024, 1, MALLOC_CAP_SPIRAM);
     s_tx_stream  = xStreamBufferCreateWithCaps(TX_STREAM_BYTES, 1, MALLOC_CAP_SPIRAM);
 #if ENABLE_WAKEWORD
@@ -1955,8 +1530,7 @@ static void voice_task(void *arg) {
     }
 
 #if VOICE_AEC_ENABLE
-    // Echo canceller: internal RAM first for speed, PSRAM as the fallback.
-    // If neither works the voice link still runs — just half-duplex.
+    // AEC buffers: internal RAM first, PSRAM fallback; without AEC, half-duplex.
     s_ref_stream = xStreamBufferCreateWithCaps(32 * 1024, 1, MALLOC_CAP_SPIRAM);
     aec_config_t acfg = {
         .mic_num = 1, .ref_num = 1, .out_num = 1,
@@ -1983,11 +1557,7 @@ static void voice_task(void *arg) {
         s_aec_frame = heap_caps_malloc((MIC_FRAME_SAMPLES + s_aec_chunk) * sizeof(int16_t),
                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!s_aec_stage || !s_aec_ref || !s_aec_out || !s_aec_frame) {
-            // aec_destroy frees the canceller. It does not free these four,
-            // and three of them are internal RAM -- so the fallback that
-            // exists because memory ran short was itself holding the memory,
-            // for the life of the process. Free every one that succeeded and
-            // null them, because the read paths test the pointers.
+            // aec_destroy doesn't free these; free and NULL them (read paths test the pointers).
             ESP_LOGE(TAG, "AEC buffer alloc failed — half-duplex fallback");
             heap_caps_free(s_aec_stage);
             heap_caps_free(s_aec_ref);
@@ -2007,12 +1577,7 @@ static void voice_task(void *arg) {
         ESP_LOGW(TAG, "AEC create failed — half-duplex fallback");
     }
 
-    // Half-duplex now, by either route above. The echo reference has exactly
-    // one reader, the canceller, so leaving the buffer alive means spk_task
-    // downsamples every chunk it plays into a queue nothing drains: 32 KB of
-    // PSRAM held and the work done, for the life of the process. Deleting it
-    // turns the `if (s_ref_stream)` guard on that path into the switch that
-    // skips it.
+    // Half-duplex: delete the reference buffer, or spk_task keeps filling it for nobody.
     if (!s_aec && s_ref_stream) {
         vStreamBufferDeleteWithCaps(s_ref_stream);
         s_ref_stream = NULL;
@@ -2020,15 +1585,13 @@ static void voice_task(void *arg) {
 #endif
 
 #if ENABLE_WAKEWORD
-    // BEFORE the audio tasks exist: mic_task feeds the spotter from its very
-    // first frame, and a half-initialized WakeNet is a LoadProhibited panic
-    // (we lost exactly that race once when AEC init shifted the timing).
+    // BEFORE the audio tasks: a half-initialized WakeNet panics mic_task.
     bool wn_ok = wakeword_init();
 #endif
 #if ENABLE_COMMANDS
-    // After wakeword_init: both share s_models (one esp_srmodel_init read).
+    // Shares s_models with wakeword_init.
     bool cmd_ok = commands_init();
-    // Tell mic_task the model is already resident, or it would load a second one.
+    // Already resident, so mic_task doesn't load a second one.
     s_mn_loaded = true;
     ESP_LOGI(TAG, "local command words: %s", cmd_ok ? "ready" : "OFF");
     ESP_LOGW(TAG, "heap after commands: internal_free=%u internal_largest=%u psram_free=%u",
@@ -2037,23 +1600,8 @@ static void voice_task(void *arg) {
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
 
-    // Pin the audio tasks to core 1 (WiFi/TLS runs on core 0) and give playback
-    // the higher priority so Sandy's voice never gets starved → no stutter.
-    // Stacks live in internal RAM — if it's exhausted these fail SILENTLY and
-    // voice just never answers, so check and shout.
-    // Priority 6: below the audio pair (8/9) so capture and playback always win,
-    // above the websocket's own task (7) is NOT wanted — this one is allowed to
-    // wait, that is its entire job.
-    // 3072, not 4096: task stacks come out of internal RAM, and internal RAM is
-    // the scarce thing on this board — it is what the TLS task needs to open a
-    // voice session at all. This task does one stream read and one send call; it
-    // does not go deep.
-    // One `if` each, not three chained with `||`. Short-circuiting meant the
-    // first failure stopped the other two from even being attempted -- so an
-    // out-of-memory uplink task also cost the microphone and the speaker, and
-    // the single log line could not say which of the three was missing. Three
-    // different partial states look identical from outside the board, and
-    // telling them apart is the whole job of S4.2.
+    // Audio tasks on core 1 (WiFi/TLS on core 0), playback highest. Uplink task at 6
+    // (may wait), 3 KB stack (internal RAM). Separate checks so the log says which failed.
     int audio_task_fail = 0;
     if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 3072, NULL, 6, NULL, 1) != pdPASS) {
         audio_task_fail++;
@@ -2068,9 +1616,7 @@ static void voice_task(void *arg) {
         ESP_LOGE(TAG, "audio task voice_mic create FAILED");
     }
     if (audio_task_fail) {
-        // Task stacks come out of internal RAM, so this is what exhaustion
-        // looks like from here. Logging alone left a robot that boots, shows
-        // her face, and never answers -- with nothing on screen to say why.
+        // Out of internal RAM for stacks: say so on her face.
         ESP_LOGE(TAG, "%d of 3 audio tasks did not start (heap_int free=%u largest=%u)",
                  audio_task_fail,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -2080,21 +1626,16 @@ static void voice_task(void *arg) {
 
 #if ENABLE_WAKEWORD
     if (!wn_ok) {
-        // **Closed, not open.** This used to fall back to an always-on session:
-        // a missing or broken model meant the microphone streamed the room to
-        // the cloud, all day, with nobody having said her name. A robot that
-        // does not hear its wake word is a robot that needs fixing; one that
-        // listens to everything is a breach. The command words ("hey Sandy")
-        // still open a session if they loaded.
+        // Fail closed: without a wake word the mic stays local (no always-on streaming).
+        // Command words still open a session if loaded.
         ESP_LOGE(TAG, "wake word unavailable — the microphone stays local "
                       "(sessions open only from a command word)");
     }
 
-    // Session manager: the paid Gemini link is connected ONLY between a wake
-    // word and the silence that follows it.
+    // Session manager: the paid link is up only between a wake word and the silence after.
     for (;;) {
         if (s_session_active && s_auth_refused) {
-            // Refused: end it now rather than let the client knock again.
+            // Refused: end now.
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
         } else if (!s_session_active) {
@@ -2108,12 +1649,8 @@ static void voice_task(void *arg) {
                 VOICE_LED(LED_STATE_IDLE);
             } else if (s_wake_req) {
                 s_wake_req = false;
-                // One TLS session at a time (sandy_net_busy.h): an update check
-                // holding the network plus a voice handshake ran internal RAM
-                // out and rebooted her. A manifest fetch is over in a second or
-                // two, so wait that long; a download is not, and ends in a
-                // restart anyway, so after the wait the wake is dropped.
-                // Held from here until ws_close — released on every exit below.
+                // One TLS session at a time (sandy_net_busy.h): wait out a short manifest fetch,
+                // else drop the wake. Held until ws_close.
                 for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {
                     vTaskDelay(pdMS_TO_TICKS(100));
                 }
@@ -2124,31 +1661,14 @@ static void voice_task(void *arg) {
                     continue;
                 }
                 ESP_LOGI(TAG, "opening voice session");
-                // Fresh room, fresh floor. Carrying the last call's noise
-                // history into a different room is how a gate ends up set for
-                // a place nobody is standing in any more.
+                // Fresh noise floor per call.
                 tx_gate_reset();
 #if ENABLE_COMMANDS
-                // Free the command model BEFORE opening, not after the session
-                // goes active. The old order deadlocked: its ~70KB of internal
-                // SRAM is exactly what the TLS websocket task needs, so the
-                // open failed ("Error create websocket task"), the session
-                // never went active, and the model was never handed over.
+                // Free the command model BEFORE opening: TLS needs its ~70 KB.
                 s_mn_want = false;
-                // Wait for the model to actually go, and wait long enough.
-                //
-                // This used to give up after 500 ms and open anyway. When the
-                // unload had not finished, the socket opened against a heap that
-                // was still ~70 KB short and failed — and 70 KB is not a margin
-                // anything else can make up. The board reported LOW MEMORY on its
-                // face, which was true, and pointed at the wrong cause.
-                //
-                // Three seconds is far beyond how long the release takes when it
-                // works, and still shorter than the pause before she answers.
+                // Wait up to 3 s for the model to go; opening while it's resident fails.
                 for (int i = 0; i < 300 && s_mn_loaded; i++) vTaskDelay(pdMS_TO_TICKS(10));
                 if (s_mn_loaded) {
-                    // Still holding it. Opening now is a guaranteed failure with a
-                    // misleading label, so say what actually happened instead.
                     ESP_LOGE(TAG, "command model did not release in 3s — "
                                   "skipping this session rather than failing blind");
                     status_set(SANDY_ST_LOW_MEMORY);
@@ -2156,9 +1676,7 @@ static void voice_task(void *arg) {
                     net_release(NET_OWNER_VOICE);
                     continue;
                 }
-                // Largest contiguous block, not just total free: the TLS task
-                // needs one unbroken allocation, and a heap with plenty free and
-                // no big block left fails in a way the total never explains.
+                // Largest block matters: TLS needs one contiguous allocation.
                 ESP_LOGI(TAG, "before open: internal free=%u largest=%u psram=%u",
                          (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
@@ -2168,22 +1686,12 @@ static void voice_task(void *arg) {
                     s_session_voice_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;
-                    // المخزن بيرجع لأصغر قيمة مع كل مكالمة.
-                    //
-                    // بلا هاد، دقيقة شبكة سيئة بتخلّي كل رد بعدها بطيء لحدّ ما
-                    // تنطفي — والشبكة بتتغيّر بين مكالمة وتانية أكتر ما بتتغيّر
-                    // بنص وحدة. البداية من الأدنى بتخلّيه يقيس الوضع الحالي مش
-                    // وضع الأمس.
+                    // المخزن بيرجع لأصغر قيمة مع كل مكالمة، عشان يقيس الشبكة الحالية.
                     s_prebuf = SPK_PREBUF_MIN;
                     s_calm_replies = 0;
                     VOICE_SESSION(true);
                 } else {
-                    // The silent freeze lived here. The wake word had already
-                    // put MOOD_CURIOUS on her face, and the only code that ever
-                    // clears it sits in the close branch below — which needs a
-                    // session that opened. So a failed open left her staring,
-                    // awake-looking and deaf, until someone power-cycled her.
-                    // Now she says which failure it was and goes back to idle.
+                    // A failed open must clear the wake face and say why, or she stares, deaf.
                     unsigned largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
                     ESP_LOGE(TAG, "ws open failed (int free=%u largest=%u)",
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -2191,27 +1699,20 @@ static void voice_task(void *arg) {
                     if (!wifi_sandy_is_connected()) {
                         status_set(SANDY_ST_NO_WIFI);
                     } else if (largest < WS_TASK_MIN_BLOCK) {
-                        // The websocket's TLS task needs one contiguous block;
-                        // total free being fine while the largest block is not
-                        // is exactly how this fails, so report the real reason.
+                        // Not enough contiguous internal RAM for TLS.
                         status_set(SANDY_ST_LOW_MEMORY);
                     } else {
                         status_set(SANDY_ST_NO_SERVER);
                     }
                     net_release(NET_OWNER_VOICE);   // ws_open left no socket behind
 #if ENABLE_COMMANDS
-                    // Nothing to clean up — ws_open destroyed it all — but take
-                    // the model back so the offline command words keep working
-                    // until the next wake word.
+                    // Take the command model back until the next wake word.
                     s_mn_want = true;
 #endif
                 }
             }
         } else if (s_link_lost_ms && !s_authed) {
-            // Link down mid-call. The mic can't refresh the activity timer while
-            // it's down, so without this the idle window expires and we hang up
-            // on a conversation the user is still in the middle of. Hold the
-            // session open and let the client's auto-reconnect re-auth.
+            // Link down mid-call: hold the session within the grace window while the client re-auths.
             if ((now_ms() - s_link_lost_ms) < VOICE_RECONNECT_GRACE_MS) {
                 s_session_voice_ms = now_ms();
             } else {
@@ -2234,7 +1735,7 @@ static void voice_task(void *arg) {
 }
 
 esp_err_t voice_init(void) {
-    // 12KB: aec_create_from_config runs on this stack and goes deep.
+    // 12 KB: aec_create_from_config goes deep.
     xTaskCreate(voice_task, "voice", 12288, NULL, 5, NULL);
     return ESP_OK;
 }
@@ -2251,6 +1752,6 @@ bool voice_session_is_active(void) {
 #if ENABLE_WAKEWORD
     return s_session_active;
 #else
-    return s_authed;  // always-on build: connected means in-conversation
+    return s_authed;  // always-on build: connected = in conversation
 #endif
 }

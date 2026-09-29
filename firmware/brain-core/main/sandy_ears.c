@@ -1,9 +1,5 @@
-// Sound-direction sensing from a stereo INMP441 pair.
-//
-// Both mics sit on one I2S bus (shared SCK/WS/SD); the left mic has L/R→GND
-// (left slot) and the right mic L/R→VDD (right slot). We read both channels,
-// measure how loud each is over a short window, and glance the eyes toward the
-// louder side. Fully local — no cloud needed.
+// Sound direction from a stereo INMP441 pair on one I2S bus (left mic L/R→GND,
+// right mic L/R→VDD): glance the eyes toward the louder side.
 
 #include "sandy_ears.h"
 #include "config.h"
@@ -21,9 +17,9 @@ static const char *TAG = "ears";
 static i2s_chan_handle_t s_rx;
 
 #define FRAMES        512    // stereo frames per read (~32 ms at 16 kHz)
-#define EARS_SHIFT    12     // bring the 24-bit INMP441 sample into a sane range
-#define EARS_THRESH   2000   // mean level below this (per ch) = ambient, ignore
-#define EARS_BIAS     8      // |pan| under this = treat as centre (mic mismatch)
+#define EARS_SHIFT    12     // 24-bit sample into a sane range
+#define EARS_THRESH   2000   // per-channel mean below this = ambient
+#define EARS_BIAS     8      // |pan| below this = centre (mic mismatch)
 
 static int32_t s_buf[FRAMES * 2];
 

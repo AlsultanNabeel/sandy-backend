@@ -1,49 +1,29 @@
 #pragma once
 #include <stdbool.h>
 
-// Sandy's health surface — the one place that answers "why isn't she working?"
-//
-// The rule this enforces: **she never fails silently.** Before this existed a
-// dropped Wi-Fi link, an unreachable server and a rejected handshake all looked
-// identical from the outside — a face frozen mid-expression and no sound — so
-// the only way to tell them apart was a serial cable. Every failure now names
-// itself on her face, on the screen and (once clips are flashed) out loud.
-//
-// One writer, many readers: subsystems report what they observe via
-// status_set(); this module owns turning that into a face, an LED state, a line
-// of text and a spoken line. Subsystems must not touch the face directly for
-// error conditions — that is what let a half-finished state stay on screen.
+// Health surface: subsystems report via status_set(); this module alone turns it
+// into face, LED, text and speech, so no failure is silent.
 
 typedef enum {
     SANDY_ST_OK = 0,        // everything reachable
     SANDY_ST_BOOTING,       // still bringing subsystems up
     SANDY_ST_NO_WIFI,       // no association with the access point
     SANDY_ST_NO_SERVER,     // Wi-Fi up, the cloud is not answering
-    SANDY_ST_LINK_DROPPED,  // was connected, the link died mid-conversation
-    SANDY_ST_NET_SLOW,      // audio can't get out AND the radio link is weak
-    // Audio can't get out and the radio is fine — a different fault wearing the
-    // same symptom. Split from NET_SLOW because the old single state told the
-    // owner to move closer to the router, which is useless advice when the
-    // router is two metres away and the signal is strong: it sends them to fix
-    // the one thing that is not broken, and makes the robot look wrong about its
-    // own house.
+    SANDY_ST_LINK_DROPPED,  // connected, then died mid-conversation
+    SANDY_ST_NET_SLOW,      // audio stuck AND weak radio
+    // Audio stuck but radio is strong: a different fix than "move closer".
     SANDY_ST_LINK_STALL,
-    SANDY_ST_AUTH_FAILED,   // the server refused this device (config problem)
+    SANDY_ST_AUTH_FAILED,   // server refused this device
     SANDY_ST_LOW_MEMORY,    // not enough internal RAM to open a session
-    // The router answered and refused the password. Not "NO WI-FI": that one
-    // tells the owner to switch the router on, and the router is on.
+    // Router refused the password (distinct from NO WI-FI).
     SANDY_ST_WIFI_BAD_PASS,
     SANDY_ST_COUNT
 } sandy_status_t;
 
-// Bring up the status layer. Safe before the display exists — text is queued
-// and drawn once the face is ready.
+// Safe before the display exists; text is drawn once the face is ready.
 void status_init(void);
 
-// Report the current condition. Idempotent: re-reporting the same status does
-// not re-announce it, so a subsystem may call this on every retry without
-// making her repeat herself. Changing status always re-announces.
+// Re-reporting the same status doesn't re-announce it.
 void status_set(sandy_status_t st);
 
-// The current condition.
 sandy_status_t status_get(void);

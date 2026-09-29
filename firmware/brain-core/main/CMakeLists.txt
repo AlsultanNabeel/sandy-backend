@@ -24,10 +24,7 @@ idf_component_register(
         "sandy_status.c"
         "sandy_audio_ctl.c"
         "sandy_screen.c"
-        # Generated Arabic fonts — see fonts/README.md. Listed explicitly rather
-        # than globbed: a glob hides the fact that these are build artefacts,
-        # and this project has already been bitten once by a .c that existed,
-        # compiled clean, and was never in the build.
+        # Generated Arabic fonts (fonts/README.md), listed explicitly, not globbed.
         "fonts/sandy_font_ar_24.c"
         "fonts/sandy_font_ar_32.c"
     INCLUDE_DIRS
@@ -65,9 +62,8 @@ idf_component_register(
         esp-sr
 )
 
-# Sale build: `idf.py -B build-retail -DSANDY_RETAIL=1 build`. Shuts the LAN
-# upload/log server (see ENABLE_REMOTE in config.h). The publish script always
-# builds this way, so nothing that goes out over the air can ship with it open.
+# Retail build: `idf.py -B build-retail -DSANDY_RETAIL=1 build` closes the LAN
+# upload/log server (ENABLE_REMOTE). The publish script always builds this way.
 if(SANDY_RETAIL)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE SANDY_RETAIL=1)
 endif()

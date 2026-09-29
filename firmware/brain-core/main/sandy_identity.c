@@ -7,8 +7,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-// The retail build (the one published over the air) never sees the real
-// secrets: it compiles the example file, whose values are all placeholders.
+// The retail (OTA) build compiles the placeholder example, never real secrets.
 #if SANDY_RETAIL
 #include "secrets.example.h"
 #else
@@ -67,8 +66,7 @@ esp_err_t identity_init(void) {
     nvs_handle_t saved = 0, factory = 0;
     bool have_saved = nvs_open(ID_NS, NVS_READWRITE, &saved) == ESP_OK;
 
-    // The factory partition is optional: boards flashed before it existed, and
-    // developer boards, simply do not have one.
+    // Optional: older and developer boards have no factory partition.
     bool have_factory = false;
     if (nvs_flash_init_partition(FACTORY_PART) == ESP_OK) {
         have_factory = nvs_open_from_partition(FACTORY_PART, FACTORY_NS, NVS_READONLY,
@@ -95,9 +93,7 @@ esp_err_t identity_init(void) {
     if (have_factory) nvs_close(factory);
 
     derive_node_id(s_id.pair_code, s_id.node_id, sizeof(s_id.node_id));
-    // The voice socket identifies the robot by the same id as its topics. A
-    // separate value that drifted (a model name, a typo) made every session
-    // anonymous — so when none is given, it *is* the node id.
+    // Defaults to the node id: a drifting device id made voice sessions anonymous.
     if (!s_id.device_id[0]) snprintf(s_id.device_id, sizeof(s_id.device_id), "%s", s_id.node_id);
     if (strcmp(s_id.device_id, s_id.node_id) != 0) {
         ESP_LOGW(TAG, "device id %s differs from node id %s — the voice link will not "
@@ -121,7 +117,7 @@ esp_err_t identity_save(void) {
     nvs_handle_t h;
     esp_err_t e = nvs_open(ID_NS, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
-    // The Wi-Fi is the owner's, not the robot's: a reset forgets it.
+    // The owner's Wi-Fi is forgotten on reset.
     const struct { const char *key; const char *val; } rows[] = {
         {"pair", s_id.pair_code}, {"dev", s_id.device_id}, {"mqtt", s_id.mqtt_uri},
         {"mu", s_id.mqtt_user},   {"mp", s_id.mqtt_pass},  {"voice", s_id.voice_uri},

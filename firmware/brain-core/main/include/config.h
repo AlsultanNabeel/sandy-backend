@@ -1,9 +1,7 @@
 #pragma once
 
-// ─── Feature flags (bring-up toggles) ──────────────────────────────────────────
-// 1 = subsystem enabled, 0 = skipped at boot. Bring the robot up one piece at a
-// time: leave only what you've wired set to 1, reflash, test, then enable the
-// next. WIFI gates the cloud parts (MQTT / OTA / voice) — they need it.
+// ─── Feature flags ───
+// 1 = enabled at boot. WIFI gates MQTT / OTA / voice.
 #define ENABLE_WIFI     1
 #define ENABLE_FACE     1   // ST7789 display
 #define ENABLE_SERVO    1
@@ -12,69 +10,30 @@
 #define ENABLE_MOTORS   0
 #define ENABLE_TOUCH    0
 #define ENABLE_MIC      0   // MAX9814 clap mic
-#define ENABLE_EARS     0   // stereo sound-direction (temp off; merging into VOICE next)
-#define ENABLE_OTA      1   // needs WIFI — pulls signed releases from the server (sandy_ota.c)
-#define ENABLE_MQTT     1   // needs WIFI — cloud body control (mood/servo/buzzer/base)
+#define ENABLE_EARS     0   // stereo sound direction (off for now)
+#define ENABLE_OTA      1   // needs WIFI — signed releases from the server
+#define ENABLE_MQTT     1   // needs WIFI — cloud body control
 #define ENABLE_VOICE    1   // needs WIFI
-#define ENABLE_WAKEWORD 1   // local WakeNet gate for the voice session (needs VOICE)
-// نموذج الأوامر المحلية (MultiNet) — مطفي بقرار، والسبب يستاهل يتكتب.
-//
-// كان بياخد حوالي ٥٨ كيلو من الرام الداخلية. والداخلية ٢٢٧ كيلو كلها، وبتنزل
-// لـ ٢٦ بعد ما الواي فاي وكلمة الإيقاظ ياخدوا نصيبهم — فالنموذج لحاله كان
-// بياكل أكتر من نصف اللي بيضل. ولما التشفير طلب بضع مئات بايت بنص مكالمة، ما
-// لقي: `esp-aes: Failed to allocate memory`.
-//
-// وعشان ما بيسع مع وصلة الصوت، كان لازم ينفرّغ كل مكالمة ويترجّع بعدها. هاد
-// أخّر فتح كل جلسة، وطبع خطأ أحمر كل مرّة.
-//
-// واللي كان بيشتريه بهاد الثمن: خمستعش عبارة إنجليزية ثابتة زي
-// "SANDY TURN ON THE LIGHT". المالك بيحكي عربي، والتطبيق بيعمل نفس الإشي بضغطة.
-//
-// كلمة الإيقاظ نموذج تاني وأصغر بكتير، وضلّت شغّالة — الفرق إنه بعد ما تصحيها
-// بتحكي معها بدل ما تقول عبارة محفوظة.
-//
-// الكود كله محروس بهاي الراية ومكانه، فرجعتها لواحد بترجّع الميزة كاملة.
+#define ENABLE_WAKEWORD 1   // local WakeNet gate for voice (needs VOICE)
+// أوامر MultiNet المحلية مطفية: كانت تاخد ~٥٨ كيلو من الرام الداخلية وتسبب
+// `esp-aes: Failed to allocate memory` بنص المكالمة. رجّعها لـ 1 بترجع الميزة كاملة.
 #define ENABLE_COMMANDS 0   // local MultiNet "Sandy ..." command words (needs WAKEWORD)
-#define ENABLE_SPK_TEST 0   // temporary: triple-beep to verify amp + speaker
-// Dev only: unauthenticated image upload + log stream on the LAN. Anyone on the
-// same Wi-Fi can flash the board while this is on. Sold robots update through
-// ENABLE_OTA instead.
-//
-// نسخة البيع بتسكّره لحالها. ملف النشر بيبني بمجلد منفصل مع SANDY_RETAIL=1
-// (`idf.py -B build-retail -DSANDY_RETAIL=1 build`)، فأي نسخة بتنزل بالتحديث
-// عن بعد مستحيل تطلع وهو مفتوح — ما في إشي لازم حدا يتذكّره قبل البيع. بناء
-// التطوير العادي (`idf.py build`) بيضل زي ما هو.
+#define ENABLE_SPK_TEST 0   // triple-beep amp + speaker check
+// Dev only: unauthenticated image upload + log stream on the LAN.
+// نسخة البيع (-DSANDY_RETAIL=1، اللي بيبنيها ملف النشر) بتسكّره لحالها.
 #if defined(SANDY_RETAIL) && SANDY_RETAIL
 #define ENABLE_REMOTE   0
 #else
-#define ENABLE_REMOTE   1   // cable-free dev: OTA upload + serial log over WiFi (needs WIFI)
+#define ENABLE_REMOTE   1   // OTA upload + serial log over WiFi (needs WIFI)
 #endif
-// تزويد الشبكة من نقطة وصول اللوح نفسه — أول تشغيل، وتبديل راوتر.
-//
-// بدونه اسم الشبكة وكلمة سرّها محروقين بالكود، وكل زبون بده تعديل ملف وترجمة
-// وحرق من عندك لبيته. وما إله أي جواب للحالة العادية: حدا غيّر راوتره. الكود
-// القديم كان بيعيد المحاولة ع شبكة ميتة للأبد وبصمت.
 #define ENABLE_PROVISION 1  // needs WIFI — SoftAP setup page when no network answers
-// كم يستنى قبل ما يطلّع شبكته. طويل بقصد: شبكة بتتأخر دقيقة بالصبح شي عادي،
-// وروبوت بيدخل وضع التزويد كل ما الراوتر يتأخر أسوأ من واحد ما بيدخله أبدًا.
-// وكمان بيخلّي خادم الرفع اللاسلكي (بيستنى ستين ثانية لعنوان) يفضّي المنفذ.
+// طويل بقصد: الراوتر ممكن يتأخر دقيقة بالصبح، والتزويد ما لازم يشتغل عالفاضي.
 #define PROVISION_WINDOW_MS  90000
-// الأشعة تحت الحمراء — تعلّم وإعادة إرسال.
-//
-// أرخص ميزة بالجهاز وأكبرها أثرًا: مستقبل وليد بدولار ونص بيخلّوا كل ريموت
-// بالغرفة إشي بتقدر تكبسه — التلفزيون والمكيّف والمروحة. بلا مرحّلات، وبلا
-// تمديد ع الكهربا، وبلا لوح تاني. نص الخادم جاهز من زمان وكان مستني هالنص.
 #define ENABLE_IR       1   // needs MQTT — IR learn + replay over RMT
-#define ENABLE_LED      1   // on-board WS2812: idle blue / listening white / talking amber
+#define ENABLE_LED      1   // on-board WS2812 status LED
 
-// ─── GPIO Pins ────────────────────────────────────────────────────────────────
-// Mapped for the ESP32-S3-DevKitC-1 / N16R8 (verified against the board's
-// broken-out header). Reserved pins that are NOT used here:
-//   33-37  → Octal PSRAM on the N16R8 (35/36/37 are on the header but off-limits)
-//   0/3/45/46 → strapping pins
-//   43/44  → UART0 console (TX/RX)
-//   19/20  → native USB D-/D+
-//   48     → on-board RGB LED (PIN_W2812 below)
+// ─── GPIO Pins (ESP32-S3-DevKitC-1 N16R8) ───
+// Do not use: 33-37 octal PSRAM, 0/3/45/46 strapping, 43/44 UART0, 19/20 USB, 48 RGB LED.
 
 // Servo (neck) — SG90 via LEDC PWM
 #define PIN_SERVO               16
@@ -92,25 +51,21 @@
 #define PIN_MOTOR_IN3           12
 #define PIN_MOTOR_IN4           47
 
-// MAX9814 analog mic (clap detection) — ADC1 CH3 = GPIO4 on the S3.
-// Separate from the INMP441 voice mic below; this one only watches for claps.
+// MAX9814 analog mic for clap detection (ADC1 CH3), separate from the INMP441.
 #define PIN_MIC_ADC             4
 #define MIC_ADC_CHANNEL         ADC_CHANNEL_3   // GPIO4 = ADC1_CH3 on S3
 
 // TTP223 capacitive touch
 #define PIN_TOUCH               14
 
-// WS2812 RGB LED — on-board on the DevKitC-1 N16R8 (GPIO48).
+// WS2812 RGB LED, on-board.
 #define PIN_W2812               48
 
-// الأشعة تحت الحمراء. أرجل حرّة ع رأس اللوح، وبعيدة عن أرجل الإقلاع الحسّاسة
-// وعن أرجل اليو إس بي — الليد بتنكتب وقت الإقلاع، ورِجل إقلاع بتخلّي اللوح
-// يقلع بوضع غلط أو ما يقلع.
+// أرجل بعيدة عن أرجل الإقلاع واليو إس بي: رِجل إقلاع بتخرّب الإقلاع.
 #define PIN_IR_TX               21   // IR LED (through a transistor, not direct)
 #define PIN_IR_RX               38   // VS1838B / TSOP38238 data
 
-// ST7789 240×240 display — SPI. Any GPIO works via the S3 GPIO matrix; these
-// stay clear of the PSRAM/strapping/USB pins above.
+// ST7789 240×240 display over SPI, clear of the reserved pins above.
 #define PIN_TFT_MOSI            40
 #define PIN_TFT_SCLK            41
 #define PIN_TFT_CS              39
@@ -120,151 +75,103 @@
 #define TFT_WIDTH               240
 #define TFT_HEIGHT              240
 
-// ─── LEDC ─────────────────────────────────────────────────────────────────────
+// ─── LEDC ───
 #define LEDC_CH_SERVO           LEDC_CHANNEL_0
 #define LEDC_CH_BUZZER          LEDC_CHANNEL_1
 #define LEDC_TIMER_SERVO        LEDC_TIMER_0
 #define LEDC_TIMER_BUZZER       LEDC_TIMER_1
 
-// ─── Servo ────────────────────────────────────────────────────────────────────
+// ─── Servo ───
 #define SERVO_FREQ_HZ           50
 #define SERVO_RESOLUTION        LEDC_TIMER_14_BIT
 #define SERVO_MIN_US            500             // pulse width at 0°
 #define SERVO_MAX_US            2500            // pulse width at 180°
-// The neck's own travel, not the servo's: at the ends of 0..180 the head hits
-// the body and the servo stalls against it — hot, loud, and pulling current the
-// voice path needs. Gestures are offsets from wherever she looks (±55 at most),
-// so 20..160 keeps every one of them inside the range with room to spare.
-// Tune to the build: the smallest angle that does not touch, and the largest.
+// The neck's travel: past these the head hits the body and the servo stalls.
+// Gestures are ±55 at most, so 20..160 keeps them inside. Tune per build.
 #define SERVO_SAFE_MIN          20
 #define SERVO_SAFE_MAX          160
-// Pulses stop this long after the neck comes to rest. A held servo hums, jitters
-// on every noisy pulse and draws current for nothing; the gearing holds the head.
+// Stop pulses after the neck rests: a held servo hums and draws current; gearing holds it.
 #define SERVO_RELAX_MS          700
 #define SERVO_DEFAULT_POS       90
 
-// ─── HC-SR04 ─────────────────────────────────────────────────────────────────
+// ─── HC-SR04 ───
 #define SENSOR_TIMEOUT_US       6000            // ~1 m max
 #define SENSOR_MEDIAN_N         3
 #define SENSOR_POLL_MS          200
 
-// ─── Buzzer ───────────────────────────────────────────────────────────────────
+// ─── Buzzer ───
 #define BUZZER_RESOLUTION       LEDC_TIMER_10_BIT
 #define BUZZER_VOLUME           512             // 50% of 10-bit
 
-// ─── Motor watchdog ───────────────────────────────────────────────────────────
+// ─── Motor watchdog ───
 #define MOTOR_WATCHDOG_MS       3000
 
-// ─── Mic (clap detection) ─────────────────────────────────────────────────────
+// ─── Mic (clap detection) ───
 #define MIC_SAMPLE_PERIOD_MS    5               // 200 Hz
 #define MIC_CLAP_THRESHOLD      2200
 #define MIC_CLAP_COOLDOWN_MS    1500
 
-// ─── Touch ────────────────────────────────────────────────────────────────────
+// ─── Touch ───
 #define TOUCH_DEBOUNCE_MS       80
 
-// ─── MQTT ─────────────────────────────────────────────────────────────────────
+// ─── MQTT ───
 #define MQTT_STATUS_INTERVAL_MS 5000
 
-// Reported in every heartbeat. Bump it with each flash: without it, "did that
-// fix actually reach the board?" is a question nobody can answer from the app,
-// and today that question cost an afternoon.
+// Reported in every heartbeat. Bump with each flash.
 #define SANDY_FW_VERSION "0.10.0"
 
-// Which board this is. Three ESP boards share the house network and take three
-// different binaries that are not interchangeable:
-//
-//   sandy-brain-s3   ESP32-S3    this project (ESP-IDF)   — voice, face, servo
-//   sandy-room-node  ESP32       sandy/ (Arduino)         — lights, fan, IR
-//   sandy-cam        ESP32-CAM   vision-core/ (Arduino)   — the camera
-//
-// The flash script requires this exact string from the board's own page before
-// it sends a binary. Sending the wrong image is not a mistake anyone notices
-// until the board stops booting.
+// The flash script checks this against the board before sending a binary:
+// sandy-brain-s3 (this), sandy-room-node, sandy-cam are not interchangeable.
 #define SANDY_BOARD_ID "sandy-brain-s3"
 #define MQTT_RECONNECT_MS       5000
 
-// ─── Voice: I2S digital mic (INMP441) ──────────────────────────────────────────
+// ─── Voice: I2S digital mic (INMP441) ───
 #define PIN_I2S_MIC_SCK         5       // BCLK / SCK
 #define PIN_I2S_MIC_WS          6       // LRCL / WS
 #define PIN_I2S_MIC_SD          7       // DOUT (mic data into the S3)
 
-// ─── Voice: I2S amplifier + speaker (MAX98357) ──────────────────────────────────
+// ─── Voice: I2S amplifier + speaker (MAX98357) ───
 #define PIN_I2S_SPK_BCLK        9       // BCLK
 #define PIN_I2S_SPK_LRC         10      // LRC / WS
 #define PIN_I2S_SPK_DIN         11      // DIN (data from the S3 into the amp)
 
-// Gemini Live: 16 kHz audio in, 24 kHz out.
+// 16 kHz audio in, 24 kHz out.
 #define VOICE_IN_RATE           16000
 #define VOICE_OUT_RATE          24000
-// Mic gain: the mono mix is amplified ×2^(16-this) AFTER the echo canceller.
-// 12 (≈+12 dB over 14) so normal speech reaches Gemini's voice-activity
-// threshold from a comfortable distance. Capture itself always runs at full
-// headroom (>>16, clip-proof): gain at capture used to saturate the mics
-// whenever her own speaker (a few cm behind them) played, and a clipped echo
-// is nonlinear — the AEC cancelled nothing and she answered her own voice.
+// Mono mix gain ×2^(16-this), applied AFTER the echo canceller. Capture stays at
+// full headroom: gain there clipped on her own speaker and broke the AEC.
 #define VOICE_MIC_GAIN_SHIFT    12
-// Keep the mic muted this long after Sandy's last audio (avoids echo).
+// Mic muted this long after Sandy's last audio (echo).
 #define VOICE_HALF_DUPLEX_TAIL_MS  400
 
-// ─── Wake word (ESP-SR / WakeNet) ──────────────────────────────────────────────
-// Local, always-on keyword spotter that gates the cloud voice session: the
-// Gemini link only connects after the wake word and drops after silence, so we
-// don't pay for an open session while idle. Built-in model for now
-// (wn9_hiandy_tts2 "Hi Andy" — closest to "Sandy", set in sdkconfig.defaults);
-// a custom-trained "Sandy" model swaps in later without touching this code.
-// Close the session (disconnect Gemini) after this long with no speech.
+// ─── Wake word (ESP-SR WakeNet) ───
+// Gates the cloud session (model set in sdkconfig.defaults).
+// Close the session after this long with no speech.
 #define VOICE_SESSION_IDLE_MS      8000
-// How long a mid-call link drop is allowed to take before we give up on the
-// conversation. One stalled socket write kills the connection; the client
-// reconnects in ~5s, so this has to be comfortably longer than that.
+// Allowed time for a mid-call reconnect (~5 s) before giving up the conversation.
 #define VOICE_RECONNECT_GRACE_MS   15000
-// Mic level (avg abs sample/frame) above which the user counts as still
-// talking, to hold the session open. Must sit ABOVE the room's ambient floor
-// (seen ~400-1000 on the diag log) or background noise keeps the session from
-// ever closing; real speech runs 2500+. Tune with the `diag mic=` log.
-// Speech loud enough to count as "the user is still in this conversation". Kept
-// equal to VOICE_DUPLEX_GATE_LEVEL on purpose: that gate already decides what is
-// a human talking, and when this one sat higher, a normal speaking voice failed
-// it and the session hung up mid-sentence while his words were still streaming.
+// Level that counts as "still talking" and holds the session open. Keep equal to
+// VOICE_DUPLEX_GATE_LEVEL: higher hung up on normal speech. Tune with `diag mic=`.
 #define VOICE_SESSION_VAD_LEVEL    1500
 
-// With nothing happening for this long, the face drifts off to sleep
-// (MOOD_SLEEPY). Any interaction — wake word, proximity, a cloud mood —
-// wakes her instantly.
+// Idle this long → MOOD_SLEEPY; any interaction wakes her.
 #define FACE_SLEEP_AFTER_MS     (5 * 60 * 1000)
 
-// Turn-toward-sound: on the wake word, point the neck at whoever called.
-// Direction comes from the left/right mic energy balance of the wake
-// utterance itself. Tune with the `ears:` log line.
+// On the wake word, turn the neck toward the louder mic. Tune with the `ears:` log.
 #define VOICE_EARS_SWING           35   // max degrees off center (90)
 #define VOICE_EARS_INVERT          1    // set 1 if she turns the wrong way
 
-// ─── Acoustic echo cancellation (esp-sr AEC) ──────────────────────────────────
-// Subtract Sandy's own speaker audio from the mic signal so she hears the user
-// even while she's talking — this is what makes natural barge-in possible.
+// ─── Echo cancellation (esp-sr AEC) ───
 #define VOICE_AEC_ENABLE           1
 #define VOICE_AEC_FILTER_LEN       4    // adaptive filter blocks (esp-sr recommends 4)
-// The captured reference leads the acoustic echo by roughly the TX DMA depth
-// (~60ms of audio sits in hardware before the amp plays it), so playback
-// starts by pre-filling this much silence into the reference queue.
+// The reference leads the real echo by the TX DMA depth (~60 ms), so pre-fill that much silence.
 #define VOICE_AEC_REF_DELAY_MS     60
-// 1 = the mic keeps streaming to the cloud while she talks (full duplex —
-//     talk over her and Gemini interrupts itself). Falls back to half-duplex
-//     automatically if the AEC engine failed to start.
-// 0 = half-duplex: mute the mic while she talks. The AEC residual was still
-//     leaking her own voice back up, so she'd hear herself and answer twice.
-//     Half-duplex kills the echo/double-reply for sure (cost: no barge-in —
-//     wait for her to finish). Re-enable once the speaker is physically moved
-//     away from the mics so the AEC has less echo to cancel.
+// 1 = full duplex (barge-in; falls back to half if AEC fails to start).
+// 0 = mute the mic while she talks: the AEC residual made her answer herself.
+// Re-enable once the speaker is moved away from the mics.
 #define VOICE_AEC_FULL_DUPLEX      0
-// While she talks, mic frames only go to the cloud above this (cleaned)
-// level — the AEC residual sits low, a real interrupting voice doesn't.
-// The final guard against her answering her own echo. Tune with `diag mic=`
-// readings taken while she speaks.
+// While she talks, frames go up only above this cleaned level (echo residual stays below).
 #define VOICE_DUPLEX_GATE_LEVEL    1500
-// ...and only after this many consecutive over-gate batches (~33ms each):
-// a lone spike is echo residual sneaking through, a 100ms run is a human.
-// The pending batches are stashed and sent once the run qualifies, so the
-// start of the interruption still reaches Gemini.
+// ...and only after this many consecutive over-gate batches (~33 ms each); the
+// held batches are then sent so the start of the interruption isn't lost.
 #define VOICE_DUPLEX_GATE_RUN      3
