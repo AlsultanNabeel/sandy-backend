@@ -391,3 +391,121 @@ Working features that may not be worth keeping. Nothing here was removed.
 - `SandyShareExtension/` — share sheet that sends text/links from other apps to Sandy. Lose: "Share → Sandy" from Safari and other apps.
 - `SandyAppUITests/` — Xcode template UI tests (launch + screenshot, no assertions). Lose: a launch smoke test.
 
+
+
+---
+
+# firmware/, room-node/, vision-core/ file justification
+
+Scope: `firmware/`, `room-node/`, `vision-core/` (excluding `firmware/brain-core/main/fonts/`,
+generated). C/Arduino cannot be compiled here, so no file was moved, merged or deleted and no
+code changed: only comments shrank. Every edit was checked with a script that strips comments
+and whitespace from the old and new file and requires the rest to be identical. Nothing in scope
+is unused: every brain-core .c is in `main/CMakeLists.txt` SRCS, every header is included, and
+the Arduino .ino files are all compiled together by the IDE.
+
+Totals (.c/.h/.ino/.py in scope, fonts excluded): 14188 lines before → 12029 after.
+
+file | lines before | lines after | what it does | verdict
+---|---|---|---|---
+firmware/brain-core/.gitignore | 18 | 12 | build outputs, secrets ignored | KEEP
+firmware/brain-core/CMakeLists.txt | 3 | 3 | ESP-IDF project entry point | KEEP
+firmware/brain-core/HARDWARE.md | 105 | 105 | generated pin table (gen_hardware_doc.py) | KEEP
+firmware/brain-core/WIRING.md | 87 | 87 | human wiring map | KEEP
+firmware/brain-core/dependencies.lock | 128 | 128 | component manager version pin | KEEP
+firmware/brain-core/main/CMakeLists.txt | 73 | 69 | component sources and requires | KEEP
+firmware/brain-core/main/fw_pubkey.pem | 4 | 4 | OTA signature public key | KEEP
+firmware/brain-core/main/idf_component.yml | 13 | 10 | pinned managed components | KEEP
+firmware/brain-core/main/include/config.h | 270 | 177 | feature flags, pins, tunables | KEEP
+firmware/brain-core/main/include/sandy_audio_ctl.h | 131 | 84 | mic/speaker gain, NS, sounds API | KEEP
+firmware/brain-core/main/include/sandy_buzzer.h | 6 | 6 | buzzer API | KEEP
+firmware/brain-core/main/include/sandy_ears.h | 6 | 6 | sound direction API | KEEP
+firmware/brain-core/main/include/sandy_face.h | 47 | 26 | face/display API | KEEP
+firmware/brain-core/main/include/sandy_identity.h | 48 | 32 | robot identity API | KEEP
+firmware/brain-core/main/include/sandy_ir.h | 26 | 11 | IR learn/replay API | KEEP
+firmware/brain-core/main/include/sandy_led.h | 66 | 47 | status LED API | KEEP
+firmware/brain-core/main/include/sandy_mic.h | 4 | 4 | clap mic API | KEEP
+firmware/brain-core/main/include/sandy_motors.h | 7 | 7 | motor driver API | KEEP
+firmware/brain-core/main/include/sandy_mqtt.h | 29 | 17 | MQTT publish API | KEEP
+firmware/brain-core/main/include/sandy_net_busy.h | 24 | 16 | one-TLS-session lock API | KEEP
+firmware/brain-core/main/include/sandy_nvs.h | 46 | 20 | NVS + deferred writes API | KEEP
+firmware/brain-core/main/include/sandy_ota.h | 34 | 15 | OTA + rollback API | KEEP
+firmware/brain-core/main/include/sandy_provision.h | 29 | 12 | SoftAP Wi-Fi setup API | KEEP
+firmware/brain-core/main/include/sandy_remote.h | 10 | 6 | dev OTA/log server API | KEEP
+firmware/brain-core/main/include/sandy_screen.h | 88 | 47 | owner text/image API | KEEP
+firmware/brain-core/main/include/sandy_sensor.h | 6 | 6 | ultrasonic sensor API | KEEP
+firmware/brain-core/main/include/sandy_servo.h | 43 | 31 | neck servo + gestures API | KEEP
+firmware/brain-core/main/include/sandy_spktest.h | 8 | 5 | speaker test API | KEEP
+firmware/brain-core/main/include/sandy_status.h | 49 | 29 | health status API | KEEP
+firmware/brain-core/main/include/sandy_touch.h | 4 | 4 | touch sensor API | KEEP
+firmware/brain-core/main/include/sandy_types.h | 68 | 66 | shared moods, melodies, enums | KEEP
+firmware/brain-core/main/include/sandy_voice.h | 32 | 20 | voice link API | KEEP
+firmware/brain-core/main/include/sandy_wifi.h | 60 | 37 | Wi-Fi station API | KEEP
+firmware/brain-core/main/sandy_audio_ctl.c | 307 | 285 | mic/speaker controls, noise suppression | KEEP
+firmware/brain-core/main/sandy_buzzer.c | 144 | 135 | piezo melodies task | KEEP
+firmware/brain-core/main/sandy_ears.c | 90 | 86 | stereo sound direction | ASK OWNER (see list)
+firmware/brain-core/main/sandy_face.c | 948 | 876 | LVGL animated face | KEEP
+firmware/brain-core/main/sandy_identity.c | 142 | 138 | identity from secrets/factory/NVS | KEEP
+firmware/brain-core/main/sandy_ir.c | 299 | 270 | IR learn and replay | KEEP
+firmware/brain-core/main/sandy_led.c | 296 | 266 | WS2812 privacy LED, effects | KEEP
+firmware/brain-core/main/sandy_main.c | 204 | 172 | boot sequence, app_main | KEEP
+firmware/brain-core/main/sandy_mic.c | 50 | 50 | MAX9814 clap detection | ASK OWNER (see list)
+firmware/brain-core/main/sandy_motors.c | 67 | 67 | L298N motors with watchdog | ASK OWNER (see list)
+firmware/brain-core/main/sandy_mqtt.c | 1038 | 850 | MQTT commands, heartbeat, credentials | KEEP
+firmware/brain-core/main/sandy_net_busy.c | 20 | 20 | one-TLS-session atomic lock | KEEP
+firmware/brain-core/main/sandy_nvs.c | 157 | 139 | NVS init, deferred writes | KEEP
+firmware/brain-core/main/sandy_ota.c | 534 | 486 | signed OTA pull, rollback | KEEP
+firmware/brain-core/main/sandy_provision.c | 401 | 352 | SoftAP setup page | KEEP
+firmware/brain-core/main/sandy_remote.c | 262 | 207 | dev LAN OTA + log | KEEP
+firmware/brain-core/main/sandy_screen.c | 393 | 350 | owner text/image on display | KEEP
+firmware/brain-core/main/sandy_sensor.c | 71 | 69 | HC-SR04 distance | ASK OWNER (see list)
+firmware/brain-core/main/sandy_servo.c | 236 | 214 | neck servo, gestures | KEEP
+firmware/brain-core/main/sandy_spktest.c | 87 | 86 | speaker triple-beep test | ASK OWNER (see list)
+firmware/brain-core/main/sandy_status.c | 119 | 106 | health status to face/LED | KEEP
+firmware/brain-core/main/sandy_touch.c | 38 | 38 | TTP223 head pat | ASK OWNER (see list)
+firmware/brain-core/main/sandy_voice.c | 2256 | 1757 | voice WS, wake word, AEC | KEEP
+firmware/brain-core/main/sandy_wifi.c | 404 | 338 | Wi-Fi, switch, factory reset | KEEP
+firmware/brain-core/main/secrets.example.h | 46 | 24 | secrets template, retail build input | KEEP
+firmware/brain-core/partitions.csv | 25 | 14 | flash partition table | KEEP
+firmware/brain-core/sdkconfig.defaults | 158 | 98 | ESP-IDF config defaults | KEEP
+firmware/brain-core/tools/gen_phonemes.py | 47 | 47 | MultiNet phoneme generator | ASK OWNER (see list)
+room-node/partitions.csv | 10 | 8 | flash partition table | KEEP
+room-node/room-node.ino | 586 | 544 | room node sketch: light, music | KEEP
+room-node/sandy_ca_roots.h | 113 | 113 | generated TLS roots (gen_ca_roots.py) | KEEP
+room-node/sandy_identity.h | 78 | 66 | identity in NVS (shared copy) | KEEP
+room-node/sandy_ota_pull.h | 353 | 337 | signed OTA pull (shared copy) | KEEP
+room-node/secrets.example.h | 36 | 28 | secrets template | KEEP
+vision-core/cam_capture.ino | 192 | 172 | camera init, snapshot capture | KEEP
+vision-core/cam_control.ino | 545 | 509 | flash, settings, command dispatch | KEEP
+vision-core/cam_http.ino | 265 | 227 | local MJPEG stream server | KEEP
+vision-core/cam_mqtt.ino | 386 | 314 | MQTT topics, heartbeat | KEEP
+vision-core/cam_ota.ino | 102 | 80 | dev OTA + telnet | KEEP
+vision-core/cam_upload.ino | 416 | 339 | signed HTTPS upload, remote stream | KEEP
+vision-core/cam_wifi.ino | 191 | 167 | Wi-Fi, network switch | KEEP
+vision-core/config.h | 200 | 153 | pins, topics, tunables | KEEP
+vision-core/partitions.csv | 11 | 8 | flash partition table | KEEP
+vision-core/sandy_ca_roots.h | 113 | 113 | generated TLS roots (gen_ca_roots.py) | KEEP
+vision-core/sandy_identity.h | 78 | 66 | identity in NVS (shared copy) | KEEP
+vision-core/sandy_ota_pull.h | 353 | 337 | signed OTA pull (shared copy) | KEEP
+vision-core/secrets.example.h | 43 | 31 | secrets template | KEEP
+vision-core/vision-core.ino | 341 | 274 | globals, setup, loop | KEEP
+firmware/brain-core/main/fonts/ (3 files) | 18313 | 18313 | generated Arabic LVGL fonts | SKIPPED: generated font data
+
+## firmware ASK OWNER
+
+Working code that is compiled in but switched off in `config.h`. Nothing was removed.
+
+- `sandy_sensor.c` (ENABLE_SENSOR=0) — HC-SR04 "look surprised when something is close". Lose: proximity reaction (part isn't fitted).
+- `sandy_motors.c` (ENABLE_MOTORS=0) — L298N drive with a watchdog. Lose: the MQTT `base` motor commands.
+- `sandy_touch.c` (ENABLE_TOUCH=0) — TTP223 head pat → happy face + melody. Lose: the head-pat reaction.
+- `sandy_mic.c` (ENABLE_MIC=0) — MAX9814 clap detection. Lose: clap reactions (the INMP441 voice mics are separate).
+- `sandy_ears.c` (ENABLE_EARS=0) — standalone stereo sound direction; the voice path already turns toward the caller. Lose: eye glances toward sounds outside a conversation.
+- `sandy_spktest.c` (ENABLE_SPK_TEST=0) — bring-up triple beep. Lose: a boot-time speaker wiring check (the `spk_play` sounds over MQTT remain).
+- MultiNet command words (ENABLE_COMMANDS=0: the `SANDY_COMMANDS` block in `sandy_voice.c`, `tools/gen_phonemes.py`, `CONFIG_SR_MN_*` in sdkconfig.defaults) — offline English "Sandy turn on the light". Off because it cost ~58 KB internal RAM. Lose: offline English room commands.
+
+## firmware left alone (unsure / by design)
+
+- `room-node/` and `vision-core/` each carry identical `sandy_identity.h`, `sandy_ota_pull.h`, `sandy_ca_roots.h`: Arduino sketches only see their own folder, and `tests/` checks the copies match. Merging needs a shared Arduino library; left for the owner.
+- `sandy_ca_roots.h`, `HARDWARE.md`, `dependencies.lock`: generated; not hand-edited (HARDWARE.md was regenerated because it quotes config.h comments).
+- `WIRING.md`, `firmware/brain-core/tools/gen_phonemes.py` docstring: documentation, kept as is.
+- Tiny per-module headers (`sandy_mic.h`, `sandy_touch.h`, …, 4–8 lines): conventional one header per module; not worth a merge that can't be compiled here.
