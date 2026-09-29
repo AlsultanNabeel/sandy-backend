@@ -125,6 +125,7 @@ package import in a test with no credentials. Do not add import-time side effect
 | `app/integrations/` | Clients for everything external. |
 | `app/services/` | Push delivery (APNs), the nudge scheduler, and the scene-timer runner (once a minute). |
 | `app/utils/` | Tenancy (+ `tenant_version`), circuit breaker, background thread pool, profiles, time, text. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
+| `app/blocks/` | Phase 1 of the rebuild, not wired in yet — log / lists / schedules + the kinds table (§2.12). |
 
 ### 2.3 The agent graph
 
@@ -533,6 +534,36 @@ owner's machine, not in a sandbox.
 
 **Where a chat turn's time goes** is one log line: `[turn] …ms total — route ·
 soul · <node> (<tool>)`, from `run_graph`. Grep it before theorising.
+
+### 2.12 `app/blocks/` — Phase 1 of the rebuild: not wired in yet
+
+Nothing imports this package outside its own tests and the migration script; the
+agent, tools, API, voice path and bootstrap still use the feature stores above.
+It is the replacement for them: every feature becomes a row in one of three
+collections instead of its own store + tools + routes.
+
+| Module | Collection | Holds |
+|---|---|---|
+| `blocks/entries.py` | `sandy_entries` | LOG — what happened or what Sandy learned: `{kind, text, data, at, source, embedding, migrated_from}` |
+| `blocks/items.py` | `sandy_items` | LISTS — anything ticked off: `{list, text, done, due, priority, data, created_at, done_at, migrated_from}` |
+| `blocks/schedules.py` | `sandy_schedules` | SCHEDULES — anything that fires: `{kind, text, fire_at, recurrence (RRULE), payload, status, migrated_from}` |
+| `blocks/kinds.py` | — | The kinds table: every log kind, list and schedule kind with labels, SF Symbol and typed `data` fields. `validate()` refuses an unknown kind or an undeclared/mistyped field. A `project:` row matches any `project:<name>` list. |
+
+Each module is add / get / update / delete / list with filters (kind or list,
+date range, done/status, text). Access goes through `scoped()` (§2.6) on
+`user_id`; no tenant → empty result, nothing written. `init_blocks(db)` creates
+the indexes on the raw handle (tenant-first). `entries.embed_text` is the one
+door to an embedding: it reuses `semantic_memory._embed`, so no key → `null`.
+
+**Adding a feature is adding a row to `kinds.KINDS`.** Nothing else should need
+to change once Phase 2 wires the blocks in.
+
+`scripts/migrate_to_blocks.py` copies the old stores in: dry run by default
+(counts per source and per target, three sample docs per source), `--apply` to
+write, `--user <id>` for one tenant. Every written doc has `migrated_from:
+{collection, id}` and an `_id` derived from it, so a re-run skips what is
+already there. It only reads the old collections. The mapping table is in its
+`SOURCES`; its docstring lists what is deliberately not migrated.
 
 ---
 
