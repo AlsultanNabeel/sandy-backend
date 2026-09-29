@@ -139,8 +139,8 @@ def test_every_request_builder_goes_through_the_retry():
     assert "APIClient.session.bytes(for: req)" in chat
     # The comment right above the stream call must still say why it skips the retry.
     lines = chat.splitlines()
-    at = next(i for i, l in enumerate(lines) if "APIClient.session.bytes(for: req)" in l)
-    above = " ".join(l for l in lines[max(0, at - 3):at] if l.strip().startswith("//"))
+    at = next(i for i, line in enumerate(lines) if "APIClient.session.bytes(for: req)" in line)
+    above = " ".join(line for line in lines[max(0, at - 3):at] if line.strip().startswith("//"))
     assert "retry" in above.lower(), "the exception lost its reason"
 
 
