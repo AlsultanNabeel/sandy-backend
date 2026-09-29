@@ -137,7 +137,11 @@ def test_every_request_builder_goes_through_the_retry():
 
     chat = (IOS / "Core/Networking/APIClient+Chat.swift").read_text(encoding="utf-8")
     assert "APIClient.session.bytes(for: req)" in chat
-    assert "No retry on a stream" in chat, "the exception lost its reason"
+    # The comment right above the stream call must still say why it skips the retry.
+    lines = chat.splitlines()
+    at = next(i for i, l in enumerate(lines) if "APIClient.session.bytes(for: req)" in l)
+    above = " ".join(l for l in lines[max(0, at - 3):at] if l.strip().startswith("//"))
+    assert "retry" in above.lower(), "the exception lost its reason"
 
 
 def test_a_cancelled_chat_send_is_not_reported_as_a_network_failure():
