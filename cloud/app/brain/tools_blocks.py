@@ -112,10 +112,28 @@ def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:
     return kind, list_name, " ".join(rest)
 
 
+def _route(kind: Optional[str], list_name: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Put a name in the slot it belongs to: the model sends kind="tasks" as often
+    as list="tasks", and an alias («مهام») as often as the name."""
+    for name in (kind, list_name):
+        if not name:
+            continue
+        row = by_alias(_task_match_key(name))
+        if row is None and not get_kind(LIST, name) and not get_kind(LOG, name) \
+                and not get_kind(SCHEDULE, name):
+            continue
+        if row is None:
+            if get_kind(LIST, name) and not (name == kind and (
+                    get_kind(LOG, name) or get_kind(SCHEDULE, name))):
+                return None, name
+            return name, None
+        return (None, row.name) if row.block == LIST else (row.name, None)
+    return kind, list_name
+
+
 def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     query = str(args.get("query") or "")
-    kind = str(args.get("kind") or "") or None
-    list_name = _list_name(args) or None
+    kind, list_name = _route(str(args.get("kind") or "") or None, _list_name(args) or None)
     if kind is None and list_name is None:
         kind, list_name, query = _alias_filters(query)
     since = W.parse_bound(args.get("since"))

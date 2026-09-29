@@ -116,3 +116,18 @@ def test_a_new_request_instead_of_a_choice_drops_the_question(two_milks):
     model = ScriptedModel()
     state = _turn(model, "شو الطقس اليوم؟", asked["pending_state"])
     assert state["pending_state"] is None and len(model.seen) == 1
+
+
+# Second live test: the model sent kind="tasks" (a list) and got nothing back.
+@pytest.mark.parametrize("args", [{"kind": "tasks"}, {"list": "tasks"}, {"kind": "مهام"},
+                                  {"list": "المهام"}])
+def test_recall_finds_a_list_whichever_slot_names_it(db, args):
+    with active_user_profile_context(A):
+        items.add("tasks", "تقرير المشروع")
+    assert [r["text"] for r in _run("recall", **args)["rows"]] == ["تقرير المشروع"]
+
+
+def test_recall_finds_a_log_kind_sent_as_a_list(db):
+    with active_user_profile_context(A):
+        entries.add("expense", "غدا", {"amount": 50.0}, embed=False)
+    assert _run("recall", list="expense")["rows"][0]["kind"] == "expense"
