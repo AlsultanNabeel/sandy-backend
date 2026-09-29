@@ -191,6 +191,13 @@ def m_user_fact(d, ctx, uid) -> Mapped:
         "at": _dt(d.get("created_at"))}
 
 
+def m_labeled_fact(d, ctx, uid) -> Mapped:
+    """Free-form labels Sandy made up on the fly ("عائلة", "تفضيلات"...): facts, label kept."""
+    return "fact", _s(d.get("content")), {
+        "subtype": "labeled", "category": _s(d.get("label"))}, {
+        "at": _dt(d.get("created_at"))}
+
+
 def m_emotional(d, ctx, uid) -> Mapped:
     return "mood", _s(d.get("topic")), {
         "mood": _s(d.get("mood")), "encrypted": _enc(d.get("topic"))}, {
@@ -293,6 +300,8 @@ class Source:
     @property
     def key(self) -> str:
         label = self.query.get("label") or self.query.get("status")
+        if isinstance(label, dict):
+            label = "other labels"
         return f"{self.collection}[{label}]" if label else self.collection
 
 
@@ -320,14 +329,17 @@ SOURCES: Tuple[Source, ...] = (
     _mem("interest", m_interest),
     _mem("milestone", m_milestone),
     _mem("conversation_summary", m_summary),
+    # Every other label, so a memory under a label nobody planned for is never dropped.
+    Source("sandy_memories", "chat_id", LOG, m_labeled_fact,
+           {"label": {"$nin": ["user_fact", "emotional_memory", "style_memory",
+                               "lesson_learned", "relationship", "interest",
+                               "milestone", "conversation_summary"]}}),
     Source("sandy_photos", "chat_id", LOG, m_photo),
     Source("sandy_reminders", "user_id", SCHEDULE, m_reminder),
     Source("sandy_future_messages", "chat_id", SCHEDULE, m_future_message),
     Source("sandy_scene_timers", "user_id", SCHEDULE, m_scene_timer),
     Source("sandy_daily_nudge", "user_id", SCHEDULE, m_daily_nudge),
 )
-
-_MEMORY_LABELS = {s.query["label"] for s in SOURCES if s.collection == "sandy_memories"}
 
 
 @dataclass
@@ -339,7 +351,6 @@ class Report:
     targets: Counter = field(default_factory=Counter)
     samples: Dict[str, List[Dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
     errors: List[str] = field(default_factory=list)
-    unmapped_labels: Counter = field(default_factory=Counter)
 
 
 def _check(block: str, name: str, data: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -408,10 +419,6 @@ def run(mongo_db, *, apply: bool = False, user: Optional[str] = None) -> Report:
         for uid in _tenants(mongo_db, src, user):
             with active_user_profile_context({"chat_id": uid}):
                 _migrate_source(mongo_db, src, uid, apply, ctx, report)
-    labels = mongo_db["sandy_memories"].distinct("label", {"chat_id": user} if user else {})
-    for label in labels:
-        if label not in _MEMORY_LABELS:
-            report.unmapped_labels[str(label)] += 1
     return report
 
 
@@ -425,8 +432,6 @@ def print_report(report: Report, apply: bool) -> None:
     print("\nPer target (new docs):")
     for key, n in sorted(report.targets.items()):
         print(f"  {key:40} {n:6}")
-    if report.unmapped_labels:
-        print("\nsandy_memories labels not migrated:", ", ".join(sorted(report.unmapped_labels)))
     for line in report.errors[:50]:
         print("  invalid:", line)
     print("\nSamples:")

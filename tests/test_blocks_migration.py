@@ -52,6 +52,7 @@ def _seed(d, uid):
                                          "start_page": 10, "end_page": 50, "state": "done"})
     d.sandy_memories.insert_many([
         {**c, "label": "user_fact", "category": "food", "content": "likes tea", "created_at": _T},
+        {**c, "label": "عائلة", "content": "has two brothers", "created_at": _T},
         {**c, "user_id": uid, "label": "emotional_memory", "mood": "happy",
          "topic": "enc:abc", "created_at": _T},
         {**c, "user_id": uid, "label": "style_memory", "preference": "short replies",
@@ -89,7 +90,7 @@ _PER_TENANT = {
     "sandy_items:tasks": 2, "sandy_items:shopping": 1, "sandy_items:goals": 1,
     "sandy_items:reading": 1, "sandy_items:habits": 1, "sandy_items:plans": 1,
     "sandy_entries:habit": 1, "sandy_entries:expense": 1, "sandy_entries:journal": 1,
-    "sandy_entries:reading": 1, "sandy_entries:fact": 6, "sandy_entries:mood": 1,
+    "sandy_entries:reading": 1, "sandy_entries:fact": 7, "sandy_entries:mood": 1,
     "sandy_entries:summary": 1, "sandy_entries:photo": 1,
     "sandy_schedules:reminder": 1, "sandy_schedules:message_to_future_self": 1,
     "sandy_schedules:scene": 1, "sandy_schedules:daily_nudge": 1,
@@ -104,7 +105,6 @@ def db():
     appdb.configure(d)
     _seed(d, "u1")
     _seed(d, "u2")
-    d.sandy_memories.insert_one({"chat_id": "u1", "label": "gift_note", "x": 1})
     yield d
     appdb.reset()
 
@@ -133,7 +133,6 @@ def test_dry_run_writes_nothing_and_counts_everything(db):
     assert dict(report.targets) == {k: 2 * v for k, v in _PER_TENANT.items()}
     assert sum(report.invalid.values()) == 0, report.errors
     assert all(1 <= len(v) <= 3 for v in report.samples.values())
-    assert set(report.unmapped_labels) == {"gift_note"}
 
 
 def test_apply_writes_the_right_counts_and_shapes(db):
