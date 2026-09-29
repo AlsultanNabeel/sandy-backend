@@ -1,14 +1,6 @@
-// Showing the owner's text or picture on Sandy's display.
-// Contract and reasoning: include/sandy_screen.h
-//
-// Threading, which is the only subtle part:
-//
-// LVGL is not thread-safe and every object here belongs to the LVGL task. So
-// nothing in this file touches an LVGL object from a caller's thread. MQTT (or
-// anything else) writes plain state under a mutex and sets a dirty flag;
-// `screen_lvgl_tick()`, which sandy_face runs from an LVGL timer, is the only
-// code that draws. Same shape as the status banner next door — one rule for the
-// whole display instead of two.
+// Owner's text or picture on the display (see sandy_screen.h).
+// LVGL isn't thread-safe: callers set state under a mutex, and only
+// screen_lvgl_tick() (on the LVGL task) draws.
 
 #include "config.h"
 #if ENABLE_FACE
@@ -28,7 +20,7 @@ static const char *TAG = "screen";
 #define MAX_CHUNKS  64
 #define TEXT_MAX    256
 
-// ── State written by callers, read by the LVGL task ──────────────────────────
+// ── State written by callers, read by the LVGL task ──
 static SemaphoreHandle_t s_lock;
 
 static char     s_text[TEXT_MAX];
@@ -37,20 +29,13 @@ static bool     s_want_image;
 static bool     s_want_dismiss;
 static bool     s_want_qr;
 static char     s_qr_payload[128];
-static lv_obj_t *s_qr;          // built on first use; most robots never need it
+static lv_obj_t *s_qr;          // built on first use
 static lv_obj_t *s_qr_caption;
 static bool     s_dirty;
 static bool     s_showing;
 
-// ── Text size ────────────────────────────────────────────────────────────────
-//
-// LVGL ships exactly one font with Arabic glyphs, at sixteen pixels. So the
-// other two are generated from the same typeface at build time and live in
-// main/fonts — see the README there for how and why.
-//
-// This mattered more than it looks. A "size" control that changed a number and
-// not the letters would be worse than no control at all: it would appear to
-// work. Three sizes that are visibly three sizes is the whole feature.
+// ── Text size ──
+// LVGL's only Arabic font is 16 px; the other sizes are generated (main/fonts).
 LV_FONT_DECLARE(sandy_font_ar_24);
 LV_FONT_DECLARE(sandy_font_ar_32);
 
@@ -63,9 +48,7 @@ static const lv_font_t *font_for(sandy_screen_size_t size) {
     case SCREEN_SIZE_SMALL:
     default:
 #if LV_FONT_DEJAVU_16_PERSIAN_HEBREW
-        // The built-in. With LV_USE_BIDI and LV_USE_ARABIC_PERSIAN_CHARS on,
-        // LVGL joins the letters and lays the line out right to left — which is
-        // what separates readable Arabic from a row of disconnected shapes.
+        // With LV_USE_BIDI and LV_USE_ARABIC_PERSIAN_CHARS, LVGL joins letters RTL.
         return &lv_font_dejavu_16_persian_hebrew;
 #else
         return &sandy_font_ar_24;
@@ -73,29 +56,24 @@ static const lv_font_t *font_for(sandy_screen_size_t size) {
     }
 }
 
-// The image buffer, PSRAM. Allocated on the first transfer and kept: taking and
-// returning 115 KB per picture would fragment PSRAM for no gain, and this board
-// has eight megabytes of it.
+// PSRAM, allocated on first transfer and kept (avoids fragmentation).
 static uint8_t *s_img;        // what LVGL draws
-// The next picture is received here and swapped in whole. With one buffer, a
-// picture arriving over the one on screen drew half of each, and a transfer
-// that failed halfway left the shown picture overwritten by the start of one
-// that never finished.
+// Received separately and swapped in whole, so a failed transfer never corrupts the shown one.
 static uint8_t *s_img_rx;
 static size_t   s_rx_bytes;   // bytes of it actually received
 static int      s_expect_chunks;
-// طول القطعة الواحدة — بيجي من القطعة الأولى، مش محسوبًا بالقسمة.
+// من القطعة الأولى، مش بالقسمة.
 static size_t   s_chunk_size;
 static uint32_t s_have_mask[(MAX_CHUNKS + 31) / 32];
 static int      s_have_count;
 
-// ── LVGL objects, touched only on the LVGL task ──────────────────────────────
+// ── LVGL objects, touched only on the LVGL task ──
 static lv_obj_t     *s_panel;
 static lv_obj_t     *s_label;
 static lv_obj_t     *s_img_obj;
 static lv_img_dsc_t  s_img_dsc;
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ──
 
 static bool lock(void) {
     return s_lock && xSemaphoreTake(s_lock, pdMS_TO_TICKS(50)) == pdTRUE;
@@ -113,7 +91,7 @@ static void chunk_mark(int seq) {
     s_have_mask[seq / 32] |= 1u << (seq % 32);
 }
 
-// ── Called by sandy_face, on the LVGL task ───────────────────────────────────
+// ── Called by sandy_face, on the LVGL task ──
 
 void screen_lvgl_build(lv_obj_t *parent) {
     s_lock = xSemaphoreCreateMutex();
@@ -149,8 +127,7 @@ void screen_set_size(sandy_screen_size_t size) {
     if (size < SCREEN_SIZE_SMALL || size > SCREEN_SIZE_LARGE) return;
     if (!lock()) return;
     s_size = size;
-    // Redraw only if a line is actually up. Changing the size while the face is
-    // showing must not yank the face away to prove the setting took.
+    // Redraw only if a line is up; don't hide the face to show a size change.
     if (s_showing) { s_want_text = true; s_dirty = true; }
     unlock();
     ESP_LOGI(TAG, "text size = %d", (int)size);
@@ -174,7 +151,7 @@ void screen_lvgl_tick(void) {
     s_want_text = s_want_image = s_want_dismiss = s_want_qr = false;
     s_dirty = false;
 
-    // A QR code stays only while it is what is being shown.
+    // A QR stays only while it is what's shown.
     if ((want_dismiss || want_text || want_image) && s_qr) {
         lv_obj_add_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_qr_caption, LV_OBJ_FLAG_HIDDEN);
@@ -183,7 +160,7 @@ void screen_lvgl_tick(void) {
     if (want_qr) {
         if (!s_qr) {
             s_qr = lv_qrcode_create(s_panel, 170, lv_color_black(), lv_color_white());
-            // A white quiet zone: phones will not read a code that touches black.
+            // White quiet zone, or phones won't read it.
             lv_obj_set_style_border_color(s_qr, lv_color_white(), 0);
             lv_obj_set_style_border_width(s_qr, 8, 0);
             lv_obj_align(s_qr, LV_ALIGN_TOP_MID, 0, 14);
@@ -203,7 +180,7 @@ void screen_lvgl_tick(void) {
         s_showing = true;
     }
 #else
-    if (want_qr) want_text = true;   // no widget in this build: the caption alone
+    if (want_qr) want_text = true;   // no QR widget: caption only
 #endif
 
     if (want_dismiss) {
@@ -238,8 +215,7 @@ void screen_lvgl_tick(void) {
         lv_obj_clear_flag(s_img_obj, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_label, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_panel, LV_OBJ_FLAG_HIDDEN);
-        // The cached copy is the old picture; without this the panel keeps
-        // showing what it drew last time even though the bytes changed.
+        // Invalidate the cache or the old picture stays.
         lv_img_cache_invalidate_src(&s_img_dsc);
         lv_obj_invalidate(s_img_obj);
         s_showing = true;
@@ -248,7 +224,7 @@ void screen_lvgl_tick(void) {
     unlock();
 }
 
-// ── Called from anywhere ─────────────────────────────────────────────────────
+// ── Called from anywhere ──
 
 void screen_show_text(const char *text) {
     if (!text || !*text) { screen_dismiss(); return; }
@@ -290,8 +266,7 @@ bool screen_image_begin(int total_chunks) {
     if (!lock()) return false;
 
     if (!s_img_rx) {
-        // PSRAM, never internal. Internal RAM is what the voice session needs,
-        // and a picture must not be the reason she cannot talk.
+        // PSRAM, never internal (voice needs it).
         s_img_rx = heap_caps_malloc(IMG_BYTES, MALLOC_CAP_SPIRAM);
         if (!s_img_rx) {
             unlock();
@@ -313,31 +288,16 @@ void screen_image_chunk(int seq, const uint8_t *data, size_t len) {
     if (!data || len == 0) return;
     if (!lock()) return;
 
-    // Every one of these is a refusal, not a clamp. The payload arrives over a
-    // shared broker from something nobody authenticated, so a piece that does
-    // not fit where it claims to go is dropped rather than trimmed to fit.
+    // Untrusted broker input: refuse misfitting pieces, never trim.
     if (!s_img_rx || s_expect_chunks <= 0) { unlock(); return; }
     if (seq < 0 || seq >= s_expect_chunks) { unlock(); return; }
     if (chunk_seen(seq)) { unlock(); return; }
 
-    // **مقاس القطعة بيجي مع القطعة، ما بينحسب.**
-    //
-    // كان: `IMG_BYTES / عدد القطع`. وهاد بيعطي مية وخمسة عشر ألف على تسعة عشر
-    // = ٦٠٦٣، والخادم بيبعت قطع بـ ٦١٤٤ (ستة كيلوبايت بالضبط). فرق واحد وثمانين
-    // بايت بكل قطعة، **بيتراكم**: القطعة العاشرة بتنكتب مزحلقة ثمن مية بايت،
-    // والأخيرة أكثر من ألف وأربع مية.
-    //
-    // النتيجة صورة مقسّمة لشرائط أفقية مزحلقة — وهاد بالضبط اللي شافه المالك.
-    // ولأنه الإزاحة بتراكمية، الشرائط بتبيّن مقلوبة ومبعثرة، فشكلها عطل بالشاشة
-    // مش عطل بالحساب.
-    //
-    // والصح إنه الطول موجود قدّامنا: `len` هو طول القطعة الحقيقي. القطعة
-    // الأولى بتحدّد المقاس، والباقي بتتبعه. الأخيرة أقصر عادةً وهاد ما بيهمّ —
-    // هي آخر وحدة، وما في إشي بعدها بيتزحلق.
+    // مقاس القطعة من `len` تبع القطعة الأولى، مش `IMG_BYTES / عدد القطع`: القسمة
+    // بتختلف عن مقاس الخادم والفرق بيتراكم لشرائط مزحلقة.
     if (seq == 0) s_chunk_size = len;
     if (s_chunk_size == 0) { unlock(); return; }
-    // Only the last piece may be shorter. A middle piece of another size would
-    // be written where the next one belongs.
+    // Only the last piece may be shorter.
     if (seq < s_expect_chunks - 1 && len != s_chunk_size) {
         ESP_LOGW(TAG, "chunk %d is %u bytes, the first was %u — refused",
                  seq, (unsigned)len, (unsigned)s_chunk_size);
@@ -361,8 +321,7 @@ void screen_image_chunk(int seq, const uint8_t *data, size_t len) {
 
 bool screen_image_end(void) {
     if (!lock()) return false;
-    // Every piece *and* every byte: a count alone passed a picture whose pieces
-    // were short, and the rest of the buffer was whatever was there before.
+    // Check bytes too, not only the count.
     bool complete = (s_expect_chunks > 0 && s_have_count >= s_expect_chunks &&
                      s_rx_bytes == IMG_BYTES);
     if (complete) {
@@ -380,8 +339,6 @@ bool screen_image_end(void) {
     unlock();
 
     if (!complete) {
-        // Naming the shortfall matters: "it did not appear" and "eleven of
-        // twelve pieces arrived" send you to completely different places.
         ESP_LOGW(TAG, "image incomplete — %d of %d chunks, %u of %d bytes; nothing drawn",
                  have, want, (unsigned)bytes, IMG_BYTES);
         return false;

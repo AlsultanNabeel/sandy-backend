@@ -42,9 +42,7 @@ typedef enum {
     MELODY_FOCUS_START,
     MELODY_FOCUS_BREAK,
     MELODY_FOCUS_END,
-    // ── نغمات تانية للمزاج والتفاعل ──
-    // الجرس بيزو سلبي: بيعزف أي تردد، فالنغمة قائمة نوتات مش صوت مسجّل.
-    // إضافة وحدة = سطر هون + مصفوفة بـ sandy_buzzer.c + اسم بجدول MQTT.
+    // الجرس سلبي: كل نغمة قائمة نوتات. إضافة وحدة = سطر هون + مصفوفة بـ sandy_buzzer.c + اسم بجدول MQTT.
     MELODY_HELLO,       // ترحيب قصير لما تناديها
     MELODY_BYE,         // وداع هابط
     MELODY_YES,         // تأكيد صاعد نوتتين
@@ -64,5 +62,5 @@ typedef enum {
     MOTOR_RIGHT
 } motor_cmd_t;
 
-// Global mood — written by MQTT/touch/mic handlers, read by face/buzzer tasks
+// Written by MQTT/touch/mic, read by face/buzzer.
 extern volatile sandy_mood_t g_current_mood;

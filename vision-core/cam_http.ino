@@ -1,20 +1,9 @@
-// =========================
-// ESP32-CAM — HTTP: live video stream + instant still
-// =========================
-// الفيديو ما بينفع عبر MQTT: كل إطار بينقسم لعشرات الرسائل وبيخنق البروكر.
-// فالبث بيمشي مباشرة عبر الشبكة المحلية، والـMQTT بيضل للصور المفردة والأوامر.
-//
-//   GET /stream   → بث مباشر (MJPEG) — يفتح بأي متصفح
-//   GET /still    → صورة وحدة فوراً (JPEG)
+// ESP32-CAM — HTTP: live video stream + instant still (الفيديو ما بيمشي عبر MQTT)
+//   GET /stream   → بث مباشر (MJPEG)
+//   GET /still    → صورة وحدة (JPEG)
 //   GET /status   → حالة مختصرة (JSON)
-//
-// الخادم مطفي افتراضياً. بينشغل بأمر: {"cmd":"stream","state":"on"}
-// وبيطفي لحاله بعد فترة بلا متفرّجين — عشان ما يضل ياكل ذاكرة وحرارة.
-//
-// **وكل طلب لازم يحمل مفتاح البث** (`?key=` أو ترويسة `X-Sandy-Key`). المفتاح
-// عشوائي، بيتولّد كل إقلاع، وبيوصل الخادم بالنبضة، والخادم بيعطيه لصاحب
-// الروبوت بس. جهاز تاني ع نفس الشبكة — تلفزيون، قابس ذكي مخترق، ضيف — ما
-// بيعرفه، فما بيشوف إشي.
+// مطفي افتراضيًّا؛ بينشغل بـ {"cmd":"stream","state":"on"} وبيطفي لحاله بلا متفرّجين.
+// كل طلب لازم يحمل مفتاح البث (`?key=` أو `X-Sandy-Key`)، عشوائي كل إقلاع وبيوصل صاحب الروبوت عبر الخادم بس.
 
 #include "esp_http_server.h"
 #include "esp_random.h"
@@ -28,22 +17,11 @@ void camUnlock();
 
 static httpd_handle_t g_httpd = NULL;
 static volatile unsigned long g_lastStreamActivityMs = 0;
-// إشارة «وقّف» لحلقة البث. `httpd_stop` بيستنّى مهمّة الخادم تخلص، وهي عالقة
-// جوّا حلقة البث اللي ما بتطلع إلا لمّا الإرسال يفشل — يعني وإنت عم تتفرّج،
-// «وقّف البث» كان بيعلّق الحلقة الرئيسية كلها للأبد.
+// إشارة «وقّف» لحلقة البث، وإلا `httpd_stop` بيستنّى مهمّة عالقة فيها للأبد.
 static volatile bool g_streamStop = false;
 static char g_streamKey[33] = {0};
-// مش `static`: البثّ البعيد بيقراها عشان ما ينازع المتفرّج المحلي ع مخزن
-// الإطار الوحيد.
-//
-// علم واحد، مش عدّاد، وهاد صحيح هون: `esp_http_server` بيشتغل بمهمّة وحدة
-// (`httpd_config_t` عندها `task_priority` و`stack_size` و`core_id` — مفردة،
-// ما في مجمع خيوط)، فبيخدم طلب واحد بالمرّة. يعني ما بتقدر تشتغل نسختين من
-// `streamHandler` بنفس اللحظة أصلاً: المتفرّج التاني بيضلّ واقف بالدور لحدّ ما
-// الأوّل يخلص. مراجعة قالت إنّ `bool` ما بيمثّل متفرّجين متزامنين — وهاد صحيح
-// عن `bool` بالعموم ومش منطبق هون، لأنّ المتزامنين مستحيلين بهالخادم.
-//
-// لو انتقلنا لخادم بيخدم أكتر من طلب بالتوازي، هون بيصير لازم عدّاد ذرّي.
+// مش `static`: البثّ البعيد بيقراها. علم مش عدّاد لأنّ esp_http_server بيخدم طلب واحد
+// بالمرّة؛ لو صار متوازي، لازم عدّاد ذرّي.
 volatile bool g_streamViewerActive = false;
 
 #define STREAM_BOUNDARY "sandyframe"
@@ -53,8 +31,7 @@ static const char* kStreamBoundary = "\r\n--" STREAM_BOUNDARY "\r\n";
 static const char* kStreamPartFmt =
     "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
-// المفتاح اللي الخادم بيوزّعه للتطبيق. مولّد مرّة بكل إقلاع (أو من الأسرار
-// لنسخ التطوير)، وثابت طول التشغيل عشان التطبيق ما يلحق وراه.
+// ثابت طول التشغيل (مولّد كل إقلاع، أو من الأسرار بنسخ التطوير).
 const char* camStreamKey() {
   if (g_streamKey[0]) return g_streamKey;
   if (strlen(CAM_HTTP_TOKEN) > 0) {
@@ -67,8 +44,7 @@ const char* camStreamKey() {
   return g_streamKey;
 }
 
-// مقارنة بزمن ثابت: مقارنة عادية بتوقف عند أول حرف مختلف، والوقت اللي بتاخده
-// بيسرّب قدّيش الحرزة صح.
+// مقارنة بزمن ثابت، ما بتسرّب قدّيش المفتاح صح.
 static bool keyEquals(const char* a, const char* b) {
   size_t la = strlen(a), lb = strlen(b);
   unsigned char diff = (unsigned char)(la ^ lb);
@@ -76,20 +52,8 @@ static bool keyEquals(const char* a, const char* b) {
   return diff == 0 && la > 0;
 }
 
-// الترويسة أوّلاً، وبعدها `?key=`.
-//
-// **الـ`?key=` مش تساهل، هو الطريق الوحيد للبثّ.** مراجعة قالت نشيله لأنّ
-// المفتاح بالرابط بيوصل سجلّات وReferer — وهاد صحيح بالعموم وغلط هون: العارض
-// بالتطبيق `MJPEGView`، وهو `WKWebView` عم يحمّل `<img src="…/stream?key=…">`
-// (`ios/SandyApp/Features/Control/CameraView.swift`). وسم `<img>` ما بياخد
-// ترويسات — لا بالويب ولا بالويب فيو — فشيل الـ`?key=` بيرجّع ٤٠٣ ويطفّي
-// الكاميرا الحيّة كلها.
-//
-// اللي بيحدّ الضرر موجود أصلاً: المفتاح بيتولّد عشوائي كل إقلاع، والخادم محلّي
-// ع الشبكة المنزلية وبيطفي لحاله لمّا ما يضل حدا متفرّج، والرابط ما بينكتب
-// بالسجل أبداً (تحت، بـ`startCamHttp`). اللي بيشيله فعلاً تغيير بالمنتج مش
-// بالسطر: عارض MJPEG مكتوب بـ`URLSession` بدل الويب فيو، وقتها بتنشال هالكتلة
-// وبيضل بس التحقّق بالترويسة.
+// الترويسة أوّلاً، وبعدها `?key=`. الـ`?key=` لازم: عارض التطبيق `<img>` بـ WKWebView
+// (ios/.../CameraView.swift) ما بيبعت ترويسات. الرابط ما بينكتب بالسجل أبداً.
 static bool authorized(httpd_req_t* req) {
   const char* want = camStreamKey();
   char got[48] = {0};
@@ -161,8 +125,7 @@ static esp_err_t streamHandler(httpd_req_t* req) {
 
   esp_err_t rc = httpd_resp_set_type(req, kStreamContentType);
   if (rc != ESP_OK) return rc;
-  // ما في `Access-Control-Allow-Origin: *` بعد اليوم: كان بيسمح لأي صفحة ويب
-  // مفتوحة ع أي جهاز بالبيت تقرا الإطارات بسكربت.
+  // ما في `Access-Control-Allow-Origin: *`: أي صفحة ويب بالبيت كانت تقرا الإطارات.
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
   g_streamViewerActive = true;
@@ -174,7 +137,7 @@ static esp_err_t streamHandler(httpd_req_t* req) {
       g_log.println("[HTTP] جلسة البث المحلي وصلت سقفها — وقّفناها");
       break;
     }
-    // الإطار تحت القفل، والإرسال برّاه: الالتقاط ما بيستنّى شبكة المتفرّج.
+    // الإطار تحت القفل والإرسال برّاه.
     if (!camLock(1000)) { delay(20); continue; }
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) { camUnlock(); rc = ESP_FAIL; break; }
@@ -240,14 +203,13 @@ void startCamHttp() {
   httpd_register_uri_handler(g_httpd, &route);
 
   g_lastStreamActivityMs = millis();
-  // العنوان بلا المفتاح: السجل مش المكان اللي بيوصل منه المفتاح لحدا.
+  // العنوان بلا المفتاح.
   g_log.printf("[HTTP] up → http://%s/stream\n", WiFi.localIP().toString().c_str());
 }
 
 void stopCamHttp() {
   if (!g_httpd) return;
-  // الإشارة قبل الإيقاف: حلقة البث بتشوفها بالإطار الجاي وبتطلع، فـ`httpd_stop`
-  // بيلاقي المهمّة فاضية بدل ما يستنّاها للأبد.
+  // الإشارة قبل الإيقاف، فحلقة البث بتطلع و`httpd_stop` ما بيعلق.
   g_streamStop = true;
   httpd_stop(g_httpd);
   g_httpd = NULL;
@@ -255,7 +217,7 @@ void stopCamHttp() {
   g_log.println("[HTTP] stopped");
 }
 
-// تُنادى من الـ loop — تطفي الخادم لما ما يضل حدا متفرّج
+// من الـ loop: بيطفي الخادم لما ما يضل متفرّج.
 void camHttpTick() {
   if (!g_httpd || g_streamViewerActive) return;
   if (millis() - g_lastStreamActivityMs > CAM_STREAM_IDLE_TIMEOUT_MS) {

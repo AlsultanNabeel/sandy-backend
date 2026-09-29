@@ -37,22 +37,11 @@ CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=30000
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 
-# OTA — HTTPS only for the pull path (ota_trigger). The push path is the board's
-# own HTTP server on the LAN, which is a different thing.
+# OTA pull over HTTPS only (the LAN push server is separate).
 CONFIG_OTA_ALLOW_HTTP=n
 
-# Rollback. A freshly flashed image boots as PENDING_VERIFY and must declare
-# itself healthy; reboot without declaring, and the bootloader goes back to the
-# previous image on its own.
-#
-# This matters here because flashing is done over Wi-Fi. Without it, one bad
-# image that boots but cannot reach the network takes the recovery path with it
-# and the only way back is a cable. With it, the worst case is a robot that
-# reboots once and comes back on the firmware that worked.
-#
-# "Healthy" is defined in sandy_ota.c as: Wi-Fi associated and the update server
-# listening — i.e. still rescuable. Deliberately not "the cloud answers", or a
-# home-internet outage would roll back perfectly good firmware.
+# Rollback: a new image boots PENDING_VERIFY; sandy_ota.c confirms it once it
+# is still rescuable (Wi-Fi + update server), else the bootloader reverts.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # ADC
@@ -64,95 +53,46 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 # LVGL — SPI panels need byte-swapped RGB565 (else blue renders as green)
 CONFIG_LV_COLOR_16_SWAP=y
 
-# ESP-SR wake word: only pack "Hi Andy" (wn9_hiandy_tts2) into the model
-# partition — closest built-in to "Sandy". NSN/VAD stay on WebRTC (no model
-# files), so the model partition holds just this one ~300KB wake word.
-# Swap for a custom-trained "Sandy" model later by changing this line.
+# Pack only the "Hi Andy" wake word (closest built-in to "Sandy"); NSN/VAD use WebRTC.
 CONFIG_SR_WN_WN9_HIANDY_TTS2=y
 
-# ESP-SR offline command words (MultiNet, English, quant8 = smallest, ~2.1MB).
-# Lets the device recognize a fixed list of "Sandy ..." phrases fully on-device
-# (no cloud), e.g. "Sandy turn on the light". The phrase list + actions live in
-# sandy_voice.c (SANDY_COMMANDS table). Needs the enlarged 4MB model partition
-# — wake word + this model don't fit the old 2MB.
+# MultiNet English command words (~2.1MB, table in sandy_voice.c); needs the 4MB model partition.
 CONFIG_SR_MN_EN_MULTINET5_SINGLE_RECOGNITION_QUANT8=y
 
-# TLS buffers from PSRAM: two TLS sessions (MQTT broker + voice WSS) ran the
-# internal heap dry — the voice handshake died with create_ssl_handle failed
-# the moment MQTT held its connection. 8MB PSRAM carries them both easily.
+# TLS buffers in PSRAM: MQTT + voice TLS together exhausted the internal heap.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
-# WiFi + lwip buffers from PSRAM too. Adding the MultiNet command model dropped
-# internal SRAM to ~32KB free, and the voice WSS write then failed (net send
-# couldn't get a buffer). Moving WiFi/lwip allocations to PSRAM (4MB+ free)
-# gives the TLS/network path its internal headroom back.
+# WiFi/lwip buffers in PSRAM too, to keep internal headroom for TLS.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
-# ...and push generic allocations above this size to PSRAM instead of internal
-# SRAM. WiFi-in-PSRAM alone wasn't enough; esp-sr's own working buffers were the
-# real hog (internal dropped to ~18KB at idle).
-#
-# Lowered from 4096 to 1024 after `esp-aes: Failed to allocate memory` killed a
-# call. The TLS context is a few hundred bytes, so the old threshold forced it
-# into internal RAM — of which there were 26 KB left, while PSRAM sat with four
-# megabytes free. Small allocations that do not need the speed now go outside,
-# and internal stays for what genuinely must run with the cache disabled.
-#
-# DMA-tagged allocations still force internal, so audio I/O is unaffected.
+# Allocations above 1024 bytes go to PSRAM (4096 left esp-aes without internal RAM).
+# DMA-tagged allocations still stay internal.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
 CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=3
 CONFIG_LV_FONT_DEJAVU_16_PERSIAN_HEBREW=y
 CONFIG_LV_USE_BIDI=y
 CONFIG_LV_USE_ARABIC_PERSIAN_CHARS=y
 
-# ── WebSocket client: one lock per direction ──────────────────────────────────
-#
-# **هاد جذر «بتوقف بنص الحكي».**
-#
-# مكتبة المقبس بتحمي العميل كله بقفل واحد — الإرسال والاستقبال سوا. ووقت ما
-# تكون ساندي بتحكي، مسار الاستقبال ماسك القفل وهو بيفكّ صوتها وبيعبّي مخزن
-# السمّاعة، والمايك بيستنى وراه. وهاد بينطبع حرفيًّا:
-#
-#   E websocket_client: Could not lock ws-client within 400 timeout
-#
-# وبيطلع **بس لمّا `talking=1`** — يعني ما بيصير إلا وهي بتحكي. وبينتج عنه
-# طابور صوت طالع (شوهد واحد وتسعين كيلو ≈ تلات ثواني)، يعني هي بتسمعك متأخّرة
-# تلات ثواني وبتردّ ع كلام خلص.
-#
-# المكتبة عندها الحلّ جاهز ومطفّي افتراضيًّا: قفل مستقل للإرسال. وصفهم بالحرف
-# «بيتجنّب تنافس القفل لمّا الإرسال والاستقبال يصيروا بنفس الوقت» — وهاي حالتنا
-# بالضبط، وهي حالة أي محادثة صوتية باتجاهين.
-#
-# ملاحظة للحرق: `sdkconfig` المولّد فيه هالخيار مكتوب «مش مضبوط»، والقيم هون
-# ما بتغلبه. امسح `sdkconfig` مرة وحدة (أو غيّره من `idf.py menuconfig`) عشان
-# يتولّد من جديد.
+# ── WebSocket client: one lock per direction ──
+# قفل واحد للإرسال والاستقبال كان يأخّر المايك تلات ثواني وهي بتحكي
+# ("Could not lock ws-client within 400 timeout"). قفل إرسال مستقل بيحلّها.
+# امسح `sdkconfig` مرة وحدة عشان الخيار ياخد مفعوله.
 CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y
 CONFIG_ESP_WS_CLIENT_TX_LOCK_TIMEOUT_MS=2000
 
-# ── Internal RAM for the voice call ───────────────────────────────────────────
-#
-# الروبوت كان يعيد التشغيل عند أول «هاي أندي»: بعد اتصال الأوامر بيضل حوالي
-# اتنين وعشرين كيلو بالذاكرة الداخلية، واتصال الصوت المشفّر بدّه أكتر. هدول
-# التلاتة بيرجّعوا حوالي خمسين كيلو من غير ما يمسّوا الصوت:
-#
-# ١. مخزن الواجهة الرسومية كان مصفوفة ثابتة اتنين وتلاتين كيلو بالداخلية، محجوزة
-#    حتى لو الوجه ما استعمل ربعها. هلّق بياخد من المخصّص العام قد ما بدّه، واللي
-#    فوق الألف بايت بيروح للذاكرة الخارجية لحاله.
+# ── Internal RAM for the voice call ──
+# بيرجّعوا ~٥٠ كيلو داخلية لمصافحة الصوت:
+# ١. ذاكرة LVGL من المخصّص العام بدل مصفوفة ثابتة ٣٢ كيلو.
 CONFIG_LV_MEM_CUSTOM=y
 CONFIG_LV_MEM_CUSTOM_INCLUDE="stdlib.h"
-# ٢. تحسين سرعة الاستقبال بيحط دوال الوايفاي بالذاكرة الداخلية (سبعطعش كيلو).
-#    الصوت بيحتاج جزء صغير من سرعة الوايفاي، فما في داعي.
+# ٢. دوال استقبال الوايفاي برّا الذاكرة الداخلية (١٧ كيلو).
 # CONFIG_ESP_WIFI_RX_IRAM_OPT is not set
-# ٣. مخازن الإرسال الثابتة: كل وحدة كيلو وستمية بالداخلية. عشرة بتكفّي الصوت
-#    الطالع، واللي بيفيض بيستنى بطابور الذاكرة الخارجية بدل ما يضيع.
+# ٣. عشر مخازن إرسال ثابتة بتكفّي الصوت الطالع.
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=10
 
-# ── Crash dumps to flash ──────────────────────────────────────────────────────
-# A panic writes its dump to the `coredump` partition and survives the reboot;
-# `idf.py coredump-info` reads it later. Needs the partition table above, and —
-# like every choice here — a fresh sdkconfig (delete it once) to take effect.
+# ── Crash dumps to flash ──
+# Dump goes to the `coredump` partition; read with `idf.py coredump-info`. Needs a fresh sdkconfig.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
-# ── QR code on her face at setup ──────────────────────────────────────────────
-# The phone's camera joins the setup network from her screen in one tap.
+# ── QR code on her face at setup ──
 CONFIG_LV_USE_QRCODE=y

@@ -12,22 +12,19 @@ static const char *TAG = "buzzer";
 
 typedef struct { uint32_t freq; uint32_t ms; } note_t;
 
-// Melody definitions (freq=0 → rest)
+// freq=0 → rest
 static const note_t BOOT[]    = {{523,100},{659,100},{784,150},{0,50},{1047,200}};
 static const note_t HAPPY[]   = {{784,100},{880,100},{1047,200}};
 static const note_t CURIOUS[] = {{523,80},{587,80},{659,80},{698,120}};
 static const note_t SAD[]     = {{494,200},{440,200},{392,300}};
 static const note_t ALERT[]   = {{880,100},{0,50},{880,100},{0,50},{880,150}};
 static const note_t ERR[]     = {{330,200},{0,50},{294,200},{0,50},{262,300}};
-// Focus cues: START rises (motivating), BREAK is a soft two-note pause,
-// END is a warm descending "done".
+// Focus cues: start rises, break pauses, end descends.
 static const note_t FOC_START[] = {{523,90},{659,90},{784,90},{988,220}};
 static const note_t FOC_BREAK[] = {{784,120},{0,60},{587,160}};
 static const note_t FOC_END[]   = {{988,120},{784,120},{659,120},{523,260}};
 
 // ── نغمات إضافية ──
-// نوتات سُلَّم مزاجي: الصاعد بيحسّ إيجابي، والهابط بيحسّ ختام أو رفض. الفواصل
-// (freq=0) بتعمل الفرق بين «نغمة» و«زقزقة» — بلاها كل شي بيسمع زي بعض.
 static const note_t HELLO[]     = {{659,90},{784,90},{988,160}};
 static const note_t BYE[]       = {{988,110},{784,110},{523,240}};
 static const note_t YES[]       = {{784,80},{1047,160}};
@@ -50,8 +47,7 @@ static const melody_def_t s_defs[MELODY_COUNT] = {
     [MELODY_FOCUS_START] = {FOC_START, ARRAY_LEN(FOC_START)},
     [MELODY_FOCUS_BREAK] = {FOC_BREAK, ARRAY_LEN(FOC_BREAK)},
     [MELODY_FOCUS_END]   = {FOC_END,   ARRAY_LEN(FOC_END)},
-    // ARRAY_LEN بدل رقم مكتوب: العدد الغلط هون بيقرا خارج المصفوفة، وهاد عطل
-    // بيظهر كنغمة فيها ضجيج مش كخطأ — يعني بتدوّر عليه بالمكان الغلط.
+    // ARRAY_LEN مش رقم مكتوب: العدد الغلط بيقرا خارج المصفوفة.
     [MELODY_HELLO]     = {HELLO,     ARRAY_LEN(HELLO)},
     [MELODY_BYE]       = {BYE,       ARRAY_LEN(BYE)},
     [MELODY_YES]       = {YES,       ARRAY_LEN(YES)},
@@ -85,7 +81,7 @@ static void _task(void *arg) {
         for (size_t i = 0; i < def->count; i++) {
             sandy_melody_t next;
             if (xQueuePeek(s_q, &next, 0) == pdTRUE) {
-                // Preempt: switch to newer melody
+                // Preempt with the newer melody
                 xQueueReceive(s_q, &next, 0);
                 m = next;
                 def = &s_defs[m < MELODY_COUNT ? m : MELODY_NONE];
@@ -119,8 +115,7 @@ esp_err_t buzzer_init(void) {
     err = ledc_channel_config(&ch);
     if (err != ESP_OK) return err;
 
-    // s_q stays NULL unless the player task is really running: buzzer_play
-    // checks it, so a failed start means silence, not a queue nobody drains.
+    // s_q stays NULL unless the task runs, so a failed start is silence.
     QueueHandle_t q = xQueueCreate(3, sizeof(sandy_melody_t));
     if (!q) return ESP_ERR_NO_MEM;
     s_q = q;
@@ -133,11 +128,7 @@ esp_err_t buzzer_init(void) {
     return ESP_OK;
 }
 
-// Callers all over the firmware ask for a melody without checking ENABLE_BUZZER
-// first — the MQTT layer plays one on every broker connect, for instance. With
-// the part switched off there is no queue, and sending to a null queue is a
-// FreeRTOS assert, i.e. the whole robot reboots every time it connects. A part
-// that isn't fitted must go quiet, never take the board down with it.
+// Called regardless of ENABLE_BUZZER; sending to a NULL queue would assert and reboot.
 void buzzer_play(sandy_melody_t melody) {
     if (!s_q) return;
     xQueueSend(s_q, &melody, 0);

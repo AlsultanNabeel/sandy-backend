@@ -1,29 +1,14 @@
-// =========================
-// Sandy — Room Node (الـESP32 القديمة)
-// =========================
-// جهاز ثانٍ على نفس بروكر HiveMQ تبع الروبوت. يشترك بمواضيع غرفته
-// اللي تنشرها ساندي (العقد في cloud/app/integrations/room_device.py)
-// وينفّذها على عتاد الغرفة.
+// Sandy — Room Node (classic ESP32)
+// جهاز تاني ع نفس وسيط الروبوت، بينفّذ أوامر الغرفة (العقد بـ cloud/app/integrations/room_device.py).
+// كل جهاز = صف بجدول DEVICES + دالة. الإضاءة: سيرفو بيكبس المفتاح ميكانيكيًّا.
 //
-// الفلسفة: كل جهاز بالغرفة = صف واحد بجدول DEVICES + دالة معالِجة.
-// إضافة جهاز جديد (شريط ألوان، مروحة، ستارة) = أضف سطر بالجدول + دالة. خلص.
-//
-// أول جهاز: مفتاح الإضاءة عبر سيرفو يكبس القلّاب ميكانيكياً (صفر تلامس مع 220).
-//
-// ── المواضيع: تحت شجرة الروبوت، مش شجرة عامة ────────────────────────────────
-//
-// كانت `room/cmd/*` — شجرة عالمية مشتركة بين كل الزباين. هلق كل شي تحت
-// `sandy/node/<معرّف>/`، متل الكاميرا بالضبط — والمعرّف بينشتقّ من كود الاقتران
-// المطبوع ع علبة الروبوت. عقدة الغرفة جزء من نفس الروبوت، فبتاخد نفس الكود.
-//
+// المواضيع تحت شجرة الروبوت (المعرّف من كود الاقتران، نفس الكاميرا):
 //   sandy/node/<معرّف>/room/light   ← "on" | "off" | "0".."100"
 //   sandy/node/<معرّف>/room/music   ← "on|off|stop|pause|resume|next|prev"
 //                                     | "play:F:T" | "vol:0..30"
 //   sandy/node/<معرّف>/room/status  → نبضة كل 5 ثواني، و«متّصل/مقطوع» محفوظة
 //
-// ── التحديث ─────────────────────────────────────────────────────────────────
-// بعد البيع: اللوح بيسأل الخادم عن نسخة موقّعة (sandy_ota_pull.h). الترقية ع
-// الشبكة المحلية بنسخة التطوير بس (`SANDY_DEV`).
+// التحديث: نسخة موقّعة من الخادم (sandy_ota_pull.h)؛ ترقية الشبكة المحلية بـ `SANDY_DEV` بس.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -46,49 +31,46 @@
   #endif
 #endif
 
-// خادم ساندي — التحديثات بتنزل منه.
+// خادم ساندي للتحديثات.
 #ifndef SANDY_API_HOST
   #define SANDY_API_HOST "sandy-robot-3da0693d32f7.herokuapp.com"
 #endif
 
-// الهويّة (الكود ومفاتيح الوسيط والشبكة) بذاكرة اللوح مش بالصورة — شوف
-// sandy_identity.h. هيك صورة التحديث وحدة لكل الروبوتات وما فيها ولا سرّ.
+// الهويّة بذاكرة اللوح مش بالصورة (sandy_identity.h).
 #include "sandy_identity.h"
 #include "sandy_ota_pull.h"
 
-// ===== إعدادات تعايرها هنا =====
+// ===== إعدادات =====
 #define SERVO_PIN        13      // إشارة السيرفو (برتقالي)
 #define LIGHT_REST_ANGLE 120     // النص: الذراع أفقي بلا كبس (مرجع الكبس)
 #define LIGHT_ON_ANGLE   80      // كبسة أعلى القلّاب = تشغيل
 #define LIGHT_OFF_ANGLE  160     // كبسة أسفل القلّاب = إطفاء
 #define PRESS_HOLD_MS    400     // مدة كل مرحلة من الكبسة
 #define OTA_HOSTNAME     "sandy-room"
-// اسم اللوح ونسخته — بيروحوا بكل نبضة.
+// بيروحوا بكل نبضة.
 #define SANDY_ROOM_BOARD_ID   "sandy-room-node"
 #define SANDY_ROOM_FW_VERSION "0.4.0"
 
-// DFPlayer Mini (مشغّل الموسيقى) — تسلسلي 9600 على UART2
+// DFPlayer Mini — تسلسلي 9600 على UART2
 #define DF_PIN_ESP_RX      26    // ESP RX  ← وصّل DF TX
 #define DF_PIN_ESP_TX      27    // ESP TX  → وصّل DF RX
 #define DF_VOLUME_DEFAULT  20    // 0..30
-// المشغّل بياخد ثانية ونص تقريبًا بعد الكهربا لحتى يقرا الكرت. أي أمر قبلها
-// بيضيع — وكان الصوت الأوّلي بيروح هيك، فأول أغنية بتطلع بصوت المصنع.
+// المشغّل بياخد ~١.٥ ثانية بعد الكهربا ليقرا الكرت؛ الأوامر قبلها بتضيع.
 #define DF_READY_AFTER_MS  2000
-#define DF_DEFAULT_FOLDER  1     // «شغّل الموسيقى» بلا شي قبلها = مجلد 1 مقطع 1
+#define DF_DEFAULT_FOLDER  1     // «شغّل الموسيقى» = مجلد 1 مقطع 1
 #define DF_DEFAULT_TRACK   1
-#define DF_SELFTEST        0     // 1 = يشغّل مجلد1/مقطع1 تلات ثواني بعد الإقلاع (للتجربة بس)
+#define DF_SELFTEST        0     // 1 = تجربة تشغيل بعد الإقلاع
 #define DF_SELFTEST_VOLUME 18
 
 #define WIFI_RETRY_MIN_MS           5000
 #define WIFI_RETRY_MAX_MS           60000
 #define MQTT_RECONNECT_INTERVAL_MS  5000
 #define STATUS_POST_INTERVAL_MS     5000
-// ربع ساعة بلا وسيط = إعادة تشغيل. اللوح الصغير بيعلق أحيانًا بحالة شبكة ما
-// بيطلع منها لحاله، وإعادة التشغيل أرخص من زبون بيفصل الكهربا بإيده.
+// ربع ساعة بلا وسيط = إعادة تشغيل (اللوح أحيانًا بيعلق بحالة شبكة).
 #define OFFLINE_REBOOT_MS           (15UL * 60UL * 1000UL)
 #define ROOM_WDT_TIMEOUT_MS         30000
 #define TLS_HANDSHAKE_TIMEOUT_S     10
-// قبل هالتاريخ الساعة مش مضبوطة (اللوح بيقلع ع سنة سبعين) والشهادات بتنرفض.
+// قبلها الساعة مش مضبوطة والشهادات بتنرفض.
 #define CLOCK_SANE_EPOCH            1700000000L
 #define ROOM_NVS                    "sandyroom"
 
@@ -111,14 +93,8 @@ static char             g_ntpGateway[16]    = {0};       // لازم يعيش: �
 
 static void feedWatchdog() { esp_task_wdt_reset(); }
 
-// =========================
-// الإضاءة — سيرفو بلا حجز للحلقة
-// =========================
-//
-// **الكبسة كانت تلات `delay` ورا بعض — ثانية وربع الحلقة واقفة.** بهالوقت ما
-// في وسيط ولا نبضة، وأمرين ورا بعض («طفّي، لا شغّل») كانوا بيتنفّذوا كبستين
-// كاملتين. هلّق الكبسة مراحل بتمشي مع الحلقة، والأمر الجديد وقت الكبسة بيستبدل
-// اللي مستني: آخر أمر هو اللي بيربح.
+// ===== الإضاءة: كبسة سيرفو بمراحل بلا delay =====
+// الحلقة ما بتوقف، والأمر الجديد وقت الكبسة بيستبدل اللي مستني.
 
 enum PressPhase { PRESS_IDLE, PRESS_REST, PRESS_PUSH, PRESS_BACK };
 static PressPhase    g_pressPhase   = PRESS_IDLE;
@@ -159,7 +135,7 @@ static void pressLoop() {
       g_lightState = g_pressTarget ? "on" : "off";
       Serial.printf("[LIGHT] %s\n", g_lightState);
       g_pressPhase = PRESS_IDLE;
-      // نفس الحالة مرتين ورا بعض = كبسة وحدة بتكفي.
+      // نفس الحالة مرتين = كبسة وحدة.
       if (g_pressPending == g_pressTarget) g_pressPending = -1;
       break;
     default:
@@ -176,8 +152,7 @@ static bool parseBoundedInt(const String& s, int lo, int hi, int* out) {
   return true;
 }
 
-// مفتاح الإضاءة: on/off أو 0..100 (أي >0 = تشغيل لأن السيرفو ما بيعتّم).
-// **صارم:** «oops» كانت بتصير `toInt()==0` = «طفّي»، يعني أي كلمة غلط بتطفي الضو.
+// on/off أو 0..100 (أي >0 = تشغيل). صارم: كلمة غلط ما بتطفي الضو.
 static void handleLight(const String& value) {
   int on = -1, level;
   if      (value == "on")  on = 1;
@@ -191,8 +166,8 @@ static void handleLight(const String& value) {
   else g_pressPending = on;
 }
 
-// ---- DFPlayer Mini: إطارات أوامر خام (بلا مكتبة خارجية) ----
-// الإطار: 7E FF 06 CMD 00 PARAM_H PARAM_L CHK_H CHK_L EF
+// ---- DFPlayer Mini: إطارات أوامر خام ----
+// 7E FF 06 CMD 00 PARAM_H PARAM_L CHK_H CHK_L EF
 static void dfCmd(uint8_t cmd, uint16_t param) {
   uint8_t f[10] = { 0x7E, 0xFF, 0x06, cmd, 0x00,
                     (uint8_t)(param >> 8), (uint8_t)(param & 0xFF), 0, 0, 0xEF };
@@ -210,8 +185,7 @@ static void dfResume()      { dfCmd(0x0D, 0); }
 static void dfNext()        { dfCmd(0x01, 0); }
 static void dfPrev()        { dfCmd(0x02, 0); }
 
-// الصوت قبل كل تشغيل: المشغّل بينسى صوته لو انقطعت عنه الكهربا لحظة
-// (السيرفو بيسحب تيار)، والأغنية بتطلع بصوت المصنع العالي.
+// الصوت قبل كل تشغيل: المشغّل بينسى صوته لو الكهربا رجفت.
 static void dfPlayFolderTrack(int fo, int tr) {
   dfSendVolume();
   delay(30);
@@ -256,13 +230,11 @@ static void dfLoop() {
 #endif
 }
 
-// مشغّل الموسيقى: "on|off|stop|pause|resume|next|prev" | "play:F:T" | "F:T" | "vol:0..30"
+// "on|off|stop|pause|resume|next|prev" | "play:F:T" | "F:T" | "vol:0..30"
 static void handleMusic(const String& value) {
   Serial.printf("[MUSIC] %.24s\n", value.c_str());
 
-  // «on» و«off» هنّ كلمات المشاهد والخادم (room_device.normalize_action).
-  // «on» بعد إقلاع ما شغّل شي = «كمّل» ع ولا إشي، فالمشغّل بيسكت. هيك بيشغّل
-  // الافتراضي بدل ما يطنّش.
+  // «on» (من room_device.normalize_action) بيشغّل الافتراضي، مش «كمّل» ع ولا إشي.
   if (value == "on") {
     if (g_dfPlayedSinceBoot) { dfSendVolume(); delay(30); dfResume(); }
     else dfPlayFolderTrack(DF_DEFAULT_FOLDER, DF_DEFAULT_TRACK);
@@ -298,24 +270,20 @@ static void handleMusic(const String& value) {
   Serial.printf("[MUSIC] صيغة غير معروفة: %.24s\n", value.c_str());
 }
 
-// جدول الأجهزة: **اسم المخرج** → دالة. هذا هو "مفتاح التوسعة".
-// والنبضة بتعلن نفس الأسماء (`outputs`)، والخادم ما بيبعت إلا لمخرج مُعلَن.
+// جدول الأجهزة: اسم المخرج → دالة. النبضة بتعلن نفس الأسماء (`outputs`).
 typedef void (*DeviceHandler)(const String& value);
 struct Device { const char* name; const char* kind; DeviceHandler handler; };
 
 static const Device DEVICES[] = {
-  // `kind` لازم يكون من قائمة الخادم (`KNOWN_CAPABILITIES` بـ node_store) —
-  // نوع خارجها بينرفض بصمت والجهاز ما بيظهر بالتطبيق.
+  // `kind` لازم يكون من KNOWN_CAPABILITIES بـ node_store، وإلا بينرفض بصمت.
   { "light", "relay", handleLight },
   { "music", "audio", handleMusic },
 };
 static const size_t DEVICE_COUNT = sizeof(DEVICES) / sizeof(DEVICES[0]);
 
-// =========================
-// المواضيع — تحت شجرة الروبوت
-// =========================
+// ===== المواضيع =====
 
-// نفس اشتقاق الكاميرا والدماغ حرفيًّا: حروف صغيرة وأرقام فقط من كود الاقتران.
+// نفس اشتقاق الكاميرا والدماغ: حروف صغيرة وأرقام من كود الاقتران.
 static String roomNodeId() {
   String out;
   const char* src = g_id.pair.c_str();
@@ -336,8 +304,7 @@ static void roomBuildTopics() {
   g_nodeId      = roomNodeId();
   g_topicBase   = "sandy/node/" + g_nodeId + "/room";
   g_topicStatus = g_topicBase + "/status";
-  // المعرّف بالوسيط: العقدة + العنوان الكامل. كان نص العنوان بس (٣٢ بت)، ولوحين
-  // بنفس النص بيطردوا بعض من الوسيط كل خمس ثواني.
+  // معرّف العميل = العقدة + الـMAC كامل، عشان لوحين ما يطردوا بعض.
   uint64_t mac = ESP.getEfuseMac();
   char macHex[13];
   snprintf(macHex, sizeof(macHex), "%04x%08x",
@@ -346,9 +313,7 @@ static void roomBuildTopics() {
   Serial.printf("[MQTT] node id = %s\n", g_nodeId.c_str());
 }
 
-// =========================
-// MQTT
-// =========================
+// ===== MQTT =====
 static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (length > 64) {
     Serial.printf("[MQTT] رسالة أطول من اللازم (%u) — انتجاهلت\n", length);
@@ -376,21 +341,20 @@ static bool mqttReconnect() {
   if (now - g_lastMqttAttemptMs < MQTT_RECONNECT_INTERVAL_MS) return false;
   g_lastMqttAttemptMs = now;
 
-  // التحقّق من الشهادة بيقارن تاريخها بساعة اللوح، فبنستنى الساعة.
+  // الشهادة بتحتاج ساعة مضبوطة.
   if (time(nullptr) < CLOCK_SANE_EPOCH) {
     Serial.println("[MQTT] الساعة لسا مش مضبوطة — بستنى قبل الاتصال");
     return false;
   }
 
   Serial.printf("[MQTT] connecting as %s ...\n", g_clientId.c_str());
-  // الوصيّة: لو انقطعنا بلا وداع، الوسيط بينشر «مقطوع» محفوظة ع موضوع الحالة،
-  // والتطبيق بيعرف فورًا بدل ما يستنى النبضات تبطّل.
+  // وصيّة «مقطوع» محفوظة ع موضوع الحالة.
   if (!g_mqtt.connect(g_clientId.c_str(), g_id.mqttUser.c_str(), g_id.mqttPass.c_str(),
                       g_topicStatus.c_str(), 1, true, "{\"online\":false}")) {
     Serial.printf("[MQTT] connect failed rc=%d\n", g_mqtt.state());
     return false;
   }
-  // كل مخرج بموضوعه بالضبط — مش نجمة بترجّعلنا نبضاتنا وأي إشي بينكتب تحتنا.
+  // اشتراك لكل مخرج، مش نجمة.
   bool ok = true;
   for (size_t i = 0; i < DEVICE_COUNT; i++) {
     String topic = g_topicBase + "/" + DEVICES[i].name;
@@ -400,7 +364,7 @@ static bool mqttReconnect() {
     }
   }
   if (!ok) {
-    // اتصال بلا اشتراك = لوح بيبيّن شغّال وما بيسمع. أحسن نعيد من الأول.
+    // اتصال بلا اشتراك ما بيسمع شي: منعيد من الأول.
     g_mqtt.disconnect();
     return false;
   }
@@ -415,7 +379,7 @@ static void publishStatus() {
   if (g_lastStatusPubMs && now - g_lastStatusPubMs < STATUS_POST_INTERVAL_MS) return;
   g_lastStatusPubMs = now ? now : 1;
 
-  // **`outputs` هي اللي بتخلّي الغرفة تظهر بالتطبيق**، وهي نفس جدول `DEVICES`.
+  // `outputs` (نفس جدول DEVICES) هي اللي بتظهّر الغرفة بالتطبيق.
   char outputs[160];
   size_t used = 0;
   outputs[0] = '\0';
@@ -438,7 +402,7 @@ static void publishStatus() {
                    now / 1000UL, (int)WiFi.RSSI(), (unsigned)ESP.getFreeHeap(),
                    g_lightState, WiFi.localIP().toString().c_str(),
                    SANDY_ROOM_BOARD_ID, SANDY_ROOM_FW_VERSION, outputs);
-  // نبضة مقطوعة = JSON مكسور = الخادم بيرميها بصمت والغرفة بتختفي من التطبيق.
+  // نبضة مقطوعة = JSON مكسور، والخادم بيرميها.
   if (n < 0 || (size_t)n >= sizeof(buf)) {
     Serial.println("[STATUS] النبضة أطول من المخزن — ما انبعتت");
     return;
@@ -446,9 +410,7 @@ static void publishStatus() {
   g_mqtt.publish(g_topicStatus.c_str(), buf, false);
 }
 
-// =========================
-// WiFi
-// =========================
+// ===== WiFi =====
 static void connectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
@@ -459,8 +421,7 @@ static void connectWiFi() {
   Serial.printf("[WIFI] connecting to '%s' ...\n", g_id.wifiSsid.c_str());
 }
 
-// المحاولة كل عشر ثواني للأبد كانت بتقطع محاولة الراوتر الحالية قبل ما تخلص،
-// وبتغرق راوتر عم يقلع. هلّق المهلة بتتضاعف لدقيقة.
+// مهلة متضاعفة لدقيقة، عشان ما نقطع محاولة شغّالة ولا نغرق الراوتر.
 static void ensureWiFi() {
   unsigned long now = millis();
   if (now - g_lastWifiAttemptMs < g_wifiRetryMs) return;
@@ -471,8 +432,7 @@ static void ensureWiFi() {
   WiFi.begin(g_id.wifiSsid.c_str(), g_id.wifiPass.c_str());
 }
 
-// الوقت: الراوتر كمان مصدر. شبكات كتير بتسدّ خوادم الوقت العامة، وبلا ساعة
-// ما في شهادة بتنقبل وما في وسيط.
+// الراوتر كمان مصدر وقت: شبكات كتير بتسدّ خوادم الوقت العامة.
 static void startClock() {
   String gw = WiFi.gatewayIP().toString();
   strncpy(g_ntpGateway, gw.c_str(), sizeof(g_ntpGateway) - 1);
@@ -497,15 +457,13 @@ static void setupLanOta() {
 
 static bool roomIdle() { return g_pressPhase == PRESS_IDLE && g_pressPending < 0; }
 
-// =========================
-// setup / loop
-// =========================
+// ===== setup / loop =====
 void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.printf("\n[ROOM] boot — %s %s\n", SANDY_ROOM_BOARD_ID, SANDY_ROOM_FW_VERSION);
 
-  // المراقب: حلقة علقت نص دقيقة = إعادة تشغيل، بدل لوح ميّت بينبض وما بيسمع.
+  // حلقة علقت نص دقيقة = إعادة تشغيل.
   esp_task_wdt_config_t wdt = {
     .timeout_ms = ROOM_WDT_TIMEOUT_MS,
     .idle_core_mask = 0,
@@ -520,7 +478,7 @@ void setup() {
   dfSetup();
   if (g_id.wifiSsid.length()) connectWiFi();
 
-  // بنتحقّق من شهادة الوسيط. بلاها، أي حدا ع نفس الشبكة بيعمل حاله الوسيط.
+  // تحقّق من شهادة الوسيط.
   g_tcp.setCACert(SANDY_CA_ROOTS);
   g_tcp.setHandshakeTimeout(TLS_HANDSHAKE_TIMEOUT_S);
   g_tcp.setTimeout(TLS_HANDSHAKE_TIMEOUT_S * 1000);
@@ -551,7 +509,7 @@ void loop() {
 
   bool online = false;
   if (!g_id.complete() || !g_id.wifiSsid.length()) {
-    // بلا هويّة ما في وين نروح. الموسيقى والمفتاح المحلي بيضلّوا شغّالين.
+    // بلا هويّة ما في اتصال؛ الموسيقى والمفتاح المحلي شغّالين.
   } else if (WiFi.status() != WL_CONNECTED) {
     g_netServicesReady = false;
     ensureWiFi();

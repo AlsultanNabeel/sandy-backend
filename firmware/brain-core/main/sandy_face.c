@@ -1,10 +1,5 @@
-// Sandy's face — LVGL native objects + animation engine.
-//
-// Unlike the old immediate-mode (TFT_eSprite) face, here every feature is a
-// real LVGL object: eyes/iris/pupil/brows/mouth. That buys us smooth blinks
-// and eye movement WITHOUT full-screen flicker (LVGL only repaints the region
-// that changed), vertical gradients for a glossy 3-D look, and eased mood
-// transitions. Solid shapes only — never a thin hairline.
+// Sandy's face: native LVGL objects, so blinks and eye moves repaint only the
+// changed region. Solid shapes only, never thin hairlines.
 
 #include "sandy_face.h"
 #include "config.h"
@@ -31,18 +26,13 @@
 
 static const char *TAG = "face";
 
-// ─── Display + LVGL internals ─────────────────────────────────────────────────
-// 5 ms is well inside LVGL's 1-10 ms guidance; at 2 ms the esp_timer task
-// (priority 22, above every task on the board) woke 500 times a second just to
-// add 2 to a counter.
+// ─── Display + LVGL internals ───
+// 5 ms: at 2 ms the priority-22 esp_timer task woke 500×/s.
 #define LVGL_TICK_PERIOD_MS     5
 #define LVGL_TASK_STACK         6144
 #define LVGL_TASK_PRIORITY      5
-// Two draw buffers of this many lines. They must be DMA-capable, which means
-// internal RAM — the RAM the voice session's TLS runs out of. 40 lines was
-// 2 x 19.2 KB; 20 lines halves that for a face that mostly repaints small
-// regions (blinks, drifts), and costs a large repaint only a few more 2 ms SPI
-// transfers.
+// DMA buffers must be internal RAM, which voice TLS needs; 20 lines is enough
+// for the mostly small repaints.
 #define LCD_BUF_LINES           20
 
 static esp_lcd_panel_handle_t s_panel = NULL;
@@ -53,19 +43,19 @@ static lv_color_t             s_buf1[TFT_WIDTH * LCD_BUF_LINES];
 static lv_color_t             s_buf2[TFT_WIDTH * LCD_BUF_LINES];
 static SemaphoreHandle_t      s_mutex;
 
-// ─── Face geometry (240×240) ──────────────────────────────────────────────────
+// ─── Face geometry (240×240) ───
 #define EYE_W       98           // round eyes (W == H → perfect circle)
 #define EYE_H       98
 #define EYE_CY      92           // vertical centre of the eyes
 #define BROW_BASE_Y (EYE_CY - EYE_H / 2 - 20)
 #define EYE_DX      54           // each eye offset from screen centre
-#define IRIS_D      84           // huge iris — white sclera is just a thin rim
+#define IRIS_D      84           // huge iris, thin sclera rim
 #define PUPIL_D     38
 #define GLOSS_D     18
 #define BROW_W      60
 #define BROW_H      12
 
-// ─── Colours ──────────────────────────────────────────────────────────────────
+// ─── Colours ───
 #define C_BG        lv_color_hex(0x000000)
 #define C_SCLERA    lv_color_hex(0xFFFFFF)
 #define C_SCLERA2   lv_color_hex(0xD7E2F2)
@@ -81,7 +71,7 @@ static SemaphoreHandle_t      s_mutex;
 #define IR_PINK     0xFF5FA0
 #define IR_SKY      0x35C6FF
 
-// ─── Face objects ─────────────────────────────────────────────────────────────
+// ─── Face objects ───
 static lv_obj_t *s_eye_l, *s_eye_r;          // sclera
 static lv_obj_t *s_iris_l, *s_iris_r;        // iris (carries pupil + gloss)
 static lv_obj_t *s_brow_l, *s_brow_r;
@@ -93,14 +83,13 @@ static lv_obj_t *s_blush_l, *s_blush_r;
 
 static volatile sandy_mood_t s_mood = MOOD_IDLE;
 
-// ─── Focus-session ring overlay (alternates with the face, 5 s on / 5 s off) ───
+// ─── Focus ring overlay (alternates with the face, 5 s on / 5 s off) ───
 static lv_obj_t *s_focus_panel;    // full-screen cover that holds the ring
 static lv_obj_t *s_focus_ring;     // the countdown arc
 static lv_obj_t *s_focus_time;     // mm:ss in the middle
 static lv_obj_t *s_focus_status;   // "FOCUS" / "BREAK"
 
-// Status banner — the line that tells you WHY she is not answering. Written
-// from any task, drawn by the LVGL one, same split as the focus ring.
+// Status banner: written from any task, drawn by the LVGL task.
 static lv_obj_t *s_banner;
 static char      s_banner_text[24];
 static bool      s_banner_dirty;
@@ -114,47 +103,34 @@ static int16_t  s_eye_l_x0, s_eye_r_x0;   // resting eye positions
 static int64_t  s_look_until_ms;          // hold gaze toward a sound until this time
 static volatile int64_t s_last_active_ms; // last interaction, for the sleep timer
 
-// ── The stuck-face watchdog ──────────────────────────────────────────────────
-//
-// See the note on face_set_session_active() in the header for why this exists.
-// Short version: an expression that outlives its session is a bug that has
-// already happened once, and telling each new code path to remember to clean up
-// is not a fix — it is the same bug waiting for the next author.
-//
-// A transient expression is one that only makes sense while a conversation is
-// happening: curious (she just heard her name), focused (listening), happy
-// (talking). Anything else — idle, worried, the error faces — is allowed to
-// stay, because those are states in their own right.
+// ── Stuck-face watchdog (see face_set_session_active) ──
+// Transient expressions (curious, focused, talking-happy) only make sense during
+// a conversation; other moods may stay.
 static volatile int64_t s_mood_set_ms;    // when the current expression started
 static volatile bool    s_session_live;   // a voice session is genuinely open
-static volatile bool    s_mood_from_app;  // the owner chose it; the watchdog leaves it
-// The face exists. Everything that touches an LVGL object checks this: a display
-// that failed to initialise left the mutex created and the objects NULL, and the
-// first glance toward a sound dereferenced them.
+static volatile bool    s_mood_from_app;  // owner's choice; the watchdog leaves it
+// Every LVGL touch checks this: a failed display init left the objects NULL.
 static volatile bool    s_ready;
 
-// An app mood lasts half an hour. Long enough to be a choice, short enough that
-// "sad" picked on Monday is not still on her face on Wednesday.
+// App moods last half an hour.
 #define FACE_APP_MOOD_TTL_MS (30 * 60 * 1000)
 
-// Generous on purpose: the normal gap between hearing the wake word and the
-// session opening is a second or two, and a slow network can stretch it. Six
-// seconds is far beyond any healthy case and far under a person's patience.
+// Well past a normal wake-word-to-session gap, even on a slow network.
 #define FACE_STUCK_AFTER_MS 6000
 
 static bool mood_is_transient(sandy_mood_t m) {
     return m == MOOD_CURIOUS || m == MOOD_FOCUSED || m == MOOD_HAPPY;
 }
 
-// ─── Mood → look ──────────────────────────────────────────────────────────────
+// ─── Mood → look ───
 typedef enum { MO_NEUTRAL, MO_SMILE, MO_BIG_SMILE, MO_FROWN, MO_OPEN, MO_FLAT, MO_SMIRK } mouth_t;
 static mouth_t s_look_mouth = MO_NEUTRAL;
 static void show_mouth(mouth_t m);
 
 typedef struct {
     uint8_t  openness;   // 30-100 → eye height
-    int16_t  brow_deg;   // inner-end tilt; + = angry (inner down), - = sad (inner up)
-    int8_t   brow_dy;    // whole-brow vertical shift: - = raised, + = lowered toward eyes
+    int16_t  brow_deg;   // inner-end tilt; + angry, - sad
+    int8_t   brow_dy;    // - raised, + lowered
     mouth_t  mouth;
     uint32_t iris;
     bool     blush;
@@ -188,16 +164,14 @@ static const look_t LOOKS[MOOD_COUNT] = {
     [MOOD_SILLY]        = {100, -12,  -5, MO_BIG_SMILE, IR_GREEN, true },
 };
 
-// ─── LVGL flush plumbing ──────────────────────────────────────────────────────
+// ─── LVGL flush plumbing ───
 static bool _on_flush_ready(esp_lcd_panel_io_handle_t io,
                              esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
     lv_disp_flush_ready((lv_disp_drv_t *)user_ctx);
     return false;
 }
 static void _flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *map) {
-    // A transfer that never starts never finishes, and LVGL waits for "ready"
-    // before drawing anything again: one failed SPI queue froze her face for
-    // good. Tell it now instead; the next frame repaints the area.
+    // A failed SPI queue never signals ready and would freeze LVGL; signal now.
     if (esp_lcd_panel_draw_bitmap(s_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1,
                                   map) != ESP_OK) {
         lv_disp_flush_ready(drv);
@@ -210,8 +184,7 @@ static void _lvgl_task(void *arg) {
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             uint32_t ms = lv_timer_handler();
             xSemaphoreGive(s_mutex);
-            // At a 100 Hz tick, pdMS_TO_TICKS(1..9) is 0 and vTaskDelay(0)
-            // only yields — the task spun at priority 5. Always sleep a tick.
+            // At a 100 Hz tick, short delays round to 0 and only yield; always sleep a tick.
             TickType_t t = pdMS_TO_TICKS(ms > 50 ? 50 : ms);
             vTaskDelay(t ? t : 1);
         } else {
@@ -220,7 +193,7 @@ static void _lvgl_task(void *arg) {
     }
 }
 
-// ─── Small style helpers ──────────────────────────────────────────────────────
+// ─── Small style helpers ───
 static void style_circle(lv_obj_t *o, int d, lv_color_t c) {
     lv_obj_set_size(o, d, d);
     lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
@@ -231,14 +204,13 @@ static void style_circle(lv_obj_t *o, int d, lv_color_t c) {
     lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
 }
 
-// Clean solid iris — depth comes from the gloss highlights, not a gradient
-// (gradients band badly in RGB565 and looked muddy).
+// Solid iris: gradients band badly in RGB565.
 static void iris_set_color(lv_obj_t *iris, uint32_t rgb) {
     lv_obj_set_style_bg_color(iris, lv_color_hex(rgb), 0);
     lv_obj_set_style_bg_grad_dir(iris, LV_GRAD_DIR_NONE, 0);
 }
 
-// ─── Eye blink / openness animation (height only → partial repaint) ───────────
+// ─── Eye blink / openness (height only → partial repaint) ───
 static void eye_h_cb(void *obj, int32_t h) {
     lv_obj_t *e = (lv_obj_t *)obj;
     lv_obj_set_height(e, h);
@@ -263,9 +235,7 @@ static void anim_eye_h(lv_obj_t *e, int32_t from, int32_t to, uint16_t t, uint16
     anim_eye_h_delayed(e, from, to, t, playback, 0);
 }
 
-// People do not blink like a metronome. Speed varies a little, and now and then
-// comes a double blink — the small irregularity is most of what reads as alive.
-// Asleep, she does not blink at all.
+// Slightly irregular blinks, sometimes double; none while asleep.
 static void blink_timer_cb(lv_timer_t *t) {
     if (s_mood == MOOD_SLEEPY) {
         lv_timer_set_period(t, 3000);
@@ -280,16 +250,12 @@ static void blink_timer_cb(lv_timer_t *t) {
         anim_eye_h_delayed(s_eye_l, h, 8, speed, speed, gap);
         anim_eye_h_delayed(s_eye_r, h, 8, speed, speed, gap);
     }
-    // schedule next blink at a natural, slightly random interval
     lv_timer_set_period(t, 2200 + (esp_random() % 2600));
 }
 
-// ─── Breathing ───────────────────────────────────────────────────────────────
-// The whole face rises and falls two pixels on a slow four-second cycle — the
-// difference between a picture of a face and a face at rest. A separate style
-// offset (translate), so it never fights the blink or the glance, which set the
-// real position. Deeper and slower when she sleeps; still during a call, when
-// the audio tasks share the core and the face has better things to show.
+// ─── Breathing ───
+// The face rises and falls 2 px via translate, so it never fights blink or glance.
+// Deeper when asleep; still during a call.
 static void breathe_timer_cb(lv_timer_t *t) {
     (void)t;
     static int last = 99;
@@ -309,7 +275,7 @@ static void breathe_timer_cb(lv_timer_t *t) {
     }
 }
 
-// ─── Idle eye drift (glides the iris within the eye → alive, no twitch) ────────
+// ─── Idle eye drift ───
 static void set_x_cb(void *o, int32_t v) { lv_obj_set_x((lv_obj_t *)o, (lv_coord_t)v); }
 static void set_y_cb(void *o, int32_t v) { lv_obj_set_y((lv_obj_t *)o, (lv_coord_t)v); }
 
@@ -325,20 +291,19 @@ static void anim_axis(lv_obj_t *o, lv_anim_exec_xcb_t cb, int32_t from, int32_t 
 }
 
 static void drift_timer_cb(lv_timer_t *t) {
-    // While a sound is being tracked, hold the gaze and skip random drift.
+    // Hold the gaze while tracking a sound.
     if ((esp_timer_get_time() / 1000) < s_look_until_ms) {
         lv_timer_set_period(t, 150);
         return;
     }
-    // Glance just ended → bring the eyes back to centre.
+    // Glance ended: recentre.
     if (lv_obj_get_x(s_eye_l) != s_eye_l_x0) {
         anim_axis(s_eye_l, set_x_cb, lv_obj_get_x(s_eye_l), s_eye_l_x0, 250);
         anim_axis(s_eye_r, set_x_cb, lv_obj_get_x(s_eye_r), s_eye_r_x0, 250);
     }
     int dx = 5 - (int)(esp_random() % 11);   // -5..+5
     int dy = 3 - (int)(esp_random() % 7);    // -3..+3
-    // Thinking looks up and to the side, the way people search for a word —
-    // and holds there longer than an idle glance.
+    // Thinking looks up and aside, and holds longer.
     if (s_mood == MOOD_THINKING) {
         dx = 5 + (int)(esp_random() % 3);
         dy = -6 - (int)(esp_random() % 2);
@@ -352,7 +317,7 @@ static void drift_timer_cb(lv_timer_t *t) {
     lv_timer_set_period(t, 900 + (esp_random() % 1400));
 }
 
-// Glance toward a sound (called from the ears module, off the LVGL task).
+// Called from the ears module, off the LVGL task.
 void face_look(int pan) {
     if (pan < -100) pan = -100;
     else if (pan > 100) pan = 100;
@@ -370,7 +335,7 @@ void face_look(int pan) {
     xSemaphoreGive(s_mutex);
 }
 
-// ─── Apply a mood ─────────────────────────────────────────────────────────────
+// ─── Apply a mood ───
 static void apply_look(sandy_mood_t mood) {
     if (mood >= MOOD_COUNT) mood = MOOD_IDLE;
     const look_t *l = &LOOKS[mood];
@@ -382,7 +347,7 @@ static void apply_look(sandy_mood_t mood) {
     iris_set_color(s_iris_l, l->iris);
     iris_set_color(s_iris_r, l->iris);
 
-    // Brows (every mood): raise/lower the whole brow + tilt the inner end.
+    // Brows: shift the whole brow and tilt the inner end.
     int by = BROW_BASE_Y + l->brow_dy;
     lv_obj_set_y(s_brow_l, by);
     lv_obj_set_y(s_brow_r, by);
@@ -401,7 +366,6 @@ static void apply_look(sandy_mood_t mood) {
     }
 }
 
-// The mouth a mood asks for: the right shape shown, the others hidden.
 static void show_mouth(mouth_t m) {
     lv_obj_add_flag(s_mouth_arc, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_mouth_bar, LV_OBJ_FLAG_HIDDEN);
@@ -443,11 +407,8 @@ static void show_mouth(mouth_t m) {
     }
 }
 
-// ─── Her mouth follows her voice ─────────────────────────────────────────────
-// While the speaker plays, the mouth is an open oval whose height follows the
-// loudness of what is coming out, 20 times a second. Not phonemes — the eye
-// reads rhythm, and a mouth that opens on the stressed syllables looks like
-// speech. When she stops, the mood's own mouth comes back.
+// ─── Lip sync ───
+// While the speaker plays, the mouth is an oval whose height follows loudness (20 Hz).
 static void lipsync_timer_cb(lv_timer_t *t) {
     (void)t;
 #if ENABLE_VOICE
@@ -465,7 +426,7 @@ static void lipsync_timer_cb(lv_timer_t *t) {
             lv_obj_add_flag(s_mouth_bar, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(s_mouth_o, LV_OBJ_FLAG_HIDDEN);
         }
-        // Ease toward the target so the mouth moves, not flickers.
+        // Ease toward the target to avoid flicker.
         h = shown_h ? (shown_h + h) / 2 : h;
         if (h != shown_h) {
             shown_h = h;
@@ -485,14 +446,14 @@ static void lipsync_timer_cb(lv_timer_t *t) {
     }
 }
 
-// ─── Backlight: dims as she falls asleep ─────────────────────────────────────
+// ─── Backlight: dims as she falls asleep ───
 #define BL_AWAKE   200
 #define BL_ASLEEP  24
 static void backlight_step(void) {
     static int duty = BL_AWAKE;
     const int target = (s_mood == MOOD_SLEEPY) ? BL_ASLEEP : BL_AWAKE;
     if (duty == target) return;
-    // Falling asleep takes a few seconds; waking is at once.
+    // Dim slowly, wake at once.
     duty = target > duty ? target : (duty - 4 < target ? target : duty - 4);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
@@ -507,19 +468,8 @@ static void mood_timer_cb(lv_timer_t *t) {
     backlight_step();
 }
 
-// Show the focus ring for ~5 s, then the face for ~5 s, repeating, while a
-// session is live; off → keep it hidden (normal face). Runs in the LVGL task —
-// face_set_focus (MQTT task) only updates the volatiles read here. The ring
-// counts down locally between cloud updates so it stays smooth.
-// Lives up here with the other timer callbacks, not down beside face_set_banner
-// where it belongs by topic: build_face() registers it, and build_face is defined
-// before that section.
-// Runs every half second and asks one question: is she wearing a face that only
-// makes sense during a conversation, while no conversation is happening?
-//
-// It does not know or care *why*. That is the design. The previous freeze was a
-// failed socket open on a path that forgot to reset the face; the next one will
-// be something nobody has thought of yet, and this catches that one too.
+// Every half second: a transient face with no session is dropped, whatever
+// failed to clear it.
 static void stuck_face_timer_cb(lv_timer_t *t) {
     (void)t;
     if (s_mood_from_app) {
@@ -536,13 +486,11 @@ static void stuck_face_timer_cb(lv_timer_t *t) {
     int64_t now = esp_timer_get_time() / 1000;
     if (s_mood_set_ms == 0 || now - s_mood_set_ms < FACE_STUCK_AFTER_MS) return;
 
-    // Logged as a warning, not silently corrected: this firing means something
-    // upstream failed without saying so, and that is worth finding.
+    // Warn: something upstream failed silently.
     ESP_LOGW(TAG, "expression %d stuck %lldms with no session — back to idle",
              (int)s_mood, now - s_mood_set_ms);
     face_set_mood(MOOD_IDLE);
 }
-
 
 static void screen_timer_cb(lv_timer_t *t) {
     (void)t;
@@ -559,14 +507,12 @@ static void banner_timer_cb(lv_timer_t *t) {
     }
     lv_label_set_text(s_banner, s_banner_text);
     lv_obj_clear_flag(s_banner, LV_OBJ_FLAG_HIDDEN);
-    // In front of everything, every time it shows: the owner's picture panel
-    // and the focus ring are both full-screen and were built later, so a
-    // "NO WI-FI" banner sat hidden behind a photo — the one moment the robot
-    // most needed to say why it had gone quiet.
+    // Always in front: the picture and focus panels would hide it.
     lv_obj_move_foreground(s_banner);
 }
 
-
+// LVGL task: alternate ring and face while a session is live; counts down locally
+// between cloud updates. face_set_focus only writes the volatiles.
 static void focus_timer_cb(lv_timer_t *t) {
     int phase = s_focus_phase;
     bool hidden = lv_obj_has_flag(s_focus_panel, LV_OBJ_FLAG_HIDDEN);
@@ -597,9 +543,7 @@ static void focus_timer_cb(lv_timer_t *t) {
     if (hidden) lv_obj_clear_flag(s_focus_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
-// Ignored for FACE_SLEEP_AFTER_MS while idle → doze off. Anything expressive
-// (wake word, proximity, a cloud mood) resets the clock in face_set_mood and
-// snaps her awake by simply setting a new mood.
+// Idle for FACE_SLEEP_AFTER_MS → doze; face_set_mood resets the clock.
 static void sleep_timer_cb(lv_timer_t *t) {
     if (s_mood != MOOD_IDLE) return;
     int64_t now = esp_timer_get_time() / 1000;
@@ -611,7 +555,7 @@ static void sleep_timer_cb(lv_timer_t *t) {
     }
 }
 
-// ─── Demo: cycle every mood so we can eyeball them on hardware ────────────────
+// ─── Demo: cycle every mood for hardware checks ───
 #define FACE_DEMO 0
 #if FACE_DEMO
 static const char *MOOD_NAMES[MOOD_COUNT] = {
@@ -628,7 +572,7 @@ static void demo_timer_cb(lv_timer_t *t) {
 }
 #endif
 
-// ─── Build the face objects ───────────────────────────────────────────────────
+// ─── Build the face objects ───
 static lv_obj_t *make_eye(int x) {
     lv_obj_t *eye = lv_obj_create(lv_scr_act());
     lv_obj_set_size(eye, EYE_W, EYE_H);
@@ -647,13 +591,12 @@ static void build_face(void) {
 
     int cx = TFT_WIDTH / 2;
 
-    // Eyes
     s_eye_l = make_eye(cx - EYE_DX - EYE_W / 2);
     s_eye_r = make_eye(cx + EYE_DX - EYE_W / 2);
     s_eye_l_x0 = cx - EYE_DX - EYE_W / 2;
     s_eye_r_x0 = cx + EYE_DX - EYE_W / 2;
 
-    // Iris (child of each eye) carries pupil + gloss and moves for "look-around"
+    // Iris (child of the eye) carries pupil + gloss and moves for look-around.
     int ipos = (EYE_W - IRIS_D) / 2;
     s_iris_l = lv_obj_create(s_eye_l);
     style_circle(s_iris_l, IRIS_D, lv_color_hex(IR_BLUE));
@@ -677,7 +620,6 @@ static void build_face(void) {
         lv_obj_align(gloss2, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
     }
 
-    // Brows
     int by = EYE_CY - EYE_H / 2 - 22;
     s_brow_l = lv_obj_create(lv_scr_act());
     lv_obj_set_size(s_brow_l, BROW_W, BROW_H);
@@ -699,7 +641,7 @@ static void build_face(void) {
     lv_obj_set_style_transform_pivot_y(s_brow_r, BROW_H / 2, 0);
     lv_obj_clear_flag(s_brow_r, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Mouth — arc (smile/frown)
+    // Mouth: arc (smile/frown)
     s_mouth_arc = lv_arc_create(lv_scr_act());
     lv_obj_set_size(s_mouth_arc, 96, 96);
     lv_obj_align(s_mouth_arc, LV_ALIGN_CENTER, 0, 80);
@@ -711,7 +653,7 @@ static void build_face(void) {
     lv_obj_remove_style(s_mouth_arc, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(s_mouth_arc, LV_OBJ_FLAG_CLICKABLE);
 
-    // Mouth — bar (neutral/flat)
+    // Mouth: bar (neutral/flat)
     s_mouth_bar = lv_obj_create(lv_scr_act());
     lv_obj_set_size(s_mouth_bar, 46, 14);
     lv_obj_align(s_mouth_bar, LV_ALIGN_CENTER, 0, 90);
@@ -722,7 +664,7 @@ static void build_face(void) {
     lv_obj_set_style_transform_pivot_y(s_mouth_bar, 7, 0);
     lv_obj_clear_flag(s_mouth_bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Mouth — open circle (surprised)
+    // Mouth: open circle (surprised)
     s_mouth_o = lv_obj_create(lv_scr_act());
     style_circle(s_mouth_o, 34, C_WHITE);
     lv_obj_align(s_mouth_o, LV_ALIGN_CENTER, 0, 90);
@@ -731,7 +673,6 @@ static void build_face(void) {
     lv_obj_center(o_in);
     s_mouth_o_in = o_in;
 
-    // Blush
     s_blush_l = lv_obj_create(lv_scr_act());
     style_circle(s_blush_l, 18, C_BLUSH);
     lv_obj_align(s_blush_l, LV_ALIGN_CENTER, -82, 40);
@@ -739,9 +680,7 @@ static void build_face(void) {
     style_circle(s_blush_r, 18, C_BLUSH);
     lv_obj_align(s_blush_r, LV_ALIGN_CENTER, 82, 40);
 
-    // Focus ring overlay — full-screen cover (on top of the face) that we flip
-    // on/off to alternate the ring with her normal expression. Hidden until a
-    // session is live.
+    // Focus overlay: full-screen cover toggled to alternate with the face.
     s_focus_panel = lv_obj_create(lv_scr_act());
     lv_obj_set_size(s_focus_panel, TFT_WIDTH, TFT_HEIGHT);
     lv_obj_set_pos(s_focus_panel, 0, 0);
@@ -768,7 +707,7 @@ static void build_face(void) {
     lv_obj_remove_style(s_focus_ring, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(s_focus_ring, LV_OBJ_FLAG_CLICKABLE);
 
-    // mm:ss — drawn in Montserrat 14 (the only Latin font built in), zoomed ~2× (256 = 1×).
+    // mm:ss in Montserrat 14 (only Latin font), zoomed ~2× (256 = 1×).
     s_focus_time = lv_label_create(s_focus_panel);
     lv_obj_set_width(s_focus_time, 80);
     lv_obj_set_style_text_align(s_focus_time, LV_TEXT_ALIGN_CENTER, 0);
@@ -784,9 +723,7 @@ static void build_face(void) {
     lv_label_set_text(s_focus_status, "FOCUS");
     lv_obj_align(s_focus_status, LV_ALIGN_CENTER, 0, -52);
 
-    // Status banner: bottom strip, above the face so a failure is never hidden
-    // behind an expression. Amber on black — readable across a room, which is
-    // the whole point of putting it on the robot instead of in a log.
+    // Status banner: bottom strip, amber on black, above the face.
     s_banner = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_color(s_banner, lv_color_hex(0xFF8C00), 0);
     lv_obj_set_style_bg_color(s_banner, C_BG, 0);
@@ -798,7 +735,7 @@ static void build_face(void) {
 
     apply_look(MOOD_IDLE);
 
-    // Animations: periodic blink + idle eye drift + dozing off when ignored.
+    // Blink, eye drift, dozing.
     lv_timer_create(blink_timer_cb, 3000, NULL);
     lv_timer_create(drift_timer_cb, 600, NULL);
     lv_timer_create(mood_timer_cb, 60, NULL);
@@ -808,10 +745,7 @@ static void build_face(void) {
     lv_timer_create(breathe_timer_cb, 120, NULL);
     lv_timer_create(lipsync_timer_cb, 50, NULL);
 
-    // The owner's text/picture panel. Built here, as a sibling of the face and
-    // on top of it, and ticked from this same timer loop — so every LVGL call
-    // on this board happens on one task and there is one rule to remember
-    // instead of two.
+    // Owner's text/picture panel, ticked from this loop so all LVGL calls stay on one task.
     screen_lvgl_build(lv_scr_act());
     lv_obj_move_foreground(s_banner);   // above the picture panel too
     lv_timer_create(screen_timer_cb, 100, NULL);
@@ -821,7 +755,7 @@ static void build_face(void) {
 #endif
 }
 
-// ─── LCD hardware init ────────────────────────────────────────────────────────
+// ─── LCD hardware init ───
 static esp_err_t _lcd_init(void) {
     ledc_timer_config_t bl_timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = LEDC_TIMER_8_BIT,
@@ -879,11 +813,9 @@ static void _lvgl_init(void) {
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, LVGL_TICK_PERIOD_MS * 1000));
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Public API ───
 esp_err_t face_init(void) {
-    // A display that will not come up returns an error to TRY_INIT instead of
-    // aborting the boot: every face_set_* call only writes variables, so the
-    // rest of the robot runs fine without a face.
+    // Return errors instead of aborting: face_set_* only writes variables, so the robot runs without a face.
     s_mutex = xSemaphoreCreateMutex();
     if (!s_mutex) return ESP_ERR_NO_MEM;
     ESP_RETURN_ON_ERROR(_lcd_init(), TAG, "display");
@@ -913,13 +845,11 @@ void face_set_mood(sandy_mood_t mood) {
         s_mood_from_app = false;   // the robot's own expression takes over
         s_mood = mood;
         g_current_mood = mood;
-        // Any expressed mood counts as interaction and resets the sleep clock
-        // (idle/sleepy don't, or she could never doze off).
+        // Expressive moods reset the sleep clock (idle/sleepy don't).
         if (mood != MOOD_IDLE && mood != MOOD_SLEEPY) {
             s_last_active_ms = esp_timer_get_time() / 1000;
         }
-        // When did this expression start? The watchdog needs it to tell an
-        // expression that is doing its job from one that got stuck.
+        // For the stuck-face watchdog.
         s_mood_set_ms = esp_timer_get_time() / 1000;
     }
 }
@@ -929,20 +859,18 @@ void face_set_session_active(bool active) {
 }
 
 void face_set_banner(const char *text) {
-    // strncpy + explicit terminator: this is called from the Wi-Fi and websocket
-    // event handlers, which must not block and must not fault on a long string.
+    // Called from Wi-Fi/websocket handlers: must not block or overrun.
     if (text == NULL) text = "";
     strncpy(s_banner_text, text, sizeof(s_banner_text) - 1);
     s_banner_text[sizeof(s_banner_text) - 1] = '\0';
     s_banner_dirty = true;
 }
 
-
 void face_set_focus(int phase, int remaining_sec, int total_sec) {
     s_focus_phase     = phase;
     s_focus_remaining = remaining_sec < 0 ? 0 : remaining_sec;
     s_focus_total     = total_sec < 0 ? 0 : total_sec;
     s_focus_set_ms    = esp_timer_get_time() / 1000;
-    // A live session counts as activity so she doesn't doze off mid-study.
+    // A live focus session counts as activity.
     if (phase != 0) s_last_active_ms = s_focus_set_ms;
 }

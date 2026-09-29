@@ -1,7 +1,4 @@
-# Sandy camera — two 1.9 MB app slots so it can update itself from the server
-# (sandy_ota_pull.h), plus a slot for crash dumps. Arduino picks this file up
-# automatically because it sits next to the sketch. Same NVS offset as before,
-# so the saved Wi-Fi, identity and settings survive the first cable flash.
+# Sandy camera: two 1.9 MB OTA slots (sandy_ota_pull.h) + crash dump. Keep NVS at 0x9000.
 # Name,    Type, SubType,  Offset,   Size
 nvs,       data, nvs,      0x9000,   0x5000
 otadata,   data, ota,      0xe000,   0x2000

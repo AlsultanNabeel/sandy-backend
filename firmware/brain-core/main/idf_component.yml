@@ -1,8 +1,5 @@
-# Pinned to the minor versions dependencies.lock resolved and the firmware was
-# tested on. "*" let a fresh machine (or a deleted lock) pull whatever was newest
-# that day — a new esp-sr can change the wake word model's memory needs, and the
-# board's internal RAM has no slack for surprises. "~X.Y.Z" still takes patch
-# fixes. Raise one on purpose, build, test, and commit the new lock with it.
+# Pinned to tested minor versions: a newer esp-sr can change the wake word's RAM
+# needs and internal RAM has no slack. Bump on purpose and commit the new lock.
 dependencies:
   espressif/esp-sr: "~2.4.6"                  # WakeNet on-device wake word engine
   lvgl/lvgl: "~8.3.11"

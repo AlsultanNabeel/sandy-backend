@@ -1,8 +1,4 @@
-// On-board WS2812 (GPIO 48). Contract and reasoning: include/sandy_led.h
-//
-// One task owns the pixel. Everything else posts a request and returns, so a
-// caller asking for a two-minute rainbow does not block for two minutes, and
-// the voice link can take the light back instantly when a session opens.
+// On-board WS2812 (see sandy_led.h). One task owns the pixel; callers post and return.
 
 #include "config.h"
 #if ENABLE_LED
@@ -23,9 +19,7 @@ static const char *TAG = "led";
 
 static led_strip_handle_t s_strip;
 
-// What the light should be doing. Written by callers, read by the effect task.
-// Plain scalars, each written in one instruction — no lock needed, and a torn
-// read at worst shows one wrong frame twenty milliseconds long.
+// Written by callers, read by the task. Single-word scalars, no lock needed.
 static volatile sandy_led_fx_t     s_fx    = LED_FX_OFF;
 static volatile uint32_t           s_rgb   = 0x00A0FF;
 static volatile int                s_speed = 5;
@@ -40,9 +34,7 @@ static void put(uint8_t r, uint8_t g, uint8_t b) {
     led_strip_refresh(s_strip);
 }
 
-// Hue (0..359) to RGB at full saturation, scaled by `v` (0..255).
-// Integer maths on purpose: this runs fifty times a second forever, and the
-// float unit is wanted by the audio path.
+// Integer maths: runs 50×/s and the FPU belongs to audio.
 static void hue_to_rgb(int hue, int v, uint8_t *r, uint8_t *g, uint8_t *b) {
     hue = ((hue % 360) + 360) % 360;
     int region = hue / 60;
@@ -58,8 +50,7 @@ static void hue_to_rgb(int hue, int v, uint8_t *r, uint8_t *g, uint8_t *b) {
     }
 }
 
-// The indicator colours. Kept dim: this sits on a desk in front of a face, and
-// a full-brightness WS2812 at arm's length is unpleasant to sit beside.
+// Kept dim: it sits right in front of the face.
 static void paint_state(sandy_led_state_t st) {
     switch (st) {
     case LED_STATE_IDLE:       put(0, 0, 12);   break;
@@ -70,9 +61,7 @@ static void paint_state(sandy_led_state_t st) {
     }
 }
 
-// The truth about the microphone, not the last colour someone asked for. The
-// status banner sets LED_STATE_OFF on a network error — mid-session, with the
-// mic still open — and the privacy light went dark while audio could leave.
+// Ask the mic, not the last colour: a network-error banner turned the light off mid-session.
 static bool session_live(void) {
 #if ENABLE_VOICE
     return voice_session_is_active();
@@ -84,26 +73,19 @@ static bool session_live(void) {
 static void led_task(void *arg) {
     (void)arg;
     int frame = 0;
-    int last_fx = -1;   // an effect restarts from its first frame when it changes
-    // The state last painted, or -1 (not a valid state) when the pixel shows
-    // something else and the next indicator pass must repaint.
+    int last_fx = -1;   // restart the effect when it changes
+    // -1 forces a repaint of the indicator.
     int last = -1;
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(FRAME_MS));
 
         if (s_state_owns || session_live()) {
-            // The privacy indicator holds the light. Repaint only on change —
-            // refreshing an unchanged pixel fifty times a second is pure noise
-            // on the RMT peripheral. During a session it can only say "live":
-            // nothing turns it dark or idle while the microphone is open.
+            // Privacy indicator holds the light; repaint only on change. During a session it can only say "live".
             sandy_led_state_t st = s_state;
             if (session_live() && st != LED_STATE_TALKING) st = LED_STATE_LISTENING;
             if (st == LED_STATE_IDLE) {
-                // Idle breathes: a slow six-second swell in the same dim blue.
-                // A light that never changes reads as "off" or "stuck"; one
-                // that breathes reads as asleep and fine. Repainted only when
-                // the level changes, which is a few times a second.
+                // Idle breathes slowly, so it reads as alive rather than stuck.
                 static int idle_lvl = -1;
                 int t = (int)((xTaskGetTickCount() * portTICK_PERIOD_MS) % 6000);
                 int tri = t < 3000 ? t : 6000 - t;          // 0..3000..0
@@ -121,18 +103,14 @@ static void led_task(void *arg) {
             last_fx = -1;
             continue;
         }
-        // An effect is painting over the indicator. Forget what it last showed:
-        // otherwise "led idle" after an effect, with the state already IDLE,
-        // matched `last` and left the effect's final colour lit for good.
+        // Forget the last state, or the effect's last colour stays lit.
         last = -1;
 
         const int  spd = s_speed < 1 ? 1 : (s_speed > 10 ? 10 : s_speed);
         const uint32_t rgb = s_rgb;
         const uint8_t  cr = (rgb >> 16) & 0xFF, cg = (rgb >> 8) & 0xFF, cb = rgb & 0xFF;
         uint8_t r = 0, g = 0, b = 0;
-        // Frame counts from the effect's own start. It ran on from whatever came
-        // before, so a sunrise asked for after a minute of rainbow had already
-        // "finished" and jumped straight to full brightness.
+        // Restart the frame count per effect, or a sunrise after a rainbow starts "finished".
         if ((int)s_fx != last_fx) { last_fx = (int)s_fx; frame = 0; }
         frame++;
 
@@ -142,8 +120,7 @@ static void led_task(void *arg) {
             break;
 
         case LED_FX_BREATHE: {
-            // Triangle wave rather than a sine: no float, and at this size the
-            // eye cannot tell them apart.
+            // Triangle wave: no float, indistinguishable at this size.
             int period = 400 / spd, t = frame % period;
             int lvl = t < period / 2 ? (t * 255 / (period / 2))
                                      : (255 - (t - period / 2) * 255 / (period / 2));
@@ -189,14 +166,12 @@ static void led_task(void *arg) {
         }
 
         case LED_FX_SUNRISE: {
-            // Runs once and stops, which is the point of a sunrise.
+            // Runs once and stops.
             int steps = 600 / spd;
             int t = frame > steps ? steps : frame;
             r = 20 + t * 235 / steps;
             g = t * 140 / steps;
-            // Blue comes in last and slowly. Integer order matters: t*t/steps/
-            // steps is zero until the final frame, which made the whole climb
-            // blue-less and then flicked blue on at the end.
+            // Integer order matters: t*t/steps/steps is 0 until the last frame.
             b = (uint8_t)((int32_t)t * t * 60 / ((int32_t)steps * steps));
             if (frame >= steps) { s_fx = LED_FX_SOLID; s_rgb = 0xFF8C3C; }
             break;
@@ -242,8 +217,7 @@ esp_err_t led_init(void) {
     s_state_owns = true;
     s_state = LED_STATE_IDLE;
     paint_state(LED_STATE_IDLE);
-    // 2048: integer maths and one driver call per frame. Priority 1 — a dropped
-    // animation frame is invisible; a dropped audio frame is not.
+    // Priority 1: a dropped animation frame is invisible, an audio frame is not.
     xTaskCreate(led_task, "led_fx", 2048, NULL, 1, NULL);
     ESP_LOGI(TAG, "ready on GPIO %d", PIN_W2812);
     return err;
@@ -257,17 +231,13 @@ void led_set_state(sandy_led_state_t state) {
 bool led_set_effect(sandy_led_fx_t fx, uint32_t rgb, int speed) {
     if (fx < 0 || fx >= LED_FX_COUNT) return false;
 
-    // While a session is open the light means "audio is leaving this room" and
-    // nothing may paint over it. Refusing is the honest answer; accepting and
-    // showing nothing would be worse than either.
+    // Refuse while audio can leave the room: the privacy light must stay visible.
     if (session_live() || s_state == LED_STATE_LISTENING || s_state == LED_STATE_TALKING) {
         ESP_LOGW(TAG, "effect refused — the light is showing a live session");
         return false;
     }
 
-    // No colour given keeps the current one: "breathe" after "solid:ff0000"
-    // breathes red. It used to reset to blue, so every effect without a
-    // colour forgot the one the owner had just chosen.
+    // No colour keeps the current one.
     if (rgb != LED_RGB_KEEP) s_rgb = rgb & 0xFFFFFF;
     s_speed = speed;
     s_fx    = fx;

@@ -1,23 +1,11 @@
-// =========================
-// ESP32-CAM — Sandy's Vision (MQTT-based)
-// =========================
-//   • WiFi مباشر
-//   • MQTT (HiveMQ) — نفس البروكر تبع Sandy
-//   • Topics — تحت شجرة الروبوت (sandy/node/<node_id>/cam/…، الأسماء بـ config.h):
+// ESP32-CAM — Sandy's Vision
+//   • Topics تحت sandy/node/<node_id>/cam/… (الأسماء بـ config.h):
 //       cam/request · command · wifi · flash · stream · framesize  ← أوامر داخلة
-//       cam/status  ← حالة الكاميرا (نبضة)،  cam/event ← أحداث
-//     الصورة نفسها ما بتمرّ بالوسيط: بتنرفع بطلب واحد لـ /api/cam/upload.
-//   • تحديث موقّع من الخادم (sandy_ota_pull.h)؛ الترقية المحلية والتلنت للتطوير بس
-//
-// التقسيم على ملفات .ino — يدمجها Arduino IDE تلقائياً:
-//   vision-core.ino  — globals + setup + loop (هذا الملف)
-//   cam_capture.ino  — esp_camera init + JPEG capture
-//   cam_control.ino  — إعدادات الكاميرا والفلاش (محفوظة)
-//   cam_http.ino     — البث المباشر على الشبكة المحلية
-//   cam_mqtt.ino     — MQTT connect / subscribe / status
-//   cam_ota.ino      — OTA + Telnet
-//   cam_upload.ino   — رفع الصورة للخادم (موقّع، مع مفتاح الكاميرا الخاص)
-//   cam_wifi.ino     — WiFi + diagnostics
+//       cam/status  ← نبضة،  cam/event ← أحداث
+//     الصورة بتنرفع بطلب لـ /api/cam/upload، مش بالوسيط.
+//   • تحديث موقّع من الخادم (sandy_ota_pull.h)؛ الترقية المحلية والتلنت للتطوير بس.
+// ملفات .ino (Arduino بيدمجها): capture, control (إعدادات وفلاش), http (بث محلي),
+// mqtt, ota (+Telnet), upload (رفع موقّع), wifi.
 
 #include <Arduino.h>
 #include "esp_camera.h"
@@ -27,22 +15,15 @@
 #include <PubSubClient.h>
 #include "esp_system.h"
 #include "esp_task_wdt.h"
-// **الأسرار قبل الإعدادات.** `config.h` بيعطي قيمًا افتراضية بـ `#ifndef` —
-// والترتيب العكسي كان بيخلّي أي قيمة بالأسرار (زي مفتاح البث المحلي) تيجي
-// متأخرة وتنتهي تحذير «إعادة تعريف» بدل ما تسري.
+// الأسرار قبل config.h، اللي قيمه الافتراضية بـ `#ifndef`.
 #include "secrets.h"
 #include "config.h"
 #include "sandy_ca_roots.h"
-// الهويّة بذاكرة اللوح، والتحديث الموقّع من الخادم — نفس الملفين بعقدة الغرفة.
+// نفس الملفين بعقدة الغرفة.
 #include "sandy_identity.h"
 #include "sandy_ota_pull.h"
 
-// ── السجل ──────────────────────────────────────────────────────────────────
-//
-// **نسخة التطوير بس بتمرّر السجل ع الشبكة.** مرآة التلنت كانت شغّالة بكل
-// نسخة، بلا كلمة سر، ع منفذ ثلاثة وعشرين — وأي جهاز بالبيت كان بيقرا كل سطر:
-// عناوين، وأوامر، ولحظة تغيير الواي فاي كلمة سرّها كمان. بالنسخة اللي بتنباع
-// السجل ع الكبل وبس.
+// ── السجل: ع الشبكة بنسخة التطوير بس (التلنت كان مفتوح بلا كلمة سر) ──
 #if SANDY_DEV
 WiFiServer g_telnetServer(23);
 WiFiClient g_telnetClient;
@@ -67,21 +48,13 @@ class MirrorStream : public Print {
 };
 MirrorStream g_log;
 
-// ── الحارس ─────────────────────────────────────────────────────────────────
-//
-// **ما كان في حارس، وفي عشرة أماكن ممكن تعلّق.** مزامنة الساعة، مصافحة الوسيط،
-// الرفع، تبديل الشبكة، إعادة تشغيل المستشعر، وإيقاف خادم البث وفي حدا بيتفرّج.
-// أي وحدة منهن علقت كانت بتعني لوحًا ميّت لحدّ ما حدا يشيل الفيشة — والفلاش
-// ضايل مشتعل إذا صادف إنه كان شغّال لحظتها، لأنّ مؤقّت الأمان تبعه بيمشي من
-// نفس الحلقة اللي علقت.
-//
-// دقيقة كاملة: أطول انتظار مقصود باللوح (رفع + قراءة الردّ) نصّها. وكل انتظار
-// طويل بيطعم الحارس بنفسه عبر `camWait`، فالحارس ما بيعضّ إلا تعليقًا حقيقيًّا.
+// ── الحارس ──
+// دقيقة: ضعف أطول انتظار مقصود. الانتظارات الطويلة بتطعمه عبر `camWait`.
 #define CAM_WDT_TIMEOUT_MS 60000
 
 void camWdtFeed() { esp_task_wdt_reset(); }
 
-// `delay` اللي بيطعم الحارس — كل انتظار طويل باللوح لازم يمرق من هون.
+// `delay` بيطعم الحارس؛ كل انتظار طويل لازم يمرق من هون.
 void camWait(unsigned long ms) {
   unsigned long t0 = millis();
   while (millis() - t0 < ms) {
@@ -91,12 +64,9 @@ void camWait(unsigned long ms) {
   }
 }
 
-// ── مخزن الإطار: مستهلك واحد بكل لحظة ────────────────────────────────────
-//
-// المستشعر عنده مخزن إطار **واحد**، وتلات أطراف بتطلبه: الالتقاط بالحلقة،
-// والبث البعيد بالحلقة، وخادم البث المحلي بمهمّته الخاصة. والأخطر: إنعاش
-// المستشعر بيعمل `esp_camera_deinit` — لو صار وخادم البث ماسك إطارًا، الذاكرة
-// بتنسحب من تحت إيده والبورد بيطيح. القفل هون بيخلّي كل واحد ياخد دوره.
+// ── مخزن الإطار: مستهلك واحد بكل لحظة ──
+// الالتقاط والبث البعيد وخادم البث المحلي بيتشاركوا مخزن واحد، و`esp_camera_deinit`
+// تحت إيد حدا ماسك إطار بيطيّح اللوح.
 static SemaphoreHandle_t g_camMutex = NULL;
 
 bool camLock(uint32_t waitMs) {
@@ -109,24 +79,18 @@ void camUnlock() {
   if (g_camMutex) xSemaphoreGive(g_camMutex);
 }
 
-// **قفل الفلاش بعد انهيار الكهربا — قرار ما بيتغيّر بالإعدادات.**
-//
-// كان بيتطبّق بتصفير وضع الفلاش، وبعد سطرين بترجع الإعدادات المحفوظة وبتكتب
-// فوقه — يعني الحماية كانت بتنلغى قبل أول صورة. علم لحاله ما حدا بيلمسه.
+// قفل الفلاش بعد انهيار الكهربا: علم لحاله ما بتكتب فوقه الإعدادات المحفوظة.
 bool g_flashLockedByBrownout = false;
 
-// ── Cross-file state ────────────────────────────────────────────
-// كل متغيّر بيستعمله أكتر من ملف لازم يكون هون: Arduino بيلزق ملفات الـino
-// ورا بعض أبجدياً بعد الملف الرئيسي، فاللي هون بيسبق الكل.
+// ── Cross-file state ──
+// Arduino بيلزق ملفات الـino بعد الملف الرئيسي، فاللي هون بيسبق الكل.
 void mqttPublishEvent(const char* json);
 bool camValidId(const String& id);
 void flashSet(uint8_t level, unsigned long autoOffMs);
 void flashOff();
 void camRemoteStreamTick();
 void camRemoteStream(bool on);
-// أردوينو بيولّد إعلانات الدوال لحاله، بس بيوقف عن هيك لمّا يكون في تعريفات
-// قبل `setup` — وهاد اللي صار لمّا ضفنا قراءة سبب الإقلاع. الإعلان الصريح
-// بيشيل الاعتماد ع سلوك ضمني بيتغيّر مع أي إضافة فوق.
+// إعلانات صريحة: Arduino بيوقف توليدها لمّا في تعريفات قبل `setup`.
 void settingsLoadFromNvs();
 void setupCamera();
 void connectWiFi();
@@ -153,7 +117,6 @@ bool g_snapshotPending = false;          // طلب snapshot قيد التنفي�
 String g_currentRequestId = "";          // UUID من Sandy backend
 unsigned long g_lastStatusPubMs = 0;
 
-// الفلاش
 FlashMode g_flashMode  = FLASH_MODE_AUTO;   // الوضع الافتراضي وقت الالتقاط
 uint8_t   g_flashLevel = FLASH_DEFAULT_LEVEL;
 
@@ -166,20 +129,10 @@ unsigned long g_burstNextAtMs = 0;
 String        g_burstBaseId = "";
 unsigned int  g_burstIndex = 0;
 
-// آخر مرّة قلع فيها اللوح — ليش؟
-//
-// اللوح بيعرف السبب، وكان بيرميه. «بتعمل ريستارت» كانت سؤالًا بلا جواب لأيام،
-// والجواب محفوظ برجستر بيتقرا بسطر واحد.
-//
-// والفرق بين الأسباب مش تفصيل — كل واحد إله حلّ تاني تمامًا:
-//   انهيار كهربا  → مزوّد ومكثّف. مش كود، ولا سطر بيصلحه.
-//   حارس المهام   → الكود علّق. كود.
-//   انهيار برمجي  → خلل بالكود.
-//   إعادة برمجية  → طلبناها إحنا. مش عطل أصلًا.
+// سبب آخر إقلاع، بالنبضة: انهيار كهربا = مزوّد، حارس = كود علّق، انهيار = خلل، برمجية = طلبناها.
 static esp_reset_reason_t g_bootReason = ESP_RST_UNKNOWN;
 
-// بتنقرا من `cam_mqtt.ino` عشان تنحطّ بالنبضة — أردوينو بيلزق الملفات ورا
-// بعض، فاللي هون بيسبق الكل والدالة بتوصلهم.
+// لـ `cam_mqtt.ino` (النبضة).
 esp_reset_reason_t camBootReason() { return g_bootReason; }
 
 static const char* bootReasonText(esp_reset_reason_t r) {
@@ -197,7 +150,7 @@ static const char* bootReasonText(esp_reset_reason_t r) {
   }
 }
 
-// فاضية للتحديث: ما في التقاط ولا سلسلة ولا بث. التنزيل بيوقف الحلقة ثواني.
+// ما في التقاط ولا سلسلة ولا بث: التنزيل بيوقف الحلقة ثواني.
 bool camIdleForUpdate() {
   return !g_snapshotPending && g_burstRemaining == 0 && !g_streamViewerActive &&
          !camRemoteStreaming();
@@ -212,7 +165,6 @@ void setup() {
   Serial.printf("[BOOT] سبب آخر إقلاع: %s (%d)\n",
                 bootReasonText(g_bootReason), (int)g_bootReason);
 
-  // الحارس قبل أي إشي ممكن يعلّق.
   esp_task_wdt_config_t wdt = {};
   wdt.timeout_ms = CAM_WDT_TIMEOUT_MS;
   wdt.idle_core_mask = 0;
@@ -222,33 +174,21 @@ void setup() {
 
   g_camMutex = xSemaphoreCreateMutex();
 
-  // الهويّة قبل الشبكة: الشبكة الأولى ومعرّف العقدة جايين منها.
+  // الهويّة قبل الشبكة.
   sandyIdentityLoad(SANDY_PAIR_CODE, SANDY_MQTT_HOST, SANDY_MQTT_USER, SANDY_MQTT_PASS,
                     SANDY_WS_HMAC_KEY, SECRET_SSID, SECRET_OPTIONAL_PASS);
 
   settingsInit();
   flashInit();
 
-  // **بعد انهيار كهربا، ما منشغّل الفلاش.**
-  //
-  // الفلاش هو أكبر سحب تيّار باللوح، وبيشتغل بنفس اللحظة اللي بيصوّر فيها
-  // المستشعر ويبعت الراديو — يعني تلات أحمال ع نطّة وحدة. لو المزوّد ما
-  // بيتحمّلها، الفولت بينزل واللوح بيعيد التشغيل، **وبيرجع يعيدها بالالتقاط
-  // اللي بعده**: حلقة بتبيّن كأنّ الروبوت خربان وهي كهربا مش كافية.
-  //
-  // فبنقطع الحلقة: أول التقاط بعد الانهيار بيصير بلا فلاش. صورة أعتم أحسن من
-  // لوح بيختفي، والمالك بيقرا السبب بالسجل بدل ما يخمّن.
+  // بعد انهيار كهربا أول التقاط بلا فلاش: الفلاش مع المستشعر والراديو بيرجّعوا الانهيار.
   if (g_bootReason == ESP_RST_BROWNOUT) {
     g_flashLockedByBrownout = true;
     Serial.println("[BOOT] ⚠️ الفلاش متوقّف مؤقّتًا — آخر إقلاع كان انهيار كهربا. "
                    "بدّه مزوّد خمس فولت بأمبيرين ومكثّف ألف ميكرو.");
   }
 
-  // ومضة إقلاع: تثبت إنّ الفلاش موصول وشغّال بلا ما نستنى الوسيط، وبتعطي
-  // إشارة بصرية إنّ اللوحة قلعت من جديد.
-  //
-  // وبتنشال بعد انهيار كهربا: ومضة بأول ثانية من عمر لوح ما زال مزوّده ضعيف
-  // بترجّعه لنفس الحفرة قبل ما يوصل الشبكة أصلًا.
+  // ومضة إقلاع (بتثبت إنّ الفلاش شغّال)، إلا بعد انهيار كهربا.
   if (g_bootReason != ESP_RST_BROWNOUT) {
     flashSet(FLASH_DEFAULT_LEVEL, 250);
     delay(250);
@@ -258,10 +198,9 @@ void setup() {
   WiFi.onEvent(onWiFiEvent);
   connectWiFi();
 
-  // ابدأ تهيئة الكاميرا — لو فشل، نعيد عند أول طلب snapshot
+  // لو فشلت، منعيد عند أول طلب snapshot.
   setupCamera();
 
-  // الإعدادات المحفوظة بترجع بعد ما يجهز المستشعر
   if (g_cameraReady) settingsLoadFromNvs();
 
   static SandyOtaConfig ota;
@@ -276,8 +215,7 @@ void setup() {
   ota.feed     = camWdtFeed;
   sandyOtaBegin(ota);
 
-  // المصافحة المشفّرة مع الوسيط بدها كتلة ذاكرة متّصلة كبيرة. لو الذاكرة ضيقة
-  // بتعلّق بلا رسالة خطأ، فمنطبع القياس هون عشان يبان السبب فوراً.
+  // مصافحة الوسيط بدها كتلة ذاكرة متّصلة كبيرة، وبتعلّق بلا خطأ لو ما لقت.
   Serial.printf("[MEM] psram=%s free=%u largest_block=%u\n",
                 psramFound() ? "yes" : "no",
                 (unsigned)ESP.getFreeHeap(),
@@ -300,13 +238,11 @@ void loop() {
     camRemoteStreamTick();
   }
 
-  // بعد الخدمات: التبديل بيقطع الشبكة بقصد، فلازم يصير والخدمات عارفة حالها
-  // مش وهي بتتأسّس.
+  // بعد الخدمات: التبديل بيقطع الشبكة بقصد.
   camWifiTick();
 
   flashTick();
 
-  // طلب snapshot في انتظار المعالجة — نلتقطه وننشره
   if (g_snapshotPending) {
     g_snapshotPending = false;
     Serial.printf("[LOOP] dispatching capture for id=%s\n", g_currentRequestId.c_str());
@@ -316,10 +252,7 @@ void loop() {
     Serial.flush();
   }
 
-  // سلسلة لقطات: لقطة كل فترة. الدماغ بيلف الرقبة بين الوحدة والتانية،
-  // فبتطلع بانوراما بلقطات مرقّمة بنفس المعرّف.
-  // مقارنة بالفرق، مش بالقيمة: العدّاد بيلفّ بعد تسعة وأربعين يوم تشغيل،
-  // والمقارنة المباشرة وقتها بتطلق اللقطات كلها مرّة وحدة أو بتوقفها.
+  // سلسلة لقطات (الدماغ بيلف الرقبة بينهن). مقارنة بالفرق عشان التفاف millis().
   if (g_burstRemaining > 0 && (long)(millis() - g_burstNextAtMs) >= 0) {
     String frameId = g_burstBaseId + "-" + String(g_burstIndex);
     captureAndPublishSnapshot(frameId, g_snapshotSettleMs, g_snapshotFlash);

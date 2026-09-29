@@ -35,7 +35,7 @@ esp_err_t motors_init(void) {
 }
 
 void motors_command(motor_cmd_t cmd, uint32_t duration_ms) {
-    if (!s_wdt) return;   // motors not fitted — ignore, don't drive stray pins
+    if (!s_wdt) return;   // motors not fitted
     _stop_raw();
     switch (cmd) {
         case MOTOR_FORWARD:

@@ -15,10 +15,7 @@
 #include "freertos/event_groups.h"
 #include "sandy_identity.h"
 
-
-// WPA2 as the floor when there is a password (never downgrade to WEP/WPA);
-// an empty password is an open network, which a WPA2 floor can never join —
-// though the setup page tells the owner to leave it empty for one.
+// WPA2 floor with a password; an empty password means an open network.
 static wifi_auth_mode_t auth_threshold(const char *pass) {
     return (pass && pass[0]) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 }
@@ -27,29 +24,22 @@ static char s_ip[16] = "";   // آخر عنوان أخذناه، للنبضة
 
 #define WIFI_CONNECTED_BIT  BIT0
 
-// Paced retry. Reconnecting straight from the disconnect event spins hard when
-// the AP is simply gone, and there is no cap any more — a router reboot that
-// outlasted the old ten tries left the robot offline until it was power-cycled.
+// Paced, uncapped retry: the old ten-try cap left the robot offline after router reboots.
 #define WIFI_RETRY_MS       5000
-// Failing attempts back off to this. A robot whose router is gone used to try
-// every five seconds all night — noise in the log, and a radio that never rests.
+// Back off to this on repeated failures.
 #define WIFI_RETRY_MAX_MS   60000
-// This many "wrong password" answers in a row and we say so, instead of
-// "NO WI-FI". One is not enough: a handshake timeout on a busy router looks the
-// same for a single try.
+// Consecutive "wrong password" answers before saying so; one could be a busy-router timeout.
 #define WIFI_BAD_PASS_AFTER 3
 
 static EventGroupHandle_t s_eg;
 static TaskHandle_t       s_retry_task;
 
-// Declared up here, not next to the switch, because the retry task below has to
-// see it: the two run at the same time by definition.
+// Declared here: the retry task reads it.
 static volatile bool s_switching;
 static volatile int  s_bad_pass_count;
 static volatile bool s_had_ip_this_try;
 
-// Reason codes that mean "the router is there and refused us", as opposed to
-// "no router": a wrong password shows up as a handshake that never completes.
+// Reasons meaning "the router refused us" rather than "no router".
 static bool reason_is_bad_password(int r) {
     return r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
            r == WIFI_REASON_HANDSHAKE_TIMEOUT || r == WIFI_REASON_MIC_FAILURE ||
@@ -67,11 +57,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             const bool was_up = (xEventGroupGetBits(s_eg) & WIFI_CONNECTED_BIT) != 0;
             xEventGroupClearBits(s_eg, WIFI_CONNECTED_BIT);
             s_ip[0] = '\0';   // no address now; never report the old one
-            // A link that was up just dropped: retry now rather than up to
-            // WIFI_RETRY_MS later — a voice call only survives a short gap.
-            // Only on that edge: the failed attempts after it also land here,
-            // and waking on every one of them is the hard spin the pacing
-            // below exists to prevent.
+            // Only on the up→down edge: retry at once so a voice call survives the gap.
             if (was_up && s_retry_task) xTaskNotifyGive(s_retry_task);
             const int reason = ev ? ev->reason : -1;
             if (reason_is_bad_password(reason)) {
@@ -85,16 +71,14 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "IP: " IPSTR, IP2STR(&ev->ip_info.ip));
-        // نحفظه عشان النبضة تحمله. العنوان بيوزّعه الراوتر وبيتغيّر، وبلاه
-        // إيجاد اللوح ع الشبكة بيصير مسح وتخمين — وهاد بالضبط اللي وقّفنا مرة.
+        // نحفظه للنبضة: العنوان بيتغيّر مع الراوتر.
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ev->ip_info.ip));
         s_bad_pass_count = 0;
         xEventGroupSetBits(s_eg, WIFI_CONNECTED_BIT);
     }
 }
 
-// Retries forever while the link is down. Owning the retry here (instead of in
-// the event handler) keeps the pacing in one place and keeps the event task free.
+// Retries forever while down; pacing lives here, off the event task.
 static void _retry_task(void *arg) {
     uint32_t tries = 0;
     uint32_t wait_ms = WIFI_RETRY_MS;
@@ -103,35 +87,28 @@ static void _retry_task(void *arg) {
             tries = 0;
             wait_ms = WIFI_RETRY_MS;
         } else if (s_switching) {
-            // A credential test is driving the radio. A blind reconnect here
-            // lands in the middle of it and makes it fail — and the failure
-            // looks like a wrong password, which is the one wrong answer that
-            // sends the owner off to reset their router.
+            // A credential test owns the radio: reconnecting now would fail it as "wrong password".
             tries = 0;
 #if ENABLE_PROVISION
         } else if (provision_is_active()) {
-            // Setup mode still tries the saved network, just rarely — every
-            // half minute, so a scan for the setup page mostly has the radio.
-            // It used to stop trying altogether: the router came back after a
-            // power cut and the robot sat in setup mode until someone noticed.
+            // In setup mode, still try the saved network every half minute.
             wait_ms = WIFI_RETRY_MS;
             if (++tries % 6 == 0 && wifi_sandy_ssid()[0]) esp_wifi_connect();
 #endif
         } else {
             tries++;
-            // First attempt after each drop, then one line a minute: a dead
-            // router must not flood the 8KB remote log buffer with retry noise.
+            // Log the first try, then once a minute (the remote log buffer is 8 KB).
             if (tries == 1 || tries % 12 == 0) {
                 ESP_LOGI(TAG, "reconnecting (attempt %lu, next in %lus)",
                          (unsigned long)tries, (unsigned long)(wait_ms / 1000));
             }
             esp_wifi_connect();
-            // Five seconds while it might be a blip, then longer and longer.
+            // 5 s while it might be a blip, then back off.
             if (tries > 6 && wait_ms < WIFI_RETRY_MAX_MS) {
                 wait_ms = wait_ms * 2 > WIFI_RETRY_MAX_MS ? WIFI_RETRY_MAX_MS : wait_ms * 2;
             }
         }
-        // Sleeps, or less when the event handler reports a fresh drop.
+        // Woken early by a fresh drop.
         if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms))) {
             tries = 0;
             wait_ms = WIFI_RETRY_MS;
@@ -139,8 +116,7 @@ static void _retry_task(void *arg) {
     }
 }
 
-// Report and bail instead of aborting: a Wi-Fi stack that won't come up is no
-// reason to lose the face, the wake word and the offline room commands.
+// Report and bail instead of aborting: keep the face and wake word alive.
 #define WIFI_TRY(what, call)                                                   \
     do {                                                                       \
         esp_err_t _e = (call);                                                 \
@@ -150,7 +126,7 @@ static void _retry_task(void *arg) {
         }                                                                      \
     } while (0)
 
-// ── بيانات الشبكة ────────────────────────────────────────────────────────────
+// ── بيانات الشبكة ──
 
 #define WIFI_NS   "sandy_wifi"
 #define K_SSID    "ssid"
@@ -162,27 +138,16 @@ static char s_pass[65];
 
 const char *wifi_sandy_ssid(void) { return s_ssid; }
 
-// مسح المصنع — للبيع أو الإهداء.
-//
-// فكّ الربط ع الخادم لحاله ما بيكفي: اللوح بيضلّ حافظ اسم شبكة البائع وكلمة
-// سرّها بذاكرته، فالمشتري بيشغّله وهو بيحاول يدخل ع شبكة ببيت حدا تاني. وهاد
-// مش بس إزعاج — هاد بيانات بيت انباعت مع الجهاز.
-//
-// بنمسح المساحة كلها مش المفاتيح اللي بنعرفها: أي إشي انحفظ لاحقًا ونُسي هون
-// بيضلّ ع اللوح، والنسيان بهالمكان بالذات معناه تسريب.
+// مسح المصنع — للبيع أو الإهداء: ما لازم تنباع بيانات بيت البائع مع الجهاز.
 void wifi_sandy_factory_reset(void) {
-    // **الذاكرة كلها، مش مساحة الشبكة بس.** كانت بتنمسح `sandy_wifi` لحالها —
-    // وبيضلّ مفتاح الوسيط الخاص، ومفتاح الصوت، والمزاج، والإعدادات، ونسخة
-    // الشبكة اللي مكتبة الواي فاي نفسها بتحفظها بمساحتها. هلّق بنمسح الكل،
-    // وبنرجّع الهويّة بس (كود العلبة وعناوين الخوادم) — هي للجهاز مش للمالك.
-    esp_wifi_restore();   // the driver's own saved copy (nvs.net80211)
+    // بنمسح الذاكرة كلها (مش sandy_wifi بس) وبنرجّع الهويّة بس، لأنها للجهاز مش للمالك.
+    esp_wifi_restore();   // the driver's own copy (nvs.net80211)
     esp_err_t e = nvs_flash_erase();
     if (e == ESP_OK) e = nvs_flash_init();
     if (e == ESP_OK) e = identity_save();
     ESP_LOGW(TAG, "factory reset — %s", e == ESP_OK ? "everything erased, identity kept"
                                                     : esp_err_to_name(e));
-    // إعادة تشغيل عشان يقلع بلا بيانات ويطلع بوضع التزويد. تأخير بسيط عشان
-    // تلحق تنطبع رسالة الخروج، ويوصل الردّ للتطبيق قبل ما ينقطع الاتصال.
+    // تأخير بسيط عشان يوصل الردّ للتطبيق قبل إعادة التشغيل.
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 }
@@ -199,15 +164,8 @@ static void _load_creds(void) {
     nvs_handle_t h;
     if (nvs_open(WIFI_NS, NVS_READWRITE, &h) != ESP_OK) return;
 
-    // حارس الإقلاع.
-    //
-    // لو انقطعت الكهربا بنص تجربة شبكة جديدة، بتضل «قيد التجربة» محفوظة —
-    // ومن غير هالسطر اللوح بيقلع عليها للأبد ع شبكة ما ثبت إنها بتشتغل. مسحها
-    // هون بيضمن إنه أي إقلاع بيصير ع شبكة نجحت فعلًا.
-    //
-    // والشبكة المحفوظة بتنقرا **بالحالتين**: الجديدة ما بتنحفظ إلا لمّا تنجح،
-    // يعني المحفوظ دايمًا آخر شبكة ثبتت. كانت علامة التجربة بتقفز عن القراءة،
-    // فاللوح بيرجع لشبكة المصنع بدل شبكة البيت — وبيضيع.
+    // حارس الإقلاع: علامة «قيد التجربة» بتنمسح عند كل إقلاع، والشبكة المحفوظة
+    // بتنقرا دايمًا لأنها آخر شبكة نجحت.
     uint8_t trying = 0;
     if (nvs_get_u8(h, K_TRYING, &trying) == ESP_OK && trying) {
         ESP_LOGW(TAG, "a network switch was interrupted — back on the last good one");
@@ -225,15 +183,8 @@ static void _load_creds(void) {
     nvs_close(h);
 }
 
-// حقول 802.11 مصفوفات بايتات بطول ثابت، مش سلاسل نصية — الاسم لحدّ اثنين
-// وثلاثين بايت وما بده صفرًا بالآخر، وكذلك كلمة السر لحدّ أربعة وستين.
-//
-// `snprintf` هون كانت غلط من جهتين. المترجم رفضها لأنها **ممكن** تقصّ (مخزننا
-// أكبر بواحد عشان الصفر)، وهاد صحيح. والأهم إنها بتكتب صفرًا جوّا الحقل، فاسم
-// بطول اثنين وثلاثين بالضبط كان بيوصل ناقص حرف — وشبكة اسمها طويل كانت بتفشل
-// بلا سبب ظاهر.
-//
-// النسخ بطول محسوب بيحلّ الاتنين: بيملا اللي بيسع وبس، وبلا صفر مقحوم.
+// حقول 802.11 بايتات بطول ثابت بلا صفر بالآخر؛ snprintf كانت تقصّ آخر حرف
+// من اسم طوله ٣٢.
 static void set_wifi_field(uint8_t *dst, size_t cap, const char *src) {
     size_t n = src ? strlen(src) : 0;
     if (n > cap) n = cap;
@@ -252,13 +203,11 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     snprintf(old_ssid, sizeof(old_ssid), "%s", s_ssid);
     snprintf(old_pass, sizeof(old_pass), "%s", s_pass);
 
-    // «قيد التجربة» بينكتب قبل ما نلمس الراديو: إذا وقعت الكهربا من هون لجاي،
-    // الإقلاع الجاي بيمسحها وبيرجع ع القديمة.
+    // «قيد التجربة» بينكتب قبل ما نلمس الراديو.
     nvs_handle_t h;
     if (nvs_open(WIFI_NS, NVS_READWRITE, &h) != ESP_OK ||
         nvs_set_u8(h, K_TRYING, 1) != ESP_OK || nvs_commit(h) != ESP_OK) {
-        // Without the marker a power cut mid-trial could boot into a network
-        // nobody proved. Better to refuse the switch than to risk that.
+        // Without the marker, a power cut could boot into an unproven network.
         ESP_LOGE(TAG, "could not mark the trial — switch refused");
         s_switching = false;
         return WIFI_SWITCH_FAILED;
@@ -274,9 +223,7 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     cfg.sta.threshold.authmode = auth_threshold(pass);
     cfg.sta.pmf_cfg.capable = true;
 
-    // The old link's "connected" bit and address are still set until the
-    // disconnect event lands — and the wait below used to see them and declare
-    // the new network working after 250 ms, saving a password it never tried.
+    // Clear the old link's bits first, or the wait below sees them and saves an untried password.
     xEventGroupClearBits(s_eg, WIFI_CONNECTED_BIT);
     s_ip[0] = '\0';
     s_bad_pass_count = 0;
@@ -284,8 +231,7 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     esp_wifi_set_config(WIFI_IF_STA, &cfg);
     esp_wifi_connect();
 
-    // بننتظر عنوان، مش «اتصال»: الاتصال بيصير قبل ما يجي العنوان، ولوح إله
-    // اتصال وبلا عنوان ما بيقدر يوصل الخادم — يعني مقطوع، بس شكله متصل.
+    // بننتظر عنوان مش «اتصال»: بلا عنوان ما في وصول للخادم.
     const int step_ms = 250;
     int waited = 0;
     bool ok = false;
@@ -345,9 +291,7 @@ esp_err_t wifi_sandy_start(void) {
 
     wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     WIFI_TRY("wifi init", esp_wifi_init(&init_cfg));
-    // The driver keeps its own copy of the last network in NVS unless told
-    // not to. Ours is in `sandy_wifi` and is the only one we erase and trust;
-    // a second copy is a second place for a seller's password to survive a reset.
+    // RAM storage: our `sandy_wifi` copy is the only one; a driver copy would survive a reset.
     WIFI_TRY("wifi storage", esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
     WIFI_TRY("wifi events", esp_event_handler_instance_register(
@@ -355,10 +299,7 @@ esp_err_t wifi_sandy_start(void) {
     WIFI_TRY("ip events", esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, _handler, NULL, NULL));
 
-    // الشبكة المحفوظة تغلب المكتوبة بالكود.
-    //
-    // المكتوبة بالكود ضلّت كخطّ رجعة: لوح انحرق ولسا ما حدا غيّر شبكته بيشتغل
-    // زي ما كان، ومسح الذاكرة بيرجّعه لنقطة معروفة بدل ما يخلّيه بلا شبكة خالص.
+    // المحفوظة تغلب المكتوبة بالكود؛ المكتوبة بتضل خطّ رجعة.
     _load_creds();
     wifi_config_t wifi_cfg = { 0 };
     set_wifi_field(wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), s_ssid);
@@ -369,19 +310,12 @@ esp_err_t wifi_sandy_start(void) {
     WIFI_TRY("set mode", esp_wifi_set_mode(WIFI_MODE_STA));
     WIFI_TRY("set config", esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
     WIFI_TRY("wifi start", esp_wifi_start());
-    // No modem sleep: the default WIFI_PS_MIN_MODEM naps between DTIM beacons,
-    // which turns a steady audio stream into late bursts — the #1 source of
-    // choppy playback. The robot runs off a supply, so the power cost is fine.
+    // No modem sleep: DTIM naps turn the audio stream into bursts and choppy playback.
     WIFI_TRY("power save off", esp_wifi_set_ps(WIFI_PS_NONE));
 
     xTaskCreate(_retry_task, "wifi_retry", 3072, NULL, 3, &s_retry_task);
 
-    // Returns as soon as the radio is up — association happens in the
-    // background. Boot used to block here until connected, then hand an
-    // ESP_FAIL to an ESP_ERROR_CHECK, so a router that was down at power-on
-    // meant an endless reboot loop with no face and no wake word. Everything
-    // that actually needs the link already waits for it: voice_task polls
-    // wifi_sandy_is_connected(), and the MQTT client retries on its own.
+    // Non-blocking: association happens in the background; voice and MQTT wait for it.
     ESP_LOGI(TAG, "radio up — associating with '%s' in the background", s_ssid);
     return ESP_OK;
 }
