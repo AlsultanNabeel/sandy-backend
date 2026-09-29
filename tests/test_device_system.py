@@ -546,8 +546,8 @@ def test_all_three_boards_name_themselves_distinctly():
     root = Path(__file__).resolve().parent.parent
     sources = {
         "brain":  root / "firmware/brain-core/main/include/config.h",
-        "camera": root / "vision-core/config.h",
-        "room":   root / "room-node/room-node.ino",
+        "camera": root / "firmware/vision-core/config.h",
+        "room":   root / "firmware/room-node/room-node.ino",
     }
     names = {}
     for board, path in sources.items():

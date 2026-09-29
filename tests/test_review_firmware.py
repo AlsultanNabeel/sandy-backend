@@ -122,8 +122,8 @@ def test_both_small_boards_carry_the_same_updater_and_the_real_key():
     """
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
-    cam = (root / "vision-core" / "sandy_ota_pull.h").read_text()
-    room = (root / "room-node" / "sandy_ota_pull.h").read_text()
+    cam = (root / "firmware" / "vision-core" / "sandy_ota_pull.h").read_text()
+    room = (root / "firmware" / "room-node" / "sandy_ota_pull.h").read_text()
     assert cam == room, "vision-core and room-node have different sandy_ota_pull.h"
     pem = (root / "firmware" / "brain-core" / "main" / "fw_pubkey.pem").read_text()
     body = [ln for ln in pem.splitlines() if ln and "-----" not in ln]
@@ -142,15 +142,15 @@ def test_both_small_boards_keep_their_identity_out_of_the_image():
     """
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
-    cam = (root / "vision-core" / "sandy_identity.h").read_text()
-    assert cam == (root / "room-node" / "sandy_identity.h").read_text()
+    cam = (root / "firmware" / "vision-core" / "sandy_identity.h").read_text()
+    assert cam == (root / "firmware" / "room-node" / "sandy_identity.h").read_text()
     assert 'strncmp(v, "YOUR_", 5) == 0' in cam and '"XXXX"' in cam
-    for sketch in ("vision-core/vision-core.ino", "room-node/room-node.ino"):
+    for sketch in ("firmware/vision-core/vision-core.ino", "firmware/room-node/room-node.ino"):
         src = (root / sketch).read_text()
         assert "sandyIdentityLoad(SANDY_PAIR_CODE, SANDY_MQTT_HOST" in src, sketch
         assert "sandyOtaBegin(ota)" in src and "sandyOtaLoop(" in src, sketch
     # Nothing reads the compiled identity directly any more.
-    for f in list((root / "vision-core").glob("cam_*.ino")) + [root / "room-node" / "room-node.ino"]:
+    for f in list((root / "firmware" / "vision-core").glob("cam_*.ino")) + [root / "firmware" / "room-node" / "room-node.ino"]:
         code = "\n".join(ln for ln in f.read_text().splitlines()
                          if not ln.lstrip().startswith("//") and "sandyIdentityLoad" not in ln
                          and "SANDY_MQTT_USER, SANDY_MQTT_PASS" not in ln)
@@ -183,7 +183,7 @@ def test_the_partition_tables_match_the_server_slots():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     for sketch, board in (("vision-core", "cam"), ("room-node", "room")):
-        rows = [ln.split(",") for ln in (root / sketch / "partitions.csv").read_text().splitlines()
+        rows = [ln.split(",") for ln in (root / "firmware" / sketch / "partitions.csv").read_text().splitlines()
                 if ln.strip() and not ln.startswith("#")]
         apps = [r for r in rows if r[1].strip() == "app"]
         assert [r[2].strip() for r in apps] == ["ota_0", "ota_1"], sketch

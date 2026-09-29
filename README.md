@@ -124,9 +124,10 @@ cloud/            backend
   app/integrations/ external clients
   app/services/     APNs push, nudge and scene-timer schedulers
   app/utils/        tenancy, background thread pool, circuit breaker, profiles
-firmware/         ESP32-S3 robot brain (ESP-IDF, C)
-vision-core/      ESP32-CAM
-room-node/        room controller (Arduino)
+firmware/         every board's program
+  brain-core/     ESP32-S3 robot brain (ESP-IDF, C)
+  vision-core/    ESP32-CAM (Arduino)
+  room-node/      room controller (Arduino)
 ios/              iPhone client (SwiftUI)
 tests/  scripts/
 ```

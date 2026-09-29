@@ -62,7 +62,7 @@ ENV_FILE = pathlib.Path("~/Desktop/.sandy-publish.env").expanduser()
 # the board to build for, their OTA slot, and strings only a dev build has.
 SMALL_BOARDS = {
     "cam": {
-        "sketch": REPO / "vision-core",
+        "sketch": REPO / "firmware" / "vision-core",
         "version_re": r'#define\s+SANDY_CAM_FW_VERSION\s+"([^"]+)"',
         "version_file": "config.h",
         "fqbn": "esp32:esp32:esp32cam",
@@ -70,7 +70,7 @@ SMALL_BOARDS = {
         "dev_markers": [b"ESP32-CAM serial mirror", b"[TELNET]"],
     },
     "room": {
-        "sketch": REPO / "room-node",
+        "sketch": REPO / "firmware" / "room-node",
         "version_re": r'#define\s+SANDY_ROOM_FW_VERSION\s+"([^"]+)"',
         "version_file": "room-node.ino",
         "fqbn": "esp32:esp32:esp32",

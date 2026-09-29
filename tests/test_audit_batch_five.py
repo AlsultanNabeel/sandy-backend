@@ -193,10 +193,10 @@ def test_replies_are_not_chunked_for_a_transport_that_was_removed():
 
 
 def test_the_map_does_not_contradict_itself_about_the_camera():
-    """§5 said in bold that `vision-core/` does not exist while §4.6 said it was
+    """§5 said in bold that `firmware/vision-core/` does not exist while §4.6 said it was
     flashed and answering on the broker. A map that lies is worse than no map."""
     mp = (ROOT / "ARCHITECTURE_MAP.md").read_text()
-    assert (ROOT / "vision-core").exists()
+    assert (ROOT / "firmware" / "vision-core").exists()
     assert "**this directory does not exist.**" not in mp
 
 

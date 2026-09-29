@@ -57,12 +57,13 @@ owner, it is called out as a defect, not a style.
 
 ```
 cloud/                the Python backend — the brain and the API
-firmware/brain-core/  ESP32-S3 robot brain (ESP-IDF, C) — voice, face, servo, MQTT
-vision-core/          ESP32-CAM (Arduino) — camera board
-room-node/            classic ESP32 (Arduino) — the room node (sandy/node/<id>/room/*)
+firmware/             every board's program, one folder each:
+  brain-core/         ESP32-S3 robot brain (ESP-IDF, C) — voice, face, servo, MQTT
+  vision-core/        ESP32-CAM (Arduino) — camera board
+  room-node/          classic ESP32 (Arduino) — the room node (sandy/node/<id>/room/*)
 ios/SandyApp/         SwiftUI iPhone client
 tests/                backend tests (pytest + mongomock)
-scripts/              sync, smoke test, voice-WS probe, laptop voice client, the two audit
+scripts/              sync, smoke test, voice-WS probe, the two audit
                       instruments, firmware keygen/publish, CA-roots generator, latency bench
 docs/                 NOT IN GIT — see §11
 ```
@@ -852,7 +853,7 @@ was named here twice and does not exist; the generator has never written it.)
 
 | Part | Reachable from the backend | Physically working |
 |---|---|---|
-| Camera (ESP32-CAM) | Yes — flash, snapshot, stream, framesize, quality | Yes — `vision-core/`, flashed and on the broker |
+| Camera (ESP32-CAM) | Yes — flash, snapshot, stream, framesize, quality | Yes — `firmware/vision-core/`, flashed and on the broker |
 | Face / display | Yes — all 25 moods | Yes |
 | Microphones | Yes — per-channel gain, mute, live level | Yes |
 | Speaker | Yes — volume 0..100, test tone | Yes, through the voice path |
@@ -872,7 +873,7 @@ from a cross-wired one without a multimeter.
 **Everything in the first column is true of the source, not of the board on the
 desk, until it is flashed.**
 
-The camera board program is no longer missing — `vision-core/` exists, is
+The camera board program is no longer missing — `firmware/vision-core/` exists, is
 flashed, and answers on the broker. Neither is the IR code (`main/sandy_ir.c`, on the brain; §4.5), though
 it is written and not yet tried on hardware. Still genuinely missing: two-mic
 beamforming.
@@ -885,7 +886,7 @@ what makes the text-size control real rather than decorative.
 
 ## 5. The other boards
 
-- **`vision-core/`** (ESP32-CAM) — the camera board's own program. It exists,
+- **`firmware/vision-core/`** (ESP32-CAM) — the camera board's own program. It exists,
   it is flashed, and it answers on the broker (§4.6). This section used to say
   in bold that it did not exist, while §4.6 two pages later said it was working
   — the map contradicting itself, which is worse than either answer.
@@ -904,7 +905,7 @@ what makes the text-size control real rather than decorative.
   snapshot request was published exactly right and nothing was subscribed; no
   `cam/status` heartbeat was ever sent, so the address the live view needs never
   arrived, and "couldn't get the address" was the literal truth.
-- **`room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
+- **`firmware/room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
   `sandy/node/<id>/room/`.
 
 ---

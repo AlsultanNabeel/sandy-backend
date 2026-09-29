@@ -324,8 +324,8 @@ def test_each_board_gets_its_own_client_id():
     assert '"sandy-brain-%s", s_node_id' in fw, (
         "the client id is fixed again — two robots will fight over it")
 
-    for path, prefix in (("vision-core/cam_mqtt.ino", "sandy-cam-"),
-                         ("room-node/room-node.ino", "sandy-room-")):
+    for path, prefix in (("firmware/vision-core/cam_mqtt.ino", "sandy-cam-"),
+                         ("firmware/room-node/room-node.ino", "sandy-room-")):
         src = _read(path)
         assert prefix in src and "getEfuseMac()" in src, (
             f"{path} no longer derives a unique client id")

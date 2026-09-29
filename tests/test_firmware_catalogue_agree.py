@@ -39,7 +39,7 @@ def _read(rel: str) -> str:
 
 BRAIN_MQTT = "firmware/brain-core/main/sandy_mqtt.c"
 BRAIN_LED = "firmware/brain-core/main/sandy_led.c"
-CAM_CONTROL = "vision-core/cam_control.ino"
+CAM_CONTROL = "firmware/vision-core/cam_control.ino"
 
 # output id -> (names the firmware accepts, minimum we expect to find)
 CASES = {
@@ -110,7 +110,7 @@ def test_the_camera_outputs_the_app_offers_are_ones_the_camera_answers_to():
     mismatch is a control in the app that publishes to a topic nobody is
     subscribed to — no error anywhere, just a button that does nothing.
     """
-    cam = _read("vision-core/cam_mqtt.ino")
+    cam = _read("firmware/vision-core/cam_mqtt.ino")
     handled = set(re.findall(r'out == "(\w+)"', cam))
     assert len(handled) >= 6, "the camera's simple-output router stopped matching"
 
@@ -141,7 +141,7 @@ def test_the_camera_never_subscribes_to_a_topic_it_publishes_on():
     So the rule is not "scope the wildcard". It is: subscribe by name, and never
     to a name you publish on.
     """
-    cam = _read("vision-core/cam_mqtt.ino")
+    cam = _read("firmware/vision-core/cam_mqtt.ino")
     assert 'camNodeId() + "/+"' not in cam, "the camera subscribes to the whole node tree"
     assert "/cam/+" not in cam, (
         "the camera subscribes to a wildcard over its own branch again — every "

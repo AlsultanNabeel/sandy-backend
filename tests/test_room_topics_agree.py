@@ -307,7 +307,7 @@ def test_the_room_heartbeat_declares_kinds_the_server_accepts():
     """
     from app.features.node_store import KNOWN_CAPABILITIES
 
-    ino = _read("room-node/room-node.ino")
+    ino = _read("firmware/room-node/room-node.ino")
     kinds = {k for _, k in _ROOM_TABLE.findall(ino)}
     assert kinds, "the room heartbeat declares no outputs at all"
     assert kinds <= set(KNOWN_CAPABILITIES), (
@@ -318,7 +318,7 @@ def test_every_declared_room_output_has_a_catalogue_entry():
     """A declared output with no catalogue row is ignored, not drawn."""
     from app.features.node_provision import PART_CATALOGUE
 
-    ino = _read("room-node/room-node.ino")
+    ino = _read("firmware/room-node/room-node.ino")
     declared = {name for name, _ in _ROOM_TABLE.findall(ino)}
     assert declared == {"light", "music"}
     for out in declared:
@@ -339,7 +339,7 @@ def test_the_server_listens_to_the_room_heartbeat():
 def test_no_global_room_tree_is_left_in_any_firmware():
     for rel in ("firmware/brain-core/main/sandy_voice.c",
                 "firmware/brain-core/main/sandy_mqtt.c",
-                "room-node/room-node.ino"):
+                "firmware/room-node/room-node.ino"):
         src = _read(rel)
         code = "\n".join(ln for ln in src.splitlines()
                          if not ln.lstrip().startswith("//"))
@@ -374,7 +374,7 @@ def test_the_brain_ignores_outputs_that_belong_to_other_boards():
 
 
 def test_the_room_node_listens_on_its_own_tree():
-    ino = _read("room-node/room-node.ino")
+    ino = _read("firmware/room-node/room-node.ino")
     assert '"sandy/node/" + g_nodeId + "/room"' in ino
     # One exact topic per declared output — a wildcard also delivered the node's
     # own heartbeat back to it, and anything anyone wrote under the tree.
@@ -384,7 +384,7 @@ def test_the_room_node_listens_on_its_own_tree():
     # Its heartbeat moves with it; a status left on the old tree would be one
     # customer's room reporting into everybody's.
     assert 'g_topicStatus = g_topicBase + "/status"' in ino
-    assert "SANDY_PAIR_CODE" in _read("room-node/secrets.example.h"), (
+    assert "SANDY_PAIR_CODE" in _read("firmware/room-node/secrets.example.h"), (
         "the room node has no pairing code, so it cannot know which tree is its")
 
 
@@ -397,8 +397,8 @@ def test_all_three_firmwares_derive_the_node_id_identically():
     """
     sources = {
         "brain": _read("firmware/brain-core/main/sandy_mqtt.c"),
-        "camera": _read("vision-core/cam_mqtt.ino"),
-        "room": _read("room-node/room-node.ino"),
+        "camera": _read("firmware/vision-core/cam_mqtt.ino"),
+        "room": _read("firmware/room-node/room-node.ino"),
     }
     for name, src in sources.items():
         assert re.search(r"c\s*-\s*'A'\s*\+\s*'a'", src), (

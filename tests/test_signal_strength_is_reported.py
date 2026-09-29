@@ -79,7 +79,7 @@ def test_each_board_keeps_its_own_signal_strength(db):
     the camera's address already had."""
     assert "room_rssi" in node_store._TELEMETRY_KEYS
 
-    ino = _read("room-node/room-node.ino")
+    ino = _read("firmware/room-node/room-node.ino")
     assert '\\"rssi\\"' in ino, "the room node stopped reporting its own"
 
     ingest = _read("cloud/app/integrations/mqtt_ingest.py")

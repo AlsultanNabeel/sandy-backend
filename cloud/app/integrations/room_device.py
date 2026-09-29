@@ -1,7 +1,7 @@
 """Publish-only MQTT client for the room node (a second board on the same broker).
 
 Topics live under the robot's own tree, so a tenant can only reach their own room
-(keep in sync with room-node/room-node.ino):
+(keep in sync with firmware/room-node/room-node.ino):
 
     sandy/node/<id>/room/light    — "on" | "off" | "0".."100"
     sandy/node/<id>/room/color    — named color or "#rrggbb"

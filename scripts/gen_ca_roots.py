@@ -26,8 +26,8 @@ import re
 import certifi
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TARGETS = [ROOT / "vision-core" / "sandy_ca_roots.h",
-           ROOT / "room-node" / "sandy_ca_roots.h"]
+TARGETS = [ROOT / "firmware" / "vision-core" / "sandy_ca_roots.h",
+           ROOT / "firmware" / "room-node" / "sandy_ca_roots.h"]
 WANTED = ["ISRG Root X1", "ISRG Root X2", "DigiCert Global Root G2",
           "DigiCert Global Root G3", "Amazon Root CA 1"]
 

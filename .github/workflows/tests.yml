@@ -100,7 +100,7 @@ jobs:
         # symbols to exist, so CI writes a dummy — a build failure here is a
         # code failure, never a missing credential.
         run: |
-          for f in firmware/brain-core/main vision-core; do
+          for f in firmware/brain-core/main firmware/vision-core; do
             [ -d "$f" ] || continue
             [ -f "$f/secrets.h" ] || cp "$f/secrets.example.h" "$f/secrets.h"
           done
