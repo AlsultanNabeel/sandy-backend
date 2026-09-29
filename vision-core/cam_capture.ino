@@ -1,7 +1,5 @@
-// =========================
 // ESP32-CAM — Camera Init + Snapshot Capture + Upload
-// =========================
-// التقاط: VGA 640x480 JPEG quality=12 → عادة 40-80KB، وبترتفع بطلب واحد للخادم.
+// VGA JPEG quality=12 (~40-80KB)، بترتفع بطلب واحد للخادم.
 
 // ── إعلانات من ملفات تانية ──
 void mqttPublishEvent(const char* json);
@@ -42,8 +40,7 @@ static camera_config_t buildCameraConfig() {
   cfg.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   cfg.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
 
-  // بلا ذاكرة خارجية ما في مجال للدقّة الكاملة — المخزن الداخلي ما بيسعها،
-  // والتشغيل بيفشل من أصله. فبننزل لدقّة بتشتغل بدل ما نموت بالإقلاع.
+  // بلا PSRAM ما بتسع الدقّة الكاملة، فبننزل بدل ما نفشل بالإقلاع.
   if (!psramFound()) {
     cfg.frame_size = FRAMESIZE_SVGA;
     cfg.jpeg_quality = 15;
@@ -54,7 +51,7 @@ static camera_config_t buildCameraConfig() {
 void setupCamera() {
   pinMode(PWDN_GPIO_NUM, OUTPUT);
 
-  // دورة باور كاملة: مطفي ثم مشغّل — يساعد إذا الكام في حالة معلّقة
+  // دورة باور كاملة بتساعد لو الكام معلّق.
   digitalWrite(PWDN_GPIO_NUM, HIGH);  // power down
   delay(100);
   digitalWrite(PWDN_GPIO_NUM, LOW);   // power up
@@ -62,7 +59,6 @@ void setupCamera() {
 
   camera_config_t cfg = buildCameraConfig();
 
-  // محاولة أولى
   esp_err_t err = esp_camera_init(&cfg);
   if (err != ESP_OK) {
     g_log.printf("[CAM] init attempt 1 failed: 0x%x — retrying...\n", err);
@@ -90,8 +86,7 @@ void setupCamera() {
 void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMode flash) {
   char ev[160];
   if (!g_cameraReady) {
-    // لا نحاول re-init هنا — esp_camera_init() ممكن يعلّق إذا الهاردوير مش راد
-    // (ribbon غير مثبت، باور ناقص). نرسل خطأ فوراً بدل ما نهنّق الـ loop.
+    // ما منعيد init هون: esp_camera_init ممكن يعلّق لو العتاد مش جاهز.
     g_log.println("[CAM] not ready — sending error without re-init");
     snprintf(ev, sizeof(ev),
              "{\"id\":\"%s\",\"error\":\"camera_init_failed_at_boot\"}", id.c_str());
@@ -99,11 +94,10 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
     return;
   }
 
-  // انتظار ثبات: بعد ما تلف الرقبة، أول إطار بيطلع مهزوز والتعريض لسا ما ضبط
+  // بعد لفّ الرقبة أول إطار مهزوز والتعريض لسا ما ضبط.
   if (settleMs > 0) camWait(settleMs);
 
-  // **المستشعر إلنا لحدّ ما نخلص** — بما فيه الإنعاش تحت. بلا القفل، الإنعاش
-  // بيعمل `deinit` وخادم البث المحلي ماسك إطارًا، والذاكرة بتنسحب من تحت إيده.
+  // المستشعر إلنا لحدّ ما نخلص (بما فيه الإنعاش): deinit وحدا ماسك إطار بيطيّح اللوح.
   if (!camLock(5000)) {
     g_log.println("[CAM] المستشعر مشغول — ما قدرنا نصوّر");
     snprintf(ev, sizeof(ev), "{\"id\":\"%s\",\"error\":\"camera_busy\"}", id.c_str());
@@ -111,7 +105,7 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
     return;
   }
 
-  // الفلاش: بيشتعل قبل الالتقاط بلحظة عشان المستشعر يضبط تعريضه على الإضاءة
+  // الفلاش قبل الالتقاط بلحظة عشان التعريض يضبط.
   bool useFlash = flashWantedForCapture(flash);
   if (useFlash) {
     g_log.printf("[CAM] flash on (level=%u)\n", g_flashLevel);
@@ -119,23 +113,16 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
     delay(FLASH_WARMUP_MS);
   }
 
-  // ارمي إطاراً قديماً من الـ buffer (مهم: أول fb_get بعد فترة بيرجع إطار قديم)
+  // ارمي الإطار القديم (أول fb_get بعد فترة بيرجع قديم).
   camera_fb_t* stale = esp_camera_fb_get();
   if (stale) esp_camera_fb_return(stale);
 
-  // التقاط الإطار الحديث
   camera_fb_t* fb = esp_camera_fb_get();
 
-  // الفلاش بينطفي فوراً بعد الالتقاط — الباقي نشر بيوخد ثواني، ما إله داعي
   if (useFlash) flashOff();
 
   if (!fb) {
-    // **محاولة إنعاش قبل الاستسلام.**
-    //
-    // المستشعر بيعلّق أحيانًا: بعد بثّ طويل، أو بعد ساعات بلا التقاط. والنتيجة
-    // إنّ اللوح بيضلّ ينبض ويقول `cam=yes` — وهو مش قادر يصوّر. دورة كهربا
-    // كاملة للمستشعر بترجّعه بأغلب الحالات. بنجرّبها مرّة؛ ولو ما زبطت بنقول
-    // فشلنا بصراحة. والقفل معنا، فما حدا ماسك إطارًا وقت الـ`deinit`.
+    // المستشعر بيعلّق أحيانًا وهو بيقول `cam=yes`: منجرّب دورة كهربا مرّة، وإلا منقول فشلنا.
     g_log.println("[CAM] capture failed — بنعيد تشغيل المستشعر");
     esp_camera_deinit();
     delay(120);
@@ -157,18 +144,11 @@ void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMod
     return;
   }
 
-  // الطول قبل الإرجاع — بعد `fb_return` المخزن مش إلنا، والمشغّل ممكن يعبّيه
-  // بإطار جديد وإحنا بنقرا منه.
+  // الطول قبل `fb_return`: بعدها المخزن مش إلنا.
   const size_t bytes = fb->len;
   g_log.printf("[CAM] captured %u bytes — uploading...\n", (unsigned)bytes);
 
-  // **الرفع مباشرة للخادم، ومحاولة تانية بدل مسار احتياطي.**
-  //
-  // كان في احتياطي: لو الرفع فشل، الصورة بتتقطّع وتنبعت عبر الوسيط. وهاد المسار
-  // كان بلا توقيع — أي حدا بيقدر ينشر ع موضوع الكاميرا كان بيقدر يزرع صورة
-  // مكان صورة البيت — وصور البيت كانت بتمرق ع وسيط طرف تالت. وبنفس الوقت ما كان
-  // بيوصّل إشي فعليًّا: القطع بتضيع بصمت. محاولة تانية بعد ثانية، وبعدها خطأ
-  // صريح بيوصل التطبيق، أحسن من صورة بطيئة ومكشوفة ما بتوصل.
+  // رفع مباشر للخادم مع محاولة تانية؛ ما في مسار احتياطي عبر الوسيط (كان بلا توقيع).
   bool ok = uploadSnapshot(id, fb->buf, bytes);
   if (!ok) {
     g_log.println("[CAM] upload failed — محاولة تانية بعد ثانية");

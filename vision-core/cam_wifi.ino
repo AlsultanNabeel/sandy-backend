@@ -1,31 +1,15 @@
-// =========================
 // ESP32-CAM — WiFi + Diagnostics
-// =========================
 
 static unsigned long g_lastWifiAttemptMs = 0;
 static uint32_t      g_wifiDropCount     = 0;
 
-// ── الشبكة المحفوظة ─────────────────────────────────────────────────────────
-//
-// **الخطر اللي هالتصميم موجود عشانه:** الطريقة الوحيدة اللي بنوصل فيها للكاميرا
-// هي الشبكة اللي هي عليها. كلمة سر غلط بتقطعها، وبتقطع معها القناة اللي كنّا رح
-// نقولها فيها «ارجعي» — وساعتها ما إلها حل غير كبل وحرق. بسبب حرف.
-//
-// فبنجرّب الجديدة، وإذا ما طلعت عليها خلال المهلة، **بترجع للقديمة لحالها**.
-// والقديمة ما بتنمسح إلا بعد ما الجديدة تشتغل فعلًا.
-//
-// وفي حارس إقلاع: علامة «قيد التجربة» بتنمسح مع كل تشغيل. يعني حتى لو انقطعت
-// الكهربا بنص التجربة، الكاميرا بترجع تشتغل ع الشبكة اللي كانت عليها.
-//
-// نفس منطق الدماغ بالضبط (`sandy_wifi.c`) — لوحان بسلوكين مختلفين بنفس الميزة
-// بيخلّوا المالك يحفظ استثناء لكل واحد.
+// ── الشبكة المحفوظة ──
+// نفس منطق الدماغ (`sandy_wifi.c`): بنجرّب الجديدة وبنرجع للقديمة لو ما اشتغلت خلال
+// المهلة؛ علامة «قيد التجربة» بتنمسح مع كل إقلاع.
 
 #include <Preferences.h>
 
-// **مساحة لحالها، مش مساحة الإعدادات.** كانت نفس `sandycam` تبع إعدادات
-// المستشعر، و«رجوع للإعدادات الأصلية» بيمسح المساحة كلها — يعني بيمسح الشبكة
-// كمان، والكاميرا بترجع ع شبكة المصنع وما بتوصل لحدا. تصفير الإعدادات ما لازم
-// يقطع الكاميرا عن البيت.
+// مساحة لحالها: تصفير إعدادات المستشعر ما لازم يمسح الشبكة.
 #define WIFI_NS         "sandywifi"
 #define WIFI_NS_LEGACY  "sandycam"
 #define WIFI_K_SSID     "ssid"
@@ -39,8 +23,7 @@ static bool   g_switching = false;
 
 const char *camSsid() { return g_ssid.c_str(); }
 
-// نقل لمرّة وحدة: الشبكة المحفوظة بالمساحة القديمة بتنتقل للجديدة، بلا ما
-// المالك يعيد الإعداد بعد الترقية.
+// نقل لمرّة وحدة من المساحة القديمة.
 static void migrateLegacyWifi() {
   Preferences fresh;
   if (!fresh.begin(WIFI_NS, false)) return;
@@ -64,8 +47,7 @@ static void migrateLegacyWifi() {
 }
 
 static void loadWifiCreds() {
-  // الشبكة الأولى من الهويّة المحفوظة (sandy_identity.h)، مش من الصورة: صورة
-  // التحديث فيها أمثلة، وكانت رح ترجّع الكاميرا لشبكة اسمها «YOUR_WIFI_SSID».
+  // من الهويّة المحفوظة، مش من الصورة (فيها أمثلة).
   g_ssid = g_id.wifiSsid;
   g_pass = g_id.wifiPass;
 
@@ -74,8 +56,7 @@ static void loadWifiCreds() {
   if (!p.begin(WIFI_NS, false)) return;
 
   if (p.getBool(WIFI_K_TRYING, false)) {
-    // انقطعت الكهربا بنص تجربة. بنمسح العلامة وبنقلع ع **آخر شبكة ثبتت** —
-    // والمحفوظة هي بالزبط هاي، لأنّ الجديدة ما بتنحفظ إلا بعد ما تنجح.
+    // تجربة انقطعت: بنقلع ع آخر شبكة ثبتت (المحفوظة).
     Serial.println("[WIFI] a switch was interrupted — back to the last good network");
     p.remove(WIFI_K_TRYING);
   }
@@ -88,8 +69,7 @@ static void loadWifiCreds() {
   p.end();
 }
 
-// بتحجز لحدّ خمسة وعشرين ثانية. بتتنده من الحلقة الرئيسية، مش من رد نداء MQTT:
-// رد النداء ما بيجوز ينام، وإذا نام بتتكدّس الرسائل وبيسقط الاتصال.
+// بتحجز لحدّ ٢٥ ثانية؛ من الحلقة الرئيسية مش من رد نداء MQTT.
 bool camSwitchNetwork(const String &ssid, const String &pass) {
   if (!ssid.length() || ssid.length() > 32 || pass.length() > 64) return false;
   if (g_switching) return false;
@@ -106,8 +86,7 @@ bool camSwitchNetwork(const String &ssid, const String &pass) {
   WiFi.disconnect();
   WiFi.begin(ssid.c_str(), pass.c_str());
 
-  // بننتظر عنوانًا، مش «اتصال»: لوح متصل وبلا عنوان ما بيوصل الخادم — يعني
-  // مقطوع، بس شكله متصل.
+  // بننتظر عنوان، مش «اتصال».
   unsigned long t0 = millis();
   bool ok = false;
   while (millis() - t0 < WIFI_TRY_WINDOW_MS) {
@@ -168,9 +147,7 @@ void connectWiFi() {
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());
 }
 
-// **تباعد متزايد، ومحاولة وحدة بكل مرّة.** كانت كل عشر ثواني تقطع وتبدأ من
-// جديد، فوق إعادة الاتصال التلقائية تبع المكتبة — والاتنين بيتسابقوا، وراوتر
-// بطيء (ربط + عنوان بأكتر من عشر ثواني) ما كان يلحق يكمّل ولا مرّة.
+// تباعد متزايد ومحاولة وحدة بكل مرّة، بدل ما نسابق إعادة الاتصال التلقائية.
 static unsigned long g_wifiRetryMs = WIFI_RECONNECT_INTERVAL_MS;
 #define WIFI_RETRY_MAX_MS 60000
 
@@ -182,8 +159,7 @@ void ensureWiFiConnected() {
   unsigned long now = millis();
   if (now - g_lastWifiAttemptMs < g_wifiRetryMs) return;
   g_lastWifiAttemptMs = now;
-  // ما منقاطع تجربة شغّالة: هي بتقطع الاتصال بقصد وبتستنى، وإعادة الاتصال
-  // التلقائية كانت بتشدّها للقديمة وتفشّلها كل مرّة.
+  // ما منقاطع تجربة شغّالة.
   if (g_switching) return;
   WiFi.disconnect();
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());

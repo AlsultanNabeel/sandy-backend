@@ -1,10 +1,6 @@
-// =========================
 // ESP32-CAM — Flash, sensor settings, command dispatch
-// =========================
-// كل قدرة بالعتاد مفتوحة كأمر عبر MQTT، وكل إعداد بينحفظ بالذاكرة الدائمة.
-// الفكرة: ما نرجع نفلش الجهاز عشان نغيّر إعداد — الدماغ بالسحابة بيبعت أمر وخلص.
-//
-// الأوامر (topic: sandy/cam/command، صيغة JSON):
+// كل قدرة بالعتاد أمر عبر MQTT، وكل إعداد بينحفظ بالذاكرة الدائمة.
+// الأوامر (sandy/node/<معرّف>/cam/command، JSON):
 //   {"cmd":"flash","state":"on|off","level":0-255,"ms":1500}
 //   {"cmd":"flash_mode","mode":"off|on|auto"}
 //   {"cmd":"snapshot","id":"...","settle_ms":300,"flash":"auto"}
@@ -26,14 +22,11 @@ bool camHttpRunning();
 
 static Preferences g_prefs;
 
-// حالة الفلاش الداخلية. المتغيّرات المشتركة بين الملفات معرّفة بالملف الرئيسي
-// (Arduino بيلزق الملفات ورا بعض أبجدياً، فالمشترك لازم يكون قبل أول استعمال).
+// المتغيّرات المشتركة بين الملفات بالملف الرئيسي.
 static bool          g_flashOn = false;
 static unsigned long g_flashOffAtMs = 0;   // 0 = بلا مؤقت
 
-// ─────────────────────────────────────────────────────────────
-// JSON: قارئ صغير بدل مكتبة كاملة — الرسائل عندنا مسطّحة وبسيطة
-// ─────────────────────────────────────────────────────────────
+// ── JSON: قارئ صغير، الرسائل مسطّحة ──
 static int jsonValuePos(const String& src, const char* key) {
   String needle = "\"";
   needle += key;
@@ -69,7 +62,7 @@ long jsonInt(const String& src, const char* key, long def) {
   if (p >= (int)src.length() || !isdigit(src[p])) return def;
   long v = 0;
   int digits = 0;
-  // تسع خانات بتكفّي كل قيمة عندنا؛ أكتر من هيك بيفيض `long` وبيطلع رقم غريب.
+  // تسع خانات بتكفّي؛ أكتر بيفيض `long`.
   while (p < (int)src.length() && isdigit(src[p])) {
     if (++digits > 9) return def;
     v = v * 10 + (src[p] - '0');
@@ -78,9 +71,7 @@ long jsonInt(const String& src, const char* key, long def) {
   return neg ? -v : v;
 }
 
-// معرّف طلب مقبول: حروف وأرقام وشرطة، لحدّ أربعين. المعرّف بيروح بترويسة طلب
-// الرفع وبـ JSON الأحداث؛ علامة تنصيص أو سطر جديد فيه كانت بتكسر الاتنين —
-// وبتسمح بحقن ترويسة بطلب الرفع.
+// حروف وأرقام وشرطة لحدّ أربعين: المعرّف بيروح بترويسة الرفع وبـ JSON (منع الحقن).
 bool camValidId(const String& id) {
   if (id.length() == 0 || id.length() > 40) return false;
   for (size_t i = 0; i < id.length(); i++) {
@@ -90,7 +81,6 @@ bool camValidId(const String& id) {
   return true;
 }
 
-// هروب لقيمة نصّية جوّا JSON.
 static String jsonEscape(const String& in) {
   String out;
   out.reserve(in.length() + 4);
@@ -103,9 +93,7 @@ static String jsonEscape(const String& in) {
   return out;
 }
 
-// **حدّ واحد لكل إشي بيشغّل المستشعر أو الفلاش.** كان في حدّ ع مسار قديم ما
-// حدا بيستعمله، والمسار اللي بيستعمله الخادم (التصوير والسلسلة والبث) كان بلا
-// حدّ — يعني تكرار الطلب مع «فلاش شغّال» بيسخّن اللمبة وبيوقّع الكهربا.
+// حدّ واحد لكل إشي بيشغّل المستشعر أو الفلاش (حرارة اللمبة والكهربا).
 static unsigned long g_lastHeavyCmdMs = 0;
 static bool g_heavyCmdSeen = false;
 bool camCommandAllowed() {
@@ -116,9 +104,7 @@ bool camCommandAllowed() {
   return true;
 }
 
-// ─────────────────────────────────────────────────────────────
-// الفلاش
-// ─────────────────────────────────────────────────────────────
+// ── الفلاش ──
 void flashInit() {
   ledcAttachChannel(FLASH_LED_GPIO, FLASH_PWM_FREQ_HZ, FLASH_PWM_BITS, FLASH_PWM_CHANNEL);
   ledcWrite(FLASH_LED_GPIO, 0);
@@ -129,7 +115,7 @@ void flashSet(uint8_t level, unsigned long autoOffMs) {
   ledcWrite(FLASH_LED_GPIO, level);
   g_flashOn = level > 0;
   if (level > 0) {
-    // حتى لو ما طُلب مؤقت، منحط سقف أمان — اللمبة بتسخن وبتاكل تيار
+    // سقف أمان دايمًا: اللمبة بتسخن وبتاكل تيار.
     unsigned long limit = autoOffMs > 0 ? min(autoOffMs, (unsigned long)FLASH_MAX_ON_MS)
                                         : (unsigned long)FLASH_MAX_ON_MS;
     g_flashOffAtMs = millis() + limit;
@@ -142,37 +128,32 @@ void flashOff() { flashSet(0, 0); }
 
 bool flashIsOn() { return g_flashOn; }
 
-// تُنادى من الـ loop — تطفي الفلاش لما يخلص وقته
+// من الـ loop: بيطفي الفلاش لما يخلص وقته.
 void flashTick() {
-  // بالفرق مش بالقيمة، عشان لفّة العدّاد بعد تسعة وأربعين يوم.
+  // بالفرق عشان لفّة millis().
   if (g_flashOn && g_flashOffAtMs && (long)(millis() - g_flashOffAtMs) >= 0) {
     g_log.println("[FLASH] auto-off (safety timer)");
     flashOff();
   }
 }
 
-// عتمة؟ منقرأها من كسب المستشعر: كل ما زاد الكسب، كل ما كانت الإضاءة أقل.
-//
-// **الكسب الحيّ، مش الإعداد.** `status.agc_gain` هو الكسب اليدوي اللي بينحطّ
-// لمّا الكسب التلقائي مطفي — وهو مشغّل عندنا، فالقيمة ضايلة صفر ووضع «تلقائي»
-// ما كان يشعل الفلاش ولا مرّة، وصور الليل طالعة سودا. مستشعر OV2640 بيحكي
-// كسبه الحالي بسجلّ `GAIN` (بنك المستشعر، العنوان صفر)؛ غير هيك بنرجع للإعداد.
+// العتمة من الكسب الحيّ للمستشعر (سجلّ `GAIN` بـ OV2640)، مش `status.agc_gain`
+// اللي بيضل صفر مع الكسب التلقائي؛ غير هيك بنرجع للإعداد.
 bool sceneIsDark() {
   sensor_t* s = esp_camera_sensor_get();
   if (!s) return false;
   if (s->id.PID == OV2640_PID && s->status.agc && s->get_reg) {
     int g = s->get_reg(s, 0x100 | 0x00, 0xff);
-    // البتات العليا مضاعفات (×٢ لكل بت)، والسفلى كسر. من ×٤ وطالع = عتمة.
+    // البتات العليا مضاعفات (×٢ لكل بت)؛ من ×٤ وطالع = عتمة.
     if (g >= 0) return g >= FLASH_AUTO_GAIN_REG_THRESHOLD;
   }
   return s->status.agc_gain >= FLASH_AUTO_GAIN_THRESHOLD;
 }
 
-// هل نشعل الفلاش لهاللقطة؟
 extern bool g_flashLockedByBrownout;
 
 bool flashWantedForCapture(FlashMode mode) {
-  // بعد انهيار كهربا ما في فلاش للّقطات، مهما قال الوضع المحفوظ أو الطلب.
+  // بعد انهيار كهربا ما في فلاش للّقطات.
   if (g_flashLockedByBrownout) return false;
   switch (mode) {
     case FLASH_MODE_ON:   return true;
@@ -197,9 +178,7 @@ static const char* flashModeName(FlashMode m) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// أحجام الصورة
-// ─────────────────────────────────────────────────────────────
+// ── أحجام الصورة ──
 struct FrameSizeName { const char* name; framesize_t size; };
 static const FrameSizeName kFrameSizes[] = {
   {"96X96",   FRAMESIZE_96X96},   {"QQVGA", FRAMESIZE_QQVGA},
@@ -228,11 +207,8 @@ static const char* frameSizeName(framesize_t size) {
   return "?";
 }
 
-// ─────────────────────────────────────────────────────────────
-// إعدادات المستشعر — كلها قابلة للتغيير وقت التشغيل
-// ─────────────────────────────────────────────────────────────
-// اسم الأمر ← دالة الضبط ← الحد الأدنى/الأعلى. أي إشي بيقدر يعمله المستشعر
-// موجود هون، حتى لو ما بنستعمله هلأ — عشان ما نرجع نفلش لما نحتاجه.
+// ── إعدادات المستشعر (وقت التشغيل) ──
+// اسم ← دالة الضبط ← الحدود. كل قدرات المستشعر هون حتى لو مش مستعملة.
 struct SensorSetting {
   const char* key;
   int (*apply)(sensor_t*, int);
@@ -305,7 +281,7 @@ static int readSetting(sensor_t* s, const char* key) {
 
 static int clampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-// بيرجّع عدد الإعدادات اللي انطبقت فعلاً
+// بيرجّع عدد الإعدادات اللي انطبقت.
 static int applySettingsFromJson(const String& payload, bool persist) {
   sensor_t* s = esp_camera_sensor_get();
   if (!s) return 0;
@@ -317,7 +293,7 @@ static int applySettingsFromJson(const String& payload, bool persist) {
 
     int v;
     if (!strcmp(def.key, "framesize")) {
-      // منقبل الاسم ("VGA") أو الرقم — الاسم أوضح للسحابة
+      // الاسم ("VGA") أو الرقم.
       String nameVal = jsonStr(payload, def.key, "");
       framesize_t fs;
       if (nameVal.length() && frameSizeFromName(nameVal, &fs)) {
@@ -367,9 +343,7 @@ static void settingsClear() {
   g_log.println("[SET] stored settings cleared — defaults on next boot");
 }
 
-// ─────────────────────────────────────────────────────────────
-// نشر الحالة الكاملة (كل الإعدادات + حالة الجهاز)
-// ─────────────────────────────────────────────────────────────
+// ── نشر الحالة الكاملة ──
 void publishFullStatus() {
   sensor_t* s = esp_camera_sensor_get();
   String out = "{";
@@ -403,9 +377,7 @@ static void publishAck(const char* cmd, bool ok, const String& detail) {
   mqttPublishEvent(out.c_str());
 }
 
-// ─────────────────────────────────────────────────────────────
-// تنفيذ الأوامر
-// ─────────────────────────────────────────────────────────────
+// ── تنفيذ الأوامر ──
 void handleCamCommand(const String& payload) {
   String cmd = jsonStr(payload, "cmd", "");
   if (cmd.length() == 0) {
@@ -431,11 +403,10 @@ void handleCamCommand(const String& payload) {
   }
 
   if (cmd == "flash_level") {
-    // الشدّة للّقطات الجاية، بلا تشغيل. صفر ما إله معنى كشدّة — الإطفاء إله
-    // وضع «مطفي».
+    // الشدّة للّقطات الجاية بلا تشغيل؛ الإطفاء إله وضع «مطفي».
     g_flashLevel = (uint8_t)clampInt(jsonInt(payload, "level", g_flashLevel), 1, 255);
     g_prefs.putInt("flash_level", g_flashLevel);
-    // لو شغّال هلّق، بيتغيّر لحظيًّا — المنزلق بيعطي ردّة فعل وإنت عم تحرّكه.
+    // لو شغّال، بيتغيّر لحظيًّا.
     if (flashIsOn()) ledcWrite(FLASH_LED_GPIO, g_flashLevel);
     publishAck("flash_level", true, String(g_flashLevel));
     return;
@@ -497,14 +468,7 @@ void handleCamCommand(const String& payload) {
   }
 
   if (cmd == "stream") {
-    // **الاتنين مع بعض، والمشاهد بيختار.**
-    //
-    // المحلي سريع وسلس وبس ببيتك. والبعيد أبطأ وبيشتغل من أي مكان. تشغيلهن
-    // سوا معناه إنّ التطبيق ما بيحتاج يعرف إنت وين — بيجرّب المحلي، وإذا ما
-    // وصل بيسحب من الخادم.
-    //
-    // والكلفة بسيطة: المحلي ما بيصوّر إلا لمّا حدا يتفرّج، والبعيد بيرفع إطارًا
-    // كل تلت ثانية. اللوح بيحمل التنين.
+    // المحلي والبعيد سوا: التطبيق بيجرّب المحلي وإلا بيسحب من الخادم.
     String state = jsonStr(payload, "state", "on");
     if (state == "off") {
       stopCamHttp();
