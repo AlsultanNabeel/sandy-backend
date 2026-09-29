@@ -1,6 +1,4 @@
-# Sandy room node — the Arduino default layout, written out so it cannot
-# change under us: two 1.25 MB app slots for signed updates from the server
-# (sandy_ota_pull.h) and a crash-dump slot. Same NVS offset as before.
+# Sandy room node: two 1.25 MB OTA slots (sandy_ota_pull.h) + crash dump. Keep NVS at 0x9000.
 # Name,    Type, SubType,  Offset,   Size
 nvs,       data, nvs,      0x9000,   0x5000
 otadata,   data, ota,      0xe000,   0x2000

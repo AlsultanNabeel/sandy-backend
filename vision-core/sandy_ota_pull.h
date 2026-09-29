@@ -1,24 +1,11 @@
-// =========================
-// Sandy — التحديث عن بعد للألواح الصغيرة (الكاميرا وعقدة الغرفة)
-// =========================
-//
-// **نسخة طبق الأصل بـ vision-core و room-node.** اختبار بالمستودع بيتأكّد
-// إنّ النسختين متطابقتين، ف أي تعديل لازم ينعمل بالاتنين.
-//
-// نفس فكرة الدماغ (firmware/brain-core/main/sandy_ota.c) بالضبط:
-//
-//   ١. اللوح بيسأل الخادم: `/api/firmware/manifest?board=<لوح>&device_id=&v=`.
-//      الروبوت المباع ورا راوتر حدا تاني، ما حدا بيقدر يوصله — فهو اللي بيسأل.
-//   ٢. التوقيع (ECDSA P-256) بيتفحص بالمفتاح العام المحروق هون. الرسالة
-//      الموقّعة فيها اسم اللوح: `sandy-fw|<لوح>|<نسخة>|<حجم>|<sha256>` — فصورة
-//      الدماغ الموقّعة ما بتنركّب ع كاميرا حتى لو الخادم غلط أو انخرق.
-//   ٣. الصورة بتنزل ع القسم الفاضي، والبصمة بتنحسب وهي نازلة، وما بنبدّل
-//      القسم إلا لو الحجم والبصمة طابقوا الموقّع.
-//   ٤. بعد الإقلاع الجديد الصورة «تحت التجربة»: لو ما رجع اللوح ع الوسيط خلال
-//      خمس دقايق، أو علّق وقام المراقب، بيرجع للنسخة القديمة لحاله. والنسخة
-//      اللي فشلت بتنحفظ وما بنرجع نجرّبها.
-//
-// ما في نزول لنسخة أقدم أبدًا.
+// Sandy — التحديث عن بعد للألواح الصغيرة. نسخة طبق الأصل بـ vision-core و room-node (اختبار بيتأكّد).
+// نفس فكرة الدماغ (sandy_ota.c):
+//   ١. اللوح بيسأل `/api/firmware/manifest?board=<لوح>&device_id=&v=`.
+//   ٢. توقيع ECDSA P-256 ع `sandy-fw|<لوح>|<نسخة>|<حجم>|<sha256>` (اسم اللوح جوّا
+//      التوقيع، فصورة الدماغ ما بتنركّب ع كاميرا).
+//   ٣. التنزيل ع القسم الفاضي، والتبديل بس لو الحجم والبصمة طابقوا الموقّع.
+//   ٤. تحت التجربة: بلا وسيط خلال خمس دقايق (أو المراقب قام) بيرجع للقديمة، والفاشلة ما بتنعاد.
+// ما في نزول لنسخة أقدم.
 
 #ifndef SANDY_OTA_PULL_H
 #define SANDY_OTA_PULL_H
@@ -31,8 +18,7 @@
 #include "mbedtls/md.h"
 #include "mbedtls/pk.h"
 
-// المفتاح العام — نفس firmware/brain-core/main/fw_pubkey.pem. عام، مش سرّ:
-// بيفحص التوقيع بس، وما بيقدر يوقّع.
+// نفس firmware/brain-core/main/fw_pubkey.pem؛ عام، بيفحص بس.
 static const char SANDY_FW_PUBKEY[] =
   "-----BEGIN PUBLIC KEY-----\n"
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3DWyfwXCt1A8SsoVVx/wB/tiZqNJ\n"
@@ -56,7 +42,7 @@ struct SandyOtaConfig {
   const char* version;        // نسخة هالصورة
   const char* caRoots;        // جذور الشهادات
   bool (*idle)();             // اللوح فاضي؟ (مش بيصوّر، مش بيحرّك)
-  void (*prepare)();          // حرّر الذاكرة قبل التنزيل (مثلًا سكّر اتصالات)
+  void (*prepare)();          // حرّر الذاكرة قبل التنزيل
   void (*feed)();             // غذّي المراقب وقت التنزيل
 };
 
@@ -65,9 +51,8 @@ static unsigned long  g_otaNextCheckMs = 0;
 static bool           g_otaPendingVerify = false;
 static unsigned long  g_otaHealthySinceMs = 0;
 
-// أرويدوينو بيعلّم أي صورة جديدة «سليمة» لحظة الإقلاع، قبل ما نعرف إذا بتوصل
-// الشبكة أصلًا. هيك بنأجّل الحكم: الصورة بتضلّ تحت التجربة لحدّ ما تثبت حالها.
-// (دالّة C بالنواة، فالاسم لازم يطلع بلا تزيين C++ وإلا ما بتنربط وبتنتجاهل بصمت.)
+// أرويدوينو بيعلّم الصورة «سليمة» لحظة الإقلاع؛ هيك بنأجّل الحكم لحدّ ما تثبت حالها.
+// extern "C" لازم، وإلا ما بتنربط وبتنتجاهل بصمت.
 extern "C" bool verifyRollbackLater() { return true; }
 
 // -1 / 0 / 1 رقميًّا لكل جزء ("0.10" أكبر من "0.9").
@@ -140,7 +125,7 @@ static bool sandyOtaSignatureOk(const char* version, long size, const char* sha,
   return r == 0;
 }
 
-// طلب GET بسيط. بيرجّع رمز الحالة والطول، والعميل واقف عند أول بايت بالجسم.
+// GET بسيط؛ العميل بيوقف عند أول بايت بالجسم.
 static int sandyOtaGet(WiFiClientSecure& c, const String& path, long* contentLength) {
   *contentLength = -1;
   if (!c.connect(g_otaCfg.host, 443)) return -1;
@@ -170,7 +155,7 @@ static bool sandyOtaIsBad(const char* version) {
   return bad.length() && bad == version;
 }
 
-// الفحص الكامل. بيرجّع لمتى نأجّل الفحص الجاي.
+// بيرجّع لمتى نأجّل الفحص الجاي.
 static unsigned long sandyOtaCheckOnce() {
   char path[200];
   snprintf(path, sizeof(path), "/api/firmware/manifest?board=%s&device_id=%s&v=%s",
@@ -287,7 +272,7 @@ static unsigned long sandyOtaCheckOnce() {
     Serial.printf("[OTA] %s: ما انقفل التحديث: %s\n", version, Update.errorString());
     return SANDY_OTA_RETRY_MS;
   }
-  // منحفظ شو جرّبنا: لو رجعنا للقديمة، الإقلاع الجاي بيعرف إنها هي اللي فشلت.
+  // لو رجعنا للقديمة، الإقلاع الجاي بيعرف مين فشل.
   Preferences p;
   if (p.begin(SANDY_OTA_NVS, false)) {
     p.putString("trying", version);
@@ -299,7 +284,7 @@ static unsigned long sandyOtaCheckOnce() {
   return SANDY_OTA_PERIOD_MS;
 }
 
-// بالإقلاع: هل هالصورة جديدة تحت التجربة؟ وهل نسخة سابقة فشلت ورجعنا منها؟
+// بالإقلاع: هل الصورة تحت التجربة؟ وهل رجعنا من نسخة فاشلة؟
 static void sandyOtaBegin(const SandyOtaConfig& cfg) {
   g_otaCfg = cfg;
   g_otaNextCheckMs = millis() + SANDY_OTA_FIRST_CHECK_MS;
@@ -313,7 +298,6 @@ static void sandyOtaBegin(const SandyOtaConfig& cfg) {
   if (!p.begin(SANDY_OTA_NVS, false)) return;
   String trying = p.getString("trying", "");
   if (trying.length() && trying != cfg.version) {
-    // جرّبنا نسخة ورجعنا للقديمة: هي اللي فشلت.
     p.putString("bad", trying);
     Serial.printf("[OTA] %s فشلت ورجعنا لـ %s\n", trying.c_str(), cfg.version);
   }
@@ -322,7 +306,7 @@ static void sandyOtaBegin(const SandyOtaConfig& cfg) {
   if (g_otaPendingVerify) Serial.printf("[OTA] %s تحت التجربة\n", cfg.version);
 }
 
-// من الحلقة. `online` = اللوح موصول ع الوسيط هلّق.
+// `online` = موصول ع الوسيط هلّق.
 static void sandyOtaLoop(bool online) {
   unsigned long now = millis();
   if (g_otaPendingVerify) {

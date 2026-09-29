@@ -1,18 +1,6 @@
-// =========================
-// Sandy — هويّة اللوح (الكاميرا وعقدة الغرفة)
-// =========================
-//
-// **نسخة طبق الأصل بـ vision-core و room-node** (اختبار بيتأكّد).
-//
-// كود الاقتران ومفاتيح الوسيط والشبكة كانوا محروقين جوّا البرنامج نفسه. هاد
-// ماشي طول ما كل لوح بينحرق بالكيبل لحاله — وبيوقف أول ما صار في تحديث عن بعد:
-// صورة وحدة بتنزل لكل الروبوتات، فإمّا بتحمل هويّة روبوت واحد لكل الباقيين،
-// أو بتمسح هويّاتهم. والصورة ع الخادم عامّة، فأي سرّ فيها مكشوف.
-//
-// هلّق الهويّة بتعيش بذاكرة اللوح الدائمة (`sandyid`):
-//   • حرق بالكيبل بقيم حقيقية بـ secrets.h ← بتنكتب بالذاكرة وبتنستعمل.
-//   • صورة التحديث (مبنية بـ secrets.example.h، قيم أمثلة) ← الذاكرة هي المرجع.
-// كل حقل لحاله: قيمة مثال ما بتمسح قيمة محفوظة أبدًا.
+// Sandy — هويّة اللوح (الكاميرا وعقدة الغرفة). نسخة طبق الأصل بـ vision-core و room-node (اختبار بيتأكّد).
+// الهويّة بذاكرة اللوح (`sandyid`) مش بالصورة: حرق الكيبل بقيم secrets.h الحقيقية
+// بيكتبها، وصورة التحديث (secrets.example.h) بتقرا المحفوظ. قيمة مثال ما بتمسح المحفوظ.
 
 #ifndef SANDY_IDENTITY_H
 #define SANDY_IDENTITY_H
@@ -23,10 +11,10 @@
 
 struct SandyIdentity {
   String pair;        // كود الاقتران المطبوع ع العلبة
-  String mqttHost;    // الوسيط — بيتغيّر لو انتقلنا لوسيط تاني، فمكانه هون مش بالصورة
+  String mqttHost;    // الوسيط، مش بالصورة
   String mqttUser;
   String mqttPass;
-  String sharedKey;   // مفتاح الرفع المشترك (الكاميرا بس) — لحدّ ما ياخد مفتاحه الخاص
+  String sharedKey;   // مفتاح الرفع المشترك (الكاميرا بس) لحدّ ما ياخد الخاص
   String wifiSsid;    // الشبكة الأولى
   String wifiPass;
   bool complete() const {
@@ -36,7 +24,7 @@ struct SandyIdentity {
 
 static SandyIdentity g_id;
 
-// قيمة مثال = مش قيمة. «YOUR_…» و«…XXXX…» هنّ اللي بملفات المثال.
+// «YOUR_…» و«…XXXX…» = قيم أمثلة.
 static bool sandyIsPlaceholder(const char* v) {
   return v == nullptr || *v == '\0' || strncmp(v, "YOUR_", 5) == 0 ||
          strstr(v, "XXXX") != nullptr;
@@ -62,7 +50,7 @@ static void sandyIdentityLoad(const char* pair, const char* mqttHost,
   g_id.mqttPass  = sandyIdField(p, "mp", mqttPass);
   g_id.sharedKey = sandyIdField(p, "sk", sharedKey);
   g_id.wifiSsid  = sandyIdField(p, "ws", wifiSsid);
-  // كلمة سرّ الشبكة ممكن تكون فاضية ع شبكة مفتوحة؛ بتمشي مع اسمها.
+  // كلمة السر ممكن تكون فاضية (شبكة مفتوحة).
   if (!sandyIsPlaceholder(wifiSsid)) g_id.wifiPass = sandyIdField(p, "wp", wifiPass ? wifiPass : "");
   else g_id.wifiPass = p ? p->getString("wp", "") : String();
   if (p) prefs.end();
@@ -70,7 +58,7 @@ static void sandyIdentityLoad(const char* pair, const char* mqttHost,
   if (g_id.complete()) {
     Serial.printf("[ID] كود %s — الهويّة جاهزة\n", g_id.pair.c_str());
   } else {
-    // ما بنخمّن ولا بنتصل بهويّة ناقصة: لوح بلا كود بيسمع ع شجرة غلط.
+    // ما منتصل بهويّة ناقصة.
     Serial.println("[ID] ⚠️ ما في هويّة — لازم حرق أوّل بالكيبل بقيم secrets.h الحقيقية");
   }
 }
