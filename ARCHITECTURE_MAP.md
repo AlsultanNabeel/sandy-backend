@@ -116,14 +116,14 @@ package import in a test with no credentials. Do not add import-time side effect
 | Path | Role |
 |---|---|
 | `app/config.py` | The central env-var module. New code imports from here rather than calling `os.getenv` at a call site; older modules (bootstrap, ltm_crypto, integrations/*, …) still read the environment directly. |
-| `app/bootstrap.py` | One-time startup, run last: `validate_config` (fatal → `RuntimeError`), Google creds, Sentry, tool registry, `ensure_indexes`, summary migration, the nudge scheduler and the scene-timer runner. Idempotent. |
+| `app/bootstrap.py` | One-time startup, run last: `validate_config` (fatal → `RuntimeError`), Google creds, Sentry, tool registry, `ensure_indexes`, summary migration, the nudge scheduler, the scene-timer runner, and the blocks' indexes + the schedule runner (§2.12). Idempotent. |
 | `app/db.py` | The single Mongo handle. Every store reads through `get_db()`. |
 | `app/errors.py` | Typed error taxonomy. |
 | `app/agent/` | The brain: graph, nodes, tools, executor, and the memory layers. |
 | `app/api/` | HTTP routes and the `/voice` WebSocket. |
 | `app/features/` | Feature stores — the data layer, one module per domain. |
 | `app/integrations/` | Clients for everything external. |
-| `app/services/` | Push delivery (APNs), the nudge scheduler, and the scene-timer runner (once a minute). |
+| `app/services/` | Push delivery (APNs), the nudge scheduler, the scene-timer runner and the `sandy_schedules` runner (each once a minute). |
 | `app/utils/` | Tenancy (+ `tenant_version`), circuit breaker, background thread pool, profiles, time, text. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
 | `app/blocks/` | The rebuild's data layer — log / lists / schedules + the kinds table (§2.12). |
 | `app/brain/` | Phase 2 of the rebuild: the one-call agent on the blocks, behind `SANDY_NEW_AGENT` (§2.13). |
@@ -461,7 +461,7 @@ paired the code. **A heartbeat cannot nominate its own owner.**
 
 ### 2.9 HTTP surface
 
-136 HTTP route handlers on 103 paths, plus two WebSockets (`/voice`, `/voice/enroll`). All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
+150 HTTP route handlers on 111 paths, plus two WebSockets (`/voice`, `/voice/enroll`). All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
 Registered by explicit `register_*_api(app, …)` calls in `api/server.py` — there
 are no Flask blueprints, so **route discovery means reading `server.py`'s
 registration block**, not grepping for blueprints.
@@ -471,12 +471,31 @@ Groups: auth (email, Google, Apple) · account (get / reset / delete) · agent (
 journal, books, focus, scenes) · devices + nodes · memory · photos · goals · gifts ·
 future messages · share · timeline · research · images · weather · persona ·
 onboarding · push · subscriptions · features · daily nudge · studio plans · voice TTS ·
-firmware images · diagnose · camera upload.
+firmware images · diagnose · camera upload · blocks.
+
+**The blocks** (`api/blocks_api.py`, phase 3 of the rebuild, §2.12) — every route
+`require_tenant` except `/api/kinds` (`require_auth`), so the block stores' scoped
+handles do the isolation; a bad input is 400 `{"error": <code>, "message": <Arabic>}`,
+text capped at 2000 characters and `data`/`payload` at 8000 of JSON:
+
+| Route | Does |
+|---|---|
+| `GET/POST /api/entries`, `PATCH/DELETE /api/entries/<id>` | the log; `GET` filters `kind`, `since`, `until`, `q`, `limit` |
+| `GET/POST /api/items`, `PATCH/DELETE /api/items/<id>` | the lists; `GET` filters `list`, `done`, `q`, `limit`; `PATCH {"due": null}` clears it |
+| `GET/POST /api/schedules`, `PATCH/DELETE /api/schedules/<id>` | anything that fires; `GET` filters `kind`, `from`, `to`, `status`, `limit`; `fire_at` must be future; `recurrence` is daily/weekly/monthly/yearly or an RRULE; the app may set status only to `pending`/`cancelled` |
+| `GET /api/kinds` | `kinds.KINDS` as `{name, block, labels:{ar,en}, icon, prefix, fields:{name: type}}` — the app builds its screens from it |
+| `POST /api/summary` | `{period, focus?}` → `{text, count}`: the brain's `summarize` rows, one model call (`brain/summary.py`); metered; nothing recorded → a fixed sentence, no call |
+
+Datetimes go out as ISO in the user's zone and come in as ISO (naive = user's
+zone; a bare date in `until`/`to` covers its day). A row with `encrypted` in its
+`data`/`payload` is decrypted for its owner and re-sealed on edit; a
+`message_to_future_self` is sealed at rest, as `/api/future-messages` keeps it.
+None of the old routes changed.
 
 **Every route that spends money on a provider is metered** through
 `api/metering.py` — the chat routes, image generation and analysis, web and
 place search, content suggestions, gift writing, studio summaries
-and photo tagging, one unit each against the caller's tier. A new paid route calls `meter_claims`.
+and photo tagging, `/api/summary`, one unit each against the caller's tier. A new paid route calls `meter_claims`.
 
 ### 2.10 Auth
 
@@ -538,9 +557,10 @@ soul · <node> (<tool>)`, from `run_graph`. Grep it before theorising.
 
 ### 2.12 `app/blocks/` — Phase 1 of the rebuild
 
-Only `app/brain/` (§2.13, behind a flag that defaults off), its own tests and the
-migration script use this package; with the flag off, the agent, tools, API,
-voice path and bootstrap still use the feature stores above.
+Used by `app/brain/` (§2.13, behind a flag that defaults off), the blocks REST
+routes (§2.9), the schedule runner below, the migration script and their tests.
+With the flag off, the agent, tools, voice path and the old routes still use the
+feature stores above. `account_delete` erases the three collections.
 It is the replacement for them: every feature becomes a row in one of three
 collections instead of its own store + tools + routes.
 
@@ -566,6 +586,26 @@ write, `--user <id>` for one tenant. Every written doc has `migrated_from:
 {collection, id}` and an `_id` derived from it, so a re-run skips what is
 already there. It only reads the old collections. The mapping table is in its
 `SOURCES`; its docstring lists what is deliberately not migrated.
+
+**The schedule runner** (`services/schedule_runner.py`) is one more job on the
+leader-elected scheduler (§2.1), once a minute, alongside the old runners — it
+replaces nothing yet. `bootstrap` creates the blocks' indexes and starts it. A
+due row (`status` pending, `fire_at` ≤ now, not `migrated_from`) is claimed by a
+compare-and-set on its own `(status, fire_at)`: a one-off moves to `sent`, a
+recurring one to its next RRULE time (`reminders_store._next_occurrence`, anchored
+in local time), and only the worker whose update matched fires it, so nothing
+fires twice across workers or dynos. `fired_at` and `last_error` are set on the row.
+
+| Kind | Firing |
+|---|---|
+| `reminder` | The phone rings it locally from `GET /api/schedules`, as it does from `/api/reminders`. The server also pushes over APNs when `services/apns.py` is configured, unless the row is more than 15 minutes late. `failed` only when devices exist and none took the push. |
+| `scene` | `scene_store._actuate` (what `scene_timer_runner` applies); a miss retries a minute later up to `MAX_TIMER_TRIES`, then `failed`. |
+| `daily_nudge`, `summary_nudge` | push text only; `failed` when no device took it (no APNs, no token, every send refused). |
+| `message_to_future_self` | not fired here: the next chat reply delivers it (§2.13). |
+
+A recurring row that fails stays armed for its next time with `last_error`.
+Migrated rows are skipped because their old stores still own firing them until
+phase 5.
 
 ### 2.13 `app/brain/` — Phase 2 of the rebuild: one agent, behind `SANDY_NEW_AGENT`
 
@@ -606,7 +646,7 @@ needs no tool change.
 
 | Tool | Does |
 |---|---|
-| `remember` | `entries.add(kind, text, data)` |
+| `remember` | `entries.add(kind, text, data)`; `kind=mood` is the old emotional moment (below) |
 | `recall` | entries + items + pending schedules, filtered by kind / list / since / until / query words; compact rows |
 | `list_add` | `items.add`; `due` parsed like `when` |
 | `list_update` | by `id` or `match_text` (the `tasks_matcher` ladder, `matching.py`): done / text / due / delete |
@@ -625,13 +665,23 @@ the router and pending dispatch share). Yes runs the held call, no cancels,
 anything else drops the hold and is a normal turn. On voice there is no text turn
 to read, so the `confirm(answer)` tool passes the user's words to the same resolver,
 and holds go to the `voice` pending thread as before. The speaker gate
-(`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) lists old tool names only, so it does not
-guard the brain's tools yet.
+(`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's destructive calls too
+(`speaker._is_sensitive_call`).
 
-**Known gap until phase 3/4:** the iPhone app reads reminders from `/api/reminders`
-(`sandy_reminders`) and schedules local notifications from it. With the flag on,
-reminders made in chat live in `sandy_schedules` and do **not** ring on the phone.
-Nothing fires `sandy_schedules` yet either.
+**After the turn**, as `run_graph` does: due `message_to_future_self` schedules
+(`brain/future.py`) go into the system prompt with the old soul node's sentence,
+and are marked `sent` (`payload.delivered_at`) only when the reply is not an
+error; the mark matches on `pending`, so a message is delivered once. The
+emotional moment the graph kept when its router picked `chat_emotional` is a
+`mood` entry here: the chat prompt tells the model to call `remember` with
+`kind=mood` on a strong feeling, and the tool keeps it only for the graph's
+significant moods (`stressed, frustrated, sad, angry, happy, excited`), stores the
+user's words (200 chars) encrypted and un-embedded, once per turn.
+
+**Known gap until phase 4:** the iPhone app still reads reminders from
+`/api/reminders` (`sandy_reminders`). With the flag on, reminders made in chat live
+in `sandy_schedules`; the server runner pushes them when APNs is configured, but the
+phone's local notifications need the phase 4 screens on `GET /api/schedules`.
 
 ---
 
@@ -691,8 +741,11 @@ You can probe all of this from a browser without hardware — see §10.
 
 `features/speaker_id.py` + `voice_ws/speaker.py`. CAM++ via sherpa-onnx, running
 locally: no account, no torch. Gated by `SANDY_REQUIRE_SPEAKER_AUTH=1`, off by
-default, and it only guards the sensitive tool set (`task_delete`,
-`reminder_delete`, `schedule_message_to_self`). With no
+default, and it only guards the sensitive calls (`speaker._is_sensitive_call`):
+`task_delete`, `reminder_delete`, `schedule_message_to_self`, and with the brain
+on, `list_update` delete / `all_matching`, `schedule_update` cancel / `all_matching`,
+`schedule` of a `message_to_future_self`, and `confirm` (which only runs a held
+delete or bulk change). With no
 voiceprint enrolled it allows — it does not lock the owner out before enrolment.
 
 ---
@@ -1093,7 +1146,7 @@ database.
 
 ## 9. Tests and CI
 
-110 test files, pytest + mongomock, no hardware and no live credentials needed.
+112 test files, pytest + mongomock, no hardware and no live credentials needed.
 `tests/test_device_system.py` carries the headline guarantee: the brain may only
 act on a **registered** device with a **validated** action, and refuses with the
 allowed list rather than guessing.

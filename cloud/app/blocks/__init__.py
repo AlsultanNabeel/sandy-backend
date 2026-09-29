@@ -1,6 +1,7 @@
 """The four building blocks of the rebuild: log, lists, schedules (+ summaries later).
 
-Phase 1: not wired into the agent, tools, API or bootstrap yet.
+Read and written by the brain (phase 2), /api/entries|items|schedules|kinds and
+the schedule runner (phase 3); bootstrap creates the indexes.
 """
 
 from __future__ import annotations

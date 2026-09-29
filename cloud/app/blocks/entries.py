@@ -73,7 +73,7 @@ def get(entry_id: str, mongo_db=None) -> Optional[Dict[str, Any]]:
 
 def update(entry_id: str, *, text: Optional[str] = None,
            data: Optional[Mapping[str, Any]] = None,
-           at: Optional[datetime] = None, mongo_db=None) -> bool:
+           at: Optional[datetime] = None, embed: bool = True, mongo_db=None) -> bool:
     """Change text / data (replaced whole) / at; True when the entry exists."""
     coll = _base.coll(_base.ENTRIES, mongo_db)
     if coll is None or not entry_id:
@@ -85,7 +85,7 @@ def update(entry_id: str, *, text: Optional[str] = None,
     if text is not None:
         changes["text"] = str(text).strip()
         # A stale vector would keep matching the old wording.
-        changes["embedding"] = embed_text(changes["text"])
+        changes["embedding"] = embed_text(changes["text"]) if embed else None
     if data is not None:
         changes["data"] = validate(LOG, current["kind"], data)
     if at is not None:
