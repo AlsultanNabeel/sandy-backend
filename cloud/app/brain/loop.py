@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from app.agent.fast_path import try_fast_route
 from app.agent.graph.graph import _stm_load, _stm_save, recent_turns_for_user
 from app.agent.nodes.execute import _get_stream_hooks
-from app.brain import confirm, context, model, tools
+from app.brain import confirm, context, future, model, tools
 from app.brain.ctx import TurnCtx
 from app.utils.tenant_version import turn_scope
 
@@ -131,15 +131,22 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     if outcome is None:
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
+        due = None
         try:
-            messages = [{"role": "system",
-                         "content": context.build_system(user_id, message, history)},
+            system = context.build_system(user_id, message, history)
+            due = future.due_context()
+            if due:
+                system += "\n\n" + due[0]
+            messages = [{"role": "system", "content": system},
                         *context.history_messages(history),
                         {"role": "user", "content": message}]
             outcome = _run_loop(messages, ctx, complete)
         except Exception:  # noqa: BLE001 — the request boundary: answer, never 500
             logger.exception("[brain] turn failed")
             outcome = {"text": ERROR_REPLY, "pending": None, "tools": [], "error": True}
+        if due and not outcome.get("error"):
+            # Delivered only once a real reply carries it, as run_graph does.
+            future.mark_delivered(due[1])
 
     text = outcome["text"]
     logger.info("[turn] %.0fms total — brain%s tools=%s",

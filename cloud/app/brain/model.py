@@ -93,8 +93,10 @@ def _openai_direct(messages, tools):
     client = _get_openai_direct_client()
     if client is None:
         return None
+    # The API refuses an empty tools list; a summary call sends none.
+    extra = {"tools": tools} if tools else {}
     return client.chat.completions.create(
-        model=OPENAI_MODEL, messages=messages, tools=tools,
+        model=OPENAI_MODEL, messages=messages, **extra,
         max_tokens=MAX_TOKENS, temperature=TEMPERATURE, timeout=DEFAULT_CHAT_TIMEOUT_S)
 
 

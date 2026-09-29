@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timezone
 from typing import Any, Dict, List, Optional
 
-from app.agent.ltm_crypto import decrypt_field
+from app.agent.ltm_crypto import decrypt_field, encrypt_field
 from app.blocks import entries, items, schedules
 from app.blocks.kinds import LOG, SCHEDULE, KindError, get_kind
 from app.brain import when as W
@@ -15,6 +15,8 @@ from app.features.tasks_matcher import _task_match_key
 
 MAX_ROWS = 30
 SUMMARY_ROWS = 200
+# graph._SIGNIFICANT_MOODS: the moods the old turn kept an emotional moment for.
+SIGNIFICANT_MOODS = ("stressed", "frustrated", "sad", "angry", "happy", "excited")
 
 
 # ── row shapes the model sees ────────────────────────────────────────────────
@@ -62,10 +64,28 @@ def _list_name(args: Dict[str, Any]) -> str:
 
 # ── remember / recall / summarize ────────────────────────────────────────────
 
+def _mood(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """The old emotional moment as a `mood` entry: a significant mood, the user's
+    words (200 chars) encrypted and never embedded, at most once per turn."""
+    mood = str((args.get("data") or {}).get("mood") or "")
+    if mood not in SIGNIFICANT_MOODS:
+        return refused(f"data.mood must be one of {SIGNIFICANT_MOODS}")
+    if ctx.artifacts.get("mood_saved"):
+        return {"ok": True, "id": ctx.artifacts["mood_saved"]}
+    words = (ctx.message or str(args.get("text") or "")).strip()[:200]
+    sealed = encrypt_field(words)
+    eid = entries.add("mood", sealed, {"mood": mood, "encrypted": sealed != words},
+                      source=ctx.source, embed=False)
+    ctx.artifacts["mood_saved"] = eid
+    return {"ok": bool(eid), "id": eid} if eid else refused("not saved")
+
+
 def remember(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "note"), str(args.get("text") or "").strip()
     if not text:
         return refused("text is empty")
+    if kind == "mood":
+        return _mood(args, ctx)
     try:
         eid = entries.add(kind, text, args.get("data") or None, source=ctx.source)
     except KindError as exc:

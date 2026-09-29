@@ -188,6 +188,9 @@ def create_app(
     from app.api.firmware_api import register_firmware_api
     register_firmware_api(app)
 
+    from app.api.blocks_api import register_blocks_api
+    register_blocks_api(app, mongo_db=mongo_db)
+
     # Sign-in is Apple, Google or email (the shared owner-password /api/auth is gone).
     from app.api.metering import limit_response as _limit_response
     from app.api.metering import meter_or_error as _meter_or_error

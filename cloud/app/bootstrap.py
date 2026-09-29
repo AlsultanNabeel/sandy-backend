@@ -268,4 +268,14 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
         except Exception as exc:
             logger.warning("[Bootstrap] scene timer runner start failed: %s", exc)
 
+        # sandy_schedules (the blocks) — once a minute; alongside the old runners, not instead.
+        try:
+            from app.blocks import init_blocks
+            from app.db import get_db
+            from app.services.schedule_runner import start_schedule_runner
+            init_blocks(get_db())
+            start_schedule_runner(get_db())
+        except Exception as exc:
+            logger.warning("[Bootstrap] schedule runner start failed: %s", exc)
+
     logger.debug("[Bootstrap] Startup complete (env=%s)", app_env)

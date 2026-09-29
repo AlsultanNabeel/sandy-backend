@@ -63,6 +63,10 @@ _BY_USER: List[str] = [
     "sandy_prompt_cache",
     # Chat threads (no `sandy_` prefix).
     "conversations",
+    # The blocks (§2.12); the app writes them since /api/entries|items|schedules.
+    "sandy_entries",
+    "sandy_items",
+    "sandy_schedules",
 ]
 
 # STM docs are keyed "<thread>:<user>" and also carry user_id; both are cleared.

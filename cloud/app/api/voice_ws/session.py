@@ -25,7 +25,6 @@ from app.api.voice_ws._config import (
     _APP_PREFIX_MS,
     _APP_SILENCE_MS,
     _APP_TURNS_BY_GEMINI,
-    _SENSITIVE_TOOLS,
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
     _BARGE_MIN_MS,
@@ -47,6 +46,7 @@ from app.api.voice_ws._config import (
 )
 from app.api.voice_ws.speaker import (
     _RecentAudio,
+    _is_sensitive_call,
     _speaker_gate_enabled,
     _verify_and_inject,
     _verify_owner,
@@ -1205,7 +1205,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
             fn_responses: List[types.FunctionResponse] = []
             for fc in response.tool_call.function_calls:
                 # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.
-                if gate_on and fc.name in _SENSITIVE_TOOLS:
+                if gate_on and _is_sensitive_call(fc.name, dict(fc.args or {})):
                     verified = await loop.run_in_executor(
                         None, _verify_owner, recent.snapshot(), get_voice_identity()
                     )
