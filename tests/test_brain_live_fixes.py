@@ -131,3 +131,41 @@ def test_recall_finds_a_log_kind_sent_as_a_list(db):
     with active_user_profile_context(A):
         entries.add("expense", "غدا", {"amount": 50.0}, embed=False)
     assert _run("recall", list="expense")["rows"][0]["kind"] == "expense"
+
+
+# Third live test: «عالخمسة» at 13:30 became 14:00, and «كمان نص» counted from now.
+@pytest.mark.parametrize("said,expected", [
+    ("عال٥", "17:00"), ("الساعة ٥", "17:00"), ("الساعة 5 الصبح", "05:00 +1"),
+    ("الساعة ٥ ونص", "17:30"), ("بكرا الساعة ٨", "08:00 +1"), ("الساعة 9 المسا", "21:00"),
+    ("عالساعة 14:45", "14:45"), ("بعد 5 دقايق", None),
+])
+def test_a_spoken_clock_time_is_the_next_such_moment(said, expected):
+    from datetime import datetime, timedelta
+    from app.brain import when as W
+    from app.utils.time import USER_TZ
+    now = datetime(2026, 9, 30, 13, 30, tzinfo=USER_TZ)
+    got = W._clock(said, now)
+    if expected is None:
+        assert got is None
+        return
+    local = got.astimezone(USER_TZ)
+    hhmm, _, plus = expected.partition(" +")
+    assert local.strftime("%H:%M") == hhmm
+    assert local.date() == (now + timedelta(days=int(plus or 0))).date()
+
+
+def test_relative_times_are_counted_by_the_code(db):
+    from datetime import timedelta
+    from app.blocks import schedules
+    from app.brain import when as W
+    before = W.now_utc()
+    out = _run("schedule", kind="reminder", text="اشرب مي", in_minutes=30)
+    with active_user_profile_context(A):
+        row = schedules.get(out["id"])
+    at = W.aware_utc(row["fire_at"])
+    assert timedelta(minutes=29) < at - before < timedelta(minutes=31)
+    # «أجّليه كمان نص ساعة»: thirty more minutes from its own time, not from now.
+    _run("schedule_update", id=out["id"], shift_minutes=30)
+    with active_user_profile_context(A):
+        moved = W.aware_utc(schedules.get(out["id"])["fire_at"])
+    assert moved - at == timedelta(minutes=30)

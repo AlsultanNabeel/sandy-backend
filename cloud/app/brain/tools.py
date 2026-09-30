@@ -17,6 +17,7 @@ from app.brain.when import PERIODS
 logger = logging.getLogger(__name__)
 
 _S = {"type": "string"}
+_I = {"type": "integer"}
 
 
 def _obj(props: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
@@ -54,7 +55,7 @@ def _schemas() -> List[Dict[str, Any]]:
                              "list": _list_enum(), "project": _S}, [])},
         {"name": "list_add", "description": "ضيفي عنصر لقائمة (مهمة، تسوق، هدف...).",
          "parameters": _obj({"list": _list_enum(), "project": _S, "text": _S,
-                             "due": {**_S, "description": "ISO أو كلام زي «بكرا 5 المسا»"},
+                             "due": {**_S, "description": "كلام المستخدم زي ما هو («بكرا 5 المسا») أو YYYY-MM-DD HH:MM بتوقيته"},
                              "priority": _S, "data": data}, ["list", "text"])},
         {"name": "list_update", "description": "عدّلي/خلّصي/احذفي عنصر قائمة؛ خدي الـ id من «وضعه هلأ»، والنص بس لو مش ظاهر.",
          "parameters": _obj({**target, "list": _list_enum(), "project": _S,
@@ -62,12 +63,15 @@ def _schemas() -> List[Dict[str, Any]]:
                              "delete": {"type": "boolean"}}, [])},
         {"name": "schedule", "description": "تذكير أو إشي بصير بوقت محدّد.",
          "parameters": _obj({"kind": _enum(SCHEDULE, "النوع"), "text": _S,
-                             "when": {**_S, "description": "ISO كامل بالمنطقة الزمنية، أو الكلام نفسه"},
+                             "in_minutes": {**_I, "description": "لوقت نسبي: بعد قديش دقيقة من هلأ («بعد نص ساعة» = 30، «شوي» = 15)"},
+                             "when": {**_S, "description": "لوقت محدد: كلام المستخدم زي ما هو («عالخمسة»، «بكرا الصبح»)، أو YYYY-MM-DD HH:MM بتوقيته بدون منطقة زمنية"},
                              "recurrence": {**_S, "description": "daily|weekly|monthly|yearly أو RRULE"}},
-                            ["kind", "text", "when"])},
+                            ["kind", "text"])},
         {"name": "schedule_update", "description": "غيّري وقت/نص تذكير أو الغيه؛ خدي الـ id من «وضعه هلأ»، والنص بس لو مش ظاهر.",
-         "parameters": _obj({**target, "when": _S, "text": _S,
-                             "cancel": {"type": "boolean"}}, [])},
+         "parameters": _obj({**target,
+                             "shift_minutes": {**_I, "description": "أجّلي (موجب) أو قدّمي (سالب) بهالعدد من الدقايق من وقته الحالي («أجّليه شوي» = 15، «كمان نص ساعة» = 30)"},
+                             "when": {**_S, "description": "وقت جديد محدد، بنفس شكل when بأداة schedule"},
+                             "text": _S, "cancel": {"type": "boolean"}}, [])},
         {"name": "summarize", "description": "جيبي كل اللي صار بفترة عشان تلخّصيه — بس لما يطلب ملخّص.",
          "parameters": _obj({"period": {"type": "string", "enum": list(PERIODS)},
                              "focus": {**_S, "description": "نوع أو قائمة أو موضوع (اختياري)"}},

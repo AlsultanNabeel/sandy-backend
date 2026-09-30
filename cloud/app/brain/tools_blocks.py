@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
@@ -265,11 +265,24 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
 # ── schedules ────────────────────────────────────────────────────────────────
 
+def _minutes(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "reminder"), str(args.get("text") or "").strip()
-    fire_at = W.parse_when(args.get("when"))
+    # The model gives minutes or the user's words; the clock arithmetic is ours.
+    minutes = _minutes(args.get("in_minutes"))
+    if minutes is not None and minutes > 0:
+        fire_at = W.now_utc() + timedelta(minutes=minutes)
+    else:
+        fire_at = W.parse_when(args.get("when"))
     if fire_at is None:
-        return refused("could not read `when` as a future time", when=args.get("when"))
+        return refused("could not read the time; pass in_minutes or the user's words as when",
+                       when=args.get("when"))
     rule = W.recurrence_rule(args.get("recurrence"))
     if rule is None:
         return refused("recurrence must be daily|weekly|monthly|yearly or an RRULE")
@@ -279,8 +292,8 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(str(exc))
     if not sid:
         return refused("not saved")
-    return {"ok": True, "id": sid, "when": W.iso(fire_at),
-            "reply": f"تمام، بذكّرك «{text}» {W.iso(fire_at)} ⏰"}
+    return {"ok": True, "id": sid, "when": W.local_text(fire_at),
+            "reply": f"تمام، بذكّرك «{text}» {W.local_text(fire_at)} ⏰"}
 
 
 def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -293,16 +306,27 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if (cancel or len(rows) > 1) and not ctx.confirmed:
         verb = "تلغي" if cancel else "تعدّل"
         return needs_confirmation(f"{verb} {_names(rows)}")
+    shift = _minutes(args.get("shift_minutes"))
     fire_at: Optional[Any] = None
-    if args.get("when"):
+    if args.get("when") and not shift:
         fire_at = W.parse_when(args["when"])
         if fire_at is None:
-            return refused("could not read `when` as a future time", when=args["when"])
+            return refused("could not read the time; pass shift_minutes or the user's words",
+                           when=args["when"])
+    moved = None
     for r in rows:
         if cancel:
             schedules.update(r["id"], status="cancelled")
-        else:
-            schedules.update(r["id"], text=args.get("text"), fire_at=fire_at)
-    verb = "لغيت" if cancel else "عدّلت"
-    return {"ok": True, "changed": len(rows), "reply": f"{verb} {_names(rows)} ✅"}
-
+            continue
+        at = fire_at
+        if shift:
+            # From its own time, not from now: «أجّليه كمان نص ساعة» adds to what is set.
+            base = max(W.aware_utc(r["fire_at"]), W.now_utc())
+            at = base + timedelta(minutes=shift)
+        schedules.update(r["id"], text=args.get("text"), fire_at=at)
+        moved = at or moved
+    if cancel:
+        return {"ok": True, "changed": len(rows), "reply": f"لغيت {_names(rows)} ✅"}
+    when = f" لـ{W.local_text(moved)}" if moved else ""
+    return {"ok": True, "changed": len(rows), "when": W.local_text(moved) if moved else None,
+            "reply": f"عدّلت {_names(rows)}{when} ✅"}

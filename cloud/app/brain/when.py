@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -70,6 +71,61 @@ def _parse_with_model(text: str) -> Optional[str]:
     return dt.isoformat() if dt >= now else None
 
 
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def aware_utc(dt: datetime) -> datetime:
+    """Stored times come back naive UTC from Mongo."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def local_text(dt: Optional[datetime]) -> str:
+    """How the reply names a time: his clock, never UTC."""
+    if dt is None:
+        return ""
+    return aware_utc(dt).astimezone(USER_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+_RELATIVE = re.compile(r"بعد|دقيق|دقايق|ساعات|ساعتين|يومين|أيام|ايام|اسبوع|أسبوع|شهر")
+_CLOCK = re.compile(r"(?:عال|ع ال|على ال|الساعة|الساعه|ساعة|ساعه|ع)?\s*(\d{1,2})(?:[:.](\d{2}))?")
+_MORNING = ("الصبح", "صباحا", "صباحاً", "الفجر", " ص")
+_EVENING = ("المسا", "مساء", "مساءً", "بالليل", "الليل", "العصر", "الظهر", "بعد الظهر", " م")
+
+
+def _clock(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
+    """«عالخمسة», «الساعة ٥ ونص», «بكرا الساعة ٨ الصبح» → the next such moment.
+    With no morning/evening word, the nearest one still ahead (5 → 17:00 after 5am)."""
+    t = " " + (text or "").translate(_DIGITS).strip() + " "
+    if _RELATIVE.search(t):
+        return None
+    m = _CLOCK.search(t)
+    if not m or not 0 <= int(m.group(1)) <= 23:
+        return None
+    hour, minute = int(m.group(1)), int(m.group(2) or 0)
+    if "ونص" in t:
+        minute += 30
+    elif "وربع" in t:
+        minute += 15
+    elif "الا ربع" in t or "إلا ربع" in t:
+        minute -= 15
+    now = (now or datetime.now(USER_TZ)).astimezone(USER_TZ)
+    day = now.date() + timedelta(days=1) if ("بكرا" in t or "بكرة" in t or "غدا" in t) else now.date()
+    if hour > 12 or any(w in t for w in _MORNING):
+        hours = [hour]
+    elif any(w in t for w in _EVENING):
+        hours = [hour % 12 + 12]
+    else:
+        hours = [hour % 12, hour % 12 + 12]
+    for d in (day, day + timedelta(days=1)):
+        for h in hours:
+            at = datetime(d.year, d.month, d.day, tzinfo=USER_TZ) + timedelta(hours=h, minutes=minute)
+            if at > now:
+                return at.astimezone(timezone.utc)
+    return None
+
+
 def _aware(dt: datetime) -> datetime:
     return dt.replace(tzinfo=USER_TZ) if dt.tzinfo is None else dt
 
@@ -84,6 +140,9 @@ def parse_when(text: str) -> Optional[datetime]:
         if (dt.hour, dt.minute, dt.second) == (0, 0, 0):
             dt = dt.replace(hour=9)  # a date with no time, same default as arabic_days
         return dt.astimezone(timezone.utc)
+    clock = _clock(text)
+    if clock is not None:
+        return clock
     iso = _parse_with_model(text)
     if not iso and not has_explicit_time(text):
         # Day-only phrases still resolve without a model; a clock time never falls to 9am.
