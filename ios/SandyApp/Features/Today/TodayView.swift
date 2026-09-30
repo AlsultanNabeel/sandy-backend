@@ -133,6 +133,16 @@ struct TodayView: View {
                     .foregroundColor(Theme.Colors.tertiaryText)
             }
             Spacer()
+            HStack(spacing: Theme.Spacing.md) {
+                // Focus drives the lock-screen Live Activity; home is the devices.
+                NavigationLink { FocusView() } label: { Image(systemName: "target") }
+                    .accessibilityLabel(lang.s("today.focus"))
+                NavigationLink { ControlView() } label: { Image(systemName: "house.fill") }
+                    .accessibilityLabel(lang.s("today.home"))
+            }
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundColor(Theme.Colors.accent)
+            .padding(.top, 2)
             if let w = weather.snapshot {
                 HStack(spacing: 4) {
                     Image(systemName: w.symbol)
@@ -191,24 +201,15 @@ struct TodayView: View {
         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.Colors.surface.opacity(0.45)))
     }
 
-    /// Today's spending, focus and the home's devices, quietly at the bottom.
+    /// Today's spending, quietly at the bottom.
+    @ViewBuilder
     private var footer: some View {
-        HStack(spacing: Theme.Spacing.md) {
-            if spentToday > 0 {
-                Label(String(format: lang.s("today.spent"), AppLocale.number(spentToday)),
-                      systemImage: "creditcard")
-            }
-            Spacer()
-            // Focus stays one tap away: it drives the lock-screen Live Activity.
-            NavigationLink { FocusView() } label: {
-                Label(lang.s("today.focus"), systemImage: "target")
-            }
-            NavigationLink { ControlView() } label: {
-                Label(lang.s("today.home"), systemImage: "house.fill")
-            }
+        if spentToday > 0 {
+            Label(String(format: lang.s("today.spent"), AppLocale.number(spentToday)),
+                  systemImage: "creditcard")
+                .font(Theme.Typography.subheadline)
+                .foregroundColor(Theme.Colors.secondaryText)
+                .padding(.top, Theme.Spacing.sm)
         }
-        .font(Theme.Typography.subheadline)
-        .foregroundColor(Theme.Colors.secondaryText)
-        .padding(.top, Theme.Spacing.sm)
     }
 }

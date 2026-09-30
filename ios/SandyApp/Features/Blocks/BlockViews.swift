@@ -363,7 +363,13 @@ struct LogView: View {
                 Button(lang.s("blocks.period." + period)) { summarize(period) }
             }
         } label: {
-            if summarizing { ProgressView() } else { Image(systemName: "text.alignleft") }
+            if summarizing {
+                ProgressView()
+            } else {
+                Label(lang.s("blocks.summarize"), systemImage: "sparkles")
+                    .labelStyle(.titleAndIcon)
+                    .font(Theme.Typography.callout)
+            }
         }
         .disabled(summarizing)
     }

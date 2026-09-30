@@ -259,7 +259,7 @@ final class LogStore: LoadableStore {
         do {
             let rows = try await api.entries(kind: kind)
             guard isCurrentLoad(gen) else { return }
-            entries = kind == nil ? rows.filter { $0.kind != "summary" } : rows
+            entries = rows
             markLoaded()
             DiskCache.save(entries, key: cacheKey, userId: api.currentUserId)
             if kind == nil { SpotlightIndexer.indexEntries(entries) }

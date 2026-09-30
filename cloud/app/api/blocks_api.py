@@ -224,6 +224,9 @@ def register_blocks_api(app, mongo_db=None):
                                     since=_when(request.args.get("since")),
                                     until=_when(request.args.get("until"), end=True),
                                     text=request.args.get("q", "")[:MAX_TEXT_CHARS],
+                                    # Chat summaries are Sandy's memory, most of the log by
+                                    # count; the user's log shows them only when asked by kind.
+                                    exclude=("summary",),
                                     limit=_limit())
         return jsonify({"items": [_shown(r, "data") for r in rows]}), 200
 

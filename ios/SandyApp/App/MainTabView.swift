@@ -191,14 +191,18 @@ private struct SandyOrb: View {
                 .fill(Theme.Colors.accent.opacity(0.22))
                 .frame(width: breathe ? 76 : 64, height: breathe ? 76 : 64)
                 .blur(radius: 6)
+            // Dark glass so the robot reads clearly; the light is in the ring and the glow.
             Circle()
-                .fill(RadialGradient(colors: [Theme.Colors.accentSoft, Theme.Colors.accent,
-                                              Theme.Colors.accentDeep],
+                .fill(RadialGradient(colors: [Theme.Colors.surface, Theme.Colors.background],
                                      center: .topLeading, startRadius: 2, endRadius: 60))
                 .frame(width: 58, height: 58)
-                .overlay(Circle().stroke(Color.white.opacity(selected ? 0.8 : 0.25), lineWidth: 1.5))
-                .shadow(color: Theme.Colors.accent.opacity(0.6), radius: selected ? 16 : 8)
-            SandyAvatar(size: 34, mood: .happy)
+                .overlay(Circle().strokeBorder(
+                    AngularGradient(colors: [Theme.Colors.accent, Theme.Colors.accentDeep,
+                                             Theme.Colors.success, Theme.Colors.accent],
+                                    center: .center),
+                    lineWidth: selected ? 3 : 2))
+                .shadow(color: Theme.Colors.accent.opacity(selected ? 0.7 : 0.4), radius: selected ? 16 : 10)
+            SandyAvatar(size: 38, mood: .happy)
         }
         .frame(width: 80)
         .contentShape(Circle())

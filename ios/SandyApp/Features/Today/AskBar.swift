@@ -27,7 +27,11 @@ struct AskBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             field
-            if thinking || !reply.isEmpty { answer.transition(.move(edge: .top).combined(with: .opacity)) }
+            if thinking || !reply.isEmpty {
+                answer.transition(.move(edge: .top).combined(with: .opacity))
+            } else if text.isEmpty {
+                suggestions.transition(.opacity)
+            }
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: reply)
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: thinking)
@@ -76,6 +80,28 @@ struct AskBar: View {
                 .animation(.linear(duration: 6).repeatForever(autoreverses: false), value: glow)
         )
         .shadow(color: Theme.Colors.accent.opacity(focused ? 0.35 : 0.15), radius: 16)
+    }
+
+    /// Starts of sentences Sandy understands: they teach what the field can do.
+    private var suggestions: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Spacing.sm) {
+                ForEach(lang.list("today.suggestions"), id: \.self) { start in
+                    Button {
+                        text = start + " "
+                        focused = true
+                    } label: {
+                        Text(start)
+                            .font(Theme.Typography.caption)
+                            .foregroundColor(Theme.Colors.secondaryText)
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, 7)
+                            .background(Capsule().stroke(Theme.Colors.border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private var answer: some View {

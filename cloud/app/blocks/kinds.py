@@ -44,7 +44,7 @@ KINDS: Tuple[Kind, ...] = (
         "subtype": _S, "category": _S, "relation": _S, "name": _S,
         "count": _I, "source_message": _S, "signal": _S, "event_date": _S,
         "last_seen": _T, "encrypted": _B}, ("معلومات", "عني")),
-    Kind("reading", LOG, "جلسة قراءة", "Reading session", "book", {
+    Kind("reading", LOG, "قراءة", "Reading", "book", {
         "book_item_id": _S, "book": _S, "start_page": _I, "end_page": _I,
         "pages": _I, "paused_total_sec": _I, "state": _S, "ended_at": _T},
         ("قراءه", "قريت", "قرات")),

@@ -80,9 +80,9 @@ struct LifeHeader: View {
                 .foregroundColor(Theme.Colors.primaryText)
                 .lineLimit(1)
         }
-        .frame(width: 104, alignment: .leading)
-        .padding(Theme.Spacing.md)
-        .liquidGlass(cornerRadius: 18)
+        .frame(width: 84, alignment: .leading)
+        .padding(Theme.Spacing.sm + 2)
+        .liquidGlass(cornerRadius: 16)
     }
 }
 

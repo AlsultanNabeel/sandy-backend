@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from app.blocks import _base
 from app.blocks.kinds import LOG, validate
@@ -104,14 +104,17 @@ def delete(entry_id: str, mongo_db=None) -> bool:
 
 def list_entries(kind: Optional[str] = None, *, since: Optional[datetime] = None,
                  until: Optional[datetime] = None, text: str = "",
+                 exclude: Tuple[str, ...] = (),
                  limit: int = 100, mongo_db=None) -> List[Dict[str, Any]]:
-    """Newest first; every filter optional."""
+    """Newest first; every filter optional. ``exclude`` drops kinds when no kind is given."""
     coll = _base.coll(_base.ENTRIES, mongo_db)
     if coll is None:
         return []
     query: Dict[str, Any] = {}
     if kind:
         query["kind"] = kind
+    elif exclude:
+        query["kind"] = {"$nin": list(exclude)}
     rng = _base.range_filter(since, until)
     if rng:
         query["at"] = rng

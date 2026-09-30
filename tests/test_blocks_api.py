@@ -332,3 +332,12 @@ def test_items_store_is_untouched_by_a_refused_write(c):
     c.post("/api/items", json={"list": "nope", "text": "x"}, headers=_h())
     with active_user_profile_context({"chat_id": "userA"}):
         assert items.list_items() == []
+
+
+def test_the_log_leaves_chat_summaries_out_unless_asked_by_kind(c):
+    for kind, text in (("summary", "ملخص محادثة"), ("note", "رقم الجار")):
+        assert c.post("/api/entries", json={"kind": kind, "text": text}, headers=_h()).status_code == 200
+    kinds = [r["kind"] for r in c.get("/api/entries", headers=_h()).get_json()["items"]]
+    assert kinds == ["note"]
+    only = c.get("/api/entries?kind=summary", headers=_h()).get_json()["items"]
+    assert [r["kind"] for r in only] == ["summary"]
