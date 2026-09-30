@@ -90,3 +90,11 @@ def test_misheard_audio_is_left_out_of_the_history():
              {"role": "user", "content": "お待たせいたしました"},
              {"role": "user", "content": "مرحبا"}]
     assert [m["content"] for m in context.history_messages(turns)] == ["مرحبا"]
+
+
+def test_the_voice_reading_a_reply_skips_its_emoji(monkeypatch):
+    from app.integrations import gemini_tts
+    said = []
+    monkeypatch.setattr(gemini_tts._cb, "call", lambda fn, text, *a: said.append(text))
+    gemini_tts.synthesize_voice_with_gemini("تمام ✅ يلا 😄🇵🇸", api_key="k")
+    assert said == ["تمام  يلا"]

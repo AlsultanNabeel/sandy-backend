@@ -2,6 +2,7 @@
 
 import base64
 import os
+import re
 import wave
 from io import BytesIO
 from typing import Optional
@@ -109,12 +110,17 @@ def _do_synthesize(text: str, mood: str, api_key: str) -> Optional[bytes]:
     return _pcm_to_wav(raw)
 
 
+# Emoji belong in the chat bubble, not in the voice reading it.
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+")
+
+
 def synthesize_voice_with_gemini(
     text: str,
     mood: str = "neutral",
     api_key: str = "",
 ) -> Optional[bytes]:
     """WAV bytes or None on failure."""
+    text = _EMOJI.sub("", text or "").strip()
     if not text:
         return None
 
