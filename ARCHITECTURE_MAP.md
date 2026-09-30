@@ -195,8 +195,9 @@ for a refusal. A held action is "not done yet", neither.
 | Layer | Module | Store |
 |---|---|---|
 | Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), the last 10 messages, TTL 30 days |
-| What she knows | `brain/context.py` | `fact` entries (the newest 40, decrypted when sealed) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
-| Related past | `brain/context.py::similar_entries` | the 8 nearest non-fact entries by cosine over their `embedding` (the newest 400 scored in Python — there is no Atlas index on `sandy_entries`); text search with no embedding key |
+| What she knows | `brain/context.py` | `fact` entries (the newest 30 distinct ones of two words or more; anything still ciphertext is left out) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
+| What is open now | `brain/context.py::state_block` | open items per list and pending reminders, with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
+| Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are neither facts nor chat summaries, by cosine over their `embedding` (the newest 400 scored in Python — there is no Atlas index on `sandy_entries`); text search with no embedding key |
 | Conversation summaries | `brain/stm.py::_summarize` | turns that overflow a thread become a `summary` entry (`data.thread_id`), in the background; `recall` leaves them out unless asked |
 | Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
 
@@ -545,7 +546,7 @@ pending reminders) and the last STM turn ("was up late").
 | `tools.py` | the tool table (JSON schemas from `kinds.KINDS`), `declarations()` for Gemini Live, `execute()` |
 | `tools_blocks.py` | `remember`, `recall`, `summarize`, `list_add`, `list_update`, `schedule`, `schedule_update` |
 | `tools_world.py` | `device_control`, `scene_apply`, `web_search`, `weather`, `image` |
-| `context.py` | the system prompt: persona, rules, time, profile, facts, related entries |
+| `context.py` | the system prompt, steady parts first so the provider can cache the prefix: persona, rules, profile, facts, open state, related entries, then the clock last |
 | `persona.py` | `build_effective_persona`: tone (custom instructions or `SANDY_PERSONALITY`), dialect preset, then the language, no-promises and anti-injection rules, then `SANDY_IDENTITY_LOCK` last |
 | `stm.py` | short-term memory and the cross-channel read |
 | `confirm.py`, `pending.py` | held actions: the question, the yes/no resolver, the pick-by-number, the lifecycle and the store |

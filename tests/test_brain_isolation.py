@@ -55,9 +55,9 @@ def test_similar_entries_rank_by_vector(brain_db, monkeypatch):  # noqa: F811
         entries.add("journal", "بحر", embedding=[1.0, 0.0])
         entries.add("journal", "جبل", embedding=[0.0, 1.0])
         monkeypatch.setattr(entries, "embed_text", lambda text: [0.9, 0.1])
-        assert [e["text"] for e in context.similar_entries("سباحة", k=1)] == ["بحر"]
+        assert [e["text"] for e in context.similar_entries("بدي أروح سباحة بكرا", k=1)] == ["بحر"]
     with active_user_profile_context(B):
-        assert context.similar_entries("سباحة") == []
+        assert context.similar_entries("بدي أروح سباحة بكرا") == []
 
 
 def test_a_turn_with_no_tenant_writes_nothing(brain_db):  # noqa: F811
@@ -67,3 +67,26 @@ def test_a_turn_with_no_tenant_writes_nothing(brain_db):  # noqa: F811
     assert brain_db["sandy_items"].count_documents({}) == 0
     with active_user_profile_context(A):
         assert schedules.list_schedules() == []
+
+
+def test_the_prompt_shows_whats_open_with_ids_and_never_ciphertext(brain_db):  # noqa: F811
+    from app.blocks import items, schedules
+    from datetime import datetime, timedelta, timezone
+    with active_user_profile_context(A):
+        tid = items.add("tasks", "أخلص التقرير")
+        sid = schedules.add("reminder", "انو آكل", datetime.now(timezone.utc) + timedelta(hours=1))
+        entries.add("fact", "يشجع برشلونة", embed=False)
+        entries.add("fact", "يشجع  برشلونة", embed=False)      # the same fact twice
+        entries.add("fact", "احكي", embed=False)                 # a one-word scrap
+        entries.add("fact", "enc:not-decryptable", embed=False)  # ciphertext with no key
+        system = context.build_system("userA", "غيري وقت تذكير الأكل")
+    assert f"#{tid}" in system and f"#{sid}" in system
+    assert system.count("برشلونة") == 1
+    assert "- احكي" not in system and "enc:" not in system
+
+
+def test_misheard_audio_is_left_out_of_the_history():
+    turns = [{"role": "user", "content": "<noise>"},
+             {"role": "user", "content": "お待たせいたしました"},
+             {"role": "user", "content": "مرحبا"}]
+    assert [m["content"] for m in context.history_messages(turns)] == ["مرحبا"]

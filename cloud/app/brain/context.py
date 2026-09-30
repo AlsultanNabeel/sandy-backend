@@ -5,48 +5,51 @@ from __future__ import annotations
 import logging
 import math
 import re
+from datetime import timezone
 from typing import Any, Dict, List, Optional
 
 from app.brain.persona import build_effective_persona
 from app.utils.ltm_crypto import decrypt_field
 from app.blocks import _base, entries
+from app.blocks.kinds import LIST, get_kind
+from app.utils.time import USER_TZ
 from app.utils.time_awareness import time_awareness_block
 from app.utils.user_profiles import address_instruction
 
 logger = logging.getLogger(__name__)
 
-MAX_FACTS = 40
+MAX_FACTS = 30
+STATE_ROWS = 15
 TOP_ENTRIES = 8
 # How many recent vectors are scored in Python; the blocks have no Atlas index yet.
 SCAN_ENTRIES = 400
 RECENT_TURNS = 8
+_NOISE = re.compile(r"^<noise>$|[\u3040-\u30ff\u4e00-\u9fff]")
 
 _RULES = """
-طريقة شغلك بهالمحادثة:
-- عندك أدوات حقيقية. أي طلب فيه حفظ أو تعديل أو حذف أو تذكير أو جهاز → استدعي الأداة المناسبة، وما تقولي إنك عملتي إشي إلا لما ترجعلك نتيجته.
-- فرّقي بين تلات أشياء:
-  • إشي صار (صرفت، قريت، رحت الجيم، نمت، أكلت) → remember بالنوع المناسب.
-    مثال: «صرفت خمسين على الغدا» → remember kind=expense, text="غدا", data.amount=50.
-  • إشي لازم ينعمل (مهمة، غرض تشتريه، هدف) → list_add.
-    مثال: «لازم أشتري حليب» → list_add list=shopping, text="حليب".
-  • إشي بوقت محدد → schedule. مثال: «ذكّريني بعد ساعة أشرب مي» → schedule.
-- «شو عندي / شو مهامي / قديش صرفت» → recall. حطي اسم القائمة أو النوع بـ list أو kind
-  (مهامي → list=tasks، مصاريفي → kind=expense)، والـ query بس لكلمة بتدوّري عليها.
-- أي سؤال عن إشي محفوظ (مهام، مصاريف، تذكيرات...) → استدعي recall بنفس الدور، حتى لو
-  سألك نفس السؤال قبل. ما تجاوبي من المحادثة أو من ذاكرتك: المحفوظ ممكن يكون تغيّر.
-- «لخّصيلي» → summarize ثم لخّصي الصفوف اللي رجعت.
-- معلومة ثابتة عن المستخدم (اسمه، شغله، إشي بحبه) → remember بنوع fact.
-- لو المستخدم حكى عن شعور قوي (متوتر، محبط، زعلان، معصّب، مبسوط، متحمّس) → remember بنوع mood و data.mood = stressed|frustrated|sad|angry|happy|excited، مرة وحدة بالدور.
-- لو أداة رجعت needs_confirmation، اسألي المستخدم سؤال التأكيد بجملة وحدة.
-- ردّك الأخير نص طبيعي قصير، بدون JSON وبدون أرقام تعريف.
+كيف تشتغلي:
+- افهمي المقصود، مش الكلمات. الطلب الملفوف أو الناقص افهميه من السياق ومن «وضعه هلأ» تحت،
+  ونفّذي على أقرب فهم معقول. اسألي بس إذا في احتمالين حقيقيين، وسؤال واحد قصير.
+- لما يحكي عن إشي موجود («تذكير الأكل»، «المهمة تبعت الجيم»، «الأولى»)، لاقيه بـ«وضعه هلأ»
+  وعدّليه بالـ id تبعه. ما تعملي عنصر جديد إذا في واحد بيشبهه، عدّلي الموجود.
+- عندك أدوات حقيقية؛ ما تقولي إنك عملتي إشي إلا لما ترجعلك نتيجته.
+- إشي صار (صرفت، قريت، رحت، أكلت) → remember بالنوع المناسب (صرفت خمسين على الغدا →
+  kind=expense، data.amount=50). إشي لازم ينعمل → list_add (مهمة، تسوّق، هدف). إشي بوقت → schedule.
+- معلومة ثابتة عنه → remember kind=fact. شعور قوي → remember kind=mood مرة وحدة بالدور.
+- سؤال عن محفوظ مش ظاهر تحت (مصاريف، سجل قديم، محادثات سابقة) → recall. «لخّصيلي» → summarize.
+- لو أداة رجعت needs_confirmation، اسألي سؤال التأكيد بجملة وحدة.
+- ردّك قصير وطبيعي، بدون JSON وبدون أرقام تعريف.
 """
 
 
-def _fact_line(e: Dict[str, Any]) -> str:
-    text = e.get("text") or ""
-    if (e.get("data") or {}).get("encrypted"):
-        text = decrypt_field(text)
-    return f"- {text}"
+def _plain(e: Dict[str, Any]) -> str:
+    """The row's text, decrypted; "" when it is still ciphertext (no key, wrong key)."""
+    text = decrypt_field(e.get("text") or "")
+    return "" if text.startswith("enc:") else text.strip()
+
+
+def _key(text: str) -> str:
+    return re.sub(r"\W+", " ", text).strip().lower()
 
 
 def profile_block(user_id: str) -> str:
@@ -77,10 +80,53 @@ def profile_block(user_id: str) -> str:
 
 
 def facts_block(limit: int = MAX_FACTS) -> str:
-    rows = entries.list_entries("fact", limit=limit)
-    if not rows:
+    """What she knows about him: newest first, repeats and one-word scraps left out."""
+    seen, lines = set(), []
+    for e in entries.list_entries("fact", limit=limit * 3):
+        text = _plain(e)
+        key = _key(text)
+        if len(key.split()) < 2 or key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"- {text}")
+        if len(lines) == limit:
+            break
+    return "معلومات بتعرفيها عنه:\n" + "\n".join(lines) if lines else ""
+
+
+def _when(value: Any) -> str:
+    """In his time zone, the same clock as «الآن» at the end of the prompt."""
+    if not hasattr(value, "astimezone"):
         return ""
-    return "معلومات بتعرفيها عن المستخدم:\n" + "\n".join(_fact_line(e) for e in rows)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(USER_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def state_block(rows: int = STATE_ROWS) -> str:
+    """What is on his plate right now, with ids, so a vague mention («تذكير الأكل»)
+    is resolved by understanding and acted on by id, not by matching words."""
+    from app.blocks import items, schedules
+
+    parts: List[str] = []
+    open_items = items.list_items(None, done=False, limit=rows * 3)
+    by_list: Dict[str, List[str]] = {}
+    for i in open_items:
+        due = f" (موعدها {_when(i.get('due'))})" if i.get("due") else ""
+        by_list.setdefault(i.get("list") or "", []).append(f"- {i.get('text', '')}{due} #{i['id']}")
+    for name, lines in by_list.items():
+        row = get_kind(LIST, name)
+        label = f"{row.ar} ({name})" if row else name
+        parts.append(f"قائمة {label}:\n" + "\n".join(lines[:rows]))
+    # Reminders only: a message to his future self stays sealed until it is due.
+    upcoming = schedules.list_schedules("reminder", status="pending", limit=rows)
+    if upcoming:
+        parts.append("التذكيرات الجاية:\n" + "\n".join(
+            f"- {s.get('text', '')} ({_when(s.get('fire_at'))}"
+            f"{', بتتكرر' if s.get('recurrence') else ''}) #{s['id']}" for s in upcoming))
+    if not parts:
+        return "وضعه هلأ: ما عنده مهام مفتوحة ولا تذكيرات جاية."
+    return "وضعه هلأ (استعملي الـ id لما تعدّلي):\n" + "\n\n".join(parts)
 
 
 def _cosine(a: List[float], b: List[float]) -> float:
@@ -101,8 +147,12 @@ def similar_entries(message: str, k: int = TOP_ENTRIES,
     coll = _base.coll(_base.ENTRIES)
     if coll is None or not (message or "").strip():
         return []
+    # A greeting or a two-word order has nothing to look up (an asked-for kind always does).
+    if kind is None and len(message.split()) < 3:
+        return []
     vector = entries.embed_text(message)
-    base_q: Dict[str, Any] = {"kind": kind or {"$ne": "fact"}}
+    # Facts are already in the prompt; chat summaries are recall's job, not every turn's.
+    base_q: Dict[str, Any] = {"kind": kind or {"$nin": ["fact", "summary"]}}
     if vector:
         docs = list(coll.find({**base_q, "embedding": {"$ne": None}})
                     .sort("at", -1).limit(SCAN_ENTRIES))
@@ -118,27 +168,24 @@ def similar_entries(message: str, k: int = TOP_ENTRIES,
 def _entry_line(e: Dict[str, Any]) -> str:
     at = e.get("at")
     day = at.strftime("%Y-%m-%d") if hasattr(at, "strftime") else ""
-    text = e.get("text") or ""
-    if (e.get("data") or {}).get("encrypted"):
-        text = decrypt_field(text)
-    return f"- [{e.get('kind')} {day}] {text}"
+    return f"- [{e.get('kind')} {day}] {_plain(e)}"
 
 
 def build_system(user_id: str, message: str,
                  history: Optional[List[Dict[str, Any]]] = None) -> str:
-    parts = [build_effective_persona(user_id or None), address_instruction(), _RULES,
-             time_awareness_block(history)]
+    """Steady parts first, changing parts last: the provider caches an unchanged
+    prefix, so the persona and rules are read once, and the clock never breaks it."""
+    parts = [build_effective_persona(user_id or None), address_instruction(), _RULES]
     try:
         parts.append(profile_block(user_id))
-        facts = facts_block()
-        if facts:
-            parts.append(facts)
-        related = similar_entries(message)
+        parts.append(facts_block())
+        parts.append(state_block())
+        related = [e for e in similar_entries(message) if _plain(e)]
         if related:
-            parts.append("من سجلّ المستخدم (ممكن يفيد):\n"
-                         + "\n".join(_entry_line(e) for e in related))
+            parts.append("من سجلّه (ممكن يفيد):\n" + "\n".join(_entry_line(e) for e in related))
     except Exception as exc:  # noqa: BLE001 — memory is never worth a failed reply
         logger.warning("[brain] memory context skipped: %s", exc)
+    parts.append(time_awareness_block(history))
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
@@ -146,7 +193,8 @@ def history_messages(history: Optional[List[Dict[str, Any]]],
                      limit: int = RECENT_TURNS) -> List[Dict[str, str]]:
     out = []
     for m in (history or [])[-limit:]:
-        role, content = m.get("role"), m.get("content")
-        if role in ("user", "assistant") and content:
-            out.append({"role": role, "content": str(content)})
+        role, content = m.get("role"), str(m.get("content") or "").strip()
+        # Misheard audio («<noise>», a line of Japanese) only confuses the next reply.
+        if role in ("user", "assistant") and content and not _NOISE.search(content):
+            out.append({"role": role, "content": content})
     return out
