@@ -9,7 +9,7 @@ enum SpotlightIndexer {
     /// item = a list row, entry = a log row; the domain adds the list so each list
     /// replaces only its own rows.
     enum Kind: String, CaseIterable {
-        case item, reminder, entry, memory
+        case item, reminder, entry
     }
 
     struct Entry {
@@ -72,12 +72,6 @@ enum SpotlightIndexer {
 
     static func indexEntries(_ items: [LogEntry]) {
         replace(.entry, with: items.map {
-            Entry(id: $0.id, title: headline($0.text), detail: $0.text)
-        })
-    }
-
-    static func indexMemory(_ items: [MemoryFact]) {
-        replace(.memory, with: items.map {
             Entry(id: $0.id, title: headline($0.text), detail: $0.text)
         })
     }

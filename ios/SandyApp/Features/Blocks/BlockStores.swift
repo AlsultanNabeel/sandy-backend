@@ -50,9 +50,17 @@ final class ItemsStore: LoadableStore {
         return f
     }()
 
+    private var cacheKey: String { "items.\(list).\(showDone ? "done" : "open")" }
+
     func load(api: APIClient) async {
         loadTask?.cancel()
         let gen = beginLoad()
+        // Offline: the last copy shows at once, the fetch replaces it.
+        if !hasSnapshot, let cached = DiskCache.load([ListItem].self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            items = cached
+            hasSnapshot = true
+        }
         let task = Task { @MainActor in
             defer { endLoad(gen) }
             do {
@@ -62,6 +70,7 @@ final class ItemsStore: LoadableStore {
                 items = rows
                 checkedToday = today
                 markLoaded()
+                DiskCache.save(rows, key: cacheKey, userId: api.currentUserId)
                 if !showDone {
                     publishTasks()
                     SpotlightIndexer.indexItems(list: list, rows)
@@ -167,11 +176,18 @@ final class SchedulesStore: LoadableStore {
     func load(api: APIClient) async {
         let gen = beginLoad()
         defer { endLoad(gen) }
+        let cacheKey = "schedules.\(kind)"
+        if !hasSnapshot, let cached = DiskCache.load([ScheduleItem].self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            items = cached
+            hasSnapshot = true
+        }
         do {
             let rows = try await api.schedules(kind: kind)
             guard isCurrentLoad(gen) else { return }
             items = rows.sorted { $0.fireAt < $1.fireAt }
             markLoaded()
+            DiskCache.save(items, key: cacheKey, userId: api.currentUserId)
             publish()
             if kind == "reminder" { SpotlightIndexer.indexReminders(items) }
         } catch {
@@ -234,11 +250,18 @@ final class LogStore: LoadableStore {
     func load(api: APIClient) async {
         let gen = beginLoad()
         defer { endLoad(gen) }
+        let cacheKey = "entries.\(kind ?? "all")"
+        if !hasSnapshot, let cached = DiskCache.load([LogEntry].self, key: cacheKey,
+                                                     userId: api.currentUserId) {
+            entries = cached
+            hasSnapshot = true
+        }
         do {
             let rows = try await api.entries(kind: kind)
             guard isCurrentLoad(gen) else { return }
             entries = kind == nil ? rows.filter { $0.kind != "summary" } : rows
             markLoaded()
+            DiskCache.save(entries, key: cacheKey, userId: api.currentUserId)
             if kind == nil { SpotlightIndexer.indexEntries(entries) }
         } catch {
             failLoad(error, generation: gen) { notify("blocks.errorLoad") }

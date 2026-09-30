@@ -118,8 +118,7 @@ def test_every_request_builder_goes_through_the_retry():
     The chat stream is the one exception and says so: a reply that is
     half-delivered must not be started over.
     """
-    for rel in ("Core/Networking/APIClient+Photos.swift",
-                "Core/Networking/APIClient+Projects.swift"):
+    for rel in ("Core/Networking/APIClient+Photos.swift",):
         src = (IOS / rel).read_text(encoding="utf-8")
         assert "APIClient.session.data(for:" not in src, \
             f"{rel} sends straight at the session, skipping the retry"
@@ -136,6 +135,8 @@ def test_every_request_builder_goes_through_the_retry():
             f"{rel} builds requests outside the shared client"
 
     chat = (IOS / "Core/Networking/APIClient+Chat.swift").read_text(encoding="utf-8")
+    # The TTS download lives here too now, and it goes through the retry.
+    assert "APIClient.session.data(for:" not in chat and "sendWithRetry" in chat
     assert "APIClient.session.bytes(for: req)" in chat
     # The comment right above the stream call must still say why it skips the retry.
     lines = chat.splitlines()

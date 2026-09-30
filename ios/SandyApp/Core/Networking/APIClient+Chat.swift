@@ -1,15 +1,5 @@
 import Foundation
 
-private struct MemoryListResponse: Decodable {
-    let items: [Row]?
-
-    struct Row: Decodable {
-        let id: String?
-        let text: String?
-        let type: String?
-    }
-}
-
 private struct ConversationListResponse: Decodable {
     let items: [Row]?
 
@@ -194,26 +184,22 @@ extension APIClient {
         }
     }
 
-    // MARK: - الذاكرة
+    // MARK: - صوت ساندي
 
-    func getMemory() async throws -> [MemoryFact] {
-        let r: MemoryListResponse = try await fetch("/api/memory")
-        return (r.items ?? []).map {
-            MemoryFact(id: $0.id ?? "",
-                       text: $0.text ?? "",
-                       type: $0.type ?? "general")
+    /// صوت ساندي (WAV من جيميني) لنصّ معيّن؛ بايتات خام، فبيضل على URLSession مباشرة.
+    func synthesizeVoice(text: String, mood: String = "neutral") async throws -> Data {
+        guard let url = URL(string: baseURL + "/api/voice/tts") else {
+            throw APIError(message: "عنوان غير صالح")
         }
-    }
-
-    func addMemory(text: String) async throws {
-        try await send("/api/memory", method: "POST", body: ["text": text])
-    }
-
-    func updateMemory(id: String, text: String) async throws {
-        try await send("/api/memory/\(id)", method: "PATCH", body: ["text": text])
-    }
-
-    func deleteMemory(id: String) async throws {
-        try await send("/api/memory/\(id)", method: "DELETE")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "mood": mood])
+        let (data, resp) = try await APIClient.sendWithRetry(
+            req, method: req.httpMethod ?? "GET")
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code >= 400 { throw APIError(message: "صوت غير متاح (\(code))") }
+        return data
     }
 }

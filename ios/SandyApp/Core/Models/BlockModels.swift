@@ -51,7 +51,7 @@ struct BlockKind: Decodable, Identifiable, Hashable {
     }
 }
 
-struct LogEntry: Decodable, Identifiable, Hashable {
+struct LogEntry: Codable, Identifiable, Hashable {
     let id: String
     let kind: String
     var text: String
@@ -61,7 +61,7 @@ struct LogEntry: Decodable, Identifiable, Hashable {
     var amount: Double? { data?["amount"]?.number }
 }
 
-struct ListItem: Decodable, Identifiable, Hashable {
+struct ListItem: Codable, Identifiable, Hashable {
     let id: String
     let list: String
     var text: String
@@ -70,7 +70,7 @@ struct ListItem: Decodable, Identifiable, Hashable {
     var priority: String?
 }
 
-struct ScheduleItem: Decodable, Identifiable, Hashable {
+struct ScheduleItem: Codable, Identifiable, Hashable {
     let id: String
     let kind: String
     var text: String

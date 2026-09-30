@@ -2,7 +2,7 @@ import CoreSpotlight
 import Foundation
 
 /// مهمة/تذكير → ورقة `NotificationManager.pendingRoute`؛ عنصر قائمة تانية → يومي؛
-/// سجلّ → حياتي؛ ذاكرة → الرئيسية (`pendingTab` اللي `MainTabView` بيراقبه).
+/// سجلّ → حياتي (`pendingTab` اللي `MainTabView` بيراقبه).
 @MainActor
 final class SpotlightRouter: ObservableObject {
     static let shared = SpotlightRouter()
@@ -26,7 +26,6 @@ final class SpotlightRouter: ObservableObject {
         case .item:     pendingTab = .daily
         case .reminder: NotificationManager.shared.pendingRoute = .reminders
         case .entry:    pendingTab = .life
-        case .memory:   pendingTab = .home
         }
         return true
     }

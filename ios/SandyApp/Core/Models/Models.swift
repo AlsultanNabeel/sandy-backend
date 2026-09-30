@@ -22,28 +22,6 @@ struct ConversationHit: Identifiable {
     let updatedAt: String
 }
 
-// ── الذاكرة — /api/memory ──
-
-struct MemoryFact: Identifiable {
-    let id: String
-    let text: String
-    let type: String
-}
-
-struct ProjectPlan: Identifiable {
-    let id: String
-    let topic: String
-    let summary: String
-    let finishedAt: String   // ISO
-    var planText: String     // النص الكامل بصيغة Markdown — قابل للتعديل بعد المراجعة
-}
-
-struct ActiveBrainstorm {
-    let topic: String
-    var points: [String]
-    let startedAt: String   // ISO
-}
-
 struct OnboardingData {
     var done: Bool = false
     var preferredName: String = ""

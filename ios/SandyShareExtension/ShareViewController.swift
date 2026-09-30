@@ -191,14 +191,10 @@ final class ShareModel: ObservableObject {
             ], timeout: 90)
             return ShareText.t("انحفظت الصورة بألبوم ساندي.", "Saved the photo to Sandy's album.")
         }
-        if let u = url {
-            let title = (text?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                ?? (u.host ?? u.absoluteString)
-            _ = try await api.post("/api/share/saved", ["url": u.absoluteString, "title": title])
-        }
+        // A note in the log (My life): Sandy finds it when asked, the user sees it there.
         let memo = ShareText.t("حفظت هاد: ", "Saved this: ") + contentLine
-        _ = try await api.post("/api/memory", ["text": memo])
-        return ShareText.t("انحفظ بذاكرة ساندي.", "Saved to Sandy's memory.")
+        _ = try await api.post("/api/entries", ["kind": "note", "text": String(memo.prefix(2000))])
+        return ShareText.t("انحفظ بسجلّك عند ساندي.", "Saved to your log in Sandy.")
     }
 
     private func makeTask(_ api: ShareAPI) async throws -> String {
@@ -226,7 +222,9 @@ final class ShareModel: ObservableObject {
             if t.count > title.count { note = note.isEmpty ? String(t.prefix(2000)) : note + "\n" + String(t.prefix(2000)) }
         }
         if title.isEmpty { title = ShareText.t("مهمة من المشاركة", "Task from share") }
-        _ = try await api.post("/api/tasks", ["text": title, "note": note])
+        var body: [String: Any] = ["list": "tasks", "text": title]
+        if !note.isEmpty { body["data"] = ["notes": note] }
+        _ = try await api.post("/api/items", body)
         return ShareText.t("ضفت المهمة: ", "Added task: ") + title
     }
 

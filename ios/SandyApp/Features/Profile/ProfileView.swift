@@ -89,14 +89,14 @@ struct ProfileView: View {
 
     // MARK: - بطاقة الأدوات والأرشيف
 
-    /// أرشيف ساندي — الذاكرة + المشاريع + إعدادات الروبوت. نقلناهن من
+    /// أرشيف ساندي — الذاكرة + إعدادات الروبوت. نقلناهن من
     /// الشريط السفلي لهون حتى يبقى التنقّل أربعة تبويبات نظيفة، وهاي أدوات نوصلها وقت الحاجة.
     private var archiveCard: some View {
         SandyCard {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 SectionHeader(title: lang.s("profile.archive"))
-                archiveRow(icon: "brain", titleKey: "tabs.memory") { MemoryView() }
-                archiveRow(icon: "lightbulb.fill", titleKey: "tabs.projects") { ProjectsView() }
+                // What Sandy knows about you is the log's `fact` kind.
+                archiveRow(icon: "brain", titleKey: "tabs.memory") { LogView(kind: "fact") }
                 archiveRow(icon: "av.remote.fill", titleKey: "tabs.robot") { RobotView() }
                 archiveRow(icon: "sparkles", titleKey: "persona.title") { PersonaView() }
                 // ربط الروبوت، وفكّه للبيع، وحذف الحساب.
