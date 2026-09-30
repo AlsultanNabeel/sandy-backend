@@ -72,18 +72,18 @@ def test_stm_has_the_index_recent_turns_for_user_needs():
     chat turn and twice per voice session. Without this it scanned every
     conversation on the server."""
     import app.db as appdb
-    from app.brain import stm as graph_mod
+    from app.brain import stm
     from app.brain.stm import _stm_collection
 
     db = mongomock.MongoClient()["t"]
     appdb.configure(db)
-    graph_mod._stm_index_ready = False
+    stm._stm_index_ready = False
     try:
         _stm_collection()
         keys = [tuple(i["key"].items()) for i in db["sandy_stm"].list_indexes()]
         assert (("user_id", 1), ("updated_at", -1)) in keys
     finally:
-        graph_mod._stm_index_ready = False
+        stm._stm_index_ready = False
         appdb.reset()
 
 
@@ -95,7 +95,7 @@ def test_stm_indexes_are_created_independently():
     compound index for the life of the process.
     """
     import app.db as appdb
-    from app.brain import stm as graph_mod
+    from app.brain import stm
 
     db = mongomock.MongoClient()["t"]
     appdb.configure(db)
@@ -112,7 +112,7 @@ def test_stm_indexes_are_created_independently():
             return self._real.create_index(keys, **kw)
 
     try:
-        graph_mod._ensure_stm_indexes(_Sabotaged(db["sandy_stm"]))
+        stm._ensure_stm_indexes(_Sabotaged(db["sandy_stm"]))
         keys = [tuple(i["key"].items()) for i in db["sandy_stm"].list_indexes()]
         assert (("user_id", 1), ("updated_at", -1)) in keys, \
             "a failed TTL index must not skip the index every chat turn needs"

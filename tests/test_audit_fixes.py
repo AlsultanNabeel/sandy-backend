@@ -155,7 +155,7 @@ def test_a_failed_stm_index_is_retried_rather_than_given_up_on(monkeypatch):
     chat turn after a deploy cost this process the `(user_id, updated_at)` index
     for its whole life — and losing that one makes every reply get slower as
     everybody else's history grows, which nobody reports as a bug."""
-    from app.brain import stm as graph_mod
+    from app.brain import stm
 
     attempts = {"n": 0}
 
@@ -165,16 +165,16 @@ def test_a_failed_stm_index_is_retried_rather_than_given_up_on(monkeypatch):
             if attempts["n"] <= 3:       # the whole first pass fails
                 raise RuntimeError("transient")
 
-    monkeypatch.setattr(graph_mod, "_stm_index_ready", False)
+    monkeypatch.setattr(stm, "_stm_index_ready", False)
     monkeypatch.setattr("app.db.get_db", lambda: {"sandy_stm": _Coll()})
 
-    graph_mod._stm_collection()
-    assert graph_mod._stm_index_ready is False, "a failed pass must not latch"
-    graph_mod._stm_collection()
-    assert graph_mod._stm_index_ready is True, "a successful pass must stop the retries"
+    stm._stm_collection()
+    assert stm._stm_index_ready is False, "a failed pass must not latch"
+    stm._stm_collection()
+    assert stm._stm_index_ready is True, "a successful pass must stop the retries"
 
     before = attempts["n"]
-    graph_mod._stm_collection()
+    stm._stm_collection()
     assert attempts["n"] == before, "it must not keep retrying after success"
 
 
