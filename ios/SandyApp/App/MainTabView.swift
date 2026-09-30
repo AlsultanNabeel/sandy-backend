@@ -3,22 +3,20 @@ import SwiftUI
 /// الترتيب ثابت ومرتبط بـ `selection` حتى نقدر نبدّل التبويب برمجيًّا.
 /// الحساب (ProfileView) مش تبويب — نوصله من زر الأفاتار بالرئيسية.
 enum MainTab: Int, Hashable, CaseIterable {
-    case home, sandy, daily, life
+    case today, sandy, life
 
     var icon: String {
         switch self {
-        case .home:  return "house.fill"
+        case .today: return "sun.max.fill"
         case .sandy: return "sparkles"
-        case .daily: return "calendar"
         case .life:  return "heart.text.square.fill"
         }
     }
 
     var titleKey: String {
         switch self {
-        case .home:  return "tabs.home"
+        case .today: return "tabs.today"
         case .sandy: return "tabs.sandy"
-        case .daily: return "tabs.daily"
         case .life:  return "tabs.life"
         }
     }
@@ -29,46 +27,31 @@ struct MainTabView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
 
-    @State private var selection: MainTab = .home
+    @State private var selection: MainTab = .today
 
     @ObservedObject private var notifs = NotificationManager.shared
 
     @ObservedObject private var router = DeepLinkRouter.shared
     @ObservedObject private var spotlight = SpotlightRouter.shared
     @State private var showLiveCall = false
-    @State private var showQuickAdd = false
 
-    /// لما يطلع الكيبورد نخفي شريط التبويبات والرفيق العائم حتى ما يزدحموا فوقه.
+    /// لما يطلع الكيبورد نخفي شريط التبويبات حتى ما يزاحمه.
     @State private var keyboardUp = false
 
     var body: some View {
         VStack(spacing: 0) {
             TabView(selection: $selection) {
-                NavigationStack { HomeView(selection: $selection) }
+                NavigationStack { TodayView() }
                     .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.home)
+                    .tag(MainTab.today)
 
                 NavigationStack { SandyHubView() }
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.sandy)
 
-                NavigationStack { DailyView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.daily)
-
                 NavigationStack { LifeView() }
                     .toolbar(.hidden, for: .tabBar)
                     .tag(MainTab.life)
-            }
-            .overlay {
-                if !keyboardUp {
-                    SandyCompanionLayer(tab: selection) {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            selection = .sandy
-                        }
-                    }
-                    .transition(.opacity)
-                }
             }
 
             if !keyboardUp {
@@ -99,7 +82,7 @@ struct MainTabView: View {
         // التنبيه اليومي مش ورقة: بطاقته عالرئيسية، فنبدّل للرئيسية ونصفّر المسار.
         .onChange(of: notifs.pendingRoute) { _, route in
             if route == .dailyNudge {
-                selection = .home
+                selection = .today
                 notifs.pendingRoute = nil
             }
         }
@@ -121,11 +104,6 @@ struct MainTabView: View {
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
                 .environment(\.locale, AppLocale.locale(for: lang.lang))
         }
-        .fullScreenCover(isPresented: $showQuickAdd) {
-            QuickAddSheet()
-                .environmentObject(state)
-                .environmentObject(lang)
-        }
     }
 
     private func open(_ link: DeepLink) {
@@ -135,7 +113,9 @@ struct MainTabView: View {
         case .call:
             showLiveCall = true
         case .quickAdd:
-            showQuickAdd = true
+            // Adding anything is the ask bar on Today now.
+            selection = .today
+            AskBarFocus.shared.request &+= 1
         }
     }
 
@@ -156,53 +136,82 @@ struct FloatingTabBar: View {
     @Binding var selection: MainTab
     @EnvironmentObject var lang: LanguageManager
 
+    /// Today and My Life on the sides; Sandy is the orb in the middle. Tap talks to her in
+    /// chat, a long press calls her.
     var body: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            ForEach(MainTab.allCases, id: \.self) { tab in
-                tabButton(tab)
-                    .frame(maxWidth: .infinity)
+        HStack(spacing: 0) {
+            sideButton(.today)
+            SandyOrb(selected: selection == .sandy) {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) { selection = .sandy }
+            } onHold: {
+                DeepLinkRouter.shared.pending = .call
             }
+            .offset(y: -14)
+            sideButton(.life)
         }
-        .padding(6)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, 6)
         .liquidGlass(cornerRadius: Theme.Radius.pill, tint: 0.08)
         .shadow(color: Theme.Shadow.liftColor,
                 radius: Theme.Shadow.liftRadius, x: 0, y: Theme.Shadow.liftY)
-        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.horizontal, Theme.Spacing.xl)
         .padding(.bottom, Theme.Spacing.sm)
     }
 
-    @ViewBuilder
-    private func tabButton(_ tab: MainTab) -> some View {
+    private func sideButton(_ tab: MainTab) -> some View {
         let selected = selection == tab
-        Button {
+        return Button {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) { selection = tab }
         } label: {
-            HStack(spacing: Theme.Spacing.xs) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 17, weight: .semibold))
-                if selected {
-                    Text(lang.s(tab.titleKey))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .lineLimit(1)
-                        .fixedSize()
-                }
+            VStack(spacing: 3) {
+                Image(systemName: tab.icon).font(.system(size: 19, weight: .semibold))
+                Text(lang.s(tab.titleKey)).font(.system(size: 11, weight: .semibold, design: .rounded))
             }
-            .foregroundColor(selected ? Theme.Colors.onAccent : Theme.Colors.secondaryText)
-            .padding(.vertical, 10)
-            .padding(.horizontal, selected ? Theme.Spacing.md : 12)
-            .background {
-                if selected {
-                    Capsule().fill(
-                        LinearGradient(
-                            colors: [Theme.Colors.accent, Theme.Colors.accentDeep],
-                            startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
-            }
-            .clipShape(Capsule())
+            .foregroundColor(selected ? Theme.Colors.accent : Theme.Colors.secondaryText)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
         }
-        .liquidGlassPress()
+        .buttonStyle(.plain)
         .accessibilityLabel(lang.s(tab.titleKey))
-        // بدونها قارئ الشاشة ما بيقول أي تبويب مختار.
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// Sandy in the tab bar: a glowing orb that breathes, brighter when her tab is open.
+private struct SandyOrb: View {
+    @EnvironmentObject var lang: LanguageManager
+    let selected: Bool
+    let onTap: () -> Void
+    let onHold: () -> Void
+    @State private var breathe = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Theme.Colors.accent.opacity(0.22))
+                .frame(width: breathe ? 76 : 64, height: breathe ? 76 : 64)
+                .blur(radius: 6)
+            Circle()
+                .fill(RadialGradient(colors: [Theme.Colors.accentSoft, Theme.Colors.accent,
+                                              Theme.Colors.accentDeep],
+                                     center: .topLeading, startRadius: 2, endRadius: 60))
+                .frame(width: 58, height: 58)
+                .overlay(Circle().stroke(Color.white.opacity(selected ? 0.8 : 0.25), lineWidth: 1.5))
+                .shadow(color: Theme.Colors.accent.opacity(0.6), radius: selected ? 16 : 8)
+            SandyAvatar(size: 34, mood: .happy)
+        }
+        .frame(width: 80)
+        .contentShape(Circle())
+        .onTapGesture { onTap() }
+        .onLongPressGesture(minimumDuration: 0.35) {
+            Haptics.play(.listening)
+            onHold()
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathe = true }
+        }
+        .accessibilityLabel(lang.s("tabs.sandy"))
+        .accessibilityHint(lang.s("today.holdToTalk"))
+        .accessibilityAddTraits(.isButton)
     }
 }

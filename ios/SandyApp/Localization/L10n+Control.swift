@@ -17,8 +17,6 @@ enum L10nControl {
         ar: [
             // ── Entry point + screen ──
             "title":            .text("التحكّم بالبيت"),
-            "home.cardTitle":   .text("التحكّم بالبيت"),
-            "home.cardBody":    .text("شغّل النور، سكّر الستارة، تحكّم بأجهزتك… كلها من هون."),
 
             // ── Sections ──
             "section.devices":  .text("أجهزتك"),
@@ -136,8 +134,6 @@ enum L10nControl {
         en: [
             // ── Entry point + screen ──
             "title":            .text("Home control"),
-            "home.cardTitle":   .text("Home control"),
-            "home.cardBody":    .text("Turn on the lights, close the curtains, control your devices… all from here."),
 
             // ── Sections ──
             "section.devices":  .text("Your devices"),

@@ -1,0 +1,58 @@
+import Foundation
+
+// Namespace: today — the Today tab (Features/Today): the day sentence, the ask bar,
+// the day ribbon, habits.
+enum L10nToday {
+    static let ns = "today"
+
+    static let table = L10nTable(
+        ar: [
+            "hello.morning": .text("صباح الخير"),
+            "hello.afternoon": .text("مساء الخير"),
+            "hello.evening": .text("مساء النور"),
+            "ask": .text("شو ببالك؟"),
+            "askFailed": .text("ما وصلتني، جرّب كمان مرة."),
+            "holdToTalk": .text("اضغط مطوّل لتحكي مع ساندي"),
+            "restOfDay": .text("باقي اليوم"),
+            "restFree": .text("ما في إشي بوقت محدد لباقي اليوم."),
+            "now": .text("هلأ"),
+            "anytime": .text("أي وقت"),
+            "habits": .text("عاداتك اليوم"),
+            "spent": .text("صرفت اليوم %@"),
+            "home": .text("البيت"),
+            "focus": .text("تركيز"),
+            "profile": .text("حسابي"),
+            "brief.lead": .text("اليوم: "),
+            "brief.join": .text("، "),
+            "brief.late": .text("%@ فات وقتها"),
+            "brief.tasks": .text("%@ مهام مفتوحة"),
+            "brief.next": .text("الجاي الساعة %@"),
+            "brief.habits": .text("%@ عادات لسا"),
+            "brief.free": .text("يومك فاضي. احكيلي شو بدك نعمل."),
+        ],
+        en: [
+            "hello.morning": .text("Good morning"),
+            "hello.afternoon": .text("Good afternoon"),
+            "hello.evening": .text("Good evening"),
+            "ask": .text("What's on your mind?"),
+            "askFailed": .text("That didn't reach me, try again."),
+            "holdToTalk": .text("Hold to talk to Sandy"),
+            "restOfDay": .text("Rest of today"),
+            "restFree": .text("Nothing timed for the rest of today."),
+            "now": .text("Now"),
+            "anytime": .text("Any time"),
+            "habits": .text("Today's habits"),
+            "spent": .text("Spent today %@"),
+            "home": .text("Home"),
+            "focus": .text("Focus"),
+            "profile": .text("My account"),
+            "brief.lead": .text("Today: "),
+            "brief.join": .text(", "),
+            "brief.late": .text("%@ overdue"),
+            "brief.tasks": .text("%@ open tasks"),
+            "brief.next": .text("next at %@"),
+            "brief.habits": .text("%@ habits left"),
+            "brief.free": .text("Your day is clear. Tell me what we should do."),
+        ]
+    )
+}

@@ -1064,10 +1064,18 @@ what makes the text-size control real rather than decorative.
 
 ## 6. iPhone app
 
-`ios/SandyApp/`, SwiftUI, ~19 600 lines, 18 feature folders. Swift is one module,
+`ios/SandyApp/`, SwiftUI, ~17 400 lines, 14 feature folders. Swift is one module,
 so folders are organisation only.
 
-- `App/` — `SandyApp`, `AppState` (holds the base URL), `MainTabView`.
+- `App/` — `SandyApp`, `AppState` (holds the base URL), `MainTabView`. **Three tabs**:
+  Today, Sandy (the orb in the middle of the tab bar: tap = chat, hold = live call) and
+  My Life. Profile opens from the avatar on Today and holds memory (the `fact` log),
+  robot, photos, weather settings, persona and account.
+- `Features/Today/` — one screen: a sentence about the day, the ask bar (`AskBar`: one
+  field for everything, sent to `/api/agent/stream`; Sandy decides what it is and the
+  day refreshes; the quick-add shortcut focuses it), the rest of the day as a timeline
+  with a live "now" mark (`DayRibbon`), untimed tasks, habits as rings, today's spending,
+  focus and home controls. The weather is a read-only corner, like the lock-screen clock.
 - `Core/Networking/` — `APIClient` split into 9 extensions by domain, behind
   `APIClientProtocol`. **Add new endpoints as an extension, not to the base class.**
 - `Core/Auth/` — Keychain (`…ThisDeviceOnly`), Google sign-in, auth view.
@@ -1077,12 +1085,13 @@ so folders are organisation only.
   (`ItemsView`, any list in the kinds table; habits check in per day as `habit` log
   entries instead of being "done"), one schedules screen (`SchedulesView`, reminders and
   messages to future self) and the log (`LogView`, the My Life tab, with the on-demand
-  summary). `KindsStore` loads `/api/kinds` once; Daily builds a card per list from it,
-  so a new list needs no app change. `APIClient+Blocks` is the only client of
-  `/api/entries|items|schedules|kinds|summary`, plus the home glance (`homeSnapshot`).
-  Quick add, Siri intents, the tasks widget's ✓ (`PATCH /api/items/<id>`), Spotlight and
-  the reminder banner buttons all write to the blocks. Focus sessions keep their own
-  screen (they drive the Live Activity).
+  summary, search, a thirty-day activity strip and a card per list on top).
+  `KindsStore` loads `/api/kinds` once; My Life builds a card per list from it, so a new
+  list needs no app change. The screens keep an offline copy (`DiskCache`).
+  `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
+  Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
+  Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep
+  their own screen (they drive the Live Activity), opened from Today.
 - `Services/` — `GeminiLiveManager` (in-app live voice), `SpeechManager` (reply playback only),
   `NotificationManager`, `SubscriptionManager`.
 - `Localization/` — one `L10n+<Area>.swift` per feature. Arabic/English, RTL/LTR.

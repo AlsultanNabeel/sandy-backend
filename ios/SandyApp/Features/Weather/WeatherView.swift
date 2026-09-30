@@ -1,7 +1,7 @@
 import SwiftUI
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Weather — شاشة الطقس + بطاقة مصغّرة للشاشة الرئيسية.
+//  Weather — شاشة الطقس (من الملف الشخصي). اليوم بيعرض الحرارة بس، بالزاوية.
 //
 //  المصدر: GET /api/weather?city=<اسم المدينة> — غلاف رفيع حول نفس مُحرّك
 //  الطقس اللي تستعمله ساندي بالشات. الموقع = نص حر للمدينة يكتبه المستخدم،
@@ -255,70 +255,6 @@ private struct WeatherCityEditor: View {
             let ok = await onSubmit(trimmed)
             submitting = false
             if ok { dismiss() }
-        }
-    }
-}
-
-// MARK: - بطاقة مصغّرة للشاشة الرئيسية
-
-/// بطاقة طقس مختصرة وقائمة بذاتها (بلا معطيات) — تملك ستورها الخاص وتجلب عند
-/// الظهور. تعرض الأيقونة + الحرارة + الحالة + المدينة. مخصّصة للتركيب على الشاشة
-/// الرئيسية. تستعمل APIClient من البيئة (AppState).
-struct WeatherCard: View {
-    @EnvironmentObject var state: AppState
-    @EnvironmentObject var lang: LanguageManager
-
-    @StateObject private var store = WeatherStore()
-
-    var body: some View {
-        SandyCard {
-            Group {
-                if let snap = store.snapshot {
-                    loaded(snap)
-                } else if store.loading {
-                    ProgressView()
-                        .tint(Theme.Colors.accent)
-                        .frame(maxWidth: .infinity, minHeight: 56)
-                } else {
-                    HStack(spacing: Theme.Spacing.md) {
-                        Image(systemName: "cloud.sun.fill")
-                            .font(.title2)
-                            .foregroundColor(Theme.Colors.accent.opacity(0.6))
-                        Text(lang.s("weather.empty"))
-                            .font(Theme.Typography.subheadline)
-                            .foregroundColor(Theme.Colors.secondaryText)
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-        }
-        .task { await store.load(api: state.api) }
-    }
-
-    private func loaded(_ snap: WeatherSnapshot) -> some View {
-        HStack(spacing: Theme.Spacing.md) {
-            Image(systemName: snap.symbol)
-                .font(.system(size: Theme.Icon.xl))
-                .symbolRenderingMode(.multicolor)
-                .foregroundColor(Theme.Colors.accent)
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Text(snap.tempDisplay)
-                    .font(Theme.Typography.title)
-                    .foregroundColor(Theme.Colors.primaryText)
-                Text(snap.description)
-                    .font(Theme.Typography.subheadline)
-                    .foregroundColor(Theme.Colors.secondaryText)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            HStack(spacing: Theme.Spacing.xs) {
-                Image(systemName: "mappin.circle.fill")
-                    .font(.caption)
-                Text(snap.city)
-                    .font(Theme.Typography.caption)
-                    .lineLimit(1)
-            }
-            .foregroundColor(Theme.Colors.secondaryText)
         }
     }
 }

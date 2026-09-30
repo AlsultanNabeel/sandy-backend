@@ -12,9 +12,8 @@ enum L10nTabs {
     static let table = L10nTable(
         ar: [
             // الشريط السفلي — أربعة تبويبات.
-            "home":     .text("الرئيسية"),
+            "today":    .text("اليوم"),
             "sandy":    .text("ساندي"),
-            "daily":    .text("يومي"),
             "life":     .text("حياتي"),
             // عناوين شاشات الميزات (تُفتح من جوّا هَب أو من أرشيف البروفايل).
             "focus":    .text("الفوكس"),
@@ -22,19 +21,16 @@ enum L10nTabs {
             "search":   .text("البحث"),
             "images":   .text("الصور"),
             "memory":   .text("الذاكرة"),
-            "projects": .text("المشاريع"),
         ],
         en: [
-            "home":     .text("Home"),
+            "today":    .text("Today"),
             "sandy":    .text("Sandy"),
-            "daily":    .text("Daily"),
             "life":     .text("Life"),
             "focus":    .text("Focus"),
             "robot":    .text("Room scenes"),   // not the robot: these are device scenes
             "search":   .text("Search"),
             "images":   .text("Images"),
             "memory":   .text("Memory"),
-            "projects": .text("Projects"),
         ]
     )
 }

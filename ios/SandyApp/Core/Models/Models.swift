@@ -57,21 +57,6 @@ struct ListResult<T> {
     let demo: Bool
 }
 
-/// لقطة الرئيسية من القطع الثلاث؛ كل قسم يتحمّل الفشل وحده.
-struct HomeSnapshot {
-    var overdueTasks: Int = 0  // موعدها فات وغير منجزة
-    var todayTasks: Int = 0
-    var openTasks: Int = 0
-
-    var nextReminderText: String = ""
-    var nextReminderAt: String = ""
-
-    var todayExpenseTotal: Double = 0
-    var weekExpenseTotal: Double = 0  // آخر 7 أيام
-
-    var hadError: Bool = false
-}
-
 // ── الفوكس + مشاهد الغرفة ──
 
 struct FocusStatus {

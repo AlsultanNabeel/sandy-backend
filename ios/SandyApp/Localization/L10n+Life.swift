@@ -7,9 +7,11 @@ enum L10nLife {
     static let table = L10nTable(
         ar: [
             "title": .text("حياتي"),
+            "month": .text("شهرك"),
         ],
         en: [
             "title": .text("My Life"),
+            "month": .text("Your month"),
         ]
     )
 }

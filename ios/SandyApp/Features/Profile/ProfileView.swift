@@ -98,6 +98,8 @@ struct ProfileView: View {
                 // What Sandy knows about you is the log's `fact` kind.
                 archiveRow(icon: "brain", titleKey: "tabs.memory") { LogView(kind: "fact") }
                 archiveRow(icon: "av.remote.fill", titleKey: "tabs.robot") { RobotView() }
+                archiveRow(icon: "photo.stack.fill", titleKey: "sandy.photos") { PhotosView() }
+                archiveRow(icon: "cloud.sun.fill", titleKey: "weather.title") { WeatherView() }
                 archiveRow(icon: "sparkles", titleKey: "persona.title") { PersonaView() }
                 // ربط الروبوت، وفكّه للبيع، وحذف الحساب.
                 //

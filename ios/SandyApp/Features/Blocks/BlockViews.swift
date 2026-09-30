@@ -259,39 +259,53 @@ struct LogView: View {
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject private var kinds = KindsStore.shared
     @StateObject private var store: LogStore
+    /// The My Life tab: month strip, your lists and search above the log.
+    private let isLife: Bool
 
-    init(kind: String? = nil) {
+    init(kind: String? = nil, isLife: Bool = false) {
         _store = StateObject(wrappedValue: LogStore(kind: kind))
+        self.isLife = isLife
     }
     @State private var adding = false
     @State private var summary: String?
     @State private var summarizing = false
+    @State private var search = ""
+
+    private var shown: [LogEntry] {
+        let q = search.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? store.entries : store.entries.filter { $0.text.localizedCaseInsensitiveContains(q) }
+    }
+
+    private var title: String {
+        if isLife { return lang.s("life.title") }
+        return store.kind.map { kinds.kindOrBare($0, .log).label(lang.lang) } ?? lang.s("life.title")
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            filters
-            BlockNotices(store: store)
-            if store.entries.isEmpty && !store.loading {
-                Spacer()
-                LivelyEmptyState(line: lang.s("blocks.emptyLog"))
-                Spacer()
-            } else {
-                List {
-                    ForEach(store.entries) { entry in
-                        row(entry)
-                            .blockRow()
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) { store.delete(api: state.api, entry) } label: {
-                                    Label(lang.s("blocks.delete"), systemImage: "trash")
-                                }
-                            }
+        List {
+            if isLife {
+                LifeHeader(entries: store.entries).blockRow()
+                filters.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+            BlockNotices(store: store).blockRow()
+            if shown.isEmpty && !store.loading {
+                LivelyEmptyState(line: lang.s("blocks.emptyLog")).blockRow()
+            }
+            ForEach(shown) { entry in
+                row(entry)
+                    .blockRow()
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) { store.delete(api: state.api, entry) } label: {
+                            Label(lang.s("blocks.delete"), systemImage: "trash")
+                        }
                     }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
         }
-        .navigationTitle(lang.s("life.title"))
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .searchable(text: $search, prompt: lang.s("blocks.search"))
+        .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) { summaryMenu }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -454,7 +468,8 @@ private struct BlockNotices: View {
     }
 }
 
-private extension View {
+extension View {
+    /// A clear, separator-less list row with the block screens' insets.
     func blockRow() -> some View {
         listRowBackground(Color.clear)
             .listRowSeparator(.hidden)

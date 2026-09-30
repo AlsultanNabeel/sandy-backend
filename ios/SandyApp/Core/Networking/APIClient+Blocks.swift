@@ -133,38 +133,4 @@ extension APIClient {
     func deleteSchedule(id: String) async throws {
         try await send("/api/schedules/\(id)", method: "DELETE")
     }
-
-    // MARK: home
-
-    /// Today's glance from the three blocks; a failed part leaves its numbers at 0.
-    func homeSnapshot() async -> HomeSnapshot {
-        async let tasksRes = try? listItems("tasks", done: false)
-        async let remindersRes = try? schedules(kind: "reminder")
-        async let expensesRes = try? entries(kind: "expense")
-        let (tasks, reminders, expenses) = await (tasksRes, remindersRes, expensesRes)
-
-        var snap = HomeSnapshot()
-        snap.hadError = tasks == nil || reminders == nil || expenses == nil
-        let now = Date()
-        let cal = Calendar.current
-
-        for t in tasks ?? [] {
-            snap.openTasks += 1
-            guard let due = NotificationManager.parseISOOrDay(t.due ?? "") else { continue }
-            if due < now { snap.overdueTasks += 1 } else if cal.isDateInToday(due) { snap.todayTasks += 1 }
-        }
-        if let next = (reminders ?? [])
-            .compactMap({ r in NotificationManager.parseISO(r.fireAt).map { (r, $0) } })
-            .filter({ $0.1 >= now }).min(by: { $0.1 < $1.1 }) {
-            snap.nextReminderText = next.0.text
-            snap.nextReminderAt = next.0.fireAt
-        }
-        let weekAgo = cal.date(byAdding: .day, value: -7, to: now) ?? now
-        for e in expenses ?? [] {
-            guard let amount = e.amount, let at = NotificationManager.parseISO(e.at ?? "") else { continue }
-            if at >= weekAgo { snap.weekExpenseTotal += amount }
-            if cal.isDateInToday(at) { snap.todayExpenseTotal += amount }
-        }
-        return snap
-    }
 }
