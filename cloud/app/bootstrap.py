@@ -143,10 +143,6 @@ def ensure_indexes() -> None:
         ("sandy_focus.user_id+state+ended_at", lambda: mongo_db.sandy_focus.create_index(
             [("user_id", 1), ("state", 1), ("ended_at", 1)], background=True
         )),
-        # the once-a-minute cross-tenant due scan
-        ("sandy_scene_timers.fire_at", lambda: mongo_db.sandy_scene_timers.create_index(
-            [("fire_at", 1)], background=True
-        )),
     ]
     for label, job in index_jobs:
         try:
@@ -198,15 +194,7 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
         except Exception as exc:
             logger.warning("[Bootstrap] nudge scheduler start failed: %s", exc)
 
-        # Scene timed reverts ("movie for two hours, then lights on") — once a minute.
-        try:
-            from app.db import get_db
-            from app.services.scene_timer_runner import start_scene_timer_runner
-            start_scene_timer_runner(get_db())
-        except Exception as exc:
-            logger.warning("[Bootstrap] scene timer runner start failed: %s", exc)
-
-        # sandy_schedules (the blocks) — once a minute; alongside the old runners, not instead.
+        # sandy_schedules — reminders, scene reverts, nudges — once a minute.
         try:
             from app.blocks import init_blocks
             from app.db import get_db

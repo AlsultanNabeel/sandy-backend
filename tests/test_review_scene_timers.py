@@ -1,27 +1,60 @@
-"""A scene's timed revert actually fires — once, for its own owner only."""
+"""A scene's timed revert is a `scene` row in sandy_schedules, and it fires once, for its owner."""
 from datetime import datetime, timedelta, timezone
 
 import mongomock
+import pytest
 
 from app import db as appdb
+from app.blocks import init_blocks, schedules
 from app.features import scene_store as ss
-from app.services import scene_timer_runner as runner
+from app.services import schedule_runner as runner
+from app.utils.user_profiles import active_user_profile_context
 
 
-def _db():
-    d = mongomock.MongoClient().db
-    appdb.configure(d)
-    return d
+def _as(uid):
+    return active_user_profile_context({"chat_id": uid, "permissions": "all", "relation": "user"})
 
 
-def _timer(d, uid, minutes_ago, device="light", value="on"):
-    d["sandy_scene_timers"].insert_one({
-        "user_id": uid, "device": device, "value": value,
-        "fire_at": datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)})
+@pytest.fixture
+def d(monkeypatch):
+    database = mongomock.MongoClient().db
+    appdb.configure(database)
+    init_blocks(database)
+    monkeypatch.setattr(ss, "_actuate", lambda actions: (len(actions), []))
+    yield database
+    appdb.reset()
 
 
-def test_due_reverts_fire_once_per_owner(monkeypatch):
-    d = _db()
+def _movie_for(uid, minutes=30):
+    with _as(uid):
+        ss.add_scene("movie2", actions=[
+            {"device": "light", "value": "10", "for_min": minutes, "then": "100"},
+            {"device": "curtain", "value": "close"}])
+        return ss.apply_scene("movie2")
+
+
+def _scene_rows(uid, status=None):
+    with _as(uid):
+        return schedules.list_schedules("scene", status=status)
+
+
+def test_applying_a_scene_schedules_its_revert(d):
+    r = _movie_for("u1")
+    assert r["ok"] and r["timers"] == 1
+    rows = _scene_rows("u1", "pending")
+    assert len(rows) == 1 and rows[0]["payload"] == {"device": "light", "value": "100"}
+    assert d["sandy_scene_timers"].count_documents({}) == 0, "the old collection is not written"
+    assert _scene_rows("u2") == [], "another account sees nothing"
+
+
+def test_reapplying_cancels_the_pending_revert(d):
+    _movie_for("u1")
+    _movie_for("u1")
+    assert len(_scene_rows("u1", "pending")) == 1
+    assert len(_scene_rows("u1", "cancelled")) == 1
+
+
+def test_the_revert_fires_once_for_its_owner_only(d, monkeypatch):
     fired = []
 
     def fake_actuate(actions):
@@ -29,67 +62,18 @@ def test_due_reverts_fire_once_per_owner(monkeypatch):
         fired.append((current_user_id(), [a["device"] for a in actions]))
         return len(actions), []
 
+    _movie_for("u1")
+    _movie_for("u2", minutes=90)
+    # u1's half hour is up.
+    d["sandy_schedules"].update_many({"user_id": "u1"}, {"$set": {
+        "fire_at": datetime.now(timezone.utc) - timedelta(minutes=1)}})
     monkeypatch.setattr(ss, "_actuate", fake_actuate)
-    try:
-        _timer(d, "u1", 2)
-        _timer(d, "u2", 1, device="fan", value="off")
-        _timer(d, "u1", -30)  # not due yet
-        assert runner.run_all_due(d) == 2
-        assert sorted(fired) == [("u1", ["light"]), ("u2", ["fan"])]
-        # a second tick finds nothing: each revert was claimed and removed
-        assert runner.run_all_due(d) == 0
-        left = list(d["sandy_scene_timers"].find({}))
-        assert len(left) == 1 and left[0]["user_id"] == "u1"
-    finally:
-        appdb.reset()
-
-
-def test_one_owner_failing_does_not_stop_the_rest(monkeypatch):
-    d = _db()
-
-    def flaky(actions):
-        from app.utils.user_profiles import current_user_id
-        if current_user_id() == "bad":
-            raise RuntimeError("broker down")
-        return len(actions), []
-
-    monkeypatch.setattr(ss, "_actuate", flaky)
-    try:
-        _timer(d, "bad", 1)
-        _timer(d, "good", 1)
-        assert runner.run_all_due(d) == 1
-    finally:
-        appdb.reset()
+    assert runner.run_all_due(d) == 1
+    assert fired == [("u1", ["light"])]
+    assert runner.run_all_due(d) == 0, "a revert fired twice"
 
 
 def test_something_schedules_the_runner():
-    import pathlib
-    src = (pathlib.Path(__file__).resolve().parents[1]
-           / "cloud/app/bootstrap.py").read_text()
-    assert "start_scene_timer_runner(" in src, "nothing fires scene reverts again"
-
-
-def test_undelivered_revert_is_retried_then_given_up(monkeypatch):
-    d = _db()
-    monkeypatch.setattr(ss, "_actuate", lambda actions: (0, ["light"]))
-    try:
-        _timer(d, "u1", 1)
-        for _ in range(ss.MAX_TIMER_TRIES):
-            runner.run_all_due(d)
-            d["sandy_scene_timers"].update_many(
-                {}, {"$set": {"fire_at": datetime.now(timezone.utc) - timedelta(seconds=1)}})
-        assert d["sandy_scene_timers"].count_documents({}) == 0, "retries forever"
-    finally:
-        appdb.reset()
-
-
-def test_undelivered_revert_comes_back(monkeypatch):
-    d = _db()
-    monkeypatch.setattr(ss, "_actuate", lambda actions: (0, ["light"]))
-    try:
-        _timer(d, "u1", 1)
-        runner.run_all_due(d)
-        left = list(d["sandy_scene_timers"].find({}))
-        assert len(left) == 1 and left[0]["tries"] == 1 and left[0]["user_id"] == "u1"
-    finally:
-        appdb.reset()
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "cloud/app/bootstrap.py").read_text()
+    assert "start_schedule_runner(" in src, "nothing fires scene reverts again"

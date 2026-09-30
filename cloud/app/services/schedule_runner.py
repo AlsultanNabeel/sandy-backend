@@ -1,4 +1,4 @@
-"""Once-a-minute runner for due `sandy_schedules` rows (rebuild phase 3, §2.12).
+"""Once-a-minute runner for due `sandy_schedules` rows (§2.12): everything that fires.
 
 Each due row is claimed with a compare-and-set on (status "pending", its fire_at):
 a one-off moves to "sent", a recurring one to its next RRULE time. Only the
@@ -7,14 +7,16 @@ the same row twice. What firing means per kind:
 
   reminder         APNs when configured (the phone also rings it locally from
                    GET /api/schedules); stale by > 15 min: no push, still settled.
-  scene            the device revert scene_timer_runner applies (`scene_store._actuate`),
-                   retried a minute later up to MAX_TIMER_TRIES like a scene timer.
+  scene            a scene's timed revert (`scene_store.apply_scene` writes it), sent
+                   through `scene_store._actuate`; a miss retries a minute later, up to
+                   MAX_TIMER_TRIES.
   daily_nudge,
   summary_nudge    push text only; "failed" when no device took it.
   message_to_future_self  not here: delivered into the next chat reply (`brain/future.py`).
 
-Rows copied in by scripts/migrate_to_blocks.py are skipped: their old stores
-still own firing them until phase 5.
+A row copied in by scripts/migrate_to_blocks.py that is more than LOOKBACK_MIN
+late is settled without firing: its old store already fired it, and replaying a
+scene revert hours later would switch someone's lights for no reason.
 """
 
 from __future__ import annotations
@@ -44,8 +46,7 @@ _scheduler = None
 
 
 def _due_query(now: datetime) -> Dict[str, Any]:
-    return {"status": "pending", "kind": {"$in": list(RUNNABLE)},
-            "fire_at": {"$lte": now}, "migrated_from": None}
+    return {"status": "pending", "kind": {"$in": list(RUNNABLE)}, "fire_at": {"$lte": now}}
 
 
 def _aware(dt: datetime) -> datetime:
@@ -116,6 +117,9 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
     """(ok, error). Raises only on a bug; the caller marks that "failed"."""
     kind, text = doc["kind"], str(doc.get("text") or "")
     data = {"kind": kind, "schedule_id": doc["_id"]}
+    late = _aware(doc["fire_at"]) < now - timedelta(minutes=LOOKBACK_MIN)
+    if doc.get("migrated_from") and late:
+        return True, ""
     if kind == "scene":
         # Import here: scene_store pulls in the device/MQTT stack (C9).
         from app.features.scene_store import _actuate
@@ -126,7 +130,7 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
     if not apns.is_configured():
         # A reminder still rings on the phone; a push-only nudge reached no one.
         return (True, "") if kind == "reminder" else (False, "apns not configured")
-    if kind == "reminder" and _aware(doc["fire_at"]) < now - timedelta(minutes=LOOKBACK_MIN):
+    if kind == "reminder" and late:
         return True, ""
     tried, took = _push(uid, text, data)
     if took or (kind == "reminder" and not tried):

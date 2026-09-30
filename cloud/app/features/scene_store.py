@@ -10,8 +10,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from app.utils.tenant_db import scoped
+from app.blocks import _base, schedules
 from app.db import configure, get_db
+from app.utils.tenant_db import scoped
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,8 @@ _COLL = "sandy_scenes"
 
 # سقف أمان، مش حد منتج.
 MAX_SCENES = 200
-MAX_DUE_TIMERS = 100
+# A revert the device misses is retried a minute later, this many times in all.
 MAX_TIMER_TRIES = 5
-_TIMERS = "sandy_scene_timers"   # timed reverts: {fire_at, device, value, tries}
 
 # Seeded once per user; the owner can edit freely.
 _BUILTIN: Dict[str, Dict[str, Any]] = {
@@ -93,9 +93,6 @@ def init_scene_store(mongo_db) -> None:
         mongo_db[_COLL].create_index(
             [("user_id", 1), ("name", 1)], unique=True, background=True
         )
-        mongo_db[_TIMERS].create_index(
-            [("user_id", 1), ("fire_at", 1)], background=True
-        )
         logger.info("[SceneStore] ready")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[SceneStore] index skipped: {e}")
@@ -103,10 +100,6 @@ def init_scene_store(mongo_db) -> None:
 
 def _coll():
     return scoped(get_db(), _COLL)
-
-
-def _timers():
-    return scoped(get_db(), _TIMERS)
 
 
 def _now():
@@ -247,25 +240,25 @@ def delete_scene(name: str) -> Dict[str, Any]:
 def apply_scene(name: str) -> Dict[str, Any]:
     """Run a scene on the owner's devices and return its actions (callers like Shortcuts may run them).
 
-    Re-applying any scene cancels pending reverts and schedules this scene's `for_min` ones.
+    Re-applying any scene cancels pending reverts and schedules this scene's `for_min`
+    ones as `scene` rows in sandy_schedules, which the schedule runner fires.
     """
     sc = get_scene(name)
     if not sc:
         return {"ok": False, "error": "not_found"}
 
     timers = 0
-    tcoll = _timers()
-    if tcoll is not None:
-        tcoll.delete_many({})
+    pending = _base.coll(_base.SCHEDULES)
+    if pending is not None:
+        pending.update_many({"kind": "scene", "status": "pending"},
+                            {"$set": {"status": "cancelled"}})
         now = _now()
-        docs = [
-            {"fire_at": now + timedelta(minutes=a["for_min"]),
-             "device": a["device"], "value": a["then"]}
-            for a in sc["actions"] if a.get("for_min")
-        ]
-        if docs:
-            tcoll.insert_many(docs)
-            timers = len(docs)
+        for a in sc["actions"]:
+            if a.get("for_min") and schedules.add(
+                    "scene", f"{a['device']} → {a['then']}",
+                    now + timedelta(minutes=a["for_min"]),
+                    {"device": a["device"], "value": a["then"]}):
+                timers += 1
     sent, missed = _actuate(sc["actions"])
 
     return {
@@ -353,47 +346,3 @@ def actuate_scene_actions(actions: list) -> bool:
     except Exception:  # noqa: BLE001 — actuation must never crash the caller
         logger.warning("[SceneStore] scene actuation failed", exc_info=True)
         return False
-
-
-def run_due_timers() -> Dict[str, Any]:
-    """Fire the active user's due reverts, each claimed by an atomic find-and-delete.
-
-    Missed ones are retried a minute later, up to MAX_TIMER_TRIES.
-    """
-    tcoll = _timers()
-    if tcoll is None:
-        return {"due": [], "sent": 0, "missed": []}
-    due: List[Dict[str, str]] = []
-    # Capped per tick; the rest stay for the next one.
-    for _ in range(MAX_DUE_TIMERS):
-        t = tcoll.find_one_and_delete({"fire_at": {"$lte": _now()}},
-                                      sort=[("fire_at", 1)])
-        if not t:
-            break
-        due.append({"device": t.get("device", ""), "value": t.get("value", ""),
-                    "tries": int(t.get("tries") or 0)})
-    if not due:
-        return {"due": [], "sent": 0, "missed": []}
-    sent, missed = _actuate(due)
-    retry = []
-    for a in due:
-        name = str(a["device"]).strip().lower()
-        if name in missed and a["tries"] + 1 < MAX_TIMER_TRIES:
-            retry.append({"fire_at": _now() + timedelta(minutes=1),
-                          "device": a["device"], "value": a["value"],
-                          "tries": a["tries"] + 1})
-    if retry:
-        tcoll.insert_many(retry)
-    return {"due": due, "sent": sent, "missed": missed, "retrying": len(retry)}
-
-
-def users_with_due_timers(mongo_db, limit: int = 500) -> List[str]:
-    """Owners with a revert due now (raw cross-tenant read; only ids leave)."""
-    if mongo_db is None:
-        return []
-    try:
-        ids = mongo_db[_TIMERS].distinct("user_id", {"fire_at": {"$lte": _now()}})
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[SceneStore] due-timer scan failed: %s", exc)
-        return []
-    return [str(u) for u in ids if u][:limit]

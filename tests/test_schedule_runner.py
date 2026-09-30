@@ -1,5 +1,5 @@
 """The sandy_schedules runner, future-self delivery in the brain's turn, the mood
-entry, and the speaker gate on the brain's destructive tools (rebuild phase 3)."""
+entry, and the speaker gate on the brain's destructive tools."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -154,7 +154,7 @@ def test_a_nudge_without_apns_or_devices_fails(brain_db, monkeypatch):  # noqa: 
 
 # ── scenes ───────────────────────────────────────────────────────────────────
 
-def test_a_scene_is_applied_through_the_scene_timer_actuator(brain_db, monkeypatch):  # noqa: F811
+def test_a_scene_revert_is_applied_through_the_scene_actuator(brain_db, monkeypatch):  # noqa: F811
     from app.features import scene_store
     applied = []
     monkeypatch.setattr(scene_store, "_actuate",
@@ -179,16 +179,34 @@ def test_a_missed_scene_retries_then_fails(brain_db, monkeypatch):  # noqa: F811
     assert _get(sid)["status"] == "failed"
 
 
-# ── what the runner leaves alone ─────────────────────────────────────────────
+# ── migrated rows, and what the runner leaves alone ─────────────────────────
 
-def test_migrated_rows_and_future_self_messages_are_not_fired(brain_db, push):  # noqa: F811
-    migrated = _add(migrated_from={"collection": "sandy_reminders", "id": "r1"})
+def test_a_migrated_row_on_time_fires_like_any_other(brain_db, push):  # noqa: F811
+    sid = _add(migrated_from={"collection": "sandy_reminders", "id": "r1"})
+    assert _tick() == {"fired": 1, "failed": 0}
+    assert _get(sid)["status"] == "sent" and len(push["sent"]) == 1
+
+
+def test_a_late_migrated_row_is_settled_without_firing_again(brain_db, monkeypatch):  # noqa: F811
+    """Its old store already fired it: a scene revert replayed hours later would
+    switch someone's lights for no reason."""
+    from app.features import scene_store
+    applied = []
+    monkeypatch.setattr(scene_store, "_actuate",
+                        lambda actions: applied.extend(actions) or (1, []))
+    sid = _add("scene", "light → off", minutes_ago=R.LOOKBACK_MIN + 60,
+               payload={"device": "light", "value": "off"},
+               migrated_from={"collection": "sandy_scene_timers", "id": "t1"})
+    assert _tick() == {"fired": 1, "failed": 0}
+    assert _get(sid)["status"] == "sent" and applied == []
+
+
+def test_future_self_messages_and_cancelled_rows_are_not_fired(brain_db, push):  # noqa: F811
     future = _add("message_to_future_self", "إلك")
     cancelled = _add(status="cancelled")
     assert _tick() == {"fired": 0, "failed": 0}
     assert R.users_with_due(brain_db, NOW) == []
-    assert [_get(s)["status"] for s in (migrated, future, cancelled)] == [
-        "pending", "pending", "cancelled"]
+    assert [_get(s)["status"] for s in (future, cancelled)] == ["pending", "cancelled"]
     assert push["sent"] == []
 
 
