@@ -328,11 +328,6 @@ def test_summary_validation_failure_and_metering(c, monkeypatch):
     assert r.status_code == 429 and r.get_json()["error"] == "rate_limited"
 
 
-def test_old_routes_are_still_registered(c):
-    rules = {r.rule for r in c.application.url_map.iter_rules()}
-    assert {"/api/reminders", "/api/future-messages", "/api/agent"} <= rules
-
-
 def test_items_store_is_untouched_by_a_refused_write(c):
     c.post("/api/items", json={"list": "nope", "text": "x"}, headers=_h())
     with active_user_profile_context({"chat_id": "userA"}):

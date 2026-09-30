@@ -7,7 +7,6 @@ import os
 import queue
 import threading
 import time
-from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
@@ -25,13 +24,6 @@ _MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 
 # سقف وصف الصورة: نرفض هون مجّاناً بدل ما ندفع نداء المزوّد بيرفضه.
 _MAX_IMAGE_PROMPT_CHARS = 2000
-
-
-# أقصى عدد رسائل بنحفظه من سجل شات الويب (الأحدث).
-_MAX_HISTORY_MESSAGES = 500
-
-# مدة بقاء سجل شات الزائر قبل انتهائه (٤٨ ساعة).
-_GUEST_CHAT_TTL = timedelta(hours=48)
 
 # A retried send whose first run is still going waits this long on the stream route.
 _DUPLICATE_WAIT_S = 120
@@ -113,26 +105,14 @@ def create_app(
     from app.api.voice_api import register_voice_api
     register_voice_api(app)
 
-    from app.api.productivity_api import register_productivity_api
-    register_productivity_api(app, mongo_db=mongo_db)
-
-    from app.api.studio_api import register_studio_api
-    register_studio_api(app, mongo_db=mongo_db)
-
     from app.api.research_api import register_research_api
     register_research_api(app)
 
     from app.api.conversations_api import register_conversations_api
     register_conversations_api(app, mongo_db=mongo_db)
 
-    from app.api.memory_api import register_memory_api
-    register_memory_api(app, mongo_db=mongo_db)
-
-    from app.api.timeline_api import register_timeline_api
-    register_timeline_api(app)
-
     from app.api.life_api import register_life_api
-    register_life_api(app, mongo_db=mongo_db)
+    register_life_api(app)
 
     from app.api.devices_api import register_devices_api
     register_devices_api(app, mongo_db=mongo_db)
@@ -142,9 +122,6 @@ def create_app(
 
     from app.api.daily_nudge_api import register_daily_nudge_api
     register_daily_nudge_api(app, mongo_db=mongo_db)
-
-    from app.api.insights_api import register_insights_api
-    register_insights_api(app, mongo_db=mongo_db)
 
     from app.api.push_api import register_push_api
     register_push_api(app)
@@ -167,20 +144,8 @@ def create_app(
     from app.api.account_api import register_account_api
     register_account_api(app)
 
-    from app.api.goals_api import register_goals_api
-    register_goals_api(app, mongo_db=mongo_db)
-
-    from app.api.future_messages_api import register_future_messages_api
-    register_future_messages_api(app, mongo_db=mongo_db)
-
     from app.api.photos_api import register_photos_api
     register_photos_api(app, mongo_db=mongo_db)
-
-    from app.api.gifts_api import register_gifts_api
-    register_gifts_api(app, mongo_db=mongo_db)
-
-    from app.api.share_api import register_share_api
-    register_share_api(app, mongo_db=mongo_db)
 
     from app.api.weather_api import register_weather_api
     register_weather_api(app, mongo_db=mongo_db)
@@ -195,33 +160,10 @@ def create_app(
     from app.api.metering import limit_response as _limit_response
     from app.api.metering import meter_or_error as _meter_or_error
 
-    def _guest_media_gate(claims):
-        """Charge one shared guest unit; a ready ``(body, status)`` refusal, or None."""
-        if claims.get("role") != "guest":
-            return None
-        from app.agent.guest_usage import check_and_increment, guest_label
-
-        jti = claims.get("jti", "")
-        guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
-        status, count, limit = check_and_increment(jti, guest_name, "all", mongo_db)
-        if status == "pending":
-            return {
-                "error": "limit_reached",
-                "message": f"وصلت للحد المسموح ({limit}). طلبت الإذن من المسؤول — انتظر الموافقة.",
-                "count": count,
-                "limit": limit,
-            }, 429
-        if status == "block":
-            return {
-                "error": "access_denied",
-                "message": "تم رفض طلبك من المسؤول.",
-            }, 403
-        return None
-
     def _media_gate(claims):
-        """Meter one image-model call (guest budget or tier quota); a ``(body, status)`` refusal, or None."""
-        if claims.get("role") == "guest":
-            return _guest_media_gate(claims)
+        """Meter one image-model call against the tier quota; a ``(body, status)`` refusal, or None."""
+        if claims.get("role") not in ("owner", "user"):
+            return {"error": "forbidden"}, 403
         over = _meter_or_error(claims.get("role", "user"), claims.get("user_id") or "")
         if over:
             return _limit_response(over), 429
@@ -235,41 +177,6 @@ def create_app(
             return base64.b64decode(image_b64, validate=True)
         except (binascii.Error, ValueError):
             return None
-
-    def _chat_history_key(claims):
-        # Signed-in users key by user_id; guests by token jti.
-        if claims.get("role") != "guest":
-            return f"web_chat_{claims.get('user_id', '')}"
-        return f"web_chat_{claims.get('jti', 'guest')}"
-
-    @app.route("/api/chat/history", methods=["GET"])
-    @require_auth
-    def get_chat_history(claims):
-        if mongo_db is None:
-            return jsonify({"messages": []}), 200
-        key = _chat_history_key(claims)
-        doc = mongo_db.web_chat_history.find_one({"_id": key}, {"_id": 0, "messages": 1})
-        return jsonify({"messages": doc["messages"] if doc else []}), 200
-
-    @app.route("/api/chat/history", methods=["PUT"])
-    @require_auth
-    def put_chat_history(claims):
-        if mongo_db is None:
-            return jsonify({"ok": True}), 200
-        body = request.get_json(silent=True) or {}
-        messages = body.get("messages", [])
-        if not isinstance(messages, list):
-            return jsonify({"error": "invalid_request"}), 400
-        # Newest only: Mongo documents cap at 16 MB.
-        messages = messages[-_MAX_HISTORY_MESSAGES:]
-        key = _chat_history_key(claims)
-        expire_at = None if claims.get("role") != "guest" else \
-            datetime.now(timezone.utc) + _GUEST_CHAT_TTL
-        doc = {"_id": key, "messages": messages, "updated_at": datetime.now(timezone.utc)}
-        if expire_at:
-            doc["expire_at"] = expire_at
-        mongo_db.web_chat_history.replace_one({"_id": key}, doc, upsert=True)
-        return jsonify({"ok": True}), 200
 
     def _run_authenticated_agent(claims: dict, body: dict) -> dict:
         """Run the per-user graph pipeline and format the reply.
@@ -341,79 +248,39 @@ def create_app(
 
         role = claims.get("role", "guest")
         user_id = claims.get("user_id") or ""
+        # No route issues a guest token any more; one that verifies is still refused.
+        if role not in ("owner", "user"):
+            return jsonify({"error": "forbidden"}), 403
 
-        # A retried send (same client_msg_id) is answered from the ledger, never re-run or re-metered.
+        refused = _conversation_refusal(user_id, body)
+        if refused is not None:
+            return refused
         # Idempotency: a retried send (same client_msg_id) is answered from
         # the ledger — never run, never metered twice.
-        cmid = ""
-        if role in ("owner", "user"):
-            refused = _conversation_refusal(user_id, body)
-            if refused is not None:
-                return refused
-            cmid = _client_msg_id(body)
+        cmid = _client_msg_id(body)
+        if cmid:
+            turn, cached = claim_turn(mongo_db, user_id, cmid)
+            if turn == "done":
+                return jsonify(cached), 200
+            if turn == "processing":
+                return jsonify(_STILL_PROCESSING), 409
+
+        _over = _meter_or_error(role, user_id)
+        if _over:
             if cmid:
-                turn, cached = claim_turn(mongo_db, user_id, cmid)
-                if turn == "done":
-                    return jsonify(cached), 200
-                if turn == "processing":
-                    return jsonify(_STILL_PROCESSING), 409
-
-        # Meter every authenticated request (owner shares the subscriber tier).
-        if role != "guest":
-            _over = _meter_or_error(role, user_id)
-            if _over:
-                if cmid:
-                    release_turn(mongo_db, user_id, cmid)
-                return jsonify(_limit_response(_over)), 429
-
-        if role in ("owner", "user"):
-            try:
-                result = _run_authenticated_agent(claims, body)
-            except Exception:
-                logger.exception("[web_agent] user pipeline failed")
-                if cmid:
-                    finish_turn(mongo_db, user_id, cmid, error=True)
-                return jsonify({"error": "internal_error"}), 500
-            if cmid:
-                finish_turn(mongo_db, user_id, cmid, result)
-            return jsonify(result), 200
-
-        # Guest path: shared visitor budget, then a basic chat.
-        from app.agent.guest_usage import check_and_increment, guest_label
-        jti = claims.get("jti", "")
-        chat_type = "all"
-        guest_name = claims.get("name") or (guest_label(jti) if jti else "زائر")
-        status, count, limit = check_and_increment(jti, guest_name, chat_type, mongo_db)
-        if status == "pending":
-            return jsonify({
-                "error": "limit_reached",
-                "message": f"وصلت للحد المسموح ({limit} {chat_type}). طلبت الإذن من المسؤول — انتظر الموافقة.",
-                "count": count, "limit": limit,
-            }), 429
-        if status == "block":
-            return jsonify({
-                "error": "access_denied",
-                "message": "تم رفض طلبك من المسؤول.",
-                "count": count, "limit": limit,
-            }), 403
+                release_turn(mongo_db, user_id, cmid)
+            return jsonify(_limit_response(_over)), 429
 
         try:
-            from app.config import GUEST_PERSONALITY
-            from app.agent.context_builder import LANGUAGE_RULE
-            from app.agent.facade.agent import create_chat_completion
-            history = body.get("history") or []
-            # Same language rule as every other channel.
-            guest_system = GUEST_PERSONALITY + LANGUAGE_RULE
-            messages = [{"role": "system", "content": guest_system}]
-            for h in history[-6:]:
-                r = "user" if h.get("role") == "user" else "assistant"
-                messages.append({"role": r, "content": h.get("text", "")})
-            messages.append({"role": "user", "content": message})
-            resp = create_chat_completion(messages=messages, max_tokens=300)
-            return jsonify({"reply": resp.choices[0].message.content, "role": "guest"}), 200
+            result = _run_authenticated_agent(claims, body)
         except Exception:
-            logger.exception("[web_agent] guest chat failed")
+            logger.exception("[web_agent] user pipeline failed")
+            if cmid:
+                finish_turn(mongo_db, user_id, cmid, error=True)
             return jsonify({"error": "internal_error"}), 500
+        if cmid:
+            finish_turn(mongo_db, user_id, cmid, result)
+        return jsonify(result), 200
 
     @app.route("/api/agent/stream", methods=["POST"])
     @require_auth
@@ -577,21 +444,6 @@ def create_app(
         except Exception:
             logger.exception("[web_image_edit] image edit failed")
             return jsonify({"error": "internal_error"}), 500
-
-    @app.route("/api/guest-usage/status", methods=["GET"])
-    @require_auth
-    def guest_usage_status(claims):
-        """Read-only poll of a guest's visitor budget (does not consume usage)."""
-        from app.agent.guest_usage import get_usage_doc
-        if claims.get("role") != "guest":
-            return jsonify({"state": "approved", "count": 0, "limit": 0}), 200
-        jti = claims.get("jti", "")
-        doc = get_usage_doc(jti, "all", mongo_db) or {}
-        return jsonify({
-            "state": doc.get("approval_state", "none"),
-            "count": doc.get("count", 0),
-            "limit": doc.get("limit", 3),
-        }), 200
 
     @app.route("/api/analyze-image", methods=["POST"])
     @require_auth

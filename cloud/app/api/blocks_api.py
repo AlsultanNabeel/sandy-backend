@@ -348,7 +348,7 @@ def register_blocks_api(app, mongo_db=None):
         fire_at = _future(body.get("fire_at"))
         rule = _rule(body.get("recurrence")) or ""
         if kind == "message_to_future_self":
-            # At rest encrypted, as /api/future-messages keeps it.
+            # Sealed at rest: only its owner reads it back.
             text, payload["encrypted"] = _sealed(text)
         new_id = schedules.add(kind, text, fire_at, payload, recurrence=rule)
         return _saved(new_id, schedules.get, "payload")

@@ -34,16 +34,6 @@ _QUIET_LOGGERS = (
     "bedrock-runtime",
 )
 
-# Polled on a timer: drop their access-log lines.
-_QUIET_ACCESS_PATHS = ("/api/reminders",)
-
-
-class _DropPollingAccess(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        return not any(p in msg for p in _QUIET_ACCESS_PATHS)
-
-
 def configure_logging(log_level: str = "INFO") -> None:
     """Set up root logger. Safe to call multiple times."""
     logging.basicConfig(
@@ -53,10 +43,6 @@ def configure_logging(log_level: str = "INFO") -> None:
     )
     for name in _QUIET_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
-    # Drop the frontend's per-minute reminder poll from werkzeug's access log.
-    _wz = logging.getLogger("werkzeug")
-    if not any(isinstance(f, _DropPollingAccess) for f in _wz.filters):
-        _wz.addFilter(_DropPollingAccess())
     logger.debug("[Bootstrap] Logging configured at %s level", log_level)
 
 
@@ -101,23 +87,11 @@ def ensure_indexes() -> None:
 
     # One failure must not skip the rest.
     index_jobs = [
-        ("web_chat_history.expire_at", lambda: mongo_db.web_chat_history.create_index(
-            "expire_at", expireAfterSeconds=0, background=True
-        )),
         ("sandy_session_state.chat_id", lambda: mongo_db.sandy_session_state.create_index(
             "chat_id", unique=True, background=True
         )),
         ("sandy_evals.chat_id+created_at", lambda: mongo_db.sandy_evals.create_index(
             [("chat_id", 1), ("created_at", -1)], background=True
-        )),
-        ("guest_usage.jti+chat_type", lambda: mongo_db.guest_usage.create_index(
-            [("jti", 1), ("chat_type", 1)], unique=True, background=True
-        )),
-        ("guest_usage.last_request_at", lambda: mongo_db.guest_usage.create_index(
-            "last_request_at", background=True
-        )),
-        ("guest_usage.created_at_ttl", lambda: mongo_db.guest_usage.create_index(
-            "created_at", expireAfterSeconds=60 * 60 * 24 * 90, background=True
         )),
         ("sandy_pending_state.updated_at_ttl", lambda: mongo_db.sandy_pending_state.create_index(
             "updated_at", expireAfterSeconds=60 * 60, background=True

@@ -93,13 +93,6 @@ SANDY_IDENTITY_LOCK: str = os.getenv(
 """,
 ).strip()
 
-# Web guest persona: identity yes, intimacy no.
-GUEST_PERSONALITY: str = os.getenv(
-    "SANDY_GUEST_PERSONALITY",
-    "أنتِ ساندي، مساعدة ذكية فلسطينية طوّرك نبيل السلطان. إذا سُئلتِ «من أنتِ؟» ردي بابتسامة: «أنا ساندي، من تطوير نبيل السلطان، ومهمتي أكون مساعدتك الذكية.. شو بقدر أقدم لك اليوم؟». أسلوبك ودود، مهذب، وعفوي، بتستخدمي اللهجة الفلسطينية بلمسات خفيفة وتلقائية بتعطي دفا للمحادثة. التزمي بالاختصار، خلي ردودك دايماً مفيدة، وإذا ما عندك معلومة قوليها بكل صراحة وبساطة بدون أي تكلف أو تأليف.",
-).strip()
-
-
 # ── Per-board broker credentials (features/broker_creds.py) ───────────────────
 # JSON keyed by device id: {"sandy0001": {"user": …, "pass": …}}.
 SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
