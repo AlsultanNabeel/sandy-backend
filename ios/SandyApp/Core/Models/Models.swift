@@ -30,18 +30,6 @@ struct MemoryFact: Identifiable {
     let type: String
 }
 
-// ── الخط الزمني — /api/timeline ──
-
-/// يحمل نوعه ومعرّفه ليقدر التطبيق يحذفه من مصدره.
-struct TimelineEvent: Identifiable {
-    let id: String
-    let type: String      // task | reminder | expense | journal
-    let title: String
-    let subtitle: String
-    let ts: String        // ISO
-    var done: Bool
-}
-
 struct ProjectPlan: Identifiable {
     let id: String
     let topic: String
@@ -76,7 +64,7 @@ struct PersonaData {
     var availableDialects: [DialectOption] = []
 }
 
-// note و priority اختياريان من الباك-إند.
+/// Open task as the home-screen widget stores it.
 struct TaskItem: Identifiable {
     let id: String
     let text: String
@@ -86,67 +74,23 @@ struct TaskItem: Identifiable {
     var priority: String = "normal"   // "low" | "normal" | "high"
 }
 
-struct ReminderItem: Identifiable {
-    let id: String
-    let text: String
-    var remindAt: String  // ISO أو فاضي
-    let isRecurring: Bool
-    var recurrence: String = ""   // RRULE من الخادم، مثل "RRULE:FREQ=DAILY"
-    var note: String = ""
-}
-
-struct HabitItem: Identifiable {
-    let id: String
-    let name: String
-    let streak: Int
-    var doneToday: Bool
-}
-
-struct ExpenseItem: Identifiable {
-    let id: String
-    let amount: Double
-    let note: String
-    let category: String
-    let at: String   // ISO أو فاضي
-}
-
-struct ExpensesSummary {
-    let total: Double
-    let count: Int
-}
-
-struct JournalEntry: Identifiable {
-    let id: String
-    let date: String
-    let text: String
-}
-
 struct ListResult<T> {
     let items: [T]
     let demo: Bool
 }
 
-struct ExpensesResult {
-    let items: [ExpenseItem]
-    let summary: ExpensesSummary
-    let demo: Bool
-}
-
-/// لقطة الرئيسية من نداءات GET الموجودة؛ كل قسم يتحمّل الفشل وحده.
+/// لقطة الرئيسية من القطع الثلاث؛ كل قسم يتحمّل الفشل وحده.
 struct HomeSnapshot {
-    var overdueTasks: Int = 0  // due_at < الآن وغير منجزة
+    var overdueTasks: Int = 0  // موعدها فات وغير منجزة
     var todayTasks: Int = 0
     var openTasks: Int = 0
-    var sampleTaskTexts: [String] = []  // حتى 3
 
     var nextReminderText: String = ""
     var nextReminderAt: String = ""
-    var upcomingReminders: [ReminderItem] = []  // حتى 3
 
     var todayExpenseTotal: Double = 0
     var weekExpenseTotal: Double = 0  // آخر 7 أيام
 
-    var demo: Bool = false
     var hadError: Bool = false
 }
 

@@ -6,9 +6,10 @@ import UniformTypeIdentifiers
 /// `replace` بيمسح نطاق النوع ويعيد فهرسته، والنداءات متسلسلة فما بيتداخل مسح مع فهرسة.
 @MainActor
 enum SpotlightIndexer {
+    /// item = a list row, entry = a log row; the domain adds the list so each list
+    /// replaces only its own rows.
     enum Kind: String, CaseIterable {
-        case task, reminder, journal, book, memory
-        var domain: String { "sandy.\(rawValue)" }
+        case item, reminder, entry, memory
     }
 
     struct Entry {
@@ -21,20 +22,21 @@ enum SpotlightIndexer {
 
     static func identifier(_ kind: Kind, _ id: String) -> String { "sandy:\(kind.rawValue):\(id)" }
 
-    static func replace(_ kind: Kind, with entries: [Entry]) {
+    static func replace(_ kind: Kind, scope: String = "", with entries: [Entry]) {
+        let domain = scope.isEmpty ? "sandy.\(kind.rawValue)" : "sandy.\(kind.rawValue).\(scope)"
         let previous = chain
         let rows = entries.filter { !$0.id.isEmpty && !$0.title.isEmpty }
         chain = Task { @MainActor in
             await previous?.value
             let index = CSSearchableIndex.default()
-            try? await index.deleteSearchableItems(withDomainIdentifiers: [kind.domain])
+            try? await index.deleteSearchableItems(withDomainIdentifiers: [domain])
             guard !rows.isEmpty else { return }
             let items = rows.map { e -> CSSearchableItem in
                 let attrs = CSSearchableItemAttributeSet(contentType: UTType.text)
                 attrs.title = e.title
                 attrs.contentDescription = e.detail
                 return CSSearchableItem(uniqueIdentifier: SpotlightIndexer.identifier(kind, e.id),
-                                        domainIdentifier: kind.domain,
+                                        domainIdentifier: domain,
                                         attributeSet: attrs)
             }
             try? await index.indexSearchableItems(items)
@@ -57,27 +59,20 @@ enum SpotlightIndexer {
         return trimmed.count > 80 ? String(trimmed.prefix(80)) + "…" : trimmed
     }
 
-    static func indexTasks(_ items: [TaskItem]) {
-        replace(.task, with: items.filter { !$0.done }.map {
-            Entry(id: $0.id, title: $0.text, detail: $0.note)
+    /// Open rows of one list; the list rides in the id so a tap opens the right screen.
+    static func indexItems(list: String, _ items: [ListItem]) {
+        replace(.item, scope: list, with: items.filter { !$0.done }.map {
+            Entry(id: list + ":" + $0.id, title: $0.text, detail: "")
         })
     }
 
-    static func indexReminders(_ items: [ReminderItem]) {
-        replace(.reminder, with: items.map {
-            Entry(id: $0.id, title: $0.text, detail: $0.note)
-        })
+    static func indexReminders(_ items: [ScheduleItem]) {
+        replace(.reminder, with: items.map { Entry(id: $0.id, title: $0.text, detail: "") })
     }
 
-    static func indexJournal(_ items: [JournalEntry]) {
-        replace(.journal, with: items.map {
+    static func indexEntries(_ items: [LogEntry]) {
+        replace(.entry, with: items.map {
             Entry(id: $0.id, title: headline($0.text), detail: $0.text)
-        })
-    }
-
-    static func indexBooks(_ items: [BookItem]) {
-        replace(.book, with: items.map {
-            Entry(id: $0.id, title: $0.title, detail: $0.author)
         })
     }
 

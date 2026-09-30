@@ -1064,15 +1064,25 @@ what makes the text-size control real rather than decorative.
 
 ## 6. iPhone app
 
-`ios/SandyApp/`, SwiftUI, ~23 500 lines, 26 feature folders. Swift is one module,
+`ios/SandyApp/`, SwiftUI, ~19 600 lines, 18 feature folders. Swift is one module,
 so folders are organisation only.
 
 - `App/` — `SandyApp`, `AppState` (holds the base URL), `MainTabView`.
-- `Core/Networking/` — `APIClient` split into 15 extensions by domain, behind
+- `Core/Networking/` — `APIClient` split into 9 extensions by domain, behind
   `APIClientProtocol`. **Add new endpoints as an extension, not to the base class.**
 - `Core/Auth/` — Keychain (`…ThisDeviceOnly`), Google sign-in, auth view.
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
 - `Core/Stores/LoadableStore.swift` — the shared load/error/empty state machine.
+- `Features/Blocks/` — **the screens for the blocks (§2.12)**: one generic list screen
+  (`ItemsView`, any list in the kinds table; habits check in per day as `habit` log
+  entries instead of being "done"), one schedules screen (`SchedulesView`, reminders and
+  messages to future self) and the log (`LogView`, the My Life tab, with the on-demand
+  summary). `KindsStore` loads `/api/kinds` once; Daily builds a card per list from it,
+  so a new list needs no app change. `APIClient+Blocks` is the only client of
+  `/api/entries|items|schedules|kinds|summary`, plus the home glance (`homeSnapshot`).
+  Quick add, Siri intents, the tasks widget's ✓ (`PATCH /api/items/<id>`), Spotlight and
+  the reminder banner buttons all write to the blocks. Focus sessions keep their own
+  screen (they drive the Live Activity).
 - `Services/` — `GeminiLiveManager` (in-app live voice), `SpeechManager` (reply playback only),
   `NotificationManager`, `SubscriptionManager`.
 - `Localization/` — one `L10n+<Area>.swift` per feature. Arabic/English, RTL/LTR.

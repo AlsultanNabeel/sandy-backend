@@ -92,41 +92,6 @@ extension APIClient {
         try await send("/api/plans/\(id)", method: "DELETE")
     }
 
-    // حذف عنصر من مصدره الأصلي حسب نوعه (من الخط الزمني).
-    func deleteTask(id: String) async throws {
-        try await send("/api/tasks/\(id)", method: "DELETE")
-    }
-
-    func deleteExpense(id: String) async throws {
-        try await send("/api/life/expenses/\(id)", method: "DELETE")
-    }
-
-    private struct ExpenseUpdate: Encodable {
-        let amount: Double?
-        let note: String?
-        let category: String?
-    }
-
-    // الغائب = بلا تغيير.
-    func updateExpense(id: String, amount: Double? = nil,
-                       note: String? = nil, category: String? = nil) async throws {
-        guard amount != nil || note != nil || category != nil else { return }
-        try await send("/api/life/expenses/\(id)", method: "PATCH",
-                       body: ExpenseUpdate(amount: amount, note: note, category: category))
-    }
-
-    func deleteJournalEntry(id: String) async throws {
-        try await send("/api/life/journal/\(id)", method: "DELETE")
-    }
-
-    private struct JournalText: Encodable {
-        let text: String
-    }
-
-    func updateJournalEntry(id: String, text: String) async throws {
-        try await send("/api/life/journal/\(id)", method: "PATCH", body: JournalText(text: text))
-    }
-
     /// صوت ساندي (WAV من جيميني) لنصّ معيّن؛ بايتات خام، فبيضل على URLSession مباشرة.
     func synthesizeVoice(text: String, mood: String = "neutral") async throws -> Data {
         guard let url = URL(string: baseURL + "/api/voice/tts") else {

@@ -18,11 +18,11 @@ final class HomeStore: LoadableStore {
         let gen = beginLoad()
         let task = Task { @MainActor in
             defer { endLoad(gen) }
-            let snap = await api.getHomeSnapshot()
+            let snap = await api.homeSnapshot()
             guard isCurrentLoad(gen) else { return }
             let fullFail = snap.hadError
                 && snap.openTasks == 0
-                && snap.upcomingReminders.isEmpty
+                && snap.nextReminderText.isEmpty
                 && snap.weekExpenseTotal == 0
             // ما نمسح لوحة جيدة على خطأ/إلغاء عابر: نحدّث فقط لو نجح أو لسا ما عندنا بيانات.
             if !snap.hadError || !didAppear {

@@ -123,7 +123,7 @@ struct CompleteTaskIntent: AppIntent {
     private static func markDone(_ id: String) async -> Bool {
         guard let token = WidgetTaskCache.token,
               let safe = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: WidgetTaskCache.baseURL + "/api/tasks/" + safe) else { return false }
+              let url = URL(string: WidgetTaskCache.baseURL + "/api/items/" + safe) else { return false }
         var req = URLRequest(url: url)
         req.httpMethod = "PATCH"
         req.timeoutInterval = 15

@@ -201,15 +201,15 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let lang = AppLocale.lang
         let snooze = UNNotificationAction(
             identifier: ReminderNotificationAction.snooze.rawValue,
-            title: translate(lang, "reminders.snooze"),
+            title: translate(lang, "blocks.notif.snooze"),
             options: [])
         let done = UNNotificationAction(
             identifier: ReminderNotificationAction.done.rawValue,
-            title: translate(lang, "reminders.done"),
+            title: translate(lang, "blocks.notif.done"),
             options: [])
         let remove = UNNotificationAction(
             identifier: ReminderNotificationAction.delete.rawValue,
-            title: translate(lang, "reminders.delete"),
+            title: translate(lang, "blocks.notif.delete"),
             options: [.destructive])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.reminderCategory,
@@ -241,23 +241,22 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             do {
                 switch action {
                 case .snooze:
-                    let out = try await api.snoozeReminder(id: reminderId,
-                                                           minutes: Self.snoozeMinutes)
+                    let at = Date().addingTimeInterval(TimeInterval(Self.snoozeMinutes * 60))
+                    try await api.updateSchedule(id: reminderId, at: at)
                     // One shot on purpose: repeating from the snoozed time would ring late every day after.
-                    if let at = Self.parseISO(out.remindAt) {
-                        self.schedule(id: notifId, title: content.title, body: content.body,
-                                      at: at, category: Self.reminderCategory, userInfo: info)
-                    }
+                    self.schedule(id: notifId, title: content.title, body: content.body,
+                                  at: at, category: Self.reminderCategory, userInfo: info)
                 case .done:
-                    let out = try await api.completeReminder(id: reminderId)
-                    // Recurring answers with its next occurrence; a one-off stays cancelled.
-                    if let at = Self.parseISO(out.remindAt) {
-                        self.schedule(id: notifId, title: content.title, body: content.body,
-                                      at: at, repeats: NotificationRepeat(rrule: recurrence),
-                                      category: Self.reminderCategory, userInfo: info)
+                    // A repeating one keeps its repeating notification; a one-off is closed.
+                    if recurrence.isEmpty {
+                        try await api.updateSchedule(id: reminderId, status: "cancelled")
+                    } else {
+                        // Removing it above also removed the repeat; put the same trigger back.
+                        try await self.center.add(UNNotificationRequest(
+                            identifier: notifId, content: content, trigger: notification.trigger))
                     }
                 case .delete:
-                    try await api.deleteReminder(id: reminderId)
+                    try await api.deleteSchedule(id: reminderId)
                 }
                 self.remindersChanged &+= 1
             } catch {
@@ -302,8 +301,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             // (a) صارلك يومين — same id, replaces the previous one.
             self.addProactive(
                 id: Self.awayID,
-                title: translate(lang, "insights.notif.away.title"),
-                body: translate(lang, "insights.notif.away.body"),
+                title: translate(lang, "blocks.notif.away.title"),
+                body: translate(lang, "blocks.notif.away.body"),
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 48 * 3600, repeats: false))
 
             // (c) weekday 1 is Sunday in the Gregorian calendar.
@@ -313,8 +312,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             sunday.minute = 0
             self.addProactive(
                 id: Self.weeklyID,
-                title: translate(lang, "insights.notif.weekly.title"),
-                body: translate(lang, "insights.notif.weekly.body"),
+                title: translate(lang, "blocks.notif.weekly.title"),
+                body: translate(lang, "blocks.notif.weekly.body"),
                 trigger: UNCalendarNotificationTrigger(dateMatching: sunday, repeats: true))
 
             // (b) heads-up an hour before today's timed tasks/reminders.
@@ -330,8 +329,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                         [.year, .month, .day, .hour, .minute], from: h.date)
                     self.addProactive(
                         id: h.id,
-                        title: translate(lang, "insights.notif.headsUp.title"),
-                        body: String(format: translate(lang, "insights.notif.headsUp.body"), h.text),
+                        title: translate(lang, "blocks.notif.headsUp.title"),
+                        body: String(format: translate(lang, "blocks.notif.headsUp.body"), h.text),
                         trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false))
                 }
             }

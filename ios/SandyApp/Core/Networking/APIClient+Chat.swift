@@ -10,19 +10,6 @@ private struct MemoryListResponse: Decodable {
     }
 }
 
-private struct TimelineListResponse: Decodable {
-    let items: [Row]?
-
-    struct Row: Decodable {
-        let id: String?
-        let type: String?
-        let title: String?
-        let subtitle: String?
-        let ts: String?
-        let done: Bool?
-    }
-}
-
 private struct ConversationListResponse: Decodable {
     let items: [Row]?
 
@@ -228,19 +215,5 @@ extension APIClient {
 
     func deleteMemory(id: String) async throws {
         try await send("/api/memory/\(id)", method: "DELETE")
-    }
-
-    // MARK: - الخط الزمني
-
-    func getTimeline() async throws -> [TimelineEvent] {
-        let r: TimelineListResponse = try await fetch("/api/timeline")
-        return (r.items ?? []).map {
-            TimelineEvent(id: $0.id ?? "",
-                          type: $0.type ?? "",
-                          title: $0.title ?? "",
-                          subtitle: $0.subtitle ?? "",
-                          ts: $0.ts ?? "",
-                          done: $0.done ?? false)
-        }
     }
 }

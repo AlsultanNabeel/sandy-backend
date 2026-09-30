@@ -67,10 +67,7 @@ private struct SandyToolsSheet: View {
                 SandyBackground()
                 ScrollView {
                     VStack(spacing: Theme.Spacing.md) {
-                        toolRow(icon: "cart.fill", titleKey: "sandy.shopping") { ShoppingView() }
-                        toolRow(icon: "books.vertical.fill", titleKey: "sandy.books") { BooksView() }
                         toolRow(icon: "photo.stack.fill", titleKey: "sandy.photos") { PhotosView() }
-                        toolRow(icon: "sparkles", titleKey: "sandy.share") { ShareContentView() }
                     }
                     .padding(Theme.Spacing.lg)
                 }

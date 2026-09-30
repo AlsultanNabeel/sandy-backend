@@ -142,10 +142,10 @@ struct MainTabView: View {
     @ViewBuilder
     private func routeView(_ route: NotifRoute) -> some View {
         switch route {
-        case .reminders:  RemindersView()
-        case .tasks:      TasksView()
-        case .future:     FutureMessagesView()
-        case .insights:   InsightsView()
+        case .reminders:  SchedulesView()
+        case .tasks:      ItemsView(kind: KindsStore.shared.kindOrBare("tasks", .list))
+        case .future:     SchedulesView(kind: "message_to_future_self")
+        case .insights:   LogView()
         case .dailyNudge: EmptyView()
         }
     }

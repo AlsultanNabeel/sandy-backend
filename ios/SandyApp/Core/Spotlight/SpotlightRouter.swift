@@ -1,8 +1,8 @@
 import CoreSpotlight
 import Foundation
 
-/// مهمة/تذكير → ورقة `NotificationManager.pendingRoute`؛ كتاب → تبويب ساندي؛
-/// خاطرة/ذاكرة → `pendingTab` اللي `MainTabView` بيراقبه.
+/// مهمة/تذكير → ورقة `NotificationManager.pendingRoute`؛ عنصر قائمة تانية → يومي؛
+/// سجلّ → حياتي؛ ذاكرة → الرئيسية (`pendingTab` اللي `MainTabView` بيراقبه).
 @MainActor
 final class SpotlightRouter: ObservableObject {
     static let shared = SpotlightRouter()
@@ -21,10 +21,11 @@ final class SpotlightRouter: ObservableObject {
               let kind = SpotlightIndexer.Kind(rawValue: String(parts[1]))
         else { return false }
         switch kind {
-        case .task:     NotificationManager.shared.pendingRoute = .tasks
+        case .item where parts[2].hasPrefix("tasks:"):
+            NotificationManager.shared.pendingRoute = .tasks
+        case .item:     pendingTab = .daily
         case .reminder: NotificationManager.shared.pendingRoute = .reminders
-        case .book:     DeepLinkRouter.shared.pending = .chat
-        case .journal:  pendingTab = .life
+        case .entry:    pendingTab = .life
         case .memory:   pendingTab = .home
         }
         return true

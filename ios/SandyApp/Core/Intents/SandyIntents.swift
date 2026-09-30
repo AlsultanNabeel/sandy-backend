@@ -11,10 +11,6 @@ enum IntentAPI {
         return api
     }
 
-    static func iso(_ date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
-    }
-
     static var isArabic: Bool {
         Locale.current.language.languageCode?.identifier == "ar"
     }
@@ -60,7 +56,7 @@ struct AddTaskIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
-        try await api.addTask(text: text)
+        try await api.addItem(list: "tasks", text: text)
         return .result(dialog: IntentAPI.dialog("ضفت المهمة: \(text)", "Added task: \(text)"))
     }
 }
@@ -78,7 +74,7 @@ struct AddReminderIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
-        try await api.addReminder(text: text, remindAt: IntentAPI.iso(date), note: nil)
+        try await api.addSchedule(text: text, at: date)
         return .result(dialog: IntentAPI.dialog("ضفت التذكير: \(text)", "Added reminder: \(text)"))
     }
 }
@@ -93,7 +89,7 @@ struct AddHabitIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
-        try await api.addHabit(name: name)
+        try await api.addItem(list: "habits", text: name)
         return .result(dialog: IntentAPI.dialog("ضفت العادة: \(name)", "Added habit: \(name)"))
     }
 }
@@ -111,7 +107,9 @@ struct AddExpenseIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
-        try await api.addExpense(amount: amount, note: note ?? "", category: "")
+        // The server needs some text; an expense said with no note is just «مصروف».
+        let label = note.flatMap { $0.isEmpty ? nil : $0 } ?? (IntentAPI.isArabic ? "مصروف" : "Expense")
+        try await api.addEntry(kind: "expense", text: label, data: ["amount": .number(amount)])
         return .result(dialog: IntentAPI.dialog("سجّلت مصروف بمبلغ \(amount)", "Logged expense: \(amount)"))
     }
 }
@@ -126,7 +124,7 @@ struct AddJournalIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let api = try IntentAPI.make()
-        try await api.addJournalEntry(text: text)
+        try await api.addEntry(kind: "journal", text: text)
         return .result(dialog: IntentAPI.dialog("ضفت الخاطرة بدفترك.", "Added to your journal."))
     }
 }

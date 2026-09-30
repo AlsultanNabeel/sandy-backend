@@ -1,41 +1,9 @@
 import SwiftUI
 
-/// تبويب حياتي — لوح ودجات زي «يومي»، مش قائمة ثابتة.
-/// العادات انتقلت لتبويب يومي.
+/// تبويب حياتي — سجلّ كل اللي صار (مصاريف، قراءة، عادات، مزاج...) بفلتر حسب
+/// النوع، وملخّص بس لما تطلبه.
 struct LifeView: View {
-    @EnvironmentObject var lang: LanguageManager
-
-    private let rows: [HubRowSpec] = [
-        HubRowSpec(icon: "creditcard.fill", titleKey: "life.expenses",
-                   subtitleKey: "life.expenses.subtitle", tint: Theme.Colors.success),
-        HubRowSpec(icon: "book.closed.fill", titleKey: "life.journal",
-                   subtitleKey: "life.journal.subtitle", tint: Theme.Colors.warn),
-        HubRowSpec(icon: "gift.fill", titleKey: "life.gifts",
-                   subtitleKey: "life.gifts.subtitle", tint: Theme.Colors.accent),
-    ]
-
-    var body: some View {
-        CardBoard("life") {
-            rows.enumerated().map { index, spec in
-                // المفتاح `titleKey` مش الموقع: الموقع بيتزحلق أول ما حدا يضيف
-                // صف، وساعتها ترتيب كل مستخدم بيتغيّر لحاله.
-                BoardCard(spec.titleKey, titleKey: spec.titleKey,
-                          icon: spec.icon, defaultSize: .small) {
-                    NavigationLink {
-                        switch index {
-                        case 0:  ExpensesView()
-                        case 1:  JournalView()
-                        default: GiftsView()
-                        }
-                    } label: {
-                        HubRowCard(spec: spec)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .navigationTitle(lang.s("life.title"))
-    }
+    var body: some View { LogView() }
 }
 
 // MARK: - حالة فاضية حيّة (مشتركة)
