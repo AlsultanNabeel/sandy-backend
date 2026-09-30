@@ -54,7 +54,7 @@ Rules every change in this codebase follows. Tests and code comments cite them b
 
 ### C8b — The one deterministic route, and the four conditions on it
 
-`agent/fast_path.py` picks a tool without asking a model. That is the shape C8
+`brain/fast_path.py` picks a tool without asking a model. That is the shape C8
 exists to stop, so it is written down here rather than argued in a commit
 message, and it is allowed **only** while all four of these hold. Anything that
 wants to join it satisfies all four or it does not go in.
@@ -69,12 +69,12 @@ wants to join it satisfies all four or it does not go in.
    objection: a keyword search finds "شغل الضو" inside a story about somebody
    else saying it, and a whole-utterance match does not, because the other
    eleven words have nowhere to go.
-3. **It only picks; it never acts.** It returns the same `function_call` the
-   router would have produced and the ordinary chain runs underneath it —
-   dispatcher, `command_payload`, `tenant_owns_topic`. It can be wrong about
-   intent and still cannot be wrong about permission. Nothing in
-   `guards.DESTRUCTIVE_TOOLS` is reachable, and nothing whose real-world effect
-   is not a closed reversible set (`ir`, `text`, `enum`) is either.
+3. **It only picks; it never acts.** It returns the tool call the model would
+   have made and the brain's own `device_control` runs it — `command_payload`,
+   `tenant_owns_topic`. It can be wrong about intent and still cannot be wrong
+   about permission. It names `device_control` and nothing else, so nothing that
+   deletes or cancels is reachable, and no device whose real-world effect is not
+   a closed reversible set (`ir`, `text`, `enum`) is either.
 4. **It fails open.** Every uncertainty — a leftover word, two devices matching
    the same label, an action the device refuses, any exception — returns `None`
    and the model decides. A route that fails *closed* would be C8's failure mode
@@ -96,7 +96,7 @@ it and must say so where they sit:
 
 - **A long-lived singleton** started once for the life of the process — the MQTT
   reconnect watchdog, the one-shot speaker-model warm-up.
-- **Work the request waits on.** `/api/agent/stream` runs the pipeline on a
+- **Work the request waits on.** `/api/agent/stream` runs the turn on a
   thread and streams what it produces; the request ends when that thread ends.
   Putting it on the shared background pool would let ten concurrent streams hold
   every worker for the length of a turn and starve everything genuinely
@@ -106,52 +106,25 @@ Everything else goes through `utils/thread_pool.submit_background`, which also
 carries the caller's tenant context — a raw thread does not, so background work
 started that way reads and writes nothing and says nothing about it.
 
-## C10 — A handler result answers three questions, not one
-`handled` — "this handler owns the turn and here is its answer".
-`ok` — "the change the user asked for actually happened".
-`error` — "the tool itself broke".
+## C10 — A tool result says whether it happened
 
-A refusal is `{"handled": True, "ok": False}`: it ran, and the answer is no. A
-handler that catches its own exception adds `error`, because a friendly failure
-sentence is still a failure — `_guard` in `executor/dispatch.py` is the model to
-copy.
+A brain tool (`app/brain/tools_*.py`) returns a dict the model reads as JSON:
 
-Set `ok=False` when the handler is **finished** and the request did not take
-effect: a refusal, a not-found target of a change, an input it gave up on, a
-failed write, a no-op with nothing to act on. Do **not** set it when:
-- a read or search legitimately found nothing — the request took effect and the
-  answer is an empty list;
-- the requested end state already holds (pausing what is paused);
-- **a pending action is still live.** A confirmation prompt or a re-ask that
-  keeps the pending alive is the flow continuing, not ending, and marking it
-  makes the next turn look like a failure to a model that is mid-conversation.
+- `ok` — the change the user asked for actually happened. A refusal, a not-found
+  target of a change, a failed write, an input it gave up on: `ok: False`, with
+  `error` saying why, and `reply` when there is a sentence the user should hear.
+- `broke` — the tool itself raised (`tools.execute` catches it and says so). A
+  refusal is not breakage: it ran, and the answer is no.
+- `needs_confirmation` / `needs_choice` — the tool will not act without a yes, or
+  without being told which row. The loop holds the call and asks; this is the flow
+  continuing, not a failure.
 
-An ask that stores **no** pending is finished, and is marked: `task_create` with
-no title asks "شو المهمة اللي بدك أضيفها؟" and nothing carries that forward, so
-without the mark the adapter above it wrote "سجّلتها ✅" over the question.
+A read or search that legitimately found nothing is `ok: True` with no rows; the
+request took effect.
 
-Read `ok` with `app.agent.tool_result.result_ok` at any site that renders a
-success sentence. Read breakage with `result_failed`, which is `error` and
-nothing else:
-- `tool_health` uses `result_failed`, never `ok`. A refusal is not flakiness,
-  and the counter is process-global and keyed by tool name, so three customers
-  each mistyping an item once would otherwise be enough to tell the owner his
-  shopping tool is broken.
-- `handled: False` is **not** breakage either. It is a routing signal —
-  `task_update` returns it for "say which field you want changed" — and scoring
-  it as failure marks a healthy tool degraded after three clarifications.
-- The voice path marks **everything** that did not happen, because an unmarked
-  refusal is what Gemini reads as success and confirms to the user. It marks
-  them differently: `[فشل التنفيذ]` for breakage — raised, not found
-  (`handled: False`), or `error` set — and `[لم يُنفَّذ]` for a refusal.
-  Calling "ما لقيت جهاز بهالاسم، أي واحد تقصد؟" a failed execution makes her
-  abandon a disambiguation the user is halfway through.
-
-Never read `result["handled"]` to decide whether something worked. Omitting `ok`
-means `ok == handled`, so an un-migrated handler keeps its old behaviour; that
-default is a migration aid, not a licence to skip it — and it is why a site that
-overwrites a reply with a success sentence must check `ok`, not `handled`.
-
-An adapter that replaces a handler's reply must not destroy what the handler
-alone knows. `task_create` swaps in a persona-toned sentence; the scheduling
-conflict warning travels beside it as `alert` so the swap stops costing it.
+Never write a success sentence without `ok`. The voice path marks everything that
+did not happen (`brain/voice.py::_tagged`), because an unmarked refusal is what
+Gemini reads as success and confirms to the user — and it marks them differently:
+`[فشل التنفيذ]` for breakage, `[لم يُنفَّذ]` for a refusal. Calling «ما لقيت
+جهاز بهالاسم، أي واحد تقصد؟» a failed execution makes her abandon a
+disambiguation the user is halfway through.
