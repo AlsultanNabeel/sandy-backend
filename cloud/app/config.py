@@ -15,12 +15,8 @@ load_dotenv(BASE_DIR / ".env", override=False)
 APP_ENV = os.getenv("APP_ENV", "prod").lower()
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# Legacy single-owner id.
-SANDY_USER_CHAT_ID = os.getenv("SANDY_USER_CHAT_ID", "").strip()
-
 # Operator addresses (comma-separated). Unset means nobody (never "everybody").
 SANDY_OWNER_EMAILS: str = os.getenv("SANDY_OWNER_EMAILS", "")
-OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "").strip()
 
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 
@@ -66,10 +62,6 @@ EXA_API_KEY = os.getenv("EXA_API_KEY", "").strip()
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "sany-db").strip()
 
-# Paths
-DATA_DIR = BASE_DIR.parent / "data"
-TASKS_DIR = DATA_DIR / "tasks"
-
 # Default personality for guests / new users: warm, no romantic pet names. A user's
 # dialect/custom instructions replace it; SANDY_IDENTITY_LOCK still applies on top.
 SANDY_PERSONALITY: str = os.getenv(
@@ -93,24 +85,13 @@ SANDY_IDENTITY_LOCK: str = os.getenv(
 """,
 ).strip()
 
-# Web guest persona: identity yes, intimacy no.
-GUEST_PERSONALITY: str = os.getenv(
-    "SANDY_GUEST_PERSONALITY",
-    "أنتِ ساندي، مساعدة ذكية فلسطينية طوّرك نبيل السلطان. إذا سُئلتِ «من أنتِ؟» ردي بابتسامة: «أنا ساندي، من تطوير نبيل السلطان، ومهمتي أكون مساعدتك الذكية.. شو بقدر أقدم لك اليوم؟». أسلوبك ودود، مهذب، وعفوي، بتستخدمي اللهجة الفلسطينية بلمسات خفيفة وتلقائية بتعطي دفا للمحادثة. التزمي بالاختصار، خلي ردودك دايماً مفيدة، وإذا ما عندك معلومة قوليها بكل صراحة وبساطة بدون أي تكلف أو تأليف.",
-).strip()
-
-
 # ── Per-board broker credentials (features/broker_creds.py) ───────────────────
 # JSON keyed by device id: {"sandy0001": {"user": …, "pass": …}}.
 SANDY_BROKER_CREDS: str = os.getenv("SANDY_BROKER_CREDS", "").strip()
 
-# ── The fast path (agent/fast_path.py); SANDY_FAST_PATH=0 turns it off ──────
+# ── The fast path (brain/fast_path.py); SANDY_FAST_PATH=0 turns it off ──────
 SANDY_FAST_PATH: bool = os.getenv("SANDY_FAST_PATH", "1").strip().lower() not in (
     "0", "false", "no", "off")
-
-# ── The rebuilt agent (app/brain/); SANDY_NEW_AGENT=1 switches chat + voice to it ──
-SANDY_NEW_AGENT: bool = os.getenv("SANDY_NEW_AGENT", "0").strip().lower() in (
-    "1", "true", "yes", "on")
 
 # ── Native social sign-in: the audience an ID token must be minted for ──────
 # (empty in prod refuses sign-in; outside prod the check is skipped).

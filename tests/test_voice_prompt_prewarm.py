@@ -49,7 +49,7 @@ def test_a_write_builds_the_next_call_s_instruction(db, inline, monkeypatch):
     monkeypatch.setattr(vt, "_build_cached_instruction", built.append)
     monkeypatch.setattr(vt, "tenant_uses_voice", lambda t: True)
 
-    bump_for("u1", collection="sandy_memories")
+    bump_for("u1", collection="sandy_entries")
 
     assert built == ["u1"], (
         "الكتابة حرّكت النسخة وما بنت التعليمات — المكالمة الجاية بتدفعها هي")
@@ -63,12 +63,12 @@ def test_a_tenant_who_never_called_is_not_warmed(db, inline, monkeypatch):
     built: list[str] = []
     monkeypatch.setattr(vt, "_build_cached_instruction", built.append)
 
-    bump_for("silent-user", collection="sandy_tasks")
+    bump_for("silent-user", collection="sandy_entries")
     assert built == []
 
     # أول مكالمة بتحطّ العلامة، وبعدها بيتسخّن زي غيره.
     vt._shared_put("silent-user", 1, "التعليمات")
-    bump_for("silent-user", collection="sandy_tasks")
+    bump_for("silent-user", collection="sandy_entries")
     assert built == ["silent-user"]
 
 
@@ -87,7 +87,7 @@ def test_a_burst_of_writes_builds_once(db, inline, monkeypatch):
     monkeypatch.setattr(vt, "tenant_uses_voice", lambda t: True)
     inline._pending.add("u2")          # بناء مجدوَل أصلاً
 
-    bump_for("u2", collection="sandy_memories")
+    bump_for("u2", collection="sandy_entries")
     assert built == [], "بناءين ع نفس المستأجر بنفس اللحظة"
 
 
@@ -108,7 +108,7 @@ def test_the_background_build_reads_the_new_version_not_the_turn_s(db, inline,
 
     with turn_scope():
         assert version_for("u3") == 0        # بتتخزّن بذاكرة الدور
-        bump_for("u3", collection="sandy_memories")
+        bump_for("u3", collection="sandy_entries")
 
     assert seen == [1], f"التسخين بنى ع نسخة {seen} والقاعدة عندها واحد"
 
@@ -150,7 +150,7 @@ def test_writes_during_a_call_build_once_when_it_ends(db, inline, monkeypatch):
 
     inline.hold("u4")
     for _ in range(3):
-        bump_for("u4", collection="sandy_memories")
+        bump_for("u4", collection="sandy_entries")
     assert built == [], "بنى بنصّ المكالمة"
 
     inline.release("u4")

@@ -7,8 +7,8 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-from app.agent.context_builder import build_effective_persona
-from app.agent.ltm_crypto import decrypt_field
+from app.brain.persona import build_effective_persona
+from app.utils.ltm_crypto import decrypt_field
 from app.blocks import _base, entries
 from app.utils.time_awareness import time_awareness_block
 from app.utils.user_profiles import address_instruction
@@ -49,6 +49,33 @@ def _fact_line(e: Dict[str, Any]) -> str:
     return f"- {text}"
 
 
+def profile_block(user_id: str) -> str:
+    """What the user told her at first open and in the daily questions
+    (`sandy_users.onboarding`), so she greets them by name on every channel."""
+    from app.features import users_store
+
+    if not user_id:
+        return ""
+    onboarding = (users_store.get_user(user_id) or {}).get("onboarding") or {}
+    name = str(onboarding.get("preferred_name") or "").strip()
+    raw = onboarding.get("interests")
+    interests = [str(i).strip() for i in raw if str(i).strip()] if isinstance(raw, list) else []
+    notes = str(onboarding.get("notes") or "").strip()
+    raw = onboarding.get("nudge_answers")
+    answers = [str(v).strip() for v in raw.values() if str(v).strip()] if isinstance(raw, dict) else []
+    parts: List[str] = []
+    if name:
+        parts.append(f"نادِ المستخدم باسم «{name}»")
+    if interests:
+        parts.append("اهتماماته: " + "، ".join(interests[:8]))
+    if notes:
+        parts.append(f"عن نفسه: {notes[:300]}")
+    if answers:
+        # The newest six: nearer to how they are today, and the list only grows.
+        parts.append("قال عن حاله: " + " · ".join(answers[-6:]))
+    return "[ملف المستخدم: " + " · ".join(parts) + "]" if parts else ""
+
+
 def facts_block(limit: int = MAX_FACTS) -> str:
     rows = entries.list_entries("fact", limit=limit)
     if not rows:
@@ -67,13 +94,15 @@ def _words(message: str) -> List[str]:
     return [w for w in re.findall(r"\w+", message or "") if len(w) >= 3][:8]
 
 
-def similar_entries(message: str, k: int = TOP_ENTRIES) -> List[Dict[str, Any]]:
-    """Top-k non-fact log entries for this message; text search without embeddings."""
+def similar_entries(message: str, k: int = TOP_ENTRIES,
+                    kind: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Top-k log entries for this message (of ``kind``, else every kind but facts);
+    text search without embeddings."""
     coll = _base.coll(_base.ENTRIES)
     if coll is None or not (message or "").strip():
         return []
     vector = entries.embed_text(message)
-    base_q: Dict[str, Any] = {"kind": {"$ne": "fact"}}
+    base_q: Dict[str, Any] = {"kind": kind or {"$ne": "fact"}}
     if vector:
         docs = list(coll.find({**base_q, "embedding": {"$ne": None}})
                     .sort("at", -1).limit(SCAN_ENTRIES))
@@ -100,6 +129,7 @@ def build_system(user_id: str, message: str,
     parts = [build_effective_persona(user_id or None), address_instruction(), _RULES,
              time_awareness_block(history)]
     try:
+        parts.append(profile_block(user_id))
         facts = facts_block()
         if facts:
             parts.append(facts)

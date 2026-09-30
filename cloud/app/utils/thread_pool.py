@@ -2,7 +2,6 @@
 
 import contextvars
 import logging
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
@@ -26,33 +25,3 @@ def submit_background(fn, *args, _label: str | None = None, **kwargs):
             logger.exception("[background] %s failed", label)
 
     return sandy_executor.submit(contextvars.copy_context().run, _runner)
-
-
-def gather(jobs: "dict[str, object]") -> "dict[str, object]":
-    """Run name→callable jobs in parallel (with the caller's context); a failing job gives None.
-
-    From inside a pool worker the jobs run inline, since waiting on our own pool can deadlock it.
-    """
-    if not jobs:
-        return {}
-
-    out: "dict[str, object]" = {}
-    if threading.current_thread().name.startswith(_WORKER_PREFIX):
-        for name, fn in jobs.items():
-            try:
-                out[name] = fn()
-            except Exception:  # noqa: BLE001
-                logger.warning("[gather] %s failed", name, exc_info=True)
-                out[name] = None
-        return out
-
-    ctx = contextvars.copy_context()
-    futures = {name: sandy_executor.submit(ctx.copy().run, fn)
-               for name, fn in jobs.items()}
-    for name, fut in futures.items():
-        try:
-            out[name] = fut.result()
-        except Exception:  # noqa: BLE001
-            logger.warning("[gather] %s failed", name, exc_info=True)
-            out[name] = None
-    return out

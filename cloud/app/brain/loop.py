@@ -1,8 +1,8 @@
-"""One turn of the new agent: model -> tool calls -> results -> model, until text.
+"""One chat turn: model -> tool calls -> results -> model, until text.
 
-`run_turn` takes `run_graph`'s arguments and returns the few state keys its
-callers read (`final_response`, `pending_state`, `execution_result`), so the
-chat route swaps one function for the other behind the flag.
+A held action is resolved first, then the fast path, then at most MAX_STEPS
+model calls. `run_turn` returns what the chat routes read: the reply, the pending
+to store for the next turn, and any image a tool made.
 """
 
 from __future__ import annotations
@@ -12,10 +12,8 @@ import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from app.agent.fast_path import try_fast_route
-from app.agent.graph.graph import _stm_load, _stm_save, recent_turns_for_user
-from app.agent.nodes.execute import _get_stream_hooks
-from app.brain import confirm, context, future, model, tools
+from app.brain import confirm, context, future, model, stm, tools
+from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
 from app.utils.tenant_version import turn_scope
 
@@ -24,17 +22,6 @@ logger = logging.getLogger(__name__)
 MAX_STEPS = 6
 ERROR_REPLY = "حصل خطأ، حاول مرة ثانية."
 GAVE_UP_REPLY = "ما قدرت أكمّل هالطلب، جرّب تحكيه بطريقة تانية."
-
-
-def _history(thread_id: str, user_id: str):
-    """(this thread's turns, the turns the prompt sees) — same merge as run_graph."""
-    threads: Dict[str, List[Dict[str, Any]]] = {}
-    cross = recent_turns_for_user(user_id, limit=6, threads_out=threads)
-    key = f"{thread_id}:{user_id}"
-    own = threads[key] if key in threads else _stm_load(thread_id, user_id)
-    seen = {(m.get("role"), m.get("content")) for m in own}
-    extra = [m for m in cross if (m.get("role"), m.get("content")) not in seen]
-    return own, extra + own
 
 
 def _for_model(result: Dict[str, Any]) -> str:
@@ -51,7 +38,7 @@ def _assistant_msg(reply: model.Reply) -> Dict[str, Any]:
 def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
               complete: Callable) -> Dict[str, Any]:
     """{"text", "pending", "tools"} after at most MAX_STEPS model calls."""
-    hooks = _get_stream_hooks()
+    hooks = model.stream_hooks()
     on_text = None
     if hooks:
         hooks[0]()
@@ -136,8 +123,7 @@ def _resolve_pending(pending: Dict[str, Any], message: str,
 
 
 def _fast(message: str, ctx: TurnCtx, image_state) -> Optional[Dict[str, Any]]:
-    fc = try_fast_route({"message": message, "pending_state": None,
-                         "image_state": image_state})
+    fc = try_fast_route(message, image_state=image_state)
     if fc is None:
         return None
     result = tools.execute(fc["name"], fc.get("args") or {}, ctx)
@@ -165,7 +151,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                   source="voice" if source == "voice" else "chat", image_state=image_state)
     held = confirm.live(pending_state)
     outcome = _resolve_pending(held, message, ctx) if held else None
-    own, history = _history(thread_id, user_id)
+    own, history = stm.history(thread_id, user_id)
     if outcome is None:
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
@@ -183,15 +169,15 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
             logger.exception("[brain] turn failed")
             outcome = {"text": ERROR_REPLY, "pending": None, "tools": [], "error": True}
         if due and not outcome.get("error"):
-            # Delivered only once a real reply carries it, as run_graph does.
+            # Delivered only once a real reply carries it.
             future.mark_delivered(due[1])
 
     text = outcome["text"]
     logger.info("[turn] %.0fms total — brain%s tools=%s",
                 (time.perf_counter() - t0) * 1000, " (fast)" if outcome.get("fast") else "",
                 outcome["tools"])
-    _stm_save(thread_id, user_id, message, text, prior_history=own,
-              via="شات التطبيق" if source == "web" else (source or ""))
+    stm.save(thread_id, user_id, message, text, prior_history=own,
+             via="شات التطبيق" if source == "web" else (source or ""), source=ctx.source)
     return {
         "message": message, "user_id": user_id, "chat_id": chat_id,
         "final_response": text,

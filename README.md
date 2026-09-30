@@ -46,34 +46,29 @@ The apps additionally fetch `POST /api/voice/tts` for Sandy's synthesized voice.
 
 ## The agent
 
-One function-calling pass over the real tool schemas, then a fixed graph:
+One model call with native tools, in a loop (`cloud/app/brain/`):
 
 ```
-fc_router  →  soul  →  router  →  ┬ pending  ┐
-                                  ├ execute  ├→  response
-                                  └ clarify  ┘
+held confirmation?  →  fast path (a bare device command, no model)  →
+model  →  tool calls  →  results  →  model  …  (at most 6 calls)  →  reply
 ```
 
-- **fc_router** — a single model call sees all registered tools and always calls
-  one or more (plain conversation is the `chat_respond` tool).
-- **soul** — injects the persona, emotional context and wellness signals.
-- **execute** — runs the tool through the dispatcher.
-- **response** — shapes the final reply.
-
-State flows through a single typed `SandyState`. No globals. Adding a capability
-means registering a tool, not editing the router.
+Twelve tools — `remember`, `recall`, `list_add`, `list_update`, `schedule`,
+`schedule_update`, `summarize`, `device_control`, `scene_apply`, `web_search`,
+`weather`, `image` — read and write three collections (the *blocks*): a log of
+what happened, lists of things to do, and schedules of things that fire. Their
+kinds come from one table (`blocks/kinds.py`), so a new kind of list or log entry
+is a row there, not new code. Deletes, cancels and bulk changes wait for a yes.
+The voice session runs the same tools, plus `confirm`.
 
 ## Memory
 
 | Layer | Backing store |
 |---|---|
-| Short-term conversation | MongoDB, TTL-expired, one document per chat |
-| Facts | MongoDB |
-| Semantic recall | MongoDB Vector Search, degrades safely without the index |
-| Emotional long-term | Encrypted (Fernet) |
-
-Plus per-user tracking of interests, style, lessons, relationships and shared
-history — all of it feeding the persona.
+| Short-term conversation | `sandy_stm`, one document per thread, TTL-expired; every channel sees the last turns of the others |
+| What she knows | `fact` entries in the log, and the onboarding profile |
+| Recall | the log's entries by embedding (Python cosine over the newest 400), text search without a key |
+| Emotional moments | `mood` entries, the user's words Fernet-encrypted |
 
 ## Multi-tenancy
 
@@ -88,13 +83,13 @@ cannot widen its own scope. With no database *or* no authenticated tenant
 
 | Area | What it does |
 |---|---|
-| Conversation | Text and voice, mood-aware, short- and long-term memory |
-| Tasks & reminders | Create, edit, complete, delete; recurrence; confirmation before anything destructive |
-| Life tracking | Shopping, habits with streaks, expenses, journal, reading log, Pomodoro focus |
+| Conversation | Text and voice, one memory across both, short- and long-term |
+| Lists, log & schedules | Tasks, shopping, goals, habits, reading, projects; expenses, journal, moods; reminders with recurrence and messages to your future self — all rows in the three blocks; confirmation before anything destructive |
+| Focus | Pomodoro sessions that can start and end a scene |
 | Room control | Saved scenes driving a room node over MQTT — lights, colour, music, fan, curtain. The node declares its outputs in its heartbeat, so its devices appear in the app on their own |
 | Research | Web research and places lookup |
 | Images | Generation, editing and description |
-| Push | APNs delivery of the daily nudge (reminders are polled by the app from `/api/reminders`) |
+| Push | APNs delivery of reminders and the daily nudge (the app also rings reminders locally from `/api/schedules`) |
 
 ---
 
@@ -103,9 +98,9 @@ cannot widen its own scope. With no database *or* no authenticated tenant
 ```
 Python 3.11 · Flask + gunicorn      backend
 MongoDB                             all memory and feature stores
-Azure OpenAI                        primary brain (routing, chat, vision)
-Gemini                              Live voice, TTS, and a routing fallback
-OpenAI · AWS Bedrock                further fallbacks
+Azure OpenAI                        primary brain (chat with tools, vision)
+Gemini                              Live voice and TTS
+OpenAI                              fallback when Azure fails
 Exa                                 web research
 ESP-IDF / Arduino · MQTT            firmware and device transport
 SwiftUI                             iPhone client
@@ -118,11 +113,12 @@ Heroku                              deployment
 
 ```
 cloud/            backend
-  app/agent/        graph · nodes · tools · executor · memory layers
+  app/brain/        the agent: loop, tools, memory, confirmation, persona
+  app/blocks/       the log, the lists, the schedules, and the kinds table
   app/api/          HTTP routes and the /voice WebSocket
-  app/features/     feature stores (tasks, reminders, life, devices …)
+  app/features/     devices, nodes, scenes, focus, photos, users, research …
   app/integrations/ external clients
-  app/services/     APNs push, nudge and scene-timer schedulers
+  app/services/     APNs push, the schedule runner and the nudge scheduler
   app/utils/        tenancy, background thread pool, circuit breaker, profiles
 firmware/         every board's program
   brain-core/     ESP32-S3 robot brain (ESP-IDF, C)

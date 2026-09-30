@@ -22,6 +22,18 @@ import mongomock
 import pytest
 
 
+def _voice_body(uid, persona=None):
+    """The voice instruction with a stub persona: the real one credits her
+    developer by name, which is product copy and not what these tests are about."""
+    from unittest.mock import patch
+
+    import app.api.voice_ws.tools as vt
+    if persona is not None:
+        return vt._system_instruction_body(uid)
+    with patch("app.brain.persona.build_effective_persona", lambda _uid: "شخصية"):
+        return vt._system_instruction_body(uid)
+
+
 CUSTOMER = "cust-1"
 PROFILE = {"user_id": CUSTOMER, "chat_id": CUSTOMER, "relation": "user",
            "permissions": "all", "is_owner": False, "is_guest": False, "name": ""}
@@ -62,12 +74,11 @@ def test_the_live_voice_prompt_names_the_customer(db):
     every call, and it said the person in front of it was نبيل.
     """
     import app.api.voice_ws.memory as vm
-    import app.api.voice_ws.tools as vt
     from app.utils import user_profiles
 
     with user_profiles.active_user_profile_context(PROFILE):
         vm.set_voice_identity(CUSTOMER)
-        text = vt._system_instruction_body(CUSTOMER, lambda _uid: "شخصية")
+        text = _voice_body(CUSTOMER)
 
     assert "نبيل" not in text
     assert "سامي" in text
@@ -94,38 +105,13 @@ def test_recalled_transcripts_attribute_turns_to_the_right_person(db):
     """Every user turn was labelled «نبيل», so the model read a customer's own
     conversation as somebody else's."""
     import app.api.voice_ws.memory as vm
-    import app.features.brainstorm as bs
     from app.utils import user_profiles
 
     with user_profiles.active_user_profile_context(PROFILE):
         vm.set_voice_identity(CUSTOMER)
         voice = vm._load_stm_context([{"role": "user", "content": "مرحبا"}])
 
-        bs.init_brainstorm(db)
-        bs.start_session(CUSTOMER, "فكرة")
-        db["sandy_stm"].insert_one({
-            "key": f"{CUSTOMER}:{CUSTOMER}", "user_id": CUSTOMER,
-            "history": [{"role": "user", "content": "بدي أعمل مشروع"}],
-        })
-        captured = {}
-
-        def _capture(messages=None, **kw):
-            captured["prompt"] = "\n".join(
-                str(m.get("content", "")) for m in (messages or []))
-
-            class _C:
-                class message:  # noqa: N801
-                    content = "خطة"
-
-            class _R:
-                choices = [_C]
-
-            return _R()
-
-        bs.finish_session(CUSTOMER, create_chat_completion_fn=_capture)
-
     assert "نبيل" not in voice and "سامي" in voice
-    assert "نبيل" not in captured.get("prompt", "")
 
 
 def test_the_address_instruction_does_not_name_anyone(db):
@@ -135,47 +121,6 @@ def test_the_address_instruction_does_not_name_anyone(db):
 
     assert "نبيل" not in user_profiles.address_instruction({})
     assert "المؤنث" in user_profiles.address_instruction({"gender": "female"})
-
-
-def test_the_morning_brief_is_written_for_whoever_asked(db, monkeypatch):
-    """It opened with «اكتبي ملخص صباحي … لنبيل (ذكر)» for every tenant."""
-    import app.integrations.azure_intent_client as aic
-    from app.agent.facade.briefing import build_morning_briefing
-    from app.utils import user_profiles
-
-    captured = {}
-    monkeypatch.setattr(aic.AzureIntentClient, "__init__",
-                        lambda self, *a, **kw: None)
-    monkeypatch.setattr(
-        aic.AzureIntentClient, "_generate_with_gemini",
-        lambda self, prompt, **kw: (captured.setdefault("p", str(prompt)), "صباح")[1])
-
-    with user_profiles.active_user_profile_context(PROFILE):
-        build_morning_briefing(memory={}, mongo_db=db, tasks_file=None)
-
-    instruction = captured["p"].split("اكتبي ملخص صباحي")[-1]
-    assert "نبيل" not in instruction
-    assert "سامي" in instruction
-
-
-def test_the_dead_owner_device_gate_is_gone():
-    """`_OWNER_DEVICE_PREFIXES = ("hardware_",)` and no registered tool has ever
-    started with `hardware_`. Two branches called it, both dead, and the refusal
-    one of them held named the owner to customers who could never reach it.
-
-    The real boundary is `device_store.tenant_owns_topic` — a device belongs to
-    the calling tenant's registry or it does not exist for them.
-    """
-    import app.agent.nodes.execute as ex
-    from app.agent.tools.registry import get_registry
-    from app.agent.tools.setup import register_all_tools
-
-    assert not hasattr(ex, "_is_owner_device_tool")
-    assert not hasattr(ex, "_OWNER_DEVICE_PREFIXES")
-
-    register_all_tools()
-    assert not [n for n in get_registry().all_names() if n.startswith("hardware_")], \
-        "a hardware_ tool now exists — the gate deleted here may be needed again"
 
 
 def test_a_voice_caller_is_a_user_not_the_owner():
@@ -201,7 +146,6 @@ def test_a_woman_is_not_told_she_is_a_man_with_no_way_out(db):
     would have been told she was male with nothing able to change it.
     """
     import app.api.voice_ws.memory as vm
-    import app.api.voice_ws.tools as vt
     from app.utils import user_profiles
 
     default = user_profiles.address_instruction({})
@@ -209,7 +153,7 @@ def test_a_woman_is_not_told_she_is_a_man_with_no_way_out(db):
 
     with user_profiles.active_user_profile_context(PROFILE):
         vm.set_voice_identity(CUSTOMER)
-        prompt = vt._system_instruction_body(CUSTOMER, lambda _uid: "شخصية")
+        prompt = _voice_body(CUSTOMER)
     assert "المؤنث" in prompt
 
 
@@ -294,7 +238,7 @@ def test_she_answers_in_the_language_she_was_written_to(db):
     and for the same reason: it has to survive a custom persona and a Heroku
     override of `SANDY_PERSONALITY`.
     """
-    from app.agent.context_builder import build_effective_persona
+    from app.brain.persona import build_effective_persona
 
     persona = build_effective_persona(None)
     assert "بلغة آخر رسالة" in persona
@@ -307,13 +251,11 @@ def test_the_language_rule_reaches_voice_too(db):
     """One rule, every channel — it goes in the persona, which the voice
     instruction builds on, so it cannot apply to chat and not to the robot."""
     import app.api.voice_ws.memory as vm
-    import app.api.voice_ws.tools as vt
-    from app.agent.context_builder import build_effective_persona
     from app.utils import user_profiles
 
     with user_profiles.active_user_profile_context(PROFILE):
         vm.set_voice_identity(CUSTOMER)
-        text = vt._system_instruction_body(CUSTOMER, build_effective_persona)
+        text = _voice_body(CUSTOMER, persona="real")
 
     assert "بلغة آخر رسالة" in text
 
@@ -330,13 +272,12 @@ def test_both_halves_of_the_voice_prompt_name_the_same_person(db):
     """
     import app.api.voice_ws.memory as vm
     import app.api.voice_ws.speaker as vs
-    import app.api.voice_ws.tools as vt
     from app.utils import user_profiles
 
     nameless = {**PROFILE, "chat_id": "no-name", "user_id": "no-name"}
     with user_profiles.active_user_profile_context(nameless):
         vm.set_voice_identity("no-name")
-        standing = vt._system_instruction_body("no-name", lambda _uid: "شخصية")
+        standing = _voice_body("no-name")
         per_turn = vs._speaker_directive(False)
 
     for text in (standing, per_turn):
@@ -350,13 +291,11 @@ def test_the_voice_prompt_does_not_order_a_dialect_over_the_language_rule(db):
     specific about the same decision, so an English utterance got two orders
     and the later one normally wins."""
     import app.api.voice_ws.memory as vm
-    import app.api.voice_ws.tools as vt
-    from app.agent.context_builder import build_effective_persona
     from app.utils import user_profiles
 
     with user_profiles.active_user_profile_context(PROFILE):
         vm.set_voice_identity(CUSTOMER)
-        text = vt._system_instruction_body(CUSTOMER, build_effective_persona)
+        text = _voice_body(CUSTOMER, persona="real")
 
     assert "وبالشامي" not in text
     assert "بلغة آخر رسالة" in text
@@ -382,31 +321,6 @@ def test_no_route_still_follows_the_interface_language():
         assert "English" not in window, (
             "a route still tells her to reply in English because the site is "
             f"in English: ...{window[:120]}")
-
-
-def test_the_morning_brief_addresses_a_nameless_tenant_in_arabic(db):
-    """«لـ» + «المستخدم» renders «لـالمستخدم». The lam assimilates."""
-    import app.integrations.azure_intent_client as aic
-    from app.agent.facade.briefing import build_morning_briefing
-    from app.utils import user_profiles
-
-    captured = {}
-    with user_profiles.active_user_profile_context(
-            {**PROFILE, "chat_id": "no-name", "user_id": "no-name"}):
-        import pytest as _pytest
-        mp = _pytest.MonkeyPatch()
-        try:
-            mp.setattr(aic.AzureIntentClient, "__init__",
-                       lambda self, *a, **kw: None)
-            mp.setattr(aic.AzureIntentClient, "_generate_with_gemini",
-                       lambda self, prompt, **kw: (
-                           captured.setdefault("p", str(prompt)), "صباح")[1])
-            build_morning_briefing(memory={}, mongo_db=db, tasks_file=None)
-        finally:
-            mp.undo()
-
-    assert "لـالمستخدم" not in captured["p"]
-    assert "للمستخدم" in captured["p"]
 
 
 def test_the_speaker_gate_is_told_who_it_is_verifying(db):
@@ -436,32 +350,10 @@ def test_the_dialect_preset_does_not_outrank_the_language_rule(db):
     line is the more specific one, so an English-only customer on the main text
     path got two orders. The rule states its own precedence now, and says what
     the dialect line actually governs."""
-    from app.agent.context_builder import LANGUAGE_RULE, build_effective_persona
+    from app.brain.persona import LANGUAGE_RULE, build_effective_persona
 
     persona = build_effective_persona(None)
     assert "اللهجة الفلسطينية" in persona, "the fixture no longer covers a dialect"
     assert "بتغلب أي تعليمة لهجة" in LANGUAGE_RULE
     assert "مش بتلزمك تحكي عربي" in LANGUAGE_RULE
     assert persona.index("اللهجة الفلسطينية") < persona.index("بتغلب أي تعليمة لهجة")
-
-
-def test_a_name_that_begins_with_alef_lam_is_not_mangled(db, monkeypatch):
-    """«الياس» is a name, not «ال» + «ياس». Assimilating blindly turns it into
-    «للياس», which is a different person."""
-    import app.integrations.azure_intent_client as aic
-    import app.utils.user_profiles as up
-    from app.agent.facade.briefing import build_morning_briefing
-
-    captured = {}
-    monkeypatch.setattr(aic.AzureIntentClient, "__init__",
-                        lambda self, *a, **kw: None)
-    monkeypatch.setattr(
-        aic.AzureIntentClient, "_generate_with_gemini",
-        lambda self, prompt, **kw: (captured.setdefault("p", str(prompt)), "صباح")[1])
-    monkeypatch.setattr(up, "speaker_label", lambda *a, **kw: "الياس")
-
-    with up.active_user_profile_context(PROFILE):
-        build_morning_briefing(memory={}, mongo_db=db, tasks_file=None)
-
-    assert "للياس" not in captured["p"]
-    assert "الياس" in captured["p"]

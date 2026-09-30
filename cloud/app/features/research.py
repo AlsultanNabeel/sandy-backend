@@ -1,285 +1,76 @@
-"""Web research: places via Google, news/general via Exa + summary, else the full pipeline."""
+"""Web research for the brain's `web_search`: Exa snippets, summarised in one model call."""
 
 import logging
-import os
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional
 from urllib.parse import urlparse
 
-from app.agent.deep_context import (
-    LAST_SEARCH_RESULTS_KEY,
-    places_to_search_items,
-    wants_comparison_grounded_in_search,
-)
-from app.features.google_places import format_places_for_reply, search_places
-from app.features.research_pipeline import run_research_pipeline
-from app.features.research_formatter import summarize_research_results
+from app.config import EXA_API_KEY
+from app.integrations.exa_client import search_exa
 
 logger = logging.getLogger(__name__)
 
-_FOLLOWUP_TRIGGERS = [
-    "من هدول",
-    "من بينهم",
-    "من النتائج",
-    "فيهم",
-    "منهم",
-    "الأفضل",
-    "افضل",
-    "الأحسن",
-    "احسن",
-    "best",
-    "top",
-    "which of these",
-    "from these",
-    "among them",
-    "among these",
-]
+MAX_RESULTS = 8
+SHOWN_RESULTS = 5
+_SUMMARY_SYSTEM = (
+    "أنت ساندي، مساعدة ذكية. لخّص نتائج البحث باللغة العربية "
+    "بشكل مختصر وواضح ومرتب حسب طلب المستخدم. "
+    "لا تبدأ بـ'تفضل' أو كلمات فارغة — ابدأ مباشرة بالمعلومات."
+)
 
 
-def is_research_followup_request(message: str) -> bool:
-    text = str(message or "").strip().lower()
-    return any(t in text for t in _FOLLOWUP_TRIGGERS)
-
-
-def _research_context_items_from_exa(
-    rows: List[Dict[str, Any]], limit: int
-) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for i, r in enumerate(rows[:limit], 1):
-        title = (r.get("title") or "").strip()
-        url = (r.get("url") or "").strip()
-        snip = (r.get("text") or "").strip()[:520]
-        label = title or url or snip[:80] or ""
-        if not label:
-            continue
-        out.append({"row": i, "title": label[:440], "url": url[:400], "snippet": snip})
-    return out
-
-
-def _research_context_items_from_pipeline(
-    results: List[Dict[str, Any]], limit: int
-) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for i, item in enumerate(results[:limit], 1):
-        if not isinstance(item, dict):
-            continue
-        pd = item.get("page_data") or {}
-        title_bit = (
-            pd.get("program_name")
-            or pd.get("product_name")
-            or pd.get("place_name")
-            or pd.get("headline")
-            or pd.get("title")
-            or item.get("source_title")
-            or ""
-        )
-        inst = pd.get("institution_name") or ""
-        bits = [
-            str(x).strip()
-            for x in (inst, str(title_bit or "").strip())
-            if str(x).strip()
-        ]
-        label = (
-            " — ".join(bits)
-            if bits
-            else (item.get("source_title") or item.get("source_url") or "بدون عنوان")
-        )
-        url = str(item.get("source_url") or "").strip()
-        snip = str(item.get("exa_snippet") or "").strip()[:520]
-        out.append(
-            {"row": i, "title": str(label)[:440], "url": url[:400], "snippet": snip}
-        )
-    return out
-
-
-def execute_web_research(
-    query: str,
-    user_message: str,
-    research_type: str = "general",
-    requested_count: int = 5,
-    search_exa_fn: Optional[Callable[..., List[Dict[str, Any]]]] = None,
-    get_exa_page_content_fn: Optional[Callable[..., Dict[str, Any]]] = None,
-    create_chat_completion_fn: Optional[Callable[..., Any]] = None,
-    exa_api_key: str = "",
-    session: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, List[Dict[str, Any]]]:
-    """Returns (Arabic reply, structured items for the session's search buffer)."""
-
-    sess = session if isinstance(session, dict) else {}
-
-    def _last_search_payload() -> Dict[str, Any]:
-        payload = sess.get(LAST_SEARCH_RESULTS_KEY) if isinstance(sess, dict) else {}
-        return payload if isinstance(payload, dict) else {}
-
-    last_search_payload = _last_search_payload()
-    has_last_search = bool(last_search_payload.get("items"))
-    followup_requested = is_research_followup_request(user_message) or (
-        has_last_search and wants_comparison_grounded_in_search(user_message)
-    )
-
-    def _format_followup_reply(
-        payload: Dict[str, Any],
-    ) -> Tuple[str, List[Dict[str, Any]]]:
-        items = payload.get("items") if isinstance(payload.get("items"), list) else []
-        clean_items = [
-            it
-            for it in items
-            if isinstance(it, dict)
-            and (it.get("title") or it.get("snippet") or it.get("url"))
-        ]
-        if not clean_items:
-            return "ما عندي نتائج سابقة أقدر أبني عليها. اعيدي البحث أولاً.", []
-
-        best = clean_items[0]
-        best_title = str(
-            best.get("title") or best.get("url") or "النتيجة الأولى"
-        ).strip()
-        best_snippet = str(best.get("snippet") or "").strip()
-        reply_lines = [f"استنادًا للنتائج السابقة، الأفضل مبدئيًا هو: {best_title}"]
-        if best_snippet:
-            reply_lines.append(f"السبب/الملخص: {best_snippet[:220]}")
-
-        if len(clean_items) > 1:
-            reply_lines.append("خيارات قريبة:")
-            for idx, item in enumerate(clean_items[1:4], 2):
-                title = str(
-                    item.get("title") or item.get("url") or f"الخيار {idx}"
-                ).strip()
-                reply_lines.append(f"{idx}. {title}")
-
-        return "\n".join(reply_lines), clean_items[: max(3, requested_count)]
-
-    if research_type == "places":
-        places_api_key = os.getenv("GOOGLE_PLACES_API_KEY", "").strip()
-        if not places_api_key:
-            return "خدمة الأماكن غير متوفرة حالياً.", []
-
-        # "Could not search" must not sound like "found nothing".
-        from app.features.google_places import PlacesUnavailable
-        try:
-            places = search_places(
-                query, places_api_key, max_results=max(1, min(requested_count, 8))
-            )
-        except PlacesUnavailable as e:
-            logger.error("[Research] places unavailable: %s", e)
-            return ("خدمة الأماكن مش شغّالة عندي حاليًا — مش إنه ما في نتايج، "
-                    "إنه البحث نفسه ما اشتغل."), []
-
-        if not places:
-            return f"ما لقيت أماكن تطابق '{query}'.", []
-
-        ctx_items = places_to_search_items(places, limit=max(requested_count, 8))
-        return format_places_for_reply(places), ctx_items
-
-    if followup_requested:
-        followup_reply, followup_items = _format_followup_reply(last_search_payload)
-        if followup_items:
-            return followup_reply, followup_items
-
-    if not search_exa_fn or not exa_api_key:
-        return "ما قدرت أكمل البحث — خدمة البحث غير متوفرة حالياً.", []
-
-    def _format_fast_path_reply(body: str) -> str:
-        body = str(body or "").strip()
-        if not body:
-            body = "ما قدرت ألخص النتائج بشكل واضح حالياً."
-        source_lines = []
-        for idx, url in enumerate(sources[:5], 1):
-            source_lines.append(f"{idx}. {_short_url(url)}")
-        if source_lines:
-            return f"📌 الملخص:\n{body}\n\n📎 المصادر:\n" + "\n".join(source_lines)
-        return f"📌 الملخص:\n{body}"
-
-    # Fast path for news/general: Exa snippets plus an AI summary.
-    if research_type in {"news", "general"}:
-        try:
-            results = search_exa_fn(query, exa_api_key=exa_api_key, num_results=8)
-        except Exception as e:
-            logger.warning(f"[Research] Exa call raised: {e}")
-            return f"ما قدرت أجد نتائج عن '{query}' — خطأ في الاتصال بخدمة البحث.", []
-
-        ctx_items = _research_context_items_from_exa(results, max(requested_count, 8))
-
-        if not results:
-            return f"ما قدرت أجد نتائج عن '{query}' الآن. جرب مرة ثانية لاحقاً.", []
-
-        snippets: List[str] = []
-        sources: List[str] = []
-        for r in results[:8]:
-            title = (r.get("title") or "").strip()
-            text = (r.get("text") or "")[:400].strip()
-            url = (r.get("url") or "").strip()
-            line = f"- {title}" if title else ""
-            if text:
-                line += f": {text}" if line else f"- {text}"
-            if line:
-                snippets.append(line)
-                if url:
-                    sources.append(url)
-
-        if not snippets:
-            return f"ما قدرت أجد نتائج واضحة عن '{query}'.", ctx_items
-
-        def _short_url(u: str) -> str:
-            try:
-                parsed = urlparse(u)
-                return parsed.netloc.removeprefix("www.") or u
-            except Exception:
-                return u
-
-        if create_chat_completion_fn is None:
-            return (
-                _format_fast_path_reply("\n".join(snippets[:requested_count])),
-                ctx_items,
-            )
-
-        try:
-            response = create_chat_completion_fn(
-                temperature=0.3,
-                max_tokens=600,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "أنت ساندي، مساعدة ذكية. لخّص نتائج البحث باللغة العربية "
-                            "بشكل مختصر وواضح ومرتب حسب طلب المستخدم. "
-                            "لا تبدأ بـ'تفضل' أو كلمات فارغة — ابدأ مباشرة بالمعلومات."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"طلب المستخدم: {user_message}\n\n"
-                            f"نتائج البحث:\n" + "\n".join(snippets)
-                        ),
-                    },
-                ],
-            )
-            reply = (response.choices[0].message.content or "").strip()
-        except Exception as e:
-            logger.warning(f"[Research] AI summary failed: {e}")
-            reply = ""
-
-        base = reply if reply else "\n".join(snippets[:requested_count])
-        return _format_fast_path_reply(base), ctx_items
-
-    # Heavy path for education/product/travel: run the full pipeline.
+def _short_url(u: str) -> str:
     try:
-        results = run_research_pipeline(
-            user_query=query,
-            research_type=research_type,
-            requested_count=requested_count,
-            search_exa_fn=search_exa_fn,
-            get_exa_page_content_fn=get_exa_page_content_fn,
-            create_chat_completion_fn=create_chat_completion_fn,
-            exa_api_key=exa_api_key,
-        )
-    except Exception as e:
-        logger.warning(f"[Research] pipeline failed: {e}")
-        return f"ما قدرت أجد نتائج عن '{query}' — حدث خطأ غير متوقع.", []
+        return urlparse(u).netloc.removeprefix("www.") or u
+    except ValueError:
+        return u
 
+
+def _with_sources(body: str, sources: List[str]) -> str:
+    body = str(body or "").strip() or "ما قدرت ألخص النتائج بشكل واضح حالياً."
+    lines = [f"{i}. {_short_url(url)}" for i, url in enumerate(sources[:5], 1)]
+    if lines:
+        return f"📌 الملخص:\n{body}\n\n📎 المصادر:\n" + "\n".join(lines)
+    return f"📌 الملخص:\n{body}"
+
+
+def web_answer(query: str, user_message: str,
+               complete: Optional[Callable[..., Any]] = None) -> str:
+    """The Arabic answer to a web question, with its sources; a sentence saying so
+    when the search could not run or found nothing."""
+    if not EXA_API_KEY:
+        return "ما قدرت أكمل البحث — خدمة البحث غير متوفرة حالياً."
+    try:
+        results = search_exa(query, exa_api_key=EXA_API_KEY, num_results=MAX_RESULTS)
+    except Exception as exc:  # noqa: BLE001 — provider boundary
+        logger.warning("[research] Exa call raised: %s", exc)
+        return f"ما قدرت أجد نتائج عن '{query}' — خطأ في الاتصال بخدمة البحث."
     if not results:
-        return f"ما قدرت أجد نتائج واضحة عن '{query}'.", []
+        return f"ما قدرت أجد نتائج عن '{query}' الآن. جرب مرة ثانية لاحقاً."
 
-    ctx_heavy = _research_context_items_from_pipeline(results, requested_count)
-    summarized = summarize_research_results(results, requested_count)
-    return summarized, ctx_heavy
+    snippets: List[str] = []
+    sources: List[str] = []
+    for r in results[:MAX_RESULTS]:
+        title = (r.get("title") or "").strip()
+        text = (r.get("text") or "")[:400].strip()
+        url = (r.get("url") or "").strip()
+        line = f"- {title}" if title else ""
+        if text:
+            line += f": {text}" if line else f"- {text}"
+        if line:
+            snippets.append(line)
+            if url:
+                sources.append(url)
+    if not snippets:
+        return f"ما قدرت أجد نتائج واضحة عن '{query}'."
+
+    reply = ""
+    if complete is not None:
+        try:
+            response = complete(temperature=0.3, max_tokens=600, messages=[
+                {"role": "system", "content": _SUMMARY_SYSTEM},
+                {"role": "user", "content": (f"طلب المستخدم: {user_message}\n\n"
+                                             "نتائج البحث:\n" + "\n".join(snippets))}])
+            reply = (response.choices[0].message.content or "").strip()
+        except Exception as exc:  # noqa: BLE001 — provider boundary; the snippets still answer
+            logger.warning("[research] summary failed: %s", exc)
+    return _with_sources(reply or "\n".join(snippets[:SHOWN_RESULTS]), sources)

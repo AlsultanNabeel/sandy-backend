@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.integrations import azure_intent_client as aic
+from app.integrations import openai_client as aic
 
 
 class _Rejected(Exception):

@@ -112,16 +112,23 @@ def test_unpairing_one_robot_leaves_another_tenants_devices_alone(db):
 
 def test_deleting_an_account_leaves_nothing_behind(db):
     """Nine collections survived, four of them because they key on `chat_id`
-    and the erase only ever filtered on `user_id`."""
+    and the erase only ever filtered on `user_id`.
+
+    The pre-blocks collections are on the list too: nothing writes them any more,
+    but until the owner drops them they still hold this person's rows."""
     from app.features.account_delete import delete_account
 
     for coll in ("sandy_facts", "sandy_conversations", "sandy_memories",
-                 "sandy_activity", "sandy_context_metadata"):
+                 "sandy_activity", "sandy_context_metadata", "sandy_goals",
+                 "sandy_brainstorms", "sandy_future_messages", "sandy_shared_content",
+                 "sandy_session_state", "memory"):
         db[coll].insert_one({"chat_id": U, "text": "شي"})
     for coll in ("sandy_books", "sandy_photos", "sandy_habit_log", "sandy_gifts",
                  "sandy_reading_sessions", "sandy_reading_meta", "sandy_evals",
                  "sandy_focus_meta", "sandy_bs_pending", "sandy_usage_daily",
-                 "sandy_tasks", "sandy_journal"):
+                 "sandy_tasks", "sandy_journal", "sandy_reminders", "sandy_shopping",
+                 "sandy_habits", "sandy_expenses", "sandy_scene_timers",
+                 "sandy_entries", "sandy_items", "sandy_schedules"):
         db[coll].insert_one({"user_id": U, "text": "شي"})
 
     out = delete_account(U)
@@ -186,9 +193,8 @@ def test_deleting_an_account_also_releases_its_robots(db):
 def test_a_legacy_numeric_id_does_not_survive_the_delete(db):
     """**Mongo equality is type-strict.**
 
-    Legacy documents carry the owner's old Telegram id as an *integer* —
-    `api/studio_api.py::_brainstorm_chat_ids` exists only to read them and
-    queries `{"$in": [uid, int(uid)]}` for exactly this reason. The delete
+    Legacy documents carry the owner's old Telegram id as an *integer*, and
+    reading them always needed `{"$in": [uid, int(uid)]}` for exactly this reason. The delete
     compared the string form alone and walked straight past every one of them,
     while reporting success. The batch that added collections to the list left
     the type axis open, and the coverage test checks names, not types.

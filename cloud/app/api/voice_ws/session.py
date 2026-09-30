@@ -67,7 +67,6 @@ from app.api.voice_ws.tools import (
     _build_cached_instruction,
     _build_live_tools,
     _dispatch_tool,
-    _make_dispatcher,
     with_recent_turns,
 )
 
@@ -596,7 +595,6 @@ async def _live_session(ws, remote: str) -> None:
         resume_handle: Optional[str] = None
         live_state: Dict[str, Any] = {"resume": None, "goaway": False}
         client = genai.Client(api_key=GEMINI_API_KEY)
-        dispatcher = _make_dispatcher()
 
         while True:
             config_kwargs["session_resumption"] = types.SessionResumptionConfig(
@@ -636,7 +634,7 @@ async def _live_session(ws, remote: str) -> None:
                     _device_to_live(reader, session, recent, verify=gate_on,
                                     live_state=live_state))
                 t_out = asyncio.create_task(
-                    _live_to_device(ws, session, dispatcher, recent, live_state))
+                    _live_to_device(ws, session, recent, live_state))
 
                 done, pending = await asyncio.wait(
                     [t_in, t_out],
@@ -1039,7 +1037,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 consumed, heard_ms / 1000, loudest, threshold)
 
 
-async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
+async def _live_to_device(ws, session, recent: "_RecentAudio",
                           live_state: Optional[Dict[str, Any]] = None) -> None:
     """Relay Gemini Live responses to the device and handle tool calls.
 
@@ -1198,7 +1196,7 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
             _sandy_buf.clear()
 
         # Tool calls: dispatch them and return the result to Live.
-        if response.tool_call and dispatcher:
+        if response.tool_call:
             # للتطبيق بس: «لحظة، عم دوّر» وقت الأداة بدل ما تبيّن معلّقة.
             if get_voice_channel() == _APP_CHANNEL:
                 await send_msg({"type": "working"})
@@ -1218,10 +1216,10 @@ async def _live_to_device(ws, session, dispatcher, recent: "_RecentAudio",
                             )},
                         ))
                         continue
-                # No spoken confirmation step (owner's decision; guards.py lists the
-                # truly destructive tools). The identity travels with the tool call.
+                # Deletes and bulk changes hold for `confirm` inside the brain.
+                # The identity travels with the tool call.
                 result = await loop.run_in_executor(
-                    tools_pool, _dispatch_tool, dispatcher, fc.name,
+                    tools_pool, _dispatch_tool, fc.name,
                     dict(fc.args or {}), get_voice_identity()
                 )
                 fn_responses.append(

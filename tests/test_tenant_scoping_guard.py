@@ -25,7 +25,6 @@ ALLOWED_RAW = {
     "usage_store.py": "rate-limit/metering, keyed by composite _id '<user_id>:<date>'",
     "users_store.py": "the identity/tenant table itself — it manages tenants",
     "speaker_id.py": "owner voiceprint, keyed by _id=str(chat_id)",
-    "brainstorm.py": "chat-scoped drafts, keyed by chat_id",
     "node_store.py": "physical room nodes, keyed by node_id (device infra)",
     "photo_album.py": "album meta keyed by chat_id/photo_id alongside GridFS",
 }

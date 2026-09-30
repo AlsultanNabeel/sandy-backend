@@ -1,12 +1,12 @@
-"""Delete / bulk wait for a yes, read by the existing Arabic yes/no resolver."""
+"""Delete / bulk wait for a yes, read by the Arabic yes/no resolver."""
 from __future__ import annotations
 
 import pytest
 from brain_fakes import A, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
-from app.agent.pending_store import load_pending_state, save_pending_state
 from app.blocks import items
 from app.brain import confirm, loop, voice
+from app.brain import pending as P
 from app.utils.user_profiles import active_user_profile_context
 
 
@@ -75,8 +75,8 @@ def test_an_expired_hold_is_ignored(gym):
 
 def test_the_hold_round_trips_through_the_pending_store(gym, brain_db):  # noqa: F811
     held = _ask_delete(gym)["pending_state"]
-    save_pending_state("userA", "userA", brain_db, held)
-    assert confirm.live(load_pending_state("userA", "userA", brain_db))["tool"] == "list_update"
+    P.save("userA", "userA", brain_db, held)
+    assert confirm.live(P.load("userA", "userA", brain_db))["tool"] == "list_update"
 
 
 def test_voice_holds_then_confirm_tool_resolves_with_the_same_resolver(gym):

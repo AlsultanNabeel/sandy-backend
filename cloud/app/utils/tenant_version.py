@@ -1,8 +1,8 @@
 """One version number per tenant, bumped whenever anything they own changes.
 
-Cached persona/context blocks are keyed on it. It lives in the database so
-both gunicorn workers and writes that bypass the agent (the app's API routes)
-all invalidate the same cache; a TTL alone would serve stale data.
+The cached voice instruction (`api/voice_ws/tools.py`) is keyed on it. It lives
+in the database so both gunicorn workers and the app's own writes invalidate the
+same cache; a TTL alone would serve stale data.
 """
 
 from __future__ import annotations
@@ -18,24 +18,8 @@ logger = logging.getLogger(__name__)
 
 _STAMPS = "sandy_cache_stamps"
 
-# Collections the cached persona block is built from.
-VERSIONED = frozenset({
-    "sandy_memories",
-    "sandy_users",
-    "sandy_tasks",
-    "sandy_reminders",
-    "sandy_habits",
-    "sandy_habit_log",
-    "sandy_books",
-    "sandy_reading_sessions",
-    "sandy_reading_meta",
-    "sandy_journal",
-    "sandy_shopping",
-    "sandy_goals",
-    "sandy_expenses",
-    "sandy_focus",
-    "sandy_focus_meta",
-})
+# Collections the cached voice instruction is built from: the profile and the log's facts.
+VERSIONED = frozenset({"sandy_users", "sandy_entries"})
 
 # Memo lives for one turn only (turn_scope); a cross-turn memo would hide
 # writes made on the other worker.

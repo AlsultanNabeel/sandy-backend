@@ -241,20 +241,19 @@ def test_voice_does_not_stop_to_ask_are_you_sure():
     assert "تأكيد صوتي" not in src, "the spoken confirmation step is back"
     assert "awaited_confirm" not in src
     assert "DESTRUCTIVE_TOOLS" not in src, (
-        "the voice path is gating tools again — that guard belongs to the text "
-        "router, where there is no conversation waiting on it")
+        "the voice path is gating tools again — holds belong to the brain's "
+        "deletes and bulk changes, not to every call")
 
 
 def test_switching_a_device_on_is_not_treated_as_destruction():
-    from app.agent.guards import DESTRUCTIVE_TOOLS
+    """Only deletes, cancels and bulk changes wait for a yes; a lamp is undone by
+    saying the opposite."""
+    from app.brain.ctx import TurnCtx
+    from app.brain.tools import execute
 
-    for tool in ("device_control", "scene_apply", "shopping_remove"):
-        assert tool not in DESTRUCTIVE_TOOLS, (
-            f"{tool} is reversible by saying the opposite — guarding it buys "
-            "nothing and costs a round trip on every command")
-
-    # ...and the ones that really do lose something are still guarded.
-    assert {"delete_photo", "brainstorm_delete"} <= DESTRUCTIVE_TOOLS
+    out = execute("device_control", {"device": "nothing", "action": "on"},
+                  TurnCtx(user_id=""))
+    assert not out.get("needs_confirmation")
 
 
 def test_tools_do_not_run_on_the_shared_thread_pool():

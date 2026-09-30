@@ -198,27 +198,6 @@ class ScopedCollection:
         self._note_write()
         return out
 
-    def insert_missing(self, documents: List[Mapping[str, Any]]) -> int:
-        """Insert documents whose ``_id`` is new, in one round trip; returns the count inserted.
-
-        Not a general bulk_write: scoping arbitrary pymongo ops would depend on
-        driver internals. Unordered, so duplicate keys from a race skip only themselves.
-        """
-        docs = [self._stamp(d) for d in documents if d.get("_id") is not None]
-        if not docs:
-            return 0
-        from pymongo.errors import BulkWriteError
-
-        try:
-            result = self._raw.insert_many(docs, ordered=False)
-            self._note_write()
-            return len(getattr(result, "inserted_ids", None) or [])
-        except BulkWriteError as exc:
-            errors = (exc.details or {}).get("writeErrors") or []
-            if errors and all(e.get("code") == 11000 for e in errors):
-                return len(docs) - len(errors)
-            raise
-
 
 def scoped(mongo_db: Any, name: str, field: str = "user_id",
            bump: bool = True) -> Optional[ScopedCollection]:

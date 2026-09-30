@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from brain_fakes import A, B, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
-from app.agent.ltm_crypto import encrypt_field
+from app.utils.ltm_crypto import encrypt_field
 from app.blocks import entries, items, schedules
 from app.brain import context, loop, tools
 from app.brain.ctx import TurnCtx
@@ -43,7 +43,7 @@ def test_the_prompt_carries_only_this_tenants_memory(brain_db):  # noqa: F811
 
 def test_encrypted_facts_are_decrypted_for_the_prompt(brain_db, monkeypatch):  # noqa: F811
     from cryptography.fernet import Fernet
-    from app.agent import ltm_crypto
+    from app.utils import ltm_crypto
     monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
     with active_user_profile_context(A):
         entries.add("fact", encrypt_field("بحب الشاي"), {"encrypted": True})

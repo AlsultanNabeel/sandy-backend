@@ -19,7 +19,7 @@ def env(monkeypatch):
     monkeypatch.setattr(pair_presence, "_publish",
                         lambda node_id, code: sent.append((node_id, code)) or True)
     db = mongomock.MongoClient().db
-    app = create_app(mongo_db=db, semantic_memory_stats_fn=lambda: {})
+    app = create_app(mongo_db=db)
     return app.test_client(), db, sent
 
 

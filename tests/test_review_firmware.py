@@ -49,7 +49,7 @@ def test_publish_endpoint_needs_the_token(db, monkeypatch):
     from app.api.server import create_app
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     monkeypatch.setattr(config, "SANDY_FIRMWARE_TOKEN", "t0k", raising=False)
-    c = create_app(mongo_db=db, semantic_memory_stats_fn=lambda: {}).test_client()
+    c = create_app(mongo_db=db).test_client()
     data = {"version": "1.0.0", "signature": "ab",
             "image": (io.BytesIO(b"img"), "fw.bin")}
     assert c.post("/api/firmware/publish", data=data,
@@ -100,7 +100,7 @@ def test_the_small_boards_get_their_board_in_the_url(db, monkeypatch):
     from app.api.server import create_app
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     monkeypatch.setattr(config, "SANDY_FIRMWARE_TOKEN", "t0k", raising=False)
-    c = create_app(mongo_db=db, semantic_memory_stats_fn=lambda: {}).test_client()
+    c = create_app(mongo_db=db).test_client()
     data = {"version": "0.5.0", "signature": "ab", "board": "room", "rollout": "100",
             "image": (io.BytesIO(b"roomimg"), "fw.bin")}
     r = c.post("/api/firmware/publish", data=data, content_type="multipart/form-data",

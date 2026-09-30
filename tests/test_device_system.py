@@ -165,18 +165,18 @@ def mock_actuation(monkeypatch):
 
 
 def test_control_unknown_device_refuses_and_asks(db, mock_actuation):
-    from app.agent.tools.schemas.device_tools import device_control
+    from app.brain.tools_world import device_control
 
     with as_tenant("t1"):
         _add_light()
         out = device_control({"device": "غسالة", "action": "on"}, None)
-    assert out["handled"] is True
+    assert out["ok"] is False
     assert "ضوء الصالة" in out["reply"]          # lists what's available
     assert "topic" not in mock_actuation          # nothing was actuated
 
 
 def test_control_on_actuates_real_topic(db, mock_actuation):
-    from app.agent.tools.schemas.device_tools import device_control
+    from app.brain.tools_world import device_control
 
     with as_tenant("t1"):
         _add_light()
@@ -188,7 +188,7 @@ def test_control_on_actuates_real_topic(db, mock_actuation):
 
 def test_control_never_applies_the_opposite(db, mock_actuation):
     """'on' must send 'on' — never silently flip to 'off' (the original bug)."""
-    from app.agent.tools.schemas.device_tools import device_control
+    from app.brain.tools_world import device_control
 
     with as_tenant("t1"):
         _add_light()
@@ -198,7 +198,7 @@ def test_control_never_applies_the_opposite(db, mock_actuation):
 
 
 def test_control_bad_action_refuses_without_actuating(db, mock_actuation):
-    from app.agent.tools.schemas.device_tools import device_control
+    from app.brain.tools_world import device_control
 
     with as_tenant("t1"):
         device_store.add_device("salon_curtain", "ستارة", "cover",
@@ -211,7 +211,7 @@ def test_control_bad_action_refuses_without_actuating(db, mock_actuation):
 def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, monkeypatch):
     """A scene action on a registered device goes through command_payload +
     device_topic (the same validated path device_control uses), not the old vocab."""
-    from app.agent.tools.schemas.life_tools import actuate_scene_actions
+    from app.features.scene_store import actuate_scene_actions
 
     with as_tenant("t1"):
         _add_light()  # dimmer "living_light" -> room/cmd/light
@@ -219,18 +219,6 @@ def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, m
     assert sent is True
     assert mock_actuation["topic"] == "room/cmd/light"
     assert mock_actuation["payload"] == "on"
-
-
-def test_device_catalog_lists_registered_devices_only(db):
-    from app.agent.tools.schemas.device_tools import build_device_catalog
-
-    with as_tenant("t1"):
-        _add_light()
-        catalog = build_device_catalog()
-    assert "living_light" in catalog
-    assert "on|off" in catalog
-    with as_tenant("t2"):
-        assert build_device_catalog() == ""       # other tenant sees nothing
 
 
 # ── Per-tenant actuation ownership (replaces the old owner-only gate) ────────

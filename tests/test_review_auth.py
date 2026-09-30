@@ -39,7 +39,7 @@ def _app(monkeypatch):
     from app.api.server import create_app
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     db = mongomock.MongoClient().db
-    return create_app(mongo_db=db, semantic_memory_stats_fn=lambda: {}), db
+    return create_app(mongo_db=db), db
 
 
 def _bearer(role="user", uid="u1"):
@@ -69,16 +69,6 @@ def test_bad_base64_is_a_400(monkeypatch):
     assert r.status_code == 400
 
 
-def test_chat_history_is_capped_and_typed(monkeypatch):
-    app, db = _app(monkeypatch)
-    c = app.test_client()
-    assert c.put("/api/chat/history", json={"messages": "x"},
-                 headers=_bearer()).status_code == 400
-    c.put("/api/chat/history", json={"messages": list(range(900))}, headers=_bearer())
-    doc = db.web_chat_history.find_one({"_id": "web_chat_u1"})
-    assert len(doc["messages"]) == 500 and doc["messages"][-1] == 899
-
-
 def test_social_owner_tier_needs_a_vouched_email(monkeypatch):
     from app.api import social_auth_api as sa
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
@@ -105,15 +95,11 @@ def test_paid_routes_are_metered(monkeypatch):
     c = app.test_client()
     h = _bearer()
     assert c.get("/api/research?q=x", headers=h).status_code == 429
-    assert c.post("/api/gifts/generate", json={}, headers=h).status_code == 429
-    assert c.post("/api/plans/active/finish", headers=h).status_code == 429
 
 
 def test_non_numeric_body_fields_are_a_400(monkeypatch):
     app, _ = _app(monkeypatch)
     c = app.test_client()
     h = _bearer()
-    r = c.post("/api/life/books", json={"title": "x", "total_pages": "abc"}, headers=h)
+    r = c.post("/api/life/focus/start", json={"focus_min": "x"}, headers=h)
     assert r.status_code == 400 and r.get_json()["error"] == "invalid_request"
-    assert c.post("/api/life/focus/start", json={"focus_min": "x"}, headers=h).status_code == 400
-    assert c.get("/api/life/expenses?days=abc", headers=h).status_code == 400

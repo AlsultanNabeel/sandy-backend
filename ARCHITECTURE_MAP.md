@@ -6,27 +6,14 @@ lives, why it is shaped that way, and which parts are load-bearing.
 
 Written by reading every source file in the repo, not from the older docs — where
 this contradicts `README.md`, `docs/`, or a code comment, this is the newer
-reading. Last full pass: 14 Aug 2026, kept current through **25 Aug 2026**, when
-a system-wide audit ran in eight batches and rewrote §2.4, §2.5, §2.5b, §5, §7,
-§9 and §12 from what the code does now.
-
-`scripts/audit_turn_cost.py` and `scripts/audit_all_tools.py` are the audit's
-two instruments and they stayed: the first counts the database round trips and
-external calls in one chat turn with the models stubbed, the second dispatches
-all 80 tools and prints what each returned. §12 cites the first by name, and a
-number in a document with no way to re-measure it is how a regression gets
-called an improvement — which happened once in this audit already, when a
-feature that had stopped running read as two round trips saved.
-
-Current readings: **28 round trips on a warm turn (36 cold), 1 embedding call per turn**; **RAISED 0,
-NOT-HANDLED 9, OK 71** (the nine are seven routing meta-tools with stub
-handlers and the two image tools, which need a key).
+reading. Last full pass: 14 Aug 2026. The backend sections (§2, §3.2, §8, §9,
+§12) were rewritten on **30 Sep 2026** for phase 5 of the rebuild, which deleted
+the old agent (graph, router, 80-tool registry, memory layers), every
+per-feature store and route the app stopped calling, and the scene-timer runner.
+What is described below is what exists; the old world is in git history.
 
 **§12 is the list of what is still wrong**, ranked by whether a customer can
-feel it. It was rewritten from scratch in that pass because four of the nine
-items in it had already been fixed and the list had not been told — a ranked
-defect list that nobody re-reads becomes a way of believing things that stopped
-being true.
+feel it.
 
 **Keep this current.** When you change a contract in here — a topic, a route, an
 ownership rule, a boundary — update the section as part of the same commit. A map
@@ -63,8 +50,8 @@ firmware/             every board's program, one folder each:
   room-node/          classic ESP32 (Arduino) — the room node (sandy/node/<id>/room/*)
 ios/SandyApp/         SwiftUI iPhone client
 tests/                backend tests (pytest + mongomock)
-scripts/              sync, smoke test, voice-WS probe, the two audit
-                      instruments, firmware keygen/publish, CA-roots generator, latency bench
+scripts/              migration into the blocks, voice-WS probe, board provisioning,
+                      firmware keygen/publish, CA-roots and hardware-doc generators, C checks
 docs/                 NOT IN GIT — see §11
 ```
 
@@ -93,21 +80,22 @@ web: gunicorn --chdir cloud wsgi:app --workers 2 --threads 8 --timeout 120
 ```
 
 Two workers × eight threads = sixteen concurrent requests. **There is no worker
-dyno and no job queue.** Long work — research pipelines, image generation — runs
+dyno and no job queue.** Long work — a chat turn with tools, image generation — runs
 inside the request under a 120-second cap. If you add anything slower than that,
 you are adding a queue first.
 
 Every worker runs `bootstrap()`, so the periodic jobs used to start twice per
 dyno. They are now behind `utils/process_leader.claim_leadership` — a `flock` on
 the local filesystem, released by the kernel if the holder dies, so gunicorn's
-replacement claims it on its own boot. The per-day nudge lock and the
-per-timer find-and-delete stay: they are what makes this safe across *dynos*,
-which a per-machine lock says nothing about. `mqtt_ingest` is deliberately
+replacement claims it on its own boot. The per-day nudge lock and the schedule
+runner's compare-and-set claim stay: they are what makes this safe across
+*dynos*, which a per-machine lock says nothing about. `mqtt_ingest` is deliberately
 **not** elected — one subscriber for every board's heartbeat is a redundancy
 decision, and `/api/diagnose` reports that listener per worker.
 
 `wsgi.py` is production; `serve_api.py` is the local dev runner. Both build the
-same app: `configure_logging()` → `init_runtime()` → `create_app()` → `bootstrap()`. Nothing connects to
+same app: `configure_logging()` → `bootstrap.init_runtime()` (Mongo, the stores'
+indexes, MQTT ingest) → `create_app()` → `bootstrap()`. Nothing connects to
 a database at *import* time — that is deliberate, and it is what lets the whole
 package import in a test with no credentials. Do not add import-time side effects.
 
@@ -115,228 +103,166 @@ package import in a test with no credentials. Do not add import-time side effect
 
 | Path | Role |
 |---|---|
-| `app/config.py` | The central env-var module. New code imports from here rather than calling `os.getenv` at a call site; older modules (bootstrap, ltm_crypto, integrations/*, …) still read the environment directly. |
-| `app/bootstrap.py` | One-time startup, run last: `validate_config` (fatal → `RuntimeError`), Google creds, Sentry, tool registry, `ensure_indexes`, summary migration, the nudge scheduler, the scene-timer runner, and the blocks' indexes + the schedule runner (§2.12). Idempotent. |
+| `app/config.py` | The central env-var module. New code imports from here rather than calling `os.getenv` at a call site; older modules (`auth_handlers`, `ltm_crypto`, integrations/*, …) still read the environment directly. |
+| `app/bootstrap.py` | `init_runtime()` (Mongo on `app.db`, the stores' indexes, MQTT ingest), then `bootstrap()`: `validate_config` (fatal → `RuntimeError`), Google creds, Sentry, `ensure_indexes`, and — on the elected worker — the nudge scheduler and the blocks' indexes + the schedule runner. Idempotent. |
 | `app/db.py` | The single Mongo handle. Every store reads through `get_db()`. |
 | `app/errors.py` | Typed error taxonomy. |
-| `app/agent/` | The brain: graph, nodes, tools, executor, and the memory layers. |
-| `app/api/` | HTTP routes and the `/voice` WebSocket. |
-| `app/features/` | Feature stores — the data layer, one module per domain. |
-| `app/integrations/` | Clients for everything external. |
-| `app/services/` | Push delivery (APNs), the nudge scheduler, the scene-timer runner and the `sandy_schedules` runner (each once a minute). |
-| `app/utils/` | Tenancy (+ `tenant_version`), circuit breaker, background thread pool, profiles, time, text. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
-| `app/blocks/` | The rebuild's data layer — log / lists / schedules + the kinds table (§2.12). |
-| `app/brain/` | Phase 2 of the rebuild: the one-call agent on the blocks, behind `SANDY_NEW_AGENT` (§2.13). |
+| `app/brain/` | The agent: the loop, its tools, short-term memory, held confirmations, persona, the fast path (§2.3–§2.5). |
+| `app/blocks/` | The data layer — log / lists / schedules + the kinds table (§2.12). |
+| `app/api/` | HTTP routes and the `/voice` WebSocket (§2.9). |
+| `app/features/` | What is not a block: devices, nodes, scenes, focus, photos, users, usage, speaker id, firmware, device keys, research, weather, vision, account deletion. |
+| `app/integrations/` | Clients for everything external: the chat client (`openai_client.chat_fn`), embeddings, Exa, Places, FLUX/Azure images, Gemini TTS, MQTT, the camera, Sentry. |
+| `app/services/` | APNs, the `sandy_schedules` runner (once a minute) and the daily-nudge scheduler. |
+| `app/utils/` | Tenancy (`tenant_db`, `tenant_version`), `ltm_crypto`, circuit breaker, background thread pool, process leader, profiles, time, Arabic days. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
 
-### 2.3 The agent graph
+### 2.3 The agent — `app/brain/`
 
-`app/agent/graph/graph.py` runs a fixed pipeline:
+One model call with native tools, in a loop, on the blocks. Chat enters at
+`loop.run_turn` (from `api/server.py::_run_authenticated_agent`, shared by
+`/api/agent` and `/api/agent/stream`); voice enters at `voice.dispatch` (from
+`api/voice_ws/tools.py::_dispatch_tool`). There is no other agent and no flag.
 
-```
-fc_router → soul → router → ┬ pending  ┐
-                            ├ execute  ├→ response → final reply
-                            └ clarify  ┘
-```
+**The turn** (`loop.py`):
 
-- **`fast_path.py`** — tried first, and usually not taken. A bare device command
-  («شغّل الضو») is matched *whole* against the caller's own registered devices and
-  answered with no model call at all — the turn's two serial model calls (§12.5)
-  drop to zero, because `response_node` passes a handler's reply straight
-  through. It only picks the tool; `apply_routing_decision` derives everything
-  else so the two routes cannot drift, and the dispatcher, `command_payload` and
-  `tenant_owns_topic` run underneath it unchanged. Its four conditions, and why
-  it is not the thing C8 bans, are in `CONVENTIONS.md` C8b. `SANDY_FAST_PATH=0`
-  turns it off.
-- **`agents/fc_router.py`** — one native function-calling pass. The model sees
-  every registered tool as a real tool (name + description + JSON schema) and
-  always calls one or more (`tool_choice="required"`; plain conversation is the
-  `chat_respond` tool, so the router never writes a reply that gets thrown away).
-  This replaced a
-  ~200-line hand-written disambiguation prompt: one call, more accurate. Mood and
-  face are derived from the chosen tool by a cheap lookup, no extra model call.
-  The stable prefix (tool catalogue + persona) is sent first and kept byte-identical
-  across turns so Azure prompt caching keeps hitting — **do not reorder it.**
-- **`nodes/soul.py`** — persona snippet, emotional context, wellness signals.
-- **`nodes/router.py`** — picks the branch.
-- **`nodes/execute.py`** — bridge to `ToolDispatcher`.
-- **`nodes/pending.py`** — resumes a confirmation the user was mid-way through.
-- **`nodes/clarify.py`** — asks instead of guessing.
-- **`nodes/response.py`** — templates + persona → the reply.
+1. A held confirmation (`pending_state`, loaded by the route from
+   `sandy_pending_state`) is resolved first: yes runs the held call, no cancels,
+   a pick answers "which one", anything else drops the hold and is a normal turn.
+2. **The fast path** (`fast_path.py`): a bare device command («شغّل الضو») is
+   matched *whole* against the caller's own registered devices and run with no
+   model call at all. It only picks the tool; `device_control`,
+   `command_payload` and `tenant_owns_topic` run underneath it unchanged. Its four
+   conditions, and why it is not the thing C8 bans, are in `CONVENTIONS.md` C8b.
+   `SANDY_FAST_PATH=0` turns it off.
+3. `context.build_system` (§2.5), then at most **6** model calls with native tools:
+   model → tool calls → results (JSON tool messages) → model, until it answers in
+   text. A tool asking for a yes or a choice ends the turn with a deterministic
+   question and a held action, with no second model call.
+4. Due `message_to_future_self` schedules (`future.py`) go into the system prompt
+   and are marked `sent` only when the reply is not an error.
+5. The turn is written to short-term memory (`stm.save`, with `via`).
 
-State is one `TypedDict`, `graph/state.py::SandyState`, passed through every
-node. No globals. Preserve that.
+**The model call** (`model.py`): the Azure chat deployment through
+`openai_client.chat_fn()` — the process's one chat client, behind the `openai`
+breaker and the param-quirk adapter — then OpenAI direct (`OPENAI_MODEL`), then
+`None` and a fixed error sentence. Text streams through thread-local hooks
+(`model.set_stream_hooks`), cumulative, which `/api/agent/stream` sets on the
+thread that runs the turn.
+
+`run_turn` returns `final_response`, `pending_state` (the route saves it for the
+next turn) and `execution_result` (image bytes and caption when a tool made one).
+The `[turn] …ms total — brain tools=[…]` log line says where a slow turn went.
 
 ### 2.4 Tools
 
-80 tools registered through `tools/setup.py::register_all_tools()` from 14 schema
-modules in `agent/tools/schemas/`. `registry.py` holds them, `dispatcher.py` runs
-them.
+Twelve (`tools.py`), voice adds `confirm`. Enums come from `kinds.KINDS`, so a new
+kind needs no tool change.
 
-Groups: tasks · reminders · meta · other (research/image/utility) · mcp (memory +
-fetch) · goals · future messages · gifts · content share · self-awareness · photos ·
-brainstorm · life (shopping/habits/expenses/journal/books/reading/focus/scenes) ·
-devices.
+| Tool | Does |
+|---|---|
+| `remember` | `entries.add(kind, text, data)`; `kind=mood` keeps a significant mood with the user's words sealed (`ltm_crypto`), once per turn |
+| `recall` | entries + items + pending schedules, filtered by kind / list / since / until / query words (an alias like «مهامي» becomes the filter); compact rows |
+| `list_add` | `items.add`; `due` parsed like `when`; a duplicate open item is reported, not added |
+| `list_update` | by `id` or `match_text` (`matching.match_rows`: exact, contained, fuzzy ≥ 0.72): done / text / due / delete |
+| `schedule` | `schedules.add`; `when` = ISO, else a bare weekday, else one model call (`when._parse_with_model`), else the deterministic Arabic date parser |
+| `schedule_update` | move / rename / cancel (status `cancelled`) |
+| `summarize` | the period's entries, items and schedules as rows; the model writes the summary, nothing is stored |
+| `device_control` | a registered device by slug or label; `command_payload` validates, `send_to_topic` checks the topic is the caller's; an unknown device or action is refused with what is available |
+| `scene_apply` | `scene_store.apply_scene` (actuates, schedules the reverts, §2.12) plus the room-node vocabulary fallback |
+| `web_search` | `features/research.web_answer`: Exa snippets summarised in one model call, with sources |
+| `weather` | `features/weather` |
+| `image` | `vision.generate_image_with_azure` on the model's own prompt (FLUX, then Azure DALL-E) |
 
-**Adding a capability means adding a tool, not editing the router.**
+**A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
+`reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
+breaks the turn); `needs_confirmation` / `needs_choice` when it will not act yet.
 
-Destructive tools are named once, in `agent/guards.py`, and that one set is shared
-by the text path and the voice path. Do not redefine it locally.
+**Confirmation** (`confirm.py`, `pending.py`): deletes, cancels and multi-row
+changes return `needs_confirmation`; two matching rows return `needs_choice`. The
+loop stores a `brain_confirm` pending (10 minutes, a nonce, `consumed_at`) and
+asks «متأكد إنك بدك …؟ (اه/لأ)» or lists the candidates. `confirm.answer` is the
+one yes/no resolver: letter-variant, digit and emoji folding, cancellation wins a
+mixed reply, and a reply longer than four words is a new message, not an answer.
+On voice there is no text turn to read, so the `confirm(answer)` tool passes the
+user's words to the same resolver, and holds wait on the `voice` pending thread.
 
-**A result answers three questions.** `handled` — this handler owns the turn and
-here is its answer. `ok` — the change actually happened. `error` — the tool
-itself broke. Only `handled` existed until 24 Aug 2026, so every reader that
-wanted one of the other two asked it instead, and a refusal is `handled`.
-
-What that produced: a task whose write failed was confirmed as saved
-(`tasks_store.add_task` swallows every exception and returns `""`), the graph
-appended `" ✅"` to `سجّل دخولك…`, and on the voice path a refusal reached Gemini
-as ordinary text, which she then confirmed to the user.
-
-**`tool_health` reads `error`, not `ok`, and that distinction is load-bearing.**
-The audit's first reading was that it should record `ok` — but a refusal is the
-tool *working*, and `_history` is process-global and keyed by tool name alone,
-not per tenant. Scoring refusals as failures means three different customers
-each mistyping a shopping item once crosses the degradation threshold and the
-owner is told his shopping tool is broken. Meanwhile the one thing the monitor
-exists to catch — `executor/dispatch.py::_guard` swallowing a real exception
-behind a friendly sentence — was being recorded as a clean call, so the weather
-API could raise on every request and the health surface stayed green.
-
-`handled: False` is not breakage either — it is a routing signal, the same
-distinction commit `ea628a6` drew on the voice path — so three ordinary
-`حدّد ما تريد تعديله` turns must not mark `task_update` degraded.
-
-That health surface was dead anyway. `response_node`'s degradation warning sat
-in an `elif reply:` branch that needs a node setting `execution_result`
-*without* `final_response`; almost every node sets both, so the warning was effectively dead.
-It now sits in the single `if final or reply:` branch, and fires only when `result_ok`. The generic `" ✅"` append that shared that
-branch is deleted: it reached nothing, and every handler that wants a tick
-writes its own (`سجّلتها ✅`).
-
-**On the voice path everything that did not happen is marked**, because an
-unmarked refusal is exactly what Gemini reads as success and confirms to the
-user. The two marks are not the same: `[فشل التنفيذ]` for breakage,
-`[لم يُنفَّذ]` for a refusal. Calling `ما لقيت جهاز بهالاسم، أي واحد تقصد؟` a
-failed execution makes her abandon a disambiguation the user is mid-way through.
-
-`app/agent/tool_result.py` holds the contract, `result_ok()` and
-`result_failed()`. Omitting `ok` means `ok == handled`, which is what the ~330
-un-migrated sites meant already; the refusal sites carry it explicitly. **An ask
-that keeps a pending alive is not a refusal** — the flow is continuing, and
-marking it makes the next turn look like a failure to a model that is mid
-conversation. An ask that stores no pending is finished, and is marked: without
-that, `task_create` with an empty title wrote `سجّلتها ✅ ''` over its own
-question. Rules in `CONVENTIONS.md` C10. **Never read `result["handled"]` to
-decide whether something worked.**
-
-One more shape to keep: an adapter that replaces a handler's reply must not
-destroy what only the handler knows. `task_create` swaps in a persona-toned
-sentence and used to take the scheduling-conflict warning with it; the warning
-now travels beside the reply as `alert`.
+**On the voice path everything that did not happen is marked**
+(`voice._tagged`), because an unmarked refusal is exactly what Gemini reads as
+success and confirms to the user: `[فشل التنفيذ]` for breakage, `[لم يُنفَّذ]`
+for a refusal. A held action is "not done yet", neither.
 
 ### 2.5 Memory
 
 | Layer | Module | Store |
 |---|---|---|
-| Short-term conversation | `graph/graph.py` | `sandy_stm`, one doc per chat, TTL-expired |
-| Facts | `agent/memory.py` | `memory` |
-| Semantic recall | `agent/semantic_memory.py` | `sandy_facts` + `sandy_memories` (summaries) via Atlas `$vectorSearch` + OpenAI/Azure embeddings; degrades to keyword/recency with no index |
-| Emotional, encrypted | `agent/emotional_ltm.py` + `ltm_crypto.py` | Fernet-encrypted fields |
-
-Around them: `interests_tracker`, `style_memory`, `lessons_memory`,
-`relationships_memory`, `shared_history`, `dreams_engine`, `session_state`,
-`deep_context`, `soul_vault`.
-
-**Nothing that ignores the router waits for it.** `start_soul_prefetch` starts
-the reads that depend only on who is talking — comfort, directives, the semantic
-search, the emotional context, the router's device list, session state /
-active brainstorm / persona, and the chat-only block (dreams, anniversaries,
-goals, due future messages) — before routing, so they overlap the model call.
-Only the STM read is still serial before the router. The chat-only block only
-reads; `run_graph` marks due messages delivered after a chat reply actually used
-them, so a speculative read on a task turn delivers nothing.
+| Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), the last 10 messages, TTL 30 days |
+| What she knows | `brain/context.py` | `fact` entries (the newest 40, decrypted when sealed) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
+| Related past | `brain/context.py::similar_entries` | the 8 nearest non-fact entries by cosine over their `embedding` (the newest 400 scored in Python — there is no Atlas index on `sandy_entries`); text search with no embedding key |
+| Conversation summaries | `brain/stm.py::_summarize` | turns that overflow a thread become a `summary` entry (`data.thread_id`), in the background; `recall` leaves them out unless asked |
+| Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
 
 **One memory across every channel.** App chat (`/api/agent`), the robot's voice
 (`/voice`, HMAC hello → the paired node's `user_id`) and in-app live voice
 (`GeminiLiveManager` → the same `/voice` socket with a JWT hello) all resolve to
-the same `user_id`, read the same `sandy_stm` recent turns and the same persona,
-facts and summaries, and write their turns back to `sandy_stm` with `via`.
-The voice prompt cache (`voice_ws/tools.py`) holds no turns — fresh recent turns
-are added per session (`with_recent_turns`) — so a line typed in chat reaches the
-next call. Voice turns run the same emotional/relationship extraction as chat.
+the same `user_id`, read the same `sandy_stm` recent turns
+(`stm.recent_turns_for_user`: a person's last turns across their five newest
+threads, ordered by their own timestamps) and the same profile and facts, and
+write their turns back with `via`. Threads stay separate: a chat sees the other
+channels' last turns before its own, without repeating a line (`stm.history`).
 `tests/test_memory_is_one_memory.py` holds this.
 
-**One embedding per turn, not one per search.** `search_relevant_facts` and
-`search_relevant_summaries` each embedded the query independently — two OpenAI
-round trips per message for one string, on every channel. `search_memory_for_turn`
-embeds once and hands the vector to both; the individual functions still take an
-optional `query_vector` so a single search is unchanged.
+**The voice instruction is cached per tenant version** (`voice_ws/tools.py`, per
+process and in `sandy_prompt_cache` across workers), because building it used to
+take seconds with the microphone running. It holds the persona, the profile and
+the facts — never the recent turns, which are added per session
+(`with_recent_turns`). `utils/tenant_version.VERSIONED` names the collections it
+is built from (`sandy_users`, `sandy_entries`): a write there through `scoped()`
+bumps the version, and `prompt_prewarm` rebuilds it in the background for tenants
+who use voice. Bump `_PROMPT_REV` when the cached text changes shape.
 
-**Conversation summaries belong to the user; the thread is a field.** When STM
-overflows, `graph._summarize_to_ltm` writes a `conversation_summary` into
-`sandy_memories` with `chat_id` = the user (the tenant field) and `thread_id` =
-the conversation (`conversation_id`, or the user id when there is none). The
-client supplies `conversation_id`, so it must never be the only key: it used to
-be stored as `chat_id`, and two accounts sending "default" shared summaries.
-`semantic_memory.migrate_summary_threads` rewrites old rows at boot. The
-per-turn search filters by tenant in `$vectorSearch` and by thread in a `$match`
-after it (the Atlas index does not declare `thread_id`).
-
-**`get_persona_directives` is cached per tenant, keyed on a version stamp**
-(`utils/tenant_version.py`, `context_builder._cached_directive_blocks`). Every
-write to a collection the cached blocks read must bump that version.
-`ScopedCollection` bumps on every write it makes, so the rule is simply: write
-tenant data through `scoped()`. The few writers that still reach past it
-(`users_store`, `api/memory_api.py`, `graph._summarize_to_ltm`) call `bump_for` themselves. A failed read
-is never cached. The per-message keyword search stays outside the cache.
+**One embedding per call site, none without a key** (`integrations/embeddings.py`,
+built once, eight-second deadline). Entries are embedded when written, except
+sealed moods.
 
 Short-term memory is on Mongo, not Redis, on purpose: the free Redis tier hit its
 monthly request cap and memory silently froze. Mongo has no per-request quota and
 was already wired. Don't "fix" this back to Redis without solving the quota.
 
-**Context does not cross a thread boundary, and memory is full of them.** The
-active tenant lives in a `ContextVar`, and a pool worker starts with none — so a
-`scoped()` store called on a pool thread reads nothing, writes nothing, and
-returns an ordinary empty result. Nothing raises; Sandy simply does not know the
-person. Fixed 24 Aug 2026 by making the propagation belong to the *submit*
-(`nodes/soul.py::_submit` wraps `contextvars.copy_context().run`) rather than to
-each call site, and by running the voice instruction build inside
-`active_user_profile_context`. **Never add a bare `.submit()` on a path that
-touches a scoped store.**
+**Context does not cross a thread boundary.** The active tenant lives in a
+`ContextVar`, and a pool worker starts with none — so a `scoped()` store called
+on a pool thread reads nothing, writes nothing, and returns an ordinary empty
+result. `utils/thread_pool.submit_background` runs every job in a copy of the
+caller's context; the voice path passes the identity explicitly to everything it
+runs in an executor and enters `active_user_profile_context` there. **Never add a
+bare `.submit()` on a path that touches a scoped store.**
 
 ### 2.5b Whose name she says
 
 Eight strings that reach a customer had the owner's name typed into them, and
 the worst was the live voice prompt: *"you are in a voice conversation with نبيل
 (your partner)"* — the first thing every robot in the world is told about the
-person standing in front of it. The speaker-verification note told a customer
-«مش نبيل» after matching *their own* voice; every user turn in a recalled
-transcript was attributed to him; the morning brief was written «لنبيل (ذكر)».
+person standing in front of it.
 
 `user_profiles.speaker_label()` is the one answer, reading the name from
 first-run setup. `HAS_NO_NAME` (`المستخدم`) is the fallback, and a caller
 building a *discriminating* sentence — "this is not X", "even if he claims to be
 X" — must **branch** on it rather than substitute it: «مش المستخدم» denies that
-the speaker is the user, which is not a sentence. **The speaker gate is handed the identity, never left to find it.**
-`_verify_owner` runs on a pool thread where the session context does not reach —
-that is why it takes a `user_id` — and `_verify_and_inject` was not passing one.
-An empty id means `has_profile("")` is false, which takes the "no voiceprint
-enrolled, allow" branch: a comparison that never ran returning *owner*. Naming
-the customer correctly in that sentence only made the false positive more
-convincing.
+the speaker is the user, which is not a sentence. **The speaker gate is handed the
+identity, never left to find it.** `_verify_owner` runs on a pool thread where the
+session context does not reach — that is why it takes a `user_id`. An empty id
+means `has_profile("")` is false, which takes the "no voiceprint enrolled, allow"
+branch: a comparison that never ran returning *owner*.
 
 **Both halves of the voice prompt build such a sentence** — the standing
-instruction in `voice_ws/tools.py` and the per-turn note in
-`voice_ws/speaker.py` — and they must agree, or the model is left deciding
-whether «المستخدم» and «صاحب الحساب» are the same person before it decides
-whether to hand over somebody's memories.
+instruction in `voice_ws/tools.py` and the per-turn note in `voice_ws/speaker.py`
+— and they must agree, or the model is left deciding whether «المستخدم» and
+«صاحب الحساب» are the same person before it decides whether to hand over
+somebody's memories.
 
 The voice path resolves the name once per session into a context variable
 (`voice_speaker_label`), because `_speaker_directive` is awaited on the loop
 relaying audio and a `find_one` there is an audible pause at the end of every
-sentence. **`_live_session` resolves it before the instruction build**, not
-inside it: `run_in_executor` does not copy context back, so a name resolved on
-the pool thread leaves the loop's own copy empty and utterance one pays anyway.
+sentence. `_live_session` resolves it before the instruction build, not inside
+it: `run_in_executor` does not copy context back.
 
 `config.py` is deliberately untouched. *"طوّرك نبيل السلطان"* is a developer
 credit and belongs to every customer.
@@ -344,30 +270,16 @@ credit and belongs to every customer.
 **Gender and language are told to the model, not assumed.**
 `address_instruction()` keeps its escape hatch — masculine by default because
 Arabic forces a choice, switching to feminine the moment the speaker turns out
-to be a woman. No production path sets `gender` on a profile yet, so that
-sentence is the only thing standing between a female customer and a robot that
-insists she is male. `context_builder.LANGUAGE_RULE` is appended by code beside
-the anti-injection rule, for the same reason — it must survive a custom persona:
-reply in the language of the last message, per message, so a conversation that
-turns from Arabic to English turns with it. It replaced a coarser rule that
-followed the *interface* language for a whole session, on **three** routes —
-deleting one at a time is how the second survived, so the guard test looks for
-the shape (`lang == "en"` then an instruction about English) rather than one
-phrasing. The guest route shares the rule now: two policies for the same product
-is how a visitor ends up with different behaviour from a customer.
+to be a woman. `brain/persona.LANGUAGE_RULE` is appended by code beside the
+anti-injection and no-promises rules, so it survives a custom persona: reply in
+the language of the last message, per message. It also **says** it outranks the
+dialect preset beside it — «احكي باللهجة الفلسطينية» is more specific and about the
+same decision, and without that clause an English-only customer gets two orders
+and the narrower one wins.
 
-The rule also has to **say** it outranks the dialect preset sitting beside it.
-«احكي باللهجة الفلسطينية» is more specific and about the same decision, so
-without that clause an English-only customer gets two orders and the narrower
-one wins. The dialect line describes her Arabic; it does not require Arabic.
-
-**There is no owner-only device gate.** `_OWNER_DEVICE_PREFIXES = ("hardware_",)`
-guarded tools whose names start with `hardware_`, and no registered tool ever
-has — the two branches that called it were dead, and the refusal one of them
-held named the owner to customers who could never reach it. §2.7 is the real
-boundary and it works: a device is actuated only through
-`device_store.tenant_owns_topic`, which asks whether the topic belongs to a
-device in the *calling tenant's* registry.
+A device is actuated only through `device_store.tenant_owns_topic`, which asks
+whether the topic belongs to a device in the *calling tenant's* registry (§2.7);
+there is no owner-only gate.
 
 ### 2.6 Tenant isolation — the most important file in the repo
 
@@ -386,6 +298,13 @@ collection handle on a request path.**
 
 Index creation is the one exception: it runs on the raw handle at boot, before any
 request sets a tenant. Indexes lead with the tenant field (`user_id`, or `chat_id` on the older collections).
+
+Three request-path collections are keyed by hand, each on the caller's id on every
+call: `sandy_stm` (`<thread>:<user>` plus a `user_id` field), `sandy_pending_state`
+(`_id` `<chat_id>:<thread>` and a `chat_id` filter) and `conversations`
+(`user_id`). The infrastructure stores that key on something other than a tenant
+(users, nodes, voiceprints, push tokens, usage, photos' GridFS) are listed with a
+reason in `tests/test_tenant_scoping_guard.py`.
 
 ### 2.7 Actuation ownership
 
@@ -461,22 +380,39 @@ paired the code. **A heartbeat cannot nominate its own owner.**
 
 ### 2.9 HTTP surface
 
-150 HTTP route handlers on 111 paths, plus two WebSockets (`/voice`, `/voice/enroll`). All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
+88 HTTP route handlers on 71 paths, plus two WebSockets (`/voice`, `/voice/enroll`).
+All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
 Registered by explicit `register_*_api(app, …)` calls in `api/server.py` — there
 are no Flask blueprints, so **route discovery means reading `server.py`'s
-registration block**, not grepping for blueprints.
+registration block**, not grepping for blueprints. `tests/test_routes_kept.py`
+pins every route a client calls, with its methods.
 
-Groups: auth (email, Google, Apple) · account (get / reset / delete) · agent (chat
-+ stream) · conversations · tasks · reminders · life (shopping, habits, expenses,
-journal, books, focus, scenes) · devices + nodes · memory · photos · goals · gifts ·
-future messages · share · timeline · research · images · weather · persona ·
-onboarding · push · subscriptions · features · daily nudge · studio plans · voice TTS ·
-firmware images · diagnose · camera upload · blocks.
+Who calls what:
 
-**The blocks** (`api/blocks_api.py`, phase 3 of the rebuild, §2.12) — every route
-`require_tenant` except `/api/kinds` (`require_auth`), so the block stores' scoped
-handles do the isolation; a bad input is 400 `{"error": <code>, "message": <Arabic>}`,
-text capped at 2000 characters and `data`/`payload` at 8000 of JSON:
+- **The iPhone app** — auth (`/api/auth/apple|google|email/login|email/register`),
+  account (get / reset / delete), chat (`/api/agent`, `/api/agent/stream`),
+  conversations (list, create, get, rename, delete, messages, search), the blocks
+  (below), `/api/summary`, `/api/kinds`, daily nudge (+ answer), devices and nodes
+  (control, IR learn, pairing, snapshots, Wi-Fi), `/api/life/focus` (+ start /
+  stop / history), `/api/life/scenes` (+ actions / apply / delete), photos
+  (+ albums, file), images (`/api/image`, `/api/image/edit`, `/api/analyze-image`),
+  `/api/research`, `/api/weather`, `/api/persona`, `/api/onboarding`,
+  `/api/features`, `/api/subscription`, push register / unregister,
+  `/api/voice/tts`, and the `/voice` socket for live calls. The share extension
+  uses `/api/agent`, `/api/analyze-image`, `/api/photos`, `/api/entries` and
+  `/api/items`.
+- **The boards** — `/voice` (the brain), `/api/cam/upload` (the camera),
+  `/api/firmware/manifest` and `/api/firmware/image/<version>` (OTA).
+- **The owner's tooling** — `/api/firmware/publish` and `/rollout`
+  (`scripts/publish_firmware.py`), `/api/diagnose` and `/health` (by hand).
+- **RevenueCat** — `/webhook/revenuecat`.
+- `/voice/enroll` records a voiceprint for speaker verification (§3.2); no
+  shipped client opens it yet, and it is the only way to enrol one.
+
+**The blocks** (`api/blocks_api.py`, §2.12) — every route `require_tenant` except
+`/api/kinds` (`require_auth`), so the block stores' scoped handles do the
+isolation; a bad input is 400 `{"error": <code>, "message": <Arabic>}`, text
+capped at 2000 characters and `data`/`payload` at 8000 of JSON:
 
 | Route | Does |
 |---|---|
@@ -489,13 +425,16 @@ text capped at 2000 characters and `data`/`payload` at 8000 of JSON:
 Datetimes go out as ISO in the user's zone and come in as ISO (naive = user's
 zone; a bare date in `until`/`to` covers its day). A row with `encrypted` in its
 `data`/`payload` is decrypted for its owner and re-sealed on edit; a
-`message_to_future_self` is sealed at rest, as `/api/future-messages` keeps it.
-None of the old routes changed.
+`message_to_future_self` is sealed at rest.
 
 **Every route that spends money on a provider is metered** through
 `api/metering.py` — the chat routes, image generation and analysis, web and
-place search, content suggestions, gift writing, studio summaries
-and photo tagging, `/api/summary`, one unit each against the caller's tier. A new paid route calls `meter_claims`.
+place search, photo tagging and `/api/summary`, one unit each against the
+caller's tier. A new paid route calls `meter_claims`.
+
+**No route issues a guest token.** `make_token` still honours a `guest` role;
+chat and images refuse one with 403, `require_tenant` routes refuse it, and the
+rest resolve it to an empty tenant.
 
 ### 2.10 Auth
 
@@ -506,21 +445,20 @@ an empty secret would let anyone forge a token, so it refuses rather than degrad
 
 ### 2.11 External services
 
-Tool router (`agent/agents/fc_router.py`): Gemini if `GEMINI_ROUTER_MODEL` is set →
-Bedrock if `BEDROCK_ROUTER_MODEL_ID` is set → **Azure OpenAI** (the default). If
-routing throws, `model_fallback.route_with_gpt` (OpenAI direct) can still pick a
-task or reminder; otherwise it falls to `chat_respond`. The chat reply is Azure
-OpenAI → OpenAI direct → a persona snippet. Speech-to-text on the voice path is
-Gemini Live's own input transcription. TTS (`/api/voice/tts`) is Gemini only.
-Images are Azure FLUX with an Azure OpenAI image fallback. Research is Exa; places
-are Google Places. Push is APNs over HTTP/2 (`h2` is in `requirements.txt` for
-exactly this). MQTT is HiveMQ Cloud over TLS.
+The chat model is `openai_client.chat_fn()`: Azure OpenAI (`AZURE_OPENAI_CHAT_DEPLOYMENT`)
+when the Azure trio is set, else OpenAI direct; the brain falls back to OpenAI
+direct (`OPENAI_MODEL`) when the primary call fails. Every other model call —
+the conversation title, the STM summary, the daily agenda line, image analysis
+and photo tagging, the web-search summary, the time parser — uses the same client.
+Speech-to-text on the voice path is Gemini Live's own input transcription. TTS
+(`/api/voice/tts`) is Gemini only. Images are Azure FLUX with an Azure OpenAI image
+fallback. Embeddings are Azure (`AZURE_OPENAI_EMBEDDING_DEPLOYMENT`) or OpenAI
+direct. Research is Exa; places are Google Places. Push is APNs over HTTP/2 (`h2`
+is in `requirements.txt` for exactly this). MQTT is HiveMQ Cloud over TLS.
 
-Circuit breakers (`utils/circuit_breaker.py`) wrap `azure_intent_client` (the
-hottest call), `openai_client`, `exa_client`, `gemini_tts` and
-`features/weather`. Not wrapped: `azure_flux`, `azure_image`, `gemini_router`,
-`bedrock_router`, `google_places`, `services/apns`, and the embeddings in
-`semantic_memory`.
+Circuit breakers (`utils/circuit_breaker.py`) wrap `openai_client`, `exa_client`,
+`gemini_tts` and `features/weather`. Not wrapped: `azure_flux`, `azure_image`,
+`google_places`, `services/apns`, `embeddings`.
 
 **None of the breakers pass `timeout=`, and that is on purpose.** The class
 supports one and it looks like the missing half; it is not. `_invoke` enforces a
@@ -529,159 +467,98 @@ so *queue* time counts against the call's own budget and the resulting timeout i
 scored as a failure. Switch it on across every client and load alone can open a
 breaker in front of a provider that is answering perfectly — and `future.cancel()`
 cannot stop a running job, so slow calls keep their slots exactly when the queue
-is longest. Per-request deadlines belong on the SDK client, where they cost no
-threads: `AZURE_INTENT_TIMEOUT_S` and `semantic_memory._EMBED_TIMEOUT_S` are
-there for that reason.
+is longest. Per-request deadlines belong on the SDK call, where they cost no
+threads: `OPENAI_CHAT_TIMEOUT_S` and `embeddings.EMBED_TIMEOUT_S` are there for
+that reason.
 
 A missing key disables only its own feature — the app still boots.
 
-**Parameter quirks are learned once per deployment, and both model calls share
-them.** `azure_intent_client._create_chat_adapting` retries a call without a
-parameter the model refused (`reasoning_effort`, `temperature`) or with
-`max_tokens` renamed — and it used to relearn that on every call. The router
-always sends `reasoning_effort`, so on a non-reasoning deployment every message
-paid one refused round trip to Azure before the call that worked. `_ADAPTED`
-now remembers the answer per model name for the life of the process. The chat
-reply (`openai_client.create_chat_completion`) goes through the same adapter;
-before, a reasoning deployment failed the streamed reply, failed the retry, and
-fell to OpenAI direct.
+**Parameter quirks are learned once per deployment.**
+`openai_client._create_chat_adapting` retries a call without a parameter the model
+refused (`reasoning_effort`, `temperature`) or with `max_tokens` renamed, and
+`_ADAPTED` remembers the answer per model name for the life of the process, so a
+refused parameter costs one round trip, not one per message.
 
-**What would change it** is `scripts/latency_bench.py`: the router with its real
-prompt and catalogue timed on a labelled set of sentences (speed *and* correct
-picks), optionally beside the Gemini router (`--gemini <model>`), plus the chat
-reply's time to first token. Needs network to the providers, so it runs on the
-owner's machine, not in a sandbox.
+**Where a chat turn's time goes** is one log line: `[turn] …ms total — brain
+tools=[…]`, from `brain/loop.py` (`(fast)` when the fast path answered). Grep it
+before theorising.
 
-**Where a chat turn's time goes** is one log line: `[turn] …ms total — route ·
-soul · <node> (<tool>)`, from `run_graph`. Grep it before theorising.
+### 2.12 `app/blocks/` — the data layer
 
-### 2.12 `app/blocks/` — Phase 1 of the rebuild
-
-Used by `app/brain/` (§2.13, behind a flag that defaults off), the blocks REST
-routes (§2.9), the schedule runner below, the migration script and their tests.
-With the flag off, the agent, tools, voice path and the old routes still use the
-feature stores above. `account_delete` erases the three collections.
-It is the replacement for them: every feature becomes a row in one of three
-collections instead of its own store + tools + routes.
+Every user feature is a row in one of three collections, reached through
+`scoped()` (§2.6) on `user_id`: no tenant → empty result, nothing written.
+`init_blocks(db)` creates the indexes on the raw handle (tenant-first).
 
 | Module | Collection | Holds |
 |---|---|---|
 | `blocks/entries.py` | `sandy_entries` | LOG — what happened or what Sandy learned: `{kind, text, data, at, source, embedding, migrated_from}` |
 | `blocks/items.py` | `sandy_items` | LISTS — anything ticked off: `{list, text, done, due, priority, data, created_at, done_at, migrated_from}` |
 | `blocks/schedules.py` | `sandy_schedules` | SCHEDULES — anything that fires: `{kind, text, fire_at, recurrence (RRULE), payload, status, migrated_from}` |
-| `blocks/kinds.py` | — | The kinds table: every log kind, list and schedule kind with labels, SF Symbol and typed `data` fields. `validate()` refuses an unknown kind or an undeclared/mistyped field. A `project:` row matches any `project:<name>` list. |
+| `blocks/kinds.py` | — | The kinds table: every log kind, list and schedule kind with labels, SF Symbol, the words a user says for it (`aliases`) and typed `data` fields. `validate()` refuses an unknown kind or an undeclared/mistyped field. A `project:` row matches any `project:<name>` list. |
 
 Each module is add / get / update / delete / list with filters (kind or list,
-date range, done/status, text). Access goes through `scoped()` (§2.6) on
-`user_id`; no tenant → empty result, nothing written. `init_blocks(db)` creates
-the indexes on the raw handle (tenant-first). `entries.embed_text` is the one
-door to an embedding: it reuses `semantic_memory._embed`, so no key → `null`.
+date range, done/status, text). `entries.embed_text` is the one door to an
+embedding (`integrations/embeddings.py`), so no key → `null`.
 
-**Adding a feature is adding a row to `kinds.KINDS`.** Nothing else should need
-to change once Phase 2 wires the blocks in.
+**Adding a feature is adding a row to `kinds.KINDS`.** The brain's tool enums, the
+REST validation and the app's screens (`/api/kinds`) all follow it.
 
-`scripts/migrate_to_blocks.py` copies the old stores in: dry run by default
+`scripts/migrate_to_blocks.py` copied the old stores in: dry run by default
 (counts per source and per target, three sample docs per source), `--apply` to
 write, `--user <id>` for one tenant. Every written doc has `migrated_from:
 {collection, id}` and an `_id` derived from it, so a re-run skips what is
-already there. It only reads the old collections. The mapping table is in its
-`SOURCES`; its docstring lists what is deliberately not migrated.
+already there. It only reads the old collections, which are left in place until
+the owner drops them (§8). The mapping table is in its `SOURCES`; its docstring
+lists what is deliberately not migrated.
 
-**The schedule runner** (`services/schedule_runner.py`) is one more job on the
-leader-elected scheduler (§2.1), once a minute, alongside the old runners — it
-replaces nothing yet. `bootstrap` creates the blocks' indexes and starts it. A
-due row (`status` pending, `fire_at` ≤ now, not `migrated_from`) is claimed by a
-compare-and-set on its own `(status, fire_at)`: a one-off moves to `sent`, a
-recurring one to its next RRULE time (`reminders_store._next_occurrence`, anchored
-in local time), and only the worker whose update matched fires it, so nothing
-fires twice across workers or dynos. `fired_at` and `last_error` are set on the row.
+**The schedule runner** (`services/schedule_runner.py`) is the one job that fires
+anything, on the leader-elected scheduler (§2.1), once a minute. A due row
+(`status` pending, `fire_at` ≤ now) is claimed by a compare-and-set on its own
+`(status, fire_at)`: a one-off moves to `sent`, a recurring one to its next RRULE
+time (anchored in local time, so "every day at 8" survives DST), and only the
+worker whose update matched fires it, so nothing fires twice across workers or
+dynos. `fired_at` and `last_error` are set on the row.
 
 | Kind | Firing |
 |---|---|
-| `reminder` | The phone rings it locally from `GET /api/schedules`, as it does from `/api/reminders`. The server also pushes over APNs when `services/apns.py` is configured, unless the row is more than 15 minutes late. `failed` only when devices exist and none took the push. |
-| `scene` | `scene_store._actuate` (what `scene_timer_runner` applies); a miss retries a minute later up to `MAX_TIMER_TRIES`, then `failed`. |
+| `reminder` | The phone rings it locally from `GET /api/schedules`. The server also pushes over APNs when `services/apns.py` is configured, unless the row is more than 15 minutes late. `failed` only when devices exist and none took the push. |
+| `scene` | A scene's timed revert: `scene_store.apply_scene` cancels the tenant's pending `scene` rows and writes one per `for_min` action; the runner sends it through `scene_store._actuate`, and a miss retries a minute later up to `MAX_TIMER_TRIES`, then `failed`. |
 | `daily_nudge`, `summary_nudge` | push text only; `failed` when no device took it (no APNs, no token, every send refused). |
-| `message_to_future_self` | not fired here: the next chat reply delivers it (§2.13). |
+| `message_to_future_self` | not fired here: the next chat reply delivers it (§2.3). |
 
-A recurring row that fails stays armed for its next time with `last_error`.
-Migrated rows are skipped because their old stores still own firing them until
-phase 5.
+A recurring row that fails stays armed for its next time with `last_error`. A
+migrated row more than 15 minutes late is settled without firing: its old store
+already fired it, and the migrated scene timers in particular were never marked,
+so replaying them would switch lights hours later.
 
-### 2.13 `app/brain/` — Phase 2 of the rebuild: one agent, behind `SANDY_NEW_AGENT`
+The daily nudge push itself still runs on its own scheduler
+(`services/nudge_scheduler.py`, 08:00 local, one worker per day by a Mongo lock);
+`/api/daily-nudge` builds the day's nudge from the blocks (open tasks, overdue,
+pending reminders) and the last STM turn ("was up late").
 
-`SANDY_NEW_AGENT=1` (`app/config.py`, default **off**) switches chat and voice
-from the graph (§2.3) and the 80-tool registry (§2.4) to this package. The flag
-is read at call time through `brain.enabled()`. With it off nothing below runs.
+### 2.13 `app/brain/`, file by file
 
-**Entry points (the only places that check the flag):**
-- `api/server.py::_run_authenticated_agent`: `run_graph` or `brain.loop.run_turn`.
-  Same arguments, and the result carries the keys the route reads
-  (`final_response`, `pending_state`, `execution_result`), so `/api/agent` and
-  `/api/agent/stream` are otherwise unchanged. Pending load/save, metering and the
-  turn ledger stay as they are.
-- `api/voice_ws/tools.py`: `_build_live_tools` declares `brain.voice.declarations()`,
-  `_make_dispatcher` returns a marker, `_dispatch_tool` calls `brain.voice.dispatch`
-  in the caller's tenant.
-
-**The turn** (`loop.py`): fast path first (`agent/fast_path.py`, unchanged; a bare
-device command costs no model call) → a held confirmation is resolved →
-`context.build_system` → at most **6** model calls with native tools
-(model → tool calls → results → model, until it answers in text) → STM save through
-`graph._stm_save`. The model call (`model.py`) is the old chat reply's client:
-the Azure chat deployment via `execute._get_chat_completion_fn` (breaker + param
-quirks), then OpenAI direct (`OPENAI_MODEL`). The Gemini/Bedrock router options
-are not used. Text streams through the same thread-local hooks
-(`execute.set_stream_hooks`), cumulative, as the old chat reply did.
-
-**Context** (`context.py`), built once per turn: `build_effective_persona`
-(so `SANDY_PERSONALITY` and custom instructions still apply) + `address_instruction`,
-the newest 40 `fact` entries (decrypted with `ltm_crypto` when `data.encrypted`),
-the top 8 non-fact entries by cosine over their `embedding` (the newest 400 are
-scored in Python, since there is no Atlas index on `sandy_entries`; text search
-when embeddings are off), the time block (`time_awareness_block`), and the recent
-turns from the same cross-channel STM read as `run_graph`.
-
-**Tools** (`tools.py`, 12; voice adds `confirm`). Enums come from `kinds.KINDS`, so a new kind
-needs no tool change.
-
-| Tool | Does |
+| Module | Holds |
 |---|---|
-| `remember` | `entries.add(kind, text, data)`; `kind=mood` is the old emotional moment (below) |
-| `recall` | entries + items + pending schedules, filtered by kind / list / since / until / query words; compact rows |
-| `list_add` | `items.add`; `due` parsed like `when` |
-| `list_update` | by `id` or `match_text` (the `tasks_matcher` ladder, `matching.py`): done / text / due / delete |
-| `schedule` | `schedules.add`; `when` = ISO, else `time_parser` + `arabic_days` |
-| `schedule_update` | move / rename / cancel (status `cancelled`) |
-| `summarize` | the period's entries, items and schedules as rows; the model writes the summary, nothing is stored |
-| `device_control`, `scene_apply` | the old handlers, so `command_payload` / `tenant_owns_topic` are still the gate |
-| `web_search`, `weather`, `image` | the old `research_web` / `get_weather` / `image_generate` handlers |
+| `loop.py` | `run_turn`: held action → fast path → context → model/tool loop → future-self delivery → STM save |
+| `model.py` | the model call (Azure via `chat_fn`, then OpenAI direct), streaming, the stream hooks |
+| `tools.py` | the tool table (JSON schemas from `kinds.KINDS`), `declarations()` for Gemini Live, `execute()` |
+| `tools_blocks.py` | `remember`, `recall`, `summarize`, `list_add`, `list_update`, `schedule`, `schedule_update` |
+| `tools_world.py` | `device_control`, `scene_apply`, `web_search`, `weather`, `image` |
+| `context.py` | the system prompt: persona, rules, time, profile, facts, related entries |
+| `persona.py` | `build_effective_persona`: tone (custom instructions or `SANDY_PERSONALITY`), dialect preset, then the language, no-promises and anti-injection rules, then `SANDY_IDENTITY_LOCK` last |
+| `stm.py` | short-term memory and the cross-channel read |
+| `confirm.py`, `pending.py` | held actions: the question, the yes/no resolver, the pick-by-number, the lifecycle and the store |
+| `voice.py` | the voice session's tools: `declarations()` (+ `confirm`), `dispatch()`, the C10 marks |
+| `fast_path.py` | the model-free device command (C8b) |
+| `matching.py` | the row-name normaliser and the exact → contained → fuzzy ladder |
+| `when.py` | `when` / `due` / `since` / `until` / `period` parsing |
+| `future.py` | due messages to your future self |
+| `summary.py` | `/api/summary`: the `summarize` rows written up in one call |
+| `ctx.py` | `TurnCtx` — what a tool knows about its turn |
 
-**Confirmation** (`confirm.py`): deletes, cancels and multi-row changes return
-`needs_confirmation`; the loop stores a `brain_confirm` pending
-(`agent/pending.py` lifecycle, `pending_store`) and asks
-«متأكد إنك بدك …؟ (اه/لأ)» without a second model call. The next turn is read
-by `executor/helpers.is_cancellation` then `_is_quick_confirmation` (the resolver
-the router and pending dispatch share). Yes runs the held call, no cancels,
-anything else drops the hold and is a normal turn. On voice there is no text turn
-to read, so the `confirm(answer)` tool passes the user's words to the same resolver,
-and holds go to the `voice` pending thread as before. The speaker gate
-(`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's destructive calls too
-(`speaker._is_sensitive_call`).
-
-**After the turn**, as `run_graph` does: due `message_to_future_self` schedules
-(`brain/future.py`) go into the system prompt with the old soul node's sentence,
-and are marked `sent` (`payload.delivered_at`) only when the reply is not an
-error; the mark matches on `pending`, so a message is delivered once. The
-emotional moment the graph kept when its router picked `chat_emotional` is a
-`mood` entry here: the chat prompt tells the model to call `remember` with
-`kind=mood` on a strong feeling, and the tool keeps it only for the graph's
-significant moods (`stressed, frustrated, sad, angry, happy, excited`), stores the
-user's words (200 chars) encrypted and un-embedded, once per turn.
-
-**Known gap until phase 4:** the iPhone app still reads reminders from
-`/api/reminders` (`sandy_reminders`). With the flag on, reminders made in chat live
-in `sandy_schedules`; the server runner pushes them when APNs is configured, but the
-phone's local notifications need the phase 4 screens on `GET /api/schedules`.
+The speaker gate (`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's
+destructive voice calls (`speaker._is_sensitive_call`).
 
 ---
 
@@ -697,8 +574,9 @@ robot mic (I2S)
       ├─ _authenticate()      HMAC handshake, ±30 s anti-replay
       ├─ speaker.py           CAM++ speaker verification (sherpa-onnx, local)
       ├─ VAD                  measured (adaptive) RMS floor + silence + minimum utterance
-      ├─ tools.py             the same tool set as the text path
-      └─ memory.py            writes the turn into short-term memory
+      ├─ tools.py             the instruction (persona, profile, facts, recent turns)
+      │                       and the brain's tools (brain/voice.py), same as chat
+      └─ memory.py            writes the turn into short-term memory (brain/stm.py)
   → Gemini Live
   → audio back → speaker + amplitude-driven lip-sync
 ```
@@ -742,11 +620,10 @@ You can probe all of this from a browser without hardware — see §10.
 `features/speaker_id.py` + `voice_ws/speaker.py`. CAM++ via sherpa-onnx, running
 locally: no account, no torch. Gated by `SANDY_REQUIRE_SPEAKER_AUTH=1`, off by
 default, and it only guards the sensitive calls (`speaker._is_sensitive_call`):
-`task_delete`, `reminder_delete`, `schedule_message_to_self`, and with the brain
-on, `list_update` delete / `all_matching`, `schedule_update` cancel / `all_matching`,
+`list_update` delete / `all_matching`, `schedule_update` cancel / `all_matching`,
 `schedule` of a `message_to_future_self`, and `confirm` (which only runs a held
-delete or bulk change). With no
-voiceprint enrolled it allows — it does not lock the owner out before enrolment.
+delete or bulk change). With no voiceprint enrolled it allows — it does not lock
+the owner out before enrolment. Voiceprints are recorded over `/voice/enroll`.
 
 ---
 
@@ -1118,57 +995,55 @@ uses, and the only thing to rebuild is the client.
 
 ## 8. Data model
 
-Most Mongo collections are reached through `scoped()` and carry the `sandy_`
-prefix. Two predate it: `memory` (scoped on `user_id`) and `guest_usage` (keyed on
-the guest token's `jti`, not scoped). The semantic-memory collections
-(`sandy_facts`, `sandy_memories`, `sandy_goals`, `sandy_activity`,
-`sandy_future_messages`) key on `chat_id`: pass `field="chat_id"` to `scoped()`. Two more are outside
-`scoped()` and outside the prefix, and are the easy ones to forget: the app's
-chat threads, `conversations` (filtered by `user_id` by hand in
-`conversations_api.py`), and the older single-blob `web_chat_history`, keyed
-`_id: web_chat_<user_id>` with no user field at all. (`camera_inbox`, a TTL inbox for snapshots in
-`integrations/camera_client.py`, is a third.) Both are in
-`account_delete`'s list — the first by name, the second by `_id` — because
-until 18 Sep 2026 neither was, and a deleted account's chats survived.
+Written today, and what reads it:
 
-Identity and access: `sandy_users`, `sandy_auth`,
-`sandy_usage_daily`, `sandy_usage_rl`, `guest_usage`.
-Conversation and memory: `sandy_stm`, `sandy_facts`, `memory`,
-`sandy_memories`, `sandy_session_state`, `sandy_pending_state`, `sandy_prompt_cache`, `sandy_cache_stamps`.
-`sandy_vector_index` is the Atlas vector index name, not a collection.
-Legacy, no longer written: `sandy_conversations` (still cleared by account
-deletion), `sandy_context_metadata`.
-Productivity: `sandy_tasks`, `sandy_reminders`, `sandy_goals`, `sandy_focus`,
-`sandy_focus_meta`, `sandy_brainstorms`, `sandy_bs_pending`.
-Life: `sandy_shopping`, `sandy_habits`, `sandy_habit_log`, `sandy_expenses`,
-`sandy_journal`, `sandy_books`, `sandy_reading_sessions`, `sandy_reading_meta`.
-Hardware: `sandy_devices`, `sandy_nodes`, `sandy_device_keys`, `sandy_scenes`, `sandy_scene_timers`,
-`sandy_voiceprints`, `sandy_firmware`, `sandy_firmware_chunks`.
-Social and delivery: `sandy_photos`, `sandy_photo_files`, `sandy_gifts`,
-`sandy_shared_content`, `sandy_future_messages`, `sandy_push_tokens`,
-`sandy_daily_nudge`, `sandy_nudge_locks`, `sandy_activity`, `sandy_evals`.
+- **The blocks** — `sandy_entries`, `sandy_items`, `sandy_schedules` (§2.12),
+  through `scoped()` on `user_id`.
+- **Identity and access** — `sandy_users` (profile, onboarding, persona,
+  subscription), `sandy_auth` (login rate limit), `sandy_usage_daily`,
+  `sandy_usage_rl`.
+- **Conversation** — `sandy_stm`, `sandy_pending_state`, `sandy_prompt_cache`,
+  `sandy_cache_stamps`, `conversations` (the app's chat threads, filtered by
+  `user_id` by hand in `conversations_api.py`) and `agent_turns` (the send ledger,
+  TTL 10 minutes).
+- **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
+  `sandy_scenes`, `sandy_voiceprints`, `sandy_firmware`, `sandy_firmware_chunks`,
+  `node_pair_challenges`, `cam_upload_nonces`, `camera_inbox`.
+- **Everything else** — `sandy_focus`, `sandy_photos` + the `sandy_photo_files`
+  GridFS bucket, `sandy_push_tokens`, `sandy_daily_nudge`, `sandy_nudge_locks`.
 
-Indexes are created at boot on the raw handle — by each store's `init_*`
-(tasks, reminders, devices, nodes, scenes, …) and by `bootstrap.ensure_indexes()`
-for the rest (conversations, focus, habits, journal, reading sessions, scene
-timers, gifts, shared content, goals, …) — one `try` per index, so one failure
-cannot skip the rest. `sandy_stm`'s three are the exception and live in
-`graph.py::_ensure_stm_indexes`, created on first use, same one-try-each rule.
+**Left in place, no longer written** — the pre-blocks stores, copied into the
+blocks by `scripts/migrate_to_blocks.py` and kept until the owner drops them by
+hand: `sandy_tasks`, `sandy_reminders`, `sandy_goals`, `sandy_brainstorms`,
+`sandy_bs_pending`, `sandy_shopping`, `sandy_habits`, `sandy_habit_log`,
+`sandy_expenses`, `sandy_journal`, `sandy_books`, `sandy_reading_sessions`,
+`sandy_reading_meta`, `sandy_focus_meta`, `sandy_future_messages`, `sandy_gifts`,
+`sandy_shared_content`, `sandy_scene_timers`, `sandy_facts`, `sandy_memories`,
+`memory`, `sandy_session_state`, `sandy_activity`, `sandy_evals`,
+`sandy_conversations`, `sandy_context_metadata`, `web_chat_history`, and
+`guest_usage` (keyed on a guest token's `jti`, not a person). Account deletion
+(`features/account_delete.py`) still erases a person's rows in every one of the
+others — most by `user_id` or `chat_id`, `web_chat_history` by `_id` — so a
+deleted account leaves nothing behind.
 
-Two of them were added 24 Aug 2026 and are the reason replies stopped getting
-slower with use: `sandy_stm (user_id, updated_at desc)` for
-`recent_turns_for_user`, and `sandy_memories (chat_id, label, created_at desc)`
-— that collection had **no index at all** and is the fastest-growing one in the
-database.
+Indexes are created at boot on the raw handle — by each store's `init_*` and
+`init_blocks`, and by `bootstrap.ensure_indexes()` for the rest (pending state,
+prompt cache, camera and pairing TTLs, conversations, focus) — one `try` per
+index, so one failure cannot skip the rest. `sandy_stm`'s three are created on
+first use by `brain/stm.py::_ensure_stm_indexes`, same one-try-each rule, and
+retried until they exist: `(user_id, updated_at desc)` is what keeps the
+cross-channel read from scanning every conversation on the server.
 
 ---
 
 ## 9. Tests and CI
 
-112 test files, pytest + mongomock, no hardware and no live credentials needed.
+87 test files, pytest + mongomock, no hardware and no live credentials needed.
 `tests/test_device_system.py` carries the headline guarantee: the brain may only
 act on a **registered** device with a **validated** action, and refuses with the
-allowed list rather than guessing.
+allowed list rather than guessing. `tests/test_routes_kept.py` pins every route a
+client calls; `tests/test_tenant_isolation.py` runs every store through the
+isolation contract; the `test_brain_*` files drive the loop with a scripted model.
 
 CI (`.github/workflows/tests.yml`): pytest with coverage → Codecov → `bandit -ll`
 → `ruff check` → a secret scan that fails the build if a `.env`, key, or
@@ -1194,7 +1069,7 @@ alongside `requirements.txt`. It carries `pyOpenSSL>=23.2.0` — without it
 collection dies before the first test on an OpenSSL symbol mismatch
 (`AttributeError: module 'lib' has no attribute ...`), which this paragraph used
 to ask the next person to fix by hand. Coverage has a floor
-(`--cov-fail-under=55`, currently ~58%), and the Codecov upload is skipped on
+(`--cov-fail-under=55`, currently ~68%), and the Codecov upload is skipped on
 forks, where `secrets` are not available and it could only fail.
 
 ---
@@ -1244,10 +1119,10 @@ From `CONVENTIONS.md` and the owner's standing instructions:
 
 ## 12. Known defects, ranked
 
-Rewritten 25 Aug 2026, re-checked against the code 19 Sep 2026. Every item was checked against
-the source, not carried forward — and four of the nine that were here had been
-fixed without this list being told, which is its own lesson about a ranked list
-nobody re-reads. **Ranked by whether a customer can feel it.**
+Rewritten 25 Aug 2026, re-checked against the code 30 Sep 2026 after phase 5.
+Every item was checked against the source, not carried forward — a ranked list
+nobody re-reads becomes a way of believing things that stopped being true.
+**Ranked by whether a customer can feel it.**
 
 ### Reaches a user
 
@@ -1282,31 +1157,26 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    bodies and, since 19 Sep 2026, log breadcrumbs down to their `[tag]`.
    Without the DSN, failures are still discovered by the owner using the
    product.
-2. **`tool_health` is process-global and not per tenant.** `_history` is keyed
-   by tool name alone, so one customer's outage shapes what `get_capabilities`
-   tells another. It reads `error` rather than `ok` now, so ordinary refusals no
-   longer trip it (§2.4), but a genuinely broken upstream is still reported to
-   everybody. The fix is a key, not a rewrite.
-3. **A warm chat turn still costs 28 database round trips** (36 cold;
-   `scripts/audit_turn_cost.py`) even though the persona block is cached per
-   tenant version (§2.5). What remains is mostly `sandy_facts` and
-   `sandy_memories` reads and writes; only one of them is serial before the router.
+2. **The robot's body no longer reacts to what she does.** The celebrate /
+   acknowledge / focus melodies and faces were called only by the old goal,
+   task, habit and focus tools; the brain never called them, and phase 5 deleted
+   the unused `robot_expression` module. The board side (gestures, melodies,
+   light effects) is intact; wiring it back means the brain's `list_update`
+   (done) and the focus routes calling one small helper.
+3. **The brain is not told which devices exist.** `device_control` resolves the
+   model's `device` by slug or label and, when nothing matches, refuses with the
+   list of the caller's devices so the model can try again — correct, but it can
+   cost a model round trip on the first command of a conversation. The fast path
+   (§2.3) covers the bare commands.
 4. **A POST is never retried, and the chat send is a POST.** `sendWithRetry`
    guards on GET/HEAD because retrying a write could duplicate it, which is
    right — but it means the one dropped packet that motivated the whole change
    is still a red banner on the most-used call in the app. An idempotency key
    on the send is what would close it.
-5. **The chat turn makes two model calls in series** — the function-calling
-   router, then the reply. That pair, not the database, is why chat feels slower
-   than voice: voice injects memory once at session start and then only streams.
-   Merging them, or streaming the reply before routing finishes, is the open
-   question. The `[turn]` log line (§2.11) now gives the split per message.
-   *Partly closed 25 Sep 2026 for one class of turn:* `agent/fast_path.py` (§2.3)
-   answers a bare device command with **neither** call — it picks the tool by
-   matching the whole utterance against the caller's own registered devices, and
-   `response_node` passes the handler's reply straight through. It fires only on
-   a short order naming one registered device and nothing else; everything else
-   still pays for both. `[turn] … route 0 (fast)` marks the ones that did not.
+5. **A tool call costs two model calls in series** — the one that picks the tool
+   and the one that writes the answer; plain conversation is one. The fast path
+   answers a bare device command with none. `[turn] …ms total — brain tools=[…]`
+   (§2.11) gives the time per message.
 
 ### Real, but nobody hits it today
 
@@ -1316,20 +1186,23 @@ nobody re-reads. **Ranked by whether a customer can feel it.**
    app's shared `APIClient.session` / `sendWithRetry` policy cannot see it, so a future change to
    retry or timeouts will miss it.
 
-**Two more, found by the final review and left open deliberately** — both are
-sizing decisions rather than bugs, and both want a measurement first:
-`_SOUL_POOL`'s three-second deadline is per future, so two concurrent turns on
-one worker can add several of them onto the request thread; and
-`submit_background`'s ten workers now carry two LLM calls per turn (the STM
-summary and the conversation title) with no future ever read — *(partly closed
-18 Sep 2026: both calls now go through `_create_chat_resilient` with
-`OPENAI_CHAT_TIMEOUT_S`, so a stalled upstream costs a worker for that long,
-not for ever)*.
+8. **Related-memory recall is a Python scan.** `context.similar_entries` scores
+   the newest 400 log entries with an embedding by cosine on every chat turn;
+   there is no Atlas vector index on `sandy_entries`. Conversation summaries are
+   log entries too and are written about once a turn once a thread passes ten
+   messages, so on a long-lived account they fill most of that window. An Atlas
+   index (tenant-filtered) is the fix when accounts grow.
+9. **`submit_background`'s ten workers carry two model calls per turn** (the STM
+   summary and the conversation title) with no future ever read. Both go through
+   `chat_fn` with `OPENAI_CHAT_TIMEOUT_S`, so a stalled upstream costs a worker
+   for that long, not for ever. A sizing question, wanting a measurement first.
+10. **`/voice/enroll` has no client.** Speaker verification (§3.2) is off by
+   default and there is no screen that records a voiceprint.
 
 ### Hardware, and the owner already knows
 
-8. **Two-mic beamforming is not written.** §4.6.
-9. **Voice status clips are not flashed** — the sentences are in the table, the
+11. **Two-mic beamforming is not written.** §4.6.
+12. **Voice status clips are not flashed** — the sentences are in the table, the
    speaking hook is not written and the partition table has no room reserved. §4.2.
 
 ### Checked and closed since the last version of this list
@@ -1340,3 +1213,7 @@ room node is **on the per-node topic tree** (§4.5), so `room_device.send()` is
 not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
 (`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed. Servo easing and ten gestures are in
 (`sandy_servo.c`). The visitor approval flow and the JSON profile store are gone.
+Phase 5 closed three more by deleting what they were about: `tool_health` (no
+tool registry left), the 28-round-trip warm turn (the persona-directive build
+and the old memory layers are gone), and the router-then-reply pair on every
+message (plain chat is one call).

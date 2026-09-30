@@ -7,16 +7,22 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
+from app.blocks import items, schedules
+from app.brain.persona import build_effective_persona
+from app.brain.stm import recent_turns_for_user
+from app.integrations.openai_client import chat_fn
 from app.utils.tenant_db import scoped
+from app.utils.time_awareness import parse_ts
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import (
     active_user_profile_context,
+    address_instruction,
     build_user_profile,
     current_user_id,
 )
@@ -62,32 +68,26 @@ def _next_question(uid: str) -> Optional[Dict[str, str]]:
     return None
 
 
-def _was_up_late(mongo_db, uid: str) -> bool:
-    """True if the user was active 00:00–04:59 local recently (from session_state.last_active_at)."""
-    try:
-        from app.agent.session_state import get_session_state
-        ss = get_session_state(uid, mongo_db) or {}
-        la = ss.get("last_active_at")
-        if not isinstance(la, datetime):
-            return False
-        if la.tzinfo is None:
-            la = la.replace(tzinfo=timezone.utc)
-        local = la.astimezone(USER_TZ)
-        now = datetime.now(USER_TZ)
-        return local.hour < 5 and (now - local).total_seconds() < 18 * 3600
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("[daily_nudge] late-night check failed: %s", exc)
+def _was_up_late(uid: str) -> bool:
+    """True if the user's last message, on any channel, was 00:00–04:59 local and recent."""
+    last = recent_turns_for_user(uid, limit=1)
+    at = parse_ts(last[-1].get("timestamp")) if last else None
+    if at is None:
         return False
+    local = at.astimezone(USER_TZ)
+    return local.hour < 5 and (datetime.now(USER_TZ) - local).total_seconds() < 18 * 3600
 
 
-def _load_summary(mongo_db, uid: str) -> Dict[str, Any]:
-    from app.features import reminders_store, tasks_store
-    tasks = tasks_store.load_tasks(mongo_db=mongo_db) or []
-    overdue = tasks_store.overdue_among(tasks)
-    reminders = reminders_store.load_reminders(max_results=20) or []
+def _load_summary(uid: str) -> Dict[str, Any]:
+    """Today's load from the blocks: open tasks, the overdue ones, pending reminders."""
+    now = datetime.now(timezone.utc)
+    tasks = items.list_items("tasks", done=False)
+    overdue = [t for t in tasks if t.get("due") and _aware(t["due"]) < now]
+    reminders = schedules.list_schedules("reminder", status="pending",
+                                         since=now - timedelta(minutes=15), limit=20)
     titles = [
         str(t.get("text", "")).strip()
-        for t in (list(overdue)[:2] + list(tasks)[:3])
+        for t in (overdue[:2] + tasks[:3])
         if str(t.get("text", "")).strip()
     ]
     return {
@@ -95,8 +95,12 @@ def _load_summary(mongo_db, uid: str) -> Dict[str, Any]:
         "overdue": len(overdue),
         "reminders": len(reminders),
         "titles": titles,
-        "late": _was_up_late(mongo_db, uid),
+        "late": _was_up_late(uid),
     }
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
 def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
@@ -109,9 +113,6 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
     heavy = summary["overdue"] > 0 or (summary["tasks"] + summary["overdue"]) >= 4
     late = bool(summary.get("late"))
     try:
-        from app.agent.context_builder import build_effective_persona
-        from app.agent.facade.agent import create_chat_completion
-        from app.utils.user_profiles import address_instruction
         system = build_effective_persona(uid) + _AGENDA_INSTRUCTION + "\n" + address_instruction()
         user = load_line + (" أبرز العناوين: " + "؛ ".join(titles) if titles else "")
         if late:
@@ -119,7 +120,7 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
                 " (ملاحظة: كان ساهر لوقت متأخر مبارح — ابدئي بصباح دافئ واسأليه "
                 "بلطف كيف نام وكيف حاله بعد السهر قبل ما تحكي عن المهام.)"
             )
-        result = create_chat_completion(
+        result = chat_fn()(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -158,7 +159,7 @@ def get_daily_nudge(mongo_db, uid: str) -> Dict[str, Any]:
     if q is not None:
         nudge: Dict[str, Any] = {"kind": "question", "qid": q["id"], "text": q["text"]}
     else:
-        nudge = {"kind": "agenda", "text": _generate_agenda(uid, _load_summary(mongo_db, uid))}
+        nudge = {"kind": "agenda", "text": _generate_agenda(uid, _load_summary(uid))}
 
     if coll is not None:
         try:

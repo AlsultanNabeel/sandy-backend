@@ -2,8 +2,8 @@
 
 Voice has no text turn for the server to read a yes from, so it declares one
 extra tool, ``confirm``: the model passes the user's own words and the same
-yes/no resolver as chat decides. Held actions use the pending store's "voice"
-thread, as the old voice path does.
+yes/no resolver as chat decides. Held actions wait on the pending store's "voice"
+thread.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from app.agent.pending_store import load_pending_state, save_pending_state
 from app.brain import confirm, tools
+from app.brain import pending as P
 from app.brain.ctx import TurnCtx
 from app.db import get_db
 
@@ -36,7 +36,7 @@ def declarations() -> List[Dict[str, Any]]:
 
 
 def _tagged(result: Dict[str, Any]) -> Dict[str, Any]:
-    """The old voice path's marks (C10): Gemini must not confirm what did not happen."""
+    """Everything that did not happen is marked (C10): Gemini must not confirm it."""
     text = str(result.get("reply") or "").strip()
     if result.get("ok"):
         return {"handled": True, "ok": True, "reply": text or _brief(result)}
@@ -54,7 +54,7 @@ def _brief(result: Dict[str, Any]) -> str:
 
 def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
     db = get_db()
-    held = confirm.live(load_pending_state(VOICE_THREAD, chat_id, db))
+    held = confirm.live(P.load(VOICE_THREAD, chat_id, db))
     if held is None:
         return {"handled": True, "reply": "ما في إشي مستني تأكيد."}
     said = confirm.answer(answer)
@@ -62,7 +62,7 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
         # The held action stays alive, so this is an ask, not a refusal (C10).
         return {"handled": True,
                 "reply": f"ما فهمت اه ولا لأ — اسأليه مرة تانية: {confirm.question(held['summary'])}"}
-    save_pending_state(VOICE_THREAD, chat_id, db, None)
+    P.save(VOICE_THREAD, chat_id, db, None)
     if said == "no":
         return {"handled": True, "reply": confirm.CANCELLED_REPLY}
     return _tagged(confirm.run_held(held, TurnCtx(user_id=chat_id, source="voice")))
@@ -75,7 +75,7 @@ def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
     result = tools.execute(name, args or {}, TurnCtx(user_id=chat_id, source="voice"))
     if result.get("needs_confirmation"):
         held = confirm.hold(name, args or {}, result["summary"])
-        save_pending_state(VOICE_THREAD, chat_id, get_db(), held)
+        P.save(VOICE_THREAD, chat_id, get_db(), held)
         logger.info("[voice_ws] brain %s is waiting for a confirmation", name)
         # Not done yet and not refused: the pending is live (C10).
         return {"handled": True,

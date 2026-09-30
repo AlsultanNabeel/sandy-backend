@@ -120,11 +120,6 @@ def _reset_live_model_cache() -> None:
 
 _ANTI_REPLAY_MS: int = 30_000
 
-# على المايك نتأكد إنه صوت المالك قبل أمر حسّاس (SANDY_REQUIRE_SPEAKER_AUTH=1).
-_SENSITIVE_TOOLS = {
-    "task_delete", "reminder_delete",
-    "schedule_message_to_self",
-}
 # آخر ~5 ثوانٍ من صوت الجهاز (16kHz·16bit·mono = 32KB/s) للتحقّق عند أمر حسّاس.
 _RECENT_AUDIO_MAX_BYTES = 160_000
 # أقل صوت لتحقّق موثوق ≈ 0.5s.
@@ -173,5 +168,3 @@ _APP_TURNS_BY_GEMINI: bool = os.getenv("SANDY_APP_TURNS", "ours").strip().lower(
 _APP_DUPLEX: bool = os.getenv("SANDY_APP_DUPLEX", "1").strip().lower() not in {"0", "false", "off", "no"}
 _APP_SILENCE_MS = 900
 _APP_PREFIX_MS = 300
-
-_VOICE_CTX_TTL_S = float(os.getenv("SANDY_VOICE_CTX_TTL_S", "60"))

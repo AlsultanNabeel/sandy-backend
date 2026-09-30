@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.agent import fast_path
+from app.brain import fast_path
 
 
 # ── the tenant's registry, which is what the matcher is built from ───────────
@@ -34,9 +34,8 @@ def _registry(monkeypatch):
     monkeypatch.setattr("app.features.device_store.list_devices", lambda: _DEVICES)
 
 
-def _route(message, **state):
-    state.setdefault("message", message)
-    return fast_path.try_fast_route(state)
+def _route(message, image_state=None):
+    return fast_path.try_fast_route(message, image_state=image_state)
 
 
 # ── what must be fast ────────────────────────────────────────────────────────
@@ -148,11 +147,6 @@ def test_no_devices_means_no_fast_path():
         assert _route("شغل الضو") is None
 
 
-def test_a_pending_confirmation_suspends_it():
-    """A confirmation in flight is a conversation mid-sentence."""
-    assert _route("شغل الضو", pending_state={"type": "tool_guard"}) is None
-
-
 def test_an_image_turn_suspends_it():
     assert _route("شغل الضو", image_state={"b64": "..."}) is None
 
@@ -173,10 +167,7 @@ def test_it_never_raises(monkeypatch):
 # ── the boundary it must not cross ───────────────────────────────────────────
 
 def test_it_can_only_ever_name_one_tool_and_that_tool_is_not_destructive():
-    from app.agent.guards import DESTRUCTIVE_TOOLS
-
     assert fast_path._FAST_TOOL == "device_control"
-    assert fast_path._FAST_TOOL not in DESTRUCTIVE_TOOLS
 
     src = (__import__("pathlib").Path(fast_path.__file__)).read_text(encoding="utf-8")
     body = src.split('_FAST_TOOL = ')[1]
@@ -185,8 +176,8 @@ def test_it_can_only_ever_name_one_tool_and_that_tool_is_not_destructive():
 
 
 def test_it_picks_but_never_executes():
-    """The call it returns is handed to the ordinary dispatcher. If this module
-    ever grows a `send`/`publish`/`set_state` call it has stopped being a router
+    """The call it returns is run by the brain's own `device_control`. If this module
+    ever grows a `send`/`publish`/`set_state` call it has stopped picking
     and started being a second, unguarded actuation path."""
     from pathlib import Path
 
@@ -196,66 +187,3 @@ def test_it_picks_but_never_executes():
     code = code.split('"""', 2)[-1]          # drop the module docstring
     for forbidden in ("set_state", "send_to_topic", "apply_actions", "publish"):
         assert forbidden not in code, f"the fast path must not call {forbidden}"
-
-
-def test_both_routes_derive_the_same_fields():
-    """The fast path hands over a tool call and nothing else; every other field
-    the graph reads is derived by `apply_routing_decision`, for both callers.
-    Copying those lookups would drift, and the symptom would be Sandy wearing
-    the wrong face for a command she carried out correctly."""
-    from app.agent.agents.fc_router import apply_routing_decision
-    from app.agent.graph.state import create_initial_state
-
-    state = create_initial_state(message="شغل الضو", user_id="u1", chat_id="u1")
-    call = fast_path.try_fast_route(dict(state))
-    assert call is not None
-    routed = apply_routing_decision(state, call, routed_by="fast_path")
-
-    assert routed["function_call"] == call
-    assert routed["routed_by"] == "fast_path"
-    for field in ("intent", "routing_hint", "mood", "sandy_face", "persona_intensity"):
-        assert routed.get(field), f"{field} was not derived for the fast route"
-
-
-# ── the claim itself: the model is not called ────────────────────────────────
-
-def test_a_fast_turn_never_reaches_the_router(monkeypatch):
-    """The point of the whole module, asserted rather than assumed.
-
-    `_route_intent` is where a turn spends its first model call. This replaces
-    `route_with_fc` with something that fails the test if it is reached at all,
-    so "no model call" is checked by the suite instead of by reading the code.
-    """
-    from app.agent.graph import graph as graph_mod
-
-    def _must_not_run(*_a, **_k):
-        raise AssertionError("route_with_fc was called on a fast-path turn")
-
-    monkeypatch.setattr("app.agent.agents.fc_router.route_with_fc", _must_not_run)
-
-    from app.agent.graph.state import create_initial_state
-    state = create_initial_state(message="شغل الضو", user_id="u1", chat_id="u1")
-    routed = graph_mod._route_intent(state)
-
-    assert routed["routed_by"] == "fast_path"
-    assert routed["function_call"]["name"] == "device_control"
-
-
-def test_an_ordinary_turn_still_reaches_the_router(monkeypatch):
-    """The other half, so a fast path that silently swallowed everything would
-    not pass this file."""
-    from app.agent.graph import graph as graph_mod
-
-    seen = {}
-
-    def _fake(state, declarations):
-        seen["called"] = True
-        return state
-
-    monkeypatch.setattr("app.agent.agents.fc_router.route_with_fc", _fake)
-
-    from app.agent.graph.state import create_initial_state
-    state = create_initial_state(message="كيفك اليوم يا ساندي؟",
-                                 user_id="u1", chat_id="u1")
-    graph_mod._route_intent(state)
-    assert seen.get("called"), "an ordinary sentence must still go to the model"

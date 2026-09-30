@@ -6,10 +6,9 @@ import json
 from brain_fakes import (A, ScriptedModel, brain_db, call, text_reply,  # noqa: F401
                          tools_reply)
 
-from app.agent.nodes.execute import clear_stream_hooks, set_stream_hooks
 from app.blocks import items
 from app.brain import loop
-from app.brain.model import Reply
+from app.brain.model import Reply, clear_stream_hooks, set_stream_hooks
 from app.utils.user_profiles import active_user_profile_context
 
 
@@ -55,7 +54,7 @@ def test_model_down_gives_the_error_sentence(brain_db):  # noqa: F811
     assert state["final_response"] == loop.ERROR_REPLY and state["error"]
 
 
-def test_the_final_text_streams_through_the_existing_hooks(brain_db):  # noqa: F811
+def test_the_final_text_streams_through_the_hooks(brain_db):  # noqa: F811
     chunks = []
     set_stream_hooks(on_start=lambda: None, on_chunk=chunks.append)
     try:
@@ -67,7 +66,7 @@ def test_the_final_text_streams_through_the_existing_hooks(brain_db):  # noqa: F
 
 def test_the_turn_is_written_to_short_term_memory(brain_db):  # noqa: F811
     _turn(ScriptedModel(text_reply("تمام")), "كيفك")
-    from app.agent.graph.graph import recent_turns_for_user
+    from app.brain.stm import recent_turns_for_user
     turns = recent_turns_for_user("userA")
     assert [t["content"] for t in turns] == ["كيفك", "تمام"]
     # ...and the next turn sees it as history.
@@ -86,7 +85,6 @@ def test_fast_path_still_wins_with_no_model_call(brain_db, monkeypatch):  # noqa
             return True
 
     monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
-    monkeypatch.setattr("app.config.SANDY_NEW_AGENT", True)
     with active_user_profile_context(A):
         device_store.add_device("living_light", "الضو", "switch",
                                 {"kind": "mqtt", "topic": "room/cmd/light"})
@@ -112,5 +110,4 @@ def test_image_bytes_reach_the_reply(brain_db, monkeypatch):  # noqa: F811
     monkeypatch.setitem(loop.tools.HANDLERS, "image", fake_image)
     state = _turn(ScriptedModel(tools_reply(call("image", prompt="قطة")),
                                 Reply(text="هاي الصورة")), "ارسمي قطة")
-    from app.agent.graph.graph import get_final_reply
-    assert get_final_reply(state)["image_bytes"] == b"png"
+    assert state["execution_result"]["image_bytes"] == b"png"

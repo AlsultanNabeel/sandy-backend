@@ -214,35 +214,16 @@ def _title_from(text: str) -> str:
 
 def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
     """Small LLM title from the first exchange; runs in the background."""
+    from app.integrations.openai_client import chat_fn
+
     try:
-        from app.config import (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
-                                 AZURE_OPENAI_API_VERSION, AZURE_OPENAI_CHAT_DEPLOYMENT)
-        from openai import AzureOpenAI
-
-        if not AZURE_OPENAI_API_KEY:
-            return
-        client = AzureOpenAI(
-            api_key=AZURE_OPENAI_API_KEY,
-            azure_endpoint=AZURE_OPENAI_ENDPOINT,
-            api_version=AZURE_OPENAI_API_VERSION,
-            max_retries=0,
-        )
-        from app.integrations.azure_intent_client import _create_chat_resilient
-        from app.integrations.openai_client import DEFAULT_CHAT_TIMEOUT_S
-
-        # Breaker + deadline: this runs on the shared background pool.
-        resp = _create_chat_resilient(client, {
-            "model": AZURE_OPENAI_CHAT_DEPLOYMENT,
-            "messages": [
-                {"role": "system", "content": (
-                    "اكتب عنوانًا قصيرًا جدًا (كلمتين لأربع كلمات) يلخّص موضوع المحادثة. "
-                    "بنفس لغة المستخدم، بدون علامات اقتباس وبدون نقطة في الآخر."
-                )},
-                {"role": "user", "content": f"المستخدم: {user_msg}\nساندي: {reply}"},
-            ],
-            "max_tokens": 20,
-            "timeout": DEFAULT_CHAT_TIMEOUT_S,
-        })
+        resp = chat_fn()(max_tokens=20, messages=[
+            {"role": "system", "content": (
+                "اكتب عنوانًا قصيرًا جدًا (كلمتين لأربع كلمات) يلخّص موضوع المحادثة. "
+                "بنفس لغة المستخدم، بدون علامات اقتباس وبدون نقطة في الآخر."
+            )},
+            {"role": "user", "content": f"المستخدم: {user_msg}\nساندي: {reply}"},
+        ])
         title = (resp.choices[0].message.content or "").strip().strip('"').strip("«»").strip()
         if title:
             coll.update_one({"_id": cid, "user_id": uid},
@@ -258,35 +239,20 @@ def _generate_title_async(coll, cid: str, uid: str, user_msg: str, reply: str) -
                       _label="conversation-title")
 
 
-def _semantic_hits(mongo_db, query: str, limit: int = 30):
-    """[(conversation_id, summary)] whose rolling summary matches the query by meaning.
+def _semantic_hits(uid: str, query: str, limit: int = 30):
+    """[(conversation_id, summary)] from the caller's own conversation summaries, by meaning.
 
-    Ownership is checked by the caller; any failure yields [] (text search still answers).
+    Any failure yields [] (text search still answers).
     """
-    if mongo_db is None:
-        return []
+    from app.brain.context import similar_entries
+
     try:
-        from app.agent.semantic_memory import _embed
-        vec = _embed(query)
-        if not vec:
-            return []
-        pipeline = [
-            {"$vectorSearch": {
-                "index": "sandy_vector_index",
-                "path": "embedding",
-                "queryVector": vec,
-                "numCandidates": 80,
-                "limit": limit,
-                "filter": {"label": {"$eq": "conversation_summary"}},
-            }},
-            {"$project": {"chat_id": 1, "summary": 1}},
-        ]
-        return [
-            (str(d.get("chat_id", "")), d.get("summary", ""))
-            for d in mongo_db["sandy_memories"].aggregate(pipeline)
-        ]
+        with active_user_profile_context({"chat_id": uid}):
+            rows = similar_entries(query, k=limit, kind="summary")
     except Exception:  # noqa: BLE001 — text search is the floor
+        logger.warning("[conversations] summary search failed", exc_info=True)
         return []
+    return [(str((r.get("data") or {}).get("thread_id") or ""), r.get("text", "")) for r in rows]
 
 
 def register_conversations_api(app, mongo_db=None):
@@ -447,10 +413,10 @@ def register_conversations_api(app, mongo_db=None):
             })
             seen.add(str(d["_id"]))
 
-        # 2) Semantic match over rolling summaries, limited to the caller's own threads.
+        # 2) Match over the caller's conversation summaries, limited to their own threads.
         if len(items) >= _MAX_SEARCH_RESULTS:
             return jsonify({"items": items}), 200
-        hits = [(cid, s) for cid, s in _semantic_hits(mongo_db, q) if cid and cid not in seen]
+        hits = [(cid, s) for cid, s in _semantic_hits(uid, q) if cid and cid not in seen]
         owned = {
             str(c["_id"]): c
             for c in coll.find(

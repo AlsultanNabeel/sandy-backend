@@ -183,21 +183,31 @@ def test_device_control_calls_the_same_handler_and_gate(tenant_a, monkeypatch):
     assert out["ok"] is False and "ضوء الصالة" in out["reply"]
 
 
-def test_world_tools_wrap_the_existing_handlers(tenant_a, monkeypatch):
+def test_world_tools_reach_their_providers(tenant_a, monkeypatch):
     seen = []
-
-    def fake(action_type, params, ctx):
-        seen.append((action_type, params))
-        return {"handled": True, "reply": f"{action_type} ok",
-                **({"image_bytes": b"png"} if action_type == "image" else {})}
-
-    monkeypatch.setattr("app.agent.tools.schemas.other_tools._call_dispatch", fake)
+    monkeypatch.setattr("app.features.research.web_answer",
+                        lambda q, msg, complete: seen.append(("web", q)) or "📌 الملخص:\nخبر")
+    monkeypatch.setattr("app.features.weather.get_weather",
+                        lambda city: seen.append(("weather", city)) or dict(
+                            city=city, description="مشمس", temp_c=20, feels_like_c=19,
+                            max_temp_c=24, min_temp_c=12, humidity=40, sunset="18:10"))
+    monkeypatch.setattr("app.features.vision.generate_image_with_azure",
+                        lambda prompt: seen.append(("image", prompt)) or b"png")
     ctx = TurnCtx(user_id="userA", message="x")
-    assert tools.execute("web_search", {"query": "أخبار"}, ctx)["reply"] == "research ok"
+    assert tools.execute("web_search", {"query": "أخبار"}, ctx)["reply"].startswith("📌")
     assert tools.execute("weather", {"city": "عمّان"}, ctx)["ok"]
     assert tools.execute("image", {"prompt": "قطة"}, ctx)["ok"]
-    assert ctx.artifacts["image_bytes"] == b"png"
-    assert [s[0] for s in seen] == ["research", "weather", "image"]
+    assert ctx.artifacts["image_bytes"] == b"png" and ctx.artifacts["caption"] == "قطة"
+    assert seen == [("web", "أخبار"), ("weather", "عمّان"), ("image", "قطة")]
+
+
+def test_a_failed_image_or_weather_is_a_refusal_not_a_success(tenant_a, monkeypatch):
+    monkeypatch.setattr("app.features.weather.get_weather", lambda city: None)
+    monkeypatch.setattr("app.features.vision.generate_image_with_azure", lambda prompt: None)
+    ctx = TurnCtx(user_id="userA", message="x")
+    assert tools.execute("weather", {"city": "عمّان"}, ctx)["ok"] is False
+    assert tools.execute("image", {"prompt": "قطة"}, ctx)["ok"] is False
+    assert "image_bytes" not in ctx.artifacts
 
 
 def test_a_raising_tool_is_a_result_not_a_crash(tenant_a, monkeypatch):

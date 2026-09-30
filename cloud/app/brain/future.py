@@ -1,4 +1,4 @@
-"""Messages to your future self, delivered the way the old graph does it (§2.5).
+"""Messages to your future self, delivered into the next chat reply.
 
 Due `message_to_future_self` schedules go into the next chat turn's prompt, and
 are marked "sent" only once a real reply exists, so a failed turn delivers
@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Tuple
 
-from app.agent.ltm_crypto import decrypt_field
+from app.utils.ltm_crypto import decrypt_field
 from app.blocks import _base, schedules
 
 KIND = "message_to_future_self"
@@ -33,7 +33,6 @@ def due_context(now: Optional[datetime] = None) -> Optional[Tuple[str, List[Any]
     rows = schedules.list_schedules(KIND, status="pending", until=now, limit=MAX_DUE)
     if not rows:
         return None
-    # Same sentence the old soul node puts in the prompt.
     text = "[رسالة مجدولة من المستخدم لنفسه: " + " | ".join(_line(r) for r in rows) + "]"
     return text, [r["id"] for r in rows]
 

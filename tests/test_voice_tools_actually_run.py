@@ -19,86 +19,40 @@ from app.api.voice_ws.tools import _build_system_instruction, _dispatch_tool  # 
 
 
 class _Recorder:
-    """Stands in for the dispatcher and keeps the context it was handed."""
+    """Stands in for the brain's voice dispatch and keeps who it was called for."""
 
     def __init__(self, result=None):
-        self.ctx = None
-        self.result = result or {"handled": True, "reply": "تمام"}
+        self.chat_id = None
+        self.result = result or {"handled": True, "ok": True, "reply": "تمام"}
 
-    def dispatch(self, name, args, ctx):
-        self.ctx = ctx
+    def __call__(self, name, args, chat_id):
+        from app.utils.user_profiles import current_user_id
+        self.chat_id, self.tenant = chat_id, current_user_id()
         return self.result
 
 
-def test_tools_are_given_an_account_and_a_database():
+def test_tools_are_given_an_account():
     """The bug, in one assertion.
 
-    The voice path built its context with `state` and `mongo_db` left at their
-    defaults. Tools read `ctx.state["chat_id"]` and `ctx.mongo_db`, so a reminder
-    was written for an account called "default" — a real row, in a tenant no
-    screen in the app can see — and anything needing the database got None and
-    stopped.
-
-    Nothing raised. The failure was a value, and values do not appear in logs.
+    The voice path once ran tools with no account: a reminder was written for a
+    tenant called "default" — a real row no screen in the app can see. Nothing
+    raised. The failure was a value, and values do not appear in logs.
     """
     rec = _Recorder()
-    with patch("app.api.voice_ws.tools._stm_chat_id", return_value="owner-42"), \
-         patch("app.db.get_db", return_value={"marker": True}):
-        _dispatch_tool(rec, "reminder_create", {"text": "اتصل بأمي"})
-
-    assert rec.ctx is not None, "the dispatcher was never called"
-    assert rec.ctx.state, "tools were handed no state — chat_id falls back to 'default'"
-    assert rec.ctx.state.get("chat_id") == "owner-42", (
-        f"tools would write to {rec.ctx.state.get('chat_id')!r} instead of the "
-        "owner — data lands in a tenant nothing can read back")
-    assert rec.ctx.mongo_db is not None, (
-        "tools that need the database get None and return without doing anything")
-
-
-def test_the_camera_flash_is_the_exception_that_proves_it():
-    """The one thing that worked needs neither of the two missing pieces.
-
-    Kept as a test because the reasoning is the useful part: when one feature out
-    of eighty works, the question is what that one does differently — and the
-    answer named the bug faster than reading any of the other seventy-nine.
-    """
-    src = (Path(__file__).resolve().parent.parent
-           / "cloud/app/agent/tools/schemas/device_tools.py").read_text(encoding="utf-8")
-    body = src[src.index("def device_control"):src.index("def device_control") + 2000]
-
-    assert "ctx.state" not in body and "ctx.mongo_db" not in body, (
-        "device_control now depends on context the voice path may not supply — "
-        "it was the only tool that still worked, and this is why")
-
-
-def test_a_failed_tool_is_reported_as_failed():
-    """`handled=False` must not reach the model looking like success.
-
-    The dispatcher returns `handled=False` when it refuses or cannot find the
-    tool, and only `reply` was passed on. Gemini saw a sentence, assumed it
-    worked, and confirmed. That is half the "she says she did it" report.
-    """
-    rec = _Recorder({"handled": False, "reply": "ما لقيت هالجهاز."})
-    with patch("app.api.voice_ws.tools._stm_chat_id", return_value="owner-42"), \
-         patch("app.db.get_db", return_value={}):
-        out = _dispatch_tool(rec, "device_control", {"device": "غير موجود"})
-
-    assert out["handled"] is False
-    assert "فشل" in out["reply"], (
-        "the model is told a sentence with no sign of failure, so it will "
-        "confirm an action that did not happen")
+    with patch("app.brain.voice.dispatch", rec):
+        _dispatch_tool("schedule", {"text": "اتصل بأمي"}, "owner-42")
+    assert rec.chat_id == "owner-42", (
+        f"tools would write to {rec.chat_id!r} instead of the owner")
+    assert rec.tenant == "owner-42", "the scoped stores would read and write nothing"
 
 
 def test_an_exception_is_reported_as_failure_not_silence():
-    class _Boom:
-        def dispatch(self, *_):
-            raise RuntimeError("mongo down")
+    def _boom(*_a):
+        raise RuntimeError("mongo down")
 
-    with patch("app.api.voice_ws.tools._stm_chat_id", return_value="owner-42"), \
-         patch("app.db.get_db", return_value={}):
-        out = _dispatch_tool(_Boom(), "task_create", {"title": "x"})
-
-    assert out["handled"] is False and out["reply"]
+    with patch("app.brain.voice.dispatch", _boom):
+        out = _dispatch_tool("list_add", {"text": "x"}, "owner-42")
+    assert out["handled"] is False and "فشل" in out["reply"]
 
 
 def _instruction() -> str:
@@ -110,7 +64,7 @@ def _instruction() -> str:
     misdirection this whole file exists because of.
     """
     with patch("app.api.voice_ws.tools._stm_chat_id", return_value="owner-42"), \
-         patch("app.agent.context_builder.build_effective_persona",
+         patch("app.brain.persona.build_effective_persona",
                return_value="persona"), \
          patch("app.db.get_db", return_value=None):
         return _build_system_instruction()
@@ -132,9 +86,9 @@ def test_she_is_told_the_first_acknowledgement_is_not_a_confirmation():
 def test_content_requests_are_exempt_from_the_two_sentence_limit():
     """"One or two sentences, execute and confirm without explaining."
 
-    Right for "turn off the light". Wrong for "start a brainstorm" — she ran the
-    tool and went quiet, because the content *is* the answer and the rule forbade
-    it. Not a missing capability: a rule that removed it.
+    Right for "turn off the light". Wrong for a brainstorm or a summary — she ran
+    the tool and went quiet, because the content *is* the answer and the rule
+    forbade it.
     """
     text = _instruction()
     assert "عصف ذهني" in text and "المحتوى نفسه هو الجواب" in text

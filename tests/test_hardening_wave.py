@@ -2,15 +2,12 @@
 
 Locks in the fixes so they can't silently regress:
 - unified Arabic yes/no confirmation matching (the "اه" → hallucinated حذفت bug),
-- fetch_url SSRF host filtering,
 - per-user pending-state key isolation,
 - device transport validation (reserved node namespace).
 """
 
-from app.agent.executor.helpers import _is_quick_confirmation, is_cancellation
-from app.agent.executor.pending.dispatch import classify_response_to_pending
-from app.agent.tools.schemas.mcp_tools import _is_safe_public_url
-from app.agent.pending_store import _key as pending_key
+from app.brain.confirm import answer
+from app.brain.pending import _key as pending_key
 from app.features.device_store import _valid_transport
 
 
@@ -19,41 +16,18 @@ from app.features.device_store import _valid_transport
 def test_confirmations_recognized():
     for t in ["اه", "آه", "أه", "اه صح", "اه احذفها", "اه 👍", "تمام", "نعم",
               "ايوه", "احذفها", "ok", "okay", "تمام يلا"]:
-        assert _is_quick_confirmation(t), t
-        assert classify_response_to_pending(t, "task") == "confirm", t
+        assert answer(t) == "yes", t
 
 
 def test_cancellations_recognized_and_win_mixed():
     for t in ["لا", "لأ", "مش هلأ", "الغي", "خلص", "no", "cancel", "لا تحذف",
               "اه بس لا", "تمام لا مشكلة"]:
-        assert is_cancellation(t), t
-        assert classify_response_to_pending(t, "task") == "reject", t
+        assert answer(t) == "no", t
 
 
 def test_non_answers_are_ignored_not_confirmed():
     for t in ["شو الطقس اليوم", "اي واحدة", "احكيلي قصة", ""]:
-        assert not _is_quick_confirmation(t), t
-        assert classify_response_to_pending(t, "task") == "ignore", t
-
-
-# ── fetch_url SSRF host filter ───────────────────────────────────────────────
-
-def test_fetch_url_rejects_internal_hosts():
-    for u in [
-        "http://169.254.169.254/latest/meta-data/",   # cloud metadata
-        "http://127.0.0.1/",                           # loopback
-        "http://10.0.0.5/",                            # private
-        "http://192.168.1.1/",                         # private
-        "http://[::1]/",                               # ipv6 loopback
-        "ftp://example.com/",                          # non-http scheme
-        "not a url",
-    ]:
-        assert _is_safe_public_url(u) is False, u
-
-
-def test_fetch_url_allows_public_ip_literal():
-    # 8.8.8.8 is a public literal → no DNS, hermetic.
-    assert _is_safe_public_url("http://8.8.8.8/") is True
+        assert answer(t) == "other", t
 
 
 # ── pending-state key isolation ──────────────────────────────────────────────

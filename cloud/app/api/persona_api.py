@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from flask import jsonify, request
 
-from app.agent.context_builder import DIALECT_PRESETS
 from app.api.auth_handlers import require_auth
+from app.brain.persona import DIALECT_PRESETS
 from app.features import users_store
 
 _MAX_CUSTOM_INSTRUCTIONS = 2000
