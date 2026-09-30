@@ -3,14 +3,14 @@
 
 # ── Text search must not be a regular expression the user wrote ──────────────
 
-def test_a_habit_named_with_regex_characters_matches_only_itself():
+def test_a_search_with_regex_characters_matches_only_itself():
     """The user's text goes into a regex, so it has to be escaped.
 
-    Unescaped, a habit named `.*` matches every habit, and a name like `(a+)+$`
+    Unescaped, a search for `.*` matches every row, and a query like `(a+)+$`
     can hang the matcher on a long string — a denial of service written by
-    somebody who was only naming a habit.
+    somebody who was only searching.
     """
-    from app.utils.text_query import contains, equals
+    from app.utils.text_query import contains
 
     q = contains("name", ".*")
     assert q["name"]["$regex"] == r"\.\*"
@@ -18,19 +18,15 @@ def test_a_habit_named_with_regex_characters_matches_only_itself():
     q = contains("name", "(a+)+$")
     assert "(" not in q["name"]["$regex"].replace(r"\(", "")
 
-    # Exact match stays anchored, so a substring cannot satisfy it.
-    q = equals("title", "Hobbit")
-    assert q["title"]["$regex"].startswith("^") and q["title"]["$regex"].endswith("$")
-
 
 def test_list_reads_all_have_a_ceiling():
     """Every list-returning query is capped; every aggregate deliberately is not.
 
     The distinction is the point. A cap on a list is a safety net — the caller
     gets fewer rows and the request survives. A cap on a sum is a wrong number
-    that looks right, which is worse than a slow query. So the aggregates in
-    reading_store carry a comment saying why they are uncapped, and this test
-    exists so nobody "fixes" them later without reading it.
+    that looks right, which is worse than a slow query. So an aggregate carries a
+    comment saying why it is uncapped, and this test exists so nobody "fixes" it
+    later without reading it.
     """
     import re
     from pathlib import Path

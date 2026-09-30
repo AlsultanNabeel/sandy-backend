@@ -27,9 +27,6 @@ os.environ.setdefault("JWT_SECRET", "test-secret-for-isolation")
 
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 
-FAR_FUTURE = "2099-01-01T10:00:00"
-
-
 def as_tenant(tenant_id):
     """Run a block as an authenticated user with full permissions on their own
     tenant — exactly what build_user_profile produces for a signed-in user."""
@@ -54,67 +51,26 @@ STORE_CASES = []
 
 
 def _register():
-    from app.features import (
-        expenses_store,
-        habits_store,
-        journal_store,
-        reading_store,
-        reminders_store,
-        scene_store,
-        shopping_store,
-        tasks_store,
-    )
+    from datetime import datetime, timezone
 
+    from app.blocks import entries, init_blocks, items, schedules
+    from app.features import scene_store
+
+    far = datetime(2099, 1, 1, 10, tzinfo=timezone.utc)
     STORE_CASES.extend(
         [
-            (
-                "tasks",
-                tasks_store.init_tasks_store,
-                lambda m: tasks_store.add_task(m),
-                lambda: tasks_store.load_tasks(),
-            ),
-            (
-                "shopping",
-                shopping_store.init_shopping_store,
-                lambda m: shopping_store.add_item(m),
-                lambda: shopping_store.list_items(include_bought=True),
-            ),
-            (
-                "reminders",
-                reminders_store.init_reminders_store,
-                lambda m: reminders_store.add_reminder(m, FAR_FUTURE),
-                lambda: reminders_store.load_reminders(),
-            ),
-            (
-                "habits",
-                habits_store.init_habits_store,
-                lambda m: habits_store.add_habit(m),
-                lambda: habits_store.list_habits(),
-            ),
-            (
-                "journal",
-                journal_store.init_journal_store,
-                lambda m: journal_store.add_entry(m),
-                lambda: journal_store.recent_entries(),
-            ),
-            (
-                "expenses",
-                expenses_store.init_expenses_store,
-                lambda m: expenses_store.add_expense(1.0, note=m),
-                lambda: expenses_store.list_expenses(),
-            ),
-            (
-                "reading",
-                reading_store.init_reading_store,
-                lambda m: reading_store.add_book(m),
-                lambda: reading_store.list_books(),
-            ),
-            (
-                "scene",
-                scene_store.init_scene_store,
-                lambda m: scene_store.add_scene(m),
-                lambda: scene_store.list_scenes(),
-            ),
+            ("entries", init_blocks,
+             lambda m: entries.add("note", m, embed=False),
+             lambda: entries.list_entries()),
+            ("items", lambda db: None,
+             lambda m: items.add("tasks", m),
+             lambda: items.list_items()),
+            ("schedules", lambda db: None,
+             lambda m: schedules.add("reminder", m, far),
+             lambda: schedules.list_schedules()),
+            ("scene", scene_store.init_scene_store,
+             lambda m: scene_store.add_scene(m),
+             lambda: scene_store.list_scenes()),
         ]
     )
 

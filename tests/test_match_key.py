@@ -1,8 +1,8 @@
-"""Pure-logic guards for task-name matching.
+"""Pure-logic guards for row-name matching.
 
-_task_match_key is the normaliser every task lookup compares against.
+match_key is the normaliser every "which one did they mean" lookup compares against.
 """
-from app.features.tasks_matcher import _task_match_key
+from app.brain.matching import match_key as _task_match_key
 
 
 def test_match_key_normalises_alef_variants():

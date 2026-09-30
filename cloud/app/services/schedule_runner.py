@@ -23,17 +23,19 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from dateutil.rrule import rrulestr
+
 from app.blocks import _base
 from app.features import push_tokens_store
-from app.features.reminders_store import _next_occurrence
 from app.services import apns
+from app.utils.time import USER_TZ
 from app.utils.user_profiles import active_user_profile_context
 
 logger = logging.getLogger(__name__)
 
 RUNNABLE = ("reminder", "scene", "daily_nudge", "summary_nudge")
 PUSH_TITLE = "ساندي"
-# Same window reminders_store drops a missed tick after.
+# A reminder this late is not pushed: the phone already rang it, or it is stale news.
 LOOKBACK_MIN = 15
 MAX_PER_TICK = 50
 
@@ -66,6 +68,15 @@ def users_with_due(mongo_db, now: Optional[datetime] = None) -> List[str]:
         logger.warning("[schedules] due scan failed: %s", exc)
         return []
     return [str(u) for u in ids if u]
+
+
+def _next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optional[datetime]:
+    """First occurrence of the RRULE (anchored at ``first``) strictly after ``after``; None when it ended."""
+    # Anchored in local time so "every day at 8" survives DST changes.
+    start = first.astimezone(USER_TZ)
+    rule = rrulestr(recurrence.removeprefix("RRULE:"), dtstart=start)
+    nxt = rule.after(after.astimezone(USER_TZ), inc=False)
+    return nxt.astimezone(timezone.utc) if nxt else None
 
 
 def _next_time(doc: Dict[str, Any], now: datetime) -> Optional[datetime]:

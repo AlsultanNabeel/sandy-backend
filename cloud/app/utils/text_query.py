@@ -12,8 +12,3 @@ from typing import Any, Dict
 def contains(field: str, text: str) -> Dict[str, Any]:
     """Documents whose `field` contains `text`, ignoring case."""
     return {field: {"$regex": re.escape(str(text or "").strip()), "$options": "i"}}
-
-
-def equals(field: str, text: str) -> Dict[str, Any]:
-    """Documents whose `field` equals `text` exactly, ignoring case."""
-    return {field: {"$regex": f"^{re.escape(str(text or '').strip())}$", "$options": "i"}}
