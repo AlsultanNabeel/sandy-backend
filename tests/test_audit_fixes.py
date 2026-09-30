@@ -16,43 +16,12 @@ def _app(monkeypatch):
     from app.api.server import create_app
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     db = mongomock.MongoClient().db
-    return create_app(mongo_db=db, semantic_memory_stats_fn=lambda: {}), db
+    return create_app(mongo_db=db), db
 
 
 def _bearer(role="user", uid="u1"):
     from app.api.auth_handlers import make_token
     return {"Authorization": f"Bearer {make_token(role, user_id=uid)}"}
-
-
-# ── AUD-CLOUD-001 — clearing a field has to clear its row ────────────────────
-
-def test_clearing_your_interests_removes_them_from_what_she_can_recall(monkeypatch):
-    """Settings said one thing and «شو اهتماماتي؟» answered with the other.
-
-    The mirror upserted the fields that were present and never removed the ones
-    that had gone, so interests deleted in settings stayed searchable in
-    `sandy_memories` for ever — the profile and the memory disagreeing about the
-    same fact, which is exactly what the mirror exists to prevent.
-    """
-    from app.db import configure
-    from app.features import users_store
-
-    db = mongomock.MongoClient().db
-    configure(db)
-    users_store.init_users_store(db)
-    monkeypatch.setattr(users_store, "_bump", lambda *a, **k: None)
-
-    db["sandy_users"].insert_one({"_id": "u1", "onboarding": {}})
-    users_store.set_onboarding("u1", preferred_name="نبيل",
-                               interests=["الروبوتات", "القهوة"], notes="بحب أبني أشياء")
-    keys = {d["source_key"] for d in db["sandy_memories"].find({"chat_id": "u1"})}
-    assert keys == {"onboarding_name", "onboarding_interests", "onboarding_notes"}
-
-    # The user empties their interests and their note, and keeps the name.
-    users_store.set_onboarding("u1", preferred_name="نبيل", interests=[], notes="")
-    rows = list(db["sandy_memories"].find({"chat_id": "u1"}))
-    assert {d["source_key"] for d in rows} == {"onboarding_name"}
-    assert "القهوة" not in " ".join(d.get("content", "") for d in rows)
 
 
 # ── AUD-AUTH-001 — an ID token has to have been minted for *this* app ────────
@@ -186,7 +155,7 @@ def test_a_failed_stm_index_is_retried_rather_than_given_up_on(monkeypatch):
     chat turn after a deploy cost this process the `(user_id, updated_at)` index
     for its whole life — and losing that one makes every reply get slower as
     everybody else's history grows, which nobody reports as a bug."""
-    from app.agent.graph import graph as graph_mod
+    from app.brain import stm as graph_mod
 
     attempts = {"n": 0}
 
@@ -209,32 +178,6 @@ def test_a_failed_stm_index_is_retried_rather_than_given_up_on(monkeypatch):
     assert attempts["n"] == before, "it must not keep retrying after success"
 
 
-# ── AUD-AGENT-002 — the sentence before something irreversible ──────────────
-
-def test_deleting_everything_does_not_ask_the_same_question_as_deleting_one():
-    """«متأكد إنك بدك تنفّذ هذه العملية؟» was the sentence standing between a
-    customer and every task they had: three of the four guarded tools had no
-    entry, and the hint keys matched none of them."""
-    from app.agent.tools.dispatcher import _guard_summary
-
-    one = _guard_summary("task_delete", {"reference": "ادفع الفاتورة"})
-    every = _guard_summary("task_delete", {"all": True})
-    assert "ادفع الفاتورة" in one
-    assert one != every and "كل" in every
-
-    assert "صورة البحر" in _guard_summary("delete_photo", {"query": "صورة البحر"})
-    assert "الدوا" in _guard_summary("reminder_delete", {"text": "الدوا"})
-    assert "خطة السفر" in _guard_summary("brainstorm_delete", {"query": "خطة السفر"})
-
-
-def test_every_destructive_tool_has_its_own_confirmation_sentence():
-    from app.agent.guards import DESTRUCTIVE_TOOLS
-    from app.agent.tools.dispatcher import _GUARD_SUMMARY
-
-    assert DESTRUCTIVE_TOOLS <= set(_GUARD_SUMMARY), \
-        f"no confirmation sentence for {DESTRUCTIVE_TOOLS - set(_GUARD_SUMMARY)}"
-
-
 # ── AUD-BOOT-001 — one worker per machine runs the periodic jobs ────────────
 
 def test_only_one_process_on_this_machine_claims_a_job():
@@ -245,17 +188,3 @@ def test_only_one_process_on_this_machine_claims_a_job():
     # The same process asking twice is the same holder, not a second one.
     assert claim_leadership("pytest-job") is True
     assert "pytest-job" in _held
-
-
-# ── AUD-SCRIPT-001 — a refusal is not a success and not a failure ───────────
-
-def test_the_tool_probe_can_tell_breakage_from_a_refusal():
-    from pathlib import Path
-
-    src = (Path(__file__).resolve().parent.parent
-           / "scripts/audit_all_tools.py").read_text(encoding="utf-8")
-    assert "result_failed" in src and "result_ok" in src, \
-        "the probe reads `handled` only, so a tool that broke behind a friendly " \
-        "sentence is counted in the OK column — the exact fault it exists to find"
-    for label in ("ERROR", "REFUSED", "NOT-HANDLED", "OK", "RAISED"):
-        assert label in src

@@ -11,8 +11,6 @@ import time
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 
-from app.agent.semantic_memory import semantic_memory_stats
-
 logger = logging.getLogger(__name__)
 
 
@@ -33,11 +31,7 @@ _STILL_PROCESSING = {
 }
 
 
-def create_app(
-    *,
-    mongo_db=None,
-    semantic_memory_stats_fn=semantic_memory_stats,
-):
+def create_app(*, mongo_db=None):
     # Imported here so importing this module doesn't need PyJWT.
     from app.api.auth_handlers import require_auth
 
@@ -77,27 +71,12 @@ def create_app(
                 logger.warning("[health] mongo ping failed: %s", exc)
                 mongo_status["error"] = type(exc).__name__
 
-        chroma_status = {"ok": False}
-        try:
-            chroma_data = semantic_memory_stats_fn() if callable(semantic_memory_stats_fn) else {}
-            chroma_status.update({"ok": True, **(chroma_data or {})})
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[health] semantic memory stats failed: %s", exc)
-            chroma_status["error"] = type(exc).__name__
-
-        overall_ok = (
-            mongo_status.get("ok")
-            and chroma_status.get("ok")
-        )
-        return jsonify(
-            {
-                "ok": bool(overall_ok),
-                # Which build is serving.
-                "release": RELEASE_ID,
-                "mongo": mongo_status,
-                "chroma": chroma_status,
-            }
-        ), (200 if overall_ok else 503)
+        return jsonify({
+            "ok": bool(mongo_status.get("ok")),
+            # Which build is serving.
+            "release": RELEASE_ID,
+            "mongo": mongo_status,
+        }), (200 if mongo_status.get("ok") else 503)
 
     from app.api.voice_ws import register_voice_ws
     register_voice_ws(app)
@@ -179,12 +158,12 @@ def create_app(
             return None
 
     def _run_authenticated_agent(claims: dict, body: dict) -> dict:
-        """Run the per-user graph pipeline and format the reply.
+        """Run one brain turn for the caller and format the reply.
 
         Shared by /api/agent and /api/agent/stream (inside its worker thread). Raises on failure.
         """
-        from app.agent.graph.graph import run_graph, get_final_reply
-        from app.agent.pending_store import load_pending_state, save_pending_state
+        from app.brain import pending
+        from app.brain.loop import run_turn
         from app.utils.user_profiles import active_user_profile_context, build_user_profile
 
         user_id = claims.get("user_id") or ""
@@ -194,15 +173,11 @@ def create_app(
         _profile = build_user_profile(claims)
         # Optional chat session: each conversation gets its own memory thread.
         conversation_id = (body.get("conversation_id") or "").strip()
-        # Must match run_graph's thread_id so pending state round-trips.
+        # Must match run_turn's thread_id so the held action round-trips.
         thread_id = conversation_id or user_id
-        loaded_pending = load_pending_state(thread_id, user_id, mongo_db)
-        from app.brain import enabled as _new_agent_enabled
-        runner = run_graph
-        if _new_agent_enabled():
-            from app.brain.loop import run_turn as runner
+        loaded_pending = pending.load(thread_id, user_id, mongo_db)
         with active_user_profile_context(_profile):
-            state = runner(
+            state = run_turn(
                 message,
                 user_id=user_id,
                 chat_id=user_id,
@@ -210,14 +185,14 @@ def create_app(
                 conversation_id=conversation_id or None,
                 pending_state=loaded_pending,
             )
-        save_pending_state(thread_id, user_id, mongo_db, state.get("pending_state"))
-        reply = get_final_reply(state)
-        text = reply.get("text", "")
+        pending.save(thread_id, user_id, mongo_db, state.get("pending_state"))
+        text = state.get("final_response") or ""
+        made = state.get("execution_result") or {}
         result = {"reply": text, "role": role}
-        img_bytes = reply.get("image_bytes")
+        img_bytes = made.get("image_bytes")
         if img_bytes:
             b64 = base64.b64encode(img_bytes).decode()
-            result["reply"] = reply.get("caption") or text
+            result["reply"] = made.get("caption") or text
             result["image_url"] = f"data:image/png;base64,{b64}"
         return result
 
@@ -286,7 +261,7 @@ def create_app(
     @require_auth
     def web_agent_stream(claims):
         """/api/agent with the chat reply streamed token by token over SSE (accounts only)."""
-        from app.agent.nodes.execute import clear_stream_hooks, set_stream_hooks
+        from app.brain.model import clear_stream_hooks, set_stream_hooks
 
         body = request.get_json(silent=True) or {}
         message = (body.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
@@ -454,7 +429,7 @@ def create_app(
         image_b64 = (body.get("image") or "").strip()
         question = (body.get("question") or "صف هذه الصورة بتفصيل").strip()
         # لغة الردّ من السؤال نفسه، نفس القاعدة بكل القنوات.
-        from app.agent.context_builder import LANGUAGE_RULE as _lang_rule
+        from app.brain.persona import LANGUAGE_RULE as _lang_rule
         question = f"{question}{_lang_rule}"
         if not image_b64:
             return jsonify({"error": "no image"}), 400
@@ -466,14 +441,11 @@ def create_app(
 
         try:
             from app.features.vision import analyze_image_with_azure
-            from app.agent.facade.agent import create_chat_completion
             img_bytes = _decode_image(image_b64)
             if img_bytes is None:
                 return jsonify({"error": "invalid_image"}), 400
-            reply = analyze_image_with_azure(
-                img_bytes, question, create_chat_completion_fn=create_chat_completion,
-                user_id=claims.get("user_id") or None,
-            )
+            reply = analyze_image_with_azure(img_bytes, question,
+                                             user_id=claims.get("user_id") or None)
             return jsonify({"reply": reply or "تعذّر تحليل الصورة"}), 200
         except Exception:
             logger.exception("[web_analyze_image] image analysis failed")

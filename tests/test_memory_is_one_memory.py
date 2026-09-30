@@ -22,266 +22,69 @@ last few turns from anywhere.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "cloud"))
+import mongomock
+import pytest
 
-_GRAPH = (Path(__file__).resolve().parent.parent
-          / "cloud/app/agent/graph/graph.py").read_text(encoding="utf-8")
-_VOICE_MEM = (Path(__file__).resolve().parent.parent
-              / "cloud/app/api/voice_ws/memory.py").read_text(encoding="utf-8")
-
-
-def test_a_turn_records_who_said_it_not_just_which_thread():
-    """The key was `thread:user`, and a key is not a query.
-
-    With the person's id only ever glued into a string, "everything this person
-    said recently" could not be asked for at all. Storing `user_id` as a field
-    is the whole enabling change.
-    """
-    assert '"user_id": str(user_id)' in _GRAPH, (
-        "turns no longer record their owner, so cross-channel recall cannot work")
+_ROOT = Path(__file__).resolve().parent.parent / "cloud/app"
+_STM = (_ROOT / "brain/stm.py").read_text(encoding="utf-8")
+_VOICE_MEM = (_ROOT / "api/voice_ws/memory.py").read_text(encoding="utf-8")
 
 
 def test_the_voice_can_see_what_was_typed_in_the_app():
-    from app.agent.graph.graph import recent_turns_for_user  # noqa: F401
-
     assert "recent_turns_for_user" in _VOICE_MEM, (
         "the voice path reads only its own thread again — the robot cannot "
         "remember a conversation the owner had in the app a minute ago")
-    assert "_stm_load(chat_id, chat_id)" in _VOICE_MEM, (
+    assert "stm.load(chat_id, chat_id)" in _VOICE_MEM, (
         "the fallback for pre-existing documents is gone; anyone whose memory "
-        "was written before this deploy starts from nothing")
+        "was written before `user_id` was stored starts from nothing")
 
 
-def test_the_app_chat_can_see_what_was_said_out_loud():
-    assert "cross = recent_turns_for_user(user_id" in _GRAPH, (
-        "the text chat is blind to the voice channel again — this is the "
-        "owner's exact complaint, in the other direction")
-
-
-def test_the_same_sentence_is_not_shown_twice():
-    """The thread's own turns are also in the cross-channel read.
-
-    Without a guard, the last thing said appears twice in the context — once as
-    background, once as history. A model reading that has good reason to think
-    it was said twice, and will answer as if it was.
-    """
-    assert "seen = {(m.get(\"role\"), m.get(\"content\")) for m in history}" in _GRAPH
-
-
-def test_threads_are_not_merged():
-    """Sharing recent turns is not the same as merging conversations.
-
-    The easy fix would have been to drop `conversation_id` and put everything in
-    one thread. That trades one bug for a worse one: separate chats would run
-    into each other, and a long thread would push the current topic out of a ten
-    message window. Each channel keeps its own transcript; only a short shared
-    view is added on top.
-    """
-    assert "thread_id = str(conversation_id or chat_id)" in _GRAPH, (
-        "per-conversation threading was removed — chats will now bleed into "
-        "each other")
-    assert "limit: int = 6" in _GRAPH, (
-        "the shared window is unbounded or missing; it is meant to be a few "
-        "turns of background, not a second transcript")
-
-
-def test_the_voice_prompt_actually_contains_the_recent_turns():
-    """Sharing the turns is worthless if the prompt then drops them.
-
-    The owner's test, run for real: he asked the robot "what do you know about
-    me" and got a good answer — durable facts. He asked the app "what was the
-    last thing I asked you" and got a good answer — that thread's own history.
-    He went back to the robot and asked the same thing: "I don't know."
-
-    She did know. `_voice_memory_context` builds with `durable_only=True`, which
-    keeps stable facts and throws the recent lines away before they reach the
-    prompt. That was a deliberate guard against the native-audio model reading a
-    logged line and continuing it as if it had just been said.
-
-    But the guard already exists in words, further down the prompt — "this is a
-    past record, do not reply to it" — so the lines can come back and the
-    protection stays.
-    """
-    tools = (Path(__file__).resolve().parent.parent
-             / "cloud/app/api/voice_ws/tools.py").read_text(encoding="utf-8")
-
-    assert "elif rich_ctx is None:" not in tools, (
-        "recent turns are a fallback again — they are only loaded when the rich "
-        "context FAILS, which is exactly the bug: on the working path she has "
-        "facts about him and no idea what he just said")
-    assert "سجلّ سابق للاطّلاع فقط" in tools, (
-        "the 'do not reply to the record' instruction is gone. It is the only "
-        "reason it is safe to seed recent turns into a native-audio model")
+def test_the_voice_prompt_keeps_the_past_record_guard():
+    """Recent turns are safe to seed into a native-audio model only because the
+    prompt says, in words, that they are a past record and not a live request."""
+    tools = (_ROOT / "api/voice_ws/tools.py").read_text(encoding="utf-8")
+    assert "سجلّ سابق للاطّلاع فقط" in tools
 
 
 def test_every_turn_remembers_which_body_said_it():
-    """He can ask "when did I tell you that?" and the answer should be real.
-
-    Three doors, one memory — but a person remembers *where* a conversation
-    happened. "You told me on the phone" and "you told me while standing here"
-    are different memories, and without the tag she can only say "you told me",
-    which is the kind of answer that makes her feel like software.
-    """
-    assert 'history.append({"role": "user", "content": user_msg, "timestamp": ts, "via": via})' in _GRAPH
-
-    session = (Path(__file__).resolve().parent.parent
-               / "cloud/app/api/voice_ws/session.py").read_text(encoding="utf-8")
+    """He can ask "when did I tell you that?" and the answer should be real."""
+    assert '"timestamp": ts, "via": via}' in _STM
+    session = (_ROOT / "api/voice_ws/session.py").read_text(encoding="utf-8")
     assert 'set_voice_channel("الروبوت")' in session, (
         "the robot no longer tags its turns — it and the app's call share a "
         "socket, so without this they become indistinguishable in the record")
     assert '_APP_CHANNEL = "مكالمة التطبيق"' in session
     assert "set_voice_channel(_APP_CHANNEL)" in session
-
     assert 'f"[{via}] {role_label}: {content}"' in _VOICE_MEM, (
         "the source is recorded but never shown to her, which is the same as "
         "not recording it")
 
 
-def test_she_knows_your_name_on_every_channel():
-    """He typed his name at first open. She asked him who he was anyway.
-
-    The onboarding answers — preferred name, interests — were saved correctly
-    and read by a function that resolved the user from the *ambient request
-    profile*. The chat has one, so it worked there. The voice path builds its
-    system prompt with no profile open, so the same function returned nothing,
-    and the robot greeted its owner like a stranger.
-
-    Nothing was broken and nothing was missing. One reader was standing
-    somewhere it could not see, and which channel you used decided whether she
-    knew you.
-
-    Passing the id in removes the question entirely.
-    """
-    import inspect
-
-    from app.agent.context_builder import get_onboarding_directive
-
-    sig = inspect.signature(get_onboarding_directive)
-    assert "user_id" in sig.parameters, (
-        "the onboarding profile is read from ambient context again — it will "
-        "silently return nothing on the voice path")
-
-    ctx = (Path(__file__).resolve().parent.parent
-           / "cloud/app/agent/context_builder.py").read_text(encoding="utf-8")
-    assert "get_onboarding_directive(chat_id)" in ctx, (
-        "the caller stopped passing the user, so the parameter is decoration")
-
-
-def test_everything_the_user_told_her_is_actually_read():
-    """Two fields were saved and never read by anything.
-
-    `onboarding.notes` is a five-hundred character box where the user writes
-    about himself at first open. `onboarding.nudge_answers` holds his replies to
-    the daily get-to-know-you question — and those were used **only** to avoid
-    repeating a question. He answered one every day and she never learned a
-    thing from any of them.
-
-    A field that is stored and never read is worse than a field that does not
-    exist. The user watched himself tell her, and she behaves as though he
-    never did.
-    """
-    ctx = (Path(__file__).resolve().parent.parent
-           / "cloud/app/agent/context_builder.py").read_text(encoding="utf-8")
-    for field in ('onboarding.get("preferred_name"',
-                  'onboarding.get("interests")',
-                  'onboarding.get("notes"',
-                  'onboarding.get("nudge_answers")'):
-        assert field in ctx, f"{field} is collected from the user and never read"
-
-
-def test_the_profile_is_searchable_without_becoming_a_second_truth():
-    """Same fact, two answers, depending on how you phrase the question.
-
-    Name and interests live in the profile and are injected into the prompt, so
-    she knows them. But "what are my interests?" reads like a memory question,
-    goes to the memory search, finds nothing, and she answers "I have no saved
-    memories" — about something she was told directly.
-
-    Mirroring them into memory fixes that and introduces a worse risk: edit your
-    interests in settings and the old copy sits in memory contradicting the new
-    one. Which is why the mirror is **keyed and upserted**, never appended: one
-    row per fact, rewritten each time. The profile stays the source; this is a
-    generated, searchable view of it.
-    """
-    src = (Path(__file__).resolve().parent.parent
-           / "cloud/app/features/users_store.py").read_text(encoding="utf-8")
-
-    assert "_mirror_onboarding_to_memory" in src
-    assert '"source_key": key' in src and "upsert=True" in src, (
-        "the mirror appends instead of replacing — every settings edit leaves "
-        "the previous answer behind, and she will recite both")
-
-    # The function body, not "everything after the name is first mentioned".
-    # The old slice started at the call site, so a later, unrelated `insert_one`
-    # in this module counted against the mirror — and a comment added near the
-    # top of the file that happened to name the function moved the slice to the
-    # whole file. A test that a comment can fail teaches the next reader to
-    # delete comments.
-    body = src.split("def _mirror_onboarding_to_memory")[1].split("\ndef ")[0]
-    assert "insert_one" not in body, (
-        "an insert in the mirror means duplicates accumulate per save")
-
-    # **Replacement is both halves.** Upserting the fields that are present was
-    # only ever the adding half: clear your interests in settings and the row
-    # stayed, so the profile said one thing and the memory search answered with
-    # what you had just removed — the same two-sources-of-truth split this
-    # function exists to prevent, reached from the other side.
-    assert "delete_many" in body and "_MIRROR_SOURCE_KEYS" in body, (
-        "the mirror never removes a field the user cleared — deleted interests "
-        "stay searchable for ever")
-
-
-def test_durable_memory_was_always_keyed_by_person():
-    """Stated so the next reader does not 'fix' the part that was right.
-
-    Semantic long-term memory is searched by chat_id — the person — not by
-    conversation. That is why she could recall facts about him from any channel
-    while forgetting what he said thirty seconds ago on another one, which made
-    the bug read like something much stranger than it was.
-    """
-    ctx = (Path(__file__).resolve().parent.parent
-           / "cloud/app/agent/context_builder.py").read_text(encoding="utf-8")
-    # The two searches became one call — they were embedding the same string
-    # twice — but the identity it searches by is still the person.
-    assert "search_memory_for_turn(message, chat_id" in ctx
-
-
-# ── Behaviour, not source: one turn, said once, recalled on every channel ─────
-#
-# The source checks above prove the pieces exist. These run them against a real
-# (mongomock) store, the way the three channels actually call them:
+# ── Behaviour: one turn, said once, recalled on every channel ────────────────
 #
 #   robot voice  -> /voice, HMAC hello, identity = node.user_id  (session.py)
-#   app voice    -> /voice, JWT hello,  identity = claims.user_id (session.py;
-#                   GeminiLiveManager.swift opens `/voice`, never Gemini direct)
+#   app voice    -> /voice, JWT hello,  identity = claims.user_id (session.py)
 #   app chat     -> /api/agent, user_id = claims.user_id          (server.py)
 #
 # All three land on the same id, so what follows uses one id for all of them.
 
-import mongomock  # noqa: E402
-import pytest  # noqa: E402
-
 _UID = "one-memory-user"
 _PROFILE = {"user_id": _UID, "chat_id": _UID, "relation": "user",
-            "permissions": "all", "is_owner": False, "is_guest": False, "name": ""}
+            "permissions": "all", "name": ""}
 
 
 @pytest.fixture()
 def store(monkeypatch):
     import app.db as appdb
-    import app.agent.graph.graph as graph
+    from app.brain import stm
 
     database = mongomock.MongoClient()["one_memory"]
     appdb.configure(database)
-    monkeypatch.setattr(graph, "_stm_index_ready", True)  # mongomock: no TTL index
-    extracted = []
-    monkeypatch.setattr(graph, "_save_emotional_async",
-                        lambda state, message: extracted.append(message))
+    monkeypatch.setattr(stm, "_stm_index_ready", True)  # mongomock: no TTL index
     try:
-        yield database, extracted
+        yield database
     finally:
         appdb.reset()
 
@@ -292,8 +95,8 @@ def _robot_says(user_text, reply, uid=_UID):
 
 
 def test_a_sentence_said_to_the_robot_is_known_to_the_app_chat_and_the_app_call(store):
-    from app.agent.graph.graph import recent_turns_for_user
     from app.api.voice_ws.memory import load_recent_turns
+    from app.brain.stm import recent_turns_for_user
 
     _robot_says("اسم أخوي محمد", "حلو، تشرّفنا")
 
@@ -305,6 +108,19 @@ def test_a_sentence_said_to_the_robot_is_known_to_the_app_chat_and_the_app_call(
                for m in call_sees), "the app's call cannot see the robot's turn"
 
 
+def test_the_chat_sees_other_channels_once_and_keeps_its_own_thread(store):
+    from app.brain import stm
+
+    _robot_says("بكرا عندي مقابلة", "بالتوفيق")
+    stm.save("conv-1", _UID, "شو لازم ألبس؟", "إشي رسمي", via="شات التطبيق")
+    own, seen = stm.history("conv-1", _UID)
+    assert [m["content"] for m in own] == ["شو لازم ألبس؟", "إشي رسمي"]
+    contents = [m["content"] for m in seen]
+    assert contents.count("شو لازم ألبس؟") == 1, "the thread's own line is shown twice"
+    assert "بكرا عندي مقابلة" in contents, "the chat is blind to the robot"
+    assert stm.load(_UID, _UID) != own, "threads were merged"
+
+
 def test_a_sentence_typed_in_the_app_reaches_the_next_voice_call(store, monkeypatch):
     """Through the cache — which is where it used to die.
 
@@ -313,17 +129,17 @@ def test_a_sentence_typed_in_the_app_reaches_the_next_voice_call(store, monkeypa
     call that built it: type in the app, call the robot, and she did not know.
     """
     import app.api.voice_ws.tools as vt
-    from app.agent.graph.graph import _stm_save
+    from app.brain.stm import save
 
     vt.clear_instruction_cache()
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 3)
     monkeypatch.setattr(vt, "_shared_get", lambda k, v: None)
     monkeypatch.setattr(vt, "_shared_put", lambda k, v, t: None)
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid, persona: "persona\n" + vt._PAST_RECORD_NOTE)
+                        lambda cid: "persona\n" + vt._PAST_RECORD_NOTE)
 
     vt._build_system_instruction(_UID)                       # the first call warms the cache
-    _stm_save("conv-7", _UID, "بكرا عندي مقابلة", "بالتوفيق", via="شات التطبيق")
+    save("conv-7", _UID, "بكرا عندي مقابلة", "بالتوفيق", via="شات التطبيق")
     text = vt._build_system_instruction(_UID)                # cache hit, same version
 
     assert "بكرا عندي مقابلة" in text, "the cached instruction froze the recent turns"
@@ -333,19 +149,11 @@ def test_a_sentence_typed_in_the_app_reaches_the_next_voice_call(store, monkeypa
     vt.clear_instruction_cache()
 
 
-def test_the_voice_learns_from_what_it_hears_like_the_chat_does(store):
-    """The chat extracts relationships, lessons, milestones from every message;
-    the voice saved only the transcript, so the robot never learned anything."""
-    _db, extracted = store
-    _robot_says("اسم أخوي محمد", "حلو")
-    assert extracted == ["اسم أخوي محمد"]
-
-
 def test_a_pool_thread_does_not_lend_one_account_to_the_next(store):
     """Pool threads keep their context between jobs. With `if user_id:` an
     unpaired robot's turn was saved into whoever used the thread last."""
-    from app.agent.graph.graph import recent_turns_for_user
     from app.api.voice_ws.memory import load_recent_turns, set_voice_identity
+    from app.brain.stm import recent_turns_for_user
 
     set_voice_identity(_UID)            # a previous session on this thread
     _robot_says("سرّ ما لحدا", "ماشي", uid="")   # an unpaired robot
@@ -354,15 +162,34 @@ def test_a_pool_thread_does_not_lend_one_account_to_the_next(store):
     set_voice_identity("")
 
 
+def test_she_knows_your_name_on_every_channel(store):
+    """He typed his name at first open; chat and voice both read it from the one
+    profile, and so do his answers to the daily questions."""
+    import app.api.voice_ws.tools as vt
+    from app.api.voice_ws.memory import set_voice_identity
+    from app.brain import context
+
+    store["sandy_users"].insert_one({"_id": _UID, "onboarding": {
+        "preferred_name": "سامي", "interests": ["قهوة"],
+        "nudge_answers": {"unwind": "المشي"}}})
+    assert "سامي" in context.profile_block(_UID)
+    set_voice_identity(_UID)
+    try:
+        text = vt._system_instruction_body(_UID)
+    finally:
+        set_voice_identity("")
+    assert "«سامي»" in text and "قهوة" in text and "المشي" in text
+
+
 def test_the_voice_seed_invents_nothing(store):
-    """The legacy `memory` doc has no writer and the chat never reads it; for a
-    customer without one, voice seeded a default with a made-up home city."""
+    """For a customer with nothing saved, the seed adds nothing about them."""
     import app.api.voice_ws.tools as vt
     from app.api.voice_ws.memory import set_voice_identity
     from app.utils.user_profiles import active_user_profile_context
 
     with active_user_profile_context(_PROFILE):
         set_voice_identity(_UID)
-        text = vt._system_instruction_body(_UID, lambda _uid: "شخصية")
+        text = vt._system_instruction_body(_UID)
     set_voice_identity("")
-    assert "October City" not in text and "ذاكرتك:" not in text
+    assert "October City" not in text and "ملف المستخدم" not in text
+    assert "معلومات بتعرفيها" not in text

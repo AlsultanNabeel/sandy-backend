@@ -10,8 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
-from app.bootstrap import bootstrap, configure_logging  # noqa: E402  (env must load before app imports)
-from app.agent.facade.agent import init_runtime  # noqa: E402
+from app.bootstrap import bootstrap, configure_logging, init_runtime  # noqa: E402  (env must load before app imports)
 from app.api.server import create_app  # noqa: E402
 from app.config import APP_ENV, LOG_LEVEL  # noqa: E402
 from app.db import get_db  # noqa: E402

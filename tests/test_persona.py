@@ -11,7 +11,7 @@ from __future__ import annotations
 import mongomock
 import pytest
 
-from app.agent import context_builder
+from app.brain import persona as context_builder
 from app.config import SANDY_IDENTITY_LOCK
 from app.features import users_store
 

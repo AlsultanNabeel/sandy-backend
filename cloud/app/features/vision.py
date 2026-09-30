@@ -2,7 +2,10 @@
 
 import base64
 import logging
-from typing import Any, Callable, Optional
+from typing import Optional
+
+from app.brain.persona import build_effective_persona
+from app.integrations.openai_client import chat_fn
 
 logger = logging.getLogger(__name__)
 
@@ -16,26 +19,11 @@ _VISION_CONTEXT = (
 
 def _build_sandy_vision_system(user_id: Optional[str] = None) -> str:
     """ساندي الفعلية (تخصيص المستخدم أو الافتراضية + قفل الهوية) + سياق الصورة."""
-    try:
-        from app.agent.context_builder import build_effective_persona
-        persona = (build_effective_persona(user_id) or "").strip()
-    except Exception:
-        persona = ""
-    if persona:
-        return f"{persona}\n\n{_VISION_CONTEXT}"
-    return _VISION_CONTEXT
+    return f"{build_effective_persona(user_id).strip()}\n\n{_VISION_CONTEXT}"
 
 
-def analyze_image_with_azure(
-    image_bytes: bytes,
-    prompt: str,
-    *,
-    create_chat_completion_fn: Callable[..., Any],
-    azure_openai_vision_deployment: Optional[str] = None,
-    azure_openai_chat_deployment: Optional[str] = None,
-    openai_model: Optional[str] = None,
-    user_id: Optional[str] = None,
-) -> str:
+def analyze_image_with_azure(image_bytes: bytes, prompt: str, *,
+                             user_id: Optional[str] = None) -> str:
     """Analyze image bytes via Azure GPT-4o-mini Vision, in Sandy's voice."""
     if not image_bytes:
         return "[think] ما قدرت أحلل الصورة حالياً."
@@ -43,13 +31,7 @@ def analyze_image_with_azure(
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         data_url = f"data:image/jpeg;base64,{image_b64}"
-        model_hint = (
-            azure_openai_vision_deployment
-            or azure_openai_chat_deployment
-            or openai_model
-        )
-
-        response = create_chat_completion_fn(
+        response = chat_fn()(
             messages=[
                 {"role": "system", "content": _build_sandy_vision_system(user_id)},
                 {
@@ -62,8 +44,6 @@ def analyze_image_with_azure(
             ],
             temperature=0.95,
             max_tokens=120,
-            prefer_azure=True,
-            model_hint=model_hint,
         )
         return (
             response.choices[0].message.content
@@ -74,13 +54,7 @@ def analyze_image_with_azure(
         return "[think] صار خلل أثناء تحليل الصورة. جرب مرة ثانية."
 
 
-def generate_image_with_azure(
-    prompt: str,
-    *,
-    azure_openai_image_deployment: Optional[str] = None,
-    size: str = "1024x1024",
-    **kwargs,
-) -> Optional[bytes]:
+def generate_image_with_azure(prompt: str, *, size: str = "1024x1024") -> Optional[bytes]:
     """Generate an image. Azure FLUX.2-pro first, Azure DALL-E only as fallback."""
     if not prompt:
         return None
@@ -98,13 +72,8 @@ def generate_image_with_azure(
     return img
 
 
-def edit_image_with_azure(
-    image_bytes: bytes,
-    prompt: str,
-    *,
-    azure_openai_image_deployment: Optional[str] = None,
-    size: str = "1024x1024",
-) -> Optional[bytes]:
+def edit_image_with_azure(image_bytes: bytes, prompt: str, *,
+                          size: str = "1024x1024") -> Optional[bytes]:
     """Edit an image. Azure FLUX.2-pro (image-to-image), Azure DALL-E fallback."""
     if not image_bytes or not prompt:
         return None

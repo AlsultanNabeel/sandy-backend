@@ -6,7 +6,6 @@ import os
 from app.api.voice_ws._config import (
     logger,
     _RECENT_AUDIO_MAX_BYTES,
-    _SENSITIVE_TOOLS,
 )
 from app.api.voice_ws.memory import _stm_chat_id
 
@@ -18,9 +17,10 @@ def _speaker_gate_enabled() -> bool:
 
 
 def _is_sensitive_call(name: str, args=None) -> bool:
-    """The old sensitive set, plus the brain's (§2.13) deletes, cancels, bulk
-    changes, future-self messages and `confirm`, which only ever runs one of those."""
-    if name in _SENSITIVE_TOOLS or name == "confirm":
+    """With SANDY_REQUIRE_SPEAKER_AUTH=1 these wait for the owner's voice: deletes,
+    cancels, bulk changes, future-self messages, and `confirm`, which only ever
+    runs one of those."""
+    if name == "confirm":
         return True
     args = args or {}
     if name == "list_update":

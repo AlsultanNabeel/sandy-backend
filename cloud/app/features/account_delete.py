@@ -1,7 +1,8 @@
 """Erase a person completely (Apple requires in-app account deletion).
 
 The collection list is written out on purpose: a new collection must be added
-here, or its data survives deletion.
+here, or its data survives deletion. It still names the pre-blocks collections
+nothing writes any more, until they are dropped: their rows are still someone's.
 """
 
 from __future__ import annotations
@@ -182,13 +183,9 @@ def delete_account(user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "partial", "removed": removed}
 
     # The cache stamp is keyed by id, not a scope field.
-    from app.agent.context_builder import clear_directives_cache
-    from app.agent.life_snapshot import clear_lists_cache
     from app.utils.tenant_version import forget
 
     forget(user_id)
-    clear_directives_cache()
-    clear_lists_cache()
     try:
         from app.api.voice_ws.tools import clear_instruction_cache
 

@@ -39,25 +39,7 @@ def _do_search(
     return results
 
 
-def _do_get_contents(url: str, exa_api_key: str, timeout: int) -> Dict[str, Any]:
-    api_url = "https://api.exa.ai/contents"
-    headers = {"x-api-key": exa_api_key, "Content-Type": "application/json"}
-    payload = {"urls": [url], "text": True}
-    response = requests.post(api_url, headers=headers, json=payload, timeout=timeout)
-    response.raise_for_status()
-    data = response.json()
-    results = data.get("results", [])
-    if not results:
-        return {}
-    item = results[0]
-    return {
-        "url": str(item.get("url") or "").strip(),
-        "title": str(item.get("title") or "").strip(),
-        "text": str(item.get("text") or "").strip(),
-    }
-
-
-# For HTTP routes; the 60s default is for the research pipeline.
+# For the /api/research route; a chat turn's web search keeps the 60s default.
 INTERACTIVE_TIMEOUT_S = 15
 
 
@@ -80,21 +62,3 @@ def search_exa(
     except Exception as e:
         logger.error("[Exa] search failed: %s", e)
         return []
-
-
-def get_exa_page_content(
-    url: str,
-    exa_api_key: str,
-    timeout: int = 60,
-) -> Dict[str, Any]:
-    if not exa_api_key:
-        logger.warning("[Exa] EXA_API_KEY missing")
-        return {}
-    try:
-        return _cb.call(_do_get_contents, url, exa_api_key, timeout)
-    except CircuitOpenError:
-        logger.warning("[Exa] circuit open, skipping content fetch")
-        return {}
-    except Exception as e:
-        logger.error("[Exa] contents fetch failed for %s: %s", url, e)
-        return {}

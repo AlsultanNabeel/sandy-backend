@@ -75,30 +75,9 @@ def test_a_refusal_from_google_becomes_unavailable_not_empty():
         google_places.requests.post = original
 
 
-def test_every_caller_says_it_could_not_search():
-    """Three call sites, three chances to turn it back into "nothing found"."""
-    research = _read("cloud/app/features/research.py")
-    assert "PlacesUnavailable" in research
-    assert "البحث نفسه ما اشتغل" in research
-
-    dispatch = _read("cloud/app/agent/executor/dispatch.py")
-    assert "PlacesUnavailable" in dispatch
-    assert "البحث نفسه ما" in dispatch
-
+def test_the_places_route_says_it_could_not_search():
+    """The one caller left; an empty 200 would turn it back into "nothing found"."""
     api = _read("cloud/app/api/research_api.py")
     assert "PlacesUnavailable" in api
     assert "503" in api, (
         "an empty 200 tells the app a search ran and found nothing")
-
-
-def test_the_two_sentences_are_not_the_same_sentence():
-    """If they read alike, the distinction exists in the types and not for the
-    person listening — which is the whole point of making it."""
-    research = _read("cloud/app/features/research.py")
-    i = research.index("if research_type == \"places\"")
-    section = research[i:i + 2000]
-
-    could_not = "خدمة الأماكن مش شغّالة عندي حاليًا"
-    found_none = "ما لقيت أماكن تطابق"
-    assert could_not in section and found_none in section
-    assert could_not != found_none

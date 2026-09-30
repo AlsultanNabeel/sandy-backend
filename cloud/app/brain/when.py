@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
-from app.features.time_parser import parse_reminder_time_ai
-from app.utils.arabic_days import has_explicit_time, parse_date_from_text
+from app.utils.arabic_days import has_explicit_time, parse_date_from_text, resolve_day_name_to_iso
 from app.utils.nlp_normalizer import normalize_user_message
 from app.utils.time import USER_TZ
 from app.utils.time_awareness import plausible_future_iso
@@ -19,14 +19,55 @@ RECURRENCES = {"daily": "FREQ=DAILY", "weekly": "FREQ=WEEKLY",
                "monthly": "FREQ=MONTHLY", "yearly": "FREQ=YEARLY"}
 
 
+_PARSE_SYSTEM = (
+    "Convert reminder/time expressions to JSON only."
+    "Return fields: success (boolean), remind_at_iso (string|null), intent (one of 'reminder','calendar','task','unknown'), reason (string), original_text (string)."
+    "If no time can be inferred set success=false and provide a reason."
+    "If a date is given but no time, default to 09:00:00 in the user's timezone."
+    "Use the provided current datetime as reference and output full ISO format."
+)
+
+
 def _chat_fn():
-    # The old agent's singleton client (C4); None without credentials.
-    from app.agent.nodes.execute import _get_chat_completion_fn
+    """The shared chat client (C4); None without credentials."""
+    from app.integrations.openai_client import chat_fn
     try:
-        return _get_chat_completion_fn()
+        return chat_fn()
     except Exception as exc:  # noqa: BLE001 — no key only disables the AI parse
         logger.info("[brain] no model for time parsing: %s", exc)
         return None
+
+
+def _parse_with_model(text: str) -> Optional[str]:
+    """ISO in the user's zone for a time expression: a bare weekday without a
+    model, else one JSON call. None when unreadable or in the past."""
+    normalized = normalize_user_message(text)
+    if not normalized:
+        return None
+    now = datetime.now(USER_TZ)
+    day = resolve_day_name_to_iso(normalized)
+    if day and datetime.fromisoformat(day) > now:
+        return day
+    complete = _chat_fn()
+    if complete is None:
+        return None
+    try:
+        response = complete(
+            temperature=0, max_tokens=140, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": _PARSE_SYSTEM},
+                      {"role": "user", "content": (f"current_datetime={now.isoformat()}\n"
+                                                   f"raw_text={text}\n"
+                                                   f"normalized_text={normalized}")}])
+        payload = json.loads(response.choices[0].message.content or "{}")
+        iso_value = str(payload.get("remind_at_iso") or "").strip()
+        if not payload.get("success") or not iso_value:
+            logger.info("[brain] time not parsed: %s", payload.get("reason") or "unknown")
+            return None
+        dt = _aware(datetime.fromisoformat(iso_value)).astimezone(USER_TZ)
+    except Exception as exc:  # noqa: BLE001 — provider boundary; the caller refuses instead
+        logger.warning("[brain] time parse failed: %s", exc)
+        return None
+    return dt.isoformat() if dt >= now else None
 
 
 def _aware(dt: datetime) -> datetime:
@@ -43,7 +84,7 @@ def parse_when(text: str) -> Optional[datetime]:
         if (dt.hour, dt.minute, dt.second) == (0, 0, 0):
             dt = dt.replace(hour=9)  # a date with no time, same default as arabic_days
         return dt.astimezone(timezone.utc)
-    iso = parse_reminder_time_ai(text, create_chat_completion_fn=_chat_fn())
+    iso = _parse_with_model(text)
     if not iso and not has_explicit_time(text):
         # Day-only phrases still resolve without a model; a clock time never falls to 9am.
         iso = parse_date_from_text(normalize_user_message(text))

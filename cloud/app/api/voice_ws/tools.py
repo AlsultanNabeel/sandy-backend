@@ -1,4 +1,4 @@
-"""Voice tools: system-instruction build/cache, tool dispatch, and pending confirmations."""
+"""Voice tools: the system-instruction build/cache and the brain's tool dispatch."""
 from __future__ import annotations
 
 import threading
@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
 
-from app.agent.tool_result import result_failed, result_ok
 from app.api.voice_ws._config import (
     logger,
 )
@@ -14,88 +13,11 @@ from app.api.voice_ws.memory import (
     session_context,
     _load_stm_history,
     _stm_chat_id,
-    _voice_memory_context,
     set_voice_identity,
 )
 from app.api.voice_ws.speaker import (
     _speaker_gate_enabled,
 )
-
-
-# Tools that only steer the text pipeline (stub handlers). A literal list, so a
-# real tool added to meta_tools can never silently become unreachable by voice.
-_ROUTING_SIGNAL_TOOLS = frozenset({
-    "chat_respond", "chat_emotional",
-    "ask_clarification", "request_confirmation",
-    "pending_confirm", "pending_reject", "pending_select",
-})
-
-# Answers to a held confirmation; see _resolve_pending.
-_PENDING_SIGNAL_TOOLS = frozenset({
-    "pending_confirm", "pending_reject", "pending_select",
-})
-
-# One pending thread per identity, shared with the app.
-_VOICE_THREAD = "voice"
-
-
-def _pending_words(name: str) -> str:
-    """What the user effectively said, in the words the executor classifies."""
-    return {"pending_confirm": "اه",
-            "pending_reject": "لأ",
-            "pending_select": "1"}.get(name, "اه")
-
-
-def _resolve_pending(name: str, user_id: str = "") -> Dict[str, Any]:
-    """Carry out — or drop — the action the previous turn held for confirmation.
-
-    Uses pending_store (same as the text path), so a confirmation begun by voice
-    can be answered in the app and vice versa.
-    """
-    from app.agent.executor.pending.dispatch import execute_pending_action
-    from app.agent.pending_store import load_pending_state, save_pending_state
-    from app.db import get_db
-    from app.utils.user_profiles import active_user_profile_context
-
-    chat_id = _stm_chat_id() or user_id
-    mongo_db = get_db()
-    pending = load_pending_state(_VOICE_THREAD, chat_id, mongo_db)
-    if not pending:
-        logger.info("[voice_ws] %s with nothing held — answering directly", name)
-        return {"handled": True,
-                "reply": "ما في إشي مستني تأكيد."}
-
-    session: Dict[str, Any] = {"pending_action": pending}
-    profile = _voice_profile(chat_id)
-    try:
-        with active_user_profile_context(profile):
-            result = execute_pending_action(
-                user_message=_pending_words(name),
-                session=session,
-                session_file=None,
-                mongo_db=mongo_db,
-                tasks_file=None,
-                save_session_fn=lambda *a, **k: None,
-            )
-    except Exception as exc:
-        logger.error("[voice_ws] pending %s failed: %s", name, exc, exc_info=True)
-        return {"handled": False, "reply": "ما قدرت أكمّل — صار خطأ عند الخادم."}
-
-    left = session.get("pending_action")
-    if isinstance(left, dict) and left.get("consumed_at"):
-        left = None
-    save_pending_state(_VOICE_THREAD, chat_id, mongo_db, left)
-
-    logger.info("[voice_ws] pending %s → ok=%s reply=%.80s",
-                name, result_ok(result), result.get("reply") or "")
-    # Same two tags as `_dispatch_tool`; the refusal text passes through.
-    broke = result_failed(result) or not result.get("handled")
-    if broke or not result_ok(result):
-        text = str(result.get("reply") or "").strip()
-        tag = "[فشل التنفيذ]" if broke else "[لم يُنفَّذ]"
-        return {"handled": True, "ok": False,
-                "reply": f"{tag} {text or 'ما قدرت أنفّذ اللي أكّدته.'}"}
-    return result
 
 
 def _voice_profile(chat_id: str) -> Dict[str, Any]:
@@ -126,13 +48,12 @@ def _build_cached_instruction(user_id: str) -> str:
 
     Identity is always written, even empty: pool threads keep context between jobs.
     """
-    from app.agent.context_builder import build_effective_persona
     from app.utils.user_profiles import active_user_profile_context
 
     set_voice_identity(user_id)
     chat_id = _stm_chat_id()
     with active_user_profile_context(_voice_profile(chat_id) if chat_id else None):
-        return _cached_system_instruction(chat_id, build_effective_persona)
+        return _cached_system_instruction(chat_id)
 
 
 # The "past record" guard; recent turns go right before it (see with_recent_turns).
@@ -162,7 +83,8 @@ _INSTRUCTION_LOCK = threading.Lock()
 
 _PROMPT_COLL = "sandy_prompt_cache"
 # Bump when the cached text changes shape. Rev 2: recent turns left the cache.
-_PROMPT_REV = 2
+# Rev 3: facts come from the blocks and the rules name the brain's tools.
+_PROMPT_REV = 3
 
 
 def _shared_get(key: str, version: int) -> Optional[str]:
@@ -227,13 +149,13 @@ def tenant_uses_voice(tenant: str) -> bool:
         return True
 
 
-def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
+def _cached_system_instruction(chat_id: str) -> str:
     from app.utils.tenant_version import version_for
 
     key = str(chat_id or "")
     version = version_for(key) if key else -1
     if version < 0:
-        return _system_instruction_body(chat_id, build_effective_persona)
+        return _system_instruction_body(chat_id)
 
     with _INSTRUCTION_LOCK:
         hit = _INSTRUCTION_CACHE.get(key)
@@ -253,7 +175,7 @@ def _cached_system_instruction(chat_id: str, build_effective_persona) -> str:
     logger.info("[voice_ws] instruction rebuilt (version %d, shared row %s)",
                 version, "absent" if shared is None else "empty")
 
-    text = _system_instruction_body(chat_id, build_effective_persona)
+    text = _system_instruction_body(chat_id)
     if text:
         with _INSTRUCTION_LOCK:
             if len(_INSTRUCTION_CACHE) > 256:
@@ -272,7 +194,15 @@ def clear_instruction_cache() -> None:
         _INSTRUCTION_CACHE.clear()
 
 
-def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
+# Device vs scene: the one choice voice gets wrong without being told.
+_DEVICE_SCENE_RULES = """\
+⚠️ جهاز مفرد مقابل مشهد (أخطاء شائعة — انتبه):
+  • أمر على **جهاز مفرد** ('ضوّي/نوري الضو'، 'طفّي المروحة'، 'افتح الستارة', 'المكيف ٢٢') → device_control. «ضوّي/نوري»=on، «طفّي»=off. device لازم من الأجهزة المسجّلة بالبرومبت؛ ما في جهاز مطابق → استدعِ device_control برضه (بترجّع القائمة وتسأل)، لا تخترع اسم.
+  • 'شغّلي وضع/جو X (دراسة/فيلم/راحة...)' = مشهد كامل متعدّد الأجهزة → scene_apply.
+  ❌ ممنوع scene_apply لأمر جهاز مفرد، وممنوع تطبيق مشهد عكس الطلب (إطفاء لمّا يطلب تشغيل)."""
+
+
+def _system_instruction_body(chat_id: str) -> str:
     """The instruction text itself; each read is timed (the wait before dialling Gemini)."""
     import time as _t
 
@@ -282,26 +212,25 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
         logger.info("[voice_ws] seed %s: %.0fms", what,
                     (_t.perf_counter() - _t0) * 1000)
 
+    from app.brain.context import facts_block, profile_block
+    from app.brain.persona import build_effective_persona
+
     parts: List[str] = [build_effective_persona(chat_id or None).strip()]
     _took("persona")
 
-    # Durable facts only; mid-call facts come through `memory_recall`.
-    rich_ctx = _voice_memory_context("", include_semantic=False)
-    _took("context")
-    if rich_ctx:
-        # Size at INFO, text at DEBUG: it's the customer's personal memory.
-        logger.info("[voice_ws] memory seed (%d chars)", len(rich_ctx))
-        logger.debug("[voice_ws] memory seed text: %s",
-                     rich_ctx.replace("\n", " ")[:600])
-        parts.append(rich_ctx)
+    # The profile and durable facts only; anything else mid-call comes through `recall`.
+    seed = "\n".join(p for p in (profile_block(chat_id), facts_block() if chat_id else "") if p)
+    _took("facts")
+    if seed:
+        # Size only: it's the customer's personal memory.
+        logger.info("[voice_ws] memory seed (%d chars)", len(seed))
+        parts.append(seed)
 
     # Past-record guard: native-audio Gemini otherwise continues the last logged
     # line as a live request. Recent turns are inserted before it, uncached.
     parts.append(_PAST_RECORD_NOTE)
 
-    # نفس قواعد التمييز تبع الراوتر النصّي (مصدر واحد: command_rules).
-    from app.agent.command_rules import DISAMBIGUATION_RULES_AR
-    parts.append("\n" + DISAMBIGUATION_RULES_AR)
+    parts.append("\n" + _DEVICE_SCENE_RULES)
 
     # إقرار قصير قبل التنفيذ وتأكيد قصير بعده.
     parts.append(
@@ -379,121 +308,27 @@ def _system_instruction_body(chat_id: str, build_effective_persona) -> str:
     return "\n".join(parts)
 
 
-def _build_live_tools(types) -> Optional[List]:
-    """Tools for LiveConnectConfig from the global ToolRegistry (or the brain's, behind the flag)."""
-    from app.brain import enabled as _new_agent_enabled
-    if _new_agent_enabled():
-        from app.brain.voice import declarations
-        return [types.Tool(function_declarations=declarations())]
-    try:
-        from app.agent.tools.registry import get_registry
-        from app.agent.tools.setup import register_all_tools
-        register_all_tools()
-        declarations = get_registry().get_function_declarations()
-        if not declarations:
-            return None
-        return [types.Tool(function_declarations=declarations)]
-    except Exception as exc:
-        logger.warning("[voice_ws] tools load failed: %s", exc)
-        return None
+def _build_live_tools(types) -> List:
+    """The brain's tools (and `confirm`) for LiveConnectConfig."""
+    from app.brain.voice import declarations
+    return [types.Tool(function_declarations=declarations())]
 
 
-# Stands in for the ToolDispatcher when the brain runs voice; session.py only checks it is set.
-_BRAIN_DISPATCHER = "brain"
-
-
-def _make_dispatcher():
-    from app.brain import enabled as _new_agent_enabled
-    if _new_agent_enabled():
-        return _BRAIN_DISPATCHER
-    try:
-        from app.agent.tools.dispatcher import ToolDispatcher
-        return ToolDispatcher()
-    except Exception as exc:
-        logger.warning("[voice_ws] dispatcher init failed: %s", exc)
-        return None
-
-
-def _dispatch_tool(dispatcher, name: str, args: Dict[str, Any],
-                   user_id: str = "") -> Dict[str, Any]:
-    """Dispatch one tool call in the caller's tenant (runs via run_in_executor).
+def _dispatch_tool(name: str, args: Dict[str, Any], user_id: str = "") -> Dict[str, Any]:
+    """Run one tool call in the caller's tenant (runs via run_in_executor).
 
     ``user_id`` is passed in because the pool thread lacks the session context;
     without it every scoped read/write goes nowhere.
     """
-    from app.agent.tools.dispatcher import DispatchContext
+    from app.brain.voice import dispatch
     from app.utils.user_profiles import active_user_profile_context
 
     # Always, even when empty: a pool thread keeps its context between jobs.
     set_voice_identity(user_id)
-
-    from app.brain import enabled as _new_agent_enabled
-    if _new_agent_enabled():
-        from app.brain.voice import dispatch as _brain_dispatch
-        chat_id = _stm_chat_id() or user_id
-        try:
-            with active_user_profile_context(_voice_profile(chat_id)):
-                return _brain_dispatch(name, args, chat_id)
-        except Exception as exc:  # noqa: BLE001 — same boundary as the dispatcher below
-            logger.error("[voice_ws] brain tool %s failed: %s", name, exc, exc_info=True)
-            return {"handled": False, "reply": f"[فشل التنفيذ] ما قدرت أنفّذ {name}."}
-
-    # Routing signals are not actions: answer them as information, not failure.
-    # `pending_*` resolve the held confirmation.
-    if name in _PENDING_SIGNAL_TOOLS:
-        return _resolve_pending(name, user_id)
-
-    if name in _ROUTING_SIGNAL_TOOLS:
-        logger.info("[voice_ws] %s is a routing signal, not an action — "
-                    "answering the user directly", name)
-        return {"handled": True,
-                "reply": "تمام، كمّلي عادي — ما في إشي لازم ينفّذ هون."}
-
-    owner_profile = _voice_profile(_stm_chat_id())
-    # `state` and `mongo_db` are required: tools read chat_id and the db from them.
-    from app.db import get_db
-
-    chat_id = _stm_chat_id()
-    # A destructive tool stores its held action in this session dict.
-    session: Dict[str, Any] = {}
-    ctx = DispatchContext(
-        user_message="",
-        normalized_message="",
-        session=session,
-        state={"chat_id": chat_id, "user_id": chat_id},
-        mongo_db=get_db(),
-    )
+    chat_id = _stm_chat_id() or user_id
     try:
-        with active_user_profile_context(owner_profile):
-            result = dispatcher.dispatch(name, args, ctx)
-    except Exception as exc:
+        with active_user_profile_context(_voice_profile(chat_id)):
+            return dispatch(name, args, chat_id)
+    except Exception as exc:  # noqa: BLE001 — one tool never ends the call
         logger.error("[voice_ws] tool %s failed: %s", name, exc, exc_info=True)
-        return {"handled": False,
-                "reply": f"ما قدرت أنفّذ {name} — صار خطأ عند الخادم."}
-
-    # Persist a held action before the failure branch, so "اه" can find it next turn.
-    held = session.get("pending_action")
-    if held:
-        from app.agent.pending_store import save_pending_state
-        save_pending_state(_VOICE_THREAD, _stm_chat_id() or user_id, get_db(), held)
-        logger.info("[voice_ws] %s is waiting for a confirmation", name)
-
-    # ما صار لازم يوصل الموديل موسوماً، وإلا بتأكّد إنها نفّذت:
-    # `[فشل التنفيذ]` للعطل (رمت، ما انلاقت، أو `error`)، `[لم يُنفَّذ]` للرفض أو سؤال توضيحي.
-    handled_flag = bool(result.get("handled"))
-    broke = result_failed(result) or not handled_flag
-    if broke or not result_ok(result):
-        # Log the whole result: a refusal's reason is often in `error`, not `reply`.
-        text = result.get("reply") or ""
-        why = result.get("error") or result.get("reason") or ""
-        logger.warning("[voice_ws] tool %s did not run — broke=%s error=%s "
-                       "reply=%r keys=%s args=%s",
-                       name, broke, why or "(none)", text[:120],
-                       sorted(result), sorted(args or {}))
-        tag = "[فشل التنفيذ]" if broke else "[لم يُنفَّذ]"
-        return {"handled": handled_flag, "ok": False,
-                "reply": f"{tag} {text or why or 'الأداة ما اشتغلت.'}"}
-
-    logger.info("[voice_ws] tool %s ok: %.120s",
-                name, result.get("reply") or "")
-    return result
+        return {"handled": False, "reply": f"[فشل التنفيذ] ما قدرت أنفّذ {name}."}

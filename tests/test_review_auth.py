@@ -39,7 +39,7 @@ def _app(monkeypatch):
     from app.api.server import create_app
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     db = mongomock.MongoClient().db
-    return create_app(mongo_db=db, semantic_memory_stats_fn=lambda: {}), db
+    return create_app(mongo_db=db), db
 
 
 def _bearer(role="user", uid="u1"):

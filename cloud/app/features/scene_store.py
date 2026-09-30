@@ -322,6 +322,39 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
     return sent, missed
 
 
+def actuate_scene_actions(actions: list) -> bool:
+    """Apply a scene's actions to hardware; True if at least one reached the broker.
+
+    Registry devices go through the validated path (`command_payload`, and
+    `send_to_topic` checks the topic against the caller's own registry); any other
+    name falls back to the room-node vocabulary, which `client.send` resolves on
+    the caller's own node.
+    """
+    try:
+        from app.features.device_store import command_payload, device_topic, get_device
+        from app.integrations.room_device import get_room_device_client
+
+        client = get_room_device_client()
+        sent_any = False
+        for a in actions:
+            dev_name = str(a.get("device", "")).strip().lower()
+            value = str(a.get("value", "")).strip()
+            if not dev_name or not value:
+                continue
+            device = get_device(dev_name)
+            if device is not None:
+                res = command_payload(device, value)
+                topic = device_topic(device)
+                if res.get("ok") and topic and client.send_to_topic(topic, res["payload"]):
+                    sent_any = True
+            elif client.send(dev_name, value):
+                sent_any = True
+        return sent_any
+    except Exception:  # noqa: BLE001 — actuation must never crash the caller
+        logger.warning("[SceneStore] scene actuation failed", exc_info=True)
+        return False
+
+
 def run_due_timers() -> Dict[str, Any]:
     """Fire the active user's due reverts, each claimed by an atomic find-and-delete.
 

@@ -200,12 +200,12 @@ def register_photos_api(app, mongo_db=None):
 
 def _start_ai_tagging(photo_id, image_bytes, album) -> None:
     """Caption + tag the photo off the request path; a chosen album becomes a tag."""
-    from app.agent.facade.agent import create_chat_completion
     from app.features import photo_album
+    from app.integrations.openai_client import chat_fn
 
     def _bg():
         try:
-            caption, tags = photo_album.generate_tags(image_bytes, create_chat_completion)
+            caption, tags = photo_album.generate_tags(image_bytes, chat_fn())
             if album and album not in tags:
                 tags = [album] + tags
             if caption or tags:

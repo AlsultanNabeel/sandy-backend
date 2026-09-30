@@ -56,15 +56,13 @@ def register_life_api(app):
     @require_tenant
     def api_scene_apply(claims):
         body = request.get_json(silent=True) or {}
-        from app.features.scene_store import apply_scene
+        from app.features.scene_store import actuate_scene_actions, apply_scene
 
         name = (body.get("name") or "").strip()
         r = apply_scene(name)
         # فعّل المشهد على أجهزة هالمستأجر؛ البوابة ملكية الموضوع (tenant_owns_topic).
         online = False
         if r.get("ok"):
-            from app.agent.tools.schemas.life_tools import actuate_scene_actions
-
             online = actuate_scene_actions(r.get("actions") or [])
         r["online"] = online
         return jsonify(r), (200 if r.get("ok") else 404)

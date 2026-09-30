@@ -9,9 +9,9 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional
 
-from app.agent import semantic_memory
 from app.blocks import _base
 from app.blocks.kinds import LOG, validate
+from app.integrations import embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def init_entries_store(mongo_db) -> None:
 
 def embed_text(text: str) -> Optional[List[float]]:
     """The repo's one embedding helper; None when embeddings are off or fail."""
-    return semantic_memory._embed(text)
+    return embeddings.embed(text)
 
 
 def add(kind: str, text: str, data: Optional[Mapping[str, Any]] = None, *,

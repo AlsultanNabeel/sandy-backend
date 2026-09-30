@@ -21,10 +21,6 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_users"
 
-# Every sandy_memories ``source_key`` the onboarding mirror owns (and cleans up).
-_MIRROR_SOURCE_KEYS = ("onboarding_name", "onboarding_interests", "onboarding_notes")
-
-
 def init_users_store(mongo_db) -> None:
     configure(mongo_db)
     if mongo_db is None:
@@ -172,14 +168,6 @@ def create_email_user(
     return doc
 
 
-def get_or_create_owner(name: str = "") -> Optional[str]:
-    """The owner's stable user_id (provider='owner'), or None without Mongo."""
-    import os
-    sub = (os.getenv("OWNER_CHAT_ID") or os.getenv("SANDY_USER_CHAT_ID") or "owner").strip() or "owner"
-    user = upsert_from_oauth("owner", sub, name=name)
-    return (user or {}).get("_id")
-
-
 def set_onboarding(
     user_id: str,
     preferred_name: Optional[str] = None,
@@ -200,60 +188,7 @@ def set_onboarding(
         sets["onboarding.notes"] = notes.strip()[:500]
     res = coll.update_one({"_id": user_id}, {"$set": sets})
     _bump(user_id)
-    if res.matched_count:
-        _mirror_onboarding_to_memory(user_id)
     return res.matched_count > 0
-
-
-def _mirror_onboarding_to_memory(user_id: str) -> None:
-    """انسخ الاسم والاهتمامات لذاكرة البحث باستبدال (مفتاح ثابت)، عشان «شو اهتماماتي؟» تلاقيهم.
-
-    الملف الشخصي بيضلّ المصدر؛ الحقل الفاضي بينمسح صفّه.
-    """
-    try:
-        from datetime import datetime, timezone
-
-        from app.db import get_db
-
-        db = get_db()
-        coll_user = _coll()
-        if db is None or coll_user is None:
-            return
-        user = coll_user.find_one({"_id": user_id}, {"onboarding": 1}) or {}
-        ob = user.get("onboarding") or {}
-
-        lines = []
-        if str(ob.get("preferred_name") or "").strip():
-            lines.append(("onboarding_name",
-                          f"اسمه المفضّل: {str(ob['preferred_name']).strip()}"))
-        interests = [str(i).strip() for i in (ob.get("interests") or []) if str(i).strip()]
-        if interests:
-            lines.append(("onboarding_interests", "اهتماماته: " + "، ".join(interests)))
-        if str(ob.get("notes") or "").strip():
-            lines.append(("onboarding_notes", f"عن نفسه: {str(ob['notes']).strip()}"))
-
-        for key, text in lines:
-            db["sandy_memories"].update_one(
-                {"chat_id": user_id, "source_key": key},
-                {"$set": {"chat_id": user_id, "user_id": user_id,
-                          "label": "user_fact", "content": text,
-                          "source_key": key,
-                          "created_at": datetime.now(timezone.utc)}},
-                upsert=True,
-            )
-
-        stale = [k for k in _MIRROR_SOURCE_KEYS if k not in {key for key, _ in lines}]
-        removed = 0
-        if stale:
-            removed = db["sandy_memories"].delete_many(
-                {"chat_id": user_id, "source_key": {"$in": stale}}
-            ).deleted_count
-
-        # One bump after the whole mirror (deletions count too).
-        if lines or removed:
-            _bump(user_id, "sandy_memories")
-    except Exception as exc:  # noqa: BLE001 — نسخة مساعدة، ما بتوقّف حفظ التعارف
-        logger.warning("[UsersStore] onboarding mirror failed for %s: %s", user_id, exc)
 
 
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:

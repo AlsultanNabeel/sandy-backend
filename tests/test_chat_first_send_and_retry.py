@@ -5,7 +5,7 @@ send retried after a network drop never runs the turn twice.
   the conversation for the caller — an id that already belongs to someone else
   is refused, never read or written.
 * Each user message carries a `client_msg_id`; a duplicate is answered from the
-  turn ledger instead of running the graph (and the meter) again.
+  turn ledger instead of running the turn (and the meter) again.
 """
 from __future__ import annotations
 
@@ -19,25 +19,21 @@ import pytest
 @pytest.fixture()
 def env(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
-    from app.agent import pending_store
-    from app.agent.graph import graph as graph_mod
     from app.api.server import create_app
+    from app.brain import loop
     from app.features import usage_store
 
     calls = []
 
-    def fake_run_graph(message, **kw):
+    def fake_run_turn(message, **kw):
         calls.append((message, kw.get("conversation_id")))
-        return {"reply": f"رد على {message}"}
+        return {"final_response": f"رد على {message}"}
 
-    monkeypatch.setattr(graph_mod, "run_graph", fake_run_graph)
-    monkeypatch.setattr(graph_mod, "get_final_reply", lambda st: {"text": st["reply"]})
-    monkeypatch.setattr(pending_store, "load_pending_state", lambda *a, **k: None)
-    monkeypatch.setattr(pending_store, "save_pending_state", lambda *a, **k: None)
+    monkeypatch.setattr(loop, "run_turn", fake_run_turn)
     monkeypatch.setattr(usage_store, "check_and_record", lambda *a, **k: None)
 
     db = mongomock.MongoClient().db
-    app = create_app(mongo_db=db, semantic_memory_stats_fn=lambda: {})
+    app = create_app(mongo_db=db)
     return app.test_client(), db, calls
 
 
@@ -53,7 +49,7 @@ def _sse_done(resp):
     return events[-1]
 
 
-def test_duplicate_client_msg_id_does_not_run_the_graph_twice(env):
+def test_duplicate_client_msg_id_does_not_run_the_turn_twice(env):
     c, _, calls = env
     body = {"message": "مرحبا", "client_msg_id": uuid.uuid4().hex}
     r1 = c.post("/api/agent", json=body, headers=_h("u1"))

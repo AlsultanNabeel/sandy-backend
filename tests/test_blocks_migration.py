@@ -110,8 +110,9 @@ def db():
 
 
 def _snapshot(d):
+    # The cache stamps move on purpose: migrated facts must refresh the voice prompt.
     return {n: sorted(map(repr, d[n].find())) for n in d.list_collection_names()
-            if n not in _TARGETS}
+            if n not in _TARGETS and n != "sandy_cache_stamps"}
 
 
 def _count(d):

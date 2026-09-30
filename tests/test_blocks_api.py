@@ -19,7 +19,7 @@ def c(monkeypatch, brain_db):  # noqa: F811
     from app.api.server import create_app
     from app.features import usage_store
     monkeypatch.setattr(usage_store, "check_and_record", lambda *a, **k: None)
-    app = create_app(mongo_db=brain_db, semantic_memory_stats_fn=lambda: {})
+    app = create_app(mongo_db=brain_db)
     return app.test_client()
 
 
@@ -142,7 +142,7 @@ def test_entry_datetime_fields_are_read_from_iso(c):
 def test_encrypted_entry_is_shown_decrypted_and_resealed_on_edit(c, monkeypatch):
     from cryptography.fernet import Fernet
 
-    from app.agent import ltm_crypto
+    from app.utils import ltm_crypto
     monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
     monkeypatch.setattr(ltm_crypto, "_init_attempted", True)
     embedded = []
@@ -255,7 +255,7 @@ def test_schedules_validation(c, body, code):
 def test_a_future_message_is_sealed_at_rest_and_readable_by_its_owner(c, monkeypatch):
     from cryptography.fernet import Fernet
 
-    from app.agent import ltm_crypto
+    from app.utils import ltm_crypto
     monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
     monkeypatch.setattr(ltm_crypto, "_init_attempted", True)
     r = c.post("/api/schedules", json={"kind": "message_to_future_self", "text": "سر",

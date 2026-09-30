@@ -104,7 +104,7 @@ def test_per_raise_override():
 def test_create_app_registers_the_handler():
     from app.api.server import create_app
 
-    app = create_app(mongo_db=None, semantic_memory_stats_fn=lambda: {})
+    app = create_app(mongo_db=None)
     client = app.test_client()
 
     @app.route("/__raise_test")

@@ -242,7 +242,7 @@ def test_another_tenants_message_never_reaches_this_turn(brain_db):  # noqa: F81
 def test_a_mood_is_the_users_words_sealed_once_per_turn(brain_db, monkeypatch):  # noqa: F811
     from cryptography.fernet import Fernet
 
-    from app.agent import ltm_crypto
+    from app.utils import ltm_crypto
     monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
     monkeypatch.setattr(ltm_crypto, "_init_attempted", True)
     monkeypatch.setattr(entries, "embed_text", lambda t: pytest.fail("embedded a mood"))
@@ -281,9 +281,6 @@ def test_the_turn_writes_a_mood_when_the_model_records_one(brain_db):  # noqa: F
 # ── speaker gate on the brain's tools ────────────────────────────────────────
 
 @pytest.mark.parametrize("name, args, sensitive", [
-    ("task_delete", {}, True),
-    ("reminder_delete", {}, True),
-    ("schedule_message_to_self", {}, True),
     ("list_update", {"match_text": "حليب", "delete": True}, True),
     ("list_update", {"match_text": "حليب", "all_matching": True, "done": True}, True),
     ("list_update", {"match_text": "حليب", "done": True}, False),

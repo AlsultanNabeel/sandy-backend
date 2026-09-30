@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any, Callable, Dict, Optional
 
-from app.agent.context_builder import build_effective_persona
+from app.brain.persona import build_effective_persona
 from app.brain import model, tools_blocks
 from app.brain.ctx import TurnCtx
 from app.utils.user_profiles import address_instruction

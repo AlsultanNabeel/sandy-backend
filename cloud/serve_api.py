@@ -15,9 +15,8 @@ from app.bootstrap import bootstrap  # noqa: E402  (env must load before app imp
 
 
 def main() -> None:
-    from app.agent.facade.agent import init_runtime
     from app.api.server import create_app
-    from app.bootstrap import configure_logging
+    from app.bootstrap import configure_logging, init_runtime
     from app.config import APP_ENV, LOG_LEVEL
     from app.db import get_db
 

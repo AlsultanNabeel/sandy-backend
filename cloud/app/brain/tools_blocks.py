@@ -5,17 +5,17 @@ from __future__ import annotations
 from datetime import timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.agent.ltm_crypto import decrypt_field, encrypt_field
+from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.blocks import entries, items, schedules
 from app.blocks.kinds import LIST, LOG, SCHEDULE, KindError, by_alias, get_kind, names
 from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
 from app.brain.matching import match_rows
-from app.features.tasks_matcher import _task_match_key
+from app.brain.matching import match_key
 
 MAX_ROWS = 30
 SUMMARY_ROWS = 200
-# graph._SIGNIFICANT_MOODS: the moods the old turn kept an emotional moment for.
+# The moods strong enough to keep as an emotional moment.
 SIGNIFICANT_MOODS = ("stressed", "frustrated", "sad", "angry", "happy", "excited")
 
 
@@ -49,10 +49,10 @@ def _schedule_row(s: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _matches_query(row: Dict[str, Any], query: str) -> bool:
-    words = [w for w in _task_match_key(query).split() if len(w) >= 2]
+    words = [w for w in match_key(query).split() if len(w) >= 2]
     if not words:
         return True
-    hay = _task_match_key(" ".join(str(v) for v in row.values()))
+    hay = match_key(" ".join(str(v) for v in row.values()))
     return any(w in hay for w in words)
 
 
@@ -65,7 +65,7 @@ def _list_name(args: Dict[str, Any]) -> str:
 # ── remember / recall / summarize ────────────────────────────────────────────
 
 def _mood(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    """The old emotional moment as a `mood` entry: a significant mood, the user's
+    """An emotional moment as a `mood` entry: a significant mood, the user's
     words (200 chars) encrypted and never embedded, at most once per turn."""
     mood = str((args.get("data") or {}).get("mood") or "")
     if mood not in SIGNIFICANT_MOODS:
@@ -99,7 +99,7 @@ def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:
     not the text «مهامي» — matched as text it filtered every task out."""
     kind = list_name = None
     rest = []
-    for word in _task_match_key(query).split():
+    for word in match_key(query).split():
         hit = None
         for form in (word, word[2:] if word.startswith("ال") else "", word.rstrip("ي")):
             hit = hit or (by_alias(form) if form else None)
@@ -118,7 +118,7 @@ def _route(kind: Optional[str], list_name: Optional[str]) -> Tuple[Optional[str]
     for name in (kind, list_name):
         if not name:
             continue
-        row = by_alias(_task_match_key(name))
+        row = by_alias(match_key(name))
         if row is None and not get_kind(LIST, name) and not get_kind(LOG, name) \
                 and not get_kind(SCHEDULE, name):
             continue
@@ -195,9 +195,9 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if get_kind(LOG, name) and not get_kind(LIST, name):
         return refused(f"«{name}» is something that happened, not a list: "
                        f"call remember with kind={name}")
-    same = _task_match_key(text)
+    same = match_key(text)
     for row in items.list_items(name, done=False):
-        if _task_match_key(row.get("text", "")) == same:
+        if match_key(row.get("text", "")) == same:
             return {"ok": True, "id": row["id"], "already": True,
                     "reply": f"«{text}» موجودة أصلاً بالقائمة"}
     due = None

@@ -1,18 +1,11 @@
-"""Voice session memory: identity/channel context vars, STM history, and the memory seed."""
+"""Voice session memory: identity/channel context vars and the STM history."""
 from __future__ import annotations
 
 import contextvars
-import time
-from collections import OrderedDict
 from typing import Any, Dict, List, Optional
-from app.api.voice_ws._config import (
-    logger,
-    _VOICE_CTX_TTL_S,
-)
 
-# chat_id -> (built_at, text); bounded LRU (the TTL only makes stale entries unused).
-_VOICE_CTX_MAX = 128
-_voice_ctx_cache: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+from app.api.voice_ws._config import logger
+from app.brain import stm
 
 # Session identity, channel (robot vs app call) and speaker name live in context
 # variables: per async task, safe across concurrent sessions. They don't reach
@@ -82,16 +75,8 @@ def _load_stm_history() -> List[Dict[str, Any]]:
     chat_id = _stm_chat_id()
     if not chat_id:
         return []
-    try:
-        from app.agent.graph.graph import _stm_load, recent_turns_for_user
-        shared = recent_turns_for_user(chat_id, limit=10)
-        if shared:
-            return shared
-        # Legacy docs without user_id.
-        return _stm_load(chat_id, chat_id)
-    except Exception as exc:
-        logger.debug("[voice_ws] STM load skipped: %s", exc)
-    return []
+    # Falls back to the voice thread itself for docs written before `user_id` was stored.
+    return stm.recent_turns_for_user(chat_id, limit=10) or stm.load(chat_id, chat_id)
 
 
 def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
@@ -128,74 +113,24 @@ def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
             + _load_stm_context(history))
 
 
-
-
-def _voice_memory_context(message: str, *, include_semantic: bool) -> Optional[str]:
-    """Voice-formatted memory context for the session owner, or None (caller falls back)."""
-    chat_id = _stm_chat_id()
-    if not chat_id:
-        return None
-
-    # Only the session-start seed is cacheable; per-turn semantic context is query-specific.
-    cacheable = message == "" and not include_semantic
-    if cacheable:
-        cached = _voice_ctx_cache.get(chat_id)
-        if cached and (time.monotonic() - cached[0]) < _VOICE_CTX_TTL_S:
-            return cached[1]
-
-    try:
-        from app.agent.context_builder import build_memory_context, format_for_voice
-        from app.db import get_db
-        mongo_db = get_db()
-        ctx = build_memory_context(
-            chat_id=chat_id,
-            user_id=chat_id,
-            message=message,
-            mongo_db=mongo_db,
-            include_semantic=include_semantic,
-            # Stable facts only: recent turns resurface as phantom replies on native audio.
-            durable_only=True,
-        )
-        text = format_for_voice(ctx)
-        if cacheable:
-            _voice_ctx_cache[chat_id] = (time.monotonic(), text)
-            _voice_ctx_cache.move_to_end(chat_id)
-            while len(_voice_ctx_cache) > _VOICE_CTX_MAX:
-                _voice_ctx_cache.popitem(last=False)
-        return text
-    except Exception as exc:
-        logger.debug("[voice_ws] context_builder skipped: %s", exc)
-        return None
-
-
 def _save_voice_turn(user_text: str, sandy_text: str,
                      user_id: str = "", channel: str = "") -> None:
-    """Save a voice turn to STM and run the same durable extraction as chat.
+    """Save a voice turn to STM, in the caller's tenant (the overflow summary is scoped).
 
     Identity and channel come in as arguments (this runs on a pool thread).
     """
+    from app.api.voice_ws.tools import _voice_profile
+    from app.utils.user_profiles import active_user_profile_context
+
     # Always set, even empty: pool threads keep context between jobs.
     set_voice_identity(user_id)
     set_voice_channel(channel)
     chat_id = _stm_chat_id()
     if not chat_id or not user_text or not sandy_text:
         return
-    try:
-        from app.agent.graph.graph import _save_emotional_async, _stm_save
-        _stm_save(chat_id, chat_id, user_text, sandy_text, via=get_voice_channel())
-        # Same durable extraction as the chat turn (no mood on this path).
-        from app.api.voice_ws.tools import _voice_profile
-        from app.utils.user_profiles import active_user_profile_context
-        with active_user_profile_context(_voice_profile(chat_id)):
-            _save_emotional_async({}, user_text)
-    except Exception as exc:
-        logger.warning("[voice_ws] voice turn save failed: %s", exc)
-    try:
-        from app.db import get_db
-        from app.agent.session_state import update_session_state
-        update_session_state(chat_id, get_db(), platform="voice")
-    except Exception:
-        logger.debug("[voice_ws] session state update skipped", exc_info=True)
+    with active_user_profile_context(_voice_profile(chat_id)):
+        stm.save(chat_id, chat_id, user_text, sandy_text, via=get_voice_channel(),
+                 source="voice")
 
 
 def load_recent_turns(user_id: str) -> List[Dict[str, Any]]:

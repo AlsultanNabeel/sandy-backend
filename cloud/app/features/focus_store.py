@@ -1,7 +1,4 @@
-"""وضع التركيز (بومودورو) في sandy_focus؛ الأطوار بتتقدّم عند القراءة، بلا مؤقّت بالسيرفر.
-
-خانات الميتا (sounds/goals) مفتاحها فيه معرّف المستأجر لأنها مفردة لكل مستأجر.
-"""
+"""وضع التركيز (بومودورو) في sandy_focus؛ الأطوار بتتقدّم عند القراءة، بلا مؤقّت بالسيرفر."""
 
 from __future__ import annotations
 
@@ -12,15 +9,11 @@ from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
-from app.utils.user_profiles import current_user_id
 from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
 
 _COLL = "sandy_focus"
-_META = "sandy_focus_meta"
-
-_DEFAULT_SOUNDS = {"start": "focus_start", "break": "focus_break", "end": "focus_end"}
 
 
 def init_focus_store(mongo_db) -> None:
@@ -31,44 +24,6 @@ def init_focus_store(mongo_db) -> None:
 
 def _coll():
     return scoped(get_db(), _COLL)
-
-
-def _meta():
-    return scoped(get_db(), _META)
-
-
-def get_focus_sounds() -> Dict[str, str]:
-    out = dict(_DEFAULT_SOUNDS)
-    uid = current_user_id()
-    meta = _meta()
-    if uid is not None and meta is not None:
-        doc = meta.find_one({"_id": f"sounds:{uid}"}) or {}
-        for k in out:
-            if doc.get(k):
-                out[k] = doc[k]
-    return out
-
-
-def set_focus_sound(event: str, melody: str) -> Dict[str, Any]:
-    """غيّر صوت حدث (start|break|end)."""
-    uid = current_user_id()
-    if uid is None:
-        return {"ok": False}
-    event = (event or "").strip().lower()
-    melody = (melody or "").strip().lower()
-    if event not in _DEFAULT_SOUNDS:
-        return {"ok": False, "error": "bad_event"}
-    if not melody:
-        return {"ok": False, "error": "bad_melody"}
-    meta = _meta()
-    if meta is None:
-        return {"ok": False}
-    meta.update_one(
-        {"_id": f"sounds:{uid}"},
-        {"$set": {"user_id": uid, event: melody}},
-        upsert=True,
-    )
-    return {"ok": True, "event": event, "melody": melody}
 
 
 def _phase_total_sec(s: Dict[str, Any]) -> int:
@@ -264,9 +219,7 @@ def focus_status() -> Dict[str, Any]:
     }
 
 
-# ── History, stats & goals ──────────────────────────────────────────────────
-
-_GOAL_KEYS = ("day", "week", "month", "year")
+# ── History ─────────────────────────────────────────────────────────────────
 
 
 def focus_history(limit: int = 50) -> List[Dict[str, Any]]:
@@ -295,89 +248,4 @@ def focus_history(limit: int = 50) -> List[Dict[str, Any]]:
             "started_at": started.astimezone(USER_TZ).isoformat() if started else None,
             "ended_at": ended.astimezone(USER_TZ).isoformat() if ended else None,
         })
-    return out
-
-
-def get_focus_goals() -> Dict[str, int]:
-    """Target focused-minutes per period (0 = no goal set)."""
-    out = {k: 0 for k in _GOAL_KEYS}
-    uid = current_user_id()
-    meta = _meta()
-    if uid is None or meta is None:
-        return out
-    doc = meta.find_one({"_id": f"goals:{uid}"}) or {}
-    for k in _GOAL_KEYS:
-        try:
-            out[k] = max(0, int(doc.get(k, 0) or 0))
-        except (TypeError, ValueError):
-            out[k] = 0
-    return out
-
-
-def set_focus_goal(period: str, minutes: int) -> Dict[str, Any]:
-    """Set a daily/weekly/monthly/yearly focus target (in minutes)."""
-    uid = current_user_id()
-    if uid is None:
-        return {"ok": False}
-    period = (period or "").strip().lower()
-    if period not in _GOAL_KEYS:
-        return {"ok": False, "error": "bad_period", "choices": list(_GOAL_KEYS)}
-    meta = _meta()
-    if meta is None:
-        return {"ok": False}
-    try:
-        minutes = max(0, min(100000, int(minutes)))
-    except (TypeError, ValueError):
-        return {"ok": False, "error": "bad_minutes"}
-    meta.update_one(
-        {"_id": f"goals:{uid}"},
-        {"$set": {"user_id": uid, period: minutes}},
-        upsert=True,
-    )
-    return {"ok": True, "period": period, "minutes": minutes}
-
-
-def _period_starts() -> Dict[str, datetime]:
-    """UTC starts of today/week/month/year in the user's tz; the week starts Saturday."""
-    local = datetime.now(timezone.utc).astimezone(USER_TZ)
-    today = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    week = today - timedelta(days=(local.weekday() - 5) % 7)
-    return {
-        "day": today.astimezone(timezone.utc),
-        "week": week.astimezone(timezone.utc),
-        "month": today.replace(day=1).astimezone(timezone.utc),
-        "year": today.replace(month=1, day=1).astimezone(timezone.utc),
-    }
-
-
-def focus_stats() -> Dict[str, Any]:
-    coll = _coll()
-    empty = {k: {"minutes": 0, "sessions": 0, "goal_min": 0, "pct": 0} for k in _GOAL_KEYS}
-    if coll is None:
-        return empty
-    goals = get_focus_goals()
-    starts = _period_starts()
-    minutes_in = {k: 0 for k in starts}
-    sessions_in = {k: 0 for k in starts}
-    # One read for all periods. بلا سقف: it's a sum, bounded to a year by the filter.
-    for d in coll.find({"state": {"$in": ["done", "cancelled"]},
-                        "ended_at": {"$gte": min(starts.values())}},
-                       {"ended_at": 1, "focused_min": 1}):
-        ended = _aware(d.get("ended_at"))
-        if ended is None:
-            continue
-        for key, start in starts.items():
-            if ended >= start:
-                minutes_in[key] += int(d.get("focused_min") or 0)
-                sessions_in[key] += 1
-    out: Dict[str, Any] = {}
-    for key in starts:
-        minutes = minutes_in[key]
-        target = int(goals.get(key, 0))
-        out[key] = {
-            "minutes": minutes,
-            "sessions": sessions_in[key],
-            "goal_min": target,
-            "pct": min(100, int(minutes * 100 / target)) if target else 0,
-        }
     return out

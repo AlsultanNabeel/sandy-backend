@@ -159,17 +159,17 @@ def test_the_instruction_is_cached_per_tenant_version(monkeypatch):
     calls = {"n": 0}
 
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid, persona: (calls.__setitem__("n", calls["n"] + 1)
+                        lambda cid: (calls.__setitem__("n", calls["n"] + 1)
                                               or "التعليمات"))
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 7)
 
-    assert vt._cached_system_instruction("u1", None) == "التعليمات"
-    assert vt._cached_system_instruction("u1", None) == "التعليمات"
+    assert vt._cached_system_instruction("u1") == "التعليمات"
+    assert vt._cached_system_instruction("u1") == "التعليمات"
     assert calls["n"] == 1, "every call rebuilds the whole instruction"
 
     # A write moves the version, and the next session must see it.
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 8)
-    vt._cached_system_instruction("u1", None)
+    vt._cached_system_instruction("u1")
     assert calls["n"] == 2, "a saved memory never reached the voice prompt"
     vt.clear_instruction_cache()
 
@@ -180,10 +180,10 @@ def test_two_tenants_do_not_share_an_instruction(monkeypatch):
     vt.clear_instruction_cache()
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 1)
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid, persona: f"تعليمات {cid}")
+                        lambda cid: f"تعليمات {cid}")
 
-    assert vt._cached_system_instruction("u1", None) == "تعليمات u1"
-    assert vt._cached_system_instruction("u2", None) == "تعليمات u2"
+    assert vt._cached_system_instruction("u1") == "تعليمات u1"
+    assert vt._cached_system_instruction("u2") == "تعليمات u2"
     vt.clear_instruction_cache()
 
 
@@ -454,22 +454,22 @@ def test_the_instruction_cache_crosses_the_worker_boundary(monkeypatch):
 
     builds = {"n": 0}
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid, persona: (builds.__setitem__("n", builds["n"] + 1)
+                        lambda cid: (builds.__setitem__("n", builds["n"] + 1)
                                               or "التعليمات الكاملة"))
 
     vt.clear_instruction_cache()
-    assert vt._cached_system_instruction("u1", None) == "التعليمات الكاملة"
+    assert vt._cached_system_instruction("u1") == "التعليمات الكاملة"
     assert builds["n"] == 1
 
     # The other worker: same tenant, same version, empty local cache.
     vt.clear_instruction_cache()
-    assert vt._cached_system_instruction("u1", None) == "التعليمات الكاملة"
+    assert vt._cached_system_instruction("u1") == "التعليمات الكاملة"
     assert builds["n"] == 1, "the second worker rebuilt the whole thing"
 
     # And a write still invalidates it everywhere.
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 4)
     vt.clear_instruction_cache()
-    vt._cached_system_instruction("u1", None)
+    vt._cached_system_instruction("u1")
     assert builds["n"] == 2, "a saved memory never reached the voice prompt"
     vt.clear_instruction_cache()
 

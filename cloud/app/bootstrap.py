@@ -1,4 +1,9 @@
-"""One-time, idempotent startup: config check, logging, Sentry, indexes, schedulers."""
+"""One-time, idempotent startup: the runtime (Mongo, stores, MQTT), then config
+check, Sentry, indexes and the schedulers.
+
+Nothing connects at *import* time, so the package imports in a test with no
+credentials; the entrypoints call `init_runtime()` then `bootstrap()`.
+"""
 
 import logging
 import os
@@ -22,17 +27,13 @@ _QUIET_LOGGERS = (
     "apscheduler",
     "openai",
     "openai._base_client",
-    "anthropic",
-    "boto3",
-    "botocore",
-    "s3transfer",
     "google",
     "google.auth",
     "google.api_core",
     "asyncio",
-    "bedrock",
-    "bedrock-runtime",
 )
+
+_initialized = False
 
 def configure_logging(log_level: str = "INFO") -> None:
     """Set up root logger. Safe to call multiple times."""
@@ -44,6 +45,38 @@ def configure_logging(log_level: str = "INFO") -> None:
     for name in _QUIET_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
     logger.debug("[Bootstrap] Logging configured at %s level", log_level)
+
+
+def init_runtime() -> None:
+    """Connect Mongo, register it on `app.db`, create the stores' indexes, start
+    MQTT ingest. Idempotent."""
+    global _initialized
+    if _initialized:
+        return
+    from app.config import MONGODB_DB_NAME, MONGODB_URI
+    from app.db import configure
+    from app.features.device_store import init_device_store
+    from app.features.focus_store import init_focus_store
+    from app.features.node_store import init_node_store
+    from app.features.photo_album import init_photo_album
+    from app.features.push_tokens_store import init_push_tokens_store
+    from app.features.scene_store import init_scene_store
+    from app.features.speaker_id import init_speaker_store
+    from app.features.usage_store import init_usage_store
+    from app.features.users_store import init_users_store
+    from app.integrations.mongodb_store import init_mongo_connection
+    from app.integrations.mqtt_ingest import start_mqtt_ingest
+
+    _client, mongo_db = init_mongo_connection(MONGODB_URI, MONGODB_DB_NAME)
+    # Every store reads the one handle through app.db.get_db().
+    configure(mongo_db)
+    for init in (init_users_store, init_speaker_store, init_photo_album, init_focus_store,
+                 init_scene_store, init_device_store, init_node_store, init_usage_store,
+                 init_push_tokens_store):
+        init(mongo_db)
+    start_mqtt_ingest()
+    _initialized = True
+    logger.debug("[Bootstrap] runtime initialized")
 
 
 def write_google_credentials() -> None:
@@ -64,41 +97,18 @@ def write_google_credentials() -> None:
         logger.warning("[Bootstrap] Failed to write Google credentials: %s", exc)
 
 
-def ensure_data_dirs() -> None:
-    """Create runtime data directories if they don't exist."""
-    from app.config import TASKS_DIR
-
-    TASKS_DIR.mkdir(parents=True, exist_ok=True)
-    logger.debug("[Bootstrap] Data directories ready")
-
-
 def ensure_indexes() -> None:
     """Create every boot-time index independently (on the raw handle, before any tenant)."""
-    from app.agent.health_monitor import ensure_ttl_index
     from app.db import get_db
 
     mongo_db = get_db()
-    try:
-        ensure_ttl_index(mongo_db)
-    except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
-        logger.warning("[Bootstrap] ensure_ttl_index failed: %s", exc)
     if mongo_db is None:
         return
 
     # One failure must not skip the rest.
     index_jobs = [
-        ("sandy_session_state.chat_id", lambda: mongo_db.sandy_session_state.create_index(
-            "chat_id", unique=True, background=True
-        )),
-        ("sandy_evals.chat_id+created_at", lambda: mongo_db.sandy_evals.create_index(
-            [("chat_id", 1), ("created_at", -1)], background=True
-        )),
         ("sandy_pending_state.updated_at_ttl", lambda: mongo_db.sandy_pending_state.create_index(
             "updated_at", expireAfterSeconds=60 * 60, background=True
-        )),
-        # Hot on every message (persona directives, summary search); grows fastest.
-        ("sandy_memories.chat_id+label+created_at", lambda: mongo_db.sandy_memories.create_index(
-            [("chat_id", 1), ("label", 1), ("created_at", -1)], background=True
         )),
         # صفّ لكل (مستأجر، نسخة) بيتراكم؛ القديم ما حدا بيسأل عنه.
         ("sandy_prompt_cache.created_at_ttl",
@@ -121,15 +131,6 @@ def ensure_indexes() -> None:
          lambda: mongo_db.node_pair_challenges.create_index(
              [("node_id", 1), ("tenant", 1)], unique=True, background=True
          )),
-        # Popped on every chat message (passive delivery of due messages).
-        ("sandy_future_messages.chat_id+delivered+deliver_at",
-         lambda: mongo_db.sandy_future_messages.create_index(
-             [("chat_id", 1), ("delivered", 1), ("deliver_at", 1)], background=True
-         )),
-        # Read on every chat reply (chat_id + status).
-        ("sandy_goals.chat_id+status+updated_at", lambda: mongo_db.sandy_goals.create_index(
-            [("chat_id", 1), ("status", 1), ("updated_at", 1)], background=True
-        )),
         # The conversation list and search.
         ("conversations.user_id+updated_at", lambda: mongo_db.conversations.create_index(
             [("user_id", 1), ("updated_at", -1)], background=True
@@ -142,29 +143,9 @@ def ensure_indexes() -> None:
         ("sandy_focus.user_id+state+ended_at", lambda: mongo_db.sandy_focus.create_index(
             [("user_id", 1), ("state", 1), ("ended_at", 1)], background=True
         )),
-        # the habit list
-        ("sandy_habits.user_id+archived+created_at", lambda: mongo_db.sandy_habits.create_index(
-            [("user_id", 1), ("archived", 1), ("created_at", 1)], background=True
-        )),
-        # reads sort by `at`, the old index is on `date`
-        ("sandy_journal.user_id+at", lambda: mongo_db.sandy_journal.create_index(
-            [("user_id", 1), ("at", -1)], background=True
-        )),
-        # reading stats filter on `ended_at`
-        ("sandy_reading_sessions.user_id+state+ended_at", lambda: mongo_db.sandy_reading_sessions.create_index(
-            [("user_id", 1), ("state", 1), ("ended_at", 1)], background=True
-        )),
         # the once-a-minute cross-tenant due scan
         ("sandy_scene_timers.fire_at", lambda: mongo_db.sandy_scene_timers.create_index(
             [("fire_at", 1)], background=True
-        )),
-        # the gifts list
-        ("sandy_gifts.chat_id+created_at", lambda: mongo_db.sandy_gifts.create_index(
-            [("chat_id", 1), ("created_at", -1)], background=True
-        )),
-        # the saved-content list
-        ("sandy_shared_content.chat_id+created_at", lambda: mongo_db.sandy_shared_content.create_index(
-            [("chat_id", 1), ("created_at", -1)], background=True
         )),
     ]
     for label, job in index_jobs:
@@ -189,7 +170,6 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
         raise RuntimeError("Sandy cannot start: " + "; ".join(fatal))
 
     write_google_credentials()
-    ensure_data_dirs()
 
     # First, so the first failure is reported. No-op without SENTRY_DSN.
     try:
@@ -199,26 +179,10 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("[Bootstrap] error tracking failed to start: %s", exc)
 
-
-    try:
-        from app.agent.tools.setup import register_all_tools
-
-        register_all_tools()
-    except Exception as exc:
-        logger.warning("[Bootstrap] Tools registration failed: %s", exc)
-
     try:
         ensure_indexes()
     except Exception as exc:
         logger.warning("[Bootstrap] Mongo index setup failed: %s", exc)
-
-    try:
-        from app.agent.semantic_memory import migrate_summary_threads
-        from app.db import get_db
-
-        migrate_summary_threads(get_db())
-    except Exception as exc:
-        logger.warning("[Bootstrap] summary migration failed: %s", exc)
 
     # ── Periodic jobs: one worker per machine (kernel file lock) ─────────────
     # Per-day / per-timer claims still make them safe across dynos. mqtt_ingest

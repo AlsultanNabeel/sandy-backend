@@ -42,7 +42,7 @@ def get_key(device_id: str) -> Optional[Dict[str, Any]]:
     doc = coll.find_one({"_id": device_id})
     if not doc or not doc.get("key"):
         return None
-    from app.agent.ltm_crypto import decrypt_field
+    from app.utils.ltm_crypto import decrypt_field
 
     hex_key = decrypt_field(str(doc["key"]))
     try:
@@ -67,7 +67,7 @@ def issue_key(device_id: str) -> Optional[str]:
         return None
     if current:
         return current["hex"]
-    from app.agent.ltm_crypto import encrypt_field
+    from app.utils.ltm_crypto import encrypt_field
 
     hex_key = secrets.token_hex(32)
     # Only fills a keyless record, so a concurrent issue keeps its key.
