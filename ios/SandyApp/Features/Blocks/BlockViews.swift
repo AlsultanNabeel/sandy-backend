@@ -21,6 +21,8 @@ struct ItemsView: View {
     @ObservedObject private var kinds = KindsStore.shared
     @StateObject private var store: ItemsStore
     @State private var draft = ""
+    @State private var editing: ListItem?
+    @State private var addingFull = false
     private let kind: BlockKind
 
     init(kind: BlockKind) {
@@ -49,7 +51,7 @@ struct ItemsView: View {
                 Spacer()
             } else {
                 List {
-                    ForEach(store.items) { item in
+                    ForEach(store.ordered) { item in
                         itemRow(item)
                             .blockRow()
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -61,17 +63,39 @@ struct ItemsView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .animation(.spring(response: 0.45, dampingFraction: 0.85), value: store.ordered.map(\.id))
             }
 
             if !store.showDone { addBar }
         }
-        .navigationTitle((kinds.kind(kind.name, .list) ?? kind).label(lang.lang))
+        .undoToast(store, api: state.api, bottom: 70)
+        .navigationTitle(title)
+        .sheet(item: $editing) { item in
+            ItemEditSheet(title: title, item: item, isHabit: store.isHabits,
+                          save: { text, due, important in
+                              store.update(api: state.api, item, text: text, due: due, important: important)
+                          },
+                          delete: { store.delete(api: state.api, item) })
+                .environmentObject(lang)
+        }
+        .sheet(isPresented: $addingFull) {
+            ItemEditSheet(title: title, item: nil, draft: draft, isHabit: store.isHabits,
+                          save: { text, due, important in
+                              draft = ""
+                              Task { await store.add(api: state.api, text: text, due: due,
+                                                     priority: important ? "high" : nil) }
+                          })
+                .environmentObject(lang)
+        }
         .task {
             await kinds.load(api: state.api)
             await store.load(api: state.api)
         }
         .refreshable { await store.load(api: state.api) }
     }
+
+    private var title: String { (kinds.kind(kind.name, .list) ?? kind).label(lang.lang) }
+
 
     private func itemRow(_ item: ListItem) -> some View {
         let checked = store.isHabits ? store.checkedToday[item.id] != nil : item.done
@@ -85,7 +109,7 @@ struct ItemsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text)
                     .font(Theme.Typography.body)
-                    .foregroundColor(item.done ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
+                    .foregroundColor(checked ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
                     .strikethrough(item.done)
                 if let due = BlockDate.text(item.due) {
                     Label(due, systemImage: "clock")
@@ -94,15 +118,30 @@ struct ItemsView: View {
                 }
             }
             Spacer(minLength: 0)
+            if store.isHabits, let streak = store.streaks[item.id], streak > 1 {
+                StreakBadge(days: streak)
+            }
             if item.priority == "high" {
                 Image(systemName: "flag.fill").foregroundColor(Theme.Colors.warn)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { editing = item }
+        .opacity(store.isHabits && checked ? 0.6 : 1)
         .sandyCard()
     }
 
     private var addBar: some View {
         HStack(spacing: Theme.Spacing.sm) {
+            if !store.isHabits {
+                // The full sheet: a time and a flag along with the text.
+                Button { addingFull = true } label: {
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: Theme.Icon.md))
+                        .foregroundColor(Theme.Colors.accent)
+                }
+                .accessibilityLabel(lang.s("blocks.addWithTime"))
+            }
             TextField(lang.s("blocks.addPlaceholder"), text: $draft)
                 .textFieldStyle(.plain)
                 .padding(Theme.Spacing.sm)
@@ -135,6 +174,7 @@ struct SchedulesView: View {
     @ObservedObject private var notifs = NotificationManager.shared
     @StateObject private var store: SchedulesStore
     @State private var adding = false
+    @State private var editing: ScheduleItem?
 
     init(kind: String = "reminder") {
         _store = StateObject(wrappedValue: SchedulesStore(kind: kind))
@@ -162,6 +202,15 @@ struct SchedulesView: View {
                                     Label(lang.s("blocks.delete"), systemImage: "trash")
                                 }
                             }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                if store.kind == "reminder" && (item.recurrence ?? "").isEmpty {
+                                    Button { store.complete(api: state.api, item) } label: {
+                                        Label(lang.s("blocks.markDone"), systemImage: "checkmark")
+                                    }
+                                    .tint(Theme.Colors.success)
+                                }
+                            }
+                            .contextMenu { ReminderActions(store: store, item: item) { editing = item } }
                     }
                 }
                 .listStyle(.plain)
@@ -182,9 +231,18 @@ struct SchedulesView: View {
         // A banner button (later / done / delete) changed one while this screen was open.
         .onChange(of: notifs.remindersChanged) { Task { await store.load(api: state.api) } }
         .sheet(isPresented: $adding) {
-            AddReminderSheet(title: title, allowRepeat: store.kind == "reminder") { text, date, repeats in
+            ReminderEditSheet(title: title, allowRepeat: store.kind == "reminder") { text, date, repeats in
                 await store.add(api: state.api, text: text, at: date, recurrence: repeats)
             }
+            .environmentObject(lang)
+        }
+        .sheet(item: $editing) { item in
+            ReminderEditSheet(title: title, item: item, allowRepeat: store.kind == "reminder",
+                              save: { text, date, repeats in
+                                  await store.update(api: state.api, item, text: text, at: date,
+                                                     recurrence: repeats)
+                              },
+                              delete: { store.delete(api: state.api, item) })
             .environmentObject(lang)
         }
     }
@@ -201,53 +259,35 @@ struct SchedulesView: View {
             }
             Spacer(minLength: 0)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { editing = item }
         .sandyCard()
     }
 }
 
-private struct AddReminderSheet: View {
+/// Long-press menu on a reminder: later, done, edit, delete.
+struct ReminderActions: View {
+    @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    @Environment(\.dismiss) private var dismiss
-    let title: String
-    let allowRepeat: Bool
-    let save: (String, Date, String?) async -> Bool
-    @State private var text = ""
-    @State private var date = Date().addingTimeInterval(3600)
-    @State private var repeats = ""
-    @State private var saving = false
+    @ObservedObject var store: SchedulesStore
+    let item: ScheduleItem
+    let edit: () -> Void
 
     var body: some View {
-        NavigationStack {
-            Form {
-                TextField(lang.s("blocks.reminderPlaceholder"), text: $text)
-                DatePicker(lang.s("blocks.when"), selection: $date, in: Date()...)
-                if allowRepeat {
-                    Picker(lang.s("blocks.repeat"), selection: $repeats) {
-                        Text(lang.s("blocks.repeatNone")).tag("")
-                        Text(lang.s("blocks.repeatDaily")).tag("daily")
-                        Text(lang.s("blocks.repeatWeekly")).tag("weekly")
-                        Text(lang.s("blocks.repeatMonthly")).tag("monthly")
-                    }
-                }
+        Button { store.snooze(api: state.api, item, minutes: 15) } label: {
+            Label(lang.s("blocks.quick.15"), systemImage: "clock.arrow.circlepath")
+        }
+        Button { store.snooze(api: state.api, item, minutes: 60) } label: {
+            Label(lang.s("blocks.quick.hour"), systemImage: "clock.arrow.circlepath")
+        }
+        if (item.recurrence ?? "").isEmpty {
+            Button { store.complete(api: state.api, item) } label: {
+                Label(lang.s("blocks.markDone"), systemImage: "checkmark")
             }
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("blocks.cancel")) { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(lang.s("blocks.save")) {
-                        saving = true
-                        Task {
-                            let ok = await save(text.trimmingCharacters(in: .whitespaces), date,
-                                                repeats.isEmpty ? nil : repeats)
-                            saving = false
-                            if ok { dismiss() }
-                        }
-                    }
-                    .disabled(saving || text.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
+        }
+        Button(action: edit) { Label(lang.s("blocks.edit"), systemImage: "pencil") }
+        Button(role: .destructive) { store.delete(api: state.api, item) } label: {
+            Label(lang.s("blocks.delete"), systemImage: "trash")
         }
     }
 }
@@ -267,13 +307,20 @@ struct LogView: View {
         self.isLife = isLife
     }
     @State private var adding = false
+    @State private var editing: LogEntry?
+    @State private var day: Date?
     @State private var summary: String?
     @State private var summarizing = false
     @State private var search = ""
 
     private var shown: [LogEntry] {
         let q = search.trimmingCharacters(in: .whitespaces)
-        return q.isEmpty ? store.entries : store.entries.filter { $0.text.localizedCaseInsensitiveContains(q) }
+        var rows = q.isEmpty ? store.entries : store.entries.filter { $0.text.localizedCaseInsensitiveContains(q) }
+        if let day {
+            let cal = Calendar.current
+            rows = rows.filter { NotificationManager.parseISO($0.at ?? "").map { cal.isDate($0, inSameDayAs: day) } ?? false }
+        }
+        return rows
     }
 
     private var title: String {
@@ -284,7 +331,7 @@ struct LogView: View {
     var body: some View {
         List {
             if isLife {
-                LifeHeader(entries: store.entries).blockRow()
+                LifeHeader(entries: store.entries, day: $day).blockRow()
                 filters.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -319,17 +366,22 @@ struct LogView: View {
         .refreshable { await store.load(api: state.api) }
         .onChange(of: store.kind) { Task { await store.load(api: state.api) } }
         .sheet(isPresented: $adding) {
-            AddEntrySheet(kinds: kinds.logKinds) { kind, text, amount in
-                await store.add(api: state.api, kind: kind, text: text, amount: amount)
+            EntryEditSheet(kinds: kinds.logKinds, kind: store.kind ?? "note") { kind, text, amount, at in
+                await store.add(api: state.api, kind: kind, text: text, amount: amount, at: at)
             }
             .environmentObject(lang)
         }
+        .sheet(item: $editing) { entry in
+            EntryEditSheet(kinds: kinds.logKinds, entry: entry,
+                           save: { _, text, amount, at in
+                               store.update(api: state.api, entry, text: text, amount: amount, at: at)
+                               return true
+                           },
+                           delete: { store.delete(api: state.api, entry) })
+            .environmentObject(lang)
+        }
         .sheet(item: Binding(get: { summary.map(SummaryText.init) }, set: { summary = $0?.text })) { s in
-            ScrollView {
-                Text(s.text).font(Theme.Typography.body).padding(Theme.Spacing.lg)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .presentationDetents([.medium, .large])
+            SummarySheet(text: s.text).environmentObject(lang)
         }
     }
 
@@ -404,6 +456,8 @@ struct LogView: View {
                     .foregroundColor(Theme.Colors.success)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { editing = entry }
         .sandyCard()
     }
 }
@@ -413,47 +467,49 @@ private struct SummaryText: Identifiable {
     var id: String { text }
 }
 
-private struct AddEntrySheet: View {
+/// A summary Sandy wrote, as a card with her face on it.
+private struct SummarySheet: View {
     @EnvironmentObject var lang: LanguageManager
-    @Environment(\.dismiss) private var dismiss
-    let kinds: [BlockKind]
-    let save: (String, String, Double?) async -> Bool
-    @State private var kind = "note"
-    @State private var text = ""
-    @State private var amount = ""
-    @State private var saving = false
+    let text: String
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Picker(lang.s("blocks.kind"), selection: $kind) {
-                    ForEach(kinds) { k in Label(k.label(lang.lang), systemImage: k.icon).tag(k.name) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                HStack(spacing: Theme.Spacing.sm) {
+                    SandyAvatar(size: 36, mood: .happy)
+                    Text(lang.s("blocks.summaryTitle"))
+                        .font(Theme.Typography.headline)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                    Spacer()
+                    ShareLink(item: text) { Image(systemName: "square.and.arrow.up") }
+                        .foregroundColor(Theme.Colors.accent)
                 }
-                TextField(lang.s("blocks.entryPlaceholder"), text: $text, axis: .vertical)
-                if kind == "expense" {
-                    TextField(lang.s("blocks.amount"), text: $amount).keyboardType(.decimalPad)
-                }
+                Text(text)
+                    .font(.system(size: 17, design: .rounded))
+                    .lineSpacing(6)
+                    .foregroundColor(Theme.Colors.primaryText)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .navigationTitle(lang.s("blocks.newEntry"))
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(lang.s("blocks.cancel")) { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(lang.s("blocks.save")) {
-                        saving = true
-                        Task {
-                            let value = Double(amount.replacingOccurrences(of: ",", with: "."))
-                            let ok = await save(kind, text.trimmingCharacters(in: .whitespaces),
-                                                kind == "expense" ? value : nil)
-                            saving = false
-                            if ok { dismiss() }
-                        }
-                    }
-                    .disabled(saving || text.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
+            .padding(Theme.Spacing.lg)
         }
+        .background(SandyBackground())
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// Days in a row: a small flame and a number.
+struct StreakBadge: View {
+    let days: Int
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "flame.fill")
+            Text(AppLocale.number(days))
+        }
+        .font(.system(size: 12, weight: .bold, design: .rounded))
+        .foregroundColor(Theme.Colors.warn)
     }
 }
 

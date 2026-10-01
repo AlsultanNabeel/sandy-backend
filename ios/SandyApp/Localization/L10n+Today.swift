@@ -30,6 +30,9 @@ enum L10nToday {
             "brief.next": .text("الجاي الساعة %@"),
             "brief.habits": .text("%@ عادات لسا"),
             "brief.free": .text("يومك فاضي. احكيلي شو بدك نعمل."),
+            "brief.allDone": .text("خلّصت كل إشي اليوم، عاش 🎉"),
+            "task": .text("مهمة"),
+            "habit": .text("عادة"),
         ],
         en: [
             "hello.morning": .text("Good morning"),
@@ -55,6 +58,9 @@ enum L10nToday {
             "brief.next": .text("next at %@"),
             "brief.habits": .text("%@ habits left"),
             "brief.free": .text("Your day is clear. Tell me what we should do."),
+            "brief.allDone": .text("All done for today, well done 🎉"),
+            "task": .text("Task"),
+            "habit": .text("Habit"),
         ]
     )
 }

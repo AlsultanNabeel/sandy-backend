@@ -37,11 +37,21 @@ final class ItemsStore: LoadableStore {
     @Published var showDone = false
     /// Habits only: the ones checked in today (a habit is never "done", it is done today).
     @Published var checkedToday: [String: String] = [:]   // habit id → today's check-in entry id
+    /// Habits only: days in a row each habit was kept, today included once it is checked.
+    @Published var streaks: [String: Int] = [:]
+    /// The last one ticked done, so a slip of the finger can be taken back.
+    @Published var justDone: ListItem?
     private var loadTask: Task<Void, Never>?
 
     init(list: String) { self.list = list }
 
     var isHabits: Bool { list == "habits" }
+
+    /// Habits: what is left today first, what is kept today sinks to the end.
+    var ordered: [ListItem] {
+        guard isHabits else { return items }
+        return items.filter { checkedToday[$0.id] == nil } + items.filter { checkedToday[$0.id] != nil }
+    }
 
     private static let day: DateFormatter = {
         let f = DateFormatter()
@@ -65,10 +75,10 @@ final class ItemsStore: LoadableStore {
             defer { endLoad(gen) }
             do {
                 let rows = try await api.listItems(list, done: showDone)
-                let today = isHabits ? try await todaysCheckIns(api: api) : [:]
+                let checks = isHabits ? try await checkIns(api: api) : ([:], [:])
                 guard isCurrentLoad(gen) else { return }
                 items = rows
-                checkedToday = today
+                (checkedToday, streaks) = checks
                 markLoaded()
                 DiskCache.save(rows, key: cacheKey, userId: api.currentUserId)
                 if !showDone {
@@ -83,9 +93,9 @@ final class ItemsStore: LoadableStore {
         await task.value
     }
 
-    func add(api: APIClient, text: String) async {
+    func add(api: APIClient, text: String, due: Date? = nil, priority: String? = nil) async {
         do {
-            try await api.addItem(list: list, text: text)
+            try await api.addItem(list: list, text: text, due: due, priority: priority)
             clearNotice()
             await load(api: api)
         } catch {
@@ -93,27 +103,79 @@ final class ItemsStore: LoadableStore {
         }
     }
 
-    private func todaysCheckIns(api: APIClient) async throws -> [String: String] {
+    /// Today's check-ins (habit id → entry id) and each habit's run of days.
+    private func checkIns(api: APIClient) async throws -> ([String: String], [String: Int]) {
+        let cal = Calendar.current
         let today = Self.day.string(from: Date())
-        var out: [String: String] = [:]
-        for e in try await api.entries(kind: "habit", limit: 100) {
-            if case .string(let date)? = e.data?["date"], date == today,
-               case .string(let habit)? = e.data?["habit_item_id"] {
-                out[habit] = e.id
-            }
+        var todays: [String: String] = [:]
+        var days: [String: Set<String>] = [:]
+        for e in try await api.entries(kind: "habit", limit: 1000) {
+            guard case .string(let date)? = e.data?["date"],
+                  case .string(let habit)? = e.data?["habit_item_id"] else { continue }
+            days[habit, default: []].insert(date)
+            if date == today { todays[habit] = e.id }
         }
-        return out
+        var streaks: [String: Int] = [:]
+        for (habit, set) in days {
+            // A run still counts while today is not checked yet: it starts from yesterday.
+            var day = set.contains(today) ? Date() : cal.date(byAdding: .day, value: -1, to: Date())!
+            var n = 0
+            while set.contains(Self.day.string(from: day)) {
+                n += 1
+                day = cal.date(byAdding: .day, value: -1, to: day)!
+            }
+            streaks[habit] = n
+        }
+        return (todays, streaks)
     }
 
     func toggle(api: APIClient, _ item: ListItem) {
         if isHabits { return checkIn(api: api, item) }
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         let removed = items[idx]
+        if !item.done { justDone = item }
         // It leaves this filter (open ↔ done), so it leaves the list.
         optimistic("blocks.errorSave",
-                   apply: { self.items.remove(at: idx) },
-                   rollback: { self.items.insert(removed, at: min(idx, self.items.count)) },
+                   apply: { self.items.remove(at: idx); self.publishTasks() },
+                   rollback: { self.items.insert(removed, at: min(idx, self.items.count)); self.publishTasks() },
                    call: { try await api.updateItem(id: item.id, done: !item.done) })
+    }
+
+    /// Puts the last ticked one back as open.
+    func undoDone(api: APIClient) {
+        guard let item = justDone else { return }
+        justDone = nil
+        optimistic("blocks.errorSave",
+                   apply: { self.items.insert(item, at: 0); self.publishTasks() },
+                   rollback: { self.items.removeAll { $0.id == item.id }; self.publishTasks() },
+                   call: { try await api.updateItem(id: item.id, done: false) })
+    }
+
+    /// Saves an edit in place; the row changes at once and comes back if the server refuses.
+    func update(api: APIClient, _ item: ListItem, text: String, due: Date?, important: Bool) {
+        guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+        let old = items[idx]
+        var new = old
+        new.text = text
+        let priority = isHabits ? nil : (important ? "high" : "normal")
+        var change = APIClient.ItemChange()
+        if text != old.text { change.text = text }
+        if !isHabits {
+            new.priority = priority
+            if priority != (old.priority ?? "normal") { change.priority = priority }
+            let oldDue = NotificationManager.parseISOOrDay(old.due ?? "")
+            if due != oldDue {
+                change.due = .some(due)
+                new.due = due.map { ISO8601DateFormatter().string(from: $0) }
+            }
+        }
+        optimistic("blocks.errorSave",
+                   apply: { self.items[idx] = new; self.publishTasks() },
+                   rollback: {
+                       if let i = self.items.firstIndex(where: { $0.id == item.id }) { self.items[i] = old }
+                       self.publishTasks()
+                   },
+                   call: { try await api.updateItem(id: item.id, change) })
     }
 
     func delete(api: APIClient, _ item: ListItem) {
@@ -128,21 +190,25 @@ final class ItemsStore: LoadableStore {
     /// Check in today (a `habit` log entry), or undo today's check-in.
     private func checkIn(api: APIClient, _ item: ListItem) {
         if let entry = checkedToday[item.id] {
+            let streak = streaks[item.id] ?? 0
             optimistic("blocks.errorSave",
-                       apply: { self.checkedToday[item.id] = nil },
-                       rollback: { self.checkedToday[item.id] = entry },
+                       apply: { self.checkedToday[item.id] = nil; self.streaks[item.id] = max(streak - 1, 0) },
+                       rollback: { self.checkedToday[item.id] = entry; self.streaks[item.id] = streak },
                        call: { try await api.deleteEntry(id: entry) })
             return
         }
+        let streak = streaks[item.id] ?? 0
         checkedToday[item.id] = ""
+        streaks[item.id] = streak + 1
         Task { @MainActor in
             do {
                 try await api.addEntry(kind: "habit", text: item.text, data: [
                     "habit_item_id": .string(item.id),
                     "date": .string(Self.day.string(from: Date()))])
-                checkedToday = try await todaysCheckIns(api: api)
+                (checkedToday, streaks) = try await checkIns(api: api)
             } catch {
                 checkedToday[item.id] = nil
+                streaks[item.id] = streak
                 notify("blocks.errorSave")
             }
         }
@@ -208,12 +274,66 @@ final class SchedulesStore: LoadableStore {
     }
 
     func delete(api: APIClient, _ item: ScheduleItem) {
+        drop(item) { try await api.deleteSchedule(id: item.id) }
+    }
+
+    /// Already done: a one-off is closed. A repeating one stays for its next time.
+    func complete(api: APIClient, _ item: ScheduleItem) {
+        drop(item) { try await api.updateSchedule(id: item.id, status: "cancelled") }
+    }
+
+    /// Takes it off the list now and puts it back if the server refuses.
+    private func drop(_ item: ScheduleItem, call: @escaping () async throws -> Void) {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         let removed = items[idx]
         optimistic("blocks.errorSave",
                    apply: { self.items.remove(at: idx); self.publish() },
                    rollback: { self.items.insert(removed, at: min(idx, self.items.count)); self.publish() },
-                   call: { try await api.deleteSchedule(id: item.id) })
+                   call: call)
+    }
+
+    /// Edit text, time or repeat; recurrence "" makes it ring once.
+    func update(api: APIClient, _ item: ScheduleItem, text: String, at: Date, recurrence: String?) async -> Bool {
+        let moved = NotificationManager.parseISO(item.fireAt).map { abs($0.timeIntervalSince(at)) >= 60 } ?? true
+        do {
+            try await api.updateSchedule(id: item.id, at: moved ? at : nil,
+                                         text: text == item.text ? nil : text,
+                                         recurrence: recurrence ?? "")
+            clearNotice()
+            await load(api: api)
+            return true
+        } catch {
+            notify("blocks.errorSave")
+            return false
+        }
+    }
+
+    private func sortByTime() {
+        items.sort {
+            (NotificationManager.parseISO($0.fireAt) ?? .distantFuture)
+                < (NotificationManager.parseISO($1.fireAt) ?? .distantFuture)
+        }
+    }
+
+    /// Later: the same reminder, `minutes` from now.
+    func snooze(api: APIClient, _ item: ScheduleItem, minutes: Int) {
+        guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+        let old = items[idx]
+        let at = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        var new = old
+        new.fireAt = ISO8601DateFormatter().string(from: at)
+        optimistic("blocks.errorSave",
+                   apply: {
+                       self.items[idx] = new
+                       self.sortByTime()
+                       self.publish()
+                   },
+                   rollback: {
+                       if let i = self.items.firstIndex(where: { $0.id == item.id }) { self.items[i] = old }
+                       self.sortByTime()
+                       self.publish()
+                   },
+                   call: { try await api.updateSchedule(id: item.id, at: at) })
     }
 
     private func publish() {
@@ -268,10 +388,10 @@ final class LogStore: LoadableStore {
         }
     }
 
-    func add(api: APIClient, kind: String, text: String, amount: Double?) async -> Bool {
+    func add(api: APIClient, kind: String, text: String, amount: Double?, at: Date? = nil) async -> Bool {
         do {
             try await api.addEntry(kind: kind, text: text,
-                                   data: amount.map { ["amount": .number($0)] })
+                                   data: amount.map { ["amount": .number($0)] }, at: at)
             clearNotice()
             await load(api: api)
             return true
@@ -279,6 +399,30 @@ final class LogStore: LoadableStore {
             notify("blocks.errorSave")
             return false
         }
+    }
+
+    /// Edit text, amount or time; the amount goes into a copy of the row's data.
+    func update(api: APIClient, _ entry: LogEntry, text: String, amount: Double?, at: Date) {
+        guard let idx = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        let old = entries[idx]
+        var new = old
+        new.text = text
+        var data: [String: JSONValue]?
+        if entry.kind == "expense" {
+            var d = old.data ?? [:]
+            d["amount"] = amount.map { JSONValue.number($0) }
+            data = d
+            new.data = d
+        }
+        let moved = NotificationManager.parseISO(old.at ?? "").map { abs($0.timeIntervalSince(at)) >= 60 } ?? true
+        if moved { new.at = ISO8601DateFormatter().string(from: at) }
+        optimistic("blocks.errorSave",
+                   apply: { self.entries[idx] = new },
+                   rollback: {
+                       if let i = self.entries.firstIndex(where: { $0.id == entry.id }) { self.entries[i] = old }
+                   },
+                   call: { try await api.updateEntry(id: entry.id, text: text == old.text ? nil : text,
+                                                     data: data, at: moved ? at : nil) })
     }
 
     func delete(api: APIClient, _ entry: LogEntry) {

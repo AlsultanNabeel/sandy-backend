@@ -14,6 +14,9 @@ struct TodayView: View {
     @StateObject private var weather = WeatherStore()
     @State private var spentToday: Double = 0
     @State private var showProfile = false
+    @State private var editingTask: ListItem?
+    @State private var editingHabit: ListItem?
+    @State private var editingReminder: ScheduleItem?
 
     var body: some View {
         ScrollView {
@@ -27,7 +30,28 @@ struct TodayView: View {
                 AskBar { await reload() }
                 if nudge.nudge != nil && !nudge.dismissed { DailyNudgeCard(store: nudge) }
                 section("today.restOfDay") {
-                    DayRibbon(moments: moments) { tasks.toggle(api: state.api, $0) }
+                    DayRibbon(moments: moments,
+                              onDone: { source in
+                                  switch source {
+                                  case .task(let t): withAnimation { tasks.toggle(api: state.api, t) }
+                                  case .reminder(let r): withAnimation { reminders.complete(api: state.api, r) }
+                                  }
+                              },
+                              onOpen: { source in
+                                  switch source {
+                                  case .task(let t): editingTask = t
+                                  case .reminder(let r): editingReminder = r
+                                  }
+                              },
+                              onSnooze: { r, minutes in
+                                  withAnimation { reminders.snooze(api: state.api, r, minutes: minutes) }
+                              },
+                              onDelete: { source in
+                                  switch source {
+                                  case .task(let t): withAnimation { tasks.delete(api: state.api, t) }
+                                  case .reminder(let r): withAnimation { reminders.delete(api: state.api, r) }
+                                  }
+                              })
                 }
                 if !anytime.isEmpty {
                     section("today.anytime") {
@@ -37,15 +61,26 @@ struct TodayView: View {
                     }
                 }
                 if !habits.items.isEmpty {
-                    section("today.habits") {
+                    section("today.habits", trailing: habitCount) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: Theme.Spacing.md) {
-                                ForEach(habits.items) { h in
-                                    HabitRing(title: h.text, checked: habits.checkedToday[h.id] != nil) {
+                                ForEach(habits.ordered) { h in
+                                    HabitRing(title: h.text, checked: habits.checkedToday[h.id] != nil,
+                                              streak: habits.streaks[h.id] ?? 0) {
                                         habits.toggle(api: state.api, h)
+                                    }
+                                    .contextMenu {
+                                        Button { editingHabit = h } label: {
+                                            Label(lang.s("blocks.edit"), systemImage: "pencil")
+                                        }
+                                        Button(role: .destructive) { habits.delete(api: state.api, h) } label: {
+                                            Label(lang.s("blocks.delete"), systemImage: "trash")
+                                        }
                                     }
                                 }
                             }
+                            .animation(.spring(response: 0.5, dampingFraction: 0.8),
+                                       value: habits.ordered.map(\.id))
                         }
                     }
                 }
@@ -60,7 +95,35 @@ struct TodayView: View {
         .task { await nudge.loadIfNeeded(api: state.api) }
         .task { await weather.load(api: state.api) }
         .refreshable { await reload() }
+        .undoToast(tasks, api: state.api, bottom: 100)
         .sheet(isPresented: $showProfile) { NavigationStack { ProfileView() } }
+        .sheet(item: $editingTask) { t in
+            ItemEditSheet(title: lang.s("today.task"), item: t, isHabit: false,
+                          save: { text, due, important in
+                              tasks.update(api: state.api, t, text: text, due: due, important: important)
+                          },
+                          delete: { tasks.delete(api: state.api, t) })
+        }
+        .sheet(item: $editingHabit) { h in
+            ItemEditSheet(title: lang.s("today.habit"), item: h, isHabit: true,
+                          save: { text, _, _ in
+                              habits.update(api: state.api, h, text: text, due: nil, important: false)
+                          },
+                          delete: { habits.delete(api: state.api, h) })
+        }
+        .sheet(item: $editingReminder) { r in
+            ReminderEditSheet(title: lang.s("blocks.reminders"), item: r, allowRepeat: true,
+                              save: { text, date, repeats in
+                                  await reminders.update(api: state.api, r, text: text, at: date,
+                                                         recurrence: repeats)
+                              },
+                              delete: { reminders.delete(api: state.api, r) })
+        }
+    }
+
+    private var habitCount: String {
+        let kept = habits.items.filter { habits.checkedToday[$0.id] != nil }.count
+        return AppLocale.number(kept) + "/" + AppLocale.number(habits.items.count)
     }
 
     // MARK: - Data
@@ -113,7 +176,10 @@ struct TodayView: View {
             parts.append(String(format: lang.s("today.brief.next"), t))
         }
         if left > 0 { parts.append(String(format: lang.s("today.brief.habits"), AppLocale.number(left))) }
-        guard !parts.isEmpty else { return lang.s("today.brief.free") }
+        guard !parts.isEmpty else {
+            // Habits were there and all of them are kept: say so.
+            return lang.s(habits.items.isEmpty ? "today.brief.free" : "today.brief.allDone")
+        }
         return lang.s("today.brief.lead") + parts.joined(separator: lang.s("today.brief.join"))
     }
 
@@ -170,19 +236,24 @@ struct TodayView: View {
         return trimmed.isEmpty ? base : base + " " + trimmed
     }
 
-    private func section<C: View>(_ key: String, @ViewBuilder content: () -> C) -> some View {
+    private func section<C: View>(_ key: String, trailing: String? = nil,
+                                  @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text(lang.s(key))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundColor(Theme.Colors.tertiaryText)
-                .textCase(.uppercase)
+            HStack {
+                Text(lang.s(key))
+                Spacer()
+                if let trailing { Text(trailing).contentTransition(.numericText()) }
+            }
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundColor(Theme.Colors.tertiaryText)
+            .textCase(.uppercase)
             content()
         }
     }
 
     private func anytimeRow(_ item: ListItem) -> some View {
         HStack(spacing: Theme.Spacing.md) {
-            Button { tasks.toggle(api: state.api, item) } label: {
+            Button { withAnimation { tasks.toggle(api: state.api, item) } } label: {
                 Image(systemName: "circle")
                     .font(.system(size: Theme.Icon.md))
                     .foregroundColor(Theme.Colors.accent)
@@ -199,17 +270,31 @@ struct TodayView: View {
         .padding(.vertical, 10)
         .padding(.horizontal, Theme.Spacing.md)
         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.Colors.surface.opacity(0.45)))
+        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .onTapGesture { editingTask = item }
+        .contextMenu {
+            Button { editingTask = item } label: { Label(lang.s("blocks.edit"), systemImage: "pencil") }
+            Button(role: .destructive) { tasks.delete(api: state.api, item) } label: {
+                Label(lang.s("blocks.delete"), systemImage: "trash")
+            }
+        }
     }
 
     /// Today's spending, quietly at the bottom.
     @ViewBuilder
     private var footer: some View {
         if spentToday > 0 {
-            Label(String(format: lang.s("today.spent"), AppLocale.number(spentToday)),
-                  systemImage: "creditcard")
+            NavigationLink { LogView(kind: "expense") } label: {
+                HStack {
+                    Label(String(format: lang.s("today.spent"), AppLocale.number(spentToday)),
+                          systemImage: "creditcard")
+                    Image(systemName: "chevron.forward").font(.caption)
+                }
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)
-                .padding(.top, Theme.Spacing.sm)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, Theme.Spacing.sm)
         }
     }
 }

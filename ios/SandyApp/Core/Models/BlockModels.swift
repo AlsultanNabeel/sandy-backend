@@ -55,7 +55,7 @@ struct LogEntry: Codable, Identifiable, Hashable {
     let id: String
     let kind: String
     var text: String
-    let at: String?
+    var at: String?
     var data: [String: JSONValue]?
 
     var amount: Double? { data?["amount"]?.number }

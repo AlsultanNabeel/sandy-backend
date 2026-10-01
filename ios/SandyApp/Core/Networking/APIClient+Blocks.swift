@@ -5,7 +5,7 @@ extension APIClient {
     private struct Kinds: Decodable { let kinds: [BlockKind]? }
     private struct Summary: Decodable { let text: String? }
 
-    private static let iso: ISO8601DateFormatter = {
+    fileprivate static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f
@@ -38,11 +38,27 @@ extension APIClient {
         let kind: String
         let text: String
         let data: [String: JSONValue]?
+        let at: String?
     }
 
-    func addEntry(kind: String, text: String, data: [String: JSONValue]? = nil) async throws {
+    func addEntry(kind: String, text: String, data: [String: JSONValue]? = nil,
+                  at: Date? = nil) async throws {
         try await send("/api/entries", method: "POST",
-                       body: EntryCreate(kind: kind, text: text, data: data))
+                       body: EntryCreate(kind: kind, text: text, data: data,
+                                         at: at.map { Self.iso.string(from: $0) }))
+    }
+
+    /// Edit a log row: `data` replaces the row's data whole, so pass the merged copy.
+    private struct EntryPatch: Encodable {
+        let text: String?
+        let data: [String: JSONValue]?
+        let at: String?
+    }
+
+    func updateEntry(id: String, text: String? = nil, data: [String: JSONValue]? = nil,
+                     at: Date? = nil) async throws {
+        try await send("/api/entries/\(id)", method: "PATCH",
+                       body: EntryPatch(text: text, data: data, at: at.map { Self.iso.string(from: $0) }))
     }
 
     func deleteEntry(id: String) async throws {
@@ -70,20 +86,43 @@ extension APIClient {
         let list: String
         let text: String
         let due: String?
+        let priority: String?
     }
 
-    func addItem(list: String, text: String, due: Date? = nil) async throws {
+    func addItem(list: String, text: String, due: Date? = nil, priority: String? = nil) async throws {
         try await send("/api/items", method: "POST",
-                       body: ItemCreate(list: list, text: text, due: due.map { Self.iso.string(from: $0) }))
+                       body: ItemCreate(list: list, text: text,
+                                        due: due.map { Self.iso.string(from: $0) }, priority: priority))
     }
 
-    private struct ItemPatch: Encodable {
-        let done: Bool?
-        let text: String?
+    /// What an edit changes on a list item; nil leaves a field as it is.
+    struct ItemChange: Encodable {
+        var done: Bool?
+        var text: String?
+        var priority: String?
+        /// nil keeps the time, `.some(nil)` clears it.
+        var due: Date??
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: Key.self)
+            try c.encodeIfPresent(done, forKey: .done)
+            try c.encodeIfPresent(text, forKey: .text)
+            try c.encodeIfPresent(priority, forKey: .priority)
+            if let due {
+                if let date = due { try c.encode(APIClient.iso.string(from: date), forKey: .due) }
+                else { try c.encodeNil(forKey: .due) }
+            }
+        }
+
+        private enum Key: String, CodingKey { case done, text, priority, due }
     }
 
-    func updateItem(id: String, done: Bool? = nil, text: String? = nil) async throws {
-        try await send("/api/items/\(id)", method: "PATCH", body: ItemPatch(done: done, text: text))
+    func updateItem(id: String, _ change: ItemChange) async throws {
+        try await send("/api/items/\(id)", method: "PATCH", body: change)
+    }
+
+    func updateItem(id: String, done: Bool) async throws {
+        try await updateItem(id: id, ItemChange(done: done))
     }
 
     func deleteItem(id: String) async throws {
@@ -117,16 +156,21 @@ extension APIClient {
     private struct SchedulePatch: Encodable {
         let fire_at: String?
         let status: String?
+        let text: String?
+        let recurrence: String?
     }
 
     private struct ScheduleSaved: Decodable { let item: ScheduleItem? }
 
-    /// Move it (snooze) or close it; status is "pending" or "cancelled".
+    /// Edit, move (snooze) or close it; status is "pending" or "cancelled",
+    /// recurrence "" makes it ring once.
     @discardableResult
-    func updateSchedule(id: String, at: Date? = nil, status: String? = nil) async throws -> ScheduleItem? {
+    func updateSchedule(id: String, at: Date? = nil, status: String? = nil, text: String? = nil,
+                        recurrence: String? = nil) async throws -> ScheduleItem? {
         let r: ScheduleSaved = try await fetch(
             "/api/schedules/\(id)", method: "PATCH",
-            body: SchedulePatch(fire_at: at.map { Self.iso.string(from: $0) }, status: status))
+            body: SchedulePatch(fire_at: at.map { Self.iso.string(from: $0) }, status: status,
+                                text: text, recurrence: recurrence))
         return r.item
     }
 

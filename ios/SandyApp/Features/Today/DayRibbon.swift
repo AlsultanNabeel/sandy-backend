@@ -14,7 +14,12 @@ struct RibbonMoment: Identifiable {
 struct DayRibbon: View {
     @EnvironmentObject var lang: LanguageManager
     let moments: [RibbonMoment]
-    let onComplete: (ListItem) -> Void
+    /// Ticked: a task is done, a one-off reminder is closed.
+    let onDone: (RibbonMoment.Source) -> Void
+    /// Tapped: opens its edit sheet.
+    let onOpen: (RibbonMoment.Source) -> Void
+    let onSnooze: (ScheduleItem, Int) -> Void
+    let onDelete: (RibbonMoment.Source) -> Void
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -56,25 +61,63 @@ struct DayRibbon: View {
             .frame(width: 14)
             HStack(spacing: Theme.Spacing.sm) {
                 switch m.source {
-                case .task(let item):
-                    Button { onComplete(item) } label: {
+                case .task:
+                    Button { onDone(m.source) } label: {
                         Image(systemName: "circle").foregroundColor(Theme.Colors.accent)
                     }
                     .buttonStyle(.plain)
-                case .reminder:
-                    Image(systemName: "bell.fill").foregroundColor(Theme.Colors.warn)
+                case .reminder(let r):
+                    if (r.recurrence ?? "").isEmpty {
+                        Button { onDone(m.source) } label: {
+                            Image(systemName: "bell.circle").foregroundColor(Theme.Colors.warn)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Image(systemName: "repeat.circle").foregroundColor(Theme.Colors.warn)
+                    }
                 }
                 Text(m.text)
                     .font(Theme.Typography.body)
                     .foregroundColor(Theme.Colors.primaryText)
                     .lineLimit(2)
                 Spacer(minLength: 0)
+                if case .task(let item) = m.source, item.priority == "high" {
+                    Image(systemName: "flag.fill").foregroundColor(Theme.Colors.warn)
+                }
             }
             .padding(.vertical, 10)
             .padding(.horizontal, Theme.Spacing.md)
             .background(RoundedRectangle(cornerRadius: 14)
                 .fill(late ? Theme.Colors.warnSoft.opacity(0.7) : Theme.Colors.surface.opacity(0.45)))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .onTapGesture { onOpen(m.source) }
+            .contextMenu { menu(m) }
             .padding(.vertical, 3)
+        }
+    }
+
+    /// A repeating reminder has no "done": it comes back on its own.
+    private static func canClose(_ source: RibbonMoment.Source) -> Bool {
+        if case .reminder(let r) = source { return (r.recurrence ?? "").isEmpty }
+        return true
+    }
+
+    @ViewBuilder
+    private func menu(_ m: RibbonMoment) -> some View {
+        if case .reminder(let r) = m.source {
+            Button { onSnooze(r, 15) } label: {
+                Label(lang.s("blocks.quick.15"), systemImage: "clock.arrow.circlepath")
+            }
+            Button { onSnooze(r, 60) } label: {
+                Label(lang.s("blocks.quick.hour"), systemImage: "clock.arrow.circlepath")
+            }
+        }
+        if Self.canClose(m.source) {
+            Button { onDone(m.source) } label: { Label(lang.s("blocks.markDone"), systemImage: "checkmark") }
+        }
+        Button { onOpen(m.source) } label: { Label(lang.s("blocks.edit"), systemImage: "pencil") }
+        Button(role: .destructive) { onDelete(m.source) } label: {
+            Label(lang.s("blocks.delete"), systemImage: "trash")
         }
     }
 
@@ -115,6 +158,7 @@ private struct NowPulse: View {
 struct HabitRing: View {
     let title: String
     let checked: Bool
+    var streak = 0
     let action: () -> Void
 
     var body: some View {
@@ -136,9 +180,11 @@ struct HabitRing: View {
                 .animation(.spring(response: 0.6, dampingFraction: 0.7), value: checked)
                 Text(title)
                     .font(Theme.Typography.caption)
-                    .foregroundColor(Theme.Colors.primaryText)
+                    .foregroundColor(checked ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
                     .lineLimit(1)
                     .frame(width: 70)
+                // Same height either way, so rings stay in line.
+                StreakBadge(days: streak).opacity(streak > 1 ? 1 : 0)
             }
         }
         .buttonStyle(.plain)

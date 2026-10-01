@@ -8,10 +8,18 @@ enum L10nLife {
         ar: [
             "title": .text("حياتي"),
             "month": .text("شهرك"),
+            "showAll": .text("رجّع كل الأيام"),
+            "stat.spent": .text("صرفت هالشهر"),
+            "stat.habits": .text("مرة التزمت"),
+            "stat.logged": .text("إشي سجّلت"),
         ],
         en: [
             "title": .text("My Life"),
             "month": .text("Your month"),
+            "showAll": .text("Show all days"),
+            "stat.spent": .text("Spent this month"),
+            "stat.habits": .text("Habits kept"),
+            "stat.logged": .text("Things logged"),
         ]
     )
 }
