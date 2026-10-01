@@ -118,11 +118,11 @@ final class ItemsStore: LoadableStore {
         var streaks: [String: Int] = [:]
         for (habit, set) in days {
             // A run still counts while today is not checked yet: it starts from yesterday.
-            var day = set.contains(today) ? Date() : cal.date(byAdding: .day, value: -1, to: Date())!
+            var day: Date? = set.contains(today) ? Date() : cal.date(byAdding: .day, value: -1, to: Date())
             var n = 0
-            while set.contains(Self.day.string(from: day)) {
+            while let d = day, set.contains(Self.day.string(from: d)) {
                 n += 1
-                day = cal.date(byAdding: .day, value: -1, to: day)!
+                day = cal.date(byAdding: .day, value: -1, to: d)
             }
             streaks[habit] = n
         }

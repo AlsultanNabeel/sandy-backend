@@ -103,7 +103,8 @@ struct LifeHeader: View {
     private var monthNumbers: some View {
         let cal = Calendar.current
         let month = entries.filter {
-            NotificationManager.parseISO($0.at ?? "").map { cal.isDate($0, equalTo: Date(), toGranularity: .month) } ?? false
+            guard let at = NotificationManager.parseISO($0.at ?? "") else { return false }
+            return cal.isDate(at, equalTo: Date(), toGranularity: .month)
         }
         let spent = month.filter { $0.kind == "expense" }.reduce(0) { $0 + ($1.amount ?? 0) }
         let kept = month.filter { $0.kind == "habit" }.count

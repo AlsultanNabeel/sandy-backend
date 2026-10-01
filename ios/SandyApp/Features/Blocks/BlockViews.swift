@@ -318,7 +318,10 @@ struct LogView: View {
         var rows = q.isEmpty ? store.entries : store.entries.filter { $0.text.localizedCaseInsensitiveContains(q) }
         if let day {
             let cal = Calendar.current
-            rows = rows.filter { NotificationManager.parseISO($0.at ?? "").map { cal.isDate($0, inSameDayAs: day) } ?? false }
+            rows = rows.filter {
+                guard let at = NotificationManager.parseISO($0.at ?? "") else { return false }
+                return cal.isDate(at, inSameDayAs: day)
+            }
         }
         return rows
     }
