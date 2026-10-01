@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 from datetime import timezone
 from typing import Any, Dict, List, Optional
+
+from pymongo.errors import PyMongoError
 
 from app.brain.persona import build_effective_persona
 from app.utils.ltm_crypto import decrypt_field
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 MAX_FACTS = 30
 STATE_ROWS = 15
 TOP_ENTRIES = 8
-# How many recent vectors are scored in Python; the blocks have no Atlas index yet.
-SCAN_ENTRIES = 400
+# Atlas vector index on sandy_entries.embedding (filters: user_id, kind); see ARCHITECTURE_MAP.
+VECTOR_INDEX = "entries_vector"
 RECENT_TURNS = 8
 _NOISE = re.compile(r"^<noise>$|[\u3040-\u30ff\u4e00-\u9fff]")
 
@@ -131,21 +132,14 @@ def state_block(rows: int = STATE_ROWS) -> str:
     return "وضعه هلأ (استعملي الـ id لما تعدّلي):\n" + "\n\n".join(parts)
 
 
-def _cosine(a: List[float], b: List[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    return dot / (na * nb) if na and nb else 0.0
-
-
 def _words(message: str) -> List[str]:
     return [w for w in re.findall(r"\w+", message or "") if len(w) >= 3][:8]
 
 
 def similar_entries(message: str, k: int = TOP_ENTRIES,
                     kind: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Top-k log entries for this message (of ``kind``, else every kind but facts);
-    text search without embeddings."""
+    """Top-k log entries for this message (of ``kind``, else every kind but facts,
+    summaries and habit ticks): the vector index first, word search when it has nothing."""
     coll = _base.coll(_base.ENTRIES)
     if coll is None or not (message or "").strip():
         return []
@@ -153,13 +147,16 @@ def similar_entries(message: str, k: int = TOP_ENTRIES,
     if kind is None and len(message.split()) < 3:
         return []
     vector = entries.embed_text(message)
-    # Facts are already in the prompt; chat summaries are recall's job, not every turn's.
-    base_q: Dict[str, Any] = {"kind": kind or {"$nin": ["fact", "summary"]}}
+    # Facts are already in the prompt; summaries are recall's job; habit ticks are not memories.
+    base_q: Dict[str, Any] = {"kind": kind or {"$nin": ["fact", "summary", "habit"]}}
     if vector:
-        docs = list(coll.find({**base_q, "embedding": {"$ne": None}})
-                    .sort("at", -1).limit(SCAN_ENTRIES))
-        docs.sort(key=lambda d: _cosine(vector, d.get("embedding") or []), reverse=True)
-        return [_base.out(d) for d in docs[:k]]
+        try:
+            docs = coll.vector_search(vector, index=VECTOR_INDEX, k=k, filter=base_q)
+        except (PyMongoError, NotImplementedError) as exc:  # no index, or no Atlas (tests)
+            logger.warning("[context] vector search unavailable: %s", exc)
+            docs = []
+        if docs:
+            return [_base.out(d) for d in docs]
     words = _words(message)
     if not words:
         return []

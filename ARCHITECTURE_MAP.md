@@ -197,7 +197,7 @@ for a refusal. A held action is "not done yet", neither.
 | Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), the last 10 messages, TTL 30 days |
 | What she knows | `brain/context.py` | `fact` entries (the newest 30 distinct ones of two words or more; anything still ciphertext is left out) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
 | What is open now | `brain/context.py::state_block` | open items per list and pending reminders, with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
-| Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are neither facts nor chat summaries, by cosine over their `embedding` (the newest 400 scored in Python — there is no Atlas index on `sandy_entries`); text search with no embedding key |
+| Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are not facts, chat summaries or habit ticks, from the Atlas vector index `entries_vector` (tenant in its filter); text search when there is no vector or no hit |
 | Conversation summaries | `brain/stm.py::_summarize` | turns that overflow a thread become a `summary` entry (`data.thread_id`), in the background; `recall` leaves them out unless asked |
 | Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
 
@@ -1187,12 +1187,12 @@ nobody re-reads becomes a way of believing things that stopped being true.
    app's shared `APIClient.session` / `sendWithRetry` policy cannot see it, so a future change to
    retry or timeouts will miss it.
 
-8. **Related-memory recall is a Python scan.** `context.similar_entries` scores
-   the newest 400 log entries with an embedding by cosine on every chat turn;
-   there is no Atlas vector index on `sandy_entries`. Conversation summaries are
-   log entries too and are written about once a turn once a thread passes ten
-   messages, so on a long-lived account they fill most of that window. An Atlas
-   index (tenant-filtered) is the fix when accounts grow.
+8. **Related-memory recall: fixed.** `context.similar_entries` now asks the
+   Atlas vector index `entries_vector` (on `sandy_entries.embedding`, filter fields
+   `user_id` and `kind`) through `ScopedCollection.vector_search`, which puts the
+   tenant in the `$vectorSearch` filter. The index lives in Atlas, not in code: a
+   new database needs it created again (1536 dims, cosine). Encrypted rows (moods,
+   facts) are never embedded, so they are never found this way.
 9. **`submit_background`'s ten workers carry two model calls per turn** (the STM
    summary and the conversation title) with no future ever read. Both go through
    `chat_fn` with `OPENAI_CHAT_TIMEOUT_S`, so a stalled upstream costs a worker

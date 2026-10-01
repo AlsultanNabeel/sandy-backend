@@ -135,6 +135,18 @@ class ScopedCollection:
         scoped_pipeline = [{"$match": {self._field: self._tenant}}, *(pipeline or [])]
         return self._raw.aggregate(scoped_pipeline, *args, **kwargs)
 
+    def vector_search(self, vector: List[float], *, index: str, k: int,
+                      filter: Optional[Mapping[str, Any]] = None, path: str = "embedding",
+                      candidates: int = 150) -> List[Dict[str, Any]]:
+        """Nearest docs to ``vector`` through an Atlas vector index, this tenant only.
+        ``$vectorSearch`` must be stage one, so the tenant goes in its filter."""
+        stage = {"$vectorSearch": {
+            "index": index, "path": path, "queryVector": vector,
+            "numCandidates": max(candidates, k), "limit": k,
+            "filter": {**dict(filter or {}), self._field: self._tenant},
+        }}
+        return list(self._raw.aggregate([stage, {"$project": {path: 0}}]))
+
     # ── writes ───────────────────────────────────────────────────────────────
     # Every write marks the tenant's cached context stale (utils/tenant_version.py).
     def _note_write(self) -> None:

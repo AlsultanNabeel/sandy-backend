@@ -50,14 +50,31 @@ def test_encrypted_facts_are_decrypted_for_the_prompt(brain_db, monkeypatch):  #
         assert "بحب الشاي" in context.facts_block()
 
 
-def test_similar_entries_rank_by_vector(brain_db, monkeypatch):  # noqa: F811
+def test_similar_entries_search_the_index_inside_the_tenant(brain_db, monkeypatch):  # noqa: F811
+    from app.utils.tenant_db import ScopedCollection
+    seen = {}
+
+    def fake_search(self, vector, *, index, k, filter=None, **_kw):
+        seen.update(tenant=self.tenant, index=index, k=k, filter=filter, vector=vector)
+        return [{"_id": "e1", "kind": "journal", "text": "بحر", "user_id": self.tenant}]
+
+    monkeypatch.setattr(ScopedCollection, "vector_search", fake_search)
+    monkeypatch.setattr(entries, "embed_text", lambda text: [0.9, 0.1])
     with active_user_profile_context(A):
-        entries.add("journal", "بحر", embedding=[1.0, 0.0])
-        entries.add("journal", "جبل", embedding=[0.0, 1.0])
-        monkeypatch.setattr(entries, "embed_text", lambda text: [0.9, 0.1])
-        assert [e["text"] for e in context.similar_entries("بدي أروح سباحة بكرا", k=1)] == ["بحر"]
+        rows = context.similar_entries("بدي أروح سباحة بكرا", k=1)
+    assert [e["text"] for e in rows] == ["بحر"] and "user_id" not in rows[0]
+    assert seen["tenant"] == "userA" and seen["index"] == context.VECTOR_INDEX and seen["k"] == 1
+    assert seen["filter"] == {"kind": {"$nin": ["fact", "summary", "habit"]}}
+
+
+def test_similar_entries_fall_back_to_words_without_an_index(brain_db, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(entries, "embed_text", lambda text: [0.9, 0.1])
+    with active_user_profile_context(A):
+        entries.add("journal", "رحت عالبحر مع صحابي", embedding=[1.0, 0.0])
+        # mongomock has no $vectorSearch: the words carry the search.
+        assert [e["text"] for e in context.similar_entries("بدي أروح عالبحر بكرا")] == ["رحت عالبحر مع صحابي"]
     with active_user_profile_context(B):
-        assert context.similar_entries("بدي أروح سباحة بكرا") == []
+        assert context.similar_entries("بدي أروح عالبحر بكرا") == []
 
 
 def test_a_turn_with_no_tenant_writes_nothing(brain_db):  # noqa: F811
