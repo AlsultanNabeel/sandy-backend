@@ -6,6 +6,7 @@
   GET  /api/kinds           the kinds table, so the app builds its screens from it
   POST /api/summary         {period, focus?} -> {text}
   GET  /api/stats           My Life's numbers: entries per day (30), this month's totals
+  POST /api/budget          {amount}: the monthly spending limit (0 removes it)
 
 A POST may carry its own ``id`` (32 hex): the app makes rows offline and sends them
 later, so the id it already uses must stay, and a resent POST must not double the row.
@@ -32,6 +33,7 @@ from app.blocks import entries, items, schedules
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, KindError, get_kind
 from app.brain import summary
 from app.brain import when as W
+from app.features import users_store
 from app.utils.user_profiles import current_user_id
 
 MAX_TEXT_CHARS = 2000
@@ -57,6 +59,7 @@ _MESSAGES = {
     "not_found": "ما لقيته.",
     "not_saved": "ما قدرت أحفظ، جرّب كمان شوي.",
     "invalid_id": "رقم التعريف مش صحيح.",
+    "invalid_amount": "المبلغ مش صحيح.",
     "id_taken": "رقم التعريف مستعمل.",
     "summary_failed": "ما قدرت أعمل الملخّص هلّق، جرّب كمان شوي.",
 }
@@ -272,7 +275,21 @@ def register_blocks_api(app, mongo_db=None):
     @_answers_invalid
     def api_stats(claims):
         """My Life's numbers over the whole log (not the newest page the app holds)."""
-        return jsonify(entries.stats()), 200
+        out = entries.stats()
+        out["budget"] = users_store.get_budget(current_user_id())
+        return jsonify(out), 200
+
+    @app.route("/api/budget", methods=["POST"])
+    @require_tenant
+    @_answers_invalid
+    def api_budget(claims):
+        """{amount}: the monthly spending limit; 0 removes it."""
+        amount = _body().get("amount")
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0:
+            raise _Invalid("invalid_amount")
+        if not users_store.set_budget(current_user_id(), float(amount)):
+            raise _Invalid("not_saved", 503)
+        return jsonify({"ok": True, "budget": float(amount)}), 200
 
     @app.route("/api/entries/<entry_id>", methods=["PATCH"])
     @require_tenant

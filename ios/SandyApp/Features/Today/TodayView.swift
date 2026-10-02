@@ -129,7 +129,9 @@ struct TodayView: View {
         async let b: Void = habits.load(api: state.api)
         async let c: Void = reminders.load(api: state.api)
         async let d: Void = expenses.load(api: state.api)
-        _ = await (a, b, c, d)
+        // The budget alert on a new expense needs this month's numbers.
+        async let e: Void = LifeStatsStore.shared.load(api: state.api)
+        _ = await (a, b, c, d, e)
     }
 
     private var spentToday: Double {

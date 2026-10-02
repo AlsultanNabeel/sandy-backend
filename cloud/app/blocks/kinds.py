@@ -48,6 +48,7 @@ KINDS: Tuple[Kind, ...] = (
         "book_item_id": _S, "book": _S, "start_page": _I, "end_page": _I,
         "pages": _I, "paused_total_sec": _I, "state": _S, "ended_at": _T},
         ("قراءه", "قريت", "قرات")),
+    # category: food | transport | shopping | bills | fun | health | other
     Kind("expense", LOG, "مصروف", "Expense", "creditcard", {
         "amount": _F, "category": _S, "note": _S},
         ("مصروف", "مصاريف", "مصروفات", "صرفت", "صرفيات", "دفعت")),

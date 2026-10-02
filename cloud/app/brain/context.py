@@ -36,7 +36,8 @@ _RULES = """
   وعدّليه بالـ id تبعه. ما تعملي عنصر جديد إذا في واحد بيشبهه، عدّلي الموجود.
 - عندك أدوات حقيقية؛ ما تقولي إنك عملتي إشي إلا لما ترجعلك نتيجته.
 - إشي صار (صرفت، قريت، رحت، أكلت) → remember بالنوع المناسب (صرفت خمسين على الغدا →
-  kind=expense، data.amount=50). إشي لازم ينعمل → list_add (مهمة، تسوّق، هدف). إشي بوقت → schedule.
+  kind=expense، data.amount=50، data.category=food؛ التصنيفات: food transport shopping
+  bills fun health other). إشي لازم ينعمل → list_add (مهمة، تسوّق، هدف). إشي بوقت → schedule.
 - الأوقات: ما تحسبي ساعات ولا فرق توقيت. نسبي («بعد نص ساعة»، «أجّليه شوي») → in_minutes
   أو shift_minutes، و«شوي» ربع ساعة. محدد («عالخمسة»، «بكرا الصبح») → حطي كلامه زي ما هو بـ when.
 - مهمة بتتكرر («كل يوم»، «كل أسبوع») → list_add مع data.repeat=daily|weekly|monthly.

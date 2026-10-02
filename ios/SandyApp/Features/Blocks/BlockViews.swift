@@ -320,7 +320,7 @@ struct LogView: View {
     @State private var summary: String?
     @State private var summarizing = false
     @State private var search = ""
-    @StateObject private var lifeStats = LifeStatsStore()
+    @ObservedObject private var lifeStats = LifeStatsStore.shared
     /// What the server found for the search or the picked day, over the whole log;
     /// nil while there is no query, or offline (then the rows on the phone are filtered).
     @State private var found: [LogEntry]?
@@ -403,15 +403,16 @@ struct LogView: View {
         .onChange(of: store.kind) { Task { await store.load(api: state.api) } }
         .task(id: "\(query)|\(day?.timeIntervalSince1970 ?? 0)|\(store.kind ?? "")") { await lookUp() }
         .sheet(isPresented: $adding) {
-            EntryEditSheet(kinds: kinds.logKinds, kind: store.kind ?? "note") { kind, text, amount, at in
-                await store.add(api: state.api, kind: kind, text: text, amount: amount, at: at)
+            EntryEditSheet(kinds: kinds.logKinds, kind: store.kind ?? "note") { kind, text, amount, category, at in
+                await store.add(api: state.api, kind: kind, text: text, amount: amount, category: category, at: at)
             }
             .environmentObject(lang)
         }
         .sheet(item: $editing) { entry in
             EntryEditSheet(kinds: kinds.logKinds, entry: entry,
-                           save: { _, text, amount, at in
-                               store.update(api: state.api, entry, text: text, amount: amount, at: at)
+                           save: { _, text, amount, category, at in
+                               store.update(api: state.api, entry, text: text, amount: amount,
+                                            category: category, at: at)
                                return true
                            },
                            delete: { store.delete(api: state.api, entry) })
@@ -474,7 +475,7 @@ struct LogView: View {
     private func row(_ entry: LogEntry) -> some View {
         let k = kinds.kind(entry.kind, .log)
         return HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            Image(systemName: k?.icon ?? "circle")
+            Image(systemName: entry.kind == "expense" ? ExpenseCategory.icon(entry.category) : k?.icon ?? "circle")
                 .foregroundColor(Theme.Colors.accent)
                 .frame(width: Theme.Icon.lg)
             VStack(alignment: .leading, spacing: 2) {

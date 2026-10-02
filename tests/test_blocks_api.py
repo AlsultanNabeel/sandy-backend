@@ -394,3 +394,33 @@ def test_a_habit_keeps_its_days_and_time(c):
     r = c.post("/api/items", json={"list": "habits", "text": "جيم",
                                    "data": {"days": [1, 3, 5], "time": "18:30"}}, headers=_h())
     assert r.get_json()["item"]["data"] == {"days": [1, 3, 5], "time": "18:30"}
+
+
+def test_a_budget_and_the_months_spending_by_category(c, monkeypatch):
+    from app.features import users_store
+    saved = {}
+    monkeypatch.setattr(users_store, "set_budget", lambda uid, a: saved.update({uid: a}) or True)
+    monkeypatch.setattr(users_store, "get_budget", lambda uid: saved.get(uid, 0.0))
+    assert c.post("/api/budget", json={"amount": 500}, headers=_h()).get_json()["budget"] == 500
+    _bad(c.post("/api/budget", json={"amount": -1}, headers=_h()), "invalid_amount")
+    now = datetime.now(USER_TZ).isoformat()
+    for cat, amount in [("food", 40), ("food", 10), (None, 5)]:
+        data = {"amount": amount, **({"category": cat} if cat else {})}
+        c.post("/api/entries", json={"kind": "expense", "text": "x", "data": data, "at": now}, headers=_h())
+    s = c.get("/api/stats", headers=_h()).get_json()
+    assert s["budget"] == 500 and s["by_category"] == {"food": 50, "other": 5}
+
+
+def test_sandy_is_told_when_spending_nears_the_budget(monkeypatch, brain_db):  # noqa: F811
+    from brain_fakes import A
+    from app.brain import tools_blocks
+    from app.brain.ctx import TurnCtx
+    from app.features import users_store
+    monkeypatch.setattr(users_store, "get_budget", lambda uid: 100.0)
+    with active_user_profile_context(A):
+        out = tools_blocks.remember({"kind": "expense", "text": "غدا", "data": {"amount": 50}},
+                                    TurnCtx(user_id="userA"))
+        assert "budget" not in out
+        out = tools_blocks.remember({"kind": "expense", "text": "عشا", "data": {"amount": 40}},
+                                    TurnCtx(user_id="userA"))
+        assert "قرّب" in out["budget"]

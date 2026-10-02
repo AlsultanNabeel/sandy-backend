@@ -90,8 +90,28 @@ def remember(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         eid = entries.add(kind, text, args.get("data") or None, source=ctx.source)
     except KindError as exc:
         return refused(str(exc))
-    return {"ok": bool(eid), "id": eid, "reply": f"سجّلتها ✅ «{text}»"} if eid \
-        else refused("not saved")
+    if not eid:
+        return refused("not saved")
+    out = {"ok": True, "id": eid, "reply": f"سجّلتها ✅ «{text}»"}
+    if kind == "expense":
+        note = budget_note(ctx.user_id)
+        if note:
+            out["budget"] = note
+    return out
+
+
+def budget_note(user_id: str) -> str:
+    """A line for the model once this month's spending passes 80% of the limit, else ""."""
+    from app.features import users_store
+
+    budget = users_store.get_budget(user_id)
+    if not budget:
+        return ""
+    spent = entries.stats(days=1)["spent"]
+    if spent < budget * 0.8:
+        return ""
+    state = "تعدّى ميزانية الشهر" if spent >= budget else "قرّب يخلّص ميزانية الشهر"
+    return f"{state}: صرف {spent:g} من {budget:g}. نبّهيه بلطف."
 
 
 def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:

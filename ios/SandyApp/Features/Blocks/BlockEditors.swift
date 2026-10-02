@@ -229,24 +229,27 @@ struct EntryEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     let kinds: [BlockKind]
     let entry: LogEntry?
-    let save: (String, String, Double?, Date) async -> Bool
+    /// (kind, text, amount, category, time)
+    let save: (String, String, Double?, String?, Date) async -> Bool
     var delete: (() -> Void)?
 
     @State private var kind: String
     @State private var text: String
     @State private var amount: String
+    @State private var category: String
     @State private var at: Date
     @State private var saving = false
     @State private var confirmDelete = false
 
     init(kinds: [BlockKind], entry: LogEntry? = nil, kind: String = "note",
-         save: @escaping (String, String, Double?, Date) async -> Bool, delete: (() -> Void)? = nil) {
+         save: @escaping (String, String, Double?, String?, Date) async -> Bool, delete: (() -> Void)? = nil) {
         self.kinds = kinds
         self.entry = entry
         self.save = save
         self.delete = delete
         _kind = State(initialValue: entry?.kind ?? kind)
         _text = State(initialValue: entry?.text ?? "")
+        _category = State(initialValue: entry?.category ?? "food")
         _amount = State(initialValue: entry?.amount.map {
             $0.formatted(.number.precision(.fractionLength(0...2)).grouping(.never)
                 .locale(Locale(identifier: "en_US_POSIX")))
@@ -276,6 +279,7 @@ struct EntryEditSheet: View {
                 TextField(lang.s("blocks.entryPlaceholder"), text: $text, axis: .vertical)
                 if kind == "expense" {
                     TextField(lang.s("blocks.amount"), text: $amount).keyboardType(.decimalPad)
+                    CategoryPicker(selection: $category)
                 }
                 DatePicker(lang.s("blocks.when"), selection: $at, in: ...Date())
                 if let delete {
@@ -298,7 +302,8 @@ struct EntryEditSheet: View {
                     Button(lang.s("blocks.save")) {
                         saving = true
                         Task {
-                            let ok = await save(kind, trimmed, kind == "expense" ? value : nil, at)
+                            let ok = await save(kind, trimmed, kind == "expense" ? value : nil,
+                                                kind == "expense" ? category : nil, at)
                             saving = false
                             if ok { dismiss() }
                         }
@@ -448,5 +453,42 @@ enum HabitPlan {
             parts.append(at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocale.current)))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// The expense categories, with their icons; the server keeps the name.
+enum ExpenseCategory {
+    static let all: [(name: String, icon: String)] = [
+        ("food", "fork.knife"), ("transport", "car.fill"), ("shopping", "bag.fill"),
+        ("bills", "doc.text.fill"), ("fun", "gamecontroller.fill"), ("health", "cross.case.fill"),
+        ("other", "square.grid.2x2.fill"),
+    ]
+
+    static func icon(_ name: String) -> String {
+        all.first { $0.name == name }?.icon ?? "square.grid.2x2.fill"
+    }
+}
+
+struct CategoryPicker: View {
+    @EnvironmentObject var lang: LanguageManager
+    @Binding var selection: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Spacing.sm) {
+                ForEach(ExpenseCategory.all, id: \.name) { cat in
+                    let on = selection == cat.name
+                    Button { selection = cat.name } label: {
+                        Label(lang.s("blocks.cat." + cat.name), systemImage: cat.icon)
+                            .font(Theme.Typography.caption)
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, 7)
+                            .foregroundColor(on ? Theme.Colors.onAccent : Theme.Colors.primaryText)
+                            .background(Capsule().fill(on ? Theme.Colors.accent : Theme.Colors.surface.opacity(0.6)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 }

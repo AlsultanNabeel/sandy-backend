@@ -435,6 +435,12 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let date: Date
     }
 
+    /// Rings now (a second from now), e.g. the budget passing its mark.
+    func notifyNow(title: String, body: String) {
+        addProactive(id: Self.proactivePrefix + "now." + UUID().uuidString, title: title, body: body,
+                     trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
+    }
+
     private func addProactive(id: String, title: String, body: String,
                               trigger: UNNotificationTrigger) {
         let content = UNMutableNotificationContent()

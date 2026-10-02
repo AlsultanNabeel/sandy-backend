@@ -725,12 +725,16 @@ final class LogStore: LoadableStore {
         }
     }
 
-    func add(api: APIClient, kind: String, text: String, amount: Double?, at: Date? = nil) async -> Bool {
+    func add(api: APIClient, kind: String, text: String, amount: Double?, category: String? = nil,
+             at: Date? = nil) async -> Bool {
         restore(api)
+        var data: [String: JSONValue] = [:]
+        if let amount { data["amount"] = .number(amount) }
+        if kind == "expense", let category { data["category"] = .string(category) }
         let entry = LogEntry(id: ClientID.make(), kind: kind, text: text,
-                             at: isoOut.string(from: at ?? Date()),
-                             data: amount.map { ["amount": .number($0)] })
+                             at: isoOut.string(from: at ?? Date()), data: data.isEmpty ? nil : data)
         Self.noteMade(entry)
+        if kind == "expense", let amount { LifeStatsStore.shared.checkBudget(adding: amount) }
         optimistic("blocks.errorSave",
                    apply: { Self.addEverywhere(entry, userId: self.userId) },
                    rollback: { Self.removeEverywhere(entry.id, kind: kind, userId: self.userId) },
@@ -739,7 +743,8 @@ final class LogStore: LoadableStore {
     }
 
     /// Edit text, amount or time; the amount goes into a copy of the row's data.
-    func update(api: APIClient, _ entry: LogEntry, text: String, amount: Double?, at: Date) {
+    func update(api: APIClient, _ entry: LogEntry, text: String, amount: Double?, category: String? = nil,
+                at: Date) {
         guard let old = entries.first(where: { $0.id == entry.id }) else { return }
         var new = old
         new.text = text
@@ -747,6 +752,7 @@ final class LogStore: LoadableStore {
         if entry.kind == "expense" {
             var d = old.data ?? [:]
             d["amount"] = amount.map { JSONValue.number($0) }
+            d["category"] = category.map { JSONValue.string($0) }
             data = d
             new.data = d
         }

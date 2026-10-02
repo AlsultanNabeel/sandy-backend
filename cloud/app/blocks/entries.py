@@ -126,8 +126,8 @@ def list_entries(kind: Optional[str] = None, *, since: Optional[datetime] = None
 
 def stats(days: int = 30, *, now: Optional[datetime] = None, mongo_db=None) -> Dict[str, Any]:
     """The My Life numbers over the whole log, in the user's zone: how many entries each
-    of the last ``days`` days holds (oldest first), and this month's spending, habit
-    check-ins and entries. Chat summaries are Sandy's, not the user's, and are left out."""
+    of the last ``days`` days holds (oldest first), and this month's spending (in all
+    and per category), habit check-ins and entries. Chat summaries are left out."""
     from datetime import timedelta
 
     from app.utils.time import USER_TZ
@@ -136,13 +136,14 @@ def stats(days: int = 30, *, now: Optional[datetime] = None, mongo_db=None) -> D
     today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     first_day = today - timedelta(days=days - 1)
     month_start = today.replace(day=1)
-    out: Dict[str, Any] = {"days": [0] * days, "spent": 0.0, "habits": 0, "logged": 0}
+    out: Dict[str, Any] = {"days": [0] * days, "spent": 0.0, "habits": 0, "logged": 0,
+                           "by_category": {}}
     coll = _base.coll(_base.ENTRIES, mongo_db)
     if coll is None:
         return out
     since = min(first_day, month_start)
     rows = coll.find({"kind": {"$ne": "summary"}, "at": {"$gte": since}},
-                     {"_id": 0, "kind": 1, "at": 1, "data.amount": 1})
+                     {"_id": 0, "kind": 1, "at": 1, "data.amount": 1, "data.category": 1})
     for row in rows:
         at = row.get("at")
         if not isinstance(at, datetime):
@@ -160,4 +161,6 @@ def stats(days: int = 30, *, now: Optional[datetime] = None, mongo_db=None) -> D
             amount = (row.get("data") or {}).get("amount")
             if row.get("kind") == "expense" and isinstance(amount, (int, float)):
                 out["spent"] += float(amount)
+                category = str((row.get("data") or {}).get("category") or "other")
+                out["by_category"][category] = out["by_category"].get(category, 0.0) + float(amount)
     return out

@@ -57,6 +57,14 @@ struct LifeStats: Codable, Hashable {
     var spent: Double
     var habits: Int
     var logged: Int
+    /// This month's spending per category, and the monthly limit (0 = none).
+    var byCategory: [String: Double]?
+    var budget: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case days, spent, habits, logged, budget
+        case byCategory = "by_category"
+    }
 
     /// With entries made on the phone since the numbers were counted.
     func including(_ added: [LogEntry]) -> LifeStats {
@@ -70,7 +78,10 @@ struct LifeStats: Codable, Hashable {
             guard cal.isDate(at, equalTo: Date(), toGranularity: .month) else { continue }
             out.logged += 1
             if e.kind == "habit" { out.habits += 1 }
-            if e.kind == "expense" { out.spent += e.amount ?? 0 }
+            if e.kind == "expense" {
+                out.spent += e.amount ?? 0
+                out.byCategory?[e.category, default: 0] += e.amount ?? 0
+            }
         }
         return out
     }
@@ -84,6 +95,12 @@ struct LogEntry: Codable, Identifiable, Hashable {
     var data: [String: JSONValue]?
 
     var amount: Double? { data?["amount"]?.number }
+
+    /// Expenses: food | transport | shopping | bills | fun | health | other.
+    var category: String {
+        if case .string(let c)? = data?["category"], !c.isEmpty { return c }
+        return "other"
+    }
 }
 
 struct ListItem: Codable, Identifiable, Hashable {

@@ -191,6 +191,26 @@ def set_onboarding(
     return res.matched_count > 0
 
 
+def get_budget(user_id: str) -> float:
+    """The monthly spending limit the user set; 0 when there is none."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return 0.0
+    doc = coll.find_one({"_id": user_id}, {"budget": 1}) or {}
+    value = doc.get("budget")
+    return float(value) if isinstance(value, (int, float)) and value > 0 else 0.0
+
+
+def set_budget(user_id: str, amount: float) -> bool:
+    """0 removes the limit."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return False
+    res = coll.update_one({"_id": user_id}, {"$set": {"budget": max(float(amount), 0.0)}})
+    _bump(user_id)
+    return res.matched_count > 0
+
+
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:
     """{qid: answer} for the daily-nudge questions."""
     coll = _coll()

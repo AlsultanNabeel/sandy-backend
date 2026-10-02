@@ -43,6 +43,13 @@ extension APIClient {
         return r.items ?? []
     }
 
+    private struct Budget: Encodable { let amount: Double }
+
+    /// The monthly spending limit; 0 removes it.
+    func setBudget(_ amount: Double) async throws {
+        try await queued("/api/budget", method: "POST", body: Budget(amount: amount))
+    }
+
     /// My Life's numbers, counted on the server over the whole log.
     func stats() async throws -> LifeStats {
         try await fetch("/api/stats")
