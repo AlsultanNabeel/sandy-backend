@@ -981,7 +981,7 @@ so folders are organisation only.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep
   their own screen (they drive the Live Activity), opened from Today.
-- `Services/` — `GeminiLiveManager` (in-app live voice), `SpeechManager` (reply playback only),
+- `Services/` — `GeminiLiveManager` (in-app live voice; one shared call that outlives its screen — `CallBar` over the tabs brings it back, the end button, the Live Activity or sign-out end it), `SpeechManager` (reply playback only),
   `NotificationManager`, `SubscriptionManager`.
 - `Localization/` — one `L10n+<Area>.swift` per feature. Arabic/English, RTL/LTR.
 - `Widgets/` — home-screen widgets.

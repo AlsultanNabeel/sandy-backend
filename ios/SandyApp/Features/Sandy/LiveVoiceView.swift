@@ -10,7 +10,7 @@ struct LiveVoiceView: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 
-    @StateObject private var live = GeminiLiveManager()
+    @ObservedObject private var live = GeminiLiveManager.shared
 
     /// نبضة الهالة المستمرة.
     @State private var pulse = false
@@ -20,6 +20,17 @@ struct LiveVoiceView: View {
             SandyBackground()
 
             VStack(spacing: Theme.Spacing.xl) {
+                HStack {
+                    // Closing the screen keeps the call; the bar over the tabs brings it back.
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(Theme.Colors.secondaryText)
+                            .padding(10)
+                    }
+                    .accessibilityLabel(lang.s("chat.liveMinimize"))
+                    Spacer()
+                }
                 Spacer()
                 sandyOrb
                 statusLabel
@@ -31,11 +42,8 @@ struct LiveVoiceView: View {
         }
         .onAppear {
             pulse = true
-            live.start(baseURL: state.api.baseURL, token: state.api.token ?? "")
+            if !live.inCall { live.start(baseURL: state.api.baseURL, token: state.api.token ?? "") }
         }
-        .onDisappear { live.stop() }
-        // «إنهاء» من الـ Live Activity / الجزيرة الديناميكية (sandy://call/end).
-        .onReceive(DeepLinkRouter.shared.endCall) { _ in dismiss() }
     }
 
     // MARK: - ساندي + الهالة (تتفاعل مع الطور)
@@ -104,7 +112,10 @@ struct LiveVoiceView: View {
     // MARK: - زر الإنهاء
 
     private var endButton: some View {
-        Button { dismiss() } label: {
+        Button {
+            live.stop()
+            dismiss()
+        } label: {
             HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: "phone.down.fill")
                 Text(lang.s("chat.liveEnd"))
@@ -143,4 +154,37 @@ struct LiveVoiceView: View {
     private var pulseLow: CGFloat { live.phase == .connecting ? 0.92 : 0.85 }
     private var pulseHigh: CGFloat { live.phase == .speaking ? 1.12 : 1.02 }
     private var pulseSpeed: Double { live.phase == .speaking ? 0.7 : 1.8 }
+}
+
+/// The call going on while its screen is closed: tap to go back to it, or hang up.
+struct CallBar: View {
+    @EnvironmentObject var lang: LanguageManager
+    @ObservedObject var live: GeminiLiveManager
+    let open: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Image(systemName: live.phase == .speaking ? "waveform" : "phone.fill")
+                .symbolEffect(.variableColor.iterative, isActive: live.phase == .speaking)
+                .foregroundColor(.white)
+            Text(lang.s("chat.liveBar"))
+                .font(Theme.Typography.subheadline)
+                .foregroundColor(.white)
+            Spacer(minLength: 0)
+            Button { live.stop() } label: {
+                Image(systemName: "phone.down.fill")
+                    .foregroundColor(.white)
+                    .padding(8)
+                    .background(Circle().fill(Theme.Colors.danger))
+            }
+            .accessibilityLabel(lang.s("chat.liveEnd"))
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(Theme.Colors.success.opacity(0.92)))
+        .contentShape(Capsule())
+        .onTapGesture(perform: open)
+        .padding(.horizontal, Theme.Spacing.lg)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
 }

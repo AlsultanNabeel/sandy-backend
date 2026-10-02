@@ -7,7 +7,13 @@ import os
 /// المايك بيضل مفتوح وهي بتحكي (مع إلغاء الصدى) حتى تقاطعها، لو السيرفر سمح بـ `duplex`.
 @MainActor
 final class GeminiLiveManager: NSObject, ObservableObject {
+    /// One call for the whole app: it keeps going while the call screen is closed.
+    static let shared = GeminiLiveManager()
+
     enum Phase: Equatable { case idle, connecting, listening, speaking }
+
+    /// A call is on (from start until it is ended or drops).
+    @Published private(set) var inCall = false
 
     /// Each transition plays a haptic and drives the call's Live Activity.
     @Published var phase: Phase = .idle {
@@ -35,6 +41,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
     func start(baseURL: String, token: String) {
         stopped = false
+        inCall = true
         errorText = ""
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             Task { @MainActor in
@@ -58,6 +65,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         urlSession = nil
         audio.stop()
         phase = .idle
+        inCall = false
         mouthOpen = 0
         working = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

@@ -34,6 +34,7 @@ struct MainTabView: View {
     @ObservedObject private var router = DeepLinkRouter.shared
     @ObservedObject private var spotlight = SpotlightRouter.shared
     @State private var showLiveCall = false
+    @ObservedObject private var call = GeminiLiveManager.shared
 
     /// لما يطلع الكيبورد نخفي شريط التبويبات حتى ما يزاحمه.
     @State private var keyboardUp = false
@@ -54,6 +55,10 @@ struct MainTabView: View {
                     .tag(MainTab.life)
             }
 
+            if call.inCall && !showLiveCall {
+                CallBar(live: call) { showLiveCall = true }
+                    .padding(.bottom, 6)
+            }
             if !keyboardUp {
                 FloatingTabBar(selection: $selection)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -62,6 +67,12 @@ struct MainTabView: View {
         .background(SandyBackground())
         .task {
             await state.refreshOnboardingIfNeeded()
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: call.inCall)
+        // «إنهاء» من الـ Live Activity / الجزيرة الديناميكية (sandy://call/end), screen open or not.
+        .onReceive(DeepLinkRouter.shared.endCall) { _ in
+            call.stop()
+            showLiveCall = false
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillShowNotification)) { _ in
