@@ -127,7 +127,7 @@ struct AuthView: View {
         .onAppear {
             guard !appeared else { return }
             if reduceMotion { appeared = true; return }
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.85).delay(0.05)) {
+            withAnimation(Animation.spring(response: 0.6, dampingFraction: 0.85).delay(0.05).reduced) {
                 appeared = true
             }
         }

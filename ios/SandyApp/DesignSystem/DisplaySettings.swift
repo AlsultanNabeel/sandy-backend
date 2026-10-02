@@ -91,3 +91,12 @@ extension View {
         modifier(ScaledFont(points: points, weight: weight, design: design, style: style))
     }
 }
+
+// MARK: - تقليل الحركة
+
+extension Animation {
+    /// Nothing moves when the device asks for reduced motion; the change still happens.
+    var reduced: Animation? {
+        UIAccessibility.isReduceMotionEnabled ? nil : self
+    }
+}

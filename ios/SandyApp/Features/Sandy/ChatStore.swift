@@ -7,6 +7,8 @@ import SwiftUI
 final class ChatStore: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var sending = false
+    /// From send until the reply is complete (`sending` ends at the first word): the stop button.
+    @Published private(set) var replying = false
     /// What Sandy is doing right now («عم ضيف للقائمة…»), empty while she only talks.
     @Published var activity = ""
     @Published var errorMessage = ""
@@ -42,6 +44,7 @@ final class ChatStore: ObservableObject {
         currentID = nil
         errorMessage = ""
         sending = false
+        replying = false
     }
 
     /// عند فتح التبويب: يحمّل السجل، ويستكمل آخر محادثة من اليوم أو يبدأ نظيفة.
@@ -139,13 +142,23 @@ final class ChatStore: ObservableObject {
         await loadList(api: api)
     }
 
+    /// What the error line calls the user (their preferred name), set by the chat screen.
+    var userName = ""
+    private var lastErrorVariant = -1
+    /// The reply streaming now, so «إيقاف» can keep what already arrived.
+    private var streamingID: UUID?
+    private var streamingCid: String?
+
     /// يرسل، يخزّن السؤال والرد، ويرجّع رد ساندي (ليقرأه الـView بالصوت).
-    func send(api: APIClient, text: String) async -> String? {
+    /// `appendUser: false` answers the line already last (regenerate).
+    func send(api: APIClient, text: String, appendUser: Bool = true) async -> String? {
         sendTask?.cancel()
         sendGeneration += 1
         let generation = sendGeneration
-        messages.append(ChatMessage(role: "user", text: text))
+        if appendUser { messages.append(ChatMessage(role: "user", text: text)) }
+        let userLineID = messages.last { $0.role == "user" }?.id
         sending = true
+        replying = true
         errorMessage = ""
         Haptics.play(.send)
         // محادثة جديدة: المعرّف منّا (uuid) والخادم بينشئها مع أول رسالة — بلا
@@ -161,11 +174,19 @@ final class ChatStore: ObservableObject {
         // مفتاح الرسالة: نفسه بكل محاولة، فالخادم ما بيشغّل الدور مرتين.
         let clientMsgID = Self.newID()
         let t = Task { @MainActor () -> String? in
-            defer { if generation == sendGeneration { sending = false; activity = "" } }
+            defer {
+                if generation == sendGeneration {
+                    sending = false
+                    replying = false
+                    activity = ""
+                }
+            }
             // حفظ رسالة المستخدم وتشغيل ساندي مستقلّان — /api/agent بياخد نص
             // الرسالة من الطلب نفسه، مش من القاعدة، فما داعي ننتظر الحفظ. مهمة
             // منفصلة: الرسالة بتنحفظ حتى لو الإرسال اتلغى أو فشل.
-            let saveUser = Task { try? await api.appendMessage(cid: cid, role: "user", text: text) }
+            let saveUser = Task {
+                if appendUser { try? await api.appendMessage(cid: cid, role: "user", text: text) }
+            }
             // By id, not index: `messages` can be replaced mid-stream (new
             // chat, another conversation opened), and a stored index then
             // points past the end — a crash on the next chunk.
@@ -208,6 +229,8 @@ final class ChatStore: ObservableObject {
                                 self.sending = false
                                 let bubble = ChatMessage(role: "sandy", text: partial)
                                 sandyID = bubble.id
+                                self.streamingID = bubble.id
+                                self.streamingCid = cid
                                 self.messages.append(bubble)
                             }
                         }
@@ -231,10 +254,16 @@ final class ChatStore: ObservableObject {
                     try? await api.appendMessage(cid: cid, role: "sandy", text: reply)
                     await self.loadList(api: api)
                 }
+                Announce.say(String(format: LanguageManager.shared.s("a11y.replyArrived"), reply))
                 return reply
             } catch {
                 if !error.isCancellation {
-                    errorMessage = LanguageManager.shared.s("chat.sendError")
+                    // The line itself is marked, with «أعد المحاولة» on it.
+                    if let id = userLineID, let idx = messages.firstIndex(where: { $0.id == id }) {
+                        messages[idx].failed = true
+                    }
+                    errorMessage = nextErrorLine()
+                    Announce.say(errorMessage)
                     Haptics.play(.failure)
                 }
                 return nil
@@ -242,6 +271,58 @@ final class ChatStore: ObservableObject {
         }
         sendTask = t
         return await t.value
+    }
+
+    /// One of the error lines, in Sandy's voice with the user's name, never the same twice in a row.
+    private func nextErrorLine() -> String {
+        let lang = LanguageManager.shared
+        let lines = lang.list("chat.sendErrors")
+        guard !lines.isEmpty else { return "" }
+        var pick = Int.random(in: 0..<lines.count)
+        if lines.count > 1 && pick == lastErrorVariant { pick = (pick + 1) % lines.count }
+        lastErrorVariant = pick
+        let name = userName.isEmpty ? lang.s("chat.friend") : userName
+        return String(format: lines[pick], name)
+    }
+
+    /// «إيقاف»: the reply stops where it is; what arrived stays, here and in the history.
+    func stop(api: APIClient) {
+        sendTask?.cancel()
+        sendGeneration += 1
+        sending = false
+        replying = false
+        activity = ""
+        guard let id = streamingID, let cid = streamingCid,
+              let partial = messages.first(where: { $0.id == id })?.text, !partial.isEmpty else { return }
+        streamingID = nil
+        saveLines(api, id: cid)
+        Task { try? await api.appendMessage(cid: cid, role: "sandy", text: partial) }
+    }
+
+    /// A failed line, sent again in its place.
+    func retry(api: APIClient, _ message: ChatMessage) async -> String? {
+        messages.removeAll { $0.id == message.id }
+        errorMessage = ""
+        return await send(api: api, text: message.text)
+    }
+
+    /// Sandy's last reply, written again: dropped here and on the server, the same line re-answered.
+    func regenerate(api: APIClient) async -> String? {
+        guard !sending, let last = messages.last, last.role == "sandy", let cid = currentID,
+              let line = messages.last(where: { $0.role == "user" })?.text else { return nil }
+        messages.removeLast()
+        errorMessage = ""
+        try? await api.rewindConversation(id: cid, keepUser: true)
+        return await send(api: api, text: line, appendUser: false)
+    }
+
+    /// The user's last line, edited: it and its reply go, the new line is sent in their place.
+    func editLast(api: APIClient, to text: String) async -> String? {
+        guard !sending, let idx = messages.lastIndex(where: { $0.role == "user" }) else { return nil }
+        messages.removeSubrange(idx...)
+        errorMessage = ""
+        if let cid = currentID { try? await api.rewindConversation(id: cid, keepUser: false) }
+        return await send(api: api, text: text)
     }
 
     /// كم مرة نعيد إرسال رسالة انقطع اتصالها (مش خطأ من الخادم).

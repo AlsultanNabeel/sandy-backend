@@ -72,6 +72,7 @@ struct OnboardingView: View {
                 if page > 0 {
                     Button(action: goBack) {
                         Image(systemName: "chevron.backward")
+                            .accessibilityLabel(LanguageManager.shared.s("a11y.back"))
                             .scaledFont(Theme.Icon.md, weight: .semibold)
                             .foregroundColor(Theme.Colors.primaryText)
                             .frame(width: 44, height: 44)
@@ -109,7 +110,7 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, Theme.Spacing.lg)
         .padding(.top, Theme.Spacing.sm)
-        .animation(.easeInOut(duration: 0.2), value: page)
+        .animation(Animation.easeInOut(duration: 0.2).reduced, value: page)
     }
 
     // MARK: - الصفحات
@@ -290,7 +291,7 @@ struct OnboardingView: View {
                     }
                 }
                 .padding(.vertical, Theme.Spacing.xs)
-                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: interests)
+                .animation(Animation.spring(response: 0.3, dampingFraction: 0.8).reduced, value: interests)
 
                 HStack(spacing: Theme.Spacing.sm) {
                     TextField(lang.s("onboarding.interestsPlaceholder"), text: $customInterest)
@@ -301,6 +302,7 @@ struct OnboardingView: View {
                         .modifier(OnboardingField())
                     Button(action: addCustom) {
                         Image(systemName: "plus")
+                            .accessibilityLabel(LanguageManager.shared.s("a11y.add"))
                             .scaledFont(Theme.Icon.md, weight: .bold)
                             .foregroundColor(Theme.Colors.onAccent)
                             .frame(width: 48, height: 48)
@@ -444,7 +446,7 @@ struct OnboardingView: View {
             }
         }
         .sandyCard(status == .granted ? .info : .secondary)
-        .animation(.easeInOut(duration: 0.2), value: status)
+        .animation(Animation.easeInOut(duration: 0.2).reduced, value: status)
     }
 
     private func statusLabel(_ icon: String, _ text: String, _ color: Color) -> some View {
@@ -490,7 +492,7 @@ struct OnboardingView: View {
                     .frame(width: i == page ? 22 : 7, height: 7)
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: page)
+        .animation(Animation.spring(response: 0.35, dampingFraction: 0.8).reduced, value: page)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(lang.s("onboarding.progress"))
         .accessibilityValue("\(page + 1) / \(pageCount)")

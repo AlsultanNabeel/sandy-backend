@@ -4,6 +4,9 @@ Collection `conversations`: {_id, user_id, title, created_at, updated_at, messag
 
   GET/POST /api/conversations · GET/PATCH/DELETE /api/conversations/<cid>
   POST /api/conversations/<cid>/messages · GET /api/conversations/search?q=
+  POST /api/conversations/<cid>/rewind {keep_user}: drop the last reply (and, unless
+       keep_user, the line it answered) here and in Sandy's memory of the thread, so the
+       app can regenerate a reply or resend an edited last message in its place.
 
 The app may pick a new chat's id itself; the first write creates it
 (`ensure_conversation`), and an id belonging to another user is refused.
@@ -380,6 +383,29 @@ def register_conversations_api(app, mongo_db=None):
             last_user = last[-1].get("text", "") if last and last[-1].get("role") == "user" else ""
             _generate_title_async(coll, cid, uid, last_user, text)
         return jsonify({"ok": True}), 200
+
+    @app.route("/api/conversations/<cid>/rewind", methods=["POST"])
+    @require_auth
+    def rewind_conversation(claims, cid):
+        uid = _uid(claims)
+        coll = _coll()
+        if not uid or coll is None:
+            return jsonify({"error": "no_user"}), 403
+        keep_user = bool((request.get_json(silent=True) or {}).get("keep_user"))
+        d = coll.find_one({"_id": cid, "user_id": uid}, {"messages": {"$slice": -2}})
+        if not d:
+            return jsonify({"error": "not_found"}), 404
+        tail = [m.get("role") for m in d.get("messages") or []]
+        drop = 0
+        if tail and tail[-1] == "sandy":
+            drop += 1
+        if not keep_user and len(tail) > drop and tail[-1 - drop] == "user":
+            drop += 1
+        for _ in range(drop):
+            coll.update_one({"_id": cid, "user_id": uid}, {"$pop": {"messages": 1}})
+        from app.brain import stm
+        stm.rewind(cid, uid)
+        return jsonify({"ok": True, "dropped": drop}), 200
 
     @app.route("/api/conversations/search", methods=["GET"])
     @require_auth

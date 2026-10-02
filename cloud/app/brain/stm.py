@@ -20,6 +20,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from pymongo.errors import PyMongoError
+
 from app.utils.thread_pool import submit_background
 
 logger = logging.getLogger(__name__)
@@ -161,6 +163,25 @@ def _ended(turns: List[Dict[str, Any]], now: datetime) -> List[Dict[str, Any]]:
     if now - last < SESSION_GAP:
         return []
     return [m for m in turns if not m.get("summarized")]
+
+
+def rewind(thread_id: str, user_id: str) -> None:
+    """Forget the thread's last exchange (its last user line and any reply after it),
+    so the same line, or an edited one, can be answered again in its place."""
+    coll = _stm_collection()
+    if coll is None:
+        return
+    key = f"{thread_id}:{user_id}"
+    try:
+        doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
+        turns = list((doc or {}).get("history") or [])
+        while turns and turns[-1].get("role") == "assistant":
+            turns.pop()
+        if turns and turns[-1].get("role") == "user":
+            turns.pop()
+        coll.update_one({"key": key}, {"$set": {"history": turns}})
+    except PyMongoError as exc:  # memory is never worth a failed reply
+        logger.warning("[stm] rewind failed: %s", exc)
 
 
 def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,

@@ -25,7 +25,7 @@ struct DailyNudgeCard: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: store.isVisible)
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.isVisible)
     }
 
     // ترويسة: وجه ساندي + عنوان + زر إغلاق (لجملة المهام؛ السؤال يُخفى بالجواب).

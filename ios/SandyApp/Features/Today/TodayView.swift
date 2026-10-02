@@ -78,9 +78,13 @@ struct TodayView: View {
                                             Label(lang.s("blocks.delete"), systemImage: "trash")
                                         }
                                     }
+                                    .accessibilityAction(named: lang.s("a11y.edit")) { editingHabit = h }
+                                    .accessibilityAction(named: lang.s("a11y.delete")) {
+                                        habits.delete(api: state.api, h)
+                                    }
                                 }
                             }
-                            .animation(.spring(response: 0.5, dampingFraction: 0.8),
+                            .animation(Animation.spring(response: 0.5, dampingFraction: 0.8).reduced,
                                        value: habits.today.map(\.id))
                         }
                     }
@@ -262,6 +266,7 @@ struct TodayView: View {
             .scaledFont(13, weight: .semibold, design: .rounded)
             .foregroundColor(Theme.Colors.tertiaryText)
             .textCase(.uppercase)
+            .accessibilityAddTraits(.isHeader)
             content()
         }
     }
@@ -293,6 +298,11 @@ struct TodayView: View {
                 Label(lang.s("blocks.delete"), systemImage: "trash")
             }
         }
+        .rowAccessibility(label: A11yText.item(item, habits: false, streak: nil),
+                          value: lang.s("a11y.notDone"), hint: lang.s("a11y.rowHint"),
+                          open: { editingTask = item },
+                          actions: [(lang.s("a11y.markDone"), { tasks.toggle(api: state.api, item) }),
+                                    (lang.s("a11y.delete"), { tasks.delete(api: state.api, item) })])
     }
 
     /// Today's spending, quietly at the bottom.

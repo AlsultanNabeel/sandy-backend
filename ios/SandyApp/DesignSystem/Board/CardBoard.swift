@@ -174,7 +174,7 @@ struct CardBoard: View {
         guard let i = ids.firstIndex(of: held) else { return }
         let next: Int = up ? max(0, i - 1) : min(ids.count - 1, i + 1)
         guard next != i, let proxy = scroll else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(Animation.easeInOut(duration: 0.18).reduced) {
             proxy.scrollTo(ids[next], anchor: up ? .top : .bottom)
         }
     }
@@ -192,7 +192,7 @@ struct CardBoard: View {
                     .foregroundColor(Theme.Colors.secondaryText)
             }
             Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                withAnimation(Animation.spring(response: 0.3, dampingFraction: 0.85).reduced) {
                     store.editing.toggle()
                 }
             } label: {
@@ -267,7 +267,7 @@ private struct CardCell: View {
             .zIndex(isHeld ? 1 : 0)
             .contentShape(Rectangle())
             .gesture(reorder, isEnabled: store.editing)
-            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: size)
+            .animation(Animation.spring(response: 0.3, dampingFraction: 0.85).reduced, value: size)
     }
 
 
@@ -291,18 +291,19 @@ private struct CardCell: View {
     /// زرّان مش إيماءة، عن قصد: السحب من الزاوية انلغى بأربع نسخ.
     private var sizeControls: some View {
         HStack(spacing: 2) {
-            stepButton("minus") { store.setSize(size.previous(), for: card.id) }
-            stepButton("plus") { store.setSize(size.next(), for: card.id) }
+            stepButton("minus", label: "a11y.smaller") { store.setSize(size.previous(), for: card.id) }
+            stepButton("plus", label: "a11y.bigger") { store.setSize(size.next(), for: card.id) }
         }
         .padding(4)
     }
 
-    private func stepButton(_ icon: String, action: @escaping () -> Void) -> some View {
+    private func stepButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { action() }
+            withAnimation(Animation.spring(response: 0.3, dampingFraction: 0.85).reduced) { action() }
             Haptics.play(.drag)
         } label: {
             Image(systemName: icon)
+                .accessibilityLabel(LanguageManager.shared.s(label))
                 .scaledFont(13, weight: .bold)
                 .foregroundColor(.white)
                 .frame(width: 34, height: 34)

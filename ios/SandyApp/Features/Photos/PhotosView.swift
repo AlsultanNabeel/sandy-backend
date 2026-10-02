@@ -40,8 +40,8 @@ struct PhotosView: View {
                 }
             }
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.photos.map(\.id))
-        .animation(.easeInOut(duration: 0.25), value: store.notice)
+        .animation(Animation.spring(response: 0.45, dampingFraction: 0.8).reduced, value: store.photos.map(\.id))
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.notice)
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
         .fullScreenCover(isPresented: $showAdd) {

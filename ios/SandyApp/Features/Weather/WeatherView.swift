@@ -81,8 +81,8 @@ struct WeatherView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: store.notice)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: store.snapshot?.city)
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.notice)
+        .animation(Animation.spring(response: 0.45, dampingFraction: 0.85).reduced, value: store.snapshot?.city)
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
         .fullScreenCover(isPresented: $showCityEditor) {

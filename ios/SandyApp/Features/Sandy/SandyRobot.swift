@@ -39,9 +39,12 @@ struct SandyRobot: View {
     private var isHappy: Bool { happy || expr.happy }
     private var openAmount: CGFloat { max(mouthOpen, expr.open) }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         Group {
-            if animated {
+            // Reduced motion: she stays still (no blinking, no drifting gaze).
+            if animated && !reduceMotion {
                 // ساعة موحّدة تقود الغمزة الدورية وانجراف النظرة (iOS 16-safe).
                 TimelineView(.animation) { timeline in
                     let t = timeline.date.timeIntervalSinceReferenceDate
@@ -55,7 +58,7 @@ struct SandyRobot: View {
         .frame(width: size, height: renderedHeight)
         // هالة كهربائية ناعمة حولها (تقابل blue glow بالويب).
         .shadow(color: Theme.Shadow.glowColor, radius: size * 0.10, x: 0, y: 0)
-        .accessibilityLabel("ساندي")
+        .accessibilityLabel(LanguageManager.shared.s("common.sandy"))
     }
 
     // MARK: حركة (iOS 16-safe — مشتقّة من الزمن، بدون مؤقّتات منفصلة)

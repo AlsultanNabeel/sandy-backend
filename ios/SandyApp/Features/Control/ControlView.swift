@@ -82,8 +82,8 @@ struct ControlView: View {
         }
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
-        .animation(.spring(response: 0.45, dampingFraction: 0.82), value: store.devices.map(\.id))
-        .animation(.easeInOut(duration: 0.25), value: store.notice)
+        .animation(Animation.spring(response: 0.45, dampingFraction: 0.82).reduced, value: store.devices.map(\.id))
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.notice)
     }
 
     // ── المحتوى: تحميل / فاضي / أقسام ──────────────────────────────────────

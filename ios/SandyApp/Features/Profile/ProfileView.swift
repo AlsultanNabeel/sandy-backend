@@ -50,7 +50,7 @@ struct ProfileView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task { await state.refreshOnboarding() }
             .onAppear {
-                withAnimation(.spring(response: 0.55, dampingFraction: 0.8)) { appeared = true }
+                withAnimation(Animation.spring(response: 0.55, dampingFraction: 0.8).reduced) { appeared = true }
             }
             .sheet(isPresented: $showEdit) {
                 EditProfileSheet(
@@ -279,7 +279,7 @@ private struct InterestChip: View {
             .overlay(Capsule().stroke(Theme.Colors.accent.opacity(0.25), lineWidth: 1))
             .scaleEffect(appeared ? 1 : 0.6)
             .opacity(appeared ? 1 : 0)
-            .animation(.spring(response: 0.5, dampingFraction: 0.7), value: appeared)
+            .animation(Animation.spring(response: 0.5, dampingFraction: 0.7).reduced, value: appeared)
     }
 }
 
@@ -452,6 +452,7 @@ private struct EditProfileSheet: View {
                         addInterest()
                     } label: {
                         Image(systemName: "plus.circle.fill")
+                            .accessibilityLabel(LanguageManager.shared.s("a11y.add"))
                             .scaledFont(Theme.Icon.lg)
                             .foregroundColor(canAdd ? Theme.Colors.accent : Theme.Colors.tertiaryText)
                     }
@@ -470,7 +471,7 @@ private struct EditProfileSheet: View {
             newInterest = ""
             return
         }
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+        withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.75).reduced) {
             interests.append(item)
         }
         newInterest = ""
@@ -478,7 +479,7 @@ private struct EditProfileSheet: View {
     }
 
     private func remove(_ item: String) {
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+        withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.8).reduced) {
             interests.removeAll { $0 == item }
         }
     }
@@ -516,6 +517,7 @@ private struct EditableChip: View {
                 .foregroundColor(Theme.Colors.accentDeep)
             Button(action: onDelete) {
                 Image(systemName: "xmark.circle.fill")
+                    .accessibilityLabel(LanguageManager.shared.s("a11y.removeInterest"))
                     .scaledFont(Theme.Icon.sm)
                     .foregroundColor(Theme.Colors.accentDeep.opacity(0.6))
             }

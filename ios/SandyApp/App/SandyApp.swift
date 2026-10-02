@@ -115,7 +115,7 @@ private struct LaunchHandoff: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .task {
-            withAnimation(.easeOut(duration: 0.42)) { leaving = true }
+            withAnimation(Animation.easeOut(duration: 0.42).reduced) { leaving = true }
             try? await Task.sleep(nanoseconds: 450_000_000)
             onFinished()
         }

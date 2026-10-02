@@ -58,7 +58,7 @@ struct LiveVoiceView: View {
                 )
                 .frame(width: 320, height: 320)
                 .scaleEffect(pulse ? pulseHigh : pulseLow)
-                .animation(.easeInOut(duration: pulseSpeed).repeatForever(autoreverses: true), value: pulse)
+                .animation(Animation.easeInOut(duration: pulseSpeed).repeatForever(autoreverses: true).reduced, value: pulse)
 
             SandyRobot(size: 168,
                        blink: false,
@@ -66,7 +66,7 @@ struct LiveVoiceView: View {
                        animated: true,
                        mouthOpen: live.mouthOpen)
                 .scaleEffect(live.phase == .speaking ? 1.04 : 1.0)
-                .animation(.easeInOut(duration: 0.3), value: live.phase)
+                .animation(Animation.easeInOut(duration: 0.3).reduced, value: live.phase)
         }
         .frame(height: 320)
     }
@@ -77,8 +77,8 @@ struct LiveVoiceView: View {
         Text(statusText)
             .font(Theme.Typography.title)
             .foregroundColor(Theme.Colors.primaryText)
-            .animation(.easeInOut(duration: 0.2), value: live.phase)
-            .animation(.easeInOut(duration: 0.2), value: live.working)
+            .animation(Animation.easeInOut(duration: 0.2).reduced, value: live.phase)
+            .animation(Animation.easeInOut(duration: 0.2).reduced, value: live.working)
     }
 
     // MARK: - تلميح / خطأ
@@ -103,8 +103,8 @@ struct LiveVoiceView: View {
         }
         .frame(minHeight: 80)
         .padding(.horizontal, Theme.Spacing.lg)
-        .animation(.easeInOut(duration: 0.25), value: live.phase)
-        .animation(.easeInOut(duration: 0.25), value: live.errorText)
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: live.phase)
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: live.errorText)
     }
 
     // MARK: - زر الإنهاء

@@ -70,7 +70,7 @@ struct MainTabView: View {
         .task {
             await state.refreshOnboardingIfNeeded()
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: call.inCall)
+        .animation(Animation.spring(response: 0.4, dampingFraction: 0.85).reduced, value: call.inCall)
         // «إنهاء» من الـ Live Activity / الجزيرة الديناميكية (sandy://call/end), screen open or not.
         .onReceive(DeepLinkRouter.shared.endCall) { _ in
             call.stop()
@@ -78,11 +78,11 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillShowNotification)) { _ in
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { keyboardUp = true }
+            withAnimation(Animation.spring(response: 0.35, dampingFraction: 0.9).reduced) { keyboardUp = true }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillHideNotification)) { _ in
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { keyboardUp = false }
+            withAnimation(Animation.spring(response: 0.35, dampingFraction: 0.9).reduced) { keyboardUp = false }
         }
         .sheet(item: $notifs.pendingRoute) { route in
             NavigationStack { routeView(route) }
@@ -122,7 +122,7 @@ struct MainTabView: View {
     private func open(_ link: DeepLink) {
         switch link {
         case .chat:
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { selection = .sandy }
+            withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.85).reduced) { selection = .sandy }
         case .call:
             showLiveCall = true
         case .quickAdd:
@@ -155,7 +155,7 @@ struct FloatingTabBar: View {
         HStack(spacing: 0) {
             sideButton(.today)
             SandyOrb(selected: selection == .sandy) {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) { selection = .sandy }
+                withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.78).reduced) { selection = .sandy }
             } onHold: {
                 DeepLinkRouter.shared.pending = .call
             }
@@ -176,7 +176,7 @@ struct FloatingTabBar: View {
     private func sideButton(_ tab: MainTab) -> some View {
         let selected = selection == tab
         return Button {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) { selection = tab }
+            withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.78).reduced) { selection = tab }
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: tab.icon).scaledFont(19, weight: .semibold)
@@ -228,7 +228,7 @@ private struct SandyOrb: View {
             onHold()
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathe = true }
+            withAnimation(Animation.easeInOut(duration: 2.4).repeatForever(autoreverses: true).reduced) { breathe = true }
         }
         .accessibilityLabel(lang.s("tabs.sandy"))
         .accessibilityHint(lang.s("today.holdToTalk"))

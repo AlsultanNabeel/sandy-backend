@@ -36,7 +36,7 @@ struct ImagesView: View {
             }
         }
         .navigationTitle(lang.s("tabs.images"))
-        .animation(.easeInOut(duration: 0.25), value: store.notice)
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.notice)
         .onChange(of: mode) { store.reset() }
         .onChange(of: pickedItem) { _, item in loadPicked(item) }
     }

@@ -36,8 +36,8 @@ struct RobotView: View {
             }
         }
         .navigationTitle(lang.s("tabs.robot"))
-        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.scenes.map(\.id))
-        .animation(.easeInOut(duration: 0.25), value: store.notice)
+        .animation(Animation.spring(response: 0.45, dampingFraction: 0.8).reduced, value: store.scenes.map(\.id))
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.notice)
         .task { await store.load(api: state.api) }
         .refreshable {
             await store.refreshLive(api: state.api)
@@ -247,6 +247,7 @@ private struct SceneEditorSheet: View {
                 actions.removeAll { $0.id == act.wrappedValue.id }
             } label: {
                 Image(systemName: "minus.circle.fill").foregroundColor(Theme.Colors.danger)
+                    .accessibilityLabel(LanguageManager.shared.s("a11y.removeAction"))
             }
             .buttonStyle(.plain)
         }

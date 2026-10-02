@@ -35,7 +35,7 @@ struct SearchView: View {
             }
         }
         .navigationTitle(lang.s("tabs.search"))
-        .animation(.easeInOut(duration: 0.25), value: store.notice)
+        .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.notice)
     }
 
     // MARK: - حقل البحث
@@ -52,6 +52,7 @@ struct SearchView: View {
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .accessibilityLabel(LanguageManager.shared.s("a11y.clear"))
                         .foregroundColor(Theme.Colors.secondaryText)
                 }
                 .buttonStyle(.plain)

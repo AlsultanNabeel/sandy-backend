@@ -983,6 +983,15 @@ so folders are organisation only.
   screen at once and reaches the server only when the offer ends (4 s, the next offer,
   or the app leaving the front). `DesignSystem/PermissionCard.swift` shows a denied mic
   or notifications where they are needed (ask bar mic, the call, reminders, Profile).
+  `DesignSystem/DisplaySettings.swift` holds Profile › Display (text step, element scale,
+  light / dark / automatic) and `scaledFont`; every colour token has a light and a dark
+  value. `DesignSystem/Accessibility.swift` gives list rows one screen-reader element with
+  their gestures as named actions, and `Announce` speaks replies, errors and undo offers;
+  every animation goes through `.reduced` (none under Reduce Motion).
+  Chat: long-press copy / share / select on any message, «write it again» on Sandy's last
+  reply and «edit and resend» on the user's last line (both through
+  `POST /api/conversations/<cid>/rewind`), a stop button that keeps what arrived, and a
+  failed line marked with «أعد المحاولة».
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

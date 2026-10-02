@@ -69,7 +69,7 @@ struct ItemsView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                .animation(.spring(response: 0.45, dampingFraction: 0.85), value: store.ordered.map(\.id))
+                .animation(Animation.spring(response: 0.45, dampingFraction: 0.85).reduced, value: store.ordered.map(\.id))
             }
 
             if !showDone { addBar }
@@ -136,6 +136,15 @@ struct ItemsView: View {
         .onTapGesture { editing = item }
         .opacity(store.isHabits && checked ? 0.6 : 1)
         .sandyCard()
+        .rowAccessibility(label: A11yText.item(item, habits: store.isHabits, streak: store.streaks[item.id]),
+                          value: lang.s(store.isHabits ? (checked ? "a11y.keptToday" : "a11y.notKeptToday")
+                                                       : (checked ? "a11y.done" : "a11y.notDone")),
+                          hint: lang.s("a11y.rowHint"), open: { editing = item },
+                          actions: [
+                              (lang.s(checked ? "a11y.markOpen" : "a11y.markDone"),
+                               { store.toggle(api: state.api, item) }),
+                              (lang.s("a11y.delete"), { store.delete(api: state.api, item) }),
+                          ])
     }
 
     private var addBar: some View {
@@ -156,6 +165,7 @@ struct ItemsView: View {
                 .onSubmit(submit)
             Button(action: submit) {
                 Image(systemName: "plus.circle.fill")
+                    .accessibilityLabel(LanguageManager.shared.s("a11y.add"))
                     .scaledFont(Theme.Icon.lg)
                     .foregroundColor(Theme.Colors.accent)
             }
@@ -234,6 +244,8 @@ struct SchedulesView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { adding = true } label: { Image(systemName: "plus.circle.fill") }
+                    .accessibilityLabel(LanguageManager.shared.s("a11y.add"))
+                    .accessibilityLabel(LanguageManager.shared.s("a11y.add"))
             }
         }
         .task {
@@ -275,6 +287,11 @@ struct SchedulesView: View {
         .contentShape(Rectangle())
         .onTapGesture { editing = item }
         .sandyCard()
+        .rowAccessibility(label: [item.text, BlockDate.text(item.fireAt) ?? "",
+                                  (item.recurrence ?? "").isEmpty ? "" : lang.s("a11y.repeats")]
+                                    .filter { !$0.isEmpty }.joined(separator: lang.s("common.listSeparator")),
+                          hint: lang.s("a11y.rowHint"), open: { editing = item },
+                          actions: A11yText.reminderActions(item, store: store, api: state.api))
     }
 }
 
@@ -508,6 +525,12 @@ struct LogView: View {
         .contentShape(Rectangle())
         .onTapGesture { editing = entry }
         .sandyCard()
+        .rowAccessibility(label: [k?.label(lang.lang) ?? "", entry.text,
+                                  entry.amount.map { AppLocale.number($0) } ?? "",
+                                  BlockDate.text(entry.at) ?? ""]
+                                    .filter { !$0.isEmpty }.joined(separator: lang.s("common.listSeparator")),
+                          hint: lang.s("a11y.rowHint"), open: { editing = entry },
+                          actions: [(lang.s("a11y.delete"), { store.delete(api: state.api, entry) })])
     }
 }
 
@@ -586,5 +609,35 @@ extension View {
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.md,
                                       bottom: Theme.Spacing.xs, trailing: Theme.Spacing.md))
+    }
+}
+
+/// What the screen reader says for list rows, shared by the lists and Today.
+@MainActor
+enum A11yText {
+    static func item(_ item: ListItem, habits: Bool, streak: Int?) -> String {
+        let lang = LanguageManager.shared
+        var parts = [item.text]
+        if let due = BlockDate.text(item.due) { parts.append(due) }
+        if item.repeatRule != nil { parts.append(lang.s("a11y.repeats")) }
+        if item.priority == "high" { parts.append(lang.s("a11y.important")) }
+        if habits, let streak, streak > 1 {
+            parts.append(String(format: lang.s("a11y.streak"), AppLocale.number(streak)))
+        }
+        return parts.joined(separator: lang.s("common.listSeparator"))
+    }
+
+    static func reminderActions(_ item: ScheduleItem, store: SchedulesStore,
+                                api: APIClient) -> [(name: String, run: () -> Void)] {
+        let lang = LanguageManager.shared
+        var out: [(name: String, run: () -> Void)] = [
+            (lang.s("a11y.snooze15"), { store.snooze(api: api, item, minutes: 15) }),
+            (lang.s("a11y.snoozeHour"), { store.snooze(api: api, item, minutes: 60) }),
+        ]
+        if (item.recurrence ?? "").isEmpty {
+            out.append((lang.s("a11y.markDone"), { store.complete(api: api, item) }))
+        }
+        out.append((lang.s("a11y.delete"), { store.delete(api: api, item) }))
+        return out
     }
 }

@@ -156,7 +156,7 @@ struct LiquidGlassButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
             .brightness(configuration.isPressed ? 0.06 : 0)
-            .animation(.spring(response: 0.32, dampingFraction: 0.55),
+            .animation(Animation.spring(response: 0.32, dampingFraction: 0.55).reduced,
                        value: configuration.isPressed)
     }
 }
@@ -228,6 +228,7 @@ struct SectionHeader: View {
             .font(Theme.Typography.headline)
             .foregroundColor(Theme.Colors.primaryText)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

@@ -169,6 +169,12 @@ extension APIClient {
                        body: ["role": role, "text": text])
     }
 
+    /// Drops the last reply (and, unless `keepUser`, the line it answered) on the server and
+    /// in Sandy's memory of the thread, before a regenerate or an edited resend.
+    func rewindConversation(id: String, keepUser: Bool) async throws {
+        try await send("/api/conversations/\(id)/rewind", method: "POST", body: ["keep_user": keepUser])
+    }
+
     func renameConversation(id: String, title: String) async throws {
         try await send("/api/conversations/\(id)", method: "PATCH",
                        body: ["title": title])

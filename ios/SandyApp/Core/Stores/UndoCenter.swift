@@ -24,6 +24,7 @@ final class UndoCenter: ObservableObject {
                commit: @escaping () -> Void = {}) {
         commitNow()
         offer = Offer(message: message, icon: icon, undo: undo, commit: commit)
+        Announce.say(message)
     }
 
     func undo() {
@@ -85,7 +86,7 @@ private struct UndoOverlay: ViewModifier {
                     UndoToast(offer: offer).padding(.bottom, bottom)
                 }
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: center.offer?.id)
+            .animation(Animation.spring(response: 0.4, dampingFraction: 0.85).reduced, value: center.offer?.id)
     }
 }
 

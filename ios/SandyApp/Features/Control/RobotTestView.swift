@@ -130,7 +130,7 @@ struct RobotTestView: View {
                 }
             }
             .frame(height: 10)
-            .animation(.easeOut(duration: 0.25), value: level)
+            .animation(Animation.easeOut(duration: 0.25).reduced, value: level)
         }
         // شريط بلا وصف = «صورة» بصوت القارئ، والمقياس هو كل معنى هاي الشاشة.
         // بنجمّع السطر كله بعنصر واحد بقيمة منطوقة، فالأعمى بيقدر يعمل نفس

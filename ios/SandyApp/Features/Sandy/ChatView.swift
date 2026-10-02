@@ -34,6 +34,10 @@ struct ChatView: View {
     @AppStorage("sandy_voice_replies") private var voiceReplies = true
     /// عرض شاشة المكالمة الصوتية الحيّة.
     @State private var showLive = false
+    /// The field holds the last message being edited; sending replaces it and its reply.
+    @State private var editingLast = false
+    /// A message opened for picking part of its text.
+    @State private var selecting: SelectableMessage?
 
     /// لغة التعرّف/الصوت تتبع لغة التطبيق.
     private var voiceLocaleID: String { lang.lang == .ar ? "ar-SA" : "en-US" }
@@ -93,6 +97,13 @@ struct ChatView: View {
         .task { await store.bootstrap(api: state.api) }
         // نوقف صوت ساندي عند مغادرة الشاشة.
         .onDisappear { speech.stopSpeaking() }
+        .sheet(item: $selecting) { m in
+            SelectTextSheet(text: m.text).environmentObject(lang)
+        }
+        .onAppear {
+            store.userName = state.onboarding.preferredName.isEmpty ? state.onboarding.name
+                                                                   : state.onboarding.preferredName
+        }
         .sheet(isPresented: $showHistory) {
             ChatHistorySheet(store: store)
                 .environmentObject(state).environmentObject(lang)
@@ -114,11 +125,7 @@ struct ChatView: View {
                 // Lazy: a long thread builds only the rows on screen.
                 LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     ForEach(store.messages) { m in
-                        // Equatable row: a streamed chunk re-renders only the
-                        // growing bubble, not every bubble above it.
-                        ChatBubbleRow(isUser: m.role == "user", text: m.text)
-                            .equatable()
-                            .id(m.id)
+                        messageRow(m)
                             // حيوية: كل فقاعة تظهر بتكبير لطيف + تلاشٍ.
                             .transition(
                                 .scale(scale: 0.85, anchor: .bottom)
@@ -145,9 +152,9 @@ struct ChatView: View {
             // إصلاح (1): سحب القائمة يخفي الكيبورد بسلاسة.
             .scrollDismissesKeyboard(.interactively)
             // حيوية: حركة نابضة عند تغيّر عدد الرسائل أو ظهور مؤشّر الكتابة.
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: store.messages.count)
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: store.sending)
-            .animation(.easeInOut(duration: 0.25), value: store.errorMessage)
+            .animation(Animation.spring(response: 0.4, dampingFraction: 0.8).reduced, value: store.messages.count)
+            .animation(Animation.spring(response: 0.4, dampingFraction: 0.8).reduced, value: store.sending)
+            .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.errorMessage)
             // إصلاح (1): نقر بأي مكان بالخلفية/القائمة يخفي الكيبورد.
             .contentShape(Rectangle())
             .onTapGesture { dismissKeyboard() }
@@ -170,7 +177,7 @@ struct ChatView: View {
 
     /// ينزّل العرض لآخر عنصر (مؤشّر الكتابة لو شغّال، وإلا آخر رسالة).
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+        withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.8).reduced) {
             if store.sending {
                 proxy.scrollTo(Self.typingAnchorID, anchor: .bottom)
             } else if let last = store.messages.last {
@@ -182,6 +189,38 @@ struct ChatView: View {
     // MARK: - شريط الإدخال
 
     private var inputBar: some View {
+        VStack(spacing: Theme.Spacing.xs) {
+            if editingLast { editBanner }
+            inputRow
+        }
+        .padding(Theme.Spacing.md)
+        // شريط إدخال زجاجي مموّه مع خيط أزرق رفيع فوقه.
+        .background(
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea(edges: .bottom)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Theme.Colors.accent.opacity(0.18)).frame(height: 1)
+                }
+        )
+    }
+
+    private var editBanner: some View {
+        HStack {
+            Label(lang.s("chat.editing"), systemImage: "pencil")
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.secondaryText)
+            Spacer()
+            Button(lang.s("chat.cancelEdit")) {
+                editingLast = false
+                input = ""
+            }
+            .font(Theme.Typography.caption)
+            .foregroundColor(Theme.Colors.accent)
+        }
+    }
+
+    private var inputRow: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
             liveCallButton
 
@@ -201,18 +240,98 @@ struct ChatView: View {
                 // نطمّن أولًا ثم نرسل فقط لو في نص فعلي.
                 .onSubmit { handleReturn() }
 
-            sendButton
+            if store.replying {
+                stopButton
+            } else {
+                sendButton
+            }
         }
-        .padding(Theme.Spacing.md)
-        // شريط إدخال زجاجي مموّه مع خيط أزرق رفيع فوقه.
-        .background(
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea(edges: .bottom)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(Theme.Colors.accent.opacity(0.18)).frame(height: 1)
-                }
-        )
+    }
+
+    /// While a reply is coming: stops it, keeping what already arrived.
+    private var stopButton: some View {
+        Button { store.stop(api: state.api) } label: {
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.accent)
+                    .frame(width: ChatMetrics.control, height: ChatMetrics.control)
+                Image(systemName: "stop.fill")
+                    .scaledFont(Theme.Icon.sm, weight: .semibold)
+                    .foregroundColor(Theme.Colors.onAccent)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(lang.s("a11y.stop"))
+    }
+
+    /// Copy, share and pick text on every message; write the last reply again; edit the
+    /// last line of yours.
+    @ViewBuilder
+    private func menu(for m: ChatMessage) -> some View {
+        Button { UIPasteboard.general.string = m.text } label: {
+            Label(lang.s("chat.copy"), systemImage: "doc.on.doc")
+        }
+        ShareLink(item: m.text) { Label(lang.s("chat.share"), systemImage: "square.and.arrow.up") }
+        Button { selecting = SelectableMessage(text: m.text) } label: {
+            Label(lang.s("chat.selectText"), systemImage: "selection.pin.in.out")
+        }
+        if !store.replying, m.role == "sandy", m.id == store.messages.last?.id {
+            Button { regenerate() } label: {
+                Label(lang.s("chat.regenerate"), systemImage: "arrow.clockwise")
+            }
+        }
+        if !store.replying, m.role == "user", m.id == store.messages.last(where: { $0.role == "user" })?.id {
+            Button {
+                input = m.text
+                editingLast = true
+                inputFocused = true
+            } label: {
+                Label(lang.s("chat.editMessage"), systemImage: "pencil")
+            }
+        }
+    }
+
+    /// One message: its bubble with the long-press menu, and «أعد المحاولة» under a failed one.
+    @ViewBuilder
+    private func messageRow(_ m: ChatMessage) -> some View {
+        // Equatable row: a streamed chunk re-renders only the growing bubble.
+        ChatBubbleRow(isUser: m.role == "user", text: m.text, failed: m.failed)
+            .equatable()
+            .contextMenu { menu(for: m) }
+            .accessibilityAction(named: lang.s("chat.copy")) { UIPasteboard.general.string = m.text }
+            .id(m.id)
+        if m.failed { retryButton(m) }
+    }
+
+    /// Under a line that did not go through.
+    private func retryButton(_ m: ChatMessage) -> some View {
+        HStack {
+            Spacer()
+            Button {
+                speak { await store.retry(api: state.api, m) }
+            } label: {
+                Label(lang.s("chat.retry"), systemImage: "arrow.clockwise")
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.warn)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func regenerate() {
+        speech.stopSpeaking()
+        speak { await store.regenerate(api: state.api) }
+    }
+
+    /// Runs a send and reads the reply aloud when voice replies are on.
+    private func speak(_ run: @escaping () async -> String?) {
+        Task {
+            let reply = await run()
+            if voiceReplies, let reply {
+                let wav = try? await state.api.synthesizeVoice(text: reply)
+                speech.playReply(wav: wav, fallbackText: reply, localeID: voiceLocaleID)
+            }
+        }
     }
 
     /// زر المكالمة الحيّة — يفتح شاشة الصوت (تحكي وساندي ترد بصوتها).
@@ -262,7 +381,7 @@ struct ChatView: View {
         .buttonStyle(.plain)
         // إصلاح (3): مستحيل ترسل رسالة فاضية — الزر معطّل ما لم يوجد نص فعلي.
         .disabled(!canSend)
-        .animation(.easeInOut(duration: 0.2), value: canSend)
+        .animation(Animation.easeInOut(duration: 0.2).reduced, value: canSend)
         .accessibilityLabel(lang.s("chat.send"))
     }
 
@@ -299,13 +418,12 @@ struct ChatView: View {
         input = ""
         speech.stopSpeaking()               // لو عم تقرأ رد قديم، تسكت
 
-        Task {
-            let reply = await store.send(api: state.api, text: text)
-            // ساندي تقرأ ردها بصوت جيميني الحقيقي (لو السمّاعة شغّالة).
-            if voiceReplies, let reply {
-                let wav = try? await state.api.synthesizeVoice(text: reply)
-                speech.playReply(wav: wav, fallbackText: reply, localeID: voiceLocaleID)
-            }
+        // ساندي تقرأ ردها بصوت جيميني الحقيقي (لو السمّاعة شغّالة).
+        if editingLast {
+            editingLast = false
+            speak { await store.editLast(api: state.api, to: text) }
+        } else {
+            speak { await store.send(api: state.api, text: text) }
         }
     }
 
@@ -329,6 +447,7 @@ private enum ChatMetrics {
 private struct ChatBubbleRow: View, Equatable {
     let isUser: Bool
     let text: String
+    var failed = false
 
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
@@ -353,6 +472,72 @@ private struct ChatBubbleRow: View, Equatable {
             .padding(Theme.Spacing.md)
             // فقاعات زجاج سائل — فقاعتك أزرق أوضح، فقاعة ساندي زجاج صافٍ.
             .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: isUser ? 0.28 : 0.06)
+            .overlay {
+                if failed {
+                    RoundedRectangle(cornerRadius: Theme.Radius.bubble, style: .continuous)
+                        .stroke(Theme.Colors.warn, lineWidth: 1.5)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if failed {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundColor(Theme.Colors.warn)
+                        .offset(x: -6, y: 6)
+                        .accessibilityHidden(true)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(LanguageManager.shared.s(isUser ? "a11y.fromYou" : "a11y.fromSandy")
+                                + LanguageManager.shared.s("common.listSeparator") + text)
+            .accessibilityValue(failed ? LanguageManager.shared.s("a11y.failed") : "")
+            .accessibilityHint(LanguageManager.shared.s("a11y.messageHint"))
+    }
+}
+
+/// A message opened so part of it can be picked and copied.
+private struct SelectableMessage: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+private struct SelectTextSheet: View {
+    @EnvironmentObject var lang: LanguageManager
+    @Environment(\.dismiss) private var dismiss
+    let text: String
+
+    var body: some View {
+        NavigationStack {
+            SelectableText(text: text)
+                .padding(Theme.Spacing.md)
+                .navigationTitle(lang.s("chat.selectText"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(lang.s("common.done")) { dismiss() }
+                    }
+                }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// Read-only text where any part can be selected (SwiftUI's own selection takes all of it).
+private struct SelectableText: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.backgroundColor = .clear
+        view.font = UIFont.preferredFont(forTextStyle: .body)
+        view.adjustsFontForContentSizeCategory = true
+        view.textColor = UIColor(Theme.Colors.primaryText)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        view.text = text
     }
 }
 
@@ -574,9 +759,9 @@ private struct TypingIndicator: View {
                         .scaleEffect(animating ? 1.0 : 0.5)
                         .opacity(animating ? 1.0 : 0.4)
                         .animation(
-                            .easeInOut(duration: 0.6)
+                            Animation.easeInOut(duration: 0.6)
                                 .repeatForever(autoreverses: true)
-                                .delay(Double(i) * 0.18),
+                                .delay(Double(i) * 0.18).reduced,
                             value: animating
                         )
                 }
@@ -588,7 +773,7 @@ private struct TypingIndicator: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.25), value: activity)
+            .animation(Animation.easeInOut(duration: 0.25).reduced, value: activity)
             .padding(.vertical, Theme.Spacing.md)
             .padding(.horizontal, Theme.Spacing.md)
             .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: 0.06)

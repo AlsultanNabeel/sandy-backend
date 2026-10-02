@@ -153,3 +153,31 @@ def test_malformed_conversation_id_is_refused(env):
     r = c.post("/api/agent", json={"message": "x", "conversation_id": "{$ne: 1}"},
                headers=_h("u1"))
     assert r.status_code == 404 and calls == []
+
+
+def test_rewind_drops_the_last_reply_and_the_threads_memory_of_it(env, monkeypatch):
+    c, db, _ = env
+    import app.db as appdb
+    from app.brain import stm
+    appdb.configure(db)
+    monkeypatch.setattr(stm, "_stm_index_ready", True)
+    cid = uuid.uuid4().hex
+    for role, text in [("user", "مرحبا"), ("sandy", "أهلين"), ("user", "شو الطقس؟"), ("sandy", "مشمس")]:
+        c.post(f"/api/conversations/{cid}/messages", json={"role": role, "text": text}, headers=_h("u1"))
+    stm.save(cid, "u1", "مرحبا", "أهلين")
+    stm.save(cid, "u1", "شو الطقس؟", "مشمس")
+
+    # Regenerate: the question stays, its answer goes.
+    r = c.post(f"/api/conversations/{cid}/rewind", json={"keep_user": True}, headers=_h("u1"))
+    assert r.get_json()["dropped"] == 1
+    msgs = c.get(f"/api/conversations/{cid}", headers=_h("u1")).get_json()["messages"]
+    assert [m["text"] for m in msgs] == ["مرحبا", "أهلين", "شو الطقس؟"]
+    assert [t["content"] for t in stm.load(cid, "u1")] == ["مرحبا", "أهلين"]
+
+    # Edit: the question goes too.
+    r = c.post(f"/api/conversations/{cid}/rewind", json={}, headers=_h("u1"))
+    msgs = c.get(f"/api/conversations/{cid}", headers=_h("u1")).get_json()["messages"]
+    assert [m["text"] for m in msgs] == ["مرحبا", "أهلين"]
+    # Not someone else's.
+    assert c.post(f"/api/conversations/{cid}/rewind", json={}, headers=_h("u2")).status_code == 404
+    appdb.reset()

@@ -108,8 +108,8 @@ struct NodePairSheet: View {
                     .opacity(trimmedCode.isEmpty ? 0.6 : 1)
                 }
             }
-            .animation(.easeInOut(duration: 0.25), value: notice)
-            .animation(.easeInOut(duration: 0.25), value: askingPresence)
+            .animation(Animation.easeInOut(duration: 0.25).reduced, value: notice)
+            .animation(Animation.easeInOut(duration: 0.25).reduced, value: askingPresence)
         }
         .environment(\.layoutDirection, lang.lang.layoutDirection)
         .onAppear {
@@ -232,7 +232,7 @@ struct NodeRenameSheet: View {
                 .disabled(trimmed.isEmpty)
                 .opacity(trimmed.isEmpty ? 0.6 : 1)
             }
-            .animation(.easeInOut(duration: 0.25), value: notice)
+            .animation(Animation.easeInOut(duration: 0.25).reduced, value: notice)
         }
         .environment(\.layoutDirection, lang.lang.layoutDirection)
     }

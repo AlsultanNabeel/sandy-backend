@@ -102,6 +102,27 @@ struct DayRibbon: View {
             .contextMenu { menu(m) }
             .padding(.vertical, 3)
         }
+        .rowAccessibility(label: label(m, late: late), hint: lang.s("a11y.rowHint"),
+                          open: { onOpen(m.source) }, actions: actions(m))
+    }
+
+    private func label(_ m: RibbonMoment, late: Bool) -> String {
+        var parts = [time(m.date), m.text]
+        if late { parts.append(lang.s("a11y.late")) }
+        if case .task(let item) = m.source, item.priority == "high" { parts.append(lang.s("a11y.important")) }
+        return parts.joined(separator: lang.s("common.listSeparator"))
+    }
+
+    /// The long-press menu, for the screen reader.
+    private func actions(_ m: RibbonMoment) -> [(name: String, run: () -> Void)] {
+        var out: [(name: String, run: () -> Void)] = []
+        if case .reminder(let r) = m.source {
+            out.append((lang.s("a11y.snooze15"), { onSnooze(r, 15) }))
+            out.append((lang.s("a11y.snoozeHour"), { onSnooze(r, 60) }))
+        }
+        if Self.canClose(m.source) { out.append((lang.s("a11y.markDone"), { onDone(m.source) })) }
+        out.append((lang.s("a11y.delete"), { onDelete(m.source) }))
+        return out
     }
 
     /// A repeating reminder has no "done": it comes back on its own.
@@ -144,6 +165,8 @@ struct DayRibbon: View {
                 .frame(height: 2)
         }
         .padding(.vertical, 6)
+        // «هلأ», read once; the pulse and its line are decoration.
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -159,7 +182,7 @@ private struct NowPulse: View {
         }
         .frame(height: 22)
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { on = true }
+            withAnimation(Animation.easeInOut(duration: 1.4).repeatForever(autoreverses: true).reduced) { on = true }
         }
     }
 }
@@ -187,7 +210,7 @@ struct HabitRing: View {
                         .foregroundColor(checked ? Theme.Colors.success : Theme.Colors.secondaryText)
                 }
                 .frame(width: 54, height: 54)
-                .animation(.spring(response: 0.6, dampingFraction: 0.7), value: checked)
+                .animation(Animation.spring(response: 0.6, dampingFraction: 0.7).reduced, value: checked)
                 Text(title)
                     .font(Theme.Typography.caption)
                     .foregroundColor(checked ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
@@ -200,5 +223,12 @@ struct HabitRing: View {
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.success, trigger: checked) { _, now in now }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(streak > 1 ? title + LanguageManager.shared.s("common.listSeparator")
+            + String(format: LanguageManager.shared.s("a11y.streak"), AppLocale.number(streak)) : title)
+        .accessibilityValue(LanguageManager.shared.s(checked ? "a11y.keptToday" : "a11y.notKeptToday"))
+        .accessibilityHint(LanguageManager.shared.s("a11y.habitHint"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default, action)
     }
 }

@@ -34,6 +34,7 @@ class LoadableStore: ObservableObject {
 
     func notify(_ key: String) {
         notice = LanguageManager.shared.s(key)
+        Announce.say(notice)
     }
 
     func clearNotice() { notice = "" }

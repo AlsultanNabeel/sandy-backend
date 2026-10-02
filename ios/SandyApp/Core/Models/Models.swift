@@ -5,6 +5,8 @@ struct ChatMessage: Identifiable {
     let role: String   // "user" | "sandy"
     // var: streaming updates the bubble's text in place.
     var text: String
+    /// A line of the user's that did not go through; its bubble offers «أعد المحاولة».
+    var failed = false
 }
 
 // ── سجل المحادثات — /api/conversations ──

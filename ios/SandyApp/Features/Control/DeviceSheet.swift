@@ -116,9 +116,9 @@ struct DeviceSheet: View {
                 .disabled(!canSave)
                 .opacity(canSave ? 1 : 0.6)
             }
-            .animation(.easeInOut(duration: 0.25), value: notice)
-            .animation(.easeInOut(duration: 0.2), value: controlType)
-            .animation(.easeInOut(duration: 0.2), value: transportKind)
+            .animation(Animation.easeInOut(duration: 0.25).reduced, value: notice)
+            .animation(Animation.easeInOut(duration: 0.2).reduced, value: controlType)
+            .animation(Animation.easeInOut(duration: 0.2).reduced, value: transportKind)
         }
         .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
@@ -229,6 +229,7 @@ struct DeviceSheet: View {
                             irButtons.removeValue(forKey: name)
                         } label: {
                             Image(systemName: "trash")
+                                .accessibilityLabel(LanguageManager.shared.s("a11y.removeButton"))
                                 .foregroundColor(Theme.Colors.danger)
                         }
                         .buttonStyle(.plain)
@@ -250,6 +251,7 @@ struct DeviceSheet: View {
                         addButton()
                     } label: {
                         Image(systemName: "plus.circle.fill")
+                            .accessibilityLabel(LanguageManager.shared.s("a11y.add"))
                             .font(.title3)
                             .foregroundColor(Theme.Colors.accent)
                     }

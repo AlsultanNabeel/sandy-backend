@@ -100,6 +100,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nSandy.ns:      L10nSandy.table,
     L10nAuth.ns:       L10nAuth.table,
     L10nPermissions.ns: L10nPermissions.table,
+    L10nA11y.ns:       L10nA11y.table,
     L10nAccount.ns:    L10nAccount.table,
     L10nOnboarding.ns: L10nOnboarding.table,
     L10nNudge.ns:      L10nNudge.table,
@@ -228,7 +229,7 @@ struct LanguageToggle: View {
             RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
                 .stroke(Theme.Colors.border, lineWidth: 1)
         )
-        .animation(.easeInOut(duration: 0.2), value: lang.lang)
+        .animation(Animation.easeInOut(duration: 0.2).reduced, value: lang.lang)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(lang.s("common.language"))
     }

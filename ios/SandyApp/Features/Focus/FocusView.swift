@@ -108,7 +108,7 @@ private struct TimerSection: View {
                                            startPoint: .top, endPoint: .bottom),
                             style: StrokeStyle(lineWidth: 10, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 0.5), value: progress)
+                        .animation(Animation.linear(duration: 0.5).reduced, value: progress)
                     VStack(spacing: Theme.Spacing.xs) {
                         Text(clock(status.remainingSec))
                             .scaledFont(40, weight: .bold, design: .rounded, relativeTo: .largeTitle)

@@ -37,8 +37,8 @@ struct AskBar: View {
                 suggestions.transition(.opacity)
             }
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: reply)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: thinking)
+        .animation(Animation.spring(response: 0.45, dampingFraction: 0.85).reduced, value: reply)
+        .animation(Animation.spring(response: 0.45, dampingFraction: 0.85).reduced, value: thinking)
         .onChange(of: focusRequests.request) { focused = true }
         .onAppear { glow = true }
     }
@@ -69,6 +69,7 @@ struct AskBar: View {
             } else {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill")
+                        .accessibilityLabel(LanguageManager.shared.s("a11y.send"))
                         .scaledFont(28, relativeTo: .largeTitle)
                         .foregroundColor(Theme.Colors.accent)
                 }
@@ -85,7 +86,7 @@ struct AskBar: View {
                     colors: [Theme.Colors.accent, Theme.Colors.accentDeep.opacity(0.1),
                              Theme.Colors.success.opacity(0.6), Theme.Colors.accent],
                     center: .center, angle: .degrees(glow ? 360 : 0)), lineWidth: 1.5)
-                .animation(.linear(duration: 6).repeatForever(autoreverses: false), value: glow)
+                .animation(Animation.linear(duration: 6).repeatForever(autoreverses: false).reduced, value: glow)
         )
         .shadow(color: Theme.Colors.accent.opacity(focused ? 0.35 : 0.15), radius: 16)
     }
@@ -134,6 +135,7 @@ struct AskBar: View {
             if !thinking {
                 Button { reply = "" } label: {
                     Image(systemName: "xmark").font(.caption).foregroundColor(Theme.Colors.tertiaryText)
+                        .accessibilityLabel(LanguageManager.shared.s("a11y.dismissReply"))
                 }
             }
         }
@@ -157,8 +159,10 @@ struct AskBar: View {
                     reply = partial
                 }
                 reply = out.reply
+                Announce.say(String(format: lang.s("a11y.replyArrived"), reply))
             } catch {
                 reply = lang.s("today.askFailed")
+                Announce.say(reply)
             }
             thinking = false
             activity = ""

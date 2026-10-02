@@ -11,6 +11,7 @@ enum L10nCommon {
         ar: [
             "demoData": .text("بيانات تجريبية"),
             "listSeparator": .text("، "),
+            "sandy": .text("ساندي"),
             "add":     .text("إضافة"),
             "cancel":  .text("إلغاء"),
             "save":    .text("حفظ"),
@@ -27,6 +28,7 @@ enum L10nCommon {
         en: [
             "demoData": .text("Demo data"),
             "listSeparator": .text(", "),
+            "sandy": .text("Sandy"),
             "add":     .text("Add"),
             "cancel":  .text("Cancel"),
             "save":    .text("Save"),

@@ -119,8 +119,14 @@ struct LifeHeader: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             Haptics.play(.selection)
-                            withAnimation(.spring(response: 0.35)) { day = picked ? nil : date }
+                            withAnimation(Animation.spring(response: 0.35).reduced) { day = picked ? nil : date }
                         }
+                        .accessibilityElement()
+                        .accessibilityLabel(String(format: lang.s("a11y.dayStrip"),
+                            date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted)
+                                .locale(AppLocale.current)), AppLocale.number(n)))
+                        .accessibilityHint(lang.s("a11y.dayStripHint"))
+                        .accessibilityAddTraits(picked ? [.isButton, .isSelected] : .isButton)
                 }
             }
             .frame(height: 30)
@@ -217,7 +223,7 @@ struct LivelyEmptyState: View {
         VStack(spacing: Theme.Spacing.md) {
             SandyAvatar(size: 64, mood: mood)
                 .offset(y: bob ? -6 : 0)
-                .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true), value: bob)
+                .animation(Animation.easeInOut(duration: 2.2).repeatForever(autoreverses: true).reduced, value: bob)
             Text(line)
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)

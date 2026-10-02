@@ -46,7 +46,7 @@ struct RobotLiveSection: View {
                     .padding(.vertical, Theme.Spacing.lg)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: store.live)
+        .animation(Animation.easeInOut(duration: 0.3).reduced, value: store.live)
     }
 
     // MARK: البطل — الوجه + الحالة
@@ -56,7 +56,7 @@ struct RobotLiveSection: View {
             SandyRobot(size: 110, animated: node.online, mood: store.displayMood)
                 .opacity(node.online ? 1 : 0.45)
                 .saturation(node.online ? 1 : 0)
-                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: store.displayMood)
+                .animation(Animation.spring(response: 0.4, dampingFraction: 0.75).reduced, value: store.displayMood)
                 .padding(.top, Theme.Spacing.xs)
 
             Text(node.label)

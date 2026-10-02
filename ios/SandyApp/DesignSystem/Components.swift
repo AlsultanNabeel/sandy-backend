@@ -130,6 +130,7 @@ struct SandyPopup<Content: View>: View {
                     Spacer(minLength: Theme.Spacing.md)
                     Button { dismiss() } label: {
                         Image(systemName: "xmark.circle.fill")
+                            .accessibilityLabel(LanguageManager.shared.s("a11y.close"))
                             .font(.title3)
                             .foregroundColor(Theme.Colors.secondaryText)
                     }
@@ -229,7 +230,8 @@ struct SandyAvatar: View {
                    happy: mood == .happy,
                    animated: true)
             .frame(width: size, height: size)
-            .accessibilityLabel("ساندي")
+            // Her face is decoration; the button or message around it says what it is.
+            .accessibilityHidden(true)
     }
 }
 
