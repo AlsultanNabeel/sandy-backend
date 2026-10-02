@@ -107,7 +107,7 @@ def test_fast_path_still_wins_with_no_model_call(brain_db, monkeypatch):  # noqa
 
 def test_fast_path_steps_aside_while_a_confirmation_is_held(brain_db):  # noqa: F811
     from app.brain import confirm
-    held = confirm.hold("list_update", {"id": "x", "delete": True}, "تحذف «x»")
+    held = confirm.hold([{"tool": "list_update", "args": {"id": "x", "delete": True}, "summary": "تحذف «x»"}])
     model = ScriptedModel(text_reply("تمام"))
     state = _turn(model, "لا", pending=held)
     assert state["final_response"] == confirm.CANCELLED_REPLY and model.seen == []

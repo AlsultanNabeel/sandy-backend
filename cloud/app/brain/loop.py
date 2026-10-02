@@ -12,7 +12,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.blocks import _base as blocks_base
 from app.brain import confirm, context, future, model, stm, stops, tools
@@ -38,10 +38,19 @@ def _assistant_msg(reply: model.Reply) -> Dict[str, Any]:
         for c in reply.tool_calls]}
 
 
+# What the model reads for a held call: the system asks, the model goes on with the rest.
+HELD_NOTE = ("مستنّي تأكيده؛ النظام بيسأله بآخر الرد. ما تسأليه انتِ وما تعيدي هالأداة، "
+             "وكمّلي باقي طلبه إذا في.")
+
+
 def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
               complete: Callable, stopped: Callable[[], bool] = lambda: False) -> Dict[str, Any]:
     """{"text", "pending", "tools"} after at most MAX_STEPS model calls. Once the app
-    stops the reply (`stopped`), no further tool or model call runs."""
+    stops the reply (`stopped`), no further tool or model call runs.
+
+    A delete that waits for a yes does not end the turn: the rest of the request still
+    runs, every held action joins one question, and the reply is what was done plus
+    that question, both deterministic, so the model cannot talk past either."""
     hooks = model.stream_hooks()
     on_text = None
     if hooks:
@@ -49,18 +58,23 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
         on_text = hooks[1]
     used: List[str] = []
     replies: List[str] = []
+    held: Optional[Dict[str, Any]] = None
     specs = tools.openai_tools()
     on_step = model.step_hook()
     for step in range(MAX_STEPS):
         if step and stopped():
             return {"text": "\n".join(replies), "pending": None, "tools": used, "stopped": True}
-        reply = complete(messages, specs, on_text=on_text)
+        # Once something is held the reply is ours, so nothing of the model's is streamed.
+        reply = complete(messages, specs, on_text=None if held else on_text)
         if reply is None:
+            if held is not None:
+                return _settled(replies, held, used)
             return {"text": ERROR_REPLY, "pending": None, "tools": used, "error": True}
         if not reply.tool_calls:
+            if held is not None:
+                return _settled(replies, held, used)
             return {"text": reply.text or GAVE_UP_REPLY, "pending": None, "tools": used}
         messages.append(_assistant_msg(reply))
-        pending = None
         for call in reply.tool_calls:
             if stopped():
                 return {"text": "\n".join(replies), "pending": None, "tools": used, "stopped": True}
@@ -68,33 +82,40 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
             if on_step:
                 on_step(call.name)
             result = tools.execute(call.name, call.args, ctx)
-            if pending is None:
-                pending = _hold_if_asked(call.name, call.args, result)
-            if result.get("reply"):
+            held, waiting = _hold(held, call.name, call.args, result)
+            if waiting:
+                result = {"ok": False, "held": True, "note": HELD_NOTE}
+            elif result.get("reply"):
                 replies.append(result["reply"])
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": _for_model(result)})
-        if pending is not None:
-            # Deterministic question, no second call: the model cannot talk past it.
-            return {"text": _ask(pending), "pending": pending, "tools": used}
     logger.warning("[brain] step cap (%d) reached; tools=%s", MAX_STEPS, used)
-    return {"text": "\n".join(replies) or GAVE_UP_REPLY, "pending": None, "tools": used}
+    return _settled(replies, held, used)
 
 
-def _hold_if_asked(name: str, args: Dict[str, Any],
-                   result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """A pending when the tool is waiting on the user (a yes, or which one), else None."""
-    if result.get("needs_confirmation"):
-        return confirm.hold(name, args, result["summary"])
-    if result.get("needs_choice"):
-        return confirm.hold_choice(name, args, result["candidates"])
-    return None
+def _hold(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
+          result: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """(the turn's pending, whether this call joined it). Every action waiting for a yes
+    joins one question; a «which one?» is held only when nothing else is."""
+    if result.get("needs_confirmation") and (held is None or held.get("action") != confirm.CHOOSE):
+        return confirm.with_step(held, name, args, result["summary"]), True
+    if result.get("needs_choice") and held is None:
+        return confirm.hold_choice(name, args, result["candidates"]), True
+    return held, False
 
 
 def _ask(pending: Dict[str, Any]) -> str:
     if pending.get("action") == confirm.CHOOSE:
         return confirm.choice_question(pending["candidates"])
     return confirm.question(pending["summary"])
+
+
+def _settled(replies: List[str], held: Optional[Dict[str, Any]],
+             used: List[str]) -> Dict[str, Any]:
+    """What was done, then the question when something waits for the user."""
+    if held is None:
+        return {"text": "\n".join(replies) or GAVE_UP_REPLY, "pending": None, "tools": used}
+    return {"text": "\n".join([*replies, _ask(held)]), "pending": held, "tools": used}
 
 
 def _resolve_choice(pending: Dict[str, Any], message: str,
@@ -104,33 +125,43 @@ def _resolve_choice(pending: Dict[str, Any], message: str,
     ids = confirm.pick(message, pending.get("candidates") or [])
     if ids is None:
         return None
-    args = {k: v for k, v in (pending.get("args") or {}).items() if k != "match_text"}
-    if len(ids) == 1:
-        args["id"] = ids[0]
-    else:
-        args["match_text"] = (pending.get("args") or {}).get("match_text", "")
-        args["all_matching"] = True
     name = pending.get("tool", "")
-    result = tools.execute(name, args, ctx)
-    held = _hold_if_asked(name, args, result)
-    if held is not None:
-        return {"text": _ask(held), "pending": held, "tools": [name]}
-    return {"text": result.get("reply") or GAVE_UP_REPLY, "pending": None, "tools": [name]}
+    base = {k: v for k, v in (pending.get("args") or {}).items()
+            if k not in ("match_text", "all_matching")}
+    held, replies = None, []
+    for row_id in ids:
+        args = {**base, "id": row_id}
+        result = tools.execute(name, args, ctx)
+        held, waiting = _hold(held, name, args, result)
+        if not waiting and result.get("reply"):
+            replies.append(result["reply"])
+    return _settled(replies, held, [name])
 
 
 def _resolve_pending(pending: Dict[str, Any], message: str,
                      ctx: TurnCtx) -> Optional[Dict[str, Any]]:
-    """The turn's outcome when the message answers a held action, else None."""
+    """The turn's outcome when the message answers a held action, else None. When a new
+    request follows the answer («اه وضيفي خبز»), `rest` tells the model what the answer
+    already settled, and the model does the rest."""
     if pending.get("action") == confirm.CHOOSE:
         return _resolve_choice(pending, message, ctx)
-    said = confirm.answer(message)
+    said, rest = confirm.read(message, pending)
+    if said == "other":
+        return None
+    summary = pending.get("summary", "")
+    used = [s.get("tool", "") for s in pending.get("steps") or []]
     if said == "no":
-        return {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
-    if said == "yes":
+        outcome = {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
+        settled = f"قال لأ على «{summary}»، فما انعمل"
+    else:
         result = confirm.run_held(pending, ctx)
         text = result.get("reply") or ("تم ✅" if result.get("ok") else GAVE_UP_REPLY)
-        return {"text": text, "pending": None, "tools": [pending.get("tool", "")]}
-    return None
+        outcome = {"text": text, "pending": None, "tools": used}
+        settled = f"قال اه على «{summary}»، والنتيجة: {text}"
+    if rest:
+        outcome["rest"] = (f"[جوابه على سؤال التأكيد انحسب: {settled}. نفّذي بس الباقي من "
+                           "رسالته، وما تعيدي هالإشي ولا تحكي عنه.]")
+    return outcome
 
 
 def _fast(message: str, ctx: TurnCtx, image_state) -> Optional[Dict[str, Any]]:
@@ -192,9 +223,22 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     # Everything the turn writes is journaled, a confirmed «yes» included, so a rewritten
     # or edited reply can take it all back.
     with blocks_base.journal() as effects:
-        outcome = _resolve_pending(held, message, ctx) if held else None
-        outcome = _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete,
-                          attachments, began)
+        resolved = _resolve_pending(held, message, ctx) if held else None
+        settled = resolved if resolved is not None and resolved.get("rest") else None
+        outcome = _answer(None if settled else resolved, message, ctx, image_state, user_id,
+                          thread_id, history, complete, attachments, began,
+                          note=settled["rest"] if settled else "")
+        if settled:
+            # A «no» says nothing of its own here: the model's reply is the answer.
+            first = settled["text"] if settled["tools"] else ""
+            outcome = {**outcome, "text": "\n".join(t for t in (first, outcome["text"]) if t),
+                       "tools": settled["tools"] + outcome["tools"]}
+        elif (held and resolved is None and outcome["pending"] is None
+              and not outcome.get("error") and not outcome.get("stopped")):
+            # Neither yes nor no: the message was answered, and the question is asked once more.
+            again = confirm.asked_again(held)
+            if again is not None:
+                outcome = {**outcome, "text": f"{outcome['text']}\n{_ask(again)}", "pending": again}
 
     text = outcome["text"]
     # Stopped from the app: memory keeps what was shown, marked as cut.
@@ -220,15 +264,18 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
 
 
 def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete,
-            attachments=(), began=None):
+            attachments=(), began=None, note=""):
     """The held confirmation's outcome, else the fast path's, else the model loop's.
-    A line with attachments always goes to the model: only it can look at them."""
-    if outcome is None and not attachments:
+    A line with attachments, or with `note` (what an answer already settled), always goes
+    to the model."""
+    if outcome is None and not attachments and not note:
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
         due = None
         try:
             system = context.build_system(user_id, message, history, spoken=ctx.source == "voice")
+            if note:
+                system += "\n\n" + note
             due = future.due_context()
             if due:
                 system += "\n\n" + due[0]

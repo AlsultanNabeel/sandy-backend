@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from brain_fakes import A, ScriptedModel, brain_db, call, tools_reply  # noqa: F401
+from brain_fakes import A, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
 from app.blocks import entries, items
 from app.brain import confirm, loop, tools
@@ -87,7 +87,7 @@ def test_ambiguous_delete_asks_which_one(two_milks):
     state = _turn(model, "احذفي مهمة الحليب")
     assert state["pending_state"]["action"] == confirm.CHOOSE
     assert "١. أشتري حليب" in state["final_response"]
-    assert len(model.seen) == 1
+    assert len(model.seen) == 2  # the rest of the request still runs, then the question
 
 
 def test_first_then_yes_deletes_only_that_one(two_milks):
@@ -109,13 +109,24 @@ def test_pick_reads_numbers_ordinals_and_all(said, count):
     assert len(confirm.pick(said, cands)) == count
 
 
-def test_a_new_request_instead_of_a_choice_drops_the_question(two_milks):
+def test_a_new_request_instead_of_a_choice_is_answered_and_asked_once_more(two_milks):
     asked = _turn(ScriptedModel(tools_reply(call("list_update", list="tasks",
                                                  match_text="حليب", delete=True))),
                   "احذفي مهمة الحليب")
-    model = ScriptedModel()
+    model = ScriptedModel(text_reply("مشمس"))
     state = _turn(model, "شو الطقس اليوم؟", asked["pending_state"])
-    assert state["pending_state"] is None and len(model.seen) == 1
+    assert len(model.seen) == 1 and state["final_response"].startswith("مشمس\nلقيت أكتر من وحدة")
+    again = _turn(ScriptedModel(text_reply("تمام")), "احكيلي نكتة", state["pending_state"])
+    assert again["pending_state"] is None and again["final_response"] == "تمام"
+
+
+@pytest.mark.parametrize("said,count", [("الأولى والتالتة", 2), ("اتنين", 1), ("الاتنين", 3),
+                                        ("١ و٣", 2)])
+def test_pick_reads_several_and_a_bare_number_is_that_one(said, count):
+    cands = [{"id": "a", "text": "حليب"}, {"id": "b", "text": "حليب"}, {"id": "c", "text": "حليب"}]
+    assert len(confirm.pick(said, cands)) == count
+    if said == "اتنين":
+        assert confirm.pick(said, cands) == ["b"]
 
 
 # Second live test: the model sent kind="tasks" (a list) and got nothing back.

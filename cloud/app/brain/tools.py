@@ -62,6 +62,11 @@ def _schemas() -> List[Dict[str, Any]]:
                              "done": {"type": "boolean"}, "text": _S, "due": _S,
                              "qty": {"type": "number", "description": "الكمية اللي ضايلة (لو اشترى جزء بس)"},
                              "delete": {"type": "boolean"}}, [])},
+        {"name": "log_update",
+         "description": "صحّحي أو احذفي إشي بالسجلّ (مصروف، معلومة عنه...)؛ خدي الـ id من «سجّل اليوم» أو «معلومات بتعرفيها»، والنص بس لو مش ظاهر. بلا id ولا نص: آخر واحد من النوع.",
+         "parameters": _obj({**target, "kind": {**_S, "description": "نوع السجلّ (اختياري)"},
+                             "text": _S, "amount": {"type": "number"}, "data": data,
+                             "delete": {"type": "boolean"}}, [])},
         {"name": "schedule", "description": "تذكير أو إشي بصير بوقت محدّد.",
          "parameters": _obj({"kind": _enum(SCHEDULE, "النوع"), "text": _S,
                              "in_minutes": {**_I, "description": "لوقت نسبي: بعد قديش دقيقة من هلأ («بعد نص ساعة» = 30، «شوي» = 15)"},
@@ -82,6 +87,9 @@ def _schemas() -> List[Dict[str, Any]]:
          "parameters": _obj({"device": _S, "action": _S, "value": _S}, ["device", "action"])},
         {"name": "scene_apply", "description": "طبّقي مشهد غرفة بأمر صريح فقط.",
          "parameters": _obj({"name": _S}, ["name"])},
+        {"name": "room_restore",
+         "description": "رجّعي أجهزة الغرفة زي ما كانت قبل آخر مشهد.",
+         "parameters": _obj({}, [])},
         {"name": "web_search", "description": "ابحثي بالويب عن أخبار أو معلومة بتتغيّر.",
          "parameters": _obj({"query": _S}, ["query"])},
         {"name": "weather", "description": "الطقس لمدينة.",
@@ -89,7 +97,7 @@ def _schemas() -> List[Dict[str, Any]]:
         {"name": "image", "description": "ولّدي صورة من وصف.",
          "parameters": _obj({"prompt": _S}, ["prompt"])},
         {"name": "undo_last",
-         "description": "ارجعي عن كل اللي عملتيه بردّك اللي قبل (اللي ضفتيه بينشال، اللي عدّلتيه أو حذفتيه بيرجع).",
+         "description": "ارجعي عن كل اللي عملتيه بردّك اللي قبل: اللي ضفتيه بينشال، واللي عدّلتيه أو حذفتيه أو لغيتيه بيرجع (الأجهزة لأ).",
          "parameters": _obj({}, [])},
     ]
 
@@ -100,7 +108,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "schedule": B.schedule, "schedule_update": B.schedule_update,
     "device_control": X.device_control, "scene_apply": X.scene_apply,
     "web_search": X.web_search, "weather": X.weather, "image": X.image,
-    "undo_last": B.undo_last,
+    "undo_last": B.undo_last, "log_update": B.log_update, "room_restore": X.room_restore,
 }
 
 

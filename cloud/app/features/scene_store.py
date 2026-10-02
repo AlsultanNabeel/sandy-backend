@@ -259,6 +259,9 @@ def apply_scene(name: str) -> Dict[str, Any]:
                     now + timedelta(minutes=a["for_min"]),
                     {"device": a["device"], "value": a["then"]}):
                 timers += 1
+    from app.features.device_store import keep_before_scene
+
+    keep_before_scene([str(a.get("device") or "") for a in sc["actions"]])
     sent, missed = _actuate(sc["actions"])
 
     return {
@@ -270,6 +273,21 @@ def apply_scene(name: str) -> Dict[str, Any]:
         "missed": missed,
         "actions": sc["actions"],
     }
+
+
+def restore_room() -> Dict[str, Any]:
+    """Puts the devices the last scene changed back as they were, and drops its timers."""
+    from app.features.device_store import take_before_scene
+
+    actions = take_before_scene()
+    if not actions:
+        return {"ok": False, "error": "nothing_kept"}
+    pending = _base.coll(_base.SCHEDULES)
+    if pending is not None:
+        pending.update_many({"kind": "scene", "status": "pending"},
+                            {"$set": {"status": "cancelled"}})
+    sent, missed = _actuate(actions)
+    return {"ok": True, "sent": sent, "missed": missed}
 
 
 def _actuate(actions: List[Dict[str, Any]]) -> tuple:

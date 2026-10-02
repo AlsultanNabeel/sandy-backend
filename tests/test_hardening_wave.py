@@ -15,13 +15,13 @@ from app.features.device_store import _valid_transport
 
 def test_confirmations_recognized():
     for t in ["اه", "آه", "أه", "اه صح", "اه احذفها", "اه 👍", "تمام", "نعم",
-              "ايوه", "احذفها", "ok", "okay", "تمام يلا"]:
+              "ايوه", "احذفها", "ok", "okay", "تمام يلا", "تمام لا مشكلة"]:
         assert answer(t) == "yes", t
 
 
 def test_cancellations_recognized_and_win_mixed():
     for t in ["لا", "لأ", "مش هلأ", "الغي", "خلص", "no", "cancel", "لا تحذف",
-              "اه بس لا", "تمام لا مشكلة"]:
+              "اه بس لا"]:
         assert answer(t) == "no", t
 
 

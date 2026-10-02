@@ -126,9 +126,51 @@ def undo_last(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if not effects:
         return refused("nothing to undo: the last reply changed nothing in the lists, log or reminders")
     undone = _base.undo(effects)
-    names = [e.get("text") for e in effects if e.get("text")]
+    names = [decrypt_field(e["text"]) for e in effects if e.get("text")]
     return {"ok": bool(undone), "undone": undone, "items": names,
             "reply": "رجّعت عنه ✅ " + "، ".join(f"«{n}»" for n in names[:3])}
+
+
+def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """«لا قصدي أربعين مش خمسين»، «احذفي هالمصروف»، «نقلت بيت جديد»، «انسي إني بحب القهوة»:
+    a log row is changed or deleted, not logged again. With no id and no text, the newest
+    row of the kind. Encrypted rows are sealed again and never embedded."""
+    kind = str(args.get("kind") or "").strip() or None
+    pool = [_entry_row(e) for e in entries.list_entries(kind, exclude=("summary",), limit=MAX_ROWS * 2)]
+    if args.get("id") or args.get("match_text"):
+        picked = _pick(args, pool, lambda i: _entry_row(e) if (e := entries.get(i)) else None)
+    else:
+        picked = {"rows": pool[:1]} if pool else refused("nothing logged to change")
+    if "rows" not in picked:
+        return picked
+    rows = picked["rows"]
+    delete = bool(args.get("delete"))
+    if (delete or len(rows) > 1) and not ctx.confirmed:
+        verb = "تحذف" if delete else "تعدّل"
+        return needs_confirmation(f"{verb} {_names(rows)}")
+    amount = args.get("amount")
+    for r in rows:
+        if delete:
+            entries.delete(r["id"])
+            continue
+        current = entries.get(r["id"]) or {}
+        data = dict(current.get("data") or {})
+        extra = args.get("data") if isinstance(args.get("data"), dict) else {}
+        if extra or (isinstance(amount, (int, float)) and not isinstance(amount, bool)):
+            data.update(extra)
+            if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+                data["amount"] = amount
+        else:
+            data = None
+        text, embed = args.get("text"), True
+        if text is not None and (current.get("data") or {}).get("encrypted"):
+            text, embed = encrypt_field(str(text)), False
+        try:
+            entries.update(r["id"], text=text, data=data, embed=embed)
+        except KindError as exc:
+            return refused(str(exc))
+    verb = "حذفت" if delete else "عدّلت"
+    return {"ok": True, "changed": len(rows), "reply": f"{verb} {_names(rows)} ✅"}
 
 
 def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:

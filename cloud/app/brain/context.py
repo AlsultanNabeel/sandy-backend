@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
@@ -12,7 +12,7 @@ from pymongo.errors import PyMongoError
 from app.brain.persona import build_effective_persona
 from app.utils.ltm_crypto import decrypt_field
 from app.blocks import _base, entries, habits
-from app.blocks.kinds import LIST, get_kind
+from app.blocks.kinds import LIST, LOG, get_kind
 from app.utils.time import USER_TZ
 from app.utils.time_awareness import time_awareness_block
 from app.utils.user_profiles import address_instruction
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 MAX_FACTS = 30
 STATE_ROWS = 15
 TOP_ENTRIES = 8
+# Log kinds the state block leaves out: facts have their own block, the rest are not edited by hand.
+_NOT_SHOWN = ("fact", "summary", "habit", "mood")
 # Atlas vector index on sandy_entries.embedding (filters: user_id, kind); see ARCHITECTURE_MAP.
 VECTOR_INDEX = "entries_vector"
 # Messages of the conversation the model sees (twelve exchanges).
@@ -48,8 +50,11 @@ _RULES = """
 - «لا خلص احذفيه»، «غلط»، «ارجعي عنه»، «مش هيك» عن إشي عملتيه بردّك اللي قبل → undo_last،
   ولا تقولي «ماشي» بدون ما تنفّذي. لو بدّه يعدّله بس (مش يلغيه) → list_update / schedule_update بالـ id.
 - معلومة ثابتة عنه → remember kind=fact. شعور قوي → remember kind=mood مرة وحدة بالدور.
+- تصحيح لإشي بالسجلّ («لا قصدي أربعين مش خمسين») أو «احذفي هالمصروف» → log_update بالـ id من
+  «سجّل اليوم». معلومة عنه تغيّرت («نقلت بيت جديد») → log_update للمعلومة القديمة بالنص الجديد، مش
+  remember جديد. «انسي إني…» → log_update delete للمعلومة.
+- «رجّعي الغرفة زي ما كانت» بعد مشهد → room_restore.
 - سؤال عن محفوظ مش ظاهر تحت (مصاريف، سجل قديم، محادثات سابقة) → recall. «لخّصيلي» → summarize.
-- لو أداة رجعت needs_confirmation، اسألي سؤال التأكيد بجملة وحدة.
 - ردّك قصير وطبيعي، بدون JSON وبدون أرقام تعريف.
 """
 
@@ -100,10 +105,10 @@ def facts_block(limit: int = MAX_FACTS) -> str:
         if len(key.split()) < 2 or key in seen:
             continue
         seen.add(key)
-        lines.append(f"- {text}")
+        lines.append(f"- {text} #{e['id']}")
         if len(lines) == limit:
             break
-    return "معلومات بتعرفيها عنه:\n" + "\n".join(lines) if lines else ""
+    return "معلومات بتعرفيها عنه (استعملي الـ id لما تتغيّر أو تنحذف):\n" + "\n".join(lines) if lines else ""
 
 
 def _when(value: Any) -> str:
@@ -136,6 +141,9 @@ def state_block(rows: int = STATE_ROWS) -> str:
         parts.append("التذكيرات الجاية:\n" + "\n".join(
             f"- {s.get('text', '')} ({_when(s.get('fire_at'))}"
             f"{', بتتكرر' if s.get('recurrence') else ''}) #{s['id']}" for s in upcoming))
+    logged = _logged_today(rows)
+    if logged:
+        parts.append("سجّل اليوم:\n" + "\n".join(logged))
     if any(p.startswith("قائمة العادات") for p in parts):
         # The same numbers the app shows («كم يوم التزمت؟»), from one place.
         h = habits.progress()
@@ -144,6 +152,21 @@ def state_block(rows: int = STATE_ROWS) -> str:
     if not parts:
         return "وضعه هلأ: ما عنده مهام مفتوحة ولا تذكيرات جاية."
     return "وضعه هلأ (استعملي الـ id لما تعدّلي):\n" + "\n\n".join(parts)
+
+
+def _logged_today(rows: int) -> List[str]:
+    """Today's log lines with ids, so «لا قصدي أربعين» or «احذفي هالمصروف» lands on the row."""
+    start = datetime.now(USER_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    lines = []
+    for e in entries.list_entries(since=start, exclude=_NOT_SHOWN, limit=rows):
+        text = _plain(e)
+        if not text:
+            continue
+        row = get_kind(LOG, e.get("kind") or "")
+        amount = (e.get("data") or {}).get("amount")
+        lines.append(f"- {row.ar if row else e.get('kind')}: {text}"
+                     f"{f' ({amount:g})' if isinstance(amount, (int, float)) else ''} #{e['id']}")
+    return lines
 
 
 def _words(message: str) -> List[str]:

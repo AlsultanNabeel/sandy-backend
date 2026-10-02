@@ -57,15 +57,22 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
     held = confirm.live(P.load(VOICE_THREAD, chat_id, db))
     if held is None:
         return {"handled": True, "reply": "ما في إشي مستني تأكيد."}
-    said = confirm.answer(answer)
+    said, rest = confirm.read(answer, held)
     if said == "other":
-        # The held action stays alive, so this is an ask, not a refusal (C10).
+        # Asked once more, as in chat; a second unclear answer lets it go (C10: say so).
+        again = confirm.asked_again(held)
+        P.save(VOICE_THREAD, chat_id, db, again)
+        if again is None:
+            return {"handled": True, "ok": False,
+                    "reply": f"[لم يُنفَّذ] ما فهمت جوابه مرتين، فما عملت: {held['summary']}."}
         return {"handled": True,
                 "reply": f"ما فهمت اه ولا لأ — اسأليه مرة تانية: {confirm.question(held['summary'])}"}
     P.save(VOICE_THREAD, chat_id, db, None)
-    if said == "no":
-        return {"handled": True, "reply": confirm.CANCELLED_REPLY}
-    return _tagged(confirm.run_held(held, TurnCtx(user_id=chat_id, source="voice")))
+    out = ({"handled": True, "reply": confirm.CANCELLED_REPLY} if said == "no"
+           else _tagged(confirm.run_held(held, TurnCtx(user_id=chat_id, source="voice"))))
+    if rest:
+        out["reply"] += "\nقال كمان إشي بعد جوابه: نفّذيه هلأ."
+    return out
 
 
 def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
@@ -74,10 +81,13 @@ def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
         return _answer_held(str((args or {}).get("answer") or ""), chat_id)
     result = tools.execute(name, args or {}, TurnCtx(user_id=chat_id, source="voice"))
     if result.get("needs_confirmation"):
-        held = confirm.hold(name, args or {}, result["summary"])
-        P.save(VOICE_THREAD, chat_id, get_db(), held)
+        db = get_db()
+        # Two deletes in one breath wait as one: the question names both, one yes runs both.
+        held = confirm.with_step(confirm.live(P.load(VOICE_THREAD, chat_id, db)),
+                                 name, args or {}, result["summary"])
+        P.save(VOICE_THREAD, chat_id, db, held)
         logger.info("[voice_ws] brain %s is waiting for a confirmation", name)
         # Not done yet and not refused: the pending is live (C10).
         return {"handled": True,
-                "reply": f"لسا ما نفّذت — اسأليه: {confirm.question(result['summary'])}"}
+                "reply": f"لسا ما نفّذت — اسأليه: {confirm.question(held['summary'])}"}
     return _tagged(result)

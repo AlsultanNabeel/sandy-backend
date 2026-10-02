@@ -99,6 +99,17 @@ def scene_apply(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     return {"ok": True, "reply": f"✨ جهّزت مشهد «{r['label']}»{suffix}."}
 
 
+def room_restore(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    from app.features.scene_store import restore_room
+
+    r = restore_room()
+    if not r.get("ok"):
+        return _no("ما في مشهد طبّقته قبل هيك أرجّع عنه.")
+    if not r.get("sent"):
+        return _no("الغرفة مش متّصلة هلّق، ما قدرت أرجّعها.")
+    return {"ok": True, "reply": "رجّعت الغرفة زي ما كانت 🏠"}
+
+
 def web_search(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     from app.features.research import web_answer
 

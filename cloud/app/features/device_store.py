@@ -272,6 +272,34 @@ def set_state(name: str, payload: str) -> None:
         logger.debug("[DeviceStore] set_state failed for %s: %s", name, e)
 
 
+# What a scene can put back: a learned IR code toggles and a screen's text is a message,
+# so neither is replayed.
+_NOT_RESTORED = ("ir", "text")
+
+
+def keep_before_scene(names: List[str]) -> None:
+    """Remember these devices' state as it is now (`before_scene`), dropping the last
+    scene's, so «رجّعي الغرفة زي ما كانت» can put it back."""
+    coll = _coll()
+    if coll is None:
+        return
+    coll.update_many({"before_scene": {"$exists": True}}, {"$unset": {"before_scene": ""}})
+    for name, d in get_devices(names).items():
+        if d.get("state") and d.get("control_type") not in _NOT_RESTORED:
+            coll.update_one({"name": name}, {"$set": {"before_scene": d["state"]}})
+
+
+def take_before_scene() -> List[Dict[str, str]]:
+    """The kept states as scene actions ({device, value}), forgotten once taken."""
+    coll = _coll()
+    if coll is None:
+        return []
+    kept = [{"device": d["name"], "value": d["before_scene"]}
+            for d in coll.find({"before_scene": {"$exists": True}}).limit(MAX_DEVICES)]
+    coll.update_many({"before_scene": {"$exists": True}}, {"$unset": {"before_scene": ""}})
+    return kept
+
+
 def learn_ir_button(name: str, button: str, code: str) -> Dict[str, Any]:
     coll = _coll()
     if coll is None:

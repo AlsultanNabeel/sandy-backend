@@ -125,8 +125,12 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
 **The turn** (`loop.py`):
 
 1. A held confirmation (`pending_state`, loaded by the route from
-   `sandy_pending_state`) is resolved first: yes runs the held call, no cancels,
-   a pick answers "which one", anything else drops the hold and is a normal turn.
+   `sandy_pending_state`) is resolved first: yes runs every held call, no cancels,
+   a pick answers "which one" (one or several). When a new request follows the
+   answer («اه وضيفي خبز»), the model gets the message with a note of what the
+   answer settled and does only the rest. Anything else is a normal turn, and the
+   question is asked once more at the end of its reply; a second unclear answer
+   lets the hold go, so an old yes never fires later.
 2. **The fast path** (`fast_path.py`): a bare device command («شغّل الضو») is
    matched *whole* against the caller's own registered devices and run with no
    model call at all. It only picks the tool; `device_control`,
@@ -135,8 +139,10 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    `SANDY_FAST_PATH=0` turns it off.
 3. `context.build_system` (§2.5), then at most **6** model calls with native tools:
    model → tool calls → results (JSON tool messages) → model, until it answers in
-   text. A tool asking for a yes or a choice ends the turn with a deterministic
-   question and a held action, with no second model call.
+   text. A tool asking for a yes or a choice does not end the turn: the model is
+   told it waits and goes on with the rest of the request; every held action joins
+   one pending, and the reply is what the tools did plus one question, both
+   deterministic (nothing of the model's is streamed once something is held).
 4. Due `message_to_future_self` schedules (`future.py`) go into the system prompt
    and are marked `sent` only when the reply is not an error.
 5. The turn is written to short-term memory (`stm.save`, with `via`).
@@ -154,7 +160,7 @@ The `[turn] …ms total — brain tools=[…]` log line says where a slow turn w
 
 ### 2.4 Tools
 
-Twelve (`tools.py`), voice adds `confirm`. Enums come from `kinds.KINDS`, so a new
+Fifteen (`tools.py`), voice adds `confirm`. Enums come from `kinds.KINDS`, so a new
 kind needs no tool change.
 
 | Tool | Does |
@@ -163,14 +169,17 @@ kind needs no tool change.
 | `recall` | entries + items + pending schedules, filtered by kind / list / since / until / query words (an alias like «مهامي» becomes the filter); compact rows |
 | `list_add` | `items.add`; `due` parsed like `when`; a duplicate open item is reported, not added |
 | `list_update` | by `id` or `match_text` (`matching.match_rows`: exact, contained, fuzzy ≥ 0.72): done / text / due / delete |
+| `log_update` | a log row by `id` (`state_block` shows today's, `facts_block` the facts), `match_text`, or the newest of a `kind`: new text (an encrypted row is sealed again, never embedded), `amount`/`data` merged, or delete. A changed fact is updated, not logged again; «انسي…» deletes it |
 | `schedule` | `schedules.add`; `when` = ISO, else a bare weekday, else one model call (`when._parse_with_model`), else the deterministic Arabic date parser |
 | `schedule_update` | move / rename / cancel (status `cancelled`) |
 | `summarize` | the period's entries, items and schedules as rows; the model writes the summary, nothing is stored |
 | `device_control` | a registered device by slug or label; `command_payload` validates, `send_to_topic` checks the topic is the caller's; an unknown device or action is refused with what is available |
-| `scene_apply` | `scene_store.apply_scene` (actuates, schedules the reverts, §2.12) plus the room-node vocabulary fallback |
+| `scene_apply` | `scene_store.apply_scene` (keeps the devices' state first, actuates, schedules the reverts, §2.12) plus the room-node vocabulary fallback |
+| `room_restore` | `scene_store.restore_room`: the devices the last scene changed get the state kept before it (`device_store.before_scene`; IR and screen text are not replayed), its timers are cancelled; once per scene |
 | `web_search` | `features/research.web_answer`: Exa snippets summarised in one model call, with sources |
 | `weather` | `features/weather` |
 | `image` | `vision.generate_image_with_azure` on the model's own prompt (FLUX, then Azure DALL-E) |
+| `undo_last` | takes back the previous reply's journaled block writes: added rows go, edited, deleted and cancelled ones come back; devices are not undone |
 
 **A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
 `reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
@@ -178,12 +187,19 @@ breaks the turn); `needs_confirmation` / `needs_choice` when it will not act yet
 
 **Confirmation** (`confirm.py`, `pending.py`): deletes, cancels and multi-row
 changes return `needs_confirmation`; two matching rows return `needs_choice`. The
-loop stores a `brain_confirm` pending (10 minutes, a nonce, `consumed_at`) and
-asks «متأكد إنك بدك …؟ (اه/لأ)» or lists the candidates. `confirm.answer` is the
-one yes/no resolver: letter-variant, digit and emoji folding, cancellation wins a
-mixed reply, and a reply longer than four words is a new message, not an answer.
-On voice there is no text turn to read, so the `confirm(answer)` tool passes the
-user's words to the same resolver, and holds wait on the `voice` pending thread.
+loop stores a `brain_confirm` pending (10 minutes, a nonce, `consumed_at`; its
+`steps` are every held `{tool, args, summary}` of the turn) and asks «متأكد إنك بدك …؟
+(اه/لأ)» or lists the candidates. `confirm.read` is the one yes/no resolver, and it
+reads only the opening of the reply: yes/no words, the held action's own verb
+(«احذفيها»، «الغيه» for a cancel), filler («متأكد»، «يا ساندي»), and phrases like
+«مش مشكلة». «خلص» next to a yes or the verb is «go on», alone it is «drop it»; a
+negated verb («لا تحذفها») is a no; cancellation wins a mixed reply; a yes followed by
+«بس» is not a yes. Whatever follows the opening is a new request (`rest`). `pick`
+reads several («الأولى والتالتة»), a bare number word is that one («اتنين» is the
+second), «الاتنين»/«كلهم» are all. On voice there is no text turn to read, so the
+`confirm(answer)` tool passes the user's words to the same resolver; holds wait on
+the `voice` pending thread, a second hold joins the first, and an unclear answer is
+asked once more, then let go, as in chat.
 
 **On the voice path everything that did not happen is marked**
 (`voice._tagged`), because an unmarked refusal is exactly what Gemini reads as
@@ -195,8 +211,8 @@ for a refusal. A held action is "not done yet", neither.
 | Layer | Module | Store |
 |---|---|---|
 | Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), up to 40 messages, TTL 30 days; the model sees the last 24 (`context.RECENT_TURNS`, chat and the call alike) |
-| What she knows | `brain/context.py` | `fact` entries (the newest 30 distinct ones of two words or more; anything still ciphertext is left out) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
-| What is open now | `brain/context.py::state_block` | open items per list and pending reminders, with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
+| What she knows | `brain/context.py` | `fact` entries with their ids (the newest 30 distinct ones of two words or more; anything still ciphertext is left out) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
+| What is open now | `brain/context.py::state_block` | open items per list, pending reminders and today's log (not facts, moods, habit ticks or summaries), with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
 | Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are not facts, chat summaries or habit ticks, from the Atlas vector index `entries_vector` (tenant in its filter); text search when there is no vector or no hit |
 | Conversation summaries | `brain/stm.py::_summarize` | one `summary` entry (`data.thread_id`) per conversation, in the background: when a message comes after a 30-minute pause, or when a thread passes 40 messages and drops to its newest 20; turns are marked `summarized` so none is summarised twice; `recall` leaves them out unless asked |
 | Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
