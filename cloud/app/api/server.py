@@ -136,6 +136,8 @@ def create_app(*, mongo_db=None):
     register_blocks_api(app, mongo_db=mongo_db)
     from app.api.attachments_api import register_attachments_api
     register_attachments_api(app)
+    from app.api.settings_api import register_settings_api
+    register_settings_api(app)
 
     # Sign-in is Apple, Google or email (the shared owner-password /api/auth is gone).
     from app.api.metering import limit_response as _limit_response

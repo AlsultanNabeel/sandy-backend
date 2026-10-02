@@ -104,7 +104,7 @@ def test_daily_send_delivers_and_prunes_dead_tokens(db, monkeypatch):
 
     sent = []
 
-    def fake_send(token, title, body, data=None):
+    def fake_send(token, title, body, data=None, silent=False):
         sent.append(token)
         return (False, "gone") if token == "dead" else (True, "ok")
 

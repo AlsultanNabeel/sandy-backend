@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from dateutil.rrule import rrulestr
 
 from app.blocks import _base
-from app.features import push_tokens_store
+from app.features import notify_prefs, push_tokens_store
 from app.services import apns
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import active_user_profile_context
@@ -100,12 +100,12 @@ def _claim(coll, doc: Dict[str, Any], now: datetime) -> Tuple[bool, Optional[dat
     return res.modified_count == 1, nxt
 
 
-def _push(uid: str, text: str, data: Dict[str, Any]) -> Tuple[int, int]:
+def _push(uid: str, text: str, data: Dict[str, Any], silent: bool = False) -> Tuple[int, int]:
     """(devices tried, devices that took it)."""
     tried = took = 0
     for token in push_tokens_store.tokens_for_user(uid):
         tried += 1
-        ok, status = apns.send(token, PUSH_TITLE, text, data=data)
+        ok, status = apns.send(token, PUSH_TITLE, text, data=data, silent=silent)
         if ok:
             took += 1
         elif status == "gone":
@@ -132,7 +132,11 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
         return (True, "") if kind == "reminder" else (False, "apns not configured")
     if kind == "reminder" and late:
         return True, ""
-    tried, took = _push(uid, text, data)
+    # The user's switches: a kind turned off is settled without a push; quiet hours push silently.
+    wanted, silent = notify_prefs.push_rule(uid, kind, now)
+    if not wanted:
+        return True, ""
+    tried, took = _push(uid, text, data, silent=silent)
     if took or (kind == "reminder" and not tried):
         return True, ""
     return False, "no device took the push"

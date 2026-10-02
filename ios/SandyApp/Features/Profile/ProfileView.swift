@@ -33,15 +33,30 @@ struct ProfileView: View {
                 ScrollView {
                     VStack(spacing: Theme.Spacing.lg) {
                         header
+
+                        sectionTitle("settings.sectionAccount")
                         premiumCard
                         preferredNameCard
                         interestsCard
+                        editButton
+
+                        sectionTitle("settings.sectionApp")
                         languageCard
                         DisplayCard()
+                        notificationsCard
                         permissionsCard
+
+                        sectionTitle("settings.sectionSandy")
                         archiveCard
-                        editButton
+
+                        sectionTitle("settings.sectionHelp")
+                        helpCard
+
                         signOutButton
+                        Text(String(format: lang.s("settings.version"), AppInfo.version))
+                            .font(Theme.Typography.caption)
+                            .foregroundColor(Theme.Colors.tertiaryText)
+                            .padding(.top, Theme.Spacing.xs)
                     }
                     .padding(Theme.Spacing.md)
                 }
@@ -112,6 +127,67 @@ struct ProfileView: View {
                 archiveRow(icon: "person.crop.circle.badge.xmark",
                            titleKey: "account.title") { AccountView() }
             }
+        }
+    }
+
+    /// A group's name above its cards.
+    private func sectionTitle(_ key: String) -> some View {
+        Text(lang.s(key))
+            .font(Theme.Typography.caption.weight(.semibold))
+            .foregroundColor(Theme.Colors.tertiaryText)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, Theme.Spacing.sm)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private var notificationsCard: some View {
+        SandyCard {
+            archiveRow(icon: "bell.badge.fill", titleKey: "settings.notifications") {
+                NotificationSettingsView()
+            }
+        }
+    }
+
+    /// Support, and the privacy and terms pages (AppLinks: «soon» until they are set).
+    private var helpCard: some View {
+        SandyCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                archiveRow(icon: "bubble.left.and.text.bubble.right.fill", titleKey: "settings.support") {
+                    SupportView()
+                }
+                linkRow(icon: "hand.raised.fill", titleKey: "settings.privacy", link: AppLinks.privacyPolicy)
+                linkRow(icon: "doc.plaintext.fill", titleKey: "settings.terms", link: AppLinks.terms)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func linkRow(icon: String, titleKey: String, link: String) -> some View {
+        let label = HStack(spacing: Theme.Spacing.md) {
+            Image(systemName: icon)
+                .scaledFont(Theme.Icon.md, weight: .semibold)
+                .foregroundColor(Theme.Colors.accent)
+                .frame(width: 28)
+            Text(lang.s(titleKey))
+                .font(Theme.Typography.headline)
+                .foregroundColor(Theme.Colors.primaryText)
+            Spacer(minLength: 0)
+            if AppLinks.url(link) == nil {
+                Text(lang.s("settings.soon"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            } else {
+                Image(systemName: "arrow.up.forward")
+                    .scaledFont(Theme.Icon.sm, weight: .semibold)
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+        if let url = AppLinks.url(link) {
+            Link(destination: url) { label }.buttonStyle(.plain)
+        } else {
+            label.accessibilityElement(children: .combine)
         }
     }
 

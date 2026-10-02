@@ -28,7 +28,7 @@ def push(monkeypatch):
     monkeypatch.setattr(push_tokens_store, "tokens_for_user", lambda uid: [f"tok-{uid}"])
     monkeypatch.setattr(push_tokens_store, "unregister_token", lambda t, *a: gone.append(t))
 
-    def send(token, title, body, data=None):
+    def send(token, title, body, data=None, silent=False):
         sent.append((token, body, data))
         return state["ok"], state["status"]
 

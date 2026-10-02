@@ -1007,6 +1007,15 @@ so folders are organisation only.
   Loading (`DesignSystem/Loading.swift`): skeleton rows with a shine on first loads,
   `LoadingDots` inside buttons, and `SandyWaiting` (her face and changing lines with the
   user's name) for long waits; nothing moves under Reduce Motion.
+  Profile is in four groups (account, app, Sandy and your data, help). Notifications
+  (`Features/Profile/SettingsViews.swift`): a switch per kind (reminders, the daily
+  nudge, Sandy's proactive nudges) and quiet hours, kept on the phone (`NotificationPrefs`,
+  applied by NotificationManager: a kind off is not scheduled, a time inside the quiet
+  hours rings silently) and on the server (`GET/POST /api/notification-settings`,
+  `features/notify_prefs.py`: the schedule runner and the daily send skip a kind turned
+  off and push silently in the quiet hours). Support sends `POST /api/feedback` with the
+  version and device (`sandy_feedback`). The privacy, terms and support-mail values live
+  only in `App/AppLinks.swift`, empty until the release.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

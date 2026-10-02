@@ -157,13 +157,19 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         return nil
     }
 
+    /// What Profile › Notifications calls «reminders»: reminders, timed tasks, habits.
+    private static let reminderPrefixes: Set<String> = ["reminder.", "task.", "habit."]
+
     /// نلغي كل المعلّق بالبادئة ثم نجدول العناصر المستقبلية.
     func sync(prefix: String, items: [NotificationItem]) {
+        // Switched off in Profile › Notifications: nothing of this kind rings (they are
+        // still remembered below, so turning it back on brings them back).
+        let wanted = Self.reminderPrefixes.contains(prefix) && !NotificationPrefs.current.reminders ? [] : items
         center.getPendingNotificationRequests { [weak self] reqs in
             guard let self else { return }
             let stale = reqs.map(\.identifier).filter { $0.hasPrefix(prefix) }
             self.center.removePendingNotificationRequests(withIdentifiers: stale)
-            for it in items {
+            for it in wanted {
                 self.schedule(id: prefix + it.id, title: it.title, body: it.body,
                               at: it.date, repeats: it.repeats,
                               category: it.category, userInfo: it.userInfo)
@@ -307,6 +313,15 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     /// Safe to call often: away ping 48h ahead (pushed on each open), heads-up 60 min before
     /// today's timed items, weekly Sunday 19:00. Clears them when notifications are denied.
+    /// Profile › Notifications changed: everything the phone rings is scheduled again.
+    func preferencesChanged() {
+        knownLock.lock()
+        let known = knownItems
+        knownLock.unlock()
+        for (prefix, items) in known { sync(prefix: prefix, items: items) }
+        scheduleProactiveNudges()
+    }
+
     func scheduleProactiveNudges() {
         knownLock.lock()
         let known = knownItems
@@ -317,7 +332,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         center.getNotificationSettings { [weak self] settings in
             guard let self else { return }
             let allowed: [UNAuthorizationStatus] = [.authorized, .provisional, .ephemeral]
-            guard allowed.contains(settings.authorizationStatus) else {
+            // Denied, or proactive nudges switched off in Profile › Notifications.
+            guard allowed.contains(settings.authorizationStatus), NotificationPrefs.current.proactive else {
                 self.center.getPendingNotificationRequests { reqs in
                     let ours = reqs.map(\.identifier).filter { $0.hasPrefix(Self.proactivePrefix) }
                     self.center.removePendingNotificationRequests(withIdentifiers: ours)
@@ -446,7 +462,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        Self.applyQuiet(content, at: (trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate()
+                        ?? (trigger as? UNTimeIntervalNotificationTrigger)?.nextTriggerDate())
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 
@@ -459,7 +476,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        Self.applyQuiet(content, at: date)
         // الحمولة بتخلّي الزرّ ينفّذ بلا ما يفتح التطبيق.
         if let category { content.categoryIdentifier = category }
         if !userInfo.isEmpty {
@@ -478,6 +495,17 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let comps = Calendar.current.dateComponents(fields, from: date)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: repeats != .none)
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+    }
+
+    /// Sound, unless it rings inside the user's quiet hours: then it arrives silently
+    /// (no sound, the screen stays dark) and waits in Notification Center.
+    private static func applyQuiet(_ content: UNMutableNotificationContent, at date: Date?) {
+        if let date, NotificationPrefs.current.isQuiet(date) {
+            content.sound = nil
+            content.interruptionLevel = .passive
+        } else {
+            content.sound = .default
+        }
     }
 
     /// متسامح: بمنطقة زمنية، بكسور ثانية، أو بدون. المحلّلات مبنية مرّة (غالية، وآمنة بين الخيوط).

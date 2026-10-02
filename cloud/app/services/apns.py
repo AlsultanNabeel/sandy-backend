@@ -82,8 +82,10 @@ def send(
     title: str,
     body: str,
     data: Optional[Dict[str, Any]] = None,
+    silent: bool = False,
 ) -> Tuple[bool, str]:
-    """Send one alert; returns (ok, status). status "gone" means prune the token. Never raises."""
+    """Send one alert; returns (ok, status). status "gone" means prune the token. Never raises.
+    `silent` (the user's quiet hours): no sound, delivered without lighting the screen."""
     if not is_configured():
         return False, "not_configured"
     token = (token or "").strip()
@@ -95,7 +97,12 @@ def send(
         return False, "no_provider_token"
 
     host = _SANDBOX_HOST if os.getenv("APNS_USE_SANDBOX", "").strip() in ("1", "true", "True") else _PROD_HOST
-    payload: Dict[str, Any] = {"aps": {"alert": {"title": title, "body": body}, "sound": "default"}}
+    aps: Dict[str, Any] = {"alert": {"title": title, "body": body}}
+    if silent:
+        aps["interruption-level"] = "passive"
+    else:
+        aps["sound"] = "default"
+    payload: Dict[str, Any] = {"aps": aps}
     if data:
         payload.update(data)
 

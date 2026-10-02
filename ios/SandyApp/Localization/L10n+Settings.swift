@@ -1,0 +1,66 @@
+import Foundation
+
+// Namespace: settings — Profile's sections, Notifications and Support
+// (Features/Profile/SettingsViews.swift, ProfileView.swift).
+enum L10nSettings {
+    static let ns = "settings"
+
+    static let table = L10nTable(
+        ar: [
+            "sectionAccount": .text("حسابك"),
+            "sectionApp": .text("التطبيق"),
+            "sectionSandy": .text("ساندي وبياناتك"),
+            "sectionHelp": .text("المساعدة والقانوني"),
+            "notifications": .text("الإشعارات"),
+            "reminders": .text("التذكيرات"),
+            "daily": .text("التنبيه اليومي"),
+            "proactive": .text("تنبيهات ساندي"),
+            "kindsNote": .text("التذكيرات: تذكيراتك ومواعيد مهامك وعاداتك. التنبيه اليومي: سؤال أو جدول اليوم من ساندي. تنبيهات ساندي: صباح الخير، والعادات بالمسا، وقبل المواعيد بساعة، والميزانية."),
+            "quiet": .text("ساعات الهدوء"),
+            "quietFrom": .text("من"),
+            "quietTo": .text("لـ"),
+            "quietNote": .text("بهالساعات الإشعارات بتوصل بدون صوت، وبتلاقيها بمركز الإشعارات."),
+            "support": .text("الدعم والملاحظات"),
+            "feedbackTitle": .text("احكيلنا"),
+            "feedbackPlaceholder": .text("شو عجبك، شو ما زبط، شو بدك نضيف…"),
+            "feedbackSend": .text("ابعت"),
+            "feedbackNote": .text("بتنبعت مع نسخة التطبيق ونوع جهازك، عشان نلاقي المشكلة أسرع."),
+            "feedbackThanks": .text("وصلت، شكراً إلك 🤍"),
+            "feedbackFailed": .text("ما وصلت، جرّب كمان شوي."),
+            "emailUs": .text("راسلنا بالإيميل"),
+            "emailSubject": .text("ملاحظة على ساندي"),
+            "privacy": .text("سياسة الخصوصية"),
+            "terms": .text("شروط الاستخدام"),
+            "soon": .text("قريباً"),
+            "version": .text("النسخة %@"),
+        ],
+        en: [
+            "sectionAccount": .text("Your account"),
+            "sectionApp": .text("App"),
+            "sectionSandy": .text("Sandy and your data"),
+            "sectionHelp": .text("Help and legal"),
+            "notifications": .text("Notifications"),
+            "reminders": .text("Reminders"),
+            "daily": .text("Daily nudge"),
+            "proactive": .text("Sandy's nudges"),
+            "kindsNote": .text("Reminders: your reminders, task times and habits. Daily nudge: a question or today's plan from Sandy. Sandy's nudges: good morning, evening habits, an hour before appointments, and the budget."),
+            "quiet": .text("Quiet hours"),
+            "quietFrom": .text("From"),
+            "quietTo": .text("To"),
+            "quietNote": .text("During these hours notifications arrive without a sound and wait in Notification Center."),
+            "support": .text("Support and feedback"),
+            "feedbackTitle": .text("Tell us"),
+            "feedbackPlaceholder": .text("What you like, what didn't work, what we should add…"),
+            "feedbackSend": .text("Send"),
+            "feedbackNote": .text("Sent with the app version and your device model, so we find the problem faster."),
+            "feedbackThanks": .text("Got it, thank you 🤍"),
+            "feedbackFailed": .text("That didn't reach us, try again in a bit."),
+            "emailUs": .text("Email us"),
+            "emailSubject": .text("Feedback on Sandy"),
+            "privacy": .text("Privacy policy"),
+            "terms": .text("Terms of use"),
+            "soon": .text("Soon"),
+            "version": .text("Version %@"),
+        ]
+    )
+}

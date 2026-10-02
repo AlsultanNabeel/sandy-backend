@@ -51,8 +51,13 @@ def run_daily_send(mongo_db) -> int:
         logger.info("[nudge_sched] another worker owns today's send; skipping")
         return 0
 
+    from app.features import notify_prefs
+
     delivered = 0
     for uid in push_tokens_store.user_ids_with_tokens():
+        wanted, silent = notify_prefs.push_rule(uid, "daily_nudge")
+        if not wanted:
+            continue
         try:
             with active_user_profile_context(_profile_for(uid)):
                 nudge = get_daily_nudge(mongo_db, uid)
@@ -63,7 +68,7 @@ def run_daily_send(mongo_db) -> int:
             if nudge.get("qid"):
                 data["qid"] = nudge["qid"]
             for token in push_tokens_store.tokens_for_user(uid):
-                ok, status = apns.send(token, "ساندي", text, data=data)
+                ok, status = apns.send(token, "ساندي", text, data=data, silent=silent)
                 if ok:
                     delivered += 1
                 elif status == "gone":
