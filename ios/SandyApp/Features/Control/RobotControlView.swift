@@ -145,7 +145,7 @@ struct RobotControlView: View {
                 } label: {
                     HStack(spacing: Theme.Spacing.md) {
                         Image(systemName: "eye.circle.fill")
-                            .font(.system(size: Theme.Icon.lg))
+                            .scaledFont(Theme.Icon.lg)
                             .foregroundColor(Theme.Colors.accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(lang.s("robot.control.camera.open"))
@@ -157,7 +157,7 @@ struct RobotControlView: View {
                         }
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.forward")
-                            .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                            .scaledFont(Theme.Icon.sm, weight: .semibold)
                             .foregroundColor(Theme.Colors.tertiaryText)
                     }
                     .sandyCard()
@@ -194,7 +194,7 @@ struct RobotControlView: View {
                     HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: sendingImage
                               ? "arrow.triangle.2.circlepath" : "photo.on.rectangle")
-                            .font(.system(size: Theme.Icon.md, weight: .semibold))
+                            .scaledFont(Theme.Icon.md, weight: .semibold)
                         Text(pickTitle)
                             .font(Theme.Typography.button)
                     }
@@ -285,7 +285,7 @@ struct RobotControlView: View {
     private var emptyState: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "figure.wave")
-                .font(.system(size: Theme.Icon.xl))
+                .scaledFont(Theme.Icon.xl, relativeTo: .largeTitle)
                 .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("robot.control.empty.title"))
                 .font(Theme.Typography.headline)

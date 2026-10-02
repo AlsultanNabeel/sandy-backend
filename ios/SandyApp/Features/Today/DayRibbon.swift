@@ -13,7 +13,13 @@ struct RibbonMoment: Identifiable {
 /// "now" and moves with the clock, and each thing waits at its own time below it.
 struct DayRibbon: View {
     @EnvironmentObject var lang: LanguageManager
+    @Environment(\.dynamicTypeSize) private var typeSize
     let moments: [RibbonMoment]
+
+    /// The time column grows with the text, so «١٠:٣٠ م» never wraps.
+    private var timeWidth: CGFloat {
+        typeSize.isAccessibilitySize ? 96 : typeSize >= .xLarge ? 68 : 52
+    }
     /// Ticked: a task is done, a one-off reminder is closed.
     let onDone: (RibbonMoment.Source) -> Void
     /// Tapped: opens its edit sheet.
@@ -48,9 +54,11 @@ struct DayRibbon: View {
     private func row(_ m: RibbonMoment, late: Bool) -> some View {
         HStack(alignment: .center, spacing: Theme.Spacing.sm) {
             Text(time(m.date))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .scaledFont(12, weight: .medium, design: .rounded)
                 .foregroundColor(late ? Theme.Colors.warn : Theme.Colors.secondaryText)
-                .frame(width: 52, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: timeWidth, alignment: .trailing)
             ZStack {
                 Rectangle().fill(Theme.Colors.border).frame(width: 2)
                 Circle()
@@ -124,9 +132,11 @@ struct DayRibbon: View {
     private func nowMark(_ now: Date) -> some View {
         HStack(spacing: Theme.Spacing.sm) {
             Text(lang.s("today.now"))
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .scaledFont(12, weight: .bold, design: .rounded)
                 .foregroundColor(Theme.Colors.accent)
-                .frame(width: 52, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: timeWidth, alignment: .trailing)
             NowPulse().frame(width: 14)
             Rectangle()
                 .fill(LinearGradient(colors: [Theme.Colors.accent, .clear],
@@ -173,7 +183,7 @@ struct HabitRing: View {
                                 style: StrokeStyle(lineWidth: 5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                     Image(systemName: checked ? "checkmark" : "plus")
-                        .font(.system(size: 16, weight: .bold))
+                        .scaledFont(16, weight: .bold)
                         .foregroundColor(checked ? Theme.Colors.success : Theme.Colors.secondaryText)
                 }
                 .frame(width: 54, height: 54)
@@ -182,7 +192,8 @@ struct HabitRing: View {
                     .font(Theme.Typography.caption)
                     .foregroundColor(checked ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
                     .lineLimit(1)
-                    .frame(width: 70)
+                    .minimumScaleFactor(0.75)
+                    .frame(width: 70 * DisplaySettings.shared.elementScale)
                 // Same height either way, so rings stay in line.
                 StreakBadge(days: streak).opacity(streak > 1 ? 1 : 0)
             }

@@ -104,7 +104,7 @@ struct ItemsView: View {
         return HStack(spacing: Theme.Spacing.md) {
             Button { store.toggle(api: state.api, item) } label: {
                 Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: Theme.Icon.lg))
+                    .scaledFont(Theme.Icon.lg)
                     .foregroundColor(checked ? Theme.Colors.success : Theme.Colors.accent)
             }
             .buttonStyle(.plain)
@@ -144,7 +144,7 @@ struct ItemsView: View {
                 // The full sheet: a time and a flag along with the text.
                 Button { addingFull = true } label: {
                     Image(systemName: "calendar.badge.plus")
-                        .font(.system(size: Theme.Icon.md))
+                        .scaledFont(Theme.Icon.md)
                         .foregroundColor(Theme.Colors.accent)
                 }
                 .accessibilityLabel(lang.s("blocks.addWithTime"))
@@ -156,7 +156,7 @@ struct ItemsView: View {
                 .onSubmit(submit)
             Button(action: submit) {
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: Theme.Icon.lg))
+                    .scaledFont(Theme.Icon.lg)
                     .foregroundColor(Theme.Colors.accent)
             }
             .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -534,7 +534,7 @@ private struct SummarySheet: View {
                         .foregroundColor(Theme.Colors.accent)
                 }
                 Text(text)
-                    .font(.system(size: 17, design: .rounded))
+                    .scaledFont(17, design: .rounded)
                     .lineSpacing(6)
                     .foregroundColor(Theme.Colors.primaryText)
                     .textSelection(.enabled)
@@ -557,7 +557,7 @@ struct StreakBadge: View {
             Image(systemName: "flame.fill")
             Text(AppLocale.number(days))
         }
-        .font(.system(size: 12, weight: .bold, design: .rounded))
+        .scaledFont(12, weight: .bold, design: .rounded)
         .foregroundColor(Theme.Colors.warn)
     }
 }

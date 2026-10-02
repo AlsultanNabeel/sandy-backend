@@ -54,7 +54,7 @@ struct AskBar: View {
                 .onSubmit(send)
             if trimmed.isEmpty {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
                     .foregroundColor(Theme.Colors.accent)
                     .padding(8)
                     .onLongPressGesture(minimumDuration: 0.35) {
@@ -69,7 +69,7 @@ struct AskBar: View {
             } else {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
+                        .scaledFont(28, relativeTo: .largeTitle)
                         .foregroundColor(Theme.Colors.accent)
                 }
                 .disabled(thinking)

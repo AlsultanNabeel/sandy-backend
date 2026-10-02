@@ -1,84 +1,95 @@
 import SwiftUI
 
-/// نظام تصميم ساندي — مطابق لباليت الويب الداكن (frontend/index.css).
+/// نظام تصميم ساندي — الغامق مطابق لباليت الويب (frontend/index.css)، والفاتح مبني
+/// عليه بتباين مقروء على الأبيض.
 enum Theme {
 
     enum Colors {
-        /// الأزرق الكهربائي — للعنصر المهيمن الواحد بكل شاشة فقط.
-        static let accent = Color(red: 0.0, green: 0.831, blue: 1.0)         // #00D4FF
-        static let accentSoft = Color(red: 0.373, green: 0.890, blue: 1.0)   // ~#5FE3FF
-        static let accentDeep = Color(red: 0.0, green: 0.588, blue: 1.0)     // #0096FF
-        /// سيان أهدأ لإشارات ثانوية محدودة حتى ما ينافس الأساسي.
-        static let secondary = Color(red: 0.224, green: 0.776, blue: 0.886)  // ~#39C6E2
+        /// Electric blue — the one dominant element on each screen. Darker in light mode so
+        /// it still reads as text on white.
+        static let accent = Color(light: 0x0077B6, dark: 0x00D4FF)
+        static let accentSoft = Color(light: 0x2E9BD6, dark: 0x5FE3FF)
+        static let accentDeep = Color(light: 0x005B8F, dark: 0x0096FF)
+        /// A quieter cyan for a few secondary signals, so it never competes with the accent.
+        static let secondary = Color(light: 0x16869E, dark: 0x39C6E2)
 
-        static let spark = Color(red: 0.0, green: 0.831, blue: 1.0)          // #00D4FF
+        static let spark = accent
 
-        static let background = Color(red: 0.008, green: 0.020, blue: 0.031) // #020508
-        static let card = Color(red: 0.039, green: 0.078, blue: 0.133)      // ~#0A1422
-        static let surface = Color(red: 0.055, green: 0.102, blue: 0.165)    // ~#0E1A2A
+        static let background = Color(light: 0xF4F7FB, dark: 0x020508)
+        static let card = Color(light: 0xFFFFFF, dark: 0x0A1422)
+        static let surface = Color(light: 0xE6EDF4, dark: 0x0E1A2A)
 
-        static let primaryText = Color(red: 0.941, green: 0.980, blue: 1.0)  // #F0FAFF
-        static let secondaryText = Color(red: 0.616, green: 0.698, blue: 0.776) // ~#9DB2C6
-        static let tertiaryText = Color(red: 0.439, green: 0.514, blue: 0.592)  // ~#70838F
-        static let onAccent = Color(red: 0.008, green: 0.071, blue: 0.110)   // ~#02121C
+        static let primaryText = Color(light: 0x0B1A26, dark: 0xF0FAFF)
+        static let secondaryText = Color(light: 0x45586A, dark: 0x9DB2C6)
+        static let tertiaryText = Color(light: 0x627485, dark: 0x70838F)
+        static let onAccent = Color(light: 0xFFFFFF, dark: 0x02121C)
 
-        static let border = Color(red: 0.0, green: 0.831, blue: 1.0).opacity(0.18)
+        static let border = accent.opacity(0.18)
 
-        static let success = Color(red: 0.204, green: 0.878, blue: 0.690)    // ~#34E0B0
-        /// كهرماني — يحلّ محل الأحمر الصارخ بالأخطاء.
-        static let warn = Color(red: 1.0, green: 0.722, blue: 0.302)         // ~#FFB84D
-        static let warnSoft = Color(red: 0.165, green: 0.118, blue: 0.047)   // ~#2A1E0C
-        static let danger = Color(red: 1.0, green: 0.420, blue: 0.420)       // ~#FF6B6B
+        static let success = Color(light: 0x0B8F6A, dark: 0x34E0B0)
+        /// Amber — stands in for a harsh red on errors.
+        static let warn = Color(light: 0xA65F00, dark: 0xFFB84D)
+        static let warnSoft = Color(light: 0xFFF0D9, dark: 0x2A1E0C)
+        static let danger = Color(light: 0xC62F2F, dark: 0xFF6B6B)
+
+        /// The light catching a glass edge: white on dark, a faint blue-grey on light.
+        static let shine = Color(light: 0xFFFFFF, dark: 0xFFFFFF)
+        static let hairline = Color(light: 0x0B1A26, lightAlpha: 0.08, dark: 0xFFFFFF, darkAlpha: 0.05)
+        /// Text and icons on a coloured fill (call bar, red button).
+        static let onFill = Color.white
     }
 
+    /// Text styles, so every token follows the device's text size (and the app's own step).
     enum Typography {
-        static let largeTitle = Font.system(size: 28, weight: .bold, design: .rounded)
-        static let title = Font.system(size: 22, weight: .bold, design: .rounded)
-        static let headline = Font.system(size: 17, weight: .semibold, design: .rounded)
-        static let body = Font.system(size: 16, weight: .regular)
-        static let callout = Font.system(size: 15, weight: .medium)
-        static let subheadline = Font.system(size: 14, weight: .regular)
-        static let caption = Font.system(size: 12, weight: .regular)
-        static let button = Font.system(size: 16, weight: .semibold, design: .rounded)
+        static let largeTitle = Font.system(.title, design: .rounded, weight: .bold)
+        static let title = Font.system(.title2, design: .rounded, weight: .bold)
+        static let headline = Font.system(.headline, design: .rounded, weight: .semibold)
+        static let body = Font.system(.callout)
+        static let callout = Font.system(.subheadline, weight: .medium)
+        static let subheadline = Font.system(.subheadline)
+        static let caption = Font.system(.caption)
+        static let button = Font.system(.callout, design: .rounded, weight: .semibold)
     }
 
     enum Spacing {
-        static let xs: CGFloat = 4
-        static let sm: CGFloat = 8
-        static let md: CGFloat = 14
-        static let lg: CGFloat = 20
-        static let xl: CGFloat = 28
-        static let xxl: CGFloat = 40
+        private static var k: CGFloat { DisplaySettings.shared.elementScale }
+        static var xs: CGFloat { 4 * k }
+        static var sm: CGFloat { 8 * k }
+        static var md: CGFloat { 14 * k }
+        static var lg: CGFloat { 20 * k }
+        static var xl: CGFloat { 28 * k }
+        static var xxl: CGFloat { 40 * k }
         /// بين المجموعات الكبيرة بالشاشة.
-        static let section: CGFloat = 24
+        static var section: CGFloat { 24 * k }
     }
 
     /// لا تستعمل أرقامًا حرّة بالشاشات.
     enum Icon {
-        static let sm: CGFloat = 15   // داخل الأزرار/التسميات
-        static let md: CGFloat = 18   // أيقونات الصفوف/التولبار
-        static let lg: CGFloat = 24   // أيقونات بارزة
-        static let xl: CGFloat = 40   // الحالة الفاضية/التتويج
+        private static var k: CGFloat { DisplaySettings.shared.elementScale }
+        static var sm: CGFloat { 15 * k }   // داخل الأزرار/التسميات
+        static var md: CGFloat { 18 * k }   // أيقونات الصفوف/التولبار
+        static var lg: CGFloat { 24 * k }   // أيقونات بارزة
+        static var xl: CGFloat { 40 * k }   // الحالة الفاضية/التتويج
     }
 
     enum Radius {
-        static let card: CGFloat = 16
-        static let bubble: CGFloat = 18
-        static let control: CGFloat = 12
+        static var card: CGFloat { 16 * DisplaySettings.shared.elementScale }
+        static var bubble: CGFloat { 18 * DisplaySettings.shared.elementScale }
+        static var control: CGFloat { 12 * DisplaySettings.shared.elementScale }
         static let pill: CGFloat = 999
     }
 
     enum Shadow {
-        static let cardColor = Color.black.opacity(0.45)
+        static let cardColor = Color(light: 0x0B1A26, lightAlpha: 0.10, dark: 0x000000, darkAlpha: 0.45)
         static let cardRadius: CGFloat = 9
         static let cardY: CGFloat = 4
 
-        static let liftColor = Color.black.opacity(0.6)
+        static let liftColor = Color(light: 0x0B1A26, lightAlpha: 0.16, dark: 0x000000, darkAlpha: 0.6)
         static let liftRadius: CGFloat = 18
         static let liftY: CGFloat = 8
 
         /// للعنصر المهيمن الواحد بكل شاشة فقط.
-        static let glowColor = Theme.Colors.accent.opacity(0.34)
+        static let glowColor = Theme.Colors.accent.opacity(0.30)
         static let glowRadius: CGFloat = 14
     }
 }
@@ -108,9 +119,9 @@ struct LiquidGlass: ViewModifier {
             .overlay {
                 shape.stroke(
                     LinearGradient(
-                        colors: [Color.white.opacity(shine),
+                        colors: [Theme.Colors.shine.opacity(shine),
                                  Theme.Colors.accent.opacity(shine * 0.55),
-                                 Color.white.opacity(shine * 0.1)],
+                                 Theme.Colors.shine.opacity(shine * 0.1)],
                         startPoint: .topLeading, endPoint: .bottomTrailing),
                     lineWidth: 1)
             }
@@ -200,7 +211,7 @@ struct CardStyle: ViewModifier {
         case .info:
             base
                 .background(shape.fill(Theme.Colors.surface.opacity(0.45)))
-                .overlay(shape.stroke(Color.white.opacity(0.05), lineWidth: 1))
+                .overlay(shape.stroke(Theme.Colors.hairline, lineWidth: 1))
         }
     }
 }
@@ -242,3 +253,23 @@ struct DemoBanner: View {
     }
 }
 
+
+// MARK: - ألوان بوضعين
+
+extension Color {
+    /// One colour per appearance, from hex (0xRRGGBB).
+    init(light: UInt32, lightAlpha: Double = 1, dark: UInt32, darkAlpha: Double = 1) {
+        self.init(UIColor { traits in
+            traits.userInterfaceStyle == .light
+                ? UIColor(hex: light, alpha: lightAlpha)
+                : UIColor(hex: dark, alpha: darkAlpha)
+        })
+    }
+}
+
+extension UIColor {
+    convenience init(hex: UInt32, alpha: Double = 1) {
+        self.init(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                  blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
+    }
+}

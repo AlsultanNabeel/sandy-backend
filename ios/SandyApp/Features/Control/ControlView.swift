@@ -201,7 +201,7 @@ struct ControlView: View {
                     } label: {
                         HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: "plus")
-                                .font(.system(size: Theme.Icon.sm, weight: .bold))
+                                .scaledFont(Theme.Icon.sm, weight: .bold)
                             Text(lang.s("control.node.pair"))
                                 .font(Theme.Typography.callout)
                         }
@@ -231,7 +231,7 @@ struct ControlView: View {
                         } label: {
                             HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "wifi")
-                                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                                    .scaledFont(Theme.Icon.sm, weight: .semibold)
                                 Text(lang.s("wifi.title"))
                                     .font(Theme.Typography.caption)
                                 Spacer(minLength: 0)
@@ -239,7 +239,7 @@ struct ControlView: View {
                                     .font(Theme.Typography.caption)
                                     .foregroundColor(Theme.Colors.tertiaryText)
                                 Image(systemName: "chevron.forward")
-                                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                                    .scaledFont(Theme.Icon.sm, weight: .semibold)
                                     .foregroundColor(Theme.Colors.tertiaryText)
                             }
                             .foregroundColor(Theme.Colors.accent)

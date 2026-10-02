@@ -57,7 +57,7 @@ struct DeviceCard: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: iconForType(device.controlType))
-                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
                     .foregroundColor(Theme.Colors.accent)
                 Spacer(minLength: 0)
                 Circle()
@@ -81,7 +81,7 @@ struct DeviceCard: View {
     private var header: some View {
         HStack(spacing: Theme.Spacing.md) {
             Image(systemName: iconForType(device.controlType))
-                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .scaledFont(Theme.Icon.md, weight: .semibold)
                 .foregroundColor(Theme.Colors.accent)
                 .frame(width: 38, height: 38)
                 .background(Theme.Colors.accent.opacity(0.14))
@@ -269,7 +269,7 @@ struct DeviceCard: View {
 
                 Button { sendText() } label: {
                     Image(systemName: "paperplane.fill")
-                        .font(.system(size: Theme.Icon.md, weight: .semibold))
+                        .scaledFont(Theme.Icon.md, weight: .semibold)
                         .foregroundColor(draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                          ? Theme.Colors.tertiaryText : Theme.Colors.accent)
                 }
@@ -371,7 +371,7 @@ struct DeviceCard: View {
         Button(action: action) {
             VStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
                 Text(title)
                     .font(Theme.Typography.caption)
                     .lineLimit(1)
@@ -425,7 +425,7 @@ struct NodeCard: View {
                     .fill(Theme.Colors.secondary.opacity(0.14))
                     .frame(width: 44, height: 44)
                 Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
                     .foregroundColor(Theme.Colors.secondary)
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -456,7 +456,7 @@ struct NodeCard: View {
                     RobotTestView(store: store, node: node)
                 } label: {
                     Image(systemName: "waveform.badge.magnifyingglass")
-                        .font(.system(size: Theme.Icon.md, weight: .semibold))
+                        .scaledFont(Theme.Icon.md, weight: .semibold)
                         .foregroundColor(Theme.Colors.accent)
                 }
                 .buttonStyle(.plain)

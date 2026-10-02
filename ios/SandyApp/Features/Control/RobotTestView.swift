@@ -111,7 +111,7 @@ struct RobotTestView: View {
                 Text(title).font(Theme.Typography.callout)
                 if muted {
                     Image(systemName: "mic.slash.fill")
-                        .font(.system(size: Theme.Icon.sm))
+                        .scaledFont(Theme.Icon.sm)
                         .foregroundColor(Theme.Colors.secondaryText)
                 }
                 Spacer(minLength: 0)

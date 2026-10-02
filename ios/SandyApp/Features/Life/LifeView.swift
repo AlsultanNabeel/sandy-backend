@@ -66,6 +66,7 @@ struct LifeHeader: View {
     let stats: LifeStats
     /// The day picked on the strip; the log below shows only it.
     @Binding var day: Date?
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Opens the spending sheet (presented by the screen, not from inside a list row).
     let openSpending: () -> Void
 
@@ -102,7 +103,7 @@ struct LifeHeader: View {
         let top = max(counts.max() ?? 1, 1)
         return VStack(alignment: .leading, spacing: 6) {
             Text(lang.s("life.month"))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .scaledFont(13, weight: .semibold, design: .rounded)
                 .foregroundColor(Theme.Colors.tertiaryText)
             HStack(spacing: 3) {
                 ForEach(Array(counts.enumerated()), id: \.offset) { i, n in
@@ -144,8 +145,11 @@ struct LifeHeader: View {
     }
 
     /// This month at a glance: what you spent and how many things you logged.
+    /// Three cards in a row; one under the other at the largest text sizes.
     private var monthNumbers: some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: Theme.Spacing.sm))
+                                                  : AnyLayout(HStackLayout(spacing: Theme.Spacing.sm))
+        return layout {
             Button(action: openSpending) {
                 stat(icon: "creditcard.fill", value: AppLocale.number(Int(stats.spent.rounded())),
                      key: "life.stat.spent", progress: budgetShare)
@@ -165,10 +169,10 @@ struct LifeHeader: View {
     private func stat(icon: String, value: String, key: String, progress: Double? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .scaledFont(13, weight: .semibold)
                 .foregroundColor(Theme.Colors.accent)
             Text(value)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .scaledFont(20, weight: .bold, design: .rounded)
                 .foregroundColor(Theme.Colors.primaryText)
             Text(lang.s(key))
                 .font(Theme.Typography.caption)
@@ -186,14 +190,14 @@ struct LifeHeader: View {
     private func card(icon: String, title: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .scaledFont(Theme.Icon.md, weight: .semibold)
                 .foregroundColor(Theme.Colors.accent)
             Text(title)
                 .font(Theme.Typography.callout)
                 .foregroundColor(Theme.Colors.primaryText)
                 .lineLimit(1)
         }
-        .frame(width: 84, alignment: .leading)
+        .frame(width: 84 * DisplaySettings.shared.elementScale, alignment: .leading)
         .padding(Theme.Spacing.sm + 2)
         .liquidGlass(cornerRadius: 16)
     }

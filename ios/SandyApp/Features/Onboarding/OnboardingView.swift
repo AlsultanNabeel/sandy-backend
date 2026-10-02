@@ -72,7 +72,7 @@ struct OnboardingView: View {
                 if page > 0 {
                     Button(action: goBack) {
                         Image(systemName: "chevron.backward")
-                            .font(.system(size: Theme.Icon.md, weight: .semibold))
+                            .scaledFont(Theme.Icon.md, weight: .semibold)
                             .foregroundColor(Theme.Colors.primaryText)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
@@ -236,7 +236,7 @@ struct OnboardingView: View {
 
     private func iconBadge(_ icon: String) -> some View {
         Image(systemName: icon)
-            .font(.system(size: Theme.Icon.md, weight: .semibold))
+            .scaledFont(Theme.Icon.md, weight: .semibold)
             .foregroundColor(Theme.Colors.accent)
             .frame(width: 42, height: 42)
             .background(
@@ -301,7 +301,7 @@ struct OnboardingView: View {
                         .modifier(OnboardingField())
                     Button(action: addCustom) {
                         Image(systemName: "plus")
-                            .font(.system(size: Theme.Icon.md, weight: .bold))
+                            .scaledFont(Theme.Icon.md, weight: .bold)
                             .foregroundColor(Theme.Colors.onAccent)
                             .frame(width: 48, height: 48)
                             .background(

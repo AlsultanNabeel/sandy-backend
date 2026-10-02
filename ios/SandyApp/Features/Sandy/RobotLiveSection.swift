@@ -111,7 +111,7 @@ struct RobotLiveSection: View {
     private func statTile(icon: String, title: String, value: String, tint: Color) -> some View {
         HStack(spacing: Theme.Spacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .scaledFont(Theme.Icon.md, weight: .semibold)
                 .foregroundColor(tint)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
@@ -169,7 +169,7 @@ struct RobotLiveSection: View {
                             SandyRobot(size: 26, animated: false, mood: mood)
                                 .frame(height: 42)
                             Text(label("mood", mood))
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .scaledFont(11, weight: .medium, design: .rounded)
                                 .foregroundColor(selected ? Theme.Colors.accent : Theme.Colors.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.7)
@@ -178,7 +178,7 @@ struct RobotLiveSection: View {
                         .padding(.vertical, Theme.Spacing.sm)
                         .background(
                             RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                                .fill(selected ? Theme.Colors.accent.opacity(0.14) : Color.white.opacity(0.04)))
+                                .fill(selected ? Theme.Colors.accent.opacity(0.14) : Theme.Colors.hairline))
                         .overlay(
                             RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
                                 .stroke(selected ? Theme.Colors.accent.opacity(0.6) : Color.clear, lineWidth: 1))
@@ -219,7 +219,7 @@ struct RobotLiveSection: View {
                             .padding(.horizontal, Theme.Spacing.md)
                             .padding(.vertical, Theme.Spacing.sm)
                             .background(Capsule().fill(selected ? Theme.Colors.accent
-                                                                : Color.white.opacity(0.08)))
+                                                                : Theme.Colors.hairline))
                         }
                         .buttonStyle(.plain)
                         .disabled(store.demo || !store.sending.isEmpty)

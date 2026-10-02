@@ -110,7 +110,7 @@ struct SearchView: View {
     private var hintView: some View {
         VStack(spacing: Theme.Spacing.lg) {
             Image(systemName: "globe.middle.east.fill")
-                .font(.system(size: Theme.Icon.xl))
+                .scaledFont(Theme.Icon.xl, relativeTo: .largeTitle)
                 .foregroundColor(Theme.Colors.tertiaryText)
             Text(lang.s("search.hint"))
                 .font(Theme.Typography.subheadline)

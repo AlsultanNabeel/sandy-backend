@@ -110,7 +110,7 @@ struct RobotView: View {
                             ProgressView().tint(Theme.Colors.onAccent)
                         } else {
                             Image(systemName: "play.fill")
-                                .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                                .scaledFont(Theme.Icon.sm, weight: .semibold)
                         }
                         Text(lang.s("robot.apply"))
                     }

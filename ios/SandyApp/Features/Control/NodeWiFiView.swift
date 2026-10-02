@@ -82,7 +82,7 @@ struct NodeWiFiView: View {
             SectionHeader(title: lang.s("wifi.current"))
             HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: node.online ? "wifi" : "wifi.slash")
-                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
                     .foregroundColor(node.online ? Theme.Colors.success
                                                  : Theme.Colors.tertiaryText)
                 VStack(alignment: .leading, spacing: 2) {

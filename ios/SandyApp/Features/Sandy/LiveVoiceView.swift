@@ -24,7 +24,7 @@ struct LiveVoiceView: View {
                     // Closing the screen keeps the call; the bar over the tabs brings it back.
                     Button { dismiss() } label: {
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 18, weight: .semibold))
+                            .scaledFont(18, weight: .semibold)
                             .foregroundColor(Theme.Colors.secondaryText)
                             .padding(10)
                     }
@@ -119,12 +119,12 @@ struct LiveVoiceView: View {
                 Text(lang.s("chat.liveEnd"))
                     .font(Theme.Typography.button)
             }
-            .foregroundColor(.white)
+            .foregroundColor(Theme.Colors.onFill)
             .padding(.vertical, Theme.Spacing.md)
             .padding(.horizontal, Theme.Spacing.xl)
-            .background(Color(red: 0.93, green: 0.27, blue: 0.33))
+            .background(Theme.Colors.danger)
             .clipShape(Capsule())
-            .shadow(color: Color(red: 0.93, green: 0.27, blue: 0.33).opacity(0.5),
+            .shadow(color: Theme.Colors.danger.opacity(0.5),
                     radius: 12, x: 0, y: 4)
         }
         .buttonStyle(.plain)
@@ -164,14 +164,14 @@ struct CallBar: View {
         HStack(spacing: Theme.Spacing.md) {
             Image(systemName: live.phase == .speaking ? "waveform" : "phone.fill")
                 .symbolEffect(.variableColor.iterative, isActive: live.phase == .speaking)
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.onFill)
             Text(lang.s("chat.liveBar"))
                 .font(Theme.Typography.subheadline)
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.onFill)
             Spacer(minLength: 0)
             Button { live.stop() } label: {
                 Image(systemName: "phone.down.fill")
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.Colors.onFill)
                     .padding(8)
                     .background(Circle().fill(Theme.Colors.danger))
             }

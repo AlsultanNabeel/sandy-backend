@@ -14,6 +14,7 @@ struct TodayView: View {
     @StateObject private var weather = WeatherStore()
     @StateObject private var expenses = LogStore(kind: "expense")
     @State private var showProfile = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var editingTask: ListItem?
     @State private var editingHabit: ListItem?
     @State private var editingReminder: ScheduleItem?
@@ -23,7 +24,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 header
                 Text(briefing)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .scaledFont(26, weight: .bold, design: .rounded, relativeTo: .largeTitle)
                     .foregroundColor(Theme.Colors.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
@@ -188,43 +189,56 @@ struct TodayView: View {
 
     /// Greeting and date on one side; the weather sits in the corner as plain information,
     /// like the clock on the lock screen, and the avatar opens your profile.
+    /// Side by side; at the largest text sizes the greeting goes under the buttons.
     private var header: some View {
-        HStack(alignment: .top) {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Spacing.sm))
+            : AnyLayout(HStackLayout(alignment: .top))
+        return layout {
             VStack(alignment: .leading, spacing: 2) {
                 Text(greeting)
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(Date().formatted(Date.FormatStyle(date: .complete, time: .omitted)
                     .locale(AppLocale.current)))
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
-            HStack(spacing: Theme.Spacing.md) {
-                // Focus drives the lock-screen Live Activity; home is the devices.
-                NavigationLink { FocusView() } label: { Image(systemName: "target") }
-                    .accessibilityLabel(lang.s("today.focus"))
-                NavigationLink { ControlView() } label: { Image(systemName: "house.fill") }
-                    .accessibilityLabel(lang.s("today.home"))
-            }
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundColor(Theme.Colors.accent)
-            .padding(.top, 2)
-            if let w = weather.snapshot {
-                HStack(spacing: 4) {
-                    Image(systemName: w.symbol)
-                    Text("\(w.tempC)°")
-                }
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundColor(Theme.Colors.secondaryText)
-                .padding(.top, 2)
-                .accessibilityElement(children: .combine)
-            }
-            Button { showProfile = true } label: { SandyAvatar(size: 34, mood: .happy) }
-                .buttonStyle(.plain)
-                .accessibilityLabel(lang.s("today.profile"))
+            .accessibilityElement(children: .combine)
+            if !typeSize.isAccessibilitySize { Spacer() }
+            HStack(alignment: .top, spacing: Theme.Spacing.md) { buttons }
         }
         .padding(.top, Theme.Spacing.sm)
+    }
+
+    /// Focus, home, the weather in the corner, and the avatar that opens Profile.
+    @ViewBuilder
+    private var buttons: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            // Focus drives the lock-screen Live Activity; home is the devices.
+            NavigationLink { FocusView() } label: { Image(systemName: "target") }
+                .accessibilityLabel(lang.s("today.focus"))
+            NavigationLink { ControlView() } label: { Image(systemName: "house.fill") }
+                .accessibilityLabel(lang.s("today.home"))
+        }
+        .scaledFont(17, weight: .semibold)
+        .foregroundColor(Theme.Colors.accent)
+        .padding(.top, 2)
+        if let w = weather.snapshot {
+            HStack(spacing: 4) {
+                Image(systemName: w.symbol)
+                Text("\(w.tempC)°")
+            }
+            .scaledFont(15, weight: .semibold, design: .rounded)
+            .foregroundColor(Theme.Colors.secondaryText)
+            .padding(.top, 2)
+            .accessibilityElement(children: .combine)
+        }
+        Button { showProfile = true } label: { SandyAvatar(size: 34, mood: .happy) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(lang.s("today.profile"))
     }
 
     private var greeting: String {
@@ -245,7 +259,7 @@ struct TodayView: View {
                 Spacer()
                 if let trailing { Text(trailing).contentTransition(.numericText()) }
             }
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .scaledFont(13, weight: .semibold, design: .rounded)
             .foregroundColor(Theme.Colors.tertiaryText)
             .textCase(.uppercase)
             content()
@@ -256,7 +270,7 @@ struct TodayView: View {
         HStack(spacing: Theme.Spacing.md) {
             Button { withAnimation { tasks.toggle(api: state.api, item) } } label: {
                 Image(systemName: "circle")
-                    .font(.system(size: Theme.Icon.md))
+                    .scaledFont(Theme.Icon.md)
                     .foregroundColor(Theme.Colors.accent)
             }
             .buttonStyle(.plain)

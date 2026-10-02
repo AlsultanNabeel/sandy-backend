@@ -169,6 +169,8 @@ struct FloatingTabBar: View {
                 radius: Theme.Shadow.liftRadius, x: 0, y: Theme.Shadow.liftY)
         .padding(.horizontal, Theme.Spacing.xl)
         .padding(.bottom, Theme.Spacing.sm)
+        // The bar keeps its shape at the largest sizes, like the system's.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     }
 
     private func sideButton(_ tab: MainTab) -> some View {
@@ -177,8 +179,8 @@ struct FloatingTabBar: View {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) { selection = tab }
         } label: {
             VStack(spacing: 3) {
-                Image(systemName: tab.icon).font(.system(size: 19, weight: .semibold))
-                Text(lang.s(tab.titleKey)).font(.system(size: 11, weight: .semibold, design: .rounded))
+                Image(systemName: tab.icon).scaledFont(19, weight: .semibold)
+                Text(lang.s(tab.titleKey)).scaledFont(11, weight: .semibold, design: .rounded)
             }
             .foregroundColor(selected ? Theme.Colors.accent : Theme.Colors.secondaryText)
             .frame(maxWidth: .infinity)
@@ -204,7 +206,8 @@ private struct SandyOrb: View {
                 .fill(Theme.Colors.accent.opacity(0.22))
                 .frame(width: breathe ? 76 : 64, height: breathe ? 76 : 64)
                 .blur(radius: 6)
-            // Dark glass so the robot reads clearly; the light is in the ring and the glow.
+            // Glass from the theme's surfaces (dark or light); the robot's face carries its own
+            // dark screen, so it reads on either, and the light is in the ring and the glow.
             Circle()
                 .fill(RadialGradient(colors: [Theme.Colors.surface, Theme.Colors.background],
                                      center: .topLeading, startRadius: 2, endRadius: 60))

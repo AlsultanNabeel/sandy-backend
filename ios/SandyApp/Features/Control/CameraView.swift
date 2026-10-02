@@ -75,7 +75,7 @@ struct CameraView: View {
                     }
                 } else {
                     Image(systemName: "camera")
-                        .font(.system(size: Theme.Icon.xl))
+                        .scaledFont(Theme.Icon.xl, relativeTo: .largeTitle)
                         .foregroundColor(Theme.Colors.tertiaryText)
                 }
             }

@@ -39,7 +39,7 @@ struct DailyNudgeCard: View {
             if store.nudge?.isQuestion == false {
                 Button { store.dismiss() } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
+                        .scaledFont(18)
                         .foregroundColor(Theme.Colors.secondaryText)
                 }
                 .buttonStyle(.plain)

@@ -261,7 +261,7 @@ private struct CardCell: View {
                 }
             )
             .scaleEffect(isHeld ? 1.05 : 1)
-            .shadow(color: .black.opacity(isHeld ? 0.28 : 0),
+            .shadow(color: isHeld ? Theme.Shadow.liftColor : .clear,
                     radius: isHeld ? 14 : 0, y: 6)
             .offset(isHeld ? offset : .zero)
             .zIndex(isHeld ? 1 : 0)
@@ -303,7 +303,7 @@ private struct CardCell: View {
             Haptics.play(.drag)
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .bold))
+                .scaledFont(13, weight: .bold)
                 .foregroundColor(.white)
                 .frame(width: 34, height: 34)
                 .background(
@@ -319,8 +319,8 @@ private struct CardCell: View {
 
     private var nameTag: some View {
         HStack(spacing: 4) {
-            Image(systemName: card.icon).font(.system(size: 10, weight: .semibold))
-            Text(lang.s(card.titleKey)).font(.system(size: 11, weight: .semibold))
+            Image(systemName: card.icon).scaledFont(10, weight: .semibold)
+            Text(lang.s(card.titleKey)).scaledFont(11, weight: .semibold)
                 .lineLimit(1)
         }
         .foregroundColor(Theme.Colors.onAccent)

@@ -37,6 +37,7 @@ struct ProfileView: View {
                         preferredNameCard
                         interestsCard
                         languageCard
+                        DisplayCard()
                         permissionsCard
                         archiveCard
                         editButton
@@ -72,7 +73,7 @@ struct ProfileView: View {
         Button { showPaywall = true } label: {
             HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
                     .foregroundColor(Theme.Colors.accent)
                     .frame(width: 28)
                 Text(lang.s("paywall.title"))
@@ -80,7 +81,7 @@ struct ProfileView: View {
                     .foregroundColor(Theme.Colors.primaryText)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.forward")
-                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .scaledFont(Theme.Icon.sm, weight: .semibold)
                     .foregroundColor(Theme.Colors.tertiaryText)
             }
             .padding(Theme.Spacing.md)
@@ -125,7 +126,7 @@ struct ProfileView: View {
         } label: {
             HStack(spacing: Theme.Spacing.md) {
                 Image(systemName: icon)
-                    .font(.system(size: Theme.Icon.md, weight: .semibold))
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
                     .foregroundColor(Theme.Colors.accent)
                     .frame(width: 28)
                 Text(lang.s(titleKey))
@@ -133,7 +134,7 @@ struct ProfileView: View {
                     .foregroundColor(Theme.Colors.primaryText)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.forward")
-                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .scaledFont(Theme.Icon.sm, weight: .semibold)
                     .foregroundColor(Theme.Colors.tertiaryText)
             }
             .padding(.vertical, Theme.Spacing.xs)
@@ -221,7 +222,7 @@ struct ProfileView: View {
     private func permissionRow(icon: String, titleKey: String, off: Bool) -> some View {
         HStack(spacing: Theme.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .scaledFont(Theme.Icon.md, weight: .semibold)
                 .foregroundColor(Theme.Colors.accent)
                 .frame(width: 28)
             Text(lang.s(titleKey))
@@ -451,7 +452,7 @@ private struct EditProfileSheet: View {
                         addInterest()
                     } label: {
                         Image(systemName: "plus.circle.fill")
-                            .font(.system(size: Theme.Icon.lg))
+                            .scaledFont(Theme.Icon.lg)
                             .foregroundColor(canAdd ? Theme.Colors.accent : Theme.Colors.tertiaryText)
                     }
                     .buttonStyle(.plain)
@@ -515,7 +516,7 @@ private struct EditableChip: View {
                 .foregroundColor(Theme.Colors.accentDeep)
             Button(action: onDelete) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: Theme.Icon.sm))
+                    .scaledFont(Theme.Icon.sm)
                     .foregroundColor(Theme.Colors.accentDeep.opacity(0.6))
             }
             .buttonStyle(.plain)
@@ -525,5 +526,104 @@ private struct EditableChip: View {
         .background(Theme.Colors.accent.opacity(0.14))
         .clipShape(Capsule())
         .overlay(Capsule().stroke(Theme.Colors.accent.opacity(0.25), lineWidth: 1))
+    }
+}
+
+// MARK: - العرض
+
+/// Text size and element size on top of the device's settings, and light / dark /
+/// automatic. Every change is saved and applied at once; the preview shows it here.
+private struct DisplayCard: View {
+    @EnvironmentObject var lang: LanguageManager
+    @Bindable private var display = DisplaySettings.shared
+
+    private var textStep: Binding<Double> {
+        Binding(get: { Double(display.textStep) }, set: { display.textStep = Int($0.rounded()) })
+    }
+
+    var body: some View {
+        SandyCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                SectionHeader(title: lang.s("profile.display"))
+
+                Picker(lang.s("profile.display.appearance"), selection: $display.appearance) {
+                    Text(lang.s("profile.display.system")).tag(DisplaySettings.Appearance.system)
+                    Text(lang.s("profile.display.light")).tag(DisplaySettings.Appearance.light)
+                    Text(lang.s("profile.display.dark")).tag(DisplaySettings.Appearance.dark)
+                }
+                .pickerStyle(.segmented)
+
+                slider(titleKey: "profile.display.text", icon: "textformat.size",
+                       value: textStep,
+                       range: Double(DisplaySettings.textSteps.lowerBound)...Double(DisplaySettings.textSteps.upperBound),
+                       step: 1, valueText: stepText)
+                slider(titleKey: "profile.display.elements", icon: "square.resize",
+                       value: $display.elementScale, range: DisplaySettings.elementRange, step: 0.05,
+                       valueText: display.elementScale.formatted(.percent.precision(.fractionLength(0))
+                           .locale(AppLocale.current)))
+
+                preview
+
+                if display.textStep != 0 || display.elementScale != 1 {
+                    Button(lang.s("profile.display.reset")) {
+                        withAnimation {
+                            display.textStep = 0
+                            display.elementScale = 1
+                        }
+                    }
+                    .font(Theme.Typography.callout)
+                    .foregroundColor(Theme.Colors.accent)
+                }
+            }
+        }
+    }
+
+    private var stepText: String {
+        display.textStep == 0 ? lang.s("profile.display.deviceSize")
+            : (display.textStep > 0 ? "+" : "−") + AppLocale.number(abs(display.textStep))
+    }
+
+    private func slider(titleKey: String, icon: String, value: Binding<Double>,
+                        range: ClosedRange<Double>, step: Double, valueText: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack {
+                Label(lang.s(titleKey), systemImage: icon)
+                    .font(Theme.Typography.callout)
+                    .foregroundColor(Theme.Colors.primaryText)
+                Spacer()
+                Text(valueText)
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+            }
+            Slider(value: value, in: range, step: step)
+                .tint(Theme.Colors.accent)
+                .accessibilityLabel(lang.s(titleKey))
+                .accessibilityValue(valueText)
+        }
+    }
+
+    /// What a row of the app looks like with these settings.
+    private var preview: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            SandyAvatar(size: 34 * display.elementScale, mood: .happy)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(lang.s("profile.display.previewTitle"))
+                    .font(Theme.Typography.headline)
+                    .foregroundColor(Theme.Colors.primaryText)
+                Text(lang.s("profile.display.previewBody"))
+                    .font(Theme.Typography.subheadline)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "checkmark.circle.fill")
+                .scaledFont(Theme.Icon.lg)
+                .foregroundColor(Theme.Colors.success)
+                .accessibilityHidden(true)
+        }
+        .sandyCard(.info)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(lang.s("profile.display.preview"))
     }
 }

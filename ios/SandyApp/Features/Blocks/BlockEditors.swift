@@ -128,7 +128,7 @@ struct WeekdayPicker: View {
                     if on { days.remove(day) } else { days.insert(day) }
                 } label: {
                     Text(symbols[day - 1])
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .scaledFont(14, weight: .semibold, design: .rounded)
                         .frame(width: 34, height: 34)
                         .foregroundColor(on ? Theme.Colors.onAccent : Theme.Colors.primaryText)
                         .background(Circle().fill(on ? Theme.Colors.accent : Theme.Colors.surface.opacity(0.6)))

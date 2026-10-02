@@ -37,7 +37,7 @@ struct SandyButton: View {
                         .tint(foreground)
                 } else if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(15, weight: .semibold)
                 }
                 Text(title)
                     .font(Theme.Typography.button)
@@ -153,7 +153,7 @@ struct SandyPopup<Content: View>: View {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .stroke(Theme.Colors.surface, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 12)
+            .shadow(color: Theme.Shadow.liftColor, radius: 30, x: 0, y: 12)
             .padding(.horizontal, Theme.Spacing.lg)
         }
         .presentationBackground(.clear)

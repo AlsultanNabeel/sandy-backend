@@ -40,8 +40,8 @@ struct SandyApp: App {
                 .environmentObject(lang)
                 .environment(\.layoutDirection, lang.lang.layoutDirection)
                 .environment(\.locale, AppLocale.locale(for: lang.lang))
-                // داكنة دائماً حتى تتناسق أدوات النظام مع خلفية التطبيق.
-                .preferredColorScheme(.dark)
+                // Text size, element size and light / dark from Profile › Display.
+                .sandyDisplay()
                 .onOpenURL { url in
                     if DeepLinkRouter.shared.handle(url) { return }
                     #if canImport(GoogleSignIn)

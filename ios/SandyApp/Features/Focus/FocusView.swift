@@ -111,7 +111,7 @@ private struct TimerSection: View {
                         .animation(.linear(duration: 0.5), value: progress)
                     VStack(spacing: Theme.Spacing.xs) {
                         Text(clock(status.remainingSec))
-                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .scaledFont(40, weight: .bold, design: .rounded, relativeTo: .largeTitle)
                             .foregroundColor(Theme.Colors.primaryText)
                             .monospacedDigit()
                         Text(status.isBreak ? lang.s("focus.timer.phaseBreak")

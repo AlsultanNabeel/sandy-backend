@@ -11,6 +11,7 @@ struct AuthView: View {
     @State private var emailLoading = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         ZStack {
@@ -59,12 +60,12 @@ struct AuthView: View {
                                 .frame(height: 50)
                                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control,
                                                             style: .continuous))
-                                .signInWithAppleButtonStyle(.white)
+                                .signInWithAppleButtonStyle(scheme == .dark ? .white : .black)
 
                             Button { googleSignIn() } label: {
                                 HStack(spacing: Theme.Spacing.sm) {
                                     Image(systemName: "g.circle.fill")
-                                        .font(.system(size: Theme.Icon.md, weight: .semibold))
+                                        .scaledFont(Theme.Icon.md, weight: .semibold)
                                     Text(lang.s("auth.google"))
                                         .font(Theme.Typography.button)
                                 }

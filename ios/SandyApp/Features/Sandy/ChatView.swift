@@ -228,7 +228,7 @@ struct ChatView: View {
                     .overlay(Circle().stroke(Theme.Colors.border, lineWidth: 1))
 
                 Image(systemName: "waveform")
-                    .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                    .scaledFont(Theme.Icon.sm, weight: .semibold)
                     .foregroundColor(Theme.Colors.secondaryText)
             }
         }
@@ -254,7 +254,7 @@ struct ChatView: View {
                         .tint(Theme.Colors.onAccent)
                 } else {
                     Image(systemName: "paperplane.fill")
-                        .font(.system(size: Theme.Icon.sm, weight: .semibold))
+                        .scaledFont(Theme.Icon.sm, weight: .semibold)
                         .foregroundColor(canSend ? Theme.Colors.onAccent : Theme.Colors.accentDeep.opacity(0.5))
                 }
             }
@@ -468,7 +468,7 @@ private struct ChatHistorySheet: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.lg) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: Theme.Icon.xl))
+                .scaledFont(Theme.Icon.xl, relativeTo: .largeTitle)
                 .foregroundColor(Theme.Colors.tertiaryText)
             Text(lang.s("chat.historyEmpty"))
                 .font(Theme.Typography.subheadline)

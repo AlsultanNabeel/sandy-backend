@@ -121,11 +121,11 @@ struct WeatherView: View {
     private func heroCard(_ snap: WeatherSnapshot) -> some View {
         VStack(spacing: Theme.Spacing.sm) {
             Image(systemName: snap.symbol)
-                .font(.system(size: Theme.Icon.xl + 24))
+                .scaledFont(Theme.Icon.xl + 24, relativeTo: .largeTitle)
                 .symbolRenderingMode(.multicolor)
                 .foregroundColor(Theme.Colors.accent)
             Text(snap.tempDisplay)
-                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .scaledFont(56, weight: .bold, design: .rounded, relativeTo: .largeTitle)
                 .foregroundColor(Theme.Colors.primaryText)
             Text(snap.description)
                 .font(Theme.Typography.headline)
@@ -167,7 +167,7 @@ struct WeatherView: View {
     private func detailCell(icon: String, title: String, value: String) -> some View {
         HStack(spacing: Theme.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .scaledFont(Theme.Icon.md, weight: .semibold)
                 .foregroundColor(Theme.Colors.secondary)
                 .frame(width: Theme.Icon.lg)
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -186,7 +186,7 @@ struct WeatherView: View {
     private var emptyView: some View {
         VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "cloud.sun.fill")
-                .font(.system(size: Theme.Icon.xl))
+                .scaledFont(Theme.Icon.xl, relativeTo: .largeTitle)
                 .foregroundColor(Theme.Colors.secondaryText)
             Text(lang.s("weather.empty"))
                 .font(Theme.Typography.subheadline)
