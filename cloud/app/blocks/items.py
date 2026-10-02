@@ -90,8 +90,10 @@ def next_due(due: Optional[datetime], rule: str, now: Optional[datetime] = None)
 
 def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = None,
            due: Any = _UNSET, priority: Optional[str] = None,
-           data: Optional[Mapping[str, Any]] = None, mongo_db=None) -> bool:
-    """Change fields; ``due=None`` clears it. True when the item exists."""
+           data: Optional[Mapping[str, Any]] = None, list_name: Optional[str] = None,
+           mongo_db=None) -> bool:
+    """Change fields; ``due=None`` clears it; ``list_name`` moves it to another list.
+    True when the item exists."""
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None or not item_id:
         return False
@@ -113,8 +115,13 @@ def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = N
         changes["due"] = due
     if priority is not None:
         changes["priority"] = str(priority).strip()
-    if data is not None:
-        changes["data"] = validate(LIST, current["list"], data)
+    target = list_name or current["list"]
+    if list_name and list_name != current["list"]:
+        # Its fields are checked against the list it goes to.
+        changes["list"] = list_name
+        changes["data"] = validate(LIST, list_name, data if data is not None else current.get("data"))
+    elif data is not None:
+        changes["data"] = validate(LIST, target, data)
     if changes:
         _base.noted("updated", _base.ITEMS, item_id, coll)
         coll.update_one({"_id": item_id}, {"$set": changes})
@@ -131,8 +138,10 @@ def delete(item_id: str, mongo_db=None) -> bool:
 
 def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
                due_after: Optional[datetime] = None, due_before: Optional[datetime] = None,
-               text: str = "", limit: int = 200, mongo_db=None) -> List[Dict[str, Any]]:
-    """Oldest first, the order a list is read in; every filter optional."""
+               text: str = "", order: str = "created", limit: int = 200,
+               mongo_db=None) -> List[Dict[str, Any]]:
+    """Oldest first, the order a list is read in; ``order="newest"`` or ``"due"`` (soonest
+    first) instead; every filter optional."""
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None:
         return []
@@ -146,5 +155,6 @@ def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
         query["due"] = rng
     if text:
         query.update(_base.text_filter(text))
-    cursor = coll.find(query).sort("created_at", 1).limit(_base.clamp(limit))
+    key, way = {"newest": ("created_at", -1), "due": ("due", 1)}.get(order, ("created_at", 1))
+    cursor = coll.find(query).sort(key, way).limit(_base.clamp(limit))
     return [_base.out(d) for d in cursor]

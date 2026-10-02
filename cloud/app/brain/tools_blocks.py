@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.brain.categorize import categorize_later
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
-from app.blocks import entries, items, schedules
+from app.utils.time import USER_TZ
+from app.blocks import _base, entries, items, schedules
 from app.blocks.kinds import LIST, LOG, SCHEDULE, KindError, by_alias, get_kind, names
 from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
@@ -41,8 +42,15 @@ def _item_row(i: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
+# The schedules that are the user's own; nudges and scene timers are the app's.
+USER_SCHEDULES = ("reminder", "message_to_future_self")
+
+
 def _schedule_row(s: Dict[str, Any]) -> Dict[str, Any]:
-    row = {"id": s["id"], "kind": s.get("kind"), "text": s.get("text", ""),
+    # A message to his future self stays sealed until it is delivered.
+    sealed = s.get("kind") == "message_to_future_self" and s.get("status") != "sent"
+    row = {"id": s["id"], "kind": s.get("kind"),
+           "text": "(رسالة مختومة لحد موعدها)" if sealed else decrypt_field(s.get("text", "")),
            "when": W.iso(s.get("fire_at")), "status": s.get("status")}
     if s.get("recurrence"):
         row["recurrence"] = s["recurrence"]
@@ -145,9 +153,9 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return picked
     rows = picked["rows"]
     delete = bool(args.get("delete"))
-    if (delete or len(rows) > 1) and not ctx.confirmed:
-        verb = "تحذف" if delete else "تعدّل"
-        return needs_confirmation(f"{verb} {_names(rows)}")
+    held = _held(picked, "تحذف" if delete else "تعدّل", delete, args, ctx)
+    if held:
+        return held
     amount = args.get("amount")
     for r in rows:
         if delete:
@@ -218,21 +226,60 @@ def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     since = W.parse_bound(args.get("since"))
     until = W.parse_bound(args.get("until"), end=True)
     rows: List[Dict[str, Any]] = []
+    if args.get("rang"):
+        return _rang(since, until, query)
     if not list_name and (kind is None or get_kind(LOG, kind)):
         # Chat summaries are most of the log; they only come back when asked for.
         for k in [kind] if kind else [k for k in names(LOG) if k not in ("summary", "fact")]:
+            # Every expense of the period, so the total is the server's, not the model's sum.
             rows += [_entry_row(e) for e in entries.list_entries(
-                k, since=since, until=until, limit=SUMMARY_ROWS)]
+                k, since=since, until=until, limit=_base.MAX_LIMIT if k == "expense" else SUMMARY_ROWS)]
     if not kind:
         found = items.list_items(list_name, limit=SUMMARY_ROWS)
         rows += [_item_row(i) for i in sorted(found, key=lambda i: bool(i.get("done")))]
-    if not list_name and (kind is None or get_kind(SCHEDULE, kind)):
+    if not list_name and (kind is None or kind in USER_SCHEDULES):
         rows += [_schedule_row(s) for s in schedules.list_schedules(
-            kind, status="pending", since=since, until=until, limit=SUMMARY_ROWS)]
+            kind, status="pending", since=since, until=until, limit=SUMMARY_ROWS)
+            if s.get("kind") in USER_SCHEDULES]
     narrowed = [r for r in rows if _matches_query(r, query)]
     # A filter already chose the rows; leftover words ("هالشهر") must not empty them.
     if narrowed or not (kind or list_name):
         rows = narrowed
+    out = {"ok": True, "count": len(rows), "rows": rows[:MAX_ROWS]}
+    spent = _spent(rows)
+    if spent:
+        out["spending"] = spent
+    return out
+
+
+def _spent(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """«قديش صرفت؟»: the total, count and per-category sums of every expense row, ready."""
+    total, count = 0.0, 0
+    by_category: Dict[str, float] = {}
+    for r in rows:
+        amount = _number((r.get("data") or {}).get("amount"))
+        if r.get("kind") != "expense" or amount is None:
+            continue
+        total, count = total + amount, count + 1
+        cat = str((r.get("data") or {}).get("category") or "other")
+        by_category[cat] = by_category.get(cat, 0) + amount
+    if not count:
+        return None
+    return {"total": round(total, 2), "count": count,
+            "by_category": {k: round(v, 2) for k, v in by_category.items()},
+            "note": "هاد المجموع الصح من كل الصفوف؛ استعمليه ولا تجمعي بنفسك."}
+
+
+def _rang(since, until, query: str) -> Dict[str, Any]:
+    """«شو فاتني؟»: reminders that already rang (the last day unless a range is given)."""
+    start = since or W.now_utc() - timedelta(days=1)
+    end = until or W.now_utc()
+    rows = []
+    for s in schedules.list_schedules("reminder", fired_since=start, limit=SUMMARY_ROWS):
+        fired = W.aware_utc(s["fired_at"])
+        if s.get("status") != "cancelled" and fired <= end:
+            rows.append({**_schedule_row(s), "rang_at": W.iso(fired)})
+    rows = [r for r in rows if _matches_query(r, query)]
     return {"ok": True, "count": len(rows), "rows": rows[:MAX_ROWS]}
 
 
@@ -248,12 +295,14 @@ def summarize(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         if _in(created, start, end) or _in(done_at, start, end):
             rows.append(_item_row(i))
     rows += [_schedule_row(s) for s in schedules.list_schedules(since=start, until=end,
-                                                                limit=SUMMARY_ROWS)]
+                                                                limit=SUMMARY_ROWS)
+             if s.get("kind") in USER_SCHEDULES]
     if focus:
         rows = [r for r in rows if r.get("kind") == focus or r.get("list") == focus
                 or _matches_query(r, focus)]
+    spent = _spent(rows)
     return {"ok": True, "period": period, "from": W.iso(start), "to": W.iso(end),
-            "count": len(rows), "rows": rows[:SUMMARY_ROWS],
+            "count": len(rows), "rows": rows[:SUMMARY_ROWS], **({"spending": spent} if spent else {}),
             "instruction": "لخّصي هالصفوف للمستخدم بجمل قصيرة."}
 
 
@@ -274,24 +323,44 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if get_kind(LOG, name) and not get_kind(LIST, name):
         return refused(f"«{name}» is something that happened, not a list: "
                        f"call remember with kind={name}")
-    same = match_key(text)
-    for row in items.list_items(name, done=False):
-        if match_key(row.get("text", "")) == same:
-            return {"ok": True, "id": row["id"], "already": True,
-                    "reply": f"«{text}» موجودة أصلاً بالقائمة"}
     due = None
     if args.get("due"):
         due = W.parse_when(args["due"])
         if due is None:
             return refused("could not read the due time", due=args["due"])
+    qty = _number(args.get("qty"))
+    same = match_key(text)
+    for row in items.list_items(name, done=False):
+        if match_key(row.get("text", "")) == same:
+            return _add_to_existing(row, qty, due)
+    data = {**(args.get("data") or {}), **({"qty": qty} if qty is not None else {})}
     try:
-        iid = items.add(name, text, args.get("data") or None, due=due,
+        iid = items.add(name, text, data or None, due=due,
                         priority=str(args.get("priority") or ""))
     except KindError as exc:
         return refused(str(exc))
     if not iid:
         return refused("not saved")
     return {"ok": True, "id": iid, "reply": f"ضفت «{text}» ✅"}
+
+
+def _add_to_existing(row: Dict[str, Any], qty: Optional[float], due: Any) -> Dict[str, Any]:
+    """The same open item again: «كمان حليب» adds to its quantity, a new time moves it;
+    with nothing new it is only reported."""
+    if qty is None and due is None:
+        return {"ok": True, "id": row["id"], "already": True,
+                "reply": f"«{row['text']}» موجودة أصلاً بالقائمة"}
+    data = None
+    if qty is not None:
+        have = _number((row.get("data") or {}).get("qty")) or 1
+        data = {**(row.get("data") or {}), "qty": have + qty}
+    try:
+        items.update(row["id"], data=data, due=due if due is not None else items._UNSET)
+    except KindError as exc:
+        return refused(str(exc))
+    parts = ([f"صاروا {data['qty']:g}"] if data else []) + ([W.local_text(due)] if due else [])
+    return {"ok": True, "id": row["id"], "updated": True,
+            "reply": f"«{row['text']}» كانت موجودة، عدّلتها: {'، '.join(parts)} ✅"}
 
 
 def _pick(args: Dict[str, Any], rows: List[Dict[str, Any]], getter) -> Dict[str, Any]:
@@ -301,7 +370,8 @@ def _pick(args: Dict[str, Any], rows: List[Dict[str, Any]], getter) -> Dict[str,
         return {"rows": [row]} if row else refused("no row with that id")
     m = match_rows(str(args.get("match_text") or ""), rows)
     if m["status"] == "matched":
-        return {"rows": [m["row"]]}
+        # A near-spelling is a guess («فاتورة المي» → «فاتورة النت»): it waits for a yes.
+        return {"rows": [m["row"]], "guessed": m["tier"] == "fuzzy"}
     if m["status"] == "ambiguous":
         if args.get("all_matching"):
             return {"rows": m["matches"]}
@@ -316,6 +386,31 @@ def _names(rows: List[Dict[str, Any]]) -> str:
     return f"«{shown}»" + (f" وكمان {len(rows) - 3}" if len(rows) > 3 else "")
 
 
+def _held(picked: Dict[str, Any], verb: str, asks: bool, args: Dict[str, Any],
+          ctx: TurnCtx) -> Optional[Dict[str, Any]]:
+    """The question when the change waits for a yes (asked for, several rows, or a guess)."""
+    rows = picked["rows"]
+    if ctx.confirmed or not (asks or len(rows) > 1 or picked.get("guessed")):
+        return None
+    guess = f" (أقرب إشي لـ«{args.get('match_text')}»)" if picked.get("guessed") else ""
+    return needs_confirmation(f"{verb} {_names(rows)}{guess}")
+
+
+def _number(value: Any) -> Optional[float]:
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _check_in(row: Dict[str, Any]) -> Dict[str, Any]:
+    """«خلصت الجيم اليوم»: today is ticked for the habit; the habit itself stays open."""
+    today = datetime.now(USER_TZ).date().isoformat()
+    for e in entries.list_entries("habit", limit=200):
+        data = e.get("data") or {}
+        if data.get("habit_item_id") == row["id"] and data.get("date") == today:
+            return {"ok": True, "already": True, "reply": f"«{row['text']}» مسجّلة اليوم أصلاً ✅"}
+    entries.add("habit", row.get("text", ""), {"habit_item_id": row["id"], "date": today})
+    return {"ok": True, "reply": f"سجّلت «{row['text']}» لليوم ✅"}
+
+
 def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     name = _list_name(args) or None
     # Open items only, unless the ask is to reopen a done one.
@@ -325,26 +420,39 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return picked
     rows = picked["rows"]
     delete = bool(args.get("delete"))
-    if (delete or len(rows) > 1) and not ctx.confirmed:
-        verb = "تحذف" if delete else "تعدّل"
-        return needs_confirmation(f"{verb} {_names(rows)}")
+    verb = "تحذف" if delete else ("تخلّص" if args.get("done") else "تعدّل")
+    held = _held(picked, verb, delete, args, ctx)
+    if held:
+        return held
     due: Any = None if args.get("no_due") else items._UNSET
     if args.get("due") and not args.get("no_due"):
         due = W.parse_when(args["due"])
         if due is None:
             return refused("could not read the due time", due=args["due"])
-    qty = args.get("qty")
+    move = _list_name({"list": args.get("move_to"), "project": args.get("move_to_project")}) or None
+    extra = args.get("data") if isinstance(args.get("data"), dict) else {}
+    qty = _number(args.get("qty"))
+    replies = []
     for r in rows:
         if delete:
             items.delete(r["id"])
             continue
+        if args.get("done") and r.get("list") == "habits":
+            replies.append(_check_in(r)["reply"])
+            continue
         data = None
-        if isinstance(qty, (int, float)) and not isinstance(qty, bool):
-            # What is still to buy (bought part of it): the rest of the row's data stays.
-            data = {**(r.get("data") or {}), "qty": qty}
-        items.update(r["id"], text=args.get("text"), done=args.get("done"), due=due, data=data)
-    verb = "حذفت" if delete else ("خلّصت" if args.get("done") else "عدّلت")
-    return {"ok": True, "changed": len(rows), "reply": f"{verb} {_names(rows)} ✅"}
+        if extra or qty is not None:
+            # Merged into what the row has: days, time, qty, repeat, details.
+            data = {**(r.get("data") or {}), **extra, **({"qty": qty} if qty is not None else {})}
+        try:
+            items.update(r["id"], text=args.get("text"), done=args.get("done"), due=due, data=data,
+                         priority=args.get("priority"), list_name=move)
+        except KindError as exc:
+            return refused(str(exc))
+    if replies and len(replies) == len(rows):
+        return {"ok": True, "changed": len(rows), "reply": "\n".join(replies)}
+    done_verb = "حذفت" if delete else ("خلّصت" if args.get("done") else "عدّلت")
+    return {"ok": True, "changed": len(rows), "reply": "\n".join([*replies, f"{done_verb} {_names(rows)} ✅"])}
 
 
 # ── schedules ────────────────────────────────────────────────────────────────
@@ -417,19 +525,20 @@ def _skipped(row: Dict[str, Any]) -> Optional[Any]:
 
 
 def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    pool = schedules.list_schedules(status="pending")
+    # Reminders only: the daily nudge, scene timers and sealed messages are not his to edit here.
+    pool = schedules.list_schedules("reminder", status="pending")
     known = {r["id"] for r in pool}
     # Just rang: a one-time reminder is no longer pending, but «أجّليه» still means it.
-    pool += [r for r in schedules.list_schedules(fired_since=W.now_utc() - RANG_WINDOW)
+    pool += [r for r in schedules.list_schedules("reminder", fired_since=W.now_utc() - RANG_WINDOW)
              if r["id"] not in known and r.get("status") == "sent"]
-    picked = _pick(args, pool, schedules.get)
+    picked = _pick(args, pool, lambda i: r if (r := schedules.get(i)) and r.get("kind") == "reminder" else None)
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
     cancel = bool(args.get("cancel"))
-    if (cancel or len(rows) > 1) and not ctx.confirmed:
-        verb = "تلغي" if cancel else "تعدّل"
-        return needs_confirmation(f"{verb} {_names(rows)}")
+    held = _held(picked, "تلغي" if cancel else "تعدّل", cancel, args, ctx)
+    if held:
+        return held
     rule: Optional[str] = None
     if args.get("stop_repeat"):
         rule = ""

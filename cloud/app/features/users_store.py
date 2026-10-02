@@ -221,6 +221,16 @@ def set_timezone(user_id: str, zone: str) -> bool:
     return res.matched_count > 0
 
 
+def set_city(user_id: str, city: str) -> bool:
+    """The city the app shows weather for; Sandy's «شو الطقس؟» with no city."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return False
+    # Written only when it changed: the app asks for the weather often.
+    coll.update_one({"_id": user_id, "city": {"$ne": city[:80]}}, {"$set": {"city": city[:80]}})
+    return True
+
+
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:
     """{qid: answer} for the daily-nudge questions."""
     coll = _coll()

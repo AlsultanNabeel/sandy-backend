@@ -28,7 +28,23 @@ def _fetch_weather(url: str) -> Dict[str, Any]:
     return response.json()
 
 
-def get_weather(city: str = "October City", **kwargs) -> Optional[Dict[str, Any]]:
+DEFAULT_CITY = "October City"
+
+
+def home_city(user_id: Optional[str]) -> str:
+    """Where «شو الطقس؟» is asked about: the city the app last showed weather for, else
+    the city of the phone's time zone («Asia/Amman» → Amman), else the default."""
+    from app.features import users_store
+    from app.utils.time import zone_for
+
+    saved = str((users_store.get_user(user_id) or {}).get("city") or "").strip() if user_id else ""
+    if saved:
+        return saved
+    zone = zone_for(user_id).key
+    return zone.rsplit("/", 1)[-1].replace("_", " ") if "/" in zone else DEFAULT_CITY
+
+
+def get_weather(city: str = DEFAULT_CITY, **kwargs) -> Optional[Dict[str, Any]]:
     key = city.strip().lower()
     with _cache_lock:
         hit = _cache.get(key)

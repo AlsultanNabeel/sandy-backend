@@ -215,14 +215,14 @@ def parse_bound(text: str, *, end: bool = False) -> Optional[datetime]:
 
 def period_range(period: str, now: Optional[datetime] = None) -> Tuple[datetime, datetime]:
     """[start, end) in UTC for a named period, in the user's calendar: «هالأسبوع» is from
-    Sunday, «هالشهر» from the 1st, «هالسنة» from January, each up to the end of today."""
+    Saturday (the week runs Saturday to Friday), «هالشهر» from the 1st, «هالسنة» from January, each up to the end of today."""
     now = (now or datetime.now(USER_TZ)).astimezone(USER_TZ)
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = day + timedelta(days=1)
     if period == "yesterday":
         start, end = day - timedelta(days=1), day
     elif period == "week":
-        start = day - timedelta(days=(day.weekday() + 1) % 7)
+        start = day - timedelta(days=(day.weekday() - 5) % 7)
     elif period == "month":
         start = day.replace(day=1)
     elif period == "year":

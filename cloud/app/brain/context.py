@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
@@ -131,7 +131,12 @@ def state_block(rows: int = STATE_ROWS) -> str:
     from app.blocks import items, schedules
 
     parts: List[str] = []
-    open_items = items.list_items(None, done=False, limit=rows * 3)
+    # The soonest due and the newest, not the oldest: a long list must not hide either.
+    soon = items.list_items(None, done=False, due_after=datetime.now(timezone.utc) - timedelta(days=30),
+                            order="due", limit=rows * 2)
+    newest = items.list_items(None, done=False, order="newest", limit=rows * 2)
+    seen: set = set()
+    open_items = [i for i in soon + newest if not (i["id"] in seen or seen.add(i["id"]))]
     by_list: Dict[str, List[str]] = {}
     for i in open_items:
         due = f" (موعدها {_when(i.get('due'))})" if i.get("due") else ""

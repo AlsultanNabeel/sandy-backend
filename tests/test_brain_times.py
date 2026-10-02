@@ -48,7 +48,7 @@ def test_periods_are_the_calendar_week_month_and_year():
     def start(p):
         return W.period_range(p, tue)[0].astimezone(USER_TZ).date().isoformat()
 
-    assert start("week") == "2026-10-11"       # from Sunday
+    assert start("week") == "2026-10-10"       # from Saturday
     assert start("month") == "2026-10-01"
     assert start("year") == "2026-01-01"
 

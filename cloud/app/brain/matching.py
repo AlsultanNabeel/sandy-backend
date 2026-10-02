@@ -40,19 +40,20 @@ def match_score(a: str, b: str) -> float:
 
 
 def match_rows(reference: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """``{"status": matched|ambiguous|not_found|missing, "row", "matches"}``."""
+    """``{"status": matched|ambiguous|not_found|missing, "row", "matches", "tier"}``;
+    ``tier`` says how: exact, contained, or fuzzy (a guess the user should confirm)."""
     ref = match_key(reference)
     if not ref:
         return {"status": "missing", "row": None, "matches": []}
     ladder = (
-        lambda r: match_key(r.get("text", "")) == ref,
-        lambda r: ref in match_key(r.get("text", "")),
-        lambda r: match_score(ref, r.get("text", "")) >= FUZZY,
+        ("exact", lambda r: match_key(r.get("text", "")) == ref),
+        ("contained", lambda r: ref in match_key(r.get("text", ""))),
+        ("fuzzy", lambda r: match_score(ref, r.get("text", "")) >= FUZZY),
     )
-    for test in ladder:
+    for tier, test in ladder:
         hits = [r for r in rows if test(r)]
         if len(hits) == 1:
-            return {"status": "matched", "row": hits[0], "matches": hits}
+            return {"status": "matched", "row": hits[0], "matches": hits, "tier": tier}
         if hits:
-            return {"status": "ambiguous", "row": None, "matches": hits}
+            return {"status": "ambiguous", "row": None, "matches": hits, "tier": tier}
     return {"status": "not_found", "row": None, "matches": []}

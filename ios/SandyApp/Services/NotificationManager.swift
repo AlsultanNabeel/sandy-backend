@@ -312,7 +312,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     private let knownLock = NSLock()
 
     /// Safe to call often: away ping 48h ahead (pushed on each open), heads-up 60 min before
-    /// today's timed items, weekly Sunday 19:00. Clears them when notifications are denied.
+    /// today's timed items, weekly Friday 19:00. Clears them when notifications are denied.
     /// Profile › Notifications changed: everything the phone rings is scheduled again.
     func preferencesChanged() {
         knownLock.lock()
@@ -349,16 +349,17 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 body: translate(lang, "blocks.notif.away.body"),
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 48 * 3600, repeats: false))
 
-            // (c) weekday 1 is Sunday in the Gregorian calendar.
-            var sunday = DateComponents()
-            sunday.weekday = 1
-            sunday.hour = 19
-            sunday.minute = 0
+            // (c) the week runs Saturday to Friday: asked on its last evening.
+            // Weekday 6 is Friday in the Gregorian calendar.
+            var friday = DateComponents()
+            friday.weekday = 6
+            friday.hour = 19
+            friday.minute = 0
             self.addProactive(
                 id: Self.weeklyID,
                 title: translate(lang, "blocks.notif.weekly.title"),
                 body: translate(lang, "blocks.notif.weekly.body"),
-                trigger: UNCalendarNotificationTrigger(dateMatching: sunday, repeats: true))
+                trigger: UNCalendarNotificationTrigger(dateMatching: friday, repeats: true))
 
             // (d) good morning with the day in one line, the next 8:30.
             let morning = Self.next(hour: 8, minute: 30)

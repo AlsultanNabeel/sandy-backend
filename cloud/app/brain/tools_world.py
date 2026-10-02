@@ -118,11 +118,9 @@ def web_search(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
 
 def weather(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    from app.features.weather import format_weather_for_prompt, get_weather
+    from app.features.weather import format_weather_for_prompt, get_weather, home_city
 
-    city = str(args.get("city") or ctx.message or "").strip()
-    if not city:
-        return _no("ادخل مدينة أو اسم مكان للطقس.")
+    city = str(args.get("city") or "").strip() or home_city(ctx.user_id)
     data = get_weather(city)
     if not data:
         return _no(f"ما قدرت أجيب بيانات الطقس لـ {city} حالياً.")
