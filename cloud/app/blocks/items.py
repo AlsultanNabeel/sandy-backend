@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from app.blocks import _base
@@ -64,6 +64,29 @@ def get(item_id: str, mongo_db=None) -> Optional[Dict[str, Any]]:
 _UNSET = object()
 
 
+REPEATS = ("daily", "weekly", "monthly")
+
+
+def next_due(due: Optional[datetime], rule: str, now: Optional[datetime] = None) -> datetime:
+    """The first time after now that the repeat lands on, counted from ``due``
+    (from now when there was none), in the user's zone so the hour stays put."""
+    from dateutil.relativedelta import relativedelta
+
+    from app.utils.time import USER_TZ
+
+    step = {"daily": relativedelta(days=1), "weekly": relativedelta(weeks=1),
+            "monthly": relativedelta(months=1)}[rule]
+    now = (now or _base.now()).astimezone(USER_TZ)
+    if isinstance(due, datetime):
+        at = (due if due.tzinfo else due.replace(tzinfo=timezone.utc)).astimezone(USER_TZ)
+    else:
+        at = now
+    at += step
+    while at <= now:
+        at += step
+    return at.astimezone(timezone.utc)
+
+
 def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = None,
            due: Any = _UNSET, priority: Optional[str] = None,
            data: Optional[Mapping[str, Any]] = None, mongo_db=None) -> bool:
@@ -71,16 +94,21 @@ def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = N
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None or not item_id:
         return False
-    current = coll.find_one({"_id": item_id}, {"list": 1})
+    current = coll.find_one({"_id": item_id}, {"list": 1, "due": 1, "data": 1})
     if current is None:
         return False
     changes: Dict[str, Any] = {}
     if text is not None:
         changes["text"] = str(text).strip()
+    rule = ((data if data is not None else current.get("data")) or {}).get("repeat")
+    if done and rule in REPEATS:
+        # A repeating task is never closed: done moves it to its next time.
+        changes["due"] = next_due(current.get("due"), rule)
+        done = None
     if done is not None:
         changes["done"] = bool(done)
         changes["done_at"] = _base.now() if done else None
-    if due is not _UNSET:
+    if due is not _UNSET and "due" not in changes:
         changes["due"] = due
     if priority is not None:
         changes["priority"] = str(priority).strip()

@@ -93,6 +93,39 @@ struct ListItem: Codable, Identifiable, Hashable {
     var done: Bool
     var due: String?
     var priority: String?
+    var data: [String: JSONValue]?
+
+    /// Tasks: daily | weekly | monthly, or nil for once.
+    var repeatRule: String? {
+        if case .string(let r)? = data?["repeat"], !r.isEmpty { return r }
+        return nil
+    }
+
+    /// Habits: the weekdays it is kept on (1 = Sunday … 7 = Saturday); empty = every day.
+    var habitDays: [Int] {
+        guard case .array(let days)? = data?["days"] else { return [] }
+        return days.compactMap { $0.number.map(Int.init) }
+    }
+
+    /// Habits: "HH:MM", when the phone reminds of it.
+    var habitTime: String? {
+        if case .string(let t)? = data?["time"], !t.isEmpty { return t }
+        return nil
+    }
+
+    func isScheduled(on date: Date) -> Bool {
+        habitDays.isEmpty || habitDays.contains(Calendar.current.component(.weekday, from: date))
+    }
+}
+
+/// What the edit sheet hands back for a list item.
+struct ItemDraft {
+    var text: String
+    var due: Date?
+    var important: Bool
+    var repeatRule: String?
+    var days: [Int] = []
+    var time: String?
 }
 
 struct ScheduleItem: Codable, Identifiable, Hashable {

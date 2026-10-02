@@ -145,10 +145,32 @@ final class ItemsStore: LoadableStore {
         if isHabits { reportHabits() }
     }
 
-    /// The evening nudge names the habits not kept yet today.
+    /// Today's habits only (the ones kept on this weekday).
+    var today: [ListItem] { ordered.filter { $0.isScheduled(on: Date()) } }
+
+    /// The evening nudge names today's habits not kept yet; each habit with a time rings
+    /// on its days.
     private func reportHabits() {
-        NotificationManager.shared.setHabits(left: items.filter { checkedToday[$0.id] == nil }.map(\.text),
-                                             total: items.count)
+        let todays = items.filter { $0.isScheduled(on: Date()) }
+        NotificationManager.shared.setHabits(left: todays.filter { checkedToday[$0.id] == nil }.map(\.text),
+                                             total: todays.count)
+        let title = AppLocale.isArabic ? "عادة" : "Habit"
+        var notes: [NotificationItem] = []
+        for habit in items {
+            guard let at = EditTimes.clock(habit.habitTime) else { continue }
+            if habit.habitDays.isEmpty {
+                notes.append(NotificationItem(id: habit.id, title: title, body: habit.text,
+                                              date: at, repeats: .daily))
+            }
+            for day in habit.habitDays {
+                // Any date on that weekday at that time: a weekly trigger matches weekday and clock.
+                let shift = (day - Calendar.current.component(.weekday, from: at) + 7) % 7
+                let date = Calendar.current.date(byAdding: .day, value: shift, to: at) ?? at
+                notes.append(NotificationItem(id: "\(habit.id).\(day)", title: title, body: habit.text,
+                                              date: date, repeats: .weekly))
+            }
+        }
+        NotificationManager.shared.sync(prefix: "habit.", items: notes)
     }
 
     private func saveChecks() {
@@ -169,10 +191,13 @@ final class ItemsStore: LoadableStore {
             guard Outbox.shared.isEmpty else { offline = true; return }
             do {
                 let rows = try await api.listItems(list, done: done)
-                let checks = isHabits ? try await checkIns(api: api) : nil
                 guard isCurrentLoad(gen) else { return }
                 items = rows
-                if let checks { (checkedToday, streaks) = checks }
+                if isHabits {
+                    let checks = try await checkIns(api: api)
+                    guard isCurrentLoad(gen) else { return }
+                    (checkedToday, streaks) = checks
+                }
                 markLoaded()
                 if !done { SpotlightIndexer.indexItems(list: list, rows) }
             } catch {
@@ -197,16 +222,37 @@ final class ItemsStore: LoadableStore {
     }
 
     func add(api: APIClient, text: String, due: Date? = nil, priority: String? = nil) async {
+        await add(api: api, ItemDraft(text: text, due: due, important: priority == "high"))
+    }
+
+    func add(api: APIClient, _ draft: ItemDraft) async {
         restore(api)
+        let data = Self.data(draft, isHabits: isHabits, keeping: nil)
+        let priority: String? = draft.important ? "high" : nil
+        let due = draft.due
+        let text = draft.text
         let row = ListItem(id: ClientID.make(), list: list, text: text, done: false,
-                           due: due.map { isoOut.string(from: $0) }, priority: priority)
+                           due: due.map { isoOut.string(from: $0) }, priority: priority, data: data)
         let append: (inout [ListItem]) -> Void = { $0.append(row) }
         let remove: (inout [ListItem]) -> Void = { $0.removeAll { $0.id == row.id } }
         optimistic("blocks.errorSave",
                    apply: { append(&self.items); self.editTwins(append) },
                    rollback: { remove(&self.items); self.editTwins(remove) },
                    call: { try await api.addItem(id: row.id, list: self.list, text: text, due: due,
-                                                 priority: priority) })
+                                                 priority: priority, data: data) })
+    }
+
+    /// The item's data with the draft's repeat (tasks) or days and time (habits), the rest kept.
+    private static func data(_ draft: ItemDraft, isHabits: Bool,
+                             keeping old: [String: JSONValue]?) -> [String: JSONValue]? {
+        var d = old ?? [:]
+        if isHabits {
+            d["days"] = draft.days.isEmpty ? nil : .array(draft.days.map { .number(Double($0)) })
+            d["time"] = draft.time.map { .string($0) }
+        } else {
+            d["repeat"] = draft.repeatRule.map { .string($0) }
+        }
+        return d.isEmpty ? (old == nil ? nil : [:]) : d
     }
 
     /// Today's check-ins (habit id → entry id) and each habit's run of days.
@@ -215,6 +261,7 @@ final class ItemsStore: LoadableStore {
         let today = dayFormat.string(from: Date())
         var todays: [String: String] = [:]
         var days: [String: Set<String>] = [:]
+        let schedule = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for e in try await api.entries(kind: "habit", limit: 1000) {
             guard case .string(let date)? = e.data?["date"],
                   case .string(let habit)? = e.data?["habit_item_id"] else { continue }
@@ -224,10 +271,17 @@ final class ItemsStore: LoadableStore {
         var streaks: [String: Int] = [:]
         for (habit, set) in days {
             // A run still counts while today is not checked yet: it starts from yesterday.
+            // Days it is not kept on neither count nor break the run.
             var day: Date? = set.contains(today) ? Date() : cal.date(byAdding: .day, value: -1, to: Date())
             var n = 0
-            while let d = day, set.contains(dayFormat.string(from: d)) {
-                n += 1
+            var looked = 0
+            while let d = day, looked < 400 {
+                looked += 1
+                if set.contains(dayFormat.string(from: d)) {
+                    n += 1
+                } else if schedule[habit]?.isScheduled(on: d) ?? true {
+                    break
+                }
                 day = cal.date(byAdding: .day, value: -1, to: d)
             }
             streaks[habit] = n
@@ -238,6 +292,7 @@ final class ItemsStore: LoadableStore {
     /// Ticks it done (or open again): it moves to the other half of the list.
     func toggle(api: APIClient, _ item: ListItem) {
         if isHabits { return checkIn(api: api, item) }
+        if !item.done, let rule = item.repeatRule { return roll(api: api, item, rule: rule) }
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         var moved = item
         moved.done.toggle()
@@ -257,10 +312,44 @@ final class ItemsStore: LoadableStore {
                    call: { try await api.updateItem(id: item.id, done: moved.done) })
     }
 
-    /// Puts the last ticked one back as open.
+    /// A repeating task is never closed: ticked, it moves to its next time (the server does
+    /// the same, so both land on one date).
+    private func roll(api: APIClient, _ item: ListItem, rule: String) {
+        var next = item
+        next.due = isoOut.string(from: Self.nextDue(NotificationManager.parseISO(item.due ?? ""), rule: rule))
+        justDone = item
+        let put: (ListItem) -> (inout [ListItem]) -> Void = { row in
+            { rows in if let i = rows.firstIndex(where: { $0.id == row.id }) { rows[i] = row } }
+        }
+        optimistic("blocks.errorSave",
+                   apply: { put(next)(&self.items); self.editTwins(put(next)) },
+                   rollback: { put(item)(&self.items); self.editTwins(put(item)) },
+                   call: { try await api.updateItem(id: item.id, done: true) })
+    }
+
+    static func nextDue(_ due: Date?, rule: String, now: Date = Date()) -> Date {
+        let cal = Calendar.current
+        let step: DateComponents = rule == "weekly" ? DateComponents(day: 7)
+            : rule == "monthly" ? DateComponents(month: 1) : DateComponents(day: 1)
+        var at = cal.date(byAdding: step, to: due ?? now) ?? now
+        while at <= now { at = cal.date(byAdding: step, to: at) ?? now.addingTimeInterval(86_400) }
+        return at
+    }
+
+    /// Puts the last ticked one back as open (a repeating one back on its old date).
     func undoDone(api: APIClient) {
         guard let item = justDone else { return }
         justDone = nil
+        if item.repeatRule != nil {
+            var change = APIClient.ItemChange()
+            change.due = .some(NotificationManager.parseISO(item.due ?? ""))
+            let put: (inout [ListItem]) -> Void = { rows in
+                if let i = rows.firstIndex(where: { $0.id == item.id }) { rows[i] = item }
+            }
+            optimistic("blocks.errorSave", apply: { put(&self.items); self.editTwins(put) },
+                       rollback: {}, call: { try await api.updateItem(id: item.id, change) })
+            return
+        }
         var open = item
         open.done = false
         let back: (inout [ListItem]) -> Void = { rows in
@@ -280,20 +369,23 @@ final class ItemsStore: LoadableStore {
     }
 
     /// Saves an edit in place; the row changes at once and comes back if the server refuses.
-    func update(api: APIClient, _ item: ListItem, text: String, due: Date?, important: Bool) {
+    func update(api: APIClient, _ item: ListItem, _ draft: ItemDraft) {
         guard let old = items.first(where: { $0.id == item.id }) else { return }
         var new = old
-        new.text = text
+        new.text = draft.text
         var change = APIClient.ItemChange()
-        if text != old.text { change.text = text }
-        if !isHabits {
-            let priority = important ? "high" : "normal"
-            new.priority = priority
-            if priority != (old.priority ?? "normal") { change.priority = priority }
-            if due != NotificationManager.parseISOOrDay(old.due ?? "") {
-                change.due = .some(due)
-                new.due = due.map { isoOut.string(from: $0) }
-            }
+        if draft.text != old.text { change.text = draft.text }
+        let priority = draft.important ? "high" : "normal"
+        new.priority = priority
+        if priority != (old.priority ?? "normal") { change.priority = priority }
+        let data = Self.data(draft, isHabits: isHabits, keeping: old.data)
+        if data != old.data {
+            new.data = data
+            change.data = data ?? [:]
+        }
+        if !isHabits, draft.due != NotificationManager.parseISOOrDay(old.due ?? "") {
+            change.due = .some(draft.due)
+            new.due = draft.due.map { isoOut.string(from: $0) }
         }
         let put: (ListItem) -> (inout [ListItem]) -> Void = { row in
             { rows in if let i = rows.firstIndex(where: { $0.id == row.id }) { rows[i] = row } }
@@ -323,7 +415,10 @@ final class ItemsStore: LoadableStore {
         if let entryId = checkedToday[item.id] {
             optimistic("blocks.errorSave",
                        apply: {
-                           for s in habitStores { s.checkedToday[item.id] = nil; s.streaks[item.id] = max(streak - 1, 0) }
+                           for s in habitStores {
+                               s.checkedToday[item.id] = nil
+                               s.streaks[item.id] = max(streak - 1, 0)
+                           }
                            LogStore.removeEverywhere(entryId, kind: "habit", userId: self.userId)
                        },
                        rollback: {

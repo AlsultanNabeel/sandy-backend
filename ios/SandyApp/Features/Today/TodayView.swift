@@ -60,11 +60,11 @@ struct TodayView: View {
                         }
                     }
                 }
-                if !habits.items.isEmpty {
+                if !habits.today.isEmpty {
                     section("today.habits", trailing: habitCount) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: Theme.Spacing.md) {
-                                ForEach(habits.ordered) { h in
+                                ForEach(habits.today) { h in
                                     HabitRing(title: h.text, checked: habits.checkedToday[h.id] != nil,
                                               streak: habits.streaks[h.id] ?? 0) {
                                         habits.toggle(api: state.api, h)
@@ -80,7 +80,7 @@ struct TodayView: View {
                                 }
                             }
                             .animation(.spring(response: 0.5, dampingFraction: 0.8),
-                                       value: habits.ordered.map(\.id))
+                                       value: habits.today.map(\.id))
                         }
                     }
                 }
@@ -99,16 +99,12 @@ struct TodayView: View {
         .sheet(isPresented: $showProfile) { NavigationStack { ProfileView() } }
         .sheet(item: $editingTask) { t in
             ItemEditSheet(title: lang.s("today.task"), item: t, isHabit: false,
-                          save: { text, due, important in
-                              tasks.update(api: state.api, t, text: text, due: due, important: important)
-                          },
+                          save: { tasks.update(api: state.api, t, $0) },
                           delete: { tasks.delete(api: state.api, t) })
         }
         .sheet(item: $editingHabit) { h in
             ItemEditSheet(title: lang.s("today.habit"), item: h, isHabit: true,
-                          save: { text, _, _ in
-                              habits.update(api: state.api, h, text: text, due: nil, important: false)
-                          },
+                          save: { habits.update(api: state.api, h, $0) },
                           delete: { habits.delete(api: state.api, h) })
         }
         .sheet(item: $editingReminder) { r in
@@ -122,8 +118,8 @@ struct TodayView: View {
     }
 
     private var habitCount: String {
-        let kept = habits.items.filter { habits.checkedToday[$0.id] != nil }.count
-        return AppLocale.number(kept) + "/" + AppLocale.number(habits.items.count)
+        let kept = habits.today.filter { habits.checkedToday[$0.id] != nil }.count
+        return AppLocale.number(kept) + "/" + AppLocale.number(habits.today.count)
     }
 
     // MARK: - Data
@@ -169,7 +165,7 @@ struct TodayView: View {
     /// The day in one sentence, from what is really there.
     private var briefing: String {
         let late = moments.filter { $0.date < Date() }.count
-        let left = habits.items.filter { habits.checkedToday[$0.id] == nil }.count
+        let left = habits.today.filter { habits.checkedToday[$0.id] == nil }.count
         let open = tasks.items.count
         var parts: [String] = []
         if late > 0 { parts.append(String(format: lang.s("today.brief.late"), AppLocale.number(late))) }
@@ -182,7 +178,7 @@ struct TodayView: View {
         if left > 0 { parts.append(String(format: lang.s("today.brief.habits"), AppLocale.number(left))) }
         guard !parts.isEmpty else {
             // Habits were there and all of them are kept: say so.
-            return lang.s(habits.items.isEmpty ? "today.brief.free" : "today.brief.allDone")
+            return lang.s(habits.today.isEmpty ? "today.brief.free" : "today.brief.allDone")
         }
         return lang.s("today.brief.lead") + parts.joined(separator: lang.s("today.brief.join"))
     }

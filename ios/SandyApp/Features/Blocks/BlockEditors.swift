@@ -11,17 +11,21 @@ struct ItemEditSheet: View {
     let title: String
     let item: ListItem?
     let isHabit: Bool
-    let save: (String, Date?, Bool) -> Void
+    let save: (ItemDraft) -> Void
     var delete: (() -> Void)?
 
     @State private var text: String
     @State private var timed: Bool
     @State private var due: Date
     @State private var important: Bool
+    @State private var repeats: String
+    @State private var days: Set<Int>
+    @State private var reminds: Bool
+    @State private var time: Date
     @State private var confirmDelete = false
 
     init(title: String, item: ListItem?, draft: String = "", isHabit: Bool,
-         save: @escaping (String, Date?, Bool) -> Void, delete: (() -> Void)? = nil) {
+         save: @escaping (ItemDraft) -> Void, delete: (() -> Void)? = nil) {
         self.title = title
         self.item = item
         self.isHabit = isHabit
@@ -32,24 +36,51 @@ struct ItemEditSheet: View {
         _timed = State(initialValue: date != nil)
         _due = State(initialValue: date ?? EditTimes.nextRoundHour())
         _important = State(initialValue: item?.priority == "high")
+        _repeats = State(initialValue: item?.repeatRule ?? "")
+        _days = State(initialValue: Set(item?.habitDays ?? []))
+        _reminds = State(initialValue: item?.habitTime != nil)
+        _time = State(initialValue: EditTimes.clock(item?.habitTime) ?? EditTimes.next(hour: 20))
     }
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var draft: ItemDraft {
+        if isHabit {
+            return ItemDraft(text: trimmed, due: nil, important: important, repeatRule: nil,
+                             days: days.sorted(), time: reminds ? EditTimes.clockText(time) : nil)
+        }
+        return ItemDraft(text: trimmed, due: timed ? due : nil, important: important,
+                         repeatRule: timed && !repeats.isEmpty ? repeats : nil)
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 TextField(lang.s("blocks.itemPlaceholder"), text: $text, axis: .vertical)
-                if !isHabit {
+                if isHabit {
+                    Section(lang.s("blocks.habitDays")) {
+                        WeekdayPicker(days: $days)
+                        Toggle(lang.s("blocks.remindMe"), isOn: $reminds.animation())
+                        if reminds {
+                            DatePicker(lang.s("blocks.when"), selection: $time, displayedComponents: .hourAndMinute)
+                        }
+                    }
+                } else {
                     Section {
                         Toggle(lang.s("blocks.hasTime"), isOn: $timed.animation())
                         if timed {
                             QuickTimes(date: $due)
                             DatePicker(lang.s("blocks.when"), selection: $due)
+                            Picker(lang.s("blocks.repeat"), selection: $repeats) {
+                                Text(lang.s("blocks.repeatNone")).tag("")
+                                Text(lang.s("blocks.repeatDaily")).tag("daily")
+                                Text(lang.s("blocks.repeatWeekly")).tag("weekly")
+                                Text(lang.s("blocks.repeatMonthly")).tag("monthly")
+                            }
                         }
-                        Toggle(lang.s("blocks.important"), isOn: $important)
                     }
                 }
+                Section { Toggle(lang.s("blocks.important"), isOn: $important) }
                 if let delete {
                     Section {
                         Button(lang.s("blocks.delete"), role: .destructive) { confirmDelete = true }
@@ -68,7 +99,7 @@ struct ItemEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(lang.s("blocks.save")) {
-                        save(trimmed, timed && !isHabit ? due : nil, important)
+                        save(draft)
                         dismiss()
                     }
                     .disabled(trimmed.isEmpty)
@@ -76,6 +107,36 @@ struct ItemEditSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// Seven round toggles, Sunday first; none on means every day.
+struct WeekdayPicker: View {
+    @Binding var days: Set<Int>
+
+    private var symbols: [String] {
+        var cal = Calendar(identifier: .gregorian)
+        cal.locale = AppLocale.current
+        return cal.veryShortWeekdaySymbols
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(1...7, id: \.self) { day in
+                let on = days.contains(day)
+                Button {
+                    if on { days.remove(day) } else { days.insert(day) }
+                } label: {
+                    Text(symbols[day - 1])
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .frame(width: 34, height: 34)
+                        .foregroundColor(on ? Theme.Colors.onAccent : Theme.Colors.primaryText)
+                        .background(Circle().fill(on ? Theme.Colors.accent : Theme.Colors.surface.opacity(0.6)))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -270,6 +331,18 @@ enum EditTimes {
         return ""
     }
 
+    /// "18:30" as today at that time.
+    static func clock(_ text: String?) -> Date? {
+        let parts = (text ?? "").split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2 else { return nil }
+        return Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: Date())
+    }
+
+    static func clockText(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+
     /// Today at `hour`, or tomorrow when that has passed.
     static func next(hour: Int, now: Date = Date()) -> Date {
         let cal = Calendar.current
@@ -356,5 +429,24 @@ extension View {
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: store.justDone?.id)
+    }
+}
+
+/// A habit's days and time in a few words («أحد، ثلاثاء · ٦:٣٠ م»); nil for every day, no time.
+enum HabitPlan {
+    @MainActor
+    static func text(_ habit: ListItem, lang: LanguageManager) -> String? {
+        var parts: [String] = []
+        if !habit.habitDays.isEmpty {
+            var cal = Calendar(identifier: .gregorian)
+            cal.locale = AppLocale.current
+            let names = cal.shortWeekdaySymbols
+            parts.append(habit.habitDays.sorted().compactMap { (1...7).contains($0) ? names[$0 - 1] : nil }
+                .joined(separator: lang.lang == .ar ? "، " : ", "))
+        }
+        if let at = EditTimes.clock(habit.habitTime) {
+            parts.append(at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocale.current)))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

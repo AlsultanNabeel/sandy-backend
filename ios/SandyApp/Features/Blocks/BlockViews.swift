@@ -78,18 +78,15 @@ struct ItemsView: View {
         .navigationTitle(title)
         .sheet(item: $editing) { item in
             ItemEditSheet(title: title, item: item, isHabit: store.isHabits,
-                          save: { text, due, important in
-                              store.update(api: state.api, item, text: text, due: due, important: important)
-                          },
+                          save: { store.update(api: state.api, item, $0) },
                           delete: { store.delete(api: state.api, item) })
                 .environmentObject(lang)
         }
         .sheet(isPresented: $addingFull) {
             ItemEditSheet(title: title, item: nil, draft: draft, isHabit: store.isHabits,
-                          save: { text, due, important in
+                          save: { new in
                               draft = ""
-                              Task { await store.add(api: state.api, text: text, due: due,
-                                                     priority: important ? "high" : nil) }
+                              Task { await store.add(api: state.api, new) }
                           })
                 .environmentObject(lang)
         }
@@ -118,7 +115,12 @@ struct ItemsView: View {
                     .foregroundColor(checked ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
                     .strikethrough(item.done)
                 if let due = BlockDate.text(item.due) {
-                    Label(due, systemImage: "clock")
+                    Label(due, systemImage: item.repeatRule == nil ? "clock" : "repeat")
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                }
+                if store.isHabits, let plan = HabitPlan.text(item, lang: lang) {
+                    Label(plan, systemImage: "calendar")
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.secondaryText)
                 }

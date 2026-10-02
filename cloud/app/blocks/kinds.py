@@ -67,8 +67,9 @@ KINDS: Tuple[Kind, ...] = (
         "thread_id": _S, "source_turns": _I}),
 
     # ── LISTS (sandy_items) ──────────────────────────────────────────────────
+    # repeat: daily | weekly | monthly — ticking it moves `due` on instead of closing it.
     Kind("tasks", LIST, "المهام", "Tasks", "checklist", {
-        "notes": _S, "project": _S, "due_date": _S}, ("مهام", "مهامي", "شغلات")),
+        "notes": _S, "project": _S, "due_date": _S, "repeat": _S}, ("مهام", "مهامي", "شغلات")),
     Kind("shopping", LIST, "التسوق", "Shopping", "cart", {
         "category": _S, "price": _F, "qty": _F, "unit": _S},
         ("تسوق", "مشتريات", "اغراض", "اغراضي")),
@@ -78,7 +79,9 @@ KINDS: Tuple[Kind, ...] = (
         "author": _S, "category": _S, "cover_url": _S, "total_pages": _I,
         "current_page": _I, "rating": _F, "fmt": _S, "status": _S,
         "notes": _L, "quotes": _L, "started_at": _T}, ("كتب", "كتاب", "كتبي")),
-    Kind("habits", LIST, "العادات", "Habits", "repeat", {"archived": _B},
+    # days: weekdays it is kept on (1 = Sunday … 7 = Saturday; none = every day);
+    # time: "HH:MM" local, when the phone reminds of it.
+    Kind("habits", LIST, "العادات", "Habits", "repeat", {"archived": _B, "days": _L, "time": _S},
          ("عادات", "عاداتي")),
     Kind("plans", LIST, "الخطط", "Plans", "lightbulb", {
         "status": _S, "points": _L, "plan_text": _S, "summary": _S,

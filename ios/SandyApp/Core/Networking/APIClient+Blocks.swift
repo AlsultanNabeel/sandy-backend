@@ -103,13 +103,15 @@ extension APIClient {
         let text: String
         let due: String?
         let priority: String?
+        let data: [String: JSONValue]?
     }
 
     func addItem(id: String = ClientID.make(), list: String, text: String, due: Date? = nil,
-                 priority: String? = nil) async throws {
+                 priority: String? = nil, data: [String: JSONValue]? = nil) async throws {
         try await queued("/api/items", method: "POST",
                          body: ItemCreate(id: id, list: list, text: text,
-                                          due: due.map { Self.iso.string(from: $0) }, priority: priority))
+                                          due: due.map { Self.iso.string(from: $0) }, priority: priority,
+                                          data: data))
     }
 
     /// What an edit changes on a list item; nil leaves a field as it is.
@@ -117,6 +119,8 @@ extension APIClient {
         var done: Bool?
         var text: String?
         var priority: String?
+        /// The item's whole data (it replaces what is there).
+        var data: [String: JSONValue]?
         /// nil keeps the time, `.some(nil)` clears it.
         var due: Date??
 
@@ -125,13 +129,14 @@ extension APIClient {
             try c.encodeIfPresent(done, forKey: .done)
             try c.encodeIfPresent(text, forKey: .text)
             try c.encodeIfPresent(priority, forKey: .priority)
+            try c.encodeIfPresent(data, forKey: .data)
             if let due {
                 if let date = due { try c.encode(APIClient.iso.string(from: date), forKey: .due) }
                 else { try c.encodeNil(forKey: .due) }
             }
         }
 
-        private enum Key: String, CodingKey { case done, text, priority, due }
+        private enum Key: String, CodingKey { case done, text, priority, data, due }
     }
 
     func updateItem(id: String, _ change: ItemChange) async throws {

@@ -39,6 +39,8 @@ _RULES = """
   kind=expense، data.amount=50). إشي لازم ينعمل → list_add (مهمة، تسوّق، هدف). إشي بوقت → schedule.
 - الأوقات: ما تحسبي ساعات ولا فرق توقيت. نسبي («بعد نص ساعة»، «أجّليه شوي») → in_minutes
   أو shift_minutes، و«شوي» ربع ساعة. محدد («عالخمسة»، «بكرا الصبح») → حطي كلامه زي ما هو بـ when.
+- مهمة بتتكرر («كل يوم»، «كل أسبوع») → list_add مع data.repeat=daily|weekly|monthly.
+  عادة بأيام معيّنة → list=habits مع data.days (1 الأحد … 7 السبت) و data.time «HH:MM».
 - معلومة ثابتة عنه → remember kind=fact. شعور قوي → remember kind=mood مرة وحدة بالدور.
 - سؤال عن محفوظ مش ظاهر تحت (مصاريف، سجل قديم، محادثات سابقة) → recall. «لخّصيلي» → summarize.
 - لو أداة رجعت needs_confirmation، اسألي سؤال التأكيد بجملة وحدة.

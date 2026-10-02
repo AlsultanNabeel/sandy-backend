@@ -961,7 +961,10 @@ so folders are organisation only.
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
 - `Core/Stores/LoadableStore.swift` — the shared load/error/empty state machine.
 - `Features/Blocks/` — **the screens for the blocks (§2.12)**: one generic list screen
-  (`ItemsView`, any list in the kinds table; habits check in per day as `habit` log
+  (`ItemsView`, any list in the kinds table; a habit keeps `data.days` (1 = Sunday … 7) and
+  `data.time` and shows on Today only on its days, its streak skipping the others; a task
+  with `data.repeat` (daily | weekly | monthly) is never closed — `items.update` moves its
+  `due` on instead; habits check in per day as `habit` log
   entries instead of being "done"), one schedules screen (`SchedulesView`, reminders and
   messages to future self) and the log (`LogView`, the My Life tab, with the on-demand
   summary, search, a thirty-day activity strip and a card per list on top).

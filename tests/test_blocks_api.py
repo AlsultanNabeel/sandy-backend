@@ -374,3 +374,23 @@ def test_stats_count_the_whole_log_in_the_users_days(c):
     assert len(s["days"]) == 30 and s["days"][-1] == 3
     assert s["spent"] == 42.5 and s["habits"] == 1 and s["logged"] == 3
     assert c.get("/api/stats", headers=_h("userB")).get_json()["logged"] == 0
+
+
+def test_ticking_a_repeating_task_moves_it_to_its_next_time(c):
+    due = (datetime.now(USER_TZ) - timedelta(hours=2)).replace(microsecond=0)
+    r = c.post("/api/items", json={"list": "tasks", "text": "اسقي الزرع", "due": due.isoformat(),
+                                   "data": {"repeat": "daily"}}, headers=_h())
+    iid = r.get_json()["id"]
+    item = c.patch(f"/api/items/{iid}", json={"done": True}, headers=_h()).get_json()["item"]
+    assert item["done"] is False
+    nxt = datetime.fromisoformat(item["due"])
+    assert nxt > datetime.now(USER_TZ) and nxt.hour == due.hour and nxt.minute == due.minute
+    # A plain task still closes.
+    plain = c.post("/api/items", json={"list": "tasks", "text": "مرة"}, headers=_h()).get_json()["id"]
+    assert c.patch(f"/api/items/{plain}", json={"done": True}, headers=_h()).get_json()["item"]["done"]
+
+
+def test_a_habit_keeps_its_days_and_time(c):
+    r = c.post("/api/items", json={"list": "habits", "text": "جيم",
+                                   "data": {"days": [1, 3, 5], "time": "18:30"}}, headers=_h())
+    assert r.get_json()["item"]["data"] == {"days": [1, 3, 5], "time": "18:30"}
