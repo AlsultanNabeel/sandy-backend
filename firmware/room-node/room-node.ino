@@ -9,6 +9,9 @@
 //   sandy/node/<معرّف>/room/status  → نبضة كل 5 ثواني، و«متّصل/مقطوع» محفوظة
 //
 // التحديث: نسخة موقّعة من الخادم (sandy_ota_pull.h)؛ ترقية الشبكة المحلية بـ `SANDY_DEV` بس.
+//
+// البناء: لوحة esp32:esp32:esp32 (حزمة 3.3.11)، ومكتبتين بالنسخ اللي انجرّبت فيهن:
+//   arduino-cli lib install "PubSubClient@2.8" "ESP32Servo@3.2.1"
 
 #include <Arduino.h>
 #include <WiFi.h>
