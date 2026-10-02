@@ -74,7 +74,6 @@ struct ItemsView: View {
 
             if !showDone { addBar }
         }
-        .undoToast(store, api: state.api, bottom: 70)
         .navigationTitle(title)
         .sheet(item: $editing) { item in
             ItemEditSheet(title: title, item: item, isHabit: store.isHabits,
@@ -196,6 +195,12 @@ struct SchedulesView: View {
     var body: some View {
         VStack(spacing: 0) {
             BlockNotices(store: store)
+            if store.kind == "reminder" {
+                // Reminders ring as notifications: say so when they are off.
+                PermissionCard(kind: .notifications)
+                    .padding(.horizontal, Theme.Spacing.md).padding(.top, Theme.Spacing.sm)
+                    .task { await Permissions.shared.refresh() }
+            }
             if store.items.isEmpty && !store.loading {
                 Spacer()
                 LivelyEmptyState(line: lang.s("blocks.emptyReminders"))

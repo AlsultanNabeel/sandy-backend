@@ -20,6 +20,8 @@ struct AskBar: View {
     @State private var reply = ""
     @State private var thinking = false
     @State private var activity = ""
+    /// The mic was held while it is off for the app: say so, with the way to Settings.
+    @State private var micBlocked = false
     @FocusState private var focused: Bool
     @State private var glow = false
 
@@ -28,6 +30,7 @@ struct AskBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             field
+            if micBlocked { PermissionCard(kind: .mic) }
             if thinking || !reply.isEmpty {
                 answer.transition(.move(edge: .top).combined(with: .opacity))
             } else if text.isEmpty {
@@ -55,6 +58,10 @@ struct AskBar: View {
                     .foregroundColor(Theme.Colors.accent)
                     .padding(8)
                     .onLongPressGesture(minimumDuration: 0.35) {
+                        if Permissions.shared.micDenied {
+                            withAnimation { micBlocked = true }
+                            return
+                        }
                         Haptics.play(.listening)
                         DeepLinkRouter.shared.pending = .call
                     }

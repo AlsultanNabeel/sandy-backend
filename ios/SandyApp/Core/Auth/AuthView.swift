@@ -65,7 +65,7 @@ struct AuthView: View {
                                 HStack(spacing: Theme.Spacing.sm) {
                                     Image(systemName: "g.circle.fill")
                                         .font(.system(size: Theme.Icon.md, weight: .semibold))
-                                    Text(lang.lang == .ar ? "الدخول بجوجل" : "Sign in with Google")
+                                    Text(lang.s("auth.google"))
                                         .font(Theme.Typography.button)
                                 }
                                 .foregroundColor(.black)
@@ -77,9 +77,9 @@ struct AuthView: View {
                             }
                             .buttonStyle(.plain)
 
-                            dividerLabel(lang.lang == .ar ? "أو بالإيميل" : "or with email")
+                            dividerLabel(lang.s("auth.orEmail"))
 
-                            TextField(lang.lang == .ar ? "الإيميل" : "Email", text: $email)
+                            TextField(lang.s("auth.email"), text: $email)
                                 .textFieldStyle(.plain)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
@@ -87,7 +87,7 @@ struct AuthView: View {
                                 .textContentType(.emailAddress)
                                 .modifier(SandyField())
 
-                            SecureField(lang.lang == .ar ? "كلمة السر" : "Password",
+                            SecureField(lang.s("auth.password"),
                                         text: $emailPassword)
                                 .textFieldStyle(.plain)
                                 .textContentType(.password)
@@ -98,11 +98,11 @@ struct AuthView: View {
                                 .modifier(SandyField())
 
                             HStack(spacing: Theme.Spacing.sm) {
-                                SandyButton(title: lang.lang == .ar ? "دخول" : "Sign in",
+                                SandyButton(title: lang.s("auth.signIn"),
                                             systemImage: "arrow.right.circle.fill",
                                             isLoading: emailLoading,
                                             fillWidth: true) { emailAuth(isSignUp: false) }
-                                SandyButton(title: lang.lang == .ar ? "حساب جديد" : "Sign up",
+                                SandyButton(title: lang.s("auth.signUp"),
                                             style: .secondary,
                                             fillWidth: true) { emailAuth(isSignUp: true) }
                             }

@@ -95,7 +95,6 @@ struct TodayView: View {
         .task { await nudge.loadIfNeeded(api: state.api) }
         .task { await weather.load(api: state.api) }
         .refreshable { await reload() }
-        .undoToast(tasks, api: state.api, bottom: 100)
         .sheet(isPresented: $showProfile) { NavigationStack { ProfileView() } }
         .sheet(item: $editingTask) { t in
             ItemEditSheet(title: lang.s("today.task"), item: t, isHabit: false,

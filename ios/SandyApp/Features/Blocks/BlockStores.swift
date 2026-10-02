@@ -92,8 +92,6 @@ final class ItemsStore: LoadableStore {
     @Published var checkedToday: [String: String] = [:] { didSet { saveChecks() } }  // habit → entry id
     /// Habits only: days in a row each habit was kept, today included once it is checked.
     @Published var streaks: [String: Int] = [:] { didSet { saveChecks() } }
-    /// The last one ticked done, so a slip of the finger can be taken back.
-    @Published var justDone: ListItem?
     private var userId: String?
     private var restored = false
     private var loadTask: Task<Void, Never>?
@@ -296,7 +294,7 @@ final class ItemsStore: LoadableStore {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         var moved = item
         moved.done.toggle()
-        if moved.done { justDone = moved }
+        if moved.done { offerUndo(api: api, moved) }
         let out: (inout [ListItem]) -> Void = { $0.removeAll { $0.id == item.id } }
         optimistic("blocks.errorSave",
                    apply: {
@@ -317,7 +315,7 @@ final class ItemsStore: LoadableStore {
     private func roll(api: APIClient, _ item: ListItem, rule: String) {
         var next = item
         next.due = isoOut.string(from: Self.nextDue(NotificationManager.parseISO(item.due ?? ""), rule: rule))
-        justDone = item
+        offerUndo(api: api, item)
         let put: (ListItem) -> (inout [ListItem]) -> Void = { row in
             { rows in if let i = rows.firstIndex(where: { $0.id == row.id }) { rows[i] = row } }
         }
@@ -336,10 +334,15 @@ final class ItemsStore: LoadableStore {
         return at
     }
 
-    /// Puts the last ticked one back as open (a repeating one back on its old date).
-    func undoDone(api: APIClient) {
-        guard let item = justDone else { return }
-        justDone = nil
+    /// «خلّصت … · تراجع» so a slip of the finger can be taken back.
+    private func offerUndo(api: APIClient, _ item: ListItem) {
+        UndoCenter.shared.offer(String(format: LanguageManager.shared.s("blocks.doneToast"), item.text),
+                                icon: "checkmark.circle.fill",
+                                undo: { [weak self] in self?.undoDone(api: api, item) })
+    }
+
+    /// Puts a ticked one back as open (a repeating one back on its old date).
+    private func undoDone(api: APIClient, _ item: ListItem) {
         if item.repeatRule != nil {
             var change = APIClient.ItemChange()
             change.due = .some(NotificationManager.parseISO(item.due ?? ""))
@@ -399,13 +402,13 @@ final class ItemsStore: LoadableStore {
     func delete(api: APIClient, _ item: ListItem) {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         let out: (inout [ListItem]) -> Void = { $0.removeAll { $0.id == item.id } }
-        optimistic("blocks.errorSave",
-                   apply: { self.items.remove(at: idx); self.editTwins(out) },
-                   rollback: {
-                       self.items.insert(item, at: min(idx, self.items.count))
-                       self.editTwins { $0.insert(item, at: min(idx, $0.count)) }
-                   },
-                   call: { try await api.deleteItem(id: item.id) })
+        let back: (inout [ListItem]) -> Void = { rows in
+            if !rows.contains(where: { $0.id == item.id }) { rows.insert(item, at: min(idx, rows.count)) }
+        }
+        deleteWithUndo(item.text,
+                       remove: { self.items.remove(at: idx); self.editTwins(out) },
+                       restore: { back(&self.items); self.editTwins(back) },
+                       call: { try await api.deleteItem(id: item.id) })
     }
 
     /// Check in today (a `habit` log entry), or undo today's check-in.
@@ -560,7 +563,12 @@ final class SchedulesStore: LoadableStore {
     }
 
     func delete(api: APIClient, _ item: ScheduleItem) {
-        drop(item) { try await api.deleteSchedule(id: item.id) }
+        deleteWithUndo(item.text,
+                       remove: { self.everywhere { $0.removeAll { $0.id == item.id } } },
+                       restore: { self.everywhere { rows in
+                           if !rows.contains(where: { $0.id == item.id }) { rows.append(item) }
+                       } },
+                       call: { try await api.deleteSchedule(id: item.id) })
     }
 
     /// Already done: a one-off is closed. A repeating one stays for its next time.
@@ -707,6 +715,7 @@ final class LogStore: LoadableStore {
 
     static func addEverywhere(_ entry: LogEntry, userId: String?) {
         everywhere(kind: entry.kind, userId: userId) { rows in
+            guard !rows.contains(where: { $0.id == entry.id }) else { return }
             rows.insert(entry, at: 0)
             rows.sort {
                 (NotificationManager.parseISO($0.at ?? "") ?? .distantPast)
@@ -766,9 +775,9 @@ final class LogStore: LoadableStore {
     }
 
     func delete(api: APIClient, _ entry: LogEntry) {
-        optimistic("blocks.errorSave",
-                   apply: { Self.removeEverywhere(entry.id, kind: entry.kind, userId: self.userId) },
-                   rollback: { Self.addEverywhere(entry, userId: self.userId) },
-                   call: { try await api.deleteEntry(id: entry.id) })
+        deleteWithUndo(entry.text,
+                       remove: { Self.removeEverywhere(entry.id, kind: entry.kind, userId: self.userId) },
+                       restore: { Self.addEverywhere(entry, userId: self.userId) },
+                       call: { try await api.deleteEntry(id: entry.id) })
     }
 }

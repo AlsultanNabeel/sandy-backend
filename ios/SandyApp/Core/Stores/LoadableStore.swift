@@ -70,6 +70,16 @@ class LoadableStore: ObservableObject {
         }
     }
 
+    /// A delete with «تراجع»: off the screen now (`remove`), sent with `call` only when the
+    /// undo offer ends; undone, or refused by the server, `restore` puts it back.
+    func deleteWithUndo(_ text: String, remove: () -> Void, restore: @escaping () -> Void,
+                        call: @escaping () async throws -> Void) {
+        remove()
+        UndoCenter.shared.offer(String(format: LanguageManager.shared.s("blocks.deletedToast"), text),
+                                icon: "trash", undo: restore,
+                                commit: { self.optimistic("blocks.errorSave", apply: {}, rollback: restore, call: call) })
+    }
+
     /// Optimistic mutation: `apply` now, `call` in the background, `rollback` + notice on failure.
     func optimistic(
         _ noticeKey: String,

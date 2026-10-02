@@ -6,6 +6,8 @@ struct ProfileView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @State private var showEdit = false
+    @State private var confirmSignOut = false
+    @ObservedObject private var permissions = Permissions.shared
     /// يفتح شاشة الاشتراك (ساندي بريميوم) كورقة.
     @State private var showPaywall = false
     /// لإظهار الشارات بحركة لطيفة عند الدخول.
@@ -35,6 +37,7 @@ struct ProfileView: View {
                         preferredNameCard
                         interestsCard
                         languageCard
+                        permissionsCard
                         archiveCard
                         editButton
                         signOutButton
@@ -200,6 +203,38 @@ struct ProfileView: View {
         }
     }
 
+    /// The mic and notifications: allowed or off, with the way to Settings when off.
+    private var permissionsCard: some View {
+        SandyCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                SectionHeader(title: lang.s("permissions.title"))
+                permissionRow(icon: "mic.fill", titleKey: "permissions.mic", off: permissions.micDenied)
+                permissionRow(icon: "bell.fill", titleKey: "permissions.notifications",
+                              off: permissions.notificationsDenied)
+                PermissionCard(kind: .mic)
+                PermissionCard(kind: .notifications)
+            }
+        }
+        .task { await permissions.refresh() }
+    }
+
+    private func permissionRow(icon: String, titleKey: String, off: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: Theme.Icon.md, weight: .semibold))
+                .foregroundColor(Theme.Colors.accent)
+                .frame(width: 28)
+            Text(lang.s(titleKey))
+                .font(Theme.Typography.headline)
+                .foregroundColor(Theme.Colors.primaryText)
+            Spacer(minLength: 0)
+            Text(lang.s(off ? "permissions.off" : "permissions.allowed"))
+                .font(Theme.Typography.caption)
+                .foregroundColor(off ? Theme.Colors.warn : Theme.Colors.success)
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+
     // MARK: - الأزرار
 
     private var editButton: some View {
@@ -212,9 +247,16 @@ struct ProfileView: View {
     private var signOutButton: some View {
         SandyButton(title: lang.s("profile.signOut"), systemImage: "rectangle.portrait.and.arrow.right",
                     style: .secondary, fillWidth: true) {
-            state.signOut()
+            confirmSignOut = true
         }
         .padding(.top, Theme.Spacing.xs)
+        .confirmationDialog(lang.s("profile.signOutAsk"), isPresented: $confirmSignOut,
+                            titleVisibility: .visible) {
+            Button(lang.s("profile.signOut"), role: .destructive) { state.signOut() }
+            Button(lang.s("profile.signOutCancel"), role: .cancel) {}
+        } message: {
+            Text(lang.s("profile.signOutNote"))
+        }
     }
 }
 

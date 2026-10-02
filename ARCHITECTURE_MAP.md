@@ -978,6 +978,11 @@ so folders are organisation only.
   New rows carry their own 32-hex `id` (the blocks POSTs accept it and a resent POST
   returns the row already there). While the outbox holds anything, a reload keeps the
   phone's copy instead of the server's. Only a server refusal undoes a change.
+  Done ticks and deletes (lists, reminders, log, conversations) go through
+  `Core/Stores/UndoCenter.swift`: one «تراجع» offer at a time; a delete leaves the
+  screen at once and reaches the server only when the offer ends (4 s, the next offer,
+  or the app leaving the front). `DesignSystem/PermissionCard.swift` shows a denied mic
+  or notifications where they are needed (ask bar mic, the call, reminders, Profile).
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

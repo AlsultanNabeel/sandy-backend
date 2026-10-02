@@ -80,8 +80,11 @@ struct RootView: View {
         }
         // زر مركز التحكم بيترك الرابط بالمساحة المشتركة احتياطًا.
         .onChange(of: scenePhase, initial: true) { _, phase in
-            guard phase == .active else { return }
+            // Leaving the front ends an undo offer as kept: its delete goes out now.
+            guard phase == .active else { UndoCenter.shared.commitNow(); return }
             DeepLinkRouter.shared.consumeSharedPending()
+            // Settings may have changed while away: the permission cards follow.
+            Task { await Permissions.shared.refresh() }
             // Changes made offline go out as soon as the app is back in front.
             if state.stage == .chat { Task { await Outbox.shared.drain(state.api) } }
         }

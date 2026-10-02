@@ -87,10 +87,8 @@ struct LiveVoiceView: View {
     private var captions: some View {
         VStack(spacing: Theme.Spacing.md) {
             if live.permissionDenied {
-                Text(lang.s("chat.voiceDenied"))
-                    .font(Theme.Typography.subheadline)
-                    .foregroundColor(Theme.Colors.warn)
-                    .multilineTextAlignment(.center)
+                PermissionCard(kind: .mic)
+                    .task { await Permissions.shared.refresh() }
             } else if !live.errorText.isEmpty {
                 Text(live.errorText)
                     .font(Theme.Typography.subheadline)

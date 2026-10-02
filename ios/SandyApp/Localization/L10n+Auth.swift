@@ -19,6 +19,12 @@ enum L10nAuth {
             // بيوجّه التطبيق كله، وبياناته معه، ع خادم مش إلنا.
             "login":        .text("دخول"),
             "appleFailed":  .text("فشل تسجيل الدخول بآبل"),
+            "google":       .text("الدخول بجوجل"),
+            "orEmail":      .text("أو بالإيميل"),
+            "email":        .text("الإيميل"),
+            "password":     .text("كلمة السر"),
+            "signIn":       .text("دخول"),
+            "signUp":       .text("حساب جديد"),
         ],
         en: [
             "loginBtn":     .text("Log In"),
@@ -28,6 +34,12 @@ enum L10nAuth {
             "tagline":      .text("Your personal secretary"),
             "login":        .text("Log in"),
             "appleFailed":  .text("Sign in with Apple failed"),
+            "google":       .text("Sign in with Google"),
+            "orEmail":      .text("or with email"),
+            "email":        .text("Email"),
+            "password":     .text("Password"),
+            "signIn":       .text("Sign in"),
+            "signUp":       .text("Sign up"),
         ]
     )
 }

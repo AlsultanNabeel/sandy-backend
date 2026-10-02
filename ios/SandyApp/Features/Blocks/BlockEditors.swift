@@ -396,52 +396,6 @@ struct QuickTimes: View {
     }
 }
 
-/// «خلّصت … · تراجع» for a few seconds after ticking something done.
-struct UndoToast: View {
-    @EnvironmentObject var lang: LanguageManager
-    let text: String
-    let undo: () -> Void
-    let close: () -> Void
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.md) {
-            Image(systemName: "checkmark.circle.fill").foregroundColor(Theme.Colors.success)
-            Text(String(format: lang.s("blocks.doneToast"), text))
-                .font(Theme.Typography.subheadline)
-                .foregroundColor(Theme.Colors.primaryText)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            Button(lang.s("blocks.undo"), action: undo)
-                .font(Theme.Typography.headline)
-                .foregroundColor(Theme.Colors.accent)
-        }
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.vertical, 12)
-        .liquidGlass(cornerRadius: 18)
-        .padding(.horizontal, Theme.Spacing.md)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-        .task(id: text) {
-            try? await Task.sleep(for: .seconds(4))
-            close()
-        }
-    }
-}
-
-extension View {
-    /// The undo toast at the bottom while `store.justDone` is set.
-    func undoToast(_ store: ItemsStore, api: APIClient, bottom: CGFloat = 0) -> some View {
-        overlay(alignment: .bottom) {
-            if let item = store.justDone {
-                UndoToast(text: item.text,
-                          undo: { withAnimation { store.undoDone(api: api) } },
-                          close: { withAnimation { if store.justDone?.id == item.id { store.justDone = nil } } })
-                    .padding(.bottom, bottom)
-            }
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: store.justDone?.id)
-    }
-}
-
 /// A habit's days and time in a few words («أحد، ثلاثاء · ٦:٣٠ م»); nil for every day, no time.
 enum HabitPlan {
     @MainActor
@@ -452,7 +406,7 @@ enum HabitPlan {
             cal.locale = AppLocale.current
             let names = cal.shortWeekdaySymbols
             parts.append(habit.habitDays.sorted().compactMap { (1...7).contains($0) ? names[$0 - 1] : nil }
-                .joined(separator: lang.lang == .ar ? "، " : ", "))
+                .joined(separator: lang.s("common.listSeparator")))
         }
         if let at = EditTimes.clock(habit.habitTime) {
             parts.append(at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocale.current)))

@@ -407,6 +407,8 @@ private struct ChatHistorySheet: View {
                 }
             }
         }
+        // The sheet covers the tabs' undo bar, so it shows its own.
+        .undoOverlay(bottom: Theme.Spacing.md)
     }
 
     private func beginRename(_ c: ConversationMeta) {

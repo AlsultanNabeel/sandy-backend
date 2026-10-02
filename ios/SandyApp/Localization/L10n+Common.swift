@@ -10,6 +10,7 @@ enum L10nCommon {
     static let table = L10nTable(
         ar: [
             "demoData": .text("بيانات تجريبية"),
+            "listSeparator": .text("، "),
             "add":     .text("إضافة"),
             "cancel":  .text("إلغاء"),
             "save":    .text("حفظ"),
@@ -25,6 +26,7 @@ enum L10nCommon {
         ],
         en: [
             "demoData": .text("Demo data"),
+            "listSeparator": .text(", "),
             "add":     .text("Add"),
             "cancel":  .text("Cancel"),
             "save":    .text("Save"),

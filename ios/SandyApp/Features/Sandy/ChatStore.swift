@@ -108,10 +108,24 @@ final class ChatStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: currentKey)
     }
 
+    /// Off the history now, deleted on the server when the «تراجع» offer ends.
     func delete(api: APIClient, id: String) async {
-        try? await api.deleteConversation(id: id)
+        guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let removed = conversations.remove(at: idx)
         if id == currentID { startNew() }
-        await loadList(api: api)
+        UndoCenter.shared.offer(
+            String(format: LanguageManager.shared.s("blocks.deletedToast"), removed.title),
+            icon: "trash",
+            undo: { [weak self] in
+                guard let self, !self.conversations.contains(where: { $0.id == id }) else { return }
+                self.conversations.insert(removed, at: min(idx, self.conversations.count))
+            },
+            commit: { [weak self] in
+                Task {
+                    try? await api.deleteConversation(id: id)
+                    await self?.loadList(api: api)
+                }
+            })
     }
 
     /// إعادة تسمية محادثة (تحديث متفائل للعنوان) ثم مصالحة مع السيرفر.
