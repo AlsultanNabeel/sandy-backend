@@ -71,11 +71,11 @@ struct TodayView: View {
                 }
                 if !habits.today.isEmpty {
                     section("today.habits", trailing: habitCount) {
+                        HabitProgressLine(habits: habits)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: Theme.Spacing.md) {
                                 ForEach(habits.today) { h in
-                                    HabitRing(title: h.text, checked: habits.checkedToday[h.id] != nil,
-                                              streak: habits.streaks[h.id] ?? 0) {
+                                    HabitRing(title: h.text, checked: habits.checkedToday[h.id] != nil) {
                                         habits.toggle(api: state.api, h)
                                     }
                                     .contextMenu {
@@ -347,7 +347,7 @@ struct TodayView: View {
                 Label(lang.s("blocks.delete"), systemImage: "trash")
             }
         }
-        .rowAccessibility(label: A11yText.item(item, habits: false, streak: nil),
+        .rowAccessibility(label: A11yText.item(item),
                           value: lang.s("a11y.notDone"), hint: lang.s("a11y.rowHint"),
                           open: { editingTask = item },
                           actions: [(lang.s("a11y.markDone"), { tasks.toggle(api: state.api, item) }),

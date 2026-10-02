@@ -87,6 +87,9 @@ def _schemas() -> List[Dict[str, Any]]:
          "parameters": _obj({"city": _S}, [])},
         {"name": "image", "description": "ولّدي صورة من وصف.",
          "parameters": _obj({"prompt": _S}, ["prompt"])},
+        {"name": "undo_last",
+         "description": "ارجعي عن كل اللي عملتيه بردّك اللي قبل (اللي ضفتيه بينشال، اللي عدّلتيه أو حذفتيه بيرجع).",
+         "parameters": _obj({}, [])},
     ]
 
 
@@ -96,6 +99,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "schedule": B.schedule, "schedule_update": B.schedule_update,
     "device_control": X.device_control, "scene_apply": X.scene_apply,
     "web_search": X.web_search, "weather": X.weather, "image": X.image,
+    "undo_last": B.undo_last,
 }
 
 

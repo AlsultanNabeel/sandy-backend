@@ -191,7 +191,6 @@ private struct NowPulse: View {
 struct HabitRing: View {
     let title: String
     let checked: Bool
-    var streak = 0
     let action: () -> Void
 
     var body: some View {
@@ -217,15 +216,12 @@ struct HabitRing: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .frame(width: 70 * DisplaySettings.shared.elementScale)
-                // Same height either way, so rings stay in line.
-                StreakBadge(days: streak).opacity(streak > 1 ? 1 : 0)
             }
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.success, trigger: checked) { _, now in now }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(streak > 1 ? title + LanguageManager.shared.s("common.listSeparator")
-            + String(format: LanguageManager.shared.s("a11y.streak"), AppLocale.number(streak)) : title)
+        .accessibilityLabel(title)
         .accessibilityValue(LanguageManager.shared.s(checked ? "a11y.keptToday" : "a11y.notKeptToday"))
         .accessibilityHint(LanguageManager.shared.s("a11y.habitHint"))
         .accessibilityAddTraits(.isButton)

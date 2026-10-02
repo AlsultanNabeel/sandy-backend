@@ -29,7 +29,7 @@ from pymongo.errors import DuplicateKeyError
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.api.auth_handlers import require_auth, require_tenant
 from app.api.metering import meter_claims
-from app.blocks import entries, items, schedules
+from app.blocks import entries, habits, items, schedules
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, KindError, get_kind
 from app.brain import summary
 from app.brain.categorize import categorize_later
@@ -279,6 +279,7 @@ def register_blocks_api(app, mongo_db=None):
         """My Life's numbers over the whole log (not the newest page the app holds)."""
         out = entries.stats()
         out["budget"] = users_store.get_budget(current_user_id())
+        out["habit_progress"] = habits.progress()
         return jsonify(out), 200
 
     @app.route("/api/budget", methods=["POST"])

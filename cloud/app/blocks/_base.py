@@ -41,9 +41,9 @@ def journal() -> Iterator[List[Dict[str, Any]]]:
         _journal.reset(token)
 
 
-def noted(op: str, name: str, doc_id: str, handle=None) -> None:
+def noted(op: str, name: str, doc_id: str, handle=None, text: str = "") -> None:
     """Note a write. For "updated" / "deleted" pass the handle: the row as it is now is
-    kept (without its vector) to put back."""
+    kept (without its vector) to put back. A created row's `text` names it in an undo."""
     entries = _journal.get()
     if entries is None or not doc_id:
         return
@@ -52,7 +52,8 @@ def noted(op: str, name: str, doc_id: str, handle=None) -> None:
         before = handle.find_one({"_id": doc_id}, {"embedding": 0, "user_id": 0})
         if before is None:
             return
-    entries.append({"op": op, "coll": name, "id": doc_id, "before": before})
+    label = text or str((before or {}).get("text") or "")
+    entries.append({"op": op, "coll": name, "id": doc_id, "before": before, "text": label})
 
 
 def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:

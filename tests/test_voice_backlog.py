@@ -32,6 +32,16 @@ import time
 import pytest
 
 
+def _tone(n: int, level: float):
+    """`n` samples of a voice-like tone (160 Hz) whose loudness (RMS) is `level`:
+    the server counts only pitched sound as someone talking over her."""
+    import numpy as np
+
+    t = np.arange(int(n)) / 16000
+    return (level * np.sqrt(2) * np.sin(2 * np.pi * 160 * t)).astype("<i2")
+
+
+
 class _Session:
     def __init__(self) -> None:
         self.starts = 0
@@ -73,11 +83,10 @@ class _Reader:
 
 
 def _speech(ms: int, loud: bool = True) -> bytes:
-    import numpy as np
 
     n = int(16000 * ms / 1000)
     level = 3000 if loud else 5
-    return (np.full(n, level, dtype="<i2")).tobytes()
+    return (_tone(n, level)).tobytes()
 
 
 @pytest.fixture()
@@ -249,8 +258,7 @@ def test_a_noisy_room_still_gets_an_answer(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     # A room humming well above the old constant, then a sentence, then the room
     # again. The pause is quiet *for this room*, which is the only sense in which
@@ -274,8 +282,7 @@ def test_a_quiet_room_does_not_turn_a_hiss_into_a_sentence(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     chunks = [_at(3)] * 6 + [_at(20)] * 4 + [_at(3)] * 6
     session = _Session()
@@ -309,8 +316,7 @@ def test_the_turn_ends_when_the_board_goes_quiet(loop):
             await asyncio.sleep(3.0)   # the gap that means "I am done"
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     session = _Session()
     task = loop.create_task(
@@ -346,8 +352,7 @@ def test_room_frames_in_the_backlog_do_not_gag_the_turn(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     # Room, sentence, room — and every one of them was queued during setup.
     chunks = [_at(40)] * 6 + [_at(5000)] * 5 + [_at(40)] * 6
@@ -381,8 +386,7 @@ def test_the_pull_task_never_outlives_the_bridge(loop):
                 yield c
 
     def _at(level: int) -> bytes:
-        import numpy as np
-        return np.full(4800, level, dtype="<i2").tobytes()
+        return _tone(4800, level).tobytes()
 
     before = len(aio.all_tasks(loop)) if loop.is_running() else 0
     task = loop.create_task(
@@ -411,8 +415,7 @@ def test_the_floor_is_not_learned_from_the_speech_itself(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     # Room, then one long continuous sentence — no pause inside it at all.
     chunks = [_at(40)] * 5 + [_at(5000)] * 40
@@ -540,8 +543,7 @@ def test_a_blip_does_not_cancel_the_answer(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     # Room, a question, the pause that ends it, then a short noise, then quiet.
     chunks = ([_at(40)] * 5 + [_at(5000)] * 8 + [_at(40)] * 4
@@ -565,8 +567,7 @@ def test_a_real_interruption_still_gets_through(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     # Room, question, pause — then a whole second sentence, not a blip.
     chunks = ([_at(40)] * 5 + [_at(5000)] * 8 + [_at(40)] * 4
@@ -599,8 +600,7 @@ def test_an_onset_does_not_cancel_the_answer_it_interrupts(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     chunks = ([_at(40)] * 5 + [_at(5000)] * 8 + [_at(40)] * 4
               + [_at(5000)] * 2 + [_at(40)] * 6)
@@ -622,8 +622,7 @@ def test_an_interruption_keeps_the_beginning_of_its_sentence(loop):
     from app.api.voice_ws.speaker import _RecentAudio
 
     def _at(level: int, ms: int = 300) -> bytes:
-        import numpy as np
-        return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+        return _tone(int(16000 * ms / 1000), level).tobytes()
 
     quiet, loud = [_at(40)], [_at(5000)]
     chunks = (quiet * 5 + loud * 8 + quiet * 4 + loud * 8 + quiet * 4)

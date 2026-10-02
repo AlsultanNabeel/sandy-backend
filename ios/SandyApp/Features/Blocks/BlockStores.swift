@@ -93,8 +93,6 @@ final class ItemsStore: LoadableStore {
     @Published var items: [ListItem] = [] { didSet { saveItems() } }
     /// Habits only: the ones checked in today (a habit is never "done", it is done today).
     @Published var checkedToday: [String: String] = [:] { didSet { saveChecks() } }  // habit → entry id
-    /// Habits only: days in a row each habit was kept, today included once it is checked.
-    @Published var streaks: [String: Int] = [:] { didSet { saveChecks() } }
     private var userId: String?
     private var restored = false
     private var loadTask: Task<Void, Never>?
@@ -121,7 +119,6 @@ final class ItemsStore: LoadableStore {
     private struct Checks: Codable {
         let day: String
         let checked: [String: String]
-        let streaks: [String: Int]
     }
 
     /// The last copy from disk, once; a new day starts with nothing checked.
@@ -132,9 +129,9 @@ final class ItemsStore: LoadableStore {
             items = cached
             hasSnapshot = true
         }
-        if isHabits, let c = DiskCache.load(Checks.self, key: "habits.checks", userId: userId) {
-            streaks = c.streaks
-            if c.day == dayFormat.string(from: Date()) { checkedToday = c.checked }
+        if isHabits, let c = DiskCache.load(Checks.self, key: "habits.checks", userId: userId),
+           c.day == dayFormat.string(from: Date()) {
+            checkedToday = c.checked
         }
         restored = true
     }
@@ -176,7 +173,7 @@ final class ItemsStore: LoadableStore {
 
     private func saveChecks() {
         guard restored, isHabits else { return }
-        DiskCache.save(Checks(day: dayFormat.string(from: Date()), checked: checkedToday, streaks: streaks),
+        DiskCache.save(Checks(day: dayFormat.string(from: Date()), checked: checkedToday),
                        key: "habits.checks", userId: userId)
         reportHabits()
     }
@@ -195,9 +192,9 @@ final class ItemsStore: LoadableStore {
                 guard isCurrentLoad(gen) else { return }
                 items = rows
                 if isHabits {
-                    let checks = try await checkIns(api: api)
+                    let checks = try await todaysCheckIns(api: api)
                     guard isCurrentLoad(gen) else { return }
-                    (checkedToday, streaks) = checks
+                    checkedToday = checks
                 }
                 markLoaded()
                 if !done { SpotlightIndexer.indexItems(list: list, rows) }
@@ -256,38 +253,23 @@ final class ItemsStore: LoadableStore {
         return d.isEmpty ? (old == nil ? nil : [:]) : d
     }
 
-    /// Today's check-ins (habit id → entry id) and each habit's run of days.
-    private func checkIns(api: APIClient) async throws -> ([String: String], [String: Int]) {
-        let cal = Calendar.current
+    /// Today's check-ins: habit id → its entry id.
+    private func todaysCheckIns(api: APIClient) async throws -> [String: String] {
         let today = dayFormat.string(from: Date())
         var todays: [String: String] = [:]
-        var days: [String: Set<String>] = [:]
-        let schedule = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        for e in try await api.entries(kind: "habit", limit: 1000) {
-            guard case .string(let date)? = e.data?["date"],
+        for e in try await api.entries(kind: "habit", limit: 500,
+                                       since: Calendar.current.startOfDay(for: Date())) {
+            guard case .string(let date)? = e.data?["date"], date == today,
                   case .string(let habit)? = e.data?["habit_item_id"] else { continue }
-            days[habit, default: []].insert(date)
-            if date == today { todays[habit] = e.id }
+            todays[habit] = e.id
         }
-        var streaks: [String: Int] = [:]
-        for (habit, set) in days {
-            // A run still counts while today is not checked yet: it starts from yesterday.
-            // Days it is not kept on neither count nor break the run.
-            var day: Date? = set.contains(today) ? Date() : cal.date(byAdding: .day, value: -1, to: Date())
-            var n = 0
-            var looked = 0
-            while let d = day, looked < 400 {
-                looked += 1
-                if set.contains(dayFormat.string(from: d)) {
-                    n += 1
-                } else if schedule[habit]?.isScheduled(on: d) ?? true {
-                    break
-                }
-                day = cal.date(byAdding: .day, value: -1, to: d)
-            }
-            streaks[habit] = n
-        }
-        return (todays, streaks)
+        return todays
+    }
+
+    /// Habits: every habit due today is kept, so today is a committed day.
+    var todayComplete: Bool {
+        let due = today
+        return !due.isEmpty && due.allSatisfy { checkedToday[$0.id] != nil }
     }
 
     /// Ticks it done (or open again): it moves to the other half of the list.
@@ -419,19 +401,15 @@ final class ItemsStore: LoadableStore {
 
     /// Check in today (a `habit` log entry), or undo today's check-in.
     private func checkIn(api: APIClient, _ item: ListItem) {
-        let streak = streaks[item.id] ?? 0
         let habitStores = Self.live.all.filter { $0.isHabits && $0.restored }
         if let entryId = checkedToday[item.id] {
             optimistic("blocks.errorSave",
                        apply: {
-                           for s in habitStores {
-                               s.checkedToday[item.id] = nil
-                               s.streaks[item.id] = max(streak - 1, 0)
-                           }
+                           for s in habitStores { s.checkedToday[item.id] = nil }
                            LogStore.removeEverywhere(entryId, kind: "habit", userId: self.userId)
                        },
                        rollback: {
-                           for s in habitStores { s.checkedToday[item.id] = entryId; s.streaks[item.id] = streak }
+                           for s in habitStores { s.checkedToday[item.id] = entryId }
                        },
                        call: { try await api.deleteEntry(id: entryId) })
             return
@@ -443,11 +421,11 @@ final class ItemsStore: LoadableStore {
         LogStore.noteMade(entry)
         optimistic("blocks.errorSave",
                    apply: {
-                       for s in habitStores { s.checkedToday[item.id] = entry.id; s.streaks[item.id] = streak + 1 }
+                       for s in habitStores { s.checkedToday[item.id] = entry.id }
                        LogStore.addEverywhere(entry, userId: self.userId)
                    },
                    rollback: {
-                       for s in habitStores { s.checkedToday[item.id] = nil; s.streaks[item.id] = streak }
+                       for s in habitStores { s.checkedToday[item.id] = nil }
                        LogStore.removeEverywhere(entry.id, kind: "habit", userId: self.userId)
                    },
                    call: { try await api.addEntry(id: entry.id, kind: "habit", text: entry.text, data: entry.data) })

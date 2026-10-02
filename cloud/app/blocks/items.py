@@ -51,7 +51,7 @@ def add(list_name: str, text: str, data: Optional[Mapping[str, Any]] = None, *,
         "migrated_from": _base.migrated_ref(migrated_from),
     }
     coll.insert_one(doc)
-    _base.noted("created", _base.ITEMS, doc["_id"])
+    _base.noted("created", _base.ITEMS, doc["_id"], text=doc["text"])
     return doc["_id"]
 
 

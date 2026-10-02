@@ -13,6 +13,8 @@ _LEGACY_SECRET: str = os.environ.get("ROBOT_WS_SECRET", "")
 # never excludes the rest: Google renames these faster than a deploy cycle, and
 # _discover_live_models asks the API when all of these are stale.
 _LIVE_MODEL_CANDIDATES: tuple[str, ...] = (
+    # Newest first: answers faster (first sound ~1.6s against ~2.6s, measured 2026-10-02).
+    "gemini-3.8-live",
     "gemini-2.5-flash-native-audio-latest",
     "gemini-2.5-flash-native-audio-preview-12-2025",
     "gemini-2.5-flash-native-audio-preview-09-2025",
@@ -153,8 +155,11 @@ _VAD_SILENCE_MS = int(os.getenv("SANDY_VAD_SILENCE_MS", "900"))
 _VAD_MIN_UTTER_MS = int(os.getenv("SANDY_VAD_MIN_MS", "300"))      # أقصر = نتجاهله
 # اللوح بيوقف الإرسال لمّا يسكت؛ فجوة بطول الصمت معناها الدور خلص.
 _SILENCE_GAP_S = _VAD_SILENCE_MS / 1000.0
-# أقل كلام يعتبر مقاطعة وهي عم تردّ (أقصر = ضجّة).
+# أقل كلام يعتبر مقاطعة وهي عم تردّ (أقصر = ضجّة). بينحسب من الصوت البشري بس
+# (`session._voiced`)، مش من أي ضجّة: سيارة أو مروحة ما بتقطع ردّها.
 _BARGE_MIN_MS = 1200
+# How strongly a frame must repeat at a speaking pitch to count as a voice (0–1).
+_VOICED_MIN = 0.45
 # نفس الحدّ لمّا ما قالت ولا كلمة بعد إقفال الدور (غالبًا بيكمّل جملته). شوف `_barge_bar_ms`.
 _CONTINUE_MIN_MS = 800
 # سقف الكلام المحجوز قبل قرار المقاطعة — بالوقت، مش بعدد الإطارات.

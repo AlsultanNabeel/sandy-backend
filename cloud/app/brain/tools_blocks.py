@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.brain import purchases
 from app.brain.categorize import categorize_later
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.blocks import entries, items, schedules
@@ -116,6 +117,21 @@ def budget_note(user_id: str) -> str:
     return f"{state}: صرف {spent:g} من {budget:g}. نبّهيه بلطف."
 
 
+def undo_last(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """«لا، احذفيه» / «غلط» right after she did something: what her previous reply added
+    goes, what it changed or deleted comes back. Devices are not undone."""
+    from app.blocks import _base
+    from app.brain import stm
+
+    effects = stm.take_last_effects(ctx.thread_id or ctx.user_id, ctx.user_id)
+    if not effects:
+        return refused("nothing to undo: the last reply changed nothing in the lists, log or reminders")
+    undone = _base.undo(effects)
+    names = [e.get("text") for e in effects if e.get("text")]
+    return {"ok": bool(undone), "undone": undone, "items": names,
+            "reply": "رجّعت عنه ✅ " + "، ".join(f"«{n}»" for n in names[:3])}
+
+
 def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:
     """(log/schedule kind, list, the rest of the query): «شو مهامي» is the tasks list,
     not the text «مهامي» — matched as text it filtered every task out."""
@@ -217,6 +233,10 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if get_kind(LOG, name) and not get_kind(LIST, name):
         return refused(f"«{name}» is something that happened, not a list: "
                        f"call remember with kind={name}")
+    if name == "shopping" and purchases.said_bought(ctx.message):
+        # «اشتريت…»: bought, so nothing to buy. What was on the list is already ticked.
+        return refused("he already bought it: don't add it to the shopping list "
+                       "(log the expense with remember if he said a price)")
     same = match_key(text)
     for row in items.list_items(name, done=False):
         if match_key(row.get("text", "")) == same:

@@ -60,7 +60,7 @@ def add(kind: str, text: str, fire_at: datetime, payload: Optional[Mapping[str, 
         "migrated_from": _base.migrated_ref(migrated_from),
     }
     coll.insert_one(doc)
-    _base.noted("created", _base.SCHEDULES, doc["_id"])
+    _base.noted("created", _base.SCHEDULES, doc["_id"], text=doc["text"])
     return doc["_id"]
 
 

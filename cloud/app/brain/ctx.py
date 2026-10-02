@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional
 class TurnCtx:
     user_id: str
     message: str = ""
+    # The conversation's memory thread (its last reply's effects are what undo_last takes back).
+    thread_id: str = ""
     source: str = "chat"            # blocks.entries.SOURCES: chat | voice | app
     confirmed: bool = False         # set only when replaying a held action after "yes"
     image_state: Optional[Dict[str, Any]] = None

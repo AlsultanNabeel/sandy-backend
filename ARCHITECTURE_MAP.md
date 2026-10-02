@@ -1028,6 +1028,15 @@ so folders are organisation only.
   (`DiagnoseView`, `GET /api/diagnose` in plain words) and linking/unlinking. Room
   scenes (`RoomScenesSection`) are in home control. Project lists Sandy made from chat
   («project:<name>») get a card each in My Life.
+  Habits: a committed day is one on which every habit due that day was kept; the
+  commitment days and the streak (days with nothing due neither count nor break it)
+  come from `blocks/habits.py` (up to yesterday, `/api/stats` → `habit_progress`, and
+  in Sandy's state block), and the phone adds today when its last habit is ticked.
+  Shopping: `brain/purchases.py` ticks (or lessens) the open shopping items a «اشتريت /
+  جبت» line names before the model answers; list_add refuses to add what was bought.
+  `undo_last` takes back what the previous reply did (its journaled effects). Live
+  voice: an interruption needs pitched sound (`session._voiced`), so noise no longer
+  cuts a reply; `gemini-3.8-live` is the first model tried.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

@@ -28,6 +28,7 @@ from app.api.voice_ws._config import (
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
     _BARGE_MIN_MS,
+    _VOICED_MIN,
     _CONTINUE_MIN_MS,
     _CHUNK_BYTES,
     _HELD_MS_MAX,
@@ -724,6 +725,31 @@ def _she_has_not_spoken_yet(state: Dict[str, Any]) -> bool:
     return last_out is None or float(last_out) < float(closed)
 
 
+def _voiced(samples) -> bool:
+    """A voice, not noise: the frame repeats itself at a speaking pitch (80–400 Hz).
+
+    Engines, road and wind are broadband or far below that, so their energy alone
+    can no longer interrupt a reply; a person talking to her still can.
+    """
+    import numpy as np
+
+    x = samples.astype(np.float32)
+    if x.size < 400:
+        return False
+    x -= x.mean()
+    energy = float(np.dot(x, x))
+    if energy <= 1e-3:
+        return False
+    ac = np.correlate(x, x, mode="full")[x.size - 1:]
+    lo, hi = 16000 // 400, min(16000 // 80, x.size - 2)
+    peak = lo + int(np.argmax(ac[lo:hi + 1]))
+    # A real cycle peaks inside the range; a rumble too slow for a voice only slopes
+    # down across it, so its highest point sits on the edge.
+    if peak in (lo, hi) or ac[peak] < ac[peak - 1] or ac[peak] < ac[peak + 1]:
+        return False
+    return float(ac[peak]) / energy >= _VOICED_MIN
+
+
 def _barge_bar_ms(state: Dict[str, Any]) -> float:
     """قدّيش لازم يحكي عشان نعتبرها مقاطعة.
 
@@ -836,6 +862,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     speech_ms = 0.0
     held: List[bytes] = []
     held_ms = 0.0
+    # Of the held time, how much was a voice (pitched), not noise: only that interrupts her.
+    held_voiced_ms = 0.0
     backlog = reader.pending()
     draining = backlog > _BACKLOG_FRAMES
     if draining:
@@ -975,10 +1003,14 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 if state.get("replying") and _she_is_really_answering(state):
                     held.append(chunk)
                     held_ms += ms
+                    if _voiced(samples):
+                        held_voiced_ms += ms
                     while held_ms > _HELD_MS_MAX and len(held) > 1:
                         # The dropped frame's time leaves with it.
                         held_ms -= len(held.pop(0)) / 2 / 16000 * 1000
-                    if held_ms < _barge_bar_ms(state):
+                    held_voiced_ms = min(held_voiced_ms, held_ms)
+                    # A car, a fan, a door: loud but not a voice. Only speech cuts her off.
+                    if held_voiced_ms < _barge_bar_ms(state):
                         continue
                     logger.info("[voice_ws] %.1fs of speech while she answers — "
                                 "taking it as an interruption", held_ms / 1000)
@@ -994,10 +1026,12 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                     await _send_audio(pending)
                 held.clear()
                 held_ms = 0.0
+                held_voiced_ms = 0.0
             elif not speaking and held:
                 # The noise died before it became a sentence.
                 held.clear()
                 held_ms = 0.0
+                held_voiced_ms = 0.0
 
             if speaking:
                 recent.add(chunk)

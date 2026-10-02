@@ -60,10 +60,13 @@ struct LifeStats: Codable, Hashable {
     /// This month's spending per category, and the monthly limit (0 = none).
     var byCategory: [String: Double]?
     var budget: Double?
+    /// Habit commitment up to yesterday, counted by the server (blocks/habits.py).
+    var habitProgress: HabitProgress?
 
     enum CodingKeys: String, CodingKey {
         case days, spent, habits, logged, budget
         case byCategory = "by_category"
+        case habitProgress = "habit_progress"
     }
 
     /// With entries made on the phone since the numbers were counted.
@@ -85,6 +88,21 @@ struct LifeStats: Codable, Hashable {
         }
         return out
     }
+}
+
+/// Days on which every habit due was kept, and how many came in a row. The server counts
+/// up to yesterday; today is added on the phone the moment the last habit is ticked.
+struct HabitProgress: Codable, Hashable {
+    let baseCommitted: Int
+    let baseStreak: Int
+
+    enum CodingKeys: String, CodingKey {
+        case baseCommitted = "base_committed"
+        case baseStreak = "base_streak"
+    }
+
+    func committed(todayComplete: Bool) -> Int { baseCommitted + (todayComplete ? 1 : 0) }
+    func streak(todayComplete: Bool) -> Int { baseStreak + (todayComplete ? 1 : 0) }
 }
 
 struct LogEntry: Codable, Identifiable, Hashable {

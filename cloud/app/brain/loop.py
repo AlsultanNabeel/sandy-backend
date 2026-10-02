@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from app.blocks import _base as blocks_base
-from app.brain import confirm, context, future, model, stm, stops, tools
+from app.brain import confirm, context, future, model, purchases, stm, stops, tools
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
 from app.utils.tenant_version import turn_scope
@@ -185,7 +185,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     t0 = time.perf_counter()
     began = datetime.now(timezone.utc)
     thread_id = str(conversation_id or chat_id)
-    ctx = TurnCtx(user_id=str(user_id), message=message,
+    ctx = TurnCtx(user_id=str(user_id), message=message, thread_id=thread_id,
                   source="voice" if source == "voice" else "chat", image_state=image_state)
     held = confirm.live(pending_state)
     own, history = stm.history(thread_id, user_id)
@@ -223,12 +223,16 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
             attachments=(), began=None):
     """The held confirmation's outcome, else the fast path's, else the model loop's.
     A line with attachments always goes to the model: only it can look at them."""
-    if outcome is None and not attachments:
+    # «اشتريت الحليب»: the code ticks the shopping list first; the model then answers.
+    bought = purchases.apply(message) if outcome is None else []
+    if outcome is None and not attachments and not bought:
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
         due = None
         try:
             system = context.build_system(user_id, message, history, spoken=ctx.source == "voice")
+            if bought:
+                system += "\n\n" + purchases.note(bought)
             due = future.due_context()
             if due:
                 system += "\n\n" + due[0]

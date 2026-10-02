@@ -187,6 +187,29 @@ def rewind(thread_id: str, user_id: str) -> List[Dict[str, Any]]:
     return effects
 
 
+def take_last_effects(thread_id: str, user_id: str) -> List[Dict[str, Any]]:
+    """What the thread's last reply did to the blocks, handed over once: the reply keeps
+    its words, but its effects are cleared so they cannot be taken back twice."""
+    coll = _stm_collection()
+    if coll is None:
+        return []
+    key = f"{thread_id}:{user_id}"
+    try:
+        doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
+        turns = list((doc or {}).get("history") or [])
+        for i in range(len(turns) - 1, -1, -1):
+            if turns[i].get("role") != "assistant":
+                continue
+            effects = list(turns[i].get("effects") or [])
+            if effects:
+                turns[i] = {k: v for k, v in turns[i].items() if k != "effects"}
+                coll.update_one({"key": key}, {"$set": {"history": turns}})
+            return effects
+    except PyMongoError as exc:  # memory is never worth a failed reply
+        logger.warning("[stm] take effects failed: %s", exc)
+    return []
+
+
 def cut_last(thread_id: str, user_id: str, text: str) -> None:
     """The last reply, as the user saw it before stopping it (the turn was already over)."""
     coll = _stm_collection()

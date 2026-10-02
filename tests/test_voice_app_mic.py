@@ -24,6 +24,15 @@ import numpy as np
 import pytest
 
 
+def _tone(n: int, level: float):
+    """`n` samples of a voice-like tone (160 Hz) whose loudness (RMS) is `level`:
+    the server counts only pitched sound as someone talking over her."""
+
+    t = np.arange(int(n)) / 16000
+    return (level * np.sqrt(2) * np.sin(2 * np.pi * 160 * t)).astype("<i2")
+
+
+
 class _Session:
     def __init__(self) -> None:
         self.starts = 0
@@ -55,7 +64,7 @@ class _Reader:
 
 def _app_frame(level: int, ms: int = 40) -> bytes:
     """إطار بطول اللي بيبعتو التطبيق — أربعين جزء من الألف، مش مية وتمانية وعشرين."""
-    return np.full(int(16000 * ms / 1000), level, dtype="<i2").tobytes()
+    return _tone(int(16000 * ms / 1000), level).tobytes()
 
 
 @pytest.fixture()
@@ -256,3 +265,24 @@ def test_talking_over_her_from_the_app_interrupts_her(loop):
     assert session.order[:1] == ["start"], (
         f"حكى ثانية ونص فوقها وما انقطعت: {session.order}")
     assert state["replying"] is False, "بعد المقاطعة لسا معتبرينها عم تردّ"
+
+
+def test_street_noise_over_her_does_not_cut_her_off(loop):
+    """A car outside for three seconds is loud, but not a voice: her answer goes on."""
+    import time as _time
+
+
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    noise = np.random.default_rng(3).normal(0, 3000, 1600).astype("<i2").tobytes()
+    chunks = [_app_frame(30, ms=100)] * 10 + [noise] * 30
+    session = _StatefulSession()
+    now = _time.monotonic()
+    state: dict = {"replying": True, "turn_closed_at": now - 3, "last_out_at": now + 60}
+
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(),
+                        verify=False, live_state=state))
+
+    assert "start" not in session.order, f"noise cut her off: {session.order}"

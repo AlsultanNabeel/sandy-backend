@@ -11,7 +11,7 @@ from pymongo.errors import PyMongoError
 
 from app.brain.persona import build_effective_persona
 from app.utils.ltm_crypto import decrypt_field
-from app.blocks import _base, entries
+from app.blocks import _base, entries, habits
 from app.blocks.kinds import LIST, get_kind
 from app.utils.time import USER_TZ
 from app.utils.time_awareness import time_awareness_block
@@ -42,6 +42,10 @@ _RULES = """
   أو shift_minutes، و«شوي» ربع ساعة. محدد («عالخمسة»، «بكرا الصبح») → حطي كلامه زي ما هو بـ when.
 - مهمة بتتكرر («كل يوم»، «كل أسبوع») → list_add مع data.repeat=daily|weekly|monthly.
   عادة بأيام معيّنة → list=habits مع data.days (1 الأحد … 7 السبت) و data.time «HH:MM».
+- «اشتريت / جبت» شي من قائمة التسوق: الكود بيشطبه لحاله وبيحكيلك. ما تضيفي المشتريات للقائمة،
+  ولو ذكر سعر سجّلي المصروف. اللي مش بالقائمة ما تضيفيه.
+- «لا خلص احذفيه»، «غلط»، «ارجعي عنه»، «مش هيك» عن إشي عملتيه بردّك اللي قبل → undo_last،
+  ولا تقولي «ماشي» بدون ما تنفّذي. لو بدّه يعدّله بس (مش يلغيه) → list_update / schedule_update بالـ id.
 - معلومة ثابتة عنه → remember kind=fact. شعور قوي → remember kind=mood مرة وحدة بالدور.
 - سؤال عن محفوظ مش ظاهر تحت (مصاريف، سجل قديم، محادثات سابقة) → recall. «لخّصيلي» → summarize.
 - لو أداة رجعت needs_confirmation، اسألي سؤال التأكيد بجملة وحدة.
@@ -131,6 +135,11 @@ def state_block(rows: int = STATE_ROWS) -> str:
         parts.append("التذكيرات الجاية:\n" + "\n".join(
             f"- {s.get('text', '')} ({_when(s.get('fire_at'))}"
             f"{', بتتكرر' if s.get('recurrence') else ''}) #{s['id']}" for s in upcoming))
+    if any(p.startswith("قائمة العادات") for p in parts):
+        # The same numbers the app shows («كم يوم التزمت؟»), from one place.
+        h = habits.progress()
+        parts.append(f"التزامه بالعادات: {h['committed_days']} يوم التزم فيه بكل عادات اليوم، "
+                     f"والسلسلة هلأ {h['streak']} يوم ورا بعض.")
     if not parts:
         return "وضعه هلأ: ما عنده مهام مفتوحة ولا تذكيرات جاية."
     return "وضعه هلأ (استعملي الـ id لما تعدّلي):\n" + "\n\n".join(parts)

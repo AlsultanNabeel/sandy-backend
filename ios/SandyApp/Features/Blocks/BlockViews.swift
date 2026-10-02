@@ -50,6 +50,13 @@ struct ItemsView: View {
             }
 
             BlockNotices(store: store)
+            if store.isHabits {
+                HabitProgressLine(habits: store)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.top, Theme.Spacing.sm)
+                    .task { await LifeStatsStore.shared.load(api: state.api) }
+            }
 
             if store.items.isEmpty && store.loading && !store.hasSnapshot {
                 // First open, nothing on the phone yet: the rows' shapes until they come.
@@ -132,9 +139,6 @@ struct ItemsView: View {
                 }
             }
             Spacer(minLength: 0)
-            if store.isHabits, let streak = store.streaks[item.id], streak > 1 {
-                StreakBadge(days: streak)
-            }
             if item.priority == "high" {
                 Image(systemName: "flag.fill").foregroundColor(Theme.Colors.warn)
             }
@@ -143,7 +147,7 @@ struct ItemsView: View {
         .onTapGesture { editing = item }
         .opacity(store.isHabits && checked ? 0.6 : 1)
         .sandyCard()
-        .rowAccessibility(label: A11yText.item(item, habits: store.isHabits, streak: store.streaks[item.id]),
+        .rowAccessibility(label: A11yText.item(item),
                           value: lang.s(store.isHabits ? (checked ? "a11y.keptToday" : "a11y.notKeptToday")
                                                        : (checked ? "a11y.done" : "a11y.notDone")),
                           hint: lang.s("a11y.rowHint"), open: { editing = item },
@@ -589,17 +593,29 @@ private struct SummarySheet: View {
     }
 }
 
-/// Days in a row: a small flame and a number.
-struct StreakBadge: View {
-    let days: Int
+/// «🔥 سلسلة ٥ أيام · ١٢ يوم التزام»: days on which every habit due was kept.
+struct HabitProgressLine: View {
+    @EnvironmentObject var lang: LanguageManager
+    @ObservedObject var habits: ItemsStore
+    @ObservedObject private var stats = LifeStatsStore.shared
 
     var body: some View {
-        HStack(spacing: 2) {
-            Image(systemName: "flame.fill")
-            Text(AppLocale.number(days))
+        let progress = stats.stats.habitProgress ?? HabitProgress(baseCommitted: 0, baseStreak: 0)
+        let done = habits.todayComplete
+        let streak = progress.streak(todayComplete: done)
+        let committed = progress.committed(todayComplete: done)
+        HStack(spacing: Theme.Spacing.sm) {
+            Label(String(format: lang.s("blocks.habitStreak"), AppLocale.number(streak)), systemImage: "flame.fill")
+                .foregroundColor(streak > 0 ? Theme.Colors.warn : Theme.Colors.tertiaryText)
+            Text("·").foregroundColor(Theme.Colors.tertiaryText)
+            Text(String(format: lang.s("blocks.habitCommitted"), AppLocale.number(committed)))
+                .foregroundColor(Theme.Colors.secondaryText)
         }
-        .scaledFont(12, weight: .bold, design: .rounded)
-        .foregroundColor(Theme.Colors.warn)
+        .font(Theme.Typography.caption.weight(.semibold))
+        .contentTransition(.numericText())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(format: lang.s("a11y.habitProgress"),
+                                   AppLocale.number(streak), AppLocale.number(committed)))
     }
 }
 
@@ -633,15 +649,12 @@ extension View {
 /// What the screen reader says for list rows, shared by the lists and Today.
 @MainActor
 enum A11yText {
-    static func item(_ item: ListItem, habits: Bool, streak: Int?) -> String {
+    static func item(_ item: ListItem) -> String {
         let lang = LanguageManager.shared
         var parts = [item.text]
         if let due = BlockDate.text(item.due) { parts.append(due) }
         if item.repeatRule != nil { parts.append(lang.s("a11y.repeats")) }
         if item.priority == "high" { parts.append(lang.s("a11y.important")) }
-        if habits, let streak, streak > 1 {
-            parts.append(String(format: lang.s("a11y.streak"), AppLocale.number(streak)))
-        }
         return parts.joined(separator: lang.s("common.listSeparator"))
     }
 

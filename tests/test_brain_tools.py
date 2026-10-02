@@ -29,9 +29,9 @@ def tenant_a(brain_db):  # noqa: F811
         yield brain_db
 
 
-def test_twelve_tools_and_every_one_has_a_handler():
+def test_thirteen_tools_and_every_one_has_a_handler():
     specs = tools.openai_tools()
-    assert len(specs) == 12
+    assert len(specs) == 13
     assert {s["function"]["name"] for s in specs} == set(tools.HANDLERS)
 
 
