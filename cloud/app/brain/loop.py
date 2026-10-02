@@ -46,6 +46,7 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
     used: List[str] = []
     replies: List[str] = []
     specs = tools.openai_tools()
+    on_step = model.step_hook()
     for _ in range(MAX_STEPS):
         reply = complete(messages, specs, on_text=on_text)
         if reply is None:
@@ -56,6 +57,8 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
         pending = None
         for call in reply.tool_calls:
             used.append(call.name)
+            if on_step:
+                on_step(call.name)
             result = tools.execute(call.name, call.args, ctx)
             if pending is None:
                 pending = _hold_if_asked(call.name, call.args, result)

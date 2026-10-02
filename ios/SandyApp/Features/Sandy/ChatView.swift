@@ -128,7 +128,7 @@ struct ChatView: View {
 
                     // حيوية: مؤشّر "ساندي تكتب…" بنقاط متحرّكة أثناء الانتظار.
                     if store.sending {
-                        TypingIndicator()
+                        TypingIndicator(activity: store.activity)
                             .id(Self.typingAnchorID)
                             .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
                     }
@@ -557,6 +557,8 @@ private struct ChatHistorySheet: View {
 /// تعطي إحساس إن ساندي تفكّر/تكتب أثناء الانتظار (الردود تاخذ ثواني).
 private struct TypingIndicator: View {
     @EnvironmentObject var lang: LanguageManager
+    /// What she is doing, shown beside the dots while a tool runs.
+    var activity = ""
     @State private var animating = false
 
     var body: some View {
@@ -576,7 +578,15 @@ private struct TypingIndicator: View {
                             value: animating
                         )
                 }
+                if !activity.isEmpty {
+                    Text(activity)
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .padding(.leading, 4)
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.25), value: activity)
             .padding(.vertical, Theme.Spacing.md)
             .padding(.horizontal, Theme.Spacing.md)
             .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: 0.06)

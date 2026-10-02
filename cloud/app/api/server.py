@@ -322,7 +322,8 @@ def create_app(*, mongo_db=None):
 
         def _worker():
             # Stream hooks and the profile are thread-local: set them in this thread.
-            set_stream_hooks(on_start=lambda: None, on_chunk=chunk_queue.put)
+            set_stream_hooks(on_start=lambda: None, on_chunk=chunk_queue.put,
+                             on_step=lambda name: chunk_queue.put({"step": name}))
             try:
                 outcome["result"] = _run_authenticated_agent(claims, body)
                 if cmid:
@@ -350,7 +351,9 @@ def create_app(*, mongo_db=None):
                     continue
                 if item is None:
                     break
-                yield f"data: {json.dumps({'text': item}, ensure_ascii=False)}\n\n"
+                # A tool about to run ({"step": name}) or a piece of the reply.
+                event = item if isinstance(item, dict) else {"text": item}
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
             if outcome.get("error"):
                 yield f"data: {json.dumps({'error': 'internal_error'})}\n\n"

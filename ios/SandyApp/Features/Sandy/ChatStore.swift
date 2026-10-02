@@ -7,6 +7,8 @@ import SwiftUI
 final class ChatStore: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var sending = false
+    /// What Sandy is doing right now («عم ضيف للقائمة…»), empty while she only talks.
+    @Published var activity = ""
     @Published var errorMessage = ""
     @Published var conversations: [ConversationMeta] = []
     /// nil = محادثة جديدة "كسولة": معرّفها بيتولّد محليًا مع أول رسالة، والخادم
@@ -145,7 +147,7 @@ final class ChatStore: ObservableObject {
         // مفتاح الرسالة: نفسه بكل محاولة، فالخادم ما بيشغّل الدور مرتين.
         let clientMsgID = Self.newID()
         let t = Task { @MainActor () -> String? in
-            defer { if generation == sendGeneration { sending = false } }
+            defer { if generation == sendGeneration { sending = false; activity = "" } }
             // حفظ رسالة المستخدم وتشغيل ساندي مستقلّان — /api/agent بياخد نص
             // الرسالة من الطلب نفسه، مش من القاعدة، فما داعي ننتظر الحفظ. مهمة
             // منفصلة: الرسالة بتنحفظ حتى لو الإرسال اتلغى أو فشل.
@@ -170,7 +172,11 @@ final class ChatStore: ObservableObject {
                         // أول قطعة توصل تستبدل مؤشّر الكتابة بفقاعة نصّية تكبر تدريجياً —
                         // ردود الأدوات (زي "أضف مهمة") ما فيها قطع، بترجع دفعة وحدة بالنهاية.
                         try await api.sendMessageStreaming(text, conversationId: cid,
-                                                           clientMsgId: clientMsgID) { [weak self] partial in
+                                                           clientMsgId: clientMsgID,
+                                                           onStep: { [weak self] step in
+                            guard let self, generation == self.sendGeneration else { return }
+                            self.activity = ChatStep.label(step)
+                        }) { [weak self] partial in
                             // Generation as well as cancellation. Cancellation
                             // is cooperative and observed at the next check, so
                             // between `sendTask?.cancel()` and this closure
@@ -256,5 +262,16 @@ final class ChatStore: ObservableObject {
     private func isToday(_ iso: String) -> Bool {
         let today = Self.iso.string(from: Date()).prefix(10)
         return iso.prefix(10) == today
+    }
+}
+
+/// What a tool's name means on screen while it runs.
+@MainActor
+enum ChatStep {
+    static func label(_ tool: String) -> String {
+        let lang = LanguageManager.shared
+        let key = "chat.step." + tool
+        let text = lang.s(key)
+        return text == key ? lang.s("chat.step.other") : text
     }
 }

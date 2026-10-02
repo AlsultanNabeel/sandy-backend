@@ -64,6 +64,17 @@ def test_the_final_text_streams_through_the_hooks(brain_db):  # noqa: F811
     assert chunks and chunks[-1] == "مرحبا فيك"
 
 
+def test_each_tool_is_announced_before_it_runs(brain_db):  # noqa: F811
+    steps = []
+    set_stream_hooks(on_start=lambda: None, on_chunk=lambda c: None, on_step=steps.append)
+    try:
+        _turn(ScriptedModel(tools_reply(call("list_add", list="shopping", text="حليب")),
+                            text_reply("ضفته")))
+    finally:
+        clear_stream_hooks()
+    assert steps == ["list_add"]
+
+
 def test_the_turn_is_written_to_short_term_memory(brain_db):  # noqa: F811
     _turn(ScriptedModel(text_reply("تمام")), "كيفك")
     from app.brain.stm import recent_turns_for_user

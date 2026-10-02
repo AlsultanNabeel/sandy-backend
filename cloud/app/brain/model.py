@@ -26,14 +26,22 @@ TEMPERATURE = 0.5
 _stream_tls = threading.local()
 
 
-def set_stream_hooks(on_start: Callable[[], None], on_chunk: Callable[[str], None]) -> None:
+def set_stream_hooks(on_start: Callable[[], None], on_chunk: Callable[[str], None],
+                     on_step: Optional[Callable[[str], None]] = None) -> None:
     _stream_tls.on_start = on_start
     _stream_tls.on_chunk = on_chunk
+    _stream_tls.on_step = on_step
 
 
 def clear_stream_hooks() -> None:
     _stream_tls.on_start = None
     _stream_tls.on_chunk = None
+    _stream_tls.on_step = None
+
+
+def step_hook() -> Optional[Callable[[str], None]]:
+    """Told each tool's name before it runs, so the screen can say what is happening."""
+    return getattr(_stream_tls, "on_step", None)
 
 
 def stream_hooks():

@@ -52,6 +52,7 @@ extension APIClient {
         _ text: String,
         conversationId: String? = nil,
         clientMsgId: String? = nil,
+        onStep: (@MainActor (String) -> Void)? = nil,
         onChunk: @MainActor @escaping (String) -> Void
     ) async throws -> (reply: String, imageURL: String?) {
         guard let url = URL(string: baseURL + "/api/agent/stream") else {
@@ -116,7 +117,10 @@ extension APIClient {
                     sawDone = true
                     break
                 }
-                if let partial = obj["text"] as? String {
+                // A tool about to run, so the screen can say what Sandy is doing.
+                if let step = obj["step"] as? String {
+                    await onStep?(step)
+                } else if let partial = obj["text"] as? String {
                     await onChunk(partial)
                 }
             }

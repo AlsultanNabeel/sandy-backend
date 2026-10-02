@@ -19,6 +19,7 @@ struct AskBar: View {
     @State private var text = ""
     @State private var reply = ""
     @State private var thinking = false
+    @State private var activity = ""
     @FocusState private var focused: Bool
     @State private var glow = false
 
@@ -108,7 +109,14 @@ struct AskBar: View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             SandyAvatar(size: 28, mood: thinking ? .soft : .happy)
             if thinking && reply.isEmpty {
-                ProgressView().tint(Theme.Colors.accent)
+                HStack(spacing: Theme.Spacing.sm) {
+                    ProgressView().tint(Theme.Colors.accent)
+                    if !activity.isEmpty {
+                        Text(activity)
+                            .font(Theme.Typography.caption)
+                            .foregroundColor(Theme.Colors.secondaryText)
+                    }
+                }
             } else {
                 Text(reply)
                     .font(Theme.Typography.body)
@@ -136,7 +144,9 @@ struct AskBar: View {
         Haptics.play(.send)
         Task {
             do {
-                let out = try await state.api.sendMessageStreaming(message) { partial in
+                let out = try await state.api.sendMessageStreaming(message, onStep: { step in
+                    activity = ChatStep.label(step)
+                }) { partial in
                     reply = partial
                 }
                 reply = out.reply
@@ -144,6 +154,7 @@ struct AskBar: View {
                 reply = lang.s("today.askFailed")
             }
             thinking = false
+            activity = ""
             await onDone()
         }
     }
