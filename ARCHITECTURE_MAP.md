@@ -423,6 +423,7 @@ capped at 2000 characters and `data`/`payload` at 8000 of JSON:
 | `GET /api/kinds` | `kinds.KINDS` as `{name, block, labels:{ar,en}, icon, prefix, fields:{name: type}}` — the app builds its screens from it |
 | `GET /api/stats` | My Life's numbers over the whole log in the user's zone: entries per day for 30 days, and this month's spending (in all and `by_category`), habit check-ins and entries (summaries left out), plus the monthly `budget`; the app adds what it made since |
 | `POST /api/budget` | `{amount}`: the monthly spending limit on `sandy_users.budget` (0 removes it); the app rings at 80% and 100%, and `remember` of an expense tells the model past 80% |
+| (expense category) | an expense saved with no `data.category` (app sheet on "automatic", or Sandy leaving it out) gets one from its words in the background (`brain/categorize.py`, one short model call; "other" when no model) |
 | `POST /api/summary` | `{period, focus?}` → `{text, count}`: the brain's `summarize` rows, one model call (`brain/summary.py`); metered; nothing recorded → a fixed sentence, no call |
 
 Datetimes go out as ISO in the user's zone and come in as ISO (naive = user's

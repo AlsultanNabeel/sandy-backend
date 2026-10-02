@@ -66,7 +66,8 @@ struct LifeHeader: View {
     let stats: LifeStats
     /// The day picked on the strip; the log below shows only it.
     @Binding var day: Date?
-    @State private var showSpending = false
+    /// Opens the spending sheet (presented by the screen, not from inside a list row).
+    let openSpending: () -> Void
 
     private var perDay: [Int] { stats.days }
 
@@ -145,12 +146,11 @@ struct LifeHeader: View {
     /// This month at a glance: what you spent and how many things you logged.
     private var monthNumbers: some View {
         HStack(spacing: Theme.Spacing.sm) {
-            Button { showSpending = true } label: {
+            Button(action: openSpending) {
                 stat(icon: "creditcard.fill", value: AppLocale.number(Int(stats.spent.rounded())),
                      key: "life.stat.spent", progress: budgetShare)
             }
             .buttonStyle(.plain)
-            .sheet(isPresented: $showSpending) { SpendingSheet(stats: stats) }
             stat(icon: "flame.fill", value: AppLocale.number(stats.habits), key: "life.stat.habits")
             stat(icon: "square.stack.fill", value: AppLocale.number(stats.logged), key: "life.stat.logged")
         }
@@ -237,20 +237,21 @@ struct BudgetBar: View {
     let share: Double
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.Colors.surface.opacity(0.8))
+        // Scaled, not measured: a GeometryReader in a list row re-lays the row while it
+        // scrolls, which shook My Life on pull-to-refresh.
+        Capsule()
+            .fill(Theme.Colors.surface.opacity(0.8))
+            .overlay(alignment: .leading) {
                 Capsule()
                     .fill(share >= 1 ? Theme.Colors.danger : share >= 0.8 ? Theme.Colors.warn : Theme.Colors.success)
-                    .frame(width: geo.size.width * min(max(share, 0), 1))
+                    .scaleEffect(x: min(max(share, 0), 1), anchor: .leading)
             }
-        }
-        .frame(height: 5)
+            .frame(height: 5)
     }
 }
 
 /// This month's spending: the limit (set here), and what went where.
-private struct SpendingSheet: View {
+struct SpendingSheet: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss

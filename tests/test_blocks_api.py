@@ -424,3 +424,19 @@ def test_sandy_is_told_when_spending_nears_the_budget(monkeypatch, brain_db):  #
         out = tools_blocks.remember({"kind": "expense", "text": "عشا", "data": {"amount": 40}},
                                     TurnCtx(user_id="userA"))
         assert "قرّب" in out["budget"]
+
+
+def test_an_expense_with_no_category_gets_one_from_its_words(c, monkeypatch):
+    from app.brain import categorize
+    monkeypatch.setattr(categorize, "submit_background", lambda fn, *a, _label: fn(*a))
+    monkeypatch.setattr(categorize, "classify", lambda text: "food" if "كولا" in text else "other")
+    r = c.post("/api/entries", json={"kind": "expense", "text": "كولا", "data": {"amount": 20}},
+               headers=_h())
+    eid = r.get_json()["id"]
+    from brain_fakes import A
+    with active_user_profile_context(A):
+        assert entries.get(eid)["data"]["category"] == "food"
+    # A picked one is kept.
+    r = c.post("/api/entries", json={"kind": "expense", "text": "كولا",
+                                     "data": {"amount": 5, "category": "fun"}}, headers=_h())
+    assert r.get_json()["item"]["data"]["category"] == "fun"

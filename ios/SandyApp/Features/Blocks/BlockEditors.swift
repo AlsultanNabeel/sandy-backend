@@ -249,7 +249,12 @@ struct EntryEditSheet: View {
         self.delete = delete
         _kind = State(initialValue: entry?.kind ?? kind)
         _text = State(initialValue: entry?.text ?? "")
-        _category = State(initialValue: entry?.category ?? "food")
+        // "" = automatic: the server picks it from the words.
+        if case .string(let picked)? = entry?.data?["category"] {
+            _category = State(initialValue: picked)
+        } else {
+            _category = State(initialValue: "")
+        }
         _amount = State(initialValue: entry?.amount.map {
             $0.formatted(.number.precision(.fractionLength(0...2)).grouping(.never)
                 .locale(Locale(identifier: "en_US_POSIX")))
@@ -303,7 +308,7 @@ struct EntryEditSheet: View {
                         saving = true
                         Task {
                             let ok = await save(kind, trimmed, kind == "expense" ? value : nil,
-                                                kind == "expense" ? category : nil, at)
+                                                kind == "expense" && !category.isEmpty ? category : nil, at)
                             saving = false
                             if ok { dismiss() }
                         }
@@ -476,7 +481,8 @@ struct CategoryPicker: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Spacing.sm) {
-                ForEach(ExpenseCategory.all, id: \.name) { cat in
+                // "" first: automatic, the server picks it from the words.
+                ForEach([(name: "", icon: "sparkles")] + ExpenseCategory.all, id: \.name) { cat in
                     let on = selection == cat.name
                     Button { selection = cat.name } label: {
                         Label(lang.s("blocks.cat." + cat.name), systemImage: cat.icon)

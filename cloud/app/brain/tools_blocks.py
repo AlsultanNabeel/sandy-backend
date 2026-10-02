@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.brain.categorize import categorize_later
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.blocks import entries, items, schedules
 from app.blocks.kinds import LIST, LOG, SCHEDULE, KindError, by_alias, get_kind, names
@@ -93,6 +94,7 @@ def remember(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if not eid:
         return refused("not saved")
     out = {"ok": True, "id": eid, "reply": f"سجّلتها ✅ «{text}»"}
+    categorize_later(eid, kind, text, args.get("data"))
     if kind == "expense":
         note = budget_note(ctx.user_id)
         if note:

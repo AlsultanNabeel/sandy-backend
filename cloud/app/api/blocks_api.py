@@ -32,6 +32,7 @@ from app.api.metering import meter_claims
 from app.blocks import entries, items, schedules
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, KindError, get_kind
 from app.brain import summary
+from app.brain.categorize import categorize_later
 from app.brain import when as W
 from app.features import users_store
 from app.utils.user_profiles import current_user_id
@@ -266,8 +267,9 @@ def register_blocks_api(app, mongo_db=None):
             return _saved(cid, entries.get, "data")  # sent twice: already here
         kind = str(body.get("kind") or "")
         text = _text(body.get("text"), required=True)
-        new_id = entries.add(kind, text, _data(LOG, kind, body.get("data")),
-                             at=_when(body.get("at")), source="app", doc_id=cid)
+        data = _data(LOG, kind, body.get("data"))
+        new_id = entries.add(kind, text, data, at=_when(body.get("at")), source="app", doc_id=cid)
+        categorize_later(new_id, kind, text, data)
         return _saved(new_id, entries.get, "data")
 
     @app.route("/api/stats", methods=["GET"])
@@ -303,9 +305,10 @@ def register_blocks_api(app, mongo_db=None):
         if text is not None and (current.get("data") or {}).get("encrypted"):
             # Re-seal it, and never embed what is kept encrypted.
             text, embed = _sealed(text)[0], False
-        ok = entries.update(entry_id, text=text,
-                            data=_data(LOG, current["kind"], body.get("data")),
-                            at=_when(body.get("at")), embed=embed)
+        data = _data(LOG, current["kind"], body.get("data"))
+        ok = entries.update(entry_id, text=text, data=data, at=_when(body.get("at")), embed=embed)
+        if data is not None:
+            categorize_later(entry_id, current["kind"], text or current.get("text") or "", data)
         return _found(ok, entry_id, entries.get, "data")
 
     @app.route("/api/entries/<entry_id>", methods=["DELETE"])

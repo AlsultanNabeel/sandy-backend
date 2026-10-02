@@ -321,6 +321,7 @@ struct LogView: View {
     @State private var summarizing = false
     @State private var search = ""
     @ObservedObject private var lifeStats = LifeStatsStore.shared
+    @State private var showSpending = false
     /// What the server found for the search or the picked day, over the whole log;
     /// nil while there is no query, or offline (then the rows on the phone are filtered).
     @State private var found: [LogEntry]?
@@ -363,7 +364,7 @@ struct LogView: View {
     var body: some View {
         List {
             if isLife {
-                LifeHeader(stats: lifeStats.stats, day: $day).blockRow()
+                LifeHeader(stats: lifeStats.stats, day: $day) { showSpending = true }.blockRow()
                 filters.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -383,7 +384,11 @@ struct LogView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .searchable(text: $search, prompt: lang.s("blocks.search"))
+        // Always shown: a search field that slides in on the same pull as the refresh
+        // made the list jump.
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: lang.s("blocks.search"))
+        .sheet(isPresented: $showSpending) { SpendingSheet(stats: lifeStats.stats) }
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) { summaryMenu }
@@ -397,8 +402,9 @@ struct LogView: View {
             if isLife { await lifeStats.load(api: state.api) }
         }
         .refreshable {
-            await store.load(api: state.api)
-            if isLife { await lifeStats.load(api: state.api) }
+            async let rows: Void = store.load(api: state.api)
+            async let numbers: Void = isLife ? lifeStats.load(api: state.api) : ()
+            _ = await (rows, numbers)
         }
         .onChange(of: store.kind) { Task { await store.load(api: state.api) } }
         .task(id: "\(query)|\(day?.timeIntervalSince1970 ?? 0)|\(store.kind ?? "")") { await lookUp() }
