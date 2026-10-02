@@ -160,7 +160,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     if outcome is None:
         due = None
         try:
-            system = context.build_system(user_id, message, history)
+            system = context.build_system(user_id, message, history, spoken=ctx.source == "voice")
             due = future.due_context()
             if due:
                 system += "\n\n" + due[0]

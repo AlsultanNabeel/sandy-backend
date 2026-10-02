@@ -110,8 +110,17 @@ def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
     from app.utils.time_awareness import time_awareness_block
 
     history = _load_stm_history() if history is None else history
-    return ("\n" + time_awareness_block(history) + "\n(هاد وقت بداية المكالمة.)"
-            + _load_stm_context(history))
+    return ("\n" + _channel_line() + "\n" + time_awareness_block(history)
+            + "\n(هاد وقت بداية المكالمة.)" + _load_stm_context(history))
+
+
+def _channel_line() -> str:
+    """Where this call is happening, so she knows she is heard, not read."""
+    where = ("بتحكي معه بالصوت من خلال جسمك، الروبوت اللي بالغرفة"
+             if get_voice_channel() == "الروبوت" else
+             "بمكالمة صوتية مباشرة معه من التطبيق، بيسمعك وبتسمعيه")
+    return (f"هلأ إنتِ {where}. ردّك بينسمع: جمل قصيرة، بدون إيموجي ولا رموز. "
+            "ردّي بلغة آخر جملة حكاها، عربي أو إنجليزي، بدون ما تخلطي بينهم.")
 
 
 def _save_voice_turn(user_text: str, sandy_text: str,

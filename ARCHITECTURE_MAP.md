@@ -546,7 +546,7 @@ pending reminders) and the last STM turn ("was up late").
 | `tools.py` | the tool table (JSON schemas from `kinds.KINDS`), `declarations()` for Gemini Live, `execute()` |
 | `tools_blocks.py` | `remember`, `recall`, `summarize`, `list_add`, `list_update`, `schedule`, `schedule_update` |
 | `tools_world.py` | `device_control`, `scene_apply`, `web_search`, `weather`, `image` |
-| `context.py` | the system prompt, steady parts first so the provider can cache the prefix: persona, rules, profile, facts, open state, related entries, then the clock last |
+| `context.py` | the system prompt, steady parts first so the provider can cache the prefix: persona, rules, the channel line (chat: written, emoji welcome; voice: heard, no emoji), profile, facts, open state, related entries, the clock, and last the reply language (this message's, Arabic or English, decided in code) |
 | `persona.py` | `build_effective_persona`: tone (custom instructions or `SANDY_PERSONALITY`), dialect preset, then the language, no-promises and anti-injection rules, then `SANDY_IDENTITY_LOCK` last |
 | `stm.py` | short-term memory and the cross-channel read |
 | `confirm.py`, `pending.py` | held actions: the question, the yes/no resolver, the pick-by-number, the lifecycle and the store |

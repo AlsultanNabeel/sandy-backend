@@ -122,3 +122,22 @@ def test_image_bytes_reach_the_reply(brain_db, monkeypatch):  # noqa: F811
     state = _turn(ScriptedModel(tools_reply(call("image", prompt="قطة")),
                                 Reply(text="هاي الصورة")), "ارسمي قطة")
     assert state["execution_result"]["image_bytes"] == b"png"
+
+
+def test_she_knows_it_is_a_chat_and_answers_in_the_messages_language(brain_db):  # noqa: F811
+    from app.brain import context
+    model = ScriptedModel(text_reply("hi"))
+    _turn(model, "how are you today?")
+    system = model.seen[0][0]["content"]
+    assert context.CHAT_CHANNEL in system and context.SPOKEN_CHANNEL not in system
+    assert system.endswith(context.reply_language("how are you today?"))
+    assert "English" in context.reply_language("ok remind me at 5 please")
+    assert "بالعربي" in context.reply_language("ذكريني بالـ meeting")
+
+
+def test_a_spoken_turn_is_told_it_is_heard(brain_db):  # noqa: F811
+    from app.brain import context
+    model = ScriptedModel(text_reply("أهلين"))
+    with active_user_profile_context(A):
+        loop.run_turn("مرحبا", user_id="userA", chat_id="userA", source="voice", complete=model)
+    assert context.SPOKEN_CHANNEL in model.seen[0][0]["content"]

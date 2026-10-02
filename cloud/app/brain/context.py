@@ -171,11 +171,31 @@ def _entry_line(e: Dict[str, Any]) -> str:
     return f"- [{e.get('kind')} {day}] {_plain(e)}"
 
 
+CHAT_CHANNEL = ("هلأ إنتِ بالشات المكتوب بالتطبيق: ردّك بينقرا مش بينسمع، فالإيموجي الدافية "
+                "مسموحة. ما تحكي إنك بتسمعيه.")
+SPOKEN_CHANNEL = ("هلأ إنتِ بتحكي معه بالصوت: ردّك بينسمع، فجمل قصيرة بدون إيموجي ولا رموز.")
+
+
+_ARABIC = re.compile(r"[\u0600-\u06ff]")
+_LATIN = re.compile(r"[A-Za-z]")
+
+
+def reply_language(message: str) -> str:
+    """The last line of the prompt: this message's language, whatever came before.
+    English when it has more Latin letters than Arabic ones, else Arabic."""
+    english = len(_LATIN.findall(message or "")) > len(_ARABIC.findall(message or ""))
+    return ("This message is in English: write your whole reply in English only, "
+            "with no Arabic word in it." if english else
+            "هالرسالة بالعربي: ردّك كله بالعربي بلهجتك، بدون ولا كلمة إنجليزي.")
+
+
 def build_system(user_id: str, message: str,
-                 history: Optional[List[Dict[str, Any]]] = None) -> str:
+                 history: Optional[List[Dict[str, Any]]] = None, *, spoken: bool = False) -> str:
     """Steady parts first, changing parts last: the provider caches an unchanged
-    prefix, so the persona and rules are read once, and the clock never breaks it."""
-    parts = [build_effective_persona(user_id or None), address_instruction(), _RULES]
+    prefix, so the persona and rules are read once, and the clock never breaks it.
+    The channel line comes after the persona, so it wins over a persona written for voice."""
+    parts = [build_effective_persona(user_id or None), address_instruction(), _RULES,
+             SPOKEN_CHANNEL if spoken else CHAT_CHANNEL]
     try:
         parts.append(profile_block(user_id))
         parts.append(facts_block())
@@ -186,6 +206,7 @@ def build_system(user_id: str, message: str,
     except Exception as exc:  # noqa: BLE001 — memory is never worth a failed reply
         logger.warning("[brain] memory context skipped: %s", exc)
     parts.append(time_awareness_block(history))
+    parts.append(reply_language(message))
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
