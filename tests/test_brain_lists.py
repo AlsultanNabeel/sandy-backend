@@ -126,13 +126,10 @@ def test_weather_with_no_city_is_where_they_live(tenant, monkeypatch):
 def test_an_alarm_reminder_is_marked_and_can_be_unmarked(tenant):
     out = _run("schedule", kind="reminder", text="صحّيني", in_minutes=60, important=True)
     assert "منبه" in out["reply"]
-    assert schedules.get(out["id"])["payload"]["important"] is True
+    assert schedules.get(out["id"])["payload"] == {"important": True}      # keeps to a Focus
+    loud = _run("schedule", kind="reminder", text="الطيارة", in_minutes=90, important=True, break_focus=True)
+    assert schedules.get(loud["id"])["payload"] == {"important": True, "break_focus": True}
     assert "منبه" in context.state_block()
     _run("schedule_update", id=out["id"], important=False, confirmed=True)
     assert schedules.get(out["id"])["payload"]["important"] is False
 
-
-def test_alarms_pass_a_focus_only_when_allowed():
-    from app.features import notify_prefs
-    assert notify_prefs.DEFAULTS["alarm_focus"] is False
-    assert notify_prefs.clean({"alarm_focus": 1}) == {"alarm_focus": True}

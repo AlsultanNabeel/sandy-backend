@@ -182,14 +182,14 @@ extension APIClient {
         let payload: [String: JSONValue]?
     }
 
-    /// recurrence: daily | weekly | monthly | yearly, or nil for once; alarm rings like an alarm.
+    /// recurrence: daily | weekly | monthly | yearly, or nil for once; `payload` carries the
+    /// alarm flags (`important`, `break_focus`).
     func addSchedule(id: String = ClientID.make(), kind: String = "reminder", text: String, at: Date,
-                     recurrence: String? = nil, alarm: Bool = false) async throws {
+                     recurrence: String? = nil, payload: [String: JSONValue]? = nil) async throws {
         try await queued("/api/schedules", method: "POST",
                          body: ScheduleCreate(id: id, kind: kind, text: text,
                                             fire_at: Self.iso.string(from: at),
-                                            recurrence: recurrence,
-                                            payload: alarm ? ["important": .bool(true)] : nil))
+                                            recurrence: recurrence, payload: payload))
     }
 
     private struct SchedulePatch: Encodable {

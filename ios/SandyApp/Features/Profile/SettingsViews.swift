@@ -13,27 +13,11 @@ struct NotificationPrefs: Codable, Equatable {
     /// "HH:MM", or "" for no quiet hours.
     var quietStart = ""
     var quietEnd = ""
-    /// Alarms pass a Focus (time-sensitive); off unless the user turns it on.
-    var alarmFocus = false
 
     enum CodingKeys: String, CodingKey {
         case reminders, daily, proactive
         case quietStart = "quiet_start"
         case quietEnd = "quiet_end"
-        case alarmFocus = "alarm_focus"
-    }
-
-    init() {}
-
-    /// Saved before `alarm_focus` existed: the missing key is its default, not a failed read.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        reminders = try c.decode(Bool.self, forKey: .reminders)
-        daily = try c.decode(Bool.self, forKey: .daily)
-        proactive = try c.decode(Bool.self, forKey: .proactive)
-        quietStart = try c.decode(String.self, forKey: .quietStart)
-        quietEnd = try c.decode(String.self, forKey: .quietEnd)
-        alarmFocus = try c.decodeIfPresent(Bool.self, forKey: .alarmFocus) ?? false
     }
 
     private static let key = "notifications.prefs"
@@ -93,11 +77,6 @@ struct NotificationSettingsView: View {
                 }
             } footer: {
                 Text(lang.s("settings.quietNote"))
-            }
-            Section {
-                Toggle(lang.s("settings.alarmFocus"), isOn: $prefs.alarmFocus)
-            } footer: {
-                Text(lang.s("settings.alarmFocusNote"))
             }
         }
         .scrollContentBackground(.hidden)

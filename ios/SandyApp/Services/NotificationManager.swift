@@ -19,8 +19,10 @@ struct NotificationItem {
     var category: String? = nil
     /// What the buttons need to act without the app running (reminder id + rule).
     var userInfo: [String: String] = [:]
-    /// Rings like an alarm: its own long sound, through quiet hours, and again if unanswered.
+    /// Rings like an alarm: its own long sound, and again if unanswered.
     var alarm = false
+    /// The alarm passes a Focus and quiet hours (chosen per alarm).
+    var breaksFocus = false
 }
 
 /// Repeats one calendar trigger can express; anything else rings once and the
@@ -176,7 +178,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             for it in wanted {
                 self.schedule(id: prefix + it.id, title: it.title, body: it.body,
                               at: it.date, repeats: it.repeats,
-                              category: it.category, userInfo: it.userInfo, alarm: it.alarm)
+                              category: it.category, userInfo: it.userInfo,
+                              alarm: it.alarm, breaksFocus: it.breaksFocus)
             }
         }
         // عناصر كل نوع، منها بتنبني تنبيهات «بعد ساعة».
@@ -242,6 +245,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let content = notification.content
         let recurrence = content.userInfo[Self.reminderRecurrenceKey] as? String ?? ""
         let alarm = content.userInfo[Self.alarmKey] as? String == "1"
+        let breaksFocus = content.userInfo[Self.focusKey] as? String == "1"
         let info = [Self.reminderIdKey: reminderId,
                     Self.reminderRecurrenceKey: recurrence]
 
@@ -257,7 +261,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                     try await api.updateSchedule(id: reminderId, at: at)
                     // One shot on purpose: repeating from the snoozed time would ring late every day after.
                     self.schedule(id: notifId, title: content.title, body: content.body,
-                                  at: at, category: Self.reminderCategory, userInfo: info, alarm: alarm)
+                                  at: at, category: Self.reminderCategory, userInfo: info,
+                                  alarm: alarm, breaksFocus: breaksFocus)
                 case .done:
                     // A repeating one keeps its repeating notification; a one-off is closed.
                     if recurrence.isEmpty {
@@ -478,18 +483,22 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                           repeats: NotificationRepeat = .none,
                           category: String? = nil,
                           userInfo: [String: String] = [:],
-                          alarm: Bool = false) {
+                          alarm: Bool = false, breaksFocus: Bool = false) {
         guard date > Date() || repeats != .none else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         var info = userInfo
+        // An alarm keeps to a Focus and the quiet hours like anything else, unless this alarm
+        // was set to pass them (time-sensitive).
+        let silenced = !(alarm && breaksFocus) && NotificationPrefs.current.isQuiet(date)
         if alarm {
-            // An alarm rings through quiet hours (that is what it was asked for), with its own
-            // sound; it passes a Focus only when the user allowed it in Profile › Notifications.
-            content.sound = UNNotificationSound(named: Self.alarmSound)
-            content.interruptionLevel = NotificationPrefs.current.alarmFocus ? .timeSensitive : .active
             info[Self.alarmKey] = "1"
+            if breaksFocus { info[Self.focusKey] = "1" }
+        }
+        if alarm && !silenced {
+            content.sound = UNNotificationSound(named: Self.alarmSound)
+            content.interruptionLevel = breaksFocus ? .timeSensitive : .active
         } else {
             Self.applyQuiet(content, at: date)
         }
@@ -500,7 +509,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             for (key, value) in info { payload[key] = value }
             content.userInfo = payload
         }
-        if alarm && repeats == .none {
+        if alarm && !silenced && repeats == .none {
             // Unanswered, it rings again, twice, a couple of minutes apart.
             for n in 1...Self.alarmAgainCount {
                 let later = date.addingTimeInterval(TimeInterval(n * Self.alarmAgainMinutes * 60))
@@ -526,6 +535,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     // MARK: - Alarms
 
     static let alarmKey = "alarm"
+    static let focusKey = "alarm_focus"
     /// A bundled ringing tone (under 30 seconds, the system's limit for a notification sound).
     static let alarmSound = UNNotificationSoundName("sandy_alarm.caf")
     static let alarmAgainCount = 2

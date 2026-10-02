@@ -497,7 +497,10 @@ def _device_timer(args: Dict[str, Any]) -> Dict[str, Any]:
 
 def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "reminder"), str(args.get("text") or "").strip()
-    payload = {"important": True} if args.get("important") and kind == "reminder" else None
+    payload = None
+    if args.get("important") and kind == "reminder":
+        # Through a Focus only when he asked for that, never by default.
+        payload = {"important": True, **({"break_focus": True} if args.get("break_focus") else {})}
     if args.get("device"):
         timer = _device_timer(args)
         if not timer.get("kind"):
@@ -608,8 +611,9 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             at = base + timedelta(minutes=shift)
         status = "pending" if r.get("status") == "sent" and at else None
         payload = None
-        if isinstance(args.get("important"), bool) and r.get("kind") == "reminder":
-            payload = {**(r.get("payload") or {}), "important": args["important"]}
+        flags = {k: args[k] for k in ("important", "break_focus") if isinstance(args.get(k), bool)}
+        if flags and r.get("kind") == "reminder":
+            payload = {**(r.get("payload") or {}), **flags}
         schedules.update(r["id"], text=args.get("text"), fire_at=at, recurrence=rule, status=status,
                          payload=payload)
         moved = at or moved

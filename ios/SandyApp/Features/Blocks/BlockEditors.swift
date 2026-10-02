@@ -142,25 +142,39 @@ struct WeekdayPicker: View {
 
 // MARK: - A reminder (add or edit)
 
+/// How a reminder rings: a plain banner, or an alarm that may pass a Focus.
+struct ReminderAlarm: Equatable {
+    var on = false
+    /// Through a Focus and quiet hours; off unless chosen for this alarm.
+    var breaksFocus = false
+
+    init() {}
+
+    init(_ item: ScheduleItem) {
+        on = item.isAlarm
+        breaksFocus = item.breaksFocus
+    }
+}
+
 struct ReminderEditSheet: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
     let title: String
     let item: ScheduleItem?
     let allowRepeat: Bool
-    /// text, time, repeat rule (nil = once), rings like an alarm.
-    let save: (String, Date, String?, Bool) async -> Bool
+    /// text, time, repeat rule (nil = once), how it rings.
+    let save: (String, Date, String?, ReminderAlarm) async -> Bool
     var delete: (() -> Void)?
 
     @State private var text: String
     @State private var date: Date
     @State private var repeats: String
-    @State private var alarm: Bool
+    @State private var alarm: ReminderAlarm
     @State private var saving = false
     @State private var confirmDelete = false
 
     init(title: String, item: ScheduleItem? = nil, allowRepeat: Bool,
-         save: @escaping (String, Date, String?, Bool) async -> Bool, delete: (() -> Void)? = nil) {
+         save: @escaping (String, Date, String?, ReminderAlarm) async -> Bool, delete: (() -> Void)? = nil) {
         self.title = title
         self.item = item
         self.allowRepeat = allowRepeat
@@ -170,7 +184,7 @@ struct ReminderEditSheet: View {
         _text = State(initialValue: item?.text ?? "")
         _date = State(initialValue: at.map { max($0, Date().addingTimeInterval(60)) } ?? EditTimes.nextRoundHour())
         _repeats = State(initialValue: EditTimes.repeatName(item?.recurrence))
-        _alarm = State(initialValue: item?.isAlarm ?? false)
+        _alarm = State(initialValue: item.map(ReminderAlarm.init) ?? ReminderAlarm())
     }
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -190,10 +204,15 @@ struct ReminderEditSheet: View {
                             Text(lang.s("blocks.repeatMonthly")).tag("monthly")
                             Text(lang.s("blocks.repeatYearly")).tag("yearly")
                         }
-                        Toggle(lang.s("blocks.alarm"), isOn: $alarm)
+                        Toggle(lang.s("blocks.alarm"), isOn: $alarm.on)
+                        if alarm.on {
+                            Toggle(lang.s("blocks.alarmFocus"), isOn: $alarm.breaksFocus)
+                        }
                     }
                 } footer: {
-                    if allowRepeat && alarm { Text(lang.s("blocks.alarmNote")) }
+                    if allowRepeat && alarm.on {
+                        Text(lang.s(alarm.breaksFocus ? "blocks.alarmFocusNote" : "blocks.alarmNote"))
+                    }
                 }
                 if let delete {
                     Section {

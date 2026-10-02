@@ -173,8 +173,13 @@ struct ScheduleItem: Codable, Identifiable, Hashable {
     var payload: [String: JSONValue]? = nil
 
     /// Rings like an alarm (`payload.important`), not a quiet banner.
-    var isAlarm: Bool {
-        if case .bool(true)? = payload?["important"] { return true }
+    var isAlarm: Bool { flag("important") }
+
+    /// The alarm rings through a Focus and quiet hours; only when asked for (`payload.break_focus`).
+    var breaksFocus: Bool { isAlarm && flag("break_focus") }
+
+    private func flag(_ key: String) -> Bool {
+        if case .bool(true)? = payload?[key] { return true }
         return false
     }
 

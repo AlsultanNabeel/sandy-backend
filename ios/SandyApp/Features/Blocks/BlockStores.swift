@@ -536,16 +536,24 @@ final class SchedulesStore: LoadableStore {
         name.map { "FREQ=" + $0.uppercased() }
     }
 
-    func add(api: APIClient, text: String, at: Date, recurrence: String?, alarm: Bool = false) async -> Bool {
+    /// The alarm flags a reminder carries: none for a plain one.
+    static func alarmPayload(_ alarm: ReminderAlarm) -> [String: JSONValue]? {
+        guard alarm.on else { return nil }
+        return ["important": .bool(true), "break_focus": .bool(alarm.breaksFocus)]
+    }
+
+    func add(api: APIClient, text: String, at: Date, recurrence: String?,
+             alarm: ReminderAlarm = ReminderAlarm()) async -> Bool {
         restore(api)
+        let payload = Self.alarmPayload(alarm)
         let row = ScheduleItem(id: ClientID.make(), kind: kind, text: text, fireAt: isoOut.string(from: at),
                                recurrence: Self.rule(recurrence) ?? "", status: "pending",
-                               payload: alarm ? ["important": .bool(true)] : nil)
+                               payload: payload)
         optimistic("blocks.errorSave",
                    apply: { self.everywhere { $0.append(row) } },
                    rollback: { self.everywhere { $0.removeAll { $0.id == row.id } } },
                    call: { try await api.addSchedule(id: row.id, kind: self.kind, text: text, at: at,
-                                                     recurrence: recurrence, alarm: alarm) })
+                                                     recurrence: recurrence, payload: payload) })
         return true
     }
 
@@ -579,15 +587,16 @@ final class SchedulesStore: LoadableStore {
 
     /// Edit text, time or repeat; recurrence nil makes it ring once.
     func update(api: APIClient, _ item: ScheduleItem, text: String, at: Date, recurrence: String?,
-                alarm: Bool) async -> Bool {
+                alarm: ReminderAlarm) async -> Bool {
         let moved = NotificationManager.parseISO(item.fireAt).map { abs($0.timeIntervalSince(at)) >= 60 } ?? true
         var new = item
         new.text = text
         new.recurrence = Self.rule(recurrence) ?? ""
         if moved { new.fireAt = isoOut.string(from: at) }
         var payload: [String: JSONValue]? = nil
-        if alarm != item.isAlarm {
-            payload = (item.payload ?? [:]).merging(["important": .bool(alarm)]) { $1 }
+        if alarm != ReminderAlarm(item) {
+            payload = (item.payload ?? [:]).merging(["important": .bool(alarm.on),
+                                                     "break_focus": .bool(alarm.on && alarm.breaksFocus)]) { $1 }
             new.payload = payload
         }
         optimistic("blocks.errorSave",
@@ -624,7 +633,7 @@ final class SchedulesStore: LoadableStore {
                                     category: NotificationManager.reminderCategory,
                                     userInfo: [NotificationManager.reminderIdKey: s.id,
                                                NotificationManager.reminderRecurrenceKey: rule],
-                                    alarm: s.isAlarm)
+                                    alarm: s.isAlarm, breaksFocus: s.breaksFocus)
         }
         // Same prefix the old reminders used, so their notifications are replaced, not doubled.
         NotificationManager.shared.sync(prefix: "reminder.", items: notes)

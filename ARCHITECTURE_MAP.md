@@ -1042,9 +1042,10 @@ so folders are organisation only.
   off and push silently in the quiet hours). **Alarms**: a reminder with
   `payload.important` (Sandy sets it for «صحّيني»/«ضروري»; the reminder sheet has a switch)
   or a task with priority high and a time rings like an alarm: the bundled
-  `Resources/Sounds/sandy_alarm.caf` (25 s), through quiet hours, and twice more two
-  minutes apart until it is answered (a one-off; `NotificationManager.clearAgain`). It
-  passes a Focus (time-sensitive) only with the `alarm_focus` switch, off by default.
+  `Resources/Sounds/sandy_alarm.caf` (25 s), and twice more two minutes apart until it is
+  answered (a one-off; `NotificationManager.clearAgain`). It keeps to a Focus and the quiet
+  hours like any notification, unless that alarm was set to pass them (`payload.break_focus`,
+  a switch under «منبه» in the sheet, off by default; then time-sensitive).
   Support sends `POST /api/feedback` with the
   version and device (`sandy_feedback`). The privacy, terms and support-mail values live
   only in `App/AppLinks.swift`, empty until the release.
