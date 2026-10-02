@@ -168,11 +168,11 @@ kind needs no tool change.
 | `remember` | `entries.add(kind, text, data)`; `kind=mood` keeps a significant mood with the user's words sealed (`ltm_crypto`), once per turn |
 | `recall` | entries + items + pending schedules, filtered by kind / list / since / until / query words (an alias like «مهامي» becomes the filter); compact rows |
 | `list_add` | `items.add`; `due` parsed like `when`; a duplicate open item is reported, not added |
-| `list_update` | by `id` or `match_text` (`matching.match_rows`: exact, contained, fuzzy ≥ 0.72): done / text / due / delete |
+| `list_update` | by `id` or `match_text` (`matching.match_rows`: exact, contained, fuzzy ≥ 0.72): done / text / due / `no_due` (takes the due off) / delete |
 | `log_update` | a log row by `id` (`state_block` shows today's, `facts_block` the facts), `match_text`, or the newest of a `kind`: new text (an encrypted row is sealed again, never embedded), `amount`/`data` merged, or delete. A changed fact is updated, not logged again; «انسي…» deletes it |
-| `schedule` | `schedules.add`; `when` = ISO, else a bare weekday, else one model call (`when._parse_with_model`), else the deterministic Arabic date parser |
-| `schedule_update` | move / rename / cancel (status `cancelled`) |
-| `summarize` | the period's entries, items and schedules as rows; the model writes the summary, nothing is stored |
+| `schedule` | `schedules.add`; `when` = ISO, else the clock words (`when._clock`: a named weekday or «يوم 15» keeps its day, the number after «الساعة» is the hour, «12 الظهر» is noon, morning/evening words match whole words only, and with none, today takes the nearest time ahead while another day reads 1–6 as afternoon and 7–11 as morning), else a bare weekday, else one model call (`when._parse_with_model`), else the deterministic Arabic date parser. `before_id` + `before_minutes` sets it ahead of an existing reminder's or task's time |
+| `schedule_update` | move / rename / cancel (status `cancelled`); `recurrence` changes the repeat, `stop_repeat` ends it, `skip_next` jumps one occurrence (`schedule_runner.next_occurrence`). A reminder that rang in the last two hours (`fired_at`, shown in the state block) can be snoozed: a one-time one goes back to pending, a repeating one gets a one-time copy and its series is left alone |
+| `summarize` | the period's entries, items and schedules as rows; the model writes the summary, nothing is stored. `week`, `month` and `year` are calendar ones (from Sunday, the 1st, January) up to today's end |
 | `device_control` | a registered device by slug or label; `command_payload` validates, `send_to_topic` checks the topic is the caller's; an unknown device or action is refused with what is available |
 | `scene_apply` | `scene_store.apply_scene` (keeps the devices' state first, actuates, schedules the reverts, §2.12) plus the room-node vocabulary fallback |
 | `room_restore` | `scene_store.restore_room`: the devices the last scene changed get the state kept before it (`device_store.before_scene`; IR and screen text are not replayed), its timers are cancelled; once per scene |
@@ -212,7 +212,7 @@ for a refusal. A held action is "not done yet", neither.
 |---|---|---|
 | Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), up to 40 messages, TTL 30 days; the model sees the last 24 (`context.RECENT_TURNS`, chat and the call alike) |
 | What she knows | `brain/context.py` | `fact` entries with their ids (the newest 30 distinct ones of two words or more; anything still ciphertext is left out) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
-| What is open now | `brain/context.py::state_block` | open items per list, pending reminders and today's log (not facts, moods, habit ticks or summaries), with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
+| What is open now | `brain/context.py::state_block` | open items per list, pending reminders and today's log (not facts, moods, habit ticks or summaries), reminders that rang in the last two hours, with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
 | Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are not facts, chat summaries or habit ticks, from the Atlas vector index `entries_vector` (tenant in its filter); text search when there is no vector or no hit |
 | Conversation summaries | `brain/stm.py::_summarize` | one `summary` entry (`data.thread_id`) per conversation, in the background: when a message comes after a 30-minute pause, or when a thread passes 40 messages and drops to its newest 20; turns are marked `summarized` so none is summarised twice; `recall` leaves them out unless asked |
 | Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
@@ -443,7 +443,12 @@ capped at 2000 characters and `data`/`payload` at 8000 of JSON:
 | `POST /api/summary` | `{period, focus?}` → `{text, count}`: the brain's `summarize` rows, one model call (`brain/summary.py`); metered; nothing recorded → a fixed sentence, no call |
 
 Datetimes go out as ISO in the user's zone and come in as ISO (naive = user's
-zone; a bare date in `until`/`to` covers its day). A row with `encrypted` in its
+zone; a bare date in `until`/`to` covers its day). **The user's zone is their own**
+(`utils/time.py`): the app sends `X-Timezone` (the phone's IANA zone) on every
+signed-in call, `require_auth` keeps it on `sandy_users.timezone` when it changed,
+and `USER_TZ` is one tzinfo that answers with the active tenant's zone (cached five
+minutes; `USER_TIMEZONE` when none is known), in requests and in the background
+runners, which run inside the tenant's context. A row with `encrypted` in its
 `data`/`payload` is decrypted for its owner and re-sealed on edit; a
 `message_to_future_self` is sealed at rest.
 

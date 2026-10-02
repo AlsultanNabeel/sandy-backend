@@ -97,6 +97,7 @@ final class APIClient: APIClientProtocol {
         // `bearer` lets sign-out send a request after `token` is already cleared.
         let sentToken = auth ? (bearer ?? token) : nil
         if let t = sentToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
         req.httpBody = bodyData
 
         let data: Data

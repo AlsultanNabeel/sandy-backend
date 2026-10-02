@@ -104,6 +104,10 @@ def require_auth(view):
         claims = _claims_from_request()
         if not claims:
             return jsonify({"error": "unauthorized"}), 401
+        if claims.get("role") != "guest" and request.headers.get("X-Timezone"):
+            # The phone says where it is on every call; kept only when it changed.
+            from app.utils.time import note_zone
+            note_zone(claims.get("user_id"), request.headers["X-Timezone"])
         return view(*args, claims=claims, **kwargs)
 
     return _wrapped

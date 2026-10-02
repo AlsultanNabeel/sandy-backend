@@ -109,8 +109,10 @@ def delete(schedule_id: str, mongo_db=None) -> bool:
 
 def list_schedules(kind: Optional[str] = None, *, status: Optional[str] = None,
                    since: Optional[datetime] = None, until: Optional[datetime] = None,
-                   text: str = "", limit: int = 200, mongo_db=None) -> List[Dict[str, Any]]:
-    """Soonest first; ``since``/``until`` bound ``fire_at``; every filter optional."""
+                   text: str = "", fired_since: Optional[datetime] = None,
+                   limit: int = 200, mongo_db=None) -> List[Dict[str, Any]]:
+    """Soonest first; ``since``/``until`` bound ``fire_at``, ``fired_since`` the last ring;
+    every filter optional."""
     coll = _base.coll(_base.SCHEDULES, mongo_db)
     if coll is None:
         return []
@@ -124,5 +126,7 @@ def list_schedules(kind: Optional[str] = None, *, status: Optional[str] = None,
         query["fire_at"] = rng
     if text:
         query.update(_base.text_filter(text))
+    if fired_since is not None:
+        query["fired_at"] = {"$gte": fired_since}
     cursor = coll.find(query).sort("fire_at", 1).limit(_base.clamp(limit))
     return [_base.out(d) for d in cursor]

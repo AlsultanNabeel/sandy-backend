@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, Optional
 
 from app.utils.arabic_days import WEEKDAY_TO_AR_NAME
-from app.utils.time import USER_TIMEZONE, USER_TZ
+from app.utils.time import USER_TZ, zone_name
 
 # A model-supplied date further out than this is treated as a guess, not a plan.
 _PLAUSIBLE_HORIZON = timedelta(days=400)
@@ -74,7 +74,7 @@ def when_ar(dt: datetime, now: Optional[datetime] = None) -> str:
 def now_line(now: Optional[datetime] = None) -> str:
     now = _now(now)
     return (f"الآن: {WEEKDAY_TO_AR_NAME.get(now.weekday(), '')} {now:%d/%m/%Y} "
-            f"الساعة {_clock(now)} (توقيت {USER_TIMEZONE}) — ISO: "
+            f"الساعة {_clock(now)} (توقيت {zone_name()}) — ISO: "
             f"{now.replace(microsecond=0).isoformat()}")
 
 

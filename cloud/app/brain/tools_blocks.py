@@ -328,8 +328,8 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if (delete or len(rows) > 1) and not ctx.confirmed:
         verb = "تحذف" if delete else "تعدّل"
         return needs_confirmation(f"{verb} {_names(rows)}")
-    due: Any = items._UNSET
-    if args.get("due"):
+    due: Any = None if args.get("no_due") else items._UNSET
+    if args.get("due") and not args.get("no_due"):
         due = W.parse_when(args["due"])
         if due is None:
             return refused("could not read the due time", due=args["due"])
@@ -356,11 +356,31 @@ def _minutes(value: Any) -> Optional[int]:
         return None
 
 
+# A reminder that rang this recently can still be snoozed («أجّليه ربع ساعة»).
+RANG_WINDOW = timedelta(hours=2)
+
+
+def _anchor_time(row_id: str) -> Optional[Any]:
+    """The time of an existing reminder or task, for «قبل الاجتماع بربع ساعة»."""
+    row = schedules.get(row_id)
+    if row and row.get("fire_at"):
+        return W.aware_utc(row["fire_at"])
+    item = items.get(row_id)
+    return W.aware_utc(item["due"]) if item and item.get("due") else None
+
+
 def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "reminder"), str(args.get("text") or "").strip()
     # The model gives minutes or the user's words; the clock arithmetic is ours.
     minutes = _minutes(args.get("in_minutes"))
-    if minutes is not None and minutes > 0:
+    if args.get("before_id"):
+        anchor = _anchor_time(str(args["before_id"]))
+        if anchor is None:
+            return refused("no reminder or task with a time has that id")
+        fire_at = anchor - timedelta(minutes=_minutes(args.get("before_minutes")) or 0)
+        if fire_at <= W.now_utc():
+            return refused("that time has already passed", when=W.local_text(fire_at))
+    elif minutes is not None and minutes > 0:
         fire_at = W.now_utc() + timedelta(minutes=minutes)
     else:
         fire_at = W.parse_when(args.get("when"))
@@ -380,8 +400,28 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             "reply": f"تمام، بذكّرك «{text}» {W.local_text(fire_at)} ⏰"}
 
 
+def _rang_lately(row: Dict[str, Any]) -> bool:
+    fired = row.get("fired_at")
+    return bool(fired) and W.aware_utc(fired) >= W.now_utc() - RANG_WINDOW
+
+
+def _skipped(row: Dict[str, Any]) -> Optional[Any]:
+    """The occurrence after the next one, for «اليوم بس لا»; None when it does not repeat."""
+    from app.services.schedule_runner import next_occurrence
+
+    rule = str(row.get("recurrence") or "")
+    if not rule:
+        return None
+    at = W.aware_utc(row["fire_at"])
+    return next_occurrence(rule, at, at)
+
+
 def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     pool = schedules.list_schedules(status="pending")
+    known = {r["id"] for r in pool}
+    # Just rang: a one-time reminder is no longer pending, but «أجّليه» still means it.
+    pool += [r for r in schedules.list_schedules(fired_since=W.now_utc() - RANG_WINDOW)
+             if r["id"] not in known and r.get("status") == "sent"]
     picked = _pick(args, pool, schedules.get)
     if "rows" not in picked:
         return picked
@@ -390,6 +430,13 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if (cancel or len(rows) > 1) and not ctx.confirmed:
         verb = "تلغي" if cancel else "تعدّل"
         return needs_confirmation(f"{verb} {_names(rows)}")
+    rule: Optional[str] = None
+    if args.get("stop_repeat"):
+        rule = ""
+    elif args.get("recurrence"):
+        rule = W.recurrence_rule(args["recurrence"])
+        if not rule:
+            return refused("recurrence must be daily|weekly|monthly|yearly or an RRULE")
     shift = _minutes(args.get("shift_minutes"))
     fire_at: Optional[Any] = None
     if args.get("when") and not shift:
@@ -403,11 +450,22 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             schedules.update(r["id"], status="cancelled")
             continue
         at = fire_at
-        if shift:
+        if args.get("skip_next"):
+            at = _skipped(r)
+            if at is None:
+                return refused("it does not repeat; cancel it instead")
+        elif shift:
+            if r.get("recurrence") and _rang_lately(r):
+                # A repeating one that just rang: snooze this ring, the series stays as it is.
+                snooze = W.now_utc() + timedelta(minutes=shift)
+                schedules.add(r.get("kind") or "reminder", r.get("text", ""), snooze)
+                moved = snooze
+                continue
             # From its own time, not from now: «أجّليه كمان نص ساعة» adds to what is set.
             base = max(W.aware_utc(r["fire_at"]), W.now_utc())
             at = base + timedelta(minutes=shift)
-        schedules.update(r["id"], text=args.get("text"), fire_at=at)
+        status = "pending" if r.get("status") == "sent" and at else None
+        schedules.update(r["id"], text=args.get("text"), fire_at=at, recurrence=rule, status=status)
         moved = at or moved
     if cancel:
         return {"ok": True, "changed": len(rows), "reply": f"لغيت {_names(rows)} ✅"}

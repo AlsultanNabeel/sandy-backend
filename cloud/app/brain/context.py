@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from pymongo.errors import PyMongoError
 
 from app.brain.persona import build_effective_persona
+from app.brain.tools_blocks import RANG_WINDOW
 from app.utils.ltm_crypto import decrypt_field
 from app.blocks import _base, entries, habits
 from app.blocks.kinds import LIST, LOG, get_kind
@@ -54,6 +55,10 @@ _RULES = """
   «سجّل اليوم». معلومة عنه تغيّرت («نقلت بيت جديد») → log_update للمعلومة القديمة بالنص الجديد، مش
   remember جديد. «انسي إني…» → log_update delete للمعلومة.
 - «رجّعي الغرفة زي ما كانت» بعد مشهد → room_restore.
+- «ذكّريني قبل الاجتماع بربع ساعة» → schedule مع before_id (id الموعد من «وضعه هلأ») و before_minutes.
+- تذكير بيتكرر: غيّري تكراره بـ recurrence، وقّفيه بـ stop_repeat، و«اليوم بس لا» → skip_next.
+- «أجّليه» بعد ما رنّ → schedule_update بالـ id من «رنّ قبل شوي» مع shift_minutes.
+- «شيلي الموعد عن المهمة» → list_update مع no_due.
 - سؤال عن محفوظ مش ظاهر تحت (مصاريف، سجل قديم، محادثات سابقة) → recall. «لخّصيلي» → summarize.
 - ردّك قصير وطبيعي، بدون JSON وبدون أرقام تعريف.
 """
@@ -144,6 +149,10 @@ def state_block(rows: int = STATE_ROWS) -> str:
     logged = _logged_today(rows)
     if logged:
         parts.append("سجّل اليوم:\n" + "\n".join(logged))
+    rang = [s for s in schedules.list_schedules("reminder", fired_since=datetime.now(timezone.utc) - RANG_WINDOW,
+                                                limit=rows) if s.get("status") == "sent" or s.get("recurrence")]
+    if rang:
+        parts.append("رنّ قبل شوي:\n" + "\n".join(f"- {s.get('text', '')} #{s['id']}" for s in rang))
     if any(p.startswith("قائمة العادات") for p in parts):
         # The same numbers the app shows («كم يوم التزمت؟»), from one place.
         h = habits.progress()

@@ -71,7 +71,7 @@ def users_with_due(mongo_db, now: Optional[datetime] = None) -> List[str]:
     return [str(u) for u in ids if u]
 
 
-def _next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optional[datetime]:
+def next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optional[datetime]:
     """First occurrence of the RRULE (anchored at ``first``) strictly after ``after``; None when it ended."""
     # Anchored in local time so "every day at 8" survives DST changes.
     start = first.astimezone(USER_TZ)
@@ -85,7 +85,7 @@ def _next_time(doc: Dict[str, Any], now: datetime) -> Optional[datetime]:
     if not rule:
         return None
     try:
-        return _next_occurrence(rule, _aware(doc["fire_at"]), now)
+        return next_occurrence(rule, _aware(doc["fire_at"]), now)
     except (ValueError, TypeError) as exc:
         logger.warning("[schedules] bad recurrence on %s: %s", doc.get("_id"), exc)
         return None

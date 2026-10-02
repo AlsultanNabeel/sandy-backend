@@ -93,6 +93,7 @@ extension APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let sentToken = token
         if let t = sentToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
         req.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
 
         let bytes: URLSession.AsyncBytes
@@ -176,6 +177,7 @@ extension APIClient {
         req.timeoutInterval = 120
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
         let body = try JSONSerialization.data(withJSONObject: [
             "data": data.base64EncodedString(), "name": name, "mime": mime])
         let (out, resp): (Data, URLResponse)
@@ -282,6 +284,7 @@ extension APIClient {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
         req.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "mood": mood])
         let (data, resp) = try await APIClient.sendWithRetry(
             req, method: req.httpMethod ?? "GET")

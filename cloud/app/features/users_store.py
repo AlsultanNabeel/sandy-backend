@@ -211,6 +211,16 @@ def set_budget(user_id: str, amount: float) -> bool:
     return res.matched_count > 0
 
 
+def set_timezone(user_id: str, zone: str) -> bool:
+    """The zone the user's phone is in (an IANA name, already checked)."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return False
+    res = coll.update_one({"_id": user_id}, {"$set": {"timezone": zone}})
+    _bump(user_id)
+    return res.matched_count > 0
+
+
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:
     """{qid: answer} for the daily-nudge questions."""
     coll = _coll()
