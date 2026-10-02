@@ -1032,8 +1032,9 @@ so folders are organisation only.
   commitment days and the streak (days with nothing due neither count nor break it)
   come from `blocks/habits.py` (up to yesterday, `/api/stats` → `habit_progress`, and
   in Sandy's state block), and the phone adds today when its last habit is ticked.
-  Shopping: `brain/purchases.py` ticks (or lessens) the open shopping items a «اشتريت /
-  جبت» line names before the model answers; list_add refuses to add what was bought.
+  Shopping: when the user says he bought something on the shopping list (any wording),
+  the rules tell the model to tick it by id with list_update (or set `qty` to what is
+  left), log an expense if a price was said, and never add what is not on the list.
   `undo_last` takes back what the previous reply did (its journaled effects). Live
   voice: an interruption needs pitched sound (`session._voiced`), so noise no longer
   cuts a reply; `gemini-3.8-live` is the first model tried.

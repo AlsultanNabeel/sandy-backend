@@ -60,6 +60,7 @@ def _schemas() -> List[Dict[str, Any]]:
         {"name": "list_update", "description": "عدّلي/خلّصي/احذفي عنصر قائمة؛ خدي الـ id من «وضعه هلأ»، والنص بس لو مش ظاهر.",
          "parameters": _obj({**target, "list": _list_enum(), "project": _S,
                              "done": {"type": "boolean"}, "text": _S, "due": _S,
+                             "qty": {"type": "number", "description": "الكمية اللي ضايلة (لو اشترى جزء بس)"},
                              "delete": {"type": "boolean"}}, [])},
         {"name": "schedule", "description": "تذكير أو إشي بصير بوقت محدّد.",
          "parameters": _obj({"kind": _enum(SCHEDULE, "النوع"), "text": _S,

@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.brain import purchases
 from app.brain.categorize import categorize_later
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.blocks import entries, items, schedules
@@ -233,10 +232,6 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if get_kind(LOG, name) and not get_kind(LIST, name):
         return refused(f"«{name}» is something that happened, not a list: "
                        f"call remember with kind={name}")
-    if name == "shopping" and purchases.said_bought(ctx.message):
-        # «اشتريت…»: bought, so nothing to buy. What was on the list is already ticked.
-        return refused("he already bought it: don't add it to the shopping list "
-                       "(log the expense with remember if he said a price)")
     same = match_key(text)
     for row in items.list_items(name, done=False):
         if match_key(row.get("text", "")) == same:
@@ -296,11 +291,16 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         due = W.parse_when(args["due"])
         if due is None:
             return refused("could not read the due time", due=args["due"])
+    qty = args.get("qty")
     for r in rows:
         if delete:
             items.delete(r["id"])
-        else:
-            items.update(r["id"], text=args.get("text"), done=args.get("done"), due=due)
+            continue
+        data = None
+        if isinstance(qty, (int, float)) and not isinstance(qty, bool):
+            # What is still to buy (bought part of it): the rest of the row's data stays.
+            data = {**(r.get("data") or {}), "qty": qty}
+        items.update(r["id"], text=args.get("text"), done=args.get("done"), due=due, data=data)
     verb = "حذفت" if delete else ("خلّصت" if args.get("done") else "عدّلت")
     return {"ok": True, "changed": len(rows), "reply": f"{verb} {_names(rows)} ✅"}
 
