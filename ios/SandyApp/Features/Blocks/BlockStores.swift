@@ -441,7 +441,9 @@ final class ItemsStore: LoadableStore {
         let title = AppLocale.isArabic ? "مهمة" : "Task"
         let notes = items.compactMap { item -> NotificationItem? in
             guard let date = NotificationManager.parseISO(item.due ?? ""), date > Date() else { return nil }
-            return NotificationItem(id: item.id, title: title, body: item.text, date: date)
+            // An important task with a time rings like an alarm.
+            return NotificationItem(id: item.id, title: title, body: item.text, date: date,
+                                    alarm: item.priority == "high")
         }
         NotificationManager.shared.sync(prefix: "task.", items: notes)
     }
@@ -534,15 +536,16 @@ final class SchedulesStore: LoadableStore {
         name.map { "FREQ=" + $0.uppercased() }
     }
 
-    func add(api: APIClient, text: String, at: Date, recurrence: String?) async -> Bool {
+    func add(api: APIClient, text: String, at: Date, recurrence: String?, alarm: Bool = false) async -> Bool {
         restore(api)
         let row = ScheduleItem(id: ClientID.make(), kind: kind, text: text, fireAt: isoOut.string(from: at),
-                               recurrence: Self.rule(recurrence) ?? "", status: "pending")
+                               recurrence: Self.rule(recurrence) ?? "", status: "pending",
+                               payload: alarm ? ["important": .bool(true)] : nil)
         optimistic("blocks.errorSave",
                    apply: { self.everywhere { $0.append(row) } },
                    rollback: { self.everywhere { $0.removeAll { $0.id == row.id } } },
                    call: { try await api.addSchedule(id: row.id, kind: self.kind, text: text, at: at,
-                                                     recurrence: recurrence) })
+                                                     recurrence: recurrence, alarm: alarm) })
         return true
     }
 
@@ -575,18 +578,24 @@ final class SchedulesStore: LoadableStore {
     }
 
     /// Edit text, time or repeat; recurrence nil makes it ring once.
-    func update(api: APIClient, _ item: ScheduleItem, text: String, at: Date, recurrence: String?) async -> Bool {
+    func update(api: APIClient, _ item: ScheduleItem, text: String, at: Date, recurrence: String?,
+                alarm: Bool) async -> Bool {
         let moved = NotificationManager.parseISO(item.fireAt).map { abs($0.timeIntervalSince(at)) >= 60 } ?? true
         var new = item
         new.text = text
         new.recurrence = Self.rule(recurrence) ?? ""
         if moved { new.fireAt = isoOut.string(from: at) }
+        var payload: [String: JSONValue]? = nil
+        if alarm != item.isAlarm {
+            payload = (item.payload ?? [:]).merging(["important": .bool(alarm)]) { $1 }
+            new.payload = payload
+        }
         optimistic("blocks.errorSave",
                    apply: { self.replace(new) },
                    rollback: { self.replace(item) },
                    call: { try await api.updateSchedule(id: item.id, at: moved ? at : nil,
                                                         text: text == item.text ? nil : text,
-                                                        recurrence: recurrence ?? "") })
+                                                        recurrence: recurrence ?? "", payload: payload) })
         return true
     }
 
@@ -614,7 +623,8 @@ final class SchedulesStore: LoadableStore {
                                     repeats: NotificationRepeat(rrule: rule),
                                     category: NotificationManager.reminderCategory,
                                     userInfo: [NotificationManager.reminderIdKey: s.id,
-                                               NotificationManager.reminderRecurrenceKey: rule])
+                                               NotificationManager.reminderRecurrenceKey: rule],
+                                    alarm: s.isAlarm)
         }
         // Same prefix the old reminders used, so their notifications are replaced, not doubled.
         NotificationManager.shared.sync(prefix: "reminder.", items: notes)

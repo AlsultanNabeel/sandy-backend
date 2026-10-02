@@ -162,6 +162,8 @@ _BARGE_MIN_MS = 1200
 _VOICED_MIN = 0.45
 # نفس الحدّ لمّا ما قالت ولا كلمة بعد إقفال الدور (غالبًا بيكمّل جملته). شوف `_barge_bar_ms`.
 _CONTINUE_MIN_MS = 800
+# Voiced speech that opens a turn when she is not answering: a word, not a bang.
+_ONSET_VOICED_MS = 200
 # سقف الكلام المحجوز قبل قرار المقاطعة — بالوقت، مش بعدد الإطارات.
 _HELD_MS_MAX = 2000.0
 # أكتر من هيك بالطابور معناها في كلام مخزون لسا ما مرّ.

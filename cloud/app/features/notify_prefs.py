@@ -15,8 +15,9 @@ from typing import Any, Dict, Optional, Tuple
 from app.db import get_db
 from app.utils.time import USER_TZ
 
+# alarm_focus: alarms pass a Focus on the phone (time-sensitive); the phone applies it.
 DEFAULTS: Dict[str, Any] = {"reminders": True, "daily": True, "proactive": True,
-                            "quiet_start": "", "quiet_end": ""}
+                            "quiet_start": "", "quiet_end": "", "alarm_focus": False}
 # A schedule kind or push → the switch that governs it.
 KIND_SWITCH = {"reminder": "reminders", "daily_nudge": "daily", "summary_nudge": "daily"}
 _CLOCK = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -37,7 +38,7 @@ def get(user_id: str) -> Dict[str, Any]:
 def clean(body: Dict[str, Any]) -> Dict[str, Any]:
     """The known fields of a request, checked; raises ValueError on a bad clock."""
     out: Dict[str, Any] = {}
-    for key in ("reminders", "daily", "proactive"):
+    for key in ("reminders", "daily", "proactive", "alarm_focus"):
         if key in body:
             out[key] = bool(body[key])
     for key in ("quiet_start", "quiet_end"):

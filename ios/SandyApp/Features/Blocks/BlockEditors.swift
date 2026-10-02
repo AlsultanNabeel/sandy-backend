@@ -148,17 +148,19 @@ struct ReminderEditSheet: View {
     let title: String
     let item: ScheduleItem?
     let allowRepeat: Bool
-    let save: (String, Date, String?) async -> Bool
+    /// text, time, repeat rule (nil = once), rings like an alarm.
+    let save: (String, Date, String?, Bool) async -> Bool
     var delete: (() -> Void)?
 
     @State private var text: String
     @State private var date: Date
     @State private var repeats: String
+    @State private var alarm: Bool
     @State private var saving = false
     @State private var confirmDelete = false
 
     init(title: String, item: ScheduleItem? = nil, allowRepeat: Bool,
-         save: @escaping (String, Date, String?) async -> Bool, delete: (() -> Void)? = nil) {
+         save: @escaping (String, Date, String?, Bool) async -> Bool, delete: (() -> Void)? = nil) {
         self.title = title
         self.item = item
         self.allowRepeat = allowRepeat
@@ -168,6 +170,7 @@ struct ReminderEditSheet: View {
         _text = State(initialValue: item?.text ?? "")
         _date = State(initialValue: at.map { max($0, Date().addingTimeInterval(60)) } ?? EditTimes.nextRoundHour())
         _repeats = State(initialValue: EditTimes.repeatName(item?.recurrence))
+        _alarm = State(initialValue: item?.isAlarm ?? false)
     }
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -187,7 +190,10 @@ struct ReminderEditSheet: View {
                             Text(lang.s("blocks.repeatMonthly")).tag("monthly")
                             Text(lang.s("blocks.repeatYearly")).tag("yearly")
                         }
+                        Toggle(lang.s("blocks.alarm"), isOn: $alarm)
                     }
+                } footer: {
+                    if allowRepeat && alarm { Text(lang.s("blocks.alarmNote")) }
                 }
                 if let delete {
                     Section {
@@ -209,7 +215,7 @@ struct ReminderEditSheet: View {
                     Button(lang.s("blocks.save")) {
                         saving = true
                         Task {
-                            let ok = await save(trimmed, date, repeats.isEmpty ? nil : repeats)
+                            let ok = await save(trimmed, date, repeats.isEmpty ? nil : repeats, alarm)
                             saving = false
                             if ok { dismiss() }
                         }

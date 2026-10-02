@@ -124,9 +124,9 @@ struct TodayView: View {
         }
         .sheet(item: $editingReminder) { r in
             ReminderEditSheet(title: lang.s("blocks.reminders"), item: r, allowRepeat: true,
-                              save: { text, date, repeats in
+                              save: { text, date, repeats, alarm in
                                   await reminders.update(api: state.api, r, text: text, at: date,
-                                                         recurrence: repeats)
+                                                         recurrence: repeats, alarm: alarm)
                               },
                               delete: { reminders.delete(api: state.api, r) })
         }

@@ -179,15 +179,17 @@ extension APIClient {
         let text: String
         let fire_at: String
         let recurrence: String?
+        let payload: [String: JSONValue]?
     }
 
-    /// recurrence: daily | weekly | monthly | yearly, or nil for once.
+    /// recurrence: daily | weekly | monthly | yearly, or nil for once; alarm rings like an alarm.
     func addSchedule(id: String = ClientID.make(), kind: String = "reminder", text: String, at: Date,
-                     recurrence: String? = nil) async throws {
+                     recurrence: String? = nil, alarm: Bool = false) async throws {
         try await queued("/api/schedules", method: "POST",
                          body: ScheduleCreate(id: id, kind: kind, text: text,
                                             fire_at: Self.iso.string(from: at),
-                                            recurrence: recurrence))
+                                            recurrence: recurrence,
+                                            payload: alarm ? ["important": .bool(true)] : nil))
     }
 
     private struct SchedulePatch: Encodable {
@@ -195,15 +197,17 @@ extension APIClient {
         let status: String?
         let text: String?
         let recurrence: String?
+        let payload: [String: JSONValue]?
     }
 
     /// Edit, move (snooze) or close it; status is "pending" or "cancelled",
     /// recurrence "" makes it ring once.
+    /// `payload` replaces the reminder's extra fields whole (its `important` flag).
     func updateSchedule(id: String, at: Date? = nil, status: String? = nil, text: String? = nil,
-                        recurrence: String? = nil) async throws {
+                        recurrence: String? = nil, payload: [String: JSONValue]? = nil) async throws {
         try await queued("/api/schedules/\(id)", method: "PATCH",
                          body: SchedulePatch(fire_at: at.map { Self.iso.string(from: $0) }, status: status,
-                                             text: text, recurrence: recurrence))
+                                             text: text, recurrence: recurrence, payload: payload))
     }
 
     func deleteSchedule(id: String) async throws {

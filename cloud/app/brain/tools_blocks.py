@@ -497,7 +497,7 @@ def _device_timer(args: Dict[str, Any]) -> Dict[str, Any]:
 
 def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "reminder"), str(args.get("text") or "").strip()
-    payload = None
+    payload = {"important": True} if args.get("important") and kind == "reminder" else None
     if args.get("device"):
         timer = _device_timer(args)
         if not timer.get("kind"):
@@ -528,7 +528,8 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(str(exc))
     if not sid:
         return refused("not saved")
-    said = f"بعمل «{text}»" if payload else f"بذكّرك «{text}»"
+    said = (f"بعمل «{text}»" if kind == "scene" else
+            f"حطّيت منبه «{text}»" if payload else f"بذكّرك «{text}»")
     return {"ok": True, "id": sid, "when": W.local_text(fire_at),
             "reply": f"تمام، {said} {W.local_text(fire_at)} ⏰"}
 
@@ -606,7 +607,11 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             base = max(W.aware_utc(r["fire_at"]), W.now_utc())
             at = base + timedelta(minutes=shift)
         status = "pending" if r.get("status") == "sent" and at else None
-        schedules.update(r["id"], text=args.get("text"), fire_at=at, recurrence=rule, status=status)
+        payload = None
+        if isinstance(args.get("important"), bool) and r.get("kind") == "reminder":
+            payload = {**(r.get("payload") or {}), "important": args["important"]}
+        schedules.update(r["id"], text=args.get("text"), fire_at=at, recurrence=rule, status=status,
+                         payload=payload)
         moved = at or moved
     if cancel:
         return {"ok": True, "changed": len(rows), "reply": f"لغيت {_names(rows)} ✅"}

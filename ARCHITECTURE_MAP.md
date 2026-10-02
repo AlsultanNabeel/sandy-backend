@@ -1039,7 +1039,13 @@ so folders are organisation only.
   applied by NotificationManager: a kind off is not scheduled, a time inside the quiet
   hours rings silently) and on the server (`GET/POST /api/notification-settings`,
   `features/notify_prefs.py`: the schedule runner and the daily send skip a kind turned
-  off and push silently in the quiet hours). Support sends `POST /api/feedback` with the
+  off and push silently in the quiet hours). **Alarms**: a reminder with
+  `payload.important` (Sandy sets it for «صحّيني»/«ضروري»; the reminder sheet has a switch)
+  or a task with priority high and a time rings like an alarm: the bundled
+  `Resources/Sounds/sandy_alarm.caf` (25 s), through quiet hours, and twice more two
+  minutes apart until it is answered (a one-off; `NotificationManager.clearAgain`). It
+  passes a Focus (time-sensitive) only with the `alarm_focus` switch, off by default.
+  Support sends `POST /api/feedback` with the
   version and device (`sandy_feedback`). The privacy, terms and support-mail values live
   only in `App/AppLinks.swift`, empty until the release.
   Today has a large home-control button, a robot button beside it when a board that
@@ -1063,7 +1069,8 @@ so folders are organisation only.
   left), log an expense if a price was said, and never add what is not on the list.
   `undo_last` takes back what the previous reply did (its journaled effects). Live
   voice: an interruption needs pitched sound (`session._voiced`), so noise no longer
-  cuts a reply; `gemini-3.8-live` is the first model tried.
+  cuts a reply, and a turn opens only on voiced speech (`_ONSET_VOICED_MS`), so a door or
+  the TV no longer becomes a question she answers; `gemini-3.8-live` is the first model tried.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

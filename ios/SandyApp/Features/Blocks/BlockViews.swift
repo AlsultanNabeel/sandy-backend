@@ -273,16 +273,16 @@ struct SchedulesView: View {
         // A banner button (later / done / delete) changed one while this screen was open.
         .onChange(of: notifs.remindersChanged) { Task { await store.load(api: state.api) } }
         .sheet(isPresented: $adding) {
-            ReminderEditSheet(title: title, allowRepeat: store.kind == "reminder") { text, date, repeats in
-                await store.add(api: state.api, text: text, at: date, recurrence: repeats)
+            ReminderEditSheet(title: title, allowRepeat: store.kind == "reminder") { text, date, repeats, alarm in
+                await store.add(api: state.api, text: text, at: date, recurrence: repeats, alarm: alarm)
             }
             .environmentObject(lang)
         }
         .sheet(item: $editing) { item in
             ReminderEditSheet(title: title, item: item, allowRepeat: store.kind == "reminder",
-                              save: { text, date, repeats in
+                              save: { text, date, repeats, alarm in
                                   await store.update(api: state.api, item, text: text, at: date,
-                                                     recurrence: repeats)
+                                                     recurrence: repeats, alarm: alarm)
                               },
                               delete: { store.delete(api: state.api, item) })
             .environmentObject(lang)
@@ -291,7 +291,7 @@ struct SchedulesView: View {
 
     private func row(_ item: ScheduleItem) -> some View {
         HStack(spacing: Theme.Spacing.md) {
-            Image(systemName: (item.recurrence ?? "").isEmpty ? "bell.fill" : "repeat")
+            Image(systemName: item.isAlarm ? "alarm.fill" : (item.recurrence ?? "").isEmpty ? "bell.fill" : "repeat")
                 .foregroundColor(Theme.Colors.warn)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text).font(Theme.Typography.body).foregroundColor(Theme.Colors.primaryText)

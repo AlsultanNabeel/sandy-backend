@@ -59,6 +59,8 @@ _RULES = """
 - تذكير بيتكرر: غيّري تكراره بـ recurrence، وقّفيه بـ stop_repeat، و«اليوم بس لا» → skip_next.
 - «أجّليه» بعد ما رنّ → schedule_update بالـ id من «رنّ قبل شوي» مع shift_minutes.
 - «شيلي الموعد عن المهمة» → list_update مع no_due.
+- «صحّيني»، «حطيلي منبه»، «ضروري ما أنسى» → schedule مع important=true (منبه بيرنّ بكامل الشاشة)؛
+  مهمة بموعد ومهمة كتير → priority=high وبترنّ كمنبه كمان.
 - سؤال عن محفوظ مش ظاهر تحت (مصاريف، سجل قديم، محادثات سابقة) → recall. «لخّصيلي» → summarize.
 - ردّك قصير وطبيعي، بدون JSON وبدون أرقام تعريف.
 """
@@ -150,7 +152,8 @@ def state_block(rows: int = STATE_ROWS) -> str:
     if upcoming:
         parts.append("التذكيرات الجاية:\n" + "\n".join(
             f"- {s.get('text', '')} ({_when(s.get('fire_at'))}"
-            f"{', بتتكرر' if s.get('recurrence') else ''}) #{s['id']}" for s in upcoming))
+            f"{', بتتكرر' if s.get('recurrence') else ''}"
+            f"{', منبه' if (s.get('payload') or {}).get('important') else ''}) #{s['id']}" for s in upcoming))
     logged = _logged_today(rows)
     if logged:
         parts.append("سجّل اليوم:\n" + "\n".join(logged))

@@ -286,3 +286,24 @@ def test_street_noise_over_her_does_not_cut_her_off(loop):
                         verify=False, live_state=state))
 
     assert "start" not in session.order, f"noise cut her off: {session.order}"
+
+
+def test_a_bang_while_she_is_quiet_does_not_open_a_turn(loop):
+    """A door or the TV while she is idle used to open a turn: Gemini answered the noise
+    («sorry about that…»). Only a voice opens one now, and its first words still reach her."""
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    noise = np.random.default_rng(5).normal(0, 3000, 1600).astype("<i2").tobytes()
+    room = [_app_frame(30, ms=100)] * 10
+    session = _StatefulSession()
+    loop.run_until_complete(
+        _device_to_live(_Reader(room + [noise] * 20), session, _RecentAudio(),
+                        verify=False, live_state={}))
+    assert "start" not in session.order, f"noise opened a turn: {session.order}"
+
+    session = _StatefulSession()
+    loop.run_until_complete(
+        _device_to_live(_Reader(room + [_app_frame(3000, ms=100)] * 10), session, _RecentAudio(),
+                        verify=False, live_state={}))
+    assert "start" in session.order

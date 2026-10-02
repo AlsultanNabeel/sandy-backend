@@ -92,7 +92,8 @@ KINDS: Tuple[Kind, ...] = (
     # ── SCHEDULES (sandy_schedules) ──────────────────────────────────────────
     Kind("reminder", SCHEDULE, "تذكير", "Reminder", "bell", {
         "note": _S, "linked_task_id": _S, "parent_summary": _S,
-        "source_kind": _S, "series_at": _T, "sent_at": _T, "last_error": _S},
+        "source_kind": _S, "series_at": _T, "sent_at": _T, "last_error": _S,
+        "important": _B},
         ("تذكير", "تذكيرات", "مواعيد", "مواعيدي", "منبهات")),
     Kind("message_to_future_self", SCHEDULE, "رسالة للمستقبل",
          "Message to future self", "envelope", {

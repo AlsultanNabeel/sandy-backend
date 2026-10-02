@@ -170,9 +170,16 @@ struct ScheduleItem: Codable, Identifiable, Hashable {
     var fireAt: String
     var recurrence: String?
     var status: String?
+    var payload: [String: JSONValue]? = nil
+
+    /// Rings like an alarm (`payload.important`), not a quiet banner.
+    var isAlarm: Bool {
+        if case .bool(true)? = payload?["important"] { return true }
+        return false
+    }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, text, recurrence, status
+        case id, kind, text, recurrence, status, payload
         case fireAt = "fire_at"
     }
 }

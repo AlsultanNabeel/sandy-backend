@@ -30,6 +30,7 @@ from app.api.voice_ws._config import (
     _BARGE_MIN_MS,
     _VOICED_MIN,
     _CONTINUE_MIN_MS,
+    _ONSET_VOICED_MS,
     _CHUNK_BYTES,
     _HELD_MS_MAX,
     _SILENCE_GAP_S,
@@ -998,20 +999,22 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 quiet_ms += ms
 
             if is_speech and not speaking:
-                # Opening a turn cancels her answer (activity_start interrupts), so
-                # while she answers an onset must earn it; frames are held meanwhile.
-                if state.get("replying") and _she_is_really_answering(state):
-                    held.append(chunk)
-                    held_ms += ms
-                    if _voiced(samples):
-                        held_voiced_ms += ms
-                    while held_ms > _HELD_MS_MAX and len(held) > 1:
-                        # The dropped frame's time leaves with it.
-                        held_ms -= len(held.pop(0)) / 2 / 16000 * 1000
-                    held_voiced_ms = min(held_voiced_ms, held_ms)
-                    # A car, a fan, a door: loud but not a voice. Only speech cuts her off.
-                    if held_voiced_ms < _barge_bar_ms(state):
-                        continue
+                # Only a voice opens a turn: a door, the TV, a fan opened one before and
+                # she answered the noise («sorry about that…») or cut her own reply. Frames
+                # are held until enough of them are voiced; while she answers (activity_start
+                # interrupts her) the bar is higher.
+                answering = state.get("replying") and _she_is_really_answering(state)
+                held.append(chunk)
+                held_ms += ms
+                if _voiced(samples):
+                    held_voiced_ms += ms
+                while held_ms > _HELD_MS_MAX and len(held) > 1:
+                    # The dropped frame's time leaves with it.
+                    held_ms -= len(held.pop(0)) / 2 / 16000 * 1000
+                held_voiced_ms = min(held_voiced_ms, held_ms)
+                if held_voiced_ms < (_barge_bar_ms(state) if answering else _ONSET_VOICED_MS):
+                    continue
+                if answering:
                     logger.info("[voice_ws] %.1fs of speech while she answers — "
                                 "taking it as an interruption", held_ms / 1000)
 
