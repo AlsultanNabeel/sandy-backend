@@ -126,6 +126,7 @@ struct ChatView: View {
             ScrollView {
                 // Lazy: a long thread builds only the rows on screen.
                 LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    if store.messages.count >= 2 { OneTimeTip(tip: MessageActionsTip()) }
                     ForEach(store.messages) { m in
                         messageRow(m)
                             // حيوية: كل فقاعة تظهر بتكبير لطيف + تلاشٍ.

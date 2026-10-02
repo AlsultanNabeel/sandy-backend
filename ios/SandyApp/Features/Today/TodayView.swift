@@ -14,6 +14,8 @@ struct TodayView: View {
     @StateObject private var weather = WeatherStore()
     @StateObject private var expenses = LogStore(kind: "expense")
     @State private var showProfile = false
+    /// A robot is linked (a board that speaks): its button shows next to the home one.
+    @AppStorage("today.hasRobot") private var hasRobot = false
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var editingTask: ListItem?
     @State private var editingHabit: ListItem?
@@ -23,6 +25,7 @@ struct TodayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 header
+                controls
                 Text(briefing)
                     .scaledFont(26, weight: .bold, design: .rounded, relativeTo: .largeTitle)
                     .foregroundColor(Theme.Colors.primaryText)
@@ -30,6 +33,7 @@ struct TodayView: View {
                     .contentTransition(.opacity)
                 AskBar { await reload() }
                 if nudge.nudge != nil && !nudge.dismissed { DailyNudgeCard(store: nudge) }
+                if !moments.isEmpty || !anytime.isEmpty { OneTimeTip(tip: RowActionsTip()) }
                 section("today.restOfDay") {
                     if tasks.loading && !tasks.hasSnapshot && moments.isEmpty {
                         SkeletonList(rows: 3)
@@ -140,9 +144,13 @@ struct TodayView: View {
         async let b: Void = habits.load(api: state.api)
         async let c: Void = reminders.load(api: state.api)
         async let d: Void = expenses.load(api: state.api)
+        async let robot = state.api.getNodes()
         // The budget alert on a new expense needs this month's numbers.
         async let e: Void = LifeStatsStore.shared.load(api: state.api)
         _ = await (a, b, c, d, e)
+        if let nodes = try? await robot, !nodes.demo {
+            hasRobot = nodes.items.contains { $0.capabilities.contains("audio") }
+        }
     }
 
     private var spentToday: Double {
@@ -224,15 +232,49 @@ struct TodayView: View {
         .padding(.top, Theme.Spacing.sm)
     }
 
-    /// Focus, home, the weather in the corner, and the avatar that opens Profile.
+    /// Home control, big, and the robot's beside it when one is linked; under them, the
+    /// reminder that saying it to Sandy works too.
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.sm) {
+                NavigationLink { ControlView() } label: { controlLabel("house.fill", "tips.home") }
+                if hasRobot {
+                    NavigationLink { RobotView() } label: { controlLabel("face.smiling.inverse", "tips.robot") }
+                }
+            }
+            .buttonStyle(.plain)
+            Text(lang.s("tips.orAsk"))
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.tertiaryText)
+                .padding(.horizontal, Theme.Spacing.xs)
+        }
+    }
+
+    private func controlLabel(_ icon: String, _ key: String) -> some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: icon)
+                .scaledFont(Theme.Icon.lg, weight: .semibold)
+                .foregroundColor(Theme.Colors.accent)
+            Text(lang.s(key))
+                .font(Theme.Typography.headline)
+                .foregroundColor(Theme.Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.md)
+        .frame(maxWidth: .infinity)
+        .liquidGlass(cornerRadius: Theme.Radius.card, tint: 0.08)
+    }
+
+    /// Focus, the weather in the corner, and the avatar that opens Profile.
     @ViewBuilder
     private var buttons: some View {
         HStack(spacing: Theme.Spacing.md) {
             // Focus drives the lock-screen Live Activity; home is the devices.
             NavigationLink { FocusView() } label: { Image(systemName: "target") }
                 .accessibilityLabel(lang.s("today.focus"))
-            NavigationLink { ControlView() } label: { Image(systemName: "house.fill") }
-                .accessibilityLabel(lang.s("today.home"))
         }
         .scaledFont(17, weight: .semibold)
         .foregroundColor(Theme.Colors.accent)

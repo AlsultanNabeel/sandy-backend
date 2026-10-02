@@ -271,6 +271,7 @@ final class ChatStore: ObservableObject {
                 Announce.say(String(format: LanguageManager.shared.s("a11y.replyArrived"), reply))
                 // A reply may have added or changed things the other tabs show.
                 NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
+                ReviewPrompter.shared.noteReply()
                 return reply
             } catch {
                 if !error.isCancellation {
@@ -279,6 +280,7 @@ final class ChatStore: ObservableObject {
                         messages[idx].failed = true
                     }
                     errorMessage = nextErrorLine()
+                    ReviewPrompter.shared.noteError()
                     Announce.say(errorMessage)
                     Haptics.play(.failure)
                 }

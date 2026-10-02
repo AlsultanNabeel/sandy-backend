@@ -1016,6 +1016,12 @@ so folders are organisation only.
   off and push silently in the quiet hours). Support sends `POST /api/feedback` with the
   version and device (`sandy_feedback`). The privacy, terms and support-mail values live
   only in `App/AppLinks.swift`, empty until the release.
+  Today has a large home-control button, a robot button beside it when a board that
+  speaks («audio» capability) is linked, and «أو قولي لساندي شو بدك» under them.
+  `Services/Guidance.swift`: one-time TipKit tips (the orb's hold-to-call, row actions,
+  the month strip, message actions; at most one a day, gone for good on «فهمت») and
+  `ReviewPrompter` (asks for a rating after every fifth finished task, or after a week
+  with ten replies; never within ten minutes of an error; at most every 120 days).
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

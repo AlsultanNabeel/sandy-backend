@@ -74,6 +74,7 @@ struct LifeHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            OneTimeTip(tip: LifeDayTip())
             monthStrip
             monthNumbers
             ScrollView(.horizontal, showsIndicators: false) {

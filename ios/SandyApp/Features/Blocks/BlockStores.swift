@@ -11,13 +11,16 @@ import SwiftUI
 final class KindsStore: ObservableObject {
     static let shared = KindsStore()
     @Published private(set) var kinds: [BlockKind] = []
+    /// Fetched from the server this session: every screen asks, one fetch answers.
+    private var fetched = false
 
     func load(api: APIClient) async {
         if kinds.isEmpty, let cached = DiskCache.load([BlockKind].self, key: "kinds",
                                                       userId: api.currentUserId) {
             kinds = cached
         }
-        guard let loaded = try? await api.blockKinds(), !loaded.isEmpty else { return }
+        guard !fetched, let loaded = try? await api.blockKinds(), !loaded.isEmpty else { return }
+        fetched = true
         kinds = loaded
         DiskCache.save(loaded, key: "kinds", userId: api.currentUserId)
     }
@@ -294,7 +297,10 @@ final class ItemsStore: LoadableStore {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         var moved = item
         moved.done.toggle()
-        if moved.done { offerUndo(api: api, moved) }
+        if moved.done {
+            offerUndo(api: api, moved)
+            ReviewPrompter.shared.noteTaskDone()
+        }
         let out: (inout [ListItem]) -> Void = { $0.removeAll { $0.id == item.id } }
         optimistic("blocks.errorSave",
                    apply: {

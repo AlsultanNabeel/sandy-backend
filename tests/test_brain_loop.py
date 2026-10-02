@@ -169,13 +169,25 @@ def stm_rewind():
 
 def test_a_stopped_reply_runs_no_more_tools_and_is_remembered_cut(brain_db):  # noqa: F811
     from app.brain import stm, stops
-    stops.request("userA", "userA", "كنت عم")
-    model = ScriptedModel(tools_reply(call("recall", query="x")),
-                          tools_reply(call("list_add", cid="c2", list="shopping", text="حليب")),
-                          text_reply("خلص"))
+    scripted = ScriptedModel(tools_reply(call("recall", query="x")),
+                             tools_reply(call("list_add", cid="c2", list="shopping", text="حليب")),
+                             text_reply("خلص"))
+
+    def model(messages, tools, on_text=None):
+        reply = scripted(messages, tools, on_text=on_text)
+        stops.request("userA", "userA", "كنت عم")  # the user taps stop while she works
+        return reply
+
     _turn(model, "دوري وضيفي")
-    assert len(model.seen) == 1, "kept going after the stop"
+    assert len(scripted.seen) == 1, "kept going after the stop"
     with active_user_profile_context(A):
         assert items.list_items("shopping") == []
     last = stm.load("userA", "userA")[-1]
     assert last["content"] == stops.cut("كنت عم") and stops.CUT_NOTE in last["content"]
+
+
+def test_a_stop_from_before_the_turn_does_not_cut_it(brain_db):  # noqa: F811
+    from app.brain import stm, stops
+    stops.request("userA", "userA", "قديم")
+    _turn(ScriptedModel(text_reply("رد كامل")), "مرحبا")
+    assert stm.load("userA", "userA")[-1]["content"] == "رد كامل"

@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from app.blocks import _base as blocks_base
@@ -182,19 +183,22 @@ def _remembered_line(message: str, attachments: List[Dict[str, Any]]) -> str:
 def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
               conversation_id, attachments, complete) -> Dict[str, Any]:
     t0 = time.perf_counter()
+    began = datetime.now(timezone.utc)
     thread_id = str(conversation_id or chat_id)
     ctx = TurnCtx(user_id=str(user_id), message=message,
                   source="voice" if source == "voice" else "chat", image_state=image_state)
     held = confirm.live(pending_state)
-    outcome = _resolve_pending(held, message, ctx) if held else None
     own, history = stm.history(thread_id, user_id)
+    # Everything the turn writes is journaled, a confirmed «yes» included, so a rewritten
+    # or edited reply can take it all back.
     with blocks_base.journal() as effects:
+        outcome = _resolve_pending(held, message, ctx) if held else None
         outcome = _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete,
-                          attachments)
+                          attachments, began)
 
     text = outcome["text"]
     # Stopped from the app: memory keeps what was shown, marked as cut.
-    shown = stops.take(user_id, thread_id)
+    shown = stops.take(user_id, thread_id, since=began)
     remembered = stops.cut(shown) if shown is not None else text
     logger.info("[turn] %.0fms total — brain%s tools=%s",
                 (time.perf_counter() - t0) * 1000, " (fast)" if outcome.get("fast") else "",
@@ -216,7 +220,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
 
 
 def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete,
-            attachments=()):
+            attachments=(), began=None):
     """The held confirmation's outcome, else the fast path's, else the model loop's.
     A line with attachments always goes to the model: only it can look at them."""
     if outcome is None and not attachments:
@@ -232,7 +236,7 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
                         *context.history_messages(history),
                         {"role": "user", "content": _user_content(message, list(attachments))}]
             outcome = _run_loop(messages, ctx, complete,
-                                stopped=lambda: stops.requested(user_id, thread_id))
+                                stopped=lambda: stops.requested(user_id, thread_id, since=began))
         except Exception:  # noqa: BLE001 — the request boundary: answer, never 500
             logger.exception("[brain] turn failed")
             outcome = {"text": ERROR_REPLY, "pending": None, "tools": [], "error": True}

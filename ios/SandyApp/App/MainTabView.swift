@@ -1,4 +1,6 @@
+import StoreKit
 import SwiftUI
+import TipKit
 
 /// الترتيب ثابت ومرتبط بـ `selection` حتى نقدر نبدّل التبويب برمجيًّا.
 /// الحساب (ProfileView) مش تبويب — نوصله من زر الأفاتار بالرئيسية.
@@ -35,6 +37,8 @@ struct MainTabView: View {
     @ObservedObject private var spotlight = SpotlightRouter.shared
     @State private var showLiveCall = false
     @ObservedObject private var call = GeminiLiveManager.shared
+    @ObservedObject private var review = ReviewPrompter.shared
+    @Environment(\.requestReview) private var requestReview
 
     /// لما يطلع الكيبورد نخفي شريط التبويبات حتى ما يزاحمه.
     @State private var keyboardUp = false
@@ -71,6 +75,15 @@ struct MainTabView: View {
             await state.refreshOnboardingIfNeeded()
         }
         .animation(Animation.spring(response: 0.4, dampingFraction: 0.85).reduced, value: call.inCall)
+        // A good moment came (tasks finished, a week of conversations): ask, a beat later.
+        .onChange(of: review.askNow) { _, ask in
+            guard ask else { return }
+            review.askNow = false
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                requestReview()
+            }
+        }
         // «إنهاء» من الـ Live Activity / الجزيرة الديناميكية (sandy://call/end), screen open or not.
         .onReceive(DeepLinkRouter.shared.endCall) { _ in
             call.stop()
@@ -225,8 +238,11 @@ private struct SandyOrb: View {
         .onTapGesture { onTap() }
         .onLongPressGesture(minimumDuration: 0.35) {
             Haptics.play(.listening)
+            // Found it: the hint never shows again.
+            OrbCallTip().invalidate(reason: .actionPerformed)
             onHold()
         }
+        .popoverTip(OrbCallTip(), arrowEdge: .bottom)
         .onAppear {
             withAnimation(Animation.easeInOut(duration: 2.4).repeatForever(autoreverses: true).reduced) { breathe = true }
         }

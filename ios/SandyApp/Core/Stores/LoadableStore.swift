@@ -35,6 +35,7 @@ class LoadableStore: ObservableObject {
     func notify(_ key: String) {
         notice = LanguageManager.shared.s(key)
         Announce.say(notice)
+        ReviewPrompter.shared.noteError()
     }
 
     func clearNotice() { notice = "" }

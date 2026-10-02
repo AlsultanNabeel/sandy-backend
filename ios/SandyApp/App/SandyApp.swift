@@ -33,6 +33,8 @@ struct SandyApp: App {
     @StateObject private var state = AppState()
     @StateObject private var lang = LanguageManager.shared
 
+    init() { Guidance.configure() }
+
     var body: some Scene {
         WindowGroup {
             RootView()

@@ -30,27 +30,31 @@ def request(user_id: str, thread_id: str, partial: str) -> None:
                           {"partial": partial, "at": datetime.now(timezone.utc)}, upsert=True)
 
 
-def _fresh(doc) -> bool:
+def _fresh(doc, since: Optional[datetime]) -> bool:
+    """Recent, and made while this turn ran (`since` = when it began): a stop that
+    arrived as the previous turn ended must not cut the next one."""
     at = (doc or {}).get("at")
     if not isinstance(at, datetime):
         return False
     if at.tzinfo is None:
         at = at.replace(tzinfo=timezone.utc)
+    if since is not None and at < since:
+        return False
     return datetime.now(timezone.utc) - at < _FRESH
 
 
-def requested(user_id: str, thread_id: str) -> bool:
+def requested(user_id: str, thread_id: str, since: Optional[datetime] = None) -> bool:
     db = get_db()
-    return db is not None and _fresh(db[_COLL].find_one({"_id": _key(user_id, thread_id)}))
+    return db is not None and _fresh(db[_COLL].find_one({"_id": _key(user_id, thread_id)}), since)
 
 
-def take(user_id: str, thread_id: str) -> Optional[str]:
+def take(user_id: str, thread_id: str, since: Optional[datetime] = None) -> Optional[str]:
     """What was shown before the stop, once (the request is used up), or None."""
     db = get_db()
     if db is None:
         return None
     doc = db[_COLL].find_one_and_delete({"_id": _key(user_id, thread_id)})
-    return str(doc.get("partial") or "") if _fresh(doc) else None
+    return str(doc.get("partial") or "") if _fresh(doc, since) else None
 
 
 def cut(partial: str) -> str:

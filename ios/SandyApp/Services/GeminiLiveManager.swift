@@ -43,10 +43,17 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         stopped = false
         inCall = true
         errorText = ""
+        // One shared manager: an earlier «no mic» must not outlive the user allowing it.
+        permissionDenied = false
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             Task { @MainActor in
                 guard let self, !self.stopped else { return }
-                if !granted { self.permissionDenied = true; return }
+                if !granted {
+                    // No mic, no call: the bar over the tabs must not offer one to go back to.
+                    self.permissionDenied = true
+                    self.inCall = false
+                    return
+                }
                 self.connect(baseURL: baseURL, token: token)
             }
         }
