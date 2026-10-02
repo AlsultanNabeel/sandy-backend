@@ -5,6 +5,7 @@
   GET/POST /api/schedules   PATCH/DELETE /api/schedules/<id>   anything that fires
   GET  /api/kinds           the kinds table, so the app builds its screens from it
   POST /api/summary         {period, focus?} -> {text}
+  GET  /api/stats           My Life's numbers: entries per day (30), this month's totals
 
 A POST may carry its own ``id`` (32 hex): the app makes rows offline and sends them
 later, so the id it already uses must stay, and a resent POST must not double the row.
@@ -265,6 +266,13 @@ def register_blocks_api(app, mongo_db=None):
         new_id = entries.add(kind, text, _data(LOG, kind, body.get("data")),
                              at=_when(body.get("at")), source="app", doc_id=cid)
         return _saved(new_id, entries.get, "data")
+
+    @app.route("/api/stats", methods=["GET"])
+    @require_tenant
+    @_answers_invalid
+    def api_stats(claims):
+        """My Life's numbers over the whole log (not the newest page the app holds)."""
+        return jsonify(entries.stats()), 200
 
     @app.route("/api/entries/<entry_id>", methods=["PATCH"])
     @require_tenant

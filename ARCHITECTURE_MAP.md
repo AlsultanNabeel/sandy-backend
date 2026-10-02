@@ -421,6 +421,7 @@ capped at 2000 characters and `data`/`payload` at 8000 of JSON:
 | `GET/POST /api/items`, `PATCH/DELETE /api/items/<id>` | the lists; `GET` filters `list`, `done`, `q`, `limit`; `PATCH {"due": null}` clears it |
 | `GET/POST /api/schedules`, `PATCH/DELETE /api/schedules/<id>` | anything that fires; `GET` filters `kind`, `from`, `to`, `status`, `limit`; `fire_at` must be future; `recurrence` is daily/weekly/monthly/yearly or an RRULE; the app may set status only to `pending`/`cancelled` |
 | `GET /api/kinds` | `kinds.KINDS` as `{name, block, labels:{ar,en}, icon, prefix, fields:{name: type}}` — the app builds its screens from it |
+| `GET /api/stats` | My Life's numbers over the whole log in the user's zone: entries per day for 30 days, and this month's spending, habit check-ins and entries (summaries left out); the app adds what it made since |
 | `POST /api/summary` | `{period, focus?}` → `{text, count}`: the brain's `summarize` rows, one model call (`brain/summary.py`); metered; nothing recorded → a fixed sentence, no call |
 
 Datetimes go out as ISO in the user's zone and come in as ISO (naive = user's

@@ -51,6 +51,31 @@ struct BlockKind: Codable, Identifiable, Hashable {
     }
 }
 
+/// My Life's numbers: entries on each of the last 30 days (oldest first) and this month's totals.
+struct LifeStats: Codable, Hashable {
+    var days: [Int]
+    var spent: Double
+    var habits: Int
+    var logged: Int
+
+    /// With entries made on the phone since the numbers were counted.
+    func including(_ added: [LogEntry]) -> LifeStats {
+        var out = self
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        for e in added {
+            guard let at = NotificationManager.parseISO(e.at ?? "") else { continue }
+            let back = cal.dateComponents([.day], from: cal.startOfDay(for: at), to: today).day ?? -1
+            if back >= 0 && back < out.days.count { out.days[out.days.count - 1 - back] += 1 }
+            guard cal.isDate(at, equalTo: Date(), toGranularity: .month) else { continue }
+            out.logged += 1
+            if e.kind == "habit" { out.habits += 1 }
+            if e.kind == "expense" { out.spent += e.amount ?? 0 }
+        }
+        return out
+    }
+}
+
 struct LogEntry: Codable, Identifiable, Hashable {
     let id: String
     let kind: String

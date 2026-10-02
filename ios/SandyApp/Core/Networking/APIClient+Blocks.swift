@@ -33,10 +33,19 @@ extension APIClient {
 
     // MARK: log
 
-    func entries(kind: String? = nil, limit: Int = 200) async throws -> [LogEntry] {
-        let r: Rows<LogEntry> = try await fetch(query("/api/entries",
-                                                      ["kind": kind, "limit": String(limit)]))
+    /// Newest first; `q` searches the text and `since`/`until` bound the time, over the whole log.
+    func entries(kind: String? = nil, limit: Int = 200, q: String? = nil,
+                 since: Date? = nil, until: Date? = nil) async throws -> [LogEntry] {
+        let r: Rows<LogEntry> = try await fetch(query("/api/entries", [
+            "kind": kind, "limit": String(limit), "q": q,
+            "since": since.map { Self.iso.string(from: $0) },
+            "until": until.map { Self.iso.string(from: $0) }]))
         return r.items ?? []
+    }
+
+    /// My Life's numbers, counted on the server over the whole log.
+    func stats() async throws -> LifeStats {
+        try await fetch("/api/stats")
     }
 
     private struct EntryCreate: Encodable {

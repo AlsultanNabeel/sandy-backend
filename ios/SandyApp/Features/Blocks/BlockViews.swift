@@ -318,10 +318,20 @@ struct LogView: View {
     @State private var summary: String?
     @State private var summarizing = false
     @State private var search = ""
+    @StateObject private var lifeStats = LifeStatsStore()
+    /// What the server found for the search or the picked day, over the whole log;
+    /// nil while there is no query, or offline (then the rows on the phone are filtered).
+    @State private var found: [LogEntry]?
+
+    private var query: String { search.trimmingCharacters(in: .whitespaces) }
 
     private var shown: [LogEntry] {
-        let q = search.trimmingCharacters(in: .whitespaces)
-        var rows = q.isEmpty ? store.entries : store.entries.filter { $0.text.localizedCaseInsensitiveContains(q) }
+        if let found {
+            // The phone's copy of a row wins: an edit made since shows at once.
+            return found.compactMap { hit in store.entries.first { $0.id == hit.id } ?? hit }
+        }
+        var rows = query.isEmpty ? store.entries
+                                 : store.entries.filter { $0.text.localizedCaseInsensitiveContains(query) }
         if let day {
             let cal = Calendar.current
             rows = rows.filter {
@@ -332,6 +342,17 @@ struct LogView: View {
         return rows
     }
 
+    /// Asks the server for the search and the picked day, a moment after typing stops.
+    private func lookUp() async {
+        guard !query.isEmpty || day != nil else { found = nil; return }
+        try? await Task.sleep(for: .milliseconds(350))
+        guard !Task.isCancelled else { return }
+        let start = day.map { Calendar.current.startOfDay(for: $0) }
+        found = try? await state.api.entries(kind: store.kind, limit: 200,
+                                             q: query.isEmpty ? nil : query, since: start,
+                                             until: start.map { $0.addingTimeInterval(86_400 - 1) })
+    }
+
     private var title: String {
         if isLife { return lang.s("life.title") }
         return store.kind.map { kinds.kindOrBare($0, .log).label(lang.lang) } ?? lang.s("life.title")
@@ -340,7 +361,7 @@ struct LogView: View {
     var body: some View {
         List {
             if isLife {
-                LifeHeader(entries: store.entries, day: $day).blockRow()
+                LifeHeader(stats: lifeStats.stats, day: $day).blockRow()
                 filters.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -371,9 +392,14 @@ struct LogView: View {
         .task {
             await kinds.load(api: state.api)
             await store.load(api: state.api)
+            if isLife { await lifeStats.load(api: state.api) }
         }
-        .refreshable { await store.load(api: state.api) }
+        .refreshable {
+            await store.load(api: state.api)
+            if isLife { await lifeStats.load(api: state.api) }
+        }
         .onChange(of: store.kind) { Task { await store.load(api: state.api) } }
+        .task(id: "\(query)|\(day?.timeIntervalSince1970 ?? 0)|\(store.kind ?? "")") { await lookUp() }
         .sheet(isPresented: $adding) {
             EntryEditSheet(kinds: kinds.logKinds, kind: store.kind ?? "note") { kind, text, amount, at in
                 await store.add(api: state.api, kind: kind, text: text, amount: amount, at: at)

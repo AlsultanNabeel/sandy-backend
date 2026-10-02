@@ -5,27 +5,41 @@ struct LifeView: View {
     var body: some View { LogView(isLife: true) }
 }
 
+/// My Life's numbers from the server (the whole log), kept on disk, plus what was made
+/// on the phone since they were counted.
+@MainActor
+final class LifeStatsStore: ObservableObject {
+    @Published private var counted: LifeStats?
+    private var countedAt = Date.distantPast
+
+    var stats: LifeStats {
+        (counted ?? LifeStats(days: Array(repeating: 0, count: 30), spent: 0, habits: 0, logged: 0))
+            .including(LogStore.madeSince(countedAt))
+    }
+
+    func load(api: APIClient) async {
+        if counted == nil, let cached = DiskCache.load(LifeStats.self, key: "life.stats",
+                                                       userId: api.currentUserId) {
+            counted = cached
+        }
+        guard Outbox.shared.isEmpty, let fresh = try? await api.stats() else { return }
+        countedAt = Date()
+        counted = fresh
+        DiskCache.save(fresh, key: "life.stats", userId: api.currentUserId)
+    }
+}
+
 /// Top of My Life: thirty days as lit squares (how much you logged each day), then your
 /// reminders, lists and messages to your future self as cards you swipe through.
 struct LifeHeader: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject private var kinds = KindsStore.shared
-    let entries: [LogEntry]
+    let stats: LifeStats
     /// The day picked on the strip; the log below shows only it.
     @Binding var day: Date?
 
-    private var perDay: [Int] {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        var counts = Array(repeating: 0, count: 30)
-        for e in entries {
-            guard let at = NotificationManager.parseISO(e.at ?? "") else { continue }
-            let days = cal.dateComponents([.day], from: cal.startOfDay(for: at), to: today).day ?? 99
-            if (0..<30).contains(days) { counts[29 - days] += 1 }
-        }
-        return counts
-    }
+    private var perDay: [Int] { stats.days }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -101,17 +115,11 @@ struct LifeHeader: View {
 
     /// This month at a glance: what you spent and how many things you logged.
     private var monthNumbers: some View {
-        let cal = Calendar.current
-        let month = entries.filter {
-            guard let at = NotificationManager.parseISO($0.at ?? "") else { return false }
-            return cal.isDate(at, equalTo: Date(), toGranularity: .month)
-        }
-        let spent = month.filter { $0.kind == "expense" }.reduce(0) { $0 + ($1.amount ?? 0) }
-        let kept = month.filter { $0.kind == "habit" }.count
-        return HStack(spacing: Theme.Spacing.sm) {
-            stat(icon: "creditcard.fill", value: AppLocale.number(Int(spent.rounded())), key: "life.stat.spent")
-            stat(icon: "flame.fill", value: AppLocale.number(kept), key: "life.stat.habits")
-            stat(icon: "square.stack.fill", value: AppLocale.number(month.count), key: "life.stat.logged")
+        HStack(spacing: Theme.Spacing.sm) {
+            stat(icon: "creditcard.fill", value: AppLocale.number(Int(stats.spent.rounded())),
+                 key: "life.stat.spent")
+            stat(icon: "flame.fill", value: AppLocale.number(stats.habits), key: "life.stat.habits")
+            stat(icon: "square.stack.fill", value: AppLocale.number(stats.logged), key: "life.stat.logged")
         }
     }
 

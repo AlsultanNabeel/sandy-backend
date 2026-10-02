@@ -336,6 +336,7 @@ final class ItemsStore: LoadableStore {
                              at: isoOut.string(from: Date()),
                              data: ["habit_item_id": .string(item.id),
                                     "date": .string(dayFormat.string(from: Date()))])
+        LogStore.noteMade(entry)
         optimistic("blocks.errorSave",
                    apply: {
                        for s in habitStores { s.checkedToday[item.id] = entry.id; s.streaks[item.id] = streak + 1 }
@@ -598,6 +599,17 @@ final class LogStore: LoadableStore {
         }
     }
 
+    /// Entries made on the phone, with when; My Life adds the ones newer than its numbers.
+    private(set) static var made: [(at: Date, entry: LogEntry)] = []
+
+    static func madeSince(_ date: Date) -> [LogEntry] {
+        made.filter { $0.at > date }.map(\.entry)
+    }
+
+    static func noteMade(_ entry: LogEntry) {
+        made.append((Date(), entry))
+    }
+
     static func addEverywhere(_ entry: LogEntry, userId: String?) {
         everywhere(kind: entry.kind, userId: userId) { rows in
             rows.insert(entry, at: 0)
@@ -623,6 +635,7 @@ final class LogStore: LoadableStore {
         let entry = LogEntry(id: ClientID.make(), kind: kind, text: text,
                              at: isoOut.string(from: at ?? Date()),
                              data: amount.map { ["amount": .number($0)] })
+        Self.noteMade(entry)
         optimistic("blocks.errorSave",
                    apply: { Self.addEverywhere(entry, userId: self.userId) },
                    rollback: { Self.removeEverywhere(entry.id, kind: kind, userId: self.userId) },

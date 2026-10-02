@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from app.blocks import _base
@@ -122,3 +122,42 @@ def list_entries(kind: Optional[str] = None, *, since: Optional[datetime] = None
         query.update(_base.text_filter(text))
     cursor = coll.find(query, {"embedding": 0}).sort("at", -1).limit(_base.clamp(limit))
     return [_base.out(d) for d in cursor]
+
+
+def stats(days: int = 30, *, now: Optional[datetime] = None, mongo_db=None) -> Dict[str, Any]:
+    """The My Life numbers over the whole log, in the user's zone: how many entries each
+    of the last ``days`` days holds (oldest first), and this month's spending, habit
+    check-ins and entries. Chat summaries are Sandy's, not the user's, and are left out."""
+    from datetime import timedelta
+
+    from app.utils.time import USER_TZ
+
+    local_now = (now or _base.now()).astimezone(USER_TZ)
+    today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    first_day = today - timedelta(days=days - 1)
+    month_start = today.replace(day=1)
+    out: Dict[str, Any] = {"days": [0] * days, "spent": 0.0, "habits": 0, "logged": 0}
+    coll = _base.coll(_base.ENTRIES, mongo_db)
+    if coll is None:
+        return out
+    since = min(first_day, month_start)
+    rows = coll.find({"kind": {"$ne": "summary"}, "at": {"$gte": since}},
+                     {"_id": 0, "kind": 1, "at": 1, "data.amount": 1})
+    for row in rows:
+        at = row.get("at")
+        if not isinstance(at, datetime):
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)  # Mongo hands back naive UTC
+        at = at.astimezone(USER_TZ)
+        index = (at.date() - first_day.date()).days
+        if 0 <= index < days:
+            out["days"][index] += 1
+        if at >= month_start:
+            out["logged"] += 1
+            if row.get("kind") == "habit":
+                out["habits"] += 1
+            amount = (row.get("data") or {}).get("amount")
+            if row.get("kind") == "expense" and isinstance(amount, (int, float)):
+                out["spent"] += float(amount)
+    return out

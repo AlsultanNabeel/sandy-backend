@@ -359,3 +359,18 @@ def test_a_post_keeps_the_apps_own_id_and_a_resend_does_not_double(c):
     assert r.get_json()["id"] == "b" * 32
     r = c.post("/api/entries", json={"id": "c" * 32, "kind": "note", "text": "فكرة"}, headers=_h())
     assert r.get_json()["id"] == "c" * 32
+
+
+def test_stats_count_the_whole_log_in_the_users_days(c):
+    now = datetime.now(USER_TZ)
+    for kind, text, data in [("expense", "غدا", {"amount": 40}), ("expense", "قهوة", {"amount": 2.5}),
+                             ("habit", "قراءة", {"habit_item_id": "h", "date": "x"}),
+                             ("summary", "ملخص", None)]:
+        c.post("/api/entries", json={"kind": kind, "text": text, "data": data,
+                                     "at": now.isoformat()}, headers=_h())
+    old = (now - timedelta(days=45)).isoformat()
+    c.post("/api/entries", json={"kind": "note", "text": "قديم", "at": old}, headers=_h())
+    s = c.get("/api/stats", headers=_h()).get_json()
+    assert len(s["days"]) == 30 and s["days"][-1] == 3
+    assert s["spent"] == 42.5 and s["habits"] == 1 and s["logged"] == 3
+    assert c.get("/api/stats", headers=_h("userB")).get_json()["logged"] == 0
