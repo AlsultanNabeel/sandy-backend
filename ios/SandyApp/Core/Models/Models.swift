@@ -9,7 +9,7 @@ struct ChatMessage: Identifiable {
 
 // ── سجل المحادثات — /api/conversations ──
 
-struct ConversationMeta: Identifiable {
+struct ConversationMeta: Identifiable, Codable {
     let id: String
     var title: String
     let updatedAt: String   // ISO

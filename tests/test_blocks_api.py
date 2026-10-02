@@ -341,3 +341,21 @@ def test_the_log_leaves_chat_summaries_out_unless_asked_by_kind(c):
     assert kinds == ["note"]
     only = c.get("/api/entries?kind=summary", headers=_h()).get_json()["items"]
     assert [r["kind"] for r in only] == ["summary"]
+
+
+def test_a_post_keeps_the_apps_own_id_and_a_resend_does_not_double(c):
+    cid = "a" * 32
+    body = {"id": cid, "list": "tasks", "text": "اشتري خبز"}
+    first = c.post("/api/items", json=body, headers=_h())
+    again = c.post("/api/items", json=body, headers=_h())
+    assert first.get_json()["id"] == cid and again.get_json()["id"] == cid
+    assert len(c.get("/api/items?list=tasks", headers=_h()).get_json()["items"]) == 1
+    # Another tenant cannot take it, and a malformed one is refused.
+    _bad(c.post("/api/items", json=body, headers=_h("userB")), "id_taken", 409)
+    _bad(c.post("/api/entries", json={"id": "x", "kind": "note", "text": "y"}, headers=_h()),
+         "invalid_id")
+    r = c.post("/api/schedules", json={"id": "b" * 32, "kind": "reminder", "text": "ميتينج",
+                                       "fire_at": _iso()}, headers=_h())
+    assert r.get_json()["id"] == "b" * 32
+    r = c.post("/api/entries", json={"id": "c" * 32, "kind": "note", "text": "فكرة"}, headers=_h())
+    assert r.get_json()["id"] == "c" * 32

@@ -965,7 +965,13 @@ so folders are organisation only.
   messages to future self) and the log (`LogView`, the My Life tab, with the on-demand
   summary, search, a thirty-day activity strip and a card per list on top).
   `KindsStore` loads `/api/kinds` once; My Life builds a card per list from it, so a new
-  list needs no app change. The screens keep an offline copy (`DiskCache`).
+  list needs no app change. **Offline first:** every block change is applied on the
+  phone, saved to `DiskCache` and reaches every copy of the same rows (the stores on
+  screen, else the file on disk), then goes through `Core/Cache/Outbox.swift`, a
+  per-account queue on disk sent in order now, on reconnect, or on return to the front.
+  New rows carry their own 32-hex `id` (the blocks POSTs accept it and a resent POST
+  returns the row already there). While the outbox holds anything, a reload keeps the
+  phone's copy instead of the server's. Only a server refusal undoes a change.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

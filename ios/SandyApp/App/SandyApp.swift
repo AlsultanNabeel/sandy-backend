@@ -80,7 +80,10 @@ struct RootView: View {
         }
         // زر مركز التحكم بيترك الرابط بالمساحة المشتركة احتياطًا.
         .onChange(of: scenePhase, initial: true) { _, phase in
-            if phase == .active { DeepLinkRouter.shared.consumeSharedPending() }
+            guard phase == .active else { return }
+            DeepLinkRouter.shared.consumeSharedPending()
+            // Changes made offline go out as soon as the app is back in front.
+            if state.stage == .chat { Task { await Outbox.shared.drain(state.api) } }
         }
     }
 }

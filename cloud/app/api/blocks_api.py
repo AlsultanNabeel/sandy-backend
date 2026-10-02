@@ -6,6 +6,9 @@
   GET  /api/kinds           the kinds table, so the app builds its screens from it
   POST /api/summary         {period, focus?} -> {text}
 
+A POST may carry its own ``id`` (32 hex): the app makes rows offline and sends them
+later, so the id it already uses must stay, and a resent POST must not double the row.
+
 Every route runs in the caller's tenant (`require_tenant`); the block stores'
 tenant-scoped handles do the isolation. A bad input is 400 with error + message.
 """
@@ -14,10 +17,12 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 
 from flask import jsonify, request
+from pymongo.errors import DuplicateKeyError
 
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.api.auth_handlers import require_auth, require_tenant
@@ -50,6 +55,8 @@ _MESSAGES = {
     "invalid_period": "الفترة مش معروفة.",
     "not_found": "ما لقيته.",
     "not_saved": "ما قدرت أحفظ، جرّب كمان شوي.",
+    "invalid_id": "رقم التعريف مش صحيح.",
+    "id_taken": "رقم التعريف مستعمل.",
     "summary_failed": "ما قدرت أعمل الملخّص هلّق، جرّب كمان شوي.",
 }
 
@@ -76,6 +83,8 @@ def _answers_invalid(view):
             return _refuse(exc.code, exc.status)
         except KindError:
             return _refuse("invalid_kind")
+        except DuplicateKeyError:
+            return _refuse("id_taken", 409)
     return wrapped
 
 
@@ -96,6 +105,19 @@ def _text(value: Any, *, required: bool) -> Optional[str]:
     if len(value) > MAX_TEXT_CHARS:
         raise _Invalid("text_too_long")
     return value.strip()
+
+
+_CLIENT_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _client_id(body: Mapping[str, Any]) -> Optional[str]:
+    """The app's own id for a new row, or None to let the store make one."""
+    value = body.get("id")
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or not _CLIENT_ID.match(value):
+        raise _Invalid("invalid_id")
+    return value
 
 
 def _new_text(body: Mapping[str, Any]) -> Optional[str]:
@@ -235,10 +257,13 @@ def register_blocks_api(app, mongo_db=None):
     @_answers_invalid
     def api_entries_add(claims):
         body = _body()
+        cid = _client_id(body)
+        if cid and entries.get(cid):
+            return _saved(cid, entries.get, "data")  # sent twice: already here
         kind = str(body.get("kind") or "")
         text = _text(body.get("text"), required=True)
         new_id = entries.add(kind, text, _data(LOG, kind, body.get("data")),
-                             at=_when(body.get("at")), source="app")
+                             at=_when(body.get("at")), source="app", doc_id=cid)
         return _saved(new_id, entries.get, "data")
 
     @app.route("/api/entries/<entry_id>", methods=["PATCH"])
@@ -280,11 +305,15 @@ def register_blocks_api(app, mongo_db=None):
     @_answers_invalid
     def api_items_add(claims):
         body = _body()
+        cid = _client_id(body)
+        if cid and items.get(cid):
+            return _saved(cid, items.get, "data")
         name = str(body.get("list") or "")
         text = _text(body.get("text"), required=True)
         new_id = items.add(name, text, _data(LIST, name, body.get("data")),
                            done=bool(_flag(body.get("done"))), due=_when(body.get("due")),
-                           priority=_text(body.get("priority"), required=False) or "")
+                           priority=_text(body.get("priority"), required=False) or "",
+                           doc_id=cid)
         return _saved(new_id, items.get, "data")
 
     @app.route("/api/items/<item_id>", methods=["PATCH"])
@@ -345,6 +374,9 @@ def register_blocks_api(app, mongo_db=None):
     @_answers_invalid
     def api_schedules_add(claims):
         body = _body()
+        cid = _client_id(body)
+        if cid and schedules.get(cid):
+            return _saved(cid, schedules.get, "payload")
         kind = str(body.get("kind") or "")
         text = _text(body.get("text"), required=True)
         payload = _data(SCHEDULE, kind, body.get("payload")) or {}
@@ -353,7 +385,7 @@ def register_blocks_api(app, mongo_db=None):
         if kind == "message_to_future_self":
             # Sealed at rest: only its owner reads it back.
             text, payload["encrypted"] = _sealed(text)
-        new_id = schedules.add(kind, text, fire_at, payload, recurrence=rule)
+        new_id = schedules.add(kind, text, fire_at, payload, recurrence=rule, doc_id=cid)
         return _saved(new_id, schedules.get, "payload")
 
     @app.route("/api/schedules/<schedule_id>", methods=["PATCH"])

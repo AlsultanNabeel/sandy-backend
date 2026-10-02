@@ -11,6 +11,11 @@ extension APIClient {
         return f
     }()
 
+    /// Writes go through the outbox: sent now, or kept until the network is back.
+    private func queued(_ path: String, method: String, body: (any Encodable)? = nil) async throws {
+        try await Outbox.shared.send(self, path, method: method, body: body)
+    }
+
     private func query(_ path: String, _ params: [String: String?]) -> String {
         var c = URLComponents()
         c.queryItems = params.compactMap { k, v in v.map { URLQueryItem(name: k, value: $0) } }
@@ -35,17 +40,18 @@ extension APIClient {
     }
 
     private struct EntryCreate: Encodable {
+        let id: String
         let kind: String
         let text: String
         let data: [String: JSONValue]?
         let at: String?
     }
 
-    func addEntry(kind: String, text: String, data: [String: JSONValue]? = nil,
-                  at: Date? = nil) async throws {
-        try await send("/api/entries", method: "POST",
-                       body: EntryCreate(kind: kind, text: text, data: data,
-                                         at: at.map { Self.iso.string(from: $0) }))
+    func addEntry(id: String = ClientID.make(), kind: String, text: String,
+                  data: [String: JSONValue]? = nil, at: Date? = nil) async throws {
+        try await queued("/api/entries", method: "POST",
+                         body: EntryCreate(id: id, kind: kind, text: text, data: data,
+                                           at: at.map { Self.iso.string(from: $0) }))
     }
 
     /// Edit a log row: `data` replaces the row's data whole, so pass the merged copy.
@@ -57,12 +63,12 @@ extension APIClient {
 
     func updateEntry(id: String, text: String? = nil, data: [String: JSONValue]? = nil,
                      at: Date? = nil) async throws {
-        try await send("/api/entries/\(id)", method: "PATCH",
+        try await queued("/api/entries/\(id)", method: "PATCH",
                        body: EntryPatch(text: text, data: data, at: at.map { Self.iso.string(from: $0) }))
     }
 
     func deleteEntry(id: String) async throws {
-        try await send("/api/entries/\(id)", method: "DELETE")
+        try await queued("/api/entries/\(id)", method: "DELETE")
     }
 
     private struct SummaryAsk: Encodable { let period: String }
@@ -83,16 +89,18 @@ extension APIClient {
     }
 
     private struct ItemCreate: Encodable {
+        let id: String
         let list: String
         let text: String
         let due: String?
         let priority: String?
     }
 
-    func addItem(list: String, text: String, due: Date? = nil, priority: String? = nil) async throws {
-        try await send("/api/items", method: "POST",
-                       body: ItemCreate(list: list, text: text,
-                                        due: due.map { Self.iso.string(from: $0) }, priority: priority))
+    func addItem(id: String = ClientID.make(), list: String, text: String, due: Date? = nil,
+                 priority: String? = nil) async throws {
+        try await queued("/api/items", method: "POST",
+                         body: ItemCreate(id: id, list: list, text: text,
+                                          due: due.map { Self.iso.string(from: $0) }, priority: priority))
     }
 
     /// What an edit changes on a list item; nil leaves a field as it is.
@@ -118,7 +126,7 @@ extension APIClient {
     }
 
     func updateItem(id: String, _ change: ItemChange) async throws {
-        try await send("/api/items/\(id)", method: "PATCH", body: change)
+        try await queued("/api/items/\(id)", method: "PATCH", body: change)
     }
 
     func updateItem(id: String, done: Bool) async throws {
@@ -126,7 +134,7 @@ extension APIClient {
     }
 
     func deleteItem(id: String) async throws {
-        try await send("/api/items/\(id)", method: "DELETE")
+        try await queued("/api/items/\(id)", method: "DELETE")
     }
 
     // MARK: schedules
@@ -138,6 +146,7 @@ extension APIClient {
     }
 
     private struct ScheduleCreate: Encodable {
+        let id: String
         let kind: String
         let text: String
         let fire_at: String
@@ -145,10 +154,10 @@ extension APIClient {
     }
 
     /// recurrence: daily | weekly | monthly | yearly, or nil for once.
-    func addSchedule(kind: String = "reminder", text: String, at: Date,
+    func addSchedule(id: String = ClientID.make(), kind: String = "reminder", text: String, at: Date,
                      recurrence: String? = nil) async throws {
-        try await send("/api/schedules", method: "POST",
-                       body: ScheduleCreate(kind: kind, text: text,
+        try await queued("/api/schedules", method: "POST",
+                         body: ScheduleCreate(id: id, kind: kind, text: text,
                                             fire_at: Self.iso.string(from: at),
                                             recurrence: recurrence))
     }
@@ -160,21 +169,16 @@ extension APIClient {
         let recurrence: String?
     }
 
-    private struct ScheduleSaved: Decodable { let item: ScheduleItem? }
-
     /// Edit, move (snooze) or close it; status is "pending" or "cancelled",
     /// recurrence "" makes it ring once.
-    @discardableResult
     func updateSchedule(id: String, at: Date? = nil, status: String? = nil, text: String? = nil,
-                        recurrence: String? = nil) async throws -> ScheduleItem? {
-        let r: ScheduleSaved = try await fetch(
-            "/api/schedules/\(id)", method: "PATCH",
-            body: SchedulePatch(fire_at: at.map { Self.iso.string(from: $0) }, status: status,
-                                text: text, recurrence: recurrence))
-        return r.item
+                        recurrence: String? = nil) async throws {
+        try await queued("/api/schedules/\(id)", method: "PATCH",
+                         body: SchedulePatch(fire_at: at.map { Self.iso.string(from: $0) }, status: status,
+                                             text: text, recurrence: recurrence))
     }
 
     func deleteSchedule(id: String) async throws {
-        try await send("/api/schedules/\(id)", method: "DELETE")
+        try await queued("/api/schedules/\(id)", method: "DELETE")
     }
 }

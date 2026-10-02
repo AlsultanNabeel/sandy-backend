@@ -33,11 +33,11 @@ enum JSONValue: Codable, Hashable {
     var number: Double? { if case .number(let n) = self { return n }; return nil }
 }
 
-enum BlockType: String, Decodable {
+enum BlockType: String, Codable {
     case log, list, schedule
 }
 
-struct BlockKind: Decodable, Identifiable, Hashable {
+struct BlockKind: Codable, Identifiable, Hashable {
     let name: String
     let block: BlockType
     let labels: [String: String]

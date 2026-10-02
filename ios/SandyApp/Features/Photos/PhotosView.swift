@@ -315,7 +315,7 @@ private struct PhotoAddSheet: View {
 
 /// صورة بالألبوم — تطابق عناصر GET /api/photos: id, name, caption, tags, created_at.
 /// البايتات تُجلب على حدة من /api/photos/<id>/file عند العرض.
-struct AlbumPhoto: Identifiable {
+struct AlbumPhoto: Identifiable, Codable {
     let id: String
     let name: String
     let caption: String
@@ -324,7 +324,7 @@ struct AlbumPhoto: Identifiable {
 }
 
 /// ألبوم = وسم — تطابق عناصر GET /api/photos/albums: name, count.
-struct PhotoAlbum: Identifiable {
+struct PhotoAlbum: Identifiable, Codable {
     let name: String
     let count: Int
     var id: String { name }

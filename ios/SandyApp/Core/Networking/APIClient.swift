@@ -163,6 +163,11 @@ final class APIClient: APIClientProtocol {
         }
     }
 
+    /// A body already encoded (the outbox keeps writes as bytes on disk).
+    func sendData(_ path: String, method: String, body: Data?) async throws {
+        _ = try await perform(path, method: method, bodyData: body, auth: true)
+    }
+
     // السطح المطبوع للتعديل: يرسل جسماً Encodable ويتحقق من رمز الحالة فقط.
     func send(_ path: String,
               method: String,

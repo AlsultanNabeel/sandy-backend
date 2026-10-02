@@ -242,6 +242,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 switch action {
                 case .snooze:
                     let at = Date().addingTimeInterval(TimeInterval(Self.snoozeMinutes * 60))
+                    SchedulesStore.bannerAction(id: reminderId, movedTo: at, userId: api.currentUserId)
                     try await api.updateSchedule(id: reminderId, at: at)
                     // One shot on purpose: repeating from the snoozed time would ring late every day after.
                     self.schedule(id: notifId, title: content.title, body: content.body,
@@ -249,6 +250,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 case .done:
                     // A repeating one keeps its repeating notification; a one-off is closed.
                     if recurrence.isEmpty {
+                        SchedulesStore.bannerAction(id: reminderId, movedTo: nil, userId: api.currentUserId)
                         try await api.updateSchedule(id: reminderId, status: "cancelled")
                     } else {
                         // Removing it above also removed the repeat; put the same trigger back.
@@ -256,6 +258,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                             identifier: notifId, content: content, trigger: notification.trigger))
                     }
                 case .delete:
+                    SchedulesStore.bannerAction(id: reminderId, movedTo: nil, userId: api.currentUserId)
                     try await api.deleteSchedule(id: reminderId)
                 }
                 self.remindersChanged &+= 1

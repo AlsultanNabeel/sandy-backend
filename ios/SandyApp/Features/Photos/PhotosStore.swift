@@ -1,6 +1,12 @@
 import SwiftUI
 import PhotosUI
 
+/// What the album screen shows, kept on disk for opening offline.
+private struct PhotosCopy: Codable {
+    let photos: [AlbumPhoto]
+    let albums: [PhotoAlbum]
+}
+
 @MainActor
 final class PhotosStore: LoadableStore {
     @Published var photos: [AlbumPhoto] = []
@@ -13,6 +19,10 @@ final class PhotosStore: LoadableStore {
     func load(api: APIClient) async {
         loadTask?.cancel()
         let album = selectedAlbum
+        let key = "photos.\(album ?? "all")"
+        if album == nil {
+            restoreSnapshot(PhotosCopy.self, key: key, api: api) { photos = $0.photos; albums = $0.albums }
+        }
         let gen = beginLoad()
         let task = Task { @MainActor in
             defer { endLoad(gen) }
@@ -24,8 +34,10 @@ final class PhotosStore: LoadableStore {
                 guard isCurrentLoad(gen) else { return }
                 photos = p
                 albums = a
+                markLoaded()
+                saveSnapshot(PhotosCopy(photos: p, albums: a), key: key, api: api)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) { notify("photos.errorLoad") }
+                failLoad(error, generation: gen) { notify("photos.errorLoad") }
             }
         }
         loadTask = task

@@ -43,6 +43,17 @@ class LoadableStore: ObservableObject {
         (error as? APIError)?.kind == .connection || error is URLError
     }
 
+    /// The last saved copy, shown before the first fetch so a tab opens on it offline.
+    func restoreSnapshot<T: Decodable>(_ type: T.Type, key: String, api: APIClient, _ show: (T) -> Void) {
+        guard !hasSnapshot, let cached = DiskCache.load(type, key: key, userId: api.currentUserId) else { return }
+        show(cached)
+        hasSnapshot = true
+    }
+
+    func saveSnapshot<T: Encodable>(_ value: T, key: String, api: APIClient) {
+        DiskCache.save(value, key: key, userId: api.currentUserId)
+    }
+
     func markLoaded() {
         hasSnapshot = true
         offline = false

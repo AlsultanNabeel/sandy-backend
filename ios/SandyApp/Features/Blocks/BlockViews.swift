@@ -19,7 +19,9 @@ struct ItemsView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject private var kinds = KindsStore.shared
-    @StateObject private var store: ItemsStore
+    @StateObject private var open: ItemsStore
+    @StateObject private var closed: ItemsStore
+    @State private var showDone = false
     @State private var draft = ""
     @State private var editing: ListItem?
     @State private var addingFull = false
@@ -27,27 +29,31 @@ struct ItemsView: View {
 
     init(kind: BlockKind) {
         self.kind = kind
-        _store = StateObject(wrappedValue: ItemsStore(list: kind.name))
+        _open = StateObject(wrappedValue: ItemsStore(list: kind.name))
+        _closed = StateObject(wrappedValue: ItemsStore(list: kind.name, done: true))
     }
+
+    /// The half on screen: open rows, or the done ones.
+    private var store: ItemsStore { showDone ? closed : open }
 
     var body: some View {
         VStack(spacing: 0) {
             if !store.isHabits {
-                Picker("", selection: $store.showDone) {
+                Picker("", selection: $showDone) {
                     Text(lang.s("blocks.open")).tag(false)
                     Text(lang.s("blocks.done")).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
-                .onChange(of: store.showDone) { Task { await store.load(api: state.api) } }
+                .onChange(of: showDone) { Task { await store.load(api: state.api) } }
             }
 
             BlockNotices(store: store)
 
             if store.items.isEmpty && !store.loading {
                 Spacer()
-                LivelyEmptyState(line: lang.s(store.showDone ? "blocks.emptyDone" : "blocks.emptyList"))
+                LivelyEmptyState(line: lang.s(showDone ? "blocks.emptyDone" : "blocks.emptyList"))
                 Spacer()
             } else {
                 List {
@@ -66,7 +72,7 @@ struct ItemsView: View {
                 .animation(.spring(response: 0.45, dampingFraction: 0.85), value: store.ordered.map(\.id))
             }
 
-            if !store.showDone { addBar }
+            if !showDone { addBar }
         }
         .undoToast(store, api: state.api, bottom: 70)
         .navigationTitle(title)

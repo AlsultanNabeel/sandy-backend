@@ -60,7 +60,25 @@ final class ChatStore: ObservableObject {
     }
 
     func loadList(api: APIClient) async {
-        if let list = try? await api.listConversations() { conversations = list }
+        if conversations.isEmpty,
+           let cached = DiskCache.load([ConversationMeta].self, key: "chat.list", userId: api.currentUserId) {
+            conversations = cached
+        }
+        if let list = try? await api.listConversations() {
+            conversations = list
+            DiskCache.save(list, key: "chat.list", userId: api.currentUserId)
+        }
+    }
+
+    /// One saved line of a conversation, for opening it offline.
+    private struct Line: Codable {
+        let role: String
+        let text: String
+    }
+
+    private func saveLines(_ api: APIClient, id: String) {
+        DiskCache.save(messages.map { Line(role: $0.role, text: $0.text) },
+                       key: "chat." + id, userId: api.currentUserId)
     }
 
     func open(api: APIClient, id: String) async {
@@ -68,10 +86,15 @@ final class ChatStore: ObservableObject {
         sendTask?.cancel()
         if let r = try? await api.getConversation(id: id) {
             messages = r.messages
-            errorMessage = ""
-            currentID = id
-            UserDefaults.standard.set(id, forKey: currentKey)
+            saveLines(api, id: id)
+        } else if let lines = DiskCache.load([Line].self, key: "chat." + id, userId: api.currentUserId) {
+            messages = lines.map { ChatMessage(role: $0.role, text: $0.text) }
+        } else {
+            return
         }
+        errorMessage = ""
+        currentID = id
+        UserDefaults.standard.set(id, forKey: currentKey)
     }
 
     /// محادثة جديدة فورية (كسولة): يصفّي العرض، والإنشاء الفعلي عند أول رسالة.
@@ -180,6 +203,7 @@ final class ChatStore: ObservableObject {
                 } else if sandyID == nil {
                     messages.append(ChatMessage(role: "sandy", text: reply))
                 }
+                saveLines(api, id: cid)
                 // حفظ الرد وتحديث القائمة بالخلفية — الرد ظاهر، وصوت ساندي ما
                 // بيستنّاهم. بالترتيب: رسالة المستخدم قبل الرد (منها العنوان).
                 Task {

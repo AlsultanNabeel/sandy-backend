@@ -16,7 +16,7 @@ import SwiftUI
 
 /// لقطة طقس — تطابق مفاتيح GET /api/weather. wttr.in يرجّع الأرقام كنصوص،
 /// فنخزّنها نصوصًا ونعرضها كما هي (مع رمز الدرجة عند العرض).
-struct WeatherSnapshot {
+struct WeatherSnapshot: Codable {
     let city: String
     let description: String
     let tempC: String

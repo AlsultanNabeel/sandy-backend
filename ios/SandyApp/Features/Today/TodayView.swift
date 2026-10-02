@@ -12,7 +12,7 @@ struct TodayView: View {
     @StateObject private var reminders = SchedulesStore()
     @StateObject private var nudge = DailyNudgeStore()
     @StateObject private var weather = WeatherStore()
-    @State private var spentToday: Double = 0
+    @StateObject private var expenses = LogStore(kind: "expense")
     @State private var showProfile = false
     @State private var editingTask: ListItem?
     @State private var editingHabit: ListItem?
@@ -132,11 +132,15 @@ struct TodayView: View {
         async let a: Void = tasks.load(api: state.api)
         async let b: Void = habits.load(api: state.api)
         async let c: Void = reminders.load(api: state.api)
-        async let d = (try? await state.api.entries(kind: "expense", limit: 50)) ?? []
-        let (_, _, _, spent) = await (a, b, c, d)
-        let cal = Calendar.current
-        spentToday = spent.reduce(0) { sum, e in
-            guard let at = NotificationManager.parseISO(e.at ?? ""), cal.isDateInToday(at) else { return sum }
+        async let d: Void = expenses.load(api: state.api)
+        _ = await (a, b, c, d)
+    }
+
+    private var spentToday: Double {
+        expenses.entries.reduce(0) { sum, e in
+            guard let at = NotificationManager.parseISO(e.at ?? ""), Calendar.current.isDateInToday(at) else {
+                return sum
+            }
             return sum + (e.amount ?? 0)
         }
     }

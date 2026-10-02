@@ -17,6 +17,7 @@ final class WeatherStore: LoadableStore {
     /// جلب الطقس للمدينة الحالية بمهمة يملكها الستور (تُلغى عند إعادة الطلب).
     func load(api: APIClient) async {
         loadTask?.cancel()
+        restoreSnapshot(WeatherSnapshot.self, key: "weather", api: api) { snapshot = $0 }
         let gen = beginLoad()
         let task = Task { @MainActor in
             defer { endLoad(gen) }
@@ -25,10 +26,10 @@ final class WeatherStore: LoadableStore {
                 guard isCurrentLoad(gen) else { return }
                 snapshot = r
                 clearNotice()
+                markLoaded()
+                saveSnapshot(r, key: "weather", api: api)
             } catch {
-                if !error.isCancellation, isCurrentLoad(gen) {
-                    notify("weather.errorLoad")
-                }
+                failLoad(error, generation: gen) { notify("weather.errorLoad") }
             }
         }
         loadTask = task
