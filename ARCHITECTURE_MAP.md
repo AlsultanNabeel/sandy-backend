@@ -990,8 +990,13 @@ so folders are organisation only.
   every animation goes through `.reduced` (none under Reduce Motion).
   Chat: long-press copy / share / select on any message, «write it again» on Sandy's last
   reply and «edit and resend» on the user's last line (both through
-  `POST /api/conversations/<cid>/rewind`), a stop button that keeps what arrived, and a
-  failed line marked with «أعد المحاولة».
+  `POST /api/conversations/<cid>/rewind`, which also takes back what that reply did to
+  the blocks: every block write in a turn is journaled with its before-state
+  (`blocks/_base.journal`, kept on the reply's STM turn as `effects`) and `_base.undo`
+  reverses it; device actions are not undone), a stop button that keeps what arrived
+  (`POST …/stop`: a running turn stops before its next tool via `brain/stops.py`, and
+  memory keeps only the shown part with a «cut here» note), and a failed line marked
+  with «أعد المحاولة».
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

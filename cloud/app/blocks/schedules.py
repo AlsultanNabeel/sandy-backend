@@ -60,6 +60,7 @@ def add(kind: str, text: str, fire_at: datetime, payload: Optional[Mapping[str, 
         "migrated_from": _base.migrated_ref(migrated_from),
     }
     coll.insert_one(doc)
+    _base.noted("created", _base.SCHEDULES, doc["_id"])
     return doc["_id"]
 
 
@@ -93,6 +94,7 @@ def update(schedule_id: str, *, text: Optional[str] = None,
     if status is not None:
         changes["status"] = _check_status(status)
     if changes:
+        _base.noted("updated", _base.SCHEDULES, schedule_id, coll)
         coll.update_one({"_id": schedule_id}, {"$set": changes})
     return True
 
@@ -101,6 +103,7 @@ def delete(schedule_id: str, mongo_db=None) -> bool:
     coll = _base.coll(_base.SCHEDULES, mongo_db)
     if coll is None or not schedule_id:
         return False
+    _base.noted("deleted", _base.SCHEDULES, schedule_id, coll)
     return coll.delete_one({"_id": schedule_id}).deleted_count > 0
 
 

@@ -5,8 +5,10 @@ Collection `conversations`: {_id, user_id, title, created_at, updated_at, messag
   GET/POST /api/conversations · GET/PATCH/DELETE /api/conversations/<cid>
   POST /api/conversations/<cid>/messages · GET /api/conversations/search?q=
   POST /api/conversations/<cid>/rewind {keep_user}: drop the last reply (and, unless
-       keep_user, the line it answered) here and in Sandy's memory of the thread, so the
-       app can regenerate a reply or resend an edited last message in its place.
+       keep_user, the line it answered) here and in Sandy's memory of the thread, and take
+       back what that reply did to the blocks, so the app can regenerate a reply or resend
+       an edited last message in its place.
+  POST /api/conversations/<cid>/stop {partial, client_msg_id}: the reply was stopped.
 
 The app may pick a new chat's id itself; the first write creates it
 (`ensure_conversation`), and an id belonging to another user is refused.
@@ -403,9 +405,31 @@ def register_conversations_api(app, mongo_db=None):
             drop += 1
         for _ in range(drop):
             coll.update_one({"_id": cid, "user_id": uid}, {"$pop": {"messages": 1}})
+        from app.blocks import _base as blocks_base
         from app.brain import stm
-        stm.rewind(cid, uid)
-        return jsonify({"ok": True, "dropped": drop}), 200
+        # What the dropped reply did (added, changed, deleted) goes back; devices stay as they are.
+        effects = stm.rewind(cid, uid)
+        with active_user_profile_context({"chat_id": uid}):
+            undone = blocks_base.undo(effects, mongo_db)
+        return jsonify({"ok": True, "dropped": drop, "undone": undone}), 200
+
+    @app.route("/api/conversations/<cid>/stop", methods=["POST"])
+    @require_auth
+    def stop_reply(claims, cid):
+        """{partial, client_msg_id}: the reply was stopped after `partial`. A turn still
+        running stops before its next tool; either way memory keeps only `partial`, cut."""
+        uid = _uid(claims)
+        if not uid:
+            return jsonify({"error": "no_user"}), 403
+        body = request.get_json(silent=True) or {}
+        partial = str(body.get("partial") or "")[:_MAX_MESSAGE_CHARS]
+        from app.brain import stm, stops
+        status, _ = turn_status(mongo_db, uid, str(body.get("client_msg_id") or ""))
+        if status == "processing":
+            stops.request(uid, cid, partial)
+        else:
+            stm.cut_last(cid, uid, stops.cut(partial))
+        return jsonify({"ok": True}), 200
 
     @app.route("/api/conversations/search", methods=["GET"])
     @require_auth

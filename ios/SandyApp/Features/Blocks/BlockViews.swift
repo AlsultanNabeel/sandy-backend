@@ -94,6 +94,9 @@ struct ItemsView: View {
             await store.load(api: state.api)
         }
         .refreshable { await store.load(api: state.api) }
+        .onReceive(NotificationCenter.default.publisher(for: .sandyBlocksChanged)) { _ in
+            Task { await store.load(api: state.api) }
+        }
     }
 
     private var title: String { (kinds.kind(kind.name, .list) ?? kind).label(lang.lang) }
@@ -253,6 +256,9 @@ struct SchedulesView: View {
             await store.load(api: state.api)
         }
         .refreshable { await store.load(api: state.api) }
+        .onReceive(NotificationCenter.default.publisher(for: .sandyBlocksChanged)) { _ in
+            Task { await store.load(api: state.api) }
+        }
         // A banner button (later / done / delete) changed one while this screen was open.
         .onChange(of: notifs.remindersChanged) { Task { await store.load(api: state.api) } }
         .sheet(isPresented: $adding) {
@@ -429,6 +435,9 @@ struct LogView: View {
             _ = await (rows, numbers)
         }
         .onChange(of: store.kind) { Task { await store.load(api: state.api) } }
+        .onReceive(NotificationCenter.default.publisher(for: .sandyBlocksChanged)) { _ in
+            Task { await store.load(api: state.api) }
+        }
         .task(id: "\(query)|\(day?.timeIntervalSince1970 ?? 0)|\(store.kind ?? "")") { await lookUp() }
         .sheet(isPresented: $adding) {
             EntryEditSheet(kinds: kinds.logKinds, kind: store.kind ?? "note") { kind, text, amount, category, at in

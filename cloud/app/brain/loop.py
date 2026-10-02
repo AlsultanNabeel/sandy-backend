@@ -12,7 +12,8 @@ import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from app.brain import confirm, context, future, model, stm, tools
+from app.blocks import _base as blocks_base
+from app.brain import confirm, context, future, model, stm, stops, tools
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
 from app.utils.tenant_version import turn_scope
@@ -36,8 +37,9 @@ def _assistant_msg(reply: model.Reply) -> Dict[str, Any]:
 
 
 def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
-              complete: Callable) -> Dict[str, Any]:
-    """{"text", "pending", "tools"} after at most MAX_STEPS model calls."""
+              complete: Callable, stopped: Callable[[], bool] = lambda: False) -> Dict[str, Any]:
+    """{"text", "pending", "tools"} after at most MAX_STEPS model calls. Once the app
+    stops the reply (`stopped`), no further tool or model call runs."""
     hooks = model.stream_hooks()
     on_text = None
     if hooks:
@@ -47,7 +49,9 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
     replies: List[str] = []
     specs = tools.openai_tools()
     on_step = model.step_hook()
-    for _ in range(MAX_STEPS):
+    for step in range(MAX_STEPS):
+        if step and stopped():
+            return {"text": "\n".join(replies), "pending": None, "tools": used, "stopped": True}
         reply = complete(messages, specs, on_text=on_text)
         if reply is None:
             return {"text": ERROR_REPLY, "pending": None, "tools": used, "error": True}
@@ -56,6 +60,8 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
         messages.append(_assistant_msg(reply))
         pending = None
         for call in reply.tool_calls:
+            if stopped():
+                return {"text": "\n".join(replies), "pending": None, "tools": used, "stopped": True}
             used.append(call.name)
             if on_step:
                 on_step(call.name)
@@ -155,6 +161,34 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     held = confirm.live(pending_state)
     outcome = _resolve_pending(held, message, ctx) if held else None
     own, history = stm.history(thread_id, user_id)
+    with blocks_base.journal() as effects:
+        outcome = _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete)
+
+    text = outcome["text"]
+    # Stopped from the app: memory keeps what was shown, marked as cut.
+    shown = stops.take(user_id, thread_id)
+    remembered = stops.cut(shown) if shown is not None else text
+    logger.info("[turn] %.0fms total — brain%s tools=%s",
+                (time.perf_counter() - t0) * 1000, " (fast)" if outcome.get("fast") else "",
+                outcome["tools"])
+    stm.save(thread_id, user_id, message, remembered, prior_history=own,
+             via="شات التطبيق" if source == "web" else (source or ""), source=ctx.source,
+             effects=effects)
+    return {
+        "message": message, "user_id": user_id, "chat_id": chat_id,
+        "final_response": text,
+        "pending_state": outcome["pending"],
+        "routed_by": "fast_path" if outcome.get("fast") else "brain",
+        "tools_used": outcome["tools"],
+        "error": "brain turn failed" if outcome.get("error") else None,
+        "execution_result": {"handled": True, "reply": text,
+                             "image_bytes": ctx.artifacts.get("image_bytes"),
+                             "caption": ctx.artifacts.get("caption", "")},
+    }
+
+
+def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete):
+    """The held confirmation's outcome, else the fast path's, else the model loop's."""
     if outcome is None:
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
@@ -167,28 +201,12 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
             messages = [{"role": "system", "content": system},
                         *context.history_messages(history),
                         {"role": "user", "content": message}]
-            outcome = _run_loop(messages, ctx, complete)
+            outcome = _run_loop(messages, ctx, complete,
+                                stopped=lambda: stops.requested(user_id, thread_id))
         except Exception:  # noqa: BLE001 — the request boundary: answer, never 500
             logger.exception("[brain] turn failed")
             outcome = {"text": ERROR_REPLY, "pending": None, "tools": [], "error": True}
         if due and not outcome.get("error"):
             # Delivered only once a real reply carries it.
             future.mark_delivered(due[1])
-
-    text = outcome["text"]
-    logger.info("[turn] %.0fms total — brain%s tools=%s",
-                (time.perf_counter() - t0) * 1000, " (fast)" if outcome.get("fast") else "",
-                outcome["tools"])
-    stm.save(thread_id, user_id, message, text, prior_history=own,
-             via="شات التطبيق" if source == "web" else (source or ""), source=ctx.source)
-    return {
-        "message": message, "user_id": user_id, "chat_id": chat_id,
-        "final_response": text,
-        "pending_state": outcome["pending"],
-        "routed_by": "fast_path" if outcome.get("fast") else "brain",
-        "tools_used": outcome["tools"],
-        "error": "brain turn failed" if outcome.get("error") else None,
-        "execution_result": {"handled": True, "reply": text,
-                             "image_bytes": ctx.artifacts.get("image_bytes"),
-                             "caption": ctx.artifacts.get("caption", "")},
-    }
+    return outcome

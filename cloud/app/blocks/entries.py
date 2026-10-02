@@ -61,6 +61,7 @@ def add(kind: str, text: str, data: Optional[Mapping[str, Any]] = None, *,
         "migrated_from": _base.migrated_ref(migrated_from),
     }
     coll.insert_one(doc)
+    _base.noted("created", _base.ENTRIES, doc["_id"])
     return doc["_id"]
 
 
@@ -91,6 +92,7 @@ def update(entry_id: str, *, text: Optional[str] = None,
     if at is not None:
         changes["at"] = at
     if changes:
+        _base.noted("updated", _base.ENTRIES, entry_id, coll)
         coll.update_one({"_id": entry_id}, {"$set": changes})
     return True
 
@@ -99,6 +101,7 @@ def delete(entry_id: str, mongo_db=None) -> bool:
     coll = _base.coll(_base.ENTRIES, mongo_db)
     if coll is None or not entry_id:
         return False
+    _base.noted("deleted", _base.ENTRIES, entry_id, coll)
     return coll.delete_one({"_id": entry_id}).deleted_count > 0
 
 

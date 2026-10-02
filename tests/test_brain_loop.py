@@ -141,3 +141,41 @@ def test_a_spoken_turn_is_told_it_is_heard(brain_db):  # noqa: F811
     with active_user_profile_context(A):
         loop.run_turn("مرحبا", user_id="userA", chat_id="userA", source="voice", complete=model)
     assert context.SPOKEN_CHANNEL in model.seen[0][0]["content"]
+
+
+def test_a_rewound_turn_takes_back_what_it_did(brain_db):  # noqa: F811
+    from app.blocks import _base
+    with active_user_profile_context(A):
+        keep = items.add("tasks", "قديمة")
+        gone = items.add("tasks", "بتنحذف")
+    model = ScriptedModel(tools_reply(call("list_add", list="shopping", text="حليب"),
+                                      call("list_update", cid="c2", id=keep, text="معدّلة"),
+                                      call("list_update", cid="c3", id=gone, delete=True)),
+                          text_reply("تمام"))
+    _turn(model, "رتّبلي القوائم")
+    effects = stm_rewind()
+    assert [e["op"] for e in effects][:2] == ["created", "updated"]
+    with active_user_profile_context(A):
+        _base.undo(effects)
+        assert items.list_items("shopping") == []
+        assert items.get(keep)["text"] == "قديمة"
+        assert items.get(gone) is not None
+
+
+def stm_rewind():
+    from app.brain import stm
+    return stm.rewind("userA", "userA")
+
+
+def test_a_stopped_reply_runs_no_more_tools_and_is_remembered_cut(brain_db):  # noqa: F811
+    from app.brain import stm, stops
+    stops.request("userA", "userA", "كنت عم")
+    model = ScriptedModel(tools_reply(call("recall", query="x")),
+                          tools_reply(call("list_add", cid="c2", list="shopping", text="حليب")),
+                          text_reply("خلص"))
+    _turn(model, "دوري وضيفي")
+    assert len(model.seen) == 1, "kept going after the stop"
+    with active_user_profile_context(A):
+        assert items.list_items("shopping") == []
+    last = stm.load("userA", "userA")[-1]
+    assert last["content"] == stops.cut("كنت عم") and stops.CUT_NOTE in last["content"]

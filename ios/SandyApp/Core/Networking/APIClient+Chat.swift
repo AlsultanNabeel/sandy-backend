@@ -175,6 +175,13 @@ extension APIClient {
         try await send("/api/conversations/\(id)/rewind", method: "POST", body: ["keep_user": keepUser])
     }
 
+    /// The reply was stopped after `partial`: the server stops the turn (if still running) and
+    /// Sandy remembers only what was shown, marked as cut.
+    func stopReply(conversationId: String, partial: String, clientMsgId: String) async throws {
+        try await send("/api/conversations/\(conversationId)/stop", method: "POST",
+                       body: ["partial": partial, "client_msg_id": clientMsgId])
+    }
+
     func renameConversation(id: String, title: String) async throws {
         try await send("/api/conversations/\(id)", method: "PATCH",
                        body: ["title": title])

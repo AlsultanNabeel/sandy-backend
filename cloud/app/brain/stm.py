@@ -165,9 +165,30 @@ def _ended(turns: List[Dict[str, Any]], now: datetime) -> List[Dict[str, Any]]:
     return [m for m in turns if not m.get("summarized")]
 
 
-def rewind(thread_id: str, user_id: str) -> None:
+def rewind(thread_id: str, user_id: str) -> List[Dict[str, Any]]:
     """Forget the thread's last exchange (its last user line and any reply after it),
-    so the same line, or an edited one, can be answered again in its place."""
+    so the same line, or an edited one, can be answered again in its place. Returns
+    what that reply did to the blocks (its `effects`), for the caller to take back."""
+    coll = _stm_collection()
+    if coll is None:
+        return []
+    key = f"{thread_id}:{user_id}"
+    effects: List[Dict[str, Any]] = []
+    try:
+        doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
+        turns = list((doc or {}).get("history") or [])
+        while turns and turns[-1].get("role") == "assistant":
+            effects = list(turns.pop().get("effects") or []) + effects
+        if turns and turns[-1].get("role") == "user":
+            turns.pop()
+        coll.update_one({"key": key}, {"$set": {"history": turns}})
+    except PyMongoError as exc:  # memory is never worth a failed reply
+        logger.warning("[stm] rewind failed: %s", exc)
+    return effects
+
+
+def cut_last(thread_id: str, user_id: str, text: str) -> None:
+    """The last reply, as the user saw it before stopping it (the turn was already over)."""
     coll = _stm_collection()
     if coll is None:
         return
@@ -175,18 +196,16 @@ def rewind(thread_id: str, user_id: str) -> None:
     try:
         doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
         turns = list((doc or {}).get("history") or [])
-        while turns and turns[-1].get("role") == "assistant":
-            turns.pop()
-        if turns and turns[-1].get("role") == "user":
-            turns.pop()
-        coll.update_one({"key": key}, {"$set": {"history": turns}})
+        if turns and turns[-1].get("role") == "assistant":
+            turns[-1] = {**turns[-1], "content": text}
+            coll.update_one({"key": key}, {"$set": {"history": turns}})
     except PyMongoError as exc:  # memory is never worth a failed reply
-        logger.warning("[stm] rewind failed: %s", exc)
+        logger.warning("[stm] cut failed: %s", exc)
 
 
 def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
          prior_history: Optional[List[Dict[str, Any]]] = None, via: str = "",
-         source: str = "chat") -> None:
+         source: str = "chat", effects: Optional[List[Dict[str, Any]]] = None) -> None:
     """Append the turn; ``prior_history`` (this thread's turns, already read this turn)
     saves a second read. Runs in the caller's tenant: the overflow summary is scoped."""
     coll = _stm_collection()
@@ -205,7 +224,9 @@ def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
         # `via` is where it was said, so «when did I tell you that?» has an answer.
         turns.append({"role": "user", "content": user_msg, "timestamp": ts, "via": via})
         if reply:
-            turns.append({"role": "assistant", "content": reply, "timestamp": ts, "via": via})
+            # What the reply did to the blocks, so a regenerate or an edit can take it back.
+            turns.append({"role": "assistant", "content": reply, "timestamp": ts, "via": via,
+                          **({"effects": effects} if effects else {})})
         if len(turns) > MAX_STM_MESSAGES:
             dropped, turns = turns[:-KEEP_AFTER_TRIM], turns[-KEEP_AFTER_TRIM:]
             to_summarize += [m for m in dropped if not m.get("summarized") and m not in to_summarize]

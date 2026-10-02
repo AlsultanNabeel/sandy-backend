@@ -148,6 +148,7 @@ final class ChatStore: ObservableObject {
     /// The reply streaming now, so «إيقاف» can keep what already arrived.
     private var streamingID: UUID?
     private var streamingCid: String?
+    private var streamingCmid: String?
 
     /// يرسل، يخزّن السؤال والرد، ويرجّع رد ساندي (ليقرأه الـView بالصوت).
     /// `appendUser: false` answers the line already last (regenerate).
@@ -173,6 +174,8 @@ final class ChatStore: ObservableObject {
         }
         // مفتاح الرسالة: نفسه بكل محاولة، فالخادم ما بيشغّل الدور مرتين.
         let clientMsgID = Self.newID()
+        streamingCid = cid
+        streamingCmid = clientMsgID
         let t = Task { @MainActor () -> String? in
             defer {
                 if generation == sendGeneration {
@@ -255,6 +258,8 @@ final class ChatStore: ObservableObject {
                     await self.loadList(api: api)
                 }
                 Announce.say(String(format: LanguageManager.shared.s("a11y.replyArrived"), reply))
+                // A reply may have added or changed things the other tabs show.
+                NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
                 return reply
             } catch {
                 if !error.isCancellation {
@@ -292,11 +297,16 @@ final class ChatStore: ObservableObject {
         sending = false
         replying = false
         activity = ""
-        guard let id = streamingID, let cid = streamingCid,
-              let partial = messages.first(where: { $0.id == id })?.text, !partial.isEmpty else { return }
+        guard let cid = streamingCid, let cmid = streamingCmid else { return }
+        let partial = streamingID.flatMap { id in messages.first { $0.id == id }?.text } ?? ""
         streamingID = nil
-        saveLines(api, id: cid)
-        Task { try? await api.appendMessage(cid: cid, role: "sandy", text: partial) }
+        streamingCmid = nil
+        if !partial.isEmpty { saveLines(api, id: cid) }
+        Task {
+            // Sandy is told it was cut here, and the turn runs no further tool.
+            try? await api.stopReply(conversationId: cid, partial: partial, clientMsgId: cmid)
+            if !partial.isEmpty { try? await api.appendMessage(cid: cid, role: "sandy", text: partial) }
+        }
     }
 
     /// A failed line, sent again in its place.
@@ -312,7 +322,9 @@ final class ChatStore: ObservableObject {
               let line = messages.last(where: { $0.role == "user" })?.text else { return nil }
         messages.removeLast()
         errorMessage = ""
+        // The old reply's changes (a task it added, a reminder it moved) are taken back.
         try? await api.rewindConversation(id: cid, keepUser: true)
+        NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
         return await send(api: api, text: line, appendUser: false)
     }
 
@@ -321,7 +333,10 @@ final class ChatStore: ObservableObject {
         guard !sending, let idx = messages.lastIndex(where: { $0.role == "user" }) else { return nil }
         messages.removeSubrange(idx...)
         errorMessage = ""
-        if let cid = currentID { try? await api.rewindConversation(id: cid, keepUser: false) }
+        if let cid = currentID {
+            try? await api.rewindConversation(id: cid, keepUser: false)
+            NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
+        }
         return await send(api: api, text: text)
     }
 
@@ -369,4 +384,9 @@ enum ChatStep {
         let text = lang.s(key)
         return text == key ? lang.s("chat.step.other") : text
     }
+}
+
+extension Notification.Name {
+    /// Sandy changed the blocks from chat (a reply, or a reply taken back): the tabs reload.
+    static let sandyBlocksChanged = Notification.Name("sandyBlocksChanged")
 }

@@ -51,6 +51,7 @@ def add(list_name: str, text: str, data: Optional[Mapping[str, Any]] = None, *,
         "migrated_from": _base.migrated_ref(migrated_from),
     }
     coll.insert_one(doc)
+    _base.noted("created", _base.ITEMS, doc["_id"])
     return doc["_id"]
 
 
@@ -115,6 +116,7 @@ def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = N
     if data is not None:
         changes["data"] = validate(LIST, current["list"], data)
     if changes:
+        _base.noted("updated", _base.ITEMS, item_id, coll)
         coll.update_one({"_id": item_id}, {"$set": changes})
     return True
 
@@ -123,6 +125,7 @@ def delete(item_id: str, mongo_db=None) -> bool:
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None or not item_id:
         return False
+    _base.noted("deleted", _base.ITEMS, item_id, coll)
     return coll.delete_one({"_id": item_id}).deleted_count > 0
 
 

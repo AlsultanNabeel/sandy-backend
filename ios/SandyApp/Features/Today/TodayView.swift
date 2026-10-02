@@ -100,6 +100,9 @@ struct TodayView: View {
         .task { await nudge.loadIfNeeded(api: state.api) }
         .task { await weather.load(api: state.api) }
         .refreshable { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .sandyBlocksChanged)) { _ in
+            Task { await reload() }
+        }
         .sheet(isPresented: $showProfile) { NavigationStack { ProfileView() } }
         .sheet(item: $editingTask) { t in
             ItemEditSheet(title: lang.s("today.task"), item: t, isHabit: false,
