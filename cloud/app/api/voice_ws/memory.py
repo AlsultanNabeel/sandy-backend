@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.api.voice_ws._config import logger
 from app.brain import stm
+from app.brain.context import RECENT_TURNS
 
 # Session identity, channel (robot vs app call) and speaker name live in context
 # variables: per async task, safe across concurrent sessions. They don't reach
@@ -76,7 +77,7 @@ def _load_stm_history() -> List[Dict[str, Any]]:
     if not chat_id:
         return []
     # Falls back to the voice thread itself for docs written before `user_id` was stored.
-    return stm.recent_turns_for_user(chat_id, limit=10) or stm.load(chat_id, chat_id)
+    return stm.recent_turns_for_user(chat_id, limit=RECENT_TURNS) or stm.load(chat_id, chat_id)
 
 
 def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:

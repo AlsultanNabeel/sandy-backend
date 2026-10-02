@@ -194,11 +194,11 @@ for a refusal. A held action is "not done yet", neither.
 
 | Layer | Module | Store |
 |---|---|---|
-| Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), the last 10 messages, TTL 30 days |
+| Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), up to 40 messages, TTL 30 days; the model sees the last 24 (`context.RECENT_TURNS`, chat and the call alike) |
 | What she knows | `brain/context.py` | `fact` entries (the newest 30 distinct ones of two words or more; anything still ciphertext is left out) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
 | What is open now | `brain/context.py::state_block` | open items per list and pending reminders, with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
 | Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are not facts, chat summaries or habit ticks, from the Atlas vector index `entries_vector` (tenant in its filter); text search when there is no vector or no hit |
-| Conversation summaries | `brain/stm.py::_summarize` | turns that overflow a thread become a `summary` entry (`data.thread_id`), in the background; `recall` leaves them out unless asked |
+| Conversation summaries | `brain/stm.py::_summarize` | one `summary` entry (`data.thread_id`) per conversation, in the background: when a message comes after a 30-minute pause, or when a thread passes 40 messages and drops to its newest 20; turns are marked `summarized` so none is summarised twice; `recall` leaves them out unless asked |
 | Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
 
 **One memory across every channel.** App chat (`/api/agent`), the robot's voice

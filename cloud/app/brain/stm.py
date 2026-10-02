@@ -6,14 +6,18 @@ Chat, the robot's voice and the in-app call all write here with ``via``, and
 said aloud reaches the next chat turn.
 
 On Mongo rather than Redis on purpose: the free Redis tier hit its monthly request
-cap and memory silently froze. What overflows a thread is summarised into a
-``summary`` log entry (`blocks.entries`), in the background.
+cap and memory silently froze.
+
+A conversation is summarised once, into one ``summary`` log entry (`blocks.entries`),
+in the background: when the next message comes after a pause of ``SESSION_GAP``, or
+when a long one fills the thread and its older half is let go. Summarised turns are
+marked ``summarized`` so no turn is summarised twice.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.thread_pool import submit_background
@@ -21,7 +25,11 @@ from app.utils.thread_pool import submit_background
 logger = logging.getLogger(__name__)
 
 STM_TTL = 60 * 60 * 24 * 30  # drives the Mongo TTL index on STM docs
-MAX_STM_MESSAGES = 10
+MAX_STM_MESSAGES = 40
+# A long thread drops to this many when it fills, so it is summarised in one go.
+KEEP_AFTER_TRIM = 20
+# A pause this long ends a conversation; the next message starts a new one.
+SESSION_GAP = timedelta(minutes=30)
 _STM_COLL = "sandy_stm"
 _stm_index_ready = False
 
@@ -139,6 +147,22 @@ def _summarize(thread_id: str, user_id: str, messages: List[Dict[str, Any]],
                                          "source_turns": len(messages)}, source=source)
 
 
+def _ended(turns: List[Dict[str, Any]], now: datetime) -> List[Dict[str, Any]]:
+    """The last conversation's unsummarised turns when it ended (a pause of
+    ``SESSION_GAP`` before this message), else nothing. Same dicts, to be marked."""
+    if not turns:
+        return []
+    try:
+        last = datetime.fromisoformat(str(turns[-1].get("timestamp") or ""))
+    except ValueError:
+        return []
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    if now - last < SESSION_GAP:
+        return []
+    return [m for m in turns if not m.get("summarized")]
+
+
 def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
          prior_history: Optional[List[Dict[str, Any]]] = None, via: str = "",
          source: str = "chat") -> None:
@@ -156,14 +180,20 @@ def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
         else:
             doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
             turns = (doc or {}).get("history", []) or []
+        to_summarize = _ended(turns, now)
         # `via` is where it was said, so «when did I tell you that?» has an answer.
         turns.append({"role": "user", "content": user_msg, "timestamp": ts, "via": via})
         if reply:
             turns.append({"role": "assistant", "content": reply, "timestamp": ts, "via": via})
         if len(turns) > MAX_STM_MESSAGES:
-            submit_background(_summarize, thread_id, user_id, turns[:-MAX_STM_MESSAGES],
+            dropped, turns = turns[:-KEEP_AFTER_TRIM], turns[-KEEP_AFTER_TRIM:]
+            to_summarize += [m for m in dropped if not m.get("summarized") and m not in to_summarize]
+        if to_summarize:
+            for m in to_summarize:
+                m["summarized"] = True
+            submit_background(_summarize, thread_id, user_id, to_summarize,
                               source, _label="stm_summarize")
-        coll.update_one({"key": key}, {"$set": {"history": turns[-MAX_STM_MESSAGES:],
+        coll.update_one({"key": key}, {"$set": {"history": turns,
                                                 "updated_at": now, "user_id": str(user_id)}},
                         upsert=True)
     except Exception as exc:  # noqa: BLE001 — memory is never worth a failed reply

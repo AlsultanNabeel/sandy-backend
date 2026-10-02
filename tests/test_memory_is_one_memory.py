@@ -193,3 +193,37 @@ def test_the_voice_seed_invents_nothing(store):
     set_voice_identity("")
     assert "October City" not in text and "ملف المستخدم" not in text
     assert "معلومات بتعرفيها" not in text
+
+
+def _summaries(monkeypatch):
+    from app.brain import stm
+    calls = []
+    monkeypatch.setattr(stm, "submit_background",
+                        lambda fn, tid, uid, msgs, source, _label: calls.append(len(msgs)))
+    return calls
+
+
+def test_a_conversation_is_summarised_once_after_a_pause(store, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.brain import stm
+    calls = _summaries(monkeypatch)
+    for i in range(6):
+        stm.save("c", _UID, f"سؤال {i}", f"جواب {i}")
+    assert calls == [], "summarised while the conversation was still going"
+    # An hour later: the six exchanges become one summary, and only once.
+    old = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    store["sandy_stm"].update_one({"key": f"c:{_UID}"}, {"$set": {"history": [
+        {**m, "timestamp": old} for m in stm.load("c", _UID)]}})
+    stm.save("c", _UID, "رجعت", "أهلين")
+    stm.save("c", _UID, "كمان سؤال", "تمام")
+    assert calls == [12]
+
+
+def test_a_long_conversation_lets_go_of_its_older_half_in_one_summary(store, monkeypatch):
+    from app.brain import stm
+    calls = _summaries(monkeypatch)
+    for i in range(stm.MAX_STM_MESSAGES // 2 + 1):
+        stm.save("c", _UID, f"سؤال {i}", f"جواب {i}")
+    kept = stm.load("c", _UID)
+    assert len(kept) == stm.KEEP_AFTER_TRIM
+    assert calls == [stm.MAX_STM_MESSAGES + 2 - stm.KEEP_AFTER_TRIM]

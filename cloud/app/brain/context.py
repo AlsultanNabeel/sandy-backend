@@ -24,7 +24,8 @@ STATE_ROWS = 15
 TOP_ENTRIES = 8
 # Atlas vector index on sandy_entries.embedding (filters: user_id, kind); see ARCHITECTURE_MAP.
 VECTOR_INDEX = "entries_vector"
-RECENT_TURNS = 8
+# Messages of the conversation the model sees (twelve exchanges).
+RECENT_TURNS = 24
 _NOISE = re.compile(r"^<noise>$|[\u3040-\u30ff\u4e00-\u9fff]")
 
 _RULES = """
