@@ -137,7 +137,7 @@ struct ControlView: View {
 
     private var loadingState: some View {
         VStack(spacing: Theme.Spacing.md) {
-            ProgressView().tint(Theme.Colors.accent)
+            LoadingDots()
             Text(lang.s("control.loading"))
                 .font(Theme.Typography.subheadline)
                 .foregroundColor(Theme.Colors.secondaryText)

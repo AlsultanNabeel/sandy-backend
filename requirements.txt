@@ -15,6 +15,7 @@ google-genai>=1.0.0
 google-cloud-texttospeech>=2.16.2
 google-auth>=2.0.0  # transitive dep of google-cloud-texttospeech / google-genai
 Pillow>=10.0.0
+pypdf>=4.0  # text out of PDF chat attachments (features/attachments)
 urllib3==2.7.0
 cryptography>=42.0.0
 websockets>=13.0

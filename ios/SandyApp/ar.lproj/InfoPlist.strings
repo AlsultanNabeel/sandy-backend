@@ -1,3 +1,5 @@
 /* رسائل طلب الإذن بالعربي. */
 "NSMicrophoneUsageDescription" = "ساندي بتسمعك لما تحكيها بصوتك بدل ما تكتب.";
 "NSLocalNetworkUsageDescription" = "ساندي بتوصل لكاميرا الروبوت على شبكة البيت عشان تعرضلك البث المباشر.";
+"NSCameraUsageDescription" = "ساندي بتستعمل الكاميرا لما تصوّر إشي وتبعتلها ياه بالشات.";
+"NSPhotoLibraryAddUsageDescription" = "ساندي بتحفظ الصور اللي بترسمها إلك بمعرض صورك.";

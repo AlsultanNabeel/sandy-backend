@@ -68,7 +68,7 @@ struct CameraView: View {
                         .cornerRadius(Theme.Radius.card)
                 } else if taking {
                     VStack(spacing: Theme.Spacing.sm) {
-                        ProgressView().tint(Theme.Colors.accent)
+                        LoadingDots()
                         Text(lang.s("robot.control.camera.taking"))
                             .font(Theme.Typography.caption)
                             .foregroundColor(Theme.Colors.secondaryText)
@@ -237,10 +237,10 @@ private struct LiveView: View {
                 if let frame {
                     Image(uiImage: frame).resizable().scaledToFit()
                 } else {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    SkeletonBlock().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             case .probing:
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonBlock().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task { await decideAndRun() }

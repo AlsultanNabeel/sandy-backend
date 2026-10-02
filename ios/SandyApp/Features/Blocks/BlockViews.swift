@@ -51,7 +51,11 @@ struct ItemsView: View {
 
             BlockNotices(store: store)
 
-            if store.items.isEmpty && !store.loading {
+            if store.items.isEmpty && store.loading && !store.hasSnapshot {
+                // First open, nothing on the phone yet: the rows' shapes until they come.
+                SkeletonList().padding(Theme.Spacing.md)
+                Spacer()
+            } else if store.items.isEmpty && !store.loading {
                 Spacer()
                 LivelyEmptyState(line: lang.s(showDone ? "blocks.emptyDone" : "blocks.emptyList"))
                 Spacer()
@@ -214,7 +218,10 @@ struct SchedulesView: View {
                     .padding(.horizontal, Theme.Spacing.md).padding(.top, Theme.Spacing.sm)
                     .task { await Permissions.shared.refresh() }
             }
-            if store.items.isEmpty && !store.loading {
+            if store.items.isEmpty && store.loading && !store.hasSnapshot {
+                SkeletonList().padding(Theme.Spacing.md)
+                Spacer()
+            } else if store.items.isEmpty && !store.loading {
                 Spacer()
                 LivelyEmptyState(line: lang.s("blocks.emptyReminders"))
                 Spacer()
@@ -397,7 +404,9 @@ struct LogView: View {
                     .listRowSeparator(.hidden)
             }
             BlockNotices(store: store).blockRow()
-            if shown.isEmpty && !store.loading {
+            if shown.isEmpty && store.loading && !store.hasSnapshot {
+                SkeletonList().blockRow()
+            } else if shown.isEmpty && !store.loading {
                 LivelyEmptyState(line: lang.s("blocks.emptyLog")).blockRow()
             }
             ForEach(shown) { entry in
@@ -491,7 +500,7 @@ struct LogView: View {
             }
         } label: {
             if summarizing {
-                ProgressView()
+                LoadingDots()
             } else {
                 Label(lang.s("blocks.summarize"), systemImage: "sparkles")
                     .labelStyle(.titleAndIcon)

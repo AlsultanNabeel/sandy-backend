@@ -31,6 +31,9 @@ struct TodayView: View {
                 AskBar { await reload() }
                 if nudge.nudge != nil && !nudge.dismissed { DailyNudgeCard(store: nudge) }
                 section("today.restOfDay") {
+                    if tasks.loading && !tasks.hasSnapshot && moments.isEmpty {
+                        SkeletonList(rows: 3)
+                    } else {
                     DayRibbon(moments: moments,
                               onDone: { source in
                                   switch source {
@@ -53,6 +56,7 @@ struct TodayView: View {
                                   case .reminder(let r): withAnimation { reminders.delete(api: state.api, r) }
                                   }
                               })
+                    }
                 }
                 if !anytime.isEmpty {
                     section("today.anytime") {

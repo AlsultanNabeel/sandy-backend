@@ -129,7 +129,7 @@ struct LaunchView: View {
             SandyBackground()
             VStack(spacing: Theme.Spacing.lg) {
                 SandyRobot(size: 96, happy: true, animated: true)
-                ProgressView().tint(Theme.Colors.accent)
+                LoadingDots()
             }
         }
     }

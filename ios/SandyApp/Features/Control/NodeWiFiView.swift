@@ -127,7 +127,7 @@ struct NodeWiFiView: View {
             switch phase {
             case .trying(let left):
                 HStack(spacing: Theme.Spacing.sm) {
-                    ProgressView().tint(Theme.Colors.accent)
+                    LoadingDots()
                     Text(String(format: lang.s("wifi.trying"), AppLocale.number(left)))
                         .font(Theme.Typography.subheadline)
                         .foregroundColor(Theme.Colors.secondaryText)

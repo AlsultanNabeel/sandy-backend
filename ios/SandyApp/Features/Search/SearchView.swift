@@ -87,7 +87,7 @@ struct SearchView: View {
         ScrollView {
             VStack(spacing: Theme.Spacing.md) {
                 if store.loading {
-                    ProgressView().tint(Theme.Colors.accent).padding(.top, Theme.Spacing.xxl)
+                    SkeletonList(rows: 4).padding(.top, Theme.Spacing.md)
                 } else if !store.hasSearched {
                     hintView
                 } else if store.isEmpty(kind) {

@@ -110,9 +110,12 @@ struct WeatherView: View {
                 .padding(.bottom, Theme.Spacing.section)
             }
         } else if store.loading {
-            ProgressView()
-                .tint(Theme.Colors.accent)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: Theme.Spacing.md) {
+                SkeletonBlock(cornerRadius: Theme.Radius.card).frame(height: 180)
+                SkeletonBlock(cornerRadius: Theme.Radius.card).frame(height: 90)
+            }
+            .padding(Theme.Spacing.md)
+            .frame(maxHeight: .infinity, alignment: .top)
         } else {
             emptyView
         }

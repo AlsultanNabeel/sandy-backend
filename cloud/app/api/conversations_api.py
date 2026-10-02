@@ -202,6 +202,18 @@ def release_turn(mongo_db, uid: str, cmid: str) -> None:
         logger.warning("[turns] release failed", exc_info=True)
 
 
+def _attachment_refs(value: Any) -> list:
+    """A message's attachments as the history keeps them: [{id, kind, name}], at most four,
+    only well-formed ids (the bytes stay in sandy_attachments, read by their owner only)."""
+    refs = []
+    for a in value if isinstance(value, list) else []:
+        if not isinstance(a, dict) or not valid_client_id(a.get("id")):
+            continue
+        refs.append({"id": a["id"], "kind": "image" if a.get("kind") == "image" else "file",
+                     "name": str(a.get("name") or "")[:120]})
+    return refs[:4]
+
+
 def _uid(claims) -> str:
     """Caller's user id, or '' (every query then fails closed)."""
     return str(claims.get("user_id") or "")
@@ -355,7 +367,8 @@ def register_conversations_api(app, mongo_db=None):
         body = request.get_json(silent=True) or {}
         role = (body.get("role") or "").strip()
         text = (body.get("text") or "").strip()
-        if role not in ("user", "sandy") or not text:
+        files = _attachment_refs(body.get("attachments"))
+        if role not in ("user", "sandy") or not (text or files):
             return jsonify({"error": "bad_message"}), 400
         # Bounded: every message is pushed onto one document (16 MB cap).
         text = text[:_MAX_MESSAGE_CHARS]
@@ -370,8 +383,11 @@ def register_conversations_api(app, mongo_db=None):
                 return jsonify({"error": "not_found"}), 404
             d = {}
 
+        message = {"role": role, "text": text, "ts": _now()}
+        if files:
+            message["attachments"] = files
         update = {
-            "$push": {"messages": {"role": role, "text": text, "ts": _now()}},
+            "$push": {"messages": message},
             "$set": {"updated_at": _now()},
         }
         # First user message is the fallback title.

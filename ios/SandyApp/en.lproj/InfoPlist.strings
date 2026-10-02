@@ -1,3 +1,5 @@
 /* Permission prompts, English. The Arabic originals are the build settings. */
 "NSMicrophoneUsageDescription" = "Sandy listens when you talk to her instead of typing.";
 "NSLocalNetworkUsageDescription" = "Sandy connects to the robot's camera on your home network to show you the live stream.";
+"NSCameraUsageDescription" = "Sandy uses the camera when you take a photo to send her in chat.";
+"NSPhotoLibraryAddUsageDescription" = "Sandy saves the images she draws for you to your photos.";

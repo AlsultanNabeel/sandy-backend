@@ -68,6 +68,8 @@ _BY_USER: List[str] = [
     "sandy_entries",
     "sandy_items",
     "sandy_schedules",
+    # Chat attachments and the images Sandy drew (bytes inline).
+    "sandy_attachments",
 ]
 
 # STM docs are keyed "<thread>:<user>" and also carry user_id; both are cleared.

@@ -63,7 +63,8 @@ struct ImagesView: View {
                 }
 
                 if store.loading {
-                    ProgressView().tint(Theme.Colors.accent).padding(.top, Theme.Spacing.lg)
+                    SandyWaiting(linesKey: mode == .generate ? "loading.drawLines" : "loading.lines")
+                        .padding(.top, Theme.Spacing.lg)
                 }
 
                 resultSection

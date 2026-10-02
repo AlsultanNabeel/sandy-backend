@@ -79,10 +79,11 @@ final class ChatStore: ObservableObject {
     private struct Line: Codable {
         let role: String
         let text: String
+        var attachments: [ChatAttachment]?
     }
 
     private func saveLines(_ api: APIClient, id: String) {
-        DiskCache.save(messages.map { Line(role: $0.role, text: $0.text) },
+        DiskCache.save(messages.map { Line(role: $0.role, text: $0.text, attachments: $0.attachments) },
                        key: "chat." + id, userId: api.currentUserId)
     }
 
@@ -93,7 +94,7 @@ final class ChatStore: ObservableObject {
             messages = r.messages
             saveLines(api, id: id)
         } else if let lines = DiskCache.load([Line].self, key: "chat." + id, userId: api.currentUserId) {
-            messages = lines.map { ChatMessage(role: $0.role, text: $0.text) }
+            messages = lines.map { ChatMessage(role: $0.role, text: $0.text, attachments: $0.attachments ?? []) }
         } else {
             return
         }
@@ -152,12 +153,16 @@ final class ChatStore: ObservableObject {
 
     /// يرسل، يخزّن السؤال والرد، ويرجّع رد ساندي (ليقرأه الـView بالصوت).
     /// `appendUser: false` answers the line already last (regenerate).
-    func send(api: APIClient, text: String, appendUser: Bool = true) async -> String? {
+    func send(api: APIClient, text: String, attachments: [ChatAttachment] = [],
+              appendUser: Bool = true) async -> String? {
         sendTask?.cancel()
         sendGeneration += 1
         let generation = sendGeneration
-        if appendUser { messages.append(ChatMessage(role: "user", text: text)) }
-        let userLineID = messages.last { $0.role == "user" }?.id
+        if appendUser { messages.append(ChatMessage(role: "user", text: text, attachments: attachments)) }
+        let userLine = messages.last { $0.role == "user" }
+        let userLineID = userLine?.id
+        // A regenerate answers the line with the attachments it had.
+        let attachments = appendUser ? attachments : (userLine?.attachments ?? [])
         sending = true
         replying = true
         errorMessage = ""
@@ -188,7 +193,9 @@ final class ChatStore: ObservableObject {
             // الرسالة من الطلب نفسه، مش من القاعدة، فما داعي ننتظر الحفظ. مهمة
             // منفصلة: الرسالة بتنحفظ حتى لو الإرسال اتلغى أو فشل.
             let saveUser = Task {
-                if appendUser { try? await api.appendMessage(cid: cid, role: "user", text: text) }
+                if appendUser {
+                    try? await api.appendMessage(cid: cid, role: "user", text: text, attachments: attachments)
+                }
             }
             // By id, not index: `messages` can be replaced mid-stream (new
             // chat, another conversation opened), and a stored index then
@@ -198,6 +205,7 @@ final class ChatStore: ObservableObject {
             var bestPartial = ""
             do {
                 let reply: String
+                var drawn: [ChatAttachment] = []
                 do {
                     let result = try await withConnectionRetry(onRetry: {
                         // المحاولة الجديدة بتبدأ الرد من أوله: نشيل الفقاعة
@@ -211,6 +219,7 @@ final class ChatStore: ObservableObject {
                         // ردود الأدوات (زي "أضف مهمة") ما فيها قطع، بترجع دفعة وحدة بالنهاية.
                         try await api.sendMessageStreaming(text, conversationId: cid,
                                                            clientMsgId: clientMsgID,
+                                                           attachments: attachments,
                                                            onStep: { [weak self] step in
                             guard let self, generation == self.sendGeneration else { return }
                             self.activity = ChatStep.label(step)
@@ -239,6 +248,7 @@ final class ChatStore: ObservableObject {
                         }
                     }
                     reply = result.reply
+                    drawn = result.image.map { [$0] } ?? []
                 } catch let e as APIError where e.kind == .connection && !bestPartial.isEmpty {
                     // كل المحاولات انقطعت بس وصل جزء من الرد: نحتفظ فيه.
                     reply = bestPartial
@@ -246,15 +256,16 @@ final class ChatStore: ObservableObject {
                 try Task.checkCancellation()
                 if let id = sandyID, let idx = messages.firstIndex(where: { $0.id == id }) {
                     messages[idx].text = reply
+                    messages[idx].attachments = drawn
                 } else if sandyID == nil {
-                    messages.append(ChatMessage(role: "sandy", text: reply))
+                    messages.append(ChatMessage(role: "sandy", text: reply, attachments: drawn))
                 }
                 saveLines(api, id: cid)
                 // حفظ الرد وتحديث القائمة بالخلفية — الرد ظاهر، وصوت ساندي ما
                 // بيستنّاهم. بالترتيب: رسالة المستخدم قبل الرد (منها العنوان).
                 Task {
                     _ = await saveUser.value
-                    try? await api.appendMessage(cid: cid, role: "sandy", text: reply)
+                    try? await api.appendMessage(cid: cid, role: "sandy", text: reply, attachments: drawn)
                     await self.loadList(api: api)
                 }
                 Announce.say(String(format: LanguageManager.shared.s("a11y.replyArrived"), reply))
@@ -313,7 +324,7 @@ final class ChatStore: ObservableObject {
     func retry(api: APIClient, _ message: ChatMessage) async -> String? {
         messages.removeAll { $0.id == message.id }
         errorMessage = ""
-        return await send(api: api, text: message.text)
+        return await send(api: api, text: message.text, attachments: message.attachments)
     }
 
     /// Sandy's last reply, written again: dropped here and on the server, the same line re-answered.
@@ -331,13 +342,14 @@ final class ChatStore: ObservableObject {
     /// The user's last line, edited: it and its reply go, the new line is sent in their place.
     func editLast(api: APIClient, to text: String) async -> String? {
         guard !sending, let idx = messages.lastIndex(where: { $0.role == "user" }) else { return nil }
+        let kept = messages[idx].attachments   // the edit changes the words, not what came with them
         messages.removeSubrange(idx...)
         errorMessage = ""
         if let cid = currentID {
             try? await api.rewindConversation(id: cid, keepUser: false)
             NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
         }
-        return await send(api: api, text: text)
+        return await send(api: api, text: text, attachments: kept)
     }
 
     /// كم مرة نعيد إرسال رسالة انقطع اتصالها (مش خطأ من الخادم).

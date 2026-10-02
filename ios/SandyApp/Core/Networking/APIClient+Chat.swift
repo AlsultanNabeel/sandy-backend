@@ -26,6 +26,28 @@ private struct ConversationDetailResponse: Decodable {
     struct Row: Decodable {
         let role: String?
         let text: String?
+        let attachments: [ChatAttachment]?
+    }
+}
+
+private struct AttachmentSaved: Decodable { let item: ChatAttachment? }
+
+/// A message as the history keeps it.
+private struct MessageAppend: Encodable {
+    let role: String
+    let text: String
+    let attachments: [ChatAttachment]?
+}
+
+/// Reports how much of an upload has gone out (0…1).
+private final class UploadProgress: NSObject, URLSessionTaskDelegate {
+    let report: @Sendable (Double) -> Void
+    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        report(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
     }
 }
 
@@ -52,9 +74,10 @@ extension APIClient {
         _ text: String,
         conversationId: String? = nil,
         clientMsgId: String? = nil,
+        attachments: [ChatAttachment] = [],
         onStep: (@MainActor (String) -> Void)? = nil,
         onChunk: @MainActor @escaping (String) -> Void
-    ) async throws -> (reply: String, imageURL: String?) {
+    ) async throws -> (reply: String, image: ChatAttachment?) {
         guard let url = URL(string: baseURL + "/api/agent/stream") else {
             throw APIError(message: "عنوان غير صالح")
         }
@@ -62,6 +85,7 @@ extension APIClient {
         var bodyDict: [String: Any] = ["message": text, "lang": lang]
         if let cid = conversationId, !cid.isEmpty { bodyDict["conversation_id"] = cid }
         if let key = clientMsgId, !key.isEmpty { bodyDict["client_msg_id"] = key }
+        if !attachments.isEmpty { bodyDict["attachments"] = attachments.map(\.id) }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -99,7 +123,7 @@ extension APIClient {
 
         var finalReply = ""
         var sawDone = false
-        var imageURL: String?
+        var image: ChatAttachment?
         do {
             for try await line in bytes.lines {
                 guard line.hasPrefix("data: "),
@@ -113,7 +137,10 @@ extension APIClient {
                 }
                 if obj["done"] as? Bool == true {
                     finalReply = obj["reply"] as? String ?? finalReply
-                    imageURL = obj["image_url"] as? String
+                    // A picture Sandy drew, kept on the server as an attachment.
+                    if let drawn = obj["image"] as? [String: Any], let id = drawn["id"] as? String {
+                        image = ChatAttachment(id: id, kind: "image", name: drawn["name"] as? String ?? "")
+                    }
                     sawDone = true
                     break
                 }
@@ -132,7 +159,46 @@ extension APIClient {
         if !sawDone {
             throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
         }
-        return (finalReply, imageURL)
+        return (finalReply, image)
+    }
+
+    // MARK: - المرفقات
+
+    /// Uploads a photo or a document for the chat; `progress` gets 0…1 as it goes out.
+    /// A refusal (too big, a type Sandy cannot read) comes back with the line to show.
+    func uploadAttachment(_ data: Data, name: String, mime: String,
+                          progress: @escaping @Sendable (Double) -> Void) async throws -> ChatAttachment {
+        guard let url = URL(string: baseURL + "/api/attachments") else {
+            throw APIError(message: "عنوان غير صالح")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 120
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "data": data.base64EncodedString(), "name": name, "mime": mime])
+        let (out, resp): (Data, URLResponse)
+        do {
+            (out, resp) = try await APIClient.session.upload(for: req, from: body,
+                                                             delegate: UploadProgress(progress))
+        } catch let urlError as URLError {
+            if urlError.code == .cancelled { throw urlError }
+            throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
+        }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let json = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any] ?? [:]
+        guard code < 400, let saved = try? JSONDecoder().decode(AttachmentSaved.self, from: out),
+              let item = saved.item else {
+            throw APIError(message: json["message"] as? String ?? "خطأ \(code)",
+                           code: json["error"] as? String, kind: .server)
+        }
+        return item
+    }
+
+    /// An attachment's bytes (a photo to show, a drawn image to save).
+    func attachmentData(id: String) async throws -> Data {
+        try await rawGet("/api/attachments/\(id)/file", timeout: 60)
     }
 
     // MARK: - سجل المحادثات
@@ -158,15 +224,19 @@ extension APIClient {
     func getConversation(id: String) async throws -> (title: String, messages: [ChatMessage]) {
         let r: ConversationDetailResponse = try await fetch("/api/conversations/\(id)")
         let msgs = (r.messages ?? []).compactMap { m -> ChatMessage? in
-            guard let role = m.role, let text = m.text else { return nil }
-            return ChatMessage(role: role, text: text)
+            guard let role = m.role else { return nil }
+            let files = m.attachments ?? []
+            guard !(m.text ?? "").isEmpty || !files.isEmpty else { return nil }
+            return ChatMessage(role: role, text: m.text ?? "", attachments: files)
         }
         return (r.title ?? "", msgs)
     }
 
-    func appendMessage(cid: String, role: String, text: String) async throws {
+    func appendMessage(cid: String, role: String, text: String,
+                       attachments: [ChatAttachment] = []) async throws {
         try await send("/api/conversations/\(cid)/messages", method: "POST",
-                       body: ["role": role, "text": text])
+                       body: MessageAppend(role: role, text: text,
+                                           attachments: attachments.isEmpty ? nil : attachments))
     }
 
     /// Drops the last reply (and, unless `keepUser`, the line it answered) on the server and

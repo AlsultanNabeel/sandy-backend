@@ -338,7 +338,7 @@ struct DeviceCard: View {
 
             if store.learning {
                 HStack(spacing: Theme.Spacing.sm) {
-                    ProgressView().tint(Theme.Colors.accent)
+                    LoadingDots()
                     Text(lang.s("control.ir.learning"))
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.secondaryText)

@@ -997,6 +997,16 @@ so folders are organisation only.
   (`POST …/stop`: a running turn stops before its next tool via `brain/stops.py`, and
   memory keeps only the shown part with a «cut here» note), and a failed line marked
   with «أعد المحاولة».
+  Attachments (`Features/Sandy/ChatAttachments.swift`): photos, the camera and documents
+  upload at once to `POST /api/attachments` (`features/attachments.py`, `sandy_attachments`,
+  bytes inline; images 8 MB, documents 5 MB; PDF / Word / text read to at most 20 000
+  characters), wait above the field with their progress, and go with the message as ids:
+  the turn gives the model the photos as images and the documents as text, memory keeps
+  «[صورة: name]». An image Sandy draws is saved the same way and comes back as `image` on
+  the reply; the history keeps `attachments` on each message.
+  Loading (`DesignSystem/Loading.swift`): skeleton rows with a shine on first loads,
+  `LoadingDots` inside buttons, and `SandyWaiting` (her face and changing lines with the
+  user's name) for long waits; nothing moves under Reduce Motion.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep

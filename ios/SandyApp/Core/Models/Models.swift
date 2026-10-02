@@ -7,6 +7,17 @@ struct ChatMessage: Identifiable {
     var text: String
     /// A line of the user's that did not go through; its bubble offers «أعد المحاولة».
     var failed = false
+    /// Photos and documents sent with it, or the picture Sandy drew.
+    var attachments: [ChatAttachment] = []
+}
+
+/// A chat attachment kept on the server (`/api/attachments`); the bytes come by id.
+struct ChatAttachment: Codable, Hashable, Identifiable {
+    let id: String
+    let kind: String   // "image" | "file"
+    let name: String
+
+    var isImage: Bool { kind == "image" }
 }
 
 // ── سجل المحادثات — /api/conversations ──

@@ -41,7 +41,7 @@ struct RobotLiveSection: View {
                     }
                 }
             } else if !store.liveLoaded {
-                ProgressView().tint(Theme.Colors.accent)
+                LoadingDots()
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Theme.Spacing.lg)
             }
@@ -210,7 +210,7 @@ struct RobotLiveSection: View {
                         } label: {
                             HStack(spacing: Theme.Spacing.xs) {
                                 if busy {
-                                    ProgressView().controlSize(.mini)
+                                    LoadingDots()
                                 }
                                 Text(label(prefix, v))
                                     .font(Theme.Typography.caption)

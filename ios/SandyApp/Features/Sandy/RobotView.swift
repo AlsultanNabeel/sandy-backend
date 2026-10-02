@@ -107,7 +107,7 @@ struct RobotView: View {
                 } label: {
                     HStack(spacing: Theme.Spacing.xs) {
                         if store.applying == scene.name {
-                            ProgressView().tint(Theme.Colors.onAccent)
+                            LoadingDots(color: Theme.Colors.onAccent)
                         } else {
                             Image(systemName: "play.fill")
                                 .scaledFont(Theme.Icon.sm, weight: .semibold)

@@ -45,6 +45,11 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- Chat attachments: a photo taken for Sandy, and saving the images she draws. -->
+	<key>NSCameraUsageDescription</key>
+	<string>ساندي بتستعمل الكاميرا لما تصوّر إشي وتبعتلها ياه بالشات.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>ساندي بتحفظ الصور اللي بترسمها إلك بمعرض صورك.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<!-- A live voice call keeps going with the screen locked. -->

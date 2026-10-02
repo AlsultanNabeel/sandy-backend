@@ -7,6 +7,7 @@ to store for the next turn, and any image a tool made.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -144,16 +145,42 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
              pending_state: Optional[Dict[str, Any]] = None, source: str = "user",
              image_state: Optional[Dict[str, Any]] = None,
              conversation_id: Optional[str] = None,
+             attachments: Optional[List[Dict[str, Any]]] = None,
              complete: Optional[Callable] = None) -> Dict[str, Any]:
     with turn_scope():
         return _run_turn(message, user_id, chat_id, pending_state=pending_state,
                          source=source, image_state=image_state,
-                         conversation_id=conversation_id,
+                         conversation_id=conversation_id, attachments=attachments or [],
                          complete=complete or model.complete)
 
 
+def _user_content(message: str, attachments: List[Dict[str, Any]]) -> Any:
+    """The user's turn for the model: plain text, or text with the photos to look at and
+    the documents' words to read."""
+    if not attachments:
+        return message
+    text = message or "شوفي المرفق."
+    for a in attachments:
+        if a.get("kind") == "file":
+            text += f"\n\n[مرفق «{a.get('name', '')}»]:\n{a.get('text', '')}"
+    parts: List[Dict[str, Any]] = [{"type": "text", "text": text}]
+    for a in attachments:
+        if a.get("kind") == "image":
+            data = base64.b64encode(bytes(a.get("data") or b"")).decode()
+            parts.append({"type": "image_url",
+                          "image_url": {"url": f"data:{a.get('mime') or 'image/jpeg'};base64,{data}"}})
+    return parts if len(parts) > 1 else text
+
+
+def _remembered_line(message: str, attachments: List[Dict[str, Any]]) -> str:
+    """The user's line as memory keeps it: the words, and which attachments came with them."""
+    marks = " ".join(f"[{'صورة' if a.get('kind') == 'image' else 'ملف'}: {a.get('name', '')}]"
+                     for a in attachments)
+    return (message + " " + marks).strip()
+
+
 def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
-              conversation_id, complete) -> Dict[str, Any]:
+              conversation_id, attachments, complete) -> Dict[str, Any]:
     t0 = time.perf_counter()
     thread_id = str(conversation_id or chat_id)
     ctx = TurnCtx(user_id=str(user_id), message=message,
@@ -162,7 +189,8 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     outcome = _resolve_pending(held, message, ctx) if held else None
     own, history = stm.history(thread_id, user_id)
     with blocks_base.journal() as effects:
-        outcome = _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete)
+        outcome = _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete,
+                          attachments)
 
     text = outcome["text"]
     # Stopped from the app: memory keeps what was shown, marked as cut.
@@ -171,7 +199,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     logger.info("[turn] %.0fms total — brain%s tools=%s",
                 (time.perf_counter() - t0) * 1000, " (fast)" if outcome.get("fast") else "",
                 outcome["tools"])
-    stm.save(thread_id, user_id, message, remembered, prior_history=own,
+    stm.save(thread_id, user_id, _remembered_line(message, attachments), remembered, prior_history=own,
              via="شات التطبيق" if source == "web" else (source or ""), source=ctx.source,
              effects=effects)
     return {
@@ -187,9 +215,11 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     }
 
 
-def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete):
-    """The held confirmation's outcome, else the fast path's, else the model loop's."""
-    if outcome is None:
+def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete,
+            attachments=()):
+    """The held confirmation's outcome, else the fast path's, else the model loop's.
+    A line with attachments always goes to the model: only it can look at them."""
+    if outcome is None and not attachments:
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
         due = None
@@ -200,7 +230,7 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
                 system += "\n\n" + due[0]
             messages = [{"role": "system", "content": system},
                         *context.history_messages(history),
-                        {"role": "user", "content": message}]
+                        {"role": "user", "content": _user_content(message, list(attachments))}]
             outcome = _run_loop(messages, ctx, complete,
                                 stopped=lambda: stops.requested(user_id, thread_id))
         except Exception:  # noqa: BLE001 — the request boundary: answer, never 500

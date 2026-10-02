@@ -32,9 +32,7 @@ struct SandyButton: View {
         Button(action: action) {
             HStack(spacing: Theme.Spacing.sm) {
                 if isLoading {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(foreground)
+                    LoadingDots(color: foreground)
                 } else if let systemImage {
                     Image(systemName: systemImage)
                         .scaledFont(15, weight: .semibold)

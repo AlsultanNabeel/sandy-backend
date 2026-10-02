@@ -180,7 +180,7 @@ private struct PhotoThumb: View {
             } else {
                 RoundedRectangle(cornerRadius: Theme.Radius.control)
                     .fill(.ultraThinMaterial)
-                    .overlay(ProgressView().tint(Theme.Colors.accent))
+                    .overlay(SkeletonBlock())
             }
         }
         .task(id: photo.id) {

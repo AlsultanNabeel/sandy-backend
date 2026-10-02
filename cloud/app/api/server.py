@@ -134,6 +134,8 @@ def create_app(*, mongo_db=None):
 
     from app.api.blocks_api import register_blocks_api
     register_blocks_api(app, mongo_db=mongo_db)
+    from app.api.attachments_api import register_attachments_api
+    register_attachments_api(app)
 
     # Sign-in is Apple, Google or email (the shared owner-password /api/auth is gone).
     from app.api.metering import limit_response as _limit_response
@@ -176,6 +178,7 @@ def create_app(*, mongo_db=None):
         # Must match run_turn's thread_id so the held action round-trips.
         thread_id = conversation_id or user_id
         loaded_pending = pending.load(thread_id, user_id, mongo_db)
+        from app.features import attachments
         with active_user_profile_context(_profile):
             state = run_turn(
                 message,
@@ -184,6 +187,7 @@ def create_app(*, mongo_db=None):
                 source="web",
                 conversation_id=conversation_id or None,
                 pending_state=loaded_pending,
+                attachments=attachments.for_message(body.get("attachments") or []),
             )
         pending.save(thread_id, user_id, mongo_db, state.get("pending_state"))
         text = state.get("final_response") or ""
@@ -191,9 +195,13 @@ def create_app(*, mongo_db=None):
         result = {"reply": text, "role": role}
         img_bytes = made.get("image_bytes")
         if img_bytes:
-            b64 = base64.b64encode(img_bytes).decode()
-            result["reply"] = made.get("caption") or text
-            result["image_url"] = f"data:image/png;base64,{b64}"
+            # Kept as an attachment: the chat shows it, and its history brings it back.
+            with active_user_profile_context(_profile):
+                try:
+                    result["image"] = attachments.save(img_bytes, "sandy.png", "image/png",
+                                                       source="generated")
+                except attachments.AttachmentError:
+                    logger.warning("[web_agent] generated image not saved")
         return result
 
     from app.api.conversations_api import (claim_turn, ensure_conversation, finish_turn,
@@ -218,7 +226,7 @@ def create_app(*, mongo_db=None):
         body = request.get_json(silent=True) or {}
 
         message = (body.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
-        if not message:
+        if not message and not body.get("attachments"):
             return jsonify({"error": "no message"}), 400
 
         role = claims.get("role", "guest")
@@ -265,7 +273,7 @@ def create_app(*, mongo_db=None):
 
         body = request.get_json(silent=True) or {}
         message = (body.get("message") or "").strip()[:_MAX_MESSAGE_CHARS]
-        if not message:
+        if not message and not body.get("attachments"):
             return jsonify({"error": "no message"}), 400
 
         role = claims.get("role", "guest")

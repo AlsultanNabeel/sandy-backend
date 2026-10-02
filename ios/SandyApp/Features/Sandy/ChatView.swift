@@ -30,6 +30,8 @@ struct ChatView: View {
 
     /// محرّك الصوت — مكالمة حيّة + قراءة ردود الكتابة بصوت ساندي.
     @StateObject private var speech = SpeechManager()
+    /// Photos and documents picked for the next message.
+    @StateObject private var composer = AttachmentComposer()
     /// هل ساندي تقرأ ردود الكتابة بصوت؟ (يتحكم فيه زر السمّاعة، محفوظ).
     @AppStorage("sandy_voice_replies") private var voiceReplies = true
     /// عرض شاشة المكالمة الصوتية الحيّة.
@@ -49,7 +51,7 @@ struct ChatView: View {
 
     /// هل يُسمح بالإرسال الآن؟ (مو مرسل حاليًا + في نص فعلي).
     private var canSend: Bool {
-        !store.sending && !trimmedInput.isEmpty
+        !store.sending && !composer.busy && (!trimmedInput.isEmpty || !composer.ready.isEmpty)
     }
 
     var body: some View {
@@ -191,6 +193,7 @@ struct ChatView: View {
     private var inputBar: some View {
         VStack(spacing: Theme.Spacing.xs) {
             if editingLast { editBanner }
+            if !composer.items.isEmpty { AttachmentStrip(composer: composer) }
             inputRow
         }
         .padding(Theme.Spacing.md)
@@ -222,6 +225,7 @@ struct ChatView: View {
 
     private var inputRow: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
+            AttachButton(composer: composer)
             liveCallButton
 
             TextField(lang.s("chat.placeholder"), text: $input, axis: .vertical)
@@ -295,7 +299,7 @@ struct ChatView: View {
     @ViewBuilder
     private func messageRow(_ m: ChatMessage) -> some View {
         // Equatable row: a streamed chunk re-renders only the growing bubble.
-        ChatBubbleRow(isUser: m.role == "user", text: m.text, failed: m.failed)
+        ChatBubbleRow(isUser: m.role == "user", text: m.text, failed: m.failed, attachments: m.attachments)
             .equatable()
             .contextMenu { menu(for: m) }
             .accessibilityAction(named: lang.s("chat.copy")) { UIPasteboard.general.string = m.text }
@@ -367,15 +371,10 @@ struct ChatView: View {
                     .frame(width: ChatMetrics.control, height: ChatMetrics.control)
                     .sandyGlow(canSend)
 
-                if store.sending {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(Theme.Colors.onAccent)
-                } else {
-                    Image(systemName: "paperplane.fill")
-                        .scaledFont(Theme.Icon.sm, weight: .semibold)
-                        .foregroundColor(canSend ? Theme.Colors.onAccent : Theme.Colors.accentDeep.opacity(0.5))
-                }
+                // While she replies the stop button stands here instead.
+                Image(systemName: "paperplane.fill")
+                    .scaledFont(Theme.Icon.sm, weight: .semibold)
+                    .foregroundColor(canSend ? Theme.Colors.onAccent : Theme.Colors.accentDeep.opacity(0.5))
             }
         }
         .buttonStyle(.plain)
@@ -410,12 +409,14 @@ struct ChatView: View {
     /// والـView يتكفّل بصوت ساندي (لأنه يملك محرّك الصوت).
     private func send() {
         let text = trimmedInput
-        guard !text.isEmpty, !store.sending else {
+        let attachments = composer.ready
+        guard !text.isEmpty || !attachments.isEmpty, !store.sending, !composer.busy else {
             input = ""
             return
         }
 
         input = ""
+        composer.clear()
         speech.stopSpeaking()               // لو عم تقرأ رد قديم، تسكت
 
         // ساندي تقرأ ردها بصوت جيميني الحقيقي (لو السمّاعة شغّالة).
@@ -423,7 +424,7 @@ struct ChatView: View {
             editingLast = false
             speak { await store.editLast(api: state.api, to: text) }
         } else {
-            speak { await store.send(api: state.api, text: text) }
+            speak { await store.send(api: state.api, text: text, attachments: attachments) }
         }
     }
 
@@ -448,18 +449,28 @@ private struct ChatBubbleRow: View, Equatable {
     let isUser: Bool
     let text: String
     var failed = false
+    var attachments: [ChatAttachment] = []
 
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
             if isUser {
                 Spacer(minLength: ChatMetrics.bubbleGutter)
-                bubble
+                content
             } else {
                 // فقاعة ساندي تجيها أفاتار صغير لها.
                 SandyAvatar(size: ChatMetrics.avatar, mood: .happy)
-                bubble
+                content
                 Spacer(minLength: ChatMetrics.bubbleGutter)
             }
+        }
+    }
+
+    /// Photos and drawn images, then documents, then the words.
+    private var content: some View {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: Theme.Spacing.xs) {
+            ForEach(attachments.filter(\.isImage)) { AttachmentPicture(attachment: $0) }
+            ForEach(attachments.filter { !$0.isImage }) { AttachmentFileChip(attachment: $0) }
+            if !text.isEmpty { bubble }
         }
     }
 
@@ -746,40 +757,38 @@ private struct TypingIndicator: View {
     @EnvironmentObject var lang: LanguageManager
     /// What she is doing, shown beside the dots while a tool runs.
     var activity = ""
-    @State private var animating = false
+    /// A long wait: after a few seconds her short lines take the dots' place.
+    @State private var long = false
 
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
             SandyAvatar(size: ChatMetrics.avatar, mood: .happy)
             HStack(spacing: 5) {
-                ForEach(0..<3, id: \.self) { i in
-                    Circle()
-                        .fill(Theme.Colors.accent.opacity(0.55))
-                        .frame(width: 7, height: 7)
-                        .scaleEffect(animating ? 1.0 : 0.5)
-                        .opacity(animating ? 1.0 : 0.4)
-                        .animation(
-                            Animation.easeInOut(duration: 0.6)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(i) * 0.18).reduced,
-                            value: animating
-                        )
-                }
                 if !activity.isEmpty {
+                    LoadingDots()
                     Text(activity)
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.secondaryText)
                         .padding(.leading, 4)
                         .transition(.opacity)
+                } else if long {
+                    SandyWaiting(compact: true, showsFace: false)
+                } else {
+                    LoadingDots()
                 }
             }
             .animation(Animation.easeInOut(duration: 0.25).reduced, value: activity)
+            .animation(Animation.easeInOut(duration: 0.25).reduced, value: long)
             .padding(.vertical, Theme.Spacing.md)
             .padding(.horizontal, Theme.Spacing.md)
             .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: 0.06)
             Spacer(minLength: ChatMetrics.bubbleGutter)
         }
-        .onAppear { animating = true }
+        .task {
+            try? await Task.sleep(for: .seconds(3))
+            long = true
+        }
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(lang.s("chat.typingA11y"))
     }
 }

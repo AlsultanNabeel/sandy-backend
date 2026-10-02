@@ -117,9 +117,12 @@ struct AskBar: View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             SandyAvatar(size: 28, mood: thinking ? .soft : .happy)
             if thinking && reply.isEmpty {
-                HStack(spacing: Theme.Spacing.sm) {
-                    ProgressView().tint(Theme.Colors.accent)
-                    if !activity.isEmpty {
+                // What she is doing when a tool runs; otherwise her waiting lines.
+                if activity.isEmpty {
+                    SandyWaiting(compact: true, showsFace: false)
+                } else {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        LoadingDots()
                         Text(activity)
                             .font(Theme.Typography.caption)
                             .foregroundColor(Theme.Colors.secondaryText)
