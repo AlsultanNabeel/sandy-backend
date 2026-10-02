@@ -51,7 +51,6 @@ def _route(message, image_state=None):
     ("ساندي شغلي الضو", "living_light", "on"),    # vocative
     ("يا ساندي طفي الضو", "living_light", "off"),
     ("شغل ضو", "living_light", "on"),             # article on one side only
-    ("الضو شغل", "living_light", "on"),           # verb trailing
     ("turn on the fan", "fan", "on"),
     ("افتح الستارة", "curtain", "open"),          # cover → open, not on
     ("سكر الستارة", "curtain", "close"),
@@ -87,6 +86,10 @@ def test_the_story_that_ends_in_the_command_does_not_fire():
     "ما تشغل الضو",                          # negation: an unconsumed word
     "بدي اشغل الضو بكرا",                    # not now
     "شو رايك نشغل الضو",                     # a question
+    "شغلت الضو؟",                            # asked, not ordered
+    "شغل الضو؟",
+    "الضو شغل",                              # verb trailing: a report as often as an order
+    "المروحة وقفت",
     "he told him to turn on the fan",
     "I was going to turn on the fan",
 ])

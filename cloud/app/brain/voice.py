@@ -23,8 +23,8 @@ VOICE_THREAD = "voice"
 
 CONFIRM_TOOL = {
     "name": "confirm",
-    "description": ("جواب المستخدم على سؤال تأكيد سألتيه (اه/لأ). "
-                    "مرّري كلامه زي ما قاله بالضبط."),
+    "description": ("جواب المستخدم على سؤال سألتيه: تأكيد (اه/لأ) أو أي وحدة من القائمة "
+                    "(«الأولى»، «التنتين»). مرّري كلامه زي ما قاله بالضبط."),
     "parameters": {"type": "object",
                    "properties": {"answer": {"type": "string"}},
                    "required": ["answer"]},
@@ -57,6 +57,8 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
     held = confirm.live(P.load(VOICE_THREAD, chat_id, db))
     if held is None:
         return {"handled": True, "reply": "ما في إشي مستني تأكيد."}
+    if held.get("action") == confirm.CHOOSE:
+        return _answer_choice(answer, held, chat_id)
     said, rest = confirm.read(answer, held)
     if said == "other":
         # Asked once more, as in chat; a second unclear answer lets it go (C10: say so).
@@ -75,6 +77,38 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
     return out
 
 
+def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
+    """«الأولى» after «أي وحدة؟», as in chat: each chosen row is acted on, and what still
+    needs a yes waits as one question."""
+    db = get_db()
+    if confirm.answer(answer) == "no":
+        P.save(VOICE_THREAD, chat_id, db, None)
+        return {"handled": True, "reply": confirm.CANCELLED_REPLY}
+    ids = confirm.pick(answer, held.get("candidates") or [])
+    if ids is None:
+        again = confirm.asked_again(held)
+        P.save(VOICE_THREAD, chat_id, db, again)
+        if again is None:
+            return {"handled": True, "ok": False,
+                    "reply": "[لم يُنفَّذ] ما فهمت أي وحدة مرتين، فما عملت إشي."}
+        return {"handled": True,
+                "reply": f"ما فهمت أي وحدة — اسأليه مرة تانية:\n{confirm.choice_question(held['candidates'])}"}
+    name = held.get("tool", "")
+    base = {k: v for k, v in (held.get("args") or {}).items() if k not in ("match_text", "all_matching")}
+    waiting, results = None, []
+    for row_id in ids:
+        args = {**base, "id": row_id}
+        result = tools.execute(name, args, TurnCtx(user_id=chat_id, source="voice"))
+        if result.get("needs_confirmation"):
+            waiting = confirm.with_step(waiting, name, args, result["summary"])
+        else:
+            results.append(_tagged(result)["reply"])
+    P.save(VOICE_THREAD, chat_id, db, waiting)
+    if waiting is not None:
+        results.append(f"لسا ما نفّذت — اسأليه: {confirm.question(waiting['summary'])}")
+    return {"handled": True, "reply": "\n".join(results)}
+
+
 def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
     """Run one voice tool call for ``chat_id`` (the caller sets the tenant context)."""
     if name == "confirm":
@@ -90,4 +124,10 @@ def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
         # Not done yet and not refused: the pending is live (C10).
         return {"handled": True,
                 "reply": f"لسا ما نفّذت — اسأليه: {confirm.question(held['summary'])}"}
+    if result.get("needs_choice"):
+        P.save(VOICE_THREAD, chat_id, get_db(),
+               confirm.hold_choice(name, args or {}, result["candidates"]))
+        # Not done and not refused: she asks which, and `confirm` takes the answer.
+        return {"handled": True,
+                "reply": f"لسا ما نفّذت — اسأليه:\n{confirm.choice_question(result['candidates'])}"}
     return _tagged(result)

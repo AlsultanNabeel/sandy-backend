@@ -133,7 +133,8 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    lets the hold go, so an old yes never fires later.
 2. **The fast path** (`fast_path.py`): a bare device command («شغّل الضو») is
    matched *whole* against the caller's own registered devices and run with no
-   model call at all. It only picks the tool; `device_control`,
+   model call at all. The verb must lead and the line must not end in a question
+   mark: «التلفزيون شغل؟» or «المكيف وقف» is a question or a report, for the model. It only picks the tool; `device_control`,
    `command_payload` and `tenant_owns_topic` run underneath it unchanged. Its four
    conditions, and why it is not the thing C8 bans, are in `CONVENTIONS.md` C8b.
    `SANDY_FAST_PATH=0` turns it off.
@@ -160,7 +161,9 @@ The `[turn] …ms total — brain tools=[…]` log line says where a slow turn w
 
 ### 2.4 Tools
 
-Fifteen (`tools.py`), voice adds `confirm`. Enums come from `kinds.KINDS`, so a new
+Sixteen (`tools.py`), voice adds `confirm`. The extra fields are named (`LOG_DATA`,
+`LIST_DATA`: amount, category, mood, habit days and time, repeat, qty…), never a
+free-form object, which the voice model drops. Enums come from `kinds.KINDS`, so a new
 kind needs no tool change.
 
 | Tool | Does |
@@ -170,10 +173,11 @@ kind needs no tool change.
 | `list_add` | `items.add`; `due` parsed like `when`; the same open item again is not added: `qty` adds to its quantity («كمان حليب»), a `due` moves it, with neither it is reported |
 | `list_update` | by `id` or `match_text` (`matching.match_rows`: exact, contained, fuzzy ≥ 0.72; a fuzzy match is a guess and waits for a yes, in `log_update` and `schedule_update` too): done / text / due / `no_due` (takes the due off) / priority / `data` merged (habit days and time, qty, repeat) / `move_to` another list / delete. Done on a habit ticks today (a `habit` entry, once a day) and keeps the habit open |
 | `log_update` | a log row by `id` (`state_block` shows today's, `facts_block` the facts), `match_text`, or the newest of a `kind`: new text (an encrypted row is sealed again, never embedded), `amount`/`data` merged, or delete. A changed fact is updated, not logged again; «انسي…» deletes it |
-| `schedule` | `schedules.add`; `when` = ISO, else the clock words (`when._clock`: a named weekday or «يوم 15» keeps its day, the number after «الساعة» is the hour, «12 الظهر» is noon, morning/evening words match whole words only, and with none, today takes the nearest time ahead while another day reads 1–6 as afternoon and 7–11 as morning), else a bare weekday, else one model call (`when._parse_with_model`), else the deterministic Arabic date parser. `before_id` + `before_minutes` sets it ahead of an existing reminder's or task's time |
+| `schedule` | `schedules.add`; `when` = ISO, else the clock words (`when._clock`: a named weekday or «يوم 15» keeps its day, the number after «الساعة» is the hour, «12 الظهر» is noon, morning/evening words match whole words only, and with none, today takes the nearest time ahead while another day reads 1–6 as afternoon and 7–11 as morning), else a bare weekday, else one model call (`when._parse_with_model`), else the deterministic Arabic date parser. `before_id` + `before_minutes` sets it ahead of an existing reminder's or task's time. With `device` + `value` it is a timed device command («طفّي المكيف بعد ساعة»): a `scene` row marked `payload.asked`, shown in the state block and cancellable like a reminder, and never cancelled by a scene |
 | `schedule_update` | reminders only: move / rename / cancel (status `cancelled`); `recurrence` changes the repeat, `stop_repeat` ends it, `skip_next` jumps one occurrence (`schedule_runner.next_occurrence`). A reminder that rang in the last two hours (`fired_at`, shown in the state block) can be snoozed: a one-time one goes back to pending, a repeating one gets a one-time copy and its series is left alone |
 | `summarize` | the period's entries, items and schedules as rows; the model writes the summary, nothing is stored; expenses come with `spending`. `week`, `month` and `year` are calendar ones (the week runs Saturday to Friday; the 1st; January) up to today's end |
-| `device_control` | a registered device by slug or label; `command_payload` validates, `send_to_topic` checks the topic is the caller's; an unknown device or action is refused with what is available |
+| `device_control` | a registered device by slug or label, several (`devices`), or every device of a `room`; `by` moves a dimmer from its current level; `command_payload` validates, `send_to_topic` checks the topic is the caller's; an unknown device or action is refused with what is available, and a device that is not connected is reported as not done («ما اشتغل») |
+| `device_state` | reads each device's last sent state, whether it is connected and when it was last heard; changes nothing. The state block lists the devices by name and room |
 | `scene_apply` | `scene_store.apply_scene` (keeps the devices' state first, actuates, schedules the reverts, §2.12) plus the room-node vocabulary fallback |
 | `room_restore` | `scene_store.restore_room`: the devices the last scene changed get the state kept before it (`device_store.before_scene`; IR and screen text are not replayed), its timers are cancelled; once per scene |
 | `web_search` | `features/research.web_answer`: Exa snippets summarised in one model call, with sources |
@@ -198,8 +202,9 @@ negated verb («لا تحذفها») is a no; cancellation wins a mixed reply; a
 reads several («الأولى والتالتة»), a bare number word is that one («اتنين» is the
 second), «الاتنين»/«كلهم» are all. On voice there is no text turn to read, so the
 `confirm(answer)` tool passes the user's words to the same resolver; holds wait on
-the `voice` pending thread, a second hold joins the first, and an unclear answer is
-asked once more, then let go, as in chat.
+the `voice` pending thread, a second hold joins the first, a «which one?» waits there
+too and `confirm` takes the pick («الأولى»), and an unclear answer is asked once more,
+then let go, as in chat.
 
 **On the voice path everything that did not happen is marked**
 (`voice._tagged`), because an unmarked refusal is exactly what Gemini reads as
@@ -547,7 +552,7 @@ dynos. `fired_at` and `last_error` are set on the row.
 | Kind | Firing |
 |---|---|
 | `reminder` | The phone rings it locally from `GET /api/schedules`. The server also pushes over APNs when `services/apns.py` is configured, unless the row is more than 15 minutes late. `failed` only when devices exist and none took the push. |
-| `scene` | A scene's timed revert: `scene_store.apply_scene` cancels the tenant's pending `scene` rows and writes one per `for_min` action; the runner sends it through `scene_store._actuate`, and a miss retries a minute later up to `MAX_TIMER_TRIES`, then `failed`. |
+| `scene` | A scene's timed revert, or a timed device command the user asked for (`payload.asked`): `scene_store.apply_scene` cancels the tenant's pending revert rows (not the asked ones) and writes one per `for_min` action; the runner sends it through `scene_store._actuate`, and a miss retries a minute later up to `MAX_TIMER_TRIES`, then `failed`. |
 | `daily_nudge`, `summary_nudge` | push text only; `failed` when no device took it (no APNs, no token, every send refused). |
 | `message_to_future_self` | not fired here: the next chat reply delivers it (§2.3). |
 
@@ -569,7 +574,7 @@ pending reminders) and the last STM turn ("was up late").
 | `model.py` | the model call (Azure via `chat_fn`, then OpenAI direct), streaming, the stream hooks |
 | `tools.py` | the tool table (JSON schemas from `kinds.KINDS`), `declarations()` for Gemini Live, `execute()` |
 | `tools_blocks.py` | `remember`, `recall`, `summarize`, `list_add`, `list_update`, `schedule`, `schedule_update` |
-| `tools_world.py` | `device_control`, `scene_apply`, `web_search`, `weather`, `image` |
+| `tools_world.py` | `device_control`, `device_state`, `scene_apply`, `room_restore`, `web_search`, `weather`, `image` |
 | `context.py` | the system prompt, steady parts first so the provider can cache the prefix: persona, rules, the channel line (chat: written, emoji welcome; voice: heard, no emoji), profile, facts, open state, related entries, the clock, and last the reply language (this message's, Arabic or English, decided in code) |
 | `persona.py` | `build_effective_persona`: tone (custom instructions or `SANDY_PERSONALITY`), dialect preset, then the language, no-promises and anti-injection rules, then `SANDY_IDENTITY_LOCK` last |
 | `stm.py` | short-term memory and the cross-channel read |

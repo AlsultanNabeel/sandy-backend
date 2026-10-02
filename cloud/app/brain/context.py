@@ -154,6 +154,14 @@ def state_block(rows: int = STATE_ROWS) -> str:
     logged = _logged_today(rows)
     if logged:
         parts.append("سجّل اليوم:\n" + "\n".join(logged))
+    timers = [s for s in schedules.list_schedules("scene", status="pending", limit=rows)
+              if (s.get("payload") or {}).get("asked")]
+    if timers:
+        parts.append("أوامر أجهزة جاية:\n" + "\n".join(
+            f"- {s.get('text', '')} ({_when(s.get('fire_at'))}) #{s['id']}" for s in timers))
+    devices = _devices_line()
+    if devices:
+        parts.append(devices)
     rang = [s for s in schedules.list_schedules("reminder", fired_since=datetime.now(timezone.utc) - RANG_WINDOW,
                                                 limit=rows) if s.get("status") == "sent" or s.get("recurrence")]
     if rang:
@@ -166,6 +174,18 @@ def state_block(rows: int = STATE_ROWS) -> str:
     if not parts:
         return "وضعه هلأ: ما عنده مهام مفتوحة ولا تذكيرات جاية."
     return "وضعه هلأ (استعملي الـ id لما تعدّلي):\n" + "\n\n".join(parts)
+
+
+def _devices_line() -> str:
+    """His devices by name and room, so «طفّي كل الأضواء» or «ضو المطبخ» lands on them
+    (their state is read with device_state, when asked)."""
+    from app.features.device_store import list_devices
+
+    found = list_devices()
+    if not found:
+        return ""
+    return "أجهزته: " + "، ".join(
+        f"{d['label']} ({d['name']}{'، ' + d['room'] if d.get('room') else ''})" for d in found[:40])
 
 
 def _logged_today(rows: int) -> List[str]:

@@ -102,6 +102,11 @@ def _coll():
     return scoped(get_db(), _COLL)
 
 
+# A scene's own reverts; a timed device command the user asked for («طفّي المكيف بعد
+# ساعة», `payload.asked`) is not the scene's to cancel.
+_SCENE_TIMERS = {"kind": "scene", "status": "pending", "payload.asked": {"$ne": True}}
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -250,7 +255,7 @@ def apply_scene(name: str) -> Dict[str, Any]:
     timers = 0
     pending = _base.coll(_base.SCHEDULES)
     if pending is not None:
-        pending.update_many({"kind": "scene", "status": "pending"},
+        pending.update_many(_SCENE_TIMERS,
                             {"$set": {"status": "cancelled"}})
         now = _now()
         for a in sc["actions"]:
@@ -284,7 +289,7 @@ def restore_room() -> Dict[str, Any]:
         return {"ok": False, "error": "nothing_kept"}
     pending = _base.coll(_base.SCHEDULES)
     if pending is not None:
-        pending.update_many({"kind": "scene", "status": "pending"},
+        pending.update_many(_SCENE_TIMERS,
                             {"$set": {"status": "cancelled"}})
     sent, missed = _actuate(actions)
     return {"ok": True, "sent": sent, "missed": missed}

@@ -98,7 +98,7 @@ KINDS: Tuple[Kind, ...] = (
          "Message to future self", "envelope", {
              "encrypted": _B, "delivered_at": _T}),
     Kind("scene", SCHEDULE, "مؤقّت مشهد", "Scene timer", "timer", {
-        "device": _S, "value": _S, "tries": _I}),
+        "device": _S, "value": _S, "tries": _I, "asked": _B}),
     Kind("daily_nudge", SCHEDULE, "لفتة يومية", "Daily nudge", "sun.max", {
         "nudge_kind": _S, "qid": _S, "date": _S}),
     Kind("summary_nudge", SCHEDULE, "تذكير بالملخص", "Summary nudge",

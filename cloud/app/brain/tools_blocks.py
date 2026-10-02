@@ -477,8 +477,32 @@ def _anchor_time(row_id: str) -> Optional[Any]:
     return W.aware_utc(item["due"]) if item and item.get("due") else None
 
 
+def _device_timer(args: Dict[str, Any]) -> Dict[str, Any]:
+    """«طفّي المكيف بعد ساعة»: the device and the value, checked now, sent by the runner
+    at the time (a `scene` row marked `asked`, so a scene does not cancel it)."""
+    from app.brain.tools_world import _resolve_device
+    from app.features.device_store import command_payload
+
+    device = _resolve_device(str(args.get("device") or ""))
+    if device is None:
+        return refused("no device by that name")
+    value = str(args.get("value") or args.get("action") or "").strip()
+    res = command_payload(device, value, value)
+    if not res.get("ok"):
+        return refused("that device does not take this value", allowed=res.get("allowed"))
+    label = device.get("label") or device["name"]
+    return {"kind": "scene", "text": f"{label} → {res['payload']}",
+            "payload": {"device": device["name"], "value": res["payload"], "asked": True}}
+
+
 def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "reminder"), str(args.get("text") or "").strip()
+    payload = None
+    if args.get("device"):
+        timer = _device_timer(args)
+        if not timer.get("kind"):
+            return timer
+        kind, text, payload = timer["kind"], timer["text"], timer["payload"]
     # The model gives minutes or the user's words; the clock arithmetic is ours.
     minutes = _minutes(args.get("in_minutes"))
     if args.get("before_id"):
@@ -499,13 +523,20 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if rule is None:
         return refused("recurrence must be daily|weekly|monthly|yearly or an RRULE")
     try:
-        sid = schedules.add(kind, text, fire_at, recurrence=rule)
+        sid = schedules.add(kind, text, fire_at, payload, recurrence=rule)
     except KindError as exc:
         return refused(str(exc))
     if not sid:
         return refused("not saved")
+    said = f"بعمل «{text}»" if payload else f"بذكّرك «{text}»"
     return {"ok": True, "id": sid, "when": W.local_text(fire_at),
-            "reply": f"تمام، بذكّرك «{text}» {W.local_text(fire_at)} ⏰"}
+            "reply": f"تمام، {said} {W.local_text(fire_at)} ⏰"}
+
+
+def _device_timers() -> List[Dict[str, Any]]:
+    """Timed device commands the user asked for: shown and cancellable like reminders."""
+    return [s for s in schedules.list_schedules("scene", status="pending")
+            if (s.get("payload") or {}).get("asked")]
 
 
 def _rang_lately(row: Dict[str, Any]) -> bool:
@@ -525,13 +556,14 @@ def _skipped(row: Dict[str, Any]) -> Optional[Any]:
 
 
 def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    # Reminders only: the daily nudge, scene timers and sealed messages are not his to edit here.
-    pool = schedules.list_schedules("reminder", status="pending")
+    # Reminders and the device timers he asked for: the daily nudge, a scene's own reverts and
+    # sealed messages are not his to edit here.
+    pool = schedules.list_schedules("reminder", status="pending") + _device_timers()
     known = {r["id"] for r in pool}
     # Just rang: a one-time reminder is no longer pending, but «أجّليه» still means it.
     pool += [r for r in schedules.list_schedules("reminder", fired_since=W.now_utc() - RANG_WINDOW)
              if r["id"] not in known and r.get("status") == "sent"]
-    picked = _pick(args, pool, lambda i: r if (r := schedules.get(i)) and r.get("kind") == "reminder" else None)
+    picked = _pick(args, pool, lambda i: next((r for r in pool if r["id"] == i), None))
     if "rows" not in picked:
         return picked
     rows = picked["rows"]

@@ -39,13 +39,28 @@ def _list_enum() -> Dict[str, Any]:
     return spec
 
 
+# The extra fields, named: the voice model drops a free-form object, so an amount, a
+# mood, a habit's days or a task's repeat would never reach the tool.
+_N = {"type": "number"}
+LOG_DATA = {"type": "object", "description": "حقول إضافية حسب النوع (اختياري)", "properties": {
+    "amount": {**_N, "description": "مبلغ المصروف"},
+    "category": {**_S, "description": "تصنيف المصروف: food transport shopping bills fun health other"},
+    "mood": {**_S, "description": "للمزاج: stressed frustrated sad angry happy excited"},
+    "book": _S, "pages": _I}}
+LIST_DATA = {"type": "object", "description": "حقول إضافية حسب القائمة (اختياري)", "properties": {
+    "days": {"type": "array", "items": _I, "description": "أيام العادة: 1 الأحد … 7 السبت"},
+    "time": {**_S, "description": "وقت العادة HH:MM"},
+    "repeat": {**_S, "description": "تكرار المهمة: daily|weekly|monthly"},
+    "qty": _N, "unit": _S, "notes": _S}}
+
+
 def _schemas() -> List[Dict[str, Any]]:
-    data = {"type": "object", "description": "حقول إضافية حسب النوع (اختياري)"}
+    data = LIST_DATA
     target = {"id": _S, "match_text": {**_S, "description": "نص العنصر كما سمّاه المستخدم"},
               "all_matching": {"type": "boolean", "description": "كل العناصر المطابقة"}}
     return [
         {"name": "remember", "description": "سجّلي إشي صار أو معلومة عن المستخدم بالسجلّ.",
-         "parameters": _obj({"kind": _enum(LOG, "النوع"), "text": _S, "data": data},
+         "parameters": _obj({"kind": _enum(LOG, "النوع"), "text": _S, "data": LOG_DATA},
                             ["kind", "text"])},
         {"name": "recall", "description": "دوّري بالسجلّ والقوائم والتذكيرات ورجّعي صفوف مختصرة.",
          "parameters": _obj({"query": _S,
@@ -70,7 +85,7 @@ def _schemas() -> List[Dict[str, Any]]:
         {"name": "log_update",
          "description": "صحّحي أو احذفي إشي بالسجلّ (مصروف، معلومة عنه...)؛ خدي الـ id من «سجّل اليوم» أو «معلومات بتعرفيها»، والنص بس لو مش ظاهر. بلا id ولا نص: آخر واحد من النوع.",
          "parameters": _obj({**target, "kind": {**_S, "description": "نوع السجلّ (اختياري)"},
-                             "text": _S, "amount": {"type": "number"}, "data": data,
+                             "text": _S, "amount": {"type": "number"}, "data": LOG_DATA,
                              "delete": {"type": "boolean"}}, [])},
         {"name": "schedule", "description": "تذكير أو إشي بصير بوقت محدّد.",
          "parameters": _obj({"kind": _enum(SCHEDULE, "النوع"), "text": _S,
@@ -78,7 +93,9 @@ def _schemas() -> List[Dict[str, Any]]:
                              "when": {**_S, "description": "لوقت محدد: كلام المستخدم زي ما هو («عالخمسة»، «بكرا الصبح»)، أو YYYY-MM-DD HH:MM بتوقيته بدون منطقة زمنية"},
                              "recurrence": {**_S, "description": "daily|weekly|monthly|yearly أو RRULE"},
                              "before_id": {**_S, "description": "«قبل الاجتماع بربع ساعة»: id التذكير أو المهمة اللي إلها وقت"},
-                             "before_minutes": {**_I, "description": "قديش دقيقة قبل before_id"}},
+                             "before_minutes": {**_I, "description": "قديش دقيقة قبل before_id"},
+                             "device": {**_S, "description": "أمر جهاز بوقت («طفّي المكيف بعد ساعة»): الجهاز"},
+                             "value": {**_S, "description": "مع device: الأمر (on/off/رقم...)"}},
                             ["kind", "text"])},
         {"name": "schedule_update", "description": "غيّري وقت/نص/تكرار تذكير، أجّلي واحد لسا رنّ، أو الغيه؛ خدي الـ id من «وضعه هلأ»، والنص بس لو مش ظاهر.",
          "parameters": _obj({**target,
@@ -93,8 +110,16 @@ def _schemas() -> List[Dict[str, Any]]:
                              "focus": {**_S, "description": "نوع أو قائمة أو موضوع (اختياري)"}},
                             ["period"])},
         {"name": "device_control",
-         "description": "تحكّم بجهاز مسجّل بأمر صريح فقط («طفّي نور الصالة»).",
-         "parameters": _obj({"device": _S, "action": _S, "value": _S}, ["device", "action"])},
+         "description": "تحكّم بجهاز مسجّل بأمر صريح فقط («طفّي نور الصالة»)؛ لعدة أجهزة devices، لغرفة room.",
+         "parameters": _obj({"device": _S,
+                             "devices": {"type": "array", "items": _S, "description": "أكتر من جهاز («طفّي كل الأضواء»)"},
+                             "room": {**_S, "description": "كل أجهزة الغرفة"},
+                             "action": _S, "value": _S,
+                             "by": {**_I, "description": "تغيير نسبي للإضاءة/المستوى («خفّفي شوي» = -20، «علّي شوي» = 20)"}},
+                            ["action"])},
+        {"name": "device_state",
+         "description": "اقري حالة الأجهزة («الضو شغّال؟»، «المكيف متّصل؟»)؛ بلا جهاز = كلهم.",
+         "parameters": _obj({"device": _S, "room": _S}, [])},
         {"name": "scene_apply", "description": "طبّقي مشهد غرفة بأمر صريح فقط.",
          "parameters": _obj({"name": _S}, ["name"])},
         {"name": "room_restore",
@@ -116,7 +141,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "remember": B.remember, "recall": B.recall, "summarize": B.summarize,
     "list_add": B.list_add, "list_update": B.list_update,
     "schedule": B.schedule, "schedule_update": B.schedule_update,
-    "device_control": X.device_control, "scene_apply": X.scene_apply,
+    "device_control": X.device_control, "device_state": X.device_state, "scene_apply": X.scene_apply,
     "web_search": X.web_search, "weather": X.weather, "image": X.image,
     "undo_last": B.undo_last, "log_update": B.log_update, "room_restore": X.room_restore,
 }

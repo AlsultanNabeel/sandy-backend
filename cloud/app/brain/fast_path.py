@@ -178,15 +178,14 @@ def _looks_like_prose(raw: str) -> bool:
 def _split_verb(utterance: str) -> Optional[Tuple[Tuple[str, ...], str]]:
     """Split a normalized utterance into (actions, target), or None.
 
-    The verb may lead or trail — «شغّل الضو» and «الضو شغّل» are both orders —
-    and whatever is left after removing it is the target, entire. Nothing is
-    searched for *inside* the utterance.
+    The verb must lead: «شغّل الضو» is an order, but «الضو شغّال» / «المكيف وقف»
+    is as often a question or a report («is the light on?», «the AC stopped»), and
+    spoken it has no question mark to tell. Whatever is left after the verb is the
+    target, entire. Nothing is searched for *inside* the utterance.
     """
     for form in _VERB_FORMS:
         if utterance.startswith(form + " "):
             return _VERBS[form], utterance[len(form) + 1:].strip()
-        if utterance.endswith(" " + form):
-            return _VERBS[form], utterance[: -len(form) - 1].strip()
     return None
 
 
@@ -249,7 +248,8 @@ def try_fast_route(message: str, *, image_state: Any = None) -> Optional[Dict[st
             return None
 
         raw = str(message or "")
-        if not raw.strip() or _looks_like_prose(raw):
+        # «التلفزيون شغل؟» asks; it does not order.
+        if not raw.strip() or raw.strip().endswith(("?", "؟")) or _looks_like_prose(raw):
             return None
 
         utterance = _normalize(raw)
