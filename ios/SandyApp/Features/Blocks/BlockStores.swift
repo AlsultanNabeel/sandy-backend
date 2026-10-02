@@ -142,12 +142,20 @@ final class ItemsStore: LoadableStore {
         guard restored else { return }
         DiskCache.save(items, key: Self.key(list, done), userId: userId)
         if list == "tasks" && !done { publishTasks() }
+        if isHabits { reportHabits() }
+    }
+
+    /// The evening nudge names the habits not kept yet today.
+    private func reportHabits() {
+        NotificationManager.shared.setHabits(left: items.filter { checkedToday[$0.id] == nil }.map(\.text),
+                                             total: items.count)
     }
 
     private func saveChecks() {
         guard restored, isHabits else { return }
         DiskCache.save(Checks(day: dayFormat.string(from: Date()), checked: checkedToday, streaks: streaks),
                        key: "habits.checks", userId: userId)
+        reportHabits()
     }
 
     func load(api: APIClient) async {
@@ -346,6 +354,7 @@ final class ItemsStore: LoadableStore {
                                          dueAt: $0.due ?? "", priority: $0.priority ?? "normal") }
         WidgetData.setOpenTasks(tasks)
         WidgetData.setActiveTasks(count: tasks.count)
+        NotificationManager.shared.setOpenTasks(tasks.count)
         let title = AppLocale.isArabic ? "مهمة" : "Task"
         let notes = items.compactMap { item -> NotificationItem? in
             guard let date = NotificationManager.parseISO(item.due ?? ""), date > Date() else { return nil }

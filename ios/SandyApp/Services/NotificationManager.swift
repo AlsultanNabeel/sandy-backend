@@ -278,6 +278,28 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     static let awayID = "proactive.away"
     static let weeklyID = "proactive.weekly"
     static let headsUpPrefix = "proactive.headsUp."
+    static let morningID = "proactive.morning"
+    static let habitsID = "proactive.habits"
+
+    /// What the morning and evening nudges talk about, from the stores.
+    private var openTasks = 0
+    private var habitsLeft: [String] = []
+    private var habitsTotal = 0
+
+    func setOpenTasks(_ count: Int) {
+        knownLock.lock()
+        openTasks = count
+        knownLock.unlock()
+        scheduleProactiveNudges()
+    }
+
+    func setHabits(left: [String], total: Int) {
+        knownLock.lock()
+        habitsLeft = left
+        habitsTotal = total
+        knownLock.unlock()
+        scheduleProactiveNudges()
+    }
 
     /// The last items `sync` saw per prefix.
     private var knownItems: [String: [NotificationItem]] = [:]
@@ -288,6 +310,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     func scheduleProactiveNudges() {
         knownLock.lock()
         let known = knownItems
+        let tasks = openTasks
+        let left = habitsLeft
+        let habitCount = habitsTotal
         knownLock.unlock()
         center.getNotificationSettings { [weak self] settings in
             guard let self else { return }
@@ -318,6 +343,34 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 title: translate(lang, "blocks.notif.weekly.title"),
                 body: translate(lang, "blocks.notif.weekly.body"),
                 trigger: UNCalendarNotificationTrigger(dateMatching: sunday, repeats: true))
+
+            // (d) good morning with the day in one line, the next 8:30.
+            let morning = Self.next(hour: 8, minute: 30)
+            let reminders = (known["reminder."] ?? []).filter {
+                $0.repeats == .daily || Calendar.current.isDate($0.date, inSameDayAs: morning)
+            }.count
+            let busy = tasks + reminders + habitCount > 0
+            self.addProactive(
+                id: Self.morningID,
+                title: translate(lang, "blocks.notif.morning.title"),
+                body: busy ? String(format: translate(lang, "blocks.notif.morning.body"),
+                                    AppLocale.number(tasks), AppLocale.number(reminders),
+                                    AppLocale.number(habitCount))
+                           : translate(lang, "blocks.notif.morning.free"),
+                trigger: Self.at(morning))
+
+            // (e) at nine in the evening, the habits not kept yet today.
+            let evening = Calendar.current.date(bySettingHour: 21, minute: 0, second: 0, of: Date()) ?? Date()
+            if left.isEmpty || evening <= Date() {
+                self.center.removePendingNotificationRequests(withIdentifiers: [Self.habitsID])
+            } else {
+                self.addProactive(
+                    id: Self.habitsID,
+                    title: translate(lang, "blocks.notif.habits.title"),
+                    body: String(format: translate(lang, "blocks.notif.habits.body"),
+                                 left.prefix(3).joined(separator: lang == .ar ? "، " : ", ")),
+                    trigger: Self.at(evening))
+            }
 
             // (b) heads-up an hour before today's timed tasks/reminders.
             let heads = Self.headsUps(known: known, now: Date())
@@ -361,6 +414,19 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             }
         }
         return out
+    }
+
+    /// Today at that time, or tomorrow when it has passed.
+    private static func next(hour: Int, minute: Int) -> Date {
+        let cal = Calendar.current
+        let today = cal.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
+        return today > Date() ? today : cal.date(byAdding: .day, value: 1, to: today) ?? today
+    }
+
+    private static func at(_ date: Date) -> UNCalendarNotificationTrigger {
+        UNCalendarNotificationTrigger(
+            dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date),
+            repeats: false)
     }
 
     private struct HeadsUp {
