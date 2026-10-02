@@ -67,6 +67,7 @@ struct LifeHeader: View {
     /// The day picked on the strip; the log below shows only it.
     @Binding var day: Date?
     @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var projects: [String] = []
     /// Opens the spending sheet (presented by the screen, not from inside a list row).
     let openSpending: () -> Void
 
@@ -89,6 +90,17 @@ struct LifeHeader: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    // Projects Sandy keeps from chat, a card each (there is no fixed list of them).
+                    ForEach(projects, id: \.self) { list in
+                        let name = String(list.dropFirst("project:".count))
+                        NavigationLink {
+                            ItemsView(kind: BlockKind(name: list, block: .list, labels: ["ar": name, "en": name],
+                                                      icon: "folder.fill", prefix: false))
+                        } label: {
+                            card(icon: "folder.fill", title: name)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     NavigationLink { SchedulesView(kind: "message_to_future_self") } label: {
                         card(icon: "envelope.fill", title: lang.s("blocks.future"))
                     }
@@ -97,6 +109,7 @@ struct LifeHeader: View {
             }
         }
         .padding(.vertical, Theme.Spacing.sm)
+        .task { projects = (try? await state.api.projectLists()) ?? projects }
     }
 
     private var monthStrip: some View {

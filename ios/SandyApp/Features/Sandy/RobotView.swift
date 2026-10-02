@@ -1,47 +1,49 @@
 import SwiftUI
 
-/// تبويب الروبوت — تحكّم بأجهزة الغرفة (room-node عبر MQTT): قائمة المشاهد،
-/// تشغيلها، وإضافة/تعديل/حذف. مصدر الحقيقة الوحيد للمشاهد؛ الفوكس يقرأ من نفس
-/// الستور قائمة مشاهد البداية/النهاية للمؤقّت. owner-gated بالباك-إند.
+/// روبوت ساندي — كل إشي بيخصّها بمكان واحد: حالتها هلأ (متّصلة، وشها، الواي فاي)،
+/// جسمها (الوش والشاشة والإضاءة والصوت والكاميرا)، فحص القطع، شبكة اللوح، ليش قطعة
+/// مش ظاهرة، وربطها أو فكّها. مشاهد الغرفة مش هون: إلها التحكّم بالبيت.
 struct RobotView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
 
-    /// مصدر الحقيقة للمشاهد: يملك البيانات + الجلب + الإجراءات، مستقل عن دورة
-    /// حياة الشاشة — فالسحب/التنقّل ما يلغي الجلب.
+    /// Her state now (the live pulse) and her quick buttons.
     @StateObject private var store = RobotStore()
+    /// Her parts are devices: the body screen, the parts test and the board's Wi-Fi read them.
+    @StateObject private var devices = DevicesStore()
 
     @Environment(\.scenePhase) private var scenePhase
     /// الشاشة ظاهرة فعلًا — رجوع التطبيق للواجهة ما بيشغّل النبض لتبويب مخفي.
     @State private var visible = false
 
-    @State private var editing: RoomScene?
-    @State private var showAdd = false
+    /// The board that speaks: the robot (a room node has no audio).
+    private var robotNode: NodeItem? {
+        devices.nodes.first { $0.capabilities.contains("audio") }
+    }
 
     var body: some View {
         ZStack {
             SandyBackground()
-
-            VStack(spacing: 0) {
-                if store.demo { DemoBanner() }
-
-                if !store.notice.isEmpty {
-                    SandyNotice(store.notice, kind: .info)
-                        .padding(.horizontal, Theme.Spacing.md)
-                        .padding(.top, Theme.Spacing.sm)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+            ScrollView {
+                VStack(spacing: Theme.Spacing.md) {
+                    if store.demo { DemoBanner() }
+                    if !store.notice.isEmpty {
+                        SandyNotice(store.notice, kind: .info)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    RobotLiveSection(store: store)
+                    links
                 }
-
-                content
+                .padding(Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xxl + Theme.Spacing.xl)
             }
         }
         .navigationTitle(lang.s("tabs.robot"))
-        .animation(Animation.spring(response: 0.45, dampingFraction: 0.8).reduced, value: store.scenes.map(\.id))
         .animation(Animation.easeInOut(duration: 0.25).reduced, value: store.notice)
-        .task { await store.load(api: state.api) }
+        .task { await devices.load(api: state.api) }
         .refreshable {
             await store.refreshLive(api: state.api)
-            await store.load(api: state.api)
+            await devices.load(api: state.api)
         }
         // نبض حي كل خمس ثواني وهي الشاشة ظاهرة بس — بيوقف لما تختفي أو يروح
         // التطبيق للخلفية، وبيرجع لما يرجع.
@@ -50,6 +52,84 @@ struct RobotView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && visible { store.startLive(api: state.api) } else { store.stopLive() }
         }
+    }
+
+    /// Everything else about her, one row each.
+    private var links: some View {
+        SandyCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                row("figure.wave", "robot.hub.body", "robot.hub.bodyNote") {
+                    RobotControlView(store: devices)
+                }
+                if let node = robotNode {
+                    row("waveform.badge.magnifyingglass", "robot.hub.test", "robot.hub.testNote") {
+                        RobotTestView(store: devices, node: node)
+                    }
+                    row("wifi", "wifi.title", "robot.hub.wifiNote") {
+                        NodeWiFiView(node: node, onFinished: { await devices.load(api: state.api) })
+                    }
+                }
+                row("stethoscope", "robot.hub.diagnose", "robot.hub.diagnoseNote") { DiagnoseView() }
+                row("link", "robot.hub.pairing", "robot.hub.pairingNote") { AccountView() }
+            }
+        }
+    }
+
+    private func row<Destination: View>(_ icon: String, _ titleKey: String, _ noteKey: String,
+                                        @ViewBuilder destination: @escaping () -> Destination) -> some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: Theme.Spacing.md) {
+                Image(systemName: icon)
+                    .scaledFont(Theme.Icon.md, weight: .semibold)
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(lang.s(titleKey))
+                        .font(Theme.Typography.headline)
+                        .foregroundColor(Theme.Colors.primaryText)
+                    Text(lang.s(noteKey))
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.forward")
+                    .scaledFont(Theme.Icon.sm, weight: .semibold)
+                    .foregroundColor(Theme.Colors.tertiaryText)
+            }
+            .padding(.vertical, Theme.Spacing.xs)
+            .accessibilityElement(children: .combine)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// مشاهد الغرفة — بالتحكّم بالبيت: تشغيلها، وإضافتها، وتعديلها، وحذفها. نفس `RobotStore`
+/// اللي بيقرأ منه الفوكس مشاهد البداية والنهاية.
+struct RoomScenesSection: View {
+    @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
+    @ObservedObject var store: RobotStore
+    @State private var editing: RoomScene?
+    @State private var showAdd = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            if store.scenes.isEmpty && !store.loading {
+                Text(lang.s("robot.empty"))
+                    .font(Theme.Typography.subheadline)
+                    .foregroundColor(Theme.Colors.secondaryText)
+            }
+            ForEach(store.scenes) { scene in sceneCard(scene) }
+            if !store.demo {
+                SandyButton(title: lang.s("robot.add"),
+                            systemImage: "plus.circle.fill", style: .secondary, fillWidth: true) {
+                    showAdd = true
+                }
+            }
+        }
+        .animation(Animation.spring(response: 0.45, dampingFraction: 0.8).reduced, value: store.scenes.map(\.id))
+        .task { await store.load(api: state.api) }
         .sheet(item: $editing) { sc in
             SceneEditorSheet(store: store, scene: sc)
                 .environmentObject(state).environmentObject(lang)
@@ -57,34 +137,6 @@ struct RobotView: View {
         .sheet(isPresented: $showAdd) {
             SceneEditorSheet(store: store, scene: nil)
                 .environmentObject(state).environmentObject(lang)
-        }
-    }
-
-    private var content: some View {
-        ScrollView {
-            VStack(spacing: Theme.Spacing.md) {
-                RobotLiveSection(store: store)
-
-                if store.scenes.isEmpty && !store.loading {
-                    Text(lang.s("robot.empty"))
-                        .font(Theme.Typography.subheadline)
-                        .foregroundColor(Theme.Colors.secondaryText)
-                        .padding(.top, Theme.Spacing.xl)
-                }
-
-                ForEach(store.scenes) { scene in
-                    sceneCard(scene)
-                }
-
-                if !store.demo {
-                    SandyButton(title: lang.s("robot.add"),
-                                systemImage: "plus.circle.fill", style: .secondary, fillWidth: true) {
-                        showAdd = true
-                    }
-                }
-            }
-            .padding(Theme.Spacing.md)
-            .padding(.bottom, Theme.Spacing.xxl + Theme.Spacing.xl)
         }
     }
 

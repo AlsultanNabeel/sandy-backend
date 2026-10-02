@@ -7,6 +7,8 @@ import SwiftUI
 struct ControlView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
+    /// Room scenes live here, with the devices they switch.
+    @StateObject private var scenes = RobotStore()
     @StateObject private var store = DevicesStore()
 
     @State private var showAddDevice = false
@@ -94,6 +96,7 @@ struct ControlView: View {
         } else if store.devices.isEmpty {
             // ما في إشي يترتّب بعد — الحالة الفاضية بتشرح الخطوة الجاية.
             devicesSection
+            RoomScenesSection(store: scenes)
             nodesSection
         } else {
             board
@@ -121,6 +124,8 @@ struct ControlView: View {
                     roomBody(group)
                 }
             }
+            BoardCard("scenes", titleKey: "robot.scenes",
+                      icon: "sparkles", defaultSize: .medium) { RoomScenesSection(store: scenes) }
             BoardCard("nodes", titleKey: "control.section.nodes",
                       icon: "cpu.fill", defaultSize: .medium) { nodesSection }
         }

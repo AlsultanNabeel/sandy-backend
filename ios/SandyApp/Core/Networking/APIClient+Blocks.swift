@@ -104,6 +104,13 @@ extension APIClient {
         return r.items ?? []
     }
 
+    /// The project lists Sandy made from chat («project:<name>»), by name.
+    func projectLists() async throws -> [String] {
+        let r: Rows<ListItem> = try await fetch(query("/api/items", ["limit": "500"]))
+        let names = (r.items ?? []).map(\.list).filter { $0.hasPrefix("project:") }
+        return Array(Set(names)).sorted()
+    }
+
     private struct ItemCreate: Encodable {
         let id: String
         let list: String

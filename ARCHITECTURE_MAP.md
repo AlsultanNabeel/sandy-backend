@@ -1022,6 +1022,12 @@ so folders are organisation only.
   the month strip, message actions; at most one a day, gone for good on «فهمت») and
   `ReviewPrompter` (asks for a rating after every fifth finished task, or after a week
   with ten replies; never within ten minutes of an error; at most every 120 days).
+  The robot screen (`Features/Sandy/RobotView.swift`) holds everything about her: her
+  state now and quick buttons, her body (`RobotControlView`: face, movement, screen,
+  light, sound, camera), the parts test, her board's Wi-Fi, «why isn't a part showing?»
+  (`DiagnoseView`, `GET /api/diagnose` in plain words) and linking/unlinking. Room
+  scenes (`RoomScenesSection`) are in home control. Project lists Sandy made from chat
+  («project:<name>») get a card each in My Life.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep
