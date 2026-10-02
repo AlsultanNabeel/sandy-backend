@@ -34,7 +34,6 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     @Published var errorText = ""
 
     private var ws: URLSessionWebSocketTask?
-    private var urlSession: URLSession?
     private let audio = LiveAudioBridge()
     private var stopped = false
 
@@ -68,8 +67,6 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     private func teardown() {
         ws?.cancel(with: .goingAway, reason: nil)
         ws = nil
-        urlSession?.invalidateAndCancel()
-        urlSession = nil
         audio.stop()
         phase = .idle
         inCall = false
@@ -84,9 +81,8 @@ final class GeminiLiveManager: NSObject, ObservableObject {
             errorText = "عنوان غير صالح"; return
         }
         phase = .connecting
-        let session = URLSession(configuration: .default)
-        urlSession = session
-        let task = session.webSocketTask(with: url)
+        // The app's one session, so its settings reach the call too.
+        let task = APIClient.session.webSocketTask(with: url)
         ws = task
         task.resume()
 

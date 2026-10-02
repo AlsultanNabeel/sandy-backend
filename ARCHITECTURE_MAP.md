@@ -1239,9 +1239,9 @@ nobody re-reads becomes a way of believing things that stopped being true.
 
 6. **No staging environment.** Production is what the robot on the desk talks
    to. §1.
-7. **`GeminiLiveManager` builds its own `URLSession`.** Harmless today, but the
-   app's shared `APIClient.session` / `sendWithRetry` policy cannot see it, so a future change to
-   retry or timeouts will miss it.
+7. **`GeminiLiveManager`'s own `URLSession`: fixed.** The call's socket now comes
+   from the app's shared `APIClient.session`. (A scene was also sent twice per apply —
+   once by `apply_scene`, again by its callers; `apply_scene` alone sends it now.)
 
 8. **Related-memory recall: fixed.** `context.similar_entries` now asks the
    Atlas vector index `entries_vector` (on `sandy_entries.embedding`, filter fields

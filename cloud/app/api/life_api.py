@@ -56,15 +56,11 @@ def register_life_api(app):
     @require_tenant
     def api_scene_apply(claims):
         body = request.get_json(silent=True) or {}
-        from app.features.scene_store import actuate_scene_actions, apply_scene
+        from app.features.scene_store import apply_scene
 
-        name = (body.get("name") or "").strip()
-        r = apply_scene(name)
-        # فعّل المشهد على أجهزة هالمستأجر؛ البوابة ملكية الموضوع (tenant_owns_topic).
-        online = False
-        if r.get("ok"):
-            online = actuate_scene_actions(r.get("actions") or [])
-        r["online"] = online
+        # apply_scene already sent each action (once) on this tenant's devices.
+        r = apply_scene((body.get("name") or "").strip())
+        r["online"] = bool(r.get("sent"))
         return jsonify(r), (200 if r.get("ok") else 404)
 
     @app.route("/api/life/scenes/delete", methods=["POST"])

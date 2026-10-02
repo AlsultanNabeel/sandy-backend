@@ -89,12 +89,13 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
 
 def scene_apply(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    from app.features.scene_store import actuate_scene_actions, apply_scene
+    from app.features.scene_store import apply_scene
 
+    # apply_scene sends each action once; it reports how many reached the room.
     r = apply_scene(str(args.get("name", "")))
     if not r.get("ok"):
         return _no(SCENES_HINT)
-    suffix = " وأرسلتها للغرفة 🏠" if actuate_scene_actions(r["actions"]) else " (الغرفة مش متّصلة)"
+    suffix = " وأرسلتها للغرفة 🏠" if r.get("sent") else " (الغرفة مش متّصلة)"
     return {"ok": True, "reply": f"✨ جهّزت مشهد «{r['label']}»{suffix}."}
 
 

@@ -211,12 +211,12 @@ def test_control_bad_action_refuses_without_actuating(db, mock_actuation):
 def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, monkeypatch):
     """A scene action on a registered device goes through command_payload +
     device_topic (the same validated path device_control uses), not the old vocab."""
-    from app.features.scene_store import actuate_scene_actions
+    from app.features.scene_store import _actuate
 
     with as_tenant("t1"):
         _add_light()  # dimmer "living_light" -> room/cmd/light
-        sent = actuate_scene_actions([{"device": "living_light", "value": "on"}])
-    assert sent is True
+        sent, missed = _actuate([{"device": "living_light", "value": "on"}])
+    assert sent == 1 and missed == []
     assert mock_actuation["topic"] == "room/cmd/light"
     assert mock_actuation["payload"] == "on"
 

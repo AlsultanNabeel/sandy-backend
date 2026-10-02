@@ -188,6 +188,10 @@ def test_a_stopped_reply_runs_no_more_tools_and_is_remembered_cut(brain_db):  # 
 
 def test_a_stop_from_before_the_turn_does_not_cut_it(brain_db):  # noqa: F811
     from app.brain import stm, stops
+    from datetime import datetime, timedelta, timezone
+    from app.db import get_db
     stops.request("userA", "userA", "قديم")
+    # It came as the previous turn ended, a few seconds before this one.
+    get_db()["turn_stops"].update_one({}, {"$set": {"at": datetime.now(timezone.utc) - timedelta(seconds=3)}})
     _turn(ScriptedModel(text_reply("رد كامل")), "مرحبا")
     assert stm.load("userA", "userA")[-1]["content"] == "رد كامل"

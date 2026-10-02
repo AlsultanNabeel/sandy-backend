@@ -38,7 +38,9 @@ def _fresh(doc, since: Optional[datetime]) -> bool:
         return False
     if at.tzinfo is None:
         at = at.replace(tzinfo=timezone.utc)
-    if since is not None and at < since:
+    # Mongo keeps milliseconds: compare at that grain, or a stop made in the turn's
+    # first millisecond would look older than the turn.
+    if since is not None and at < since.replace(microsecond=since.microsecond // 1000 * 1000):
         return False
     return datetime.now(timezone.utc) - at < _FRESH
 
