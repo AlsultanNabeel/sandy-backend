@@ -23,9 +23,12 @@ CONFIG_BT_ENABLED=n
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
 
-# Task Watchdog (5s)
+# Task Watchdog: the voice, mic, front-end, speaker, uplink, display and broker tasks
+# feed it (sandy_health.h); a hung one restarts the board. 10 s: one uplink write may
+# take 4 s on a bad link. Needs a fresh sdkconfig.
 CONFIG_ESP_TASK_WDT_EN=y
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
 

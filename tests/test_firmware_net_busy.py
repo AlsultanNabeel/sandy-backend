@@ -56,7 +56,7 @@ def test_voice_claims_before_opening_and_releases_on_every_exit():
     wake = body.index("s_wake_req = false;")
     claim = body.index("net_claim(NET_OWNER_VOICE)")
     unload = body.index("s_mn_want = false;")          # the model hand-over
-    opened = body.index("if (ws_open())")
+    opened = body.index("ws_open();")
     assert wake < claim < unload < opened, "claim must precede the handshake"
 
     # Refused (an update holds it): nothing to release, but she goes back to idle.

@@ -2,6 +2,7 @@
 // changed region. Solid shapes only, never thin hairlines.
 
 #include "sandy_face.h"
+#include "sandy_health.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -180,7 +181,9 @@ static void _flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *map
 static void _tick_cb(void *arg) { lv_tick_inc(LVGL_TICK_PERIOD_MS); }
 
 static void _lvgl_task(void *arg) {
+    health_watch();
     for (;;) {
+        health_feed();
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             uint32_t ms = lv_timer_handler();
             xSemaphoreGive(s_mutex);

@@ -1,7 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "esp_task_wdt.h"
 #include "esp_system.h"
 #include "config.h"
 #include "sandy_types.h"
@@ -25,6 +24,7 @@
 #include "sandy_remote.h"
 #include "sandy_led.h"
 #include "sandy_status.h"
+#include "sandy_health.h"
 #include "sandy_audio_ctl.h"
 
 static const char *TAG = "main";
@@ -174,10 +174,9 @@ void app_main(void) {
     xTaskCreate(_proximity_task, "proximity", 3072, NULL, 3, NULL);
 #endif
 
-    // 5 s, set in sdkconfig.defaults
-    esp_task_wdt_add(NULL);
+    health_watch();
     for (;;) {
-        esp_task_wdt_reset();
+        health_feed();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

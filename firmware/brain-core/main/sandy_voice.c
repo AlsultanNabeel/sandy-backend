@@ -54,6 +54,7 @@
 #include "sandy_status.h"
 #include "sandy_audio_ctl.h"
 #include "sandy_net_busy.h"
+#include "sandy_health.h"
 #include <math.h>   // sqrt for the per-mic level meters
 #if ENABLE_BUZZER
 #include "sandy_buzzer.h"
@@ -618,7 +619,9 @@ static void spk_task(void *arg) {
     int64_t first_seen = 0;   // when data first appeared while idle
     int64_t last_stop = 0;    // when playback last went idle
     int spk_fails = 0;        // amp writes in a row that did not finish
+    health_watch();
     for (;;) {
+        health_feed();
         // Barge-in: dump the buffer; the DMA tail plays out, then silence.
         if (s_spk_flush) {
             s_spk_flush = false;
@@ -985,7 +988,9 @@ static void ws_tx_task(void *arg) {
         vTaskDelete(NULL);
         return;
     }
+    health_watch();
     for (;;) {
+        health_feed();
         // Lock the socket BEFORE reading: audio read and then not sent is deleted mid-word.
         if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
             s_tx_lock_drops++;   // now a delay counter, not a loss counter
@@ -1013,6 +1018,7 @@ static void ws_tx_task(void *arg) {
             static const char barge[] = "{\"type\":\"barge_in\"}";
             esp_websocket_client_send_text(s_client, barge, sizeof(barge) - 1,
                                            pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
+            health_feed();   // each send may take TX_SEND_TIMEOUT_MS
         }
 
         // Catch up to real time: drop the oldest past TX_MAX_LATENCY_BYTES, counted and logged.
@@ -1173,7 +1179,9 @@ static void mic_task(void *arg) {
     int32_t ear_prev_l = 0, ear_prev_r = 0;
 #endif
 
+    health_watch();
     for (;;) {
+        health_feed();
         size_t bytes_read = 0;
         // Bounded wait so a wedged I2S stays observable.
         esp_err_t rd = i2s_channel_read(s_rx_chan, raw, MIC_FRAME_SAMPLES * 2 * sizeof(int32_t),
@@ -1292,7 +1300,10 @@ static void proc_task(void *arg) {
     int caller_level = 0;              // how loud the caller is (wake word, then their speech)
     int near_level = VOICE_NEAR_MIN;   // VOICE_NEAR_PCT of it
 
+    health_watch();
     for (;;) {
+        health_feed();
+        // Returns within 2 s even with no audio.
         afe_fetch_result_t *res = s_afe->fetch(s_afe_data);
         if (!res || res->ret_value == ESP_FAIL || !res->data || res->data_size <= 0) {
             // A failing fetch returns at once: yield, or this spins on Wi-Fi's core.
@@ -1511,7 +1522,10 @@ static void session_end(void) {
     s_session_active = false;
     VOICE_SESSION(false);
     s_link_lost_ms = 0;
+    // A close frame plus the client's stop: bounded by its network timeout, not by us.
+    health_unwatch();
     ws_close();
+    health_watch();
     net_release(NET_OWNER_VOICE);   // socket gone: updates may run again
 #if ENABLE_COMMANDS
     s_mn_want = true;   // mic_task reloads the model
@@ -1617,7 +1631,9 @@ static void voice_task(void *arg) {
     }
 
     // Session manager: the paid link is up only between a wake word and the silence after.
+    health_watch();
     for (;;) {
+        health_feed();
         if (s_session_active && s_auth_refused) {
             // Refused: end now.
             ESP_LOGW(TAG, "closing the session the server refused");
@@ -1637,6 +1653,7 @@ static void voice_task(void *arg) {
                 // else drop the wake. Held until ws_close.
                 for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {
                     vTaskDelay(pdMS_TO_TICKS(100));
+                    health_feed();
                 }
                 if (net_owner() != NET_OWNER_VOICE) {
                     ESP_LOGW(TAG, "wake ignored: update in progress");
@@ -1665,7 +1682,11 @@ static void voice_task(void *arg) {
                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                          (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
-                if (ws_open()) {
+                // Waits for the uplink's socket lock (one send, up to 4 s).
+                health_unwatch();
+                const bool opened = ws_open();
+                health_watch();
+                if (opened) {
                     s_session_voice_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;

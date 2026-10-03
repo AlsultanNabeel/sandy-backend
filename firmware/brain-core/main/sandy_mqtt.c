@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "sandy_health.h"
 
 static const char *TAG = "mqtt";
 static esp_mqtt_client_handle_t s_client = NULL;
@@ -688,10 +689,16 @@ bool mqtt_publish_room(const char *out, const char *payload) {
 static void _apply_pending_credentials(void);
 
 static void _status_task(void *arg) {
+    health_watch();
     for (;;) {
+        health_feed();
         vTaskDelay(pdMS_TO_TICKS(MQTT_STATUS_INTERVAL_MS));
+        health_feed();
+        // The client's lock is held through a reconnect's TLS handshake: a wait on purpose.
+        health_unwatch();
         _apply_pending_credentials();
         mqtt_publish_status();
+        health_watch();
     }
 }
 
