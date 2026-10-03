@@ -695,7 +695,9 @@ where the difficulty lives.
 
 The paid cloud link is open **only** between a wake word and the silence after it.
 
-1. Wake word detected locally (`Hi Andy`) → buzzer cue, `MOOD_CURIOUS`, `s_wake_req`.
+1. Wake word detected locally (`Hi Andy`) → buzzer cue, `MOOD_CURIOUS`, `s_wake_req`. She
+   listens from boot, before Wi-Fi: a wake word with no network gets a sad tone, a worried
+   face and `NO_WIFI` on the spot; the session manager starts the clock once Wi-Fi is up.
 2. Session manager frees the ~70 KB MultiNet command model **before** opening the
    socket — its internal SRAM is exactly what the TLS task needs. This ordering
    was a real deadlock once; do not reverse it.

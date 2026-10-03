@@ -1594,6 +1594,23 @@ static void session_end(void) {
 }
 #endif
 
+// From the session manager: the Wi-Fi status after a few seconds without it, and the
+// clock started once there is a network.
+static void net_tick(void) {
+    static int64_t down_since;
+    if (wifi_sandy_is_connected()) {
+        down_since = 0;
+        if (!s_clock_started_ms) clock_start();
+        return;
+    }
+    if (!down_since) down_since = now_ms();
+    // After ~5 s: a normal boot's DHCP takes a couple of seconds.
+    if (now_ms() - down_since > 5000) {
+        status_set(SANDY_PART_NET, wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
+                                                                  : SANDY_ST_NO_WIFI);
+    }
+}
+
 // From the session manager: resync after a refusal, and say so when it stays unset.
 static void clock_tick(void) {
     static bool resyncing;
@@ -1610,17 +1627,8 @@ static void clock_tick(void) {
 }
 
 static void voice_task(void *arg) {
-    // Report while waiting for Wi-Fi (boot doesn't block on it).
-    for (int i = 0; !wifi_sandy_is_connected(); i++) {
-        // After ~5 s: a normal boot's DHCP takes a couple of seconds.
-        if (i >= 10) status_set(SANDY_PART_NET, wifi_sandy_password_rejected()
-                                                    ? SANDY_ST_WIFI_BAD_PASS : SANDY_ST_NO_WIFI);
-        if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-    // Wi-Fi is up: booting is over (the Wi-Fi part clears itself on its address).
-    status_set(SANDY_PART_SYSTEM, SANDY_ST_OK);
-    clock_start();
+    // She listens from boot, network or not: a wake word with no Wi-Fi gets a local
+    // answer instead of silence. The network is the session manager's to wait for.
     devkey_load();
 
     if (i2s_start() != ESP_OK) {
@@ -1688,6 +1696,8 @@ static void voice_task(void *arg) {
         audio_task_fail++;
         ESP_LOGE(TAG, "audio task voice_proc create FAILED");
     }
+    // She can hear now: booting is over (each part reports its own faults).
+    status_set(SANDY_PART_SYSTEM, SANDY_ST_OK);
     if (audio_task_fail) {
         // Out of internal RAM for stacks: say so on her face.
         ESP_LOGE(TAG, "%d of 4 audio tasks did not start (heap_int free=%u largest=%u)",
@@ -1709,11 +1719,23 @@ static void voice_task(void *arg) {
     health_watch();
     for (;;) {
         health_feed();
+        net_tick();
         clock_tick();
         if (s_session_active && (s_auth_refused || s_clock_bad)) {
             // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
+        } else if (!s_session_active && s_wake_req && !wifi_sandy_is_connected()) {
+            // Heard, but nowhere to send it: answer here, with a tone and a face.
+            s_wake_req = false;
+            ESP_LOGW(TAG, "wake word with no Wi-Fi");
+            status_set(SANDY_PART_NET, wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
+                                                                      : SANDY_ST_NO_WIFI);
+#if ENABLE_BUZZER
+            buzzer_play(MELODY_SAD);
+#endif
+            VOICE_FACE(MOOD_WORRIED);
+            VOICE_LED(LED_STATE_IDLE);
         } else if (!s_session_active && s_wake_req && !clock_ok()) {
             // The hello would be refused: say so here instead of opening a doomed call.
             s_wake_req = false;
@@ -1832,6 +1854,11 @@ static void voice_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 #else
+    // Always-on build: the link needs the network and the clock first.
+    while (!wifi_sandy_is_connected() || !clock_ok()) {
+        net_tick();
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
     ws_open();
     vTaskDelete(NULL);  // setup done; the audio tasks carry on
 #endif
