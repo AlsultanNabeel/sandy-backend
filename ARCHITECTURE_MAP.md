@@ -881,9 +881,9 @@ button.
 
 `main/sandy_provision.c`, added 23 Aug 2026, flag `ENABLE_PROVISION`. When no
 network answers within `PROVISION_WINDOW_MS` (90 s), the board raises its own
-access point — `Sandy-<pair code>`, WPA2, password `sandy<pair code>` — serves a
-scan-and-pick page on `192.168.4.1`, and prints the network name on its own
-screen. The chosen credentials go through `wifi_sandy_switch`, which proves them
+access point — `Sandy-<last four of the pair code>`, WPA2, with a password made at
+random each boot — serves a scan-and-pick page on `192.168.4.1`, and shows a QR that
+joins it plus the name and password in text on its own screen (never in the log). The chosen credentials go through `wifi_sandy_switch`, which proves them
 before saving and reverts on failure, so a typo cannot leave a board booting onto
 a network that does not exist.
 

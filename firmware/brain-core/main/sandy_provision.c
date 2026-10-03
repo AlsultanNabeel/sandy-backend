@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -55,14 +56,25 @@ static esp_netif_t   *s_ap_netif;   // created once; start_ap may run again
 bool provision_is_active(void) { return s_active; }
 
 // ─── The access point's identity ───
-// Named after the box code so the owner finds it. WPA2, not open: the page sets
-// which network the robot joins; the password comes from the same sticker.
+// The name carries only the code's last four characters: the whole code pairs the robot,
+// and anyone in range can read a network name. WPA2 with a password made fresh each boot
+// and shown only on her face (QR and text), so it cannot be derived from anything.
+#define AP_PASS_LEN 10
 static void build_ap_identity(char *ssid, size_t ssid_cap,
                               char *pass, size_t pass_cap) {
-    snprintf(ssid, ssid_cap, "Sandy-%s", identity()->pair_code);
-    // Prefix only pads to WPA2's 8-char minimum; not a secret.
-    snprintf(pass, pass_cap, "sandy%s", identity()->pair_code);
-    if (strlen(pass) < 8) snprintf(pass, pass_cap, "sandysetup");
+    const char *code = identity()->pair_code;
+    const size_t n = strlen(code);
+    snprintf(ssid, ssid_cap, "Sandy-%s", n > 4 ? code + n - 4 : code);
+
+    static char s_pass[AP_PASS_LEN + 1];
+    if (!s_pass[0]) {
+        // No 0/o, 1/l/i: read off a screen and typed on a phone.
+        static const char ALPHABET[] = "abcdefghjkmnpqrstuvwxyz23456789";
+        for (int i = 0; i < AP_PASS_LEN; i++) {
+            s_pass[i] = ALPHABET[esp_random() % (sizeof(ALPHABET) - 1)];
+        }
+    }
+    snprintf(pass, pass_cap, "%s", s_pass);
 }
 
 // ─── The page ───
@@ -291,10 +303,10 @@ static void start_ap(void) {
     s_active = true;
     status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
 
-    // Show a QR (joins the setup network in one tap) plus the same line in text.
-    // The QR holds the setup password, which is on the box anyway.
-    char msg[96], qr[128];
-    snprintf(msg, sizeof(msg), "Scan to set up — or join %s", s_ap_ssid);
+    // A QR that joins in one tap, and the same in text for typing. The password exists
+    // only here: on her face, never in the log.
+    char msg[192], qr[128];
+    snprintf(msg, sizeof(msg), "Scan to set up — or join %s\npassword %s", s_ap_ssid, pass);
     snprintf(qr, sizeof(qr), "WIFI:T:WPA;S:%s;P:%s;;", s_ap_ssid, pass);
     screen_show_qr(qr, msg);
 

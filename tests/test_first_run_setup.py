@@ -60,8 +60,13 @@ def test_the_reconnect_loop_yields_while_the_radio_is_being_driven():
 
 def test_the_access_point_is_named_after_the_box_and_is_not_open():
     prov = _read("firmware/brain-core/main/sandy_provision.c")
-    assert '"Sandy-%s", identity()->pair_code' in prov, (
-        "the setup network has to be identifiable from the sticker on the box")
+    assert '"Sandy-%s", n > 4 ? code + n - 4 : code' in prov, (
+        "the setup network names only the code's last four characters: the whole "
+        "code pairs the robot, and a network name is readable by anyone in range")
+    ident = prov[prov.index("static void build_ap_identity"):]
+    ident = ident[:ident.index("\n}\n")]
+    assert "esp_random()" in ident and "pair_code" not in ident.split("s_pass")[1], (
+        "the setup password is random each boot, never derived from the code")
     assert "WIFI_AUTH_WPA2_PSK" in prov, (
         "an open setup network hands anyone in range the list of networks this "
         "house can see, and a form that decides which one the robot joins")
