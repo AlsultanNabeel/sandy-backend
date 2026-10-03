@@ -108,6 +108,11 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "علّقت كذا مرّة ورا بعض، فقلعت بالوضع الآمن: شبكة وتحديث بس. بستنّى تحديث أو تطفيني وتشغّلني.",
         8, "safe_mode",
     },
+    [SANDY_ST_NO_CLOCK] = {
+        MOOD_CONFUSED, LED_STATE_OFF, "CLOCK",
+        "ساعتي مش مضبوطة، فالخادم ما رح يقبلني. عم بحاول أضبطها من الراوتر والإنترنت.",
+        4, "no_clock",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {
@@ -118,6 +123,7 @@ static const char *const PART_NAME[SANDY_PART_COUNT] = {
     [SANDY_PART_SETTINGS] = "settings",
     [SANDY_PART_NECK]   = "neck",
     [SANDY_PART_SCREEN] = "screen",
+    [SANDY_PART_CLOCK]  = "clock",
 };
 
 sandy_status_t status_get(void)

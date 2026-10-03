@@ -40,6 +40,9 @@ CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=30000
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 
+# Clock: the router first, then three public servers (sandy_voice.c, clock_start).
+CONFIG_LWIP_SNTP_MAX_SERVERS=4
+
 # OTA pull over HTTPS only (the LAN push server is separate).
 CONFIG_OTA_ALLOW_HTTP=n
 

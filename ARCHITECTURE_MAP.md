@@ -633,7 +633,11 @@ actually means:
 | `auth_not_configured` | the server has no `SANDY_WS_HMAC_KEY` at all |
 | `key_unknown` | signed with `kv` 2, but the server holds no key for that board (unpaired or revoked); the board drops its key and falls back to the shared one |
 
-The `ts` must be wall-clock, so the firmware blocks on SNTP before it can connect.
+The `ts` must be wall-clock, so the firmware opens no session until SNTP has set the clock
+(`clock_start`: the router first, then three public servers; never blocking). A wake word
+before that gets a local cue and status `NO_CLOCK` (part `CLOCK`), shown on its own after a
+minute unset. `replay` resyncs the clock and ends the call, with no ten-minute lockout —
+that backoff is for the key refusals only.
 A board that cannot reach a time server will sit there forever while the wake word
 keeps working — that failure looks exactly like a dead network.
 

@@ -28,6 +28,7 @@
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "driver/i2s_std.h"
 #include "mbedtls/md.h"
@@ -249,22 +250,44 @@ static bool clock_is_set(void) {
     return time(NULL) > 1700000000;  // ~2023-11
 }
 
-// Wait up to ~60 s for SNTP: the hello must fall inside the server's 30 s replay
-// window. Proceed anyway after that; the WS auto-reconnect retries.
-static void sync_clock(void) {
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+// The hello must fall inside the server's 30 s replay window, so no session opens until
+// SNTP has set the clock. The router is asked first (it answers on the LAN even when the
+// internet is slow), then three public servers. Runs in the background: never blocks.
+#define CLOCK_UNSET_SHOW_MS  60000   // after this long unset, she says so
+static volatile bool s_clock_bad;    // the server said our time is off: resync first
+static int64_t s_clock_started_ms;
+
+static void on_clock_sync(struct timeval *tv) {
+    (void)tv;
+    s_clock_bad = false;
+    ESP_LOGI(TAG, "clock synced");
+}
+
+static void clock_start(void) {
+    static char gw[16];
+    esp_netif_ip_info_t ip;
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta && esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.gw.addr) {
+        esp_ip4addr_ntoa(&ip.gw, gw, sizeof(gw));
+    } else {
+        snprintf(gw, sizeof(gw), "pool.ntp.org");   // no gateway yet: one public server twice
+    }
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(4,
+        ESP_SNTP_SERVER_LIST(gw, "time.google.com", "time.cloudflare.com", "pool.ntp.org"));
+    cfg.sync_cb = on_clock_sync;
+    cfg.wait_for_sync = false;
+    if (s_clock_started_ms) esp_netif_sntp_deinit();   // a resync: start over, same servers
     if (esp_netif_sntp_init(&cfg) != ESP_OK) {
         ESP_LOGW(TAG, "sntp init failed");
         return;
     }
-    for (int i = 0; i < 60 && !clock_is_set(); i++) {
-        esp_netif_sntp_sync_wait(pdMS_TO_TICKS(1000));
-    }
-    if (clock_is_set()) {
-        ESP_LOGI(TAG, "clock synced");
-    } else {
-        ESP_LOGW(TAG, "clock not synced after wait; hello may be rejected");
-    }
+    s_clock_started_ms = now_ms();
+    ESP_LOGI(TAG, "clock: asking %s, then public servers", gw);
+}
+
+// Ready to sign a hello: set, and not refused by the server since the last sync.
+static bool clock_ok(void) {
+    return clock_is_set() && !s_clock_bad;
 }
 
 // ── This board's own voice key ──
@@ -551,15 +574,19 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
             } else if (text_has(ev->data_ptr, ev->data_len, "key_unknown")) {
                 // Key revoked or unknown: re-enrol with the shared key next session.
                 devkey_store(NULL);
+            } else if (text_has(ev->data_ptr, ev->data_len, "replay")) {
+                // Our time is off, not our key: resync and try again, no ten-minute lockout.
+                s_clock_bad = true;
+                status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
+                ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
             } else if (text_has(ev->data_ptr, ev->data_len, "auth_fail") ||
                        text_has(ev->data_ptr, ev->data_len, "auth_not_configured") ||
-                       text_has(ev->data_ptr, ev->data_len, "bad_handshake") ||
-                       text_has(ev->data_ptr, ev->data_len, "replay")) {
-                // Config problem (key/clock): show it instead of reconnecting forever.
+                       text_has(ev->data_ptr, ev->data_len, "bad_handshake")) {
+                // Config problem (the key): show it instead of reconnecting forever.
                 status_set(SANDY_PART_LINK, SANDY_ST_AUTH_FAILED);
                 s_auth_refused = true;
                 s_auth_refused_at = now_ms();
-                ESP_LOGE(TAG, "server refused this device — check the key and the clock "
+                ESP_LOGE(TAG, "server refused this device — check the key "
                               "(no new session for %d min)", VOICE_AUTH_BACKOFF_MS / 60000);
             } else if (text_has(ev->data_ptr, ev->data_len, "error")) {
                 ESP_LOGW(TAG, "server error frame");
@@ -1536,6 +1563,21 @@ static void session_end(void) {
 }
 #endif
 
+// From the session manager: resync after a refusal, and say so when it stays unset.
+static void clock_tick(void) {
+    static bool resyncing;
+    if (s_clock_bad && !resyncing && !s_session_active) {
+        resyncing = true;
+        clock_start();
+    }
+    if (!s_clock_bad) resyncing = false;
+    if (clock_ok()) {
+        status_set(SANDY_PART_CLOCK, SANDY_ST_OK);
+    } else if (s_clock_started_ms && now_ms() - s_clock_started_ms > CLOCK_UNSET_SHOW_MS) {
+        status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
+    }
+}
+
 static void voice_task(void *arg) {
     // Report while waiting for Wi-Fi (boot doesn't block on it).
     for (int i = 0; !wifi_sandy_is_connected(); i++) {
@@ -1547,7 +1589,7 @@ static void voice_task(void *arg) {
     }
     // Wi-Fi is up: booting is over (the Wi-Fi part clears itself on its address).
     status_set(SANDY_PART_SYSTEM, SANDY_ST_OK);
-    sync_clock();
+    clock_start();
     devkey_load();
 
     if (i2s_start() != ESP_OK) {
@@ -1635,10 +1677,21 @@ static void voice_task(void *arg) {
     health_watch();
     for (;;) {
         health_feed();
-        if (s_session_active && s_auth_refused) {
-            // Refused: end now.
+        clock_tick();
+        if (s_session_active && (s_auth_refused || s_clock_bad)) {
+            // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
+        } else if (!s_session_active && s_wake_req && !clock_ok()) {
+            // The hello would be refused: say so here instead of opening a doomed call.
+            s_wake_req = false;
+            ESP_LOGW(TAG, "wake ignored: the clock is not set yet");
+            status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
+#if ENABLE_BUZZER
+            buzzer_play(MELODY_ERROR);
+#endif
+            VOICE_FACE(MOOD_CONFUSED);
+            VOICE_LED(LED_STATE_IDLE);
         } else if (!s_session_active) {
             if (s_wake_req && s_auth_refused &&
                 now_ms() - s_auth_refused_at < VOICE_AUTH_BACKOFF_MS) {
