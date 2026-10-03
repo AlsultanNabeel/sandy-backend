@@ -762,7 +762,7 @@ sandy/node/<node_id>/mood · servo · gesture · buzzer · base · led · autono
                      · wifi · factory_reset · screen · screen_size · screen_img
 sandy/node/<node_id>/mic_l · mic_r                 mute (payload "on" = unmuted)
 sandy/node/<node_id>/mic_l_gain · mic_r_gain       digital gain, 0..300
-sandy/node/<node_id>/volume · speaker_test · noise
+sandy/node/<node_id>/volume · speaker_test
 sandy/node/<node_id>/status                        heartbeat → ingest_status
 sandy/node/<node_id>/ir/learned                    captured IR code
 sandy/node/<node_id>/cam/request · command · wifi · flash · flash_level · flash_mode · stream · framesize (in)
@@ -770,6 +770,10 @@ sandy/node/<node_id>/cam/snapshot · status · event (out)
 sandy/node/<node_id>/room/light · music            room node commands
 sandy/node/<node_id>/room/status                   room heartbeat → ingest_status
 ```
+
+A camera whose last word was its MQTT will (`telemetry.cam_online` false) is refused at
+once (409 `camera_offline`): no photo ticket, no stream switch, no «pending» for ever; the
+app's live view says so, or that nothing arrived in ten seconds, instead of a placeholder.
 
 `node_id` is derived on the board from `SANDY_PAIR_CODE` in `secrets.h` using the
 **same transform as `node_store.code_to_node_id`** — lowercase, alphanumerics

@@ -63,6 +63,19 @@ def _cam_signature_fresh(sig: str) -> bool:
         return True
 
 
+CAMERA_OFFLINE = "الكاميرا مش متصلة هلأ — تأكد إنها شغّالة وعلى الواي فاي."
+
+
+def _camera_offline(node: dict | None) -> bool:
+    """The camera's last heartbeat said it went away (its MQTT will): a photo or a stream
+    asked of it would wait forever, so it is refused at once instead."""
+    return ((node or {}).get("telemetry") or {}).get("cam_online") is False
+
+
+def _offline_reply():
+    return jsonify({"error": "camera_offline", "message": CAMERA_OFFLINE}), 409
+
+
 def _bad(error: str, extra: dict | None = None, code: int = 400):
     body = {"error": error}
     if extra:
@@ -150,6 +163,12 @@ def register_devices_api(app, mongo_db=None):
         topic = device_topic(device)
         if not topic:
             return _bad("bad_transport")
+        if name.startswith("cam_"):
+            from app.features.node_store import get_node
+
+            parts = topic.split("/")
+            if len(parts) > 2 and _camera_offline(get_node(parts[2])):
+                return _offline_reply()
         payload = res["payload"]
         sent = False
         try:
@@ -273,8 +292,11 @@ def register_devices_api(app, mongo_db=None):
             start_snapshot,
         )
 
-        if get_node(node_id) is None:
+        node = get_node(node_id)
+        if node is None:
             return _bad("not_found", code=404)
+        if _camera_offline(node):
+            return _offline_reply()
 
         body = request.get_json(silent=True) or {}
         try:
@@ -424,7 +446,8 @@ def register_devices_api(app, mongo_db=None):
         from app.features.node_store import get_node
         from app.integrations.camera_client import fetch_snapshot, fetch_snapshot_error
 
-        if get_node(node_id) is None:
+        node = get_node(node_id)
+        if node is None:
             return _bad("not_found", code=404)
         jpeg = fetch_snapshot(node_id, req_id)
         if jpeg:
@@ -432,6 +455,9 @@ def register_devices_api(app, mongo_db=None):
         failed = fetch_snapshot_error(node_id, req_id)
         if failed:
             return jsonify(failed), 502
+        if _camera_offline(node):
+            # Gone while we waited: no photo is coming, say so instead of «not yet» forever.
+            return _offline_reply()
         return jsonify({"pending": True, "req_id": req_id}), 202
 
     @app.route("/api/devices/<name>/ir-learn", methods=["POST"])

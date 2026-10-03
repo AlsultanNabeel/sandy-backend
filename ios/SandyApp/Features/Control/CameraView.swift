@@ -225,8 +225,13 @@ private struct LiveView: View {
         return c.url
     }
     @State private var frame: UIImage?
+    /// Why no picture is coming (the camera is off, or nothing arrived in time): said, not a
+    /// placeholder that spins for ever.
+    @State private var problem: String?
 
     private enum Mode { case probing, local, remote }
+    /// No frame this long and the wait is reported.
+    private static let noFrameAfter: TimeInterval = 10
 
     var body: some View {
         Group {
@@ -236,6 +241,9 @@ private struct LiveView: View {
             case .remote:
                 if let frame {
                     Image(uiImage: frame).resizable().scaledToFit()
+                } else if let problem {
+                    SandyNotice(problem, kind: .gentleWarning)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     SkeletonBlock().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -251,10 +259,23 @@ private struct LiveView: View {
         guard mode == .remote else { return }
         // ثلاثة بالثانية — نفس وتيرة رفع اللوح. أسرع منها بيسحب نفس الإطار
         // مرّتين وبيستهلك بيانات بلا فايدة.
+        let started = Date()
         while !Task.isCancelled {
-            if let d = try? await state.api.liveFrame(nodeId: nodeId),
-               let img = UIImage(data: d) {
-                frame = img
+            do {
+                if let d = try await state.api.liveFrame(nodeId: nodeId),
+                   let img = UIImage(data: d) {
+                    frame = img
+                    problem = nil
+                } else if frame == nil, Date().timeIntervalSince(started) > Self.noFrameAfter {
+                    problem = LanguageManager.shared.s("control.camera.noFrames")
+                }
+            } catch where error.isCancellation {
+                return
+            } catch {
+                // Said once, then asked again slowly: it comes back when the camera does.
+                problem = error.localizedDescription
+                frame = nil
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
             try? await Task.sleep(nanoseconds: 330_000_000)
         }
