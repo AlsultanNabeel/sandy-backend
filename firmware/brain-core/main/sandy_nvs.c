@@ -30,6 +30,19 @@ typedef struct {
 } defer_slot_t;
 
 static defer_slot_t      s_slots[DEFER_SLOTS];
+static bool              s_wiped;
+
+bool nvs_sandy_wiped(void) { return s_wiped; }
+
+void nvs_sandy_usage(int *used, int *total) {
+    nvs_stats_t st;
+    if (nvs_get_stats(NULL, &st) == ESP_OK) {
+        *used = (int)st.used_entries;
+        *total = (int)st.total_entries;
+    } else {
+        *used = *total = -1;
+    }
+}
 static SemaphoreHandle_t s_slots_lock;
 
 static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
@@ -117,7 +130,10 @@ void nvs_flush_deferred(void) {
 esp_err_t nvs_sandy_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "partition truncated — erasing");
+        // Everything stored goes: said loudly, and in every heartbeat of this boot.
+        ESP_LOGE(TAG, "settings store %s — ERASING it: Wi-Fi, keys and settings are lost",
+                 err == ESP_ERR_NVS_NO_FREE_PAGES ? "full" : "from a newer format");
+        s_wiped = true;
         err = nvs_flash_erase();
         if (err == ESP_OK) err = nvs_flash_init();
     }

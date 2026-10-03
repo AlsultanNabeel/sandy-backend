@@ -7,11 +7,13 @@ from app.features import node_store
 def test_health_members_are_kept_and_bounded():
     out = node_store._clean_telemetry({
         "boot": 4, "boots": 17, "heap_min": 9000, "heap_big": 6100, "safe": False,
+        "nvs_wiped": True, "nvs_used": 120, "nvs_total": 504,
         "faults": {"net": "no_wifi", "voice": "voice_off"},
         "stacks": {f"task{n}": n for n in range(40)},
         "nonsense": 1,
     })
     assert out["boot"] == 4 and out["boots"] == 17 and out["safe"] is False
+    assert out["nvs_wiped"] is True and out["nvs_used"] == 120
     assert out["faults"] == {"net": "no_wifi", "voice": "voice_off"}
     assert len(out["stacks"]) == node_store._DICT_MAX_ITEMS
     assert "nonsense" not in out

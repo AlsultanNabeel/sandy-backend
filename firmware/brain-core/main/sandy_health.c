@@ -193,13 +193,17 @@ static void count_boot(void) {
 int health_json(char *out, size_t cap) {
     char faults[160];
     status_faults_json(faults, sizeof(faults));
+    int nvs_used, nvs_total;
+    nvs_sandy_usage(&nvs_used, &nvs_total);
     int k = snprintf(out, cap,
                      "\"boot\":%d,\"boots\":%lu,\"heap_min\":%u,\"heap_big\":%u,"
-                     "\"safe\":%s,\"faults\":{%s},\"stacks\":{",
+                     "\"safe\":%s,\"nvs_wiped\":%s,\"nvs_used\":%d,\"nvs_total\":%d,"
+                     "\"faults\":{%s},\"stacks\":{",
                      (int)esp_reset_reason(), (unsigned long)s_boots,
                      (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-                     s_safe ? "true" : "false", faults);
+                     s_safe ? "true" : "false", nvs_sandy_wiped() ? "true" : "false",
+                     nvs_used, nvs_total, faults);
     if (k < 0 || k >= (int)cap) return -1;
     bool first = true;
     for (size_t i = 0; i < sizeof(STACK_TASKS) / sizeof(STACK_TASKS[0]); i++) {
