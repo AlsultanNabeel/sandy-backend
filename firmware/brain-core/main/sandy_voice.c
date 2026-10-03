@@ -344,6 +344,40 @@ static int hex_nibble(char c) {
     return (c >= 'a' && c <= 'f') ? c - 'a' + 10 : 0;
 }
 
+bool voice_verify_signed(const char *msg, const char *mac_hex) {
+    if (!msg || !mac_hex || strlen(mac_hex) != 64) return false;
+    for (int i = 0; i < 64; i++) {
+        if (!isxdigit((unsigned char)mac_hex[i])) return false;
+    }
+    unsigned char own[DEVKEY_HEX / 2];
+    const unsigned char *key = (const unsigned char *)identity()->hmac_key;
+    size_t key_len = strlen(identity()->hmac_key);
+    if (s_dev_key[0]) {
+        for (int i = 0; i < DEVKEY_HEX / 2; i++) {
+            own[i] = (unsigned char)((hex_nibble(s_dev_key[2 * i]) << 4) |
+                                     hex_nibble(s_dev_key[2 * i + 1]));
+        }
+        key = own;
+        key_len = sizeof(own);
+    }
+    if (key_len == 0) return false;
+
+    unsigned char mac[32];
+    const int hr = mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), key, key_len,
+                                   (const unsigned char *)msg, strlen(msg), mac);
+    mbedtls_platform_zeroize(own, sizeof(own));
+    if (hr != 0) return false;
+    // Constant time: how far a guess matched must not show in how long it took.
+    unsigned char diff = 0;
+    for (int i = 0; i < 32; i++) {
+        const unsigned char want = (unsigned char)((hex_nibble(mac_hex[2 * i]) << 4) |
+                                                   hex_nibble(mac_hex[2 * i + 1]));
+        diff |= mac[i] ^ want;
+    }
+    mbedtls_platform_zeroize(mac, sizeof(mac));
+    return diff == 0;
+}
+
 // Returns the length, or -1 if it doesn't fit (never send a truncated frame).
 static int build_hello(char *out, size_t out_len) {
     int64_t ts = wall_ms();

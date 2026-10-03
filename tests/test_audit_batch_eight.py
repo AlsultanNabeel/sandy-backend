@@ -225,6 +225,7 @@ def test_releasing_a_robot_wipes_it_and_clears_devices_before_the_node_row(db,
     lookup would rebuild the whole robot in the registry of the account that
     just released it. Boards heartbeat every few seconds.
     """
+    monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"test-shared-key")  # signs the wipe
     import app.features.node_store as node_store
     import app.integrations.room_device as room_device
     from app.features import device_store
@@ -258,6 +259,7 @@ def test_deleting_an_account_also_wipes_the_boards_it_releases(db, monkeypatch):
     The wipe lived in the *endpoint* for selling a robot, so the strongest erase
     a person can ask for produced the weakest hardware erase — the board kept
     the seller's Wi-Fi name and password."""
+    monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"test-shared-key")  # signs the wipe
     import app.integrations.room_device as room_device
     from app.features import node_store
     from app.features.account_delete import delete_account

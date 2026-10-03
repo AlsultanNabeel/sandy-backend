@@ -803,6 +803,12 @@ sandy/node/<node_id>/room/light · music            room node commands
 sandy/node/<node_id>/room/status                   room heartbeat → ingest_status
 ```
 
+`factory_reset` takes only `erase:<unix ms>:<hmac>`, signed by `node_store._erase_command`
+with the board's own voice key (the shared key while it has none) over
+`factory_reset|<node_id>|<ms>`; the board refuses it unsigned, on a wrong signature, with
+its clock unset, or more than five minutes off (`voice_verify_signed`). A bare `erase` on
+the broker no longer wipes a robot.
+
 A camera whose last word was its MQTT will (`telemetry.cam_online` false) is refused at
 once (409 `camera_offline`): no photo ticket, no stream switch, no «pending» for ever; the
 app's live view says so, or that nothing arrived in ten seconds, instead of a placeholder.

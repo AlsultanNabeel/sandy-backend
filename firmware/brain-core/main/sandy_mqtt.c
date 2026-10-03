@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
 #include "sandy_health.h"
 
 static const char *TAG = "mqtt";
@@ -412,6 +413,48 @@ static void _handle_pair_code(const char *val) {
 }
 #endif
 
+// Erase everything: "erase:<unix ms>:<hmac>", signed by the server with this board's key
+// over "factory_reset|<node id>|<ms>" (node_store._wipe_board). A word anyone on the
+// broker could send is not enough for a command with no way back; the time stops a
+// recorded one from being sent again later.
+#define ERASE_WINDOW_MS (5 * 60 * 1000)
+
+static void _handle_factory_reset(const char *val) {
+    char ms_s[16] = {0};
+    const char *mac = NULL;
+    if (strncmp(val, "erase:", 6) == 0) {
+        const char *p = val + 6;
+        const char *c = strchr(p, ':');
+        if (c && (size_t)(c - p) < sizeof(ms_s)) {
+            memcpy(ms_s, p, (size_t)(c - p));
+            mac = c + 1;
+        }
+    }
+    long long ms = 0;
+    for (const char *d = ms_s; *d; d++) {
+        if (*d < '0' || *d > '9') { mac = NULL; break; }
+        ms = ms * 10 + (*d - '0');
+    }
+    if (!mac || !ms_s[0]) { ESP_LOGW(TAG, "factory reset refused: not a signed command"); return; }
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    const long long now = (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (tv.tv_sec < 1700000000) { ESP_LOGW(TAG, "factory reset refused: clock not set"); return; }
+    if (llabs(now - ms) > ERASE_WINDOW_MS) {
+        ESP_LOGW(TAG, "factory reset refused: signed %lld s away from now", (now - ms) / 1000);
+        return;
+    }
+    char msg[80];
+    snprintf(msg, sizeof(msg), "factory_reset|%s|%s", s_node_id, ms_s);
+    if (!voice_verify_signed(msg, mac)) {
+        ESP_LOGE(TAG, "factory reset refused: bad signature");
+        return;
+    }
+    ESP_LOGW(TAG, "signed factory reset — erasing");
+    wifi_sandy_factory_reset();   // بتمسح وبتعيد التشغيل، ما بترجع
+}
+
 static void _dispatch(const char *out, const char *val, bool retained) {
     // مخارج الكاميرا وعقدة الغرفة ع نفس الشجرة؛ منتجاهلها بدل تحذير «مخرج مجهول».
     if (!strncmp(out, "cam/", 4) || !strncmp(out, "room/", 5)) return;
@@ -430,13 +473,7 @@ static void _dispatch(const char *out, const char *val, bool retained) {
     else if (!strcmp(out, "servo"))        _handle_servo(val);
     else if (!strcmp(out, "gesture"))      _handle_gesture(val);
     else if (!strcmp(out, "buzzer"))       _handle_buzzer(val);
-    else if (!strcmp(out, "factory_reset")) {
-        // كلمة وحدة بالضبط: أمر ما إله رجعة ما بيعتمد ع حارس واحد.
-        if (!strcmp(val, "erase")) {
-            ESP_LOGW(TAG, "factory reset requested — erasing");
-            wifi_sandy_factory_reset();   // بتمسح وبتعيد التشغيل، ما بترجع
-        }
-    }
+    else if (!strcmp(out, "factory_reset")) _handle_factory_reset(val);
     else if (!strcmp(out, "base"))         _handle_base(val);
     else if (!strcmp(out, "focus"))        _handle_focus(val);
     else if (!strcmp(out, "led"))          _handle_led(val);
