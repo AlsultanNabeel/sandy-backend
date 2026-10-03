@@ -891,7 +891,8 @@ question with `192.168.4.1`, and any other path (`/generate_204`, `/hotspot-dete
 redirects to the page, so a joining phone opens it by itself. It comes down by itself the
 moment the network is back; neither way needs a restart. The scan holds the saved network's
 reconnects (`wifi_sandy_hold`) — a connect in progress made it fail — and lists names
-strongest first, once each; a field takes a hidden network's name. The chosen credentials go through `wifi_sandy_switch`, which proves them
+strongest first, once each; a field takes a hidden network's name. The page and its answers are in
+English and Arabic. The chosen credentials go through `wifi_sandy_switch`, which proves them
 before saving and reverts on failure, so a typo cannot leave a board booting onto
 a network that does not exist.
 

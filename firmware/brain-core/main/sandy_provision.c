@@ -93,20 +93,25 @@ static const char PAGE_HEAD[] =
     "border-radius:10px;border:1px solid #333;background:#1c1c1c;color:#eee}"
     "button{width:100%;margin-top:22px;padding:14px;font-size:16px;border:0;"
     "border-radius:10px;background:#f5c518;color:#111;font-weight:600}"
-    "</style></head><body><h1>Sandy</h1>"
+    ".ar{direction:rtl;text-align:right}"
+    "</style></head><body><h1>Sandy · ساندي</h1>"
     "<p>Choose the network she should join.</p>"
+    "<p class=ar>اختار الشبكة اللي بدها تدخل عليها.</p>"
     "<form method=POST action=/provision>"
-    "<label>Network</label><select name=ssid>";
+    "<label>Network · الشبكة</label><select name=ssid>";
 
 static const char PAGE_TAIL[] =
     "</select>"
-    "<label>Hidden network (type its name)</label>"
-    "<input name=hidden maxlength=32 autocomplete=off placeholder='Only if it is not listed'>"
-    "<label>Password</label>"
-    "<input name=pass type=password placeholder='Leave empty if open'>"
-    "<button type=submit>Connect</button></form>"
+    "<label>Hidden network · شبكة مخفية (اكتب اسمها)</label>"
+    "<input name=hidden maxlength=32 autocomplete=off "
+    "placeholder='Only if it is not listed · بس إذا مش بالقائمة'>"
+    "<label>Password · كلمة السر</label>"
+    "<input name=pass type=password placeholder='Leave empty if open · فاضية إذا مفتوحة'>"
+    "<button type=submit>Connect · اتصل</button></form>"
     "<p style='margin-top:24px;font-size:12px'>She will test it before saving. "
-    "If it fails, this page comes back.</p></body></html>";
+    "If it fails, this page comes back.</p>"
+    "<p class=ar style='font-size:12px'>رح تجرّبها قبل ما تحفظها. إذا ما زبطت، "
+    "بترجع هالصفحة.</p></body></html>";
 
 // Strongest first.
 static int by_signal(const void *a, const void *b) {
@@ -217,16 +222,19 @@ static void form_field(const char *body, const char *key, char *out, size_t cap)
     url_decode(raw, out, cap);
 }
 
-static esp_err_t reply(httpd_req_t *req, const char *title, const char *body) {
-    char page[512];
+// Every answer in English and Arabic.
+static esp_err_t reply(httpd_req_t *req, const char *title, const char *body,
+                       const char *title_ar, const char *body_ar) {
+    char page[1280];
     snprintf(page, sizeof(page),
              "<!doctype html><meta charset=utf-8>"
              "<meta name=viewport content='width=device-width,initial-scale=1'>"
              "<body style=\"font-family:-apple-system,system-ui,sans-serif;"
              "background:#111;color:#eee;padding:24px\">"
              "<h1 style=font-size:20px>%s</h1><p style=color:#999>%s</p>"
-             "<p><a style=color:#f5c518 href=/>Back</a></p></body>",
-             title, body);
+             "<div dir=rtl><h1 style=font-size:20px>%s</h1><p style=color:#999>%s</p></div>"
+             "<p><a style=color:#f5c518 href=/>Back · رجوع</a></p></body>",
+             title, body, title_ar, body_ar);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_sendstr(req, page);
     return ESP_OK;
@@ -238,12 +246,14 @@ static esp_err_t provision_post(httpd_req_t *req) {
     char body[512];   // three fields, each fully percent-encoded at worst
     int total = req->content_len;
     if (total <= 0 || total >= (int)sizeof(body)) {
-        return reply(req, "Too long", "That did not fit. Try a shorter name.");
+        return reply(req, "Too long", "That did not fit. Try a shorter name.",
+                     "طويل كتير", "ما زبط. جرّب اسم أقصر.");
     }
     int got = 0;
     while (got < total) {
         int r = httpd_req_recv(req, body + got, total - got);
-        if (r <= 0) return reply(req, "Interrupted", "The form did not arrive whole.");
+        if (r <= 0) return reply(req, "Interrupted", "The form did not arrive whole.",
+                                 "انقطع", "الطلب ما وصل كامل. جرّب كمان مرة.");
         got += r;
     }
     body[got] = '\0';
@@ -256,7 +266,8 @@ static esp_err_t provision_post(httpd_req_t *req) {
     if (hidden[0]) snprintf(ssid, sizeof(ssid), "%s", hidden);
 
     if (!ssid[0]) {
-        return reply(req, "Pick a network", "No network was selected.");
+        return reply(req, "Pick a network", "No network was selected.",
+                     "اختار شبكة", "ما اخترت ولا شبكة.");
     }
 
     ESP_LOGI(TAG, "trying '%s' from the setup page", ssid);
@@ -265,7 +276,10 @@ static esp_err_t provision_post(httpd_req_t *req) {
     // Reply first: wifi_sandy_switch tears down the link this page is served over.
     reply(req, "Connecting…",
           "Watch her screen. If it worked she restarts on your network; "
-          "if not, this page comes back in a few seconds.");
+          "if not, this page comes back in a few seconds.",
+          "عم تتصل…",
+          "راقب شاشتها. إذا زبطت بتعيد التشغيل على شبكتك، وإذا لأ بترجع "
+          "هالصفحة بعد كم ثانية.");
     vTaskDelay(pdMS_TO_TICKS(300));
 
     wifi_switch_result_t r = wifi_sandy_switch(ssid, pass);
