@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/stream_buffer.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
@@ -31,6 +32,10 @@ static const char *TAG = "remote";
 
 static StreamBufferHandle_t s_logbuf;
 static vprintf_like_t       s_old_vprintf;
+// Every task logs, and a stream buffer takes one writer at a time: lines from two tasks
+// interleaved or corrupted the buffer. The lock also guards the one shared line buffer,
+// which keeps 200 bytes off the stack of whichever small task is logging.
+static SemaphoreHandle_t    s_log_lock;
 
 // Tee esp_log to UART and a buffer. Always buffered; when full, new lines drop,
 // so boot lines survive until a client connects.
@@ -38,10 +43,12 @@ static int log_vprintf(const char *fmt, va_list ap) {
     va_list cp;
     va_copy(cp, ap);
     int r = s_old_vprintf ? s_old_vprintf(fmt, ap) : 0;
-    if (s_logbuf) {
-        char line[200];
+    // A line that cannot get the lock at once is lost to the remote log only (UART has it).
+    if (s_logbuf && s_log_lock && xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(5)) == pdTRUE) {
+        static char line[200];
         int n = vsnprintf(line, sizeof(line), fmt, cp);
-        if (n > 0) xStreamBufferSend(s_logbuf, line, MIN(n, (int)sizeof(line)), 0);
+        if (n > 0) xStreamBufferSend(s_logbuf, line, MIN(n, (int)sizeof(line) - 1), 0);
+        xSemaphoreGive(s_log_lock);
     }
     va_end(cp);
     return r;
@@ -191,6 +198,7 @@ static void http_task(void *arg) {
 esp_err_t remote_init(void) {
     // PSRAM, to spare internal RAM. Safe: esp_log never writes with the cache disabled.
     s_logbuf = xStreamBufferCreateWithCaps(LOG_BUF_BYTES, 1, MALLOC_CAP_SPIRAM);
+    s_log_lock = xSemaphoreCreateMutex();
     s_old_vprintf = esp_log_set_vprintf(log_vprintf);
     // Stack in PSRAM (no flash access). The name "logsrv" is load-bearing:
     // publish_firmware.py checks retail images leave it out.
