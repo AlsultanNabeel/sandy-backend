@@ -24,6 +24,7 @@ typedef enum {
     SANDY_ST_SCREEN_OFF,    // the display did not start (heartbeat and LED only, obviously)
     SANDY_ST_SAFE_MODE,     // crashed repeatedly: network and updates only
     SANDY_ST_NO_CLOCK,      // the clock is not set: the server would refuse the hello
+    SANDY_ST_UPDATING,      // downloading and installing an update: do not unplug
     SANDY_ST_COUNT
 } sandy_status_t;
 
@@ -38,6 +39,7 @@ typedef enum {
     SANDY_PART_NECK,
     SANDY_PART_SCREEN,
     SANDY_PART_CLOCK,
+    SANDY_PART_UPDATE,
     SANDY_PART_COUNT
 } sandy_part_t;
 

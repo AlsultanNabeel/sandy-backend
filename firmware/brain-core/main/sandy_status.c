@@ -113,6 +113,12 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "ساعتي مش مضبوطة، فالخادم ما رح يقبلني. عم بحاول أضبطها من الراوتر والإنترنت.",
         4, "no_clock",
     },
+    // Above every fault: unplugging her now is the one thing that would cost something.
+    [SANDY_ST_UPDATING] = {
+        MOOD_THINKING, LED_STATE_OFF, "UPDATING - DO NOT UNPLUG",
+        "عم بحدّث حالي. لا تفصل الكهربا لحد ما أخلص.",
+        9, "updating",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {
@@ -124,6 +130,7 @@ static const char *const PART_NAME[SANDY_PART_COUNT] = {
     [SANDY_PART_NECK]   = "neck",
     [SANDY_PART_SCREEN] = "screen",
     [SANDY_PART_CLOCK]  = "clock",
+    [SANDY_PART_UPDATE] = "update",
 };
 
 sandy_status_t status_get(void)

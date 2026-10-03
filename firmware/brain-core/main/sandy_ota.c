@@ -201,7 +201,8 @@ extern const char fw_pubkey_pem_end[]   asm("_binary_fw_pubkey_pem_end");
 #define OTA_RETRY_MS         (5LL * 60 * 1000)
 // A failed download or install comes back in minutes, doubling, not after six hours.
 #define OTA_FAIL_RETRY_MAX_MS (60LL * 60 * 1000)
-
+// Below this the download crawls and dies halfway: wait for a better moment.
+#define OTA_MIN_RSSI         (-80)
 // ~400 bytes today; headroom so it never truncates.
 #define OTA_MANIFEST_MAX     2048
 #define OTA_BUF              4096
@@ -211,7 +212,7 @@ static int64_t            s_fail_retry_ms;   // 0 = last check did not fail
 
 typedef enum {
     OTA_DONE,      // nothing to do (current, not newer, a known-bad or unsigned release)
-    OTA_RETRY,     // try again in minutes: unreachable, cut short, not installed
+    OTA_RETRY,     // try again in minutes: unreachable, cut short, not installed, weak signal
 } ota_result_t;
 
 static void ota_retry_in(int64_t ms) {
@@ -387,24 +388,34 @@ static ota_result_t ota_check_once(void) {
         ESP_LOGE(TAG, "update %s: does not fit (%ld bytes)", version, size);
         return OTA_DONE;
     }
+    const int rssi = wifi_sandy_rssi();
+    if (rssi != 0 && rssi < OTA_MIN_RSSI) {
+        ESP_LOGW(TAG, "update %s: signal %d dBm too weak to download — later", version, rssi);
+        return OTA_RETRY;
+    }
     ESP_LOGW(TAG, "update %s: signed release, downloading %ld bytes", version, size);
+    // On her face from here to the restart: pulling the plug now costs the update.
+    status_set(SANDY_PART_UPDATE, SANDY_ST_UPDATING);
 
     snprintf(url, sizeof(url), "%s%s", base, path);
     c = http_open(url);
     if (!c) {
         ESP_LOGW(TAG, "update %s: download failed to start", version);
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
     esp_http_client_fetch_headers(c);
     if (esp_http_client_get_status_code(c) != 200) {
         ESP_LOGW(TAG, "update %s: HTTP %d", version, esp_http_client_get_status_code(c));
         esp_http_client_cleanup(c);
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
 
     esp_ota_handle_t h;
     if (esp_ota_begin(slot, size, &h) != ESP_OK) {
         esp_http_client_cleanup(c);
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
     unsigned char *buf = malloc(OTA_BUF);
@@ -434,10 +445,12 @@ static ota_result_t ota_check_once(void) {
     if (fail || total != size || strcasecmp(digest_hex, sha) != 0) {
         ESP_LOGE(TAG, "update %s: download did not match what was signed — discarded", version);
         esp_ota_abort(h);
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
     if (esp_ota_end(h) != ESP_OK || esp_ota_set_boot_partition(slot) != ESP_OK) {
         ESP_LOGE(TAG, "update %s: image not installed — trying again", version);
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
     ota_nvs_note_trying(version);

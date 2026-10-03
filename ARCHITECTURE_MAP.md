@@ -1305,7 +1305,11 @@ nobody re-reads becomes a way of believing things that stopped being true.
    private key off-repo, public key in `main/fw_pubkey.pem`), streamed into the
    idle slot with the size and SHA-256 checked before switching, canary ids
    then a stable percentage (`scripts/publish_firmware.py`), never a downgrade,
-   bootloader rollback if the new image cannot reach Wi-Fi. The MQTT `ota`
+   bootloader rollback if the new image cannot reach Wi-Fi. A failed check, download or
+   install comes back in five minutes, doubling to an hour (`OTA_FAIL_RETRY_MAX_MS`), not
+   after the six-hour period; nothing downloads under `OTA_MIN_RSSI` (-80 dBm), and from
+   the download to the restart her face says `UPDATING - DO NOT UNPLUG` (status
+   `UPDATING`, part `UPDATE`, above every fault). The MQTT `ota`
    command only triggers a check — it no longer takes a URL. Published images
    are always the sale build (`idf.py -B build-retail -DSANDY_RETAIL=1`), which
    compiles `ENABLE_REMOTE` (LAN upload + log on 3333) out; the publish script
