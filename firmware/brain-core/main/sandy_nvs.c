@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "config.h"
+#include "sandy_status.h"
 
 static const char *TAG      = "nvs";
 static const char *NVS_NS   = "sandy";
@@ -117,15 +118,19 @@ esp_err_t nvs_sandy_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "partition truncated — erasing");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
+        err = nvs_flash_erase();
+        if (err == ESP_OK) err = nvs_flash_init();
     }
-    if (err == ESP_OK) {
-        s_slots_lock = xSemaphoreCreateMutex();
-        // Small stack in internal RAM; it can't be PSRAM because nvs_commit runs with the
-        // cache disabled. Lowest priority: late settings cost nothing.
-        xTaskCreate(defer_task, "nvs_defer", 2560, NULL, 1, NULL);
+    if (err != ESP_OK) {
+        // Run on defaults rather than halt: every reader already treats a failed open as unset.
+        ESP_LOGE(TAG, "settings store unavailable (%s) — running on defaults", esp_err_to_name(err));
+        status_set(SANDY_PART_SETTINGS, SANDY_ST_SETTINGS_OFF);
+        return err;
     }
+    s_slots_lock = xSemaphoreCreateMutex();
+    // Small stack in internal RAM; it can't be PSRAM because nvs_commit runs with the
+    // cache disabled. Lowest priority: late settings cost nothing.
+    xTaskCreate(defer_task, "nvs_defer", 2560, NULL, 1, NULL);
     return err;
 }
 

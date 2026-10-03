@@ -18,6 +18,7 @@ typedef enum {
     SANDY_ST_LOW_MEMORY,    // not enough internal RAM to open a session
     // Router refused the password (distinct from NO WI-FI).
     SANDY_ST_WIFI_BAD_PASS,
+    SANDY_ST_SETTINGS_OFF,  // the settings store could not be opened: running on defaults
     SANDY_ST_COUNT
 } sandy_status_t;
 
@@ -28,6 +29,7 @@ typedef enum {
     SANDY_PART_NET,         // Wi-Fi
     SANDY_PART_LINK,        // the voice server and the uplink
     SANDY_PART_VOICE,       // mic, speaker, audio front end
+    SANDY_PART_SETTINGS,    // the settings store (NVS)
     SANDY_PART_COUNT
 } sandy_part_t;
 

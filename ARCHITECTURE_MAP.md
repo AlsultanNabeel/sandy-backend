@@ -710,7 +710,9 @@ serial cable.
 One table maps each condition to a face, an LED state, a Latin banner drawn across
 the bottom of the display, and the Arabic sentence she will speak once clips are
 flashed: `OK`, `BOOTING`, `NO_WIFI`, `NO_SERVER`, `LINK_DROPPED`, `NET_SLOW`,
-`LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`.
+`LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`, `WIFI_BAD_PASS`, `SETTINGS_OFF` (the settings store
+would not open — she runs on defaults instead of halting; no `ESP_ERROR_CHECK` is left in
+an enabled file).
 
 Rules:
 - **Subsystems must not set the face directly for error conditions.** Call

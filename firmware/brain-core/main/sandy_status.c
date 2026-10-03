@@ -83,6 +83,11 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "الراوتر رفض كلمة السر. غيّرها من التطبيق أو اعمل إعداد من جديد.",
         5, "wifi_bad_pass",
     },
+    [SANDY_ST_SETTINGS_OFF] = {
+        MOOD_CONFUSED, LED_STATE_OFF, "SETTINGS",
+        "ما قدرت أفتح إعداداتي، فشغّالة بالافتراضي. أي تغيير ما رح ينحفظ.",
+        3, "settings_off",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {
@@ -90,6 +95,7 @@ static const char *const PART_NAME[SANDY_PART_COUNT] = {
     [SANDY_PART_NET]    = "net",
     [SANDY_PART_LINK]   = "link",
     [SANDY_PART_VOICE]  = "voice",
+    [SANDY_PART_SETTINGS] = "settings",
 };
 
 sandy_status_t status_get(void)
@@ -132,10 +138,22 @@ int status_faults_json(char *out, size_t cap)
     return k;
 }
 
+static void show(int st)
+{
+    const status_face_t *f = &TABLE[st];
+    face_set_mood(f->mood);
+    led_set_state(f->led);
+    face_set_banner(f->banner);
+
+    // Spoken line not played yet: the clips aren't in the partition table.
+}
+
 void status_init(void)
 {
-    s_ready = true;
     status_set(SANDY_PART_SYSTEM, SANDY_ST_BOOTING);
+    // Faults reported before the face existed (the settings store opens first).
+    s_ready = true;
+    show(status_get());
 }
 
 void status_set(sandy_part_t part, sandy_status_t st)
@@ -165,11 +183,5 @@ void status_set(sandy_part_t part, sandy_status_t st)
 
     // A more serious fault elsewhere still stands: the face stays as it is.
     if (!s_ready || worst == prev) return;
-
-    const status_face_t *f = &TABLE[worst];
-    face_set_mood(f->mood);
-    led_set_state(f->led);
-    face_set_banner(f->banner);
-
-    // Spoken line not played yet: the clips aren't in the partition table.
+    show(worst);
 }
