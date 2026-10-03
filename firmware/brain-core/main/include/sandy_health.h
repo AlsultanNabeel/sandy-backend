@@ -10,6 +10,12 @@
 void health_boot(void);
 bool health_safe_mode(void);
 
+// Starts the monitor (internal RAM, a LOW_MEMORY left standing). After the settings store.
+void health_init(void);
+
+// A clean restart: deferred settings saved first. Counts as a crash for safe mode.
+void health_restart(const char *why) __attribute__((noreturn));
+
 // The calling task is now watched: it must call health_feed() at least every
 // CONFIG_ESP_TASK_WDT_TIMEOUT_S, or the board restarts (CONFIG_ESP_TASK_WDT_PANIC).
 void health_watch(void);

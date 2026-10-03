@@ -94,6 +94,7 @@ void app_main(void) {
 
     // ── Core services ──
     TRY_INIT("nvs", nvs_sandy_init());
+    health_init();
     // See sandy_identity.h.
     TRY_INIT("identity", identity_init());
 #if ENABLE_WIFI

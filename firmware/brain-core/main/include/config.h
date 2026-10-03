@@ -122,6 +122,13 @@
 // them, and she boots in safe mode: network and updates only, no voice, no body.
 #define HEALTH_SAFE_AFTER_CRASHES  3
 #define HEALTH_STABLE_MS           (10 * 60 * 1000)
+// Internal RAM this low (free, or the largest block TLS needs) for this long, outside a
+// call, and she restarts cleanly; so does a LOW_MEMORY status left standing outside a call.
+// These restarts count toward safe mode, so a board that is always short ends there.
+#define HEALTH_HEAP_DANGER         (10 * 1024)
+#define HEALTH_BLOCK_DANGER        (4 * 1024)
+#define HEALTH_LOW_MEM_MS          60000
+#define HEALTH_LOW_STATUS_MS       30000
 
 // Reported in every heartbeat. Bump with each flash.
 #define SANDY_FW_VERSION "0.11.2"
