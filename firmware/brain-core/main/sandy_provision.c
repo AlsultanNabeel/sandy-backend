@@ -17,6 +17,7 @@
 #include "esp_http_server.h"
 #include "esp_system.h"
 #include "esp_random.h"
+#include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -260,6 +261,70 @@ static esp_err_t provision_post(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// ─── Captive portal ───
+// A phone joining the setup network asks a known address whether it is online. Every
+// name resolves here and every unknown path is sent to the page, so the phone opens
+// the page by itself instead of the owner typing an address.
+
+static volatile bool s_dns_run;
+static TaskHandle_t  s_dns_task;
+
+// One answer for every A question: this access point.
+static void dns_task(void *arg) {
+    (void)arg;
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(53),
+                                .sin_addr.s_addr = htonl(INADDR_ANY) };
+    struct timeval tv = { .tv_sec = 1 };   // to notice the stop flag
+    if (sock < 0 || bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "captive DNS could not bind port 53");
+        if (sock >= 0) close(sock);
+        s_dns_task = NULL;
+        vTaskDelete(NULL);
+    }
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    uint8_t pkt[512];
+    while (s_dns_run) {
+        struct sockaddr_in from;
+        socklen_t flen = sizeof(from);
+        int n = recvfrom(sock, pkt, sizeof(pkt) - 16, 0, (struct sockaddr *)&from, &flen);
+        // A query: header, one question; nothing else is answered.
+        if (n < 12 + 5 || (pkt[2] & 0x80) || pkt[4] != 0 || pkt[5] != 1) continue;
+        int q = 12;
+        while (q < n && pkt[q]) q += pkt[q] + 1;   // the name's labels
+        if (q + 5 > n) continue;
+        const bool is_a = pkt[q + 1] == 0 && pkt[q + 2] == 1;
+        int len = q + 5;                           // header + question
+        pkt[2] = 0x84 | (pkt[2] & 0x01);           // response, authoritative, keep RD
+        pkt[3] = 0x80;                             // recursion available, no error
+        pkt[6] = 0; pkt[7] = is_a ? 1 : 0;         // answers
+        pkt[8] = pkt[9] = pkt[10] = pkt[11] = 0;
+        if (is_a) {
+            static const uint8_t ans[] = {
+                0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01,  // the name above, A, IN
+                0x00, 0x00, 0x00, 0x3C, 0x00, 0x04,  // 60 s, four bytes
+                192, 168, 4, 1,
+            };
+            memcpy(pkt + len, ans, sizeof(ans));
+            len += sizeof(ans);
+        }
+        sendto(sock, pkt, len, 0, (struct sockaddr *)&from, flen);
+    }
+    close(sock);
+    s_dns_task = NULL;
+    vTaskDelete(NULL);
+}
+
+// Any path but the page's own (`/generate_204`, `/hotspot-detect.html`, …): to the page.
+static esp_err_t to_the_page(httpd_req_t *req, httpd_err_code_t err) {
+    (void)err;
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 // ─── Bringing the access point up ───
 
 static void start_ap(void) {
@@ -267,7 +332,18 @@ static void start_ap(void) {
     build_ap_identity(s_ap_ssid, sizeof(s_ap_ssid), pass, sizeof(pass));
 
     // Once only: a second default AP netif asserts, and start_ap is retried.
-    if (!s_ap_netif) s_ap_netif = esp_netif_create_default_wifi_ap();
+    if (!s_ap_netif) {
+        s_ap_netif = esp_netif_create_default_wifi_ap();
+        // Joining phones are told to ask us for names (the captive DNS below).
+        esp_netif_dns_info_t dns = { .ip.type = ESP_IPADDR_TYPE_V4 };
+        dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(192, 168, 4, 1);
+        uint8_t offer = 1;
+        esp_netif_dhcps_stop(s_ap_netif);
+        esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns);
+        esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER,
+                               &offer, sizeof(offer));
+        esp_netif_dhcps_start(s_ap_netif);
+    }
 
     wifi_config_t ap = { 0 };
     size_t sn = strlen(s_ap_ssid);
@@ -299,6 +375,15 @@ static void start_ap(void) {
     httpd_uri_t post = { .uri = "/provision", .method = HTTP_POST, .handler = provision_post };
     httpd_register_uri_handler(s_httpd, &root);
     httpd_register_uri_handler(s_httpd, &post);
+    httpd_register_err_handler(s_httpd, HTTPD_404_NOT_FOUND, to_the_page);
+
+    s_dns_run = true;
+    if (!s_dns_task &&
+        xTaskCreate(dns_task, "setup_dns", 3072, NULL, 3, &s_dns_task) != pdPASS) {
+        // The page still works by its address; only the automatic opening is lost.
+        ESP_LOGW(TAG, "no captive DNS — the page opens at http://192.168.4.1 only");
+        s_dns_task = NULL;
+    }
 
     s_active = true;
     status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
@@ -315,6 +400,7 @@ static void start_ap(void) {
 }
 
 static void stop_ap(void) {
+    s_dns_run = false;   // the DNS task ends within a second
     if (s_httpd) { httpd_stop(s_httpd); s_httpd = NULL; }
     esp_wifi_set_mode(WIFI_MODE_STA);
     s_active = false;

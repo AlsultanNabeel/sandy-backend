@@ -883,7 +883,10 @@ button.
 network answers within `PROVISION_WINDOW_MS` (90 s), the board raises its own
 access point — `Sandy-<last four of the pair code>`, WPA2, with a password made at
 random each boot — serves a scan-and-pick page on `192.168.4.1`, and shows a QR that
-joins it plus the name and password in text on its own screen (never in the log). The chosen credentials go through `wifi_sandy_switch`, which proves them
+joins it plus the name and password in text on its own screen (never in the log). It is a
+captive portal: DHCP names the access point as DNS, a small DNS task answers every A
+question with `192.168.4.1`, and any other path (`/generate_204`, `/hotspot-detect.html`)
+redirects to the page, so a joining phone opens it by itself. The chosen credentials go through `wifi_sandy_switch`, which proves them
 before saving and reverts on failure, so a typo cannot leave a board booting onto
 a network that does not exist.
 
