@@ -93,6 +93,7 @@ void camRemoteStream(bool on);
 // إعلانات صريحة: Arduino بيوقف توليدها لمّا في تعريفات قبل `setup`.
 void settingsLoadFromNvs();
 void setupCamera();
+void camReinitTick();
 void connectWiFi();
 void ensureWiFiConnected();
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
@@ -198,7 +199,7 @@ void setup() {
   WiFi.onEvent(onWiFiEvent);
   connectWiFi();
 
-  // لو فشلت، منعيد عند أول طلب snapshot.
+  // لو فشلت، `camReinitTick` بيعيد المحاولة من الحلقة.
   setupCamera();
 
   if (g_cameraReady) settingsLoadFromNvs();
@@ -242,6 +243,7 @@ void loop() {
   camWifiTick();
 
   flashTick();
+  camReinitTick();
 
   if (g_snapshotPending) {
     g_snapshotPending = false;

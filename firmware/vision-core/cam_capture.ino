@@ -83,11 +83,35 @@ void setupCamera() {
   g_log.println("[CAM] ✅ camera ready");
 }
 
+// مستشعر فشل بالإقلاع: منجرّبه من الحلقة بتباعد متزايد، مش لحدّ إعادة التشغيل.
+// لو `esp_camera_init` علّق، الحارس بيعيد تشغيل اللوح، وهو نفس اللي كنّا بنستنّاه.
+#define CAM_REINIT_FIRST_MS 30000
+#define CAM_REINIT_MAX_MS   (5UL * 60UL * 1000UL)
+static unsigned long g_camReinitGapMs = CAM_REINIT_FIRST_MS;
+static unsigned long g_camReinitLastMs = 0;
+
+void camReinitTick() {
+  if (g_cameraReady) return;
+  if (millis() - g_camReinitLastMs < g_camReinitGapMs) return;
+  g_camReinitLastMs = millis();
+  if (!camLock(0)) return;
+  g_log.println("[CAM] المستشعر مش جاهز — بنجرّب نشغّله");
+  esp_camera_deinit();
+  setupCamera();
+  if (g_cameraReady) {
+    settingsLoadFromNvs();
+    g_camReinitGapMs = CAM_REINIT_FIRST_MS;
+  } else {
+    g_camReinitGapMs = min(g_camReinitGapMs * 2, CAM_REINIT_MAX_MS);
+  }
+  camUnlock();
+}
+
 void captureAndPublishSnapshot(const String& id, unsigned int settleMs, FlashMode flash) {
   char ev[160];
   if (!g_cameraReady) {
-    // ما منعيد init هون: esp_camera_init ممكن يعلّق لو العتاد مش جاهز.
-    g_log.println("[CAM] not ready — sending error without re-init");
+    // ما منعيد init هون (الطلب بيستنّى)؛ `camReinitTick` بيجرّب بالخلفية.
+    g_log.println("[CAM] not ready — sending error, re-init runs from the loop");
     snprintf(ev, sizeof(ev),
              "{\"id\":\"%s\",\"error\":\"camera_init_failed_at_boot\"}", id.c_str());
     mqttPublishEvent(ev);
