@@ -5,7 +5,7 @@
 //     الصورة بتنرفع بطلب لـ /api/cam/upload، مش بالوسيط.
 //   • تحديث موقّع من الخادم (sandy_ota_pull.h)؛ الترقية المحلية والتلنت للتطوير بس.
 // ملفات .ino (Arduino بيدمجها): capture, control (إعدادات وفلاش), http (بث محلي),
-// mqtt, ota (+Telnet), upload (رفع موقّع), wifi.
+// mqtt, ota (+Telnet), setup (شبكة احتياطية لمّا الشبكة ما بترد), upload (رفع موقّع), wifi.
 
 #include <Arduino.h>
 #include "esp_camera.h"
@@ -102,6 +102,10 @@ void updateTelnet();
 void updateMQTT();
 void camHttpTick();
 void camWifiTick();
+void camSetupTick();
+bool camQueueWifi(const String& ssid, const String& pass);
+bool camHttpRunning();
+const char *camSsid();
 void flashTick();
 void flashInit();
 void settingsInit();
@@ -241,6 +245,7 @@ void loop() {
 
   // بعد الخدمات: التبديل بيقطع الشبكة بقصد.
   camWifiTick();
+  camSetupTick();
 
   flashTick();
   camReinitTick();

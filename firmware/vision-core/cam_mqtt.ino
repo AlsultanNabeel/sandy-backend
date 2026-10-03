@@ -20,7 +20,7 @@ static String g_topicRequest, g_topicCommand, g_topicSnapshot,
               g_topicStatus,  g_topicEvent,   g_topicWifi;
 
 // طلب تغيير شبكة مستنّي `camLoop`: التبديل بيحجز ٢٥ ثانية ورد نداء MQTT ما لازم ينام.
-static bool   g_wifiPending = false;
+static volatile bool g_wifiPending = false;
 static String g_wifiSsid, g_wifiPass;
 
 // مش `static`: الرفع بيوقّع بنفس المعرّف.
@@ -107,18 +107,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // "<اسم>\n<كلمة السر>" (السطر الجديد ما بيكون جوّاهن).
     int nl = value.indexOf('\n');
     if (nl < 0) { g_log.println("[WIFI] no password line"); return; }
-    String ssid = value.substring(0, nl);
-    String pass = value.substring(nl + 1);
-    // حدود المعيار: الاسم ≤ ٣٢، كلمة السر فاضية أو ٨..٦٤. غير هيك رفض، مش قصّ.
-    if (ssid.length() == 0 || ssid.length() > 32 || pass.length() > 64 ||
-        (pass.length() > 0 && pass.length() < 8)) {
-      g_log.println("[WIFI] ignored — ssid/password outside the Wi-Fi limits");
-      return;
-    }
-    g_wifiSsid = ssid;
-    g_wifiPass = pass;
-    g_wifiPending = true;
-    g_log.printf("[WIFI] switch queued -> '%s'\n", g_wifiSsid.c_str());
+    camQueueWifi(value.substring(0, nl), value.substring(nl + 1));
     return;
   }
 
@@ -224,6 +213,22 @@ static bool mqttReconnect() {
   g_log.printf("[MQTT] connect failed rc=%d tls='%s' — next try in %lus\n",
                g_mqtt.state(), tlsErr[0] ? tlsErr : "none", g_mqttBackoffMs / 1000);
   return false;
+}
+
+// من الوسيط أو صفحة الإعداد؛ التبديل نفسه من الحلقة.
+bool camQueueWifi(const String& ssid, const String& pass) {
+  // حدود المعيار: الاسم ≤ ٣٢، كلمة السر فاضية أو ٨..٦٤. غير هيك رفض، مش قصّ.
+  if (ssid.length() == 0 || ssid.length() > 32 || pass.length() > 64 ||
+      (pass.length() > 0 && pass.length() < 8)) {
+    g_log.println("[WIFI] ignored — ssid/password outside the Wi-Fi limits");
+    return false;
+  }
+  if (g_wifiPending) return false;
+  g_wifiSsid = ssid;
+  g_wifiPass = pass;
+  g_wifiPending = true;   // آخر إشي: الحلقة بتقرا الاسم بعده
+  g_log.printf("[WIFI] switch queued -> '%s'\n", g_wifiSsid.c_str());
+  return true;
 }
 
 // تغيير الشبكة من الحلقة الرئيسية (بيحجز ٢٥ ثانية).
