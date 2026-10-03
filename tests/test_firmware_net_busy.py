@@ -46,7 +46,7 @@ def test_ota_check_claims_before_and_releases_after_the_check():
     release = body.index("net_release(NET_OWNER_OTA)")
     assert claim < once < release
     # A skipped check comes back in minutes, not after the six-hour period.
-    assert "OTA_RETRY_MS" in body and "esp_timer_start_once" in body
+    assert "OTA_RETRY_MS" in body and "ota_retry_in(" in body
 
 
 def test_voice_claims_before_opening_and_releases_on_every_exit():
