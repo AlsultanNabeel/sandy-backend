@@ -510,6 +510,25 @@ static void _schedule_reconnect(void) {
     }
 }
 
+// ─── Broker credentials (state; the functions are below) ───
+
+#define CREDS_NS "sandy_mqtt"
+
+static char s_user[65], s_pass[129];           // the credential that last connected
+// A new one is tried before it is kept: a wrong key saved over the old one left the
+// board unable to reach the broker, with nothing to go back to.
+static char s_new_user[65], s_new_pass[129];
+static volatile bool s_creds_pending;          // received, not applied yet
+static bool s_trying_new;                       // applied, waiting for CONNECTED
+static int  s_new_fails;
+#define NEW_CREDS_MAX_FAILS 3
+
+// نسخة كاملة من الإعداد: `esp_mqtt_set_config` بترجّع أي حقل ناقص للافتراضي.
+static esp_mqtt_client_config_t s_cfg;
+
+static void creds_store(const char *user, const char *pass);
+static void creds_revert(const char *why);
+
 // ─── MQTT event handler ───
 
 static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -518,6 +537,16 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_CONNECTED: {
             ESP_LOGI(TAG, "connected");
             s_backoff_ms = 0;
+            if (s_trying_new) {
+                // It works: now it is kept, and the old one goes.
+                s_trying_new = false;
+                snprintf(s_user, sizeof(s_user), "%s", s_new_user);
+                snprintf(s_pass, sizeof(s_pass), "%s", s_new_pass);
+                s_cfg.credentials.username = s_user;
+                s_cfg.credentials.authentication.password = s_pass;
+                creds_store(s_user, s_pass);
+                ESP_LOGW(TAG, "this board's own broker credential works — stored");
+            }
             // One wildcard subscription: new outputs only need a dispatch case.
             char sub[80];
             snprintf(sub, sizeof(sub), "%s/#", s_base);
@@ -546,6 +575,9 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             break;
 
         case MQTT_EVENT_DISCONNECTED:
+            if (s_trying_new && ++s_new_fails >= NEW_CREDS_MAX_FAILS) {
+                creds_revert("no connection in three tries");
+            }
             _schedule_reconnect();
             break;
 
@@ -633,6 +665,10 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "error type=%d",
                      ev->error_handle ? ev->error_handle->error_type : -1);
+            if (s_trying_new && ev->error_handle &&
+                ev->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+                creds_revert("the broker refused it");
+            }
             break;
 
         default: break;
@@ -775,15 +811,8 @@ static void _status_task(void *arg) {
 
 // ─── Broker credentials ───
 // كل لوح بياخد مفتاح وسيط خاص فيه: `creds_load` بتقرا المحفوظ وإلا المكتوب بالكود،
-// و`mqtt_sandy_set_credentials` بتحفظ المفتاح اللي بيجي من مصافحة الصوت.
+// و`mqtt_sandy_set_credentials` بتاخد المفتاح اللي بيجي من مصافحة الصوت، وبينحفظ بس لمّا يتّصل.
 
-#define CREDS_NS "sandy_mqtt"
-
-static char s_user[65], s_pass[129];
-static volatile bool s_creds_pending;
-
-// نسخة كاملة من الإعداد: `esp_mqtt_set_config` بترجّع أي حقل ناقص للافتراضي.
-static esp_mqtt_client_config_t s_cfg;
 
 static void creds_load(void) {
     snprintf(s_user, sizeof(s_user), "%s", identity()->mqtt_user);
@@ -806,29 +835,34 @@ static void creds_load(void) {
              strcmp(s_user, identity()->mqtt_user) ? "per-device (stored)" : "shared (compiled in)");
 }
 
-bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
-    if (!user || !pass || !*user || !*pass) return false;
-
-    // نفس المفتاح؟ ما منكتب (توفيرًا للذاكرة الوامضة).
-    if (!strcmp(user, s_user) && !strcmp(pass, s_pass)) return false;
-
+static void creds_store(const char *user, const char *pass) {
     nvs_handle_t h;
     if (nvs_open(CREDS_NS, NVS_READWRITE, &h) != ESP_OK) {
         ESP_LOGE(TAG, "cannot open %s to store the broker credential", CREDS_NS);
-        return false;
+        return;
     }
     esp_err_t e1 = nvs_set_str(h, "user", user);
     esp_err_t e2 = nvs_set_str(h, "pass", pass);
     esp_err_t e3 = nvs_commit(h);
     nvs_close(h);
     if (e1 != ESP_OK || e2 != ESP_OK || e3 != ESP_OK) {
-        ESP_LOGE(TAG, "storing the broker credential failed");
-        return false;
+        ESP_LOGE(TAG, "storing the broker credential failed — it works until the next boot");
     }
+}
 
-    snprintf(s_user, sizeof(s_user), "%s", user);
-    snprintf(s_pass, sizeof(s_pass), "%s", pass);
-    ESP_LOGW(TAG, "stored this board's own broker credential (user=%s)", s_user);
+bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
+    if (!user || !pass || !*user || !*pass) return false;
+    if (strlen(user) >= sizeof(s_new_user) || strlen(pass) >= sizeof(s_new_pass)) return false;
+
+    // نفس المفتاح، أو نفس اللي عم نجرّبه؟ ما في إشي جديد.
+    if (!strcmp(user, s_user) && !strcmp(pass, s_pass)) return false;
+    if ((s_creds_pending || s_trying_new) &&
+        !strcmp(user, s_new_user) && !strcmp(pass, s_new_pass)) return false;
+    if (s_trying_new) return false;   // one at a time; the server sends it again next call
+
+    snprintf(s_new_user, sizeof(s_new_user), "%s", user);
+    snprintf(s_new_pass, sizeof(s_new_pass), "%s", pass);
+    ESP_LOGW(TAG, "received this board's own broker credential (user=%s) — will try it", user);
 
     // منطبّقها بهالتشغيلة، بس مش هلّق: إعادة الاتصال فوق مصافحة الصوت بتخلّص الرام
     // الداخلية. مهمّة النبضة بتطبّقها لمّا الشبكة تفضى.
@@ -836,20 +870,32 @@ bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
     return true;
 }
 
+// Back to the credential that last worked.
+static void creds_revert(const char *why) {
+    s_trying_new = false;
+    s_cfg.credentials.username = s_user;
+    s_cfg.credentials.authentication.password = s_pass;
+    esp_mqtt_set_config(s_client, &s_cfg);
+    ESP_LOGE(TAG, "the new broker credential failed (%s) — back to the old one", why);
+}
+
 static void _apply_pending_credentials(void) {
     if (!s_creds_pending || !s_client) return;
     if (voice_is_connected() || net_owner() != NET_OWNER_NONE) return;   // later
     s_creds_pending = false;
-    // مؤشّرات أصلًا جوّا s_cfg، بس منكتبهن صراحة.
-    s_cfg.credentials.username = s_user;
-    s_cfg.credentials.authentication.password = s_pass;
+    s_cfg.credentials.username = s_new_user;
+    s_cfg.credentials.authentication.password = s_new_pass;
     if (esp_mqtt_set_config(s_client, &s_cfg) == ESP_OK) {
+        s_trying_new = true;
+        s_new_fails = 0;
         // Disconnect, not reconnect: the library ignores reconnect on a live link, and a
         // clean DISCONNECT doesn't fire the "offline" will.
         esp_mqtt_client_disconnect(s_client);
         ESP_LOGI(TAG, "reconnecting with the new credential");
     } else {
-        ESP_LOGW(TAG, "could not apply the new credential live — next boot will");
+        s_cfg.credentials.username = s_user;
+        s_cfg.credentials.authentication.password = s_pass;
+        ESP_LOGW(TAG, "could not apply the new credential live — the next call sends it again");
     }
 }
 

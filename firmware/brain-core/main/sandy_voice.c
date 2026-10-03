@@ -540,7 +540,7 @@ static void on_ws_text(const char *msg, int len) {
             if (json_str_field(msg, len, "user", bu, sizeof(bu)) &&
                 json_str_field(msg, len, "pass", bp, sizeof(bp))) {
                 if (mqtt_sandy_set_credentials(bu, bp))
-                    ESP_LOGW(TAG, "took this board's own broker credential");
+                    ESP_LOGW(TAG, "got this board's own broker credential — trying it");
             }
         }
 #endif
