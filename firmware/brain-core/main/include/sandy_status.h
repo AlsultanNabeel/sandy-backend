@@ -25,6 +25,7 @@ typedef enum {
     SANDY_ST_SAFE_MODE,     // crashed repeatedly: network and updates only
     SANDY_ST_NO_CLOCK,      // the clock is not set: the server would refuse the hello
     SANDY_ST_UPDATING,      // downloading and installing an update: do not unplug
+    SANDY_ST_NOT_SET_UP,    // no identity (pairing code, servers): nothing can connect
     SANDY_ST_COUNT
 } sandy_status_t;
 
@@ -40,6 +41,7 @@ typedef enum {
     SANDY_PART_SCREEN,
     SANDY_PART_CLOCK,
     SANDY_PART_UPDATE,
+    SANDY_PART_IDENTITY,
     SANDY_PART_COUNT
 } sandy_part_t;
 

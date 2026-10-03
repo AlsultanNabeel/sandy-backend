@@ -119,6 +119,12 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "عم بحدّث حالي. لا تفصل الكهربا لحد ما أخلص.",
         9, "updating",
     },
+    // Not a network fault: no network will help until the board is set up.
+    [SANDY_ST_NOT_SET_UP] = {
+        MOOD_CONFUSED, LED_STATE_OFF, "NOT SET UP",
+        "هالجهاز مش مجهّز: ناقصه رمز الاقتران أو عناوين الخوادم. بدّه تجهيز من المصنع.",
+        8, "not_set_up",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {
@@ -131,6 +137,7 @@ static const char *const PART_NAME[SANDY_PART_COUNT] = {
     [SANDY_PART_SCREEN] = "screen",
     [SANDY_PART_CLOCK]  = "clock",
     [SANDY_PART_UPDATE] = "update",
+    [SANDY_PART_IDENTITY] = "identity",
 };
 
 sandy_status_t status_get(void)

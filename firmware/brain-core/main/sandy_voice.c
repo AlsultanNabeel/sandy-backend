@@ -1759,6 +1759,16 @@ static void voice_task(void *arg) {
             // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
+        } else if (!s_session_active && s_wake_req && !identity_complete()) {
+            // No server to call and no name to call it with: say so, not "no internet".
+            s_wake_req = false;
+            ESP_LOGW(TAG, "wake word, but this board is not set up");
+            status_set(SANDY_PART_IDENTITY, SANDY_ST_NOT_SET_UP);
+#if ENABLE_BUZZER
+            buzzer_play(MELODY_ERROR);
+#endif
+            VOICE_FACE(MOOD_CONFUSED);
+            VOICE_LED(LED_STATE_IDLE);
         } else if (!s_session_active && s_wake_req && !wifi_sandy_is_connected()) {
             // Heard, but nowhere to send it: answer here, with a tone and a face.
             s_wake_req = false;

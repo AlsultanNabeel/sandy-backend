@@ -728,7 +728,8 @@ flashed: `OK`, `BOOTING`, `NO_WIFI`, `NO_SERVER`, `LINK_DROPPED`, `NET_SLOW`,
 `LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`, `WIFI_BAD_PASS` (a refusal, or a handshake
 timeout only when the router is heard at `WIFI_BAD_PASS_MIN_RSSI` or better), `VOICE_OFF` (I2S, the audio
 buffers or the front end did not start), `NECK_OFF`, `SCREEN_OFF` (heartbeat and LED only),
-`SETTINGS_OFF` (the settings store
+`NOT_SET_UP` (part `IDENTITY`: no pairing code or server address, so no call is even
+tried — it used to try an empty address and say «no internet»), `SETTINGS_OFF` (the settings store
 would not open — she runs on defaults instead of halting; no `ESP_ERROR_CHECK` is left in
 an enabled file).
 
