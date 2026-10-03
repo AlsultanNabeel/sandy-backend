@@ -347,4 +347,13 @@ bool screen_image_end(void) {
     return true;
 }
 
+#else  // !ENABLE_FACE
+
+#include "sandy_screen.h"
+
+// No display: what other parts show on it (setup QR, pairing code) has nowhere to go.
+void screen_show_text(const char *text) { (void)text; }
+void screen_show_qr(const char *payload, const char *caption) { (void)payload; (void)caption; }
+void screen_dismiss(void) {}
+
 #endif // ENABLE_FACE

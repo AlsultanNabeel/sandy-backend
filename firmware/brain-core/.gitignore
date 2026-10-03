@@ -1,5 +1,7 @@
 build/
 build-retail/
+build-matrix/
+build-matrix-*.log
 sdkconfig
 sdkconfig.old
 main/secrets.h

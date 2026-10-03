@@ -263,4 +263,16 @@ sandy_led_fx_t led_fx_from_name(const char *name) {
     return LED_FX_COUNT;
 }
 
+#else  // !ENABLE_LED
+
+#include "sandy_led.h"
+
+// No LED: the status and broker commands that drive it do nothing.
+void led_set_state(sandy_led_state_t state) { (void)state; }
+bool led_set_effect(sandy_led_fx_t fx, uint32_t rgb, int speed) {
+    (void)fx; (void)rgb; (void)speed;
+    return false;
+}
+sandy_led_fx_t led_fx_from_name(const char *name) { (void)name; return LED_FX_COUNT; }
+
 #endif // ENABLE_LED

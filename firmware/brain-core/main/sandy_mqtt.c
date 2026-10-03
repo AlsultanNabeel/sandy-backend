@@ -302,8 +302,6 @@ static void _handle_screen(const char *val) {
 #endif
 }
 
-#if ENABLE_FACE
-// Image chunk: seq 0 begins, seq total-1 ends; no separate begin/end commands.
 // تغيير الشبكة. الحمولة: "<اسم>\n<كلمة السر>" (السطر الجديد الحرف الوحيد اللي ما بيكون جوّاهن).
 // بيحجز لحدّ ٢٥ ثانية، فبيتنفّذ ع مهمّة لحاله: معالج MQTT ما لازم ينام.
 typedef struct { char ssid[33]; char pass[65]; } wifi_req_t;
@@ -333,10 +331,12 @@ static void _handle_wifi(const char *val) {
     }
 }
 
+#if ENABLE_FACE
 static void _handle_screen_size(const char *val) {
     screen_set_size(screen_size_from_name(val));
 }
 
+// Image chunk: seq 0 begins, seq total-1 ends; no separate begin/end commands.
 static void _handle_screen_img(const char *val) {
     int seq = 0, total = 0, consumed = 0;
     if (sscanf(val, "%d:%d:%n", &seq, &total, &consumed) != 2 || consumed <= 0 ||
