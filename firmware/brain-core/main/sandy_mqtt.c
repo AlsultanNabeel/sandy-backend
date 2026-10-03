@@ -66,6 +66,41 @@ static const char *topic_suffix(const char *topic) {
 
 // ─── Topic handlers ───
 
+// A whole number and nothing else, within [lo, hi]. atoi turned "", "abc" or "5x" into
+// 0 or 5: an empty volume muted her and an empty angle swung the neck to its end.
+static bool parse_int(const char *s, int lo, int hi, int *out) {
+    if (!s || !*s) return false;
+    const char *p = s;
+    if (*p == '-') p++;
+    if (!*p) return false;
+    long v = 0;
+    for (; *p; p++) {
+        if (*p < '0' || *p > '9') return false;
+        v = v * 10 + (*p - '0');
+        if (v > 1000000) return false;   // far past any range here
+    }
+    if (*s == '-') v = -v;
+    if (v < lo || v > hi) return false;
+    *out = (int)v;
+    return true;
+}
+
+// The number after `"key":` in a small JSON payload, by the same rule.
+static bool json_int(const char *json, const char *key, int lo, int hi, int *out) {
+    const char *p = strstr(json, key);
+    if (!p) return false;
+    p += strlen(key);
+    while (*p == ' ') p++;
+    char num[12];
+    size_t n = 0;
+    while ((p[n] == '-' || (p[n] >= '0' && p[n] <= '9')) && n < sizeof(num) - 1) {
+        num[n] = p[n];
+        n++;
+    }
+    num[n] = '\0';
+    return parse_int(num, lo, hi, out);
+}
+
 static const struct { const char *name; sandy_mood_t mood; } MOOD_MAP[] = {
     {"idle",        MOOD_IDLE},       {"happy",       MOOD_HAPPY},
     {"curious",     MOOD_CURIOUS},    {"sad",         MOOD_SAD},
@@ -93,8 +128,9 @@ static void _handle_mood(const char *val) {
 }
 
 static void _handle_servo(const char *val) {
-    int angle = atoi(val);
-    if (angle >= 0 && angle <= 180) servo_move_to((uint8_t)angle);
+    int angle;
+    if (!parse_int(val, 0, 180, &angle)) { ESP_LOGW(TAG, "servo: not an angle: %.16s", val); return; }
+    servo_move_to((uint8_t)angle);
 }
 
 // حركة = الجسم كله: رقبة + وش + نغمة + إضاءة.
@@ -165,9 +201,13 @@ static void _handle_focus(const char *val) {
     if      (strstr(val, "\"phase\":\"focus\"")) phase = 1;
     else if (strstr(val, "\"phase\":\"break\"")) phase = 2;
     int remaining = 0, total = 0;
-    const char *p;
-    if ((p = strstr(val, "\"remaining_sec\":"))) remaining = atoi(p + 16);
-    if ((p = strstr(val, "\"total_sec\":")))     total     = atoi(p + 12);
+    // A focus with broken numbers is refused; "off" needs none.
+    if (phase != 0 &&
+        (!json_int(val, "\"remaining_sec\":", 0, 24 * 3600, &remaining) ||
+         !json_int(val, "\"total_sec\":", 0, 24 * 3600, &total))) {
+        ESP_LOGW(TAG, "focus: bad numbers: %.60s", val);
+        return;
+    }
     face_set_focus(phase, remaining, total);
 }
 
@@ -184,7 +224,12 @@ static void _handle_base(const char *val) {
 // Plain payloads ("on", "off", a number), validated by the backend's device_store.command_payload.
 
 static void _handle_mic_gain(sandy_mic_ch_t ch, const char *val) {
-    mic_set_gain(ch, atoi(val));
+    int g;
+    if (!parse_int(val, AUDIO_GAIN_MIN, AUDIO_GAIN_MAX, &g)) {
+        ESP_LOGW(TAG, "mic gain: not a number in range: %.16s", val);
+        return;
+    }
+    mic_set_gain(ch, g);
 }
 
 static void _handle_mic_mute(sandy_mic_ch_t ch, const char *val) {
@@ -194,7 +239,9 @@ static void _handle_mic_mute(sandy_mic_ch_t ch, const char *val) {
 }
 
 static void _handle_volume(const char *val) {
-    spk_set_volume(atoi(val));
+    int v;
+    if (!parse_int(val, 0, 100, &v)) { ESP_LOGW(TAG, "volume: not 0..100: %.16s", val); return; }
+    spk_set_volume(v);
 }
 
 static void _handle_speaker_test(const char *val) {
@@ -229,10 +276,9 @@ static void _handle_led(const char *val) {
         uint32_t v = (uint32_t)strtoul(c1 + 1, &end, 16);
         if (end == c1 + 7 && (*end == ':' || *end == '\0')) rgb = v;
         const char *c2 = strchr(c1 + 1, ':');
-        if (c2) {
-            speed = atoi(c2 + 1);
-            if (speed < 1) speed = 1;
-            if (speed > 10) speed = 10;
+        if (c2 && !parse_int(c2 + 1, 1, 10, &speed)) {
+            ESP_LOGW(TAG, "led: speed is not 1..10: %.16s", c2 + 1);
+            return;
         }
     }
 
@@ -293,7 +339,8 @@ static void _handle_screen_size(const char *val) {
 
 static void _handle_screen_img(const char *val) {
     int seq = 0, total = 0, consumed = 0;
-    if (sscanf(val, "%d:%d:%n", &seq, &total, &consumed) != 2 || consumed <= 0) {
+    if (sscanf(val, "%d:%d:%n", &seq, &total, &consumed) != 2 || consumed <= 0 ||
+        seq < 0 || total <= 0 || seq >= total) {
         ESP_LOGW(TAG, "malformed image chunk header");
         return;
     }

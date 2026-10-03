@@ -134,9 +134,16 @@ static void ir_send_text(const char *code) {
     while (*p && nsym < IR_MAX_SYMBOLS) {
         while (*p == ' ' || *p == ',') p++;
         if (!*p) break;
+        if (*p < '0' || *p > '9') {          // strtoul would take a sign or a space
+            ESP_LOGW(TAG, "not a code: '%c' at %d — nothing sent", *p, (int)(p - code));
+            return;
+        }
         char *end = NULL;
         unsigned long v = strtoul(p, &end, 10);
-        if (end == p) break;                 // not a number: stop, don't guess
+        if (*end && *end != ' ' && *end != ',') {
+            ESP_LOGW(TAG, "not a code: '%c' at %d — nothing sent", *end, (int)(end - code));
+            return;
+        }
         p = end;
         if (v > IR_MAX_TICKS) v = IR_MAX_TICKS;   // 15-bit field; a gap this long is a gap
         dur[slot++] = (unsigned)v;
