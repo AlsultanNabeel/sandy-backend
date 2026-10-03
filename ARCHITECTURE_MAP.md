@@ -648,12 +648,19 @@ You can probe all of this from a browser without hardware — see §10.
 ### 3.2 Speaker verification
 
 `features/speaker_id.py` + `voice_ws/speaker.py`. CAM++ via sherpa-onnx, running
-locally: no account, no torch. Gated by `SANDY_REQUIRE_SPEAKER_AUTH=1`, off by
-default, and it only guards the sensitive calls (`speaker._is_sensitive_call`):
+locally: no account, no torch. On for robot sessions once the owner's voice is known
+(`speaker._speaker_gate_enabled`: a voiceprint exists, or `SANDY_REQUIRE_SPEAKER_AUTH=1`),
+never on the app's call (the phone is signed in, and its mic is not the print's). Each
+closed turn is checked and the persona injected: the owner gets her whole self, anyone
+else a kind, neutral Sandy with nothing private. It also guards the sensitive calls (`speaker._is_sensitive_call`):
 `list_update` delete / `all_matching`, `schedule_update` cancel / `all_matching`,
 `schedule` of a `message_to_future_self`, and `confirm` (which only runs a held
 delete or bulk change). With no voiceprint enrolled it allows — it does not lock
-the owner out before enrolment. Voiceprints are recorded over `/voice/enroll`.
+the owner out before enrolment. The voiceprint is learned from the robot's own mic: the
+app (Robot › «صوتي») calls `POST /api/voice/enroll`, and the next five robot turns of three
+seconds or more are its clips (`sandy_voice_enroll`, deleted once the print is built; a
+fifteen-minute window); she says so in her reply. It is stored only encrypted
+(`SANDY_BIO_KEY`). The older `/voice/enroll` socket (the laptop script) still records one.
 
 ---
 

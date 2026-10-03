@@ -11,7 +11,7 @@ import base64
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from app.db import configure, get_db
 
@@ -173,6 +173,67 @@ def enroll_speaker(chat_id: int, pcm_samples: List[bytes]) -> Tuple[bool, int, s
     if not _save_profile(chat_id, mean.astype("float32").tobytes(), len(embeddings)):
         return False, 0, "ما قدرت أحفظ بصمة صوتك بأمان هلق — جرّب بعدين."
     return True, len(embeddings), f"تمام! صرت أعرف صوتك ✅ ({len(embeddings)} مقاطع)"
+
+
+# ── Learning the owner's voice from the robot itself ─────────────────────────
+# The print must come from the mic it will be checked against: one made on a laptop
+# never matched the robot. The app starts it; the next robot turns are the clips.
+_ENROLL_COLL = "sandy_voice_enroll"
+ENROLL_CLIPS = 5
+_ENROLL_WINDOW = timedelta(minutes=15)
+# A clip shorter than this (16 kHz, 16-bit) is too little voice to learn from.
+_ENROLL_MIN_BYTES = 32000 * 3 // 2
+
+
+def start_enrollment(chat_id: str) -> bool:
+    """The owner asked (from the app): the robot's next turns teach her their voice."""
+    db = get_db()
+    if db is None or not chat_id:
+        return False
+    db[_ENROLL_COLL].replace_one(
+        {"_id": str(chat_id)},
+        {"_id": str(chat_id), "until": datetime.now(timezone.utc) + _ENROLL_WINDOW, "clips": []},
+        upsert=True)
+    return True
+
+
+def enrollment_progress(chat_id: str) -> Optional[int]:
+    """Clips collected so far while learning is on, else None."""
+    db = get_db()
+    if db is None or not chat_id:
+        return None
+    doc = db[_ENROLL_COLL].find_one({"_id": str(chat_id)}, {"until": 1, "clips": 1})
+    if not doc:
+        return None
+    until = doc.get("until")
+    if until is not None and until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    if until is None or until < datetime.now(timezone.utc):
+        db[_ENROLL_COLL].delete_one({"_id": str(chat_id)})   # raw voice is not kept
+        return None
+    return len(doc.get("clips") or [])
+
+
+def add_enrollment_clip(chat_id: str, pcm: bytes) -> Optional[Tuple[bool, int, str]]:
+    """One turn of the owner's voice. The result once the last clip is in, else None.
+    The clips are deleted either way once the print is built."""
+    if enrollment_progress(chat_id) is None or len(pcm) < _ENROLL_MIN_BYTES:
+        return None
+    from bson import Binary
+
+    db = get_db()
+    doc = db[_ENROLL_COLL].find_one_and_update(
+        {"_id": str(chat_id)}, {"$push": {"clips": Binary(pcm)}},
+        projection={"clips": 1}, return_document=True)
+    clips = [bytes(c) for c in (doc or {}).get("clips") or []]
+    if len(clips) < ENROLL_CLIPS:
+        return None
+    db[_ENROLL_COLL].delete_one({"_id": str(chat_id)})
+    result = enroll_speaker(chat_id, clips)
+    if result[0]:
+        from app.utils.tenant_version import bump_for
+        bump_for(str(chat_id))   # her instruction changes once she knows who is who
+    return result
 
 
 def verify_speaker(chat_id: int, pcm_bytes: bytes) -> Tuple[bool, float]:

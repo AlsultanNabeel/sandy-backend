@@ -50,6 +50,7 @@ from app.api.voice_ws.speaker import (
     _RecentAudio,
     _is_sensitive_call,
     _speaker_gate_enabled,
+    _learn_voice,
     _verify_and_inject,
     _verify_owner,
 )
@@ -926,6 +927,9 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             utter_ms = 0.0
             speech_ms = 0.0
             return
+        if utter_ms >= _VAD_MIN_UTTER_MS:
+            # This turn's own audio (16 kHz, 16-bit = 32 bytes a millisecond).
+            await _learn_voice(session, recent.snapshot()[-int(utter_ms * 32):])
         if verify and utter_ms >= _VAD_MIN_UTTER_MS:
             await _verify_and_inject(session, recent.snapshot())
         await session.send_realtime_input(activity_end=types.ActivityEnd())

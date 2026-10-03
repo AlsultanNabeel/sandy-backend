@@ -69,6 +69,7 @@ struct RobotView: View {
                         NodeWiFiView(node: node, onFinished: { await devices.load(api: state.api) })
                     }
                 }
+                row("person.wave.2", "robot.hub.voice", "robot.hub.voiceNote") { VoiceLearnView() }
                 row("stethoscope", "robot.hub.diagnose", "robot.hub.diagnoseNote") { DiagnoseView() }
                 row("link", "robot.hub.pairing", "robot.hub.pairingNote") { AccountView() }
             }
