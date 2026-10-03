@@ -191,3 +191,19 @@ def test_the_partition_tables_match_the_server_slots():
             assert int(r[4], 16) == fs.BOARD_SLOT_BYTES[board], sketch
         assert rows[0][0].strip() == "nvs" and rows[0][3].strip() == "0x9000", (
             f"{sketch}: moving NVS would wipe the saved identity and Wi-Fi")
+
+
+def test_the_publisher_refuses_a_dev_stale_or_secret_brain_image():
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("pf", root / "scripts" / "publish_firmware.py")
+    pf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pf)
+    good = b"\xe9" + b"x" * 64 + b"0.11.4\x00" + b"y" * 64
+    assert pf.brain_image_refused(good, "0.11.4", []) == ""
+    for marker in pf.BRAIN_DEV_MARKERS:
+        assert "dev build" in pf.brain_image_refused(good + marker, "0.11.4", [])
+    assert "not built from this source" in pf.brain_image_refused(good, "0.11.5", [])
+    assert "secrets.h" in pf.brain_image_refused(good + b"SANDY-8421", "0.11.4", [b"SANDY-8421"])
+    assert "not an ESP32" in pf.brain_image_refused(b"\x00" + good, "0.11.4", [])

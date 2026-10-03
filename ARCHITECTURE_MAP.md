@@ -1324,10 +1324,12 @@ nobody re-reads becomes a way of believing things that stopped being true.
    command only triggers a check — it no longer takes a URL. Published images
    are always the sale build (`idf.py -B build-retail -DSANDY_RETAIL=1`), which
    compiles `ENABLE_REMOTE` (LAN upload + log on 3333) out; the publish script
-   refuses an image that still contains it. The Arduino boards verify TLS
-   against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`). Still open: secure
-   boot and flash encryption are off; the Arduino boards are not on this
-   update path.
+   refuses an image that still contains it (`brain_image_refused`: the log task, the upload
+   task or its page), one whose version string is not this source's (a stale build-retail
+   would install and be offered again for ever), or one carrying a value from the real
+   `secrets.h`; `--check` runs the refusals without a key or an upload. The Arduino boards verify TLS
+   against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`) and pull signed releases too
+   (`sandy_ota_pull.h`). Still open: secure boot and flash encryption are off.
 1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
    starts at boot when `SENTRY_DSN` is set; `before_send` strips request
    bodies and, since 19 Sep 2026, log breadcrumbs down to their `[tag]`.
