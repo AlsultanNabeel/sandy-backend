@@ -428,8 +428,8 @@ Who calls what:
 - **The owner's tooling** — `/api/firmware/publish` and `/rollout`
   (`scripts/publish_firmware.py`), `/api/diagnose` and `/health` (by hand).
 - **RevenueCat** — `/webhook/revenuecat`.
-- `/voice/enroll` records a voiceprint for speaker verification (§3.2); no
-  shipped client opens it yet, and it is the only way to enrol one.
+- `/voice/enroll` (socket) records a voiceprint from the laptop script; the app's
+  Robot › «صوتي» screen uses `POST /api/voice/enroll` instead and records on the robot (§3.2).
 
 **The blocks** (`api/blocks_api.py`, §2.12) — every route `require_tenant` except
 `/api/kinds` (`require_auth`), so the block stores' scoped handles do the
@@ -927,7 +927,7 @@ was named here twice and does not exist; the generator has never written it.)
 | Face / display | Yes — all 25 moods | Yes |
 | Microphones | Yes — per-channel gain, mute, live level | Yes |
 | Speaker | Yes — volume 0..100, test tone | Yes, through the voice path |
-| Noise suppression | Yes — off / mild / medium / aggressive | Yes |
+| Noise suppression | No — inside the esp-sr front end, not a control | Yes |
 | On-board LED | Yes — off / idle / listening / talking, plus 11 effects | Yes |
 | Neck servo | Yes | **Not physically wired yet** |
 | Base motors | Topic exists | `ENABLE_MOTORS = 0` |
@@ -945,8 +945,8 @@ desk, until it is flashed.**
 
 The camera board program is no longer missing — `firmware/vision-core/` exists, is
 flashed, and answers on the broker. Neither is the IR code (`main/sandy_ir.c`, on the brain; §4.5), though
-it is written and not yet tried on hardware. Still genuinely missing: two-mic
-beamforming.
+it is written and not yet tried on hardware. Nor is two-mic separation: the esp-sr
+front end does it (`sandy_voice.c`, input "MMR").
 
 The Arabic display font is done: `main/fonts/` now carries the typeface at
 twenty-four and thirty-two pixels alongside LVGL's built-in sixteen, which is
@@ -975,6 +975,14 @@ what makes the text-size control real rather than decorative.
   snapshot request was published exactly right and nothing was subscribed; no
   `cam/status` heartbeat was ever sent, so the address the live view needs never
   arrived, and "couldn't get the address" was the literal truth.
+
+  When its network does not answer for a minute and a half (or none is saved) it
+  raises its own, `Sandy-Cam-<pair code>` with password `sandy<pair code>`, and serves
+  a page at `http://192.168.4.1` to pick a new one (`cam_setup.ino`); the choice goes
+  through the same tested switch as `cam/wifi`, and the setup network drops itself
+  once the home network is back. A sensor that failed at boot is retried from the
+  loop (30 s, doubling to 5 min) instead of waiting for a reboot. The serial log
+  stays on the board in a normal build; only `SANDY_DEV` mirrors it on port 23.
 - **`firmware/room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
   `sandy/node/<id>/room/`.
 
@@ -1314,13 +1322,9 @@ nobody re-reads becomes a way of believing things that stopped being true.
    summary and the conversation title) with no future ever read. Both go through
    `chat_fn` with `OPENAI_CHAT_TIMEOUT_S`, so a stalled upstream costs a worker
    for that long, not for ever. A sizing question, wanting a measurement first.
-10. **`/voice/enroll` has no client.** Speaker verification (§3.2) is off by
-   default and there is no screen that records a voiceprint.
-
 ### Hardware, and the owner already knows
 
-11. **Two-mic beamforming is not written.** §4.6.
-12. **Voice status clips are not flashed** — the sentences are in the table, the
+10. **Voice status clips are not flashed** — the sentences are in the table, the
    speaking hook is not written and the partition table has no room reserved. §4.2.
 
 ### Checked and closed since the last version of this list
@@ -1334,4 +1338,5 @@ not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
 Phase 5 closed three more by deleting what they were about: `tool_health` (no
 tool registry left), the 28-round-trip warm turn (the persona-directive build
 and the old memory layers are gone), and the router-then-reply pair on every
-message (plain chat is one call).
+message (plain chat is one call). Since then: the voiceprint has a client (Robot ›
+«صوتي», §3.2), and two-mic separation is the esp-sr front end's (§4).
