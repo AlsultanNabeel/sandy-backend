@@ -10,9 +10,11 @@
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "nvs.h"
 #include "sandy_nvs.h"
 #include "sandy_status.h"
 #if ENABLE_VOICE
@@ -33,6 +35,15 @@ typedef struct {
 static RTC_NOINIT_ATTR guard_t s_guard;
 
 static bool s_safe;
+static uint32_t s_boots;   // restarts since the first boot, from the settings store
+
+// Tasks whose stack headroom the heartbeat reports: ours, and the libraries' that carry
+// the network. A name not running (feature off, not started yet) is skipped.
+static const char *const STACK_TASKS[] = {
+    "main", "voice", "voice_mic", "voice_proc", "voice_spk", "voice_tx", "lvgl",
+    "mqtt_status", "mqtt_task", "websocket_task", "wifi_retry", "ota_health", "ota_check",
+    "servo_gest", "buzzer", "led_fx", "nvs_defer", "ir_rx", "provision", "health",
+};
 
 static bool is_crash(esp_reset_reason_t r) {
     return r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT ||
@@ -152,7 +163,45 @@ static void monitor_task(void *arg) {
     }
 }
 
+// One NVS write per boot: the count survives power cuts, unlike the crash guard.
+static void count_boot(void) {
+    nvs_handle_t h;
+    if (nvs_open("sandy", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_get_u32(h, "boots", &s_boots) != ESP_OK) s_boots = 0;
+    s_boots++;
+    if (nvs_set_u32(h, "boots", s_boots) == ESP_OK) nvs_commit(h);
+    nvs_close(h);
+}
+
+int health_json(char *out, size_t cap) {
+    char faults[160];
+    status_faults_json(faults, sizeof(faults));
+    int k = snprintf(out, cap,
+                     "\"boot\":%d,\"boots\":%lu,\"heap_min\":%u,\"heap_big\":%u,"
+                     "\"safe\":%s,\"faults\":{%s},\"stacks\":{",
+                     (int)esp_reset_reason(), (unsigned long)s_boots,
+                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                     s_safe ? "true" : "false", faults);
+    if (k < 0 || k >= (int)cap) return -1;
+    bool first = true;
+    for (size_t i = 0; i < sizeof(STACK_TASKS) / sizeof(STACK_TASKS[0]); i++) {
+        TaskHandle_t t = xTaskGetHandle(STACK_TASKS[i]);
+        if (!t) continue;
+        int n = snprintf(out + k, cap - k, "%s\"%s\":%u", first ? "" : ",",
+                         STACK_TASKS[i], (unsigned)uxTaskGetStackHighWaterMark(t));
+        if (n < 0 || n >= (int)(cap - k)) return -1;
+        k += n;
+        first = false;
+    }
+    if (k + 2 > (int)cap) return -1;
+    out[k++] = '}';
+    out[k] = '\0';
+    return k;
+}
+
 void health_init(void) {
+    count_boot();
     // Internal stack: health_restart() saves settings, and flash writes disable PSRAM.
     if (xTaskCreate(monitor_task, "health", 3072, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "health monitor did not start");

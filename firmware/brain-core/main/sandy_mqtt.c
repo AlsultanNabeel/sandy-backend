@@ -629,15 +629,28 @@ static void json_escape(const char *in, char *out, size_t cap) {
 
 void mqtt_publish_status(void) {
     if (!s_client || !s_status_lock) return;
-    // Static, not on the 3 KB task stack (it overflowed); s_status_lock guards it
-    // since the status timer and connect handler both publish. Worst case ~900 bytes.
-    static char buf[1024];
+    // Not on the 3 KB task stack (it overflowed): PSRAM, once, under s_status_lock since
+    // the status timer and connect handler both publish. Worst case ~1500 bytes: past
+    // CONFIG_MQTT_BUFFER_SIZE, which the client sends in pieces.
+    enum { BUF_CAP = 2048, HEALTH_CAP = 640 };
+    static char *buf, *health;
     if (xSemaphoreTake(s_status_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
+    if (!buf) buf = heap_caps_malloc(BUF_CAP + HEALTH_CAP, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        xSemaphoreGive(s_status_lock);
+        ESP_LOGE(TAG, "no memory for the heartbeat");
+        return;
+    }
+    health = buf + BUF_CAP;
     static char ssid[2 * 32 + 1];   // under the lock, like buf
     json_escape(wifi_sandy_ssid(), ssid, sizeof(ssid));
+    if (health_json(health, HEALTH_CAP) < 0) {
+        ESP_LOGW(TAG, "health members do not fit — heartbeat sent without them");
+        snprintf(health, HEALTH_CAP, "\"safe\":%s", health_safe_mode() ? "true" : "false");
+    }
     int n =
     // Live mic levels 0..100, in the heartbeat so the app's meters need no extra topic.
-        snprintf(buf, sizeof(buf),
+        snprintf(buf, BUF_CAP,
         // ما في distance: الحسّاس مش مركّب (ENABLE_SENSOR=0).
         "{\"uptime\":%lld,\"heap\":%lu,\"mood\":%d,"
         "\"mic_l\":%d,\"mic_r\":%d,"
@@ -649,7 +662,7 @@ void mqtt_publish_status(void) {
         // Exact backend key names (mqtt_ingest ignores anything else).
         "\"capabilities\":[\"servo\",\"pwm\",\"buzzer\",\"audio\"],"
         "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"" SANDY_BOARD_ID "\","
-        "\"firmware_version\":\"%s\",\"outputs\":%s}",
+        "\"firmware_version\":\"%s\",%s,\"outputs\":%s}",
         esp_timer_get_time() / 1000000LL,
         (unsigned long)esp_get_free_heap_size(),
         (int)g_current_mood,
@@ -659,10 +672,10 @@ void mqtt_publish_status(void) {
         mic_is_muted(MIC_RIGHT) ? "true" : "false",
         spk_get_volume(), wifi_sandy_rssi(),
         wifi_sandy_ip(), ssid,
-        SANDY_FW_VERSION, OUTPUTS_JSON);
+        SANDY_FW_VERSION, health, OUTPUTS_JSON);
     // Clipped JSON gets dropped whole by the server.
-    if (n < 0 || n >= (int)sizeof(buf)) {
-        ESP_LOGE(TAG, "heartbeat is %d bytes, buffer %u — not sent", n, (unsigned)sizeof(buf));
+    if (n < 0 || n >= BUF_CAP) {
+        ESP_LOGE(TAG, "heartbeat is %d bytes, buffer %u — not sent", n, (unsigned)BUF_CAP);
     } else {
         esp_mqtt_client_publish(s_client, s_topic_status, buf, n, 0, 0);
     }

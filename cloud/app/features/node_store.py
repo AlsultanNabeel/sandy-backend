@@ -100,7 +100,14 @@ _TELEMETRY_KEYS = {
     "ssid": str,
     # dBm; below about -75 the link can't carry live voice.
     "rssi": int, "room_rssi": int,
+    # The brain's health: last reset reason, restarts ever, least internal RAM it had,
+    # its largest block now, safe mode, each part not OK, each task's least stack headroom.
+    "boot": int, "boots": int, "heap_min": int, "heap_big": int, "safe": bool,
+    "faults": dict, "stacks": dict,
 }
+
+# A dict member: a few short names to a short string or a number.
+_DICT_MAX_ITEMS = 24
 
 
 def _clean_telemetry(data: Any) -> Dict[str, Any]:
@@ -111,7 +118,14 @@ def _clean_telemetry(data: Any) -> Dict[str, Any]:
         if key not in data:
             continue
         try:
-            if kind is bool:
+            if kind is dict:
+                if isinstance(data[key], dict):
+                    out[key] = {
+                        str(k)[:16]: (v if isinstance(v, int) and not isinstance(v, bool)
+                                      else str(v)[:32])
+                        for k, v in list(data[key].items())[:_DICT_MAX_ITEMS]
+                    }
+            elif kind is bool:
                 out[key] = bool(data[key])
             elif kind is str:
                 # Capped: untrusted input.

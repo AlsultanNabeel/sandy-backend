@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 // Keeping her alive unattended: the task watchdog for the tasks that matter, and
 // safe mode when she keeps crashing.
@@ -12,6 +13,12 @@ bool health_safe_mode(void);
 
 // Starts the monitor (internal RAM, a LOW_MEMORY left standing). After the settings store.
 void health_init(void);
+
+// The heartbeat's health members, without braces: why she last restarted, restarts
+// since the first boot, the least internal RAM she has had, its largest block now,
+// safe mode, every part not OK, and each task's least stack headroom in bytes.
+// Returns the length, or -1 if it does not fit.
+int health_json(char *out, size_t cap);
 
 // A clean restart: deferred settings saved first. Counts as a crash for safe mode.
 void health_restart(const char *why) __attribute__((noreturn));
