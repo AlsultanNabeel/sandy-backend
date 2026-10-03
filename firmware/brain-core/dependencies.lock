@@ -20,7 +20,7 @@ dependencies:
       type: service
     version: 0.5.3
   espressif/dl_fft:
-    component_hash: ced3cf28cc70452b7859c06f4e5059215167254a2047e34c893d6f501ccd6ea2
+    component_hash: 3e8f7d34e04bfa6333f289a6d126745bebe0cee9311b81a6a5d106047f63ef65
     dependencies:
     - name: idf
       require: private
@@ -28,7 +28,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.4.0
+    version: 0.7.0
   espressif/esp-dsp:
     component_hash: 12e44db246517a627bc0fe2b255b8335410c0215c98bfba2df5a8e3edea839ef
     dependencies:
@@ -123,6 +123,6 @@ direct_dependencies:
 - espressif/led_strip
 - espressif/mqtt
 - lvgl/lvgl
-manifest_hash: 6846ad0e085dce3076b1a4e759d6aa739d03ca71f6f040e38b4aea8f67c587f2
+manifest_hash: a2551123ea44fab3f92f4214726339aaff601d5ba871d0bacd3f5a74338f74c7
 target: esp32s3
 version: 3.0.0
