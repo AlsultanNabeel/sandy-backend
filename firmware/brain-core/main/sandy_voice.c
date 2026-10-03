@@ -468,14 +468,22 @@ fail:
 }
 #undef I2S_TRY
 
-// Substring check, enough for small fixed control frames.
+// Substring check over the whole control message (not NUL-terminated).
 static bool text_has(const char *data, int len, const char *needle) {
-    static char buf[128];
-    int n = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
-    memcpy(buf, data, n);
-    buf[n] = '\0';
-    return strstr(buf, needle) != NULL;
+    const int n = (int)strlen(needle);
+    for (int i = 0; i + n <= len; i++) {
+        if (!memcmp(data + i, needle, n)) return true;
+    }
+    return false;
 }
+
+// A control message, assembled from its pieces before it is read: the server may split
+// it into frames (continuations) or the client into events. PSRAM, from voice_task.
+#define RX_TEXT_MAX 2048
+static char *s_rx_text;
+static int   s_rx_text_len;
+static bool  s_rx_text_over;     // longer than RX_TEXT_MAX: dropped whole
+static uint8_t s_rx_op;          // 0x1 text or 0x2 audio: what a continuation continues
 
 // قيمة نصّية من إطار تحكّم، بالإيد بلا محلّل JSON.
 // بتقرا الإطار كله (بعكس `text_has`): مفتاح الوسيط بيجي بآخر المصافحة.
@@ -512,6 +520,68 @@ static bool json_str_field(const char *data, int len, const char *key,
     return j > 0;
 }
 
+// One whole control message from the server.
+static void on_ws_text(const char *msg, int len) {
+    if (text_has(msg, len, "auth_ok")) {
+        s_authed = true;
+        s_auth_refused = false;
+        s_preroll_due = true;       // the words said while we were connecting
+        s_link_lost_ms = 0;         // back on the air, drop the grace timer
+        status_set(SANDY_PART_LINK, SANDY_ST_OK);   // clears the link's past failure
+        VOICE_FACE(MOOD_FOCUSED);   // she's listening now
+        VOICE_LED(LED_STATE_LISTENING);
+        ESP_LOGI(TAG, "auth ok, streaming");
+
+        // مفتاح الوسيط الخاص بيوصل هون لأنّ المسار موثّق بالتوقيع مش بمفتاح الوسيط،
+        // فبيضل شغّال بعد إلغاء المشترك.
+#if ENABLE_MQTT
+        {
+            char bu[65], bp[129];
+            if (json_str_field(msg, len, "user", bu, sizeof(bu)) &&
+                json_str_field(msg, len, "pass", bp, sizeof(bp))) {
+                if (mqtt_sandy_set_credentials(bu, bp))
+                    ESP_LOGW(TAG, "took this board's own broker credential");
+            }
+        }
+#endif
+        {
+            char dk[DEVKEY_HEX + 8];
+            if (json_str_field(msg, len, "device_key", dk, sizeof(dk)) &&
+                is_hex_key(dk) && strcmp(dk, s_dev_key) != 0) {
+                devkey_store(dk);
+            }
+        }
+    } else if (text_has(msg, len, "interrupted")) {
+        // Server confirmed barge-in: drop stale audio.
+        s_spk_flush = true;
+        s_squelch_until_ms = 0;
+        s_rx_has_carry = false;
+        ESP_LOGI(TAG, "interrupted by user (server)");
+    } else if (text_has(msg, len, "end_turn")) {
+        s_squelch_until_ms = 0;   // stale turn fully drained server-side
+        ESP_LOGD(TAG, "end of Sandy's turn");
+    } else if (text_has(msg, len, "key_unknown")) {
+        // Key revoked or unknown: re-enrol with the shared key next session.
+        devkey_store(NULL);
+    } else if (text_has(msg, len, "replay")) {
+        // Our time is off, not our key: resync and try again, no ten-minute lockout.
+        s_clock_bad = true;
+        status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
+        ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
+    } else if (text_has(msg, len, "auth_fail") ||
+               text_has(msg, len, "auth_not_configured") ||
+               text_has(msg, len, "bad_handshake")) {
+        // Config problem (the key): show it instead of reconnecting forever.
+        status_set(SANDY_PART_LINK, SANDY_ST_AUTH_FAILED);
+        s_auth_refused = true;
+        s_auth_refused_at = now_ms();
+        ESP_LOGE(TAG, "server refused this device — check the key "
+                      "(no new session for %d min)", VOICE_AUTH_BACKOFF_MS / 60000);
+    } else if (text_has(msg, len, "error")) {
+        ESP_LOGW(TAG, "server error frame");
+    }
+}
+
 static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *event_data) {
     esp_websocket_event_data_t *ev = (esp_websocket_event_data_t *)event_data;
     switch (id) {
@@ -532,66 +602,27 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         break;
     }
     case WEBSOCKET_EVENT_DATA:
-        if (ev->op_code == 0x1) {  // text control frame
-            if (text_has(ev->data_ptr, ev->data_len, "auth_ok")) {
-                s_authed = true;
-                s_auth_refused = false;
-                s_preroll_due = true;       // the words said while we were connecting
-                s_link_lost_ms = 0;         // back on the air, drop the grace timer
-                status_set(SANDY_PART_LINK, SANDY_ST_OK);   // clears the link's past failure
-                VOICE_FACE(MOOD_FOCUSED);   // she's listening now
-                VOICE_LED(LED_STATE_LISTENING);
-                ESP_LOGI(TAG, "auth ok, streaming");
-
-                // مفتاح الوسيط الخاص بيوصل هون لأنّ المسار موثّق بالتوقيع مش بمفتاح الوسيط،
-                // فبيضل شغّال بعد إلغاء المشترك.
-#if ENABLE_MQTT
-                {
-                    char bu[65], bp[129];
-                    if (json_str_field(ev->data_ptr, ev->data_len, "user", bu, sizeof(bu)) &&
-                        json_str_field(ev->data_ptr, ev->data_len, "pass", bp, sizeof(bp))) {
-                        if (mqtt_sandy_set_credentials(bu, bp))
-                            ESP_LOGW(TAG, "took this board's own broker credential");
-                    }
-                }
-#endif
-                {
-                    char dk[DEVKEY_HEX + 8];
-                    if (json_str_field(ev->data_ptr, ev->data_len, "device_key", dk, sizeof(dk)) &&
-                        is_hex_key(dk) && strcmp(dk, s_dev_key) != 0) {
-                        devkey_store(dk);
-                    }
-                }
-            } else if (text_has(ev->data_ptr, ev->data_len, "interrupted")) {
-                // Server confirmed barge-in: drop stale audio.
-                s_spk_flush = true;
-                s_squelch_until_ms = 0;
-                s_rx_has_carry = false;
-                ESP_LOGI(TAG, "interrupted by user (server)");
-            } else if (text_has(ev->data_ptr, ev->data_len, "end_turn")) {
-                s_squelch_until_ms = 0;   // stale turn fully drained server-side
-                ESP_LOGD(TAG, "end of Sandy's turn");
-            } else if (text_has(ev->data_ptr, ev->data_len, "key_unknown")) {
-                // Key revoked or unknown: re-enrol with the shared key next session.
-                devkey_store(NULL);
-            } else if (text_has(ev->data_ptr, ev->data_len, "replay")) {
-                // Our time is off, not our key: resync and try again, no ten-minute lockout.
-                s_clock_bad = true;
-                status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
-                ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
-            } else if (text_has(ev->data_ptr, ev->data_len, "auth_fail") ||
-                       text_has(ev->data_ptr, ev->data_len, "auth_not_configured") ||
-                       text_has(ev->data_ptr, ev->data_len, "bad_handshake")) {
-                // Config problem (the key): show it instead of reconnecting forever.
-                status_set(SANDY_PART_LINK, SANDY_ST_AUTH_FAILED);
-                s_auth_refused = true;
-                s_auth_refused_at = now_ms();
-                ESP_LOGE(TAG, "server refused this device — check the key "
-                              "(no new session for %d min)", VOICE_AUTH_BACKOFF_MS / 60000);
-            } else if (text_has(ev->data_ptr, ev->data_len, "error")) {
-                ESP_LOGW(TAG, "server error frame");
+        // A new frame says what it is; a continuation (0x0) continues the last one.
+        if ((ev->op_code == 0x1 || ev->op_code == 0x2) && ev->payload_offset == 0) {
+            s_rx_op = ev->op_code;
+            if (s_rx_op == 0x1) { s_rx_text_len = 0; s_rx_text_over = false; }
+        } else if (ev->op_code != 0x0 && ev->op_code != 0x1 && ev->op_code != 0x2) {
+            break;                 // ping, pong, close: not ours to read
+        }
+        if (s_rx_op == 0x1) {      // a control message, possibly in pieces
+            if (!s_rx_text) break;
+            if (s_rx_text_len + ev->data_len > RX_TEXT_MAX) s_rx_text_over = true;
+            if (!s_rx_text_over && ev->data_len > 0) {
+                memcpy(s_rx_text + s_rx_text_len, ev->data_ptr, ev->data_len);
+                s_rx_text_len += ev->data_len;
             }
-        } else if (ev->op_code == 0x2 || ev->op_code == 0x0) {  // binary audio (+ continuation)
+            const bool last_piece = ev->fin &&
+                                    ev->payload_offset + ev->data_len >= ev->payload_len;
+            if (!last_piece) break;
+            s_rx_op = 0;
+            if (s_rx_text_over) ESP_LOGW(TAG, "control message over %d bytes dropped", RX_TEXT_MAX);
+            else on_ws_text(s_rx_text, s_rx_text_len);
+        } else if (s_rx_op == 0x2) {  // audio, a frame or its continuation
             if (ev->data_len > 0 && now_ms() >= s_squelch_until_ms &&
                 xSemaphoreTake(s_spk_wr_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_last_rx_audio_ms = now_ms();
@@ -1607,7 +1638,8 @@ static void voice_task(void *arg) {
 #endif
     s_ws_mutex = xSemaphoreCreateMutex();
     s_spk_wr_lock = xSemaphoreCreateMutex();
-    if (!s_spk_stream || !s_tx_stream || !s_ws_mutex || !s_spk_wr_lock) {
+    s_rx_text = heap_caps_malloc(RX_TEXT_MAX, MALLOC_CAP_SPIRAM);
+    if (!s_spk_stream || !s_tx_stream || !s_ws_mutex || !s_spk_wr_lock || !s_rx_text) {
         ESP_LOGE(TAG, "voice buffers could not be allocated — voice disabled");
         status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);

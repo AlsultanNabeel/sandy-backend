@@ -638,6 +638,9 @@ The `ts` must be wall-clock, so the firmware opens no session until SNTP has set
 before that gets a local cue and status `NO_CLOCK` (part `CLOCK`), shown on its own after a
 minute unset. `replay` resyncs the clock and ends the call, with no ten-minute lockout —
 that backoff is for the key refusals only.
+Control messages are assembled whole (`s_rx_text`, 2 KB PSRAM) across frames and events
+before they are read; a continuation (`0x0`) belongs to the frame type before it, so a split
+text message is never played as audio.
 A board that cannot reach a time server will sit there forever while the wake word
 keeps working — that failure looks exactly like a dead network.
 
