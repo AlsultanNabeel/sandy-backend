@@ -307,3 +307,21 @@ def test_a_bang_while_she_is_quiet_does_not_open_a_turn(loop):
         _device_to_live(_Reader(room + [_app_frame(3000, ms=100)] * 10), session, _RecentAudio(),
                         verify=False, live_state={}))
     assert "start" in session.order
+
+
+def test_a_frame_cut_mid_sample_does_not_end_the_call(loop):
+    """Live log: «buffer size must be a multiple of element size» and the call dropped. A
+    message can end mid-sample; the stray byte now waits for the next one."""
+    from app.api.voice_ws.session import _DeviceReader
+
+    reader = _DeviceReader(ws=None)
+    for part in (b"\x01\x00\x02", b"\x00\x03\x00", b"\x04", None):
+        reader._q.put_nowait(part)
+
+    async def take():
+        return [c async for c in reader.frames()]
+
+    frames = loop.run_until_complete(take())
+    assert all(len(f) % 2 == 0 for f in frames)
+    assert b"".join(frames) == b"\x01\x00\x02\x00\x03\x00"
+    reader._pool.shutdown(wait=False)

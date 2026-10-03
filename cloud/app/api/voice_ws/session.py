@@ -402,12 +402,21 @@ class _DeviceReader:
         return self._q.qsize()
 
     async def frames(self):
-        """Yield PCM frames, oldest buffered first, until the device goes away."""
+        """Yield PCM frames, oldest buffered first, until the device goes away.
+
+        Every frame is whole 16-bit samples: a socket message can end mid-sample (an odd
+        length), and decoding that one crashed the call. The stray byte waits for the next.
+        """
+        carry = b""
         while True:
             chunk = await self._q.get()
             if chunk is None:
                 return
-            yield chunk
+            chunk = carry + chunk
+            cut = len(chunk) - len(chunk) % 2
+            chunk, carry = chunk[:cut], chunk[cut:]
+            if chunk:
+                yield chunk
 
     def stop(self) -> None:
         self._stop = True
