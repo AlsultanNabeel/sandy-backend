@@ -133,7 +133,7 @@
 #define HEALTH_STACK_EDGE          512
 
 // Reported in every heartbeat. Bump with each flash.
-#define SANDY_FW_VERSION "0.11.2"
+#define SANDY_FW_VERSION "0.11.3"
 
 // The flash script checks this against the board before sending a binary:
 // sandy-brain-s3 (this), sandy-room-node, sandy-cam are not interchangeable.
