@@ -17,6 +17,7 @@
 #include "esp_http_server.h"
 #include "esp_system.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -431,35 +432,40 @@ static void stop_ap(void) {
 }
 
 // ─── The watcher ───
+// Up whenever she has been without a network long enough, at boot or later, and down
+// as soon as it is back; never a restart either way.
+//   - at boot: PROVISION_WINDOW_MS, or at once with nothing saved;
+//   - the router refusing the password: the same window;
+//   - a network that worked and is gone: PROVISION_LOST_MS (a router reboot is not a move).
 
 static void provision_task(void *arg) {
     (void)arg;
-
-    // Give the saved network time (routers are slow in the morning), unless
-    // there is none saved; then go straight to setup.
     const int step_ms = 500;
-    int waited = wifi_sandy_ssid()[0] ? 0 : PROVISION_WINDOW_MS;
-    while (waited < PROVISION_WINDOW_MS) {
-        if (wifi_sandy_is_connected()) {
-            ESP_LOGI(TAG, "connected within the window — no setup needed");
-            vTaskDelete(NULL);
-        }
-        vTaskDelay(pdMS_TO_TICKS(step_ms));
-        waited += step_ms;
-    }
+    bool ever_up = false;
+    int64_t down_since = esp_timer_get_time() / 1000;
 
-    ESP_LOGW(TAG, "no network after %d s — raising the setup access point",
-             PROVISION_WINDOW_MS / 1000);
-    start_ap();
-
-    // Stay up, but yield as soon as the real network returns.
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(step_ms));
+        const int64_t now = esp_timer_get_time() / 1000;
+
         if (wifi_sandy_is_connected()) {
-            stop_ap();
-            vTaskDelete(NULL);
+            ever_up = true;
+            down_since = 0;
+            if (s_active) stop_ap();
+            continue;
         }
-        if (!s_httpd) start_ap();   // port was busy last time; try again
+        if (!down_since) down_since = now;
+        if (s_active) continue;
+
+        int64_t wait = PROVISION_WINDOW_MS;
+        if (!wifi_sandy_ssid()[0]) wait = 0;
+        else if (ever_up && !wifi_sandy_password_rejected()) wait = PROVISION_LOST_MS;
+        if (now - down_since >= wait) {
+            ESP_LOGW(TAG, "no network for %lld s%s — raising the setup access point",
+                     (long long)((now - down_since) / 1000),
+                     wifi_sandy_password_rejected() ? " (password refused)" : "");
+            start_ap();   // if port 80 was busy it stays down, and the next step retries
+        }
     }
 }
 

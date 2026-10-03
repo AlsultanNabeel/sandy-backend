@@ -880,13 +880,16 @@ button.
 #### First-run network setup
 
 `main/sandy_provision.c`, added 23 Aug 2026, flag `ENABLE_PROVISION`. When no
-network answers within `PROVISION_WINDOW_MS` (90 s), the board raises its own
+network answers within `PROVISION_WINDOW_MS` (90 s) — at boot, or any time the router
+refuses the password — or a network that worked has been gone `PROVISION_LOST_MS`
+(5 min), the board raises its own
 access point — `Sandy-<last four of the pair code>`, WPA2, with a password made at
 random each boot — serves a scan-and-pick page on `192.168.4.1`, and shows a QR that
 joins it plus the name and password in text on its own screen (never in the log). It is a
 captive portal: DHCP names the access point as DNS, a small DNS task answers every A
 question with `192.168.4.1`, and any other path (`/generate_204`, `/hotspot-detect.html`)
-redirects to the page, so a joining phone opens it by itself. The scan holds the saved network's
+redirects to the page, so a joining phone opens it by itself. It comes down by itself the
+moment the network is back; neither way needs a restart. The scan holds the saved network's
 reconnects (`wifi_sandy_hold`) — a connect in progress made it fail — and lists names
 strongest first, once each; a field takes a hidden network's name. The chosen credentials go through `wifi_sandy_switch`, which proves them
 before saving and reverts on failure, so a typo cannot leave a board booting onto

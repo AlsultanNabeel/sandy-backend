@@ -29,6 +29,8 @@
 #define ENABLE_PROVISION 1  // needs WIFI — SoftAP setup page when no network answers
 // طويل بقصد: الراوتر ممكن يتأخر دقيقة بالصبح، والتزويد ما لازم يشتغل عالفاضي.
 #define PROVISION_WINDOW_MS  90000
+// A network that worked and then vanished gets longer: a router restarting is not a move.
+#define PROVISION_LOST_MS    (5 * 60 * 1000)
 #define ENABLE_IR       1   // needs MQTT — IR learn + replay over RMT
 #define ENABLE_LED      1   // on-board WS2812 status LED
 
