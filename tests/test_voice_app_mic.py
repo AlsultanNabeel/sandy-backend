@@ -325,3 +325,21 @@ def test_a_frame_cut_mid_sample_does_not_end_the_call(loop):
     assert all(len(f) % 2 == 0 for f in frames)
     assert b"".join(frames) == b"\x01\x00\x02\x00\x03\x00"
     reader._pool.shutdown(wait=False)
+
+
+def test_noise_after_the_question_does_not_hold_the_turn_open(loop):
+    """Live log: «turn closed after 9.4s of speech (device went quiet)» — the TV kept the
+    turn open long after the question. Loud but unvoiced counts as quiet now."""
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    noise = np.random.default_rng(9).normal(0, 3000, 1600).astype("<i2").tobytes()
+    chunks = [_app_frame(30, ms=100)] * 10 + [_app_frame(3000, ms=100)] * 10 + [noise] * 40
+    session = _StatefulSession()
+    loop.run_until_complete(
+        _device_to_live(_Reader(chunks), session, _RecentAudio(), verify=False, live_state={}))
+    from app.api.voice_ws.session import _CHUNK_BYTES
+    per_frame = -(-3200 // _CHUNK_BYTES)
+    # Closed about a second into the noise; the rest of it never reached Gemini.
+    assert session.order[:2] == ["start", "end"]
+    assert session.audio <= (10 + 12) * per_frame, f"{session.audio} pieces: the noise held the turn"

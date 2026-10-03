@@ -638,3 +638,32 @@ def test_an_interruption_keeps_the_beginning_of_its_sentence(loop):
     assert session.audio >= 16, (
         f"only {session.audio} frames reached Gemini — the beginning of the "
         "interruption was thrown away")
+
+
+def test_a_moved_version_serves_the_last_instruction_and_rebuilds_behind(monkeypatch):
+    """Live log: every robot call said `cached=no` and spent over a second rebuilding —
+    a habit ticked or a reminder moved had moved the version. The last instruction now
+    serves the call at once; the new one is built behind it for the next."""
+    import mongomock
+
+    import app.api.voice_ws.tools as vt
+    from app import db as appdb
+
+    appdb.configure(mongomock.MongoClient().db)
+    vt.clear_instruction_cache()
+    built = []
+    monkeypatch.setattr(vt, "_system_instruction_body",
+                        lambda cid: (built.append(cid) or f"تعليمات {len(built)}"))
+    monkeypatch.setattr("app.utils.thread_pool.submit_background",
+                        lambda fn, *a, _label="", **k: fn(*a, **k))
+    monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 7)
+    vt._cached_system_instruction("u1")
+    vt.clear_instruction_cache()               # another worker: only the shared rows
+
+    monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 8)
+    assert vt._cached_system_instruction("u1") == "تعليمات 1"     # no wait
+    assert len(built) == 2                                         # rebuilt behind
+    vt.clear_instruction_cache()
+    assert vt._cached_system_instruction("u1") == "تعليمات 2"     # the next call is fresh
+    vt.clear_instruction_cache()
+    appdb.reset()

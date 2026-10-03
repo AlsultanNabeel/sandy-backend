@@ -171,6 +171,19 @@ def _cached_system_instruction(chat_id: str) -> str:
             _INSTRUCTION_CACHE[key] = (version, shared)
         return shared
 
+    stale = _shared_latest(key)
+    if stale:
+        # Any write moves the version (a habit ticked, a reminder moved), and rebuilding
+        # took over a second while she waited to answer. The last one serves this call;
+        # the fresh one is built behind it for the next.
+        logger.info("[voice_ws] instruction from an older version; rebuilding behind the call")
+        with _INSTRUCTION_LOCK:
+            _INSTRUCTION_CACHE[key] = (version, stale)
+        from app.utils.thread_pool import submit_background
+
+        submit_background(_refresh_instruction, chat_id, key, version, _label="prompt-refresh")
+        return stale
+
     # Log why it missed: no row vs a moved version need opposite fixes.
     logger.info("[voice_ws] instruction rebuilt (version %d, shared row %s)",
                 version, "absent" if shared is None else "empty")
@@ -186,6 +199,43 @@ def _cached_system_instruction(chat_id: str) -> str:
         # Off the connection path; the next caller benefits.
         submit_background(_shared_put, key, version, text, _label="prompt-cache")
     return text
+
+
+# An older instruction is good for a call only this long; past it, the call waits for a new one.
+_STALE_MAX_S = 6 * 3600
+
+
+def _shared_latest(key: str) -> Optional[str]:
+    """The newest instruction built for this tenant (any version), if recent enough."""
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from app.db import get_db
+
+        db = get_db()
+        if db is None:
+            return None
+        since = datetime.now(timezone.utc) - timedelta(seconds=_STALE_MAX_S)
+        doc = db[_PROMPT_COLL].find_one(
+            {"user_id": key, "text": {"$exists": True}, "created_at": {"$gte": since},
+             "_id": {"$regex": f":r{_PROMPT_REV}$"}},
+            {"text": 1}, sort=[("created_at", -1)])
+        return (doc or {}).get("text") or None
+    except PyMongoError as exc:
+        logger.debug("[voice_ws] stale prompt read skipped: %s", exc)
+        return None
+
+
+def _refresh_instruction(chat_id: str, key: str, version: int) -> None:
+    """Build this version's instruction off the call path, for the next call."""
+    from app.utils.user_profiles import active_user_profile_context
+
+    with active_user_profile_context(_voice_profile(chat_id)):
+        text = _system_instruction_body(chat_id)
+    if text:
+        with _INSTRUCTION_LOCK:
+            _INSTRUCTION_CACHE[key] = (version, text)
+        _shared_put(key, version, text)
 
 
 def clear_instruction_cache() -> None:

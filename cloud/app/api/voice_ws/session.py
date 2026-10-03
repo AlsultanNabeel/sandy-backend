@@ -1049,9 +1049,12 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 recent.add(chunk)
                 await _send_audio(chunk)
                 utter_ms += ms
-                if is_speech:
+                # Loud is not talking: the TV or a fan kept a turn open nine seconds after
+                # the question ended. Only a voice holds it; anything else counts as quiet.
+                talking = is_speech and _voiced(samples)
+                if talking:
                     speech_ms += ms
-                silence_ms = 0.0 if is_speech else silence_ms + ms
+                silence_ms = 0.0 if talking else silence_ms + ms
 
                 # A startup backlog is one question, not four: no turn closes until
                 # the frames queued at call start are consumed (counted once, in
