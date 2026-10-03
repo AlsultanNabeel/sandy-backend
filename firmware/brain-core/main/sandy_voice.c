@@ -179,8 +179,11 @@ static const bool s_session_active = true;    // no gate: always streaming
 // A mic failing this long gets its channel restarted; this many restarts in a row is a fault.
 #define MIC_RESTART_AFTER_MS       2000
 #define MIC_RESTARTS_BEFORE_FAULT  3
-// Only the mic's own fault is cleared by its recovery.
-static volatile bool s_mic_fault;
+// The amp takes 40 ms chunks into ~60 ms of DMA: a write this late means it is wedged.
+#define SPK_WRITE_TIMEOUT_MS       500
+#define SPK_FAILS_BEFORE_RESTART   3
+// Only the mic's or the amp's own fault is cleared by their recovery.
+static volatile bool s_mic_fault, s_spk_fault;
 
 // Below this largest internal block, a failed open is out-of-memory, not network.
 // Measured: sessions open fine at 6144 (TLS uses PSRAM); the "before open" log prints it.
@@ -614,6 +617,7 @@ static void spk_task(void *arg) {
     bool playing = false;
     int64_t first_seen = 0;   // when data first appeared while idle
     int64_t last_stop = 0;    // when playback last went idle
+    int spk_fails = 0;        // amp writes in a row that did not finish
     for (;;) {
         // Barge-in: dump the buffer; the DMA tail plays out, then silence.
         if (s_spk_flush) {
@@ -728,8 +732,29 @@ static void spk_task(void *arg) {
                 if (k) xStreamBufferSend(s_ref_stream, ref, k * sizeof(int16_t), 0);
             }
             size_t written = 0;
-            i2s_channel_write(s_tx_chan, buf, n, &written, portMAX_DELAY);
-            s_spk_play_bytes += n;
+            esp_err_t wr = i2s_channel_write(s_tx_chan, buf, n, &written,
+                                             pdMS_TO_TICKS(SPK_WRITE_TIMEOUT_MS));
+            s_spk_play_bytes += written;
+            if (wr == ESP_OK && written == n) {
+                if (spk_fails) {
+                    spk_fails = 0;
+                    if (s_spk_fault) {
+                        s_spk_fault = false;
+                        status_set(SANDY_PART_VOICE, SANDY_ST_OK);
+                    }
+                }
+            } else if (++spk_fails % SPK_FAILS_BEFORE_RESTART == 0) {
+                // The rest of this chunk is lost; a wedged amp channel gets restarted.
+                i2s_channel_disable(s_tx_chan);
+                esp_err_t en = i2s_channel_enable(s_tx_chan);
+                ESP_LOGW(TAG, "speaker write failed (%s, %u of %u bytes) — restarted (%s)",
+                         esp_err_to_name(wr), (unsigned)written, (unsigned)n,
+                         esp_err_to_name(en));
+                if (spk_fails == SPK_FAILS_BEFORE_RESTART * 2 && !s_spk_fault) {
+                    s_spk_fault = true;
+                    status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
+                }
+            }
         } else {
             playing = false;
             s_playing = false;
