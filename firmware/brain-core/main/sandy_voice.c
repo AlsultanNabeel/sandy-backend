@@ -505,7 +505,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 s_auth_refused = false;
                 s_preroll_due = true;       // the words said while we were connecting
                 s_link_lost_ms = 0;         // back on the air, drop the grace timer
-                status_set(SANDY_ST_OK);    // clears any banner from a past failure
+                status_set(SANDY_PART_LINK, SANDY_ST_OK);   // clears the link's past failure
                 VOICE_FACE(MOOD_FOCUSED);   // she's listening now
                 VOICE_LED(LED_STATE_LISTENING);
                 ESP_LOGI(TAG, "auth ok, streaming");
@@ -546,7 +546,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                        text_has(ev->data_ptr, ev->data_len, "bad_handshake") ||
                        text_has(ev->data_ptr, ev->data_len, "replay")) {
                 // Config problem (key/clock): show it instead of reconnecting forever.
-                status_set(SANDY_ST_AUTH_FAILED);
+                status_set(SANDY_PART_LINK, SANDY_ST_AUTH_FAILED);
                 s_auth_refused = true;
                 s_auth_refused_at = now_ms();
                 ESP_LOGE(TAG, "server refused this device — check the key and the clock "
@@ -595,7 +595,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         // session manager waits instead of hanging up.
         if (s_session_active && !s_link_lost_ms) s_link_lost_ms = now_ms();
         // Mid-conversation: dropped link. Before auth: server unreachable.
-        status_set(s_session_active ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
+        status_set(SANDY_PART_LINK, s_session_active ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
         ESP_LOGW(TAG, "disconnected");
         break;
     default:
@@ -1024,13 +1024,13 @@ static void ws_tx_task(void *arg) {
 
         if (queued > TX_BACKLOG_WARN_BYTES) {
             if (s_backlog_since == 0) s_backlog_since = t;
-            const bool already = (status_get() == SANDY_ST_NET_SLOW ||
-                                  status_get() == SANDY_ST_LINK_STALL);
+            const sandy_status_t link = status_part_get(SANDY_PART_LINK);
+            const bool already = (link == SANDY_ST_NET_SLOW || link == SANDY_ST_LINK_STALL);
             if (t - s_backlog_since > TX_BACKLOG_WARN_MS && !already) {
                 // Pick the fault by signal strength: "move closer" is wrong advice on a strong link.
                 const int rssi = wifi_sandy_rssi();
                 const bool weak = (rssi != 0 && rssi < TX_WEAK_RSSI_DBM);
-                status_set(weak ? SANDY_ST_NET_SLOW : SANDY_ST_LINK_STALL);
+                status_set(SANDY_PART_LINK, weak ? SANDY_ST_NET_SLOW : SANDY_ST_LINK_STALL);
                 s_warned_at = t;
                 // Log RSSI with the backlog: below ~-75 dBm the radio can't carry real-time audio.
                 ESP_LOGW(TAG, "audio backing up: %u bytes queued, rssi=%d dBm "
@@ -1042,10 +1042,10 @@ static void ws_tx_task(void *arg) {
             }
         } else if (queued < TX_BACKLOG_CLEAR_BYTES) {
             s_backlog_since = 0;
+            const sandy_status_t link = status_part_get(SANDY_PART_LINK);
             if (s_authed && t - s_warned_at > TX_BACKLOG_HOLD_MS &&
-                (status_get() == SANDY_ST_NET_SLOW ||
-                 status_get() == SANDY_ST_LINK_STALL)) {
-                status_set(SANDY_ST_OK);
+                (link == SANDY_ST_NET_SLOW || link == SANDY_ST_LINK_STALL)) {
+                status_set(SANDY_PART_LINK, SANDY_ST_OK);
             }
         }
         // Between thresholds: leave the status alone (hysteresis).
@@ -1128,7 +1128,7 @@ static void mic_task(void *arg) {
         free(feed);
         free(ref);
         ESP_LOGE(TAG, "mic buffers alloc failed");
-        status_set(SANDY_ST_LOW_MEMORY);   // S4.2: no subsystem fails silently
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);   // S4.2: no subsystem fails silently
         vTaskDelete(NULL);
         return;
     }
@@ -1220,7 +1220,7 @@ static void proc_task(void *arg) {
     int16_t *out = malloc((size_t)chunk * sizeof(int16_t));
     if (!out) {
         ESP_LOGE(TAG, "voice buffer alloc failed");
-        status_set(SANDY_ST_LOW_MEMORY);
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);
         vTaskDelete(NULL);
         return;
     }
@@ -1466,13 +1466,13 @@ static void voice_task(void *arg) {
     // Report while waiting for Wi-Fi (boot doesn't block on it).
     for (int i = 0; !wifi_sandy_is_connected(); i++) {
         // After ~5 s: a normal boot's DHCP takes a couple of seconds.
-        if (i >= 10) status_set(wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
-                                                               : SANDY_ST_NO_WIFI);
+        if (i >= 10) status_set(SANDY_PART_NET, wifi_sandy_password_rejected()
+                                                    ? SANDY_ST_WIFI_BAD_PASS : SANDY_ST_NO_WIFI);
         if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
         vTaskDelay(pdMS_TO_TICKS(500));
     }
-    // Wi-Fi is up: clear the banner.
-    status_set(SANDY_ST_OK);
+    // Wi-Fi is up: booting is over (the Wi-Fi part clears itself on its address).
+    status_set(SANDY_PART_SYSTEM, SANDY_ST_OK);
     sync_clock();
     devkey_load();
 
@@ -1501,7 +1501,7 @@ static void voice_task(void *arg) {
     // BEFORE the audio tasks: they read the front end's handle and chunk size.
     if (!s_ref_stream || !afe_init()) {
         ESP_LOGE(TAG, "audio front end unavailable — voice disabled");
-        status_set(SANDY_ST_LOW_MEMORY);
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);
         vTaskDelete(NULL);
         return;
     }
@@ -1544,7 +1544,7 @@ static void voice_task(void *arg) {
                  audio_task_fail,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-        status_set(SANDY_ST_LOW_MEMORY);
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);
     }
 
 #if ENABLE_WAKEWORD
@@ -1567,7 +1567,7 @@ static void voice_task(void *arg) {
                 s_wake_req = false;
                 ESP_LOGW(TAG, "wake ignored: the server refused this device %d s ago",
                          (int)((now_ms() - s_auth_refused_at) / 1000));
-                status_set(SANDY_ST_AUTH_FAILED);
+                status_set(SANDY_PART_LINK, SANDY_ST_AUTH_FAILED);
                 VOICE_FACE(MOOD_IDLE);
                 VOICE_LED(LED_STATE_IDLE);
             } else if (s_wake_req) {
@@ -1593,7 +1593,7 @@ static void voice_task(void *arg) {
                 if (s_mn_loaded) {
                     ESP_LOGE(TAG, "command model did not release in 3s — "
                                   "skipping this session rather than failing blind");
-                    status_set(SANDY_ST_LOW_MEMORY);
+                    status_set(SANDY_PART_LINK, SANDY_ST_LOW_MEMORY);
                     s_mn_want = true;
                     net_release(NET_OWNER_VOICE);
                     continue;
@@ -1619,12 +1619,12 @@ static void voice_task(void *arg) {
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                              largest);
                     if (!wifi_sandy_is_connected()) {
-                        status_set(SANDY_ST_NO_WIFI);
+                        status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
                     } else if (largest < WS_TASK_MIN_BLOCK) {
                         // Not enough contiguous internal RAM for TLS.
-                        status_set(SANDY_ST_LOW_MEMORY);
+                        status_set(SANDY_PART_LINK, SANDY_ST_LOW_MEMORY);
                     } else {
-                        status_set(SANDY_ST_NO_SERVER);
+                        status_set(SANDY_PART_LINK, SANDY_ST_NO_SERVER);
                     }
                     net_release(NET_OWNER_VOICE);   // ws_open left no socket behind
 #if ENABLE_COMMANDS

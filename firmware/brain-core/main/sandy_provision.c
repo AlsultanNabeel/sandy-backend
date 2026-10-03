@@ -289,7 +289,7 @@ static void start_ap(void) {
     httpd_register_uri_handler(s_httpd, &post);
 
     s_active = true;
-    status_set(SANDY_ST_NO_WIFI);
+    status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
 
     // Show a QR (joins the setup network in one tap) plus the same line in text.
     // The QR holds the setup password, which is on the box anyway.

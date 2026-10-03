@@ -121,7 +121,7 @@ static void _health_task(void *arg) {
         if (!wifi_sandy_is_connected()) {
             up_since = 0;
             if (!ever_up && now - start > OTA_HEALTH_TIMEOUT_MS) {
-                status_set(SANDY_ST_NO_WIFI);
+                status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
                 _roll_back("no network in two minutes");
                 break;
             }

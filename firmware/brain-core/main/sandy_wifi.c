@@ -1,6 +1,7 @@
 #include "sandy_wifi.h"
 #include "config.h"
 #include "sandy_provision.h"
+#include "sandy_status.h"
 #include "esp_wifi.h"
 #include "nvs.h"
 #include "esp_event.h"
@@ -75,6 +76,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ev->ip_info.ip));
         s_bad_pass_count = 0;
         xEventGroupSetBits(s_eg, WIFI_CONNECTED_BIT);
+        status_set(SANDY_PART_NET, SANDY_ST_OK);   // Wi-Fi owns its own recovery
     }
 }
 

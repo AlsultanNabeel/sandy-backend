@@ -714,7 +714,12 @@ flashed: `OK`, `BOOTING`, `NO_WIFI`, `NO_SERVER`, `LINK_DROPPED`, `NET_SLOW`,
 
 Rules:
 - **Subsystems must not set the face directly for error conditions.** Call
-  `status_set()`. Direct face writes are how a half-finished state stayed on screen.
+  `status_set(part, status)`. Direct face writes are how a half-finished state stayed on screen.
+- **Each part owns its status** (`SANDY_PART_SYSTEM`, `_NET`, `_LINK`, `_VOICE`): a part
+  recovering clears only its own fault, and she shows the most serious one (`rank` in
+  the table). One shared status let a reconnect wipe a memory fault. Wi-Fi clears its
+  own part on getting an address; the link on `auth_ok`. The heartbeat lists every part
+  not OK (`status_faults_json`).
 - `status_set()` is idempotent — re-reporting the same condition does not
   re-announce, so retry loops don't make her repeat herself.
 - The banner is still Latin (Montserrat 14), but Arabic fonts are in the build
