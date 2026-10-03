@@ -1225,7 +1225,12 @@ static void proc_task(void *arg) {
         return;
     }
     int64_t last_diag = 0;
-    int speech_ms = 0;   // how long the current speech has lasted
+    int speech_ms = 0;   // how long the current near speech has lasted
+    // The last ~1.5 s of levels: the wake word's loudness is taken from it.
+    enum { LEVEL_SLOTS = 48 };
+    int levels[LEVEL_SLOTS] = {0};
+    int level_at = 0;
+    int near_level = VOICE_NEAR_MIN;   // the bar for this session, set by the wake word
 
     for (;;) {
         afe_fetch_result_t *res = s_afe->fetch(s_afe_data);
@@ -1234,10 +1239,23 @@ static void proc_task(void *arg) {
         }
         int frames = res->data_size / (int)sizeof(int16_t);
         if (frames > chunk) frames = chunk;
-        const bool speech = res->vad_state == VAD_SPEECH;
         const bool wake = res->wakeup_state == WAKENET_DETECTED;
-        speech_ms = speech ? speech_ms + frames * 1000 / VOICE_IN_RATE : 0;
         int avg = apply_gain(res->data, out, frames);
+        levels[level_at] = avg;
+        level_at = (level_at + 1) % LEVEL_SLOTS;
+        if (wake) {
+            // How loud the caller is, from the wake word they just said.
+            int peak = 0;
+            for (int i = 0; i < LEVEL_SLOTS; i++) if (levels[i] > peak) peak = levels[i];
+            near_level = peak * VOICE_NEAR_PCT / 100;
+            if (near_level < VOICE_NEAR_MIN) near_level = VOICE_NEAR_MIN;
+            ESP_LOGI(TAG, "wake level %d -> near bar %d", peak, near_level);
+        }
+        // Speech, and from the caller: another room's voices stay below the bar.
+        const bool vad = res->vad_state == VAD_SPEECH;
+        const bool speech = vad && avg >= near_level;
+        if (!vad) speech_ms = 0;
+        else if (speech) speech_ms += frames * 1000 / VOICE_IN_RATE;
         const size_t bytes = (size_t)frames * sizeof(int16_t);
         bool sandy_talking = s_playing ||
                              (now_ms() - s_last_rx_audio_ms) < VOICE_HALF_DUPLEX_TAIL_MS;
@@ -1344,10 +1362,10 @@ static void proc_task(void *arg) {
         int64_t t = now_ms();
         if (t - last_diag > 1500) {
             last_diag = t;
-            ESP_LOGI(TAG, "diag mic=%d speech=%d session=%d authed=%d talking=%d "
-                     "afe_busy=%.2f int=%u psram=%u",
-                     avg, (int)speech, (int)s_session_active, (int)s_authed,
-                     (int)sandy_talking, res->ringbuff_free_pct,
+            ESP_LOGI(TAG, "diag mic=%d vad=%d near=%d bar=%d session=%d authed=%d talking=%d "
+                     "afe_free=%.2f int=%u psram=%u",
+                     avg, (int)vad, (int)speech, near_level, (int)s_session_active,
+                     (int)s_authed, (int)sandy_talking, res->ringbuff_free_pct,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         }

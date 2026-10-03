@@ -118,7 +118,7 @@
 #define MQTT_STATUS_INTERVAL_MS 5000
 
 // Reported in every heartbeat. Bump with each flash.
-#define SANDY_FW_VERSION "0.11.0"
+#define SANDY_FW_VERSION "0.11.1"
 
 // The flash script checks this against the board before sending a binary:
 // sandy-brain-s3 (this), sandy-room-node, sandy-cam are not interchangeable.
@@ -155,6 +155,12 @@
 #define VOICE_BARGE_MS             200
 // The detector calls speech over this long after the last word (esp-sr vad_min_noise_ms).
 #define VOICE_VAD_END_MS           300
+// Only the person who said the wake word: during a session, speech counts when it is at
+// least this share of how loud the wake word was. Voices from another room are far
+// quieter (a TV or the family kept a session open for minutes and became questions).
+#define VOICE_NEAR_PCT             30
+// Floor for that bar, so a whispered wake word does not open the room.
+#define VOICE_NEAR_MIN             600
 
 // Idle this long → MOOD_SLEEPY; any interaction wakes her.
 #define FACE_SLEEP_AFTER_MS     (5 * 60 * 1000)
