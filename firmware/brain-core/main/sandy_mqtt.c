@@ -578,9 +578,14 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             if (!ev->topic) break;
             _asm_reset();                          // drop any abandoned message
 
+            // Cut short, a topic can name another output: refuse it whole.
             char topic[64] = {0};
-            int  tlen = ev->topic_len < 63 ? ev->topic_len : 63;
-            memcpy(topic, ev->topic, tlen);
+            if (ev->topic_len <= 0 || ev->topic_len >= (int)sizeof(topic)) {
+                ESP_LOGW(TAG, "topic of %d characters refused (max %u)",
+                         ev->topic_len, (unsigned)sizeof(topic) - 1);
+                break;
+            }
+            memcpy(topic, ev->topic, ev->topic_len);
 
             const char *out = topic_suffix(topic);
             if (!out) {           // the wildcard only delivers our own tree,
