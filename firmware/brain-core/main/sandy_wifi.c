@@ -40,11 +40,16 @@ static volatile bool s_switching;
 static volatile int  s_bad_pass_count;
 static volatile bool s_had_ip_this_try;
 
-// Reasons meaning "the router refused us" rather than "no router".
-static bool reason_is_bad_password(int r) {
-    return r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
-           r == WIFI_REASON_HANDSHAKE_TIMEOUT || r == WIFI_REASON_MIC_FAILURE ||
-           r == WIFI_REASON_AUTH_EXPIRE;
+// A handshake that timed out is a wrong password only when the router is heard well;
+// from a weak signal it is just the radio losing frames.
+#define WIFI_BAD_PASS_MIN_RSSI  (-70)
+
+// Reasons meaning "the router refused us" rather than "no router" or "too far".
+static bool reason_is_bad_password(int r, int rssi) {
+    if (r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_MIC_FAILURE) return true;
+    const bool timed_out = r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
+                           r == WIFI_REASON_HANDSHAKE_TIMEOUT || r == WIFI_REASON_AUTH_EXPIRE;
+    return timed_out && rssi < 0 && rssi >= WIFI_BAD_PASS_MIN_RSSI;   // 0 = not reported
 }
 
 bool wifi_sandy_password_rejected(void) { return s_bad_pass_count >= WIFI_BAD_PASS_AFTER; }
@@ -61,13 +66,15 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // Only on the up→down edge: retry at once so a voice call survives the gap.
             if (was_up && s_retry_task) xTaskNotifyGive(s_retry_task);
             const int reason = ev ? ev->reason : -1;
-            if (reason_is_bad_password(reason)) {
+            const int rssi = ev ? ev->rssi : -127;
+            const bool refused = reason_is_bad_password(reason, rssi);
+            if (refused) {
                 if (s_bad_pass_count < 1000) s_bad_pass_count++;
             } else if (reason == WIFI_REASON_NO_AP_FOUND) {
                 s_bad_pass_count = 0;   // no router at all is a different answer
             }
-            ESP_LOGW(TAG, "disconnected (reason=%d%s)", reason,
-                     reason_is_bad_password(reason) ? ", password refused" : "");
+            ESP_LOGW(TAG, "disconnected (reason=%d rssi=%d%s)", reason, rssi,
+                     refused ? ", password refused" : "");
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
