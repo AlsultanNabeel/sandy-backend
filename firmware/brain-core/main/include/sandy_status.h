@@ -22,6 +22,7 @@ typedef enum {
     SANDY_ST_VOICE_OFF,     // mic, speaker or the audio front end did not start
     SANDY_ST_NECK_OFF,      // the neck could not start
     SANDY_ST_SCREEN_OFF,    // the display did not start (heartbeat and LED only, obviously)
+    SANDY_ST_SAFE_MODE,     // crashed repeatedly: network and updates only
     SANDY_ST_COUNT
 } sandy_status_t;
 

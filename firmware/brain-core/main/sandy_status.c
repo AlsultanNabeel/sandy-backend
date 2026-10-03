@@ -103,6 +103,11 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "الشاشة ما اشتغلت. باقي إشي شغّال.",
         3, "screen_off",
     },
+    [SANDY_ST_SAFE_MODE] = {
+        MOOD_SLEEPY, LED_STATE_OFF, "SAFE MODE",
+        "علّقت كذا مرّة ورا بعض، فقلعت بالوضع الآمن: شبكة وتحديث بس. بستنّى تحديث أو تطفيني وتشغّلني.",
+        8, "safe_mode",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {

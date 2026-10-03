@@ -117,6 +117,12 @@
 // ─── MQTT ───
 #define MQTT_STATUS_INTERVAL_MS 5000
 
+// ─── Health (sandy_health.c) ───
+// This many crash restarts (panic or watchdog) without a run of HEALTH_STABLE_MS between
+// them, and she boots in safe mode: network and updates only, no voice, no body.
+#define HEALTH_SAFE_AFTER_CRASHES  3
+#define HEALTH_STABLE_MS           (10 * 60 * 1000)
+
 // Reported in every heartbeat. Bump with each flash.
 #define SANDY_FW_VERSION "0.11.2"
 

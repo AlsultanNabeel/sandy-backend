@@ -372,6 +372,12 @@ static void _dispatch(const char *out, const char *val, bool retained) {
         ESP_LOGW(TAG, "ignoring a retained %s — one-shot commands must be live", out);
         return;
     }
+    // Safe mode: the body is off; only what can rescue her gets through.
+    if (health_safe_mode() && strcmp(out, "wifi") && strcmp(out, "ota") &&
+        strcmp(out, "factory_reset")) {
+        ESP_LOGW(TAG, "safe mode — ignoring %s", out);
+        return;
+    }
 
     if      (!strcmp(out, "mood"))         _handle_mood(val);
     else if (!strcmp(out, "servo"))        _handle_servo(val);
