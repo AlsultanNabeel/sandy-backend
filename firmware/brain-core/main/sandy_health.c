@@ -44,6 +44,7 @@ static const char *const STACK_TASKS[] = {
     "mqtt_status", "mqtt_task", "websocket_task", "wifi_retry", "ota_health", "ota_check",
     "servo_gest", "buzzer", "led_fx", "nvs_defer", "ir_rx", "provision", "health",
 };
+_Static_assert(sizeof(STACK_TASKS) / sizeof(STACK_TASKS[0]) <= 32, "one warning bit each");
 
 static bool is_crash(esp_reset_reason_t r) {
     return r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT ||
@@ -128,6 +129,21 @@ static bool low_memory_shown(void) {
     return false;
 }
 
+// Each task near the end of its stack, said once (the heartbeat carries all of them).
+static void check_stacks(void) {
+    static uint32_t warned;   // one bit per STACK_TASKS entry
+    for (size_t i = 0; i < sizeof(STACK_TASKS) / sizeof(STACK_TASKS[0]); i++) {
+        TaskHandle_t t = xTaskGetHandle(STACK_TASKS[i]);
+        if (!t || (warned & (1u << i))) continue;
+        const unsigned left = (unsigned)uxTaskGetStackHighWaterMark(t);
+        if (left < HEALTH_STACK_EDGE) {
+            warned |= 1u << i;
+            ESP_LOGW(TAG, "task %s is near the end of its stack: %u bytes left at worst",
+                     STACK_TASKS[i], left);
+        }
+    }
+}
+
 // Every two seconds: internal RAM, and a LOW_MEMORY that promised a restart.
 static void monitor_task(void *arg) {
     (void)arg;
@@ -136,6 +152,7 @@ static void monitor_task(void *arg) {
     for (;;) {
         health_feed();
         vTaskDelay(pdMS_TO_TICKS(2000));
+        check_stacks();
         const int64_t now = esp_timer_get_time() / 1000;
         const size_t free_b = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         const size_t big = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);

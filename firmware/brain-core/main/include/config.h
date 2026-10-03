@@ -129,6 +129,8 @@
 #define HEALTH_BLOCK_DANGER        (4 * 1024)
 #define HEALTH_LOW_MEM_MS          60000
 #define HEALTH_LOW_STATUS_MS       30000
+// A task with less stack headroom than this is logged once: one deeper call from overflow.
+#define HEALTH_STACK_EDGE          512
 
 // Reported in every heartbeat. Bump with each flash.
 #define SANDY_FW_VERSION "0.11.2"
