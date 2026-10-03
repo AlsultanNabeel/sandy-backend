@@ -152,6 +152,7 @@ static SemaphoreHandle_t s_spk_wr_lock;
 static volatile bool s_session_active;       // WS up + mic streaming
 static volatile bool s_wake_req;             // wake heard; manager should open
 static volatile int64_t s_session_voice_ms;  // last user/Sandy activity while open
+static int64_t s_session_open_ms;            // when this session opened
 #if ENABLE_COMMANDS
 // mic_task alone touches s_mn; the session manager only requests.
 static volatile bool s_mn_want = true;       // should the model be resident?
@@ -1688,6 +1689,7 @@ static void voice_task(void *arg) {
                 health_watch();
                 if (opened) {
                     s_session_voice_ms = now_ms();
+                    s_session_open_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;
                     // المخزن بيرجع لأصغر قيمة مع كل مكالمة، عشان يقيس الشبكة الحالية.
@@ -1725,6 +1727,18 @@ static void voice_task(void *arg) {
                 s_link_lost_ms = 0;
                 s_session_voice_ms = 0;   // fall into the close branch next tick
             }
+        } else if (!s_playing && now_ms() - s_session_open_ms > VOICE_SESSION_MAX_MS) {
+            ESP_LOGW(TAG, "session reached its %d min cap, closing", VOICE_SESSION_MAX_MS / 60000);
+            session_heap_report();
+            session_end();
+        } else if (!s_playing &&
+                   now_ms() - (s_last_rx_audio_ms > s_session_open_ms ? s_last_rx_audio_ms
+                                                                      : s_session_open_ms)
+                       > VOICE_NO_REPLY_MS) {
+            // Speech keeps a session open, but not talk she never answers.
+            ESP_LOGW(TAG, "%d s of talk with no reply from her, closing", VOICE_NO_REPLY_MS / 1000);
+            session_heap_report();
+            session_end();
         } else if ((now_ms() - s_session_voice_ms) > VOICE_SESSION_IDLE_MS && !s_playing) {
             ESP_LOGI(TAG, "session idle, closing");
             session_heap_report();

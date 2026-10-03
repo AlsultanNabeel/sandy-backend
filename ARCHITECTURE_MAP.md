@@ -697,6 +697,9 @@ The paid cloud link is open **only** between a wake word and the silence after i
    back to idle.
 5. Link lost mid-call → `VOICE_RECONNECT_GRACE_MS` (15 s) of grace before hanging
    up, so a blip does not end a sentence.
+6. Two caps the room cannot stretch: `VOICE_SESSION_MAX_MS` (20 min) for any call, and
+   `VOICE_NO_REPLY_MS` (90 s) of talk with no audio from her — someone else's
+   conversation, not one with her.
 
 Every session gets a fresh `esp_websocket_client_init` and ends with a full
 `destroy` — reusing the handle once wedged the link until reboot.

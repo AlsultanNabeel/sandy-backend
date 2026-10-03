@@ -163,6 +163,10 @@
 // Gates the cloud session (model set in sdkconfig.defaults).
 // Close the session after this long with no speech.
 #define VOICE_SESSION_IDLE_MS      8000
+// A call never outlives this, whatever the room says.
+#define VOICE_SESSION_MAX_MS       (20 * 60 * 1000)
+// Talk going on with no reply from her this long is not a conversation with her.
+#define VOICE_NO_REPLY_MS          90000
 // Allowed time for a mid-call reconnect (~5 s) before giving up the conversation.
 #define VOICE_RECONNECT_GRACE_MS   15000
 // Speech over her this long (the front end's voice detector) stops her: long enough
