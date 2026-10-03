@@ -73,9 +73,10 @@ def test_voice_fails_closed_and_writes_the_speaker_one_at_a_time():
     assert "mbedtls_platform_zeroize(own" in v
     assert "portMAX_DELAY);\n        ESP_LOGI(TAG, \"connected, sent hello\")" not in v
     assert "s_auth_refused" in v and "VOICE_AUTH_BACKOFF_MS" in v
-    # Noise suppression never runs before the echo canceller.
-    mic = v[v.index("static void mic_task("):]
-    assert mic.index("aec_process(") < mic.index("ns_clean(")
+    # Both mics and the speaker reference go into the front end, and only its output goes up.
+    assert 'afe_config_init("MMR"' in v
+    proc = v[v.index("static void proc_task("):v.index("// Fresh WS client per session")]
+    assert "s_afe->fetch(" in proc and "mic_send(out" in proc and "raw[" not in proc
 
 
 def test_local_sounds_play_at_her_rate():

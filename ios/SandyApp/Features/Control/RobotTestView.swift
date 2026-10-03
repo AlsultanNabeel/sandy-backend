@@ -29,7 +29,6 @@ struct RobotTestView: View {
         static let micRightGain = "sandy_mic_right_gain"
         static let volume       = "sandy_volume"
         static let speakerTest  = "sandy_speaker_test"
-        static let noise        = "sandy_noise"
         static let face         = "sandy_face"
         static let head         = "sandy_head"
         static let gesture      = "sandy_gesture"
@@ -101,7 +100,6 @@ struct RobotTestView: View {
             deviceRow(Part.micRight)
             deviceRow(Part.micLeftGain)
             deviceRow(Part.micRightGain)
-            deviceRow(Part.noise)
         }
     }
 

@@ -343,3 +343,27 @@ def test_noise_after_the_question_does_not_hold_the_turn_open(loop):
     # Closed about a second into the noise; the rest of it never reached Gemini.
     assert session.order[:2] == ["start", "end"]
     assert session.audio <= (10 + 12) * per_frame, f"{session.audio} pieces: the noise held the turn"
+
+
+def test_the_robots_barge_in_opens_the_turn_without_our_bar(loop):
+    """The robot silences her itself and says {"type":"barge_in"}: the server opens the
+    turn on its first voiced words instead of waiting out its own 1.2-second bar."""
+    import time as _time
+
+    from app.api.voice_ws.session import _device_to_live
+    from app.api.voice_ws.speaker import _RecentAudio
+
+    chunks = [_app_frame(30, ms=100)] * 10 + [_app_frame(3000, ms=100)] * 4
+    now = _time.monotonic()
+
+    def run(barged):
+        reader = _Reader(chunks)
+        reader.barged_at = now if barged else None
+        session = _StatefulSession()
+        state = {"replying": True, "turn_closed_at": now - 3, "last_out_at": now + 60}
+        loop.run_until_complete(_device_to_live(reader, session, _RecentAudio(),
+                                                verify=False, live_state=state))
+        return session.order
+
+    assert "start" not in run(False)          # 0.4 s over her: below our own bar
+    assert "start" in run(True)               # the robot vouched for it

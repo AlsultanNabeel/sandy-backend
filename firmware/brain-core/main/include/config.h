@@ -118,7 +118,7 @@
 #define MQTT_STATUS_INTERVAL_MS 5000
 
 // Reported in every heartbeat. Bump with each flash.
-#define SANDY_FW_VERSION "0.10.0"
+#define SANDY_FW_VERSION "0.11.0"
 
 // The flash script checks this against the board before sending a binary:
 // sandy-brain-s3 (this), sandy-room-node, sandy-cam are not interchangeable.
@@ -138,10 +138,10 @@
 // 16 kHz audio in, 24 kHz out.
 #define VOICE_IN_RATE           16000
 #define VOICE_OUT_RATE          24000
-// Mono mix gain ×2^(16-this), applied AFTER the echo canceller. Capture stays at
-// full headroom: gain there clipped on her own speaker and broke the AEC.
+// Output gain ×2^(16-this), applied AFTER the audio front end. Capture stays at
+// full headroom: gain there clipped on her own speaker and broke echo cancelling.
 #define VOICE_MIC_GAIN_SHIFT    12
-// Mic muted this long after Sandy's last audio (echo).
+// She counts as talking this long after her last audio (barge-in rules apply).
 #define VOICE_HALF_DUPLEX_TAIL_MS  400
 
 // ─── Wake word (ESP-SR WakeNet) ───
@@ -150,9 +150,11 @@
 #define VOICE_SESSION_IDLE_MS      8000
 // Allowed time for a mid-call reconnect (~5 s) before giving up the conversation.
 #define VOICE_RECONNECT_GRACE_MS   15000
-// Level that counts as "still talking" and holds the session open. Keep equal to
-// VOICE_DUPLEX_GATE_LEVEL: higher hung up on normal speech. Tune with `diag mic=`.
-#define VOICE_SESSION_VAD_LEVEL    1500
+// Speech over her this long (the front end's voice detector) stops her: long enough
+// that a cough or a word to someone else does not, short enough to feel instant.
+#define VOICE_BARGE_MS             200
+// The detector calls speech over this long after the last word (esp-sr vad_min_noise_ms).
+#define VOICE_VAD_END_MS           300
 
 // Idle this long → MOOD_SLEEPY; any interaction wakes her.
 #define FACE_SLEEP_AFTER_MS     (5 * 60 * 1000)
@@ -161,17 +163,6 @@
 #define VOICE_EARS_SWING           35   // max degrees off center (90)
 #define VOICE_EARS_INVERT          1    // set 1 if she turns the wrong way
 
-// ─── Echo cancellation (esp-sr AEC) ───
-#define VOICE_AEC_ENABLE           1
-#define VOICE_AEC_FILTER_LEN       4    // adaptive filter blocks (esp-sr recommends 4)
+// ─── Echo cancellation (inside the audio front end) ───
 // The reference leads the real echo by the TX DMA depth (~60 ms), so pre-fill that much silence.
-#define VOICE_AEC_REF_DELAY_MS     60
-// 1 = full duplex (barge-in; falls back to half if AEC fails to start).
-// 0 = mute the mic while she talks: the AEC residual made her answer herself.
-// Re-enable once the speaker is moved away from the mics.
-#define VOICE_AEC_FULL_DUPLEX      0
-// While she talks, frames go up only above this cleaned level (echo residual stays below).
-#define VOICE_DUPLEX_GATE_LEVEL    1500
-// ...and only after this many consecutive over-gate batches (~33 ms each); the
-// held batches are then sent so the start of the interruption isn't lost.
-#define VOICE_DUPLEX_GATE_RUN      3
+#define VOICE_REF_DELAY_MS         60

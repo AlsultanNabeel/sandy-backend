@@ -6,12 +6,9 @@
 #include "sandy_voice.h"
 
 #include <math.h>
-#include <string.h>
 
 #include "esp_log.h"
-#include "esp_ns.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -24,11 +21,6 @@ static volatile int  s_gain[MIC_COUNT] = { AUDIO_GAIN_UNITY, AUDIO_GAIN_UNITY };
 static volatile bool s_muted[MIC_COUNT] = { false, false };
 static volatile int  s_level[MIC_COUNT] = { 0, 0 };
 static volatile int  s_volume = 100;
-
-// Declared here because audio_ctl_init() uses them before their section.
-static ns_handle_t       s_ns;
-static sandy_ns_level_t  s_ns_level = NS_OFF;
-static SemaphoreHandle_t s_ns_lock;   // rebuild vs. process
 
 static int clamp_gain(int v)
 {
@@ -70,13 +62,9 @@ void audio_ctl_init(void)
         ESP_LOGW(TAG, "both mics were saved muted — restored the left one");
     }
 
-    s_ns_lock = xSemaphoreCreateMutex();
-    ns_set_level((sandy_ns_level_t)load_i32("ns", (int32_t)NS_OFF));
-
-    ESP_LOGI(TAG, "gain L=%d R=%d, mute L=%d R=%d, volume=%d, ns=%d",
+    ESP_LOGI(TAG, "gain L=%d R=%d, mute L=%d R=%d, volume=%d",
              s_gain[MIC_LEFT], s_gain[MIC_RIGHT],
-             (int)s_muted[MIC_LEFT], (int)s_muted[MIC_RIGHT], s_volume,
-             (int)s_ns_level);
+             (int)s_muted[MIC_LEFT], (int)s_muted[MIC_RIGHT], s_volume);
 }
 
 // ── Microphones ──
@@ -132,67 +120,6 @@ void mic_report_levels(int rms_l, int rms_r)
     // Fast attack, slow release.
     s_level[MIC_LEFT]  = l > s_level[MIC_LEFT]  ? l : (s_level[MIC_LEFT]  * 3 + l) / 4;
     s_level[MIC_RIGHT] = r > s_level[MIC_RIGHT] ? r : (s_level[MIC_RIGHT] * 3 + r) / 4;
-}
-
-// ── Noise suppression ──
-
-// ns_pro_create's mode: 0 mild, 1 medium, 2 aggressive.
-static int ns_mode_for(sandy_ns_level_t l)
-{
-    switch (l) {
-    case NS_MILD:       return 0;
-    case NS_MEDIUM:     return 1;
-    case NS_AGGRESSIVE: return 2;
-    default:            return -1;
-    }
-}
-
-void ns_set_level(sandy_ns_level_t level)
-{
-    if (level >= NS_LEVEL_COUNT) return;
-
-    // A new level needs a new instance; lock so the mic task never uses a freed handle.
-    if (s_ns_lock) xSemaphoreTake(s_ns_lock, portMAX_DELAY);
-    if (s_ns) {
-        ns_destroy(s_ns);
-        s_ns = NULL;
-    }
-    s_ns_level = level;
-    int mode = ns_mode_for(level);
-    if (mode >= 0) {
-        s_ns = ns_pro_create(10, mode, 16000);   // 10 ms frames, 16 kHz
-        if (!s_ns) {
-            // Probably out of memory: report off rather than pretend.
-            s_ns_level = NS_OFF;
-            ESP_LOGE(TAG, "noise suppression failed to start (out of memory?)");
-        }
-    }
-    if (s_ns_lock) xSemaphoreGive(s_ns_lock);
-
-    save_i32("ns", (int32_t)s_ns_level);
-    ESP_LOGI(TAG, "noise suppression = %d", (int)s_ns_level);
-}
-
-sandy_ns_level_t ns_get_level(void)
-{
-    return s_ns_level;
-}
-
-void ns_clean(int16_t *pcm, int samples)
-{
-    if (!s_ns || !pcm || samples < NS_FRAME_SAMPLES) return;
-    // Don't block the mic loop mid-change; skip cleaning this buffer instead.
-    if (s_ns_lock && xSemaphoreTake(s_ns_lock, 0) != pdTRUE) return;
-    if (s_ns) {
-        int16_t out[NS_FRAME_SAMPLES];
-        int blocks = samples / NS_FRAME_SAMPLES;
-        for (int b = 0; b < blocks; b++) {
-            int16_t *in = pcm + b * NS_FRAME_SAMPLES;
-            ns_process(s_ns, in, out);
-            memcpy(in, out, sizeof(out));
-        }
-    }
-    if (s_ns_lock) xSemaphoreGive(s_ns_lock);
 }
 
 // ── Speaker ──

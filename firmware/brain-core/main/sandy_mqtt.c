@@ -206,14 +206,6 @@ static void _handle_speaker_test(const char *val) {
     else spk_play(SPK_BEEP);   // مجهول = الفحص العادي، مش صمت محيّر
 }
 
-static void _handle_ns(const char *val) {
-    if      (!strcmp(val, "off"))        ns_set_level(NS_OFF);
-    else if (!strcmp(val, "mild"))       ns_set_level(NS_MILD);
-    else if (!strcmp(val, "medium"))     ns_set_level(NS_MEDIUM);
-    else if (!strcmp(val, "aggressive")) ns_set_level(NS_AGGRESSIVE);
-    else ESP_LOGW(TAG, "unknown noise level: %s", val);
-}
-
 // State names drive the privacy indicator (always wins); anything else is an
 // effect, optionally "name:rrggbb:speed". See sandy_led.h.
 static void _handle_led(const char *val) {
@@ -400,7 +392,6 @@ static void _dispatch(const char *out, const char *val, bool retained) {
     else if (!strcmp(out, "mic_r_gain"))   _handle_mic_gain(MIC_RIGHT, val);
     else if (!strcmp(out, "volume"))       _handle_volume(val);
     else if (!strcmp(out, "speaker_test")) _handle_speaker_test(val);
-    else if (!strcmp(out, "noise"))        _handle_ns(val);
     else if (!strcmp(out, "screen"))       _handle_screen(val);
 #if ENABLE_FACE
     else if (!strcmp(out, "pair_code"))    _handle_pair_code(val);
@@ -607,7 +598,6 @@ static const char *OUTPUTS_JSON =
       "{\"id\":\"mic_r_gain\",\"kind\":\"audio\"},"
       "{\"id\":\"volume\",\"kind\":\"audio\"},"
       "{\"id\":\"speaker_test\",\"kind\":\"audio\"},"
-      "{\"id\":\"noise\",\"kind\":\"audio\"},"
       "{\"id\":\"screen\",\"kind\":\"pwm\"},"
 #if ENABLE_IR
       "{\"id\":\"ir\",\"kind\":\"ir\"},"
@@ -646,7 +636,7 @@ void mqtt_publish_status(void) {
         "\"mic_l\":%d,\"mic_r\":%d,"
         "\"mic_l_gain\":%d,\"mic_r_gain\":%d,"
         "\"mic_l_muted\":%s,\"mic_r_muted\":%s,"
-        "\"volume\":%d,\"noise\":%d,\"online\":true,"
+        "\"volume\":%d,\"online\":true,"
         // قوّة الإشارة: لتشخيص «النت بطيء».
         "\"rssi\":%d,"
         // Exact backend key names (mqtt_ingest ignores anything else).
@@ -660,7 +650,7 @@ void mqtt_publish_status(void) {
         mic_get_gain(MIC_LEFT),  mic_get_gain(MIC_RIGHT),
         mic_is_muted(MIC_LEFT)  ? "true" : "false",
         mic_is_muted(MIC_RIGHT) ? "true" : "false",
-        spk_get_volume(), (int)ns_get_level(), wifi_sandy_rssi(),
+        spk_get_volume(), wifi_sandy_rssi(),
         wifi_sandy_ip(), ssid,
         SANDY_FW_VERSION, OUTPUTS_JSON);
     // Clipped JSON gets dropped whole by the server.

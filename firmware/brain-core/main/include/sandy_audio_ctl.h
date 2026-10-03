@@ -39,27 +39,6 @@ static inline int32_t mic_apply(int32_t sample, int gain_pct, bool muted) {
 int      mic_get_level(sandy_mic_ch_t ch);
 void     mic_report_levels(int rms_l, int rms_r);   // mic task -> here
 
-// Noise suppression (WebRTC NS, already in sdkconfig). A level, not a switch:
-// aggressive settings also eat quiet speech. Separate from echo cancellation.
-
-typedef enum {
-    NS_OFF = 0,
-    NS_MILD,        // normal room
-    NS_MEDIUM,
-    NS_AGGRESSIVE,  // a fan running right next to her
-    NS_LEVEL_COUNT
-} sandy_ns_level_t;
-
-// 10 ms at 16 kHz.
-#define NS_FRAME_SAMPLES 160
-
-void             ns_set_level(sandy_ns_level_t level);   // persisted
-sandy_ns_level_t ns_get_level(void);
-
-// In place; length must be a multiple of NS_FRAME_SAMPLES (remainder untouched).
-// No-op when off or unavailable.
-void             ns_clean(int16_t *pcm, int samples);
-
 // ── Speaker ──
 
 // 0..100, persisted. Only attenuates: amplifying full-scale samples clips.

@@ -5,7 +5,9 @@
 //   2. Wait for {"type":"auth_ok"}.
 //   3. Up: PCM 16-bit LE 16 kHz mono. Down: PCM 16-bit LE 24 kHz mono.
 //      Control frames: {"type":"end_turn"} / {"type":"error",...}.
-// While she talks the mic is gated (AEC + VOICE_DUPLEX_GATE_LEVEL), not muted, so she can be interrupted.
+//      Up control: {"type":"barge_in"} the moment someone talks over her (she is already silent here).
+// Both mics and the speaker reference go through the esp-sr audio front end (echo cancelling,
+// the two mics separated into one voice, voice detection, the wake word); only speech goes up.
 
 #include "sandy_voice.h"
 #include "config.h"
@@ -33,13 +35,11 @@
 #include "nvs.h"
 #include "esp_heap_caps.h"
 
-#if ENABLE_WAKEWORD
+#include "esp_afe_sr_iface.h"
+#include "esp_afe_sr_models.h"
+#include "esp_afe_config.h"
 #include "esp_wn_iface.h"
-#include "esp_wn_models.h"
-#endif
-#if ENABLE_WAKEWORD || ENABLE_COMMANDS
 #include "model_path.h"
-#endif
 #if ENABLE_COMMANDS
 #include "esp_mn_iface.h"
 #include "esp_mn_models.h"
@@ -49,9 +49,6 @@
 // برّا حارس الأوامر: مصافحة الصوت بتسلّم مفتاح الوسيط كمان.
 #include "sandy_mqtt.h"
 
-#if VOICE_AEC_ENABLE
-#include "esp_aec.h"
-#endif
 
 #include "sandy_wifi.h"
 #include "sandy_status.h"
@@ -116,15 +113,19 @@ static volatile int64_t s_squelch_until_ms;
 static uint8_t s_rx_carry;
 static volatile bool s_rx_has_carry;
 
-#if VOICE_AEC_ENABLE
-// AEC: spk_task writes a 16 kHz copy of what the amp plays; mic_task subtracts it.
-static aec_handle_t *s_aec;
+// The audio front end: spk_task writes a 16 kHz copy of what the amp plays (the
+// reference); mic_task feeds it with both mics; proc_task reads one clean voice back.
 static StreamBufferHandle_t s_ref_stream;     // 16k mono reference (PSRAM)
-static int s_aec_chunk;                       // samples per aec_process() call
-static int16_t *s_aec_stage;                  // collects mic mono to chunk size
-static int s_aec_fill;
-static int16_t *s_aec_ref, *s_aec_out;        // aligned per-chunk buffers
-static int16_t *s_aec_frame;                  // processed output for one frame
+static const esp_afe_sr_iface_t *s_afe;
+static esp_afe_sr_data_t *s_afe_data;
+static int s_afe_feed_chunk;                  // samples per channel per feed()
+static srmodel_list_t *s_models;              // esp-sr models from the "model" partition
+static bool s_wake_ready;                     // a wake word model is running
+// Someone talked over her: the uplink task tells the server before the next audio.
+static volatile bool s_barge_pending;
+#if ENABLE_SERVO
+// Per-mic first-difference energy (~400 ms smoothing): which side the caller is on.
+static volatile int s_ear_l, s_ear_r;
 #endif
 
 // When the WS dropped mid-session (0 = up). Outside the wake-word guard: always written.
@@ -155,14 +156,6 @@ static volatile int64_t s_session_voice_ms;  // last user/Sandy activity while o
 static volatile bool s_mn_want = true;       // should the model be resident?
 static volatile bool s_mn_loaded;            // mic_task's answer
 #endif
-
-static const esp_wn_iface_t *s_wn;
-static model_iface_data_t *s_wn_data;
-static int s_wn_chunk;                        // samples per detect() call
-static int16_t *s_wn_buf;                     // accumulates mic to chunk size
-static int s_wn_fill;                         // samples currently in s_wn_buf
-
-static srmodel_list_t *s_models;              // shared esp-sr model list
 
 #if ENABLE_COMMANDS
 // MultiNet offline command words, on the idle mic audio (see SANDY_COMMANDS).
@@ -646,15 +639,13 @@ static void spk_task(void *arg) {
                 s_playing = true;
                 VOICE_FACE(MOOD_HAPPY);     // talking face
                 VOICE_LED(LED_STATE_TALKING);
-#if VOICE_AEC_ENABLE
                 // Fresh playback: pre-fill the reference with silence equal to the TX DMA depth.
                 if (s_ref_stream && xStreamBufferIsEmpty(s_ref_stream)) {
                     static const int16_t zeros[320] = {0};   // 20ms pieces
-                    for (int ms = 0; ms < VOICE_AEC_REF_DELAY_MS; ms += 20) {
+                    for (int ms = 0; ms < VOICE_REF_DELAY_MS; ms += 20) {
                         xStreamBufferSend(s_ref_stream, zeros, sizeof(zeros), 0);
                     }
                 }
-#endif
                 // Restart right after a stop = audible mid-reply gap.
                 if (last_stop && (now_ms() - last_stop) < 2000) {
                     s_spk_gaps++;
@@ -701,7 +692,6 @@ static void spk_task(void *arg) {
                 int lvl = ns ? (int)(sum / ns) / 30 : 0;
                 s_out_level = lvl > 100 ? 100 : lvl;
             }
-#if VOICE_AEC_ENABLE
             // Echo reference: post-volume, 24k→16k (2 of every 3 samples). Leftover samples
             // wait for the next chunk; dropping them drifted the AEC alignment.
             if (s_ref_stream) {
@@ -732,7 +722,6 @@ static void spk_task(void *arg) {
                 for (; i < ns && carried < 2; i++) carry[carried++] = sp[i];
                 if (k) xStreamBufferSend(s_ref_stream, ref, k * sizeof(int16_t), 0);
             }
-#endif
             size_t written = 0;
             i2s_channel_write(s_tx_chan, buf, n, &written, portMAX_DELAY);
             s_spk_play_bytes += n;
@@ -755,61 +744,41 @@ static void spk_task(void *arg) {
     }
 }
 
-#if ENABLE_WAKEWORD
-// WakeNet model from the "model" partition. False if absent (always-on fallback).
-static bool wakeword_init(void) {
-    if (!s_models) s_models = esp_srmodel_init("model");
-    srmodel_list_t *models = s_models;
-    if (!models || models->num <= 0) {
-        ESP_LOGW(TAG, "no models in 'model' partition");
+// The audio front end (esp-sr AFE), set up once: input "MMR" = left mic, right mic, the
+// reference. Echo cancelling, the two mics separated into one voice (BSS), voice activity
+// and the wake word run in one pipeline tuned for exactly this chip. False when it cannot
+// start (no models, no memory): she stays deaf rather than streaming the room.
+static bool afe_init(void) {
+    s_models = esp_srmodel_init("model");
+    afe_config_t *cfg = afe_config_init("MMR", s_models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+    if (!cfg) {
+        ESP_LOGE(TAG, "audio front end: no configuration");
         return false;
     }
-    char *name = esp_srmodel_filter(models, ESP_WN_PREFIX, NULL);
-    if (!name) {
-        ESP_LOGW(TAG, "no wakenet model found");
+    cfg->wakenet_init = ENABLE_WAKEWORD && cfg->wakenet_model_name;
+    cfg->wakenet_mode = DET_MODE_90;
+    // A fixed gain follows it (VOICE_MIC_GAIN_SHIFT): the levels below were tuned on that.
+    cfg->agc_init = false;
+    cfg->vad_min_noise_ms = VOICE_VAD_END_MS;
+    cfg->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+    cfg->afe_perferred_core = 1;
+    cfg->afe_perferred_priority = 7;
+    s_wake_ready = cfg->wakenet_init;
+    s_afe = esp_afe_handle_from_config(cfg);
+    s_afe_data = s_afe ? s_afe->create_from_config(cfg) : NULL;
+    afe_config_free(cfg);
+    if (!s_afe_data) {
+        ESP_LOGE(TAG, "audio front end did not start (psram free=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         return false;
     }
-    const esp_wn_iface_t *wn = esp_wn_handle_from_name(name);
-    model_iface_data_t *data = wn ? wn->create(name, DET_MODE_90) : NULL;
-    if (!data) {
-        ESP_LOGE(TAG, "wakenet '%s' could not be created", name);
-        return false;
-    }
-    s_wn_chunk = wn->get_samp_chunksize(data);
-    s_wn_buf = malloc(s_wn_chunk * sizeof(int16_t));
-    s_wn_fill = 0;
-    if (!s_wn_buf) {
-        wn->destroy(data);
-        return false;
-    }
-    // Published last: mic_task must never see a half-built model.
-    s_wn_data = data;
-    s_wn = wn;
-    ESP_LOGI(TAG, "wakenet '%s' ready (word='%s', chunk=%d, rate=%d)",
-             name, esp_wn_wakeword_from_name(name), s_wn_chunk,
-             s_wn->get_samp_rate(s_wn_data));
+    s_afe_feed_chunk = s_afe->get_feed_chunksize(s_afe_data);
+    ESP_LOGI(TAG, "audio front end up: %d samples x %d channels, wake word %s",
+             s_afe_feed_chunk, s_afe->get_feed_channel_num(s_afe_data),
+             s_wake_ready ? "on" : "OFF");
+    s_afe->print_pipeline(s_afe_data);
     return true;
 }
-
-// WakeNet needs exact chunks: buffer to s_wn_chunk. True if the wake word fired.
-static bool wakeword_feed(const int16_t *pcm, int n) {
-    if (!s_wn) return false;
-    bool hit = false;
-    int i = 0;
-    while (i < n) {
-        int take = s_wn_chunk - s_wn_fill;
-        if (take > n - i) take = n - i;
-        memcpy(s_wn_buf + s_wn_fill, pcm + i, take * sizeof(int16_t));
-        s_wn_fill += take;
-        i += take;
-        if (s_wn_fill == s_wn_chunk) {
-            if (s_wn->detect(s_wn_data, s_wn_buf) == WAKENET_DETECTED) hit = true;
-            s_wn_fill = 0;
-        }
-    }
-    return hit;
-}
-#endif  // ENABLE_WAKEWORD
 
 #if ENABLE_COMMANDS
 // ─── Local command words ("Sandy ...") ───
@@ -937,7 +906,7 @@ static void commands_unload(void) {
     ESP_LOGI(TAG, "multinet unloaded for the voice session");
 }
 
-// Same exact-chunk buffering as wakeword_feed. True if a command opens the session.
+// MultiNet needs exact chunks: buffer to s_mn_chunk. True if a command opens the session.
 static bool commands_feed(const int16_t *pcm, int n) {
     if (!s_mn || !s_mn_buf) return false;
     bool open = false;
@@ -1005,6 +974,14 @@ static void ws_tx_task(void *arg) {
             xSemaphoreGive(s_ws_mutex);
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;            // nothing read, so nothing lost
+        }
+
+        if (s_barge_pending) {
+            // Ahead of the audio: the server stops her reply without waiting to be sure itself.
+            s_barge_pending = false;
+            static const char barge[] = "{\"type\":\"barge_in\"}";
+            esp_websocket_client_send_text(s_client, barge, sizeof(barge) - 1,
+                                           pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
         }
 
         // Catch up to real time: drop the oldest past TX_MAX_LATENCY_BYTES, counted and logged.
@@ -1094,46 +1071,12 @@ static void session_heap_report(void) {
 #endif
 
 #if ENABLE_WAKEWORD
-// ── Uplink squelch: send speech, not the room ──
-// Continuous silence saturates a weak uplink and stutters her reply. The floor is
-// the quietest level in the last few seconds; below the gate audio goes to the
-// preroll (so onsets aren't lost), and a hangover keeps trailing words.
-#define TX_FLOOR_SLOTS      24      // ~3 s of history at 128 ms a batch
-#define TX_FLOOR_FACTOR     5       // speech is this many halves above the floor
-#define TX_FLOOR_MIN        250     // absolute floor
-#define TX_HANGOVER_MS      900     // keep sending this long after the last word
+// ── Uplink: speech, not the room ──
+// The front end says when it is speech; a hangover keeps trailing words and lets the
+// server see the quiet that ends the turn.
+#define TX_HANGOVER_MS      900
 
-static int   s_tx_floor_ring[TX_FLOOR_SLOTS];
-static int   s_tx_floor_at;
-static int   s_tx_floor_n;
 static int64_t s_tx_open_until;
-
-// True if this batch should be sent.
-static bool tx_gate(int avg) {
-    s_tx_floor_ring[s_tx_floor_at] = avg;
-    s_tx_floor_at = (s_tx_floor_at + 1) % TX_FLOOR_SLOTS;
-    if (s_tx_floor_n < TX_FLOOR_SLOTS) s_tx_floor_n++;
-
-    int floor = avg;
-    for (int i = 0; i < s_tx_floor_n; i++) {
-        if (s_tx_floor_ring[i] < floor) floor = s_tx_floor_ring[i];
-    }
-    // Half-steps: factor 2.5 without floats.
-    int gate = (floor * TX_FLOOR_FACTOR) / 2;
-    if (gate < TX_FLOOR_MIN) gate = TX_FLOOR_MIN;
-
-    if (avg >= gate) {
-        s_tx_open_until = now_ms() + TX_HANGOVER_MS;
-        return true;
-    }
-    return s_tx_open_until && now_ms() < s_tx_open_until;
-}
-
-static void tx_gate_reset(void) {
-    s_tx_floor_n = 0;
-    s_tx_floor_at = 0;
-    s_tx_open_until = 0;
-}
 
 // Send audio captured while connecting before the live frame.
 static void preroll_flush(void) {
@@ -1145,32 +1088,56 @@ static void preroll_flush(void) {
         s_tx_protected += (uint32_t)n;   // the catch-up rule leaves these alone
     }
 }
+
+// Someone talks over her: silence her here at once (no round trip), and tell the server.
+static void barge_in(const char *why) {
+    ESP_LOGI(TAG, "barge-in: %s", why);
+    s_squelch_until_ms = now_ms() + SPK_SQUELCH_MS;  // stale tail only
+    s_rx_has_carry = false;
+    s_spk_flush = true;
+    s_last_rx_audio_ms = 0;   // kill the half-duplex tail now
+    s_session_voice_ms = now_ms();
+    s_barge_pending = true;
+}
 #endif
 
-// Read the mic, convert to 16-bit PCM, stream it up.
+// The front end works at full headroom; this fixed gain (saturating) brings its output
+// to the level the thresholds and the server expect. Returns the mean level.
+static int apply_gain(const int16_t *in, int16_t *out, int n) {
+    int64_t sum_abs = 0;
+    for (int i = 0; i < n; i++) {
+        int32_t v = (int32_t)in[i] << (16 - VOICE_MIC_GAIN_SHIFT);
+        if (v > 32767) v = 32767;
+        else if (v < -32768) v = -32768;
+        out[i] = (int16_t)v;
+        sum_abs += (v < 0) ? -v : v;
+    }
+    return (int)(sum_abs / (n ? n : 1));
+}
+
+// Reads both mics, applies each one's gain and mute, and feeds the front end: left,
+// right and the reference (what the amp plays), interleaved, in its chunk size.
 static void mic_task(void *arg) {
-    // Stereo: 2 int32 slots per frame; pcm holds the mono mix.
+    // Stereo: 2 int32 slots per frame.
     int32_t *raw = malloc(MIC_FRAME_SAMPLES * 2 * sizeof(int32_t));
-    int16_t *pcm = malloc(MIC_FRAME_SAMPLES * sizeof(int16_t));
-    if (!raw || !pcm) {
-        // The allocations fail independently; free both (free(NULL) is a no-op).
+    int16_t *feed = malloc((size_t)s_afe_feed_chunk * 3 * sizeof(int16_t));
+    int16_t *ref = malloc((size_t)s_afe_feed_chunk * sizeof(int16_t));
+    if (!raw || !feed || !ref) {
+        // The allocations fail independently; free all (free(NULL) is a no-op).
         free(raw);
-        free(pcm);
+        free(feed);
+        free(ref);
         ESP_LOGE(TAG, "mic buffers alloc failed");
         status_set(SANDY_ST_LOW_MEMORY);   // S4.2: no subsystem fails silently
         vTaskDelete(NULL);
         return;
     }
-
-    // One-pole DC blocker: y[n] = x[n] - x[n-1] + R*y[n-1].
-    int32_t dc_x1 = 0, dc_y1 = 0;
-    int64_t last_diag = 0;
+    // One-pole DC blocker per mic: y[n] = x[n] - x[n-1] + R*y[n-1].
+    int32_t dcx[2] = {0, 0}, dcy[2] = {0, 0};
+    int fill = 0;
     bool first_frame = true;
-    int gate_run = 0;   // consecutive over-gate batches while she talks
 #if ENABLE_SERVO
-    // Per-mic first-difference energy (~400 ms smoothing) for L/R direction.
     int32_t ear_prev_l = 0, ear_prev_r = 0;
-    int ear_l = 0, ear_r = 0;
 #endif
 
     for (;;) {
@@ -1186,26 +1153,30 @@ static void mic_task(void *arg) {
             ESP_LOGI(TAG, "mic up (first frame, %u bytes)", (unsigned)bytes_read);
         }
         int frames = bytes_read / (2 * sizeof(int32_t));
-
-        // 24-bit data left-justified in 32-bit slots: mix at full headroom (>>16, never
-        // clips), then DC-block. Gain comes AFTER the AEC: clipped echo defeats it.
-#if ENABLE_SERVO
-        int64_t sum_dl = 0, sum_dr = 0;
-#endif
         // Snapshot controls once per frame so a change can't split a block.
         const int  gain_l  = mic_get_gain(MIC_LEFT);
         const int  gain_r  = mic_get_gain(MIC_RIGHT);
         const bool mute_l  = mic_is_muted(MIC_LEFT);
         const bool mute_r  = mic_is_muted(MIC_RIGHT);
-        // Divisor follows the live mic count, so muting one isolates the other.
-        const int  live    = (mute_l ? 0 : 1) + (mute_r ? 0 : 1);
         int64_t sum_sq_l = 0, sum_sq_r = 0;   // per-mic level, for the meters
-
+#if ENABLE_SERVO
+        int64_t sum_dl = 0, sum_dr = 0;
+#endif
         for (int i = 0; i < frames; i++) {
-            int32_t l = mic_apply(raw[2 * i]     >> 16, gain_l, mute_l);
-            int32_t r = mic_apply(raw[2 * i + 1] >> 16, gain_r, mute_r);
-            sum_sq_l += (int64_t)l * l;
-            sum_sq_r += (int64_t)r * r;
+            // 24-bit data left-justified in 32-bit slots: >>16 keeps full headroom.
+            int32_t in[2] = {
+                mic_apply(raw[2 * i]     >> 16, gain_l, mute_l),
+                mic_apply(raw[2 * i + 1] >> 16, gain_r, mute_r),
+            };
+            int16_t ch[2];
+            for (int c = 0; c < 2; c++) {
+                int32_t y = in[c] - dcx[c] + (dcy[c] - (dcy[c] >> 6));  // R ≈ 0.984
+                dcx[c] = in[c];
+                dcy[c] = y;
+                ch[c] = (int16_t)(y > 32767 ? 32767 : y < -32768 ? -32768 : y);
+            }
+            sum_sq_l += (int64_t)ch[0] * ch[0];
+            sum_sq_r += (int64_t)ch[1] * ch[1];
 #if ENABLE_SERVO
             // Ears keep the higher-gain view for L/R resolution (she's silent during the wake word).
             int32_t le = raw[2 * i]     >> VOICE_MIC_GAIN_SHIFT;
@@ -1215,78 +1186,61 @@ static void mic_task(void *arg) {
             ear_prev_l = le;
             ear_prev_r = re;
 #endif
-            int32_t x = live ? (l + r) / live : 0;
-
-            int32_t y = x - dc_x1 + (dc_y1 - (dc_y1 >> 6));  // R ≈ 0.984
-            dc_x1 = x;
-            dc_y1 = y;
-
-            if (y > 32767) y = 32767;
-            else if (y < -32768) y = -32768;
-            pcm[i] = (int16_t)y;
+            if (fill == 0) {
+                // This chunk's reference: what the amp played, silence when it was quiet.
+                size_t want = (size_t)s_afe_feed_chunk * sizeof(int16_t);
+                size_t got = s_ref_stream ? xStreamBufferReceive(s_ref_stream, ref, want, 0) : 0;
+                if (got < want) memset((uint8_t *)ref + got, 0, want - got);
+            }
+            feed[3 * fill]     = ch[0];
+            feed[3 * fill + 1] = ch[1];
+            feed[3 * fill + 2] = ref[fill];
+            if (++fill == s_afe_feed_chunk) {
+                s_afe->feed(s_afe_data, feed);
+                fill = 0;
+            }
         }
 #if ENABLE_SERVO
-        ear_l = (ear_l * 3 + (int)(sum_dl / (frames ? frames : 1))) / 4;
-        ear_r = (ear_r * 3 + (int)(sum_dr / (frames ? frames : 1))) / 4;
+        s_ear_l = (s_ear_l * 3 + (int)(sum_dl / (frames ? frames : 1))) / 4;
+        s_ear_r = (s_ear_r * 3 + (int)(sum_dr / (frames ? frames : 1))) / 4;
 #endif
-
         // Per-mic RMS post-gain/mute, so testing one mic at a time shows the truth.
         if (frames > 0) {
             mic_report_levels((int)sqrt((double)(sum_sq_l / frames)),
                               (int)sqrt((double)(sum_sq_r / frames)));
         }
+    }
+}
 
+// Reads the front end: one clean voice, whether it is speech, and the wake word. Opens
+// the session on the wake word, sends speech up, and while she talks a voice over her
+// (her own echo is already removed here) stops her at once.
+static void proc_task(void *arg) {
+    const int chunk = s_afe->get_fetch_chunksize(s_afe_data);
+    int16_t *out = malloc((size_t)chunk * sizeof(int16_t));
+    if (!out) {
+        ESP_LOGE(TAG, "voice buffer alloc failed");
+        status_set(SANDY_ST_LOW_MEMORY);
+        vTaskDelete(NULL);
+        return;
+    }
+    int64_t last_diag = 0;
+    int speech_ms = 0;   // how long the current speech has lasted
+
+    for (;;) {
+        afe_fetch_result_t *res = s_afe->fetch(s_afe_data);
+        if (!res || res->ret_value == ESP_FAIL || !res->data || res->data_size <= 0) {
+            continue;
+        }
+        int frames = res->data_size / (int)sizeof(int16_t);
+        if (frames > chunk) frames = chunk;
+        const bool speech = res->vad_state == VAD_SPEECH;
+        const bool wake = res->wakeup_state == WAKENET_DETECTED;
+        speech_ms = speech ? speech_ms + frames * 1000 / VOICE_IN_RATE : 0;
+        int avg = apply_gain(res->data, out, frames);
+        const size_t bytes = (size_t)frames * sizeof(int16_t);
         bool sandy_talking = s_playing ||
                              (now_ms() - s_last_rx_audio_ms) < VOICE_HALF_DUPLEX_TAIL_MS;
-
-        // Raw mic by default; echo-cancelled when AEC and a session are up.
-        int16_t *use = pcm;
-#if VOICE_AEC_ENABLE
-        if (s_aec && s_session_active) {
-            // Run the canceller in chunks with the speaker reference (zeros when quiet).
-            int out_n = 0;
-            for (int i = 0; i < frames; i++) {
-                s_aec_stage[s_aec_fill++] = pcm[i];
-                if (s_aec_fill == s_aec_chunk) {
-                    s_aec_fill = 0;
-                    size_t want = (size_t)s_aec_chunk * sizeof(int16_t);
-                    size_t got = xStreamBufferReceive(s_ref_stream, s_aec_ref, want, 0);
-                    if (got < want) memset((uint8_t *)s_aec_ref + got, 0, want - got);
-                    aec_process(s_aec, s_aec_stage, s_aec_ref, s_aec_out);
-                    memcpy(s_aec_frame + out_n, s_aec_out, want);
-                    out_n += s_aec_chunk;
-                }
-            }
-            if (out_n == 0) continue;   // not a full chunk yet this frame
-            use = s_aec_frame;
-            frames = out_n;
-        }
-#if VOICE_AEC_FULL_DUPLEX
-        // With AEC the mic stays open while she talks.
-        bool mic_muted = s_aec ? false : sandy_talking;
-#else
-        bool mic_muted = sandy_talking;
-#endif
-#else
-        const bool mic_muted = sandy_talking;
-#endif
-
-        // Noise suppression only on the idle raw mic (whole 1600-sample frames): never
-        // before the AEC (nonlinear, breaks convergence), and the AEC output is already
-        // suppressed. No-op when off.
-        if (use == pcm) ns_clean(use, frames);
-
-        // Re-apply gain after the canceller (saturating) so thresholds keep their scale.
-        // avg is also the VAD level and must come from the cleaned signal.
-        int64_t sum_abs = 0;
-        for (int i = 0; i < frames; i++) {
-            int32_t v = (int32_t)use[i] << (16 - VOICE_MIC_GAIN_SHIFT);
-            if (v > 32767) v = 32767;
-            else if (v < -32768) v = -32768;
-            use[i] = (int16_t)v;
-            sum_abs += (v < 0) ? -v : v;
-        }
-        int avg = (int)(sum_abs / (frames ? frames : 1));
 
 #if ENABLE_COMMANDS
         // Swap the command model's SRAM with the voice link on request; s_mn stays
@@ -1300,24 +1254,15 @@ static void mic_task(void *arg) {
 
 #if ENABLE_WAKEWORD
         if (!s_session_active) {
-#if VOICE_AEC_ENABLE
-            // Drain the stale reference from the closed session (this task is the reader).
-            if (s_ref_stream && !xStreamBufferIsEmpty(s_ref_stream)) {
-                while (xStreamBufferReceive(s_ref_stream, s_aec_ref,
-                                            (size_t)s_aec_chunk * sizeof(int16_t), 0) > 0) {}
-                s_aec_fill = 0;
-            }
-#endif
 #if ENABLE_COMMANDS
             // Offline command words on the idle audio.
-            if (!sandy_talking && commands_feed(pcm, frames)) {
+            if (!sandy_talking && commands_feed(res->data, frames)) {
                 ESP_LOGI(TAG, "command opened a voice session");
                 if (s_preroll) xStreamBufferReset(s_preroll);
                 s_wake_req = true;
             }
 #endif
-            // Idle: local wake word only; the session manager opens the WS on s_wake_req.
-            if (!sandy_talking && wakeword_feed(pcm, frames)) {
+            if (wake) {
                 ESP_LOGI(TAG, "wake word detected");
                 if (s_preroll) xStreamBufferReset(s_preroll);  // fresh capture
                 s_wake_req = true;
@@ -1330,87 +1275,81 @@ static void mic_task(void *arg) {
 #endif
 #if ENABLE_SERVO
                 // Turn toward the caller: ±10% L/R imbalance already means full swing.
-                int tot = ear_l + ear_r;
+                int tot = s_ear_l + s_ear_r;
                 if (tot > 0) {
-                    int bal = ((ear_r - ear_l) * 100) / tot;   // -100 .. +100
+                    int bal = ((s_ear_r - s_ear_l) * 100) / tot;   // -100 .. +100
                     if (VOICE_EARS_INVERT) bal = -bal;
                     int off = bal * VOICE_EARS_SWING / 10;
                     if (off >  VOICE_EARS_SWING) off =  VOICE_EARS_SWING;
                     if (off < -VOICE_EARS_SWING) off = -VOICE_EARS_SWING;
                     servo_move_to((uint8_t)(90 + off));
                     ESP_LOGI(TAG, "ears: l=%d r=%d bal=%d -> angle=%d",
-                             ear_l, ear_r, bal, 90 + off);
+                             s_ear_l, s_ear_r, bal, 90 + off);
                 }
 #endif
             }
         } else {
-            // Barge-in: the spotter keeps running while she talks (on AEC output when available).
-            if (sandy_talking && wakeword_feed(use, frames)) {
-                ESP_LOGI(TAG, "barge-in: wake word during playback");
-                s_squelch_until_ms = now_ms() + SPK_SQUELCH_MS;  // stale tail only
-                s_rx_has_carry = false;
-                s_spk_flush = true;
-                s_last_rx_audio_ms = 0;   // kill the half-duplex tail now
-                s_session_voice_ms = now_ms();
+            if (wake && sandy_talking) {
 #if ENABLE_BUZZER
                 buzzer_play(MELODY_CURIOUS);
 #endif
+                barge_in("wake word");
+                sandy_talking = false;
             }
             // Speech or her own audio keeps the session alive.
-            if (avg > VOICE_SESSION_VAD_LEVEL || sandy_talking) {
-                s_session_voice_ms = now_ms();
-            }
+            if (speech || sandy_talking) s_session_voice_ms = now_ms();
             if (s_authed && s_preroll_due) {
                 // auth_ok just arrived: send the preroll now.
                 s_preroll_due = false;
                 preroll_flush();
             }
-            if (s_authed && !mic_muted) {
-                // While she talks, only VOICE_DUPLEX_GATE_RUN consecutive loud batches (~100 ms)
-                // open the stream; pending batches wait in the preroll so the onset still arrives.
-                if (!sandy_talking) gate_run = 0;
-                if (!sandy_talking || avg > VOICE_DUPLEX_GATE_LEVEL) {
-                    if (sandy_talking && ++gate_run < VOICE_DUPLEX_GATE_RUN) {
-                        if (s_preroll) {
-                            xStreamBufferSend(s_preroll, use,
-                                              frames * sizeof(int16_t), 0);
-                        }
-                    } else if (tx_gate(avg)) {
-                        preroll_flush();
-                        mic_send(use, frames * sizeof(int16_t));
-                    } else if (s_preroll) {
-                        // Below the gate: stash in the preroll, sent first when the gate opens.
-                        xStreamBufferSend(s_preroll, use,
-                                          frames * sizeof(int16_t), 0);
-                    }
-                } else if (gate_run) {
-                    // The spike was echo: drop the stash.
-                    gate_run = 0;
-                    if (s_preroll) xStreamBufferReset(s_preroll);
-                }
-            } else if (!s_authed && s_preroll) {
+            if (!s_authed) {
                 // Connecting or reconnecting: capture, flush once authed.
-                xStreamBufferSend(s_preroll, use, frames * sizeof(int16_t), 0);
+                if (s_preroll) xStreamBufferSend(s_preroll, out, bytes, 0);
+            } else if (sandy_talking) {
+                // Held until it is clearly a person (VOICE_BARGE_MS), then she stops here and
+                // what was held goes up first, so the start of the interruption isn't lost.
+                if (!speech) {
+                    if (s_preroll) xStreamBufferReset(s_preroll);
+                } else {
+                    if (s_preroll) xStreamBufferSend(s_preroll, out, bytes, 0);
+                    if (speech_ms >= VOICE_BARGE_MS) {
+                        barge_in("voice");
+                        preroll_flush();
+                        s_tx_open_until = now_ms() + TX_HANGOVER_MS;
+                    }
+                }
+            } else if (speech || now_ms() < s_tx_open_until) {
+                if (speech && now_ms() >= s_tx_open_until && res->vad_cache_size > 0) {
+                    // The start of the word the detector needed before it was sure.
+                    const int16_t *cache = res->vad_cache;
+                    int left = res->vad_cache_size / (int)sizeof(int16_t);
+                    while (left > 0) {
+                        int n = left < chunk ? left : chunk;
+                        apply_gain(cache, out, n);
+                        mic_send(out, (size_t)n * sizeof(int16_t));
+                        cache += n;
+                        left -= n;
+                    }
+                    apply_gain(res->data, out, frames);
+                }
+                if (speech) s_tx_open_until = now_ms() + TX_HANGOVER_MS;
+                mic_send(out, bytes);
             }
         }
 #else
-        if (s_authed && !mic_muted) {
-            mic_send(use, frames * sizeof(int16_t));
-        }
+        if (s_authed) mic_send(out, bytes);
 #endif
 
         int64_t t = now_ms();
         if (t - last_diag > 1500) {
             last_diag = t;
-#if ENABLE_WAKEWORD
-            ESP_LOGI(TAG, "diag mic=%d session=%d authed=%d talking=%d int=%u psram=%u",
-                     avg, (int)s_session_active, (int)s_authed, (int)sandy_talking,
+            ESP_LOGI(TAG, "diag mic=%d speech=%d session=%d authed=%d talking=%d "
+                     "afe_busy=%.2f int=%u psram=%u",
+                     avg, (int)speech, (int)s_session_active, (int)s_authed,
+                     (int)sandy_talking, res->ringbuff_free_pct,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-#else
-            ESP_LOGI(TAG, "diag mic=%d authed=%d playing=%d talking=%d",
-                     avg, (int)s_authed, (int)s_playing, (int)sandy_talking);
-#endif
         }
     }
 }
@@ -1529,67 +1468,18 @@ static void voice_task(void *arg) {
         return;
     }
 
-#if VOICE_AEC_ENABLE
-    // AEC buffers: internal RAM first, PSRAM fallback; without AEC, half-duplex.
+    // The reference the front end cancels against (spk_task writes, mic_task reads).
     s_ref_stream = xStreamBufferCreateWithCaps(32 * 1024, 1, MALLOC_CAP_SPIRAM);
-    aec_config_t acfg = {
-        .mic_num = 1, .ref_num = 1, .out_num = 1,
-        .filter_length = VOICE_AEC_FILTER_LEN,
-        .sample_rate = VOICE_IN_RATE,
-        .caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT,
-        .mode = AEC_MODE_SR_LOW_COST,
-        .nlp_level = AEC_NLP_LEVEL_VERYAGGR,
-    };
-    ESP_LOGI(TAG, "AEC init (heap_int=%u)...",
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    s_aec = aec_create_from_config(&acfg);
-    if (!s_aec) {
-        acfg.caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-        s_aec = aec_create_from_config(&acfg);
-    }
-    ESP_LOGI(TAG, "AEC create done (%p)", (void *)s_aec);
-    if (s_aec) {
-        s_aec_chunk = aec_get_chunksize(s_aec);
-        size_t cb = (size_t)s_aec_chunk * sizeof(int16_t);
-        s_aec_stage = heap_caps_aligned_alloc(16, cb, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        s_aec_ref   = heap_caps_aligned_alloc(16, cb, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        s_aec_out   = heap_caps_aligned_alloc(16, cb, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        s_aec_frame = heap_caps_malloc((MIC_FRAME_SAMPLES + s_aec_chunk) * sizeof(int16_t),
-                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!s_aec_stage || !s_aec_ref || !s_aec_out || !s_aec_frame) {
-            // aec_destroy doesn't free these; free and NULL them (read paths test the pointers).
-            ESP_LOGE(TAG, "AEC buffer alloc failed — half-duplex fallback");
-            heap_caps_free(s_aec_stage);
-            heap_caps_free(s_aec_ref);
-            heap_caps_free(s_aec_out);
-            heap_caps_free(s_aec_frame);
-            s_aec_stage = NULL;
-            s_aec_ref   = NULL;
-            s_aec_out   = NULL;
-            s_aec_frame = NULL;
-            aec_destroy(s_aec);
-            s_aec = NULL;
-        } else {
-            ESP_LOGI(TAG, "AEC up: chunk=%d filter=%d full_duplex=%d",
-                     s_aec_chunk, VOICE_AEC_FILTER_LEN, (int)VOICE_AEC_FULL_DUPLEX);
-        }
-    } else {
-        ESP_LOGW(TAG, "AEC create failed — half-duplex fallback");
+    // BEFORE the audio tasks: they read the front end's handle and chunk size.
+    if (!s_ref_stream || !afe_init()) {
+        ESP_LOGE(TAG, "audio front end unavailable — voice disabled");
+        status_set(SANDY_ST_LOW_MEMORY);
+        vTaskDelete(NULL);
+        return;
     }
 
-    // Half-duplex: delete the reference buffer, or spk_task keeps filling it for nobody.
-    if (!s_aec && s_ref_stream) {
-        vStreamBufferDeleteWithCaps(s_ref_stream);
-        s_ref_stream = NULL;
-    }
-#endif
-
-#if ENABLE_WAKEWORD
-    // BEFORE the audio tasks: a half-initialized WakeNet panics mic_task.
-    bool wn_ok = wakeword_init();
-#endif
 #if ENABLE_COMMANDS
-    // Shares s_models with wakeword_init.
+    // Shares s_models with the front end.
     bool cmd_ok = commands_init();
     // Already resident, so mic_task doesn't load a second one.
     s_mn_loaded = true;
@@ -1600,7 +1490,7 @@ static void voice_task(void *arg) {
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
 
-    // Audio tasks on core 1 (WiFi/TLS on core 0), playback highest. Uplink task at 6
+    // Audio tasks on core 1 (WiFi/TLS on core 0; the front-end reader too), playback highest. Uplink task at 6
     // (may wait), 3 KB stack (internal RAM). Separate checks so the log says which failed.
     int audio_task_fail = 0;
     if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 3072, NULL, 6, NULL, 1) != pdPASS) {
@@ -1615,9 +1505,14 @@ static void voice_task(void *arg) {
         audio_task_fail++;
         ESP_LOGE(TAG, "audio task voice_mic create FAILED");
     }
+    // The front end's own worker runs on core 1; reading it can wait on core 0.
+    if (xTaskCreatePinnedToCore(proc_task, "voice_proc", 6144, NULL, 8, NULL, 0) != pdPASS) {
+        audio_task_fail++;
+        ESP_LOGE(TAG, "audio task voice_proc create FAILED");
+    }
     if (audio_task_fail) {
         // Out of internal RAM for stacks: say so on her face.
-        ESP_LOGE(TAG, "%d of 3 audio tasks did not start (heap_int free=%u largest=%u)",
+        ESP_LOGE(TAG, "%d of 4 audio tasks did not start (heap_int free=%u largest=%u)",
                  audio_task_fail,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
@@ -1625,7 +1520,7 @@ static void voice_task(void *arg) {
     }
 
 #if ENABLE_WAKEWORD
-    if (!wn_ok) {
+    if (!s_wake_ready) {
         // Fail closed: without a wake word the mic stays local (no always-on streaming).
         // Command words still open a session if loaded.
         ESP_LOGE(TAG, "wake word unavailable — the microphone stays local "
@@ -1661,8 +1556,7 @@ static void voice_task(void *arg) {
                     continue;
                 }
                 ESP_LOGI(TAG, "opening voice session");
-                // Fresh noise floor per call.
-                tx_gate_reset();
+                s_tx_open_until = 0;
 #if ENABLE_COMMANDS
                 // Free the command model BEFORE opening: TLS needs its ~70 KB.
                 s_mn_want = false;

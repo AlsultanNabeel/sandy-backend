@@ -101,10 +101,6 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
         "name": "sandy_speaker_test", "label": "أصوات السماعة", "control_type": "enum",
         "meta": {"values": ["beep", "chime", "alert", "sweep", "soft", "happy"]},
     },
-    "noise": {
-        "name": "sandy_noise", "label": "عزل الضجّة", "control_type": "enum",
-        "meta": {"values": ["off", "mild", "medium", "aggressive"]},
-    },
 
     # ── الكاميرا: بادئة `cam/` لأنها بتشارك معرّف الوحدة مع الدماغ ─────────────
     "cam/flash": {

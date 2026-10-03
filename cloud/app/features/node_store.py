@@ -87,7 +87,7 @@ _TELEMETRY_KEYS = {
     "mic_l": int, "mic_r": int,
     "mic_l_gain": int, "mic_r_gain": int,
     "mic_l_muted": bool, "mic_r_muted": bool,
-    "volume": int, "noise": int,
+    "volume": int,
     "uptime": int, "heap": int, "mood": int,
     # Boards share a node id, so each board's fields get their own prefix.
     "ip": str, "board": str,

@@ -665,13 +665,13 @@ where the difficulty lives.
 | File | Does |
 |---|---|
 | `sandy_main.c` | boot order; each init wrapped in `TRY_INIT` so one failure never boot-loops the board |
-| `sandy_voice.c` | wake word, local commands, VAD, AEC, the WS link, the uplink buffer, the session manager |
+| `sandy_voice.c` | the esp-sr audio front end (input "MMR": both mics and the speaker reference; echo cancelling, two-mic separation, voice detection and the wake word in one pipeline), local commands, the WS link, the uplink buffer, the session manager. `mic_task` feeds the front end, `proc_task` reads it: only speech goes up (plus the detector's cached onset), and speech over her for `VOICE_BARGE_MS` silences her on the board at once and sends `{"type":"barge_in"}`, which the server trusts for `_BARGE_TRUST_S` instead of its own bar |
 | `sandy_face.c` | LVGL face — 25 moods, blink/drift/doze animations, focus ring, status banner |
 | `sandy_status.c` | **the health surface** — see §4.2 |
 | `sandy_mqtt.c` | command subscriptions + status publish |
 | `sandy_wifi.c` | association; power save is explicitly **off** (`WIFI_PS_NONE`) for real-time audio |
 | `sandy_led.c` `sandy_servo.c` `sandy_buzzer.c` `sandy_motors.c` `sandy_sensor.c` `sandy_touch.c` `sandy_ears.c` `sandy_mic.c` `sandy_spktest.c` `sandy_ota.c` `sandy_nvs.c` `sandy_remote.c` | peripherals, OTA, remote log |
-| `sandy_audio_ctl.c` | mic gain/mute, volume, noise suppression; persisted in NVS |
+| `sandy_audio_ctl.c` | mic gain/mute, volume; persisted in NVS (noise is the front end's job now) |
 | `sandy_screen.c` | owner text/picture on the display, Arabic fonts 24/32 |
 | `sandy_ir.c` | IR learn + replay (§4.5) |
 | `sandy_provision.c` | first-run SoftAP setup (§4.5) |

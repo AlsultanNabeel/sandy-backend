@@ -38,7 +38,6 @@ struct RobotControlView: View {
         static let micRightGain = "sandy_mic_right_gain"
         static let volume      = "sandy_volume"
         static let speakerTest = "sandy_speaker_test"
-        static let noise       = "sandy_noise"
 
         static let camFlash     = "cam_flash"
         static let camFlashLvl  = "cam_flash_level"
@@ -115,7 +114,7 @@ struct RobotControlView: View {
         section("robot.control.sound", hint: "robot.control.sound.hint",
                 parts: [Part.volume, Part.speakerTest, Part.buzzer,
                         Part.micLeft, Part.micRight,
-                        Part.micLeftGain, Part.micRightGain, Part.noise])
+                        Part.micLeftGain, Part.micRightGain])
     }
 
     // ── الكاميرا: مدخل للنظر، وبعده الإعدادات ───────────────────────────────
@@ -267,7 +266,6 @@ struct RobotControlView: View {
             Part.face, Part.head, Part.gesture, Part.screen, Part.led,
             Part.volume, Part.speakerTest, Part.buzzer,
             Part.micLeft, Part.micRight, Part.micLeftGain, Part.micRightGain,
-            Part.noise,
             Part.camFlash, Part.camFlashLvl, Part.camFlashMode,
             Part.camSnapshot, Part.camStream, Part.camFrameSize, Part.camQuality,
         ]

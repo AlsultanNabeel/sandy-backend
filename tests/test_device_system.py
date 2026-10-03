@@ -335,13 +335,13 @@ def test_provisioning_is_idempotent_and_keeps_owner_edits(db):
 
         # A second heartbeat, and a firmware upgrade that adds a part.
         node_store.ingest_status("sandybrain01", True, [],
-                                 ROBOT_OUTPUTS + [{"id": "noise", "kind": "audio"}],
+                                 ROBOT_OUTPUTS + [{"id": "speaker_test", "kind": "audio"}],
                                  "0.5.0")
 
         devices = device_store.list_devices()
         assert len([d for d in devices if d["name"] == "sandy_head"]) == 1
         assert device_store.get_device("sandy_head")["label"] == "رقبتها"
-        assert "sandy_noise" in {d["name"] for d in devices}
+        assert "sandy_speaker_test" in {d["name"] for d in devices}
 
 
 def test_a_firmware_upgrade_widens_an_existing_device_vocabulary(db):

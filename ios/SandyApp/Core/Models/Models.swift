@@ -216,7 +216,6 @@ struct NodeTelemetry {
     let micLeftMuted: Bool?
     let micRightMuted: Bool?
     let volume: Int?           // ٠..١٠٠
-    let noise: Int?            // ٠ مطفي، ١ خفيف، ٢ متوسط، ٣ قوي
     /// عنوان اللوح ع الشبكة المحلية، بيتغيّر مع الراوتر فبيجي بكل نبضة.
     let ip: String?
     /// أي لوح: `sandy-brain-s3` أو الكاميرا أو عقدة الغرفة (اللبس بينهم بيحرق لوح).
@@ -245,7 +244,6 @@ struct NodeTelemetry {
         micLeftMuted  = b("mic_l_muted")
         micRightMuted = b("mic_r_muted")
         volume        = i("volume")
-        noise         = i("noise")
         ip            = d["ip"] as? String
         board         = d["board"] as? String
         camIP         = d["cam_ip"] as? String

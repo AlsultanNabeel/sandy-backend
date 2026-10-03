@@ -356,6 +356,8 @@ class _DeviceReader:
         # and outbound audio shouldn't queue behind parked readers.
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-rx")
         self.dropped = 0
+        # When the robot last said someone talked over her (its own voice detector).
+        self.barged_at: Optional[float] = None
 
     def start(self) -> "_DeviceReader":
         self._task = asyncio.create_task(self._run())
@@ -379,6 +381,11 @@ class _DeviceReader:
                 break
             if chunk is None:
                 continue       # quiet quarter second — the device is just silent
+            if isinstance(chunk, str):
+                if "barge_in" in chunk:
+                    # The robot heard someone talk over her and already silenced her.
+                    self.barged_at = time.monotonic()
+                continue
             if not isinstance(chunk, (bytes, bytearray)):
                 continue
             if self._q.full():
@@ -714,6 +721,8 @@ async def _live_session(ws, remote: str) -> None:
 
 # الردّ بيوصل قطع متلاحقة، فثانيتين بلا ولا قطعة معناها المولّد وقف.
 _REPLY_STALE_S = 2.0
+# How long a barge_in from the robot vouches for the speech that follows it.
+_BARGE_TRUST_S = 3.0
 # من سكوت المستخدم لأول صوت منها، بنعتبرها «عم ترد» حتى لو ما وصل بايت.
 _REPLY_WARMUP_S = 8.0
 
@@ -1012,7 +1021,10 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 # she answered the noise («sorry about that…») or cut her own reply. Frames
                 # are held until enough of them are voiced; while she answers (activity_start
                 # interrupts her) the bar is higher.
-                answering = state.get("replying") and _she_is_really_answering(state)
+                # The robot's {"type":"barge_in"}: it is sure, so no bar of our own.
+                barged = time.monotonic() - (getattr(reader, "barged_at", None) or -1e9) < _BARGE_TRUST_S
+                answering = (state.get("replying") and _she_is_really_answering(state)
+                             and not barged)
                 held.append(chunk)
                 held_ms += ms
                 if _voiced(samples):
