@@ -39,6 +39,17 @@ static const char *TAG = "main";
         }                                                                      \
     } while (0)
 
+// The same, for a part whose failure must show: its status is set as well.
+#define TRY_PART(name, call, part, st)                                         \
+    do {                                                                       \
+        esp_err_t _e = (call);                                                 \
+        if (_e != ESP_OK) {                                                    \
+            ESP_LOGE(TAG, "%s init failed (%s) — running without it",          \
+                     (name), esp_err_to_name(_e));                             \
+            status_set((part), (st));                                          \
+        }                                                                      \
+    } while (0)
+
 volatile sandy_mood_t g_current_mood = MOOD_IDLE;
 
 #if ENABLE_SENSOR && ENABLE_FACE
@@ -105,7 +116,7 @@ void app_main(void) {
 
     // ── Peripherals ──
 #if ENABLE_FACE
-    TRY_INIT("face", face_init());
+    TRY_PART("face", face_init(), SANDY_PART_SCREEN, SANDY_ST_SCREEN_OFF);
 #endif
 #if ENABLE_LED
     led_init();   // non-fatal
@@ -115,7 +126,7 @@ void app_main(void) {
     // Before mic, voice and MQTT use the gains.
     audio_ctl_init();
 #if ENABLE_SERVO
-    TRY_INIT("servo", servo_init());
+    TRY_PART("servo", servo_init(), SANDY_PART_NECK, SANDY_ST_NECK_OFF);
 #endif
 #if ENABLE_BUZZER
     TRY_INIT("buzzer", buzzer_init());

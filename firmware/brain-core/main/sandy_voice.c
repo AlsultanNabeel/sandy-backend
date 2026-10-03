@@ -951,6 +951,7 @@ static void ws_tx_task(void *arg) {
     uint8_t *chunk = heap_caps_malloc(TX_CHUNK_BYTES, MALLOC_CAP_SPIRAM);
     if (!chunk) {
         ESP_LOGE(TAG, "uplink buffer alloc failed");
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }
@@ -1478,6 +1479,7 @@ static void voice_task(void *arg) {
 
     if (i2s_start() != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed, voice disabled");
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }
@@ -1492,6 +1494,7 @@ static void voice_task(void *arg) {
     s_spk_wr_lock = xSemaphoreCreateMutex();
     if (!s_spk_stream || !s_tx_stream || !s_ws_mutex || !s_spk_wr_lock) {
         ESP_LOGE(TAG, "voice buffers could not be allocated — voice disabled");
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }
@@ -1501,7 +1504,7 @@ static void voice_task(void *arg) {
     // BEFORE the audio tasks: they read the front end's handle and chunk size.
     if (!s_ref_stream || !afe_init()) {
         ESP_LOGE(TAG, "audio front end unavailable — voice disabled");
-        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }

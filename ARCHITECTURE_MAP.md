@@ -710,14 +710,17 @@ serial cable.
 One table maps each condition to a face, an LED state, a Latin banner drawn across
 the bottom of the display, and the Arabic sentence she will speak once clips are
 flashed: `OK`, `BOOTING`, `NO_WIFI`, `NO_SERVER`, `LINK_DROPPED`, `NET_SLOW`,
-`LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`, `WIFI_BAD_PASS`, `SETTINGS_OFF` (the settings store
+`LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`, `WIFI_BAD_PASS`, `VOICE_OFF` (I2S, the audio
+buffers or the front end did not start), `NECK_OFF`, `SCREEN_OFF` (heartbeat and LED only),
+`SETTINGS_OFF` (the settings store
 would not open — she runs on defaults instead of halting; no `ESP_ERROR_CHECK` is left in
 an enabled file).
 
 Rules:
 - **Subsystems must not set the face directly for error conditions.** Call
   `status_set(part, status)`. Direct face writes are how a half-finished state stayed on screen.
-- **Each part owns its status** (`SANDY_PART_SYSTEM`, `_NET`, `_LINK`, `_VOICE`): a part
+- **Each part owns its status** (`SANDY_PART_SYSTEM`, `_NET`, `_LINK`, `_VOICE`, `_SETTINGS`,
+  `_NECK`, `_SCREEN`): a part
   recovering clears only its own fault, and she shows the most serious one (`rank` in
   the table). One shared status let a reconnect wipe a memory fault. Wi-Fi clears its
   own part on getting an address; the link on `auth_ok`. The heartbeat lists every part

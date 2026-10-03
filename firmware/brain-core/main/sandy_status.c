@@ -88,6 +88,21 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "ما قدرت أفتح إعداداتي، فشغّالة بالافتراضي. أي تغيير ما رح ينحفظ.",
         3, "settings_off",
     },
+    [SANDY_ST_VOICE_OFF] = {
+        MOOD_ALERT, LED_STATE_OFF, "VOICE OFF",
+        "ما بقدر أسمع ولا أحكي، الصوت عندي ما اشتغل. طفّيني وشغّلني، وإذا ضلّ هيك بدّي فحص.",
+        7, "voice_off",
+    },
+    [SANDY_ST_NECK_OFF] = {
+        MOOD_CONFUSED, LED_STATE_OFF, "NECK",
+        "رقبتي ما اشتغلت، فما رح أتلفّت. باقي إشي شغّال.",
+        3, "neck_off",
+    },
+    [SANDY_ST_SCREEN_OFF] = {
+        MOOD_IDLE, LED_STATE_OFF, "SCREEN",
+        "الشاشة ما اشتغلت. باقي إشي شغّال.",
+        3, "screen_off",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {
@@ -96,6 +111,8 @@ static const char *const PART_NAME[SANDY_PART_COUNT] = {
     [SANDY_PART_LINK]   = "link",
     [SANDY_PART_VOICE]  = "voice",
     [SANDY_PART_SETTINGS] = "settings",
+    [SANDY_PART_NECK]   = "neck",
+    [SANDY_PART_SCREEN] = "screen",
 };
 
 sandy_status_t status_get(void)

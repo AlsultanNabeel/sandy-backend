@@ -19,6 +19,9 @@ typedef enum {
     // Router refused the password (distinct from NO WI-FI).
     SANDY_ST_WIFI_BAD_PASS,
     SANDY_ST_SETTINGS_OFF,  // the settings store could not be opened: running on defaults
+    SANDY_ST_VOICE_OFF,     // mic, speaker or the audio front end did not start
+    SANDY_ST_NECK_OFF,      // the neck could not start
+    SANDY_ST_SCREEN_OFF,    // the display did not start (heartbeat and LED only, obviously)
     SANDY_ST_COUNT
 } sandy_status_t;
 
@@ -30,6 +33,8 @@ typedef enum {
     SANDY_PART_LINK,        // the voice server and the uplink
     SANDY_PART_VOICE,       // mic, speaker, audio front end
     SANDY_PART_SETTINGS,    // the settings store (NVS)
+    SANDY_PART_NECK,
+    SANDY_PART_SCREEN,
     SANDY_PART_COUNT
 } sandy_part_t;
 
