@@ -1236,6 +1236,8 @@ static void proc_task(void *arg) {
     for (;;) {
         afe_fetch_result_t *res = s_afe->fetch(s_afe_data);
         if (!res || res->ret_value == ESP_FAIL || !res->data || res->data_size <= 0) {
+            // A failing fetch returns at once: yield, or this spins on Wi-Fi's core.
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
         int frames = res->data_size / (int)sizeof(int16_t);
