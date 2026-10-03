@@ -37,6 +37,7 @@ static TaskHandle_t       s_retry_task;
 
 // Declared here: the retry task reads it.
 static volatile bool s_switching;
+static volatile bool s_hold;      // wifi_sandy_hold: a scan owns the radio
 static volatile int  s_bad_pass_count;
 static volatile bool s_had_ip_this_try;
 
@@ -51,6 +52,8 @@ static bool reason_is_bad_password(int r, int rssi) {
                            r == WIFI_REASON_HANDSHAKE_TIMEOUT || r == WIFI_REASON_AUTH_EXPIRE;
     return timed_out && rssi < 0 && rssi >= WIFI_BAD_PASS_MIN_RSSI;   // 0 = not reported
 }
+
+void wifi_sandy_hold(bool hold) { s_hold = hold; }
 
 bool wifi_sandy_password_rejected(void) { return s_bad_pass_count >= WIFI_BAD_PASS_AFTER; }
 
@@ -95,7 +98,7 @@ static void _retry_task(void *arg) {
         if (xEventGroupGetBits(s_eg) & WIFI_CONNECTED_BIT) {
             tries = 0;
             wait_ms = WIFI_RETRY_MS;
-        } else if (s_switching) {
+        } else if (s_switching || s_hold) {
             // A credential test owns the radio: reconnecting now would fail it as "wrong password".
             tries = 0;
 #if ENABLE_PROVISION

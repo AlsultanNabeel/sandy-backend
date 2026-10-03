@@ -99,11 +99,18 @@ static const char PAGE_HEAD[] =
 
 static const char PAGE_TAIL[] =
     "</select>"
+    "<label>Hidden network (type its name)</label>"
+    "<input name=hidden maxlength=32 autocomplete=off placeholder='Only if it is not listed'>"
     "<label>Password</label>"
     "<input name=pass type=password placeholder='Leave empty if open'>"
     "<button type=submit>Connect</button></form>"
     "<p style='margin-top:24px;font-size:12px'>She will test it before saving. "
     "If it fails, this page comes back.</p></body></html>";
+
+// Strongest first.
+static int by_signal(const void *a, const void *b) {
+    return ((const wifi_ap_record_t *)b)->rssi - ((const wifi_ap_record_t *)a)->rssi;
+}
 
 // Scan on demand: the router may have just been switched on.
 static esp_err_t root_get(httpd_req_t *req) {
@@ -111,15 +118,20 @@ static esp_err_t root_get(httpd_req_t *req) {
     uint16_t n = 0;
     wifi_ap_record_t *aps = NULL;
 
+    // A connect attempt to the saved network in progress makes the scan fail: hold it.
+    wifi_sandy_hold(true);
+    if (!wifi_sandy_is_connected()) esp_wifi_disconnect();
     if (esp_wifi_scan_start(&scan, true) == ESP_OK &&
         esp_wifi_scan_get_ap_num(&n) == ESP_OK && n) {
-        if (n > 20) n = 20;
+        if (n > 30) n = 30;
         aps = calloc(n, sizeof(*aps));
         if (aps && esp_wifi_scan_get_ap_records(&n, aps) != ESP_OK) {
             free(aps);
             aps = NULL;
         }
     }
+    wifi_sandy_hold(false);
+    if (aps) qsort(aps, n, sizeof(*aps), by_signal);
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_send_chunk(req, PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
@@ -128,6 +140,12 @@ static esp_err_t root_get(httpd_req_t *req) {
         for (uint16_t i = 0; i < n; i++) {
             const char *ssid = (const char *)aps[i].ssid;
             if (!ssid[0]) continue;
+            // One line per name: a mesh or a dual-band router repeats it.
+            bool seen = false;
+            for (uint16_t j = 0; j < i && !seen; j++) {
+                seen = !strcmp(ssid, (const char *)aps[j].ssid);
+            }
+            if (seen) continue;
             // SSIDs are attacker-controlled: escape value and text, and clamp the length
             // sent to what was written (long names overran the buffer).
             char esc[SSID_ESC_MAX];
@@ -216,7 +234,7 @@ static esp_err_t reply(httpd_req_t *req, const char *title, const char *body) {
 // ─── Accepting a network ───
 
 static esp_err_t provision_post(httpd_req_t *req) {
-    char body[320];
+    char body[512];   // three fields, each fully percent-encoded at worst
     int total = req->content_len;
     if (total <= 0 || total >= (int)sizeof(body)) {
         return reply(req, "Too long", "That did not fit. Try a shorter name.");
@@ -229,9 +247,12 @@ static esp_err_t provision_post(httpd_req_t *req) {
     }
     body[got] = '\0';
 
-    char ssid[33] = "", pass[65] = "";
+    char ssid[33] = "", pass[65] = "", hidden[33] = "";
     form_field(body, "ssid", ssid, sizeof(ssid));
     form_field(body, "pass", pass, sizeof(pass));
+    // A hidden network is typed, and wins over the list.
+    form_field(body, "hidden", hidden, sizeof(hidden));
+    if (hidden[0]) snprintf(ssid, sizeof(ssid), "%s", hidden);
 
     if (!ssid[0]) {
         return reply(req, "Pick a network", "No network was selected.");
