@@ -176,6 +176,11 @@ static const bool s_session_active = true;    // no gate: always streaming
 
 // ~100 ms frames at 16 kHz.
 #define MIC_FRAME_SAMPLES   1600
+// A mic failing this long gets its channel restarted; this many restarts in a row is a fault.
+#define MIC_RESTART_AFTER_MS       2000
+#define MIC_RESTARTS_BEFORE_FAULT  3
+// Only the mic's own fault is cleared by its recovery.
+static volatile bool s_mic_fault;
 
 // Below this largest internal block, a failed open is out-of-memory, not network.
 // Measured: sessions open fine at 6144 (TLS uses PSRAM); the "before open" log prints it.
@@ -1137,6 +1142,8 @@ static void mic_task(void *arg) {
     int32_t dcx[2] = {0, 0}, dcy[2] = {0, 0};
     int fill = 0;
     bool first_frame = true;
+    int64_t failing_since = 0;   // first failed read of the current run, 0 = reading fine
+    int restarts = 0;            // channel restarts without a good read in between
 #if ENABLE_SERVO
     int32_t ear_prev_l = 0, ear_prev_r = 0;
 #endif
@@ -1144,9 +1151,35 @@ static void mic_task(void *arg) {
     for (;;) {
         size_t bytes_read = 0;
         // Bounded wait so a wedged I2S stays observable.
-        if (i2s_channel_read(s_rx_chan, raw, MIC_FRAME_SAMPLES * 2 * sizeof(int32_t),
-                             &bytes_read, pdMS_TO_TICKS(1000)) != ESP_OK) {
+        esp_err_t rd = i2s_channel_read(s_rx_chan, raw, MIC_FRAME_SAMPLES * 2 * sizeof(int32_t),
+                                        &bytes_read, pdMS_TO_TICKS(1000));
+        if (rd != ESP_OK) {
+            // A timeout already waited; any other error returns at once and would spin.
+            if (rd != ESP_ERR_TIMEOUT) vTaskDelay(pdMS_TO_TICKS(10));
+            if (!failing_since) {
+                failing_since = now_ms();
+                ESP_LOGW(TAG, "mic read failed (%s)", esp_err_to_name(rd));
+            } else if (now_ms() - failing_since > MIC_RESTART_AFTER_MS) {
+                // Still failing: restart the mic channel, and say so once it stays dead.
+                failing_since = now_ms();
+                i2s_channel_disable(s_rx_chan);
+                esp_err_t en = i2s_channel_enable(s_rx_chan);
+                ESP_LOGW(TAG, "mic restarted (%s), try %d", esp_err_to_name(en), restarts + 1);
+                if (++restarts == MIC_RESTARTS_BEFORE_FAULT) {
+                    s_mic_fault = true;
+                    status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
+                }
+            }
             continue;
+        }
+        if (failing_since) {
+            ESP_LOGI(TAG, "mic reading again");
+            failing_since = 0;
+            restarts = 0;
+            if (s_mic_fault) {
+                s_mic_fault = false;
+                status_set(SANDY_PART_VOICE, SANDY_ST_OK);
+            }
         }
         if (first_frame) {
             first_frame = false;
