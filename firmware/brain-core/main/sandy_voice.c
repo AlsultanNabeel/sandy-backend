@@ -1230,7 +1230,8 @@ static void proc_task(void *arg) {
     enum { LEVEL_SLOTS = 48 };
     int levels[LEVEL_SLOTS] = {0};
     int level_at = 0;
-    int near_level = VOICE_NEAR_MIN;   // the bar for this session, set by the wake word
+    int caller_level = 0;              // how loud the caller is (wake word, then their speech)
+    int near_level = VOICE_NEAR_MIN;   // VOICE_NEAR_PCT of it
 
     for (;;) {
         afe_fetch_result_t *res = s_afe->fetch(s_afe_data);
@@ -1247,13 +1248,20 @@ static void proc_task(void *arg) {
             // How loud the caller is, from the wake word they just said.
             int peak = 0;
             for (int i = 0; i < LEVEL_SLOTS; i++) if (levels[i] > peak) peak = levels[i];
-            near_level = peak * VOICE_NEAR_PCT / 100;
+            caller_level = peak;
+            near_level = caller_level * VOICE_NEAR_PCT / 100;
             if (near_level < VOICE_NEAR_MIN) near_level = VOICE_NEAR_MIN;
             ESP_LOGI(TAG, "wake level %d -> near bar %d", peak, near_level);
         }
         // Speech, and from the caller: another room's voices stay below the bar.
         const bool vad = res->vad_state == VAD_SPEECH;
         const bool speech = vad && avg >= near_level;
+        if (speech && caller_level) {
+            // Follow the caller as they move: only their own speech (above the bar) moves it.
+            caller_level = (caller_level * 15 + avg) / 16;
+            near_level = caller_level * VOICE_NEAR_PCT / 100;
+            if (near_level < VOICE_NEAR_MIN) near_level = VOICE_NEAR_MIN;
+        }
         if (!vad) speech_ms = 0;
         else if (speech) speech_ms += frames * 1000 / VOICE_IN_RATE;
         const size_t bytes = (size_t)frames * sizeof(int16_t);

@@ -156,8 +156,9 @@
 // The detector calls speech over this long after the last word (esp-sr vad_min_noise_ms).
 #define VOICE_VAD_END_MS           300
 // Only the person who said the wake word: during a session, speech counts when it is at
-// least this share of how loud the wake word was. Voices from another room are far
-// quieter (a TV or the family kept a session open for minutes and became questions).
+// least this share of how loud the caller is (set by the wake word, then following their
+// own speech, so walking away a few metres keeps them). Voices from another room are far
+// quieter (the family kept a session open for minutes and became questions).
 #define VOICE_NEAR_PCT             30
 // Floor for that bar, so a whispered wake word does not open the room.
 #define VOICE_NEAR_MIN             600
