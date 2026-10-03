@@ -120,6 +120,9 @@ def _build_small(board: str) -> bytes:
         shutil.copytree(cfg["sketch"], dst,
                         ignore=shutil.ignore_patterns("secrets.h", "build"))
         shutil.copy(dst / "secrets.example.h", dst / "secrets.h")
+        # The sale build: LAN upload and the log mirror off, whatever secrets say.
+        with open(dst / "secrets.h", "a") as f:
+            f.write("\n#define SANDY_RETAIL 1\n")
         out = pathlib.Path(tmp) / "out"
         r = subprocess.run([cli, "compile", "--fqbn", cfg["fqbn"],
                             "--output-dir", str(out), str(dst)],
@@ -144,7 +147,7 @@ def _publish_small(a, base: str, token: str) -> int:
     for marker in cfg["dev_markers"]:
         if marker in image:
             sys.exit(f"this is a dev build ({marker.decode()!r} is inside) — "
-                     "remove SANDY_DEV and build again")
+                     "build with SANDY_RETAIL (the default here)")
     for secret in _secret_values(cfg["sketch"]):
         if secret in image:
             sys.exit("the image contains a value from your real secrets.h — it would be "

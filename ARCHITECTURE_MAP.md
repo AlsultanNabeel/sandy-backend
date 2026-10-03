@@ -981,8 +981,10 @@ what makes the text-size control real rather than decorative.
   a page at `http://192.168.4.1` to pick a new one (`cam_setup.ino`); the choice goes
   through the same tested switch as `cam/wifi`, and the setup network drops itself
   once the home network is back. A sensor that failed at boot is retried from the
-  loop (30 s, doubling to 5 min) instead of waiting for a reboot. The serial log
-  stays on the board in a normal build; only `SANDY_DEV` mirrors it on port 23.
+  loop (30 s, doubling to 5 min) instead of waiting for a reboot. Like the brain,
+  the owner's own build (a `secrets.h` with `SANDY_OTA_PASSWORD`) has LAN upload and
+  the log mirror on port 23; the sale build `publish_firmware.py` makes defines
+  `SANDY_RETAIL` and has neither. The room node follows the same rule for LAN upload.
 - **`firmware/room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
   `sandy/node/<id>/room/`.
 

@@ -54,9 +54,14 @@
   #define PCLK_GPIO_NUM 22
 #endif
 
-// نسخة التطوير: ترقية محلية + مرآة السجل ع التلنت. للتطوير: `#define SANDY_DEV 1` بـ secrets.h.
+// نسخة التطوير: ترقية محلية + مرآة السجل ع التلنت. زي الروبوت: شغّالة لحالها لمّا
+// secrets.h فيه كلمة سر الترقية، ونسخة البيع (`SANDY_RETAIL`، من ملف النشر) بتسكّرها.
 #ifndef SANDY_DEV
-  #define SANDY_DEV 0
+  #if defined(SANDY_OTA_PASSWORD) && !(defined(SANDY_RETAIL) && SANDY_RETAIL)
+    #define SANDY_DEV 1
+  #else
+    #define SANDY_DEV 0
+  #endif
 #endif
 
 #define CAMERA_SERIAL_BAUD 115200
