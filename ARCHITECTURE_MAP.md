@@ -616,6 +616,13 @@ robot mic (I2S)
   → audio back → speaker + amplitude-driven lip-sync
 ```
 
+**Her face follows what she says, on the robot only** (`voice_ws/face.py`). As her
+transcript streams in, `face.mood_of` reads its mood from words (no model call) and the
+server sends `{"type":"mood","mood":"<name>"}` whenever it changes; `end_turn` carries
+the mood of the whole reply (`"mood"`, `happy` when nothing stands out) for the face she
+keeps a moment after speaking. The names are the firmware's `MOOD_MAP`
+(`tests/test_voice_face.py` pins that). Firmware that predates it ignores both.
+
 ### 3.1 The handshake contract
 
 Firmware sends, on connect:

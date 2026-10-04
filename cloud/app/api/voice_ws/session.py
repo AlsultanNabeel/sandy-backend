@@ -46,6 +46,7 @@ from app.api.voice_ws._config import (
     _VAD_STUCK_MS,
     _VAD_MIN_UTTER_MS,
 )
+from app.api.voice_ws import face
 from app.api.voice_ws.speaker import (
     _RecentAudio,
     _is_sensitive_call,
@@ -277,7 +278,7 @@ def _authenticate(ws, remote: str) -> bool:
                 set_voice_identity(owner)
             else:
                 logger.warning("[voice_ws] device %s is not paired to anyone", device_id)
-            set_voice_channel("الروبوت")
+            set_voice_channel(_ROBOT_CHANNEL)
 
             # هون بيتسلّم اللوح بيانات الوسيط الخاصة فيه: المصافحة موثّقة بمفتاح غير
             # مفتاح الوسيط المشترك. بلا سطر بالجدول بيضلّ ع بياناته الحالية.
@@ -730,6 +731,7 @@ _REPLY_WARMUP_S = 8.0
 
 # اسم القناة لمكالمة التطبيق: بينحفظ مع كل جملة وبيفرّق مسار التطبيق عن الروبوت.
 _APP_CHANNEL = "مكالمة التطبيق"
+_ROBOT_CHANNEL = "الروبوت"
 
 # سؤال ردّت عليه بس تفريغه رجع فاضي: بينحفظ هيك بدل النقط.
 _UNHEARD_QUESTION = "(سؤال صوتي ما انكتب نصّه)"
@@ -1153,6 +1155,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
 
     # `_first`: first message of any kind from Gemini; `_audio_out`: what reached the speaker.
     _seen = {"any": False, "user_text": False, "audio_out": 0}
+    # The mood her face shows for this reply (robot only), sent again only when it changes.
+    _face = {"mood": ""}
     _audio = {"at": time.monotonic(), "chunks": 0, "wait": 0.0,
               "send": 0.0, "worst": 0.0}
     _turn_audio = {"n": 0}
@@ -1193,12 +1197,18 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             t = response.server_content.output_transcription.text
             if t:
                 _sandy_buf.append(t)
+                if get_voice_channel() == _ROBOT_CHANNEL:
+                    mood = face.mood_of("".join(_sandy_buf))
+                    if mood and mood != _face["mood"]:
+                        _face["mood"] = mood
+                        await send_msg({"type": "mood", "mood": mood})
 
         # Barge-in: tell the device to drop its buffered audio.
         if response.server_content and response.server_content.interrupted:
             # ونزّل علامة «عم ترد» هون كمان، وإلا بتضلّ مرفوعة وبتنبلع كل جملة بعدها.
             live_state["replying"] = False
             live_state.pop("last_out_at", None)
+            _face["mood"] = ""
             await send_msg({"type": "interrupted"})
 
         # Audio plus text response: relay the audio, capture the text.
@@ -1232,11 +1242,16 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
         # Turn complete: persist the turn for cross-platform memory only.
         if response.server_content and response.server_content.turn_complete:
             live_state["replying"] = False
-            await send_msg({"type": "end_turn"})
             # Concatenated, not space-joined: fragments aren't words and carry
             # their own spaces (this text is stored as memory).
             user_text = "".join(_user_buf).strip()
             sandy_text = "".join(_sandy_buf).strip()
+            done: Dict[str, Any] = {"type": "end_turn"}
+            if get_voice_channel() == _ROBOT_CHANNEL and sandy_text:
+                # The face she keeps for a moment after the reply, then back to listening.
+                done["mood"] = face.mood_of(sandy_text) or face.AFTER_DEFAULT
+            _face["mood"] = ""
+            await send_msg(done)
             if user_text and sandy_text and not _HAS_LETTERS.search(user_text):
                 # التفريغ رجع نقط: ما منحفظ النقط كأنها سؤاله.
                 logger.warning("[voice_ws] the transcript of the question came "
