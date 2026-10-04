@@ -144,6 +144,11 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    told it waits and goes on with the rest of the request; every held action joins
    one pending, and the reply is what the tools did plus one question, both
    deterministic (nothing of the model's is streamed once something is held).
+   When every call of the turn is an answer tool (`loop.ANSWER_TOOLS`: device_control,
+   scene_apply, room_restore, image) and each worked with a `reply`, that reply is the
+   answer and no second model call restates it. Two or more slow independent calls of one
+   step (`loop.SIDE_BY_SIDE`: web_search, weather, image, recall, summarize, device_state)
+   run side by side, each in a copy of the turn's context; the rest run in order.
 4. Due `message_to_future_self` schedules (`future.py`) go into the system prompt
    and are marked `sent` only when the reply is not an error.
 5. The turn is written to short-term memory (`stm.save`, with `via`).
@@ -1288,7 +1293,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
    on the send is what would close it.
 4. **A tool call costs two model calls in series** — the one that picks the tool
    and the one that writes the answer; plain conversation is one. The fast path
-   answers a bare device command with none. `[turn] …ms total — brain tools=[…]`
+   answers a bare device command with none, and a turn of answer tools only
+   (§2.3) skips the second call. `[turn] …ms total — brain tools=[…]`
    (§2.11) gives the time per message.
 
 ### Real, but nobody hits it today

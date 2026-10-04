@@ -211,3 +211,49 @@ def test_no_take_it_back_undoes_what_the_last_reply_did(brain_db):  # noqa: F811
     model = ScriptedModel(tools_reply(call("undo_last")), text_reply("ما في"))
     _turn(model, "كمان مرة")
     assert json.loads(model.seen[1][-1]["content"])["ok"] is False
+
+
+def test_an_answer_tool_that_worked_is_the_reply_with_no_second_call(brain_db, monkeypatch):  # noqa: F811
+    monkeypatch.setitem(loop.tools.HANDLERS, "device_control",
+                        lambda args, ctx: {"ok": True, "reply": "شغّلت الضو ✅"})
+    model = ScriptedModel(tools_reply(call("device_control", device="ضو", action="on")))
+    state = _turn(model, "ممكن تشغليلي الضو لو سمحتي")
+    assert state["final_response"] == "شغّلت الضو ✅" and len(model.seen) == 1
+
+
+def test_a_failed_answer_tool_goes_back_to_the_model(brain_db, monkeypatch):  # noqa: F811
+    monkeypatch.setitem(loop.tools.HANDLERS, "device_control",
+                        lambda args, ctx: {"ok": False, "reply": "ما لقيت جهاز بهالاسم"})
+    model = ScriptedModel(tools_reply(call("device_control", device="ضو", action="on")),
+                          text_reply("أي ضو قصدك؟"))
+    state = _turn(model, "ممكن تشغليلي الضو لو سمحتي")
+    assert state["final_response"] == "أي ضو قصدك؟" and len(model.seen) == 2
+
+
+def test_an_answer_tool_beside_another_tool_still_gets_the_models_reply(brain_db, monkeypatch):  # noqa: F811
+    monkeypatch.setitem(loop.tools.HANDLERS, "device_control",
+                        lambda args, ctx: {"ok": True, "reply": "شغّلت الضو ✅"})
+    model = ScriptedModel(tools_reply(call("device_control", device="ضو", action="on"),
+                                      call("list_add", list="shopping", text="حليب", cid="c2")),
+                          text_reply("شغّلت الضو وضفت الحليب"))
+    state = _turn(model, "شغلي الضو وضيفي حليب")
+    assert state["final_response"] == "شغّلت الضو وضفت الحليب" and len(model.seen) == 2
+
+
+def test_slow_independent_tools_run_side_by_side(brain_db, monkeypatch):  # noqa: F811
+    import threading
+    both_in = threading.Barrier(2, timeout=5)
+
+    def slow(name):
+        def run(args, ctx):
+            both_in.wait()  # only passes when the other call is running at the same time
+            return {"ok": True, "reply": name}
+        return run
+
+    monkeypatch.setitem(loop.tools.HANDLERS, "weather", slow("طقس"))
+    monkeypatch.setitem(loop.tools.HANDLERS, "web_search", slow("أخبار"))
+    model = ScriptedModel(tools_reply(call("weather"), call("web_search", query="أخبار", cid="c2")),
+                          text_reply("هيك الطقس والأخبار"))
+    state = _turn(model, "شو الطقس وشو آخر الأخبار")
+    assert state["final_response"] == "هيك الطقس والأخبار"
+    assert [m["tool_call_id"] for m in model.seen[1] if m.get("role") == "tool"] == ["c1", "c2"]

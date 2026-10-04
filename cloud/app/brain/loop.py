@@ -8,9 +8,11 @@ to store for the next turn, and any image a tool made.
 from __future__ import annotations
 
 import base64
+import contextvars
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -25,6 +27,11 @@ logger = logging.getLogger(__name__)
 MAX_STEPS = 6
 ERROR_REPLY = "حصل خطأ، حاول مرة ثانية."
 GAVE_UP_REPLY = "ما قدرت أكمّل هالطلب، جرّب تحكيه بطريقة تانية."
+# Tools whose `reply` is already the answer: when every call of the turn is one of these
+# and worked, that reply goes out with no second model call to restate it.
+ANSWER_TOOLS = frozenset({"device_control", "scene_apply", "room_restore", "image"})
+# Slow tools that touch nothing another call reads: several in one step run side by side.
+SIDE_BY_SIDE = frozenset({"web_search", "weather", "image", "recall", "summarize", "device_state"})
 
 
 def _for_model(result: Dict[str, Any]) -> str:
@@ -75,13 +82,16 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
                 return _settled(replies, held, used)
             return {"text": reply.text or GAVE_UP_REPLY, "pending": None, "tools": used}
         messages.append(_assistant_msg(reply))
+        early = _run_side_by_side(reply.tool_calls, ctx)
+        all_answered = True
         for call in reply.tool_calls:
             if stopped():
                 return {"text": "\n".join(replies), "pending": None, "tools": used, "stopped": True}
             used.append(call.name)
             if on_step:
                 on_step(call.name)
-            result = tools.execute(call.name, call.args, ctx)
+            result = early.get(call.id) or tools.execute(call.name, call.args, ctx)
+            all_answered &= call.name in ANSWER_TOOLS and bool(result.get("ok")) and bool(result.get("reply"))
             held, waiting = _hold(held, call.name, call.args, result)
             if waiting:
                 result = {"ok": False, "held": True, "note": HELD_NOTE}
@@ -89,8 +99,23 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
                 replies.append(result["reply"])
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": _for_model(result)})
+        if held is None and all_answered and set(used) <= ANSWER_TOOLS:
+            return {"text": "\n".join(replies), "pending": None, "tools": used}
     logger.warning("[brain] step cap (%d) reached; tools=%s", MAX_STEPS, used)
     return _settled(replies, held, used)
+
+
+def _run_side_by_side(calls, ctx: TurnCtx) -> Dict[str, Dict[str, Any]]:
+    """{call id: result} for this step's slow independent calls, run at once when there
+    are two or more; every other call runs in order as usual. Each thread gets the turn's
+    context (tenant, undo journal)."""
+    slow = [c for c in calls if c.name in SIDE_BY_SIDE]
+    if len(slow) < 2:
+        return {}
+    with ThreadPoolExecutor(max_workers=len(slow)) as pool:
+        futures = {c.id: pool.submit(contextvars.copy_context().run,
+                                     tools.execute, c.name, c.args, ctx) for c in slow}
+    return {cid: f.result() for cid, f in futures.items()}
 
 
 def _hold(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
