@@ -23,9 +23,12 @@ CONFIG_BT_ENABLED=n
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
 
-# Task Watchdog (5s)
+# Task Watchdog: the voice, mic, front-end, speaker, uplink, display and broker tasks
+# feed it (sandy_health.h); a hung one restarts the board. 10 s: one uplink write may
+# take 4 s on a bad link. Needs a fresh sdkconfig.
 CONFIG_ESP_TASK_WDT_EN=y
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
 
@@ -36,6 +39,9 @@ CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=30000
 # TLS cert bundle — lets the /voice WSS client verify Heroku's cert
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# Clock: the router first, then three public servers (sandy_voice.c, clock_start).
+CONFIG_LWIP_SNTP_MAX_SERVERS=4
 
 # OTA pull over HTTPS only (the LAN push server is separate).
 CONFIG_OTA_ALLOW_HTTP=n
@@ -49,6 +55,9 @@ CONFIG_ADC_ONESHOT_CTRL_FUNC_IN_IRAM=y
 
 # Stack sizes
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+# Stack smashing caught by the compiler (canaries on functions with arrays), on top of
+# FreeRTOS's end-of-stack canary. Needs a fresh sdkconfig.
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
 
 # LVGL — SPI panels need byte-swapped RGB565 (else blue renders as green)
 CONFIG_LV_COLOR_16_SWAP=y

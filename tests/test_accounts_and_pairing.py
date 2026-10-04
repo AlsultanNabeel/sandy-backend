@@ -207,7 +207,7 @@ def test_the_first_owner_is_not_locked_out_of_his_own_robot():
     assert "not _is_legacy_owner(claimed.get(\"user_id\"))" in store
 
 
-def test_selling_a_robot_wipes_it_before_releasing_it():
+def test_selling_a_robot_wipes_it_before_releasing_it(monkeypatch):
     """Order is the whole thing.
 
     The publish path checks that the caller owns the node. Unpair first and the
@@ -221,6 +221,7 @@ def test_selling_a_robot_wipes_it_before_releasing_it():
     skipped the wipe entirely. The wipe lives inside `unpair_node` now, and this
     watches the order the publish and the delete actually happen in.
     """
+    monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"test-shared-key")  # signs the wipe
     import mongomock
 
     import app.db as appdb

@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "config.h"
+#include "sandy_status.h"
 
 static const char *TAG      = "nvs";
 static const char *NVS_NS   = "sandy";
@@ -29,6 +30,19 @@ typedef struct {
 } defer_slot_t;
 
 static defer_slot_t      s_slots[DEFER_SLOTS];
+static bool              s_wiped;
+
+bool nvs_sandy_wiped(void) { return s_wiped; }
+
+void nvs_sandy_usage(int *used, int *total) {
+    nvs_stats_t st;
+    if (nvs_get_stats(NULL, &st) == ESP_OK) {
+        *used = (int)st.used_entries;
+        *total = (int)st.total_entries;
+    } else {
+        *used = *total = -1;
+    }
+}
 static SemaphoreHandle_t s_slots_lock;
 
 static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
@@ -116,16 +130,23 @@ void nvs_flush_deferred(void) {
 esp_err_t nvs_sandy_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "partition truncated — erasing");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
+        // Everything stored goes: said loudly, and in every heartbeat of this boot.
+        ESP_LOGE(TAG, "settings store %s — ERASING it: Wi-Fi, keys and settings are lost",
+                 err == ESP_ERR_NVS_NO_FREE_PAGES ? "full" : "from a newer format");
+        s_wiped = true;
+        err = nvs_flash_erase();
+        if (err == ESP_OK) err = nvs_flash_init();
     }
-    if (err == ESP_OK) {
-        s_slots_lock = xSemaphoreCreateMutex();
-        // Small stack in internal RAM; it can't be PSRAM because nvs_commit runs with the
-        // cache disabled. Lowest priority: late settings cost nothing.
-        xTaskCreate(defer_task, "nvs_defer", 2560, NULL, 1, NULL);
+    if (err != ESP_OK) {
+        // Run on defaults rather than halt: every reader already treats a failed open as unset.
+        ESP_LOGE(TAG, "settings store unavailable (%s) — running on defaults", esp_err_to_name(err));
+        status_set(SANDY_PART_SETTINGS, SANDY_ST_SETTINGS_OFF);
+        return err;
     }
+    s_slots_lock = xSemaphoreCreateMutex();
+    // Small stack in internal RAM; it can't be PSRAM because nvs_commit runs with the
+    // cache disabled. Lowest priority: late settings cost nothing.
+    xTaskCreate(defer_task, "nvs_defer", 2560, NULL, 1, NULL);
     return err;
 }
 

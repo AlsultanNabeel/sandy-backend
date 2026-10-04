@@ -1,8 +1,16 @@
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 
 esp_err_t nvs_sandy_init(void);
+
+// The store was erased at this boot to recover (full, or written by a newer format):
+// Wi-Fi, the board's keys and every setting went with it. For the heartbeat.
+bool nvs_sandy_wiped(void);
+
+// Entries used and in all, for the heartbeat: how close the 20 KB partition is to full.
+void nvs_sandy_usage(int *used, int *total);
 esp_err_t nvs_load_servo_angle(uint8_t *out_angle);
 
 // Deferred settings writes. An NVS commit disables the flash cache on both cores;

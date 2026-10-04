@@ -1,6 +1,7 @@
 #include "sandy_wifi.h"
 #include "config.h"
 #include "sandy_provision.h"
+#include "sandy_status.h"
 #include "esp_wifi.h"
 #include "nvs.h"
 #include "esp_event.h"
@@ -36,15 +37,23 @@ static TaskHandle_t       s_retry_task;
 
 // Declared here: the retry task reads it.
 static volatile bool s_switching;
+static volatile bool s_hold;      // wifi_sandy_hold: a scan owns the radio
 static volatile int  s_bad_pass_count;
 static volatile bool s_had_ip_this_try;
 
-// Reasons meaning "the router refused us" rather than "no router".
-static bool reason_is_bad_password(int r) {
-    return r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
-           r == WIFI_REASON_HANDSHAKE_TIMEOUT || r == WIFI_REASON_MIC_FAILURE ||
-           r == WIFI_REASON_AUTH_EXPIRE;
+// A handshake that timed out is a wrong password only when the router is heard well;
+// from a weak signal it is just the radio losing frames.
+#define WIFI_BAD_PASS_MIN_RSSI  (-70)
+
+// Reasons meaning "the router refused us" rather than "no router" or "too far".
+static bool reason_is_bad_password(int r, int rssi) {
+    if (r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_MIC_FAILURE) return true;
+    const bool timed_out = r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
+                           r == WIFI_REASON_HANDSHAKE_TIMEOUT || r == WIFI_REASON_AUTH_EXPIRE;
+    return timed_out && rssi < 0 && rssi >= WIFI_BAD_PASS_MIN_RSSI;   // 0 = not reported
 }
+
+void wifi_sandy_hold(bool hold) { s_hold = hold; }
 
 bool wifi_sandy_password_rejected(void) { return s_bad_pass_count >= WIFI_BAD_PASS_AFTER; }
 
@@ -60,13 +69,15 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // Only on the up→down edge: retry at once so a voice call survives the gap.
             if (was_up && s_retry_task) xTaskNotifyGive(s_retry_task);
             const int reason = ev ? ev->reason : -1;
-            if (reason_is_bad_password(reason)) {
+            const int rssi = ev ? ev->rssi : -127;
+            const bool refused = reason_is_bad_password(reason, rssi);
+            if (refused) {
                 if (s_bad_pass_count < 1000) s_bad_pass_count++;
             } else if (reason == WIFI_REASON_NO_AP_FOUND) {
                 s_bad_pass_count = 0;   // no router at all is a different answer
             }
-            ESP_LOGW(TAG, "disconnected (reason=%d%s)", reason,
-                     reason_is_bad_password(reason) ? ", password refused" : "");
+            ESP_LOGW(TAG, "disconnected (reason=%d rssi=%d%s)", reason, rssi,
+                     refused ? ", password refused" : "");
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
@@ -75,6 +86,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ev->ip_info.ip));
         s_bad_pass_count = 0;
         xEventGroupSetBits(s_eg, WIFI_CONNECTED_BIT);
+        status_set(SANDY_PART_NET, SANDY_ST_OK);   // Wi-Fi owns its own recovery
     }
 }
 
@@ -86,7 +98,7 @@ static void _retry_task(void *arg) {
         if (xEventGroupGetBits(s_eg) & WIFI_CONNECTED_BIT) {
             tries = 0;
             wait_ms = WIFI_RETRY_MS;
-        } else if (s_switching) {
+        } else if (s_switching || s_hold) {
             // A credential test owns the radio: reconnecting now would fail it as "wrong password".
             tries = 0;
 #if ENABLE_PROVISION

@@ -30,6 +30,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include "sandy_health.h"
 
 static const char *TAG = "mqtt";
 static esp_mqtt_client_handle_t s_client = NULL;
@@ -65,6 +67,41 @@ static const char *topic_suffix(const char *topic) {
 
 // ─── Topic handlers ───
 
+// A whole number and nothing else, within [lo, hi]. atoi turned "", "abc" or "5x" into
+// 0 or 5: an empty volume muted her and an empty angle swung the neck to its end.
+static bool parse_int(const char *s, int lo, int hi, int *out) {
+    if (!s || !*s) return false;
+    const char *p = s;
+    if (*p == '-') p++;
+    if (!*p) return false;
+    long v = 0;
+    for (; *p; p++) {
+        if (*p < '0' || *p > '9') return false;
+        v = v * 10 + (*p - '0');
+        if (v > 1000000) return false;   // far past any range here
+    }
+    if (*s == '-') v = -v;
+    if (v < lo || v > hi) return false;
+    *out = (int)v;
+    return true;
+}
+
+// The number after `"key":` in a small JSON payload, by the same rule.
+static bool json_int(const char *json, const char *key, int lo, int hi, int *out) {
+    const char *p = strstr(json, key);
+    if (!p) return false;
+    p += strlen(key);
+    while (*p == ' ') p++;
+    char num[12];
+    size_t n = 0;
+    while ((p[n] == '-' || (p[n] >= '0' && p[n] <= '9')) && n < sizeof(num) - 1) {
+        num[n] = p[n];
+        n++;
+    }
+    num[n] = '\0';
+    return parse_int(num, lo, hi, out);
+}
+
 static const struct { const char *name; sandy_mood_t mood; } MOOD_MAP[] = {
     {"idle",        MOOD_IDLE},       {"happy",       MOOD_HAPPY},
     {"curious",     MOOD_CURIOUS},    {"sad",         MOOD_SAD},
@@ -92,8 +129,9 @@ static void _handle_mood(const char *val) {
 }
 
 static void _handle_servo(const char *val) {
-    int angle = atoi(val);
-    if (angle >= 0 && angle <= 180) servo_move_to((uint8_t)angle);
+    int angle;
+    if (!parse_int(val, 0, 180, &angle)) { ESP_LOGW(TAG, "servo: not an angle: %.16s", val); return; }
+    servo_move_to((uint8_t)angle);
 }
 
 // حركة = الجسم كله: رقبة + وش + نغمة + إضاءة.
@@ -164,9 +202,13 @@ static void _handle_focus(const char *val) {
     if      (strstr(val, "\"phase\":\"focus\"")) phase = 1;
     else if (strstr(val, "\"phase\":\"break\"")) phase = 2;
     int remaining = 0, total = 0;
-    const char *p;
-    if ((p = strstr(val, "\"remaining_sec\":"))) remaining = atoi(p + 16);
-    if ((p = strstr(val, "\"total_sec\":")))     total     = atoi(p + 12);
+    // A focus with broken numbers is refused; "off" needs none.
+    if (phase != 0 &&
+        (!json_int(val, "\"remaining_sec\":", 0, 24 * 3600, &remaining) ||
+         !json_int(val, "\"total_sec\":", 0, 24 * 3600, &total))) {
+        ESP_LOGW(TAG, "focus: bad numbers: %.60s", val);
+        return;
+    }
     face_set_focus(phase, remaining, total);
 }
 
@@ -183,7 +225,12 @@ static void _handle_base(const char *val) {
 // Plain payloads ("on", "off", a number), validated by the backend's device_store.command_payload.
 
 static void _handle_mic_gain(sandy_mic_ch_t ch, const char *val) {
-    mic_set_gain(ch, atoi(val));
+    int g;
+    if (!parse_int(val, AUDIO_GAIN_MIN, AUDIO_GAIN_MAX, &g)) {
+        ESP_LOGW(TAG, "mic gain: not a number in range: %.16s", val);
+        return;
+    }
+    mic_set_gain(ch, g);
 }
 
 static void _handle_mic_mute(sandy_mic_ch_t ch, const char *val) {
@@ -193,7 +240,9 @@ static void _handle_mic_mute(sandy_mic_ch_t ch, const char *val) {
 }
 
 static void _handle_volume(const char *val) {
-    spk_set_volume(atoi(val));
+    int v;
+    if (!parse_int(val, 0, 100, &v)) { ESP_LOGW(TAG, "volume: not 0..100: %.16s", val); return; }
+    spk_set_volume(v);
 }
 
 static void _handle_speaker_test(const char *val) {
@@ -228,10 +277,9 @@ static void _handle_led(const char *val) {
         uint32_t v = (uint32_t)strtoul(c1 + 1, &end, 16);
         if (end == c1 + 7 && (*end == ':' || *end == '\0')) rgb = v;
         const char *c2 = strchr(c1 + 1, ':');
-        if (c2) {
-            speed = atoi(c2 + 1);
-            if (speed < 1) speed = 1;
-            if (speed > 10) speed = 10;
+        if (c2 && !parse_int(c2 + 1, 1, 10, &speed)) {
+            ESP_LOGW(TAG, "led: speed is not 1..10: %.16s", c2 + 1);
+            return;
         }
     }
 
@@ -255,8 +303,6 @@ static void _handle_screen(const char *val) {
 #endif
 }
 
-#if ENABLE_FACE
-// Image chunk: seq 0 begins, seq total-1 ends; no separate begin/end commands.
 // تغيير الشبكة. الحمولة: "<اسم>\n<كلمة السر>" (السطر الجديد الحرف الوحيد اللي ما بيكون جوّاهن).
 // بيحجز لحدّ ٢٥ ثانية، فبيتنفّذ ع مهمّة لحاله: معالج MQTT ما لازم ينام.
 typedef struct { char ssid[33]; char pass[65]; } wifi_req_t;
@@ -286,13 +332,16 @@ static void _handle_wifi(const char *val) {
     }
 }
 
+#if ENABLE_FACE
 static void _handle_screen_size(const char *val) {
     screen_set_size(screen_size_from_name(val));
 }
 
+// Image chunk: seq 0 begins, seq total-1 ends; no separate begin/end commands.
 static void _handle_screen_img(const char *val) {
     int seq = 0, total = 0, consumed = 0;
-    if (sscanf(val, "%d:%d:%n", &seq, &total, &consumed) != 2 || consumed <= 0) {
+    if (sscanf(val, "%d:%d:%n", &seq, &total, &consumed) != 2 || consumed <= 0 ||
+        seq < 0 || total <= 0 || seq >= total) {
         ESP_LOGW(TAG, "malformed image chunk header");
         return;
     }
@@ -364,6 +413,48 @@ static void _handle_pair_code(const char *val) {
 }
 #endif
 
+// Erase everything: "erase:<unix ms>:<hmac>", signed by the server with this board's key
+// over "factory_reset|<node id>|<ms>" (node_store._wipe_board). A word anyone on the
+// broker could send is not enough for a command with no way back; the time stops a
+// recorded one from being sent again later.
+#define ERASE_WINDOW_MS (5 * 60 * 1000)
+
+static void _handle_factory_reset(const char *val) {
+    char ms_s[16] = {0};
+    const char *mac = NULL;
+    if (strncmp(val, "erase:", 6) == 0) {
+        const char *p = val + 6;
+        const char *c = strchr(p, ':');
+        if (c && (size_t)(c - p) < sizeof(ms_s)) {
+            memcpy(ms_s, p, (size_t)(c - p));
+            mac = c + 1;
+        }
+    }
+    long long ms = 0;
+    for (const char *d = ms_s; *d; d++) {
+        if (*d < '0' || *d > '9') { mac = NULL; break; }
+        ms = ms * 10 + (*d - '0');
+    }
+    if (!mac || !ms_s[0]) { ESP_LOGW(TAG, "factory reset refused: not a signed command"); return; }
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    const long long now = (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (tv.tv_sec < 1700000000) { ESP_LOGW(TAG, "factory reset refused: clock not set"); return; }
+    if (llabs(now - ms) > ERASE_WINDOW_MS) {
+        ESP_LOGW(TAG, "factory reset refused: signed %lld s away from now", (now - ms) / 1000);
+        return;
+    }
+    char msg[80];
+    snprintf(msg, sizeof(msg), "factory_reset|%s|%s", s_node_id, ms_s);
+    if (!voice_verify_signed(msg, mac)) {
+        ESP_LOGE(TAG, "factory reset refused: bad signature");
+        return;
+    }
+    ESP_LOGW(TAG, "signed factory reset — erasing");
+    wifi_sandy_factory_reset();   // بتمسح وبتعيد التشغيل، ما بترجع
+}
+
 static void _dispatch(const char *out, const char *val, bool retained) {
     // مخارج الكاميرا وعقدة الغرفة ع نفس الشجرة؛ منتجاهلها بدل تحذير «مخرج مجهول».
     if (!strncmp(out, "cam/", 4) || !strncmp(out, "room/", 5)) return;
@@ -371,18 +462,18 @@ static void _dispatch(const char *out, const char *val, bool retained) {
         ESP_LOGW(TAG, "ignoring a retained %s — one-shot commands must be live", out);
         return;
     }
+    // Safe mode: the body is off; only what can rescue her gets through.
+    if (health_safe_mode() && strcmp(out, "wifi") && strcmp(out, "ota") &&
+        strcmp(out, "factory_reset")) {
+        ESP_LOGW(TAG, "safe mode — ignoring %s", out);
+        return;
+    }
 
     if      (!strcmp(out, "mood"))         _handle_mood(val);
     else if (!strcmp(out, "servo"))        _handle_servo(val);
     else if (!strcmp(out, "gesture"))      _handle_gesture(val);
     else if (!strcmp(out, "buzzer"))       _handle_buzzer(val);
-    else if (!strcmp(out, "factory_reset")) {
-        // كلمة وحدة بالضبط: أمر ما إله رجعة ما بيعتمد ع حارس واحد.
-        if (!strcmp(val, "erase")) {
-            ESP_LOGW(TAG, "factory reset requested — erasing");
-            wifi_sandy_factory_reset();   // بتمسح وبتعيد التشغيل، ما بترجع
-        }
-    }
+    else if (!strcmp(out, "factory_reset")) _handle_factory_reset(val);
     else if (!strcmp(out, "base"))         _handle_base(val);
     else if (!strcmp(out, "focus"))        _handle_focus(val);
     else if (!strcmp(out, "led"))          _handle_led(val);
@@ -456,6 +547,25 @@ static void _schedule_reconnect(void) {
     }
 }
 
+// ─── Broker credentials (state; the functions are below) ───
+
+#define CREDS_NS "sandy_mqtt"
+
+static char s_user[65], s_pass[129];           // the credential that last connected
+// A new one is tried before it is kept: a wrong key saved over the old one left the
+// board unable to reach the broker, with nothing to go back to.
+static char s_new_user[65], s_new_pass[129];
+static volatile bool s_creds_pending;          // received, not applied yet
+static bool s_trying_new;                       // applied, waiting for CONNECTED
+static int  s_new_fails;
+#define NEW_CREDS_MAX_FAILS 3
+
+// نسخة كاملة من الإعداد: `esp_mqtt_set_config` بترجّع أي حقل ناقص للافتراضي.
+static esp_mqtt_client_config_t s_cfg;
+
+static void creds_store(const char *user, const char *pass);
+static void creds_revert(const char *why);
+
 // ─── MQTT event handler ───
 
 static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -464,6 +574,16 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_CONNECTED: {
             ESP_LOGI(TAG, "connected");
             s_backoff_ms = 0;
+            if (s_trying_new) {
+                // It works: now it is kept, and the old one goes.
+                s_trying_new = false;
+                snprintf(s_user, sizeof(s_user), "%s", s_new_user);
+                snprintf(s_pass, sizeof(s_pass), "%s", s_new_pass);
+                s_cfg.credentials.username = s_user;
+                s_cfg.credentials.authentication.password = s_pass;
+                creds_store(s_user, s_pass);
+                ESP_LOGW(TAG, "this board's own broker credential works — stored");
+            }
             // One wildcard subscription: new outputs only need a dispatch case.
             char sub[80];
             snprintf(sub, sizeof(sub), "%s/#", s_base);
@@ -492,6 +612,9 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             break;
 
         case MQTT_EVENT_DISCONNECTED:
+            if (s_trying_new && ++s_new_fails >= NEW_CREDS_MAX_FAILS) {
+                creds_revert("no connection in three tries");
+            }
             _schedule_reconnect();
             break;
 
@@ -524,9 +647,14 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             if (!ev->topic) break;
             _asm_reset();                          // drop any abandoned message
 
+            // Cut short, a topic can name another output: refuse it whole.
             char topic[64] = {0};
-            int  tlen = ev->topic_len < 63 ? ev->topic_len : 63;
-            memcpy(topic, ev->topic, tlen);
+            if (ev->topic_len <= 0 || ev->topic_len >= (int)sizeof(topic)) {
+                ESP_LOGW(TAG, "topic of %d characters refused (max %u)",
+                         ev->topic_len, (unsigned)sizeof(topic) - 1);
+                break;
+            }
+            memcpy(topic, ev->topic, ev->topic_len);
 
             const char *out = topic_suffix(topic);
             if (!out) {           // the wildcard only delivers our own tree,
@@ -574,6 +702,10 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "error type=%d",
                      ev->error_handle ? ev->error_handle->error_type : -1);
+            if (s_trying_new && ev->error_handle &&
+                ev->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+                creds_revert("the broker refused it");
+            }
             break;
 
         default: break;
@@ -622,15 +754,28 @@ static void json_escape(const char *in, char *out, size_t cap) {
 
 void mqtt_publish_status(void) {
     if (!s_client || !s_status_lock) return;
-    // Static, not on the 3 KB task stack (it overflowed); s_status_lock guards it
-    // since the status timer and connect handler both publish. Worst case ~900 bytes.
-    static char buf[1024];
+    // Not on the 3 KB task stack (it overflowed): PSRAM, once, under s_status_lock since
+    // the status timer and connect handler both publish. Worst case ~1500 bytes: past
+    // CONFIG_MQTT_BUFFER_SIZE, which the client sends in pieces.
+    enum { BUF_CAP = 2048, HEALTH_CAP = 640 };
+    static char *buf, *health;
     if (xSemaphoreTake(s_status_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
+    if (!buf) buf = heap_caps_malloc(BUF_CAP + HEALTH_CAP, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        xSemaphoreGive(s_status_lock);
+        ESP_LOGE(TAG, "no memory for the heartbeat");
+        return;
+    }
+    health = buf + BUF_CAP;
     static char ssid[2 * 32 + 1];   // under the lock, like buf
     json_escape(wifi_sandy_ssid(), ssid, sizeof(ssid));
+    if (health_json(health, HEALTH_CAP) < 0) {
+        ESP_LOGW(TAG, "health members do not fit — heartbeat sent without them");
+        snprintf(health, HEALTH_CAP, "\"safe\":%s", health_safe_mode() ? "true" : "false");
+    }
     int n =
     // Live mic levels 0..100, in the heartbeat so the app's meters need no extra topic.
-        snprintf(buf, sizeof(buf),
+        snprintf(buf, BUF_CAP,
         // ما في distance: الحسّاس مش مركّب (ENABLE_SENSOR=0).
         "{\"uptime\":%lld,\"heap\":%lu,\"mood\":%d,"
         "\"mic_l\":%d,\"mic_r\":%d,"
@@ -642,7 +787,7 @@ void mqtt_publish_status(void) {
         // Exact backend key names (mqtt_ingest ignores anything else).
         "\"capabilities\":[\"servo\",\"pwm\",\"buzzer\",\"audio\"],"
         "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"" SANDY_BOARD_ID "\","
-        "\"firmware_version\":\"%s\",\"outputs\":%s}",
+        "\"firmware_version\":\"%s\",%s,\"outputs\":%s}",
         esp_timer_get_time() / 1000000LL,
         (unsigned long)esp_get_free_heap_size(),
         (int)g_current_mood,
@@ -652,10 +797,10 @@ void mqtt_publish_status(void) {
         mic_is_muted(MIC_RIGHT) ? "true" : "false",
         spk_get_volume(), wifi_sandy_rssi(),
         wifi_sandy_ip(), ssid,
-        SANDY_FW_VERSION, OUTPUTS_JSON);
+        SANDY_FW_VERSION, health, OUTPUTS_JSON);
     // Clipped JSON gets dropped whole by the server.
-    if (n < 0 || n >= (int)sizeof(buf)) {
-        ESP_LOGE(TAG, "heartbeat is %d bytes, buffer %u — not sent", n, (unsigned)sizeof(buf));
+    if (n < 0 || n >= BUF_CAP) {
+        ESP_LOGE(TAG, "heartbeat is %d bytes, buffer %u — not sent", n, (unsigned)BUF_CAP);
     } else {
         esp_mqtt_client_publish(s_client, s_topic_status, buf, n, 0, 0);
     }
@@ -688,24 +833,23 @@ bool mqtt_publish_room(const char *out, const char *payload) {
 static void _apply_pending_credentials(void);
 
 static void _status_task(void *arg) {
+    health_watch();
     for (;;) {
+        health_feed();
         vTaskDelay(pdMS_TO_TICKS(MQTT_STATUS_INTERVAL_MS));
+        health_feed();
+        // The client's lock is held through a reconnect's TLS handshake: a wait on purpose.
+        health_unwatch();
         _apply_pending_credentials();
         mqtt_publish_status();
+        health_watch();
     }
 }
 
 // ─── Broker credentials ───
 // كل لوح بياخد مفتاح وسيط خاص فيه: `creds_load` بتقرا المحفوظ وإلا المكتوب بالكود،
-// و`mqtt_sandy_set_credentials` بتحفظ المفتاح اللي بيجي من مصافحة الصوت.
+// و`mqtt_sandy_set_credentials` بتاخد المفتاح اللي بيجي من مصافحة الصوت، وبينحفظ بس لمّا يتّصل.
 
-#define CREDS_NS "sandy_mqtt"
-
-static char s_user[65], s_pass[129];
-static volatile bool s_creds_pending;
-
-// نسخة كاملة من الإعداد: `esp_mqtt_set_config` بترجّع أي حقل ناقص للافتراضي.
-static esp_mqtt_client_config_t s_cfg;
 
 static void creds_load(void) {
     snprintf(s_user, sizeof(s_user), "%s", identity()->mqtt_user);
@@ -728,29 +872,34 @@ static void creds_load(void) {
              strcmp(s_user, identity()->mqtt_user) ? "per-device (stored)" : "shared (compiled in)");
 }
 
-bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
-    if (!user || !pass || !*user || !*pass) return false;
-
-    // نفس المفتاح؟ ما منكتب (توفيرًا للذاكرة الوامضة).
-    if (!strcmp(user, s_user) && !strcmp(pass, s_pass)) return false;
-
+static void creds_store(const char *user, const char *pass) {
     nvs_handle_t h;
     if (nvs_open(CREDS_NS, NVS_READWRITE, &h) != ESP_OK) {
         ESP_LOGE(TAG, "cannot open %s to store the broker credential", CREDS_NS);
-        return false;
+        return;
     }
     esp_err_t e1 = nvs_set_str(h, "user", user);
     esp_err_t e2 = nvs_set_str(h, "pass", pass);
     esp_err_t e3 = nvs_commit(h);
     nvs_close(h);
     if (e1 != ESP_OK || e2 != ESP_OK || e3 != ESP_OK) {
-        ESP_LOGE(TAG, "storing the broker credential failed");
-        return false;
+        ESP_LOGE(TAG, "storing the broker credential failed — it works until the next boot");
     }
+}
 
-    snprintf(s_user, sizeof(s_user), "%s", user);
-    snprintf(s_pass, sizeof(s_pass), "%s", pass);
-    ESP_LOGW(TAG, "stored this board's own broker credential (user=%s)", s_user);
+bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
+    if (!user || !pass || !*user || !*pass) return false;
+    if (strlen(user) >= sizeof(s_new_user) || strlen(pass) >= sizeof(s_new_pass)) return false;
+
+    // نفس المفتاح، أو نفس اللي عم نجرّبه؟ ما في إشي جديد.
+    if (!strcmp(user, s_user) && !strcmp(pass, s_pass)) return false;
+    if ((s_creds_pending || s_trying_new) &&
+        !strcmp(user, s_new_user) && !strcmp(pass, s_new_pass)) return false;
+    if (s_trying_new) return false;   // one at a time; the server sends it again next call
+
+    snprintf(s_new_user, sizeof(s_new_user), "%s", user);
+    snprintf(s_new_pass, sizeof(s_new_pass), "%s", pass);
+    ESP_LOGW(TAG, "received this board's own broker credential (user=%s) — will try it", user);
 
     // منطبّقها بهالتشغيلة، بس مش هلّق: إعادة الاتصال فوق مصافحة الصوت بتخلّص الرام
     // الداخلية. مهمّة النبضة بتطبّقها لمّا الشبكة تفضى.
@@ -758,20 +907,32 @@ bool mqtt_sandy_set_credentials(const char *user, const char *pass) {
     return true;
 }
 
+// Back to the credential that last worked.
+static void creds_revert(const char *why) {
+    s_trying_new = false;
+    s_cfg.credentials.username = s_user;
+    s_cfg.credentials.authentication.password = s_pass;
+    esp_mqtt_set_config(s_client, &s_cfg);
+    ESP_LOGE(TAG, "the new broker credential failed (%s) — back to the old one", why);
+}
+
 static void _apply_pending_credentials(void) {
     if (!s_creds_pending || !s_client) return;
     if (voice_is_connected() || net_owner() != NET_OWNER_NONE) return;   // later
     s_creds_pending = false;
-    // مؤشّرات أصلًا جوّا s_cfg، بس منكتبهن صراحة.
-    s_cfg.credentials.username = s_user;
-    s_cfg.credentials.authentication.password = s_pass;
+    s_cfg.credentials.username = s_new_user;
+    s_cfg.credentials.authentication.password = s_new_pass;
     if (esp_mqtt_set_config(s_client, &s_cfg) == ESP_OK) {
+        s_trying_new = true;
+        s_new_fails = 0;
         // Disconnect, not reconnect: the library ignores reconnect on a live link, and a
         // clean DISCONNECT doesn't fire the "offline" will.
         esp_mqtt_client_disconnect(s_client);
         ESP_LOGI(TAG, "reconnecting with the new credential");
     } else {
-        ESP_LOGW(TAG, "could not apply the new credential live — next boot will");
+        s_cfg.credentials.username = s_user;
+        s_cfg.credentials.authentication.password = s_pass;
+        ESP_LOGW(TAG, "could not apply the new credential live — the next call sends it again");
     }
 }
 

@@ -120,6 +120,9 @@ def _build_small(board: str) -> bytes:
         shutil.copytree(cfg["sketch"], dst,
                         ignore=shutil.ignore_patterns("secrets.h", "build"))
         shutil.copy(dst / "secrets.example.h", dst / "secrets.h")
+        # The sale build: LAN upload and the log mirror off, whatever secrets say.
+        with open(dst / "secrets.h", "a") as f:
+            f.write("\n#define SANDY_RETAIL 1\n")
         out = pathlib.Path(tmp) / "out"
         r = subprocess.run([cli, "compile", "--fqbn", cfg["fqbn"],
                             "--output-dir", str(out), str(dst)],
@@ -144,7 +147,7 @@ def _publish_small(a, base: str, token: str) -> int:
     for marker in cfg["dev_markers"]:
         if marker in image:
             sys.exit(f"this is a dev build ({marker.decode()!r} is inside) — "
-                     "remove SANDY_DEV and build again")
+                     "build with SANDY_RETAIL (the default here)")
     for secret in _secret_values(cfg["sketch"]):
         if secret in image:
             sys.exit("the image contains a value from your real secrets.h — it would be "
@@ -154,6 +157,34 @@ def _publish_small(a, base: str, token: str) -> int:
                  "it could never update again")
     return _sign_and_upload(a, base, token, version, image,
                             f"sandy-fw|{a.board}|{version}|{len(image)}|", a.board)
+
+
+# Strings only a dev brain carries: the remote log task, the LAN upload task and page.
+BRAIN_DEV_MARKERS = (b"logsrv\x00", b"http_up\x00", b"Sandy brain-core &middot;")
+
+
+def brain_image_refused(image: bytes, version: str, secrets: list) -> str:
+    """Why this brain image must not be published, or "" when it may."""
+    if image[:1] != b"\xe9":
+        return "not an ESP32 app image"
+    # The sale build compiles ENABLE_REMOTE out; a dev image would hand every sold
+    # robot an unauthenticated flash port and its log on the LAN.
+    for marker in BRAIN_DEV_MARKERS:
+        if marker in image:
+            return (f"a dev build ({marker.rstrip(bytes(1)).decode()!r} is inside: LAN upload "
+                    "or remote log) — build with: idf.py -B build-retail -DSANDY_RETAIL=1 build")
+    # A stale build-retail labelled with today's version would install, report the
+    # old version, and be offered again for ever.
+    if version.encode() + b"\x00" not in image:
+        return (f"it was not built from this source: version {version} is not inside "
+                "— rebuild build-retail")
+    # The sale build compiles secrets.example.h, so one robot's pairing code or keys
+    # never ship to all of them. Belt and braces: refuse one that somehow does.
+    for secret in secrets:
+        if secret in image:
+            return ("it contains a value from main/secrets.h — it would be public and "
+                    "every robot would take this one's identity. Rebuild build-retail clean.")
+    return ""
 
 
 def _env(name: str) -> str:
@@ -193,7 +224,17 @@ def main() -> int:
     ap.add_argument("--rollout-only", metavar="VERSION")
     ap.add_argument("--board", choices=["brain", *SMALL_BOARDS], default="brain")
     ap.add_argument("--image", help="cam/room: publish this .bin instead of building")
+    ap.add_argument("--check", action="store_true",
+                    help="brain: run every refusal on build-retail, then stop (no key, no upload)")
     a = ap.parse_args()
+
+    if a.check and a.board == "brain":
+        image = IMAGE.read_bytes()
+        refused = brain_image_refused(image, _version(), _secret_values(FW / "main"))
+        if refused:
+            sys.exit(f"{IMAGE}: {refused}")
+        print(f"{IMAGE}: {_version()}, {len(image)} bytes — would be published")
+        return 0
 
     base = _env("SANDY_API_BASE").rstrip("/")
     token = _env("SANDY_FIRMWARE_TOKEN")
@@ -212,21 +253,9 @@ def main() -> int:
         return _publish_small(a, base, token)
     version = _version()
     image = IMAGE.read_bytes()
-    if image[:1] != b"\xe9":
-        sys.exit(f"{IMAGE} is not an ESP32 app image")
-    # Belt and braces: the LAN upload server's task name only exists in a dev
-    # build. If it is in here, this is not the sale build — refuse to ship it.
-    if b"logsrv\x00" in image:
-        sys.exit(f"{IMAGE} still has the LAN upload server (ENABLE_REMOTE) — "
-                 "build with: idf.py -B build-retail -DSANDY_RETAIL=1 build")
-    # The retail build compiles secrets.example.h (sandy_identity.c), so a
-    # published image never carries one robot's pairing code or keys to all of
-    # them. Belt and braces: refuse one that somehow does.
-    for secret in _secret_values(FW / "main"):
-        if secret in image:
-            sys.exit("the image contains a value from main/secrets.h — it would be public "
-                     "and every robot would take this one's identity. Rebuild the retail "
-                     "build from a clean build-retail directory.")
+    refused = brain_image_refused(image, version, _secret_values(FW / "main"))
+    if refused:
+        sys.exit(f"{IMAGE}: {refused}")
     return _sign_and_upload(a, base, token, version, image,
                             f"sandy-fw|{version}|{len(image)}|", "brain")
 

@@ -24,6 +24,10 @@ typedef enum {
 // Router refused the password (not "no router"); cleared on a successful connect.
 bool wifi_sandy_password_rejected(void);
 
+// Hold reconnect attempts (the setup page's scan): a connect in progress makes a scan
+// fail. Always paired with a release.
+void wifi_sandy_hold(bool hold);
+
 // بتحجز لحدّ ما تخلص التجربة (٢٥ ثانية كحدّ أقصى). من مهمّة MQTT، مش من ISR.
 wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass);
 

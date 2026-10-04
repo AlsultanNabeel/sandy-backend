@@ -36,10 +36,10 @@ void setupTelnet() {
 void updateTelnet() {
   if (g_telnetServer.hasClient()) {
     if (g_telnetClient && g_telnetClient.connected()) {
-      WiFiClient n = g_telnetServer.available();
+      WiFiClient n = g_telnetServer.accept();
       n.println("[TELNET] busy"); n.stop();
     } else {
-      g_telnetClient = g_telnetServer.available();
+      g_telnetClient = g_telnetServer.accept();
       g_telnetClient.println("=== ESP32-CAM serial mirror ===");
     }
   }

@@ -5,7 +5,7 @@
 //     الصورة بتنرفع بطلب لـ /api/cam/upload، مش بالوسيط.
 //   • تحديث موقّع من الخادم (sandy_ota_pull.h)؛ الترقية المحلية والتلنت للتطوير بس.
 // ملفات .ino (Arduino بيدمجها): capture, control (إعدادات وفلاش), http (بث محلي),
-// mqtt, ota (+Telnet), upload (رفع موقّع), wifi.
+// mqtt, ota (+Telnet), setup (شبكة احتياطية لمّا الشبكة ما بترد), upload (رفع موقّع), wifi.
 
 #include <Arduino.h>
 #include "esp_camera.h"
@@ -93,6 +93,7 @@ void camRemoteStream(bool on);
 // إعلانات صريحة: Arduino بيوقف توليدها لمّا في تعريفات قبل `setup`.
 void settingsLoadFromNvs();
 void setupCamera();
+void camReinitTick();
 void connectWiFi();
 void ensureWiFiConnected();
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
@@ -101,6 +102,10 @@ void updateTelnet();
 void updateMQTT();
 void camHttpTick();
 void camWifiTick();
+void camSetupTick();
+bool camQueueWifi(const String& ssid, const String& pass);
+bool camHttpRunning();
+const char *camSsid();
 void flashTick();
 void flashInit();
 void settingsInit();
@@ -198,7 +203,7 @@ void setup() {
   WiFi.onEvent(onWiFiEvent);
   connectWiFi();
 
-  // لو فشلت، منعيد عند أول طلب snapshot.
+  // لو فشلت، `camReinitTick` بيعيد المحاولة من الحلقة.
   setupCamera();
 
   if (g_cameraReady) settingsLoadFromNvs();
@@ -240,8 +245,10 @@ void loop() {
 
   // بعد الخدمات: التبديل بيقطع الشبكة بقصد.
   camWifiTick();
+  camSetupTick();
 
   flashTick();
+  camReinitTick();
 
   if (g_snapshotPending) {
     g_snapshotPending = false;

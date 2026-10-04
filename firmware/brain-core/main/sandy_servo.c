@@ -1,5 +1,6 @@
 #include "sandy_servo.h"
 #include "sandy_nvs.h"
+#include "sandy_status.h"
 #include "config.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
@@ -193,6 +194,7 @@ static bool _ensure_task(void) {
     // Sized to the work: task stacks are internal RAM, which voice needs.
     if (xTaskCreate(_gesture_task, "servo_gest", 2560, NULL, 3, &s_gesture_task) != pdPASS) {
         ESP_LOGE(TAG, "gesture task create failed — neck unavailable");
+        status_set(SANDY_PART_NECK, SANDY_ST_NECK_OFF);
         s_gesture_task = NULL;
         return false;
     }

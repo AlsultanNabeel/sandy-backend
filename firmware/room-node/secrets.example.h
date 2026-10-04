@@ -14,8 +14,8 @@ const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 #define SANDY_MQTT_USER "YOUR_MQTT_USER"
 #define SANDY_MQTT_PASS "YOUR_MQTT_PASS"
 
-// نسخة التطوير: ترقية ع الشبكة المحلية. لا تفعّلها بنسخة بتنباع.
-// #define SANDY_DEV 1
+// نسخة التطوير (ترقية ع الشبكة المحلية): بتشتغل لحالها لمّا تحط كلمة السر هون.
+// ملف النشر بيبني بلاها، فنسخة البيع بتطلع بلا ترقية محلية.
 // #define SANDY_OTA_PASSWORD "YOUR_OTA_PASSWORD"
 
 // خادم ساندي للتحديثات (الافتراضي بـ room-node.ino).

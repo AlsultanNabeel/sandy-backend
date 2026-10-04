@@ -2,6 +2,7 @@
 // changed region. Solid shapes only, never thin hairlines.
 
 #include "sandy_face.h"
+#include "sandy_health.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -180,7 +181,9 @@ static void _flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *map
 static void _tick_cb(void *arg) { lv_tick_inc(LVGL_TICK_PERIOD_MS); }
 
 static void _lvgl_task(void *arg) {
+    health_watch();
     for (;;) {
+        health_feed();
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             uint32_t ms = lv_timer_handler();
             xSemaphoreGive(s_mutex);
@@ -796,7 +799,7 @@ static esp_err_t _lcd_init(void) {
     return ESP_OK;
 }
 
-static void _lvgl_init(void) {
+static esp_err_t _lvgl_init(void) {
     lv_init();
     lv_disp_draw_buf_init(&s_draw_buf, s_buf1, s_buf2, TFT_WIDTH * LCD_BUF_LINES);
     lv_disp_drv_init(&s_drv);
@@ -809,8 +812,10 @@ static void _lvgl_init(void) {
 
     const esp_timer_create_args_t tick_args = { .callback = _tick_cb, .name = "lvgl_tick" };
     esp_timer_handle_t tick_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, LVGL_TICK_PERIOD_MS * 1000));
+    ESP_RETURN_ON_ERROR(esp_timer_create(&tick_args, &tick_timer), TAG, "lvgl tick");
+    ESP_RETURN_ON_ERROR(esp_timer_start_periodic(tick_timer, LVGL_TICK_PERIOD_MS * 1000),
+                        TAG, "lvgl tick start");
+    return ESP_OK;
 }
 
 // ─── Public API ───
@@ -819,7 +824,7 @@ esp_err_t face_init(void) {
     s_mutex = xSemaphoreCreateMutex();
     if (!s_mutex) return ESP_ERR_NO_MEM;
     ESP_RETURN_ON_ERROR(_lcd_init(), TAG, "display");
-    _lvgl_init();
+    ESP_RETURN_ON_ERROR(_lvgl_init(), TAG, "lvgl");
     if (xSemaphoreTake(s_mutex, portMAX_DELAY)) {
         build_face();
         s_ready = true;

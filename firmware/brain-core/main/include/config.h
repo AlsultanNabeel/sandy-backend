@@ -29,6 +29,8 @@
 #define ENABLE_PROVISION 1  // needs WIFI — SoftAP setup page when no network answers
 // طويل بقصد: الراوتر ممكن يتأخر دقيقة بالصبح، والتزويد ما لازم يشتغل عالفاضي.
 #define PROVISION_WINDOW_MS  90000
+// A network that worked and then vanished gets longer: a router restarting is not a move.
+#define PROVISION_LOST_MS    (5 * 60 * 1000)
 #define ENABLE_IR       1   // needs MQTT — IR learn + replay over RMT
 #define ENABLE_LED      1   // on-board WS2812 status LED
 
@@ -117,8 +119,23 @@
 // ─── MQTT ───
 #define MQTT_STATUS_INTERVAL_MS 5000
 
+// ─── Health (sandy_health.c) ───
+// This many crash restarts (panic or watchdog) without a run of HEALTH_STABLE_MS between
+// them, and she boots in safe mode: network and updates only, no voice, no body.
+#define HEALTH_SAFE_AFTER_CRASHES  3
+#define HEALTH_STABLE_MS           (10 * 60 * 1000)
+// Internal RAM this low (free, or the largest block TLS needs) for this long, outside a
+// call, and she restarts cleanly; so does a LOW_MEMORY status left standing outside a call.
+// These restarts count toward safe mode, so a board that is always short ends there.
+#define HEALTH_HEAP_DANGER         (10 * 1024)
+#define HEALTH_BLOCK_DANGER        (4 * 1024)
+#define HEALTH_LOW_MEM_MS          60000
+#define HEALTH_LOW_STATUS_MS       30000
+// A task with less stack headroom than this is logged once: one deeper call from overflow.
+#define HEALTH_STACK_EDGE          512
+
 // Reported in every heartbeat. Bump with each flash.
-#define SANDY_FW_VERSION "0.11.1"
+#define SANDY_FW_VERSION "0.11.5"
 
 // The flash script checks this against the board before sending a binary:
 // sandy-brain-s3 (this), sandy-room-node, sandy-cam are not interchangeable.
@@ -148,6 +165,10 @@
 // Gates the cloud session (model set in sdkconfig.defaults).
 // Close the session after this long with no speech.
 #define VOICE_SESSION_IDLE_MS      8000
+// A call never outlives this, whatever the room says.
+#define VOICE_SESSION_MAX_MS       (20 * 60 * 1000)
+// Talk going on with no reply from her this long is not a conversation with her.
+#define VOICE_NO_REPLY_MS          90000
 // Allowed time for a mid-call reconnect (~5 s) before giving up the conversation.
 #define VOICE_RECONNECT_GRACE_MS   15000
 // Speech over her this long (the front end's voice detector) stops her: long enough

@@ -46,7 +46,7 @@ def test_ota_check_claims_before_and_releases_after_the_check():
     release = body.index("net_release(NET_OWNER_OTA)")
     assert claim < once < release
     # A skipped check comes back in minutes, not after the six-hour period.
-    assert "OTA_RETRY_MS" in body and "esp_timer_start_once" in body
+    assert "OTA_RETRY_MS" in body and "ota_retry_in(" in body
 
 
 def test_voice_claims_before_opening_and_releases_on_every_exit():
@@ -56,7 +56,7 @@ def test_voice_claims_before_opening_and_releases_on_every_exit():
     wake = body.index("s_wake_req = false;")
     claim = body.index("net_claim(NET_OWNER_VOICE)")
     unload = body.index("s_mn_want = false;")          # the model hand-over
-    opened = body.index("if (ws_open())")
+    opened = body.index("ws_open();")
     assert wake < claim < unload < opened, "claim must precede the handshake"
 
     # Refused (an update holds it): nothing to release, but she goes back to idle.
@@ -71,9 +71,9 @@ def test_voice_claims_before_opening_and_releases_on_every_exit():
     failed = body[opened:body.index("} else if (s_link_lost_ms")]
     assert failed.count("net_release(NET_OWNER_VOICE)") == 1
 
-    # Exit 3: the session closes — idle or refused — through one function that
-    # gives the socket back before the claim.
-    assert body.count("session_end();") == 2
+    # Exit 3: the session closes — idle, refused, its time cap, or talk she never
+    # answers — through one function that gives the socket back before the claim.
+    assert body.count("session_end();") == 4
     assert "ws_close();" not in body
     end = _fn(v, "static void session_end(")
     assert end.index("ws_close();") < end.index("net_release(NET_OWNER_VOICE)")

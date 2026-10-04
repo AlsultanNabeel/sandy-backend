@@ -24,8 +24,14 @@
 #include "sandy_ca_roots.h"
 #include <time.h>
 
+// زي الروبوت: شغّالة لحالها لمّا secrets.h فيه كلمة سر الترقية، ونسخة البيع
+// (`SANDY_RETAIL`، من ملف النشر) بتسكّرها.
 #ifndef SANDY_DEV
-  #define SANDY_DEV 0
+  #if defined(SANDY_OTA_PASSWORD) && !(defined(SANDY_RETAIL) && SANDY_RETAIL)
+    #define SANDY_DEV 1
+  #else
+    #define SANDY_DEV 0
+  #endif
 #endif
 #if SANDY_DEV
   #include <ArduinoOTA.h>
@@ -52,7 +58,7 @@
 #define OTA_HOSTNAME     "sandy-room"
 // بيروحوا بكل نبضة.
 #define SANDY_ROOM_BOARD_ID   "sandy-room-node"
-#define SANDY_ROOM_FW_VERSION "0.4.0"
+#define SANDY_ROOM_FW_VERSION "0.4.1"
 
 // DFPlayer Mini — تسلسلي 9600 على UART2
 #define DF_PIN_ESP_RX      26    // ESP RX  ← وصّل DF TX

@@ -433,8 +433,8 @@ Who calls what:
 - **The owner's tooling** — `/api/firmware/publish` and `/rollout`
   (`scripts/publish_firmware.py`), `/api/diagnose` and `/health` (by hand).
 - **RevenueCat** — `/webhook/revenuecat`.
-- `/voice/enroll` records a voiceprint for speaker verification (§3.2); no
-  shipped client opens it yet, and it is the only way to enrol one.
+- `/voice/enroll` (socket) records a voiceprint from the laptop script; the app's
+  Robot › «صوتي» screen uses `POST /api/voice/enroll` instead and records on the robot (§3.2).
 
 **The blocks** (`api/blocks_api.py`, §2.12) — every route `require_tenant` except
 `/api/kinds` (`require_auth`), so the block stores' scoped handles do the
@@ -645,7 +645,14 @@ actually means:
 | `auth_not_configured` | the server has no `SANDY_WS_HMAC_KEY` at all |
 | `key_unknown` | signed with `kv` 2, but the server holds no key for that board (unpaired or revoked); the board drops its key and falls back to the shared one |
 
-The `ts` must be wall-clock, so the firmware blocks on SNTP before it can connect.
+The `ts` must be wall-clock, so the firmware opens no session until SNTP has set the clock
+(`clock_start`: the router first, then three public servers; never blocking). A wake word
+before that gets a local cue and status `NO_CLOCK` (part `CLOCK`), shown on its own after a
+minute unset. `replay` resyncs the clock and ends the call, with no ten-minute lockout —
+that backoff is for the key refusals only.
+Control messages are assembled whole (`s_rx_text`, 2 KB PSRAM) across frames and events
+before they are read; a continuation (`0x0`) belongs to the frame type before it, so a split
+text message is never played as audio.
 A board that cannot reach a time server will sit there forever while the wake word
 keeps working — that failure looks exactly like a dead network.
 
@@ -687,6 +694,9 @@ where the difficulty lives.
 | `sandy_voice.c` | the esp-sr audio front end (input "MMR": both mics and the speaker reference; echo cancelling, two-mic separation, voice detection and the wake word in one pipeline), local commands, the WS link, the uplink buffer, the session manager. `mic_task` feeds the front end, `proc_task` reads it: only speech goes up (plus the detector's cached onset), and speech over her for `VOICE_BARGE_MS` silences her on the board at once and sends `{"type":"barge_in"}`, which the server trusts for `_BARGE_TRUST_S` instead of its own bar |
 | `sandy_face.c` | LVGL face — 25 moods, blink/drift/doze animations, focus ring, status banner |
 | `sandy_status.c` | **the health surface** — see §4.2 |
+| `tools/build_feature_matrix.sh` | builds the brain once per enabled `ENABLE_*` flag with that one off; every one must build. A module whose feature is off keeps no-op versions of what other parts call (`sandy_screen.c`, `sandy_led.c`) |
+| `sandy_health.c` | the task watchdog (`CONFIG_ESP_TASK_WDT_PANIC`, 10 s): the session manager, `voice_mic`, `voice_proc`, `voice_spk`, `voice_tx`, `lvgl`, `mqtt_status` and `app_main` call `health_watch()` and feed it from their loops; waits that are long on purpose (socket open and close, a broker publish through a reconnect) sit between `health_unwatch()` and `health_watch()`. **Boot-loop guard:** `health_boot()` runs first in `app_main` and counts crash restarts (panic, watchdog) in RTC memory; `HEALTH_SAFE_AFTER_CRASHES` (3) with no `HEALTH_STABLE_MS` (10 min) run between them boots **safe mode** — Wi-Fi, setup page, remote flash, OTA and MQTT only, no voice, face or body, and MQTT takes only `wifi`, `ota` and `factory_reset`. Status `SAFE_MODE`. A power cut or any normal restart (an update) clears the count. **Memory monitor:** internal RAM under `HEALTH_HEAP_DANGER` free or `HEALTH_BLOCK_DANGER` largest block for a minute, or a `LOW_MEMORY` status standing 30 s, outside a call, ends in `health_restart()` — deferred settings saved first, and counted toward safe mode so a board always short ends there instead of looping. **Heartbeat:** `health_json()` adds `boot` (last reset reason), `boots` (restarts ever, NVS), `heap_min` (least internal RAM since boot), `heap_big`, `safe`, `nvs_wiped` (the settings store was erased at this boot to recover —
+Wi-Fi and the board's keys went with it), `nvs_used`/`nvs_total` (entries in the 20 KB store), `faults` (each part not OK, `{}` when none, so the server's merge clears old ones) and `stacks` (each task's least headroom in bytes); `node_store._TELEMETRY_KEYS` keeps them, the two maps capped at 24 short members. **Stacks:** `CONFIG_COMPILER_STACK_CHECK_MODE_NORM` (compiler canaries) on top of FreeRTOS's end-of-stack canary; the monitor logs once any task under `HEALTH_STACK_EDGE` (512 bytes) of headroom |
 | `sandy_mqtt.c` | command subscriptions + status publish |
 | `sandy_wifi.c` | association; power save is explicitly **off** (`WIFI_PS_NONE`) for real-time audio |
 | `sandy_led.c` `sandy_servo.c` `sandy_buzzer.c` `sandy_motors.c` `sandy_sensor.c` `sandy_touch.c` `sandy_ears.c` `sandy_mic.c` `sandy_spktest.c` `sandy_ota.c` `sandy_nvs.c` `sandy_remote.c` | peripherals, OTA, remote log |
@@ -699,7 +709,9 @@ where the difficulty lives.
 
 The paid cloud link is open **only** between a wake word and the silence after it.
 
-1. Wake word detected locally (`Hi Andy`) → buzzer cue, `MOOD_CURIOUS`, `s_wake_req`.
+1. Wake word detected locally (`Hi Andy`) → buzzer cue, `MOOD_CURIOUS`, `s_wake_req`. She
+   listens from boot, before Wi-Fi: a wake word with no network gets a sad tone, a worried
+   face and `NO_WIFI` on the spot; the session manager starts the clock once Wi-Fi is up.
 2. Session manager frees the ~70 KB MultiNet command model **before** opening the
    socket — its internal SRAM is exactly what the TLS task needs. This ordering
    was a real deadlock once; do not reverse it.
@@ -708,6 +720,9 @@ The paid cloud link is open **only** between a wake word and the silence after i
    back to idle.
 5. Link lost mid-call → `VOICE_RECONNECT_GRACE_MS` (15 s) of grace before hanging
    up, so a blip does not end a sentence.
+6. Two caps the room cannot stretch: `VOICE_SESSION_MAX_MS` (20 min) for any call, and
+   `VOICE_NO_REPLY_MS` (90 s) of talk with no audio from her — someone else's
+   conversation, not one with her.
 
 Every session gets a fresh `esp_websocket_client_init` and ends with a full
 `destroy` — reusing the handle once wedged the link until reboot.
@@ -722,11 +737,23 @@ serial cable.
 One table maps each condition to a face, an LED state, a Latin banner drawn across
 the bottom of the display, and the Arabic sentence she will speak once clips are
 flashed: `OK`, `BOOTING`, `NO_WIFI`, `NO_SERVER`, `LINK_DROPPED`, `NET_SLOW`,
-`LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`.
+`LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`, `WIFI_BAD_PASS` (a refusal, or a handshake
+timeout only when the router is heard at `WIFI_BAD_PASS_MIN_RSSI` or better), `VOICE_OFF` (I2S, the audio
+buffers or the front end did not start), `NECK_OFF`, `SCREEN_OFF` (heartbeat and LED only),
+`NOT_SET_UP` (part `IDENTITY`: no pairing code or server address, so no call is even
+tried — it used to try an empty address and say «no internet»), `SETTINGS_OFF` (the settings store
+would not open — she runs on defaults instead of halting; no `ESP_ERROR_CHECK` is left in
+an enabled file).
 
 Rules:
 - **Subsystems must not set the face directly for error conditions.** Call
-  `status_set()`. Direct face writes are how a half-finished state stayed on screen.
+  `status_set(part, status)`. Direct face writes are how a half-finished state stayed on screen.
+- **Each part owns its status** (`SANDY_PART_SYSTEM`, `_NET`, `_LINK`, `_VOICE`, `_SETTINGS`,
+  `_NECK`, `_SCREEN`): a part
+  recovering clears only its own fault, and she shows the most serious one (`rank` in
+  the table). One shared status let a reconnect wipe a memory fault. Wi-Fi clears its
+  own part on getting an address; the link on `auth_ok`. The heartbeat lists every part
+  not OK (`status_faults_json`).
 - `status_set()` is idempotent — re-reporting the same condition does not
   re-announce, so retry loops don't make her repeat herself.
 - The banner is still Latin (Montserrat 14), but Arabic fonts are in the build
@@ -789,6 +816,12 @@ sandy/node/<node_id>/cam/snapshot · status · event (out)
 sandy/node/<node_id>/room/light · music            room node commands
 sandy/node/<node_id>/room/status                   room heartbeat → ingest_status
 ```
+
+`factory_reset` takes only `erase:<unix ms>:<hmac>`, signed by `node_store._erase_command`
+with the board's own voice key (the shared key while it has none) over
+`factory_reset|<node_id>|<ms>`; the board refuses it unsigned, on a wrong signature, with
+its clock unset, or more than five minutes off (`voice_verify_signed`). A bare `erase` on
+the broker no longer wipes a robot.
 
 A camera whose last word was its MQTT will (`telemetry.cam_online` false) is refused at
 once (409 `camera_offline`): no photo ticket, no stream switch, no «pending» for ever; the
@@ -861,10 +894,19 @@ button.
 #### First-run network setup
 
 `main/sandy_provision.c`, added 23 Aug 2026, flag `ENABLE_PROVISION`. When no
-network answers within `PROVISION_WINDOW_MS` (90 s), the board raises its own
-access point — `Sandy-<pair code>`, WPA2, password `sandy<pair code>` — serves a
-scan-and-pick page on `192.168.4.1`, and prints the network name on its own
-screen. The chosen credentials go through `wifi_sandy_switch`, which proves them
+network answers within `PROVISION_WINDOW_MS` (90 s) — at boot, or any time the router
+refuses the password — or a network that worked has been gone `PROVISION_LOST_MS`
+(5 min), the board raises its own
+access point — `Sandy-<last four of the pair code>`, WPA2, with a password made at
+random each boot — serves a scan-and-pick page on `192.168.4.1`, and shows a QR that
+joins it plus the name and password in text on its own screen (never in the log). It is a
+captive portal: DHCP names the access point as DNS, a small DNS task answers every A
+question with `192.168.4.1`, and any other path (`/generate_204`, `/hotspot-detect.html`)
+redirects to the page, so a joining phone opens it by itself. It comes down by itself the
+moment the network is back; neither way needs a restart. The scan holds the saved network's
+reconnects (`wifi_sandy_hold`) — a connect in progress made it fail — and lists names
+strongest first, once each; a field takes a hidden network's name. The page and its answers are in
+English and Arabic. The chosen credentials go through `wifi_sandy_switch`, which proves them
 before saving and reverts on failure, so a typo cannot leave a board booting onto
 a network that does not exist.
 
@@ -893,7 +935,9 @@ could subscribe to any other customer's topics. Since 23 Aug 2026 each board has
 its own, and the shared one is deleted.
 
 The brain is handed its credential **on the voice handshake** (`voice_ws/session.py`
-→ `broker_creds.creds_for_device`), stores it in NVS and applies it live. Not over
+→ `broker_creds.creds_for_device`) and tries it live; it is stored in NVS only once the
+broker accepts it (`MQTT_EVENT_CONNECTED`). A refusal, or three failed connects, puts the
+old one back (`creds_revert`), so a wrong key can never strand the board. Not over
 the broker, deliberately: delivering a broker credential over the broker would
 mean the shared login has to keep working for ever, which is the thing being
 retired. The voice socket authenticates against a different key, so it still works
@@ -939,7 +983,7 @@ was named here twice and does not exist; the generator has never written it.)
 | Face / display | Yes — all 25 moods | Yes |
 | Microphones | Yes — per-channel gain, mute, live level | Yes |
 | Speaker | Yes — volume 0..100, test tone | Yes, through the voice path |
-| Noise suppression | Yes — off / mild / medium / aggressive | Yes |
+| Noise suppression | No — inside the esp-sr front end, not a control | Yes |
 | On-board LED | Yes — off / idle / listening / talking, plus 11 effects | Yes |
 | Neck servo | Yes | **Not physically wired yet** |
 | Base motors | Topic exists | `ENABLE_MOTORS = 0` |
@@ -957,8 +1001,8 @@ desk, until it is flashed.**
 
 The camera board program is no longer missing — `firmware/vision-core/` exists, is
 flashed, and answers on the broker. Neither is the IR code (`main/sandy_ir.c`, on the brain; §4.5), though
-it is written and not yet tried on hardware. Still genuinely missing: two-mic
-beamforming.
+it is written and not yet tried on hardware. Nor is two-mic separation: the esp-sr
+front end does it (`sandy_voice.c`, input "MMR").
 
 The Arabic display font is done: `main/fonts/` now carries the typeface at
 twenty-four and thirty-two pixels alongside LVGL's built-in sixteen, which is
@@ -987,6 +1031,16 @@ what makes the text-size control real rather than decorative.
   snapshot request was published exactly right and nothing was subscribed; no
   `cam/status` heartbeat was ever sent, so the address the live view needs never
   arrived, and "couldn't get the address" was the literal truth.
+
+  When its network does not answer for a minute and a half (or none is saved) it
+  raises its own, `Sandy-Cam-<pair code>` with password `sandy<pair code>`, and serves
+  a page at `http://192.168.4.1` to pick a new one (`cam_setup.ino`); the choice goes
+  through the same tested switch as `cam/wifi`, and the setup network drops itself
+  once the home network is back. A sensor that failed at boot is retried from the
+  loop (30 s, doubling to 5 min) instead of waiting for a reboot. Like the brain,
+  the owner's own build (a `secrets.h` with `SANDY_OTA_PASSWORD`) has LAN upload and
+  the log mirror on port 23; the sale build `publish_firmware.py` makes defines
+  `SANDY_RETAIL` and has neither. The room node follows the same rule for LAN upload.
 - **`firmware/room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
   `sandy/node/<id>/room/`.
 
@@ -1284,14 +1338,20 @@ nobody re-reads becomes a way of believing things that stopped being true.
    private key off-repo, public key in `main/fw_pubkey.pem`), streamed into the
    idle slot with the size and SHA-256 checked before switching, canary ids
    then a stable percentage (`scripts/publish_firmware.py`), never a downgrade,
-   bootloader rollback if the new image cannot reach Wi-Fi. The MQTT `ota`
+   bootloader rollback if the new image cannot reach Wi-Fi. A failed check, download or
+   install comes back in five minutes, doubling to an hour (`OTA_FAIL_RETRY_MAX_MS`), not
+   after the six-hour period; nothing downloads under `OTA_MIN_RSSI` (-80 dBm), and from
+   the download to the restart her face says `UPDATING - DO NOT UNPLUG` (status
+   `UPDATING`, part `UPDATE`, above every fault). The MQTT `ota`
    command only triggers a check — it no longer takes a URL. Published images
    are always the sale build (`idf.py -B build-retail -DSANDY_RETAIL=1`), which
    compiles `ENABLE_REMOTE` (LAN upload + log on 3333) out; the publish script
-   refuses an image that still contains it. The Arduino boards verify TLS
-   against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`). Still open: secure
-   boot and flash encryption are off; the Arduino boards are not on this
-   update path.
+   refuses an image that still contains it (`brain_image_refused`: the log task, the upload
+   task or its page), one whose version string is not this source's (a stale build-retail
+   would install and be offered again for ever), or one carrying a value from the real
+   `secrets.h`; `--check` runs the refusals without a key or an upload. The Arduino boards verify TLS
+   against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`) and pull signed releases too
+   (`sandy_ota_pull.h`). Still open: secure boot and flash encryption are off.
 1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
    starts at boot when `SENTRY_DSN` is set; `before_send` strips request
    bodies and, since 19 Sep 2026, log breadcrumbs down to their `[tag]`.
@@ -1332,13 +1392,9 @@ nobody re-reads becomes a way of believing things that stopped being true.
    summary and the conversation title) with no future ever read. Both go through
    `chat_fn` with `OPENAI_CHAT_TIMEOUT_S`, so a stalled upstream costs a worker
    for that long, not for ever. A sizing question, wanting a measurement first.
-9. **`/voice/enroll` has no client.** Speaker verification (§3.2) is off by
-   default and there is no screen that records a voiceprint.
-
 ### Hardware, and the owner already knows
 
-10. **Two-mic beamforming is not written.** §4.6.
-11. **Voice status clips are not flashed** — the sentences are in the table, the
+9. **Voice status clips are not flashed** — the sentences are in the table, the
    speaking hook is not written and the partition table has no room reserved. §4.2.
 
 ### Checked and closed since the last version of this list
@@ -1352,4 +1408,5 @@ not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
 The brain **is** told which devices exist: `context._devices_line` lists them by name and room in the prompt. Phase 5 closed three more by deleting what they were about: `tool_health` (no
 tool registry left), the 28-round-trip warm turn (the persona-directive build
 and the old memory layers are gone), and the router-then-reply pair on every
-message (plain chat is one call).
+message (plain chat is one call). Since then: the voiceprint has a client (Robot ›
+«صوتي», §3.2), and two-mic separation is the esp-sr front end's (§4).

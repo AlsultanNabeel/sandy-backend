@@ -28,6 +28,7 @@
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "driver/i2s_std.h"
 #include "mbedtls/md.h"
@@ -54,6 +55,7 @@
 #include "sandy_status.h"
 #include "sandy_audio_ctl.h"
 #include "sandy_net_busy.h"
+#include "sandy_health.h"
 #include <math.h>   // sqrt for the per-mic level meters
 #if ENABLE_BUZZER
 #include "sandy_buzzer.h"
@@ -151,6 +153,7 @@ static SemaphoreHandle_t s_spk_wr_lock;
 static volatile bool s_session_active;       // WS up + mic streaming
 static volatile bool s_wake_req;             // wake heard; manager should open
 static volatile int64_t s_session_voice_ms;  // last user/Sandy activity while open
+static int64_t s_session_open_ms;            // when this session opened
 #if ENABLE_COMMANDS
 // mic_task alone touches s_mn; the session manager only requests.
 static volatile bool s_mn_want = true;       // should the model be resident?
@@ -176,6 +179,14 @@ static const bool s_session_active = true;    // no gate: always streaming
 
 // ~100 ms frames at 16 kHz.
 #define MIC_FRAME_SAMPLES   1600
+// A mic failing this long gets its channel restarted; this many restarts in a row is a fault.
+#define MIC_RESTART_AFTER_MS       2000
+#define MIC_RESTARTS_BEFORE_FAULT  3
+// The amp takes 40 ms chunks into ~60 ms of DMA: a write this late means it is wedged.
+#define SPK_WRITE_TIMEOUT_MS       500
+#define SPK_FAILS_BEFORE_RESTART   3
+// Only the mic's or the amp's own fault is cleared by their recovery.
+static volatile bool s_mic_fault, s_spk_fault;
 
 // Below this largest internal block, a failed open is out-of-memory, not network.
 // Measured: sessions open fine at 6144 (TLS uses PSRAM); the "before open" log prints it.
@@ -239,22 +250,44 @@ static bool clock_is_set(void) {
     return time(NULL) > 1700000000;  // ~2023-11
 }
 
-// Wait up to ~60 s for SNTP: the hello must fall inside the server's 30 s replay
-// window. Proceed anyway after that; the WS auto-reconnect retries.
-static void sync_clock(void) {
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+// The hello must fall inside the server's 30 s replay window, so no session opens until
+// SNTP has set the clock. The router is asked first (it answers on the LAN even when the
+// internet is slow), then three public servers. Runs in the background: never blocks.
+#define CLOCK_UNSET_SHOW_MS  60000   // after this long unset, she says so
+static volatile bool s_clock_bad;    // the server said our time is off: resync first
+static int64_t s_clock_started_ms;
+
+static void on_clock_sync(struct timeval *tv) {
+    (void)tv;
+    s_clock_bad = false;
+    ESP_LOGI(TAG, "clock synced");
+}
+
+static void clock_start(void) {
+    static char gw[16];
+    esp_netif_ip_info_t ip;
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta && esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.gw.addr) {
+        esp_ip4addr_ntoa(&ip.gw, gw, sizeof(gw));
+    } else {
+        snprintf(gw, sizeof(gw), "pool.ntp.org");   // no gateway yet: one public server twice
+    }
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(4,
+        ESP_SNTP_SERVER_LIST(gw, "time.google.com", "time.cloudflare.com", "pool.ntp.org"));
+    cfg.sync_cb = on_clock_sync;
+    cfg.wait_for_sync = false;
+    if (s_clock_started_ms) esp_netif_sntp_deinit();   // a resync: start over, same servers
     if (esp_netif_sntp_init(&cfg) != ESP_OK) {
         ESP_LOGW(TAG, "sntp init failed");
         return;
     }
-    for (int i = 0; i < 60 && !clock_is_set(); i++) {
-        esp_netif_sntp_sync_wait(pdMS_TO_TICKS(1000));
-    }
-    if (clock_is_set()) {
-        ESP_LOGI(TAG, "clock synced");
-    } else {
-        ESP_LOGW(TAG, "clock not synced after wait; hello may be rejected");
-    }
+    s_clock_started_ms = now_ms();
+    ESP_LOGI(TAG, "clock: asking %s, then public servers", gw);
+}
+
+// Ready to sign a hello: set, and not refused by the server since the last sync.
+static bool clock_ok(void) {
+    return clock_is_set() && !s_clock_bad;
 }
 
 // ── This board's own voice key ──
@@ -309,6 +342,40 @@ static int hex_nibble(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     c = (char)tolower((unsigned char)c);
     return (c >= 'a' && c <= 'f') ? c - 'a' + 10 : 0;
+}
+
+bool voice_verify_signed(const char *msg, const char *mac_hex) {
+    if (!msg || !mac_hex || strlen(mac_hex) != 64) return false;
+    for (int i = 0; i < 64; i++) {
+        if (!isxdigit((unsigned char)mac_hex[i])) return false;
+    }
+    unsigned char own[DEVKEY_HEX / 2];
+    const unsigned char *key = (const unsigned char *)identity()->hmac_key;
+    size_t key_len = strlen(identity()->hmac_key);
+    if (s_dev_key[0]) {
+        for (int i = 0; i < DEVKEY_HEX / 2; i++) {
+            own[i] = (unsigned char)((hex_nibble(s_dev_key[2 * i]) << 4) |
+                                     hex_nibble(s_dev_key[2 * i + 1]));
+        }
+        key = own;
+        key_len = sizeof(own);
+    }
+    if (key_len == 0) return false;
+
+    unsigned char mac[32];
+    const int hr = mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), key, key_len,
+                                   (const unsigned char *)msg, strlen(msg), mac);
+    mbedtls_platform_zeroize(own, sizeof(own));
+    if (hr != 0) return false;
+    // Constant time: how far a guess matched must not show in how long it took.
+    unsigned char diff = 0;
+    for (int i = 0; i < 32; i++) {
+        const unsigned char want = (unsigned char)((hex_nibble(mac_hex[2 * i]) << 4) |
+                                                   hex_nibble(mac_hex[2 * i + 1]));
+        diff |= mac[i] ^ want;
+    }
+    mbedtls_platform_zeroize(mac, sizeof(mac));
+    return diff == 0;
 }
 
 // Returns the length, or -1 if it doesn't fit (never send a truncated frame).
@@ -435,14 +502,22 @@ fail:
 }
 #undef I2S_TRY
 
-// Substring check, enough for small fixed control frames.
+// Substring check over the whole control message (not NUL-terminated).
 static bool text_has(const char *data, int len, const char *needle) {
-    static char buf[128];
-    int n = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
-    memcpy(buf, data, n);
-    buf[n] = '\0';
-    return strstr(buf, needle) != NULL;
+    const int n = (int)strlen(needle);
+    for (int i = 0; i + n <= len; i++) {
+        if (!memcmp(data + i, needle, n)) return true;
+    }
+    return false;
 }
+
+// A control message, assembled from its pieces before it is read: the server may split
+// it into frames (continuations) or the client into events. PSRAM, from voice_task.
+#define RX_TEXT_MAX 2048
+static char *s_rx_text;
+static int   s_rx_text_len;
+static bool  s_rx_text_over;     // longer than RX_TEXT_MAX: dropped whole
+static uint8_t s_rx_op;          // 0x1 text or 0x2 audio: what a continuation continues
 
 // قيمة نصّية من إطار تحكّم، بالإيد بلا محلّل JSON.
 // بتقرا الإطار كله (بعكس `text_has`): مفتاح الوسيط بيجي بآخر المصافحة.
@@ -479,6 +554,68 @@ static bool json_str_field(const char *data, int len, const char *key,
     return j > 0;
 }
 
+// One whole control message from the server.
+static void on_ws_text(const char *msg, int len) {
+    if (text_has(msg, len, "auth_ok")) {
+        s_authed = true;
+        s_auth_refused = false;
+        s_preroll_due = true;       // the words said while we were connecting
+        s_link_lost_ms = 0;         // back on the air, drop the grace timer
+        status_set(SANDY_PART_LINK, SANDY_ST_OK);   // clears the link's past failure
+        VOICE_FACE(MOOD_FOCUSED);   // she's listening now
+        VOICE_LED(LED_STATE_LISTENING);
+        ESP_LOGI(TAG, "auth ok, streaming");
+
+        // مفتاح الوسيط الخاص بيوصل هون لأنّ المسار موثّق بالتوقيع مش بمفتاح الوسيط،
+        // فبيضل شغّال بعد إلغاء المشترك.
+#if ENABLE_MQTT
+        {
+            char bu[65], bp[129];
+            if (json_str_field(msg, len, "user", bu, sizeof(bu)) &&
+                json_str_field(msg, len, "pass", bp, sizeof(bp))) {
+                if (mqtt_sandy_set_credentials(bu, bp))
+                    ESP_LOGW(TAG, "got this board's own broker credential — trying it");
+            }
+        }
+#endif
+        {
+            char dk[DEVKEY_HEX + 8];
+            if (json_str_field(msg, len, "device_key", dk, sizeof(dk)) &&
+                is_hex_key(dk) && strcmp(dk, s_dev_key) != 0) {
+                devkey_store(dk);
+            }
+        }
+    } else if (text_has(msg, len, "interrupted")) {
+        // Server confirmed barge-in: drop stale audio.
+        s_spk_flush = true;
+        s_squelch_until_ms = 0;
+        s_rx_has_carry = false;
+        ESP_LOGI(TAG, "interrupted by user (server)");
+    } else if (text_has(msg, len, "end_turn")) {
+        s_squelch_until_ms = 0;   // stale turn fully drained server-side
+        ESP_LOGD(TAG, "end of Sandy's turn");
+    } else if (text_has(msg, len, "key_unknown")) {
+        // Key revoked or unknown: re-enrol with the shared key next session.
+        devkey_store(NULL);
+    } else if (text_has(msg, len, "replay")) {
+        // Our time is off, not our key: resync and try again, no ten-minute lockout.
+        s_clock_bad = true;
+        status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
+        ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
+    } else if (text_has(msg, len, "auth_fail") ||
+               text_has(msg, len, "auth_not_configured") ||
+               text_has(msg, len, "bad_handshake")) {
+        // Config problem (the key): show it instead of reconnecting forever.
+        status_set(SANDY_PART_LINK, SANDY_ST_AUTH_FAILED);
+        s_auth_refused = true;
+        s_auth_refused_at = now_ms();
+        ESP_LOGE(TAG, "server refused this device — check the key "
+                      "(no new session for %d min)", VOICE_AUTH_BACKOFF_MS / 60000);
+    } else if (text_has(msg, len, "error")) {
+        ESP_LOGW(TAG, "server error frame");
+    }
+}
+
 static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *event_data) {
     esp_websocket_event_data_t *ev = (esp_websocket_event_data_t *)event_data;
     switch (id) {
@@ -499,62 +636,27 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         break;
     }
     case WEBSOCKET_EVENT_DATA:
-        if (ev->op_code == 0x1) {  // text control frame
-            if (text_has(ev->data_ptr, ev->data_len, "auth_ok")) {
-                s_authed = true;
-                s_auth_refused = false;
-                s_preroll_due = true;       // the words said while we were connecting
-                s_link_lost_ms = 0;         // back on the air, drop the grace timer
-                status_set(SANDY_ST_OK);    // clears any banner from a past failure
-                VOICE_FACE(MOOD_FOCUSED);   // she's listening now
-                VOICE_LED(LED_STATE_LISTENING);
-                ESP_LOGI(TAG, "auth ok, streaming");
-
-                // مفتاح الوسيط الخاص بيوصل هون لأنّ المسار موثّق بالتوقيع مش بمفتاح الوسيط،
-                // فبيضل شغّال بعد إلغاء المشترك.
-#if ENABLE_MQTT
-                {
-                    char bu[65], bp[129];
-                    if (json_str_field(ev->data_ptr, ev->data_len, "user", bu, sizeof(bu)) &&
-                        json_str_field(ev->data_ptr, ev->data_len, "pass", bp, sizeof(bp))) {
-                        if (mqtt_sandy_set_credentials(bu, bp))
-                            ESP_LOGW(TAG, "took this board's own broker credential");
-                    }
-                }
-#endif
-                {
-                    char dk[DEVKEY_HEX + 8];
-                    if (json_str_field(ev->data_ptr, ev->data_len, "device_key", dk, sizeof(dk)) &&
-                        is_hex_key(dk) && strcmp(dk, s_dev_key) != 0) {
-                        devkey_store(dk);
-                    }
-                }
-            } else if (text_has(ev->data_ptr, ev->data_len, "interrupted")) {
-                // Server confirmed barge-in: drop stale audio.
-                s_spk_flush = true;
-                s_squelch_until_ms = 0;
-                s_rx_has_carry = false;
-                ESP_LOGI(TAG, "interrupted by user (server)");
-            } else if (text_has(ev->data_ptr, ev->data_len, "end_turn")) {
-                s_squelch_until_ms = 0;   // stale turn fully drained server-side
-                ESP_LOGD(TAG, "end of Sandy's turn");
-            } else if (text_has(ev->data_ptr, ev->data_len, "key_unknown")) {
-                // Key revoked or unknown: re-enrol with the shared key next session.
-                devkey_store(NULL);
-            } else if (text_has(ev->data_ptr, ev->data_len, "auth_fail") ||
-                       text_has(ev->data_ptr, ev->data_len, "auth_not_configured") ||
-                       text_has(ev->data_ptr, ev->data_len, "bad_handshake") ||
-                       text_has(ev->data_ptr, ev->data_len, "replay")) {
-                // Config problem (key/clock): show it instead of reconnecting forever.
-                status_set(SANDY_ST_AUTH_FAILED);
-                s_auth_refused = true;
-                s_auth_refused_at = now_ms();
-                ESP_LOGE(TAG, "server refused this device — check the key and the clock "
-                              "(no new session for %d min)", VOICE_AUTH_BACKOFF_MS / 60000);
-            } else if (text_has(ev->data_ptr, ev->data_len, "error")) {
-                ESP_LOGW(TAG, "server error frame");
+        // A new frame says what it is; a continuation (0x0) continues the last one.
+        if ((ev->op_code == 0x1 || ev->op_code == 0x2) && ev->payload_offset == 0) {
+            s_rx_op = ev->op_code;
+            if (s_rx_op == 0x1) { s_rx_text_len = 0; s_rx_text_over = false; }
+        } else if (ev->op_code != 0x0 && ev->op_code != 0x1 && ev->op_code != 0x2) {
+            break;                 // ping, pong, close: not ours to read
+        }
+        if (s_rx_op == 0x1) {      // a control message, possibly in pieces
+            if (!s_rx_text) break;
+            if (s_rx_text_len + ev->data_len > RX_TEXT_MAX) s_rx_text_over = true;
+            if (!s_rx_text_over && ev->data_len > 0) {
+                memcpy(s_rx_text + s_rx_text_len, ev->data_ptr, ev->data_len);
+                s_rx_text_len += ev->data_len;
             }
-        } else if (ev->op_code == 0x2 || ev->op_code == 0x0) {  // binary audio (+ continuation)
+            const bool last_piece = ev->fin &&
+                                    ev->payload_offset + ev->data_len >= ev->payload_len;
+            if (!last_piece) break;
+            s_rx_op = 0;
+            if (s_rx_text_over) ESP_LOGW(TAG, "control message over %d bytes dropped", RX_TEXT_MAX);
+            else on_ws_text(s_rx_text, s_rx_text_len);
+        } else if (s_rx_op == 0x2) {  // audio, a frame or its continuation
             if (ev->data_len > 0 && now_ms() >= s_squelch_until_ms &&
                 xSemaphoreTake(s_spk_wr_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_last_rx_audio_ms = now_ms();
@@ -595,7 +697,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         // session manager waits instead of hanging up.
         if (s_session_active && !s_link_lost_ms) s_link_lost_ms = now_ms();
         // Mid-conversation: dropped link. Before auth: server unreachable.
-        status_set(s_session_active ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
+        status_set(SANDY_PART_LINK, s_session_active ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
         ESP_LOGW(TAG, "disconnected");
         break;
     default:
@@ -609,7 +711,10 @@ static void spk_task(void *arg) {
     bool playing = false;
     int64_t first_seen = 0;   // when data first appeared while idle
     int64_t last_stop = 0;    // when playback last went idle
+    int spk_fails = 0;        // amp writes in a row that did not finish
+    health_watch();
     for (;;) {
+        health_feed();
         // Barge-in: dump the buffer; the DMA tail plays out, then silence.
         if (s_spk_flush) {
             s_spk_flush = false;
@@ -723,8 +828,29 @@ static void spk_task(void *arg) {
                 if (k) xStreamBufferSend(s_ref_stream, ref, k * sizeof(int16_t), 0);
             }
             size_t written = 0;
-            i2s_channel_write(s_tx_chan, buf, n, &written, portMAX_DELAY);
-            s_spk_play_bytes += n;
+            esp_err_t wr = i2s_channel_write(s_tx_chan, buf, n, &written,
+                                             pdMS_TO_TICKS(SPK_WRITE_TIMEOUT_MS));
+            s_spk_play_bytes += written;
+            if (wr == ESP_OK && written == n) {
+                if (spk_fails) {
+                    spk_fails = 0;
+                    if (s_spk_fault) {
+                        s_spk_fault = false;
+                        status_set(SANDY_PART_VOICE, SANDY_ST_OK);
+                    }
+                }
+            } else if (++spk_fails % SPK_FAILS_BEFORE_RESTART == 0) {
+                // The rest of this chunk is lost; a wedged amp channel gets restarted.
+                i2s_channel_disable(s_tx_chan);
+                esp_err_t en = i2s_channel_enable(s_tx_chan);
+                ESP_LOGW(TAG, "speaker write failed (%s, %u of %u bytes) — restarted (%s)",
+                         esp_err_to_name(wr), (unsigned)written, (unsigned)n,
+                         esp_err_to_name(en));
+                if (spk_fails == SPK_FAILS_BEFORE_RESTART * 2 && !s_spk_fault) {
+                    s_spk_fault = true;
+                    status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
+                }
+            }
         } else {
             playing = false;
             s_playing = false;
@@ -951,10 +1077,13 @@ static void ws_tx_task(void *arg) {
     uint8_t *chunk = heap_caps_malloc(TX_CHUNK_BYTES, MALLOC_CAP_SPIRAM);
     if (!chunk) {
         ESP_LOGE(TAG, "uplink buffer alloc failed");
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }
+    health_watch();
     for (;;) {
+        health_feed();
         // Lock the socket BEFORE reading: audio read and then not sent is deleted mid-word.
         if (xSemaphoreTake(s_ws_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
             s_tx_lock_drops++;   // now a delay counter, not a loss counter
@@ -982,6 +1111,7 @@ static void ws_tx_task(void *arg) {
             static const char barge[] = "{\"type\":\"barge_in\"}";
             esp_websocket_client_send_text(s_client, barge, sizeof(barge) - 1,
                                            pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
+            health_feed();   // each send may take TX_SEND_TIMEOUT_MS
         }
 
         // Catch up to real time: drop the oldest past TX_MAX_LATENCY_BYTES, counted and logged.
@@ -1024,13 +1154,13 @@ static void ws_tx_task(void *arg) {
 
         if (queued > TX_BACKLOG_WARN_BYTES) {
             if (s_backlog_since == 0) s_backlog_since = t;
-            const bool already = (status_get() == SANDY_ST_NET_SLOW ||
-                                  status_get() == SANDY_ST_LINK_STALL);
+            const sandy_status_t link = status_part_get(SANDY_PART_LINK);
+            const bool already = (link == SANDY_ST_NET_SLOW || link == SANDY_ST_LINK_STALL);
             if (t - s_backlog_since > TX_BACKLOG_WARN_MS && !already) {
                 // Pick the fault by signal strength: "move closer" is wrong advice on a strong link.
                 const int rssi = wifi_sandy_rssi();
                 const bool weak = (rssi != 0 && rssi < TX_WEAK_RSSI_DBM);
-                status_set(weak ? SANDY_ST_NET_SLOW : SANDY_ST_LINK_STALL);
+                status_set(SANDY_PART_LINK, weak ? SANDY_ST_NET_SLOW : SANDY_ST_LINK_STALL);
                 s_warned_at = t;
                 // Log RSSI with the backlog: below ~-75 dBm the radio can't carry real-time audio.
                 ESP_LOGW(TAG, "audio backing up: %u bytes queued, rssi=%d dBm "
@@ -1042,10 +1172,10 @@ static void ws_tx_task(void *arg) {
             }
         } else if (queued < TX_BACKLOG_CLEAR_BYTES) {
             s_backlog_since = 0;
+            const sandy_status_t link = status_part_get(SANDY_PART_LINK);
             if (s_authed && t - s_warned_at > TX_BACKLOG_HOLD_MS &&
-                (status_get() == SANDY_ST_NET_SLOW ||
-                 status_get() == SANDY_ST_LINK_STALL)) {
-                status_set(SANDY_ST_OK);
+                (link == SANDY_ST_NET_SLOW || link == SANDY_ST_LINK_STALL)) {
+                status_set(SANDY_PART_LINK, SANDY_ST_OK);
             }
         }
         // Between thresholds: leave the status alone (hysteresis).
@@ -1128,7 +1258,7 @@ static void mic_task(void *arg) {
         free(feed);
         free(ref);
         ESP_LOGE(TAG, "mic buffers alloc failed");
-        status_set(SANDY_ST_LOW_MEMORY);   // S4.2: no subsystem fails silently
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);   // S4.2: no subsystem fails silently
         vTaskDelete(NULL);
         return;
     }
@@ -1136,16 +1266,46 @@ static void mic_task(void *arg) {
     int32_t dcx[2] = {0, 0}, dcy[2] = {0, 0};
     int fill = 0;
     bool first_frame = true;
+    int64_t failing_since = 0;   // first failed read of the current run, 0 = reading fine
+    int restarts = 0;            // channel restarts without a good read in between
 #if ENABLE_SERVO
     int32_t ear_prev_l = 0, ear_prev_r = 0;
 #endif
 
+    health_watch();
     for (;;) {
+        health_feed();
         size_t bytes_read = 0;
         // Bounded wait so a wedged I2S stays observable.
-        if (i2s_channel_read(s_rx_chan, raw, MIC_FRAME_SAMPLES * 2 * sizeof(int32_t),
-                             &bytes_read, pdMS_TO_TICKS(1000)) != ESP_OK) {
+        esp_err_t rd = i2s_channel_read(s_rx_chan, raw, MIC_FRAME_SAMPLES * 2 * sizeof(int32_t),
+                                        &bytes_read, pdMS_TO_TICKS(1000));
+        if (rd != ESP_OK) {
+            // A timeout already waited; any other error returns at once and would spin.
+            if (rd != ESP_ERR_TIMEOUT) vTaskDelay(pdMS_TO_TICKS(10));
+            if (!failing_since) {
+                failing_since = now_ms();
+                ESP_LOGW(TAG, "mic read failed (%s)", esp_err_to_name(rd));
+            } else if (now_ms() - failing_since > MIC_RESTART_AFTER_MS) {
+                // Still failing: restart the mic channel, and say so once it stays dead.
+                failing_since = now_ms();
+                i2s_channel_disable(s_rx_chan);
+                esp_err_t en = i2s_channel_enable(s_rx_chan);
+                ESP_LOGW(TAG, "mic restarted (%s), try %d", esp_err_to_name(en), restarts + 1);
+                if (++restarts == MIC_RESTARTS_BEFORE_FAULT) {
+                    s_mic_fault = true;
+                    status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
+                }
+            }
             continue;
+        }
+        if (failing_since) {
+            ESP_LOGI(TAG, "mic reading again");
+            failing_since = 0;
+            restarts = 0;
+            if (s_mic_fault) {
+                s_mic_fault = false;
+                status_set(SANDY_PART_VOICE, SANDY_ST_OK);
+            }
         }
         if (first_frame) {
             first_frame = false;
@@ -1220,7 +1380,7 @@ static void proc_task(void *arg) {
     int16_t *out = malloc((size_t)chunk * sizeof(int16_t));
     if (!out) {
         ESP_LOGE(TAG, "voice buffer alloc failed");
-        status_set(SANDY_ST_LOW_MEMORY);
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);
         vTaskDelete(NULL);
         return;
     }
@@ -1233,9 +1393,14 @@ static void proc_task(void *arg) {
     int caller_level = 0;              // how loud the caller is (wake word, then their speech)
     int near_level = VOICE_NEAR_MIN;   // VOICE_NEAR_PCT of it
 
+    health_watch();
     for (;;) {
+        health_feed();
+        // Returns within 2 s even with no audio.
         afe_fetch_result_t *res = s_afe->fetch(s_afe_data);
         if (!res || res->ret_value == ESP_FAIL || !res->data || res->data_size <= 0) {
+            // A failing fetch returns at once: yield, or this spins on Wi-Fi's core.
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
         int frames = res->data_size / (int)sizeof(int16_t);
@@ -1450,7 +1615,10 @@ static void session_end(void) {
     s_session_active = false;
     VOICE_SESSION(false);
     s_link_lost_ms = 0;
+    // A close frame plus the client's stop: bounded by its network timeout, not by us.
+    health_unwatch();
     ws_close();
+    health_watch();
     net_release(NET_OWNER_VOICE);   // socket gone: updates may run again
 #if ENABLE_COMMANDS
     s_mn_want = true;   // mic_task reloads the model
@@ -1460,22 +1628,46 @@ static void session_end(void) {
 }
 #endif
 
-static void voice_task(void *arg) {
-    // Report while waiting for Wi-Fi (boot doesn't block on it).
-    for (int i = 0; !wifi_sandy_is_connected(); i++) {
-        // After ~5 s: a normal boot's DHCP takes a couple of seconds.
-        if (i >= 10) status_set(wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
-                                                               : SANDY_ST_NO_WIFI);
-        if (i % 20 == 0) ESP_LOGW(TAG, "waiting for wifi before starting voice");
-        vTaskDelay(pdMS_TO_TICKS(500));
+// From the session manager: the Wi-Fi status after a few seconds without it, and the
+// clock started once there is a network.
+static void net_tick(void) {
+    static int64_t down_since;
+    if (wifi_sandy_is_connected()) {
+        down_since = 0;
+        if (!s_clock_started_ms) clock_start();
+        return;
     }
-    // Wi-Fi is up: clear the banner.
-    status_set(SANDY_ST_OK);
-    sync_clock();
+    if (!down_since) down_since = now_ms();
+    // After ~5 s: a normal boot's DHCP takes a couple of seconds.
+    if (now_ms() - down_since > 5000) {
+        status_set(SANDY_PART_NET, wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
+                                                                  : SANDY_ST_NO_WIFI);
+    }
+}
+
+// From the session manager: resync after a refusal, and say so when it stays unset.
+static void clock_tick(void) {
+    static bool resyncing;
+    if (s_clock_bad && !resyncing && !s_session_active) {
+        resyncing = true;
+        clock_start();
+    }
+    if (!s_clock_bad) resyncing = false;
+    if (clock_ok()) {
+        status_set(SANDY_PART_CLOCK, SANDY_ST_OK);
+    } else if (s_clock_started_ms && now_ms() - s_clock_started_ms > CLOCK_UNSET_SHOW_MS) {
+        status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
+    }
+}
+
+static void voice_task(void *arg) {
+    // She listens from boot, network or not: a wake word with no Wi-Fi gets a local
+    // answer instead of silence. The network is the session manager's to wait for.
     devkey_load();
 
     if (i2s_start() != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed, voice disabled");
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }
@@ -1488,8 +1680,10 @@ static void voice_task(void *arg) {
 #endif
     s_ws_mutex = xSemaphoreCreateMutex();
     s_spk_wr_lock = xSemaphoreCreateMutex();
-    if (!s_spk_stream || !s_tx_stream || !s_ws_mutex || !s_spk_wr_lock) {
+    s_rx_text = heap_caps_malloc(RX_TEXT_MAX, MALLOC_CAP_SPIRAM);
+    if (!s_spk_stream || !s_tx_stream || !s_ws_mutex || !s_spk_wr_lock || !s_rx_text) {
         ESP_LOGE(TAG, "voice buffers could not be allocated — voice disabled");
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }
@@ -1499,7 +1693,7 @@ static void voice_task(void *arg) {
     // BEFORE the audio tasks: they read the front end's handle and chunk size.
     if (!s_ref_stream || !afe_init()) {
         ESP_LOGE(TAG, "audio front end unavailable — voice disabled");
-        status_set(SANDY_ST_LOW_MEMORY);
+        status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
         return;
     }
@@ -1536,13 +1730,15 @@ static void voice_task(void *arg) {
         audio_task_fail++;
         ESP_LOGE(TAG, "audio task voice_proc create FAILED");
     }
+    // She can hear now: booting is over (each part reports its own faults).
+    status_set(SANDY_PART_SYSTEM, SANDY_ST_OK);
     if (audio_task_fail) {
         // Out of internal RAM for stacks: say so on her face.
         ESP_LOGE(TAG, "%d of 4 audio tasks did not start (heap_int free=%u largest=%u)",
                  audio_task_fail,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-        status_set(SANDY_ST_LOW_MEMORY);
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);
     }
 
 #if ENABLE_WAKEWORD
@@ -1554,18 +1750,53 @@ static void voice_task(void *arg) {
     }
 
     // Session manager: the paid link is up only between a wake word and the silence after.
+    health_watch();
     for (;;) {
-        if (s_session_active && s_auth_refused) {
-            // Refused: end now.
+        health_feed();
+        net_tick();
+        clock_tick();
+        if (s_session_active && (s_auth_refused || s_clock_bad)) {
+            // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
+        } else if (!s_session_active && s_wake_req && !identity_complete()) {
+            // No server to call and no name to call it with: say so, not "no internet".
+            s_wake_req = false;
+            ESP_LOGW(TAG, "wake word, but this board is not set up");
+            status_set(SANDY_PART_IDENTITY, SANDY_ST_NOT_SET_UP);
+#if ENABLE_BUZZER
+            buzzer_play(MELODY_ERROR);
+#endif
+            VOICE_FACE(MOOD_CONFUSED);
+            VOICE_LED(LED_STATE_IDLE);
+        } else if (!s_session_active && s_wake_req && !wifi_sandy_is_connected()) {
+            // Heard, but nowhere to send it: answer here, with a tone and a face.
+            s_wake_req = false;
+            ESP_LOGW(TAG, "wake word with no Wi-Fi");
+            status_set(SANDY_PART_NET, wifi_sandy_password_rejected() ? SANDY_ST_WIFI_BAD_PASS
+                                                                      : SANDY_ST_NO_WIFI);
+#if ENABLE_BUZZER
+            buzzer_play(MELODY_SAD);
+#endif
+            VOICE_FACE(MOOD_WORRIED);
+            VOICE_LED(LED_STATE_IDLE);
+        } else if (!s_session_active && s_wake_req && !clock_ok()) {
+            // The hello would be refused: say so here instead of opening a doomed call.
+            s_wake_req = false;
+            ESP_LOGW(TAG, "wake ignored: the clock is not set yet");
+            status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
+#if ENABLE_BUZZER
+            buzzer_play(MELODY_ERROR);
+#endif
+            VOICE_FACE(MOOD_CONFUSED);
+            VOICE_LED(LED_STATE_IDLE);
         } else if (!s_session_active) {
             if (s_wake_req && s_auth_refused &&
                 now_ms() - s_auth_refused_at < VOICE_AUTH_BACKOFF_MS) {
                 s_wake_req = false;
                 ESP_LOGW(TAG, "wake ignored: the server refused this device %d s ago",
                          (int)((now_ms() - s_auth_refused_at) / 1000));
-                status_set(SANDY_ST_AUTH_FAILED);
+                status_set(SANDY_PART_LINK, SANDY_ST_AUTH_FAILED);
                 VOICE_FACE(MOOD_IDLE);
                 VOICE_LED(LED_STATE_IDLE);
             } else if (s_wake_req) {
@@ -1574,6 +1805,7 @@ static void voice_task(void *arg) {
                 // else drop the wake. Held until ws_close.
                 for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {
                     vTaskDelay(pdMS_TO_TICKS(100));
+                    health_feed();
                 }
                 if (net_owner() != NET_OWNER_VOICE) {
                     ESP_LOGW(TAG, "wake ignored: update in progress");
@@ -1591,7 +1823,7 @@ static void voice_task(void *arg) {
                 if (s_mn_loaded) {
                     ESP_LOGE(TAG, "command model did not release in 3s — "
                                   "skipping this session rather than failing blind");
-                    status_set(SANDY_ST_LOW_MEMORY);
+                    status_set(SANDY_PART_LINK, SANDY_ST_LOW_MEMORY);
                     s_mn_want = true;
                     net_release(NET_OWNER_VOICE);
                     continue;
@@ -1602,8 +1834,13 @@ static void voice_task(void *arg) {
                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                          (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
-                if (ws_open()) {
+                // Waits for the uplink's socket lock (one send, up to 4 s).
+                health_unwatch();
+                const bool opened = ws_open();
+                health_watch();
+                if (opened) {
                     s_session_voice_ms = now_ms();
+                    s_session_open_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;
                     // المخزن بيرجع لأصغر قيمة مع كل مكالمة، عشان يقيس الشبكة الحالية.
@@ -1617,12 +1854,12 @@ static void voice_task(void *arg) {
                              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                              largest);
                     if (!wifi_sandy_is_connected()) {
-                        status_set(SANDY_ST_NO_WIFI);
+                        status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
                     } else if (largest < WS_TASK_MIN_BLOCK) {
                         // Not enough contiguous internal RAM for TLS.
-                        status_set(SANDY_ST_LOW_MEMORY);
+                        status_set(SANDY_PART_LINK, SANDY_ST_LOW_MEMORY);
                     } else {
-                        status_set(SANDY_ST_NO_SERVER);
+                        status_set(SANDY_PART_LINK, SANDY_ST_NO_SERVER);
                     }
                     net_release(NET_OWNER_VOICE);   // ws_open left no socket behind
 #if ENABLE_COMMANDS
@@ -1641,6 +1878,18 @@ static void voice_task(void *arg) {
                 s_link_lost_ms = 0;
                 s_session_voice_ms = 0;   // fall into the close branch next tick
             }
+        } else if (!s_playing && now_ms() - s_session_open_ms > VOICE_SESSION_MAX_MS) {
+            ESP_LOGW(TAG, "session reached its %d min cap, closing", VOICE_SESSION_MAX_MS / 60000);
+            session_heap_report();
+            session_end();
+        } else if (!s_playing &&
+                   now_ms() - (s_last_rx_audio_ms > s_session_open_ms ? s_last_rx_audio_ms
+                                                                      : s_session_open_ms)
+                       > VOICE_NO_REPLY_MS) {
+            // Speech keeps a session open, but not talk she never answers.
+            ESP_LOGW(TAG, "%d s of talk with no reply from her, closing", VOICE_NO_REPLY_MS / 1000);
+            session_heap_report();
+            session_end();
         } else if ((now_ms() - s_session_voice_ms) > VOICE_SESSION_IDLE_MS && !s_playing) {
             ESP_LOGI(TAG, "session idle, closing");
             session_heap_report();
@@ -1649,6 +1898,11 @@ static void voice_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 #else
+    // Always-on build: the link needs the network and the clock first.
+    while (!wifi_sandy_is_connected() || !clock_ok()) {
+        net_tick();
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
     ws_open();
     vTaskDelete(NULL);  // setup done; the audio tasks carry on
 #endif

@@ -22,6 +22,7 @@ idf_component_register(
         "sandy_ir.c"
         "sandy_led.c"
         "sandy_status.c"
+        "sandy_health.c"
         "sandy_audio_ctl.c"
         "sandy_screen.c"
         # Generated Arabic fonts (fonts/README.md), listed explicitly, not globbed.

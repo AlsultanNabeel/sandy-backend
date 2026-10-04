@@ -100,7 +100,16 @@ _TELEMETRY_KEYS = {
     "ssid": str,
     # dBm; below about -75 the link can't carry live voice.
     "rssi": int, "room_rssi": int,
+    # The brain's health: last reset reason, restarts ever, least internal RAM it had,
+    # its largest block now, safe mode, each part not OK, each task's least stack headroom.
+    "boot": int, "boots": int, "heap_min": int, "heap_big": int, "safe": bool,
+    # The settings store: erased at this boot to recover (Wi-Fi and keys lost), and how full.
+    "nvs_wiped": bool, "nvs_used": int, "nvs_total": int,
+    "faults": dict, "stacks": dict,
 }
+
+# A dict member: a few short names to a short string or a number.
+_DICT_MAX_ITEMS = 24
 
 
 def _clean_telemetry(data: Any) -> Dict[str, Any]:
@@ -111,7 +120,14 @@ def _clean_telemetry(data: Any) -> Dict[str, Any]:
         if key not in data:
             continue
         try:
-            if kind is bool:
+            if kind is dict:
+                if isinstance(data[key], dict):
+                    out[key] = {
+                        str(k)[:16]: (v if isinstance(v, int) and not isinstance(v, bool)
+                                      else str(v)[:32])
+                        for k, v in list(data[key].items())[:_DICT_MAX_ITEMS]
+                    }
+            elif kind is bool:
                 out[key] = bool(data[key])
             elif kind is str:
                 # Capped: untrusted input.
@@ -278,13 +294,37 @@ def rename_node(node_id: str, label: str) -> Dict[str, Any]:
     return {"ok": True, "node_id": node_id}
 
 
+def _erase_command(node_id: str) -> Optional[str]:
+    """``erase:<ms>:<hmac>``, signed like the voice hello: the board's own key, or the
+    shared one while it has none. The board refuses anything unsigned or more than
+    five minutes old, so a word on the broker can no longer wipe a robot."""
+    import hashlib
+    import hmac
+    import time
+
+    from app.api.voice_ws._config import _HMAC_KEY
+    from app.features.device_keys import get_key
+
+    record = get_key(node_id)
+    key = record["key"] if record else _HMAC_KEY
+    if not key:
+        return None
+    ms = str(int(time.time() * 1000))
+    mac = hmac.new(key, f"factory_reset|{node_id}|{ms}".encode(), hashlib.sha256).hexdigest()
+    return f"erase:{ms}:{mac}"
+
+
 def _wipe_board(node_id: str) -> bool:
     """Tell the board to forget its network credentials. Best effort."""
     try:
         from app.integrations.room_device import get_room_device_client
 
+        command = _erase_command(node_id)
+        if not command:
+            logger.warning("[NodeStore] no key to sign the factory reset of %s", node_id)
+            return False
         return bool(get_room_device_client().publish_service(
-            f"sandy/node/{node_id}/factory_reset", "erase"))
+            f"sandy/node/{node_id}/factory_reset", command))
     except Exception as exc:  # noqa: BLE001 — an offline board must not block the release
         logger.warning("[NodeStore] factory reset not delivered to %s: %s",
                        node_id, exc)

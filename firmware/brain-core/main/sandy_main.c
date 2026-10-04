@@ -1,7 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "esp_task_wdt.h"
 #include "esp_system.h"
 #include "config.h"
 #include "sandy_types.h"
@@ -25,6 +24,7 @@
 #include "sandy_remote.h"
 #include "sandy_led.h"
 #include "sandy_status.h"
+#include "sandy_health.h"
 #include "sandy_audio_ctl.h"
 
 static const char *TAG = "main";
@@ -36,6 +36,17 @@ static const char *TAG = "main";
         if (_e != ESP_OK) {                                                    \
             ESP_LOGE(TAG, "%s init failed (%s) — running without it",          \
                      (name), esp_err_to_name(_e));                             \
+        }                                                                      \
+    } while (0)
+
+// The same, for a part whose failure must show: its status is set as well.
+#define TRY_PART(name, call, part, st)                                         \
+    do {                                                                       \
+        esp_err_t _e = (call);                                                 \
+        if (_e != ESP_OK) {                                                    \
+            ESP_LOGE(TAG, "%s init failed (%s) — running without it",          \
+                     (name), esp_err_to_name(_e));                             \
+            status_set((part), (st));                                          \
         }                                                                      \
     } while (0)
 
@@ -77,9 +88,13 @@ static void _mqtt_late_start(void *arg) {
 void app_main(void) {
     // Tells brownout from panic from power-on.
     ESP_LOGI(TAG, "Sandy Brain S3 — booting (reset_reason=%d)", (int)esp_reset_reason());
+    // Before anything that could crash again: decides safe mode.
+    health_boot();
+    const bool safe = health_safe_mode();
 
     // ── Core services ──
     TRY_INIT("nvs", nvs_sandy_init());
+    health_init();
     // See sandy_identity.h.
     TRY_INIT("identity", identity_init());
 #if ENABLE_WIFI
@@ -87,7 +102,7 @@ void app_main(void) {
 #endif
 #if ENABLE_IR
     // Before MQTT, which dispatches the `ir` output.
-    TRY_INIT("ir", ir_init());
+    if (!safe) TRY_INIT("ir", ir_init());
 #endif
 #if ENABLE_PROVISION
     // Raises the setup AP if no association happens.
@@ -103,41 +118,48 @@ void app_main(void) {
     // on every reboot. Early, because health only means "still reachable".
     ota_start_health_watch();
 
-    // ── Peripherals ──
+    if (safe) {
+        // Network and updates only: whatever kept crashing stays off until an update
+        // or a power cut. The heartbeat says so.
+        status_init();
+        status_set(SANDY_PART_SYSTEM, SANDY_ST_SAFE_MODE);
+    } else {
+        // ── Peripherals ──
 #if ENABLE_FACE
-    TRY_INIT("face", face_init());
+        TRY_PART("face", face_init(), SANDY_PART_SCREEN, SANDY_ST_SCREEN_OFF);
 #endif
 #if ENABLE_LED
-    led_init();   // non-fatal
+        led_init();   // non-fatal
 #endif
-    // After face and LED, which it drives.
-    status_init();
-    // Before mic, voice and MQTT use the gains.
-    audio_ctl_init();
+        // After face and LED, which it drives.
+        status_init();
+        // Before mic, voice and MQTT use the gains.
+        audio_ctl_init();
 #if ENABLE_SERVO
-    TRY_INIT("servo", servo_init());
+        TRY_PART("servo", servo_init(), SANDY_PART_NECK, SANDY_ST_NECK_OFF);
 #endif
 #if ENABLE_BUZZER
-    TRY_INIT("buzzer", buzzer_init());
+        TRY_INIT("buzzer", buzzer_init());
 #endif
 #if ENABLE_SENSOR
-    TRY_INIT("sensor", sensor_init());
+        TRY_INIT("sensor", sensor_init());
 #endif
 #if ENABLE_MOTORS
-    TRY_INIT("motors", motors_init());
+        TRY_INIT("motors", motors_init());
 #endif
 #if ENABLE_TOUCH
-    TRY_INIT("touch", touch_init());
+        TRY_INIT("touch", touch_init());
 #endif
 #if ENABLE_MIC
-    TRY_INIT("mic", mic_init());
+        TRY_INIT("mic", mic_init());
 #endif
 #if ENABLE_EARS
-    TRY_INIT("ears", ears_init());
+        TRY_INIT("ears", ears_init());
 #endif
 #if ENABLE_SPK_TEST
-    TRY_INIT("spk_test", spktest_init());
+        TRY_INIT("spk_test", spktest_init());
 #endif
+    }
 #if ENABLE_OTA
     TRY_INIT("ota", ota_init());
     ota_updates_start();
@@ -148,25 +170,24 @@ void app_main(void) {
     xTaskCreate(_mqtt_late_start, "mqtt_late", 4096, NULL, 3, NULL);
 #endif
 
-    // ── Voice link ──
+    if (!safe) {
+        // ── Voice link ──
 #if ENABLE_VOICE
-    TRY_INIT("voice", voice_init());
+        TRY_INIT("voice", voice_init());
 #endif
-
-    ESP_LOGI(TAG, "all systems go");
-
 #if ENABLE_BUZZER
-    buzzer_play(MELODY_BOOT);
+        buzzer_play(MELODY_BOOT);
 #endif
-
 #if ENABLE_SENSOR && ENABLE_FACE
-    xTaskCreate(_proximity_task, "proximity", 3072, NULL, 3, NULL);
+        xTaskCreate(_proximity_task, "proximity", 3072, NULL, 3, NULL);
 #endif
+    }
 
-    // 5 s, set in sdkconfig.defaults
-    esp_task_wdt_add(NULL);
+    ESP_LOGI(TAG, "%s", safe ? "safe mode — network and updates only" : "all systems go");
+
+    health_watch();
     for (;;) {
-        esp_task_wdt_reset();
+        health_feed();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

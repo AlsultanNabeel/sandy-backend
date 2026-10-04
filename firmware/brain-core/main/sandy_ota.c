@@ -121,7 +121,7 @@ static void _health_task(void *arg) {
         if (!wifi_sandy_is_connected()) {
             up_since = 0;
             if (!ever_up && now - start > OTA_HEALTH_TIMEOUT_MS) {
-                status_set(SANDY_ST_NO_WIFI);
+                status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
                 _roll_back("no network in two minutes");
                 break;
             }
@@ -199,11 +199,27 @@ extern const char fw_pubkey_pem_end[]   asm("_binary_fw_pubkey_pem_end");
 #define OTA_PERIOD_MS        (6LL * 60 * 60 * 1000)
 // Retry a skipped check (offline, voice busy) this soon.
 #define OTA_RETRY_MS         (5LL * 60 * 1000)
+// A failed download or install comes back in minutes, doubling, not after six hours.
+#define OTA_FAIL_RETRY_MAX_MS (60LL * 60 * 1000)
+// Below this the download crawls and dies halfway: wait for a better moment.
+#define OTA_MIN_RSSI         (-80)
 // ~400 bytes today; headroom so it never truncates.
 #define OTA_MANIFEST_MAX     2048
 #define OTA_BUF              4096
 
 static esp_timer_handle_t s_ota_timer;
+static int64_t            s_fail_retry_ms;   // 0 = last check did not fail
+
+typedef enum {
+    OTA_DONE,      // nothing to do (current, not newer, a known-bad or unsigned release)
+    OTA_RETRY,     // try again in minutes: unreachable, cut short, not installed, weak signal
+} ota_result_t;
+
+static void ota_retry_in(int64_t ms) {
+    if (!s_ota_timer) return;
+    esp_timer_stop(s_ota_timer);   // stopping an unarmed timer fails harmlessly
+    esp_timer_start_once(s_ota_timer, ms * 1000);
+}
 // Timer and MQTT tasks both start checks; atomic so only one downloads.
 static atomic_bool        s_ota_running;
 
@@ -321,20 +337,20 @@ static bool ota_server_answers(void) {
     return ok;
 }
 
-static void ota_check_once(void) {
+static ota_result_t ota_check_once(void) {
     char base[96], url[256];
-    if (!api_base(base, sizeof(base))) return;
+    if (!api_base(base, sizeof(base))) return OTA_DONE;
     snprintf(url, sizeof(url), "%s/api/firmware/manifest?device_id=%s&v=%s",
              base, identity()->device_id, SANDY_FW_VERSION);
 
     esp_http_client_handle_t c = http_open(url);
-    if (!c) { ESP_LOGW(TAG, "update check: server not reachable"); return; }
+    if (!c) { ESP_LOGW(TAG, "update check: server not reachable"); return OTA_RETRY; }
     esp_http_client_fetch_headers(c);
     int status = esp_http_client_get_status_code(c);
     if (status == 204) {
         esp_http_client_cleanup(c);
         ESP_LOGI(TAG, "update check: %s is current", SANDY_FW_VERSION);
-        return;
+        return OTA_DONE;
     }
     char *js = calloc(1, OTA_MANIFEST_MAX + 1);
     int got = js ? esp_http_client_read_response(c, js, OTA_MANIFEST_MAX) : -1;
@@ -342,7 +358,7 @@ static void ota_check_once(void) {
     if (status != 200 || got <= 0) {
         ESP_LOGW(TAG, "update check: HTTP %d", status);
         free(js);
-        return;
+        return OTA_RETRY;
     }
 
     char version[24], sha[65], sig[161], path[96];
@@ -352,42 +368,55 @@ static void ota_check_once(void) {
               json_str(js, "signature", sig, sizeof(sig)) &&
               json_str(js, "url", path, sizeof(path)) && size > 0;
     free(js);
-    if (!ok) { ESP_LOGW(TAG, "update check: unreadable manifest"); return; }
+    if (!ok) { ESP_LOGW(TAG, "update check: unreadable manifest"); return OTA_RETRY; }
     if (version_cmp(version, SANDY_FW_VERSION) <= 0) {
         ESP_LOGI(TAG, "update check: %s offered, not newer than %s", version, SANDY_FW_VERSION);
-        return;
+        return OTA_DONE;
     }
     if (ota_version_is_bad(version)) {
         ESP_LOGW(TAG, "update %s failed its trial %d times — not trying again",
                  version, OTA_BAD_MAX_TRIES);
-        return;
+        return OTA_DONE;
     }
     if (!signature_ok(version, size, sha, sig)) {
         ESP_LOGE(TAG, "update %s: BAD SIGNATURE — refused", version);
-        return;
+        return OTA_DONE;
     }
 
     const esp_partition_t *slot = esp_ota_get_next_update_partition(NULL);
     if (!slot || size > (long)slot->size) {
         ESP_LOGE(TAG, "update %s: does not fit (%ld bytes)", version, size);
-        return;
+        return OTA_DONE;
+    }
+    const int rssi = wifi_sandy_rssi();
+    if (rssi != 0 && rssi < OTA_MIN_RSSI) {
+        ESP_LOGW(TAG, "update %s: signal %d dBm too weak to download — later", version, rssi);
+        return OTA_RETRY;
     }
     ESP_LOGW(TAG, "update %s: signed release, downloading %ld bytes", version, size);
+    // On her face from here to the restart: pulling the plug now costs the update.
+    status_set(SANDY_PART_UPDATE, SANDY_ST_UPDATING);
 
     snprintf(url, sizeof(url), "%s%s", base, path);
     c = http_open(url);
-    if (!c) { ESP_LOGW(TAG, "update %s: download failed to start", version); return; }
+    if (!c) {
+        ESP_LOGW(TAG, "update %s: download failed to start", version);
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
+        return OTA_RETRY;
+    }
     esp_http_client_fetch_headers(c);
     if (esp_http_client_get_status_code(c) != 200) {
         ESP_LOGW(TAG, "update %s: HTTP %d", version, esp_http_client_get_status_code(c));
         esp_http_client_cleanup(c);
-        return;
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
+        return OTA_RETRY;
     }
 
     esp_ota_handle_t h;
     if (esp_ota_begin(slot, size, &h) != ESP_OK) {
         esp_http_client_cleanup(c);
-        return;
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
+        return OTA_RETRY;
     }
     unsigned char *buf = malloc(OTA_BUF);
     mbedtls_md_context_t sh;
@@ -416,16 +445,19 @@ static void ota_check_once(void) {
     if (fail || total != size || strcasecmp(digest_hex, sha) != 0) {
         ESP_LOGE(TAG, "update %s: download did not match what was signed — discarded", version);
         esp_ota_abort(h);
-        return;
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
+        return OTA_RETRY;
     }
     if (esp_ota_end(h) != ESP_OK || esp_ota_set_boot_partition(slot) != ESP_OK) {
-        ESP_LOGE(TAG, "update %s: image rejected by the bootloader check", version);
-        return;
+        ESP_LOGE(TAG, "update %s: image not installed — trying again", version);
+        status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
+        return OTA_RETRY;
     }
     ota_nvs_note_trying(version);
     ESP_LOGW(TAG, "update %s installed — restarting", version);
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
+    return OTA_DONE;
 }
 
 static void ota_check_task(void *arg) {
@@ -435,13 +467,18 @@ static void ota_check_task(void *arg) {
     if (!s_confirmed) {
         // An image on trial installs nothing else.
         ESP_LOGI(TAG, "update check skipped (this image is still on trial)");
-        if (s_ota_timer) {
-            esp_timer_stop(s_ota_timer);
-            esp_timer_start_once(s_ota_timer, OTA_RETRY_MS * 1000);
-        }
+        ota_retry_in(OTA_RETRY_MS);
     } else if (wifi_sandy_is_connected() && net_claim(NET_OWNER_OTA)) {
         if (!voice_is_connected()) {
-            ota_check_once();   // esp_restart()s on a successful install
+            // esp_restart()s on a successful install.
+            if (ota_check_once() == OTA_RETRY) {
+                s_fail_retry_ms = s_fail_retry_ms ? s_fail_retry_ms * 2 : OTA_RETRY_MS;
+                if (s_fail_retry_ms > OTA_FAIL_RETRY_MAX_MS) s_fail_retry_ms = OTA_FAIL_RETRY_MAX_MS;
+                ESP_LOGW(TAG, "update failed — next try in %d min", (int)(s_fail_retry_ms / 60000));
+                ota_retry_in(s_fail_retry_ms);
+            } else {
+                s_fail_retry_ms = 0;
+            }
         } else {
             ESP_LOGI(TAG, "update check skipped (in a call)");
         }
@@ -449,11 +486,7 @@ static void ota_check_task(void *arg) {
     } else {
         ESP_LOGI(TAG, "update check skipped (offline or in a call), retrying in %d min",
                  (int)(OTA_RETRY_MS / 60000));
-        // Retry in minutes. Stopping an unarmed timer fails harmlessly.
-        if (s_ota_timer) {
-            esp_timer_stop(s_ota_timer);
-            esp_timer_start_once(s_ota_timer, OTA_RETRY_MS * 1000);
-        }
+        ota_retry_in(OTA_RETRY_MS);
     }
     atomic_store(&s_ota_running, false);
     vTaskDelete(NULL);

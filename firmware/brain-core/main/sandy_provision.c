@@ -16,6 +16,9 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
+#include "esp_random.h"
+#include "esp_timer.h"
+#include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -55,14 +58,25 @@ static esp_netif_t   *s_ap_netif;   // created once; start_ap may run again
 bool provision_is_active(void) { return s_active; }
 
 // ─── The access point's identity ───
-// Named after the box code so the owner finds it. WPA2, not open: the page sets
-// which network the robot joins; the password comes from the same sticker.
+// The name carries only the code's last four characters: the whole code pairs the robot,
+// and anyone in range can read a network name. WPA2 with a password made fresh each boot
+// and shown only on her face (QR and text), so it cannot be derived from anything.
+#define AP_PASS_LEN 10
 static void build_ap_identity(char *ssid, size_t ssid_cap,
                               char *pass, size_t pass_cap) {
-    snprintf(ssid, ssid_cap, "Sandy-%s", identity()->pair_code);
-    // Prefix only pads to WPA2's 8-char minimum; not a secret.
-    snprintf(pass, pass_cap, "sandy%s", identity()->pair_code);
-    if (strlen(pass) < 8) snprintf(pass, pass_cap, "sandysetup");
+    const char *code = identity()->pair_code;
+    const size_t n = strlen(code);
+    snprintf(ssid, ssid_cap, "Sandy-%s", n > 4 ? code + n - 4 : code);
+
+    static char s_pass[AP_PASS_LEN + 1];
+    if (!s_pass[0]) {
+        // No 0/o, 1/l/i: read off a screen and typed on a phone.
+        static const char ALPHABET[] = "abcdefghjkmnpqrstuvwxyz23456789";
+        for (int i = 0; i < AP_PASS_LEN; i++) {
+            s_pass[i] = ALPHABET[esp_random() % (sizeof(ALPHABET) - 1)];
+        }
+    }
+    snprintf(pass, pass_cap, "%s", s_pass);
 }
 
 // ─── The page ───
@@ -79,18 +93,30 @@ static const char PAGE_HEAD[] =
     "border-radius:10px;border:1px solid #333;background:#1c1c1c;color:#eee}"
     "button{width:100%;margin-top:22px;padding:14px;font-size:16px;border:0;"
     "border-radius:10px;background:#f5c518;color:#111;font-weight:600}"
-    "</style></head><body><h1>Sandy</h1>"
+    ".ar{direction:rtl;text-align:right}"
+    "</style></head><body><h1>Sandy · ساندي</h1>"
     "<p>Choose the network she should join.</p>"
+    "<p class=ar>اختار الشبكة اللي بدها تدخل عليها.</p>"
     "<form method=POST action=/provision>"
-    "<label>Network</label><select name=ssid>";
+    "<label>Network · الشبكة</label><select name=ssid>";
 
 static const char PAGE_TAIL[] =
     "</select>"
-    "<label>Password</label>"
-    "<input name=pass type=password placeholder='Leave empty if open'>"
-    "<button type=submit>Connect</button></form>"
+    "<label>Hidden network · شبكة مخفية (اكتب اسمها)</label>"
+    "<input name=hidden maxlength=32 autocomplete=off "
+    "placeholder='Only if it is not listed · بس إذا مش بالقائمة'>"
+    "<label>Password · كلمة السر</label>"
+    "<input name=pass type=password placeholder='Leave empty if open · فاضية إذا مفتوحة'>"
+    "<button type=submit>Connect · اتصل</button></form>"
     "<p style='margin-top:24px;font-size:12px'>She will test it before saving. "
-    "If it fails, this page comes back.</p></body></html>";
+    "If it fails, this page comes back.</p>"
+    "<p class=ar style='font-size:12px'>رح تجرّبها قبل ما تحفظها. إذا ما زبطت، "
+    "بترجع هالصفحة.</p></body></html>";
+
+// Strongest first.
+static int by_signal(const void *a, const void *b) {
+    return ((const wifi_ap_record_t *)b)->rssi - ((const wifi_ap_record_t *)a)->rssi;
+}
 
 // Scan on demand: the router may have just been switched on.
 static esp_err_t root_get(httpd_req_t *req) {
@@ -98,15 +124,20 @@ static esp_err_t root_get(httpd_req_t *req) {
     uint16_t n = 0;
     wifi_ap_record_t *aps = NULL;
 
+    // A connect attempt to the saved network in progress makes the scan fail: hold it.
+    wifi_sandy_hold(true);
+    if (!wifi_sandy_is_connected()) esp_wifi_disconnect();
     if (esp_wifi_scan_start(&scan, true) == ESP_OK &&
         esp_wifi_scan_get_ap_num(&n) == ESP_OK && n) {
-        if (n > 20) n = 20;
+        if (n > 30) n = 30;
         aps = calloc(n, sizeof(*aps));
         if (aps && esp_wifi_scan_get_ap_records(&n, aps) != ESP_OK) {
             free(aps);
             aps = NULL;
         }
     }
+    wifi_sandy_hold(false);
+    if (aps) qsort(aps, n, sizeof(*aps), by_signal);
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_send_chunk(req, PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
@@ -115,6 +146,12 @@ static esp_err_t root_get(httpd_req_t *req) {
         for (uint16_t i = 0; i < n; i++) {
             const char *ssid = (const char *)aps[i].ssid;
             if (!ssid[0]) continue;
+            // One line per name: a mesh or a dual-band router repeats it.
+            bool seen = false;
+            for (uint16_t j = 0; j < i && !seen; j++) {
+                seen = !strcmp(ssid, (const char *)aps[j].ssid);
+            }
+            if (seen) continue;
             // SSIDs are attacker-controlled: escape value and text, and clamp the length
             // sent to what was written (long names overran the buffer).
             char esc[SSID_ESC_MAX];
@@ -185,16 +222,19 @@ static void form_field(const char *body, const char *key, char *out, size_t cap)
     url_decode(raw, out, cap);
 }
 
-static esp_err_t reply(httpd_req_t *req, const char *title, const char *body) {
-    char page[512];
+// Every answer in English and Arabic.
+static esp_err_t reply(httpd_req_t *req, const char *title, const char *body,
+                       const char *title_ar, const char *body_ar) {
+    char page[1280];
     snprintf(page, sizeof(page),
              "<!doctype html><meta charset=utf-8>"
              "<meta name=viewport content='width=device-width,initial-scale=1'>"
              "<body style=\"font-family:-apple-system,system-ui,sans-serif;"
              "background:#111;color:#eee;padding:24px\">"
              "<h1 style=font-size:20px>%s</h1><p style=color:#999>%s</p>"
-             "<p><a style=color:#f5c518 href=/>Back</a></p></body>",
-             title, body);
+             "<div dir=rtl><h1 style=font-size:20px>%s</h1><p style=color:#999>%s</p></div>"
+             "<p><a style=color:#f5c518 href=/>Back · رجوع</a></p></body>",
+             title, body, title_ar, body_ar);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_sendstr(req, page);
     return ESP_OK;
@@ -203,25 +243,31 @@ static esp_err_t reply(httpd_req_t *req, const char *title, const char *body) {
 // ─── Accepting a network ───
 
 static esp_err_t provision_post(httpd_req_t *req) {
-    char body[320];
+    char body[512];   // three fields, each fully percent-encoded at worst
     int total = req->content_len;
     if (total <= 0 || total >= (int)sizeof(body)) {
-        return reply(req, "Too long", "That did not fit. Try a shorter name.");
+        return reply(req, "Too long", "That did not fit. Try a shorter name.",
+                     "طويل كتير", "ما زبط. جرّب اسم أقصر.");
     }
     int got = 0;
     while (got < total) {
         int r = httpd_req_recv(req, body + got, total - got);
-        if (r <= 0) return reply(req, "Interrupted", "The form did not arrive whole.");
+        if (r <= 0) return reply(req, "Interrupted", "The form did not arrive whole.",
+                                 "انقطع", "الطلب ما وصل كامل. جرّب كمان مرة.");
         got += r;
     }
     body[got] = '\0';
 
-    char ssid[33] = "", pass[65] = "";
+    char ssid[33] = "", pass[65] = "", hidden[33] = "";
     form_field(body, "ssid", ssid, sizeof(ssid));
     form_field(body, "pass", pass, sizeof(pass));
+    // A hidden network is typed, and wins over the list.
+    form_field(body, "hidden", hidden, sizeof(hidden));
+    if (hidden[0]) snprintf(ssid, sizeof(ssid), "%s", hidden);
 
     if (!ssid[0]) {
-        return reply(req, "Pick a network", "No network was selected.");
+        return reply(req, "Pick a network", "No network was selected.",
+                     "اختار شبكة", "ما اخترت ولا شبكة.");
     }
 
     ESP_LOGI(TAG, "trying '%s' from the setup page", ssid);
@@ -230,7 +276,10 @@ static esp_err_t provision_post(httpd_req_t *req) {
     // Reply first: wifi_sandy_switch tears down the link this page is served over.
     reply(req, "Connecting…",
           "Watch her screen. If it worked she restarts on your network; "
-          "if not, this page comes back in a few seconds.");
+          "if not, this page comes back in a few seconds.",
+          "عم تتصل…",
+          "راقب شاشتها. إذا زبطت بتعيد التشغيل على شبكتك، وإذا لأ بترجع "
+          "هالصفحة بعد كم ثانية.");
     vTaskDelay(pdMS_TO_TICKS(300));
 
     wifi_switch_result_t r = wifi_sandy_switch(ssid, pass);
@@ -248,6 +297,70 @@ static esp_err_t provision_post(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// ─── Captive portal ───
+// A phone joining the setup network asks a known address whether it is online. Every
+// name resolves here and every unknown path is sent to the page, so the phone opens
+// the page by itself instead of the owner typing an address.
+
+static volatile bool s_dns_run;
+static TaskHandle_t  s_dns_task;
+
+// One answer for every A question: this access point.
+static void dns_task(void *arg) {
+    (void)arg;
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(53),
+                                .sin_addr.s_addr = htonl(INADDR_ANY) };
+    struct timeval tv = { .tv_sec = 1 };   // to notice the stop flag
+    if (sock < 0 || bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "captive DNS could not bind port 53");
+        if (sock >= 0) close(sock);
+        s_dns_task = NULL;
+        vTaskDelete(NULL);
+    }
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    uint8_t pkt[512];
+    while (s_dns_run) {
+        struct sockaddr_in from;
+        socklen_t flen = sizeof(from);
+        int n = recvfrom(sock, pkt, sizeof(pkt) - 16, 0, (struct sockaddr *)&from, &flen);
+        // A query: header, one question; nothing else is answered.
+        if (n < 12 + 5 || (pkt[2] & 0x80) || pkt[4] != 0 || pkt[5] != 1) continue;
+        int q = 12;
+        while (q < n && pkt[q]) q += pkt[q] + 1;   // the name's labels
+        if (q + 5 > n) continue;
+        const bool is_a = pkt[q + 1] == 0 && pkt[q + 2] == 1;
+        int len = q + 5;                           // header + question
+        pkt[2] = 0x84 | (pkt[2] & 0x01);           // response, authoritative, keep RD
+        pkt[3] = 0x80;                             // recursion available, no error
+        pkt[6] = 0; pkt[7] = is_a ? 1 : 0;         // answers
+        pkt[8] = pkt[9] = pkt[10] = pkt[11] = 0;
+        if (is_a) {
+            static const uint8_t ans[] = {
+                0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01,  // the name above, A, IN
+                0x00, 0x00, 0x00, 0x3C, 0x00, 0x04,  // 60 s, four bytes
+                192, 168, 4, 1,
+            };
+            memcpy(pkt + len, ans, sizeof(ans));
+            len += sizeof(ans);
+        }
+        sendto(sock, pkt, len, 0, (struct sockaddr *)&from, flen);
+    }
+    close(sock);
+    s_dns_task = NULL;
+    vTaskDelete(NULL);
+}
+
+// Any path but the page's own (`/generate_204`, `/hotspot-detect.html`, …): to the page.
+static esp_err_t to_the_page(httpd_req_t *req, httpd_err_code_t err) {
+    (void)err;
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 // ─── Bringing the access point up ───
 
 static void start_ap(void) {
@@ -255,7 +368,18 @@ static void start_ap(void) {
     build_ap_identity(s_ap_ssid, sizeof(s_ap_ssid), pass, sizeof(pass));
 
     // Once only: a second default AP netif asserts, and start_ap is retried.
-    if (!s_ap_netif) s_ap_netif = esp_netif_create_default_wifi_ap();
+    if (!s_ap_netif) {
+        s_ap_netif = esp_netif_create_default_wifi_ap();
+        // Joining phones are told to ask us for names (the captive DNS below).
+        esp_netif_dns_info_t dns = { .ip.type = ESP_IPADDR_TYPE_V4 };
+        dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(192, 168, 4, 1);
+        uint8_t offer = 1;
+        esp_netif_dhcps_stop(s_ap_netif);
+        esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns);
+        esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER,
+                               &offer, sizeof(offer));
+        esp_netif_dhcps_start(s_ap_netif);
+    }
 
     wifi_config_t ap = { 0 };
     size_t sn = strlen(s_ap_ssid);
@@ -287,14 +411,23 @@ static void start_ap(void) {
     httpd_uri_t post = { .uri = "/provision", .method = HTTP_POST, .handler = provision_post };
     httpd_register_uri_handler(s_httpd, &root);
     httpd_register_uri_handler(s_httpd, &post);
+    httpd_register_err_handler(s_httpd, HTTPD_404_NOT_FOUND, to_the_page);
+
+    s_dns_run = true;
+    if (!s_dns_task &&
+        xTaskCreate(dns_task, "setup_dns", 3072, NULL, 3, &s_dns_task) != pdPASS) {
+        // The page still works by its address; only the automatic opening is lost.
+        ESP_LOGW(TAG, "no captive DNS — the page opens at http://192.168.4.1 only");
+        s_dns_task = NULL;
+    }
 
     s_active = true;
-    status_set(SANDY_ST_NO_WIFI);
+    status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
 
-    // Show a QR (joins the setup network in one tap) plus the same line in text.
-    // The QR holds the setup password, which is on the box anyway.
-    char msg[96], qr[128];
-    snprintf(msg, sizeof(msg), "Scan to set up — or join %s", s_ap_ssid);
+    // A QR that joins in one tap, and the same in text for typing. The password exists
+    // only here: on her face, never in the log.
+    char msg[192], qr[128];
+    snprintf(msg, sizeof(msg), "Scan to set up — or join %s\npassword %s", s_ap_ssid, pass);
     snprintf(qr, sizeof(qr), "WIFI:T:WPA;S:%s;P:%s;;", s_ap_ssid, pass);
     screen_show_qr(qr, msg);
 
@@ -303,6 +436,7 @@ static void start_ap(void) {
 }
 
 static void stop_ap(void) {
+    s_dns_run = false;   // the DNS task ends within a second
     if (s_httpd) { httpd_stop(s_httpd); s_httpd = NULL; }
     esp_wifi_set_mode(WIFI_MODE_STA);
     s_active = false;
@@ -312,35 +446,40 @@ static void stop_ap(void) {
 }
 
 // ─── The watcher ───
+// Up whenever she has been without a network long enough, at boot or later, and down
+// as soon as it is back; never a restart either way.
+//   - at boot: PROVISION_WINDOW_MS, or at once with nothing saved;
+//   - the router refusing the password: the same window;
+//   - a network that worked and is gone: PROVISION_LOST_MS (a router reboot is not a move).
 
 static void provision_task(void *arg) {
     (void)arg;
-
-    // Give the saved network time (routers are slow in the morning), unless
-    // there is none saved; then go straight to setup.
     const int step_ms = 500;
-    int waited = wifi_sandy_ssid()[0] ? 0 : PROVISION_WINDOW_MS;
-    while (waited < PROVISION_WINDOW_MS) {
-        if (wifi_sandy_is_connected()) {
-            ESP_LOGI(TAG, "connected within the window — no setup needed");
-            vTaskDelete(NULL);
-        }
-        vTaskDelay(pdMS_TO_TICKS(step_ms));
-        waited += step_ms;
-    }
+    bool ever_up = false;
+    int64_t down_since = esp_timer_get_time() / 1000;
 
-    ESP_LOGW(TAG, "no network after %d s — raising the setup access point",
-             PROVISION_WINDOW_MS / 1000);
-    start_ap();
-
-    // Stay up, but yield as soon as the real network returns.
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(step_ms));
+        const int64_t now = esp_timer_get_time() / 1000;
+
         if (wifi_sandy_is_connected()) {
-            stop_ap();
-            vTaskDelete(NULL);
+            ever_up = true;
+            down_since = 0;
+            if (s_active) stop_ap();
+            continue;
         }
-        if (!s_httpd) start_ap();   // port was busy last time; try again
+        if (!down_since) down_since = now;
+        if (s_active) continue;
+
+        int64_t wait = PROVISION_WINDOW_MS;
+        if (!wifi_sandy_ssid()[0]) wait = 0;
+        else if (ever_up && !wifi_sandy_password_rejected()) wait = PROVISION_LOST_MS;
+        if (now - down_since >= wait) {
+            ESP_LOGW(TAG, "no network for %lld s%s — raising the setup access point",
+                     (long long)((now - down_since) / 1000),
+                     wifi_sandy_password_rejected() ? " (password refused)" : "");
+            start_ap();   // if port 80 was busy it stays down, and the next step retries
+        }
     }
 }
 

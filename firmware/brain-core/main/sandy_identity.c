@@ -1,4 +1,5 @@
 #include "sandy_identity.h"
+#include "sandy_status.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -104,6 +105,7 @@ esp_err_t identity_init(void) {
         ESP_LOGI(TAG, "node %s (%s)", s_id.node_id,
                  have_factory ? "factory identity" : "saved identity");
     } else {
+        status_set(SANDY_PART_IDENTITY, SANDY_ST_NOT_SET_UP);
         ESP_LOGE(TAG, "incomplete identity:%s%s%s — flash once by cable with a real "
                       "secrets.h, or provision the factory partition",
                  s_id.node_id[0] ? "" : " no pairing code",
