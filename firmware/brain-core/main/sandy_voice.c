@@ -12,6 +12,7 @@
 #include "sandy_voice.h"
 #include "config.h"
 #include "sandy_identity.h"
+#include "sandy_types.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -67,7 +68,10 @@
 #include "sandy_servo.h"
 #endif
 
-// Local face states: listening while open, happy while speaking, idle after.
+// Local face states: listening while open, idle after. While she speaks, the face the
+// server reads from her words (a `mood` frame; happy until one comes), and after the
+// reply the one `end_turn` names, held AFTER_FACE_MS before listening again.
+#define AFTER_FACE_MS 2500
 #if ENABLE_FACE
 #define VOICE_FACE(mood) face_set_mood(mood)
 // الحارس بالوش بيرجّع التعبير العابر اللي طوّل أكتر من الجلسة.
@@ -107,6 +111,10 @@ static int s_spk_gaps;                       // playback restarts within 2s
 // Barge-in: flush dumps the buffer; squelch drops incoming stale audio for a
 // fixed time (end_turn usually arrives long before she finishes speaking).
 static volatile bool s_spk_flush;
+// Her face for this reply, and the one to hold once it has played (MOOD_COUNT: none).
+static volatile sandy_mood_t s_talk_mood = MOOD_HAPPY;
+static volatile sandy_mood_t s_after_mood = MOOD_COUNT;
+static volatile int64_t s_after_until_ms;   // 0: not holding an after-reply face
 static volatile int64_t s_squelch_until_ms;
 #define SPK_SQUELCH_MS  1500
 
@@ -554,6 +562,17 @@ static bool json_str_field(const char *data, int len, const char *key,
     return j > 0;
 }
 
+// The mood a server frame names, when the face can show it.
+static bool frame_mood(const char *msg, int len, sandy_mood_t *out) {
+#if ENABLE_FACE
+    char name[16];
+    return json_str_field(msg, len, "mood", name, sizeof(name)) && face_mood_by_name(name, out);
+#else
+    (void)msg; (void)len; (void)out;
+    return false;
+#endif
+}
+
 // One whole control message from the server.
 static void on_ws_text(const char *msg, int len) {
     if (text_has(msg, len, "auth_ok")) {
@@ -590,10 +609,30 @@ static void on_ws_text(const char *msg, int len) {
         s_spk_flush = true;
         s_squelch_until_ms = 0;
         s_rx_has_carry = false;
+        s_talk_mood = MOOD_HAPPY;   // the reply that set it is gone
+        s_after_mood = MOOD_COUNT;
         ESP_LOGI(TAG, "interrupted by user (server)");
     } else if (text_has(msg, len, "end_turn")) {
         s_squelch_until_ms = 0;   // stale turn fully drained server-side
+        // It usually comes long before her audio ends, so the face waits for playback to
+        // finish; when nothing is left to play, it shows now.
+        sandy_mood_t mood = MOOD_HAPPY;
+        if (frame_mood(msg, len, &mood)) {
+            if (!s_playing && xStreamBufferIsEmpty(s_spk_stream)) {
+                VOICE_FACE(mood);
+                s_after_until_ms = now_ms() + AFTER_FACE_MS;
+            } else {
+                s_after_mood = mood;
+            }
+        }
         ESP_LOGD(TAG, "end of Sandy's turn");
+    } else if (text_has(msg, len, "\"mood\"")) {
+        // What she is saying now: talk with that face (end_turn, also carrying a mood, is above).
+        sandy_mood_t mood = MOOD_HAPPY;
+        if (frame_mood(msg, len, &mood)) {
+            s_talk_mood = mood;
+            if (s_playing) VOICE_FACE(mood);
+        }
     } else if (text_has(msg, len, "key_unknown")) {
         // Key revoked or unknown: re-enrol with the shared key next session.
         devkey_store(NULL);
@@ -733,6 +772,11 @@ static void spk_task(void *arg) {
             if (avail == 0) {
                 first_seen = 0;
                 s_playing = false;
+                // The after-reply face has been held long enough: back to listening.
+                if (s_after_until_ms && now_ms() >= s_after_until_ms) {
+                    s_after_until_ms = 0;
+                    if (s_session_active) VOICE_FACE(MOOD_FOCUSED);
+                }
                 // ≥ 2 ticks: under 10 ms rounds to 0 at 100 Hz and busy-spins, starving the mic task.
                 vTaskDelay(pdMS_TO_TICKS(20));
                 continue;
@@ -742,7 +786,8 @@ static void spk_task(void *arg) {
             if (avail >= s_prebuf || (now_ms() - first_seen) > 250) {
                 playing = true;
                 s_playing = true;
-                VOICE_FACE(MOOD_HAPPY);     // talking face
+                s_after_until_ms = 0;
+                VOICE_FACE(s_talk_mood);    // talking face
                 VOICE_LED(LED_STATE_TALKING);
                 // Fresh playback: pre-fill the reference with silence equal to the TX DMA depth.
                 if (s_ref_stream && xStreamBufferIsEmpty(s_ref_stream)) {
@@ -857,11 +902,18 @@ static void spk_task(void *arg) {
             s_out_level = 0;
             first_seen = 0;
             last_stop = now_ms();
-            // Done talking: listening face while the session is open.
+            // Done talking: the reply's after face for a moment, else listening, while open.
             if (s_session_active) {
-                VOICE_FACE(MOOD_FOCUSED);
+                if (s_after_mood < MOOD_COUNT) {
+                    VOICE_FACE(s_after_mood);
+                    s_after_until_ms = now_ms() + AFTER_FACE_MS;
+                } else {
+                    VOICE_FACE(MOOD_FOCUSED);
+                }
                 VOICE_LED(LED_STATE_LISTENING);
             }
+            s_after_mood = MOOD_COUNT;
+            s_talk_mood = MOOD_HAPPY;
             // Per-reply health: rx≈played, dropped=0, gaps=0 is clean.
             ESP_LOGI(TAG, "playback report: rx=%u played=%u dropped=%u gaps=%d",
                      (unsigned)s_spk_rx_bytes, (unsigned)s_spk_play_bytes,

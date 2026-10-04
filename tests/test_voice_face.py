@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.api.voice_ws import face
 
-_FIRMWARE = Path(__file__).resolve().parents[1] / "firmware/brain-core/main/sandy_mqtt.c"
+_FIRMWARE = Path(__file__).resolve().parents[1] / "firmware/brain-core/main/sandy_face.c"
 
 
 def test_what_she_says_picks_the_face():

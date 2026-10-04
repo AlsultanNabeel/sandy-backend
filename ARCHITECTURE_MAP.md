@@ -621,7 +621,11 @@ transcript streams in, `face.mood_of` reads its mood from words (no model call) 
 server sends `{"type":"mood","mood":"<name>"}` whenever it changes; `end_turn` carries
 the mood of the whole reply (`"mood"`, `happy` when nothing stands out) for the face she
 keeps a moment after speaking. The names are the firmware's `MOOD_MAP`
-(`tests/test_voice_face.py` pins that). Firmware that predates it ignores both.
+(`sandy_face.c::face_mood_by_name`, shared with the broker's `mood` command;
+`tests/test_voice_face.py` pins that). The board (0.11.6 on) talks with the latest
+`mood` frame's face (happy until one comes), and once playback ends holds the
+`end_turn` face for `AFTER_FACE_MS` (2.5 s) before listening again; a barge-in drops
+both. Firmware that predates it ignores both frames.
 
 ### 3.1 The handshake contract
 

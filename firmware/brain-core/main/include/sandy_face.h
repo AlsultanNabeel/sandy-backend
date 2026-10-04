@@ -8,6 +8,8 @@ void      face_set_mood(sandy_mood_t mood);
 // An app-chosen mood; the stuck-expression watchdog leaves it alone until
 // FACE_APP_MOOD_TTL_MS or the robot's own next expression.
 void      face_set_mood_from_app(sandy_mood_t mood);
+// A mood by its name on the wire ("happy", "sad", …); false for an unknown name.
+bool      face_mood_by_name(const char *name, sandy_mood_t *out);
 
 // pan: -100 left, 0 centre, +100 right. Drifts back to idle on its own.
 void      face_look(int pan);

@@ -839,6 +839,35 @@ esp_err_t face_init(void) {
     return ESP_OK;
 }
 
+// The moods by their names on the wire: the broker's `mood` command and the voice
+// server's mood frames (voice_ws/face.py sends these names).
+static const struct { const char *name; sandy_mood_t mood; } MOOD_MAP[] = {
+    {"idle",        MOOD_IDLE},       {"happy",       MOOD_HAPPY},
+    {"curious",     MOOD_CURIOUS},    {"sad",         MOOD_SAD},
+    {"alert",       MOOD_ALERT},      {"surprised",   MOOD_SURPRISED},
+    {"big_happy",   MOOD_BIG_HAPPY},  {"focused",     MOOD_FOCUSED},
+    {"bored",       MOOD_BORED},      {"excited",     MOOD_EXCITED},
+    {"love",        MOOD_LOVE},       {"angry",       MOOD_ANGRY},
+    {"confused",    MOOD_CONFUSED},   {"thinking",    MOOD_THINKING},
+    {"sleepy",      MOOD_SLEEPY},     {"shy",         MOOD_SHY},
+    {"proud",       MOOD_PROUD},      {"worried",     MOOD_WORRIED},
+    {"playful",     MOOD_PLAYFUL},    {"calm",        MOOD_CALM},
+    {"grumpy",      MOOD_GRUMPY},     {"hopeful",     MOOD_HOPEFUL},
+    {"grateful",    MOOD_GRATEFUL},   {"disappointed",MOOD_DISAPPOINTED},
+    {"silly",       MOOD_SILLY},
+};
+
+bool face_mood_by_name(const char *name, sandy_mood_t *out) {
+    if (!name || !out) return false;
+    for (size_t i = 0; i < sizeof(MOOD_MAP) / sizeof(MOOD_MAP[0]); i++) {
+        if (!strcmp(name, MOOD_MAP[i].name)) {
+            *out = MOOD_MAP[i].mood;
+            return true;
+        }
+    }
+    return false;
+}
+
 void face_set_mood_from_app(sandy_mood_t mood) {
     if (mood >= MOOD_COUNT) return;
     face_set_mood(mood);

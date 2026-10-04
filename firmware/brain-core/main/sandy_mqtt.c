@@ -102,28 +102,11 @@ static bool json_int(const char *json, const char *key, int lo, int hi, int *out
     return parse_int(num, lo, hi, out);
 }
 
-static const struct { const char *name; sandy_mood_t mood; } MOOD_MAP[] = {
-    {"idle",        MOOD_IDLE},       {"happy",       MOOD_HAPPY},
-    {"curious",     MOOD_CURIOUS},    {"sad",         MOOD_SAD},
-    {"alert",       MOOD_ALERT},      {"surprised",   MOOD_SURPRISED},
-    {"big_happy",   MOOD_BIG_HAPPY},  {"focused",     MOOD_FOCUSED},
-    {"bored",       MOOD_BORED},      {"excited",     MOOD_EXCITED},
-    {"love",        MOOD_LOVE},       {"angry",       MOOD_ANGRY},
-    {"confused",    MOOD_CONFUSED},   {"thinking",    MOOD_THINKING},
-    {"sleepy",      MOOD_SLEEPY},     {"shy",         MOOD_SHY},
-    {"proud",       MOOD_PROUD},      {"worried",     MOOD_WORRIED},
-    {"playful",     MOOD_PLAYFUL},    {"calm",        MOOD_CALM},
-    {"grumpy",      MOOD_GRUMPY},     {"hopeful",     MOOD_HOPEFUL},
-    {"grateful",    MOOD_GRATEFUL},   {"disappointed",MOOD_DISAPPOINTED},
-    {"silly",       MOOD_SILLY},
-};
-
 static void _handle_mood(const char *val) {
-    for (size_t i = 0; i < sizeof(MOOD_MAP)/sizeof(MOOD_MAP[0]); i++) {
-        if (!strcmp(val, MOOD_MAP[i].name)) {
-            face_set_mood_from_app(MOOD_MAP[i].mood);   // also sets g_current_mood
-            return;
-        }
+    sandy_mood_t mood;
+    if (face_mood_by_name(val, &mood)) {
+        face_set_mood_from_app(mood);   // also sets g_current_mood
+        return;
     }
     ESP_LOGW(TAG, "unknown mood: %s", val);
 }
