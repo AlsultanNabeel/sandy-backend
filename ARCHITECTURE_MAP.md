@@ -1175,6 +1175,16 @@ allowed list rather than guessing. `tests/test_routes_kept.py` pins every route 
 client calls; `tests/test_tenant_isolation.py` runs every store through the
 isolation contract; the `test_brain_*` files drive the loop with a scripted model.
 
+**The real model is scored apart from the tests** (`scripts/eval_brain.py`, cases in
+`scripts/eval_cases.py`): real sentences through `loop.run_turn` on the real chat
+deployment (`--model` picks another), on an in-memory database, with the outside tools
+(devices, scenes, search, weather, images) as recording stand-ins. Each case checks what
+was done (tools called, rows left behind, a held yes), not the wording, and the run
+prints a pass rate and the seconds per message. It costs model calls, so it runs by hand
+before a model or prompt change, never in CI. First run on `gpt-4.1` (4 Oct 2026): 31/34;
+the misses were «خلص الحليب» and «لازم أخلص التقرير» answered without adding, and
+«ذكريني كل يوم» made a habit instead of a reminder.
+
 CI (`.github/workflows/tests.yml`): pytest with coverage → Codecov → `bandit -ll`
 → `ruff check` → a secret scan that fails the build if a `.env`, key, or
 service-account JSON is ever tracked.
