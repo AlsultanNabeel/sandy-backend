@@ -27,9 +27,11 @@ from app.utils.thread_pool import submit_background
 logger = logging.getLogger(__name__)
 
 STM_TTL = 60 * 60 * 24 * 30  # drives the Mongo TTL index on STM docs
-MAX_STM_MESSAGES = 40
+# Exactly what the prompt shows (context.RECENT_TURNS), so nothing older is lost unseen:
+# it lives on as the thread's summary, which the prompt shows above the turns.
+MAX_STM_MESSAGES = 24
 # A long thread drops to this many when it fills, so it is summarised in one go.
-KEEP_AFTER_TRIM = 20
+KEEP_AFTER_TRIM = 12
 # A pause this long ends a conversation; the next message starts a new one.
 SESSION_GAP = timedelta(minutes=30)
 _STM_COLL = "sandy_stm"

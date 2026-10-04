@@ -215,11 +215,11 @@ for a refusal. A held action is "not done yet", neither.
 
 | Layer | Module | Store |
 |---|---|---|
-| Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), up to 40 messages, TTL 30 days; the model sees the last 24 (`context.RECENT_TURNS`, chat and the call alike) |
+| Short-term conversation | `brain/stm.py` | `sandy_stm`, one doc per thread (`<thread>:<user>`), up to 24 messages, TTL 30 days; the model sees all of them (`context.RECENT_TURNS` = `stm.MAX_STM_MESSAGES`, chat and the call alike), so nothing older is lost unseen |
 | What she knows | `brain/context.py` | `fact` entries with their ids (the newest 30 distinct ones of two words or more; anything still ciphertext is left out) and the onboarding profile (`sandy_users.onboarding`: name, interests, notes, daily-question answers) |
 | What is open now | `brain/context.py::state_block` | open items per list (the soonest due and the newest, so a long list hides neither), pending reminders and today's log (not facts, moods, habit ticks or summaries), reminders that rang in the last two hours, with their ids and times in the user's zone, so a vague mention is resolved by the model and edited by id (messages to future self stay out) |
 | Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are not facts, chat summaries or habit ticks, from the Atlas vector index `entries_vector` (tenant in its filter); text search when there is no vector or no hit |
-| Conversation summaries | `brain/stm.py::_summarize` | one `summary` entry (`data.thread_id`) per conversation, in the background: when a message comes after a 30-minute pause, or when a thread passes 40 messages and drops to its newest 20; turns are marked `summarized` so none is summarised twice; `recall` leaves them out unless asked |
+| Conversation summaries | `brain/stm.py::_summarize` | one `summary` entry (`data.thread_id`) per conversation, in the background: when a message comes after a 30-minute pause, or when a thread passes 24 messages and drops to its newest 12; turns are marked `summarized` so none is summarised twice. The chat prompt carries them (`context.conversation_block`): this thread's newest two, oldest first, and the two other conversations closest to the message (same embedding as the related entries, three words or more) |
 | Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
 
 **One memory across every channel.** App chat (`/api/agent`), the robot's voice
@@ -1281,46 +1281,41 @@ nobody re-reads becomes a way of believing things that stopped being true.
    the unused `robot_expression` module. The board side (gestures, melodies,
    light effects) is intact; wiring it back means the brain's `list_update`
    (done) and the focus routes calling one small helper.
-3. **The brain is not told which devices exist.** `device_control` resolves the
-   model's `device` by slug or label and, when nothing matches, refuses with the
-   list of the caller's devices so the model can try again — correct, but it can
-   cost a model round trip on the first command of a conversation. The fast path
-   (§2.3) covers the bare commands.
-4. **A POST is never retried, and the chat send is a POST.** `sendWithRetry`
+3. **A POST is never retried, and the chat send is a POST.** `sendWithRetry`
    guards on GET/HEAD because retrying a write could duplicate it, which is
    right — but it means the one dropped packet that motivated the whole change
    is still a red banner on the most-used call in the app. An idempotency key
    on the send is what would close it.
-5. **A tool call costs two model calls in series** — the one that picks the tool
+4. **A tool call costs two model calls in series** — the one that picks the tool
    and the one that writes the answer; plain conversation is one. The fast path
    answers a bare device command with none. `[turn] …ms total — brain tools=[…]`
    (§2.11) gives the time per message.
 
 ### Real, but nobody hits it today
 
-6. **No staging environment.** Production is what the robot on the desk talks
+5. **No staging environment.** Production is what the robot on the desk talks
    to. §1.
-7. **`GeminiLiveManager`'s own `URLSession`: fixed.** The call's socket now comes
+6. **`GeminiLiveManager`'s own `URLSession`: fixed.** The call's socket now comes
    from the app's shared `APIClient.session`. (A scene was also sent twice per apply —
    once by `apply_scene`, again by its callers; `apply_scene` alone sends it now.)
 
-8. **Related-memory recall: fixed.** `context.similar_entries` now asks the
+7. **Related-memory recall: fixed.** `context.similar_entries` now asks the
    Atlas vector index `entries_vector` (on `sandy_entries.embedding`, filter fields
    `user_id` and `kind`) through `ScopedCollection.vector_search`, which puts the
    tenant in the `$vectorSearch` filter. The index lives in Atlas, not in code: a
    new database needs it created again (1536 dims, cosine). Encrypted rows (moods,
    facts) are never embedded, so they are never found this way.
-9. **`submit_background`'s ten workers carry two model calls per turn** (the STM
+8. **`submit_background`'s ten workers carry two model calls per turn** (the STM
    summary and the conversation title) with no future ever read. Both go through
    `chat_fn` with `OPENAI_CHAT_TIMEOUT_S`, so a stalled upstream costs a worker
    for that long, not for ever. A sizing question, wanting a measurement first.
-10. **`/voice/enroll` has no client.** Speaker verification (§3.2) is off by
+9. **`/voice/enroll` has no client.** Speaker verification (§3.2) is off by
    default and there is no screen that records a voiceprint.
 
 ### Hardware, and the owner already knows
 
-11. **Two-mic beamforming is not written.** §4.6.
-12. **Voice status clips are not flashed** — the sentences are in the table, the
+10. **Two-mic beamforming is not written.** §4.6.
+11. **Voice status clips are not flashed** — the sentences are in the table, the
    speaking hook is not written and the partition table has no room reserved. §4.2.
 
 ### Checked and closed since the last version of this list
@@ -1331,7 +1326,7 @@ room node is **on the per-node topic tree** (§4.5), so `room_device.send()` is
 not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
 (`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed. Servo easing and ten gestures are in
 (`sandy_servo.c`). The visitor approval flow and the JSON profile store are gone.
-Phase 5 closed three more by deleting what they were about: `tool_health` (no
+The brain **is** told which devices exist: `context._devices_line` lists them by name and room in the prompt. Phase 5 closed three more by deleting what they were about: `tool_health` (no
 tool registry left), the 28-round-trip warm turn (the persona-directive build
 and the old memory layers are gone), and the router-then-reply pair on every
 message (plain chat is one call).

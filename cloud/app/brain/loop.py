@@ -273,7 +273,8 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
     if outcome is None:
         due = None
         try:
-            system = context.build_system(user_id, message, history, spoken=ctx.source == "voice")
+            system = context.build_system(user_id, message, history, spoken=ctx.source == "voice",
+                                          thread_id=thread_id)
             if note:
                 system += "\n\n" + note
             due = future.due_context()

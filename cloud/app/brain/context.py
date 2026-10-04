@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
 
+from app.brain import stm
 from app.brain.persona import build_effective_persona
 from app.brain.tools_blocks import RANG_WINDOW
 from app.utils.ltm_crypto import decrypt_field
@@ -27,8 +28,11 @@ TOP_ENTRIES = 8
 _NOT_SHOWN = ("fact", "summary", "habit", "mood")
 # Atlas vector index on sandy_entries.embedding (filters: user_id, kind); see ARCHITECTURE_MAP.
 VECTOR_INDEX = "entries_vector"
-# Messages of the conversation the model sees (twelve exchanges).
-RECENT_TURNS = 24
+# Messages of the conversation the model sees: all the thread keeps, older ones as its summary.
+RECENT_TURNS = stm.MAX_STM_MESSAGES
+# This conversation's newest summaries, and the other conversations' closest ones.
+THREAD_SUMMARIES = 2
+PAST_CONVERSATIONS = 2
 _NOISE = re.compile(r"^<noise>$|[\u3040-\u30ff\u4e00-\u9fff]")
 
 _RULES = """
@@ -211,17 +215,23 @@ def _words(message: str) -> List[str]:
     return [w for w in re.findall(r"\w+", message or "") if len(w) >= 3][:8]
 
 
-def similar_entries(message: str, k: int = TOP_ENTRIES,
-                    kind: Optional[str] = None) -> List[Dict[str, Any]]:
+def _worth_looking_up(message: str) -> bool:
+    """A greeting or a two-word order has nothing to look up."""
+    return len((message or "").split()) >= 3
+
+
+def similar_entries(message: str, k: int = TOP_ENTRIES, kind: Optional[str] = None,
+                    vector: Optional[List[float]] = None) -> List[Dict[str, Any]]:
     """Top-k log entries for this message (of ``kind``, else every kind but facts,
-    summaries and habit ticks): the vector index first, word search when it has nothing."""
+    summaries and habit ticks): the vector index first, word search when it has nothing.
+    ``vector`` is the message's embedding when the caller already has it."""
     coll = _base.coll(_base.ENTRIES)
     if coll is None or not (message or "").strip():
         return []
-    # A greeting or a two-word order has nothing to look up (an asked-for kind always does).
-    if kind is None and len(message.split()) < 3:
+    # An asked-for kind is always looked up.
+    if kind is None and not _worth_looking_up(message):
         return []
-    vector = entries.embed_text(message)
+    vector = vector or entries.embed_text(message)
     # Facts are already in the prompt; summaries are recall's job; habit ticks are not memories.
     base_q: Dict[str, Any] = {"kind": kind or {"$nin": ["fact", "summary", "habit"]}}
     if vector:
@@ -237,6 +247,30 @@ def similar_entries(message: str, k: int = TOP_ENTRIES,
         return []
     q = {**base_q, "$or": [_base.text_filter(w) for w in words]}
     return [_base.out(d) for d in coll.find(q, {"embedding": 0}).sort("at", -1).limit(k)]
+
+
+def conversation_block(thread_id: str, message: str,
+                       vector: Optional[List[float]] = None) -> str:
+    """What fell out of this conversation's turns (its newest summaries, oldest first),
+    then the other conversations closest to this message."""
+    coll = _base.coll(_base.ENTRIES)
+    if coll is None:
+        return ""
+    parts: List[str] = []
+    if thread_id:
+        own = list(coll.find({"kind": "summary", "data.thread_id": str(thread_id)},
+                             {"embedding": 0}).sort("at", -1).limit(THREAD_SUMMARIES))
+        lines = [_plain(_base.out(d)) for d in reversed(own)]
+        if any(lines):
+            parts.append("قبل هيك بهالمحادثة:\n" + "\n".join(f"- {t}" for t in lines if t))
+    if _worth_looking_up(message):
+        others = [e for e in similar_entries(message, k=PAST_CONVERSATIONS + THREAD_SUMMARIES,
+                                             kind="summary", vector=vector)
+                  if str((e.get("data") or {}).get("thread_id")) != str(thread_id) and _plain(e)]
+        if others:
+            parts.append("من محادثات قبل (ممكن تفيد):\n" + "\n".join(
+                _entry_line(e) for e in others[:PAST_CONVERSATIONS]))
+    return "\n\n".join(parts)
 
 
 def _entry_line(e: Dict[str, Any]) -> str:
@@ -264,7 +298,8 @@ def reply_language(message: str) -> str:
 
 
 def build_system(user_id: str, message: str,
-                 history: Optional[List[Dict[str, Any]]] = None, *, spoken: bool = False) -> str:
+                 history: Optional[List[Dict[str, Any]]] = None, *, spoken: bool = False,
+                 thread_id: str = "") -> str:
     """Steady parts first, changing parts last: the provider caches an unchanged
     prefix, so the persona and rules are read once, and the clock never breaks it.
     The channel line comes after the persona, so it wins over a persona written for voice."""
@@ -274,9 +309,12 @@ def build_system(user_id: str, message: str,
         parts.append(profile_block(user_id))
         parts.append(facts_block())
         parts.append(state_block())
-        related = [e for e in similar_entries(message) if _plain(e)]
+        # One embedding serves both lookups.
+        vector = entries.embed_text(message) if _worth_looking_up(message) else None
+        related = [e for e in similar_entries(message, vector=vector) if _plain(e)]
         if related:
             parts.append("من سجلّه (ممكن يفيد):\n" + "\n".join(_entry_line(e) for e in related))
+        parts.append(conversation_block(thread_id, message, vector))
     except Exception as exc:  # noqa: BLE001 — memory is never worth a failed reply
         logger.warning("[brain] memory context skipped: %s", exc)
     parts.append(time_awareness_block(history))
