@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Optional
 from app.api.voice_ws._config import (
     logger,
     _RECENT_AUDIO_MAX_BYTES,
@@ -59,10 +60,11 @@ class _RecentAudio:
         return bytes(self.buf)
 
 
-def _verify_owner(pcm: bytes, user_id: str = "") -> bool:
+def _verify_owner(pcm: bytes, user_id: str = "") -> Optional[bool]:
     """يتأكد إنّ المتكلّم هو المالك؛ بلا بصمة محفوظة بنسمح.
 
-    `user_id` بيتمرّر لأنّ سياق الجلسة ما بيعبر لخيط المجمّع.
+    None = can't check right now (the speaker model is not loaded): neither the owner
+    nor a stranger. `user_id` بيتمرّر لأنّ سياق الجلسة ما بيعبر لخيط المجمّع.
     """
     try:
         from app.api.voice_ws.memory import set_voice_identity
@@ -73,8 +75,11 @@ def _verify_owner(pcm: bytes, user_id: str = "") -> bool:
         if not chat_id or not speaker_id.has_profile(chat_id):
             logger.info("[voice_ws] no voiceprint enrolled — allowing sensitive command")
             return True
-        if not pcm:
+        if not pcm or speaker_id.get_profile_vector(chat_id) is None:
             return False
+        if not speaker_id.can_verify():
+            logger.warning("[voice_ws] speaker model not ready — cannot check the voice")
+            return None
         match, score = speaker_id.verify_speaker(chat_id, pcm)
         logger.info("[voice_ws] speaker verify: match=%s score=%.3f", match, score)
         return match
@@ -83,13 +88,23 @@ def _verify_owner(pcm: bytes, user_id: str = "") -> bool:
         return False
 
 
-def _speaker_directive(is_owner: bool) -> str:
-    """توجيه الشخصية حسب مين بيحكي؛ الاسم من ملف صاحب الجهاز، وبلا اسم بالوصف (توجيه أمني ضد الانتحال)."""
+def _speaker_directive(is_owner: Optional[bool]) -> str:
+    """توجيه الشخصية حسب مين بيحكي؛ الاسم من ملف صاحب الجهاز، وبلا اسم بالوصف (توجيه أمني ضد الانتحال).
+
+    `is_owner` None: the voice could not be checked — not called a stranger, but nothing
+    private either until it can be."""
     from app.api.voice_ws.memory import voice_speaker_label
     from app.utils.user_profiles import HAS_NO_NAME
 
     name = voice_speaker_label()
     owner_ref = f"«{name}»" if name != HAS_NO_NAME else "صاحب الحساب"
+    if is_owner is None:
+        return (
+            "[المتحدث الحالي: ما قدرتي تتأكدي من صوته هلّق (التحقق من الصوت مش "
+            "جاهز). ضلّي لطيفة ومحايدة وبدون أي خصوصيات تخصّ "
+            f"{owner_ref} لحد ما يرجع التحقق؛ ولو سأل، قوليله إنك مش قادرة تتأكدي "
+            "من صوته هلّق، مش إنه شخص غريب.]"
+        )
     if is_owner:
         return (
             f"[المتحدث الحالي: {owner_ref} — بصمة صوته تطابقت. ارجعي لشخصيتك "

@@ -1303,6 +1303,16 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     verified = await loop.run_in_executor(
                         None, _verify_owner, recent.snapshot(), get_voice_identity()
                     )
+                    if verified is None:
+                        fn_responses.append(types.FunctionResponse(
+                            id=fc.id, name=fc.name,
+                            response={"output": (
+                                "[لم يُنفَّذ] التحقق من الصوت مش جاهز هلّق. لا تنفّذي "
+                                "الأمر — قولي إنك مش قادرة تتأكدي من صوته هلّق، "
+                                "وخلّيه يجرّب كمان شوي."
+                            )},
+                        ))
+                        continue
                     if not verified:
                         fn_responses.append(types.FunctionResponse(
                             id=fc.id, name=fc.name,

@@ -685,7 +685,9 @@ else a kind, neutral Sandy with nothing private. It also guards the sensitive ca
 `schedule` of a `message_to_future_self`, and `confirm` (which only runs a held
 delete or bulk change). With no voiceprint enrolled it allows — it does not lock
 the owner out before enrolment. A voiceprint on record that cannot be read (`SANDY_BIO_KEY` missing or changed) or a
-lookup that failed is not «none» (`speaker_id.has_profile`): the gate stays on and verification says no. The voiceprint is learned from the robot's own mic: the
+lookup that failed is not «none» (`speaker_id.has_profile`): the gate stays on and verification says no. When the speaker model is not loaded (a
+failed download is retried after 30 s, doubling to 30 min, `speaker_id._get_extractor`) `_verify_owner` answers None, «cannot check»: no sensitive call runs and nothing private is
+said, but the owner is not called a stranger. The voiceprint is learned from the robot's own mic: the
 app (Robot › «صوتي») calls `POST /api/voice/enroll`, and the next five robot turns of three
 seconds or more are its clips (`sandy_voice_enroll`, deleted once the print is built; a
 fifteen-minute window); she says so in her reply. It is stored only encrypted

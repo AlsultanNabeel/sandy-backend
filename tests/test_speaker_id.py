@@ -135,3 +135,54 @@ def test_a_voiceprint_that_cannot_be_read_keeps_the_gate_shut(monkeypatch):
         assert not sid.has_profile(""), "nobody has no voiceprint"
     finally:
         appdb.reset()
+
+
+def test_a_failed_model_load_is_retried_not_kept_for_the_process(monkeypatch):
+    """One failed download at boot used to leave the extractor empty until the next
+    restart, and the owner was a stranger on every turn until then."""
+    import sys
+    import types
+
+    built = []
+
+    class _Extractor:
+        dim = 192
+
+        def __init__(self, config):
+            built.append(config)
+
+    fake = types.SimpleNamespace(SpeakerEmbeddingExtractorConfig=lambda **k: k,
+                                 SpeakerEmbeddingExtractor=_Extractor)
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", fake)
+    monkeypatch.setattr(sid, "_extractor", None)
+    monkeypatch.setattr(sid, "_extractor_retry_at", 0.0)
+    monkeypatch.setattr(sid, "_extractor_backoff_s", sid._EXTRACTOR_RETRY_MIN_S)
+    answers = iter([None, "/tmp/model.onnx"])
+    monkeypatch.setattr(sid, "_ensure_model", lambda: next(answers))
+
+    assert sid._get_extractor() is None
+    assert sid._get_extractor() is None, "retried at once instead of backing off"
+    monkeypatch.setattr(sid, "_extractor_retry_at", 0.0)   # the wait is over
+    assert isinstance(sid._get_extractor(), _Extractor)
+    assert sid.can_verify()
+
+
+def test_without_the_model_she_cannot_tell_rather_than_calls_the_owner_a_stranger(monkeypatch):
+    import mongomock
+    from cryptography.fernet import Fernet
+    from app import db as appdb
+    from app.api.voice_ws import speaker
+
+    d = mongomock.MongoClient().db
+    appdb.configure(d)
+    try:
+        monkeypatch.setattr(sid, "_fernet_init", True)
+        monkeypatch.setattr(sid, "_fernet", Fernet(Fernet.generate_key()))
+        assert sid._save_profile("u1", np.array([0.6, 0.8], dtype="float32").tobytes(), 5)
+        monkeypatch.setattr(sid, "can_verify", lambda: False)
+        assert speaker._verify_owner(b"\x00\x01" * 16000, "u1") is None
+        note = speaker._speaker_directive(None)
+        assert "شخص آخر" not in note, "a model that did not load called the owner a stranger"
+        assert "ما قدرتي تتأكدي" in note
+    finally:
+        appdb.reset()

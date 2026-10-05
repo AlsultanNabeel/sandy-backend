@@ -11,6 +11,7 @@ import base64
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from app.db import configure, get_db
@@ -35,7 +36,13 @@ _DEFAULT_MODEL_PATH = "/tmp/sandy_speaker_campplus.onnx"  # nosec B108
 _fernet = None
 _fernet_init = False
 _extractor = None
-_extractor_init = False
+# A failed load is tried again after a wait that doubles (30 s up to 30 min),
+# not kept for the life of the process.
+_EXTRACTOR_RETRY_MIN_S = 30.0
+_EXTRACTOR_RETRY_MAX_S = 1800.0
+_extractor_retry_at = 0.0
+_extractor_backoff_s = _EXTRACTOR_RETRY_MIN_S
+_extractor_lock = threading.Lock()
 _model_lock = threading.Lock()
 
 
@@ -87,24 +94,42 @@ def _ensure_model() -> Optional[str]:
 
 
 def _get_extractor():
-    global _extractor, _extractor_init
-    if _extractor_init:
+    """The embedding extractor, or None while it cannot be loaded (retried later)."""
+    global _extractor, _extractor_retry_at, _extractor_backoff_s
+    if _extractor is not None:
         return _extractor
-    _extractor_init = True
+    # A load in progress (a download can take minutes) is not waited on: the caller
+    # hears «cannot check right now» instead of a stalled call.
+    if not _extractor_lock.acquire(blocking=False):
+        return None
     try:
-        import sherpa_onnx
-        model = _ensure_model()
-        if not model:
-            return None
-        config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-            model=model, num_threads=1, provider="cpu"
-        )
-        _extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
-        logger.info("[speaker_id] embedding extractor ready (dim=%d)", _extractor.dim)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[speaker_id] extractor init failed: %s", e)
-        _extractor = None
-    return _extractor
+        if _extractor is not None or time.monotonic() < _extractor_retry_at:
+            return _extractor
+        try:
+            import sherpa_onnx
+            model = _ensure_model()
+            if model:
+                config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+                    model=model, num_threads=1, provider="cpu"
+                )
+                _extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
+                _extractor_backoff_s = _EXTRACTOR_RETRY_MIN_S
+                logger.info("[speaker_id] embedding extractor ready (dim=%d)", _extractor.dim)
+                return _extractor
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[speaker_id] extractor init failed: %s", e)
+        _extractor_retry_at = time.monotonic() + _extractor_backoff_s
+        logger.warning("[speaker_id] no speaker model; trying again in %.0fs",
+                       _extractor_backoff_s)
+        _extractor_backoff_s = min(_extractor_backoff_s * 2, _EXTRACTOR_RETRY_MAX_S)
+        return None
+    finally:
+        _extractor_lock.release()
+
+
+def can_verify() -> bool:
+    """Whether a voice can be checked right now (the engine and its model are there)."""
+    return is_available() and _get_extractor() is not None
 
 
 def _pcm_to_float(pcm_bytes: bytes):
