@@ -345,4 +345,16 @@ def get_profile_vector(chat_id: int):
 
 
 def has_profile(chat_id: int) -> bool:
-    return get_profile_vector(chat_id) is not None
+    """A voiceprint is on record, readable or not.
+
+    A row this server cannot decrypt (SANDY_BIO_KEY missing or changed) or a read
+    that failed still counts: the gate stays on and `verify_speaker` says no. Answering
+    «none» there would switch the gate off and let anyone act as the owner."""
+    if not chat_id or get_db() is None:
+        return False
+    try:
+        doc = get_db()[_COLLECTION].find_one({"_id": str(chat_id)}, {"profile": 1})
+    except Exception as e:  # noqa: BLE001 — fail closed
+        logger.warning("[speaker_id] voiceprint lookup failed, keeping the gate on: %s", e)
+        return True
+    return bool(doc and doc.get("profile"))

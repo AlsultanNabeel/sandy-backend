@@ -104,3 +104,34 @@ def test_graceful_when_engine_unavailable(monkeypatch):
     assert ok is False and n == 0 and isinstance(msg, str)
     match, score = sid.verify_speaker(123, b"\x00\x01" * 10000)
     assert match is False and score == 0.0
+
+
+def test_a_voiceprint_that_cannot_be_read_keeps_the_gate_shut(monkeypatch):
+    """SANDY_BIO_KEY missing or changed, or the read failing, is not «no voiceprint»:
+    that answer turns the gate off and lets anyone by the robot act as its owner."""
+    import mongomock
+    from cryptography.fernet import Fernet
+    from app import db as appdb
+    from app.api.voice_ws import speaker
+
+    d = mongomock.MongoClient().db
+    appdb.configure(d)
+    try:
+        monkeypatch.setattr(sid, "_fernet_init", True)
+        monkeypatch.setattr(sid, "_fernet", Fernet(Fernet.generate_key()))
+        raw = np.array([0.6, 0.8], dtype="float32").tobytes()
+        assert sid._save_profile("u1", raw, 5)
+        monkeypatch.setattr(sid, "_fernet", Fernet(Fernet.generate_key()))
+
+        assert sid.has_profile("u1"), "an unreadable voiceprint read as none"
+        assert speaker._verify_owner(b"\x00\x01" * 16000, "u1") is False
+
+        from pymongo.errors import PyMongoError
+
+        def _down(*a, **k):
+            raise PyMongoError("timed out")
+        monkeypatch.setattr(d["sandy_voiceprints"].__class__, "find_one", _down)
+        assert sid.has_profile("u1"), "a failed read turned the gate off"
+        assert not sid.has_profile(""), "nobody has no voiceprint"
+    finally:
+        appdb.reset()
