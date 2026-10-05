@@ -241,7 +241,9 @@ channels' last turns before its own, without repeating a line (`stm.history`).
 process and in `sandy_prompt_cache` across workers), because building it used to
 take seconds with the microphone running. It holds the persona, the profile and
 the facts — never the recent turns, which are added per session
-(`with_recent_turns`). `utils/tenant_version.VERSIONED` names the collections it
+(`with_recent_turns`). That per-session part (the clock, time since the last message, the recent turns) is
+built on a pool thread inside the caller's own profile (`memory.session_context_for`), so the
+clock is in their zone; built on the loop with no user active it read Cairo time. `utils/tenant_version.VERSIONED` names the collections it
 is built from (`sandy_users`, `sandy_entries`): a write there through `scoped()`
 bumps the version, and `prompt_prewarm` rebuilds it in the background for tenants
 who use voice. Bump `_PROMPT_REV` when the cached text changes shape.

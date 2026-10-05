@@ -107,3 +107,18 @@ def test_the_gate_is_read_once_per_session_off_the_audio_loop():
     assert "has_profile" not in inspect.getsource(speaker._verify_and_inject)
     assert "speaker_gate(" not in inspect.getsource(session._live_to_device)
     assert not hasattr(speaker, "_speaker_gate_enabled")
+
+
+def test_the_call_s_clock_is_in_the_caller_s_own_zone(db):
+    """«كم الساعة؟» from Toronto used to be answered on Cairo time: the call's time
+    block was built with no user active, so the zone fell back to the default."""
+    import inspect
+    from app.api.voice_ws import memory, session
+    from app.api.voice_ws.session import _ROBOT_CHANNEL
+    from app.utils import time as utime
+
+    db["sandy_users"].insert_one({"_id": "u-toronto", "timezone": "America/Toronto"})
+    utime._cache.clear()
+    text = memory.session_context_for("u-toronto", _ROBOT_CHANNEL, "سامي", [])
+    assert "America/Toronto" in text, text
+    assert "session_context_for, _who, _channel" in inspect.getsource(session._live_session)

@@ -114,6 +114,23 @@ def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
             + "\n(هاد وقت بداية المكالمة.)" + _load_stm_context(history))
 
 
+def session_context_for(user_id: str, channel: str, label: str,
+                        history: Optional[List[Dict[str, Any]]] = None) -> str:
+    """`session_context` on a pool thread, in the caller's own profile, so the clock and
+    the day are read in their zone (with no user active it falls back to the default).
+
+    Identity, channel and name come in as arguments: the session's context is not here.
+    """
+    from app.api.voice_ws.tools import _voice_profile
+    from app.utils.user_profiles import active_user_profile_context
+
+    set_voice_identity(user_id)
+    set_voice_channel(channel)
+    set_voice_speaker_label(label)
+    with active_user_profile_context(_voice_profile(user_id) if user_id else None):
+        return session_context(history)
+
+
 def _channel_line() -> str:
     """Where this call is happening, so she knows she is heard, not read."""
     where = ("بتحكي معه بالصوت من خلال جسمك، الروبوت اللي بالغرفة"

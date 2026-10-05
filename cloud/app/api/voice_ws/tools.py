@@ -10,7 +10,8 @@ from app.api.voice_ws._config import (
     logger,
 )
 from app.api.voice_ws.memory import (
-    session_context,
+    resolve_speaker_label,
+    session_context_for,
     _load_stm_history,
     _stm_chat_id,
     set_voice_identity,
@@ -39,8 +40,12 @@ def _build_system_instruction(user_id: str = "", channel: Optional[str] = None) 
 
     `user_id` is passed in because this runs on a pool thread without the session context.
     """
+    from app.api.voice_ws.session import _ROBOT_CHANNEL
+
     base = _build_cached_instruction(user_id, channel)
-    return with_recent_turns(base, session_context(_load_stm_history()))
+    history = _load_stm_history()
+    return with_recent_turns(base, session_context_for(
+        user_id, channel or _ROBOT_CHANNEL, resolve_speaker_label(user_id), history))
 
 
 def _build_cached_instruction(user_id: str, channel: Optional[str] = None) -> str:

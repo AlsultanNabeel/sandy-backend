@@ -56,7 +56,7 @@ from app.api.voice_ws.speaker import (
     _verify_owner,
 )
 from app.api.voice_ws.memory import (
-    session_context,
+    session_context_for,
     _save_voice_turn,
     _stm_chat_id,
     get_voice_channel,
@@ -580,7 +580,9 @@ async def _live_session(ws, remote: str) -> None:
         )
         set_voice_speaker_label(_label)
         _ms_seed = (time.monotonic() - _t_seed) * 1000
-        system_instruction = with_recent_turns(_base, session_context(_recent))
+        _context = await _loop.run_in_executor(
+            None, session_context_for, _who, _channel, _label, _recent)
+        system_instruction = with_recent_turns(_base, _context)
         live_tools = _build_live_tools(types)
 
         voice_name = (GEMINI_TTS_VOICE or "Aoede").strip()
