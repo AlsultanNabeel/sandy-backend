@@ -30,13 +30,6 @@ def speaker_gate(user_id: str, channel: str) -> bool:
     return speaker_id.has_profile(user_id)
 
 
-def _speaker_gate_enabled() -> bool:
-    """`speaker_gate` for this session's own identity and channel."""
-    from app.api.voice_ws.memory import get_voice_channel, get_voice_identity
-
-    return speaker_gate(get_voice_identity(), get_voice_channel())
-
-
 def _is_sensitive_call(name: str, args=None) -> bool:
     """With SANDY_REQUIRE_SPEAKER_AUTH=1 these wait for the owner's voice: deletes,
     cancels, bulk changes, future-self messages, and `confirm`, which only ever
@@ -158,9 +151,9 @@ async def _learn_voice(session, pcm: bytes) -> None:
 
 
 async def _verify_and_inject(session, pcm: bytes) -> None:
-    """يتحقّق مين المتكلّم ويحقن هويته بالجلسة قبل ما يردّ الموديل."""
-    if not _speaker_gate_enabled():
-        return
+    """يتحقّق مين المتكلّم ويحقن هويته بالجلسة قبل ما يردّ الموديل.
+
+    Only called when the session's gate is on (`verify`, read once at its start)."""
     from google.genai import types
     from app.api.voice_ws.memory import get_voice_identity
 

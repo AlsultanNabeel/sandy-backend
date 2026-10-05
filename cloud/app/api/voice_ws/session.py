@@ -50,7 +50,7 @@ from app.api.voice_ws import face
 from app.api.voice_ws.speaker import (
     _RecentAudio,
     _is_sensitive_call,
-    _speaker_gate_enabled,
+    speaker_gate,
     _learn_voice,
     _verify_and_inject,
     _verify_owner,
@@ -570,17 +570,19 @@ async def _live_session(ws, remote: str) -> None:
         # والاسم بينحطّ بسياق الحلقة قبل أول جملة.
         _loop = asyncio.get_event_loop()
         _t_seed = time.monotonic()
-        _label, _base, _recent = await asyncio.gather(
+        # The speaker gate too: a voiceprint lookup, read once here and handed down,
+        # never again on the loop that relays audio.
+        _label, _base, _recent, gate_on = await asyncio.gather(
             _loop.run_in_executor(None, resolve_speaker_label, _who),
             _loop.run_in_executor(None, _build_cached_instruction, _who, _channel),
             _loop.run_in_executor(None, load_recent_turns, _who),
+            _loop.run_in_executor(None, speaker_gate, _who, _channel),
         )
         set_voice_speaker_label(_label)
         _ms_seed = (time.monotonic() - _t_seed) * 1000
         system_instruction = with_recent_turns(_base, session_context(_recent))
         live_tools = _build_live_tools(types)
 
-        gate_on = _speaker_gate_enabled()
         voice_name = (GEMINI_TTS_VOICE or "Aoede").strip()
         config_kwargs: Dict[str, Any] = dict(
             response_modalities=["AUDIO"],
@@ -671,7 +673,7 @@ async def _live_session(ws, remote: str) -> None:
                     _device_to_live(reader, session, recent, verify=gate_on,
                                     live_state=live_state))
                 t_out = asyncio.create_task(
-                    _live_to_device(ws, session, recent, live_state))
+                    _live_to_device(ws, session, recent, live_state, gate_on))
 
                 done, pending = await asyncio.wait(
                     [t_in, t_out],
@@ -1122,7 +1124,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
 
 
 async def _live_to_device(ws, session, recent: "_RecentAudio",
-                          live_state: Optional[Dict[str, Any]] = None) -> None:
+                          live_state: Optional[Dict[str, Any]] = None,
+                          gate_on: bool = False) -> None:
     """Relay Gemini Live responses to the device and handle tool calls.
 
     `live_state` carries back the latest resumption handle and whether the server said it's hanging up.
@@ -1133,7 +1136,6 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
 
 
     loop = asyncio.get_event_loop()
-    gate_on = _speaker_gate_enabled()
 
     # One thread for everything written to the device: strict FIFO, never starved.
     tx = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-tx")

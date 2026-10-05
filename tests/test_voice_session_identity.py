@@ -97,3 +97,13 @@ def test_the_app_call_is_not_handed_the_robot_s_guarded_instruction(voiceprint_o
     assert _NEUTRAL in robot_text, "the robot was served the app's trusting instruction"
     assert _NEUTRAL not in vt._build_cached_instruction("u1", _APP_CHANNEL)
 
+
+
+def test_the_gate_is_read_once_per_session_off_the_audio_loop():
+    """No voiceprint lookup on the loop that relays audio, per sentence or per reply."""
+    import inspect
+    from app.api.voice_ws import session, speaker
+
+    assert "has_profile" not in inspect.getsource(speaker._verify_and_inject)
+    assert "speaker_gate(" not in inspect.getsource(session._live_to_device)
+    assert not hasattr(speaker, "_speaker_gate_enabled")

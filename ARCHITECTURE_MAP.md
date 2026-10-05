@@ -600,6 +600,9 @@ pending reminders) and the last STM turn ("was up late").
 
 The speaker gate (`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's
 destructive voice calls (`speaker._is_sensitive_call`).
+The gate is read once per session, on a pool thread beside the instruction build
+(`speaker_gate(user, channel)` in `_live_session`'s gather), and handed to the audio loop
+(`verify`) and the reply loop (`gate_on`); nothing on either loop reads the voiceprint again.
 
 ---
 
