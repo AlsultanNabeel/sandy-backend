@@ -321,9 +321,14 @@ def _authenticate(ws, remote: str) -> bool:
                         "own" if kv == KEY_VERSION else
                         ("issued" if "device_key" in reply else "shared"))
             return True
-        except Exception as exc:
+        except (KeyError, TypeError, ValueError) as exc:
+            # The hello itself is malformed: the board's doing, and it backs off.
             logger.warning("[voice_ws] handshake error from %s: %s", remote, exc)
             ws.send(json.dumps({"type": "error", "msg": "bad_handshake"}))
+            return False
+        except Exception as exc:  # noqa: BLE001 — anything else is ours (a database read)
+            logger.error("[voice_ws] handshake failed on our side for %s: %s", remote, exc)
+            ws.send(json.dumps({"type": "error", "msg": "server_error"}))
             return False
 
     # No auth configured: stay closed unless an explicit dev flag opts in.

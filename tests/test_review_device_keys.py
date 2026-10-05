@@ -141,3 +141,20 @@ def test_an_unreadable_key_is_a_server_fault_not_a_revoked_key(db, rotated_ltm_k
     assert not ok and reply["msg"] == "server_error"
     ok, reply = _auth(_hello("8421", SHARED))
     assert not ok and reply["msg"] == "server_error", "shared key let in while the record is unreadable"
+
+
+def test_a_database_hiccup_in_the_handshake_is_a_server_error(db, monkeypatch):
+    """«bad_handshake» locks the board out for ten minutes; a slow database is not its fault."""
+    from pymongo.errors import PyMongoError
+    from app.features import device_keys
+
+    def _down(_):
+        raise PyMongoError("timed out")
+    monkeypatch.setattr(device_keys, "get_key", _down)
+    ok, reply = _auth(_hello("8421", SHARED))
+    assert not ok and reply["msg"] == "server_error"
+
+
+def test_a_malformed_hello_is_still_a_bad_handshake(db):
+    ok, reply = _auth({"type": "hello", "device_id": "8421", "ts": "soon", "hmac": "00"})
+    assert not ok and reply["msg"] == "bad_handshake"
