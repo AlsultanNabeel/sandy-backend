@@ -243,9 +243,16 @@ def _authenticate(ws, remote: str) -> bool:
             # A board with its own key says so (`kv` 2) and is checked against it
             # alone; the shared key is refused once its own key is confirmed.
             from app.features.device_keys import (
-                KEY_VERSION, confirm_key, get_key, issue_key,
+                KEY_VERSION, KeyUnreadable, confirm_key, get_key, issue_key,
             )
-            record = get_key(device_id)
+            try:
+                record = get_key(device_id)
+            except KeyUnreadable:
+                # Our fault (the storage key), not the board's: no lockout, key kept.
+                logger.error("[voice_ws] key record of %s cannot be read — check "
+                             "SANDY_LTM_KEY", device_id)
+                ws.send(json.dumps({"type": "error", "msg": "server_error"}))
+                return False
             if kv == KEY_VERSION:
                 if not record:
                     # Revoked or never issued: the board re-enrols with the shared key.

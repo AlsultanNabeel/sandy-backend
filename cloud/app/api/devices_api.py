@@ -372,11 +372,17 @@ def register_devices_api(app, mongo_db=None):
             return _bad("stale")
 
         from app.features.device_keys import (
-            KEY_VERSION, cam_key_id, confirm_key, get_key, issue_key,
+            KEY_VERSION, KeyUnreadable, cam_key_id, confirm_key, get_key, issue_key,
         )
         kid = cam_key_id(node_id)
         own_key = (request.headers.get("X-Sandy-Kv") or "").strip() == str(KEY_VERSION)
-        record = get_key(kid)
+        try:
+            record = get_key(kid)
+        except KeyUnreadable:
+            # Not a 401: that makes the camera drop a key that is still good.
+            logger.error("[cam] key record of %s cannot be read — check SANDY_LTM_KEY",
+                         node_id)
+            return _bad("key_unreadable", code=503)
         if own_key:
             if record is None:
                 # The camera falls back to the shared key until it's paired again.

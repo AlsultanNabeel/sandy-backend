@@ -23,6 +23,12 @@ KEY_VERSION = 2          # the `kv` a hello signed with the board's own key carr
 ENROL_WINDOW_MIN = 15    # how long after pairing a board may collect its key
 
 
+class KeyUnreadable(RuntimeError):
+    """A key is on record but this server cannot read it (SANDY_LTM_KEY wrong or
+    changed). Not the board's fault: callers answer with a temporary error, never
+    with "unknown key", which makes the board throw its key away."""
+
+
 def cam_key_id(node_id: str) -> str:
     """Camera's key id: shares the node id, but must not share the robot's key."""
     return f"{(node_id or '').strip()}:cam"
@@ -34,7 +40,9 @@ def _coll():
 
 
 def get_key(device_id: str) -> Optional[Dict[str, Any]]:
-    """``{"key": bytes, "state": "issued"|"confirmed"}`` or None."""
+    """``{"key": bytes, "state": "issued"|"confirmed"}`` or None when there is none.
+
+    Raises KeyUnreadable when a record exists that cannot be decrypted."""
     coll = _coll()
     device_id = (device_id or "").strip()
     if coll is None or not device_id:
@@ -49,7 +57,7 @@ def get_key(device_id: str) -> Optional[Dict[str, Any]]:
         key = bytes.fromhex(hex_key)
     except ValueError:
         logger.error("[device_keys] stored key for %s is unreadable", device_id)
-        return None
+        raise KeyUnreadable(device_id) from None
     return {"key": key, "hex": hex_key, "state": doc.get("state", "issued")}
 
 

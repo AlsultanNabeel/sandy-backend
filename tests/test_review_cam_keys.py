@@ -101,3 +101,19 @@ def test_ids_and_size_are_checked_before_anything_else(client):
     assert _post_v2(c, SHARED, node="../etc").status_code == 400
     huge = b"\xff\xd8" + b"z" * (600 * 1024)
     assert _post_v2(c, SHARED, body=huge).status_code == 413
+
+
+def test_an_unreadable_camera_key_is_not_a_refusal(client, monkeypatch):
+    """A 401 makes the camera drop its key; a key we cannot read is our fault."""
+    from cryptography.fernet import Fernet
+    from app.utils import ltm_crypto
+
+    c, _ = client
+    monkeypatch.setattr(ltm_crypto, "_init_attempted", True)
+    monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
+    own = bytes.fromhex(_post(c, SHARED).get_json()["device_key"])
+    assert _post(c, own, kv=2).status_code == 200
+
+    monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
+    r = _post(c, own, kv=2)
+    assert r.status_code == 503 and r.get_json()["error"] == "key_unreadable"

@@ -648,6 +648,7 @@ actually means:
 | `bad_handshake` | malformed hello |
 | `auth_not_configured` | the server has no `SANDY_WS_HMAC_KEY` at all |
 | `key_unknown` | signed with `kv` 2, but the server holds no key for that board (unpaired or revoked); the board drops its key and falls back to the shared one |
+| `server_error` | the server's fault, not the board's: a key record it cannot decrypt (`device_keys.KeyUnreadable`, a wrong or changed `SANDY_LTM_KEY`), or no Gemini key. The board keeps its key and is not locked out; the camera gets 503 `key_unreadable` for the same case, never a 401 |
 
 The `ts` must be wall-clock, so the firmware opens no session until SNTP has set the clock
 (`clock_start`: the router first, then three public servers; never blocking). A wake word

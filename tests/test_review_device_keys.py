@@ -114,3 +114,30 @@ def test_pairing_opens_the_window_but_never_reissues_a_confirmed_key(db):
     assert get_key("8421")["state"] == "confirmed"
     ok, reply = _auth(_hello("8421", SHARED))
     assert not ok, "re-pairing let the shared key back in"
+
+
+@pytest.fixture
+def rotated_ltm_key(monkeypatch):
+    """Keys stored under one SANDY_LTM_KEY, the server now running with another."""
+    from cryptography.fernet import Fernet
+    from app.utils import ltm_crypto
+
+    monkeypatch.setattr(ltm_crypto, "_init_attempted", True)
+    monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
+
+    def rotate():
+        monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
+    return rotate
+
+
+def test_an_unreadable_key_is_a_server_fault_not_a_revoked_key(db, rotated_ltm_key):
+    """«key_unknown» makes every board drop its key; one bad deploy must not do that."""
+    ok, reply = _auth(_hello("8421", SHARED))
+    own = bytes.fromhex(reply["device_key"])
+    _auth(_hello("8421", own, kv=2))
+
+    rotated_ltm_key()
+    ok, reply = _auth(_hello("8421", own, kv=2))
+    assert not ok and reply["msg"] == "server_error"
+    ok, reply = _auth(_hello("8421", SHARED))
+    assert not ok and reply["msg"] == "server_error", "shared key let in while the record is unreadable"
