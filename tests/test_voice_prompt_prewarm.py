@@ -160,3 +160,41 @@ def test_writes_during_a_call_build_once_when_it_ends(db, inline, monkeypatch):
     inline.hold("u4")
     inline.release("u4")
     assert built == ["u4"]
+
+
+def test_a_corrected_or_forgotten_fact_is_never_served_from_an_older_instruction(db, monkeypatch):
+    """«انسي…» or a corrected fact used to stay in the voice instruction for up to six
+    hours: any older instruction was good enough while the new one was built."""
+    from datetime import timedelta
+
+    import app.api.voice_ws.tools as vt
+    from app.blocks import _base, entries
+    from app.utils.user_profiles import active_user_profile_context
+
+    # Only the instruction rows this test writes: no build behind the writes.
+    monkeypatch.setattr("app.utils.prompt_prewarm.schedule", lambda tenant: None)
+    with active_user_profile_context({"chat_id": "u1"}):
+        fact = entries.add("fact", "بيشتغل بالبنك", embed=False)
+        spent = entries.add("expense", "قهوة", {"amount": 3}, embed=False)
+
+        def _built_before_the_change():
+            db["sandy_prompt_cache"].delete_many({})
+            vt._shared_put("u1", 1, False, "تعليمات فيها البنك")
+            db["sandy_prompt_cache"].update_many(
+                {}, {"$set": {"created_at": _base.now() - timedelta(minutes=5)}})
+
+        _built_before_the_change()
+        entries.update(spent, data={"amount": 4})
+        assert vt._shared_latest("u1", False), "an edit outside the facts dropped the fast path"
+
+        entries.update(fact, text="بيشتغل بالمدرسة")
+        assert vt._shared_latest("u1", False) is None, "a corrected fact was served stale"
+
+        _built_before_the_change()
+        entries.delete(fact)
+        assert vt._shared_latest("u1", False) is None, "a forgotten fact was served stale"
+
+        again = entries.add("fact", "عنده قطة", embed=False)
+        _built_before_the_change()
+        _base.undo([{"op": "created", "coll": _base.ENTRIES, "id": again, "before": None}])
+        assert vt._shared_latest("u1", False) is None, "an undone fact was served stale"

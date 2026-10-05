@@ -225,7 +225,8 @@ _STALE_MAX_S = 6 * 3600
 
 
 def _shared_latest(key: str, gate_on: bool) -> Optional[str]:
-    """The newest instruction built for this tenant and gate state (any version), if recent enough."""
+    """The newest instruction built for this tenant and gate state (any version), if recent
+    enough and built after the tenant's facts last changed."""
     from datetime import datetime, timedelta, timezone
 
     try:
@@ -234,7 +235,13 @@ def _shared_latest(key: str, gate_on: bool) -> Optional[str]:
         db = get_db()
         if db is None:
             return None
+        from app.utils.tenant_version import corrected_at
+
         since = datetime.now(timezone.utc) - timedelta(seconds=_STALE_MAX_S)
+        # A fact edited or forgotten since: nothing built before that may stand in.
+        corrected = corrected_at(key)
+        if corrected is not None and corrected > since:
+            since = corrected
         doc = db[_PROMPT_COLL].find_one(
             {"user_id": key, "text": {"$exists": True}, "created_at": {"$gte": since},
              "_id": {"$regex": f":{_variant(gate_on)}:r{_PROMPT_REV}$"}},

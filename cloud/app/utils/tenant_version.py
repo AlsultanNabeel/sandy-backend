@@ -102,6 +102,43 @@ def bump_for(tenant: str, *, collection: Optional[str] = None) -> None:
     schedule(key)
 
 
+def mark_corrected(tenant: str) -> None:
+    """A fact the voice instruction carries was edited or removed: from now on no
+    instruction built before this moment may stand in while a new one is built
+    (`voice_ws.tools._shared_latest`)."""
+    from datetime import datetime, timezone
+
+    key = str(tenant or "")
+    coll = _coll()
+    if not key or coll is None:
+        return
+    try:
+        coll.update_one({"_id": key},
+                        {"$set": {"corrected_at": datetime.now(timezone.utc)}}, upsert=True)
+    except PyMongoError as exc:
+        logger.warning("[tenant_version] correction stamp failed: %s", exc)
+
+
+def corrected_at(tenant: str):
+    """When a fact of this tenant was last edited or removed (UTC), or None. Unreadable
+    reads as now: an older instruction is not served on a guess."""
+    from datetime import datetime, timezone
+
+    key = str(tenant or "")
+    coll = _coll()
+    if not key or coll is None:
+        return None
+    try:
+        doc = coll.find_one({"_id": key}, {"corrected_at": 1}) or {}
+    except PyMongoError as exc:
+        logger.debug("[tenant_version] correction stamp read failed: %s", exc)
+        return datetime.now(timezone.utc)
+    stamp = doc.get("corrected_at")
+    if stamp is not None and stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)   # pymongo hands back naive UTC
+    return stamp
+
+
 def forget(tenant: str) -> None:
     """Drop a tenant's stamp (account deletion)."""
     key = str(tenant or "")

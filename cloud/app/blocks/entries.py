@@ -94,6 +94,8 @@ def update(entry_id: str, *, text: Optional[str] = None,
     if changes:
         _base.noted("updated", _base.ENTRIES, entry_id, coll)
         coll.update_one({"_id": entry_id}, {"$set": changes})
+        if current["kind"] == "fact":
+            _base.fact_changed()
     return True
 
 
@@ -101,8 +103,12 @@ def delete(entry_id: str, mongo_db=None) -> bool:
     coll = _base.coll(_base.ENTRIES, mongo_db)
     if coll is None or not entry_id:
         return False
+    current = coll.find_one({"_id": entry_id}, {"kind": 1})
     _base.noted("deleted", _base.ENTRIES, entry_id, coll)
-    return coll.delete_one({"_id": entry_id}).deleted_count > 0
+    gone = coll.delete_one({"_id": entry_id}).deleted_count > 0
+    if gone and (current or {}).get("kind") == "fact":
+        _base.fact_changed()
+    return gone
 
 
 def list_entries(kind: Optional[str] = None, *, since: Optional[datetime] = None,

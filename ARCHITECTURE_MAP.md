@@ -253,6 +253,12 @@ apart in both caches (`_variant`). The build takes the call's channel as an argu
 when none is given, which is what the prewarm builds): it runs on a pool thread, where the
 session's channel never arrives, and reading it from there handed the owner's own phone call
 the stranger persona.
+While a moved version is rebuilt, the last instruction (up to six hours old) serves the
+call, except one built before the tenant's facts last changed: editing or removing a
+`fact` entry (`entries.update` / `delete`, or an undo touching one) stamps
+`corrected_at` on the tenant's version (`tenant_version.mark_corrected`), and
+`_shared_latest` serves nothing older, so «انسي…» or a corrected fact never reaches the
+next call.
 
 **One embedding per call site, none without a key** (`integrations/embeddings.py`,
 built once, eight-second deadline). Entries are embedded when written, except

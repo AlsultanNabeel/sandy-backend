@@ -56,15 +56,28 @@ def noted(op: str, name: str, doc_id: str, handle=None, text: str = "") -> None:
     entries.append({"op": op, "coll": name, "id": doc_id, "before": before, "text": label})
 
 
+def fact_changed() -> None:
+    """A `fact` entry was edited or removed: the voice instruction that carries the facts
+    must not be served from before it (`tenant_version.mark_corrected`)."""
+    from app.utils.tenant_version import mark_corrected
+    from app.utils.user_profiles import current_user_id
+
+    mark_corrected(current_user_id() or "")
+
+
 def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:
     """Takes back a turn's writes, newest first: created rows go, changed rows get their
     old values back, deleted rows come back. The count of rows put right."""
     done = 0
+    facts = False
     for e in reversed(effects or []):
         handle = coll(e.get("coll", ""), mongo_db)
         if handle is None or e.get("coll") not in (ENTRIES, ITEMS, SCHEDULES):
             continue
         before = e.get("before")
+        if e.get("coll") == ENTRIES and not facts:
+            row = before or handle.find_one({"_id": e["id"]}, {"kind": 1}) or {}
+            facts = row.get("kind") == "fact"
         if e.get("op") == "created":
             done += handle.delete_one({"_id": e["id"]}).deleted_count
         elif e.get("op") == "updated" and before:
@@ -72,6 +85,8 @@ def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:
         elif e.get("op") == "deleted" and before and handle.find_one({"_id": e["id"]}, {"_id": 1}) is None:
             handle.insert_one(before)
             done += 1
+    if facts:
+        fact_changed()
     return done
 
 
