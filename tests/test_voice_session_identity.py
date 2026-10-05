@@ -64,3 +64,36 @@ def test_a_refused_handshake_leaves_no_identity_behind(db):
     assert not sess._authenticate(_WS(bad), "t")
     assert get_voice_identity() == ""
     assert get_voice_channel() == "الصوت"
+
+
+_NEUTRAL = "الافتراضي: عاملي أي حدا"
+
+
+@pytest.fixture
+def voiceprint_owner(db, monkeypatch):
+    """u1 taught the robot their voice; the instruction cache is cold."""
+    import app.api.voice_ws.tools as vt
+    from app.features import speaker_id
+
+    monkeypatch.setenv("SANDY_REQUIRE_SPEAKER_AUTH", "0")
+    monkeypatch.setattr(speaker_id, "has_profile", lambda uid: uid == "u1")
+    monkeypatch.setattr("app.brain.persona.build_effective_persona", lambda _uid: "شخصية")
+    vt.clear_instruction_cache()
+    yield vt
+    vt.clear_instruction_cache()
+
+
+def test_the_app_call_is_not_handed_the_robot_s_guarded_instruction(voiceprint_owner):
+    """Built on a pool thread, where the session's channel never arrives."""
+    from app.api.voice_ws.memory import set_voice_channel
+    from app.api.voice_ws.session import _APP_CHANNEL, _ROBOT_CHANNEL
+
+    vt = voiceprint_owner
+    set_voice_channel("")                     # what a pool thread has
+    app_text = vt._build_cached_instruction("u1", _APP_CHANNEL)
+    assert _NEUTRAL not in app_text, "the owner's own phone call got the stranger persona"
+
+    robot_text = vt._build_cached_instruction("u1", _ROBOT_CHANNEL)
+    assert _NEUTRAL in robot_text, "the robot was served the app's trusting instruction"
+    assert _NEUTRAL not in vt._build_cached_instruction("u1", _APP_CHANNEL)
+

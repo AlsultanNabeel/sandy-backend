@@ -168,17 +168,17 @@ def test_the_instruction_is_cached_per_tenant_version(monkeypatch):
     calls = {"n": 0}
 
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid: (calls.__setitem__("n", calls["n"] + 1)
+                        lambda cid, gate_on: (calls.__setitem__("n", calls["n"] + 1)
                                               or "التعليمات"))
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 7)
 
-    assert vt._cached_system_instruction("u1") == "التعليمات"
-    assert vt._cached_system_instruction("u1") == "التعليمات"
+    assert vt._cached_system_instruction("u1", False) == "التعليمات"
+    assert vt._cached_system_instruction("u1", False) == "التعليمات"
     assert calls["n"] == 1, "every call rebuilds the whole instruction"
 
     # A write moves the version, and the next session must see it.
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 8)
-    vt._cached_system_instruction("u1")
+    vt._cached_system_instruction("u1", False)
     assert calls["n"] == 2, "a saved memory never reached the voice prompt"
     vt.clear_instruction_cache()
 
@@ -189,10 +189,10 @@ def test_two_tenants_do_not_share_an_instruction(monkeypatch):
     vt.clear_instruction_cache()
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 1)
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid: f"تعليمات {cid}")
+                        lambda cid, gate_on: f"تعليمات {cid}")
 
-    assert vt._cached_system_instruction("u1") == "تعليمات u1"
-    assert vt._cached_system_instruction("u2") == "تعليمات u2"
+    assert vt._cached_system_instruction("u1", False) == "تعليمات u1"
+    assert vt._cached_system_instruction("u2", False) == "تعليمات u2"
     vt.clear_instruction_cache()
 
 
@@ -445,9 +445,9 @@ def test_the_instruction_cache_crosses_the_worker_boundary(monkeypatch):
 
     store: dict = {}
     monkeypatch.setattr(vt, "_shared_get",
-                        lambda k, v: store.get(f"{k}:{v}"))
+                        lambda k, v, g: store.get(f"{k}:{v}:{g}"))
     monkeypatch.setattr(vt, "_shared_put",
-                        lambda k, v, t: store.__setitem__(f"{k}:{v}", t))
+                        lambda k, v, g, t: store.__setitem__(f"{k}:{v}:{g}", t))
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 3)
     # The write is fired onto the background pool — the robot is already waiting
     # and whoever comes next is the one who benefits. Run it inline so the test
@@ -457,22 +457,22 @@ def test_the_instruction_cache_crosses_the_worker_boundary(monkeypatch):
 
     builds = {"n": 0}
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid: (builds.__setitem__("n", builds["n"] + 1)
+                        lambda cid, gate_on: (builds.__setitem__("n", builds["n"] + 1)
                                               or "التعليمات الكاملة"))
 
     vt.clear_instruction_cache()
-    assert vt._cached_system_instruction("u1") == "التعليمات الكاملة"
+    assert vt._cached_system_instruction("u1", False) == "التعليمات الكاملة"
     assert builds["n"] == 1
 
     # The other worker: same tenant, same version, empty local cache.
     vt.clear_instruction_cache()
-    assert vt._cached_system_instruction("u1") == "التعليمات الكاملة"
+    assert vt._cached_system_instruction("u1", False) == "التعليمات الكاملة"
     assert builds["n"] == 1, "the second worker rebuilt the whole thing"
 
     # And a write still invalidates it everywhere.
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 4)
     vt.clear_instruction_cache()
-    vt._cached_system_instruction("u1")
+    vt._cached_system_instruction("u1", False)
     assert builds["n"] == 2, "a saved memory never reached the voice prompt"
     vt.clear_instruction_cache()
 
@@ -653,17 +653,17 @@ def test_a_moved_version_serves_the_last_instruction_and_rebuilds_behind(monkeyp
     vt.clear_instruction_cache()
     built = []
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid: (built.append(cid) or f"تعليمات {len(built)}"))
+                        lambda cid, gate_on: (built.append(cid) or f"تعليمات {len(built)}"))
     monkeypatch.setattr("app.utils.thread_pool.submit_background",
                         lambda fn, *a, _label="", **k: fn(*a, **k))
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 7)
-    vt._cached_system_instruction("u1")
+    vt._cached_system_instruction("u1", False)
     vt.clear_instruction_cache()               # another worker: only the shared rows
 
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 8)
-    assert vt._cached_system_instruction("u1") == "تعليمات 1"     # no wait
+    assert vt._cached_system_instruction("u1", False) == "تعليمات 1"     # no wait
     assert len(built) == 2                                         # rebuilt behind
     vt.clear_instruction_cache()
-    assert vt._cached_system_instruction("u1") == "تعليمات 2"     # the next call is fresh
+    assert vt._cached_system_instruction("u1", False) == "تعليمات 2"     # the next call is fresh
     vt.clear_instruction_cache()
     appdb.reset()

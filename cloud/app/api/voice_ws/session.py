@@ -561,6 +561,7 @@ async def _live_session(ws, remote: str) -> None:
 
         # الهوية بتتمرّر كوسيط: متغيّر السياق ما بيعبر لخيط المجمّع.
         _who = get_voice_identity()
+        _channel = get_voice_channel()
         # التسخين بيستنّى لآخر المكالمة (شوف `prompt_prewarm.hold`).
         from app.utils import prompt_prewarm
         prompt_prewarm.hold(_who)
@@ -571,7 +572,7 @@ async def _live_session(ws, remote: str) -> None:
         _t_seed = time.monotonic()
         _label, _base, _recent = await asyncio.gather(
             _loop.run_in_executor(None, resolve_speaker_label, _who),
-            _loop.run_in_executor(None, _build_cached_instruction, _who),
+            _loop.run_in_executor(None, _build_cached_instruction, _who, _channel),
             _loop.run_in_executor(None, load_recent_turns, _who),
         )
         set_voice_speaker_label(_label)

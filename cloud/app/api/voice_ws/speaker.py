@@ -11,22 +11,30 @@ from app.api.voice_ws._config import (
 from app.api.voice_ws.memory import _stm_chat_id
 
 
-def _speaker_gate_enabled() -> bool:
+def speaker_gate(user_id: str, channel: str) -> bool:
     """Who is talking matters on the robot, where anyone in the room can: on once the owner's
     voice is known (or forced by SANDY_REQUIRE_SPEAKER_AUTH). Never on the app's call: the
-    phone is signed in as its owner, and its mic is not the one the print was made on."""
-    from app.api.voice_ws.memory import get_voice_channel, get_voice_identity
+    phone is signed in as its owner, and its mic is not the one the print was made on.
+
+    Both come in as arguments: this runs on pool threads, where the session's context
+    does not reach. A Mongo read — never on the audio loop."""
     from app.api.voice_ws.session import _APP_CHANNEL
 
-    if get_voice_channel() == _APP_CHANNEL:
+    if channel == _APP_CHANNEL:
         return False
     if os.getenv("SANDY_REQUIRE_SPEAKER_AUTH", "0").strip().lower() in {"1", "true", "on", "yes"}:
         return True
-    user = get_voice_identity()
-    if not user:
+    if not user_id:
         return False
     from app.features import speaker_id
-    return speaker_id.has_profile(user)
+    return speaker_id.has_profile(user_id)
+
+
+def _speaker_gate_enabled() -> bool:
+    """`speaker_gate` for this session's own identity and channel."""
+    from app.api.voice_ws.memory import get_voice_channel, get_voice_identity
+
+    return speaker_gate(get_voice_identity(), get_voice_channel())
 
 
 def _is_sensitive_call(name: str, args=None) -> bool:

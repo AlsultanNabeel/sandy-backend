@@ -22,16 +22,16 @@ import mongomock
 import pytest
 
 
-def _voice_body(uid, persona=None):
+def _voice_body(uid, persona=None, gate_on=False):
     """The voice instruction with a stub persona: the real one credits her
     developer by name, which is product copy and not what these tests are about."""
     from unittest.mock import patch
 
     import app.api.voice_ws.tools as vt
     if persona is not None:
-        return vt._system_instruction_body(uid)
+        return vt._system_instruction_body(uid, gate_on)
     with patch("app.brain.persona.build_effective_persona", lambda _uid: "شخصية"):
-        return vt._system_instruction_body(uid)
+        return vt._system_instruction_body(uid, gate_on)
 
 
 CUSTOMER = "cust-1"

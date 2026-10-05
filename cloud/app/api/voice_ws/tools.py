@@ -16,7 +16,7 @@ from app.api.voice_ws.memory import (
     set_voice_identity,
 )
 from app.api.voice_ws.speaker import (
-    _speaker_gate_enabled,
+    speaker_gate,
 )
 
 
@@ -34,26 +34,31 @@ def _voice_profile(chat_id: str) -> Dict[str, Any]:
     }
 
 
-def _build_system_instruction(user_id: str = "") -> str:
+def _build_system_instruction(user_id: str = "", channel: Optional[str] = None) -> str:
     """Sandy's personality + durable memory + recent turns, built in the user's tenant context.
 
     `user_id` is passed in because this runs on a pool thread without the session context.
     """
-    base = _build_cached_instruction(user_id)
+    base = _build_cached_instruction(user_id, channel)
     return with_recent_turns(base, session_context(_load_stm_history()))
 
 
-def _build_cached_instruction(user_id: str) -> str:
+def _build_cached_instruction(user_id: str, channel: Optional[str] = None) -> str:
     """The instruction minus the recent turns — the part cached per tenant version.
 
-    Identity is always written, even empty: pool threads keep context between jobs.
+    `channel` is the call's (the robot when not given: the guarded side). It decides the
+    speaker gate, and with it which of two texts this is, so it comes in as an argument:
+    a pool thread has no session channel. Identity is always written, even empty: pool
+    threads keep context between jobs.
     """
+    from app.api.voice_ws.session import _ROBOT_CHANNEL
     from app.utils.user_profiles import active_user_profile_context
 
     set_voice_identity(user_id)
     chat_id = _stm_chat_id()
+    gate_on = speaker_gate(chat_id, channel or _ROBOT_CHANNEL)
     with active_user_profile_context(_voice_profile(chat_id) if chat_id else None):
-        return _cached_system_instruction(chat_id)
+        return _cached_system_instruction(chat_id, gate_on)
 
 
 # The "past record" guard; recent turns go right before it (see with_recent_turns).
@@ -84,10 +89,16 @@ _INSTRUCTION_LOCK = threading.Lock()
 _PROMPT_COLL = "sandy_prompt_cache"
 # Bump when the cached text changes shape. Rev 2: recent turns left the cache.
 # Rev 3: facts come from the blocks and the rules name the brain's tools.
-_PROMPT_REV = 3
+# Rev 4: one text per speaker-gate state (the robot's guarded one, the trusting one).
+_PROMPT_REV = 4
 
 
-def _shared_get(key: str, version: int) -> Optional[str]:
+def _variant(gate_on: bool) -> str:
+    """The cache keeps the guarded and the trusting instruction apart."""
+    return "g1" if gate_on else "g0"
+
+
+def _shared_get(key: str, version: int, gate_on: bool) -> Optional[str]:
     """The instruction from whichever worker built it last (per-process caches miss half the time)."""
     try:
         from app.db import get_db
@@ -95,14 +106,15 @@ def _shared_get(key: str, version: int) -> Optional[str]:
         db = get_db()
         if db is None:
             return None
-        doc = db[_PROMPT_COLL].find_one({"_id": f"{key}:{version}:r{_PROMPT_REV}"}, {"text": 1})
+        doc = db[_PROMPT_COLL].find_one(
+            {"_id": f"{key}:{version}:{_variant(gate_on)}:r{_PROMPT_REV}"}, {"text": 1})
         return (doc or {}).get("text") or None
     except PyMongoError as exc:
         logger.debug("[voice_ws] shared prompt read skipped: %s", exc)
         return None
 
 
-def _shared_put(key: str, version: int, text: str) -> None:
+def _shared_put(key: str, version: int, gate_on: bool, text: str) -> None:
     from datetime import datetime, timezone
 
     try:
@@ -113,7 +125,7 @@ def _shared_put(key: str, version: int, text: str) -> None:
             return
         now = datetime.now(timezone.utc)
         db[_PROMPT_COLL].update_one(
-            {"_id": f"{key}:{version}:r{_PROMPT_REV}"},
+            {"_id": f"{key}:{version}:{_variant(gate_on)}:r{_PROMPT_REV}"},
             {"$set": {"text": text, "user_id": key, "created_at": now}},
             upsert=True,
         )
@@ -149,55 +161,57 @@ def tenant_uses_voice(tenant: str) -> bool:
         return True
 
 
-def _cached_system_instruction(chat_id: str) -> str:
+def _cached_system_instruction(chat_id: str, gate_on: bool) -> str:
     from app.utils.tenant_version import version_for
 
     key = str(chat_id or "")
     version = version_for(key) if key else -1
     if version < 0:
-        return _system_instruction_body(chat_id)
+        return _system_instruction_body(chat_id, gate_on)
 
+    slot = f"{key}:{_variant(gate_on)}"
     with _INSTRUCTION_LOCK:
-        hit = _INSTRUCTION_CACHE.get(key)
+        hit = _INSTRUCTION_CACHE.get(slot)
     if hit is not None and hit[0] == version:
         logger.info("[voice_ws] instruction from cache (version %d)", version)
         return hit[1]
 
-    shared = _shared_get(key, version)
+    shared = _shared_get(key, version, gate_on)
     if shared:
         logger.info("[voice_ws] instruction from the shared cache (version %d)",
                     version)
         with _INSTRUCTION_LOCK:
-            _INSTRUCTION_CACHE[key] = (version, shared)
+            _INSTRUCTION_CACHE[slot] = (version, shared)
         return shared
 
-    stale = _shared_latest(key)
+    stale = _shared_latest(key, gate_on)
     if stale:
         # Any write moves the version (a habit ticked, a reminder moved), and rebuilding
         # took over a second while she waited to answer. The last one serves this call;
         # the fresh one is built behind it for the next.
         logger.info("[voice_ws] instruction from an older version; rebuilding behind the call")
         with _INSTRUCTION_LOCK:
-            _INSTRUCTION_CACHE[key] = (version, stale)
+            _INSTRUCTION_CACHE[slot] = (version, stale)
         from app.utils.thread_pool import submit_background
 
-        submit_background(_refresh_instruction, chat_id, key, version, _label="prompt-refresh")
+        submit_background(_refresh_instruction, chat_id, version, gate_on,
+                          _label="prompt-refresh")
         return stale
 
     # Log why it missed: no row vs a moved version need opposite fixes.
     logger.info("[voice_ws] instruction rebuilt (version %d, shared row %s)",
                 version, "absent" if shared is None else "empty")
 
-    text = _system_instruction_body(chat_id)
+    text = _system_instruction_body(chat_id, gate_on)
     if text:
         with _INSTRUCTION_LOCK:
             if len(_INSTRUCTION_CACHE) > 256:
                 _INSTRUCTION_CACHE.clear()
-            _INSTRUCTION_CACHE[key] = (version, text)
+            _INSTRUCTION_CACHE[slot] = (version, text)
         from app.utils.thread_pool import submit_background
 
         # Off the connection path; the next caller benefits.
-        submit_background(_shared_put, key, version, text, _label="prompt-cache")
+        submit_background(_shared_put, key, version, gate_on, text, _label="prompt-cache")
     return text
 
 
@@ -205,8 +219,8 @@ def _cached_system_instruction(chat_id: str) -> str:
 _STALE_MAX_S = 6 * 3600
 
 
-def _shared_latest(key: str) -> Optional[str]:
-    """The newest instruction built for this tenant (any version), if recent enough."""
+def _shared_latest(key: str, gate_on: bool) -> Optional[str]:
+    """The newest instruction built for this tenant and gate state (any version), if recent enough."""
     from datetime import datetime, timedelta, timezone
 
     try:
@@ -218,7 +232,7 @@ def _shared_latest(key: str) -> Optional[str]:
         since = datetime.now(timezone.utc) - timedelta(seconds=_STALE_MAX_S)
         doc = db[_PROMPT_COLL].find_one(
             {"user_id": key, "text": {"$exists": True}, "created_at": {"$gte": since},
-             "_id": {"$regex": f":r{_PROMPT_REV}$"}},
+             "_id": {"$regex": f":{_variant(gate_on)}:r{_PROMPT_REV}$"}},
             {"text": 1}, sort=[("created_at", -1)])
         return (doc or {}).get("text") or None
     except PyMongoError as exc:
@@ -226,16 +240,17 @@ def _shared_latest(key: str) -> Optional[str]:
         return None
 
 
-def _refresh_instruction(chat_id: str, key: str, version: int) -> None:
+def _refresh_instruction(chat_id: str, version: int, gate_on: bool) -> None:
     """Build this version's instruction off the call path, for the next call."""
     from app.utils.user_profiles import active_user_profile_context
 
+    key = str(chat_id or "")
     with active_user_profile_context(_voice_profile(chat_id)):
-        text = _system_instruction_body(chat_id)
+        text = _system_instruction_body(chat_id, gate_on)
     if text:
         with _INSTRUCTION_LOCK:
-            _INSTRUCTION_CACHE[key] = (version, text)
-        _shared_put(key, version, text)
+            _INSTRUCTION_CACHE[f"{key}:{_variant(gate_on)}"] = (version, text)
+        _shared_put(key, version, gate_on, text)
 
 
 def clear_instruction_cache() -> None:
@@ -252,8 +267,11 @@ _DEVICE_SCENE_RULES = """\
   ❌ ممنوع scene_apply لأمر جهاز مفرد، وممنوع تطبيق مشهد عكس الطلب (إطفاء لمّا يطلب تشغيل)."""
 
 
-def _system_instruction_body(chat_id: str) -> str:
-    """The instruction text itself; each read is timed (the wait before dialling Gemini)."""
+def _system_instruction_body(chat_id: str, gate_on: bool) -> str:
+    """The instruction text itself; each read is timed (the wait before dialling Gemini).
+
+    `gate_on`: the speaker gate of the call it is for (`speaker_gate`) — the guarded text
+    when anyone in the room may be talking, the trusting one otherwise."""
     import time as _t
 
     _t0 = _t.perf_counter()
@@ -326,7 +344,7 @@ def _system_instruction_body(chat_id: str) -> str:
     _resolved = speaker_label(chat_id or None)
     owner_name = f"«{_resolved}»" if _resolved != HAS_NO_NAME else "صاحب الحساب"
 
-    if _speaker_gate_enabled():
+    if gate_on:
         # التحقّق الصوتي مفعّل → شخصية حسب المتحدّث + مانع انتحال.
         parts.append(
             "\n"

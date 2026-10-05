@@ -67,7 +67,7 @@ def test_a_tenant_who_never_called_is_not_warmed(db, inline, monkeypatch):
     assert built == []
 
     # أول مكالمة بتحطّ العلامة، وبعدها بيتسخّن زي غيره.
-    vt._shared_put("silent-user", 1, "التعليمات")
+    vt._shared_put("silent-user", 1, False, "التعليمات")
     bump_for("silent-user", collection="sandy_entries")
     assert built == ["silent-user"]
 

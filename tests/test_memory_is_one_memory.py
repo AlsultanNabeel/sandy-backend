@@ -133,10 +133,10 @@ def test_a_sentence_typed_in_the_app_reaches_the_next_voice_call(store, monkeypa
 
     vt.clear_instruction_cache()
     monkeypatch.setattr("app.utils.tenant_version.version_for", lambda t: 3)
-    monkeypatch.setattr(vt, "_shared_get", lambda k, v: None)
-    monkeypatch.setattr(vt, "_shared_put", lambda k, v, t: None)
+    monkeypatch.setattr(vt, "_shared_get", lambda k, v, g: None)
+    monkeypatch.setattr(vt, "_shared_put", lambda k, v, g, t: None)
     monkeypatch.setattr(vt, "_system_instruction_body",
-                        lambda cid: "persona\n" + vt._PAST_RECORD_NOTE)
+                        lambda cid, gate_on: "persona\n" + vt._PAST_RECORD_NOTE)
 
     vt._build_system_instruction(_UID)                       # the first call warms the cache
     save("conv-7", _UID, "بكرا عندي مقابلة", "بالتوفيق", via="شات التطبيق")
@@ -175,7 +175,7 @@ def test_she_knows_your_name_on_every_channel(store):
     assert "سامي" in context.profile_block(_UID)
     set_voice_identity(_UID)
     try:
-        text = vt._system_instruction_body(_UID)
+        text = vt._system_instruction_body(_UID, False)
     finally:
         set_voice_identity("")
     assert "«سامي»" in text and "قهوة" in text and "المشي" in text
@@ -189,7 +189,7 @@ def test_the_voice_seed_invents_nothing(store):
 
     with active_user_profile_context(_PROFILE):
         set_voice_identity(_UID)
-        text = vt._system_instruction_body(_UID)
+        text = vt._system_instruction_body(_UID, False)
     set_voice_identity("")
     assert "October City" not in text and "ملف المستخدم" not in text
     assert "معلومات بتعرفيها" not in text

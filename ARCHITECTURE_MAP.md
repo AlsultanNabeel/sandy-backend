@@ -245,6 +245,12 @@ the facts — never the recent turns, which are added per session
 is built from (`sandy_users`, `sandy_entries`): a write there through `scoped()`
 bumps the version, and `prompt_prewarm` rebuilds it in the background for tenants
 who use voice. Bump `_PROMPT_REV` when the cached text changes shape.
+There are two texts per version, one per speaker-gate state (`speaker.speaker_gate(user, channel)`:
+the robot's guarded one once a voiceprint exists, the trusting one for the app's call), kept
+apart in both caches (`_variant`). The build takes the call's channel as an argument (the robot
+when none is given, which is what the prewarm builds): it runs on a pool thread, where the
+session's channel never arrives, and reading it from there handed the owner's own phone call
+the stranger persona.
 
 **One embedding per call site, none without a key** (`integrations/embeddings.py`,
 built once, eight-second deadline). Entries are embedded when written, except
