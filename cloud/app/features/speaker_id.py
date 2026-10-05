@@ -14,6 +14,9 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
+
+from pymongo.errors import PyMongoError
+
 from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
@@ -379,7 +382,7 @@ def has_profile(chat_id: int) -> bool:
         return False
     try:
         doc = get_db()[_COLLECTION].find_one({"_id": str(chat_id)}, {"profile": 1})
-    except Exception as e:  # noqa: BLE001 — fail closed
+    except PyMongoError as e:  # fail closed
         logger.warning("[speaker_id] voiceprint lookup failed, keeping the gate on: %s", e)
         return True
     return bool(doc and doc.get("profile"))
