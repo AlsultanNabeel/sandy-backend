@@ -49,6 +49,14 @@ def _bump(user_id: str, collection: str = "sandy_users") -> None:
         logger.debug("[users_store] version bump skipped", exc_info=True)
 
 
+def _profile_changed(user_id: str) -> None:
+    """The name, the get-to-know-you answers or the persona changed: the voice
+    instruction carries them, so none built before this may stand in for a new one."""
+    from app.utils.tenant_version import mark_corrected
+
+    mark_corrected(str(user_id or ""))
+
+
 def _coll():
     return get_db()[_COLL] if get_db() is not None else None
 
@@ -188,6 +196,7 @@ def set_onboarding(
         sets["onboarding.notes"] = notes.strip()[:500]
     res = coll.update_one({"_id": user_id}, {"$set": sets})
     _bump(user_id)
+    _profile_changed(user_id)
     return res.matched_count > 0
 
 
@@ -251,6 +260,7 @@ def record_nudge_answer(user_id: str, qid: str, answer: str) -> bool:
         {"$set": {f"onboarding.nudge_answers.{qid}": answer, "last_seen_at": _now()}},
     )
     _bump(user_id)
+    _profile_changed(user_id)
     return res.matched_count > 0
 
 
@@ -288,6 +298,7 @@ def set_persona(
         return True
     res = coll.update_one({"_id": user_id}, {"$set": sets})
     _bump(user_id)
+    _profile_changed(user_id)
     return res.matched_count > 0
 
 

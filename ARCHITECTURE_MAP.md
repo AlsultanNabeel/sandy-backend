@@ -256,7 +256,9 @@ the stranger persona.
 While a moved version is rebuilt, the last instruction (up to six hours old) serves the
 call, except one built before the tenant's facts last changed: editing or removing a
 `fact` entry (`entries.update` / `delete`, or an undo touching one) stamps
-`corrected_at` on the tenant's version (`tenant_version.mark_corrected`), and
+`corrected_at` on the tenant's version (`tenant_version.mark_corrected`), as does
+changing the name, the get-to-know-you answers or the persona (`users_store.set_onboarding`,
+`record_nudge_answer`, `set_persona`), and
 `_shared_latest` serves nothing older, so «انسي…» or a corrected fact never reaches the
 next call.
 

@@ -198,3 +198,33 @@ def test_a_corrected_or_forgotten_fact_is_never_served_from_an_older_instruction
         _built_before_the_change()
         _base.undo([{"op": "created", "coll": _base.ENTRIES, "id": again, "before": None}])
         assert vt._shared_latest("u1", False) is None, "an undone fact was served stale"
+
+
+def test_a_changed_name_or_profile_is_never_served_from_an_older_instruction(db, monkeypatch):
+    """The instruction carries the name, the get-to-know-you answers and the persona:
+    a change to any of them must reach the next call, not one six hours later."""
+    from datetime import timedelta
+
+    import app.api.voice_ws.tools as vt
+    from app.blocks import _base
+    from app.features import users_store
+
+    monkeypatch.setattr("app.utils.prompt_prewarm.schedule", lambda tenant: None)
+    db["sandy_users"].insert_one({"_id": "u1", "onboarding": {"preferred_name": "سامي"}})
+
+    def _built_before_the_change():
+        db["sandy_prompt_cache"].delete_many({})
+        vt._shared_put("u1", 1, False, "تعليمات فيها سامي")
+        db["sandy_prompt_cache"].update_many(
+            {}, {"$set": {"created_at": _base.now() - timedelta(minutes=5)}})
+
+    _built_before_the_change()
+    users_store.set_budget("u1", 500)
+    assert vt._shared_latest("u1", False), "a budget change dropped the fast path"
+
+    for change in (lambda: users_store.set_onboarding("u1", preferred_name="سمير"),
+                   lambda: users_store.record_nudge_answer("u1", "unwind", "القراءة"),
+                   lambda: users_store.set_persona("u1", custom_instructions="احكي باختصار")):
+        _built_before_the_change()
+        change()
+        assert vt._shared_latest("u1", False) is None, "a profile change was served stale"
