@@ -180,6 +180,10 @@ def _enroll_session(ws, remote: str) -> None:
 # Auth
 
 def _authenticate(ws, remote: str) -> bool:
+    # This server thread served other connections before: whoever it spoke for
+    # then must not carry over to a board nobody has paired yet.
+    set_voice_identity("")
+    set_voice_channel("")
     try:
         raw = ws.receive(timeout=5)
     except Exception:

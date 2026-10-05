@@ -666,6 +666,10 @@ refused), then the device HMAC. With no key configured at all it refuses unless
 `SANDY_WS_ALLOW_OPEN=1`, so a missing env var in production cannot leave the
 socket open.
 
+`_authenticate` clears the session identity and channel before it reads anything:
+the server thread is reused between connections and the identity is a context
+variable on it, so a board nobody paired yet used to speak as the last caller.
+
 You can probe all of this from a browser without hardware — see §10.
 
 ### 3.2 Speaker verification
