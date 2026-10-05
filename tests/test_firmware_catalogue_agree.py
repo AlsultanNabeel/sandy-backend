@@ -38,13 +38,16 @@ def _read(rel: str) -> str:
 
 
 BRAIN_MQTT = "firmware/brain-core/main/sandy_mqtt.c"
+# The mood names left sandy_mqtt.c for the face's own MOOD_MAP (face_mood_by_name),
+# which the broker's mood command and the voice socket's mood frames both read.
+BRAIN_FACE = "firmware/brain-core/main/sandy_face.c"
 BRAIN_LED = "firmware/brain-core/main/sandy_led.c"
 CAM_CONTROL = "firmware/vision-core/cam_control.ino"
 
 # output id -> (names the firmware accepts, minimum we expect to find)
 CASES = {
     "mood": (
-        lambda: set(re.findall(r'\{"(\w+)",\s*MOOD_\w+\}', _read(BRAIN_MQTT))),
+        lambda: set(re.findall(r'\{"(\w+)",\s*MOOD_\w+\}', _read(BRAIN_FACE))),
         20,
     ),
     "gesture": (

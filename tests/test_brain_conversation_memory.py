@@ -21,9 +21,15 @@ def test_the_threads_own_summary_is_in_the_prompt(brain_db, monkeypatch):  # noq
 
 def test_only_the_newest_summaries_of_the_thread_oldest_first(brain_db, monkeypatch):  # noqa: F811
     monkeypatch.setattr(entries, "embed_text", lambda text: None)
+    from datetime import datetime, timedelta, timezone
+
+    # Minutes apart, as real summaries are: Mongo keeps milliseconds, and three written
+    # in one millisecond have no order to test.
+    start = datetime.now(timezone.utc) - timedelta(hours=1)
     with active_user_profile_context(A):
         for i in range(context.THREAD_SUMMARIES + 1):
-            entries.add("summary", f"ملخص رقم {i}", {"thread_id": "t1"})
+            entries.add("summary", f"ملخص رقم {i}", {"thread_id": "t1"},
+                        at=start + timedelta(minutes=10 * i))
         block = context.conversation_block("t1", "مرحبا")
     assert "ملخص رقم 0" not in block
     assert block.index("ملخص رقم 1") < block.index("ملخص رقم 2")

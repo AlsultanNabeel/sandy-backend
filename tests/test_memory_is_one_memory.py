@@ -52,7 +52,8 @@ def test_every_turn_remembers_which_body_said_it():
     """He can ask "when did I tell you that?" and the answer should be real."""
     assert '"timestamp": ts, "via": via}' in _STM
     session = (_ROOT / "api/voice_ws/session.py").read_text(encoding="utf-8")
-    assert 'set_voice_channel("الروبوت")' in session, (
+    assert '_ROBOT_CHANNEL = "الروبوت"' in session
+    assert "set_voice_channel(_ROBOT_CHANNEL)" in session, (
         "the robot no longer tags its turns — it and the app's call share a "
         "socket, so without this they become indistinguishable in the record")
     assert '_APP_CHANNEL = "مكالمة التطبيق"' in session
