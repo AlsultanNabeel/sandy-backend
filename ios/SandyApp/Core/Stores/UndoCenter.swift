@@ -13,23 +13,30 @@ final class UndoCenter: ObservableObject {
         let id = UUID()
         let message: String
         let icon: String
+        /// The row a delete took off the screen, kept out of reloads until it is sent.
+        let hiding: String?
         let undo: () -> Void
         /// What happens if nobody undoes it (the server delete); nothing for a done tick.
         let commit: @MainActor () async -> Void
     }
 
     @Published private(set) var offer: Offer?
+    /// Rows deleted on the phone whose delete has not reached the outbox yet: a reload
+    /// leaves them out, or the server's copy would bring them back during the offer.
+    private(set) var hidden: Set<String> = []
 
-    func offer(_ message: String, icon: String, undo: @escaping () -> Void,
+    func offer(_ message: String, icon: String, hiding id: String? = nil, undo: @escaping () -> Void,
                commit: @escaping @MainActor () async -> Void = {}) {
         commitNow()
-        offer = Offer(message: message, icon: icon, undo: undo, commit: commit)
+        if let id { hidden.insert(id) }
+        offer = Offer(message: message, icon: icon, hiding: id, undo: undo, commit: commit)
         Announce.say(message)
     }
 
     func undo() {
         guard let current = offer else { return }
         offer = nil
+        if let id = current.hiding { hidden.remove(id) }
         current.undo()
     }
 
@@ -37,7 +44,13 @@ final class UndoCenter: ObservableObject {
     func commitNow() {
         guard let current = offer else { return }
         offer = nil
-        Task { await current.commit() }
+        Task { await self.commit(current) }
+    }
+
+    /// Runs the offer's commit; once it is queued, the outbox keeps reloads off the row.
+    private func commit(_ current: Offer) async {
+        await current.commit()
+        if let id = current.hiding { hidden.remove(id) }
     }
 
     /// Before a sign-out: the offer is kept and sent now, while the session's token is
@@ -47,7 +60,7 @@ final class UndoCenter: ObservableObject {
         guard let current = offer else { return }
         offer = nil
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await current.commit() }
+            group.addTask { await self.commit(current) }
             group.addTask { try? await Task.sleep(for: limit) }
             await group.next()
             group.cancelAll()
@@ -57,6 +70,7 @@ final class UndoCenter: ObservableObject {
     /// The session ended: an offer still up is dropped, never sent as the next account.
     func drop() {
         offer = nil
+        hidden = []
     }
 
     /// The timer ran out on this offer (a newer one may have replaced it).

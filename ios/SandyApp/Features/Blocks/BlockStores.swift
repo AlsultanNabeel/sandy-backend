@@ -90,9 +90,9 @@ final class ItemsStore: LoadableStore {
 
     let list: String
     let done: Bool
-    @Published var items: [ListItem] = [] { didSet { saveItems() } }
+    @Published var items: [ListItem] = [] { didSet { noteEdit(); saveItems() } }
     /// Habits only: the ones checked in today (a habit is never "done", it is done today).
-    @Published var checkedToday: [String: String] = [:] { didSet { saveChecks() } }  // habit → entry id
+    @Published var checkedToday: [String: String] = [:] { didSet { noteEdit(); saveChecks() } }  // habit → entry id
     private var userId: String?
     private var restored = false
     private var loadTask: Task<Void, Never>?
@@ -192,14 +192,16 @@ final class ItemsStore: LoadableStore {
             // Unsent changes first; while any wait, what is on the phone is the newer copy.
             await Outbox.shared.drain(api)
             guard Outbox.shared.isEmpty else { offline = true; return }
+            let edits = localEdits
             do {
                 let rows = try await api.listItems(list, done: done)
-                guard isCurrentLoad(gen) else { return }
-                items = rows
-                if isHabits {
-                    let checks = try await todaysCheckIns(api: api)
-                    guard isCurrentLoad(gen) else { return }
-                    checkedToday = checks
+                let checks = isHabits ? try await todaysCheckIns(api: api) : [:]
+                // A change made on the phone while it was on its way is newer than these rows.
+                guard isCurrentLoad(gen), edits == localEdits else { return }
+                let hidden = UndoCenter.shared.hidden
+                applyLoad {
+                    items = rows.filter { !hidden.contains($0.id) }
+                    if isHabits { checkedToday = checks }
                 }
                 markLoaded()
                 if !done { SpotlightIndexer.indexItems(list: list, rows) }
@@ -398,7 +400,7 @@ final class ItemsStore: LoadableStore {
         let back: (inout [ListItem]) -> Void = { rows in
             if !rows.contains(where: { $0.id == item.id }) { rows.insert(item, at: min(idx, rows.count)) }
         }
-        deleteWithUndo(item.text,
+        deleteWithUndo(item.text, id: item.id,
                        remove: { self.items.remove(at: idx); self.editTwins(out) },
                        restore: { back(&self.items); self.editTwins(back) },
                        call: { try await api.deleteItem(id: item.id) })
@@ -462,7 +464,7 @@ final class SchedulesStore: LoadableStore {
     private static let live = LiveStores<SchedulesStore>()
 
     let kind: String
-    @Published var items: [ScheduleItem] = [] { didSet { saveItems() } }
+    @Published var items: [ScheduleItem] = [] { didSet { noteEdit(); saveItems() } }
     private var userId: String?
     private var restored = false
 
@@ -496,10 +498,12 @@ final class SchedulesStore: LoadableStore {
         defer { endLoad(gen) }
         await Outbox.shared.drain(api)
         guard Outbox.shared.isEmpty else { offline = true; return }
+        let edits = localEdits
         do {
             let rows = try await api.schedules(kind: kind)
-            guard isCurrentLoad(gen) else { return }
-            items = Self.byTime(rows)
+            guard isCurrentLoad(gen), edits == localEdits else { return }
+            let hidden = UndoCenter.shared.hidden
+            applyLoad { items = Self.byTime(rows.filter { !hidden.contains($0.id) }) }
             markLoaded()
             if kind == "reminder" { SpotlightIndexer.indexReminders(items) }
         } catch {
@@ -563,7 +567,7 @@ final class SchedulesStore: LoadableStore {
     }
 
     func delete(api: APIClient, _ item: ScheduleItem) {
-        deleteWithUndo(item.text,
+        deleteWithUndo(item.text, id: item.id,
                        remove: { self.everywhere { $0.removeAll { $0.id == item.id } } },
                        restore: { self.everywhere { rows in
                            if !rows.contains(where: { $0.id == item.id }) { rows.append(item) }
@@ -655,7 +659,7 @@ final class SchedulesStore: LoadableStore {
 final class LogStore: LoadableStore {
     private static let live = LiveStores<LogStore>()
 
-    @Published var entries: [LogEntry] = [] { didSet { saveEntries() } }
+    @Published var entries: [LogEntry] = [] { didSet { noteEdit(); saveEntries() } }
     @Published var kind: String? {
         didSet { if kind != oldValue { restored = false } }
     }
@@ -689,10 +693,12 @@ final class LogStore: LoadableStore {
         defer { endLoad(gen) }
         await Outbox.shared.drain(api)
         guard Outbox.shared.isEmpty else { offline = true; return }
+        let edits = localEdits
         do {
             let rows = try await api.entries(kind: kind)
-            guard isCurrentLoad(gen) else { return }
-            entries = rows
+            guard isCurrentLoad(gen), edits == localEdits else { return }
+            let hidden = UndoCenter.shared.hidden
+            applyLoad { entries = rows.filter { !hidden.contains($0.id) } }
             markLoaded()
             if kind == nil { SpotlightIndexer.indexEntries(entries) }
         } catch {
@@ -787,7 +793,7 @@ final class LogStore: LoadableStore {
     }
 
     func delete(api: APIClient, _ entry: LogEntry) {
-        deleteWithUndo(entry.text,
+        deleteWithUndo(entry.text, id: entry.id,
                        remove: { Self.removeEverywhere(entry.id, kind: entry.kind, userId: self.userId) },
                        restore: { Self.addEverywhere(entry, userId: self.userId) },
                        call: { try await api.deleteEntry(id: entry.id) })

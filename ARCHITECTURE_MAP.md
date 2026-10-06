@@ -1195,7 +1195,11 @@ so folders are organisation only.
   warns before dropping it (`AppState.sendUnsent`, `Outbox.discard`).
   New rows carry their own 32-hex `id` (the blocks POSTs accept it and a resent POST
   returns the row already there). While the outbox holds anything, a reload keeps the
-  phone's copy instead of the server's. Only a server refusal (a 4xx other than 401, 408
+  phone's copy instead of the server's, and a reload that was already on its way when the
+  store's rows changed on the phone is dropped when it lands (`LoadableStore.localEdits`, per
+  store, counted from the rows' `didSet`; `applyLoad` puts a load's rows in uncounted). A row
+  deleted with «تراجع» still offered stays out of every reload (`UndoCenter.hidden`) until its
+  delete is queued. Only a server refusal (a 4xx other than 401, 408
   and 429) undoes a change; a delete answered 404 is done (the row was already gone, deleted
   from chat). A refusal with its caller still waiting is handed to it; one queued earlier
   has no caller left, so it shows a notice and the screens reload the server's copy

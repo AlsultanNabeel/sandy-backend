@@ -19,6 +19,10 @@ class LoadableStore: ObservableObject {
     private var loadSession = AccountSession.generation
     /// The session this store was made in: its rows are that account's.
     private let rowsSession = AccountSession.generation
+    /// Changes made on the phone to this store's rows; a load that began before one is
+    /// dropped when it lands (its rows are older than what the screen shows).
+    private(set) var localEdits = 0
+    private var applyingLoad = false
 
     /// Still the session this store was made in: after a sign-out or a switch it saves and
     /// publishes nothing (its rows are the account that left).
@@ -36,6 +40,18 @@ class LoadableStore: ObservableObject {
     /// or a switch to another account is dropped.
     func isCurrentLoad(_ generation: Int) -> Bool {
         generation == loadGeneration && loadSession == AccountSession.generation
+    }
+
+    /// This store's rows changed on the phone (called from their `didSet`).
+    func noteEdit() {
+        if !applyingLoad { localEdits &+= 1 }
+    }
+
+    /// Puts a load's rows in without counting them as a change on the phone.
+    func applyLoad(_ change: () -> Void) {
+        applyingLoad = true
+        change()
+        applyingLoad = false
     }
 
     /// Clears `loading` only if no newer load has started.
@@ -84,12 +100,13 @@ class LoadableStore: ObservableObject {
     }
 
     /// A delete with «تراجع»: off the screen now (`remove`), sent with `call` only when the
-    /// undo offer ends; undone, or refused by the server, `restore` puts it back.
-    func deleteWithUndo(_ text: String, remove: () -> Void, restore: @escaping () -> Void,
+    /// undo offer ends; undone, or refused by the server, `restore` puts it back. Until the
+    /// offer ends a reload leaves the row out (`UndoCenter.hidden`).
+    func deleteWithUndo(_ text: String, id: String, remove: () -> Void, restore: @escaping () -> Void,
                         call: @escaping () async throws -> Void) {
         remove()
         UndoCenter.shared.offer(String(format: LanguageManager.shared.s("blocks.deletedToast"), text),
-                                icon: "trash", undo: restore,
+                                icon: "trash", hiding: id, undo: restore,
                                 commit: { await self.attempt("blocks.errorSave", rollback: restore, call: call) })
     }
 
