@@ -51,7 +51,8 @@ def test_more_of_the_same_adds_to_its_quantity_and_a_new_time_moves_it(tenant):
     out = _run("list_add", list="shopping", text="حليب", qty=1)
     assert out["updated"] and items.get(milk)["data"]["qty"] == 2
     task = items.add("tasks", "التقرير")
-    _run("list_add", list="tasks", text="التقرير", due="2030-01-02 10:00")
+    soon = (datetime.now() + timedelta(days=30)).replace(hour=10, minute=0, second=0, microsecond=0)
+    _run("list_add", list="tasks", text="التقرير", due=soon.isoformat())
     assert items.get(task)["due"] is not None
     assert len(items.list_items("tasks")) == 1
     assert _run("list_add", list="tasks", text="التقرير")["already"]
