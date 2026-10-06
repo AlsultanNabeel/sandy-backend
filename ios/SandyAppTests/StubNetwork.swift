@@ -26,6 +26,7 @@ enum StubNetwork {
         original = nil
         StubURLProtocol.handler = nil
         StubURLProtocol.delays = [:]
+        StubURLProtocol.headers = [:]
     }
 
     /// Answer requests of this method only after `seconds`, without holding up the others
@@ -57,6 +58,8 @@ final class StubURLProtocol: URLProtocol {
     static var handler: ((URLRequest) -> (status: Int, body: Data))?
     static var requests: [URLRequest] = []
     static var delays: [String: TimeInterval] = [:]
+    /// Headers added to every response (a renewed token).
+    static var headers: [String: String] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -68,7 +71,8 @@ final class StubURLProtocol: URLProtocol {
         let (status, body) = Self.handler?(seen) ?? (500, Data())
         let response = HTTPURLResponse(url: request.url!, statusCode: status,
                                        httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "application/json"])!
+                                       headerFields: ["Content-Type": "application/json"]
+                                           .merging(Self.headers) { _, new in new })!
         let deliver = { [weak self] in
             guard let self else { return }
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

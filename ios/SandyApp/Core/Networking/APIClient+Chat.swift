@@ -114,6 +114,7 @@ extension APIClient {
             if urlError.code == .cancelled { throw urlError }
             throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
         }
+        keepRenewed(resp, sent: sentToken)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 {
             // Same rule as `perform`: only the current session dying signs out.

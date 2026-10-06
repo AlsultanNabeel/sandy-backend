@@ -117,6 +117,7 @@ final class APIClient: APIClientProtocol {
             // Offline, timeout or dropped connection → one "check your internet" error.
             throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
         }
+        keepRenewed(resp, sent: sentToken)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let machine = Self.nonEmpty(body?["error"] as? String)
@@ -136,6 +137,17 @@ final class APIClient: APIClientProtocol {
                            code: machine, kind: .server)
         }
         return data
+    }
+
+    /// The server renews a day-old token in this header of any signed-in response.
+    static let renewedHeader = "X-Sandy-Token"
+
+    /// Keeps the token the server renewed, when the one it renewed is still this session's
+    /// (a reply to a request sent before a sign-out or a switch must not bring it back).
+    func keepRenewed(_ resp: URLResponse, sent: String?) {
+        guard let renewed = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: Self.renewedHeader),
+              !renewed.isEmpty, let sent, sent == token else { return }
+        token = renewed
     }
 
     /// nil لو فاضي، حتى `{"message": ""}` ما ينتصر على رمز فيه معلومة.
