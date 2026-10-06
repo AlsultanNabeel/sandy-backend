@@ -16,6 +16,8 @@ final class WeatherStore: LoadableStore {
 
     /// جلب الطقس للمدينة الحالية بمهمة يملكها الستور (تُلغى عند إعادة الطلب).
     func load(api: APIClient) async {
+        // Another screen's store may have picked a city since: the saved one is the truth.
+        city = UserDefaults.standard.string(forKey: Self.cityKey) ?? city
         loadTask?.cancel()
         restoreSnapshot(WeatherSnapshot.self, key: "weather", api: api) { snapshot = $0 }
         let gen = beginLoad()
