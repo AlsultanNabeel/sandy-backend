@@ -263,7 +263,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     ctx = TurnCtx(user_id=str(user_id), message=message, thread_id=thread_id,
                   source="voice" if source == "voice" else "chat", image_state=image_state)
     held = confirm.live(pending_state)
-    own, history = stm.history(thread_id, user_id)
+    _, history = stm.history(thread_id, user_id)
     # Everything the turn writes is journaled, a confirmed «yes» included, so a rewritten
     # or edited reply can take it all back.
     with blocks_base.journal() as effects:
@@ -303,7 +303,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     logger.info("[turn] %.0fms total — brain%s tools=%s",
                 (time.perf_counter() - t0) * 1000, " (fast)" if outcome.get("fast") else "",
                 outcome["tools"])
-    stm.save(thread_id, user_id, _remembered_line(message, attachments), remembered, prior_history=own,
+    stm.save(thread_id, user_id, _remembered_line(message, attachments), remembered,
              via="شات التطبيق" if source == "web" else (source or ""), source=ctx.source,
              effects=effects)
     return {

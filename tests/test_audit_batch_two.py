@@ -156,3 +156,22 @@ def test_a_future_message_is_not_marked_when_the_turn_failed(brain_db):  # noqa:
     sid = _due_message()
     state = _turn(lambda *a, **k: None, "مرحبا")
     assert "لا تنسى" not in state["final_response"] and _status(sid) == "pending"
+
+
+# ── W10. What an undo took back is not handed back by the same turn's save ────
+
+def test_an_undo_written_again_finds_nothing_to_undo(brain_db):  # noqa: F811
+    from app.brain import stm
+
+    _turn(ScriptedModel(tools_reply(call("list_add", list="tasks", text="اشتري هدية")),
+                        text_reply("ضفتها")), "ضيفي مهمة اشتري هدية")
+    _turn(ScriptedModel(tools_reply(call("undo_last")), text_reply("رجّعت")), "لا غلط")
+    assert "اشتري هدية" not in _open()
+    # «Write it again» on the undo's reply: the reply goes, the same line is answered again.
+    with active_user_profile_context(A):
+        stm.rewind("userA", "userA")
+    model = ScriptedModel(tools_reply(call("undo_last")), text_reply("ما في شي"))
+    _turn(model, "لا غلط")
+    tool_msgs = [m for m in model.seen[-1] if m.get("role") == "tool"]
+    assert "nothing to undo" in tool_msgs[-1]["content"], \
+        "the save handed the first reply its effects back, so they were undone twice"

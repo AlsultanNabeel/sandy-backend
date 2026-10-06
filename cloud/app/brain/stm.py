@@ -229,10 +229,11 @@ def cut_last(thread_id: str, user_id: str, text: str) -> None:
 
 
 def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
-         prior_history: Optional[List[Dict[str, Any]]] = None, via: str = "",
-         source: str = "chat", effects: Optional[List[Dict[str, Any]]] = None) -> None:
-    """Append the turn; ``prior_history`` (this thread's turns, already read this turn)
-    saves a second read. Runs in the caller's tenant: the overflow summary is scoped."""
+         via: str = "", source: str = "chat",
+         effects: Optional[List[Dict[str, Any]]] = None) -> None:
+    """Append the turn to the thread as it is now, read again here: the turn itself may
+    have changed it (`undo_last` takes the last reply's effects), and a copy read when the
+    turn began would hand them back. Runs in the caller's tenant: the overflow summary is scoped."""
     coll = _stm_collection()
     if coll is None:
         return
@@ -240,11 +241,8 @@ def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
         key = f"{thread_id}:{user_id}"
         now = datetime.now(timezone.utc)
         ts = now.isoformat()
-        if prior_history is not None:
-            turns = list(prior_history)
-        else:
-            doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
-            turns = (doc or {}).get("history", []) or []
+        doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
+        turns = (doc or {}).get("history", []) or []
         to_summarize = _ended(turns, now)
         # `via` is where it was said, so «when did I tell you that?» has an answer.
         turns.append({"role": "user", "content": user_msg, "timestamp": ts, "via": via})
