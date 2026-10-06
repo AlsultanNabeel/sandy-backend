@@ -236,17 +236,33 @@ struct AttachmentStrip: View {
 
 // MARK: - In the thread
 
+/// An attachment's picture, or why there is none. The server deletes attachments thirty
+/// days after they are saved, so an old chat gets `expired` (404), not a placeholder for ever.
+enum AttachmentImage: Equatable {
+    case image(UIImage)
+    case expired
+    case failed
+}
+
 /// Bytes of attachments seen this session, so scrolling never fetches twice.
 @MainActor
 final class AttachmentImages {
     static let shared = AttachmentImages()
     private let cache = NSCache<NSString, UIImage>()
 
-    func image(_ id: String, api: APIClient) async -> UIImage? {
-        if let hit = cache.object(forKey: id as NSString) { return hit }
-        guard let data = try? await api.attachmentData(id: id), let image = UIImage(data: data) else { return nil }
+    func load(_ id: String, api: APIClient) async -> AttachmentImage {
+        if let hit = cache.object(forKey: id as NSString) { return .image(hit) }
+        let data: Data
+        do {
+            data = try await api.attachmentData(id: id)
+        } catch let error as APIError where error.code == "not_found" {
+            return .expired
+        } catch {
+            return .failed
+        }
+        guard let image = UIImage(data: data) else { return .failed }
         cache.setObject(image, forKey: id as NSString)
-        return image
+        return .image(image)
     }
 }
 
@@ -255,13 +271,28 @@ struct AttachmentPicture: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     let attachment: ChatAttachment
-    @State private var image: UIImage?
+    @State private var loaded: AttachmentImage?
     @State private var open = false
+
+    private var image: UIImage? {
+        if case .image(let image) = loaded { return image }
+        return nil
+    }
 
     var body: some View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+            } else if loaded == .expired {
+                VStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "clock.badge.xmark").scaledFont(28)
+                    Text(lang.s("chat.photoExpired")).font(Theme.Typography.caption)
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundColor(Theme.Colors.secondaryText)
+                .padding(Theme.Spacing.md)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.Colors.surface)
             } else {
                 SkeletonBlock()
             }
@@ -270,13 +301,13 @@ struct AttachmentPicture: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.bubble, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture { if image != nil { open = true } }
-        .task(id: attachment.id) { image = await AttachmentImages.shared.image(attachment.id, api: state.api) }
+        .task(id: attachment.id) { loaded = await AttachmentImages.shared.load(attachment.id, api: state.api) }
         .fullScreenCover(isPresented: $open) {
             if let image { ImageViewer(image: image).environmentObject(lang) }
         }
         .accessibilityElement()
-        .accessibilityLabel(lang.s("chat.photo"))
-        .accessibilityHint(lang.s("chat.photoHint"))
+        .accessibilityLabel(lang.s(loaded == .expired ? "chat.photoExpired" : "chat.photo"))
+        .accessibilityHint(image == nil ? "" : lang.s("chat.photoHint"))
         .accessibilityAddTraits(.isImage)
     }
 }

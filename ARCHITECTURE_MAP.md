@@ -1150,6 +1150,8 @@ so folders are organisation only.
   the turn gives the model the photos as images and the documents as text, memory keeps
   «[صورة: name]». An image Sandy draws is saved the same way and comes back as `image` on
   the reply; the history keeps `attachments` on each message.
+  An attachment the server no longer has (404, past its thirty days) shows «الصورة انتهت مدتها»
+  (`AttachmentImages.load` → `.expired`) instead of a loading placeholder.
   Loading (`DesignSystem/Loading.swift`): skeleton rows with a shine on first loads,
   `LoadingDots` inside buttons, and `SandyWaiting` (her face and changing lines with the
   user's name) for long waits; nothing moves under Reduce Motion.
