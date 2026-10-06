@@ -89,6 +89,10 @@ struct PaywallView: View {
             .disabled(!subs.purchasesAvailable)
             .opacity(subs.purchasesAvailable ? 1 : 0.5)
 
+            if let error = subs.lastError {
+                SandyNotice(error, kind: .gentleWarning)
+            }
+
             if subs.purchasesAvailable {
                 Button(lang.s("paywall.restore")) {
                     Task { await subs.restore(api: state.api) }

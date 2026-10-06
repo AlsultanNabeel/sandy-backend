@@ -1218,7 +1218,10 @@ so folders are organisation only.
   Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep
   their own screen (they drive the Live Activity), opened from Today.
 - `Services/` — `GeminiLiveManager` (in-app live voice; one shared call that outlives its screen — `CallBar` over the tabs brings it back, the end button, the Live Activity or sign-out end it), `SpeechManager` (reply playback only),
-  `NotificationManager`, `SubscriptionManager`.
+  `NotificationManager`, `SubscriptionManager` (RevenueCat configured once, the account switched with
+  `logIn` on sign-in and before a purchase or restore, `logOut` on sign-out; the paid features open
+  when the server has the purchase, asked a few times while the webhook lands; a failed refresh keeps
+  the known status; the store's error shows on the paywall).
 - `Localization/` — one `L10n+<Area>.swift` per feature. Arabic/English, RTL/LTR.
   `Localization/Digits.swift` is the one reading of a typed number (Arabic-Indic and Persian
   digits; a comma or ٬ groups thousands; a point or ٫ starts the fraction); every numeric field

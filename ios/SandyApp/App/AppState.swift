@@ -169,6 +169,7 @@ final class AppState: ObservableObject {
         verifyTask = nil
 
         api.token = nil
+        subscriptions.signOut()
         DiskCache.clearAll()
         SpotlightIndexer.deleteAll()
 
