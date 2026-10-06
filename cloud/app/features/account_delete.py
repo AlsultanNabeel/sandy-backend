@@ -74,6 +74,25 @@ _BY_USER: List[str] = [
     "sandy_feedback",
 ]
 
+# What «Reset my data» keeps: the counters (a reset is not a new daily allowance) and the
+# push tokens (notifications would stop until the app registered again). The robot and its
+# devices stay unless asked (`keep_nodes`).
+_KEPT_ON_RESET = frozenset({"sandy_push_tokens", "sandy_usage", "sandy_usage_daily",
+                            "sandy_usage_rl"})
+
+# Every field of a `sandy_users` row, and what a reset does with it. A field in neither
+# fails `tests/test_reset_keeps_the_account.py`.
+USER_ROW_KEPT = frozenset({
+    "_id", "provider", "provider_sub", "email", "password_hash",   # how they sign in
+    "name", "picture",          # the sign-in provider's, never read by Sandy
+    "locale", "timezone", "created_at", "last_seen_at",
+    "subscription", "token_gen",
+})
+USER_ROW_FORGOTTEN = frozenset({
+    "onboarding",       # preferred name, interests, notes, daily-question answers
+    "persona", "budget", "city", "notifications",
+})
+
 # Keyed by `_id` = the user's id, with no user field.
 _BY_ID: List[str] = [
     # Raw clips of the owner's voice while «صوتي» learns it.
@@ -195,10 +214,30 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     return {"ok": True, "removed": removed}
 
 
+def _forget_profile(user_id: str, result: Dict[str, Any]) -> None:
+    """The person on the account row goes; the account stays. Marks `result` partial on failure."""
+    from app.db import get_db
+    from app.features.users_store import fresh_onboarding
+
+    db = get_db()
+    if db is None or result.get("error") in ("no_user", "no_store"):
+        return
+    try:
+        db["sandy_users"].update_one({"_id": user_id}, {
+            "$set": {"onboarding": fresh_onboarding()},
+            "$unset": {f: "" for f in USER_ROW_FORGOTTEN if f != "onboarding"}})
+    except PyMongoError as exc:
+        logger.warning("[erase] profile not forgotten for %s: %s", user_id, exc)
+        result.setdefault("removed", {})["sandy_users"] = -1
+        result.update(ok=False, error="partial")
+
+
 def wipe_account_data(user_id: str, keep_nodes: bool = True) -> Dict[str, Any]:
     """Clear everything the account holds but keep the account (and, by default, its robot)."""
-    names = [n for n in _BY_USER if not (keep_nodes and n in ("sandy_nodes", "sandy_devices"))]
+    names = [n for n in _BY_USER if n not in _KEPT_ON_RESET
+             and not (keep_nodes and n in ("sandy_nodes", "sandy_devices"))]
     r = _erase(user_id, names)
+    _forget_profile(user_id, r)
     # The rows went around the scoped stores, so nothing moved the voice instruction's
     # version: every worker would keep the cached one with the erased facts in it.
     from app.utils.tenant_version import bump_for, mark_corrected

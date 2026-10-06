@@ -1372,6 +1372,12 @@ deleted account leaves nothing behind. A partial erase answers 500 `partial` wit
 `message`, keeps the account row, and keeps the photo rows when their GridFS bytes
 could not go (the rows are the way back to them), so asking again carries on from
 what is left; the app shows `account.reset.partial` / `account.delete.partial`.
+«Reset my data» (`wipe_account_data`) runs the same erase but keeps the robot and its
+devices, the push tokens and the usage counters, and on the `sandy_users` row keeps the
+account (`USER_ROW_KEPT`: sign-in, subscription, token generation, zone) while the person
+goes (`USER_ROW_FORGOTTEN`: onboarding back to new, persona, budget, city, notification
+settings). Every field the code writes to that row is in one of the two;
+`tests/test_reset_keeps_the_account.py` fails on one that is not.
 
 Indexes are created at boot on the raw handle — by each store's `init_*` and
 `init_blocks`, and by `bootstrap.ensure_indexes()` for the rest (pending state,

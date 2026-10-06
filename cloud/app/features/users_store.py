@@ -119,6 +119,11 @@ def token_generation(user_id: str) -> Optional[int]:
 
 # ── writes ───────────────────────────────────────────────────────────────
 
+def fresh_onboarding() -> Dict[str, Any]:
+    """The get-to-know-you part of a new account (and of one just reset)."""
+    return {"done": False, "preferred_name": "", "interests": [], "notes": ""}
+
+
 def upsert_from_oauth(
     provider: str,
     provider_sub: str,
@@ -154,7 +159,7 @@ def upsert_from_oauth(
         "name": name,
         "picture": picture,
         "locale": locale,
-        "onboarding": {"done": False, "preferred_name": "", "interests": [], "notes": ""},
+        "onboarding": fresh_onboarding(),
         "subscription": {"status": "none", "plan": "", "trial_ends_at": None,
                          "current_period_end": None, "source": ""},
         "created_at": now,
@@ -199,7 +204,7 @@ def create_email_user(
         "picture": "",
         "locale": "ar",
         "password_hash": password_hash,
-        "onboarding": {"done": False, "preferred_name": "", "interests": [], "notes": ""},
+        "onboarding": fresh_onboarding(),
         "subscription": {"status": "none", "plan": "", "trial_ends_at": None,
                          "current_period_end": None, "source": ""},
         "created_at": now,
