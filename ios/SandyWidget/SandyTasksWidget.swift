@@ -66,6 +66,9 @@ private enum WidgetTaskCache {
 
     static var isArabic: Bool { store?.string(forKey: TaskKeys.lang) != "en" }
 
+    /// Open tasks in all, as the app last counted them (the widget's ✓ keeps it in step).
+    static var activeCount: Int { store?.integer(forKey: TaskKeys.activeTasks) ?? 0 }
+
     /// نفس عنصر الـKeychain اللي بيكتبه التطبيق.
     static var token: String? {
         let query: [String: Any] = [
@@ -169,7 +172,8 @@ struct SandyTasksProvider: TimelineProvider {
         let all = WidgetTaskCache.load()
         return SandyTasksEntry(date: Date(),
                                tasks: Array(all.prefix(3)),
-                               total: all.count,
+                               // The cache holds ten rows; the app keeps the real count.
+                               total: max(WidgetTaskCache.activeCount, all.count),
                                signedIn: WidgetTaskCache.token != nil,
                                isArabic: WidgetTaskCache.isArabic)
     }
