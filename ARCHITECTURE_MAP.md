@@ -1191,7 +1191,9 @@ so folders are organisation only.
   returns the row already there). While the outbox holds anything, a reload keeps the
   phone's copy instead of the server's. Only a server refusal (a 4xx other than 401, 408
   and 429) undoes a change; a delete answered 404 is done (the row was already gone, deleted
-  from chat). A «not now» (5xx, 408, 429) keeps the write first in line: it
+  from chat). A refusal with its caller still waiting is handed to it; one queued earlier
+  has no caller left, so it shows a notice and the screens reload the server's copy
+  (`sandyBlocksChanged`). A «not now» (5xx, 408, 429) keeps the write first in line: it
   is tried again after a pause that doubles from five seconds to ten minutes, or after the
   429's `Retry-After`; after `Outbox.maxTries` (12) such answers or a day of them it is
   parked beside the queue (`outbox.parked`, on disk, kept by a 401 sign-out like the queue)

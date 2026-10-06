@@ -36,7 +36,8 @@ final class Outbox {
     private var userId: String?
     private var api: APIClient?
     private var pass: Task<Void, Never>?
-    /// Ops the server refused, so the caller waiting on one can be told.
+    /// Ops whose caller is still waiting on them, and the refusals to hand those callers.
+    private var awaited: Set<UUID> = []
     private var refused: [UUID: Error] = [:]
     /// Nothing is sent before this: a backoff, or the wait a 429 asked for.
     var notBefore: Date?
@@ -69,6 +70,7 @@ final class Outbox {
     var isEmpty: Bool { ops.isEmpty }
     var count: Int { ops.count }
     var parkedCount: Int { parked.count }
+    var refusedCount: Int { refused.count }
     /// Anything this account would lose by signing out.
     var hasUnsent: Bool { !ops.isEmpty || !parked.isEmpty }
 
@@ -94,6 +96,8 @@ final class Outbox {
                     body: try body.map { try JSONEncoder().encode($0) })
         ops.append(op)
         save()
+        awaited.insert(op.id)
+        defer { awaited.remove(op.id) }
         await drain(api)
         if let error = refused.removeValue(forKey: op.id) { throw error }
     }
@@ -140,13 +144,25 @@ final class Outbox {
                     return
                 }
                 // A delete of a row already gone (Sandy deleted it from chat) is what was asked.
-                if !(op.method == "DELETE" && status == 404) { refused[op.id] = error }
+                if !(op.method == "DELETE" && status == 404) { refuse(op, error) }
             }
             // Signed out or switched while it was on its way: this queue is not loaded any more.
             guard ops.first?.id == op.id else { return }
             ops.removeFirst()
             save()
         }
+    }
+
+    /// The server refused it for good. Its caller, still waiting, undoes it; one queued
+    /// earlier has no caller left, so the user is told and the screens reload the server's
+    /// copy.
+    private func refuse(_ op: Op, _ error: Error) {
+        if awaited.contains(op.id) {
+            refused[op.id] = error
+            return
+        }
+        NoticeCenter.shared.post(LanguageManager.shared.s("blocks.outboxRefused"))
+        NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
     }
 
     /// The server is down, restarting, slow or busy: the write is not refused.

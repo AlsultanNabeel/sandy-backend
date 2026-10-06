@@ -161,4 +161,20 @@ final class OutboxTests: XCTestCase {
         XCTAssertTrue(refused)
         XCTAssertTrue(Outbox.shared.isEmpty)
     }
+
+    /// L8: a change queued offline and refused later had no one waiting on it: the refusal
+    /// was kept where nothing read it (growing for ever), with no notice and no reload.
+    func testARefusalNobodyWaitsOnIsShownAndNotKept() async {
+        answer(StubNetwork.offline)
+        _ = await send()
+        XCTAssertEqual(Outbox.shared.count, 1)
+        NoticeCenter.shared.drop()
+        let reloaded = expectation(forNotification: .sandyBlocksChanged, object: nil)
+        answer(400)
+        await Outbox.shared.drain(api)
+        XCTAssertTrue(Outbox.shared.isEmpty)
+        XCTAssertEqual(Outbox.shared.refusedCount, 0, "a refusal nobody reads was kept")
+        XCTAssertEqual(NoticeCenter.shared.notice?.text, LanguageManager.shared.s("blocks.outboxRefused"))
+        await fulfillment(of: [reloaded], timeout: 1)
+    }
 }
