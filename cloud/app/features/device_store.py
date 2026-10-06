@@ -208,6 +208,16 @@ def get_devices(names: List[str]) -> Dict[str, Dict[str, Any]]:
     return {d["name"]: d for d in _with_presence(docs)}
 
 
+def devices_on_output(output: str) -> List[Dict[str, Any]]:
+    """This tenant's node devices on ``output`` (``room/light``), one per paired node."""
+    coll = _coll()
+    output = (output or "").strip()
+    if coll is None or not output:
+        return []
+    docs = list(coll.find({"transport.kind": "node", "transport.output": output}).limit(MAX_DEVICES))
+    return _with_presence(docs)
+
+
 def add_device(name: str, label: str, control_type: str,
                transport: Dict[str, Any], room: str = "",
                meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

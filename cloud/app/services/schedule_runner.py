@@ -124,9 +124,8 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
         # Import here: scene_store pulls in the device/MQTT stack (C9).
         from app.features.scene_store import _actuate
         payload = doc.get("payload") or {}
-        sent, _missed, _offline = _actuate([{"device": payload.get("device", ""),
-                                             "value": payload.get("value", "")}])
-        return (True, "") if sent else (False, "device missed")
+        r = _actuate([{"device": payload.get("device", ""), "value": payload.get("value", "")}])
+        return (True, "") if r["sent"] else (False, "device missed")
     if not apns.is_configured():
         # A reminder still rings on the phone; a push-only nudge reached no one.
         return (True, "") if kind == "reminder" else (False, "apns not configured")

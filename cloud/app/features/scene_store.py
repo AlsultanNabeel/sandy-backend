@@ -1,7 +1,9 @@
 """Room scenes (sandy_scenes): a label plus a list of {device, value} actions.
 
 Built-ins are seeded per user and resettable, not deletable. apply_scene sends
-each action to the owner's registered devices and also returns the list.
+each action to the owner's registered devices and also returns the list. An action
+names a device of the registry, or one of the room words scenes were written in
+before devices were rows (`_LEGACY`), which is read as the device on that output.
 """
 
 from __future__ import annotations
@@ -16,37 +18,19 @@ from app.utils.tenant_db import scoped
 
 logger = logging.getLogger(__name__)
 
-# Legacy room vocabulary for scene actions.
-VALID_DEVICES = frozenset({"light", "color", "music", "fan", "curtain", "scene"})
-_VALID_COLOR = {"warm", "cool", "white", "red", "green", "blue", "purple", "amber"}
-
-
-def normalize_action(device: str, value: str) -> Optional[str]:
-    """Clean payload for (device, value), or None if invalid."""
-    device = (device or "").strip().lower()
-    value = str(value or "").strip().lower()
-    if device not in VALID_DEVICES or not value:
-        return None
-    if device in ("light", "fan"):
-        if value in ("on", "off"):
-            return value
-        try:
-            return str(max(0, min(100, int(value))))
-        except ValueError:
-            return None
-    if device == "color":
-        if value in _VALID_COLOR:
-            return value
-        if value.startswith("#") and len(value) == 7:
-            return value
-        return None
-    if device == "music":
-        return value if value in ("on", "off", "pause") else None
-    if device == "curtain":
-        return value if value in ("open", "close") else None
-    if device == "scene":
-        return value
-    return None
+# The room words the built-ins and the scenes saved before devices were rows still use:
+# the output each means (None: no board has it) and what to call it when it is passed over.
+_LEGACY: Dict[str, tuple] = {
+    "light":   ("room/light", "ضو الغرفة"),
+    "music":   ("room/music", "موسيقى الغرفة"),
+    "buzzer":  ("buzzer", "جرس ساندي"),
+    "color":   (None, "لون الإضاءة"),
+    "fan":     (None, "المروحة"),
+    "curtain": (None, "الستارة"),
+    "scene":   (None, "مشهد الغرفة"),
+}
+# A player with no on/off of its own (the room's music): «on» resumes, «off» stops.
+_PLAYER_WORDS = {"on": "resume", "off": "stop"}
 
 _COLL = "sandy_scenes"
 
@@ -131,31 +115,23 @@ def _clean_actions(actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Keep only valid actions.
 
     An action is {device, value} plus optional `for_min` (revert after N minutes)
-    and `then` (revert value, default "off"). `device` is a registry device name
-    (validated on apply) or a legacy room word (normalized here).
+    and `then` (revert value, default "off"). `device` is a registry device name or
+    a legacy room word; the value is validated on apply, against the device itself.
     """
     out: List[Dict[str, Any]] = []
     for a in actions or []:
         dev = str(a.get("device", "")).strip().lower()
-        raw_val = str(a.get("value", "")).strip()
-        if not dev or not raw_val:
+        payload = str(a.get("value", "")).strip()
+        if not dev or not payload:
             continue
-        if dev in VALID_DEVICES:
-            payload = normalize_action(dev, raw_val)
-            if payload is None:
-                continue
-        else:
-            payload = raw_val
         item: Dict[str, Any] = {"device": dev, "value": payload}
         try:
             for_min = int(a.get("for_min", 0) or 0)
         except (TypeError, ValueError):
             for_min = 0
         if for_min > 0:
-            raw_then = str(a.get("then", "off")).strip() or "off"
-            then = normalize_action(dev, raw_then) if dev in VALID_DEVICES else raw_then
             item["for_min"] = min(720, for_min)
-            item["then"] = then or "off"
+            item["then"] = str(a.get("then", "off")).strip() or "off"
         out.append(item)
     return out
 
@@ -171,11 +147,30 @@ def _public(d: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_scenes() -> List[Dict[str, Any]]:
+    """Every scene, its room words shown as the devices they mean (so the editor shows
+    and saves real devices); a word no device answers to is left as it is."""
     coll = _coll()
     if coll is None:
         return []
     _seed_builtins()
-    return [_public(d) for d in coll.find({}).sort("builtin", -1).limit(MAX_SCENES)]
+    targets = _legacy_targets()
+    out = []
+    for d in coll.find({}).sort("builtin", -1).limit(MAX_SCENES):
+        sc = _public(d)
+        sc["actions"] = [_as_device(a, targets) for a in sc["actions"]]
+        out.append(sc)
+    return out
+
+
+def _as_device(action: Dict[str, Any], targets: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    device = targets.get(str(action.get("device") or "").strip().lower())
+    if device is None:
+        return action
+    shown = {**action, "device": device["name"],
+             "value": _value_for(device, str(action.get("value") or ""))}
+    if "then" in action:
+        shown["then"] = _value_for(device, str(action["then"]))
+    return shown
 
 
 def get_scene(name: str) -> Optional[Dict[str, Any]]:
@@ -252,6 +247,7 @@ def apply_scene(name: str) -> Dict[str, Any]:
     if not sc:
         return {"ok": False, "error": "not_found"}
 
+    resolved, skipped, unknown = _resolve(sc["actions"])
     timers = 0
     pending = _base.coll(_base.SCHEDULES)
     if pending is not None:
@@ -266,17 +262,17 @@ def apply_scene(name: str) -> Dict[str, Any]:
                 timers += 1
     from app.features.device_store import keep_before_scene
 
-    keep_before_scene([str(a.get("device") or "") for a in sc["actions"]])
-    sent, missed, offline = _actuate(sc["actions"])
+    keep_before_scene([device["name"] for device, _ in resolved])
+    r = _send(resolved)
 
     return {
         "ok": True,
         "name": sc["name"],
         "label": sc["label"],
         "timers": timers,
-        "sent": sent,
-        "missed": missed,
-        "offline": offline,
+        **r,
+        "missed": unknown + r["missed"],
+        "skipped": skipped,
         "actions": sc["actions"],
     }
 
@@ -292,52 +288,98 @@ def restore_room() -> Dict[str, Any]:
     if pending is not None:
         pending.update_many(_SCENE_TIMERS,
                             {"$set": {"status": "cancelled"}})
-    sent, missed, offline = _actuate(actions)
-    return {"ok": True, "sent": sent, "missed": missed, "offline": offline}
+    return {"ok": True, **_actuate(actions)}
 
 
-def _actuate(actions: List[Dict[str, Any]]) -> tuple:
-    """Send each action to its device; returns (sent, names that were missed, labels of the
-    devices whose board is gone). A gone board is passed over, the rest still go."""
-    from app.features.device_store import (
-        command_payload, device_topic, get_devices, set_state,
-    )
-    from app.integrations.room_device import get_room_device_client
+def _legacy_targets() -> Dict[str, Dict[str, Any]]:
+    """Each room word that one device of this tenant answers to (its output), by word.
+    Two robots with a room each is a guess, so a word with several devices is left out."""
+    from app.features.device_store import devices_on_output
 
-    sent, missed, offline = 0, [], []
-    # Every device the scene names, in one read.
+    targets = {}
+    for word, (output, _label) in _LEGACY.items():
+        hits = devices_on_output(output) if output else []
+        if len(hits) == 1:
+            targets[word] = hits[0]
+    return targets
+
+
+def _value_for(device: Dict[str, Any], value: str) -> str:
+    """A value written for the room words, as this device takes it: a level on a switch
+    is on or off (the room light is a servo pressing the wall switch), and a player with
+    no on/off resumes or stops."""
+    v = value.strip().lower()
+    ctype = device.get("control_type")
+    if ctype == "switch" and v.isdigit():
+        return "on" if int(v) > 0 else "off"
+    values = {str(x).lower() for x in (device.get("meta") or {}).get("values") or []}
+    if ctype == "enum" and v in _PLAYER_WORDS and v not in values and _PLAYER_WORDS[v] in values:
+        return _PLAYER_WORDS[v]
+    return value.strip()
+
+
+def _resolve(actions: List[Dict[str, Any]]) -> tuple:
+    """(each action as [device, value], room words no device answers to, by their Arabic
+    name, names that are not a device)."""
+    from app.features.device_store import get_devices
+
+    names = [str(a.get("device") or "").strip().lower() for a in actions or []]
+    targets = _legacy_targets() if any(n in _LEGACY for n in names) else {}
     try:
-        devices = get_devices([str(a.get("device") or "") for a in actions or []])
+        devices = get_devices([n for n in names if n not in _LEGACY])
     except Exception as exc:  # noqa: BLE001
         logger.debug("[SceneStore] device lookup failed: %s", exc)
         devices = {}
-    for a in actions or []:
-        name = str(a.get("device") or "").strip().lower()
-        value = str(a.get("value") or "").strip()
+    resolved, skipped, unknown = [], [], []
+    for name, a in zip(names, actions or []):
         if not name:
             continue
+        device = targets.get(name) if name in _LEGACY else devices.get(name)
+        if device is None:
+            if name in _LEGACY:
+                skipped.append(_LEGACY[name][1])
+            else:
+                unknown.append(name)
+            continue
+        resolved.append([device, _value_for(device, str(a.get("value") or ""))])
+    return resolved, list(dict.fromkeys(skipped)), unknown
+
+
+def _actuate(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Send each action to its device: {sent, missed (not reached or not a device),
+    offline (labels of the devices whose board is gone), skipped (room words no device
+    answers to)}. Whatever cannot go is passed over; the rest still go."""
+    resolved, skipped, unknown = _resolve(actions)
+    r = _send(resolved)
+    return {**r, "missed": unknown + r["missed"], "skipped": skipped}
+
+
+def _send(resolved: List[list]) -> Dict[str, Any]:
+    """Send each [device, value]; {sent, missed (labels), offline (labels)}."""
+    from app.features.device_store import command_payload, device_topic, set_state
+    from app.integrations.room_device import get_room_device_client
+
+    sent, missed, offline = 0, [], []
+    for device, value in resolved:
+        label = device.get("label") or device["name"]
         try:
-            device = devices.get(name)
-            if device is None:
-                missed.append(name)
-                continue
             # Same validation gate as the device tool.
             res = command_payload(device, value, value)
             if not res.get("ok"):
                 res = command_payload(device, "set", value)
             if not res.get("ok"):
-                missed.append(name)
+                missed.append(label)
                 continue
             payload = res["payload"]
             if device.get("board_gone"):
-                offline.append(device.get("label") or name)
+                offline.append(label)
                 continue
             if get_room_device_client().send_to_topic(device_topic(device), payload):
-                set_state(name, payload)
+                set_state(device["name"], payload)
                 sent += 1
             else:
-                missed.append(name)
+                missed.append(label)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("[SceneStore] %s failed: %s", name, exc)
-            missed.append(name)
-    return sent, missed, offline
+            logger.debug("[SceneStore] %s failed: %s", device.get("name"), exc)
+            missed.append(label)
+    return {"sent": sent, "missed": missed, "offline": offline}

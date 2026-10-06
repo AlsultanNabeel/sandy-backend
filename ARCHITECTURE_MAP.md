@@ -374,14 +374,16 @@ Now:
   enforcement — another tenant's topic simply is not in this tenant's collection.
 - **`room_device.send_to_topic()`** gates on that. Every registry-driven path goes
   through it: the `device_control` tool, `/api/devices/<name>/control`, IR learn,
-  and scene actuation.
-- **`room_device.send()`** takes a device *name* and resolves the
-  node from the **caller**, so a call site cannot address another tenant's room by
-  getting an argument wrong — there is no argument for it. Two nodes paired is
-  refused rather than guessed: guessing wrong turns off the wrong light in
-  silence. The owner-only gate these used to carry came off on 23 Aug 2026 when
-  the room moved under `sandy/node/<id>/room/…` (§4.5); it existed only because
-  the old global strings carried no device identity.
+  and scene actuation. It is the only way a device is sent to: the name-based
+  `room_device.send()` and its room vocabulary had no caller left and are gone.
+- **Scenes written in the old room words** («light», «music», «fan», «curtain», «color»:
+  the built-ins, and scenes saved before devices were rows) are read at apply time
+  (`scene_store._resolve`, `_LEGACY`): a word is the tenant's one device on that output
+  (`room/light`, `room/music`, `buzzer`), its value as that device takes it (a level on a
+  switch is on or off; «on»/«off» on the music resume or stop). Two devices on one output
+  (two robots) is passed over rather than guessed, as is a word no device answers to,
+  and the result names them (`skipped`). `list_scenes` shows the words as the devices
+  they mean, so the app's editor offers and saves real devices only.
 
 ### 2.8 Device registry
 
@@ -623,7 +625,7 @@ dynos. `fired_at` and `last_error` are set on the row.
 | Kind | Firing |
 |---|---|
 | `reminder` | The phone rings it locally from `GET /api/schedules`. The server also pushes over APNs when `services/apns.py` is configured, unless the row is more than 15 minutes late. `failed` only when devices exist and none took the push. |
-| `scene` | A scene's timed revert, or a timed device command the user asked for (`payload.asked`): `scene_store.apply_scene` cancels the tenant's pending revert rows (not the asked ones) and writes one per `for_min` action; the runner sends it through `scene_store._actuate`, and a miss retries a minute later up to `MAX_TIMER_TRIES`, then `failed`. |
+| `scene` | A scene's timed revert, or a timed device command the user asked for (`payload.asked`): `scene_store.apply_scene` cancels the tenant's pending revert rows (not the asked ones) and writes one per `for_min` action; the runner sends it through `scene_store._actuate` (room words read as in §2.7), and a miss retries a minute later up to `MAX_TIMER_TRIES`, then `failed`. |
 | `daily_nudge`, `summary_nudge` | push text only; `failed` when no device took it (no APNs, no token, every send refused). |
 | `message_to_future_self` | not fired here: the next chat reply delivers it (§2.3). |
 
@@ -1298,7 +1300,8 @@ so folders are organisation only.
   state now and quick buttons, her body (`RobotControlView`: face, movement, screen,
   light, sound, camera), the parts test, her board's Wi-Fi, «why isn't a part showing?»
   (`DiagnoseView`, `GET /api/diagnose` in plain words) and linking/unlinking. Room
-  scenes (`RoomScenesSection`) are in home control. Project lists Sandy made from chat
+  scenes (`RoomScenesSection`) are in home control; the scene editor offers the account's own
+  devices and the values each takes. Project lists Sandy made from chat
   («project:<name>») get a card each in My Life.
   Habits: a committed day is one on which every habit due that day was kept; the
   commitment days and the streak (days with nothing due neither count nor break it)
@@ -1592,8 +1595,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
 
 The firmware **is** built in CI (`idf.py build`, §9), so "never compiled" is no
 longer true. The control page **exists** (`ios/SandyApp/Features/Control/`). The
-room node is **on the per-node topic tree** (§4.5), so `room_device.send()` is
-not owner-only any more. The display **has** an Arabic font at 24 and 32 pixels
+room node is **on the per-node topic tree** (§4.5), and nothing is owner-only on the
+way to it. The display **has** an Arabic font at 24 and 32 pixels
 (`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed. Servo easing and ten gestures are in
 (`sandy_servo.c`). The visitor approval flow and the JSON profile store are gone.
 The brain **is** told which devices exist: `context._devices_line` lists them by name and room in the prompt. Phase 5 closed three more by deleting what they were about: `tool_health` (no

@@ -114,6 +114,8 @@ struct RoomScenesSection: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: RobotStore
+    /// The devices a scene can switch: the same rows as home control.
+    let devices: [DeviceItem]
     @State private var editing: RoomScene?
     @State private var showAdd = false
 
@@ -135,11 +137,11 @@ struct RoomScenesSection: View {
         .animation(Animation.spring(response: 0.45, dampingFraction: 0.8).reduced, value: store.scenes.map(\.id))
         .task { await store.load(api: state.api) }
         .sheet(item: $editing) { sc in
-            SceneEditorSheet(store: store, scene: sc)
+            SceneEditorSheet(store: store, scene: sc, devices: devices)
                 .environmentObject(state).environmentObject(lang)
         }
         .sheet(isPresented: $showAdd) {
-            SceneEditorSheet(store: store, scene: nil)
+            SceneEditorSheet(store: store, scene: nil, devices: devices)
                 .environmentObject(state).environmentObject(lang)
         }
     }
@@ -196,7 +198,9 @@ struct RoomScenesSection: View {
     }
 
     private func actionsSummary(_ actions: [SceneAction]) -> String {
-        actions.map { "\(deviceIcon($0.device)) \($0.value)" }.joined(separator: " · ")
+        actions.map { a in
+            "\(devices.first { $0.name == a.device }?.label ?? a.device) \(a.value)"
+        }.joined(separator: " · ")
     }
 }
 
@@ -210,6 +214,8 @@ private struct SceneEditorSheet: View {
     let store: RobotStore
     /// nil = إضافة مشهد جديد، غير nil = تعديل أفعال مشهد قائم.
     let scene: RoomScene?
+    /// His devices, what an action can name.
+    let devices: [DeviceItem]
 
     @State private var name = ""
     @State private var label = ""
@@ -237,9 +243,13 @@ private struct SceneEditorSheet: View {
                             actionRow($act)
                         }
 
-                        SandyButton(title: lang.s("robot.addAction"),
-                                    systemImage: "plus", style: .secondary) {
-                            actions.append(SceneAction(device: "light", value: "60"))
+                        if devices.isEmpty {
+                            SandyNotice(lang.s("robot.noDevices"), kind: .gentleWarning)
+                        } else {
+                            SandyButton(title: lang.s("robot.addAction"),
+                                        systemImage: "plus", style: .secondary) {
+                                actions.append(Self.firstAction(devices[0]))
+                            }
                         }
 
                         SandyButton(title: lang.s("robot.save"),
@@ -262,8 +272,8 @@ private struct SceneEditorSheet: View {
             if let scene {
                 label = scene.label; name = scene.name; icon = scene.icon
                 actions = scene.actions
-            } else {
-                actions = [SceneAction(device: "light", value: "60")]
+            } else if let first = devices.first {
+                actions = [Self.firstAction(first)]
             }
         }
     }
@@ -274,18 +284,44 @@ private struct SceneEditorSheet: View {
             .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(.ultraThinMaterial))
     }
 
+    /// A new action on this device, with a value it takes.
+    static func firstAction(_ device: DeviceItem) -> SceneAction {
+        SceneAction(device: device.name, value: options(for: device)?.first ?? String(device.dimmerMax))
+    }
+
+    /// The values a device takes, as a list; nil for a level or free text (a field).
+    static func options(for device: DeviceItem) -> [String]? {
+        switch device.controlType {
+        case "switch": return ["on", "off"]
+        case "media":  return ["on", "off", "pause"]
+        case "cover":  return ["open", "close", "stop"]
+        case "enum":   return device.enumValues
+        case "ir":     return device.irButtonNames
+        default:       return nil
+        }
+    }
+
     private func actionRow(_ act: Binding<SceneAction>) -> some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        let device = devices.first { $0.name == act.wrappedValue.device }
+        return HStack(spacing: Theme.Spacing.sm) {
             Picker("", selection: act.device) {
-                ForEach(sceneDevices, id: \.self) { d in
-                    Text("\(deviceIcon(d)) \(d)").tag(d)
+                ForEach(devices) { d in Text(d.label).tag(d.name) }
+                // A room word saved before devices were rows, that no device of his answers to.
+                if device == nil {
+                    Text("\(act.wrappedValue.device) — \(lang.s("robot.notADevice"))")
+                        .tag(act.wrappedValue.device)
                 }
             }
             .pickerStyle(.menu)
             .tint(Theme.Colors.accent)
+            .onChange(of: act.wrappedValue.device) { _, name in
+                if let d = devices.first(where: { $0.name == name }) {
+                    act.wrappedValue.value = Self.firstAction(d).value
+                }
+            }
 
             // قيمة: قائمة جاهزة لو الجهاز له خيارات، وإلا حقل حر.
-            if let opts = deviceOptions[act.wrappedValue.device] {
+            if let device, let opts = Self.options(for: device), !opts.isEmpty {
                 Picker("", selection: act.value) {
                     ForEach(opts, id: \.self) { Text($0).tag($0) }
                 }
@@ -328,19 +364,4 @@ private struct SceneEditorSheet: View {
         busy = false
         if ok { dismiss() } else { err = store.notice }
     }
-}
-
-// MARK: - أجهزة الغرفة (يطابق SCENE_DEVICES/DEVICE_OPTS بالويب)
-
-private let sceneDevices = ["light", "color", "music", "fan", "curtain", "buzzer"]
-private let deviceOptions: [String: [String]] = [
-    "color": ["warm", "cool", "white", "red", "green", "blue", "purple", "amber"],
-    "music": ["on", "off", "pause"],
-    "curtain": ["open", "close"],
-    "buzzer": ["boot", "happy", "curious", "sad", "alert", "error",
-               "focus_start", "focus_break", "focus_end"],
-]
-private func deviceIcon(_ d: String) -> String {
-    ["light": "💡", "color": "🎨", "music": "🎵",
-     "fan": "🌀", "curtain": "🪟", "buzzer": "🔔"][d] ?? "🎛️"
 }

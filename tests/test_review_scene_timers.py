@@ -20,7 +20,7 @@ def d(monkeypatch):
     database = mongomock.MongoClient().db
     appdb.configure(database)
     init_blocks(database)
-    monkeypatch.setattr(ss, "_actuate", lambda actions: (len(actions), [], []))
+    monkeypatch.setattr(ss, "_actuate", lambda actions: {"sent": len(actions), "missed": [], "offline": [], "skipped": []})
     yield database
     appdb.reset()
 
@@ -60,7 +60,7 @@ def test_the_revert_fires_once_for_its_owner_only(d, monkeypatch):
     def fake_actuate(actions):
         from app.utils.user_profiles import current_user_id
         fired.append((current_user_id(), [a["device"] for a in actions]))
-        return len(actions), [], []
+        return {"sent": len(actions), "missed": [], "offline": [], "skipped": []}
 
     _movie_for("u1")
     _movie_for("u2", minutes=90)

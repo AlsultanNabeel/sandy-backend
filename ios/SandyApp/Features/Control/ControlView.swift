@@ -96,7 +96,7 @@ struct ControlView: View {
         } else if store.devices.isEmpty {
             // ما في إشي يترتّب بعد — الحالة الفاضية بتشرح الخطوة الجاية.
             devicesSection
-            RoomScenesSection(store: scenes)
+            RoomScenesSection(store: scenes, devices: store.devices)
             nodesSection
         } else {
             board
@@ -125,7 +125,7 @@ struct ControlView: View {
                 }
             }
             BoardCard("scenes", titleKey: "robot.scenes",
-                      icon: "sparkles", defaultSize: .medium) { RoomScenesSection(store: scenes) }
+                      icon: "sparkles", defaultSize: .medium) { RoomScenesSection(store: scenes, devices: store.devices) }
             BoardCard("nodes", titleKey: "control.section.nodes",
                       icon: "cpu.fill", defaultSize: .medium) { nodesSection }
         }

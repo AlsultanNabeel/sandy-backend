@@ -56,14 +56,16 @@ extension APIClient {
         let ok: Bool?
         let online: Bool?
         let offline: [String]?
+        let skipped: [String]?
     }
 
-    // ok = طُبّق المشهد، online = وصل لجهاز واحد على الأقل، offline = أجهزة لوحها غايب فتخطّاها.
+    // ok = طُبّق المشهد، online = وصل لجهاز واحد على الأقل، passedOver = اللي تخطّاه: أجهزة لوحها
+    // غايب، وكلمات الغرفة القديمة اللي ما في جهاز عنده إلها.
     @discardableResult
-    func applyScene(name: String) async throws -> (ok: Bool, online: Bool, offline: [String]) {
+    func applyScene(name: String) async throws -> (ok: Bool, online: Bool, passedOver: [String]) {
         let r: ApplySceneResponse = try await fetch("/api/life/scenes/apply", method: "POST",
                                                     body: SceneName(name: name))
-        return (r.ok ?? false, r.online ?? false, r.offline ?? [])
+        return (r.ok ?? false, r.online ?? false, (r.offline ?? []) + (r.skipped ?? []))
     }
 
     private struct SceneCreate: Encodable {

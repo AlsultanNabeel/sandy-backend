@@ -131,12 +131,12 @@ final class RobotStore: LoadableStore {
         applying = scene.name; clearNotice()
         do {
             let r = try await api.applyScene(name: scene.name)
-            if r.offline.isEmpty {
+            if r.passedOver.isEmpty {
                 notify(r.online ? "robot.applied" : "robot.appliedOffline")
             } else {
-                // The devices whose board is gone were passed over: say which.
+                // What could not go was passed over: say which.
                 notice = LanguageManager.shared.s(r.online ? "robot.appliedPartly" : "robot.appliedNone")
-                    + " " + r.offline.joined(separator: AppLocale.isArabic ? "، " : ", ")
+                    + " " + r.passedOver.joined(separator: AppLocale.isArabic ? "، " : ", ")
                 Announce.say(notice)
             }
         } catch {

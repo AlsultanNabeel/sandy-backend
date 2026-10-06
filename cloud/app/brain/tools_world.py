@@ -183,13 +183,15 @@ def scene_apply(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     tail = _passed_over(r)
     if not r.get("sent"):
         return _no(f"ما تطبّق مشهد «{r['label']}»، ما وصل ولا جهاز.{tail}")
-    return {"ok": not tail, "reply": f"✨ طبّقت مشهد «{r['label']}»{tail or ' 🏠'}"}
+    return {"ok": not tail, "reply": f"✨ طبّقت مشهد «{r['label']}»{'.' + tail if tail else ' 🏠'}"}
 
 
 def _passed_over(r: Dict[str, Any]) -> str:
-    """What a scene or a restore left out, by name: the devices whose board is gone, and
-    the ones the command did not reach."""
+    """What a scene or a restore left out, by name: the devices whose board is gone, the
+    room words no device of his answers to, and the ones the command did not reach."""
     parts = []
+    if r.get("skipped"):
+        parts.append(f" ما عندك {'، '.join(r['skipped'])}، فتخطّيتها.")
     if r.get("offline"):
         parts.append(f" {'، '.join(r['offline'])} مش متّصل هلّق، فتخطّيته.")
     if r.get("missed"):
@@ -206,7 +208,7 @@ def room_restore(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     tail = _passed_over(r)
     if not r.get("sent"):
         return _no(f"ما قدرت أرجّع الغرفة، ما وصل ولا جهاز.{tail}")
-    return {"ok": not tail, "reply": f"رجّعت الغرفة زي ما كانت{tail or ' 🏠'}"}
+    return {"ok": not tail, "reply": f"رجّعت الغرفة زي ما كانت{'.' + tail if tail else ' 🏠'}"}
 
 
 def web_search(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

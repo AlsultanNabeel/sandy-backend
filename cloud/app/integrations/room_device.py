@@ -1,14 +1,8 @@
-"""Publish-only MQTT client for the room node (a second board on the same broker).
+"""Publish-only MQTT client for every board's commands (the robot, its camera, its room node).
 
-Topics live under the robot's own tree, so a tenant can only reach their own room
-(keep in sync with firmware/room-node/room-node.ino):
-
-    sandy/node/<id>/room/light    — "on" | "off" | "0".."100"
-    sandy/node/<id>/room/color    — named color or "#rrggbb"
-    sandy/node/<id>/room/music    — on|off|stop|pause|resume|next|prev, vol:N, play:F:T
-    sandy/node/<id>/room/fan      — "on" | "off" | "0".."100"
-    sandy/node/<id>/room/curtain  — "open" | "close"
-    sandy/node/<id>/room/scene    — "<scene name>"
+A device is sent to by its topic (`send_to_topic`), once `device_store.command_payload`
+has validated the value and only when the topic is one of the caller's own devices; a
+node's service channels (camera, network) go through `publish_service`.
 
 Broker creds: SANDY_MQTT_HOST / _PORT / _USER / _PASS. No-op when unconfigured.
 """
@@ -21,105 +15,18 @@ import re
 import ssl
 import threading
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import paho.mqtt.client as mqtt  # type: ignore
 
 logger = logging.getLogger(__name__)
 
-# Outputs on a node (same shape as the camera's "cam/flash").
-ROOM_OUTPUT_PREFIX = "room/"
-
-_DEVICE_OUTPUT = {
-    "light":   ROOM_OUTPUT_PREFIX + "light",
-    "color":   ROOM_OUTPUT_PREFIX + "color",
-    "music":   ROOM_OUTPUT_PREFIX + "music",
-    "fan":     ROOM_OUTPUT_PREFIX + "fan",
-    "curtain": ROOM_OUTPUT_PREFIX + "curtain",
-    "scene":   ROOM_OUTPUT_PREFIX + "scene",
-}
-
-VALID_DEVICES = frozenset(_DEVICE_OUTPUT)
-_VALID_COLOR = {"warm", "cool", "white", "red", "green", "blue", "purple", "amber"}
-_HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
-_MUSIC_WORDS = frozenset({"on", "off", "stop", "pause", "resume", "next", "prev"})
-# DFPlayer ranges (handleMusic in room-node.ino): volume 0..30, folder 1..99, track 1..255.
-_MUSIC_VOL = re.compile(r"^vol:(\d{1,2})$")
-_MUSIC_PLAY = re.compile(r"^play:(\d{1,2}):(\d{1,3})$")
 # A publish before the broker connects would be queued and falsely reported as sent.
 _CONNECT_WAIT_S = 3.0
 
 
-def _caller_node() -> Optional[Dict[str, Any]]:
-    """The caller's only node, or None; with several nodes we refuse to guess which room."""
-    from app.features.node_store import list_nodes
-
-    nodes = list_nodes() or []
-    if len(nodes) != 1:
-        if nodes:
-            logger.warning("[room_device] %d nodes paired — say which one via the "
-                           "device registry", len(nodes))
-        return None
-    return nodes[0] if str(nodes[0].get("node_id") or "").strip() else None
-
-
-
-def declared_room_outputs(node: Optional[Dict[str, Any]]) -> frozenset:
-    """Room outputs the node's room board declared (``light``, ``music``); only these are sent."""
-    outs = (node or {}).get("outputs") or []
-    names = set()
-    for o in outs:
-        oid = str((o or {}).get("id") or "") if isinstance(o, dict) else ""
-        if oid.startswith(ROOM_OUTPUT_PREFIX):
-            names.add(oid[len(ROOM_OUTPUT_PREFIX):])
-    return frozenset(names)
-
-
-def room_topic(node_id: str, device: str) -> Optional[str]:
-    output = _DEVICE_OUTPUT.get((device or "").strip().lower())
-    node_id = (node_id or "").strip()
-    if not output or not node_id:
-        return None
-    return f"sandy/node/{node_id}/{output}"
-
-
-def normalize_action(device: str, value: str) -> Optional[str]:
-    """Clean payload for (device, value), or None if invalid (see module docstring)."""
-    device = (device or "").strip().lower()
-    value = str(value or "").strip().lower()
-    if device not in _DEVICE_OUTPUT or not value:
-        return None
-    if device in ("light", "fan"):
-        if value in ("on", "off"):
-            return value
-        try:
-            return str(max(0, min(100, int(value))))
-        except ValueError:
-            return None
-    if device == "color":
-        if value in _VALID_COLOR:
-            return value
-        return value if _HEX_COLOR.match(value) else None
-    if device == "music":
-        if value in _MUSIC_WORDS:
-            return value
-        m = _MUSIC_VOL.match(value)
-        if m:
-            return value if int(m.group(1)) <= 30 else None
-        m = _MUSIC_PLAY.match(value)
-        if m:
-            folder, track = int(m.group(1)), int(m.group(2))
-            return value if 1 <= folder <= 99 and 1 <= track <= 255 else None
-        return None
-    if device == "curtain":
-        return value if value in ("open", "close") else None
-    if device == "scene":
-        return value
-    return None
-
-
 class RoomDeviceClient:
-    """Publish-only MQTT client for the room node. No-op when unconfigured."""
+    """Publish-only MQTT client. No-op when unconfigured."""
 
     def __init__(self):
         self._host = os.getenv("SANDY_MQTT_HOST", "").strip()
@@ -218,25 +125,6 @@ class RoomDeviceClient:
             logger.warning("[room_device] publish_service refused: %s", topic)
             return False
         return self._publish(topic, str(payload))
-
-    def send(self, device: str, value: str) -> bool:
-        """Send one normalized command to the caller's own room node."""
-        node = _caller_node()
-        if not node:
-            logger.warning("[room_device] actuation refused: no node for this caller")
-            return False
-        node_id = str(node.get("node_id")).strip()
-        payload = normalize_action(device, value)
-        if payload is None:
-            return False
-        name = (device or "").strip().lower()
-        if name not in declared_room_outputs(node):
-            logger.info("[room_device] %s skipped: the room board never declared it", name)
-            return False
-        topic = room_topic(node_id, device)
-        if topic is None:
-            return False
-        return self._publish(topic, payload)
 
 
 _room_client: Optional[RoomDeviceClient] = None

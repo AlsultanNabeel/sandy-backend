@@ -158,7 +158,7 @@ def test_a_scene_revert_is_applied_through_the_scene_actuator(brain_db, monkeypa
     from app.features import scene_store
     applied = []
     monkeypatch.setattr(scene_store, "_actuate",
-                        lambda actions: applied.extend(actions) or (1, [], []))
+                        lambda actions: applied.extend(actions) or {"sent": 1, "missed": [], "offline": [], "skipped": []})
     sid = _add("scene", "light → on", payload={"device": "light", "value": "on"})
     assert _tick()["fired"] == 1
     assert applied == [{"device": "light", "value": "on"}]
@@ -167,7 +167,7 @@ def test_a_scene_revert_is_applied_through_the_scene_actuator(brain_db, monkeypa
 
 def test_a_missed_scene_retries_then_fails(brain_db, monkeypatch):  # noqa: F811
     from app.features import scene_store
-    monkeypatch.setattr(scene_store, "_actuate", lambda actions: (0, ["light"], []))
+    monkeypatch.setattr(scene_store, "_actuate", lambda actions: {"sent": 0, "missed": ["light"], "offline": [], "skipped": []})
     sid = _add("scene", "light → on", payload={"device": "light", "value": "on"})
     now = NOW
     for attempt in range(1, scene_store.MAX_TIMER_TRIES):
@@ -193,7 +193,7 @@ def test_a_late_migrated_row_is_settled_without_firing_again(brain_db, monkeypat
     from app.features import scene_store
     applied = []
     monkeypatch.setattr(scene_store, "_actuate",
-                        lambda actions: applied.extend(actions) or (1, [], []))
+                        lambda actions: applied.extend(actions) or {"sent": 1, "missed": [], "offline": [], "skipped": []})
     sid = _add("scene", "light → off", minutes_ago=R.LOOKBACK_MIN + 60,
                payload={"device": "light", "value": "off"},
                migrated_from={"collection": "sandy_scene_timers", "id": "t1"})

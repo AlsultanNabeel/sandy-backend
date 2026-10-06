@@ -58,30 +58,15 @@ def db():
 
 # ── the topic itself ─────────────────────────────────────────────────────────
 
-def test_room_topic_is_scoped_to_a_node():
-    from app.integrations.room_device import room_topic
+def test_a_room_output_is_on_its_own_robots_tree():
+    """A room output is an output on a node, exactly like the camera's "cam/flash"."""
+    def topic(node_id):
+        return device_store.device_topic(
+            {"transport": {"kind": "node", "node_id": node_id, "output": "room/light"}})
 
-    assert room_topic("8421", "light") == "sandy/node/8421/room/light"
-    assert room_topic("8421", "MUSIC") == "sandy/node/8421/room/music"
+    assert topic("8421") == "sandy/node/8421/room/light"
     # Two robots, two rooms. This is the whole point of the move.
-    assert room_topic("9999", "light") != room_topic("8421", "light")
-
-    assert room_topic("", "light") is None
-    assert room_topic("8421", "nonsense") is None
-
-
-def test_a_registered_room_device_builds_the_same_topic():
-    """device_topic and room_topic must not drift apart.
-
-    A room output is an output on a node, exactly like the camera's "cam/flash".
-    If the registry built one string and the room client built another, half the
-    controls in the app would work and half would publish into nothing.
-    """
-    from app.integrations.room_device import room_topic
-
-    built = device_store.device_topic(
-        {"transport": {"kind": "node", "node_id": "8421", "output": "room/light"}})
-    assert built == room_topic("8421", "light") == "sandy/node/8421/room/light"
+    assert topic("9999") != topic("8421")
 
 
 def test_ownership_of_a_room_topic_is_a_tenant_lookup(db):
@@ -109,79 +94,6 @@ def test_ownership_of_a_room_topic_is_a_tenant_lookup(db):
 
     with as_tenant("tenant-b"):
         assert device_store.tenant_owns_topic(topic) is False
-
-
-def test_send_publishes_to_the_callers_own_room(db):
-    """The caller names a device, never a topic — the node comes from the caller.
-
-    That ordering is the safety property: a call site cannot address somebody
-    else's room by getting an argument wrong, because there is no argument for
-    it.
-    """
-    from app.integrations.room_device import RoomDeviceClient
-
-    client = RoomDeviceClient()
-    published = []
-    client._publish = lambda topic, payload: (   # type: ignore[method-assign]
-        published.append((topic, payload)) or True)
-
-    with as_tenant("tenant-a"):
-        node_store.pair_node("8421", label="غرفتي")
-        node_store.ingest_status("8421", outputs=[{"id": "room/light", "kind": "relay"}])
-        assert client.send("light", "off") is True
-        assert published == [("sandy/node/8421/room/light", "off")]
-
-        # An invalid value never reaches the broker.
-        published.clear()
-        assert client.send("light", "sideways") is False
-        assert published == []
-
-    # A tenant with no robot has no room to drive, and must not fall back to
-    # anything global — that fallback was the original bug.
-    with as_tenant("tenant-b"):
-        published.clear()
-        assert client.send("light", "off") is False
-        assert published == []
-
-
-def test_an_output_the_room_never_declared_is_not_sent(db):
-    """A command for hardware nobody announced used to "succeed" into nothing.
-
-    The broker took it, the scene reported it sent, and the room node printed
-    "no handler" to a serial port nobody watches. Only what the board declared
-    in its heartbeat goes out; the rest comes back as skipped.
-    """
-    from app.integrations.room_device import RoomDeviceClient
-
-    client = RoomDeviceClient()
-    published = []
-    client._publish = lambda topic, payload: (   # type: ignore[method-assign]
-        published.append((topic, payload)) or True)
-
-    with as_tenant("tenant-a"):
-        node_store.pair_node("8421", label="غرفتي")
-        # No room board has spoken yet: nothing is sent.
-        assert client.send("light", "on") is False
-        node_store.ingest_status("8421", outputs=[{"id": "room/light", "kind": "relay"}])
-        assert client.send("fan", "on") is False
-        assert client.send("light", "on") is True
-        assert published == [("sandy/node/8421/room/light", "on")]
-
-
-def test_music_accepts_what_the_player_understands_and_nothing_more():
-    from app.integrations.room_device import normalize_action
-
-    assert normalize_action("music", "vol:30") == "vol:30"
-    assert normalize_action("music", "vol:0") == "vol:0"
-    assert normalize_action("music", "vol:31") is None
-    assert normalize_action("music", "vol:-1") is None
-    assert normalize_action("music", "play:1:1") == "play:1:1"
-    assert normalize_action("music", "play:99:255") == "play:99:255"
-    assert normalize_action("music", "play:0:1") is None
-    assert normalize_action("music", "play:1:256") is None
-    assert normalize_action("music", "play:1") is None
-    assert normalize_action("color", "#a1b2c3") == "#a1b2c3"
-    assert normalize_action("color", "#zzzzzz") is None
 
 
 def test_service_channels_match_exactly():
@@ -217,27 +129,6 @@ def test_a_publish_waits_for_the_broker_and_then_says_no():
         assert client._publish("sandy/node/8421/room/light", "on") is False
     finally:
         rd._CONNECT_WAIT_S = old
-
-
-def test_two_robots_are_refused_rather_than_guessed(db):
-    """With two nodes paired, "turn the light off" does not name a room.
-
-    Guessing would work until the day it guessed the other one, and that failure
-    is silent: the wrong light goes off in the wrong room and nothing logs an
-    error.
-    """
-    from app.integrations.room_device import RoomDeviceClient
-
-    client = RoomDeviceClient()
-    published = []
-    client._publish = lambda topic, payload: (   # type: ignore[method-assign]
-        published.append((topic, payload)) or True)
-
-    with as_tenant("tenant-c"):
-        node_store.pair_node("8421", label="غرفة النوم")
-        node_store.pair_node("8422", label="الصالة")
-        assert client.send("light", "off") is False
-        assert published == []
 
 
 # ── the room declares itself ─────────────────────────────────────────────────

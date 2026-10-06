@@ -23,11 +23,13 @@ def test_only_the_sale_build_is_published():
 
 
 def test_room_node_understands_every_music_word_the_server_sends():
-    from app.integrations.room_device import normalize_action
+    from app.features.node_provision import PART_CATALOGUE
+    from app.features.scene_store import _PLAYER_WORDS
     src = (ROOT / "firmware/room-node/room-node.ino").read_text()
     body = src[src.index("static void handleMusic"):src.index("static const Device DEVICES")]
-    for word in ("on", "off", "stop", "pause", "resume", "next", "prev"):
-        assert normalize_action("music", word) == word
+    # What the music device offers, and what a scene's «on»/«off» becomes on it.
+    words = set(PART_CATALOGUE["room/music"]["meta"]["values"]) | set(_PLAYER_WORDS.values())
+    for word in words:
         assert f'value == "{word}"' in body, f"the room node ignores «{word}»"
 
 
