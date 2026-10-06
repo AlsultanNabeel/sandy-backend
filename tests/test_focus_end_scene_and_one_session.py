@@ -48,3 +48,36 @@ def test_finishing_by_hand_still_plays_it(scenes, brain_db):  # noqa: F811
     assert focus_store.start_focus(focus_min=25, end_scene="relax")["ok"]
     assert focus_store.stop_focus(completed=True)["ok"]
     assert scenes == ["relax"]
+
+
+# Audit T14: «start» checked for an active session and then inserted one, so two quick taps
+# made two active sessions, and «stop» stopped one of them.
+
+def test_two_starts_at_once_make_one_session(scenes, brain_db, monkeypatch):  # noqa: F811
+    focus_store.ensure_one_active(brain_db)
+    assert focus_store.start_focus(focus_min=25, scene="study")["ok"]
+    # The second tap read «none active» before the first one's insert landed.
+    monkeypatch.setattr(focus_store, "active_focus", lambda: None)
+    assert focus_store.start_focus(focus_min=25, scene="study") == {
+        "ok": False, "error": "already_active"}
+    assert brain_db["sandy_focus"].count_documents({"state": "active"}) == 1
+    assert scenes == ["study"]                       # the losing tap switched nothing
+
+
+def test_the_index_is_built_over_old_doubles_keeping_the_newest(brain_db, monkeypatch):  # noqa: F811
+    # mongomock checks a partial unique index over every row while building it, which Mongo
+    # does not (only the rows it covers); the index itself is exercised in the test above.
+    import mongomock
+    monkeypatch.setattr(mongomock.collection.Collection, "create_index",
+                        lambda self, *a, **k: k.get("name", "index"))
+    now = datetime.now(timezone.utc)
+    brain_db["sandy_focus"].insert_many([
+        {"_id": "old", "user_id": "userA", "state": "active", "started_at": now - timedelta(hours=3)},
+        {"_id": "new", "user_id": "userA", "state": "active", "started_at": now - timedelta(minutes=5)},
+        {"_id": "b", "user_id": "userB", "state": "active", "started_at": now - timedelta(hours=3)},
+        {"_id": "done", "user_id": "userA", "state": "done", "started_at": now - timedelta(days=1)},
+    ])
+    assert focus_store.ensure_one_active(brain_db) == 1
+    states = {d["_id"]: d["state"] for d in brain_db["sandy_focus"].find()}
+    assert states == {"old": "cancelled", "new": "active", "b": "active", "done": "done"}
+    assert focus_store.ensure_one_active(brain_db) == 0  # every boot runs it

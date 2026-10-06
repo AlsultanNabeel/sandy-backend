@@ -106,6 +106,7 @@ def _attachments_expiry(mongo_db) -> None:
 def ensure_indexes() -> None:
     """Create every boot-time index independently (on the raw handle, before any tenant)."""
     from app.db import get_db
+    from app.features.focus_store import ensure_one_active
 
     mongo_db = get_db()
     if mongo_db is None:
@@ -161,6 +162,8 @@ def ensure_indexes() -> None:
         ("sandy_focus.user_id+state+started_at", lambda: mongo_db.sandy_focus.create_index(
             [("user_id", 1), ("state", 1), ("started_at", -1)], background=True
         )),
+        # one active session per user (a double tap made two)
+        ("sandy_focus.one_active", lambda: ensure_one_active(mongo_db)),
         # focus stats by day
         ("sandy_focus.user_id+state+ended_at", lambda: mongo_db.sandy_focus.create_index(
             [("user_id", 1), ("state", 1), ("ended_at", 1)], background=True

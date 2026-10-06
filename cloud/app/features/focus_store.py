@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from pymongo.errors import DuplicateKeyError
+
 from app.utils.tenant_db import scoped
 from app.utils.time import USER_TZ
 from app.db import configure, get_db
@@ -29,6 +31,30 @@ def init_focus_store(mongo_db) -> None:
 
 def _coll():
     return scoped(get_db(), _COLL)
+
+
+def ensure_one_active(mongo_db) -> int:
+    """At boot, on the raw handle: one active session per user, held by a unique index.
+
+    The index cannot be built over a user who already has two (a double tap before it
+    existed), so the extra ones are closed first, the newest kept. Returns how many."""
+    newest: Dict[str, Any] = {}
+    extra: List[Any] = []
+    # بلا سقف: كل جلسة نشطة لازم تنقرا، والمكررة اللي برّا السقف كانت رح توقّف بناء الفهرس.
+    for d in mongo_db[_COLL].find({"state": "active"}, {"user_id": 1}).sort("started_at", -1):
+        if d.get("user_id") in newest:
+            extra.append(d["_id"])
+        else:
+            newest[d.get("user_id")] = d["_id"]
+    if extra:
+        mongo_db[_COLL].update_many(
+            {"_id": {"$in": extra}},
+            {"$set": {"state": "cancelled", "ended_at": datetime.now(timezone.utc),
+                      "focused_min": 0}})
+        logger.warning("[FocusStore] closed %d extra active session(s)", len(extra))
+    mongo_db[_COLL].create_index([("user_id", 1)], unique=True, name="one_active",
+                                 partialFilterExpression={"state": "active"})
+    return len(extra)
 
 
 def _phase_total_sec(s: Dict[str, Any]) -> int:
@@ -58,14 +84,6 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
     cycles = max(1, min(12, int(cycles or 1)))
     now = datetime.now(timezone.utc)
 
-    scene_result = None
-    if scene:
-        try:
-            from app.features.scene_store import apply_scene
-            scene_result = apply_scene(scene)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[FocusStore] scene apply failed: {e}")
-
     doc = {
         "_id": uuid.uuid4().hex,
         "label": str(label or "").strip(),
@@ -80,7 +98,20 @@ def start_focus(focus_min: int = 25, label: str = "", break_min: int = 0,
         "started_at": now,
         "state": "active",
     }
-    coll.insert_one(doc)
+    try:
+        coll.insert_one(doc)
+    except DuplicateKeyError:
+        # A second «start» that raced the first past the check above (`one_active`).
+        return {"ok": False, "error": "already_active"}
+
+    # After the insert, so the start that lost the race switches nothing.
+    scene_result = None
+    if scene:
+        try:
+            from app.features.scene_store import apply_scene
+            scene_result = apply_scene(scene)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[FocusStore] scene apply failed: {e}")
     return {
         "ok": True, "focus_min": focus_min, "break_min": break_min,
         "cycles": cycles, "label": label, "scene": scene,

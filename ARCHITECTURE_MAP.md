@@ -1403,7 +1403,8 @@ settings). Every field the code writes to that row is in one of the two;
 
 Indexes are created at boot on the raw handle — by each store's `init_*` and
 `init_blocks`, and by `bootstrap.ensure_indexes()` for the rest (pending state,
-prompt cache, camera and pairing TTLs, conversations, focus) — one `try` per
+prompt cache, camera and pairing TTLs, conversations, focus, and one active focus session
+per user, `focus_store.ensure_one_active`, which first closes the extra ones, the newest kept) — one `try` per
 index, so one failure cannot skip the rest. `sandy_stm`'s three are created on
 first use by `brain/stm.py::_ensure_stm_indexes`, same one-try-each rule, and
 retried until they exist: `(user_id, updated_at desc)` is what keeps the
