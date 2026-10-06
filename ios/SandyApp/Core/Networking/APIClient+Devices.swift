@@ -23,6 +23,8 @@ private struct NodeListResponse: Decodable {
             case pairedAt = "paired_at"
         }
 
+        private struct OutputRef: Decodable { let id: String }
+
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             nodeId = try c.decodeIfPresent(String.self, forKey: .nodeId)
@@ -32,8 +34,12 @@ private struct NodeListResponse: Decodable {
             online = try c.decodeIfPresent(Bool.self, forKey: .online)
             lastSeen = try c.decodeIfPresent(String.self, forKey: .lastSeen)
             pairedAt = try c.decodeIfPresent(String.self, forKey: .pairedAt)
-            // الباك بيرسل outputs ككائنات {id, kind} مش نصوص: نرجّع فاضي بدل ما نرمي.
-            outputs = (try? c.decode([String].self, forKey: .outputs)) ?? []
+            // The server sends outputs as {id, kind}; an older body sent plain ids.
+            if let objects = try? c.decode([OutputRef].self, forKey: .outputs) {
+                outputs = objects.map(\.id)
+            } else {
+                outputs = (try? c.decode([String].self, forKey: .outputs)) ?? []
+            }
             // قاموس مختلط الأنواع بينفكّ مفتاح مفتاح: قيمة ما بنقراها (قاموس `faults` أو `stacks`)
             // بتنشال لحالها بدل ما تفضّي كل التليمتري. غيابه مش خطأ: عقدة الغرفة ما بتبعث تليمتري.
             if let raw = try? c.decode([String: OptionalTelemetry].self, forKey: .telemetry) {

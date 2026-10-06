@@ -28,4 +28,8 @@ final class NodeDecodeTests: XCTestCase {
         XCTAssertEqual(n.telemetry?.micLeft, 3)
     }
 
+    func testTheOutputsAreTheirIds() async throws {
+        let n = try await node()
+        XCTAssertEqual(n.outputs, ["sandy_face", "cam_snapshot"])
+    }
 }
