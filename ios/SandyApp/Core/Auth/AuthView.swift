@@ -182,9 +182,13 @@ struct AuthView: View {
         }
     }
 
-    /// بتفرّع على `code` مش `message` لأن الرسالة نص عربي بيتغيّر.
     private func friendlyAuthError(_ error: Error) -> String {
-        let ar = lang.lang == .ar
+        Self.authErrorText(error, ar: lang.lang == .ar)
+    }
+
+    /// بتفرّع على `code` مش `message` لأن الرسالة نص عربي بيتغيّر. Every code the sign-in
+    /// routes answer has a sentence, so none reaches the user as a machine word.
+    static func authErrorText(_ error: Error, ar: Bool) -> String {
         let apiError = error as? APIError
         let msg = apiError?.message ?? error.localizedDescription
         switch apiError?.code ?? msg {
@@ -197,6 +201,15 @@ struct AuthView: View {
                       : "Password must be at least 8 characters."
         case "invalid_email":       return ar ? "الإيميل مش صحيح." : "Invalid email."
         case "auth_unavailable":    return ar ? "تعذّر الاتصال — جرّب بعد شوي." : "Service unavailable — try again."
+        case "too_many_attempts":
+            return ar ? "محاولات كتير — استنى ربع ساعة وجرّب كمان مرة."
+                      : "Too many attempts — wait fifteen minutes and try again."
+        case "invalid_token":
+            return ar ? "ما قدرنا نتأكد من الدخول — جرّب كمان مرة."
+                      : "Sign-in couldn't be verified — try again."
+        case "auth_not_configured":
+            return ar ? "هالطريقة للدخول مش متاحة هلأ — جرّب طريقة تانية."
+                      : "This sign-in method isn't available right now — try another."
         default:                    return msg
         }
     }

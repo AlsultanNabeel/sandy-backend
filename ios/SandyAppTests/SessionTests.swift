@@ -246,4 +246,14 @@ final class SessionTests: XCTestCase {
         SessionReset.clearShared()
         XCTAssertEqual(NotificationPrefs.current, NotificationPrefs(), "the last account's settings stayed")
     }
+
+    /// F15: three sign-in codes had no sentence and reached the user as machine words.
+    func testEverySignInCodeHasASentence() {
+        for code in ["too_many_attempts", "invalid_token", "auth_not_configured", "invalid_credentials"] {
+            let error = APIError(message: code, code: code, kind: .server)
+            for ar in [true, false] {
+                XCTAssertNotEqual(AuthView.authErrorText(error, ar: ar), code, "\(code) showed as is")
+            }
+        }
+    }
 }
