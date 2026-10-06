@@ -253,3 +253,30 @@ def test_rewinding_the_answered_line_still_takes_it_back(api):
     stm.save(cid, "u1", "ضيفي حليب", "ضفت", effects=_ADDED, msg_id="a" * 32)
     client.post(f"/api/conversations/{cid}/rewind", json={"keep_user": True}, headers=headers)
     assert stm.load(cid, "u1") == [] and undone == [_ADDED]
+
+
+# ── M3. No rewind while a turn of the same user is still running ─────────────
+
+def test_a_rewind_waits_for_a_running_turn_but_not_for_ever(api):
+    from datetime import datetime, timedelta, timezone
+
+    from app.api import conversations_api as conv
+    from app.brain import stm
+
+    client, headers, undone = api
+    cid = uuid.uuid4().hex
+    _say(client, headers, cid, "user", "ضيفي حليب", "a" * 32)
+    _say(client, headers, cid, "sandy", "ضفت")
+    stm.save(cid, "u1", "ضيفي حليب", "ضفت", effects=_ADDED, msg_id="a" * 32)
+    from app.db import get_db
+    db = get_db()
+    assert conv.claim_turn(db, "u1", "b" * 32)[0] == "new"    # a stopped turn, still running
+    r = client.post(f"/api/conversations/{cid}/rewind", json={"keep_user": True}, headers=headers)
+    assert r.status_code == 409 and r.get_json()["error"] == "turn_running"
+    assert len(stm.load(cid, "u1")) == 2 and not undone, \
+        "the turn before was taken back while the stopped one was still to save"
+    # A turn stuck for two minutes no longer holds it.
+    db["agent_turns"].update_many({}, {"$set": {
+        "created_at": datetime.now(timezone.utc) - timedelta(minutes=3)}})
+    r = client.post(f"/api/conversations/{cid}/rewind", json={"keep_user": True}, headers=headers)
+    assert r.status_code == 200 and undone == [_ADDED]

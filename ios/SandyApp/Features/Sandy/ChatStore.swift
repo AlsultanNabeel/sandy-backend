@@ -9,6 +9,9 @@ final class ChatStore: ObservableObject {
     @Published var sending = false
     /// From send until the reply is complete (`sending` ends at the first word): the stop button.
     @Published private(set) var replying = false
+    /// From «stop» until the server has it: the stopped turn may still be running and save last,
+    /// so «write it again» and «edit» wait.
+    @Published private(set) var stopping = false
     /// What Sandy is doing right now («عم ضيف للقائمة…»), empty while she only talks.
     @Published var activity = ""
     @Published var errorMessage = ""
@@ -316,9 +319,11 @@ final class ChatStore: ObservableObject {
         streamingID = nil
         streamingCmid = nil
         if !partial.isEmpty { saveLines(api, id: cid) }
+        stopping = true
         Task {
             // Sandy is told it was cut here, and the turn runs no further tool.
             try? await api.stopReply(conversationId: cid, partial: partial, clientMsgId: cmid)
+            self.stopping = false
             if !partial.isEmpty { try? await api.appendMessage(cid: cid, role: "sandy", text: partial) }
         }
     }
@@ -332,27 +337,50 @@ final class ChatStore: ObservableObject {
 
     /// Sandy's last reply, written again: dropped here and on the server, the same line re-answered.
     func regenerate(api: APIClient) async -> String? {
-        guard !sending, let last = messages.last, last.role == "sandy", let cid = currentID,
+        guard !sending, !stopping, let last = messages.last, last.role == "sandy", let cid = currentID,
               let line = messages.last(where: { $0.role == "user" })?.text else { return nil }
         messages.removeLast()
         errorMessage = ""
         // The old reply's changes (a task it added, a reminder it moved) are taken back.
-        try? await api.rewindConversation(id: cid, keepUser: true)
+        guard await rewound(api, cid: cid, keepUser: true) else {
+            messages.append(last)
+            return nil
+        }
         NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
         return await send(api: api, text: line, appendUser: false)
     }
 
     /// The user's last line, edited: it and its reply go, the new line is sent in their place.
     func editLast(api: APIClient, to text: String) async -> String? {
-        guard !sending, let idx = messages.lastIndex(where: { $0.role == "user" }) else { return nil }
+        guard !sending, !stopping, let idx = messages.lastIndex(where: { $0.role == "user" }) else { return nil }
         let kept = messages[idx].attachments   // the edit changes the words, not what came with them
+        let dropped = Array(messages[idx...])
         messages.removeSubrange(idx...)
         errorMessage = ""
         if let cid = currentID {
-            try? await api.rewindConversation(id: cid, keepUser: false)
+            guard await rewound(api, cid: cid, keepUser: false) else {
+                messages.append(contentsOf: dropped)
+                return nil
+            }
             NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
         }
         return await send(api: api, text: text, attachments: kept)
+    }
+
+    /// The last reply dropped on the server; false (with the reason shown) when it was not,
+    /// so nothing is answered twice. A stopped turn still running holds it back a moment.
+    private func rewound(_ api: APIClient, cid: String, keepUser: Bool) async -> Bool {
+        do {
+            try await api.rewindConversation(id: cid, keepUser: keepUser)
+            return true
+        } catch {
+            if !error.isCancellation {
+                errorMessage = (error as? APIError)?.code == "turn_running"
+                    ? LanguageManager.shared.s("chat.stillStopping") : nextErrorLine()
+                Announce.say(errorMessage)
+            }
+            return false
+        }
     }
 
     /// كم مرة نعيد إرسال رسالة انقطع اتصالها (مش خطأ من الخادم).

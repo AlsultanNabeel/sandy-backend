@@ -1172,7 +1172,10 @@ so folders are organisation only.
   the blocks, only for the turn of the line it drops: a user line carries the send's
   `client_msg_id` in the conversation and in memory (`stm.rewind` matches it, else the words),
   and nothing in memory is touched when nothing was dropped, so editing a line that failed
-  leaves the turn before it alone: every block write in a turn is journaled with its before-state
+  leaves the turn before it alone; it is refused, 409 `turn_running`, while a turn of the same
+  user is still running, for two minutes at most (`conversations_api.turn_running`), and the app
+  keeps both actions closed from «stop» until the server has the stop, and resends nothing when the
+  rewind was refused: every block write in a turn is journaled with its before-state
   (`blocks/_base.journal`, kept on the reply's STM turn as `effects`) and `_base.undo`
   reverses it (a log row it puts back is embedded again, unless sealed); device actions are not undone), a stop button that keeps what arrived
   (`POST …/stop`: a running turn stops before its next tool via `brain/stops.py`, and

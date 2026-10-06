@@ -280,12 +280,13 @@ struct ChatView: View {
         Button { selecting = SelectableMessage(text: m.text) } label: {
             Label(lang.s("chat.selectText"), systemImage: "selection.pin.in.out")
         }
-        if !store.replying, m.role == "sandy", m.id == store.messages.last?.id {
+        if !store.replying, !store.stopping, m.role == "sandy", m.id == store.messages.last?.id {
             Button { regenerate() } label: {
                 Label(lang.s("chat.regenerate"), systemImage: "arrow.clockwise")
             }
         }
-        if !store.replying, m.role == "user", m.id == store.messages.last(where: { $0.role == "user" })?.id {
+        if !store.replying, !store.stopping, m.role == "user",
+           m.id == store.messages.last(where: { $0.role == "user" })?.id {
             Button {
                 input = m.text
                 editingLast = true

@@ -8,6 +8,8 @@ Collection `conversations`: {_id, user_id, title, created_at, updated_at, messag
        keep_user, the line it answered) here and in Sandy's memory of the thread, and take
        back what that reply did to the blocks, so the app can regenerate a reply or resend
        an edited last message in its place.
+       Refused (409 `turn_running`) while a turn of the same user is still running, for
+       two minutes at most.
   POST /api/conversations/<cid>/stop {partial, client_msg_id}: the reply was stopped.
 
 The app may pick a new chat's id itself; the first write creates it
@@ -53,6 +55,8 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 _TURNS = "agent_turns"
 _TURN_TTL_S = 600
 _TURN_STALE_S = 180
+# A running turn holds a rewind back at most this long, so one that hung never locks it.
+_REWIND_WAIT_S = 120
 
 _turn_index_lock = threading.Lock()
 # id(db) -> db; holding the handle stops its id being recycled (tests build many).
@@ -172,6 +176,16 @@ def turn_status(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
         return "missing", None
     status = d.get("status") or "processing"
     return status, (dict(d.get("result") or {}) if status == "done" else None)
+
+
+def turn_running(mongo_db, uid: str) -> bool:
+    """Whether a turn of this user was claimed in the last `_REWIND_WAIT_S` and is not over:
+    a stopped turn keeps running to its next step and saves last, so a rewind now would
+    take back the turn before it."""
+    if mongo_db is None or not uid:
+        return False
+    return any(_age_s(d.get("claimed_at") or d.get("created_at")) < _REWIND_WAIT_S
+               for d in _turns(mongo_db, uid).find({"status": "processing"}).limit(20))
 
 
 def finish_turn(mongo_db, uid: str, cmid: str, result: Optional[dict] = None,
@@ -419,6 +433,9 @@ def register_conversations_api(app, mongo_db=None):
         if not uid or coll is None:
             return jsonify({"error": "no_user"}), 403
         keep_user = bool((request.get_json(silent=True) or {}).get("keep_user"))
+        if turn_running(mongo_db, uid):
+            return jsonify({"error": "turn_running",
+                            "message": "لسا عم خلّص الرد اللي وقّفته، جرّب كمان شوي."}), 409
         d = coll.find_one({"_id": cid, "user_id": uid}, {"messages": {"$slice": -2}})
         if not d:
             return jsonify({"error": "not_found"}), 404
