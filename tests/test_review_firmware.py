@@ -262,3 +262,37 @@ def test_the_publisher_refuses_a_stale_camera_or_room_image():
     assert "dev build" in pf.small_image_refused("cam", good + b"[TELNET]", "0.4.2", [])
     assert "no updater" in pf.small_image_refused("room", good.replace(b"sandyota", b"x"), "0.4.2", [])
     assert "secrets.h" in pf.small_image_refused("room", good + b"SANDY-8421", "0.4.2", [b"SANDY-8421"])
+
+
+def _publisher():
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("pf", root / "scripts" / "publish_firmware.py")
+    pf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pf)
+    return pf
+
+
+def test_an_error_page_from_the_server_prints_its_status(monkeypatch):
+    """A 503 from Heroku is an HTML page, not JSON: the script died on a traceback
+    instead of saying what the server answered."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    pf = _publisher()
+
+    def _fail(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", {},
+                                     io.BytesIO(b"<html>Application error</html>"))
+    monkeypatch.setattr(urllib.request, "urlopen", _fail)
+    out = pf._post("https://x.test/api/firmware/publish", "t", b"{}", "application/json")
+    assert out["ok"] is False and out["status"] == 503
+    assert "Application error" in out["body"]
+
+
+def test_no_requirement_nobody_imports():
+    from pathlib import Path
+    req = (Path(__file__).resolve().parent.parent / "requirements.txt").read_text()
+    assert "google-cloud-texttospeech" not in req

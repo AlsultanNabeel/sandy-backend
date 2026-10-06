@@ -12,8 +12,7 @@ certifi>=2024.0.0
 sherpa-onnx>=1.10.0  # local CAM++ speaker verification (Phase 4); ONNX, no torch, no account
 numpy>=1.24
 google-genai>=1.0.0
-google-cloud-texttospeech>=2.16.2
-google-auth>=2.0.0  # transitive dep of google-cloud-texttospeech / google-genai
+google-auth>=2.0.0  # google-genai's own dependency
 Pillow>=10.0.0
 pypdf>=4.0  # text out of PDF chat attachments (features/attachments)
 urllib3==2.7.0

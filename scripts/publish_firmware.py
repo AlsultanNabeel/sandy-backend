@@ -226,7 +226,13 @@ def _post(url: str, token: str, body: bytes, content_type: str) -> dict:
         with urllib.request.urlopen(req, timeout=120) as r:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
-        return {"ok": False, "status": e.code, **json.loads(e.read() or b"{}")}
+        raw = e.read() or b"{}"
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            # An error page (Heroku's 503 is HTML): say what came back, not a traceback.
+            return {"ok": False, "status": e.code, "body": raw[:300].decode("utf-8", "replace")}
+        return {"ok": False, "status": e.code, **(body if isinstance(body, dict) else {})}
 
 
 def main() -> int:
