@@ -38,3 +38,14 @@ def test_an_endless_question_about_a_photo_never_reaches_the_model(client, monke
                headers=_bearer())
     assert r.status_code == 413
     assert not called and not charged
+
+
+@pytest.mark.parametrize("path, body", [
+    ("/api/analyze-image", {"image": "not base64!!"}),
+    ("/api/image/edit", {"prompt": "خلّيها ليل", "image": "not base64!!"}),
+])
+def test_an_image_that_does_not_decode_costs_nothing(client, path, body):
+    c, charged = client
+    r = c.post(path, json=body, headers=_bearer())
+    assert r.status_code == 400
+    assert not charged, "a broken upload used up a unit of the day's quota"

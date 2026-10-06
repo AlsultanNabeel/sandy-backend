@@ -414,14 +414,16 @@ def create_app(*, mongo_db=None):
         if len(prompt) > _MAX_IMAGE_PROMPT_CHARS:
             return jsonify({"error": "prompt_too_long"}), 413
 
+        # Decoded before the quota: a broken upload costs nothing.
+        source = _decode_image(image_b64)
+        if source is None:
+            return jsonify({"error": "invalid_image"}), 400
+
         gate = _media_gate(claims)
         if gate is not None:
             err_body, code = gate
             return jsonify(err_body), code
 
-        source = _decode_image(image_b64)
-        if source is None:
-            return jsonify({"error": "invalid_image"}), 400
         try:
             from app.features.vision import edit_image_with_azure
             img_bytes = edit_image_with_azure(source, prompt)
@@ -448,6 +450,10 @@ def create_app(*, mongo_db=None):
         question = f"{question}{_lang_rule}"
         if not image_b64:
             return jsonify({"error": "no image"}), 400
+        # Decoded before the quota: a broken upload costs nothing.
+        img_bytes = _decode_image(image_b64)
+        if img_bytes is None:
+            return jsonify({"error": "invalid_image"}), 400
 
         gate = _media_gate(claims)
         if gate is not None:
@@ -456,9 +462,6 @@ def create_app(*, mongo_db=None):
 
         try:
             from app.features.vision import analyze_image_with_azure
-            img_bytes = _decode_image(image_b64)
-            if img_bytes is None:
-                return jsonify({"error": "invalid_image"}), 400
             reply = analyze_image_with_azure(img_bytes, question,
                                              user_id=claims.get("user_id") or None)
             return jsonify({"reply": reply or "تعذّر تحليل الصورة"}), 200
