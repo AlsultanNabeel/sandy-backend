@@ -40,7 +40,7 @@ def register_voice_api(app) -> None:
         from app.features.usage_store import add_voice_seconds
 
         uid = str(claims.get("user_id") or "")
-        if uid and voice_seconds_left(uid, claims.get("role")) <= 0:
+        if uid and voice_seconds_left(uid) <= 0:
             return jsonify(limit_response("call_minutes_exceeded")), 429
 
         from app.integrations.gemini_tts import synthesize_voice_with_gemini

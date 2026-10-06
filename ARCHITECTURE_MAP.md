@@ -664,7 +664,8 @@ frame, so a TV or a fan does not count) nor hers, and `call_time_limit` at `SAND
 the reason goes to the device as `{"type":"error","msg":…}` (the app shows a sentence,
 `GeminiLiveManager.errorLine`; the board logs it and stays unlocked).
 **Voice has a daily allowance in minutes** (`metering.voice_seconds_left`): `SANDY_CALL_MINUTES_FREE`
-(10) or, for a subscriber or the owner, `SANDY_CALL_MINUTES_SUBSCRIBER` (60), counted in seconds on
+(10) or, for a subscriber or an account named in `SANDY_OWNER_ACCOUNTS` (user ids; the account,
+never the way it signed in), `SANDY_CALL_MINUTES_SUBSCRIBER` (60), counted in seconds on
 the day's usage row (`usage_store.add_voice_seconds`). A call checks it at the start (none left →
 `call_minutes_exceeded`), ends when it runs out, and adds its length when it ends; a robot's call
 counts on its owner's account. A board nobody paired gets no call at all: `_live_session` answers

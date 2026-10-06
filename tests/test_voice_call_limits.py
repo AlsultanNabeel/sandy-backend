@@ -196,6 +196,27 @@ def test_the_day_s_minutes_and_the_tiers(monkeypatch):
         appdb.reset()
 
 
+def test_the_owner_s_cap_follows_the_account_not_the_sign_in(monkeypatch):
+    """The account marked in SANDY_OWNER_ACCOUNTS gets the top cap, even signed in by email."""
+    import mongomock
+
+    from app import db as appdb
+    from app.api import metering
+    from app.features import users_store
+
+    appdb.configure(mongomock.MongoClient().db)
+    try:
+        monkeypatch.setattr(users_store, "is_subscriber", lambda uid: False)
+        monkeypatch.setattr("app.config.SANDY_OWNER_ACCOUNTS", " boss1 , ")
+        assert metering.voice_seconds_left("boss1") == metering.CALL_MINUTES_SUBSCRIBER * 60
+        assert metering.voice_seconds_left("other") == metering.CALL_MINUTES_FREE * 60
+        assert not metering.is_owner_account("")
+        monkeypatch.setattr("app.config.SANDY_OWNER_ACCOUNTS", "")
+        assert metering.voice_seconds_left("boss1") == metering.CALL_MINUTES_FREE * 60
+    finally:
+        appdb.reset()
+
+
 def test_reading_a_reply_aloud_spends_the_same_minutes(monkeypatch):
     import io
     import wave

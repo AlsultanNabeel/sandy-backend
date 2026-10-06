@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from typing import Optional, Tuple
 
-# (daily, per minute). The owner and subscribers share the top tier.
+# (daily, per minute). The owner (by token or by account) and subscribers share the top tier.
 SUBSCRIBER_DAILY, SUBSCRIBER_PER_MIN = 5000, 60
 FREE_DAILY, FREE_PER_MIN = 40, 12
 # Minutes of voice a day (live calls on the app or the robot, and replies read aloud), from
@@ -26,7 +26,7 @@ _LIMIT_MESSAGES = {
 def _limits(role: str, user_id: str) -> Tuple[int, int]:
     from app.features import users_store
 
-    if role == "owner" or users_store.is_subscriber(user_id):
+    if role == "owner" or is_owner_account(user_id) or users_store.is_subscriber(user_id):
         return SUBSCRIBER_DAILY, SUBSCRIBER_PER_MIN
     return FREE_DAILY, FREE_PER_MIN
 
@@ -50,27 +50,22 @@ def over_limit(role: str, user_id: str) -> Optional[str]:
     return usage_store.over_limit(user_id, daily_limit=daily, per_min_limit=per_min)
 
 
-def _top_tier(user_id: str, role: Optional[str]) -> bool:
-    """The owner or a subscriber. Without a token's role (a call), the owner is read from the
-    account as sign-in grants it: a Google/Apple sign-in on an owner address."""
-    from app.features import users_store
+def is_owner_account(user_id: str) -> bool:
+    """The account itself is marked the project owner's in the settings (SANDY_OWNER_ACCOUNTS),
+    however it signed in."""
+    from app import config
 
-    if role == "owner" or users_store.is_subscriber(user_id):
-        return True
-    if role is None:
-        from app.api.auth_handlers import role_for_email
-
-        user = users_store.get_user(user_id) or {}
-        return (user.get("provider") in ("google", "apple")
-                and role_for_email(str(user.get("email") or "")) == "owner")
-    return False
+    wanted = {u.strip() for u in config.SANDY_OWNER_ACCOUNTS.split(",") if u.strip()}
+    return bool(user_id) and user_id in wanted
 
 
-def voice_seconds_left(user_id: str, role: Optional[str] = None) -> float:
-    """Seconds of voice this user has left today. `role` is the token's when there is one."""
-    from app.features import usage_store
+def voice_seconds_left(user_id: str) -> float:
+    """Seconds of voice this account has left today: the subscriber's cap for a subscriber or
+    the owner's account, by the account and never by how it signed in."""
+    from app.features import usage_store, users_store
 
-    cap = CALL_MINUTES_SUBSCRIBER if _top_tier(user_id, role) else CALL_MINUTES_FREE
+    top = is_owner_account(user_id) or users_store.is_subscriber(user_id)
+    cap = CALL_MINUTES_SUBSCRIBER if top else CALL_MINUTES_FREE
     return max(0.0, cap * 60 - usage_store.voice_seconds_today(user_id))
 
 

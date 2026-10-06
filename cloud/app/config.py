@@ -17,6 +17,9 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Operator addresses (comma-separated). Unset means nobody (never "everybody").
 SANDY_OWNER_EMAILS: str = os.getenv("SANDY_OWNER_EMAILS", "")
+# The project owner's accounts (user ids, comma-separated): the top tier whatever the
+# sign-in was. Unset means nobody.
+SANDY_OWNER_ACCOUNTS: str = os.getenv("SANDY_OWNER_ACCOUNTS", "")
 
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 
