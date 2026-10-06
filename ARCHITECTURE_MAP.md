@@ -439,7 +439,8 @@ Who calls what:
   (below), `/api/summary`, `/api/kinds`, daily nudge (+ answer), devices and nodes
   (control, IR learn, pairing, snapshots, Wi-Fi), `/api/life/focus` (+ start /
   stop / history), `/api/life/scenes` (+ actions / apply / delete), photos
-  (+ albums, file), images (`/api/image`, `/api/image/edit`, `/api/analyze-image`),
+  (+ albums, file; `GET /api/photos` is a page of 200 newest first with `next` to pass back as `before`,
+  its text search and the album counts run over the whole album in the database), images (`/api/image`, `/api/image/edit`, `/api/analyze-image`),
   `/api/research`, `/api/weather`, `/api/persona`, `/api/onboarding`,
   `/api/features`, `/api/subscription`, push register / unregister,
   `/api/voice/tts`, and the `/voice` socket for live calls. The share extension

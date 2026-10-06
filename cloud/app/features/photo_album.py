@@ -15,8 +15,6 @@ logger = logging.getLogger(__name__)
 
 _META = "sandy_photos"
 _FILES_COLLECTION = "sandy_photo_files"
-# Recent photos a text search or tag count looks through.
-_SEARCH_WINDOW = 500
 
 _gridfs = None
 
@@ -146,15 +144,14 @@ def generate_tags(image_bytes: bytes, create_chat_completion_fn) -> Tuple[str, L
         return "", []
 
 
-def _matches(doc: Dict[str, Any], query: str) -> bool:
-    q = query.lower()
-    hay = " ".join([
-        str(doc.get("name", "")),
-        str(doc.get("user_caption", "")),
-        str(doc.get("ai_caption", "")),
-        " ".join(doc.get("tags", []) or []),
-    ]).lower()
-    return all(tok in hay for tok in q.split())
+def _text_filter(query: str) -> Dict[str, Any]:
+    """Every word of the query in the name, a caption or a tag, matched in the database
+    (so the whole album is searched, not a window of recent photos)."""
+    import re
+
+    fields = ("name", "user_caption", "ai_caption", "tags")
+    return {"$and": [{"$or": [{f: {"$regex": re.escape(tok), "$options": "i"}} for f in fields]}
+                     for tok in query.lower().split()]}
 
 
 def find_photos(
@@ -162,37 +159,37 @@ def find_photos(
     query: Optional[str] = None,
     tag: Optional[str] = None,
     limit: int = 20,
+    before: Optional[Tuple[datetime, str]] = None,
 ) -> List[Dict[str, Any]]:
-    """يرجّع ميتاداتا الصور المطابقة (الأحدث أولاً). بدون query/tag → كل الصور."""
+    """يرجّع ميتاداتا الصور المطابقة (الأحدث أولاً). بدون query/tag → كل الصور.
+
+    A page: ``before`` is the last photo of the page before, as ``(created_at, id)``."""
     if not is_available():
         return []
-    cid = str(chat_id)
-    mongo_filter: Dict[str, Any] = {"chat_id": cid}
+    clauses: List[Dict[str, Any]] = [{"chat_id": str(chat_id)}]
     if tag:
-        mongo_filter["tags"] = tag.strip()
-    # Text queries are matched in Python, so search a window of recent photos.
-    cap = _SEARCH_WINDOW if query and query.strip() else max(1, min(limit, _SEARCH_WINDOW))
+        clauses.append({"tags": tag.strip()})
+    if query and query.strip():
+        clauses.append(_text_filter(query))
+    if before is not None:
+        at, last_id = before
+        clauses.append({"$or": [{"created_at": {"$lt": at}},
+                                {"created_at": at, "_id": {"$lt": last_id}}]})
     try:
-        docs = list(
-            get_db()[_META].find(mongo_filter).sort("created_at", -1).limit(cap)
-        )
+        return list(get_db()[_META].find({"$and": clauses})
+                    .sort([("created_at", -1), ("_id", -1)]).limit(max(1, limit)))
     except Exception as e:  # noqa: BLE001
         logger.warning("[photo_album] find failed: %s", e)
         return []
-    if query and query.strip():
-        docs = [d for d in docs if _matches(d, query)]
-    return docs[:limit]
 
 
 def tag_counts(chat_id: Any) -> Dict[str, int]:
-    """Per-tag counts over the user's recent photos, computed in the database."""
+    """Per-tag counts over all the user's photos, computed in the database."""
     if not is_available():
         return {}
     try:
         rows = get_db()[_META].aggregate([
             {"$match": {"chat_id": str(chat_id)}},
-            {"$sort": {"created_at": -1}},
-            {"$limit": _SEARCH_WINDOW},
             {"$unwind": "$tags"},
             {"$group": {"_id": "$tags", "n": {"$sum": 1}}},
         ])

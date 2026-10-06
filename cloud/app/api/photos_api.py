@@ -66,6 +66,35 @@ def _serialize(doc) -> dict:
     }
 
 
+# Photos a page: `next` (when there are more) goes back as `before`.
+_PAGE = 200
+
+
+def _utc_iso(value) -> str:
+    from datetime import datetime, timezone
+
+    if not isinstance(value, datetime):
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _page_cursor(raw):
+    """`next` from the page before → ``(created_at, id)``; None for the first page, False
+    when it does not read."""
+    from datetime import datetime
+
+    if not raw:
+        return None
+    at, sep, photo_id = str(raw).partition("|")
+    try:
+        when = datetime.fromisoformat(at)
+    except ValueError:
+        return False
+    return (when, photo_id) if sep and photo_id else False
+
+
 def register_photos_api(app, mongo_db=None):
     from app.features import photo_album
 
@@ -80,12 +109,20 @@ def register_photos_api(app, mongo_db=None):
             return jsonify({"items": []}), 200
         album = (request.args.get("album") or "").strip() or None
         query = (request.args.get("q") or "").strip() or None
+        before = _page_cursor(request.args.get("before"))
+        if before is False:
+            return jsonify({"error": "invalid_cursor"}), 400
         with active_user_profile_context(build_user_profile(claims)):
             uid = current_user_id()
             if not uid:
                 return jsonify({"items": []}), 200
-            docs = photo_album.find_photos(uid, query=query, tag=album, limit=200)
-        return jsonify({"items": [_serialize(d) for d in docs]}), 200
+            docs = photo_album.find_photos(uid, query=query, tag=album, limit=_PAGE,
+                                           before=before or None)
+        out = {"items": [_serialize(d) for d in docs]}
+        if len(docs) == _PAGE:
+            last = docs[-1]
+            out["next"] = f"{_utc_iso(last.get('created_at'))}|{last['_id']}"
+        return jsonify(out), 200
 
     @app.route("/api/photos/albums", methods=["GET"])
     @require_auth
