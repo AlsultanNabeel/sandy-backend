@@ -1182,7 +1182,9 @@ so folders are organisation only.
   and is edited in its sheet; habits check in per day as `habit` log
   entries instead of being "done"), one schedules screen (`SchedulesView`, reminders and
   messages to future self) and the log (`LogView`, the My Life tab, with the on-demand
-  summary, search, a thirty-day activity strip and a card per list on top).
+  summary, search, a thirty-day activity strip and a card per list on top). The search's
+  server hits live on the store (`LogStore.found`), so an entry found there — older than the
+  newest rows the phone holds — is edited and deleted like any other, and the hits follow.
   `KindsStore` loads `/api/kinds` once; My Life builds a card per list from it, so a new
   list needs no app change. **Offline first:** every block change is applied on the
   phone, saved to `DiskCache` and reaches every copy of the same rows (the stores on

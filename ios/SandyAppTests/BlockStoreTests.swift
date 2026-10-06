@@ -145,4 +145,33 @@ final class BlockStoreTests: XCTestCase {
         XCTAssertEqual(patches("/api/items/t1").count, 2, "«تراجع» after leaving the list did nothing")
         XCTAssertTrue(patches("/api/items/t1").last?.contains("\"done\":false") == true)
     }
+
+    private static let oldEntry = #"{"id":"e9","kind":"note","text":"قديم","at":"2025-01-01T10:00:00Z"}"#
+
+    /// L3: an old entry found by search (past the newest rows on the phone) was edited, the
+    /// sheet closed as if saved, and nothing was sent.
+    func testEditingAnEntryFoundBySearchIsSent() async throws {
+        serve("")
+        let store = LogStore()
+        await store.load(api: api)
+        let old = try JSONDecoder().decode(LogEntry.self, from: Data(Self.oldEntry.utf8))
+        store.update(api: api, old, text: "جديد", amount: nil,
+                     at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2025-01-01T10:00:00Z")))
+        try await waitFor { !patches("/api/entries/e9").isEmpty }
+        XCTAssertEqual(patches("/api/entries/e9").count, 1, "the edit of an entry found by search was never sent")
+    }
+
+    /// L3: the search results kept showing an entry deleted from them, and an edit made there.
+    func testSearchResultsFollowAnEditAndADelete() async throws {
+        serve("")
+        let store = LogStore()
+        await store.load(api: api)
+        let old = try JSONDecoder().decode(LogEntry.self, from: Data(Self.oldEntry.utf8))
+        store.found = [old]
+        store.update(api: api, old, text: "جديد", amount: nil,
+                     at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2025-01-01T10:00:00Z")))
+        XCTAssertEqual(store.found?.first?.text, "جديد", "the search results kept the old words")
+        store.delete(api: api, try XCTUnwrap(store.found?.first))
+        XCTAssertEqual(store.found?.isEmpty, true, "a deleted entry stayed in the search results")
+    }
 }

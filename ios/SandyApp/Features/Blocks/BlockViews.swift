@@ -369,14 +369,12 @@ struct LogView: View {
     @State private var search = ""
     @ObservedObject private var lifeStats = LifeStatsStore.shared
     @State private var showSpending = false
-    /// What the server found for the search or the picked day, over the whole log;
-    /// nil while there is no query, or offline (then the rows on the phone are filtered).
-    @State private var found: [LogEntry]?
 
     private var query: String { search.trimmingCharacters(in: .whitespaces) }
 
     private var shown: [LogEntry] {
-        if let found {
+        // The server's hits for the search or the picked day; offline, the phone's rows filtered.
+        if let found = store.found {
             // The phone's copy of a row wins: an edit made since shows at once.
             return found.compactMap { hit in store.entries.first { $0.id == hit.id } ?? hit }
         }
@@ -394,11 +392,11 @@ struct LogView: View {
 
     /// Asks the server for the search and the picked day, a moment after typing stops.
     private func lookUp() async {
-        guard !query.isEmpty || day != nil else { found = nil; return }
+        guard !query.isEmpty || day != nil else { store.found = nil; return }
         try? await Task.sleep(for: .milliseconds(350))
         guard !Task.isCancelled else { return }
         let start = day.map { Calendar.current.startOfDay(for: $0) }
-        found = try? await state.api.entries(kind: store.kind, limit: 200,
+        store.found = try? await state.api.entries(kind: store.kind, limit: 200,
                                              q: query.isEmpty ? nil : query, since: start,
                                              until: start.map { $0.addingTimeInterval(86_400 - 1) })
     }

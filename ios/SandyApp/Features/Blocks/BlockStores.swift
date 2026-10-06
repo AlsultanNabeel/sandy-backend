@@ -690,6 +690,9 @@ final class LogStore: LoadableStore {
     private static let live = LiveStores<LogStore>()
 
     @Published var entries: [LogEntry] = [] { didSet { noteEdit(); saveEntries() } }
+    /// What the server found for a search or a picked day, over the whole log (older than
+    /// `entries` reaches); nil while there is none. Edits and deletes reach it too.
+    @Published var found: [LogEntry]?
     @Published var kind: String? {
         didSet { if kind != oldValue { restored = false } }
     }
@@ -774,12 +777,15 @@ final class LogStore: LoadableStore {
 
     static func removeEverywhere(_ id: String, kind: String, userId: String?) {
         everywhere(kind: kind, userId: userId) { $0.removeAll { $0.id == id } }
+        for store in live.all { store.found?.removeAll { $0.id == id } }
     }
 
     private static func replaceEverywhere(_ entry: LogEntry, userId: String?) {
-        everywhere(kind: entry.kind, userId: userId) { rows in
+        let put: (inout [LogEntry]) -> Void = { rows in
             if let i = rows.firstIndex(where: { $0.id == entry.id }) { rows[i] = entry }
         }
+        everywhere(kind: entry.kind, userId: userId, put)
+        for store in live.all where store.found != nil { put(&store.found!) }
     }
 
     func add(api: APIClient, kind: String, text: String, amount: Double?, category: String? = nil,
@@ -802,7 +808,8 @@ final class LogStore: LoadableStore {
     /// Edit text, amount or time; the amount goes into a copy of the row's data.
     func update(api: APIClient, _ entry: LogEntry, text: String, amount: Double?, category: String? = nil,
                 at: Date) {
-        guard let old = entries.first(where: { $0.id == entry.id }) else { return }
+        // A row found by search may be older than the newest rows the phone holds.
+        let old = entries.first { $0.id == entry.id } ?? found?.first { $0.id == entry.id } ?? entry
         var new = old
         new.text = text
         var data: [String: JSONValue]?
