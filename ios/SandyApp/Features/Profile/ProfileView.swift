@@ -7,6 +7,7 @@ struct ProfileView: View {
     @EnvironmentObject var lang: LanguageManager
     @State private var showEdit = false
     @State private var confirmSignOut = false
+    @State private var warnUnsent = false
     @ObservedObject private var permissions = Permissions.shared
     /// يفتح شاشة الاشتراك (ساندي بريميوم) كورقة.
     @State private var showPaywall = false
@@ -329,10 +330,19 @@ struct ProfileView: View {
         .padding(.top, Theme.Spacing.xs)
         .confirmationDialog(lang.s("profile.signOutAsk"), isPresented: $confirmSignOut,
                             titleVisibility: .visible) {
-            Button(lang.s("profile.signOut"), role: .destructive) { state.signOut() }
+            Button(lang.s("profile.signOut"), role: .destructive) {
+                // Unsent changes go first; whatever is still waiting is warned about.
+                Task {
+                    if await state.sendUnsent() { state.signOut() } else { warnUnsent = true }
+                }
+            }
+            Button(lang.s("profile.signOutCancel"), role: .cancel) {}
+        }
+        .alert(lang.s("profile.signOutUnsent"), isPresented: $warnUnsent) {
+            Button(lang.s("profile.signOutAnyway"), role: .destructive) { state.signOut() }
             Button(lang.s("profile.signOutCancel"), role: .cancel) {}
         } message: {
-            Text(lang.s("profile.signOutNote"))
+            Text(lang.s("profile.signOutUnsentNote"))
         }
     }
 }

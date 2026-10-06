@@ -8,6 +8,10 @@ import Network
 /// when the network comes back, the app returns to the front, or a screen reloads.
 /// A write the server refuses (4xx/5xx) is dropped and its caller is told, so the
 /// screen can undo it; only a missing connection keeps a write waiting.
+///
+/// The queue is its account's, on disk: a session that ended (a 401) keeps it, and it
+/// is sent only when the same account signs in again. Nothing is sent with no one signed
+/// in, and another account never loads it.
 @MainActor
 final class Outbox {
     static let shared = Outbox()
@@ -38,7 +42,19 @@ final class Outbox {
         monitor.start(queue: DispatchQueue(label: "sandy.outbox.path"))
     }
 
+    static let fileKey = "outbox"
+
     var isEmpty: Bool { ops.isEmpty }
+    var count: Int { ops.count }
+
+    /// The session ended: nothing more is sent for it. `discarding` (a sign-out the user
+    /// chose after the warning, or a deleted account) drops its unsent changes too; else
+    /// they stay on disk for when the same account is back.
+    func signedOut(discarding: Bool) {
+        if discarding { DiskCache.remove(key: Self.fileKey, userId: userId) }
+        ops = []
+        userId = nil
+    }
 
     /// Queues one write and tries to send it (and anything before it). Throws only when
     /// the server refused it; offline it returns and the write waits.
@@ -54,6 +70,7 @@ final class Outbox {
 
     /// Sends what is waiting, one at a time, in order. Stops at the first missing connection.
     func drain(_ api: APIClient) async {
+        guard api.currentUserId != nil else { return }
         bind(api)
         if let running = pass { await running.value }
         guard pass == nil, !ops.isEmpty else { return }
@@ -73,6 +90,8 @@ final class Outbox {
                 if (error as? APIError)?.kind == .unauthorized { return }
                 refused[op.id] = error
             }
+            // Signed out or switched while it was on its way: this queue is not loaded any more.
+            guard ops.first?.id == op.id else { return }
             ops.removeFirst()
             save()
         }
@@ -84,11 +103,11 @@ final class Outbox {
         let uid = api.currentUserId
         guard uid != userId else { return }
         userId = uid
-        ops = DiskCache.load([Op].self, key: "outbox", userId: uid) ?? []
+        ops = DiskCache.load([Op].self, key: Self.fileKey, userId: uid) ?? []
     }
 
     private func save() {
-        DiskCache.save(ops, key: "outbox", userId: userId)
+        DiskCache.save(ops, key: Self.fileKey, userId: userId)
     }
 }
 

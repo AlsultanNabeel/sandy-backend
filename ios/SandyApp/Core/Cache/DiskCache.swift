@@ -40,9 +40,25 @@ enum DiskCache {
         }
     }
 
-    /// على نفس الطابور التسلسلي، فأي حفظ سبقه بينكتب ثم بينمسح.
-    static func clearAll() {
+    /// Every account's copies but their `keep` file (the outbox: unsent changes stay with
+    /// their owner until they sign in again). On the same serial queue, so a save queued
+    /// before it is written and then removed.
+    static func clearAll(except keep: String) {
         guard let root else { return }
-        queue.async { try? FileManager.default.removeItem(at: root) }
+        let kept = safe(keep) + ".json"
+        queue.async {
+            let fm = FileManager.default
+            for account in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+                for file in (try? fm.contentsOfDirectory(at: account, includingPropertiesForKeys: nil)) ?? []
+                where file.lastPathComponent != kept {
+                    try? fm.removeItem(at: file)
+                }
+            }
+        }
+    }
+
+    static func remove(key: String, userId: String?) {
+        guard let url = fileURL(key: key, userId: userId) else { return }
+        queue.async { try? FileManager.default.removeItem(at: url) }
     }
 }

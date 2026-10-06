@@ -1163,6 +1163,11 @@ so folders are organisation only.
   phone, saved to `DiskCache` and reaches every copy of the same rows (the stores on
   screen, else the file on disk), then goes through `Core/Cache/Outbox.swift`, a
   per-account queue on disk sent in order now, on reconnect, or on return to the front.
+  Nothing is sent with no one signed in. A session that ends by itself (a 401) keeps its
+  queue on disk (`DiskCache.clearAll(except:)` spares every account's outbox), and it is
+  sent only when the same account signs in again; another account never loads it. A
+  sign-out the user chooses sends the queue first and, when something is still waiting,
+  warns before dropping it (`AppState.sendUnsent`, `Outbox.signedOut(discarding:)`).
   New rows carry their own 32-hex `id` (the blocks POSTs accept it and a resent POST
   returns the row already there). While the outbox holds anything, a reload keeps the
   phone's copy instead of the server's. Only a server refusal undoes a change.

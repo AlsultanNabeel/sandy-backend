@@ -6,6 +6,8 @@ import Foundation
 /// `uninstall` (in tearDown) puts the real one back.
 enum StubNetwork {
     private static var original: URLSession?
+    /// A status that answers with no connection instead of a response.
+    static let offline = -1
 
     static func install(_ handler: @escaping (URLRequest) -> (status: Int, body: Data)) {
         StubURLProtocol.handler = handler
@@ -75,6 +77,11 @@ final class StubURLProtocol: URLProtocol {
                                            .merging(Self.headers) { _, new in new })!
         let deliver = { [weak self] in
             guard let self else { return }
+            // `StubNetwork.offline`: no answer at all, as with no connection.
+            if status == StubNetwork.offline {
+                self.client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+                return
+            }
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             self.client?.urlProtocol(self, didLoad: body)
             self.client?.urlProtocolDidFinishLoading(self)

@@ -27,7 +27,7 @@ final class AppState: ObservableObject {
         api = APIClient(baseURL: saved)
         // 401 → شاشة الدخول. القفزة لـ @MainActor لأن request ممكن يرجع خارج الخيط الرئيسي.
         api.onUnauthorized = { [weak self] in
-            Task { @MainActor in self?.signOut() }
+            Task { @MainActor in self?.signOut(keepingUnsent: true) }
         }
         // Pick the first screen before the first frame so a known user skips the launch screen.
         if api.token != nil && onboardingDoneCached {
@@ -91,7 +91,7 @@ final class AppState: ObservableObject {
             if !ob.done { stage = .onboarding }
         } catch let error as APIError where error.kind == .unauthorized {
             guard generation == sessionGeneration else { return }
-            signOut()
+            signOut(keepingUnsent: true)
         } catch {
             // Offline or a slow server: stay where we are.
         }
@@ -157,8 +157,17 @@ final class AppState: ObservableObject {
         onboarding.interests = interests
     }
 
+    /// Sends what waits in the outbox; true when nothing is left, so a sign-out the user
+    /// chose loses nothing (else they are warned first).
+    func sendUnsent() async -> Bool {
+        await Outbox.shared.drain(api)
+        return Outbox.shared.isEmpty
+    }
+
     /// نلغي توكن الدفع أولاً (والتوكن لسّا صالح) حتى ما يوصل هالجهاز دفع المستخدم القديم.
-    func signOut() {
+    /// `keepingUnsent`: the session ended on its own (a 401), so the outbox stays for this
+    /// account's return; a sign-out the user chose (after the warning) drops it.
+    func signOut(keepingUnsent: Bool = false) {
         if let deviceToken = NotificationManager.shared.lastDeviceToken,
            let session = api.token {
             let apiRef = api
@@ -168,9 +177,10 @@ final class AppState: ObservableObject {
         verifyTask?.cancel()
         verifyTask = nil
 
+        Outbox.shared.signedOut(discarding: !keepingUnsent)
         api.token = nil
         subscriptions.signOut()
-        DiskCache.clearAll()
+        DiskCache.clearAll(except: Outbox.fileKey)
         SpotlightIndexer.deleteAll()
 
         // Widgets and scheduled notifications don't check the session, so clear them
