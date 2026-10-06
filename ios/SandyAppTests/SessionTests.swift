@@ -95,4 +95,28 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(LifeStatsStore.shared.stats.spent, 0, "the last account's spending showed")
         XCTAssertEqual(LifeStatsStore.shared.stats.budget ?? 0, 0, "the last account's budget showed")
     }
+
+    /// K4: a list still loading when the account left (signed out, or switched to another)
+    /// came back and showed, cached and published the old account's rows.
+    func testALateReplyAfterASwitchShowsAndSavesNothing() async throws {
+        let first = "first-\(UUID().uuidString.prefix(8))"
+        defer { DiskCache.remove(key: "items.tasks.open", userId: first) }
+        let api = TestClient.make()
+        api.token = Self.token(first)
+        StubNetwork.install(status: 200, json: """
+            {"items":[{"id":"t1","list":"tasks","text":"مهمة الحساب الأول","done":false}]}
+            """)
+        StubNetwork.delay("GET", by: 0.4)
+        let store = ItemsStore(list: "tasks")
+        let loading = Task { await store.load(api: api) }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        AccountSession.next()
+        api.token = Self.token("second")
+        await loading.value
+        XCTAssertTrue(store.items.isEmpty, "the first account's tasks showed for the second")
+        store.items = []
+        await settle { false }
+        XCTAssertNil(DiskCache.load([ListItem].self, key: "items.tasks.open", userId: first),
+                     "the store from before the switch still wrote its cache")
+    }
 }

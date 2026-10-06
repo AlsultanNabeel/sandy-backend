@@ -56,7 +56,9 @@ final class LifeStatsStore: ObservableObject {
                                                        userId: api.currentUserId) {
             counted = cached
         }
-        guard Outbox.shared.isEmpty, let fresh = try? await api.stats() else { return }
+        let session = AccountSession.generation
+        guard Outbox.shared.isEmpty, let fresh = try? await api.stats(),
+              session == AccountSession.generation else { return }
         countedAt = Date()
         counted = fresh
         localBudget = nil

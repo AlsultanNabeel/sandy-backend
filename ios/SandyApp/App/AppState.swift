@@ -39,8 +39,6 @@ final class AppState: ObservableObject {
     /// `restoreSession` still has to run once for push setup and the background check.
     private var launchedFromCache = false
 
-    /// Bumped on every sign-in/out so in-flight work can tell the account changed.
-    private var sessionGeneration = 0
     private var verifyTask: Task<Void, Never>?
 
     var needsSessionRestore: Bool { stage == .launching || launchedFromCache }
@@ -55,7 +53,7 @@ final class AppState: ObservableObject {
             stage = .chat
             setupPush()
             verifyTask?.cancel()
-            verifyTask = Task { [weak self, generation = sessionGeneration] in
+            verifyTask = Task { [weak self, generation = AccountSession.generation] in
                 guard let self else { return }
                 await self.verifySessionInBackground(generation: generation)
             }
@@ -84,13 +82,13 @@ final class AppState: ObservableObject {
     private func verifySessionInBackground(generation: Int) async {
         do {
             let ob = try await api.getOnboarding()
-            guard generation == sessionGeneration else { return }
+            guard generation == AccountSession.generation else { return }
             onboarding = ob
             onboardingLoaded = true
             onboardingDoneCached = ob.done
             if !ob.done { stage = .onboarding }
         } catch let error as APIError where error.kind == .unauthorized {
-            guard generation == sessionGeneration else { return }
+            guard generation == AccountSession.generation else { return }
             signOut(keepingUnsent: true)
         } catch {
             // Offline or a slow server: stay where we are.
@@ -114,7 +112,7 @@ final class AppState: ObservableObject {
     }
 
     func routeAfterAuth(onboardingDone: Bool) {
-        sessionGeneration &+= 1
+        AccountSession.next()
         verifyTask?.cancel()
         verifyTask = nil
         // A call outlives its screen, not the session.
@@ -173,7 +171,7 @@ final class AppState: ObservableObject {
             let apiRef = api
             Task { try? await apiRef.unregisterPushToken(deviceToken, bearer: session) }
         }
-        sessionGeneration &+= 1
+        AccountSession.next()
         verifyTask?.cancel()
         verifyTask = nil
 

@@ -15,16 +15,27 @@ class LoadableStore: ObservableObject {
 
     /// A cancelled-and-replaced load must not clear the spinner of the load that replaced it.
     private var loadGeneration = 0
+    /// The session the current load began in.
+    private var loadSession = AccountSession.generation
+    /// The session this store was made in: its rows are that account's.
+    private let rowsSession = AccountSession.generation
+
+    /// Still the session this store was made in: after a sign-out or a switch it saves and
+    /// publishes nothing (its rows are the account that left).
+    var inItsSession: Bool { rowsSession == AccountSession.generation }
 
     /// Bumps the generation, shows the spinner, returns the load's token.
     func beginLoad() -> Int {
         loadGeneration += 1
+        loadSession = AccountSession.generation
         loading = true
         return loadGeneration
     }
 
+    /// The newest load, in the session it began in: a reply that lands after a sign-out
+    /// or a switch to another account is dropped.
     func isCurrentLoad(_ generation: Int) -> Bool {
-        generation == loadGeneration
+        generation == loadGeneration && loadSession == AccountSession.generation
     }
 
     /// Clears `loading` only if no newer load has started.

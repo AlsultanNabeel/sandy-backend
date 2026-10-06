@@ -106,6 +106,11 @@ final class ItemsStore: LoadableStore {
 
     var isHabits: Bool { list == "habits" }
 
+    /// Signed out: every list's load still on its way is cancelled.
+    static func cancelLoads() {
+        for store in live.all { store.loadTask?.cancel() }
+    }
+
     /// Habits: what is left today first, what is kept today sinks to the end.
     var ordered: [ListItem] {
         guard isHabits else { return items }
@@ -137,7 +142,7 @@ final class ItemsStore: LoadableStore {
     }
 
     private func saveItems() {
-        guard restored else { return }
+        guard restored, inItsSession else { return }
         DiskCache.save(items, key: Self.key(list, done), userId: userId)
         if list == "tasks" && !done { publishTasks() }
         if isHabits { reportHabits() }
@@ -172,7 +177,7 @@ final class ItemsStore: LoadableStore {
     }
 
     private func saveChecks() {
-        guard restored, isHabits else { return }
+        guard restored, isHabits, inItsSession else { return }
         DiskCache.save(Checks(day: dayFormat.string(from: Date()), checked: checkedToday),
                        key: "habits.checks", userId: userId)
         reportHabits()
@@ -480,7 +485,7 @@ final class SchedulesStore: LoadableStore {
     }
 
     private func saveItems() {
-        guard restored else { return }
+        guard restored, inItsSession else { return }
         DiskCache.save(items, key: cacheKey, userId: userId)
         publish()
     }
@@ -674,7 +679,7 @@ final class LogStore: LoadableStore {
     }
 
     private func saveEntries() {
-        guard restored else { return }
+        guard restored, inItsSession else { return }
         DiskCache.save(entries, key: Self.key(kind), userId: userId)
     }
 

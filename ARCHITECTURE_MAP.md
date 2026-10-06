@@ -1142,6 +1142,10 @@ so folders are organisation only.
   Spotlight and the scheduled notifications, and `App/SessionReset.clearShared` wipes
   every shared store that holds the account in memory, so the next account on the phone
   inherits nothing. A new shared store that holds a user's data adds itself there.
+  `AccountSession.generation` moves on every sign-in and sign-out: a `LoadableStore`
+  load that began in an earlier session is dropped when it lands (`isCurrentLoad`), and
+  a store made in an earlier session saves and publishes nothing (`inItsSession`: no
+  cache file, widget, notification or Spotlight entry for the account that left).
 - `Core/Networking/` — `APIClient` split into 9 extensions by domain, behind
   `APIClientProtocol`. **Add new endpoints as an extension, not to the base class.**
   Every value put in a URL goes through `URLEscape` (`query` for a parameter, `segment` for a path
