@@ -84,3 +84,19 @@ def test_the_same_item_again_is_not_added_twice_in_a_long_list(tenant):
     _run("list_add", list="shopping", text="زيت زيتون", qty=2)
     same = [d for d in tenant["sandy_items"].find({"text": "زيت زيتون"})]
     assert len(same) == 1 and same[0]["_id"] == first
+
+
+def test_a_row_brought_back_by_undo_can_be_found_by_meaning_again(tenant, monkeypatch):
+    """The journal keeps a row without its vector; put back as kept, it was invisible to
+    the search by meaning for good."""
+    from app.blocks import _base, entries
+
+    monkeypatch.setattr(entries, "embed_text", lambda text: [0.5, 0.5])
+    with _base.journal() as effects:
+        eid = entries.add("fact", "بيحب القهوة بلا سكر")
+        entries.update(eid, text="بيحب القهوة مع حليب")
+        entries.delete(eid)
+    _base.undo(effects[-1:])          # the delete
+    assert tenant["sandy_entries"].find_one({"_id": eid})["embedding"] == [0.5, 0.5]
+    _base.undo(effects[1:2])          # the edit
+    assert tenant["sandy_entries"].find_one({"_id": eid})["embedding"] == [0.5, 0.5]

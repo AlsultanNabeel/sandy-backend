@@ -1154,7 +1154,7 @@ so folders are organisation only.
   `POST /api/conversations/<cid>/rewind`, which also takes back what that reply did to
   the blocks: every block write in a turn is journaled with its before-state
   (`blocks/_base.journal`, kept on the reply's STM turn as `effects`) and `_base.undo`
-  reverses it; device actions are not undone), a stop button that keeps what arrived
+  reverses it (a log row it puts back is embedded again, unless sealed); device actions are not undone), a stop button that keeps what arrived
   (`POST …/stop`: a running turn stops before its next tool via `brain/stops.py`, and
   memory keeps only the shown part with a «cut here» note), and a failed line marked
   with «أعد المحاولة».

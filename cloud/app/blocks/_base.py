@@ -65,6 +65,16 @@ def fact_changed() -> None:
     mark_corrected(current_user_id() or "")
 
 
+def _with_vector(row: Dict[str, Any]) -> Dict[str, Any]:
+    """A log row put back by undo gets its vector again (the journal keeps it without one,
+    and a row with none is never found by meaning). Sealed rows are never embedded."""
+    if (row.get("data") or {}).get("encrypted"):
+        return row
+    from app.blocks.entries import embed_text
+
+    return {**row, "embedding": embed_text(str(row.get("text") or ""))}
+
+
 def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:
     """Takes back a turn's writes, newest first: created rows go, changed rows get their
     old values back, deleted rows come back. The count of rows put right."""
@@ -78,6 +88,8 @@ def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:
         if e.get("coll") == ENTRIES and not facts:
             row = before or handle.find_one({"_id": e["id"]}, {"kind": 1}) or {}
             facts = row.get("kind") == "fact"
+        if e.get("op") != "created" and before and e.get("coll") == ENTRIES:
+            before = _with_vector(before)
         if e.get("op") == "created":
             done += handle.delete_one({"_id": e["id"]}).deleted_count
         elif e.get("op") == "updated" and before:
