@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from app.blocks import _base
 from app.blocks.kinds import LIST, validate
@@ -152,9 +152,11 @@ def touched_between(start: datetime, end: datetime, *, limit: int = 200,
 def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
                due_after: Optional[datetime] = None, due_before: Optional[datetime] = None,
                text: str = "", order: str = "created", limit: int = 200,
+               after: Optional[Tuple[datetime, str]] = None,
                mongo_db=None) -> List[Dict[str, Any]]:
     """Oldest first, the order a list is read in; ``order="newest"`` or ``"due"`` (soonest
-    first) instead; every filter optional."""
+    first) instead; every filter optional. ``after`` is the last row of the page before,
+    as ``(created_at, id)``, for the created orders: the next page starts past it."""
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None:
         return []
@@ -169,5 +171,18 @@ def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
     if text:
         query.update(_base.text_filter(text))
     key, way = {"newest": ("created_at", -1), "due": ("due", 1)}.get(order, ("created_at", 1))
-    cursor = coll.find(query).sort(key, way).limit(_base.clamp(limit))
+    if after is not None and key == "created_at":
+        at, last_id = after
+        past = "$gt" if way == 1 else "$lt"
+        query = {"$and": [query, {"$or": [{"created_at": {past: at}},
+                                          {"created_at": at, "_id": {past: last_id}}]}]}
+    cursor = coll.find(query).sort([(key, way), ("_id", way)]).limit(_base.clamp(limit))
     return [_base.out(d) for d in cursor]
+
+
+def list_names(mongo_db=None) -> List[str]:
+    """Every list this user has rows in, by name."""
+    coll = _base.coll(_base.ITEMS, mongo_db)
+    if coll is None:
+        return []
+    return sorted(str(n) for n in coll.distinct("list") if n)

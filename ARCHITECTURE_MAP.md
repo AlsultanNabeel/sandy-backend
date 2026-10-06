@@ -464,7 +464,8 @@ capped at 2000 characters and `data`/`payload` at 8000 of JSON:
 | Route | Does |
 |---|---|
 | `GET/POST /api/entries`, `PATCH/DELETE /api/entries/<id>` | the log; `GET` filters `kind`, `since`, `until`, `q`, `limit` |
-| `GET/POST /api/items`, `PATCH/DELETE /api/items/<id>` | the lists; `GET` filters `list`, `done`, `q`, `limit`; `PATCH {"due": null}` clears it |
+| `GET/POST /api/items`, `PATCH/DELETE /api/items/<id>` | the lists; `GET` filters `list`, `done`, `q`, `limit`, a page at a time: an open list oldest first, the done half newest first, `next` when more follow (pass it back as `cursor`; the app reads an open list whole, the done half's newest page); `PATCH {"due": null}` clears it |
+| `GET /api/items/lists` | every list name the user has rows in (project lists come from here) |
 | `GET/POST /api/schedules`, `PATCH/DELETE /api/schedules/<id>` | anything that fires; `GET` filters `kind`, `from`, `to`, `status`, `limit`; `fire_at` must be future; `recurrence` is daily/weekly/monthly/yearly or an RRULE; the app may set status only to `pending`/`cancelled` |
 | `GET /api/kinds` | `kinds.KINDS` as `{name, block, labels:{ar,en}, icon, prefix, fields:{name: type}}` — the app builds its screens from it |
 | `GET /api/stats` | My Life's numbers over the whole log in the user's zone: entries per day for 30 days, and this month's spending (in all and `by_category`), habit check-ins and entries (summaries left out), plus the monthly `budget`; the app adds what it made since |

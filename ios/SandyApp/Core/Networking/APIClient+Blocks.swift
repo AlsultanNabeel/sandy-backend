@@ -2,6 +2,11 @@ import Foundation
 
 extension APIClient {
     private struct Rows<T: Decodable>: Decodable { let items: [T]? }
+    private struct Page<T: Decodable>: Decodable { let items: [T]?; let next: String? }
+    private struct ListNames: Decodable { let lists: [String]? }
+    /// Pages an open list may take (100 rows each): far past any real list, and a stop
+    /// if the cursor ever failed to move.
+    private static let maxListPages = 50
     private struct Kinds: Decodable { let kinds: [BlockKind]? }
     private struct Summary: Decodable { let text: String? }
 
@@ -98,17 +103,24 @@ extension APIClient {
 
     // MARK: lists
 
+    /// An open list whole, page by page, oldest first; the done half is its newest page.
     func listItems(_ list: String, done: Bool? = nil) async throws -> [ListItem] {
-        let r: Rows<ListItem> = try await fetch(query("/api/items", [
-            "list": list, "done": done.map { $0 ? "true" : "false" }]))
-        return r.items ?? []
+        var rows: [ListItem] = []
+        var cursor: String?
+        for _ in 0..<Self.maxListPages {
+            let page: Page<ListItem> = try await fetch(query("/api/items", [
+                "list": list, "done": done.map { $0 ? "true" : "false" }, "cursor": cursor]))
+            rows += page.items ?? []
+            guard done != true, let next = page.next, next != cursor else { break }
+            cursor = next
+        }
+        return rows
     }
 
     /// The project lists Sandy made from chat («project:<name>»), by name.
     func projectLists() async throws -> [String] {
-        let r: Rows<ListItem> = try await fetch(query("/api/items", ["limit": "500"]))
-        let names = (r.items ?? []).map(\.list).filter { $0.hasPrefix("project:") }
-        return Array(Set(names)).sorted()
+        let r: ListNames = try await fetch("/api/items/lists")
+        return (r.lists ?? []).filter { $0.hasPrefix("project:") }.sorted()
     }
 
     private struct ItemCreate: Encodable {

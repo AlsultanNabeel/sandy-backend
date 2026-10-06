@@ -29,7 +29,7 @@ from pymongo.errors import DuplicateKeyError
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.api.auth_handlers import require_auth, require_tenant
 from app.api.metering import meter_claims
-from app.blocks import entries, habits, items, schedules
+from app.blocks import _base, entries, habits, items, schedules
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, KindError, get_kind
 from app.brain import summary
 from app.brain.categorize import categorize_later
@@ -51,6 +51,7 @@ _MESSAGES = {
     "invalid_kind": "النوع أو الحقول مش معروفة.",
     "invalid_date": "التاريخ مش مفهوم.",
     "invalid_limit": "العدد مش صحيح.",
+    "invalid_cursor": "الصفحة المطلوبة مش مفهومة.",
     "invalid_done": "قيمة «تم» لازم تكون صح أو غلط.",
     "fire_at_required": "حدّد وقت التذكير.",
     "fire_at_in_past": "الوقت لازم يكون بالمستقبل.",
@@ -171,6 +172,29 @@ def _limit() -> int:
     if n < 1:
         raise _Invalid("invalid_limit")
     return n
+
+
+def _iso_utc(value: Any) -> str:
+    """A row's time as UTC ISO (the store hands back naive UTC)."""
+    if not isinstance(value, datetime):
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _cursor(raw: Optional[str]):
+    """`next` from the page before → ``(created_at, id)``; a malformed one is a 400."""
+    if not raw:
+        return None
+    at, sep, row_id = str(raw).partition("|")
+    try:
+        when = datetime.fromisoformat(at)
+    except ValueError:
+        raise _Invalid("invalid_cursor") from None
+    if not sep or not row_id:
+        raise _Invalid("invalid_cursor")
+    return when, row_id
 
 
 def _flag(value: Any) -> Optional[bool]:
@@ -323,11 +347,27 @@ def register_blocks_api(app, mongo_db=None):
     @require_tenant
     @_answers_invalid
     def api_items_list(claims):
-        rows = items.list_items(request.args.get("list") or None,
-                                done=_flag(request.args.get("done")),
+        """A page of rows: an open list oldest first, the done half newest first. `next` is
+        there when more follow; pass it back as `cursor`."""
+        done = _flag(request.args.get("done"))
+        order = "newest" if done else "created"
+        limit = _limit()
+        rows = items.list_items(request.args.get("list") or None, done=done,
                                 text=request.args.get("q", "")[:MAX_TEXT_CHARS],
-                                limit=_limit())
-        return jsonify({"items": [_shown(r, "data") for r in rows]}), 200
+                                order=order, limit=limit,
+                                after=_cursor(request.args.get("cursor")))
+        out: Dict[str, Any] = {"items": [_shown(r, "data") for r in rows]}
+        if len(rows) == min(limit, _base.MAX_LIMIT):
+            last = rows[-1]
+            out["next"] = f"{_iso_utc(last.get('created_at'))}|{last['id']}"
+        return jsonify(out), 200
+
+    @app.route("/api/items/lists", methods=["GET"])
+    @require_tenant
+    @_answers_invalid
+    def api_items_lists(claims):
+        """Every list the user has rows in (a list's name is not on its first page)."""
+        return jsonify({"lists": items.list_names()}), 200
 
     @app.route("/api/items", methods=["POST"])
     @require_tenant

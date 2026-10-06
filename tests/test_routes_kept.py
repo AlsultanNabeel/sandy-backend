@@ -34,6 +34,7 @@ KEPT = {
     "/api/entries": {"GET", "POST"},
     "/api/entries/<entry_id>": {"PATCH", "DELETE"},
     "/api/items": {"GET", "POST"},
+    "/api/items/lists": {"GET"},
     "/api/items/<item_id>": {"PATCH", "DELETE"},
     "/api/schedules": {"GET", "POST"},
     "/api/schedules/<schedule_id>": {"PATCH", "DELETE"},
