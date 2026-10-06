@@ -15,6 +15,8 @@ struct DeviceCard: View {
 
     /// قيمة شريط الإضاءة المحلّية (نحرّكها بسلاسة قبل ما نرسل عند الإفلات).
     @State private var sliderValue: Double = 0
+    /// A finger is on the slider: a refresh must not move it from under it.
+    @State private var dragging = false
     /// تعلّم زر أشعة جديد (الاسم + فتح التنبيه).
     @State private var showLearn = false
     @State private var confirmDelete = false
@@ -68,6 +70,17 @@ struct DeviceCard: View {
             }
         }
         .onAppear { sliderValue = Double(Int(device.state) ?? device.dimmerMin) }
+        .onChange(of: device.state) { _, state in
+            sliderValue = Self.sliderLevel(state: state, min: device.dimmerMin,
+                                           current: sliderValue, dragging: dragging)
+        }
+    }
+
+    /// Where the slider stands for a new state: the device's level, unless a finger is on it
+    /// or the state is not a level.
+    static func sliderLevel(state: String, min: Int, current: Double, dragging: Bool) -> Double {
+        guard !dragging, let level = Int(state) else { return current }
+        return Double(max(level, min))
     }
 
     /// الشكل المربّع: الاسم كبير فوق، والتحكّم تحته — وبس.
@@ -187,6 +200,7 @@ struct DeviceCard: View {
                        in: Double(device.dimmerMin)...Double(device.dimmerMax),
                        step: 1,
                        onEditingChanged: { editing in
+                           dragging = editing
                            // نرسل فقط عند انتهاء السحب — تفادي وابل طلبات.
                            if !editing {
                                store.control(api: state.api, device: device,
