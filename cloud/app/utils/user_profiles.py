@@ -19,9 +19,6 @@ _ACTIVE_PROFILE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     "sandy_active_user_profile", default=None
 )
 
-def set_active_user_profile(profile: Optional[Dict[str, Any]]) -> None:
-    _ACTIVE_PROFILE.set(profile)
-
 
 def get_active_user_profile() -> Optional[Dict[str, Any]]:
     profile = _ACTIVE_PROFILE.get()
