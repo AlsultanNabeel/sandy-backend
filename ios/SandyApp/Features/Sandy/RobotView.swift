@@ -66,7 +66,10 @@ struct RobotView: View {
                         RobotTestView(store: devices, node: node)
                     }
                     row("wifi", "wifi.title", "robot.hub.wifiNote") {
-                        NodeWiFiView(node: node, onFinished: { await devices.load(api: state.api) })
+                        NodeWiFiView(node: node, onFinished: {
+                            await devices.load(api: state.api)
+                            return devices.nodes.first { $0.id == node.id }
+                        })
                     }
                 }
                 row("person.wave.2", "robot.hub.voice", "robot.hub.voiceNote") { VoiceLearnView() }

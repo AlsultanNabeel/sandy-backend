@@ -19,8 +19,9 @@ struct NodeWiFiView: View {
     @Environment(\.dismiss) private var dismiss
 
     let node: NodeItem
-    /// بيتنده لما نبغى نعيد قراءة الوحدات بعد المحاولة.
-    var onFinished: () async -> Void = {}
+    /// بيتنده لما نبغى نعيد قراءة الوحدات بعد المحاولة، وبيرجّع العقدة كما هي هلّق (the
+    /// node this screen opened with is an old copy: the result is read from the fresh one).
+    var onFinished: () async -> NodeItem? = { nil }
 
     /// أي لوح — الدماغ ولا الكاميرا.
     ///
@@ -54,6 +55,12 @@ struct NodeWiFiView: View {
     static func boardLocked(during phase: Phase) -> Bool {
         if case .trying = phase { return true }
         return false
+    }
+
+    /// Whether the board is on `target` by the node as read after the try.
+    static func landed(on target: String, fresh: NodeItem?, board: String) -> Bool {
+        let now = board == "camera" ? fresh?.telemetry?.camSSID : fresh?.telemetry?.ssid
+        return now == target
     }
 
     var body: some View {
@@ -205,11 +212,10 @@ struct NodeWiFiView: View {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
 
-        await onFinished()
+        let fresh = await onFinished()
 
         // النتيجة من النبضة: الاسم اللي بيرجّعه اللوح هو اللي هو عليه فعلًا.
-        let now: String = currentSSID
-        let ok: Bool = now == target
+        let ok = Self.landed(on: target, fresh: fresh, board: board)
         phase = .done(success: ok)
         notice = ok ? "" : lang.s("wifi.rolledBack")
         if ok { dismiss() }

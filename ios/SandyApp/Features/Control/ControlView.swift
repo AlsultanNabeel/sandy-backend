@@ -230,7 +230,10 @@ struct ControlView: View {
                         // عام كان بيخلّي «أي لوح؟» سؤال لازم تجاوبه بكل مرّة.
                         NavigationLink {
                             NodeWiFiView(node: node,
-                                         onFinished: { await store.load(api: state.api) })
+                                         onFinished: {
+                                             await store.load(api: state.api)
+                                             return store.nodes.first { $0.id == node.id }
+                                         })
                                 .environmentObject(state)
                                 .environmentObject(lang)
                         } label: {
