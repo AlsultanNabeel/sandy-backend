@@ -34,7 +34,7 @@ struct NodeWiFiView: View {
     @State private var phase: Phase = .idle
     @State private var notice = ""
 
-    private enum Phase: Equatable {
+    enum Phase: Equatable {
         case idle
         case trying(secondsLeft: Int)
         case done(success: Bool)
@@ -48,6 +48,12 @@ struct NodeWiFiView: View {
     private var currentIP: String {
         board == "camera" ? (node.telemetry?.camIP ?? "")
                           : (node.telemetry?.ip ?? "")
+    }
+
+    /// The board picker is held only while a try runs; after one failed it can change.
+    static func boardLocked(during phase: Phase) -> Bool {
+        if case .trying = phase { return true }
+        return false
     }
 
     var body: some View {
@@ -72,7 +78,7 @@ struct NodeWiFiView: View {
             Text(lang.s("wifi.board.camera")).tag("camera")
         }
         .pickerStyle(.segmented)
-        .disabled(phase != .idle)
+        .disabled(Self.boardLocked(during: phase))
     }
 
     // ── الوضع الحالي ─────────────────────────────────────────────────────────
