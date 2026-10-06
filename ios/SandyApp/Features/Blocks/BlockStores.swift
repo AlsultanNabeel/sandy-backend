@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // The block stores. Each one shows its last copy at once (from disk), applies every change
@@ -96,12 +97,22 @@ final class ItemsStore: LoadableStore {
     private var userId: String?
     private var restored = false
     private var loadTask: Task<Void, Never>?
+    /// Habits: the day `checkedToday` is for. A new day starts with nothing checked.
+    var checksDay = dayFormat.string(from: Date())
+    private var api: APIClient?
+    private var dayWatch: AnyCancellable?
 
     init(list: String, done: Bool = false) {
         self.list = list
         self.done = done
         super.init()
         Self.live.add(self)
+        guard isHabits else { return }
+        // Past midnight, or back in front on another day: yesterday's ticks are not today's.
+        dayWatch = NotificationCenter.default.publisher(for: .NSCalendarDayChanged)
+            .merge(with: NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.startNewDayIfNeeded() } }
     }
 
     var isHabits: Bool { list == "habits" }
@@ -128,6 +139,7 @@ final class ItemsStore: LoadableStore {
 
     /// The last copy from disk, once; a new day starts with nothing checked.
     private func restore(_ api: APIClient) {
+        self.api = api
         guard !restored else { return }
         userId = api.currentUserId
         if let cached = DiskCache.load([ListItem].self, key: Self.key(list, done), userId: userId) {
@@ -136,6 +148,7 @@ final class ItemsStore: LoadableStore {
         }
         if isHabits, let c = DiskCache.load(Checks.self, key: "habits.checks", userId: userId),
            c.day == dayFormat.string(from: Date()) {
+            checksDay = c.day
             checkedToday = c.checked
         }
         restored = true
@@ -178,7 +191,7 @@ final class ItemsStore: LoadableStore {
 
     private func saveChecks() {
         guard restored, isHabits, inItsSession else { return }
-        DiskCache.save(Checks(day: dayFormat.string(from: Date()), checked: checkedToday),
+        DiskCache.save(Checks(day: checksDay, checked: checkedToday),
                        key: "habits.checks", userId: userId)
         reportHabits()
     }
@@ -193,6 +206,7 @@ final class ItemsStore: LoadableStore {
             await Outbox.shared.drain(api)
             guard Outbox.shared.isEmpty else { offline = true; return }
             let edits = localEdits
+            let day = dayFormat.string(from: Date())
             do {
                 let rows = try await api.listItems(list, done: done)
                 let checks = isHabits ? try await todaysCheckIns(api: api) : [:]
@@ -201,7 +215,10 @@ final class ItemsStore: LoadableStore {
                 let hidden = UndoCenter.shared.hidden
                 applyLoad {
                     items = rows.filter { !hidden.contains($0.id) }
-                    if isHabits { checkedToday = checks }
+                    if isHabits {
+                        checksDay = day
+                        checkedToday = checks
+                    }
                 }
                 markLoaded()
                 if !done { SpotlightIndexer.indexItems(list: list, rows) }
@@ -258,6 +275,16 @@ final class ItemsStore: LoadableStore {
             d["repeat"] = draft.repeatRule.map { .string($0) }
         }
         return d.isEmpty ? (old == nil ? nil : [:]) : d
+    }
+
+    /// The day turned since the ticks were made: they are cleared (yesterday's check-in
+    /// stays in the log) and today's are fetched.
+    func startNewDayIfNeeded(now: Date = Date()) {
+        let today = dayFormat.string(from: now)
+        guard isHabits, checksDay != today else { return }
+        checksDay = today
+        checkedToday = [:]
+        if let api { Task { await load(api: api) } }
     }
 
     /// Today's check-ins: habit id → its entry id.
@@ -408,6 +435,8 @@ final class ItemsStore: LoadableStore {
 
     /// Check in today (a `habit` log entry), or undo today's check-in.
     private func checkIn(api: APIClient, _ item: ListItem) {
+        // A tick left from yesterday must not be undone as if it were today's.
+        startNewDayIfNeeded()
         let habitStores = Self.live.all.filter { $0.isHabits && $0.restored }
         if let entryId = checkedToday[item.id] {
             optimistic("blocks.errorSave",

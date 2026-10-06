@@ -1285,6 +1285,10 @@ so folders are organisation only.
   commitment days and the streak (days with nothing due neither count nor break it)
   come from `blocks/habits.py` (up to yesterday, `/api/stats` → `habit_progress`, and
   in Sandy's state block), and the phone adds today when its last habit is ticked.
+  A habits store's ticks belong to their day (`ItemsStore.checksDay`, saved with them): past
+  midnight or back in front on another day they are cleared and today's are fetched
+  (`startNewDayIfNeeded`), and a tap first does the same, so yesterday's check-in is never
+  deleted as if it were today's.
   Shopping: when the user says he bought something on the shopping list (any wording),
   the rules tell the model to tick it by id with list_update (or set `qty` to what is
   left), log an expense if a price was said, and never add what is not on the list.
