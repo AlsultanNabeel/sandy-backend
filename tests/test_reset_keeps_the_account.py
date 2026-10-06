@@ -121,3 +121,41 @@ def test_a_reset_keeps_the_account_and_forgets_the_person():
     assert usage_store.voice_seconds_today(uid) == 30
     assert d.sandy_usage_rl.count_documents({"user_id": uid}) == 1
     appdb.reset()
+
+
+def test_a_reset_keeps_the_robot_paired(monkeypatch):
+    """«صفّر بياناتي» is for starting over, not for losing the robot: the board stays
+    the account's, its parts stay in Control, and its own key stays valid."""
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+    from app.features import device_store, node_store
+    from app.utils.user_profiles import active_user_profile_context
+
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    d = mongomock.MongoClient().db
+    c = create_app(mongo_db=d).test_client()
+    appdb.configure(d)
+    with active_user_profile_context({"chat_id": "u1"}):
+        paired = node_store.pair_node("ABCD1234", label="ساندي")
+        assert paired["ok"]
+        node_id = paired["node_id"]
+        assert device_store.add_device(
+            "neck", "الرقبة", "dimmer",
+            {"kind": "node", "node_id": node_id, "output": "servo"})["ok"]
+    keys_before = list(d.sandy_device_keys.find({}))
+    assert keys_before, "pairing opens the board's key enrolment"
+
+    auth = {"Authorization": f"Bearer {make_token('user', user_id='u1')}"}
+    r = c.post("/api/account/reset", json={"confirm": "RESET"}, headers=auth)
+    assert r.status_code == 200 and r.get_json()["ok"]
+
+    assert node_store.get_node_any_tenant(node_id)["user_id"] == "u1"
+    assert list(d.sandy_device_keys.find({})) == keys_before
+    with active_user_profile_context({"chat_id": "u1"}):
+        assert [n["node_id"] for n in node_store.list_nodes()] == [node_id]
+        assert [x["name"] for x in device_store.list_devices()] == ["neck"]
+        # Pairing it again is still "already ours", not "someone else's".
+        assert node_store.pair_node("ABCD1234")["already"] is True
+    r = c.get("/api/account", headers=auth)
+    assert [n["node_id"] for n in r.get_json()["nodes"]] == [node_id]
+    appdb.reset()
