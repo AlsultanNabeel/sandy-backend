@@ -178,7 +178,7 @@ struct RobotTestView: View {
     @ViewBuilder
     private func deviceRow(_ name: String) -> some View {
         if let device = store.devices.first(where: { $0.name == name }) {
-            DeviceCard(device: device, store: store, onEdit: {})
+            DeviceCard(device: device, store: store)
         }
     }
 

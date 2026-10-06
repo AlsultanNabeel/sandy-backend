@@ -8,7 +8,10 @@ struct DeviceCard: View {
     let device: DeviceItem
     @ObservedObject var store: DevicesStore
     @State private var draftText = ""
-    let onEdit: () -> Void
+    /// Opens the full edit sheet; nil for a robot part, whose menu only renames it.
+    var onEdit: (() -> Void)?
+    @State private var renaming = false
+    @State private var newLabel = ""
 
     /// قيمة شريط الإضاءة المحلّية (نحرّكها بسلاسة قبل ما نرسل عند الإفلات).
     @State private var sliderValue: Double = 0
@@ -34,13 +37,29 @@ struct DeviceCard: View {
         .sandyCard()
         .contextMenu {
             if !store.demo {
-                Button { onEdit() } label: {
-                    Label(lang.s("control.device.edit"), systemImage: "pencil")
+                if let onEdit {
+                    Button { onEdit() } label: {
+                        Label(lang.s("control.device.edit"), systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        confirmDelete = true
+                    } label: { Label(lang.s("control.device.delete"), systemImage: "trash") }
+                } else {
+                    Button {
+                        newLabel = device.label
+                        renaming = true
+                    } label: { Label(lang.s("control.node.rename"), systemImage: "pencil") }
                 }
-                Button(role: .destructive) {
-                    confirmDelete = true
-                } label: { Label(lang.s("control.device.delete"), systemImage: "trash") }
             }
+        }
+        .alert(lang.s("control.node.rename"), isPresented: $renaming) {
+            TextField(device.label, text: $newLabel)
+            Button(lang.s("blocks.save")) {
+                let label = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !label.isEmpty, label != device.label else { return }
+                Task { try? await store.rename(api: state.api, device: device, label: label) }
+            }
+            Button(lang.s("blocks.cancel"), role: .cancel) {}
         }
         .confirmationDialog(lang.s("control.device.deleteConfirm"), isPresented: $confirmDelete,
                             titleVisibility: .visible) {

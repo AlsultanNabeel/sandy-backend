@@ -164,7 +164,7 @@ struct RobotControlView: View {
                 .buttonStyle(.plain)
 
                 ForEach(settings) { device in
-                    DeviceCard(device: device, store: store, onEdit: {})
+                    DeviceCard(device: device, store: store)
                 }
             }
         }
@@ -184,7 +184,7 @@ struct RobotControlView: View {
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondaryText)
 
-                DeviceCard(device: screen, store: store, onEdit: {})
+                DeviceCard(device: screen, store: store)
 
                 // PhotosPicker builds its label off the main actor: resolve first.
                 let pickTitle = lang.s(sendingImage ? "robot.control.image.sending"
@@ -250,7 +250,7 @@ struct RobotControlView: View {
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.secondaryText)
                 ForEach(present) { device in
-                    DeviceCard(device: device, store: store, onEdit: {})
+                    DeviceCard(device: device, store: store)
                 }
             }
         }
@@ -274,7 +274,7 @@ struct RobotControlView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 SectionHeader(title: lang.s("robot.control.other"))
                 ForEach(rest) { device in
-                    DeviceCard(device: device, store: store, onEdit: {})
+                    DeviceCard(device: device, store: store)
                 }
             }
         }

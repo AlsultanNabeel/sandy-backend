@@ -172,6 +172,13 @@ final class DevicesStore: LoadableStore {
         await load(api: api)
     }
 
+    /// A robot part's own name (its menu renames, it does not delete: the next heartbeat
+    /// would bring it back).
+    func rename(api: APIClient, device: DeviceItem, label: String) async throws {
+        try await api.updateDevice(name: device.name, label: label)
+        await load(api: api)
+    }
+
     func rename(api: APIClient, node: NodeItem, label: String) async throws {
         try await api.renameNode(nodeId: node.nodeId, label: label)
         await load(api: api)

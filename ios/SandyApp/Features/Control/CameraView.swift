@@ -16,6 +16,13 @@ import WebKit
 /// وإنت بالبيت بس — الكاميرا خادم صغير ع الشبكة، مش خدمة سحابية. وعنوانها
 /// بيجي مع نبضتها، فما في تخمين ولا مسح شبكة.
 struct CameraView: View {
+    /// The sentence for why no photo came: a known reason has its own, the rest the general one.
+    static func errorKey(_ code: String) -> String {
+        let known = ["camera_init_failed_at_boot", "capture_failed", "upload_failed",
+                     "camera_busy", "camera_offline"]
+        return known.contains(code) ? "robot.control.camera.error.\(code)" : "robot.control.camera.failed"
+    }
+
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     let node: NodeItem
@@ -107,12 +114,7 @@ struct CameraView: View {
         } catch {
             // الكاميرا صارت تقول ليش ما في صورة. سبب معروف بجملته، والباقي
             // بالجملة العامة.
-            let code = (error as? APIError)?.code ?? ""
-            let known = ["camera_init_failed_at_boot", "capture_failed",
-                         "upload_failed", "camera_busy"]
-            notice = known.contains(code)
-                ? lang.s("robot.control.camera.error.\(code)")
-                : lang.s("robot.control.camera.failed")
+            notice = lang.s(Self.errorKey((error as? APIError)?.code ?? ""))
         }
     }
 
