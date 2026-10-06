@@ -62,13 +62,13 @@ final class PhotosStore: LoadableStore {
         }
     }
 
-    /// إضافة صورة (JPEG) ثم إعادة جلب. يرجّع نجاح/فشل لتقرّر الورقة تتقفل.
-    func add(api: APIClient, image: UIImage, name: String, album: String) async -> Bool {
-        guard let data = image.jpegData(compressionQuality: 0.85) else {
-            notify("photos.errorAdd"); return false
-        }
+    /// A photo is sent at most this many pixels on its long side (the server takes 8 MB).
+    static let uploadMaxPixel = 2048
+
+    /// إضافة صورة (JPEG مصغّرة) ثم إعادة جلب. يرجّع نجاح/فشل لتقرّر الورقة تتقفل.
+    func add(api: APIClient, jpeg: Data, name: String, album: String) async -> Bool {
         do {
-            try await api.photosAdd(image: data, name: name, album: album)
+            try await api.photosAdd(image: jpeg, name: name, album: album)
             clearNotice()
             await load(api: api)
             return true

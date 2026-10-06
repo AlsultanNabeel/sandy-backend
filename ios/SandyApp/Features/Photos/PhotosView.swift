@@ -45,8 +45,8 @@ struct PhotosView: View {
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
         .fullScreenCover(isPresented: $showAdd) {
-            PhotoAddSheet { image, name, album in
-                await store.add(api: state.api, image: image, name: name, album: album)
+            PhotoAddSheet { jpeg, name, album in
+                await store.add(api: state.api, jpeg: jpeg, name: name, album: album)
             }
         }
     }
@@ -225,12 +225,14 @@ private struct PhotoThumb: View {
 /// ورقة الإضافة: اختيار صورة من المكتبة + اسم/ألبوم اختياريين. تُرسل عبر closure
 /// غير متزامن يرجّع نجاح/فشل لتقرّر الورقة هل تتقفل.
 private struct PhotoAddSheet: View {
-    let onSubmit: (_ image: UIImage, _ name: String, _ album: String) async -> Bool
+    let onSubmit: (_ jpeg: Data, _ name: String, _ album: String) async -> Bool
 
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var pickedItem: PhotosPickerItem?
+    /// What is sent: the picked photo made at most `PhotosStore.uploadMaxPixel` on its long side.
+    @State private var jpeg: Data?
     @State private var image: UIImage?
     @State private var name = ""
     @State private var album = ""
@@ -292,17 +294,18 @@ private struct PhotoAddSheet: View {
         guard let item else { return }
         Task {
             if let data = try? await item.loadTransferable(type: Data.self),
-               let img = UIImage(data: data) {
-                await MainActor.run { image = img }
+               let small = ImageDownscale.jpeg(from: data, maxPixel: PhotosStore.uploadMaxPixel),
+               let img = UIImage(data: small) {
+                await MainActor.run { jpeg = small; image = img }
             }
         }
     }
 
     private func save() {
-        guard let img = image, !submitting else { return }
+        guard let jpeg, !submitting else { return }
         submitting = true
         Task {
-            let ok = await onSubmit(img,
+            let ok = await onSubmit(jpeg,
                                     name.trimmingCharacters(in: .whitespacesAndNewlines),
                                     album.trimmingCharacters(in: .whitespacesAndNewlines))
             submitting = false
