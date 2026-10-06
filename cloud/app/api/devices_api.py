@@ -307,7 +307,7 @@ def register_devices_api(app, mongo_db=None):
         req_id = start_snapshot(
             node_id,
             settle_ms=settle_ms,
-            flash=str(body.get("flash", "auto")),
+            flash=str(body.get("flash") or ""),
         )
         if not req_id:
             return _bad("not_sent", code=502)

@@ -50,7 +50,35 @@ def test_snapshot_command_shape(monkeypatch):
     assert node == NODE
     assert cmd["cmd"] == "snapshot" and cmd["id"] == req
     assert cmd["settle_ms"] == 3000, "settle is not clamped"
-    assert cmd["flash"] == "auto", "an unknown flash mode reached the board"
+    assert "flash" not in cmd, "an unknown flash mode reached the board"
+
+
+def test_a_photo_with_no_flash_chosen_leaves_the_owners_mode(monkeypatch):
+    """Audit F11: the app's photo sends an empty body and the server put «auto» in every
+    command, which the camera takes over its saved mode: an owner who set the flash off for
+    the night was flashed. Without the field the board keeps its own (cam_control.ino)."""
+    from pathlib import Path
+
+    sent = _capture_sent(monkeypatch)
+    camera_client.start_snapshot(NODE)
+    assert "flash" not in sent[0][1]
+    camera_client.start_snapshot(NODE, flash="off")
+    assert sent[1][1]["flash"] == "off"
+    board = (Path(__file__).resolve().parent.parent
+             / "firmware/vision-core/cam_control.ino").read_text(encoding="utf-8")
+    assert 'parseFlashMode(jsonStr(payload, "flash", ""), g_flashMode)' in board
+
+
+def test_the_app_photo_route_chooses_no_flash(monkeypatch, db):
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+
+    sent = _capture_sent(monkeypatch)
+    db["sandy_nodes"].insert_one({"node_id": NODE, "user_id": "u1", "telemetry": {}})
+    c = create_app(mongo_db=db).test_client()
+    c.post(f"/api/nodes/{NODE}/snapshot", data="{}", content_type="application/json",
+           headers={"Authorization": f"Bearer {make_token('user', 'u1')}"})
+    assert sent and "flash" not in sent[0][1]
 
 
 def test_an_undelivered_command_fails_fast(monkeypatch):

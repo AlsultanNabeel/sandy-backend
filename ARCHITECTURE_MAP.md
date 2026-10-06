@@ -928,6 +928,8 @@ the broker no longer wipes a robot.
 A camera whose last word was its MQTT will (`telemetry.cam_online` false) is refused at
 once (409 `camera_offline`): no photo ticket, no stream switch, no «pending» for ever; the
 app's live view says so, or that nothing arrived in ten seconds, instead of a placeholder.
+A photo's `snapshot` command carries `flash` only when the caller chose one; without it the
+camera uses the mode its owner saved (`cam/flash_mode`), so a flash set off stays off.
 
 `node_id` is derived on the board from `SANDY_PAIR_CODE` in `secrets.h` using the
 **same transform as `node_store.code_to_node_id`** — lowercase, alphanumerics

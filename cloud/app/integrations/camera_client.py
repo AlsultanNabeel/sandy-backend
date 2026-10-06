@@ -114,18 +114,23 @@ def _send(node_id: str, command: Dict[str, Any]) -> bool:
 
 
 def start_snapshot(node_id: str, settle_ms: int = 0,
-                   flash: str = "auto") -> Optional[str]:
-    """Ask for a photo and return a ticket at once; the caller polls fetch_snapshot."""
+                   flash: str = "") -> Optional[str]:
+    """Ask for a photo and return a ticket at once; the caller polls fetch_snapshot.
+
+    `flash` goes only when the caller chose one: without it the camera uses the mode its
+    owner saved (a flash set off for the night stays off)."""
     node_id = (node_id or "").strip()
     if not node_id:
         return None
     req_id = uuid.uuid4().hex[:12]
-    ok = _send(node_id, {
+    command = {
         "cmd": "snapshot",
         "id": req_id,
         "settle_ms": max(0, min(3000, int(settle_ms))),
-        "flash": flash if flash in ("on", "off", "auto") else "auto",
-    })
+    }
+    if flash in ("on", "off", "auto"):
+        command["flash"] = flash
+    ok = _send(node_id, command)
     if not ok:
         logger.info("[camera] %s: command not delivered", node_id)
         return None
