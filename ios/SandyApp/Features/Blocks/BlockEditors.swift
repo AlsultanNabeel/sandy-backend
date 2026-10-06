@@ -11,6 +11,8 @@ struct ItemEditSheet: View {
     let title: String
     let item: ListItem?
     let isHabit: Bool
+    /// The list keeps notes on its rows (tasks): the sheet shows them to edit.
+    let hasNotes: Bool
     let save: (ItemDraft) -> Void
     var delete: (() -> Void)?
 
@@ -23,12 +25,15 @@ struct ItemEditSheet: View {
     @State private var reminds: Bool
     @State private var time: Date
     @State private var confirmDelete = false
+    @State private var notes: String
 
-    init(title: String, item: ListItem?, draft: String = "", isHabit: Bool,
+    init(title: String, item: ListItem?, draft: String = "", isHabit: Bool, hasNotes: Bool = false,
          save: @escaping (ItemDraft) -> Void, delete: (() -> Void)? = nil) {
         self.title = title
         self.item = item
         self.isHabit = isHabit
+        self.hasNotes = hasNotes
+        _notes = State(initialValue: item?.notes ?? "")
         self.save = save
         self.delete = delete
         let date = NotificationManager.parseISOOrDay(item?.due ?? "")
@@ -50,13 +55,18 @@ struct ItemEditSheet: View {
                              days: days.sorted(), time: reminds ? EditTimes.clockText(time) : nil)
         }
         return ItemDraft(text: trimmed, due: timed ? due : nil, important: important,
-                         repeatRule: timed && !repeats.isEmpty ? repeats : nil)
+                         repeatRule: timed && !repeats.isEmpty ? repeats : nil,
+                         notes: hasNotes ? notes : nil)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 TextField(lang.s("blocks.itemPlaceholder"), text: $text, axis: .vertical)
+                if hasNotes {
+                    TextField(lang.s("blocks.notes"), text: $notes, axis: .vertical)
+                        .lineLimit(2...6)
+                }
                 if isHabit {
                     Section(lang.s("blocks.habitDays")) {
                         WeekdayPicker(days: $days)

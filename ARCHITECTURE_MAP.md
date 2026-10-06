@@ -1130,7 +1130,8 @@ so folders are organisation only.
   (`ItemsView`, any list in the kinds table; a habit keeps `data.days` (1 = Sunday … 7) and
   `data.time` and shows on Today only on its days, its streak skipping the others; a task
   with `data.repeat` (daily | weekly | monthly) is never closed — `items.update` moves its
-  `due` on instead; habits check in per day as `habit` log
+  `due` on instead; a task's `data.notes` (where a shared link goes) shows under it, links tappable,
+  and is edited in its sheet; habits check in per day as `habit` log
   entries instead of being "done"), one schedules screen (`SchedulesView`, reminders and
   messages to future self) and the log (`LogView`, the My Life tab, with the on-demand
   summary, search, a thirty-day activity strip and a card per list on top).

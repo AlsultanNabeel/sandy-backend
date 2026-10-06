@@ -114,6 +114,7 @@ struct TodayView: View {
         .sheet(isPresented: $showProfile) { NavigationStack { ProfileView() } }
         .sheet(item: $editingTask) { t in
             ItemEditSheet(title: lang.s("today.task"), item: t, isHabit: false,
+                          hasNotes: ListItem.listsWithNotes.contains(t.list),
                           save: { tasks.update(api: state.api, t, $0) },
                           delete: { tasks.delete(api: state.api, t) })
         }

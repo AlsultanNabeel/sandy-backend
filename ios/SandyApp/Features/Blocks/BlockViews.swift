@@ -88,12 +88,14 @@ struct ItemsView: View {
         .navigationTitle(title)
         .sheet(item: $editing) { item in
             ItemEditSheet(title: title, item: item, isHabit: store.isHabits,
+                          hasNotes: ListItem.listsWithNotes.contains(item.list),
                           save: { store.update(api: state.api, item, $0) },
                           delete: { store.delete(api: state.api, item) })
                 .environmentObject(lang)
         }
         .sheet(isPresented: $addingFull) {
             ItemEditSheet(title: title, item: nil, draft: draft, isHabit: store.isHabits,
+                          hasNotes: ListItem.listsWithNotes.contains(store.list),
                           save: { new in
                               draft = ""
                               Task { await store.add(api: state.api, new) }
@@ -131,6 +133,12 @@ struct ItemsView: View {
                     Label(due, systemImage: item.repeatRule == nil ? "clock" : "repeat")
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.secondaryText)
+                }
+                if let notes = item.notesShown {
+                    Text(notes)
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .lineLimit(2)
                 }
                 if store.isHabits, let plan = HabitPlan.text(item, lang: lang) {
                     Label(plan, systemImage: "calendar")

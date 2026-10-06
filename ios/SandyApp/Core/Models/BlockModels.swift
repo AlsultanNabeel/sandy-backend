@@ -154,6 +154,31 @@ struct ListItem: Codable, Identifiable, Hashable {
     func isScheduled(on date: Date) -> Bool {
         habitDays.isEmpty || habitDays.contains(Calendar.current.component(.weekday, from: date))
     }
+
+    /// Tasks: the notes on it (a shared link is kept here), or nil when there are none.
+    var notes: String? {
+        guard case .string(let n)? = data?["notes"] else { return nil }
+        let trimmed = n.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The notes as shown under the task, with any web address a tappable link.
+    var notesShown: AttributedString? {
+        guard let notes else { return nil }
+        var shown = AttributedString(notes)
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let whole = NSRange(notes.startIndex..., in: notes)
+        for match in detector?.matches(in: notes, range: whole) ?? [] {
+            guard let url = match.url, let range = Range(match.range, in: notes),
+                  let lower = AttributedString.Index(range.lowerBound, within: shown),
+                  let upper = AttributedString.Index(range.upperBound, within: shown) else { continue }
+            shown[lower..<upper].link = url
+        }
+        return shown
+    }
+
+    /// The lists whose rows carry notes (the kinds table declares `notes` as text on tasks).
+    static let listsWithNotes: Set<String> = ["tasks"]
 }
 
 /// What the edit sheet hands back for a list item.
@@ -164,6 +189,17 @@ struct ItemDraft {
     var repeatRule: String?
     var days: [Int] = []
     var time: String?
+    /// Tasks: the notes as edited; nil when the sheet had no notes field (left as they were).
+    var notes: String?
+
+    /// `data` with the draft's notes: set, removed when emptied, kept when not edited.
+    static func notes(_ draft: ItemDraft, into data: [String: JSONValue]) -> [String: JSONValue] {
+        guard let edited = draft.notes else { return data }
+        var out = data
+        let trimmed = edited.trimmingCharacters(in: .whitespacesAndNewlines)
+        out["notes"] = trimmed.isEmpty ? nil : .string(trimmed)
+        return out
+    }
 }
 
 struct ScheduleItem: Codable, Identifiable, Hashable {

@@ -243,7 +243,7 @@ final class ItemsStore: LoadableStore {
     /// The item's data with the draft's repeat (tasks) or days and time (habits), the rest kept.
     private static func data(_ draft: ItemDraft, isHabits: Bool,
                              keeping old: [String: JSONValue]?) -> [String: JSONValue]? {
-        var d = old ?? [:]
+        var d = ItemDraft.notes(draft, into: old ?? [:])
         if isHabits {
             d["days"] = draft.days.isEmpty ? nil : .array(draft.days.map { .number(Double($0)) })
             d["time"] = draft.time.map { .string($0) }
