@@ -49,3 +49,4 @@ def test_an_image_that_does_not_decode_costs_nothing(client, path, body):
     r = c.post(path, json=body, headers=_bearer())
     assert r.status_code == 400
     assert not charged, "a broken upload used up a unit of the day's quota"
+

@@ -1,5 +1,6 @@
 """GET /api/weather?city=<name>: today's conditions via features.weather (the user's home
-city if omitted); a city that answers is kept as the user's home city."""
+city if omitted, 400 `city_required` when there is none); a city that answers is kept as
+the user's home city."""
 
 from __future__ import annotations
 
@@ -26,8 +27,12 @@ def register_weather_api(app, mongo_db=None):
         city = (request.args.get("city") or "").strip()
         uid = str(claims.get("user_id") or "")
 
+        city_now = city or home_city(uid)
+        if not city_now:
+            return jsonify({"error": "city_required",
+                            "message": "اختار مدينتك عشان أجيبلك الطقس."}), 400
         with active_user_profile_context(build_user_profile(claims)):
-            data = get_weather(city or home_city(uid))
+            data = get_weather(city_now)
 
         if not data:
             return jsonify({"error": "weather_unavailable"}), 502

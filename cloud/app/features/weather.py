@@ -28,23 +28,17 @@ def _fetch_weather(url: str) -> Dict[str, Any]:
     return response.json()
 
 
-DEFAULT_CITY = "October City"
-
-
 def home_city(user_id: Optional[str]) -> str:
-    """Where «شو الطقس؟» is asked about: the city the app last showed weather for, else
-    the city of the phone's time zone («Asia/Amman» → Amman), else the default."""
+    """Where «شو الطقس؟» is asked about: the city the app last showed weather for, or ""
+    when there is none (then she asks; there is no default or guessed city)."""
     from app.features import users_store
-    from app.utils.time import zone_for
 
-    saved = str((users_store.get_user(user_id) or {}).get("city") or "").strip() if user_id else ""
-    if saved:
-        return saved
-    zone = zone_for(user_id).key
-    return zone.rsplit("/", 1)[-1].replace("_", " ") if "/" in zone else DEFAULT_CITY
+    if not user_id:
+        return ""
+    return str((users_store.get_user(user_id) or {}).get("city") or "").strip()
 
 
-def get_weather(city: str = DEFAULT_CITY, **kwargs) -> Optional[Dict[str, Any]]:
+def get_weather(city: str, **kwargs) -> Optional[Dict[str, Any]]:
     key = city.strip().lower()
     with _cache_lock:
         hit = _cache.get(key)
@@ -58,7 +52,7 @@ def get_weather(city: str = DEFAULT_CITY, **kwargs) -> Optional[Dict[str, Any]]:
 
 
 def _get_weather_uncached(city: str) -> Optional[Dict[str, Any]]:
-    url = f"https://wttr.in/{quote(city)}+Egypt?format=j1"
+    url = f"https://wttr.in/{quote(city)}?format=j1"
 
     last_error: Exception = Exception("unknown")
     for attempt in range(1, _RETRY_ATTEMPTS + 1):

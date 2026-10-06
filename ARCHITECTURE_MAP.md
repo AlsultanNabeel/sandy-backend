@@ -187,7 +187,7 @@ kind needs no tool change.
 | `scene_apply` | `scene_store.apply_scene` (keeps the devices' state first, actuates, schedules the reverts, §2.12) plus the room-node vocabulary fallback |
 | `room_restore` | `scene_store.restore_room`: the devices the last scene changed get the state kept before it (`device_store.before_scene`; IR and screen text are not replayed), its timers are cancelled; once per scene |
 | `web_search` | `features/research.web_answer`: Exa snippets summarised in one model call, with sources |
-| `weather` | `features/weather`; with no city, `home_city`: the city the app last showed weather for (`/api/weather` keeps it on `sandy_users.city`), else the city of the phone's zone, else the default |
+| `weather` | `features/weather` (the city as itself, nothing appended); with no city, `home_city`: the city the app last showed weather for (`/api/weather` keeps it on `sandy_users.city`); with none saved she asks which city (no default, no guess from the zone; the route answers 400 `city_required`) |
 | `image` | `vision.generate_image_with_azure` on the model's own prompt (FLUX, then Azure DALL-E); one a turn, a second is refused (so it never runs side by side) |
 | `undo_last` | takes back the previous reply's journaled block writes: added rows go, edited, deleted and cancelled ones come back; devices are not undone |
 

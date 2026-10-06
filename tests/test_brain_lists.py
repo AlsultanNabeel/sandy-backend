@@ -117,10 +117,22 @@ def test_weather_with_no_city_is_where_they_live(tenant, monkeypatch):
     monkeypatch.setattr(weather, "format_weather_for_prompt", lambda d: "مشمس")
     tenant["sandy_users"].insert_one({"_id": "userA", "city": "Ramallah"})
     assert _run("weather")["ok"] and asked == ["Ramallah"]
+    # No saved city: no guessed or default one (it was Egypt's for everyone); she asks.
     tenant["sandy_users"].update_one({"_id": "userA"}, {"$unset": {"city": ""}})
     T.note_zone("userA", "Asia/Amman")
-    _run("weather")
-    assert asked[-1] == "Amman"
+    out = _run("weather")
+    assert not out["ok"] and "مدينة" in out["reply"]
+    assert asked == ["Ramallah"]
+
+
+def test_a_city_is_looked_up_as_itself_not_in_egypt(monkeypatch):
+    from app.features import weather
+
+    urls = []
+    monkeypatch.setattr(weather, "_fetch_weather", lambda url: urls.append(url) or {})
+    weather._cache.clear()
+    weather.get_weather("Amman")
+    assert urls and "Egypt" not in urls[0] and "Amman" in urls[0]
 
 
 def test_an_alarm_reminder_is_marked_and_can_be_unmarked(tenant):
