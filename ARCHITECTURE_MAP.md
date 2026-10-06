@@ -1344,8 +1344,8 @@ Written today, and what reads it:
   `sandy_usage_rl`.
 - **Conversation** — `sandy_stm`, `sandy_pending_state`, `sandy_prompt_cache`,
   `sandy_cache_stamps`, `conversations` (the app's chat threads, filtered by
-  `user_id` by hand in `conversations_api.py`) and `agent_turns` (the send ledger,
-  TTL 10 minutes).
+  `user_id` by hand in `conversations_api.py`), `agent_turns` (the send ledger,
+  TTL 10 minutes) and `turn_stops` (a stopped reply, `_id` `<user>:<thread>`, TTL a day).
 - **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
   `sandy_scenes`, `sandy_voiceprints`, `sandy_voice_enroll`, `sandy_firmware`, `sandy_firmware_chunks`,
   `node_pair_challenges`, `cam_upload_nonces`, `camera_inbox`.

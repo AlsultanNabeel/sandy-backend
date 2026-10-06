@@ -99,3 +99,40 @@ def test_an_abandoned_voice_learning_expires_on_its_own():
            if ix.get("key") == [("until", 1)]]
     assert ttl and ttl[0].get("expireAfterSeconds") == 0
     appdb.reset()
+
+
+def _stopped(d):
+    from app.brain import stops
+
+    stops.request("u1", "c1", "نص رد ما خلص")
+    stops.request("u1", "c2", "رد تاني")
+    stops.request("u12", "c1", "حساب تاني بيبلّش بنفس الحروف")
+
+
+def test_stopped_replies_go_with_the_account():
+    """A stop that came after its turn ended is never taken, and it holds reply text."""
+    d = _db()
+    _stopped(d)
+    assert account_delete.delete_account("u1")["ok"]
+    assert d.turn_stops.count_documents({"_id": {"$regex": "^u1:"}}) == 0
+    assert d.turn_stops.find_one({"_id": "u12:c1"}) is not None
+    appdb.reset()
+
+
+def test_stopped_replies_go_with_a_reset():
+    d = _db()
+    _stopped(d)
+    assert account_delete.wipe_account_data("u1")["ok"]
+    assert d.turn_stops.count_documents({"_id": {"$regex": "^u1:"}}) == 0
+    appdb.reset()
+
+
+def test_a_stop_nobody_took_expires():
+    from app import bootstrap
+
+    d = _db()
+    bootstrap.ensure_indexes()
+    ttl = [ix for ix in d.turn_stops.index_information().values()
+           if ix.get("key") == [("at", 1)]]
+    assert ttl and ttl[0].get("expireAfterSeconds")
+    appdb.reset()

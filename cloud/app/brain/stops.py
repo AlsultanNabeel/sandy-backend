@@ -2,7 +2,8 @@
 
 The running turn checks between its steps and runs no further tool once stopped, and
 Sandy's memory of the thread keeps only what was shown, marked as cut, so she knows
-the user did not get the rest. One doc per thread in `turn_stops`, taken by the turn.
+the user did not get the rest. One doc per thread in `turn_stops`, taken by the turn;
+one never taken expires after a day (TTL on `at`) and goes with the account.
 """
 
 from __future__ import annotations

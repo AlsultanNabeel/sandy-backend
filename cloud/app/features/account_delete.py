@@ -80,6 +80,12 @@ _BY_ID: List[str] = [
     "sandy_voice_enroll",
 ]
 
+# Keyed by `_id` = "<user>:<thread>", with no user field.
+_BY_ID_PREFIX: List[str] = [
+    # A reply stopped midway, with the text shown so far.
+    "turn_stops",
+]
+
 # STM docs are keyed "<thread>:<user>" and also carry user_id; both are cleared.
 _STM = "sandy_stm"
 
@@ -143,6 +149,15 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     for name in _BY_ID:
         try:
             r = db[name].delete_many({"_id": {"$in": [str(f) for f in forms]}})
+            if r.deleted_count:
+                removed[name] = r.deleted_count
+        except PyMongoError as exc:
+            logger.warning("[erase] %s failed for %s: %s", name, user_id, exc)
+            removed[name] = -1
+
+    for name in _BY_ID_PREFIX:
+        try:
+            r = db[name].delete_many({"_id": {"$regex": f"^{re.escape(user_id)}:"}})
             if r.deleted_count:
                 removed[name] = r.deleted_count
         except PyMongoError as exc:

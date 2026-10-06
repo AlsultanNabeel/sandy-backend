@@ -133,6 +133,11 @@ def ensure_indexes() -> None:
         ("sandy_voice_enroll.until_ttl", lambda: mongo_db.sandy_voice_enroll.create_index(
             "until", expireAfterSeconds=0, background=True
         )),
+        # A stop no turn took (it came after the reply ended) holds reply text; a day is
+        # far past the ten minutes one is honoured for.
+        ("turn_stops.at_ttl", lambda: mongo_db.turn_stops.create_index(
+            "at", expireAfterSeconds=60 * 60 * 24, background=True
+        )),
         # A download reads a release's chunks in order.
         ("sandy_firmware_chunks.version+n", lambda: mongo_db.sandy_firmware_chunks.create_index(
             [("version", 1), ("n", 1)], background=True
