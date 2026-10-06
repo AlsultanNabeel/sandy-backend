@@ -1,4 +1,4 @@
-"""Gemini TTS (voice Aoede, style from mood) → 22.05 kHz mono WAV."""
+"""Gemini TTS (voice Aoede, style from mood) → mono WAV at the rate Gemini made it (24 kHz)."""
 
 import base64
 import os
@@ -37,7 +37,10 @@ def _get_genai_client(api_key: str):
         logger.info("[Gemini TTS] client initialised")
     return _genai_client
 
-_SAMPLE_RATE = 22050
+# Gemini's speech is 24 kHz 16-bit PCM; the part's mime type says so (`rate=`), and that
+# is what the WAV must be labelled with, or it plays slow and low.
+_DEFAULT_RATE = 24000
+_RATE_RE = re.compile(r"rate=(\d+)")
 _CHANNELS = 1
 _SAMPLE_WIDTH = 2  # 16-bit / LINEAR16
 
@@ -58,12 +61,17 @@ _MOOD_INSTRUCTIONS: dict = {
 }
 
 
-def _pcm_to_wav(pcm_bytes: bytes) -> bytes:
+def _rate_of(mime: str) -> int:
+    m = _RATE_RE.search(mime or "")
+    return int(m.group(1)) if m else _DEFAULT_RATE
+
+
+def _pcm_to_wav(pcm_bytes: bytes, rate: int) -> bytes:
     buf = BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(_CHANNELS)
         wf.setsampwidth(_SAMPLE_WIDTH)
-        wf.setframerate(_SAMPLE_RATE)
+        wf.setframerate(rate)
         wf.writeframes(pcm_bytes)
     return buf.getvalue()
 
@@ -100,14 +108,14 @@ def _do_synthesize(text: str, mood: str, api_key: str) -> Optional[bytes]:
     parts = getattr(content, "parts", None) or []
     if not parts:
         return None
-    raw = getattr(parts[0], "inline_data", None)
-    raw = getattr(raw, "data", None) if raw else None
+    inline = getattr(parts[0], "inline_data", None)
+    raw = getattr(inline, "data", None) if inline else None
     if not raw:
         return None
     if isinstance(raw, str):
         raw = base64.b64decode(raw)
 
-    return _pcm_to_wav(raw)
+    return _pcm_to_wav(raw, _rate_of(str(getattr(inline, "mime_type", "") or "")))
 
 
 # Emoji belong in the chat bubble, not in the voice reading it.
