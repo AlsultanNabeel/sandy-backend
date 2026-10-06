@@ -37,7 +37,9 @@ MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
 # A PDF is read page by page until there is enough text, and never past this many pages.
 MAX_PDF_PAGES = 300
 
-IMAGE_TYPES = {"image/jpeg", "image/png", "image/heic", "image/webp", "image/gif"}
+# What the model reads as an image. Not HEIC: the app sends JPEG, and a HEIC handed on
+# would reach a model that cannot open it.
+IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 TEXT_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json", "text/html"}
 PDF = "application/pdf"
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

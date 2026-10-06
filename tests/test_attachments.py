@@ -192,3 +192,9 @@ def test_an_upload_counts_against_the_day(c, monkeypatch):
     monkeypatch.setattr(usage_store, "check_and_record", lambda *a, **k: "daily_quota_exceeded")
     r = _up(c, b"\x89PNG fake", "p.png", "image/png")
     assert r.status_code == 429
+
+
+def test_an_iphone_photo_format_the_model_cannot_read_is_refused(c):
+    """HEIC used to be stored and then handed to the model, which cannot read it."""
+    r = _up(c, b"\x00\x00\x00\x18ftypheic", "IMG_1.heic", "image/heic")
+    assert r.status_code == 415 and r.get_json()["message"]
