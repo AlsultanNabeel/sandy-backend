@@ -204,7 +204,8 @@ reads only the opening of the reply: yes/no words, the held action's own verb
 («احذفيها»، «الغيه» for a cancel), filler («متأكد»، «يا ساندي»), and phrases like
 «مش مشكلة». «خلص» next to a yes or the verb is «go on», alone it is «drop it»; a
 negated verb («لا تحذفها») is a no; cancellation wins a mixed reply; a yes followed by
-«بس» is not a yes. Whatever follows the opening is a new request (`rest`). `pick`
+«بس» is not a yes. Whatever follows the opening is a new request (`rest`), and the yes does not cover it:
+`run_held` marks the turn confirmed only while the held steps run, so a delete in the rest asks again. `pick`
 reads several («الأولى والتالتة»), a bare number word is that one («اتنين» is the
 second), «الاتنين»/«كلهم» are all. On voice there is no text turn to read, so the
 `confirm(answer)` tool passes the user's words to the same resolver; holds wait on

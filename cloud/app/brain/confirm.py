@@ -143,10 +143,14 @@ def answer(text: str, held: Optional[Dict[str, Any]] = None) -> str:
 
 
 def run_held(pending: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    """Runs every held action; ok only when all of them were."""
+    """Runs every held action; ok only when all of them were. The yes covers these steps
+    only: whatever the same message asks next («اه واحذفي كمان…») asks again."""
     ctx.confirmed = True
-    results = [tools.execute(s["tool"], s.get("args") or {}, ctx)
-               for s in pending.get("steps") or []]
+    try:
+        results = [tools.execute(s["tool"], s.get("args") or {}, ctx)
+                   for s in pending.get("steps") or []]
+    finally:
+        ctx.confirmed = False
     out: Dict[str, Any] = {"ok": bool(results) and all(r.get("ok") for r in results),
                            "reply": "\n".join(r["reply"] for r in results if r.get("reply"))}
     if any(r.get("broke") for r in results):
