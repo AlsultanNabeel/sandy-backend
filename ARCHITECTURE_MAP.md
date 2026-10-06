@@ -651,6 +651,13 @@ keeps a moment after speaking. The names are the firmware's `MOOD_MAP`
 `end_turn` face for `AFTER_FACE_MS` (2.5 s) before listening again; a barge-in drops
 both. Firmware that predates it ignores both frames.
 
+**A call ends by itself on the server too** (`session._call_watchdog`), for the robot and the
+app alike: `call_idle` after `SANDY_CALL_IDLE_S` (90 s) with neither the user's voice (a pitched
+frame, so a TV or a fan does not count) nor hers, and `call_time_limit` at `SANDY_CALL_MAX_MIN`
+(20 min). The deadline is set once per call, so a GoAway reconnect neither resets nor extends it;
+the reason goes to the device as `{"type":"error","msg":…}` (the app shows a sentence,
+`GeminiLiveManager.errorLine`; the board logs it and stays unlocked).
+
 ### 3.1 The handshake contract
 
 Firmware sends, on connect:

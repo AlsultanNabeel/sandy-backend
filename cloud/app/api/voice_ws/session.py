@@ -25,6 +25,8 @@ from app.api.voice_ws._config import (
     _APP_PREFIX_MS,
     _APP_SILENCE_MS,
     _APP_TURNS_BY_GEMINI,
+    _CALL_IDLE_S,
+    _CALL_MAX_S,
     _VAD_SILENCE_MS,
     _BACKLOG_FRAMES,
     _BARGE_MIN_MS,
@@ -635,6 +637,9 @@ async def _live_session(ws, remote: str) -> None:
         # The session outlives the connection: on GoAway we reconnect with the resumption handle.
         resume_handle: Optional[str] = None
         live_state: Dict[str, Any] = {"resume": None, "goaway": False}
+        # One clock for the whole call, reconnects included (`_call_watchdog`).
+        live_state["call_started"] = time.monotonic()
+        live_state["call_deadline"] = live_state["call_started"] + _CALL_MAX_S
         client = genai.Client(api_key=GEMINI_API_KEY)
 
         while True:
@@ -676,11 +681,18 @@ async def _live_session(ws, remote: str) -> None:
                                     live_state=live_state))
                 t_out = asyncio.create_task(
                     _live_to_device(ws, session, recent, live_state, gate_on))
+                t_end = asyncio.create_task(_call_watchdog(live_state))
 
                 done, pending = await asyncio.wait(
-                    [t_in, t_out],
+                    [t_in, t_out, t_end],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                if t_end in done:
+                    # Over: tell the device why, and nothing below waits for a reply.
+                    _send_json(ws, {"type": "error", "msg": live_state["ended"]})
+                elif t_end in pending:
+                    pending.discard(t_end)
+                    t_end.cancel()
 
                 # When the robot stops sending (the normal end of a question), let
                 # the reply finish, up to a bounded wait. When Gemini's side ends,
@@ -706,6 +718,9 @@ async def _live_session(ws, remote: str) -> None:
                         logging.getLogger(__name__).debug("ignoring non-critical error", exc_info=True)
                 # Name which side ended and why (otherwise only the other task's CancelledError shows).
                 for t in done:
+                    if t is t_end:
+                        logger.info("[voice_ws] call ended: %s", live_state.get("ended"))
+                        continue
                     side = "device→live" if t is t_in else "live→device"
                     if t.cancelled():
                         logger.info("[voice_ws] %s cancelled", side)
@@ -724,7 +739,7 @@ async def _live_session(ws, remote: str) -> None:
 
             # Reconnect only if Gemini asked, the device is still there, and we have a handle.
             resume_handle = live_state.get("resume") or resume_handle
-            if not (live_state.get("goaway") and resume_handle
+            if live_state.get("ended") or not (live_state.get("goaway") and resume_handle
                     and reader is not None and not reader.finished):
                 break
             live_state["goaway"] = False
@@ -740,6 +755,26 @@ async def _live_session(ws, remote: str) -> None:
         if _held:
             from app.utils import prompt_prewarm
             prompt_prewarm.release(_held)
+
+
+async def _call_watchdog(state: Dict[str, Any]) -> None:
+    """Return once the call is over, with the reason in `state["ended"]`:
+    `call_time_limit` at `state["call_deadline"]`, or `call_idle` after `_CALL_IDLE_S` with
+    neither the user's voice (a pitched frame, so a TV's hum or a fan does not count) nor
+    hers. One per bridge; the deadline and the last voices live in `state`, so a GoAway
+    reconnect neither resets nor extends them."""
+    while True:
+        now = time.monotonic()
+        if now >= float(state["call_deadline"]):
+            state["ended"] = "call_time_limit"
+            return
+        heard = max(float(state.get("call_started") or now),
+                    float(state.get("user_voice_at") or 0),
+                    float(state.get("her_voice_at") or 0))
+        if now - heard >= _CALL_IDLE_S:
+            state["ended"] = "call_idle"
+            return
+        await asyncio.sleep(min(1.0, max(0.05, _CALL_IDLE_S / 10)))
 
 
 # الردّ بيوصل قطع متلاحقة، فثانيتين بلا ولا قطعة معناها المولّد وقف.
@@ -857,6 +892,8 @@ async def _device_to_live_auto(reader: "_DeviceReader", session,
             room = min(min(r for _, r in window), _VAD_ROOM_MAX)
             if rms >= max(room * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR):
                 state["turn_closed_at"] = time.monotonic()
+                if _voiced(samples):
+                    state["user_voice_at"] = state["turn_closed_at"]
 
         recent.add(chunk)
         for i in range(0, len(chunk), _CHUNK_BYTES):
@@ -1036,6 +1073,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             # Nothing is speech until the room is known (the board's preroll is the room).
             is_speech = (len(window) >= _VAD_FLOOR_MIN_FRAMES
                          and rms >= threshold)
+            if is_speech and _voiced(samples):
+                state["user_voice_at"] = time.monotonic()   # the call is not idle
             loudest = max(loudest, rms)
             # عدّ الصمت بس لحد أول فتح للبوابة.
             if is_speech or frames:
@@ -1240,6 +1279,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         logger.info("[voice_ws] first reply audio → device")
                     _seen["audio_out"] += len(part.inline_data.data)
                     live_state["last_out_at"] = time.monotonic()
+                    live_state["her_voice_at"] = live_state["last_out_at"]
                     _turn_audio["n"] += len(part.inline_data.data)
                     # `wait` (nothing to send) + `send` vs the audio's duration
                     # shows whether stutter is Gemini, this dyno, or the link.

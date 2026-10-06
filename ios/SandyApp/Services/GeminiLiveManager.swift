@@ -159,10 +159,19 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         case "working":
             working = true
         case "error":
-            errorText = (m["msg"] as? String) ?? "خطأ"
+            errorText = Self.errorLine(m["msg"] as? String)
         default:
             break
         }
+    }
+
+    /// What the call screen says for an error frame: the server's own endings of a call read
+    /// as a sentence; anything else is shown as sent.
+    static func errorLine(_ code: String?) -> String {
+        let lines = ["call_idle": "sandy.callIdle", "call_time_limit": "sandy.callTimeLimit"]
+        guard let code else { return "خطأ" }
+        guard let key = lines[code] else { return code }
+        return LanguageManager.shared.s(key)
     }
 
     static func wsURL(from baseURL: String) -> URL? {

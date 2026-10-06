@@ -12,12 +12,16 @@ enum L10nSandy {
             "mode.search": .text("بحث"),
             "mode.images": .text("صور"),
             "photos":      .text("الألبوم"),
+            "callIdle":      .text("سكّرت المكالمة لأنه ما حدا حكى من فترة."),
+            "callTimeLimit": .text("المكالمة وصلت أقصى مدة إلها. افتح وحدة جديدة لو بدك نكمّل."),
         ],
         en: [
             "mode.chat":   .text("Chat"),
             "mode.search": .text("Search"),
             "mode.images": .text("Images"),
             "photos":      .text("Album"),
+            "callIdle":      .text("The call ended because nobody spoke for a while."),
+            "callTimeLimit": .text("The call reached its maximum length. Start a new one to carry on."),
         ]
     )
 }
