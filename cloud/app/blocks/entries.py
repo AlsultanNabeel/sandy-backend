@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from app.blocks import _base
 from app.blocks.kinds import LOG, validate
@@ -131,6 +131,21 @@ def list_entries(kind: Optional[str] = None, *, since: Optional[datetime] = None
         query.update(_base.text_filter(text))
     cursor = coll.find(query, {"embedding": 0}).sort("at", -1).limit(_base.clamp(limit))
     return [_base.out(d) for d in cursor]
+
+
+def each_in_range(kind: str, *, since: Optional[datetime] = None,
+                  until: Optional[datetime] = None, mongo_db=None) -> Iterator[Dict[str, Any]]:
+    """Every entry of a kind in the range, newest first, with no row cap: for totals that
+    must cover the whole period (a capped read summed only the part that fit)."""
+    coll = _base.coll(_base.ENTRIES, mongo_db)
+    if coll is None:
+        return
+    query: Dict[str, Any] = {"kind": kind}
+    rng = _base.range_filter(since, until)
+    if rng:
+        query["at"] = rng
+    for d in coll.find(query, {"embedding": 0}).sort("at", -1):
+        yield _base.out(d)
 
 
 def stats(days: int = 30, *, now: Optional[datetime] = None, mongo_db=None) -> Dict[str, Any]:

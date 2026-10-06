@@ -7,8 +7,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from brain_fakes import A, brain_db  # noqa: F401
 
-from app.blocks import entries, items
+from app.blocks import items
 from app.brain import tools
+from app.brain import when as W
 from app.brain.ctx import TurnCtx
 from app.utils import time as T
 from app.utils.user_profiles import active_user_profile_context
@@ -36,3 +37,27 @@ def test_today_s_summary_sees_today_s_tasks_after_hundreds_of_old_ones(tenant):
     texts = [r.get("text") for r in _run("summarize", period="today")["rows"]]
     assert "اتصل بالبنك" in texts
     assert not any(t and t.startswith("قديم") for t in texts)
+
+
+def _expenses(tenant, n, *, days_back=300):
+    now = datetime.now(timezone.utc)
+    tenant["sandy_entries"].insert_many([
+        {"_id": f"e{i}", "user_id": "userA", "kind": "expense", "text": "قهوة",
+         "data": {"amount": 1, "category": "food"},
+         "at": now - timedelta(days=days_back * i / n, minutes=1)}
+        for i in range(n)])
+
+
+def test_a_year_of_expenses_is_totalled_whole(tenant):
+    _expenses(tenant, 600)
+    since = (datetime.now(timezone.utc) - timedelta(days=330)).date().isoformat()
+    spent = _run("recall", kind="expense", since=since)["spending"]
+    assert spent["total"] == 600 and spent["count"] == 600
+
+
+def test_a_year_s_summary_totals_every_expense(tenant):
+    start = W.period_range("year")[0]
+    days_in = (datetime.now(timezone.utc) - start).days
+    _expenses(tenant, 600, days_back=max(1, days_in - 1))
+    spent = _run("summarize", period="year")["spending"]
+    assert spent["total"] == 600 and spent["count"] == 600

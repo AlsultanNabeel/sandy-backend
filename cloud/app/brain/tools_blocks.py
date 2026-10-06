@@ -246,10 +246,21 @@ def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if narrowed or not (kind or list_name):
         rows = narrowed
     out = {"ok": True, "count": len(rows), "rows": rows[:MAX_ROWS]}
-    spent = _spent(rows)
-    if spent:
-        out["spending"] = spent
+    if not list_name and kind in (None, "expense"):
+        spent = _period_spending(since, until, lambda r: _matches_query(r, query),
+                                 keep_all=bool(kind))
+        if spent:
+            out["spending"] = spent
     return out
+
+
+def _period_spending(since, until, keep, *, keep_all: bool = False) -> Optional[Dict[str, Any]]:
+    """The spending of every expense in the range, read whole (not the capped rows shown),
+    narrowed by `keep`; with `keep_all`, a filter that matches none leaves them all (the
+    same rule `recall` uses for its rows)."""
+    rows = [_entry_row(e) for e in entries.each_in_range("expense", since=since, until=until)]
+    kept = [r for r in rows if keep(r)]
+    return _spent(kept if (kept or not keep_all) else rows)
 
 
 def _spent(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -294,10 +305,11 @@ def summarize(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     rows += [_schedule_row(s) for s in schedules.list_schedules(since=start, until=end,
                                                                 limit=SUMMARY_ROWS)
              if s.get("kind") in USER_SCHEDULES]
-    if focus:
-        rows = [r for r in rows if r.get("kind") == focus or r.get("list") == focus
-                or _matches_query(r, focus)]
-    spent = _spent(rows)
+    def _focused(r: Dict[str, Any]) -> bool:
+        return not focus or (r.get("kind") == focus or r.get("list") == focus
+                             or _matches_query(r, focus))
+    rows = [r for r in rows if _focused(r)]
+    spent = _period_spending(start, end, _focused)
     return {"ok": True, "period": period, "from": W.iso(start), "to": W.iso(end),
             "count": len(rows), "rows": rows[:SUMMARY_ROWS], **({"spending": spent} if spent else {}),
             "instruction": "لخّصي هالصفوف للمستخدم بجمل قصيرة."}
