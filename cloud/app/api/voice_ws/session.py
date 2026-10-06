@@ -1339,16 +1339,16 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             if user_text and sandy_text and not _HAS_LETTERS.search(user_text):
                 # التفريغ رجع نقط: ما منحفظ النقط كأنها سؤاله.
                 logger.warning("[voice_ws] the transcript of the question came "
-                               "back with no words (%r) — saved as unheard",
-                               user_text[:40])
+                               "back with no words (%d chars) — saved as unheard",
+                               len(user_text))
                 user_text = _UNHEARD_QUESTION
 
             # Save the turn for shared memory; never re-inject history into the live
             # session (native audio answers injected turns). heard vs replied_audio
             # separates "heard but silent" from "never heard".
-            logger.info("[voice_ws] turn done: heard=%r replied=%d chars, "
+            logger.info("[voice_ws] turn done: heard=%d replied=%d chars, "
                         "%d bytes of audio (%.1fs)",
-                        user_text[:120], len(sandy_text), _turn_audio["n"],
+                        len(user_text), len(sandy_text), _turn_audio["n"],
                         _turn_audio["n"] / 2 / 24000)
             _turn_audio["n"] = 0
             if user_text and sandy_text:
