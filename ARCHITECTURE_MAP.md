@@ -1097,6 +1097,7 @@ so folders are organisation only.
   token through a `TokenStore` (the shared Keychain by default) and mirrors its address for the
   extensions only when `mirrorsShared`; tests pass an in-memory store and `false`
   (`SandyAppTests` `TestClient.make()`), so running them never signs the app out.
+  `APIClient.session` is a `var` only so tests can answer through `StubNetwork` (no server).
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
 - `Core/Stores/LoadableStore.swift` — the shared load/error/empty state machine.
 - `Features/Blocks/` — **the screens for the blocks (§2.12)**: one generic list screen

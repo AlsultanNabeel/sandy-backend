@@ -17,6 +17,14 @@ folder as a synchronized group. Open the project and press `⌘U`.
   decode behind `APIClient.currentUserId` (valid id, missing token, malformed
   token, no `user_id`, unpadded base64URL).
 
+## The network in tests
+
+`StubNetwork.install { request in (status, body) }` swaps `APIClient.session` for one
+that answers through `StubURLProtocol`, and records what was sent
+(`StubNetwork.requests`, bodies read whole). Call `StubNetwork.uninstall()` in
+`tearDown`. Build clients with `TestClient.make()`: its token lives in memory and the
+address is not mirrored for the extensions, so a test never signs the app out.
+
 ## Growing it
 
 The store layer currently depends on the concrete `APIClient`. As stores move to

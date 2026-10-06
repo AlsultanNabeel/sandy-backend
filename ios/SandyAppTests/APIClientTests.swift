@@ -79,3 +79,20 @@ final class APIClientSideEffectTests: XCTestCase {
         XCTAssertEqual(defaults?.string(forKey: SharedAuth.baseURLKey), addressBefore)
     }
 }
+
+/// The stub network the store and decoder tests stand on.
+final class StubNetworkTests: XCTestCase {
+    override func tearDown() { StubNetwork.uninstall() }
+
+    func testARequestIsAnsweredByTheStubWithTheTokenAndZoneOnIt() async throws {
+        StubNetwork.install(json: #"{"ok": true}"#)
+        let client = TestClient.make()
+        client.token = "t.o.k"
+        let data = try await client.rawGet("/api/ping")
+        XCTAssertEqual(String(data: data, encoding: .utf8), #"{"ok": true}"#)
+        let sent = try XCTUnwrap(StubNetwork.requests.first)
+        XCTAssertEqual(sent.url?.absoluteString, "https://example.test/api/ping")
+        XCTAssertEqual(sent.value(forHTTPHeaderField: "Authorization"), "Bearer t.o.k")
+        XCTAssertNotNil(sent.value(forHTTPHeaderField: "X-Timezone"))
+    }
+}

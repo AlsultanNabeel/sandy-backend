@@ -4,7 +4,8 @@ import Foundation
 final class APIClient: APIClientProtocol {
     /// `waitsForConnectivity` OFF on purpose: with it on, timeouts are ignored offline (endless
     /// spinner); `sendWithRetry` handles handover. Not private: the extensions send through it.
-    static let session: URLSession = URLSession(configuration: .default)
+    /// A `var` only so the app tests can route it through a stub (`SandyAppTests/StubNetwork`).
+    static var session: URLSession = URLSession(configuration: .default)
 
     /// Retries for idempotent methods only: retrying a POST could create a task twice.
     static let idempotentMethods: Set<String> = ["GET", "HEAD"]
