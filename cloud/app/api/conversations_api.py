@@ -181,19 +181,11 @@ def finish_turn(mongo_db, uid: str, cmid: str, result: Optional[dict] = None,
         return
     coll = _turns(mongo_db, uid)
     fields = {"status": "error"} if error else {"status": "done", "result": result or {}}
+    # The result holds an image only as an attachment reference, so it is always small.
     try:
         coll.update_one({"client_msg_id": cmid}, {"$set": fields})
     except Exception:  # noqa: BLE001
-        if error or "image_url" not in (result or {}):
-            logger.warning("[turns] finish failed", exc_info=True)
-            return
-        # A big generated image can exceed Mongo's cap; the text alone still helps a retry.
-        try:
-            slim = {k: v for k, v in (result or {}).items() if k != "image_url"}
-            coll.update_one({"client_msg_id": cmid},
-                            {"$set": {"status": "done", "result": slim}})
-        except Exception:  # noqa: BLE001
-            logger.warning("[turns] finish failed", exc_info=True)
+        logger.warning("[turns] finish failed", exc_info=True)
 
 
 def release_turn(mongo_db, uid: str, cmid: str) -> None:
