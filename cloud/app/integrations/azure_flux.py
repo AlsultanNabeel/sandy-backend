@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_S = 60.0
 
 
+class FluxTimedOut(Exception):
+    """FLUX did not answer in time. It may still be drawing, and billing: the caller must
+    not start a second provider on top (two minutes is past the worker's limit)."""
+
+
 def _azure_config():
     return {
         "endpoint": os.getenv("AZURE_FLUX_ENDPOINT", "https://sandy-ai-azure.services.ai.azure.com").rstrip("/"),
@@ -68,6 +73,9 @@ def _flux_request(prompt: str, size: str, what: str, image: Optional[bytes] = No
         logger.info(f"[azure_flux] {what} {len(image_bytes)} bytes in {elapsed_ms:.0f}ms")
         return image_bytes
 
+    except requests.Timeout as exc:
+        logger.error(f"[azure_flux] timed out after {_TIMEOUT_S:.0f}s")
+        raise FluxTimedOut(what) from exc
     except requests.RequestException as exc:
         logger.error(f"[azure_flux] Request failed: {exc}")
         return None
@@ -77,10 +85,10 @@ def _flux_request(prompt: str, size: str, what: str, image: Optional[bytes] = No
 
 
 def generate_image_azure(prompt: str, *, size: str = "1024x1024") -> Optional[bytes]:
-    """Text-to-image; image bytes or None."""
+    """Text-to-image; image bytes or None. Raises FluxTimedOut."""
     return _flux_request(prompt, size, "Generated")
 
 
 def edit_image_azure(prompt: str, original_image: bytes, *, size: str = "1024x1024") -> Optional[bytes]:
-    """Image-to-image; edited bytes or None."""
+    """Image-to-image; edited bytes or None. Raises FluxTimedOut."""
     return _flux_request(prompt, size, "Edited image:", image=original_image)

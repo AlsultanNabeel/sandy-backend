@@ -59,8 +59,11 @@ def generate_image_with_azure(prompt: str, *, size: str = "1024x1024") -> Option
     if not prompt:
         return None
 
-    from app.integrations.azure_flux import generate_image_azure
-    img = generate_image_azure(prompt, size=size)
+    from app.integrations.azure_flux import FluxTimedOut, generate_image_azure
+    try:
+        img = generate_image_azure(prompt, size=size)
+    except FluxTimedOut:
+        return None   # still drawing there: a second provider would pay twice, too late
     if img is not None:
         return img
 
@@ -78,8 +81,11 @@ def edit_image_with_azure(image_bytes: bytes, prompt: str, *,
     if not image_bytes or not prompt:
         return None
 
-    from app.integrations.azure_flux import edit_image_azure
-    edited = edit_image_azure(prompt, image_bytes, size=size)
+    from app.integrations.azure_flux import FluxTimedOut, edit_image_azure
+    try:
+        edited = edit_image_azure(prompt, image_bytes, size=size)
+    except FluxTimedOut:
+        return None   # still working there: a second provider would pay twice, too late
     if edited is not None:
         return edited
 

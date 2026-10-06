@@ -503,7 +503,8 @@ the conversation title, the STM summary, the daily agenda line, image analysis
 and photo tagging, the web-search summary, the time parser — uses the same client.
 Speech-to-text on the voice path is Gemini Live's own input transcription. TTS
 (`/api/voice/tts`) is Gemini only. Images are Azure FLUX with an Azure OpenAI image
-fallback. Embeddings are Azure (`AZURE_OPENAI_EMBEDDING_DEPLOYMENT`) or OpenAI
+fallback, taken only when FLUX failed, not when it timed out (`azure_flux.FluxTimedOut`: it may still be
+drawing and billing, and a second sixty seconds is past the worker's limit). Embeddings are Azure (`AZURE_OPENAI_EMBEDDING_DEPLOYMENT`) or OpenAI
 direct. Research is Exa; places are Google Places. Push is APNs over HTTP/2 (`h2`
 is in `requirements.txt` for exactly this). MQTT is HiveMQ Cloud over TLS.
 
