@@ -102,6 +102,8 @@ final class DevicesStore: LoadableStore {
             await previous?.value
             do {
                 try await api.controlDevice(name: device.name, action: action, value: value)
+            } catch let error as APIError where error.code == "not_sent" {
+                notify("control.notReached")
             } catch {
                 if !error.isCancellation {
                     notify("control.controlFailed")
@@ -217,6 +219,8 @@ final class DevicesStore: LoadableStore {
                     }
                 }
                 notify("control.ir.learnTimeout")
+            } catch let error as APIError where error.code == "not_sent" {
+                notify("control.notReached")
             } catch {
                 notify("control.ir.learnFailed")
             }

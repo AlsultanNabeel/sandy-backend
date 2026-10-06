@@ -170,7 +170,21 @@ extension APIClient {
     func controlDevice(name: String, action: String, value: String? = nil) async throws {
         var body: [String: String] = ["action": action]
         if let value, !value.isEmpty { body["value"] = value }
-        try await send("/api/devices/\(URLEscape.segment(name))/control", method: "POST", body: body)
+        let r = try await request("/api/devices/\(URLEscape.segment(name))/control",
+                                  method: "POST", body: body)
+        try Self.reachedTheBoard(r)
+    }
+
+    /// The server answers 200 with `"sent": false` when the command never left it (the board
+    /// is off, the broker is down): that is not «done». An answer without the field (an older
+    /// server) is taken as sent.
+    static func reachedTheBoard(_ reply: [String: Any]) throws {
+        if (reply["sent"] as? Bool) == false {
+            throw APIError(message: AppLocale.isArabic
+                               ? "الأمر ما وصل للجهاز: ممكن يكون مطفي أو مش متصل."
+                               : "The command didn't reach the device: it may be off or offline.",
+                           code: "not_sent", kind: .unknown)
+        }
     }
 
     // الخادم بيصغّر الصورة ع ٢٤٠×٢٤٠ وبيحوّلها لصيغة الشاشة: فكّ الصور بياكل رام اللوح.
@@ -303,7 +317,9 @@ extension APIClient {
 
     // تضع الوحدة بوضع التعلّم (تلتقط الضغطة القادمة).
     func nodeIrLearnStart(nodeId: String) async throws {
-        try await send("/api/nodes/\(URLEscape.segment(nodeId))/ir/learn", method: "POST", body: [String: String]())
+        let r = try await request("/api/nodes/\(URLEscape.segment(nodeId))/ir/learn",
+                                  method: "POST", body: [String: String]())
+        try Self.reachedTheBoard(r)
     }
 
     func nodeIrLast(nodeId: String) async throws -> (code: String, at: String) {

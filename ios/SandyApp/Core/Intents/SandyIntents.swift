@@ -28,6 +28,7 @@ enum SandyIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notSignedIn
     case commandNotSupported(String)
     case buttonNotLearned(String, String)
+    case notReached(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -40,6 +41,9 @@ enum SandyIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .buttonNotLearned(let button, let device):
             return IntentAPI.say("زر \(button) مش متعلّم على \(device) بعد.",
                                  "The \(button) button isn't learned on \(device) yet.")
+        case .notReached(let device):
+            return IntentAPI.say("الأمر ما وصل لـ\(device): ممكن يكون مطفي أو مش متصل.",
+                                 "That didn't reach \(device): it may be off or offline.")
         }
     }
 }

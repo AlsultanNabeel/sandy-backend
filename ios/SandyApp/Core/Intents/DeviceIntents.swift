@@ -106,6 +106,8 @@ struct ControlDeviceIntent: AppIntent {
         let api = try IntentAPI.make()
         do {
             try await api.controlDevice(name: device.id, action: command.rawValue)
+        } catch let e as APIError where e.code == "not_sent" {
+            throw SandyIntentError.notReached(device.label)
         } catch let e as APIError where e.kind == .server {
             // الباك‑إند بيرفض الأمر اللي ما بيناسب نوع الجهاز (ستارة ما بتنطفي).
             throw SandyIntentError.commandNotSupported(device.label)
@@ -129,6 +131,8 @@ struct SetDeviceLevelIntent: AppIntent {
         let api = try IntentAPI.make()
         do {
             try await api.controlDevice(name: device.id, action: "set", value: String(level))
+        } catch let e as APIError where e.code == "not_sent" {
+            throw SandyIntentError.notReached(device.label)
         } catch let e as APIError where e.kind == .server {
             throw SandyIntentError.commandNotSupported(device.label)
         }
@@ -152,6 +156,8 @@ struct PressDeviceButtonIntent: AppIntent {
         let api = try IntentAPI.make()
         do {
             try await api.controlDevice(name: device.id, action: "send", value: button)
+        } catch let e as APIError where e.code == "not_sent" {
+            throw SandyIntentError.notReached(device.label)
         } catch let e as APIError where e.kind == .server {
             throw SandyIntentError.buttonNotLearned(button, device.label)
         }
