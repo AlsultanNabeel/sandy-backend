@@ -63,8 +63,10 @@ final class FocusLiveActivity {
         }
     }
 
-    /// ينهي الجلسة بالخادم كمكتملة (مش ملغاة) ويشيل النشاط.
+    /// ينهي الجلسة بالخادم كمكتملة (مش ملغاة) ويشيل النشاط. Only while a focus activity
+    /// is up: sign-out ends it, so a stale «stop» never reaches the next account's session.
     func stopFromLink() {
+        guard !Activity<SandyFocusAttributes>.activities.isEmpty else { return }
         Task {
             let api = APIClient(baseURL: Backend.currentURL)
             do {

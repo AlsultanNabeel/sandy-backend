@@ -145,4 +145,14 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(call.phase, .idle, "the call outlived the session")
         XCTAssertFalse(call.inCall)
     }
+
+    /// A7: the focus Live Activity stayed after sign-out, and its «stop» went out with the
+    /// next account's token.
+    func testAFocusStopWithNoActivityUpSendsNothing() async throws {
+        StubNetwork.install(status: 200, json: "{}")
+        SessionReset.clearShared()
+        FocusLiveActivity.shared.stopFromLink()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(StubNetwork.requests.isEmpty, "a stale focus stop reached the server")
+    }
 }
