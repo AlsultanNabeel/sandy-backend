@@ -206,8 +206,9 @@ reads only the opening of the reply: yes/no words, the held action's own verb
 negated verb («لا تحذفها») is a no; cancellation wins a mixed reply; a yes followed by
 «بس» is not a yes. Whatever follows the opening is a new request (`rest`), and the yes does not cover it:
 `run_held` marks the turn confirmed only while the held steps run, so a delete in the rest asks again. `pick`
-reads several («الأولى والتالتة»), a bare number word is that one («اتنين» is the
-second), «الاتنين»/«كلهم» are all. On voice there is no text turn to read, so the
+reads the opening only, like a yes: several («الأولى والتالتة»), a bare number word is that one
+(«اتنين» is the second), «الاتنين»/«كلهم» are all, «كل» only as the last word; a number further on
+(«ضيفي ٢ بيض») or «كل شي تمام» is not a pick, and a request after the pick goes to the model. On voice there is no text turn to read, so the
 `confirm(answer)` tool passes the user's words to the same resolver; holds wait on
 the `voice` pending thread, a second hold joins the first, a «which one?» waits there
 too and `confirm` takes the pick («الأولى»), and an unclear answer is asked once more,

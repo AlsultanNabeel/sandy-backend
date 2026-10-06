@@ -199,23 +199,36 @@ def _position(word: str) -> Optional[int]:
     return None
 
 
-def pick(text: str, candidates: List[Dict[str, Any]]) -> Optional[List[str]]:
-    """The chosen ids: one or several («الأولى والتالتة»), all of them for «كلهم», or
-    None when the text is not a choice."""
+# Words a pick may open with that choose nothing: «اه التانية»، «رقم 2 يا ساندي».
+_PICK_FILLER = _FILLER | _AFFIRM | {"رقم", "هي", "هاي", "اللي", "يعني", "و"}
+
+
+def pick(text: str, candidates: List[Dict[str, Any]]) -> Tuple[Optional[List[str]], bool]:
+    """(the chosen ids, whether a new request follows the choice). The choice is read from
+    the opening only, as a yes is: one or several («الأولى والتالتة»), all of them for
+    «كلهم»; whatever follows is the rest, for the model. A number further on («ضيفي ٢
+    حليب») or «كل» before more words («كل شي تمام») is not a choice: (None, False)."""
     ids = [c["id"] for c in candidates]
     words = _norm_answer(text).split()
     if not words:
-        return None
-    if any(w in _BOTH or w in _ALL or (w.startswith("و") and w[1:] in _ALL) for w in words):
-        return ids
+        return None, False
     chosen: List[str] = []
-    for w in words:
+    end = len(words)
+    for i, w in enumerate(words):
+        bare = w[1:] if w.startswith("و") and len(w) > 2 else w
+        if w in _BOTH or bare in _ALL - {"كل"} or (bare == "كل" and i == len(words) - 1):
+            chosen = list(ids)
+            continue
         n = _position(w)
-        if n is not None and -len(ids) <= n < len(ids) and ids[n] not in chosen:
-            chosen.append(ids[n])
+        if n is not None and -len(ids) <= n < len(ids):
+            if ids[n] not in chosen:
+                chosen.append(ids[n])
+        elif w not in _PICK_FILLER:
+            end = i
+            break
     if chosen:
-        return chosen
-    # They named it instead: unique text match among the candidates.
+        return chosen, end < len(words)
+    # They named it instead: the whole line, a unique text match among the candidates.
     key = match_key(text)
     named = [c["id"] for c in candidates if key and key in match_key(c.get("text", ""))]
-    return named if len(named) == 1 else None
+    return (named, False) if len(named) == 1 else (None, False)

@@ -138,17 +138,31 @@ def _ask(pending: Dict[str, Any]) -> str:
 
 def _settled(replies: List[str], held: Optional[Dict[str, Any]],
              used: List[str]) -> Dict[str, Any]:
-    """What was done, then the question when something waits for the user."""
+    """What was done, then the question when something waits for the user. `done` is
+    the first part alone."""
+    done = "\n".join(replies)
     if held is None:
-        return {"text": "\n".join(replies) or GAVE_UP_REPLY, "pending": None, "tools": used}
-    return {"text": "\n".join([*replies, _ask(held)]), "pending": held, "tools": used}
+        return {"text": done or GAVE_UP_REPLY, "pending": None, "tools": used, "done": done}
+    return {"text": "\n".join([*replies, _ask(held)]), "pending": held, "tools": used,
+            "done": done}
+
+
+def _rest_note(settled: str) -> str:
+    return (f"[جوابه على السؤال انحسب: {settled}. نفّذي بس الباقي من رسالته، وما تعيدي "
+            "هالإشي ولا تحكي عنه.]")
 
 
 def _resolve_choice(pending: Dict[str, Any], message: str,
                     ctx: TurnCtx) -> Optional[Dict[str, Any]]:
-    if confirm.answer(message) == "no":
-        return {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
-    ids = confirm.pick(message, pending.get("candidates") or [])
+    """The turn's outcome when the message picks from «which one?», else None. The pick is
+    read from the opening only; a request after it («التانية وضيفي خبز») goes to the model."""
+    said, rest = confirm.read(message)
+    if said == "no":
+        outcome = {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
+        if rest:
+            outcome["rest"] = _rest_note("قال لأ على «أي وحدة؟»، فما انعمل")
+        return outcome
+    ids, rest = confirm.pick(message, pending.get("candidates") or [])
     if ids is None:
         return None
     name = pending.get("tool", "")
@@ -161,7 +175,10 @@ def _resolve_choice(pending: Dict[str, Any], message: str,
         held, waiting = _hold(held, name, args, result)
         if not waiting and result.get("reply"):
             replies.append(result["reply"])
-    return _settled(replies, held, [name])
+    outcome = _settled(replies, held, [name])
+    if rest:
+        outcome["rest"] = _rest_note(f"اختار، والنتيجة: {outcome['text']}")
+    return outcome
 
 
 def _resolve_pending(pending: Dict[str, Any], message: str,
@@ -185,8 +202,7 @@ def _resolve_pending(pending: Dict[str, Any], message: str,
         outcome = {"text": text, "pending": None, "tools": used}
         settled = f"قال اه على «{summary}»، والنتيجة: {text}"
     if rest:
-        outcome["rest"] = (f"[جوابه على سؤال التأكيد انحسب: {settled}. نفّذي بس الباقي من "
-                           "رسالته، وما تعيدي هالإشي ولا تحكي عنه.]")
+        outcome["rest"] = _rest_note(settled)
     return outcome
 
 
@@ -255,9 +271,15 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                           thread_id, history, complete, attachments, began,
                           note=settled["rest"] if settled else "")
         if settled:
-            # A «no» says nothing of its own here: the model's reply is the answer.
-            first = settled["text"] if settled["tools"] else ""
-            outcome = {**outcome, "text": "\n".join(t for t in (first, outcome["text"]) if t),
+            # A «no» says nothing of its own here: the model's reply is the answer. A pick
+            # that still waits for a yes asks it last, after the rest was answered.
+            waiting = settled.get("pending")
+            first = (settled["done"] if waiting else settled["text"]) if settled["tools"] else ""
+            text = "\n".join(t for t in (first, outcome["text"]) if t)
+            pending = outcome["pending"]
+            if waiting is not None and pending is None:
+                text, pending = f"{text}\n{_ask(waiting)}", waiting
+            outcome = {**outcome, "text": text, "pending": pending,
                        "tools": settled["tools"] + outcome["tools"]}
         elif (held and resolved is None and outcome["pending"] is None
               and not outcome.get("error") and not outcome.get("stopped")):

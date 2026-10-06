@@ -84,7 +84,7 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
     if confirm.answer(answer) == "no":
         P.save(VOICE_THREAD, chat_id, db, None)
         return {"handled": True, "reply": confirm.CANCELLED_REPLY}
-    ids = confirm.pick(answer, held.get("candidates") or [])
+    ids, rest = confirm.pick(answer, held.get("candidates") or [])
     if ids is None:
         again = confirm.asked_again(held)
         P.save(VOICE_THREAD, chat_id, db, again)
@@ -106,6 +106,8 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
     P.save(VOICE_THREAD, chat_id, db, waiting)
     if waiting is not None:
         results.append(f"لسا ما نفّذت — اسأليه: {confirm.question(waiting['summary'])}")
+    if rest:
+        results.append("قال كمان إشي بعد اختياره: نفّذيه هلأ.")
     return {"handled": True, "reply": "\n".join(results)}
 
 

@@ -106,7 +106,7 @@ def test_first_then_yes_deletes_only_that_one(two_milks):
 @pytest.mark.parametrize("said,count", [("كلهم", 2), ("2", 1), ("التانية", 1)])
 def test_pick_reads_numbers_ordinals_and_all(said, count):
     cands = [{"id": "a", "text": "حليب"}, {"id": "b", "text": "حليب"}]
-    assert len(confirm.pick(said, cands)) == count
+    assert len(confirm.pick(said, cands)[0]) == count
 
 
 def test_a_new_request_instead_of_a_choice_is_answered_and_asked_once_more(two_milks):
@@ -124,9 +124,10 @@ def test_a_new_request_instead_of_a_choice_is_answered_and_asked_once_more(two_m
                                         ("١ و٣", 2)])
 def test_pick_reads_several_and_a_bare_number_is_that_one(said, count):
     cands = [{"id": "a", "text": "حليب"}, {"id": "b", "text": "حليب"}, {"id": "c", "text": "حليب"}]
-    assert len(confirm.pick(said, cands)) == count
+    ids, rest = confirm.pick(said, cands)
+    assert len(ids) == count and not rest
     if said == "اتنين":
-        assert confirm.pick(said, cands) == ["b"]
+        assert ids == ["b"]
 
 
 # Second live test: the model sent kind="tasks" (a list) and got nothing back.

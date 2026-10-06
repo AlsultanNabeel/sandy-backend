@@ -52,3 +52,52 @@ def test_an_iso_time_in_the_past_or_too_far_is_refused(brain_db):  # noqa: F811
         assert when.parse_when((now + timedelta(days=500)).isoformat()) is None
         assert when.parse_when((now + timedelta(hours=2)).isoformat()) is not None
         assert when.parse_when("بكرا الساعة 5") is not None, "words still go to the clock"
+
+
+# ── W3. «Which one?» is answered by the opening of the reply, not any number in it ──
+
+def _two_milks():
+    with active_user_profile_context(A):
+        a = items.add("shopping", "حليب بقر")
+        b = items.add("shopping", "حليب لوز")
+    held = _turn(ScriptedModel(tools_reply(call("list_update", list="shopping",
+                                                match_text="حليب", done=True))),
+                 "شطبي الحليب")["pending_state"]
+    assert held and held["action"] == "choose"
+    return a, b, held
+
+
+def _done(iid):
+    with active_user_profile_context(A):
+        return items.get(iid)["done"]
+
+
+def test_a_number_further_on_is_a_new_request_not_a_pick(brain_db):  # noqa: F811
+    a, b, held = _two_milks()
+    model = ScriptedModel(tools_reply(call("list_add", list="shopping", text="بيض", qty=2)),
+                          text_reply("ضفت بيض"))
+    _turn(model, "ضيفي ٢ بيض للتسوق", pending=held)
+    assert not _done(b), "«٢» picked the second milk and ticked it"
+    assert model.seen, "the request itself never reached the model"
+    assert "بيض" in _open("shopping")
+
+
+def test_all_before_more_words_is_not_all(brain_db):  # noqa: F811
+    a, b, held = _two_milks()
+    _turn(ScriptedModel(text_reply("حلو")), "كل شي تمام", pending=held)
+    assert not _done(a) and not _done(b), "«كل شي تمام» ticked both"
+
+
+def test_a_pick_then_a_request_does_both(brain_db):  # noqa: F811
+    from app.brain import confirm
+
+    a, b, held = _two_milks()
+    assert confirm.pick("التانية", held["candidates"]) == ([b], False)
+    assert confirm.pick("الأولى والتالتة", held["candidates"])[0] == [a]
+    assert confirm.pick("كلهم", held["candidates"]) == ([a, b], False)
+    model = ScriptedModel(tools_reply(call("list_add", list="shopping", text="خبز")),
+                          text_reply("ضفت خبز"))
+    state = _turn(model, "التانية وضيفي خبز", pending=held)
+    assert _done(b) and not _done(a)
+    assert "خبز" in _open("shopping") and "اختار" in model.seen[0][0]["content"]
+    assert state["pending_state"] is None
