@@ -145,4 +145,20 @@ final class OutboxTests: XCTestCase {
         XCTAssertTrue(refused)
         XCTAssertTrue(Outbox.shared.isEmpty)
     }
+
+    /// L9: a row Sandy already deleted from chat: «not found» on a delete is what was asked.
+    func testDeletingWhatIsAlreadyGoneIsDone() async {
+        answer(404)
+        let refused = await send("DELETE", "/api/items/abc")
+        XCTAssertFalse(refused, "deleting a row already gone brought it back with an error")
+        XCTAssertTrue(Outbox.shared.isEmpty)
+    }
+
+    /// A 404 on anything but a delete is still a refusal.
+    func testNotFoundOnAnEditIsARefusal() async {
+        answer(404)
+        let refused = await send("PATCH", "/api/items/abc")
+        XCTAssertTrue(refused)
+        XCTAssertTrue(Outbox.shared.isEmpty)
+    }
 }

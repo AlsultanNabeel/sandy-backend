@@ -133,12 +133,14 @@ final class Outbox {
                 if LoadableStore.isConnectionError(error) || error.isCancellation { return }
                 // Signed out: keep it for when the session is back.
                 if (error as? APIError)?.kind == .unauthorized { return }
-                if let status = (error as? APIError)?.status, Self.isNotNow(status) {
+                let status = (error as? APIError)?.status ?? 0
+                if Self.isNotNow(status) {
                     guard ops.first?.id == op.id else { return }
                     if holdBack(wait: (error as? APIError)?.retryAfter, api) { continue }
                     return
                 }
-                refused[op.id] = error
+                // A delete of a row already gone (Sandy deleted it from chat) is what was asked.
+                if !(op.method == "DELETE" && status == 404) { refused[op.id] = error }
             }
             // Signed out or switched while it was on its way: this queue is not loaded any more.
             guard ops.first?.id == op.id else { return }
