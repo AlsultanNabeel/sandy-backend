@@ -102,10 +102,20 @@ struct RobotLiveSection: View {
             statTile(icon: wifiIcon(node.rssi), title: lang.s("robot.live.wifi"),
                      value: wifiText(node), tint: wifiColor(node.rssi))
             statTile(icon: "cpu", title: lang.s("robot.live.firmware"),
-                     value: node.firmwareVersion.isEmpty ? lang.s("robot.live.unknown")
-                                                         : node.firmwareVersion,
-                     tint: Theme.Colors.accent)
+                     value: firmwareText(node), tint: Theme.Colors.accent)
         }
+    }
+
+    /// The brain's version, with the camera's and the room node's under it when they report one.
+    private func firmwareText(_ node: RobotLiveNode) -> String {
+        var lines = [node.firmwareVersion.isEmpty ? lang.s("robot.live.unknown") : node.firmwareVersion]
+        if let cam = node.cameraFirmware {
+            lines.append(String(format: lang.s("robot.live.cameraFirmware"), cam))
+        }
+        if let room = node.roomFirmware {
+            lines.append(String(format: lang.s("robot.live.roomFirmware"), room))
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func statTile(icon: String, title: String, value: String, tint: Color) -> some View {

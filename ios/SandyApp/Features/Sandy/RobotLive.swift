@@ -22,6 +22,9 @@ struct RobotLiveNode: Equatable {
     let ssid: String?
     let uptimeSec: Int?
     let volume: Int?
+    /// The camera's and the room node's own versions, when those boards are there.
+    var cameraFirmware: String? = nil
+    var roomFirmware: String? = nil
 }
 
 /// كتالوج جسم ساندي — بنفس أسماء الفيرموير حرفيًا (node_provision.py). احتياط
@@ -77,7 +80,9 @@ extension APIClient {
                 rssi: int("rssi"),
                 ssid: (ssid?.isEmpty ?? true) ? nil : ssid,
                 uptimeSec: int("uptime"),
-                volume: int("volume"))
+                volume: int("volume"),
+                cameraFirmware: (t["cam_fw"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                roomFirmware: (t["room_fw"] as? String).flatMap { $0.isEmpty ? nil : $0 })
         }
         return (nodes, r["demo"] as? Bool ?? false)
     }
