@@ -118,8 +118,6 @@ final class AppState: ObservableObject {
         AccountSession.next()
         verifyTask?.cancel()
         verifyTask = nil
-        // A call outlives its screen, not the session.
-        GeminiLiveManager.shared.stop()
         onboardingDoneCached = onboardingDone
         stage = onboardingDone ? .chat : .onboarding
         setupPush()

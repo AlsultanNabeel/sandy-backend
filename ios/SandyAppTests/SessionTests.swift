@@ -136,4 +136,13 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(fresh.tasks, 0)
         XCTAssertEqual(fresh.habitsLeft, [], "the last account's habit names reached the next one")
     }
+
+    /// M1: a minimised call went on after sign-out, the mic sending as the old account.
+    func testSignOutEndsTheCall() {
+        let call = GeminiLiveManager.shared
+        call.phase = .listening
+        SessionReset.clearShared()
+        XCTAssertEqual(call.phase, .idle, "the call outlived the session")
+        XCTAssertFalse(call.inCall)
+    }
 }

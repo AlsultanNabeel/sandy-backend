@@ -15,6 +15,9 @@ enum AccountSession {
 @MainActor
 enum SessionReset {
     static func clearShared() {
+        // A call outlives its screen, not the session: its mic must not go on talking as
+        // the account that left.
+        GeminiLiveManager.shared.stop()
         ItemsStore.cancelLoads()
         LifeStatsStore.shared.reset()
         LogStore.forgetMade()
