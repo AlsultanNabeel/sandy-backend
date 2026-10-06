@@ -263,6 +263,7 @@ static bool clock_is_set(void) {
 // internet is slow), then three public servers. Runs in the background: never blocks.
 #define CLOCK_UNSET_SHOW_MS  60000   // after this long unset, she says so
 static volatile bool s_clock_bad;    // the server said our time is off: resync first
+static volatile bool s_not_paired;   // the server opens no call: no account paired this board
 static int64_t s_clock_started_ms;
 
 static void on_clock_sync(struct timeval *tv) {
@@ -581,6 +582,7 @@ static void on_ws_text(const char *msg, int len) {
         s_preroll_due = true;       // the words said while we were connecting
         s_link_lost_ms = 0;         // back on the air, drop the grace timer
         status_set(SANDY_PART_LINK, SANDY_ST_OK);   // clears the link's past failure
+        status_set(SANDY_PART_IDENTITY, SANDY_ST_OK);   // paired since the last "not_paired"
         VOICE_FACE(MOOD_FOCUSED);   // she's listening now
         VOICE_LED(LED_STATE_LISTENING);
         ESP_LOGI(TAG, "auth ok, streaming");
@@ -636,6 +638,11 @@ static void on_ws_text(const char *msg, int len) {
     } else if (text_has(msg, len, "key_unknown")) {
         // Key revoked or unknown: re-enrol with the shared key next session.
         devkey_store(NULL);
+    } else if (text_has(msg, len, "not_paired")) {
+        // No account owns this board yet: the call ends here and she answers locally.
+        s_not_paired = true;
+        status_set(SANDY_PART_IDENTITY, SANDY_ST_NOT_PAIRED);
+        ESP_LOGW(TAG, "server opens no call: this board is not paired — pair it in the app");
     } else if (text_has(msg, len, "replay")) {
         // Our time is off, not our key: resync and try again, no ten-minute lockout.
         s_clock_bad = true;
@@ -1807,10 +1814,19 @@ static void voice_task(void *arg) {
         health_feed();
         net_tick();
         clock_tick();
-        if (s_session_active && (s_auth_refused || s_clock_bad)) {
+        if (s_session_active && (s_auth_refused || s_clock_bad || s_not_paired)) {
             // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
+            if (s_not_paired) {
+                // Not a fault to back off from: the next wake word asks again, so a
+                // pairing in the app takes effect at once.
+                s_not_paired = false;
+#if ENABLE_BUZZER
+                buzzer_play(MELODY_ERROR);
+#endif
+                VOICE_FACE(MOOD_CONFUSED);
+            }
         } else if (!s_session_active && s_wake_req && !identity_complete()) {
             // No server to call and no name to call it with: say so, not "no internet".
             s_wake_req = false;

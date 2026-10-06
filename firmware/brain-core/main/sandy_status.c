@@ -125,6 +125,12 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "هالجهاز مش مجهّز: ناقصه رمز الاقتران أو عناوين الخوادم. بدّه تجهيز من المصنع.",
         8, "not_set_up",
     },
+    // The server opens no call for a board no account has paired: she says so herself.
+    [SANDY_ST_NOT_PAIRED] = {
+        MOOD_CONFUSED, LED_STATE_OFF, "NOT PAIRED",
+        "لسا ما حدا ربطني. اربطني من التطبيق أول، وبعدين احكي معي.",
+        5, "not_paired",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {

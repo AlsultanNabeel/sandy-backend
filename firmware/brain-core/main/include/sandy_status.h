@@ -26,6 +26,7 @@ typedef enum {
     SANDY_ST_NO_CLOCK,      // the clock is not set: the server would refuse the hello
     SANDY_ST_UPDATING,      // downloading and installing an update: do not unplug
     SANDY_ST_NOT_SET_UP,    // no identity (pairing code, servers): nothing can connect
+    SANDY_ST_NOT_PAIRED,    // set up, but no account has paired it: no call until the app does
     SANDY_ST_COUNT
 } sandy_status_t;
 

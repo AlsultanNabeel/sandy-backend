@@ -83,6 +83,10 @@ def live(monkeypatch):
     monkeypatch.setattr(sess, "speaker_gate", lambda who, channel: False)
     monkeypatch.setattr(sess, "session_context_for", lambda *a: "")
     monkeypatch.setattr(sess, "remember_live_model", lambda name: None)
+    # A paired account with the day's minutes ahead of it; `minutes` below narrows them.
+    monkeypatch.setattr(sess, "voice_seconds_left", lambda who: 3600.0)
+    monkeypatch.setattr(sess, "add_voice_seconds", lambda who, s: None)
+    sess.set_voice_identity("u1")
 
     async def _open(client, config):
         return _Manager(), _Gemini(), "fake-live", None
@@ -94,7 +98,25 @@ def live(monkeypatch):
         started = time.monotonic()
         asyncio.run(asyncio.wait_for(sess._live_session(ws, "test"), within_s))
         return time.monotonic() - started
-    return run
+    yield run
+    sess.set_voice_identity("")
+
+
+def test_a_board_nobody_paired_gets_no_call(live, monkeypatch):
+    """No account to count against: refused before Gemini opens, and the board says so."""
+    from app.api.voice_ws import session as sess
+
+    sess.set_voice_identity("")
+    opened = []
+
+    async def _never(client, config):
+        opened.append(True)
+        raise AssertionError("an unpaired board must not open a paid call")
+    monkeypatch.setattr(sess, "_open_live_session", _never)
+    ws = _Socket(_voice())
+    took = live(ws, idle_s=30, max_s=60, within_s=8)
+    assert ws.errors() == ["not_paired"]
+    assert not opened and took < 2
 
 
 def test_a_call_nobody_talks_in_ends_after_the_quiet_stretch(live):
@@ -127,13 +149,11 @@ def minutes(live, monkeypatch):
 
     day = _Day()
     day.used = []
-    monkeypatch.setattr(sess, "voice_seconds_left", lambda who, role=None: day.left)
+    monkeypatch.setattr(sess, "voice_seconds_left", lambda who: day.left)
     monkeypatch.setattr(sess, "add_voice_seconds", lambda who, s: day.used.append((who, s)))
     monkeypatch.setattr("app.utils.thread_pool.submit_background",
                         lambda fn, *a, _label=None, **k: fn(*a, **k))
-    sess.set_voice_identity("u1")
-    yield day
-    sess.set_voice_identity("")
+    return day
 
 
 def test_no_minutes_left_means_no_call(minutes):

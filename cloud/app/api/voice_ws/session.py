@@ -555,6 +555,12 @@ async def _live_session(ws, remote: str) -> None:
         _send_json(ws, {"type": "error", "msg": "server_error"})
         return
 
+    # A board nobody paired has no account: no paid call, and the board says so itself.
+    if not get_voice_identity():
+        logger.info("[voice_ws] no call for a board nobody paired (remote=%s)", remote)
+        _send_json(ws, {"type": "error", "msg": "not_paired"})
+        return
+
     # Start listening BEFORE the slow setup (see _DeviceReader). Everything below
     # is inside one try/finally so the reader's thread is never leaked; bound to
     # None first and constructed inside the try.
@@ -583,7 +589,7 @@ async def _live_session(ws, remote: str) -> None:
             _loop.run_in_executor(None, _build_cached_instruction, _who, _channel),
             _loop.run_in_executor(None, load_recent_turns, _who),
             _loop.run_in_executor(None, speaker_gate, _who, _channel),
-            _loop.run_in_executor(None, _seconds_left, _who),
+            _loop.run_in_executor(None, voice_seconds_left, _who),
         )
         if _left <= 0:
             # The day's minutes are spent (a robot's are its owner's).
@@ -792,13 +798,6 @@ async def _call_watchdog(state: Dict[str, Any]) -> None:
             state["ended"] = "call_idle"
             return
         await asyncio.sleep(min(1.0, max(0.05, _CALL_IDLE_S / 10)))
-
-
-def _seconds_left(user_id: str) -> float:
-    """Voice seconds this call may use today, by the account's own record (the app's call
-    and the robot's alike). A board nobody paired has no account to count against, so only
-    the call's maximum bounds it."""
-    return voice_seconds_left(user_id) if user_id else _CALL_MAX_S
 
 
 # الردّ بيوصل قطع متلاحقة، فثانيتين بلا ولا قطعة معناها المولّد وقف.

@@ -667,7 +667,9 @@ the reason goes to the device as `{"type":"error","msg":…}` (the app shows a s
 (10) or, for a subscriber or the owner, `SANDY_CALL_MINUTES_SUBSCRIBER` (60), counted in seconds on
 the day's usage row (`usage_store.add_voice_seconds`). A call checks it at the start (none left →
 `call_minutes_exceeded`), ends when it runs out, and adds its length when it ends; a robot's call
-counts on its owner's account, a board nobody paired on none. `/api/voice/tts` spends the same
+counts on its owner's account. A board nobody paired gets no call at all: `_live_session` answers
+`{"type":"error","msg":"not_paired"}` before Gemini opens, and the board says so itself (status
+`NOT_PAIRED`, part `IDENTITY`, a tone and a confused face), asking again on the next wake word. `/api/voice/tts` spends the same
 minutes (the WAV's length) and answers 429 `call_minutes_exceeded` when they are gone.
 
 ### 3.1 The handshake contract
@@ -691,6 +693,7 @@ actually means:
 | `bad_handshake` | malformed hello |
 | `auth_not_configured` | the server has no `SANDY_WS_HMAC_KEY` at all |
 | `key_unknown` | signed with `kv` 2, but the server holds no key for that board (unpaired or revoked); the board drops its key and falls back to the shared one |
+| `not_paired` | after `auth_ok`: no account has paired this board, so no call opens (nothing is billed); the board shows `NOT_PAIRED` and asks again on the next wake word, no backoff |
 | `server_error` | the server's fault, not the board's: a key record it cannot decrypt (`device_keys.KeyUnreadable`, a wrong or changed `SANDY_LTM_KEY`), any other failure on its side during the handshake (a database read), or no Gemini key. `bad_handshake` is kept for a hello that does not parse. The board keeps its key and is not locked out; the camera gets 503 `key_unreadable` for the same case, never a 401 |
 
 The `ts` must be wall-clock, so the firmware opens no session until SNTP has set the clock
@@ -795,7 +798,8 @@ flashed: `OK`, `BOOTING`, `NO_WIFI`, `NO_SERVER`, `LINK_DROPPED`, `NET_SLOW`,
 `LINK_STALL`, `AUTH_FAILED`, `LOW_MEMORY`, `WIFI_BAD_PASS` (a refusal, or a handshake
 timeout only when the router is heard at `WIFI_BAD_PASS_MIN_RSSI` or better), `VOICE_OFF` (I2S, the audio
 buffers or the front end did not start), `NECK_OFF`, `SCREEN_OFF` (heartbeat and LED only),
-`NOT_SET_UP` (part `IDENTITY`: no pairing code or server address, so no call is even
+`NOT_PAIRED` (part `IDENTITY`: the server opens no call until an account pairs the board; cleared
+by the next `auth_ok`), `NOT_SET_UP` (part `IDENTITY`: no pairing code or server address, so no call is even
 tried — it used to try an empty address and say «no internet»), `SETTINGS_OFF` (the settings store
 would not open — she runs on defaults instead of halting; no `ESP_ERROR_CHECK` is left in
 an enabled file).
