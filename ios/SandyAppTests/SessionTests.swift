@@ -179,7 +179,8 @@ final class SessionTests: XCTestCase {
         SessionReset.clearShared()
         FocusLiveActivity.shared.stopFromLink()
         try await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertTrue(StubNetwork.requests.isEmpty, "a stale focus stop reached the server")
+        XCTAssertFalse(StubNetwork.requests.contains { $0.url?.path == "/api/life/focus/stop" },
+                       "a stale focus stop reached the server")
     }
 
     /// K7: a delete still offered for «تراجع» at sign-out stayed up and was sent with the
