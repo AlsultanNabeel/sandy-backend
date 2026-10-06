@@ -31,7 +31,8 @@ GAVE_UP_REPLY = "ما قدرت أكمّل هالطلب، جرّب تحكيه ب�
 # and worked, that reply goes out with no second model call to restate it.
 ANSWER_TOOLS = frozenset({"device_control", "scene_apply", "room_restore", "image"})
 # Slow tools that touch nothing another call reads: several in one step run side by side.
-SIDE_BY_SIDE = frozenset({"web_search", "weather", "image", "recall", "summarize", "device_state"})
+# Not `image`: a turn draws one, and two at once could both find none drawn yet.
+SIDE_BY_SIDE = frozenset({"web_search", "weather", "recall", "summarize", "device_state"})
 
 
 def _for_model(result: Dict[str, Any]) -> str:

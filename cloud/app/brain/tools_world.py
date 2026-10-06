@@ -208,8 +208,11 @@ def weather(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
 
 def image(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """One image a turn: each is a paid call, and the reply carries only one."""
     from app.features.vision import generate_image_with_azure
 
+    if ctx.artifacts.get("image_bytes"):
+        return _no("برسم صورة وحدة بكل مرة. هي الأولى جاهزة، اطلب التانية بعدها.")
     prompt = str(args.get("prompt") or ctx.message or "").strip()
     image_bytes = generate_image_with_azure(prompt) if prompt else None
     if not image_bytes:

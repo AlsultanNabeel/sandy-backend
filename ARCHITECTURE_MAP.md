@@ -147,7 +147,7 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    When every call of the turn is an answer tool (`loop.ANSWER_TOOLS`: device_control,
    scene_apply, room_restore, image) and each worked with a `reply`, that reply is the
    answer and no second model call restates it. Two or more slow independent calls of one
-   step (`loop.SIDE_BY_SIDE`: web_search, weather, image, recall, summarize, device_state)
+   step (`loop.SIDE_BY_SIDE`: web_search, weather, recall, summarize, device_state)
    run side by side, each in a copy of the turn's context; the rest run in order.
 4. Due `message_to_future_self` schedules (`future.py`) go into the system prompt
    and are marked `sent` only when the reply is not an error.
@@ -187,7 +187,7 @@ kind needs no tool change.
 | `room_restore` | `scene_store.restore_room`: the devices the last scene changed get the state kept before it (`device_store.before_scene`; IR and screen text are not replayed), its timers are cancelled; once per scene |
 | `web_search` | `features/research.web_answer`: Exa snippets summarised in one model call, with sources |
 | `weather` | `features/weather`; with no city, `home_city`: the city the app last showed weather for (`/api/weather` keeps it on `sandy_users.city`), else the city of the phone's zone, else the default |
-| `image` | `vision.generate_image_with_azure` on the model's own prompt (FLUX, then Azure DALL-E) |
+| `image` | `vision.generate_image_with_azure` on the model's own prompt (FLUX, then Azure DALL-E); one a turn, a second is refused (so it never runs side by side) |
 | `undo_last` | takes back the previous reply's journaled block writes: added rows go, edited, deleted and cancelled ones come back; devices are not undone |
 
 **A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
