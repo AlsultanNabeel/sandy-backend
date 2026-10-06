@@ -449,7 +449,10 @@ Who calls what:
   `/api/firmware/manifest` and `/api/firmware/image/<version>` (OTA).
 - **The owner's tooling** — `/api/firmware/publish` and `/rollout`
   (`scripts/publish_firmware.py`), `/api/diagnose` and `/health` (by hand).
-- **RevenueCat** — `/webhook/revenuecat`.
+- **RevenueCat** — `/webhook/revenuecat`. Events are saved in the order they happened
+  (`subscription.event_at`; an older one is acknowledged and dropped), a trial's expiry is an
+  expiry, `BILLING_ISSUE` keeps access three days from the event, an unknown user is
+  acknowledged and logged, and a failed save answers 500 so the event comes again.
 - `/voice/enroll` (socket) records a voiceprint from the laptop script; the app's
   Robot › «صوتي» screen uses `POST /api/voice/enroll` instead and records on the robot (§3.2).
 

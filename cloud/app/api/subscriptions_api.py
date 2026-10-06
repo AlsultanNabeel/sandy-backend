@@ -1,7 +1,9 @@
 """Subscription state mirrored from RevenueCat (the billing source of truth).
 
   POST /webhook/revenuecat  machine caller; Authorization must equal REVENUECAT_WEBHOOK_AUTH.
-                            Always 200 after auth so RevenueCat doesn't retry-storm.
+                            200 once handled (an event older than the one saved, or for a
+                            user we do not have, is acknowledged and logged); 500 when the
+                            save failed, so RevenueCat sends it again.
   GET  /api/subscription    the signed-in user's status.
 
 RevenueCat's ``app_user_id`` is our ``user_id``.
@@ -12,7 +14,7 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from flask import jsonify, request
@@ -33,8 +35,10 @@ _ACTIVE_EVENTS = {
 }
 _EXPIRED_EVENTS = {
     "EXPIRATION",
-    "BILLING_ISSUE",
 }
+# The card failed and the store is retrying: access stays this long from the event (the
+# owner's decision), then lapses unless a RENEWAL comes.
+_BILLING_GRACE = timedelta(days=3)
 
 
 def _dt_from_ms(ms: object) -> Optional[datetime]:
@@ -69,7 +73,8 @@ def register_subscriptions_api(app):
             logger.warning("[revenuecat] webhook auth failed")
             return jsonify({"error": "unauthorized"}), 401
 
-        # Never raise from here: RevenueCat retries non-2xx aggressively.
+        # A failed save answers 500 so RevenueCat sends the event again (the event_at
+        # guard makes a resend harmless); anything else is acknowledged.
         try:
             body = request.get_json(silent=True) or {}
             event = body.get("event") or {}
@@ -95,30 +100,37 @@ def register_subscriptions_api(app):
                 )
                 return jsonify({"ok": True}), 200
 
-            if _is_trial(event):
-                status = "trialing"
-            elif event_type in _ACTIVE_EVENTS:
-                status = "active"
-            elif event_type in _EXPIRED_EVENTS:
+            event_at = _dt_from_ms(event.get("event_timestamp_ms")) or datetime.now(timezone.utc)
+            # The event decides before the trial flag: a trial's EXPIRATION is an expiry.
+            if event_type in _EXPIRED_EVENTS:
                 status = "expired"
+            elif event_type == "BILLING_ISSUE":
+                status = "trialing" if _is_trial(event) else "active"
+                period_end = event_at + _BILLING_GRACE
+            elif event_type in _ACTIVE_EVENTS:
+                status = "trialing" if _is_trial(event) else "active"
             else:
                 # Non-subscription event (TEST, TRANSFER, ...): ack only.
                 logger.info("[revenuecat] ignoring event type %s", event_type or "<none>")
                 return jsonify({"ok": True}), 200
 
-            ok = users_store.set_subscription(
+            outcome = users_store.set_subscription(
                 app_user_id,
                 status=status,
                 plan=product_id or "",
                 current_period_end=period_end,
                 source="revenuecat",
+                event_at=event_at,
             )
-            logger.info(
-                "[revenuecat] %s → user=%s status=%s saved=%s",
-                event_type, app_user_id, status, ok,
-            )
-        except Exception as exc:  # noqa: BLE001
+            if outcome == "unknown_user":
+                logger.warning("[revenuecat] %s for unknown user %s; acknowledged",
+                               event_type, app_user_id)
+            else:
+                logger.info("[revenuecat] %s → user=%s status=%s (%s)",
+                            event_type, app_user_id, status, outcome)
+        except Exception as exc:  # noqa: BLE001 — the store asks again on a 500
             logger.exception("[revenuecat] webhook error: %s", exc)
+            return jsonify({"error": "not_saved"}), 500
 
         return jsonify({"ok": True}), 200
 

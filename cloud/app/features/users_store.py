@@ -309,10 +309,16 @@ def set_subscription(
     trial_ends_at: Optional[datetime] = None,
     current_period_end: Optional[datetime] = None,
     source: str = "",
-) -> bool:
+    event_at: Optional[datetime] = None,
+) -> str:
+    """Save the subscription as of `event_at`: "saved", "stale" (a newer event is already
+    saved: events arrive out of order), or "unknown_user". Raises when the store is down,
+    so the caller can ask for the event again."""
     coll = _coll()
-    if coll is None or not user_id:
-        return False
+    if coll is None:
+        raise RuntimeError("users store unavailable")
+    if not user_id:
+        return "unknown_user"
     sets = {
         "subscription.status": status,
         "subscription.plan": plan,
@@ -320,9 +326,17 @@ def set_subscription(
         "subscription.current_period_end": current_period_end,
         "subscription.source": source,
     }
-    res = coll.update_one({"_id": user_id}, {"$set": sets})
-    _bump(user_id)
-    return res.matched_count > 0
+    match: Dict[str, Any] = {"_id": user_id}
+    if event_at is not None:
+        sets["subscription.event_at"] = event_at
+        match["$or"] = [{"subscription.event_at": {"$exists": False}},
+                        {"subscription.event_at": None},
+                        {"subscription.event_at": {"$lte": event_at}}]
+    res = coll.update_one(match, {"$set": sets})
+    if res.matched_count:
+        _bump(user_id)
+        return "saved"
+    return "stale" if coll.find_one({"_id": user_id}, {"_id": 1}) else "unknown_user"
 
 
 def is_subscriber(user_id: str) -> bool:
