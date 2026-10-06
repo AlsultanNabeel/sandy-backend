@@ -19,6 +19,7 @@ enum SessionReset {
         // the account that left.
         GeminiLiveManager.shared.stop()
         FocusLiveActivity.shared.end()
+        UndoCenter.shared.drop()
         ItemsStore.cancelLoads()
         LifeStatsStore.shared.reset()
         LogStore.forgetMade()

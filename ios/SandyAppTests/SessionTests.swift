@@ -155,4 +155,25 @@ final class SessionTests: XCTestCase {
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertTrue(StubNetwork.requests.isEmpty, "a stale focus stop reached the server")
     }
+
+    /// K7: a delete still offered for «تراجع» at sign-out stayed up and was sent with the
+    /// next account's token; now it goes first, within a short limit, or is dropped.
+    func testAPendingUndoIsSentBeforeSignOutWithinALimitAndNeverAfter() async {
+        let undo = UndoCenter.shared
+        var sent = 0
+        undo.offer("حذفت", icon: "trash", undo: {}, commit: { sent += 1 })
+        await undo.commitBeforeSignOut()
+        XCTAssertEqual(sent, 1, "the pending delete never went out")
+
+        undo.offer("حذفت", icon: "trash", undo: {}, commit: { try? await Task.sleep(for: .seconds(10)) })
+        let began = Date()
+        await undo.commitBeforeSignOut(limit: .milliseconds(200))
+        XCTAssertLessThan(Date().timeIntervalSince(began), 2, "no network held the sign-out up")
+
+        undo.offer("حذفت", icon: "trash", undo: {}, commit: { sent += 1 })
+        SessionReset.clearShared()
+        undo.commitNow()
+        await Task.yield()
+        XCTAssertEqual(sent, 1, "the offer outlived the session and went out as the next account")
+    }
 }

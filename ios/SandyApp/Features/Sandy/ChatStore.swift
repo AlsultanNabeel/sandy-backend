@@ -128,10 +128,8 @@ final class ChatStore: ObservableObject {
                 self.conversations.insert(removed, at: min(idx, self.conversations.count))
             },
             commit: { [weak self] in
-                Task {
-                    try? await api.deleteConversation(id: id)
-                    await self?.loadList(api: api)
-                }
+                try? await api.deleteConversation(id: id)
+                await self?.loadList(api: api)
             })
     }
 

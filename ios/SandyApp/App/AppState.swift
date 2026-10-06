@@ -27,7 +27,11 @@ final class AppState: ObservableObject {
         api = APIClient(baseURL: saved)
         // 401 → شاشة الدخول. القفزة لـ @MainActor لأن request ممكن يرجع خارج الخيط الرئيسي.
         api.onUnauthorized = { [weak self] in
-            Task { @MainActor in self?.signOut(keepingUnsent: true) }
+            Task { @MainActor in
+                // A delete still offered for «تراجع» goes into this account's outbox first.
+                await UndoCenter.shared.commitBeforeSignOut()
+                self?.signOut(keepingUnsent: true)
+            }
         }
         // A session kept from last time: the stores may report to notifications before
         // `restoreSession` runs.
@@ -157,9 +161,11 @@ final class AppState: ObservableObject {
         onboarding.interests = interests
     }
 
-    /// Sends what waits in the outbox; true when nothing is left, so a sign-out the user
-    /// chose loses nothing (else they are warned first).
+    /// Sends a delete still offered for «تراجع» (briefly, never held up by no network) and
+    /// what waits in the outbox; true when nothing is left, so a sign-out the user chose
+    /// loses nothing (else they are warned first).
     func sendUnsent() async -> Bool {
+        await UndoCenter.shared.commitBeforeSignOut()
         await Outbox.shared.drain(api)
         return Outbox.shared.isEmpty
     }

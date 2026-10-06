@@ -90,7 +90,7 @@ class LoadableStore: ObservableObject {
         remove()
         UndoCenter.shared.offer(String(format: LanguageManager.shared.s("blocks.deletedToast"), text),
                                 icon: "trash", undo: restore,
-                                commit: { self.optimistic("blocks.errorSave", apply: {}, rollback: restore, call: call) })
+                                commit: { await self.attempt("blocks.errorSave", rollback: restore, call: call) })
     }
 
     /// Optimistic mutation: `apply` now, `call` in the background, `rollback` + notice on failure.
@@ -101,13 +101,17 @@ class LoadableStore: ObservableObject {
         call: @escaping () async throws -> Void
     ) {
         apply()
-        Task { @MainActor in
-            do {
-                try await call()
-            } catch {
-                rollback()
-                self.notify(noticeKey)
-            }
+        Task { @MainActor in await self.attempt(noticeKey, rollback: rollback, call: call) }
+    }
+
+    /// `call`, then `rollback` + notice on failure.
+    func attempt(_ noticeKey: String, rollback: () -> Void,
+                 call: () async throws -> Void) async {
+        do {
+            try await call()
+        } catch {
+            rollback()
+            notify(noticeKey)
         }
     }
 }

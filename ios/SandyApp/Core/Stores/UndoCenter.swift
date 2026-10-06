@@ -15,13 +15,13 @@ final class UndoCenter: ObservableObject {
         let icon: String
         let undo: () -> Void
         /// What happens if nobody undoes it (the server delete); nothing for a done tick.
-        let commit: () -> Void
+        let commit: @MainActor () async -> Void
     }
 
     @Published private(set) var offer: Offer?
 
     func offer(_ message: String, icon: String, undo: @escaping () -> Void,
-               commit: @escaping () -> Void = {}) {
+               commit: @escaping @MainActor () async -> Void = {}) {
         commitNow()
         offer = Offer(message: message, icon: icon, undo: undo, commit: commit)
         Announce.say(message)
@@ -37,7 +37,26 @@ final class UndoCenter: ObservableObject {
     func commitNow() {
         guard let current = offer else { return }
         offer = nil
-        current.commit()
+        Task { await current.commit() }
+    }
+
+    /// Before a sign-out: the offer is kept and sent now, while the session's token is
+    /// still in place, waiting at most `limit`, so no network never holds the sign-out up
+    /// (a block delete is in the outbox by then and waits there for this account).
+    func commitBeforeSignOut(limit: Duration = .seconds(3)) async {
+        guard let current = offer else { return }
+        offer = nil
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await current.commit() }
+            group.addTask { try? await Task.sleep(for: limit) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// The session ended: an offer still up is dropped, never sent as the next account.
+    func drop() {
+        offer = nil
     }
 
     /// The timer ran out on this offer (a newer one may have replaced it).

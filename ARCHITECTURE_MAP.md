@@ -1184,7 +1184,9 @@ so folders are organisation only.
   Done ticks and deletes (lists, reminders, log, conversations) go through
   `Core/Stores/UndoCenter.swift`: one «تراجع» offer at a time; a delete leaves the
   screen at once and reaches the server only when the offer ends (4 s, the next offer,
-  or the app leaving the front). `DesignSystem/PermissionCard.swift` shows a denied mic
+  or the app leaving the front). A sign-out sends an offer still up first, with the
+  session's token, waiting three seconds at most (`commitBeforeSignOut`); one still up
+  when the session ends is dropped, never sent as the next account. `DesignSystem/PermissionCard.swift` shows a denied mic
   or notifications where they are needed (ask bar mic, the call, reminders, Profile).
   `DesignSystem/DisplaySettings.swift` holds Profile › Display (text step, element scale,
   light / dark / automatic) and `scaledFont`; every colour token has a light and a dark
