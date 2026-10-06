@@ -441,6 +441,8 @@ def create_app(*, mongo_db=None):
 
         image_b64 = (body.get("image") or "").strip()
         question = (body.get("question") or "صف هذه الصورة بتفصيل").strip()
+        if len(question) > _MAX_IMAGE_PROMPT_CHARS:
+            return jsonify({"error": "question_too_long"}), 413
         # لغة الردّ من السؤال نفسه، نفس القاعدة بكل القنوات.
         from app.brain.persona import LANGUAGE_RULE as _lang_rule
         question = f"{question}{_lang_rule}"
