@@ -72,6 +72,8 @@ _BY_USER: List[str] = [
     "sandy_attachments",
     # Notes sent from Profile › Support.
     "sandy_feedback",
+    # The chat send ledger: a reply kept ten minutes against a resend.
+    "agent_turns",
 ]
 
 # What «Reset my data» keeps: the counters (a reset is not a new daily allowance) and the
@@ -107,6 +109,27 @@ _BY_ID_PREFIX: List[str] = [
 
 # STM docs are keyed "<thread>:<user>" and also carry user_id; both are cleared.
 _STM = "sandy_stm"
+
+
+# Collections no account deletion touches, each with why. Every collection the code opens
+# is erased or named here (`tests/test_every_collection_is_erased_or_excused.py`).
+NOT_ERASED: Dict[str, str] = {
+    "sandy_auth": "sign-in attempt counters keyed by email and address, gone in their window",
+    "sandy_device_keys": "a board's own key, keyed by device; unpairing (done first) revokes it",
+    "node_pair_challenges": "pairing proofs keyed by node, five minutes then TTL",
+    "cam_upload_nonces": "replay guard for camera uploads, no person in it, TTL",
+    "camera_inbox": "a camera frame waiting for its request, keyed by node, two minutes then TTL",
+    "sandy_firmware": "firmware releases, the same for every board",
+    "sandy_firmware_chunks": "firmware release bytes, the same for every board",
+    "sandy_runtime": "process settings (the live voice model), no person in it",
+}
+
+
+def erased_collections() -> List[str]:
+    """Every collection an account deletion clears, however it is keyed."""
+    return (_BY_USER + _BY_ID + _BY_ID_PREFIX
+            + [_STM, "web_chat_history", "sandy_users", "sandy_cache_stamps",
+               f"{_PHOTO_BUCKET}.files", f"{_PHOTO_BUCKET}.chunks"])
 
 
 def _id_forms(user_id: str) -> List[Any]:
