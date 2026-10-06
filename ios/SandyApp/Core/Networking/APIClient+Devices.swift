@@ -34,14 +34,22 @@ private struct NodeListResponse: Decodable {
             pairedAt = try c.decodeIfPresent(String.self, forKey: .pairedAt)
             // الباك بيرسل outputs ككائنات {id, kind} مش نصوص: نرجّع فاضي بدل ما نرمي.
             outputs = (try? c.decode([String].self, forKey: .outputs)) ?? []
-            // قاموس مختلط الأنواع بينفكّ يدويًا. غيابه مش خطأ: عقدة الغرفة ما بتبعث تليمتري.
-            if let raw = try? c.decode([String: TelemetryValue].self, forKey: .telemetry) {
-                telemetry = raw.mapValues { $0.any }
+            // قاموس مختلط الأنواع بينفكّ مفتاح مفتاح: قيمة ما بنقراها (قاموس `faults` أو `stacks`)
+            // بتنشال لحالها بدل ما تفضّي كل التليمتري. غيابه مش خطأ: عقدة الغرفة ما بتبعث تليمتري.
+            if let raw = try? c.decode([String: OptionalTelemetry].self, forKey: .telemetry) {
+                telemetry = raw.compactMapValues { $0.value?.any }
             } else {
                 telemetry = nil
             }
         }
     }
+}
+
+/// One telemetry value, or nil for a kind the app does not read (a map, a list): decoding
+/// never fails on it.
+private struct OptionalTelemetry: Decodable {
+    let value: TelemetryValue?
+    init(from decoder: Decoder) throws { value = try? TelemetryValue(from: decoder) }
 }
 
 /// رقم أو بوليان — وسيط لأن Swift ما بيفكّ قاموسًا مختلط الأنواع لحاله.
