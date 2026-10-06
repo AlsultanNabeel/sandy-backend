@@ -200,7 +200,8 @@ def match_pool(list_name: Optional[str] = None, *, done: Optional[bool] = None,
         query["list"] = list_name
     if done is not None:
         query["done"] = bool(done)
-    cursor = coll.find(query).sort([("created_at", 1), ("_id", 1)]).limit(MATCH_POOL)
+    # Insertion order, as a list is read: «the first one» must mean what she listed first.
+    cursor = coll.find(query).sort("created_at", 1).limit(MATCH_POOL)
     return [_base.out(d) for d in cursor]
 
 
