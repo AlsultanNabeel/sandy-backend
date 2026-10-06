@@ -280,3 +280,27 @@ def test_a_rewind_waits_for_a_running_turn_but_not_for_ever(api):
         "created_at": datetime.now(timezone.utc) - timedelta(minutes=3)}})
     r = client.post(f"/api/conversations/{cid}/rewind", json={"keep_user": True}, headers=headers)
     assert r.status_code == 200 and undone == [_ADDED]
+
+
+# ── A pick that waits for a yes, and the rest of the line holds something too ──
+
+def test_a_pick_waiting_for_a_yes_keeps_its_question_and_the_next_waits_behind_it(brain_db):  # noqa: F811
+    with active_user_profile_context(A):
+        items.add("tasks", "اتصل بأحمد")
+        items.add("tasks", "اتصل بأحمد الشغل")
+        report = items.add("tasks", "تقرير الشغل")
+    held = _turn(ScriptedModel(tools_reply(call("list_update", list="tasks",
+                                                match_text="أحمد", delete=True))),
+                 "احذفي مهمة اتصل بأحمد")["pending_state"]
+    assert held and held["action"] == "choose"
+    model = ScriptedModel(tools_reply(call("list_update", id=report, delete=True)), text_reply(""))
+    state = _turn(model, "التانية واحذفي كمان مهمة التقرير", pending=held)
+    assert state["final_response"].endswith("متأكد إنك بدك تحذف «اتصل بأحمد الشغل»؟ (اه/لأ)"), \
+        "the pick's own question was lost to the next hold"
+    assert "تقرير الشغل" not in state["final_response"].splitlines()[-1]
+    state = _turn(ScriptedModel(), "اه", pending=state["pending_state"])
+    assert "اتصل بأحمد الشغل" not in _open() and "تقرير الشغل" in _open()
+    assert "متأكد إنك بدك تحذف «تقرير الشغل»" in state["final_response"], \
+        "the second hold is asked after the first is answered"
+    _turn(ScriptedModel(), "اه", pending=state["pending_state"])
+    assert _open() == ["اتصل بأحمد"]

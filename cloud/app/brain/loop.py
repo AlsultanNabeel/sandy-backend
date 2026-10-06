@@ -124,18 +124,26 @@ def _run_side_by_side(calls, ctx: TurnCtx) -> Dict[str, Dict[str, Any]]:
 def _hold(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
           result: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], bool]:
     """(the turn's pending, whether this call joined it). Every action waiting for a yes
-    joins one question; a «which one?» is held only when nothing else is."""
-    if result.get("needs_confirmation") and (held is None or held.get("action") != confirm.CHOOSE):
-        return confirm.with_step(held, name, args, result["summary"]), True
-    if result.get("needs_choice") and held is None:
-        return confirm.hold_choice(name, args, result["candidates"]), True
+    joins one question; a «which one?» waits behind what is already asked."""
+    if result.get("needs_confirmation") or result.get("needs_choice"):
+        return confirm.add(held, name, args, result), True
     return held, False
 
 
-def _ask(pending: Dict[str, Any]) -> str:
-    if pending.get("action") == confirm.CHOOSE:
-        return confirm.choice_question(pending["candidates"])
-    return confirm.question(pending["summary"])
+def _done(outcome: Dict[str, Any]) -> str:
+    """The outcome's text without its question."""
+    return outcome["done"] if outcome.get("pending") is not None else outcome["text"]
+
+
+def _asked_first(waiting: Optional[Dict[str, Any]], first: str,
+                 outcome: Dict[str, Any]) -> Dict[str, Any]:
+    """``outcome`` after ``first`` (what the answer already did), with ``waiting`` (what
+    the earlier question still waits for) asked first: the reply's own hold, if any, waits
+    behind it and is asked once it is answered."""
+    if waiting is None:
+        return {**outcome, "text": "\n".join(t for t in (first, outcome["text"]) if t)}
+    text = "\n".join(t for t in (first, _done(outcome), confirm.ask(waiting)) if t)
+    return {**outcome, "text": text, "pending": confirm.then(waiting, outcome["pending"])}
 
 
 def _settled(replies: List[str], held: Optional[Dict[str, Any]],
@@ -145,7 +153,7 @@ def _settled(replies: List[str], held: Optional[Dict[str, Any]],
     done = "\n".join(replies)
     if held is None:
         return {"text": done or GAVE_UP_REPLY, "pending": None, "tools": used, "done": done}
-    return {"text": "\n".join([*replies, _ask(held)]), "pending": held, "tools": used,
+    return {"text": "\n".join([*replies, confirm.ask(held)]), "pending": held, "tools": used,
             "done": done}
 
 
@@ -274,21 +282,22 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                           note=settled["rest"] if settled else "")
         if settled:
             # A «no» says nothing of its own here: the model's reply is the answer. A pick
-            # that still waits for a yes asks it last, after the rest was answered.
-            waiting = settled.get("pending")
-            first = (settled["done"] if waiting else settled["text"]) if settled["tools"] else ""
-            text = "\n".join(t for t in (first, outcome["text"]) if t)
-            pending = outcome["pending"]
-            if waiting is not None and pending is None:
-                text, pending = f"{text}\n{_ask(waiting)}", waiting
-            outcome = {**outcome, "text": text, "pending": pending,
+            # that still waits for a yes asks it last, after the rest was answered; what
+            # waited behind the answered question comes next, and the rest's own hold after.
+            first = _done(settled) if settled["tools"] else ""
+            waiting = confirm.then(settled["pending"], confirm.following(held))
+            outcome = {**_asked_first(waiting, first, outcome),
                        "tools": settled["tools"] + outcome["tools"]}
-        elif (held and resolved is None and outcome["pending"] is None
-              and not outcome.get("error") and not outcome.get("stopped")):
-            # Neither yes nor no: the message was answered, and the question is asked once more.
-            again = confirm.asked_again(held)
-            if again is not None:
-                outcome = {**outcome, "text": f"{outcome['text']}\n{_ask(again)}", "pending": again}
+        elif resolved is not None:
+            # Answered: what it still waits for, then what waited behind it.
+            waiting = confirm.then(resolved["pending"], confirm.following(held))
+            outcome = _asked_first(waiting, "", {**resolved, "text": _done(resolved),
+                                                 "pending": None})
+        elif held and not outcome.get("error") and not outcome.get("stopped"):
+            # Neither yes nor no: the message was answered, and the question is asked once
+            # more; a second unclear answer lets it go, and what waited behind it is asked.
+            waiting = confirm.asked_again(held) or confirm.following(held)
+            outcome = _asked_first(waiting, "", outcome)
 
     # Stopped from the app: memory keeps what was shown, marked as cut.
     shown = stops.take(user_id, thread_id, since=began)

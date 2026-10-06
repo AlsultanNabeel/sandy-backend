@@ -172,3 +172,20 @@ def test_voice_two_deletes_wait_as_one(brain_db):  # noqa: F811
         assert "«مهمة أ»" in out["reply"] and "«مهمة ب»" in out["reply"]
         assert voice.dispatch("confirm", {"answer": "اه"}, "userA")["ok"]
         assert items.get(a) is None and items.get(b) is None
+
+
+def test_voice_a_which_one_waits_behind_a_held_yes_instead_of_replacing_it(gym):
+    with active_user_profile_context(A):
+        items.add("tasks", "اتصل بأحمد")
+        ahmad2 = items.add("tasks", "اتصل بأحمد الشغل")
+        voice.dispatch("list_update", {"id": gym, "delete": True}, "userA")
+        out = voice.dispatch("list_update", {"list": "tasks", "match_text": "أحمد",
+                                             "delete": True}, "userA")
+        assert "متأكد إنك بدك تحذف" in out["reply"], "the held yes is still the question"
+        out = voice.dispatch("confirm", {"answer": "اه"}, "userA")
+        assert not _exists(gym) and "أي وحدة" in out["reply"], "the «which one?» was dropped"
+        out = voice.dispatch("confirm", {"answer": "التانية"}, "userA")
+        assert "اتصل بأحمد الشغل" in out["reply"] and _exists(ahmad2)
+        voice.dispatch("confirm", {"answer": "اه"}, "userA")
+        assert not _exists(ahmad2)
+        assert "ما في إشي" in voice.dispatch("confirm", {"answer": "اه"}, "userA")["reply"]

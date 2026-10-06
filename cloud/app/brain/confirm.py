@@ -29,15 +29,46 @@ def hold(steps: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def with_step(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
               summary: str) -> Dict[str, Any]:
-    """``held`` with one more action (the same call twice is held once)."""
+    """``held`` with one more action (the same call twice is held once); what waits behind
+    it still does."""
     steps = list((held or {}).get("steps") or [])
     if not any(s["tool"] == name and s["args"] == args for s in steps):
         steps.append({"tool": name, "args": args, "summary": summary})
-    return hold(steps)
+    out = hold(steps)
+    if (held or {}).get("then"):
+        out["then"] = held["then"]
+    return out
 
 
 def question(summary: str) -> str:
     return f"متأكد إنك بدك {summary}؟ (اه/لأ)"
+
+
+# ── one question at a time ──────────────────────────────────────────────────
+# A pending asks one question; anything else that waits rides behind it as `then`, and
+# is asked once that question is answered or let go, so no hold drops another.
+
+def then(first: Optional[Dict[str, Any]],
+         nxt: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """``first`` with ``nxt`` waiting at the end of what already waits behind it."""
+    if first is None or nxt is None:
+        return first or nxt
+    return {**first, "then": then(first.get("then"), nxt)}
+
+
+def following(held: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """What waits behind ``held``, as a pending of its own from now, or None."""
+    nxt = (held or {}).get("then")
+    if not nxt:
+        return None
+    return P.create({k: v for k, v in nxt.items() if k != "asked_again"})
+
+
+def ask(pending: Dict[str, Any]) -> str:
+    """The question ``pending`` asks (what waits behind it is asked later)."""
+    if pending.get("action") == CHOOSE:
+        return choice_question(pending["candidates"])
+    return question(pending["summary"])
 
 
 def live(pending: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -178,6 +209,19 @@ def hold_choice(name: str, args: Dict[str, Any],
                 candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
     return P.create({"type": PENDING_TYPE, "action": CHOOSE, "tool": name,
                      "args": args, "candidates": candidates})
+
+
+def add(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
+        result: Dict[str, Any]) -> Dict[str, Any]:
+    """``held`` with one more action waiting (``result`` asked for a yes or a choice). A yes
+    joins the first question that asks for one, so one yes runs them all; a «which one?»
+    waits behind whatever is already asked."""
+    if result.get("needs_confirmation"):
+        if held is None or held.get("action") != CHOOSE:
+            return with_step(held, name, args, result["summary"])
+    elif held is None:
+        return hold_choice(name, args, result["candidates"])
+    return {**held, "then": add(held.get("then"), name, args, result)}
 
 
 def choice_question(candidates: List[Dict[str, Any]]) -> str:

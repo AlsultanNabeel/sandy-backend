@@ -130,7 +130,10 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    answer («اه وضيفي خبز»), the model gets the message with a note of what the
    answer settled and does only the rest. Anything else is a normal turn, and the
    question is asked once more at the end of its reply; a second unclear answer
-   lets the hold go, so an old yes never fires later.
+   lets the hold go, so an old yes never fires later. One question is asked at a
+   time: a hold that comes while another waits (a pick that still needs a yes and a
+   delete in the rest of the line) rides behind it as `then` and is asked once the
+   first is answered or let go (`confirm.then` / `confirm.following`), never dropped.
 2. **The fast path** (`fast_path.py`): a bare device command («شغّل الضو») is
    matched *whole* against the caller's own registered devices and run with no
    model call at all. The verb must lead and the line must not end in a question
@@ -214,7 +217,8 @@ reads the opening only, like a yes: several («الأولى والتالتة»),
 `confirm(answer)` tool passes the user's words to the same resolver; holds wait on
 the `voice` pending thread, a second hold joins the first, a «which one?» waits there
 too and `confirm` takes the pick («الأولى»), and an unclear answer is asked once more,
-then let go, as in chat.
+then let go, as in chat. Holds join through `confirm.add` on both paths: a yes joins the
+first question asking for one, a «which one?» waits behind what is already asked.
 
 **On the voice path everything that did not happen is marked**
 (`voice._tagged`), because an unmarked refusal is exactly what Gemini reads as

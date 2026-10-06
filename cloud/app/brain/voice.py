@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.brain import confirm, tools
 from app.brain import pending as P
@@ -63,34 +63,44 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
     if said == "other":
         # Asked once more, as in chat; a second unclear answer lets it go (C10: say so).
         again = confirm.asked_again(held)
-        P.save(VOICE_THREAD, chat_id, db, again)
         if again is None:
-            return {"handled": True, "ok": False,
-                    "reply": f"[لم يُنفَّذ] ما فهمت جوابه مرتين، فما عملت: {held['summary']}."}
+            return _ask_next(held, chat_id, {
+                "handled": True, "ok": False,
+                "reply": f"[لم يُنفَّذ] ما فهمت جوابه مرتين، فما عملت: {held['summary']}."})
+        P.save(VOICE_THREAD, chat_id, db, again)
         return {"handled": True,
                 "reply": f"ما فهمت اه ولا لأ — اسأليه مرة تانية: {confirm.question(held['summary'])}"}
-    P.save(VOICE_THREAD, chat_id, db, None)
     out = ({"handled": True, "reply": confirm.CANCELLED_REPLY} if said == "no"
            else _tagged(confirm.run_held(held, TurnCtx(user_id=chat_id, source="voice"))))
     if rest:
         out["reply"] += "\nقال كمان إشي بعد جوابه: نفّذيه هلأ."
+    return _ask_next(held, chat_id, out)
+
+
+def _ask_next(held: Dict[str, Any], chat_id: str, out: Dict[str, Any],
+              waiting: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """``held`` is answered or let go: ``waiting`` (what the answer still waits for), then
+    what waited behind it, is saved and asked; nothing left clears the hold."""
+    nxt = confirm.then(waiting, confirm.following(held))
+    P.save(VOICE_THREAD, chat_id, get_db(), nxt)
+    if nxt is not None:
+        out["reply"] += f"\nلسا ما نفّذت — اسأليه: {confirm.ask(nxt)}"
     return out
 
 
 def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
     """«الأولى» after «أي وحدة؟», as in chat: each chosen row is acted on, and what still
     needs a yes waits as one question."""
-    db = get_db()
     if confirm.answer(answer) == "no":
-        P.save(VOICE_THREAD, chat_id, db, None)
-        return {"handled": True, "reply": confirm.CANCELLED_REPLY}
+        return _ask_next(held, chat_id, {"handled": True, "reply": confirm.CANCELLED_REPLY})
     ids, rest = confirm.pick(answer, held.get("candidates") or [])
     if ids is None:
         again = confirm.asked_again(held)
-        P.save(VOICE_THREAD, chat_id, db, again)
         if again is None:
-            return {"handled": True, "ok": False,
-                    "reply": "[لم يُنفَّذ] ما فهمت أي وحدة مرتين، فما عملت إشي."}
+            return _ask_next(held, chat_id, {
+                "handled": True, "ok": False,
+                "reply": "[لم يُنفَّذ] ما فهمت أي وحدة مرتين، فما عملت إشي."})
+        P.save(VOICE_THREAD, chat_id, get_db(), again)
         return {"handled": True,
                 "reply": f"ما فهمت أي وحدة — اسأليه مرة تانية:\n{confirm.choice_question(held['candidates'])}"}
     name = held.get("tool", "")
@@ -103,12 +113,9 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
             waiting = confirm.with_step(waiting, name, args, result["summary"])
         else:
             results.append(_tagged(result)["reply"])
-    P.save(VOICE_THREAD, chat_id, db, waiting)
-    if waiting is not None:
-        results.append(f"لسا ما نفّذت — اسأليه: {confirm.question(waiting['summary'])}")
     if rest:
         results.append("قال كمان إشي بعد اختياره: نفّذيه هلأ.")
-    return {"handled": True, "reply": "\n".join(results)}
+    return _ask_next(held, chat_id, {"handled": True, "reply": "\n".join(results)}, waiting)
 
 
 def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
@@ -116,20 +123,14 @@ def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
     if name == "confirm":
         return _answer_held(str((args or {}).get("answer") or ""), chat_id)
     result = tools.execute(name, args or {}, TurnCtx(user_id=chat_id, source="voice"))
-    if result.get("needs_confirmation"):
+    if result.get("needs_confirmation") or result.get("needs_choice"):
         db = get_db()
         # Two deletes in one breath wait as one: the question names both, one yes runs both.
-        held = confirm.with_step(confirm.live(P.load(VOICE_THREAD, chat_id, db)),
-                                 name, args or {}, result["summary"])
+        # A «which one?» waits behind what is already asked, as in chat.
+        held = confirm.add(confirm.live(P.load(VOICE_THREAD, chat_id, db)),
+                           name, args or {}, result)
         P.save(VOICE_THREAD, chat_id, db, held)
-        logger.info("[voice_ws] brain %s is waiting for a confirmation", name)
-        # Not done yet and not refused: the pending is live (C10).
-        return {"handled": True,
-                "reply": f"لسا ما نفّذت — اسأليه: {confirm.question(held['summary'])}"}
-    if result.get("needs_choice"):
-        P.save(VOICE_THREAD, chat_id, get_db(),
-               confirm.hold_choice(name, args or {}, result["candidates"]))
-        # Not done and not refused: she asks which, and `confirm` takes the answer.
-        return {"handled": True,
-                "reply": f"لسا ما نفّذت — اسأليه:\n{confirm.choice_question(result['candidates'])}"}
+        logger.info("[voice_ws] brain %s is waiting for the user", name)
+        # Not done yet and not refused: the pending is live (C10); `confirm` takes the answer.
+        return {"handled": True, "reply": f"لسا ما نفّذت — اسأليه:\n{confirm.ask(held)}"}
     return _tagged(result)
