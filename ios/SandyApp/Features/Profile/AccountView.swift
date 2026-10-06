@@ -213,8 +213,8 @@ struct AccountView: View {
         do {
             try await state.api.resetAccountData()
             state.resetLocalData()
-            notice = lang.s("account.reset.done")
-            await reload()
+            // This screen goes with the rebuilt main screen; the «done» shows on the new one.
+            NoticeCenter.shared.post(lang.s("account.reset.done"))
         } catch {
             notice = lang.s("account.reset.failed")
         }

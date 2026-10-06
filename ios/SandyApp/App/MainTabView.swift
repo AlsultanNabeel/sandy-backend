@@ -60,6 +60,7 @@ struct MainTabView: View {
             }
             // Above the tab bar and clear of a list's add field.
             .undoOverlay(bottom: 72)
+            .noticeOverlay()
 
             if call.inCall && !showLiveCall {
                 CallBar(live: call) { showLiveCall = true }

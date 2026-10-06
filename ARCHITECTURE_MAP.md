@@ -1145,7 +1145,9 @@ so folders are organisation only.
   «Reset my data» (Profile › Account) drops the outbox before the server reset (sent
   after it, it would bring rows back), then does the same local clearing still signed in
   (`AppState.resetLocalData`) and builds the main screen again with fresh stores
-  (`dataEpoch`). A write with no one signed in is refused, never queued.
+  (`dataEpoch`); its «done» shows for three seconds at the top of the new one
+  (`DesignSystem/NoticeBar.swift`, `NoticeCenter`, which outlives the rebuild and goes with a
+  sign-out). A write with no one signed in is refused, never queued.
   `AccountSession.generation` moves on every sign-in and sign-out: a `LoadableStore`
   load that began in an earlier session is dropped when it lands (`isCurrentLoad`), and
   a store made in an earlier session saves and publishes nothing (`inItsSession`: no

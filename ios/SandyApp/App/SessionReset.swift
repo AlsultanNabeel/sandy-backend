@@ -21,6 +21,7 @@ enum SessionReset {
         FocusLiveActivity.shared.end()
         UndoCenter.shared.drop()
         DeepLinkRouter.shared.drop()
+        NoticeCenter.shared.drop()
         NotificationPrefs.clear()
         ItemsStore.cancelLoads()
         LifeStatsStore.shared.reset()

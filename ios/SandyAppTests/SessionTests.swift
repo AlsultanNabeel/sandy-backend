@@ -257,4 +257,20 @@ final class SessionTests: XCTestCase {
             }
         }
     }
+
+    /// After «reset my data» the main screen is built again and the Account screen that
+    /// said «done» is gone: the message is posted where the new screen shows it, briefly.
+    func testTheResetDoneMessageOutlivesTheRebuiltScreenBriefly() throws {
+        let center = NoticeCenter.shared
+        center.post("انمسح كل إشي")
+        let first = try XCTUnwrap(center.notice)
+        center.post("انمسح كل إشي")
+        center.expire(first.id)
+        XCTAssertNotNil(center.notice, "an older message's timer took down the newer one")
+        center.expire(try XCTUnwrap(center.notice).id)
+        XCTAssertNil(center.notice)
+        center.post("انمسح كل إشي")
+        SessionReset.clearShared()
+        XCTAssertNil(center.notice, "a message outlived the sign-out")
+    }
 }
