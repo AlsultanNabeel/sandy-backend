@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Shown by the app as they are. An erase is safe to ask again: it carries on from what is left.
 _PARTIAL_RESET = "ما انمسح كل شي، في جزء ضل. جرّب كمان مرّة وبكمّل من وين وقفت."
-_PARTIAL_DELETE = "ما انحذف كل شي، في جزء ضل وحسابك لسا موجود. جرّب الحذف كمان مرّة وبكمّل من وين وقفت."
+_PARTIAL_DELETE = ("ما انحذف كل شي، في جزء ضل وحسابك لسا موجود. سجّل دخولك من جديد "
+                   "وجرّب الحذف كمان مرّة، وبكمّل من وين وقفت.")
+_UNAVAILABLE = "ما قدرت أحذف الحساب هلق، وما انمسح ولا شي. جرّب كمان شوي."
 
 
 def register_account_api(app):
@@ -68,12 +70,16 @@ def register_account_api(app):
         if not uid:
             return jsonify({"error": "no_user"}), 400
 
-        # Release the hardware first: a half-deleted account must not keep a robot claimed.
+        # Every token of the account dies before anything is touched.
+        from app.features.account_delete import delete_account, revoke_sessions
+        if not revoke_sessions(uid):
+            return jsonify({"error": "unavailable", "message": _UNAVAILABLE}), 503
+
+        # Release the hardware next: a half-deleted account must not keep a robot claimed.
         from app.features.node_store import list_nodes, unpair_node
         for n in list_nodes() or []:
             unpair_node(str(n.get("node_id") or ""))
 
-        from app.features.account_delete import delete_account
         r = delete_account(uid)
         if not r.get("ok"):
             return jsonify({**r, "message": _PARTIAL_DELETE}), 500

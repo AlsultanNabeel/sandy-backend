@@ -208,6 +208,17 @@ def wipe_account_data(user_id: str, keep_nodes: bool = True) -> Dict[str, Any]:
     return r
 
 
+def revoke_sessions(user_id: str) -> bool:
+    """A delete's first step: every token of the account dies now, on this worker at
+    once and on the others within the minute their kept answer lives."""
+    from app.api.auth_handlers import forget_generation
+    from app.features.users_store import move_token_generation
+
+    moved = move_token_generation(user_id)
+    forget_generation(user_id)
+    return moved
+
+
 def delete_account(user_id: str) -> Dict[str, Any]:
     """Remove every trace of one person; returns per-collection counts."""
     r = _erase(user_id, _BY_USER)

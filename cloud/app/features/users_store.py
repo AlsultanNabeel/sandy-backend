@@ -86,6 +86,18 @@ def get_user(user_id: str) -> Optional[Dict[str, Any]]:
 TOKEN_GEN_FIELD = "token_gen"
 
 
+def move_token_generation(user_id: str) -> bool:
+    """Revoke every token issued so far; False when the account or the store is not there."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return False
+    try:
+        return coll.update_one({"_id": user_id}, {"$inc": {TOKEN_GEN_FIELD: 1}}).matched_count > 0
+    except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+        logger.warning("[users] generation not moved for %s: %s", user_id, exc)
+        return False
+
+
 class GenerationUnreadable(Exception):
     """The account's generation could not be read (no database, or the read failed)."""
 

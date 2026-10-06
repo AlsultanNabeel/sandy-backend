@@ -512,6 +512,9 @@ moving it is how tokens are revoked). A signed-in token is honoured — by `requ
 generation: the answer is kept a minute per account (`GENERATION_TTL_S`), forgotten at once when the
 account is deleted (`forget_generation`; the other workers within the minute); a read that fails
 serves the last answer kept, and with none the request goes through rather than signing everyone out.
+Deleting an account moves it first (`account_delete.revoke_sessions`, before the robots are
+released or a row goes; a store that cannot move it answers 503 `unavailable` and nothing is
+touched), so a delete that stops halfway leaves no live token: the user signs in again to finish it.
 There is no server sign-out or password change yet; when one is added it moves the generation and
 calls `forget_generation`. Once a day old it comes back renewed in the
 `X-Sandy-Token` header of any `require_auth` response (`renewed_token`), on the same

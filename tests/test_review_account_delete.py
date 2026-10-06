@@ -210,3 +210,33 @@ def test_a_partial_reset_or_delete_tells_the_user(monkeypatch):
     body = r.get_json()
     assert r.status_code == 500 and body["error"] == "partial" and body["message"]
     appdb.reset()
+
+
+def test_deleting_revokes_every_token_before_anything_is_erased(monkeypatch):
+    """The first thing a delete does is move the account's generation and drop the
+    kept answer, so every token of the account dies at once — before the robots are
+    released or a row goes, and even when the erase stops halfway."""
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+    from app.features import node_store
+
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    d = _db()
+    c = create_app(mongo_db=d).test_client()
+    appdb.configure(d)
+    auth = {"Authorization": f"Bearer {make_token('user', user_id='u1')}"}
+    assert c.get("/api/account", headers=auth).status_code == 200   # the answer is kept
+
+    seen = {}
+    monkeypatch.setattr(node_store, "list_nodes", lambda: [{"node_id": "n1"}])
+    monkeypatch.setattr(node_store, "unpair_node", lambda _n: seen.setdefault(
+        "gen_at_unpair", d.sandy_users.find_one({"_id": "u1"}).get("token_gen")))
+    monkeypatch.setattr(account_delete, "_erase_photo_blobs",
+                        lambda *_a: (_ for _ in ()).throw(PyMongoError("down")))
+    _photo(d)
+
+    r = c.delete("/api/account", json={"confirm": "DELETE"}, headers=auth)
+    assert r.status_code == 500 and r.get_json()["error"] == "partial"
+    assert seen["gen_at_unpair"] == 1
+    assert c.get("/api/account", headers=auth).status_code == 401
+    appdb.reset()

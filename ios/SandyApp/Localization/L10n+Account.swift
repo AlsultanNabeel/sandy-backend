@@ -41,7 +41,7 @@ enum L10nAccount {
             "delete.confirm":   .text("تحذف حسابك نهائيًا؟"),
             "delete.warn":      .text("بيروح كل إشي: بصمة صوتك، يومياتك، صورك، مصاريفك، وكل محادثة حكيتها معها. ما في رجعة."),
             "delete.failed":    .text("ما قدرت أحذف الحساب. جرّب كمان مرّة."),
-            "delete.partial":   .text("ما انحذف كل شي، في جزء ضل وحسابك لسا موجود. جرّب الحذف كمان مرّة وبكمّل من وين وقفت."),
+            "delete.partial":   .text("ما انحذف كل شي، في جزء ضل وحسابك لسا موجود. سجّل دخولك من جديد وجرّب الحذف كمان مرّة، وبكمّل من وين وقفت."),
         ],
         en: [
             "title":            .text("Account & robot"),
@@ -75,7 +75,7 @@ enum L10nAccount {
             "delete.confirm":   .text("Delete your account permanently?"),
             "delete.warn":      .text("Everything goes: your voiceprint, journal, photos, expenses, and every conversation you've had with her. This cannot be undone."),
             "delete.failed":    .text("Couldn't delete the account. Try again."),
-            "delete.partial":   .text("Not everything was deleted; some is left and your account still exists. Try deleting again and it carries on from where it stopped."),
+            "delete.partial":   .text("Not everything was deleted; some is left and your account still exists. Sign in again and delete once more; it carries on from where it stopped."),
         ]
     )
 }
