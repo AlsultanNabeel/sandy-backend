@@ -282,7 +282,7 @@ private struct LiveView: View {
                     lastFrameAt = Date()
                     problem = nil
                 } else if frame == nil, Date().timeIntervalSince(started) > Self.noFrameAfter {
-                    problem = LanguageManager.shared.s("control.camera.noFrames")
+                    problem = LanguageManager.shared.s("robot.control.camera.noFrames")
                 } else if StreamWatch.stalled(lastFrameAt: lastFrameAt, now: Date()) {
                     // The last picture is not live any more: say the stream stopped.
                     frame = nil
