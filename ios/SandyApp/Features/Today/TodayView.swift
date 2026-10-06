@@ -105,7 +105,6 @@ struct TodayView: View {
         .scrollDismissesKeyboard(.interactively)
         .toolbar(.hidden, for: .navigationBar)
         .task { await reload() }
-        .task { await nudge.loadIfNeeded(api: state.api) }
         .task { await weather.load(api: state.api) }
         .refreshable { await reload() }
         .onReceive(NotificationCenter.default.publisher(for: .sandyBlocksChanged)) { _ in
@@ -148,7 +147,9 @@ struct TodayView: View {
         async let robot = state.api.getNodes()
         // The budget alert on a new expense needs this month's numbers.
         async let e: Void = LifeStatsStore.shared.load(api: state.api)
-        _ = await (a, b, c, d, e)
+        // Once a day; a fetch that failed is tried again on the next reload.
+        async let f: Void = nudge.loadIfNeeded(api: state.api)
+        _ = await (a, b, c, d, e, f)
         if let nodes = try? await robot, !nodes.demo {
             hasRobot = nodes.items.contains { $0.capabilities.contains("audio") }
         }

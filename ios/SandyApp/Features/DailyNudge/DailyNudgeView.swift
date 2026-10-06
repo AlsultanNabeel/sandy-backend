@@ -19,6 +19,11 @@ struct DailyNudgeCard: View {
 
                         if n.isQuestion {
                             answerField
+                            if store.sendFailed {
+                                Text(lang.s("nudge.answer.failed"))
+                                    .font(Theme.Typography.caption)
+                                    .foregroundColor(Theme.Colors.warn)
+                            }
                         }
                     }
                 }

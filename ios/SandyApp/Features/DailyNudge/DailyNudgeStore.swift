@@ -14,8 +14,12 @@ final class DailyNudgeStore: ObservableObject {
     @Published var submitting = false
     @Published var answered = false
     @Published var dismissed = false
+    /// The last answer did not reach the server; the card says so and keeps it to resend.
+    @Published var sendFailed = false
 
+    /// Fetched this session; a failed fetch leaves it false so the next ask tries again.
     private var loaded = false
+    private var fetching = false
 
     /// Which account the two stored days below belong to.
     ///
@@ -59,7 +63,8 @@ final class DailyNudgeStore: ObservableObject {
         return f.string(from: Date())
     }
 
-    /// يجلب تنبيه اليوم مرّة (بصمت — التنبيه ميزة لطيفة مش حرجة، فأي فشل بينخفي).
+    /// يجلب تنبيه اليوم مرّة (بصمت — التنبيه ميزة لطيفة مش حرجة). A failed fetch is not
+    /// "loaded": the next ask (back on Today, a pull to refresh) tries again.
     func loadIfNeeded(api: APIClient) async {
         // A different account is a reload, whatever this store loaded before.
         let uid = api.currentUserId ?? ""
@@ -69,11 +74,14 @@ final class DailyNudgeStore: ObservableObject {
             nudge = nil
             answer = ""
         }
-        guard !loaded else { return }
-        loaded = true
+        guard !loaded, !fetching else { return }
+        fetching = true
+        defer { fetching = false }
         dismissed = UserDefaults.standard.string(forKey: Self.dismissKey) == scopedToday
         answered = UserDefaults.standard.string(forKey: Self.answerKey) == scopedToday
-        nudge = try? await api.getDailyNudge()
+        guard let fetched = try? await api.getDailyNudge(), uid == userScope else { return }
+        nudge = fetched
+        loaded = true
     }
 
     /// إغلاق بيدوم. البطاقة ما بترجع اليوم، وبترجع بكرا بمحتوى جديد.
@@ -87,13 +95,16 @@ final class DailyNudgeStore: ObservableObject {
         guard let n = nudge, n.isQuestion,
               !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         submitting = true
+        sendFailed = false
         defer { submitting = false }
         do {
             try await api.answerDailyNudge(qid: n.qid, answer: answer)
             answered = true
             UserDefaults.standard.set(scopedToday, forKey: Self.answerKey)
         } catch {
-            // فشل الإرسال — نخلّي البطاقة حتى يعيد المحاولة.
+            // فشل الإرسال — البطاقة بتضل والجواب بالحقل، وبتقول إنه ما وصل.
+            sendFailed = true
+            Announce.say(LanguageManager.shared.s("nudge.answer.failed"))
         }
     }
 

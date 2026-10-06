@@ -12,6 +12,7 @@ enum L10nNudge {
             "answer.placeholder": .text("جوابك…"),
             "answer.send":        .text("أرسل"),
             "answered":           .text("تمام، سجّلتها 🌿"),
+            "answer.failed":      .text("ما وصل جوابك، جرّب كمان مرة."),
             "dismiss":            .text("تمام"),
         ],
         en: [
@@ -19,6 +20,7 @@ enum L10nNudge {
             "answer.placeholder": .text("Your answer…"),
             "answer.send":        .text("Send"),
             "answered":           .text("Got it, saved 🌿"),
+            "answer.failed":      .text("Your answer didn't go through, try again."),
             "dismiss":            .text("Got it"),
         ]
     )
