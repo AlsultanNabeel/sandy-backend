@@ -52,6 +52,8 @@ def test_image_endpoints_meter_signed_in_users(monkeypatch):
     from app.features import usage_store
     monkeypatch.setattr(usage_store, "check_and_record",
                         lambda *a, **k: "daily_quota_exceeded")
+    # Analysis is checked first and charged only once it worked (`over_limit`).
+    monkeypatch.setattr(usage_store, "over_limit", lambda *a, **k: "daily_quota_exceeded")
     c = app.test_client()
     for path, body in (("/api/image", {"prompt": "x"}),
                        ("/api/image/edit", {"prompt": "x", "image": "aGk="}),

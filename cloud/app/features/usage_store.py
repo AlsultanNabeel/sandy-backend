@@ -76,6 +76,24 @@ def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> O
     return None
 
 
+def over_limit(user_id: str, *, daily_limit: int, per_min_limit: int) -> Optional[str]:
+    """Whether one more request would be past a limit, counting nothing: for a call that is
+    charged only once it worked (`check_and_record` afterwards). Fails open."""
+    if get_db() is None or not user_id:
+        return None
+    now = _now()
+    try:
+        rl = get_db()[_RL].find_one({"_id": f"{user_id}:{int(now.timestamp() // 60)}"}) or {}
+        if per_min_limit and int(rl.get("count", 0)) >= per_min_limit:
+            return "rate_limited"
+        d = get_db()[_DAILY].find_one({"_id": f"{user_id}:{now:%Y-%m-%d}"}) or {}
+        if daily_limit and int(d.get("count", 0)) >= daily_limit:
+            return "daily_quota_exceeded"
+    except PyMongoError:
+        logger.debug("[UsageStore] limit read skipped", exc_info=True)
+    return None
+
+
 def within_minute_limit(user_id: str, what: str, per_min_limit: int) -> bool:
     """Count one `what` for this user this minute; False once past the limit. A window of
     its own, apart from the chat quota (fails open)."""

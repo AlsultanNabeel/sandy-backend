@@ -23,10 +23,11 @@ def _build_sandy_vision_system(user_id: Optional[str] = None) -> str:
 
 
 def analyze_image_with_azure(image_bytes: bytes, prompt: str, *,
-                             user_id: Optional[str] = None) -> str:
-    """Analyze image bytes via Azure GPT-4o-mini Vision, in Sandy's voice."""
+                             user_id: Optional[str] = None) -> Optional[str]:
+    """Analyze image bytes via Azure GPT-4o-mini Vision, in Sandy's voice; None when it did
+    not work (the caller says so: an error line here was shown, and saved, as the answer)."""
     if not image_bytes:
-        return "[think] ما قدرت أحلل الصورة حالياً."
+        return None
 
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -45,13 +46,10 @@ def analyze_image_with_azure(image_bytes: bytes, prompt: str, *,
             temperature=0.95,
             max_tokens=120,
         )
-        return (
-            response.choices[0].message.content
-            or "[think] تم التحليل لكن ما في وصف واضح."
-        ).strip()
+        return (response.choices[0].message.content or "").strip() or None
     except Exception as e:
         logger.warning(f"[Azure Vision] analysis failed: {e}")
-        return "[think] صار خلل أثناء تحليل الصورة. جرب مرة ثانية."
+        return None
 
 
 def generate_image_with_azure(prompt: str, *, size: str = "1024x1024") -> Optional[bytes]:

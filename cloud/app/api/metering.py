@@ -23,17 +23,31 @@ _LIMIT_MESSAGES = {
 }
 
 
-def meter_or_error(role: str, user_id: str) -> Optional[str]:
-    """Record one unit; the error code if over the limit, else None."""
-    from app.features import usage_store, users_store
+def _limits(role: str, user_id: str) -> Tuple[int, int]:
+    from app.features import users_store
 
     if role == "owner" or users_store.is_subscriber(user_id):
-        daily, per_min = SUBSCRIBER_DAILY, SUBSCRIBER_PER_MIN
-    else:
-        daily, per_min = FREE_DAILY, FREE_PER_MIN
+        return SUBSCRIBER_DAILY, SUBSCRIBER_PER_MIN
+    return FREE_DAILY, FREE_PER_MIN
+
+
+def meter_or_error(role: str, user_id: str) -> Optional[str]:
+    """Record one unit; the error code if over the limit, else None."""
+    from app.features import usage_store
+
+    daily, per_min = _limits(role, user_id)
     return usage_store.check_and_record(
         user_id, daily_limit=daily, per_min_limit=per_min
     )
+
+
+def over_limit(role: str, user_id: str) -> Optional[str]:
+    """The error code if one more unit would be past the limit; nothing is recorded (the
+    caller charges with `meter_or_error` once the work succeeded)."""
+    from app.features import usage_store
+
+    daily, per_min = _limits(role, user_id)
+    return usage_store.over_limit(user_id, daily_limit=daily, per_min_limit=per_min)
 
 
 def _top_tier(user_id: str, role: Optional[str]) -> bool:

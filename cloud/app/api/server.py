@@ -455,16 +455,23 @@ def create_app(*, mongo_db=None):
         if img_bytes is None:
             return jsonify({"error": "invalid_image"}), 400
 
-        gate = _media_gate(claims)
-        if gate is not None:
-            err_body, code = gate
-            return jsonify(err_body), code
+        # Checked now, charged only once the analysis worked.
+        if claims.get("role") not in ("owner", "user"):
+            return jsonify({"error": "forbidden"}), 403
+        from app.api.metering import over_limit
+        over = over_limit(claims.get("role", "user"), claims.get("user_id") or "")
+        if over:
+            return jsonify(_limit_response(over)), 429
 
         try:
             from app.features.vision import analyze_image_with_azure
             reply = analyze_image_with_azure(img_bytes, question,
                                              user_id=claims.get("user_id") or None)
-            return jsonify({"reply": reply or "تعذّر تحليل الصورة"}), 200
+            if not reply:
+                return jsonify({"error": "vision_failed",
+                                "message": "ما قدرت أحلل الصورة هلّق. جرّب كمان شوي."}), 502
+            _meter_or_error(claims.get("role", "user"), claims.get("user_id") or "")
+            return jsonify({"reply": reply}), 200
         except Exception:
             logger.exception("[web_analyze_image] image analysis failed")
             return jsonify({"error": "internal_error"}), 500

@@ -487,7 +487,8 @@ runners, which run inside the tenant's context. A row with `encrypted` in its
 **Every route that spends money on a provider is metered** through
 `api/metering.py` — the chat routes, image generation and analysis, web and
 place search, photo tagging, attachment uploads and `/api/summary`, one unit each against the
-caller's tier. A new paid route calls `meter_claims`.
+caller's tier. Image analysis is checked first (`metering.over_limit`, nothing counted) and charged only
+once it worked; a failed one answers 502 `vision_failed`. A new paid route calls `meter_claims`.
 
 **No route issues a guest token.** `make_token` still honours a `guest` role;
 chat and images refuse one with 403, `require_tenant` routes refuse it, and the
