@@ -262,7 +262,8 @@ def apply_scene(name: str) -> Dict[str, Any]:
                 timers += 1
     from app.features.device_store import keep_before_scene
 
-    keep_before_scene([device["name"] for device, _ in resolved])
+    keep_before_scene({device["name"]: payload for device, value in resolved
+                       if (payload := _payload(device, value)) is not None})
     r = _send(resolved)
 
     return {
@@ -354,23 +355,29 @@ def _actuate(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {**r, "missed": unknown + r["missed"], "skipped": skipped}
 
 
+def _payload(device: Dict[str, Any], value: str) -> Optional[str]:
+    """What the device is sent for this value, through the same gate as the device tool."""
+    from app.features.device_store import command_payload
+
+    res = command_payload(device, value, value)
+    if not res.get("ok"):
+        res = command_payload(device, "set", value)
+    return res["payload"] if res.get("ok") else None
+
+
 def _send(resolved: List[list]) -> Dict[str, Any]:
     """Send each [device, value]; {sent, missed (labels), offline (labels)}."""
-    from app.features.device_store import command_payload, device_topic, set_state
+    from app.features.device_store import device_topic, set_state
     from app.integrations.room_device import get_room_device_client
 
     sent, missed, offline = 0, [], []
     for device, value in resolved:
         label = device.get("label") or device["name"]
         try:
-            # Same validation gate as the device tool.
-            res = command_payload(device, value, value)
-            if not res.get("ok"):
-                res = command_payload(device, "set", value)
-            if not res.get("ok"):
+            payload = _payload(device, value)
+            if payload is None:
                 missed.append(label)
                 continue
-            payload = res["payload"]
             if device.get("board_gone"):
                 offline.append(label)
                 continue

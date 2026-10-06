@@ -341,16 +341,26 @@ def set_board_states(node_id: str, states: Dict[str, str]) -> int:
 _NOT_RESTORED = ("ir", "text")
 
 
-def keep_before_scene(names: List[str]) -> None:
-    """Remember these devices' state as it is now (`before_scene`), dropping the last
-    scene's, so «رجّعي الغرفة زي ما كانت» can put it back."""
+def keep_before_scene(planned: Dict[str, str]) -> None:
+    """Remember the state of the devices a scene is about to set (`planned`: name → the
+    payload it sends) as it is now (`before_scene`), dropping the last scene's, so «رجّعي
+    الغرفة زي ما كانت» can put it back. A device already as this scene sets it keeps what
+    was kept before: applying the same scene twice (two taps, a repeated voice command)
+    would otherwise keep the scene's own state, and the restore would change nothing."""
     coll = _coll()
     if coll is None:
         return
-    coll.update_many({"before_scene": {"$exists": True}}, {"$unset": {"before_scene": ""}})
-    for name, d in get_devices(names).items():
-        if d.get("state") and d.get("control_type") not in _NOT_RESTORED:
+    kept = []
+    for name, d in get_devices(list(planned)).items():
+        if d.get("control_type") in _NOT_RESTORED:
+            continue
+        if "before_scene" in d and d.get("state") == planned[name]:
+            kept.append(name)
+        elif d.get("state"):
             coll.update_one({"name": name}, {"$set": {"before_scene": d["state"]}})
+            kept.append(name)
+    coll.update_many({"before_scene": {"$exists": True}, "name": {"$nin": kept}},
+                     {"$unset": {"before_scene": ""}})
 
 
 def take_before_scene() -> List[Dict[str, str]]:

@@ -79,3 +79,29 @@ def test_the_app_is_told_what_was_passed_over(robot, broker, monkeypatch):  # no
                headers={"Authorization": f"Bearer {make_token('user', 'userA')}"})
     body = r.get_json()
     assert r.status_code == 200 and body["online"] is True and body["skipped"] == ["الستارة"]
+
+
+# Audit T6: applying the same scene twice kept the scene's own state as «before», so
+# «put the room back» put nothing back and said done.
+
+def test_the_same_scene_twice_still_puts_the_room_back(robot, broker):  # noqa: F811
+    device_store.set_state("room_light", "off")
+    scene_store.add_scene("bright", actions=[{"device": "room_light", "value": "on"},
+                                             {"device": "sandy_volume", "value": "30"}])
+    _apply("bright")
+    _apply("bright")                       # a second tap, or the voice command again
+    broker.sent.clear()
+    out = tools.execute("room_restore", {}, TurnCtx(user_id="userA"))
+    assert out["ok"] and (f"sandy/node/{NODE}/room/light", "off") in broker.sent
+    assert (f"sandy/node/{NODE}/volume", "70") in broker.sent
+
+
+def test_another_scene_keeps_what_it_found(robot, broker):  # noqa: F811
+    device_store.set_state("room_light", "off")
+    scene_store.add_scene("bright", actions=[{"device": "room_light", "value": "on"}])
+    scene_store.add_scene("dark", actions=[{"device": "room_light", "value": "off"}])
+    _apply("bright")
+    _apply("dark")
+    broker.sent.clear()
+    tools.execute("room_restore", {}, TurnCtx(user_id="userA"))
+    assert broker.sent == [(f"sandy/node/{NODE}/room/light", "on")]   # as «dark» found it
