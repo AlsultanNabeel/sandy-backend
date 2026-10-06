@@ -41,7 +41,7 @@ def _result_for(user):
     # Never the owner tier: nothing here proves the email belongs to the caller.
     role = "user"
     try:
-        token = make_token(role, user_id=user_id)
+        token = make_token(role, user_id=user_id, gen=user.get(users_store.TOKEN_GEN_FIELD) or 0)
     except RuntimeError:
         return jsonify({"error": "auth_unavailable"}), 503
     onboarding = user.get("onboarding") or {}

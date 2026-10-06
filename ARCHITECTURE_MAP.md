@@ -504,7 +504,13 @@ rest resolve it to an empty tenant.
 
 ### 2.10 Auth
 
-`api/auth_handlers.py`. JWT, HS256. Owner tokens 7 days, guest 48 hours. Login
+`api/auth_handlers.py`. JWT, HS256. Owner tokens 7 days, guest 48 hours. A signed-in
+token carries its account's generation (`gen`, `sandy_users.token_gen`, 0 until it moves;
+moving it is how tokens are revoked). Once a day old it comes back renewed in the
+`X-Sandy-Token` header of any `require_auth` response (`renewed_token`), on the same
+generation only: a revoked token, a deleted account or an expired token is never renewed,
+so a session in use does not end, and one left a week unused does. The app keeps the new
+token when it is still the one it sent. Login
 rate-limited to 5 attempts per 15 minutes per IP, with an in-process sliding
 window as a fail-closed fallback when Mongo is down. `JWT_SECRET` has no default —
 an empty secret would let anyone forge a token, so it refuses rather than degrade.

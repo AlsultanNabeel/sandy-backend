@@ -81,6 +81,25 @@ def get_user(user_id: str) -> Optional[Dict[str, Any]]:
     return coll.find_one({"_id": user_id})
 
 
+# The account's token generation: a token carries the one it was issued on, and only a
+# token on the current one is renewed. Moving it on revokes every token issued before.
+TOKEN_GEN_FIELD = "token_gen"
+
+
+def token_generation(user_id: str) -> Optional[int]:
+    """The account's token generation (0 until it ever moves), None when there is no account
+    or it cannot be read."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return None
+    try:
+        doc = coll.find_one({"_id": user_id}, {TOKEN_GEN_FIELD: 1})
+    except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+        logger.warning("[users] token generation read failed: %s", exc)
+        return None
+    return int(doc.get(TOKEN_GEN_FIELD) or 0) if doc else None
+
+
 # ── writes ───────────────────────────────────────────────────────────────
 
 def upsert_from_oauth(

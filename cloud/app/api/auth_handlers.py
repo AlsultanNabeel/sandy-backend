@@ -16,13 +16,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 import jwt
-from flask import jsonify, request
+from flask import jsonify, make_response, request
 
 logger = logging.getLogger(__name__)
 
 _JWT_ALGO = "HS256"
 AUTH_TOKEN_HOURS = 24 * 7    # any signed-in user
 GUEST_TOKEN_HOURS = 48
+# A signed-in token this old comes back renewed (`RENEWED_HEADER`), so a session in use
+# never reaches its end; one left unused for AUTH_TOKEN_HOURS does.
+RENEW_AFTER_HOURS = 24
+RENEWED_HEADER = "X-Sandy-Token"
 _RATE_WINDOW = 900            # 15 minutes
 _RATE_MAX = 5                 # max login attempts per window
 
@@ -60,7 +64,8 @@ def role_for_email(email: str) -> str:
     return "owner" if wanted and (email or "").strip().lower() in wanted else "user"
 
 
-def make_token(role: str, user_id: Optional[str] = None) -> str:
+def make_token(role: str, user_id: Optional[str] = None, gen: int = 0) -> str:
+    """``gen`` is the account's token generation (`users_store.token_generation`)."""
     hours = GUEST_TOKEN_HOURS if role == "guest" else AUTH_TOKEN_HOURS
     payload = {
         "role": role,
@@ -70,7 +75,27 @@ def make_token(role: str, user_id: Optional[str] = None) -> str:
     }
     if user_id:
         payload["user_id"] = str(user_id)
+        payload["gen"] = int(gen)
     return jwt.encode(payload, _jwt_secret(), algorithm=_JWT_ALGO)
+
+
+def renewed_token(claims: dict) -> Optional[str]:
+    """A new token for a signed-in account whose token is RENEW_AFTER_HOURS old, on the
+    same generation. None for a guest, a fresh token, a revoked one (the account's
+    generation moved on) or an account that is gone; an expired token never gets here."""
+    user_id = claims.get("user_id")
+    if claims.get("role") == "guest" or not user_id:
+        return None
+    if time.time() - float(claims.get("iat") or 0) < RENEW_AFTER_HOURS * 3600:
+        return None
+    from app.features.users_store import token_generation
+    gen = token_generation(str(user_id))
+    if gen is None or gen != int(claims.get("gen") or 0):
+        return None
+    try:
+        return make_token(str(claims.get("role")), user_id=str(user_id), gen=gen)
+    except RuntimeError:
+        return None
 
 
 def verify_token(token: str) -> Optional[dict]:
@@ -97,7 +122,8 @@ def _claims_from_request() -> Optional[dict]:
 
 
 def require_auth(view):
-    """401 unless a valid token is present; passes the claims as ``claims=``."""
+    """401 unless a valid token is present; passes the claims as ``claims=``. A token due
+    for renewal gets its successor in the ``RENEWED_HEADER`` of the response."""
 
     @functools.wraps(view)
     def _wrapped(*args, **kwargs):
@@ -108,7 +134,13 @@ def require_auth(view):
             # The phone says where it is on every call; kept only when it changed.
             from app.utils.time import note_zone
             note_zone(claims.get("user_id"), request.headers["X-Timezone"])
-        return view(*args, claims=claims, **kwargs)
+        response = view(*args, claims=claims, **kwargs)
+        renewed = renewed_token(claims)
+        if renewed is None:
+            return response
+        response = make_response(response)
+        response.headers[RENEWED_HEADER] = renewed
+        return response
 
     return _wrapped
 

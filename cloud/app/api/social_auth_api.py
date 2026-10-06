@@ -211,7 +211,7 @@ def _issue_for_identity(*, provider: str, sub: str, email: str, name: str,
     user_id = user.get("_id")
     role = role_for_email(email) if email_trusted else "user"
     try:
-        token = make_token(role, user_id=user_id)
+        token = make_token(role, user_id=user_id, gen=user.get(users_store.TOKEN_GEN_FIELD) or 0)
     except RuntimeError:
         logger.error("[social_auth] cannot mint token: JWT_SECRET unset")
         return jsonify({"error": "auth_unavailable"}), 503
