@@ -177,6 +177,14 @@ def _aware(dt: datetime) -> datetime:
     return dt.replace(tzinfo=USER_TZ) if dt.tzinfo is None else dt
 
 
+def _is_iso(text: str) -> bool:
+    try:
+        datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
 def parse_when(text: str) -> Optional[datetime]:
     """A future moment (UTC) from ISO or words ("بكرا الساعة 5"), else None."""
     text = str(text or "").strip()
@@ -187,6 +195,10 @@ def parse_when(text: str) -> Optional[datetime]:
         if (dt.hour, dt.minute, dt.second) == (0, 0, 0):
             dt = dt.replace(hour=9)  # a date with no time, same default as arabic_days
         return dt.astimezone(timezone.utc)
+    if _is_iso(text):
+        # Written out but in the past or over a year away: refused, never handed to the
+        # clock words, which read the month and day as an hour.
+        return None
     clock = _clock(text)
     if clock is not None:
         return clock

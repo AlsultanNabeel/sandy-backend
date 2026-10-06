@@ -36,3 +36,19 @@ def test_a_yes_with_a_new_delete_after_it_asks_again(brain_db):  # noqa: F811
     assert "تقرير الشغل" in _open(), "the delete in the same line ran with no question"
     assert "متأكد إنك بدك تحذف «تقرير الشغل»" in state["final_response"]
     assert state["pending_state"] is not None
+
+
+# ── W2. A written-out time in the past is refused, never read as a clock ─────
+
+def test_an_iso_time_in_the_past_or_too_far_is_refused(brain_db):  # noqa: F811
+    from datetime import datetime, timedelta
+
+    from app.brain import when
+
+    now = datetime.now().replace(microsecond=0)
+    with active_user_profile_context(A):
+        assert when.parse_when((now - timedelta(hours=1)).isoformat()) is None, \
+            "a reminder an hour ago was saved for ten at night"
+        assert when.parse_when((now + timedelta(days=500)).isoformat()) is None
+        assert when.parse_when((now + timedelta(hours=2)).isoformat()) is not None
+        assert when.parse_when("بكرا الساعة 5") is not None, "words still go to the clock"
