@@ -28,6 +28,9 @@ MAX_FILE_BYTES = 5 * 1024 * 1024
 # What Sandy reads of one document; the rest is cut with a note.
 MAX_TEXT_CHARS = 20_000
 MAX_PER_MESSAGE = 4
+# A Word file is a zip: five packed megabytes can unpack to gigabytes. Its text part is
+# read only up to this, far above the MAX_TEXT_CHARS actually used.
+MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
 
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/heic", "image/webp", "image/gif"}
 TEXT_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json", "text/html"}
@@ -38,6 +41,7 @@ TOO_BIG_IMAGE = "الصورة أكبر من ثمانية ميغا. صغّرها 
 TOO_BIG_FILE = "الملف أكبر من خمسة ميغا. ابعت ملف أصغر أو جزء منه."
 UNSUPPORTED = "ما بقدر أقرأ هالنوع. ابعت صورة، أو PDF، أو Word، أو ملف نص."
 UNREADABLE = "ما قدرت أطلع نص من هالملف. ممكن يكون صور بس أو محمي."
+TOO_BIG_UNPACKED = "هالملف بيكبر كتير لما ينفتح، ما بقدر أقراه. ابعت جزء منه."
 
 
 class AttachmentError(ValueError):
@@ -69,7 +73,14 @@ def kind_of(mime: str) -> str:
 
 def _docx_text(data: bytes) -> str:
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        xml = z.read("word/document.xml").decode("utf-8", "ignore")
+        if z.getinfo("word/document.xml").file_size > MAX_DOCX_XML_BYTES:
+            raise AttachmentError("too_big", TOO_BIG_UNPACKED, 413)
+        # Read past the cap by one byte at most, whatever the header claims.
+        with z.open("word/document.xml") as f:
+            raw = f.read(MAX_DOCX_XML_BYTES + 1)
+        if len(raw) > MAX_DOCX_XML_BYTES:
+            raise AttachmentError("too_big", TOO_BIG_UNPACKED, 413)
+        xml = raw.decode("utf-8", "ignore")
     xml = re.sub(r"</w:p>", "\n", xml)
     return re.sub(r"<[^>]+>", "", xml)
 
@@ -93,6 +104,8 @@ def extract_text(data: bytes, mime: str) -> str:
             text = data.decode("utf-8", "ignore")
             if mime == "text/html":
                 text = re.sub(r"<[^>]+>", " ", text)
+    except AttachmentError:
+        raise
     except (ValueError, KeyError, zipfile.BadZipFile, OSError, PyPdfError) as exc:
         raise AttachmentError("unreadable", UNREADABLE, 422) from exc
     text = re.sub(r"[ \t]+", " ", text).strip()

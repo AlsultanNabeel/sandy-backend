@@ -1138,7 +1138,7 @@ so folders are organisation only.
   Attachments (`Features/Sandy/ChatAttachments.swift`): photos, the camera and documents
   upload at once to `POST /api/attachments` (`features/attachments.py`, `sandy_attachments`,
   bytes inline; images 8 MB, documents 5 MB; PDF / Word / text read to at most 20 000
-  characters), wait above the field with their progress, and go with the message as ids:
+  characters; a Word file whose text part unpacks past 20 MB is refused, `too_big`), wait above the field with their progress, and go with the message as ids:
   the turn gives the model the photos as images and the documents as text, memory keeps
   «[صورة: name]». An image Sandy draws is saved the same way and comes back as `image` on
   the reply; the history keeps `attachments` on each message.

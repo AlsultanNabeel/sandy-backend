@@ -93,3 +93,23 @@ def test_a_drawn_image_is_kept_as_an_attachment_and_the_history_keeps_it(c, monk
     msgs = c.get(f"/api/conversations/{cid}", headers=_h()).get_json()["messages"]
     assert msgs[-1]["attachments"] == [{"id": image["id"], "kind": "image", "name": "sandy.png"}]
     json.dumps(msgs)  # the history stays plain JSON
+
+
+def test_a_small_word_file_that_unpacks_huge_is_refused():
+    """Five megabytes packed can be gigabytes unpacked; the server read it whole."""
+    import io
+    import zipfile
+
+    from app.features import attachments as att
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        with z.open("word/document.xml", "w") as f:
+            chunk = b"\x00" * (1 << 20)
+            for _ in range(att.MAX_DOCX_XML_BYTES // len(chunk) + 8):
+                f.write(chunk)
+    packed = buf.getvalue()
+    assert len(packed) < att.MAX_FILE_BYTES
+    with pytest.raises(att.AttachmentError) as err:
+        att.extract_text(packed, att.DOCX)
+    assert err.value.code == "too_big"
