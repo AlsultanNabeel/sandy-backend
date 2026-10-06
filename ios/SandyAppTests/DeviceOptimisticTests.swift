@@ -11,7 +11,6 @@ final class DeviceOptimisticTests: XCTestCase {
         StubNetwork.install { request in
             let path = request.url!.path
             if request.httpMethod == "POST" {
-                Thread.sleep(forTimeInterval: 0.6)           // the command is slow
                 return (200, Data(#"{"ok":true,"sent":true}"#.utf8))
             }
             if path == "/api/devices" {
@@ -19,6 +18,7 @@ final class DeviceOptimisticTests: XCTestCase {
             }
             return (200, Data(#"{"items":[]}"#.utf8))
         }
+        StubNetwork.delay("POST", by: 1.0)                    // the command is slow
         let api = TestClient.make()
         let store = DevicesStore()
         await store.load(api: api)

@@ -25,6 +25,13 @@ enum StubNetwork {
         if let original { APIClient.session = original }
         original = nil
         StubURLProtocol.handler = nil
+        StubURLProtocol.delays = [:]
+    }
+
+    /// Answer requests of this method only after `seconds`, without holding up the others
+    /// (a command still on its way while a refresh comes back).
+    static func delay(_ method: String, by seconds: TimeInterval) {
+        StubURLProtocol.delays[method] = seconds
     }
 
     /// What the app sent, in order (the body read whole, also for uploads).
@@ -49,6 +56,7 @@ enum StubNetwork {
 final class StubURLProtocol: URLProtocol {
     static var handler: ((URLRequest) -> (status: Int, body: Data))?
     static var requests: [URLRequest] = []
+    static var delays: [String: TimeInterval] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -61,9 +69,17 @@ final class StubURLProtocol: URLProtocol {
         let response = HTTPURLResponse(url: request.url!, statusCode: status,
                                        httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "application/json"])!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
+        let deliver = { [weak self] in
+            guard let self else { return }
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: body)
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        if let wait = Self.delays[request.httpMethod ?? "GET"], wait > 0 {
+            DispatchQueue.global().asyncAfter(deadline: .now() + wait, execute: deliver)
+        } else {
+            deliver()
+        }
     }
 
     override func stopLoading() {}
