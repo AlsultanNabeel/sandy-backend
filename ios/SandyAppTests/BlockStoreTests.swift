@@ -120,4 +120,29 @@ final class BlockStoreTests: XCTestCase {
         XCTAssertEqual(saved, "2000-01-01", "yesterday's ticks were saved as today's")
         _ = store
     }
+
+    private func waitFor(_ check: () -> Bool) async throws {
+        for _ in 0..<50 where !check() { try await Task.sleep(nanoseconds: 20_000_000) }
+    }
+
+    private func patches(_ path: String) -> [String] {
+        StubNetwork.requests.filter { $0.httpMethod == "PATCH" && $0.url?.path == path }
+            .map { String(decoding: StubNetwork.body(of: $0), as: UTF8.self) }
+    }
+
+    /// L7: ticked done, then back out of the list within four seconds: «تراجع» showed but
+    /// the store was gone, so it did nothing and the offer left as if it had worked.
+    func testUndoAfterLeavingTheListStillTakesTheTickBack() async throws {
+        serve(Self.milk)
+        var store: ItemsStore? = ItemsStore(list: "tasks")
+        await store?.load(api: api)
+        let milk = try XCTUnwrap(store?.items.first)
+        store?.toggle(api: api, milk)
+        try await waitFor { patches("/api/items/t1").count == 1 }
+        store = nil
+        UndoCenter.shared.undo()
+        try await waitFor { patches("/api/items/t1").count == 2 }
+        XCTAssertEqual(patches("/api/items/t1").count, 2, "«تراجع» after leaving the list did nothing")
+        XCTAssertTrue(patches("/api/items/t1").last?.contains("\"done\":false") == true)
+    }
 }

@@ -356,11 +356,12 @@ final class ItemsStore: LoadableStore {
         return at
     }
 
-    /// «خلّصت … · تراجع» so a slip of the finger can be taken back.
+    /// «خلّصت … · تراجع» so a slip of the finger can be taken back. The offer holds the
+    /// store, like a delete's does: its screen may close before «تراجع» is tapped.
     private func offerUndo(api: APIClient, _ item: ListItem) {
         UndoCenter.shared.offer(String(format: LanguageManager.shared.s("blocks.doneToast"), item.text),
                                 icon: "checkmark.circle.fill",
-                                undo: { [weak self] in self?.undoDone(api: api, item) })
+                                undo: { self.undoDone(api: api, item) })
     }
 
     /// Puts a ticked one back as open (a repeating one back on its old date).
