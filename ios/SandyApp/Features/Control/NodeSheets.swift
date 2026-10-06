@@ -27,7 +27,7 @@ struct NodePairSheet: View {
     @State private var hint = ""
 
     private var trimmedCode: String { code.trimmingCharacters(in: .whitespaces) }
-    private var digits: String { presence.filter(\.isNumber) }
+    private var digits: String { Digits.latin(presence).filter(\.isASCII).filter(\.isNumber) }
     private var labelToSend: String? {
         let t = label.trimmingCharacters(in: .whitespaces)
         return t.isEmpty ? nil : t
@@ -54,7 +54,8 @@ struct NodePairSheet: View {
                             .multilineTextAlignment(.center)
                             .onChange(of: presence) { _, v in
                                 // ستّ أرقام بالكتير — الزايد بينقص بدل ما يوصل الخادم.
-                                let d = v.filter(\.isNumber)
+                                // An Arabic keyboard's digits are the same digits.
+                                let d = Digits.latin(v).filter { $0.isASCII && $0.isNumber }
                                 if d.count > 6 || d != v { presence = String(d.prefix(6)) }
                             }
                     }

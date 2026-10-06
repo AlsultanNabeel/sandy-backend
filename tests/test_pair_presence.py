@@ -129,3 +129,15 @@ def test_the_app_asks_for_the_code_on_her_screen():
         assert l10n.count(f'"node.{key}"') == 2, f"{key} needs Arabic and English"
     account = (ios / "Features" / "Profile" / "AccountView.swift").read_text()
     assert "res.needsPresence" in account, "the account screen pairs too"
+
+
+def test_the_code_typed_in_arabic_digits_finishes_it(env):
+    """An Arabic keyboard types «١٢٣٤٥٦»: they are digits, so they were kept as they were,
+    hashed as they were, and every try answered «wrong» until the challenge locked."""
+    c, db, sent = env
+    c.post("/api/nodes/pair", json={"code": "SANDY-8421"}, headers=_h("alice"))
+    shown = sent[-1][1]
+    arabic = shown.translate(str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩"))
+    r = c.post("/api/nodes/pair/confirm",
+               json={"code": "SANDY-8421", "presence": arabic}, headers=_h("alice"))
+    assert r.status_code == 200, r.get_json()

@@ -69,12 +69,16 @@ def start(node_id: str, tenant: str) -> Dict[str, Any]:
     return {"ok": True, "sent": sent, "expires_in": TTL_SECONDS}
 
 
+_LATIN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
 def confirm(node_id: str, tenant: str, code: str) -> Dict[str, Any]:
     """True only for the live code this account was sent for this robot."""
     db = get_db()
     if db is None:
         return {"ok": False, "error": "no_store"}
-    code = "".join(ch for ch in str(code or "") if ch.isdigit())
+    # Arabic-Indic and Persian digits are the same digits (an Arabic keyboard types them).
+    code = "".join(ch for ch in str(code or "").translate(_LATIN_DIGITS) if ch in "0123456789")
     doc = db[_COLL].find_one({"node_id": node_id, "tenant": tenant})
     if doc is None:
         return {"ok": False, "error": "presence_missing"}

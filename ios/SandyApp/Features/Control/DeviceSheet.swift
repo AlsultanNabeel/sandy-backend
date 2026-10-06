@@ -296,8 +296,8 @@ struct DeviceSheet: View {
                 .filter { !$0.isEmpty }
             return values.isEmpty ? [:] : ["values": values]
         case .dimmer:
-            let lo = Int(dimmerMin.trimmingCharacters(in: .whitespaces)) ?? 0
-            let hi = Int(dimmerMax.trimmingCharacters(in: .whitespaces)) ?? 100
+            let lo = Digits.integer(dimmerMin) ?? 0
+            let hi = Digits.integer(dimmerMax) ?? 100
             return ["min": lo, "max": max(hi, lo + 1)]
         case .ir:
             return irButtons.isEmpty ? [:] : ["buttons": irButtons]

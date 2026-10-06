@@ -12,6 +12,8 @@ SCREENS = [
     "Features/Life/LifeView.swift",
     "Features/Focus/FocusView.swift",
     "Features/Blocks/BlockEditors.swift",
+    "Features/Control/DeviceSheet.swift",
+    "Features/Control/NodeSheets.swift",
 ]
 
 
@@ -21,5 +23,6 @@ def test_a_number_field_reads_arabic_digits(screen):
     assert ".keyboardType(.numberPad)" in src or ".keyboardType(.decimalPad)" in src
     assert "Digits." in src, f"{screen} parses a typed number without Digits"
     for raw in ("Int(focusMin)", "Int(breakMin)", "Int(cycles)",
-                'Double(budget.replacingOccurrences'):
+                'Double(budget.replacingOccurrences', "Int(dimmerMin", "Int(dimmerMax",
+                "presence.filter(\\.isNumber)", "v.filter(\\.isNumber)"):
         assert raw not in src, f"{screen} still parses {raw}"
