@@ -396,6 +396,9 @@ Now:
   guessing. This is what ends "turn the light on → applied the off scene".
 - Transports: `{"kind":"mqtt","topic":…}`, `{"kind":"node","node_id":…,"output":…}`,
   `{"kind":"wifi_api","url":…}`.
+- A device's `online` is not stored: every read takes it from the board behind it
+  (`node_store.part_present`: the brain's `online` and not in safe mode, the camera's
+  `cam_online`, the room's `room_online`; a board never heard from is not connected).
 - The `sandy/node/` namespace is **reserved** for the ownership-checked `node`
   transport. A raw `mqtt` transport is refused if it targets it — otherwise a
   tenant could aim a device at another tenant's node with a free-form topic.

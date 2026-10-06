@@ -380,6 +380,28 @@ def _output_namespace(output_id: Any) -> str:
     return head + sep if sep else ""
 
 
+def part_present(node: Optional[Dict[str, Any]], output: Any) -> Optional[bool]:
+    """Whether the board that serves ``output`` is there now.
+
+    False when it said it went (its MQTT will: ``online`` for the brain, ``cam_online`` and
+    ``room_online`` for the others) or, for the brain, when it runs in safe mode, which takes
+    none of its outputs; None when that board was never heard from.
+    """
+    if not node:
+        return None
+    tel = node.get("telemetry") or {}
+    ns = _output_namespace(output)
+    if ns == "cam/":
+        return tel.get("cam_online") if isinstance(tel.get("cam_online"), bool) else None
+    if ns == "room/":
+        return tel.get("room_online") if isinstance(tel.get("room_online"), bool) else None
+    if ns:
+        return None
+    if not node.get("last_seen"):
+        return None
+    return bool(node.get("online")) and not tel.get("safe")
+
+
 def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]],
                    current: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Replace only the namespaces this heartbeat declares; declaring nothing keeps everything.

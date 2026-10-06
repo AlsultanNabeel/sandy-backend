@@ -4,7 +4,8 @@ Only registered devices with validated actions can be actuated; unknown ones are
 refused, never guessed. Pure data + validation: ``command_payload`` returns the
 payload, the caller sends it. Collection ``sandy_devices``: name (slug), label,
 room, control_type, transport ({"kind": "node", node_id, output} or
-{"kind": "mqtt", topic}), meta, state, online, last_seen, updated_at.
+{"kind": "mqtt", topic}), meta, state, last_seen, updated_at. `online` is not
+stored: it is read from the device's board each time (`_with_presence`).
 """
 
 from __future__ import annotations
@@ -159,11 +160,29 @@ def _public(d: Dict[str, Any]) -> Dict[str, Any]:
 
 # ── CRUD ────────────────────────────────────────────────────────────────────
 
+def _with_presence(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Each device's `online`, from the board behind it, read now: nothing writes it on the
+    device row. Only a node device can be connected (`node_store.part_present` is True)."""
+    if not any((d.get("transport") or {}).get("kind") == "node" for d in docs):
+        for d in docs:
+            d["online"] = False
+        return docs
+    from app.features.node_store import list_nodes, part_present
+
+    nodes = {n["node_id"]: n for n in list_nodes()}
+    for d in docs:
+        t = d.get("transport") or {}
+        node = nodes.get(str(t.get("node_id") or "")) if t.get("kind") == "node" else None
+        d["online"] = part_present(node, t.get("output")) is True
+    return docs
+
+
 def list_devices() -> List[Dict[str, Any]]:
     coll = _coll()
     if coll is None:
         return []
-    return [_public(d) for d in coll.find({}).sort("name", 1).limit(MAX_DEVICES)]
+    docs = list(coll.find({}).sort("name", 1).limit(MAX_DEVICES))
+    return [_public(d) for d in _with_presence(docs)]
 
 
 def get_device(name: str) -> Optional[Dict[str, Any]]:
@@ -171,7 +190,7 @@ def get_device(name: str) -> Optional[Dict[str, Any]]:
     if coll is None:
         return None
     d = coll.find_one({"name": (name or "").strip().lower()})
-    return d or None
+    return _with_presence([d])[0] if d else None
 
 
 def get_devices(names: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -180,7 +199,8 @@ def get_devices(names: List[str]) -> Dict[str, Dict[str, Any]]:
     wanted = sorted({(n or "").strip().lower() for n in names if (n or "").strip()})
     if coll is None or not wanted:
         return {}
-    return {d["name"]: d for d in coll.find({"name": {"$in": wanted}}).limit(len(wanted))}
+    docs = list(coll.find({"name": {"$in": wanted}}).limit(len(wanted)))
+    return {d["name"]: d for d in _with_presence(docs)}
 
 
 def add_device(name: str, label: str, control_type: str,
@@ -210,7 +230,6 @@ def add_device(name: str, label: str, control_type: str,
         "transport": transport,
         "meta": meta or {},
         "state": "",
-        "online": False,
         "updated_at": _now(),
     })
     return {"ok": True, "name": name}
