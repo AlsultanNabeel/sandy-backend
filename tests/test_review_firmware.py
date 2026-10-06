@@ -245,3 +245,20 @@ def test_the_chunks_are_indexed(db):
     bootstrap.ensure_indexes()
     keys = [list(i["key"]) for i in db["sandy_firmware_chunks"].list_indexes()]
     assert ["version", "n"] in keys
+
+
+def test_the_publisher_refuses_a_stale_camera_or_room_image():
+    """A .bin passed with --image was published under today's version without a look:
+    an old one would install, report the old version, and be offered again for ever."""
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("pf", root / "scripts" / "publish_firmware.py")
+    pf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pf)
+    good = b"\xe9" + b"x" * 64 + b"0.4.2\x00" + b"sandyota" + b"y" * 64
+    assert pf.small_image_refused("cam", good, "0.4.2", []) == ""
+    assert "not built from this source" in pf.small_image_refused("cam", good, "0.4.3", [])
+    assert "dev build" in pf.small_image_refused("cam", good + b"[TELNET]", "0.4.2", [])
+    assert "no updater" in pf.small_image_refused("room", good.replace(b"sandyota", b"x"), "0.4.2", [])
+    assert "secrets.h" in pf.small_image_refused("room", good + b"SANDY-8421", "0.4.2", [b"SANDY-8421"])

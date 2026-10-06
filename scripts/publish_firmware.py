@@ -140,27 +140,41 @@ def _publish_small(a, base: str, token: str) -> int:
         sys.exit(f"version not found in {cfg['version_file']}")
     version = m.group(1)
     image = pathlib.Path(a.image).expanduser().read_bytes() if a.image else _build_small(a.board)
-    if image[:1] != b"\xe9":
-        sys.exit("not an ESP32 app image")
-    if len(image) > cfg["slot"]:
-        sys.exit(f"{len(image)} bytes does not fit the {a.board} slot ({cfg['slot']})")
-    for marker in cfg["dev_markers"]:
-        if marker in image:
-            sys.exit(f"this is a dev build ({marker.decode()!r} is inside) — "
-                     "build with SANDY_RETAIL (the default here)")
-    for secret in _secret_values(cfg["sketch"]):
-        if secret in image:
-            sys.exit("the image contains a value from your real secrets.h — it would be "
-                     "public on the server. Build with secrets.example.h (the default).")
-    if b"sandyota" not in image:
-        sys.exit("this image has no updater (sandy_ota_pull.h) — a board that installs "
-                 "it could never update again")
+    refused = small_image_refused(a.board, image, version, _secret_values(cfg["sketch"]))
+    if refused:
+        sys.exit(f"refusing the {a.board} image: {refused}")
     return _sign_and_upload(a, base, token, version, image,
                             f"sandy-fw|{a.board}|{version}|{len(image)}|", a.board)
 
 
 # Strings only a dev brain carries: the remote log task, the LAN upload task and page.
 BRAIN_DEV_MARKERS = (b"logsrv\x00", b"http_up\x00", b"Sandy brain-core &middot;")
+
+
+def small_image_refused(board: str, image: bytes, version: str, secrets: list) -> str:
+    """Why this camera or room image must not be published, or "" when it may. The same
+    checks as the brain's, a passed --image included."""
+    cfg = SMALL_BOARDS[board]
+    if image[:1] != b"\xe9":
+        return "not an ESP32 app image"
+    if len(image) > cfg["slot"]:
+        return f"{len(image)} bytes does not fit the {board} slot ({cfg['slot']})"
+    for marker in cfg["dev_markers"]:
+        if marker in image:
+            return (f"a dev build ({marker.decode()!r} is inside) — build with SANDY_RETAIL "
+                    "(the default here)")
+    # An old .bin under today's version would install, report the old version, and be
+    # offered again for ever.
+    if version.encode() + b"\x00" not in image:
+        return f"it was not built from this source: version {version} is not inside — rebuild"
+    for secret in secrets:
+        if secret in image:
+            return ("it contains a value from your real secrets.h — it would be public on the "
+                    "server. Build with secrets.example.h (the default).")
+    if b"sandyota" not in image:
+        return ("it has no updater (sandy_ota_pull.h) — a board that installs it could never "
+                "update again")
+    return ""
 
 
 def brain_image_refused(image: bytes, version: str, secrets: list) -> str:
