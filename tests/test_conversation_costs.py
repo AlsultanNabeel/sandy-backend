@@ -45,3 +45,25 @@ def test_a_title_is_asked_for_once_even_when_it_fails(env, monkeypatch):
                headers=_h())
     assert len(asked) == 1, f"{len(asked)} title calls for one conversation"
     assert len(asked[0]) < 1200, "the whole exchange was sent to name it"
+
+
+def test_search_as_you_type_spends_a_bounded_number_of_model_calls(env, monkeypatch):
+    """Every keystroke used to embed the query, with no length cap and no limit."""
+    from datetime import datetime, timezone
+
+    from app.api import conversations_api
+    from app.features import usage_store
+
+    c, _ = env
+    # One minute throughout, or a minute boundary mid-test resets the window.
+    monkeypatch.setattr(usage_store, "_now",
+                        lambda: datetime(2026, 10, 6, 3, 0, 30, tzinfo=timezone.utc))
+    embedded = []
+    monkeypatch.setattr(conversations_api, "_semantic_hits",
+                        lambda uid, q, limit=30: embedded.append(q) or [])
+    for n in range(40):
+        r = c.get("/api/conversations/search", query_string={"q": "رحلة " * (60 + n)},
+                  headers=_h())
+        assert r.status_code == 200, "text search must keep answering"
+    assert len(embedded) <= conversations_api.SEARCH_EMBEDS_PER_MIN
+    assert all(len(q) <= conversations_api.MAX_SEARCH_QUERY for q in embedded)

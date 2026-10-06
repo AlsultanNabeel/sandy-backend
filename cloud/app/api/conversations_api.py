@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 _MAX_MESSAGE_CHARS = 20_000
 
 _MAX_SEARCH_RESULTS = 50
+# Search runs as the user types: the query is cut, and the search by meaning (one
+# embedding call each) is skipped past this many a minute; the text match still answers.
+MAX_SEARCH_QUERY = 200
+SEARCH_EMBEDS_PER_MIN = 20
 
 
 # Client-chosen ids: nothing that could smuggle an operator or a path.
@@ -461,7 +465,7 @@ def register_conversations_api(app, mongo_db=None):
     def search_conversations(claims):
         uid = _uid(claims)
         coll = _coll()
-        q = (request.args.get("q") or "").strip()
+        q = (request.args.get("q") or "").strip()[:MAX_SEARCH_QUERY]
         if not uid or coll is None or not q:
             return jsonify({"items": []}), 200
         items = []
@@ -490,6 +494,9 @@ def register_conversations_api(app, mongo_db=None):
 
         # 2) Match over the caller's conversation summaries, limited to their own threads.
         if len(items) >= _MAX_SEARCH_RESULTS:
+            return jsonify({"items": items}), 200
+        from app.features.usage_store import within_minute_limit
+        if not within_minute_limit(uid, "search", SEARCH_EMBEDS_PER_MIN):
             return jsonify({"items": items}), 200
         hits = [(cid, s) for cid, s in _semantic_hits(uid, q) if cid and cid not in seen]
         owned = {

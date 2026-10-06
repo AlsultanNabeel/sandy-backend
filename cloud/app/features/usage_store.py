@@ -11,6 +11,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from pymongo.errors import PyMongoError
+
 from app.db import configure, get_db
 
 logger = logging.getLogger(__name__)
@@ -72,3 +74,24 @@ def check_and_record(user_id: str, *, daily_limit: int, per_min_limit: int) -> O
     except Exception:  # noqa: BLE001
         logger.debug("ignoring non-critical error", exc_info=True)
     return None
+
+
+def within_minute_limit(user_id: str, what: str, per_min_limit: int) -> bool:
+    """Count one `what` for this user this minute; False once past the limit. A window of
+    its own, apart from the chat quota (fails open)."""
+    if get_db() is None or not user_id or per_min_limit <= 0:
+        return True
+    from pymongo import ReturnDocument
+
+    now = _now()
+    try:
+        doc = get_db()[_RL].find_one_and_update(
+            {"_id": f"{what}:{user_id}:{int(now.timestamp() // 60)}"},
+            {"$inc": {"count": 1},
+             "$setOnInsert": {"user_id": user_id, "expire_at": now + timedelta(seconds=120)}},
+            upsert=True, return_document=ReturnDocument.AFTER,
+        )
+    except PyMongoError:
+        logger.debug("[UsageStore] minute window skipped", exc_info=True)
+        return True
+    return int((doc or {}).get("count", 0)) <= per_min_limit
