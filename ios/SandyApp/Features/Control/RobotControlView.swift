@@ -221,11 +221,14 @@ struct RobotControlView: View {
         imageNotice = ""
         defer { sendingImage = false; pickedImage = nil }
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
+            // A small JPEG made here: an iPhone photo is HEIC (the server cannot open it) and
+            // full size is past its 8 MB; the screen is 240 px, so 480 is plenty.
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let jpeg = ImageDownscale.jpeg(from: data, maxPixel: 480) else {
                 imageNotice = lang.s("robot.control.image.unreadable")
                 return
             }
-            try await state.api.sendDeviceImage(name: device.name, jpegData: data)
+            try await state.api.sendDeviceImage(name: device.name, jpegData: jpeg)
         } catch {
             // الصورة بتمشي ع عشرين رسالة، فالفشل بنصّها وارد. نقولها بدل ما
             // نسكت — «ما ظهرت» و«انقطعت بالنص» مشكلتان مختلفتان.
