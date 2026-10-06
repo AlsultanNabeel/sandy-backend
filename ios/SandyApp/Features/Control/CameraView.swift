@@ -200,6 +200,17 @@ struct CameraView: View {
     }
 }
 
+/// When a remote stream counts as stopped: frames come about three a second, so ten seconds
+/// with none is not a slow link.
+enum StreamWatch {
+    static let stalledAfter: TimeInterval = 10
+
+    static func stalled(lastFrameAt: Date?, now: Date) -> Bool {
+        guard let lastFrameAt else { return false }
+        return now.timeIntervalSince(lastFrameAt) > stalledAfter
+    }
+}
+
 /// البثّ — محلي لو الكاميرا قريبة، وعبر الخادم لو بعيدة.
 ///
 /// بتجرّب المحلي أول لأنه أحسن بكل مقياس: بلا تأخير، وبمعدّل إطارات كامل، وما
@@ -262,14 +273,20 @@ private struct LiveView: View {
         // ثلاثة بالثانية — نفس وتيرة رفع اللوح. أسرع منها بيسحب نفس الإطار
         // مرّتين وبيستهلك بيانات بلا فايدة.
         let started = Date()
+        var lastFrameAt: Date?
         while !Task.isCancelled {
             do {
                 if let d = try await state.api.liveFrame(nodeId: nodeId),
                    let img = UIImage(data: d) {
                     frame = img
+                    lastFrameAt = Date()
                     problem = nil
                 } else if frame == nil, Date().timeIntervalSince(started) > Self.noFrameAfter {
                     problem = LanguageManager.shared.s("control.camera.noFrames")
+                } else if StreamWatch.stalled(lastFrameAt: lastFrameAt, now: Date()) {
+                    // The last picture is not live any more: say the stream stopped.
+                    frame = nil
+                    problem = LanguageManager.shared.s("robot.control.camera.streamStopped")
                 }
             } catch where error.isCancellation {
                 return
