@@ -289,14 +289,8 @@ struct EntryEditSheet: View {
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// Arabic digits and a comma both read as a number.
-    private var value: Double? {
-        let latin = amount.map { ch -> Character in
-            if let d = ch.wholeNumberValue, !ch.isASCII { return Character(String(d)) }
-            return ch == "٫" || ch == "," ? "." : ch
-        }
-        return Double(String(latin))
-    }
+    /// Arabic digits read as a number (`Digits`: a comma groups thousands).
+    private var value: Double? { Digits.number(amount) }
 
     var body: some View {
         NavigationStack {
