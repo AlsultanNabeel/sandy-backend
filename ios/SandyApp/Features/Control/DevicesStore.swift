@@ -12,6 +12,8 @@ final class DevicesStore: LoadableStore {
     /// ذيل طابور أوامر التحكّم التسلسلي — كل أمر ينتظره قبل ما ينفّذ، فالأوامر
     /// المتتابعة توصل العتاد بالترتيب بلا تسابق ولا إلغاء.
     private var commandChain: Task<Void, Never>?
+    /// What each device was last set to while its command is on the way, and which command.
+    private var pending: [String: (state: String, generation: Int)] = [:]
     /// جيل آخر ضغطة تحكّم — نصالح (نعيد الجلب) مرة وحدة بعد آخر ضغطة بالدفعة
     /// فقط، بدل إعادة جلب لكل ضغطة (كانت تسبّب عاصفة إعادات ورسائل خطأ عابرة).
     private var controlGeneration = 0
@@ -66,7 +68,14 @@ final class DevicesStore: LoadableStore {
                 let dev = try await devRes
                 let nod = try await nodeRes
                 guard isCurrentLoad(gen) else { return }
-                devices = dev.items
+                // A command still on its way keeps the state it asked for: this answer may
+                // predate it.
+                devices = dev.items.map { d in
+                    guard let asked = pending[d.name] else { return d }
+                    var shown = d
+                    shown.state = asked.state
+                    return shown
+                }
                 nodes = nod.items
                 demo = dev.demo || nod.demo
             } catch {
@@ -85,6 +94,8 @@ final class DevicesStore: LoadableStore {
     func control(api: APIClient, device: DeviceItem, action: String, value: String? = nil) {
         guard !demo else { return }
         // تحديث متفائل للحالة المعروضة.
+        controlGeneration &+= 1
+        let myGeneration = controlGeneration
         if let idx = devices.firstIndex(where: { $0.id == device.id }) {
             switch action {
             case "on", "off":     devices[idx].state = action
@@ -93,13 +104,18 @@ final class DevicesStore: LoadableStore {
             case "close":         devices[idx].state = "close"
             default:              break
             }
+            pending[device.name] = (devices[idx].state, myGeneration)
         }
         // اربط الأمر بذيل الطابور: ينتظر السابق ثم ينفّذ. فشل أمر ما يوقف الطابور.
-        controlGeneration &+= 1
-        let myGeneration = controlGeneration
         let previous = commandChain
         let command = Task { @MainActor in
             await previous?.value
+            defer {
+                // This device's latest command is done: the next refresh is the truth again.
+                if self.pending[device.name]?.generation == myGeneration {
+                    self.pending[device.name] = nil
+                }
+            }
             do {
                 try await api.controlDevice(name: device.name, action: action, value: value)
             } catch let error as APIError where error.code == "not_sent" {
