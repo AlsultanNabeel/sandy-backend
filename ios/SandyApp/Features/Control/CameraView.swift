@@ -52,6 +52,8 @@ struct CameraView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(lang.s("robot.control.camera.title"))
+        // A stream left running keeps the board serving it: leaving the screen stops it.
+        .onDisappear { if streaming { Task { await stopStream() } } }
     }
 
     // ── صورة وحدة ────────────────────────────────────────────────────────────
