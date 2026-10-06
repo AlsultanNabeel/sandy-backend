@@ -254,6 +254,35 @@ def _refresh_from_catalogue(name: str, existing: Dict[str, Any],
     return True
 
 
+def board_states(telemetry: Dict[str, Any]) -> Dict[str, str]:
+    """The brain's heartbeat read as its outputs' states: the volume and the mics' gain as
+    levels, a mic as on unless muted. Only what the heartbeat carries."""
+    tel = telemetry if isinstance(telemetry, dict) else {}
+    states: Dict[str, str] = {}
+    for key in ("volume", "mic_l_gain", "mic_r_gain"):
+        if isinstance(tel.get(key), int) and not isinstance(tel.get(key), bool):
+            states[key] = str(tel[key])
+    for mic in ("mic_l", "mic_r"):
+        if isinstance(tel.get(f"{mic}_muted"), bool):
+            states[mic] = "off" if tel[f"{mic}_muted"] else "on"
+    return states
+
+
+def states_for_owner(node_id: str, owner_id: str, telemetry: Dict[str, Any]) -> int:
+    """`board_states` written on the node owner's devices, from the tenant-less heartbeat
+    thread (the owner comes from the node document, as for provisioning)."""
+    from app.features.device_store import set_board_states
+    from app.utils.user_profiles import active_user_profile_context
+
+    states = board_states(telemetry)
+    if not owner_id or not states:
+        return 0
+    with active_user_profile_context(
+        {"chat_id": owner_id, "permissions": "all", "relation": "user"}
+    ):
+        return set_board_states(node_id, states)
+
+
 def provision_for_owner(node_id: str, owner_id: str,
                         outputs: List[Dict[str, Any]],
                         label: str = "") -> Dict[str, Any]:

@@ -139,3 +139,41 @@ def test_the_app_is_told_not_connected_apart_from_not_reached(robot, broker, mon
                headers=h)
     assert r.status_code == 200 and r.get_json()["sent"] is True
     assert broker.sent == [(f"sandy/node/{NODE}/volume", "40")]
+
+
+# Audit F8: a device's state was written only by commands; the volume and the mics the
+# board reports went to the node's telemetry, so «a little lower» on a new robot counted
+# from zero and silenced her, and the app showed the mics off while they listened.
+
+def test_the_heartbeat_is_the_state_so_lower_starts_from_the_real_volume(robot, broker):
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+
+    assert device_store.get_device("sandy_volume")["state"] == "70"
+    tools.execute("device_control", {"device": "sandy_volume", "by": -20},
+                  TurnCtx(user_id="userA"))
+    assert broker.sent[-1] == (f"sandy/node/{NODE}/volume", "50")
+
+
+def test_the_mics_read_as_the_board_has_them(robot):
+    brain_beat(mic_l_muted=False, mic_l_gain=150)
+    assert device_store.get_device("sandy_mic_left")["state"] == "on"
+    assert device_store.get_device("sandy_mic_left_gain")["state"] == "150"
+    brain_beat(mic_l_muted=True)
+    assert device_store.get_device("sandy_mic_left")["state"] == "off"
+
+
+def test_a_heartbeat_older_than_a_command_does_not_write_over_it(robot, broker):
+    from datetime import datetime, timedelta, timezone
+
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+
+    tools.execute("device_control", {"device": "sandy_volume", "action": "set", "value": "40"},
+                  TurnCtx(user_id="userA"))
+    brain_beat(volume=70)                  # left the board before the command reached it
+    assert device_store.get_device("sandy_volume")["state"] == "40"
+    long_ago = datetime.now(timezone.utc) - timedelta(seconds=device_store.BOARD_STATE_GRACE_S + 1)
+    robot["sandy_devices"].update_one({"name": "sandy_volume"}, {"$set": {"state_at": long_ago}})
+    brain_beat(volume=45)                  # the board's word, once the command has had its time
+    assert device_store.get_device("sandy_volume")["state"] == "45"

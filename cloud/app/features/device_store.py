@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
@@ -282,15 +282,45 @@ def delete_device(name: str) -> Dict[str, Any]:
 
 
 def set_state(name: str, payload: str) -> None:
-    """Record the last payload sent (best-effort, never raises)."""
+    """Record the last payload sent (best-effort, never raises); `state_at` is when, which
+    keeps a heartbeat that left the board before it from writing over it."""
     coll = _coll()
     if coll is None:
         return
     try:
+        now = _now()
         coll.update_one({"name": (name or "").strip().lower()},
-                        {"$set": {"state": str(payload), "updated_at": _now()}})
+                        {"$set": {"state": str(payload), "state_at": now, "updated_at": now}})
     except Exception as e:  # noqa: BLE001
         logger.debug("[DeviceStore] set_state failed for %s: %s", name, e)
+
+
+# A command's state stands this long against the board's own report: a heartbeat (retained,
+# every few seconds) may have left the board before the command reached it.
+BOARD_STATE_GRACE_S = 15
+
+
+def set_board_states(node_id: str, states: Dict[str, str]) -> int:
+    """What the board says its outputs are now (`{output: state}`), on this tenant's devices
+    of that node; a state set by a command in the last `BOARD_STATE_GRACE_S` is left alone.
+    Writes only real changes (heartbeats come every few seconds)."""
+    coll = _coll()
+    node_id = (node_id or "").strip()
+    if coll is None or not node_id or not states:
+        return 0
+    cutoff = _now() - timedelta(seconds=BOARD_STATE_GRACE_S)
+    changed = 0
+    try:
+        for output, state in states.items():
+            r = coll.update_one(
+                {"transport.kind": "node", "transport.node_id": node_id,
+                 "transport.output": output, "state": {"$ne": state},
+                 "$or": [{"state_at": {"$exists": False}}, {"state_at": {"$lt": cutoff}}]},
+                {"$set": {"state": state, "updated_at": _now()}})
+            changed += int(getattr(r, "modified_count", 0) or 0)
+    except PyMongoError as exc:
+        logger.warning("[DeviceStore] board states for %s not kept: %s", node_id, exc)
+    return changed
 
 
 # What a scene can put back: a learned IR code toggles and a screen's text is a message,

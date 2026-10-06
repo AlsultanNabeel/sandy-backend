@@ -403,6 +403,11 @@ Now:
   clean sessions, so the broker would take the command and drop it. `/api/devices/<name>/control`
   answers it 409 `device_offline` (`camera_offline` for a camera part), apart from a send the
   broker refused (200, `sent: false`).
+- A device's `state` is the last command sent (`set_state`, with `state_at`) or what the
+  brain's heartbeat says (`node_provision.board_states`: `volume`, `mic_*_gain` as levels,
+  `mic_*` on unless `mic_*_muted`, written by `device_store.set_board_states`), so a relative
+  «a little lower» starts from the real volume. A command's state stands
+  `BOARD_STATE_GRACE_S` (15 s) against a heartbeat, which may have left the board before it.
 - The `sandy/node/` namespace is **reserved** for the ownership-checked `node`
   transport. A raw `mqtt` transport is refused if it targets it — otherwise a
   tenant could aim a device at another tenant's node with a free-form topic.

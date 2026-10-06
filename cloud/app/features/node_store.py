@@ -481,6 +481,10 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
             from app.features.node_provision import provision_for_owner
             provision_for_owner(node_id, str(current["user_id"]),
                                 update["outputs"], str(current.get("label", "")))
+        # What the board says its volume and mics are, so «a little lower» starts from there.
+        if telemetry and current.get("user_id"):
+            from app.features.node_provision import states_for_owner
+            states_for_owner(node_id, str(current["user_id"]), telemetry)
         return {"ok": True}
     except Exception as e:  # noqa: BLE001
         logger.debug("[NodeStore] ingest_status failed: %s", e)
