@@ -45,6 +45,8 @@ CAM_FRAME_SIZES = [
 ]
 
 # output id -> how to present it. `name` is the device slug, unique per tenant.
+# `levels_only`: a dimmer the board takes only a number for (an angle, a gain, a volume, the
+# flash's strength); «on»/«off» there is refused rather than sent, and the app draws no switch.
 PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "mood": {
         "name": "sandy_face", "label": "وش ساندي", "control_type": "enum",
@@ -59,7 +61,7 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "servo": {
         "name": "sandy_head", "label": "رقبة ساندي", "control_type": "dimmer",
         # Degrees: 90 is centre.
-        "meta": {"min": 0, "max": 180},
+        "meta": {"min": 0, "max": 180, "levels_only": True},
     },
     "led": {
         "name": "sandy_led", "label": "إضاءة ساندي", "control_type": "enum",
@@ -89,15 +91,15 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
         "name": "sandy_mic_left_gain", "label": "مكسب المايك الشمال",
         "control_type": "dimmer",
         # 100 is unity; the firmware also clamps at 300.
-        "meta": {"min": 0, "max": 300},
+        "meta": {"min": 0, "max": 300, "levels_only": True},
     },
     "mic_r_gain": {
         "name": "sandy_mic_right_gain", "label": "مكسب المايك اليمين",
-        "control_type": "dimmer", "meta": {"min": 0, "max": 300},
+        "control_type": "dimmer", "meta": {"min": 0, "max": 300, "levels_only": True},
     },
     "volume": {
         "name": "sandy_volume", "label": "صوت ساندي", "control_type": "dimmer",
-        "meta": {"min": 0, "max": 100},
+        "meta": {"min": 0, "max": 100, "levels_only": True},
     },
     "speaker_test": {
         "name": "sandy_speaker_test", "label": "أصوات السماعة", "control_type": "enum",
@@ -112,7 +114,7 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "cam/flash_level": {
         "name": "cam_flash_level", "label": "قوة الفلاش", "control_type": "dimmer",
         # القيمة الخام اللي الفيرموير بيكتبها ع الطرف.
-        "meta": {"min": 0, "max": 255},
+        "meta": {"min": 0, "max": 255, "levels_only": True},
     },
     "cam/flash_mode": {
         "name": "cam_flash_mode", "label": "وضع الفلاش", "control_type": "enum",

@@ -390,7 +390,7 @@ Now:
 > Devices are **data, not code**. Each tenant owns a list. Adding a device is a
 > row, never new code per device.
 
-- Control types: `switch`, `dimmer`, `enum`, `media`, `cover`, `ir`, `text` (free text for her screen, limited by `meta.max_bytes`, default 255).
+- Control types: `switch`, `dimmer`, `enum`, `media`, `cover`, `ir`, `text` (free text for her screen, limited by `meta.max_bytes`, default 255). A dimmer with `meta.levels_only` (every catalogued one: the neck, the gains, the volume, the flash's strength) takes a number only; «on»/«off» is refused with its range and the app draws no switch.
 - `command_payload(device, action, value)` is the **only** validator. It returns
   the payload or refuses with the list of allowed values so Sandy asks instead of
   guessing. This is what ends "turn the light on → applied the off scene".

@@ -177,3 +177,31 @@ def test_a_heartbeat_older_than_a_command_does_not_write_over_it(robot, broker):
     robot["sandy_devices"].update_one({"name": "sandy_volume"}, {"$set": {"state_at": long_ago}})
     brain_beat(volume=45)                  # the board's word, once the command has had its time
     assert device_store.get_device("sandy_volume")["state"] == "45"
+
+
+# Audit F9: every dimmer had an on/off switch in the app and the server passed the word on;
+# the brain logs it away (the reply said «sent», the state «off») and the camera reads it as
+# 0, setting the flash to its lowest and keeping it.
+
+def test_no_catalogued_dimmer_takes_on_or_off():
+    from app.features.node_provision import PART_CATALOGUE
+
+    dimmers = {o: s for o, s in PART_CATALOGUE.items() if s["control_type"] == "dimmer"}
+    assert {"servo", "volume", "mic_l_gain", "mic_r_gain", "cam/flash_level"} <= set(dimmers)
+    assert all(s["meta"].get("levels_only") for s in dimmers.values())
+
+
+def test_on_or_off_on_a_level_only_part_is_refused_with_its_range(robot, broker):
+    volume = device_store.get_device("sandy_volume")
+    assert device_store.command_payload(volume, "off") == {
+        "ok": False, "error": "bad_action", "allowed": ["0..100"]}
+    assert device_store.command_payload(volume, "set", "40")["payload"] == "40"
+    lamp = {"control_type": "dimmer", "meta": {"min": 0, "max": 100}}
+    assert device_store.command_payload(lamp, "off")["payload"] == "off"   # a real dimmer still can
+
+
+def test_a_part_made_before_the_mark_gets_it_from_the_next_heartbeat(robot):
+    robot["sandy_devices"].update_one({"name": "sandy_volume"},
+                                      {"$unset": {"meta.levels_only": ""}})
+    brain_beat()
+    assert device_store.get_device("sandy_volume")["meta"]["levels_only"] is True

@@ -181,16 +181,18 @@ struct DeviceCard: View {
     private var dimmerWidget: some View {
         let isOn = device.state != "off" && device.state != "0" && !device.state.isEmpty
         return VStack(spacing: Theme.Spacing.sm) {
-            Toggle(isOn: Binding(
-                get: { isOn },
-                set: { store.control(api: state.api, device: device, action: $0 ? "on" : "off") }
-            )) {
-                Text(isOn ? lang.s("control.action.on") : lang.s("control.action.off"))
-                    .font(Theme.Typography.callout)
-                    .foregroundColor(Theme.Colors.secondaryText)
+            if !device.levelsOnly {
+                Toggle(isOn: Binding(
+                    get: { isOn },
+                    set: { store.control(api: state.api, device: device, action: $0 ? "on" : "off") }
+                )) {
+                    Text(isOn ? lang.s("control.action.on") : lang.s("control.action.off"))
+                        .font(Theme.Typography.callout)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                }
+                .tint(Theme.Colors.accent)
+                .disabled(store.demo)
             }
-            .tint(Theme.Colors.accent)
-            .disabled(store.demo)
 
             HStack(spacing: Theme.Spacing.sm) {
                 Text(lang.s("control.dimmer.level"))

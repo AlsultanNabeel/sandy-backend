@@ -27,7 +27,7 @@ _COLL = "sandy_devices"
 # Safety cap, not a product limit.
 MAX_DEVICES = 500
 
-# switch: on|off · dimmer: on|off|int in meta.min..max · enum: meta.values ·
+# switch: on|off · dimmer: on|off|int in meta.min..max (no on|off with meta.levels_only) · enum: meta.values ·
 # media: on|off|pause · cover: open|close|stop · ir: learned meta.buttons · text: free text
 CONTROL_TYPES = frozenset({"switch", "dimmer", "enum", "media", "cover", "ir", "text"})
 
@@ -89,11 +89,14 @@ def command_payload(device: Dict[str, Any], action: str,
         return {"ok": False, "error": "bad_action", "allowed": sorted(_SWITCH_ACTIONS)}
 
     if ctype == "dimmer":
-        if action in _SWITCH_ACTIONS:
-            return {"ok": True, "payload": action}
         lo = _coerce_int(meta.get("min", 0)) or 0
         hi = _coerce_int(meta.get("max", 100))
         hi = 100 if hi is None else hi
+        if action in _SWITCH_ACTIONS:
+            # A level-only part (`meta.levels_only`): the board drops «on» or reads it as 0.
+            if meta.get("levels_only"):
+                return {"ok": False, "error": "bad_action", "allowed": [f"{lo}..{hi}"]}
+            return {"ok": True, "payload": action}
         level = _coerce_int(value if action in ("set", "level", "") else action)
         if level is not None:
             return {"ok": True, "payload": str(max(lo, min(hi, level)))}

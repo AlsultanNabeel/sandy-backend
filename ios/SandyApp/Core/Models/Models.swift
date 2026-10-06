@@ -193,6 +193,8 @@ struct DeviceItem: Identifiable {
         let m = (meta["max"] as? NSNumber)?.intValue ?? 100
         return m > dimmerMin ? m : 100
     }
+    /// A dimmer the board takes only a number for (`meta.levels_only`): no on/off switch.
+    var levelsOnly: Bool { (meta["levels_only"] as? Bool) ?? false }
     var irButtons: [String: String] {
         (meta["buttons"] as? [String: String]) ?? [:]
     }
