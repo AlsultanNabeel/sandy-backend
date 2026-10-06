@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 import UniformTypeIdentifiers
 
 // «شارك مع ساندي» من أي تطبيق: رابط، نص، أو صورة وحدة. الأفعال:
@@ -116,15 +117,34 @@ final class ShareModel: ObservableObject {
         return nil
     }
 
-    /// JPEG مصغّرة: ذاكرة إضافات المشاركة محدودة.
+    /// JPEG مصغّرة: ذاكرة إضافات المشاركة محدودة (around 120 MB). A file or bytes are
+    /// shrunk by ImageIO without a full decode (a 48 MP photo decoded whole is ~190 MB and
+    /// got the extension killed); only a provider that hands over a UIImage is drawn.
+    /// Same approach as the app's `ImageDownscale` (a separate target, so its own copy).
     private static func loadImage(_ provider: NSItemProvider) async -> Data? {
         let value = await loadItem(provider, .image)
-        var image: UIImage?
-        if let i = value as? UIImage { image = i }
-        else if let d = value as? Data { image = UIImage(data: d) }
-        else if let u = value as? URL, let d = try? Data(contentsOf: u) { image = UIImage(data: d) }
-        guard let image else { return nil }
-        return downscaled(image, maxSide: 1600).jpegData(compressionQuality: 0.8)
+        if let u = value as? URL {
+            return CGImageSourceCreateWithURL(u as CFURL, nil).flatMap { smallJPEG($0) }
+        }
+        if let d = value as? Data {
+            return CGImageSourceCreateWithData(d as CFData, nil).flatMap { smallJPEG($0) }
+        }
+        guard let image = value as? UIImage else { return nil }
+        return downscaled(image, maxSide: maxSide).jpegData(compressionQuality: 0.8)
+    }
+
+    private static let maxSide: CGFloat = 1600
+
+    private static func smallJPEG(_ source: CGImageSource) -> Data? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxSide),
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: image).jpegData(compressionQuality: 0.8)
     }
 
     private static func downscaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
