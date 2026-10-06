@@ -229,15 +229,12 @@ def _turn(model, message="شو الأخبار"):
 def test_a_future_message_is_delivered_into_the_next_reply_once(brain_db):  # noqa: F811
     sid = _add("message_to_future_self", "لا تنسى تتصل بأمك")
     later = _add("message_to_future_self", "بعدين", minutes_ago=-60 * 24)
-    first = ScriptedModel(text_reply("أهلين"))
-    _turn(first)
-    assert "لا تنسى تتصل بأمك" in first.seen[0][0]["content"]
-    assert "بعدين" not in first.seen[0][0]["content"]
+    first = _turn(ScriptedModel(text_reply("أهلين")))["final_response"]
+    assert "لا تنسى تتصل بأمك" in first and "بعدين" not in first
     row = _get(sid)
     assert row["status"] == "sent" and row["payload"]["delivered_at"]
-    second = ScriptedModel(text_reply("أهلين"))
-    _turn(second)
-    assert "لا تنسى تتصل بأمك" not in second.seen[0][0]["content"]
+    second = _turn(ScriptedModel(text_reply("أهلين")))["final_response"]
+    assert "لا تنسى تتصل بأمك" not in second
     assert _get(later)["status"] == "pending"
 
 
@@ -250,9 +247,7 @@ def test_a_failed_turn_delivers_nothing(brain_db):  # noqa: F811
 
 def test_another_tenants_message_never_reaches_this_turn(brain_db):  # noqa: F811
     _add("message_to_future_self", "سر ب", profile=B)
-    model = ScriptedModel(text_reply("أهلين"))
-    _turn(model)
-    assert "سر ب" not in model.seen[0][0]["content"]
+    assert "سر ب" not in _turn(ScriptedModel(text_reply("أهلين")))["final_response"]
 
 
 # ── mood entry (the old emotional moment) ────────────────────────────────────

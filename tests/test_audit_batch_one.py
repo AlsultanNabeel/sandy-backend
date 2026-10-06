@@ -144,7 +144,11 @@ def test_live_session_stops_the_reader_when_setup_fails(monkeypatch):
 
     monkeypatch.setattr(sess, "_DeviceReader", lambda ws: _FakeReader())
     monkeypatch.setattr(sess, "_build_cached_instruction",
-                        lambda who: (_ for _ in ()).throw(RuntimeError("mongo down")))
+                        lambda *a: (_ for _ in ()).throw(RuntimeError("mongo down")))
+    monkeypatch.setattr(sess, "resolve_speaker_label", lambda who: "سامي")
+    monkeypatch.setattr(sess, "load_recent_turns", lambda who: [])
+    monkeypatch.setattr(sess, "speaker_gate", lambda who, channel: False)
+    monkeypatch.setattr(sess, "voice_seconds_left", lambda who: 3600.0)
     monkeypatch.setattr(sess, "_send_json", lambda ws, payload: None)
 
     pytest.importorskip("google.genai")
@@ -156,7 +160,12 @@ def test_live_session_stops_the_reader_when_setup_fails(monkeypatch):
         def send(self, _):
             pass
 
-    asyncio.run(sess._live_session(_WS(), "test"))
+    # A paired board: one nobody paired is turned away before the reader starts.
+    sess.set_voice_identity("u1")
+    try:
+        asyncio.run(sess._live_session(_WS(), "test"))
+    finally:
+        sess.set_voice_identity("")
     assert stopped["n"] == 1, "a session that fails during setup must stop its reader"
 
 
