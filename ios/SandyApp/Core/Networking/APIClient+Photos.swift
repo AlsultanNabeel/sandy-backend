@@ -3,19 +3,23 @@ import PhotosUI
 
 // Goes through the shared client so a 401 signs out like everywhere else.
 extension APIClient {
-    func photosList(album: String? = nil) async throws -> [AlbumPhoto] {
-        var path = "/api/photos"
-        if let album, !album.isEmpty {
-            path += "?album=\(URLEscape.query(album))"
-        }
+    /// One page of the album, newest first, and the cursor for the page after it (nil at
+    /// the end); pass that back as `before`.
+    func photosList(album: String? = nil,
+                    before: String? = nil) async throws -> (photos: [AlbumPhoto], next: String?) {
+        var params: [String] = []
+        if let album, !album.isEmpty { params.append("album=\(URLEscape.query(album))") }
+        if let before { params.append("before=\(URLEscape.query(before))") }
+        let path = "/api/photos" + (params.isEmpty ? "" : "?" + params.joined(separator: "&"))
         let r = try await request(path)
-        return (r["items"] as? [[String: Any]] ?? []).map {
+        let photos = (r["items"] as? [[String: Any]] ?? []).map {
             AlbumPhoto(id: $0["id"] as? String ?? "",
                        name: $0["name"] as? String ?? "",
                        caption: $0["caption"] as? String ?? "",
                        tags: $0["tags"] as? [String] ?? [],
                        createdAt: $0["created_at"] as? String ?? "")
         }
+        return (photos, r["next"] as? String)
     }
 
     func photosAlbums() async throws -> [PhotoAlbum] {

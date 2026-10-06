@@ -12,6 +12,11 @@ final class PhotosStore: LoadableStore {
     @Published var photos: [AlbumPhoto] = []
     @Published var albums: [PhotoAlbum] = []
     @Published var selectedAlbum: String?   // nil = الكل
+    /// The cursor for the album's next page; nil once the last one is here.
+    @Published private(set) var nextPage: String?
+    private var loadingMore = false
+
+    var hasMore: Bool { nextPage != nil }
 
     private var loadTask: Task<Void, Never>?
 
@@ -29,10 +34,11 @@ final class PhotosStore: LoadableStore {
             do {
                 async let photosRes = api.photosList(album: album)
                 async let albumsRes = api.photosAlbums()
-                let p = try await photosRes
+                let (p, next) = try await photosRes
                 let a = try await albumsRes
                 guard isCurrentLoad(gen) else { return }
                 photos = p
+                nextPage = next
                 albums = a
                 markLoaded()
                 saveSnapshot(PhotosCopy(photos: p, albums: a), key: key, api: api)
@@ -42,6 +48,23 @@ final class PhotosStore: LoadableStore {
         }
         loadTask = task
         await task.value
+    }
+
+    /// The page after the ones shown (the grid asks as it reaches its end).
+    func loadMore(api: APIClient) async {
+        guard let cursor = nextPage, !loadingMore else { return }
+        loadingMore = true
+        defer { loadingMore = false }
+        let album = selectedAlbum
+        do {
+            let (more, next) = try await api.photosList(album: album, before: cursor)
+            guard album == selectedAlbum, cursor == nextPage else { return }
+            let seen = Set(photos.map(\.id))
+            photos += more.filter { !seen.contains($0.id) }
+            nextPage = next
+        } catch {
+            notify("photos.errorLoad")
+        }
     }
 
     /// تصفية الألبوم تُعيد الجلب من الباك-إند (الوسم فلتر على الخادم).

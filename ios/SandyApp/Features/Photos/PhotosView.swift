@@ -72,6 +72,12 @@ struct PhotosView: View {
                             photoCell(photo)
                         }
                     }
+                    if store.hasMore {
+                        // Reaching the end of the grid brings the next page.
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .task(id: store.photos.count) { await store.loadMore(api: state.api) }
+                    }
                 }
                 .padding(Theme.Spacing.md)
                 .padding(.bottom, Theme.Spacing.xxl)
