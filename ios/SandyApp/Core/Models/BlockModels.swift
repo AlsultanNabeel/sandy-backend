@@ -69,16 +69,19 @@ struct LifeStats: Codable, Hashable {
         case habitProgress = "habit_progress"
     }
 
-    /// With entries made on the phone since the numbers were counted.
-    func including(_ added: [LogEntry]) -> LifeStats {
+    /// With entries made on the phone since the numbers were counted. Days and months are
+    /// Gregorian in the phone's zone, as the server counts them, whatever calendar the phone
+    /// shows (`calendar` gives only the zone).
+    func including(_ added: [LogEntry], now: Date = Date(), calendar: Calendar = .current) -> LifeStats {
         var out = self
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = calendar.timeZone
+        let today = cal.startOfDay(for: now)
         for e in added {
             guard let at = NotificationManager.parseISO(e.at ?? "") else { continue }
             let back = cal.dateComponents([.day], from: cal.startOfDay(for: at), to: today).day ?? -1
             if back >= 0 && back < out.days.count { out.days[out.days.count - 1 - back] += 1 }
-            guard cal.isDate(at, equalTo: Date(), toGranularity: .month) else { continue }
+            guard cal.isDate(at, equalTo: now, toGranularity: .month) else { continue }
             out.logged += 1
             if e.kind == "habit" { out.habits += 1 }
             if e.kind == "expense" {
