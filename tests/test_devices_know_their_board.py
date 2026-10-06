@@ -77,3 +77,65 @@ def test_sandy_reads_it_too(robot):
 
     rows = tools.execute("device_state", {"device": "room_light"}, TurnCtx(user_id="userA"))
     assert rows["devices"][0]["connected"] is True
+
+
+# Audit F18: «sent» meant only that the broker took it. A board whose MQTT will had come
+# was sent the command, which the broker dropped, and Sandy said «done».
+
+class _Broker:
+    def __init__(self):
+        self.sent = []
+
+    def send_to_topic(self, topic, payload):
+        self.sent.append((topic, payload))
+        return True
+
+
+@pytest.fixture
+def broker(robot, monkeypatch):
+    b = _Broker()
+    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: b)
+    return b
+
+
+def test_a_gone_board_is_not_sent_and_she_says_not_connected(robot, broker):
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+
+    device_store.set_state("room_light", "off")
+    _beat("room/status", {"online": False})
+    out = tools.execute("device_control", {"device": "room_light", "action": "on"},
+                        TurnCtx(user_id="userA"))
+    assert out["ok"] is False and "مش متّصل" in out["reply"]
+    assert not out["reply"].startswith("ما اشتغل")      # not «it did not work, try again»
+    assert broker.sent == []
+    assert device_store.get_device("room_light")["state"] == "off"
+
+
+def test_a_scene_goes_on_without_the_gone_board_and_names_it(robot, broker):
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    from app.features import scene_store
+
+    scene_store.add_scene("evening", actions=[{"device": "sandy_volume", "value": "30"},
+                                              {"device": "room_light", "value": "on"}])
+    _beat("room/status", {"online": False})
+    out = tools.execute("scene_apply", {"name": "evening"}, TurnCtx(user_id="userA"))
+    assert broker.sent == [(f"sandy/node/{NODE}/volume", "30")]
+    assert "ضوء الغرفة" in out["reply"] and "تخطّيته" in out["reply"]
+
+
+def test_the_app_is_told_not_connected_apart_from_not_reached(robot, broker, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "x" * 40)
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+
+    c = create_app(mongo_db=robot).test_client()
+    h = {"Authorization": f"Bearer {make_token('user', 'userA')}"}
+    _beat("room/status", {"online": False})
+    r = c.post("/api/devices/room_light/control", json={"action": "on"}, headers=h)
+    assert r.status_code == 409 and r.get_json()["error"] == "device_offline"
+    r = c.post("/api/devices/sandy_volume/control", json={"action": "set", "value": "40"},
+               headers=h)
+    assert r.status_code == 200 and r.get_json()["sent"] is True
+    assert broker.sent == [(f"sandy/node/{NODE}/volume", "40")]

@@ -187,9 +187,9 @@ kind needs no tool change.
 | `schedule` | `schedules.add`; `when` = ISO (one in the past or over a year away is refused, never read as clock words), else the clock words (`when._clock`: a named weekday or «يوم 15» keeps its day, the number after «الساعة» is the hour, «12 الظهر» is noon, morning/evening words match whole words only, and with none, today takes the nearest time ahead while another day reads 1–6 as afternoon and 7–11 as morning), else a bare weekday, else one model call (`when._parse_with_model`), else the deterministic Arabic date parser. `before_id` + `before_minutes` sets it ahead of an existing reminder's or task's time. With `device` + `value` it is a timed device command («طفّي المكيف بعد ساعة»): a `scene` row marked `payload.asked`, shown in the state block and cancellable like a reminder, and never cancelled by a scene |
 | `schedule_update` | reminders only: move / rename / cancel (status `cancelled`); `recurrence` changes the repeat, `stop_repeat` ends it, `skip_next` jumps one occurrence (`schedule_runner.next_occurrence`). A reminder that rang in the last two hours (`fired_at`, shown in the state block) can be snoozed: a one-time one goes back to pending, a repeating one gets a one-time copy and its series is left alone |
 | `summarize` | the period's entries, items (`items.touched_between`: added or done in it, matched in the database) and schedules as rows; the model writes the summary, nothing is stored; expenses come with `spending`. `week`, `month` and `year` are calendar ones (the week runs Saturday to Friday; the 1st; January) up to today's end |
-| `device_control` | a registered device by slug or label, several (`devices`), or every device of a `room`; `by` moves a dimmer from its current level; `command_payload` validates, `send_to_topic` checks the topic is the caller's; an unknown device or action is refused with what is available, and a device that is not connected is reported as not done («ما اشتغل») |
+| `device_control` | a registered device by slug or label, several (`devices`), or every device of a `room`; `by` moves a dimmer from its current level; `command_payload` validates, `send_to_topic` checks the topic is the caller's; an unknown device or action is refused with what is available; a device whose board is gone (`board_gone`, §2.8) is not sent and is told apart as «مش متّصل», and a send the broker refused is «ما اشتغل» |
 | `device_state` | reads each device's last sent state, whether it is connected and when it was last heard; changes nothing. The state block lists the devices by name and room |
-| `scene_apply` | `scene_store.apply_scene` (keeps the devices' state first, actuates, schedules the reverts, §2.12) plus the room-node vocabulary fallback |
+| `scene_apply` | `scene_store.apply_scene` (keeps the devices' state first, actuates, schedules the reverts, §2.12); a device whose board is gone is passed over, the rest still go, and the reply names it (`offline`), as does `/api/life/scenes/apply` for the app |
 | `room_restore` | `scene_store.restore_room`: the devices the last scene changed get the state kept before it (`device_store.before_scene`; IR and screen text are not replayed), its timers are cancelled; once per scene |
 | `web_search` | `features/research.web_answer`: Exa snippets summarised in one model call, with sources |
 | `weather` | `features/weather` (the city as itself, nothing appended); with no city, `home_city`: the city the app last showed weather for (`/api/weather` keeps it on `sandy_users.city`); with none saved she asks which city (no default, no guess from the zone; the route answers 400 `city_required`) |
@@ -399,6 +399,10 @@ Now:
 - A device's `online` is not stored: every read takes it from the board behind it
   (`node_store.part_present`: the brain's `online` and not in safe mode, the camera's
   `cam_online`, the room's `room_online`; a board never heard from is not connected).
+  A board that said it went sets `board_gone`, and nothing is sent to it: the boards hold
+  clean sessions, so the broker would take the command and drop it. `/api/devices/<name>/control`
+  answers it 409 `device_offline` (`camera_offline` for a camera part), apart from a send the
+  broker refused (200, `sent: false`).
 - The `sandy/node/` namespace is **reserved** for the ownership-checked `node`
   transport. A raw `mqtt` transport is refused if it targets it — otherwise a
   tenant could aim a device at another tenant's node with a free-form topic.

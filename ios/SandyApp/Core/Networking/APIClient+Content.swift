@@ -55,14 +55,15 @@ extension APIClient {
     private struct ApplySceneResponse: Decodable {
         let ok: Bool?
         let online: Bool?
+        let offline: [String]?
     }
 
-    // ok = طُبّق المشهد، online = وصل لـ room-node فعليًا.
+    // ok = طُبّق المشهد، online = وصل لجهاز واحد على الأقل، offline = أجهزة لوحها غايب فتخطّاها.
     @discardableResult
-    func applyScene(name: String) async throws -> (ok: Bool, online: Bool) {
+    func applyScene(name: String) async throws -> (ok: Bool, online: Bool, offline: [String]) {
         let r: ApplySceneResponse = try await fetch("/api/life/scenes/apply", method: "POST",
                                                     body: SceneName(name: name))
-        return (r.ok ?? false, r.online ?? false)
+        return (r.ok ?? false, r.online ?? false, r.offline ?? [])
     }
 
     private struct SceneCreate: Encodable {

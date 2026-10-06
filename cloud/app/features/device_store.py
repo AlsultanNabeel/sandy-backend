@@ -162,10 +162,11 @@ def _public(d: Dict[str, Any]) -> Dict[str, Any]:
 
 def _with_presence(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Each device's `online`, from the board behind it, read now: nothing writes it on the
-    device row. Only a node device can be connected (`node_store.part_present` is True)."""
+    device row. Only a node device can be connected (`node_store.part_present` is True);
+    `board_gone` is set when its board said it went, and that is what refuses a command."""
     if not any((d.get("transport") or {}).get("kind") == "node" for d in docs):
         for d in docs:
-            d["online"] = False
+            d["online"], d["board_gone"] = False, False
         return docs
     from app.features.node_store import list_nodes, part_present
 
@@ -173,7 +174,8 @@ def _with_presence(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for d in docs:
         t = d.get("transport") or {}
         node = nodes.get(str(t.get("node_id") or "")) if t.get("kind") == "node" else None
-        d["online"] = part_present(node, t.get("output")) is True
+        present = part_present(node, t.get("output"))
+        d["online"], d["board_gone"] = present is True, present is False
     return docs
 
 

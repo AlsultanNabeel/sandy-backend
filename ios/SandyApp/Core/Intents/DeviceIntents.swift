@@ -106,6 +106,8 @@ struct ControlDeviceIntent: AppIntent {
         let api = try IntentAPI.make()
         do {
             try await api.controlDevice(name: device.id, action: command.rawValue)
+        } catch let e as APIError where APIClient.isNotConnected(e) {
+            throw SandyIntentError.notConnected(device.label)
         } catch let e as APIError where e.code == "not_sent" {
             throw SandyIntentError.notReached(device.label)
         } catch let e as APIError where e.kind == .server {
@@ -131,6 +133,8 @@ struct SetDeviceLevelIntent: AppIntent {
         let api = try IntentAPI.make()
         do {
             try await api.controlDevice(name: device.id, action: "set", value: String(level))
+        } catch let e as APIError where APIClient.isNotConnected(e) {
+            throw SandyIntentError.notConnected(device.label)
         } catch let e as APIError where e.code == "not_sent" {
             throw SandyIntentError.notReached(device.label)
         } catch let e as APIError where e.kind == .server {
@@ -156,6 +160,8 @@ struct PressDeviceButtonIntent: AppIntent {
         let api = try IntentAPI.make()
         do {
             try await api.controlDevice(name: device.id, action: "send", value: button)
+        } catch let e as APIError where APIClient.isNotConnected(e) {
+            throw SandyIntentError.notConnected(device.label)
         } catch let e as APIError where e.code == "not_sent" {
             throw SandyIntentError.notReached(device.label)
         } catch let e as APIError where e.kind == .server {

@@ -118,6 +118,8 @@ final class DevicesStore: LoadableStore {
             }
             do {
                 try await api.controlDevice(name: device.name, action: action, value: value)
+            } catch let error as APIError where APIClient.isNotConnected(error) {
+                notify("control.notConnected")
             } catch let error as APIError where error.code == "not_sent" {
                 notify("control.notReached")
             } catch {

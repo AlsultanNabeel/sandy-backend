@@ -215,8 +215,8 @@ def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, m
 
     with as_tenant("t1"):
         _add_light()  # dimmer "living_light" -> room/cmd/light
-        sent, missed = _actuate([{"device": "living_light", "value": "on"}])
-    assert sent == 1 and missed == []
+        sent, missed, offline = _actuate([{"device": "living_light", "value": "on"}])
+    assert sent == 1 and missed == [] and offline == []
     assert mock_actuation["topic"] == "room/cmd/light"
     assert mock_actuation["payload"] == "on"
 

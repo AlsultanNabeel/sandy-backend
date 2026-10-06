@@ -150,6 +150,7 @@ def register_devices_api(app, mongo_db=None):
             get_device,
             set_state,
         )
+        from app.brain.tools_world import offline_line
         from app.integrations.room_device import get_room_device_client
 
         body = request.get_json(silent=True) or {}
@@ -163,12 +164,12 @@ def register_devices_api(app, mongo_db=None):
         topic = device_topic(device)
         if not topic:
             return _bad("bad_transport")
-        if name.startswith("cam_"):
-            from app.features.node_store import get_node
-
-            parts = topic.split("/")
-            if len(parts) > 2 and _camera_offline(get_node(parts[2])):
+        if device.get("board_gone"):
+            # Its board said it went: the broker would take the command and drop it.
+            if str((device.get("transport") or {}).get("output", "")).startswith("cam/"):
                 return _offline_reply()
+            return jsonify({"error": "device_offline",
+                            "message": offline_line(device.get("label") or name)}), 409
         payload = res["payload"]
         sent = False
         try:

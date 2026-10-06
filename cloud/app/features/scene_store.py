@@ -267,7 +267,7 @@ def apply_scene(name: str) -> Dict[str, Any]:
     from app.features.device_store import keep_before_scene
 
     keep_before_scene([str(a.get("device") or "") for a in sc["actions"]])
-    sent, missed = _actuate(sc["actions"])
+    sent, missed, offline = _actuate(sc["actions"])
 
     return {
         "ok": True,
@@ -276,6 +276,7 @@ def apply_scene(name: str) -> Dict[str, Any]:
         "timers": timers,
         "sent": sent,
         "missed": missed,
+        "offline": offline,
         "actions": sc["actions"],
     }
 
@@ -291,18 +292,19 @@ def restore_room() -> Dict[str, Any]:
     if pending is not None:
         pending.update_many(_SCENE_TIMERS,
                             {"$set": {"status": "cancelled"}})
-    sent, missed = _actuate(actions)
-    return {"ok": True, "sent": sent, "missed": missed}
+    sent, missed, offline = _actuate(actions)
+    return {"ok": True, "sent": sent, "missed": missed, "offline": offline}
 
 
 def _actuate(actions: List[Dict[str, Any]]) -> tuple:
-    """Send each action to its device; returns (sent, names that were missed)."""
+    """Send each action to its device; returns (sent, names that were missed, labels of the
+    devices whose board is gone). A gone board is passed over, the rest still go."""
     from app.features.device_store import (
         command_payload, device_topic, get_devices, set_state,
     )
     from app.integrations.room_device import get_room_device_client
 
-    sent, missed = 0, []
+    sent, missed, offline = 0, [], []
     # Every device the scene names, in one read.
     try:
         devices = get_devices([str(a.get("device") or "") for a in actions or []])
@@ -327,6 +329,9 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
                 missed.append(name)
                 continue
             payload = res["payload"]
+            if device.get("board_gone"):
+                offline.append(device.get("label") or name)
+                continue
             if get_room_device_client().send_to_topic(device_topic(device), payload):
                 set_state(name, payload)
                 sent += 1
@@ -335,4 +340,4 @@ def _actuate(actions: List[Dict[str, Any]]) -> tuple:
         except Exception as exc:  # noqa: BLE001
             logger.debug("[SceneStore] %s failed: %s", name, exc)
             missed.append(name)
-    return sent, missed
+    return sent, missed, offline

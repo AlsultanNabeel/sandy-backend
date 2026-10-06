@@ -35,7 +35,8 @@ enum L10nControl {
             // ── Generic notices (Sandy voice) ──
             "loadFailed":   .text("تعذّر تحميل أجهزتك. اسحب للتحديث."),
             "controlFailed":.text("تعذّر تنفيذ الأمر. أعد المحاولة بعد قليل."),
-            "notReached":   .text("الأمر ما وصل للجهاز: ممكن يكون مطفي أو مش متصل."),
+            "notReached":   .text("الأمر ما وصل للجهاز. جرّب كمان شوي."),
+            "notConnected": .text("الجهاز مش متّصل هلّق، فما بعتّله الأمر. تأكّد إنه شغّال وعلى الشبكة."),
             "saveFailed":   .text("تعذّر الحفظ. أعد المحاولة بعد قليل."),
             "deleteFailed": .text("تعذّر الحذف. أعد المحاولة."),
 
@@ -156,7 +157,8 @@ enum L10nControl {
             // ── Generic notices (Sandy voice) ──
             "loadFailed":   .text("Couldn't load your devices. Pull to refresh."),
             "controlFailed":.text("The command didn't go through. Try again in a moment."),
-            "notReached":   .text("The command didn't reach the device: it may be off or offline."),
+            "notReached":   .text("The command didn't reach the device. Try again in a moment."),
+            "notConnected": .text("The device isn't connected right now, so nothing was sent. Make sure it's on and online."),
             "saveFailed":   .text("Couldn't save. Try again in a moment."),
             "deleteFailed": .text("Couldn't delete. Try again."),
 

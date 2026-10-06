@@ -175,16 +175,21 @@ extension APIClient {
         try Self.reachedTheBoard(r)
     }
 
-    /// The server answers 200 with `"sent": false` when the command never left it (the board
-    /// is off, the broker is down): that is not «done». An answer without the field (an older
-    /// server) is taken as sent.
+    /// The server answers 200 with `"sent": false` when the command never left it (the broker
+    /// is down): that is not «done». An answer without the field (an older server) is taken as
+    /// sent. A board it knows is gone is refused before that, 409 `device_offline` (or
+    /// `camera_offline`), which `isNotConnected` reads.
     static func reachedTheBoard(_ reply: [String: Any]) throws {
         if (reply["sent"] as? Bool) == false {
             throw APIError(message: AppLocale.isArabic
-                               ? "الأمر ما وصل للجهاز: ممكن يكون مطفي أو مش متصل."
-                               : "The command didn't reach the device: it may be off or offline.",
+                               ? "الأمر ما وصل للجهاز. جرّب كمان شوي."
+                               : "The command didn't reach the device. Try again in a moment.",
                            code: "not_sent", kind: .unknown)
         }
+    }
+
+    static func isNotConnected(_ error: APIError) -> Bool {
+        error.code == "device_offline" || error.code == "camera_offline"
     }
 
     // الخادم بيصغّر الصورة ع ٢٤٠×٢٤٠ وبيحوّلها لصيغة الشاشة: فكّ الصور بياكل رام اللوح.

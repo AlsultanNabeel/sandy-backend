@@ -56,6 +56,11 @@ def _confirm_text(label: str, action: str, payload: str) -> str:
     return f"ضبطت {label}: {payload}"
 
 
+def offline_line(label: str) -> str:
+    """A device whose board is gone: not «it did not work», which reads as a fault to retry."""
+    return f"{label} مش متّصل هلّق، فما بعتّله الأمر. تأكّد إنه شغّال وعلى الشبكة."
+
+
 # «شوي» on a dimmer: a fifth of its range.
 STEP = 20
 
@@ -104,13 +109,16 @@ def _actuate_one(device: Dict[str, Any], action: str, value: Any) -> Tuple[bool,
     topic = device_topic(device)
     if not topic:
         return False, f"{label} مش مربوط بمخرج صحيح — راجع إعداده بالتطبيق."
+    if device.get("board_gone"):
+        # Its board said it went: the broker would take the command and drop it.
+        return False, offline_line(label)
     try:
         sent = get_room_device_client().send_to_topic(topic, payload)
     except Exception:  # noqa: BLE001 — the broker boundary; reported as not sent
         logger.warning("[brain] device send failed", exc_info=True)
         sent = False
     if not sent:
-        return False, f"ما اشتغل: {label} مش متّصل هلّق، فما وصله الأمر."
+        return False, f"ما اشتغل: ما قدرت أوصّل الأمر لـ {label}. جرّب كمان شوي."
     set_state(device["name"], payload)
     return True, _confirm_text(label, action, payload)
 
@@ -172,11 +180,21 @@ def scene_apply(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     r = apply_scene(str(args.get("name", "")))
     if not r.get("ok"):
         return _no(SCENES_HINT)
+    tail = _passed_over(r)
     if not r.get("sent"):
-        return _no(f"ما تطبّق مشهد «{r['label']}»: الغرفة مش متّصلة هلّق، فما وصلها إشي.")
-    missed = r.get("missed") or []
-    tail = f" بس ما وصل لـ: {'، '.join(missed)}." if missed else " 🏠"
-    return {"ok": not missed, "reply": f"✨ طبّقت مشهد «{r['label']}»{tail}"}
+        return _no(f"ما تطبّق مشهد «{r['label']}»، ما وصل ولا جهاز.{tail}")
+    return {"ok": not tail, "reply": f"✨ طبّقت مشهد «{r['label']}»{tail or ' 🏠'}"}
+
+
+def _passed_over(r: Dict[str, Any]) -> str:
+    """What a scene or a restore left out, by name: the devices whose board is gone, and
+    the ones the command did not reach."""
+    parts = []
+    if r.get("offline"):
+        parts.append(f" {'، '.join(r['offline'])} مش متّصل هلّق، فتخطّيته.")
+    if r.get("missed"):
+        parts.append(f" وما وصل لـ: {'، '.join(r['missed'])}.")
+    return "".join(parts)
 
 
 def room_restore(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -185,9 +203,10 @@ def room_restore(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     r = restore_room()
     if not r.get("ok"):
         return _no("ما في مشهد طبّقته قبل هيك أرجّع عنه.")
+    tail = _passed_over(r)
     if not r.get("sent"):
-        return _no("الغرفة مش متّصلة هلّق، ما قدرت أرجّعها.")
-    return {"ok": True, "reply": "رجّعت الغرفة زي ما كانت 🏠"}
+        return _no(f"ما قدرت أرجّع الغرفة، ما وصل ولا جهاز.{tail}")
+    return {"ok": not tail, "reply": f"رجّعت الغرفة زي ما كانت{tail or ' 🏠'}"}
 
 
 def web_search(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
