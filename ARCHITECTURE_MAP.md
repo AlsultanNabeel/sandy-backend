@@ -156,7 +156,8 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
 **The model call** (`model.py`): the Azure chat deployment through
 `openai_client.chat_fn()` — the process's one chat client, behind the `openai`
 breaker and the param-quirk adapter — then OpenAI direct (`OPENAI_MODEL`), then
-`None` and a fixed error sentence. Text streams through thread-local hooks
+`None` and a fixed error sentence. With no Azure configured the primary already is OpenAI direct
+(`openai_client.azure_is_primary`), so there is no second try. Text streams through thread-local hooks
 (`model.set_stream_hooks`), cumulative, which `/api/agent/stream` sets on the
 thread that runs the turn.
 

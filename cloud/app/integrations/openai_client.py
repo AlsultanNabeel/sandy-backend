@@ -217,6 +217,16 @@ def chat_fn() -> Callable[..., Any]:
         return _chat_fn
 
 
+def azure_is_primary() -> bool:
+    """Whether `chat_fn` goes to Azure. Without it the primary already is OpenAI direct, so
+    `openai_direct_client` is no fallback, only the same call again."""
+    from app.config import (
+        AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT, AZURE_OPENAI_ENDPOINT,
+    )
+
+    return bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY and AZURE_OPENAI_CHAT_DEPLOYMENT)
+
+
 def openai_direct_client() -> Any:
     """OpenAI with its own key and a deadline, or None without a key."""
     global _direct_client

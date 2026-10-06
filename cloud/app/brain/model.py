@@ -135,6 +135,11 @@ def complete(messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
         resp = _primary(messages, tools, stream=False)
         return _from_message(resp.choices[0].message)
     except Exception as exc:  # noqa: BLE001 — provider boundary; fall back below
+        from app.integrations import openai_client
+        if not openai_client.azure_is_primary():
+            logger.error("[brain] model failed (OpenAI direct is the primary, no fallback): %s",
+                         exc)
+            return None
         logger.warning("[brain] primary model failed, trying OpenAI direct: %s", exc)
     try:
         resp = _openai_direct(messages, tools)
