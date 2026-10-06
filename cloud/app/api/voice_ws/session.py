@@ -69,6 +69,8 @@ from app.api.voice_ws.memory import (
     set_voice_channel,
     set_voice_identity,
 )
+from app.api.metering import voice_seconds_left
+from app.features.usage_store import add_voice_seconds
 from app.api.voice_ws.tools import (
     _build_cached_instruction,
     _build_live_tools,
@@ -558,6 +560,8 @@ async def _live_session(ws, remote: str) -> None:
     # None first and constructed inside the try.
     reader: Optional["_DeviceReader"] = None
     _held = ""
+    # The call's own state, shared by both bridges and kept across GoAway reconnects.
+    live_state: Dict[str, Any] = {"resume": None, "goaway": False}
     try:
         reader = _DeviceReader(ws).start()
 
@@ -574,12 +578,18 @@ async def _live_session(ws, remote: str) -> None:
         _t_seed = time.monotonic()
         # The speaker gate too: a voiceprint lookup, read once here and handed down,
         # never again on the loop that relays audio.
-        _label, _base, _recent, gate_on = await asyncio.gather(
+        _label, _base, _recent, gate_on, _left = await asyncio.gather(
             _loop.run_in_executor(None, resolve_speaker_label, _who),
             _loop.run_in_executor(None, _build_cached_instruction, _who, _channel),
             _loop.run_in_executor(None, load_recent_turns, _who),
             _loop.run_in_executor(None, speaker_gate, _who, _channel),
+            _loop.run_in_executor(None, _seconds_left, _who),
         )
+        if _left <= 0:
+            # The day's minutes are spent (a robot's are its owner's).
+            _send_json(ws, {"type": "error", "msg": "call_minutes_exceeded"})
+            logger.info("[voice_ws] no call minutes left today for %s", _who)
+            return
         set_voice_speaker_label(_label)
         _ms_seed = (time.monotonic() - _t_seed) * 1000
         _context = await _loop.run_in_executor(
@@ -636,10 +646,11 @@ async def _live_session(ws, remote: str) -> None:
             )
         # The session outlives the connection: on GoAway we reconnect with the resumption handle.
         resume_handle: Optional[str] = None
-        live_state: Dict[str, Any] = {"resume": None, "goaway": False}
         # One clock for the whole call, reconnects included (`_call_watchdog`).
         live_state["call_started"] = time.monotonic()
-        live_state["call_deadline"] = live_state["call_started"] + _CALL_MAX_S
+        live_state["call_deadline"] = live_state["call_started"] + min(_CALL_MAX_S, _left)
+        if _left < _CALL_MAX_S:
+            live_state["deadline_reason"] = "call_minutes_exceeded"
         client = genai.Client(api_key=GEMINI_API_KEY)
 
         while True:
@@ -752,6 +763,12 @@ async def _live_session(ws, remote: str) -> None:
     finally:
         if reader is not None:
             reader.stop()
+        # The call's length counts against the day, also when it ended in an error.
+        if _held and live_state.get("call_started"):
+            from app.utils.thread_pool import submit_background
+            submit_background(add_voice_seconds, _held,
+                              time.monotonic() - float(live_state["call_started"]),
+                              _label="voice-seconds")
         if _held:
             from app.utils import prompt_prewarm
             prompt_prewarm.release(_held)
@@ -766,7 +783,7 @@ async def _call_watchdog(state: Dict[str, Any]) -> None:
     while True:
         now = time.monotonic()
         if now >= float(state["call_deadline"]):
-            state["ended"] = "call_time_limit"
+            state["ended"] = state.get("deadline_reason") or "call_time_limit"
             return
         heard = max(float(state.get("call_started") or now),
                     float(state.get("user_voice_at") or 0),
@@ -775,6 +792,13 @@ async def _call_watchdog(state: Dict[str, Any]) -> None:
             state["ended"] = "call_idle"
             return
         await asyncio.sleep(min(1.0, max(0.05, _CALL_IDLE_S / 10)))
+
+
+def _seconds_left(user_id: str) -> float:
+    """Voice seconds this call may use today, by the account's own record (the app's call
+    and the robot's alike). A board nobody paired has no account to count against, so only
+    the call's maximum bounds it."""
+    return voice_seconds_left(user_id) if user_id else _CALL_MAX_S
 
 
 # الردّ بيوصل قطع متلاحقة، فثانيتين بلا ولا قطعة معناها المولّد وقف.

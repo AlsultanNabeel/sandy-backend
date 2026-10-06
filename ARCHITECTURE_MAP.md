@@ -657,6 +657,12 @@ frame, so a TV or a fan does not count) nor hers, and `call_time_limit` at `SAND
 (20 min). The deadline is set once per call, so a GoAway reconnect neither resets nor extends it;
 the reason goes to the device as `{"type":"error","msg":…}` (the app shows a sentence,
 `GeminiLiveManager.errorLine`; the board logs it and stays unlocked).
+**Voice has a daily allowance in minutes** (`metering.voice_seconds_left`): `SANDY_CALL_MINUTES_FREE`
+(10) or, for a subscriber or the owner, `SANDY_CALL_MINUTES_SUBSCRIBER` (60), counted in seconds on
+the day's usage row (`usage_store.add_voice_seconds`). A call checks it at the start (none left →
+`call_minutes_exceeded`), ends when it runs out, and adds its length when it ends; a robot's call
+counts on its owner's account, a board nobody paired on none. `/api/voice/tts` spends the same
+minutes (the WAV's length) and answers 429 `call_minutes_exceeded` when they are gone.
 
 ### 3.1 The handshake contract
 

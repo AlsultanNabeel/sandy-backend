@@ -95,3 +95,35 @@ def within_minute_limit(user_id: str, what: str, per_min_limit: int) -> bool:
         logger.debug("[UsageStore] minute window skipped", exc_info=True)
         return True
     return int((doc or {}).get("count", 0)) <= per_min_limit
+
+
+def _day_key(user_id: str) -> str:
+    return f"{user_id}:{_now():%Y-%m-%d}"
+
+
+def voice_seconds_today(user_id: str) -> float:
+    """Seconds of calls and read-aloud this user spent today (0 when unreadable: fails open)."""
+    if get_db() is None or not user_id:
+        return 0.0
+    try:
+        doc = get_db()[_DAILY].find_one({"_id": _day_key(user_id)}, {"voice_s": 1}) or {}
+    except PyMongoError:
+        logger.debug("[UsageStore] voice seconds read skipped", exc_info=True)
+        return 0.0
+    return float(doc.get("voice_s") or 0)
+
+
+def add_voice_seconds(user_id: str, seconds: float) -> None:
+    """Add a finished call's (or a read-aloud's) seconds to today's count."""
+    if get_db() is None or not user_id or seconds <= 0:
+        return
+    now = _now()
+    try:
+        get_db()[_DAILY].update_one(
+            {"_id": _day_key(user_id)},
+            {"$inc": {"voice_s": float(seconds)},
+             "$set": {"updated_at": now},
+             "$setOnInsert": {"user_id": user_id, "date": f"{now:%Y-%m-%d}"}},
+            upsert=True)
+    except PyMongoError:
+        logger.warning("[UsageStore] voice seconds not recorded for %s", user_id, exc_info=True)

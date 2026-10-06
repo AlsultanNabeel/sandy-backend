@@ -9,6 +9,18 @@ from flask import Response, jsonify, request
 from app.api.auth_handlers import require_auth, require_tenant
 
 
+def _wav_seconds(audio: bytes) -> float:
+    """How long a WAV plays (0 when it does not read as one)."""
+    import io
+    import wave
+
+    try:
+        with wave.open(io.BytesIO(audio)) as w:
+            return w.getnframes() / float(w.getframerate() or 1)
+    except (wave.Error, EOFError):
+        return 0.0
+
+
 def register_voice_api(app) -> None:
 
     @app.route("/api/voice/tts", methods=["POST"])
@@ -23,11 +35,21 @@ def register_voice_api(app) -> None:
         # حد أمان للطول.
         text = text[:1200]
 
+        # Read aloud counts against the same minutes as a call.
+        from app.api.metering import limit_response, voice_seconds_left
+        from app.features.usage_store import add_voice_seconds
+
+        uid = str(claims.get("user_id") or "")
+        if uid and voice_seconds_left(uid, claims.get("role")) <= 0:
+            return jsonify(limit_response("call_minutes_exceeded")), 429
+
         from app.integrations.gemini_tts import synthesize_voice_with_gemini
 
         audio = synthesize_voice_with_gemini(text, mood=mood)
         if not audio:
             return jsonify({"error": "tts_unavailable"}), 503
+        if uid:
+            add_voice_seconds(uid, _wav_seconds(audio))
 
         return Response(audio, mimetype="audio/wav")
 

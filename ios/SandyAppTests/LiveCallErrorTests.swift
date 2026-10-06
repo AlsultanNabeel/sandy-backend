@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class LiveCallErrorTests: XCTestCase {
     func testTheServerEndingTheCallReadsAsASentence() {
-        for code in ["call_idle", "call_time_limit"] {
+        for code in ["call_idle", "call_time_limit", "call_minutes_exceeded"] {
             let line = GeminiLiveManager.errorLine(code)
             XCTAssertNotEqual(line, code)
             XCTAssertFalse(line.contains("_"), "\(code) shows as a code: \(line)")

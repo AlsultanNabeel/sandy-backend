@@ -14,6 +14,7 @@ enum L10nSandy {
             "photos":      .text("الألبوم"),
             "callIdle":      .text("سكّرت المكالمة لأنه ما حدا حكى من فترة."),
             "callTimeLimit": .text("المكالمة وصلت أقصى مدة إلها. افتح وحدة جديدة لو بدك نكمّل."),
+            "callMinutesExceeded": .text("خلصت دقايق الحكي لليوم. بترجع بكرا، أو رقّي اشتراكك."),
         ],
         en: [
             "mode.chat":   .text("Chat"),
@@ -22,6 +23,7 @@ enum L10nSandy {
             "photos":      .text("Album"),
             "callIdle":      .text("The call ended because nobody spoke for a while."),
             "callTimeLimit": .text("The call reached its maximum length. Start a new one to carry on."),
+            "callMinutesExceeded": .text("You've used today's talk minutes. They come back tomorrow, or upgrade your plan."),
         ]
     )
 }
