@@ -136,6 +136,19 @@ def delete(item_id: str, mongo_db=None) -> bool:
     return coll.delete_one({"_id": item_id}).deleted_count > 0
 
 
+def touched_between(start: datetime, end: datetime, *, limit: int = 200,
+                    mongo_db=None) -> List[Dict[str, Any]]:
+    """Items added or done in [start, end), newest first: what a summary of a period reads.
+    Matched in the database, so a long list's old rows do not crowd out the period's."""
+    coll = _base.coll(_base.ITEMS, mongo_db)
+    if coll is None:
+        return []
+    rng = _base.range_filter(start, end)
+    query = {"$or": [{"created_at": rng}, {"done_at": rng}]}
+    cursor = coll.find(query).sort("created_at", -1).limit(_base.clamp(limit))
+    return [_base.out(d) for d in cursor]
+
+
 def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
                due_after: Optional[datetime] = None, due_before: Optional[datetime] = None,
                text: str = "", order: str = "created", limit: int = 200,

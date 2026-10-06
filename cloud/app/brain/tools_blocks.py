@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.brain.categorize import categorize_later
@@ -290,10 +290,7 @@ def summarize(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     start, end = W.period_range(period)
     focus = str(args.get("focus") or "")
     rows = [_entry_row(e) for e in entries.list_entries(since=start, until=end, limit=SUMMARY_ROWS)]
-    for i in items.list_items(limit=SUMMARY_ROWS):
-        created, done_at = i.get("created_at"), i.get("done_at")
-        if _in(created, start, end) or _in(done_at, start, end):
-            rows.append(_item_row(i))
+    rows += [_item_row(i) for i in items.touched_between(start, end, limit=SUMMARY_ROWS)]
     rows += [_schedule_row(s) for s in schedules.list_schedules(since=start, until=end,
                                                                 limit=SUMMARY_ROWS)
              if s.get("kind") in USER_SCHEDULES]
@@ -304,14 +301,6 @@ def summarize(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     return {"ok": True, "period": period, "from": W.iso(start), "to": W.iso(end),
             "count": len(rows), "rows": rows[:SUMMARY_ROWS], **({"spending": spent} if spent else {}),
             "instruction": "لخّصي هالصفوف للمستخدم بجمل قصيرة."}
-
-
-def _in(dt: Any, start, end) -> bool:
-    if dt is None:
-        return False
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return start <= dt < end
 
 
 # ── lists ────────────────────────────────────────────────────────────────────
