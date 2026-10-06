@@ -760,7 +760,8 @@ failed download is retried after 30 s, doubling to 30 min, `speaker_id._get_extr
 said, but the owner is not called a stranger. The voiceprint is learned from the robot's own mic: the
 app (Robot › «صوتي») calls `POST /api/voice/enroll`, and the next five robot turns of three
 seconds or more are its clips (`sandy_voice_enroll`, deleted once the print is built; a
-fifteen-minute window); she says so in her reply. It is stored only encrypted
+fifteen-minute window, after which a TTL index on `until` removes them even if the robot
+never speaks again; account deletion and reset remove them too); she says so in her reply. It is stored only encrypted
 (`SANDY_BIO_KEY`). The older `/voice/enroll` socket (the laptop script) still records one.
 
 ---
@@ -1346,7 +1347,7 @@ Written today, and what reads it:
   `user_id` by hand in `conversations_api.py`) and `agent_turns` (the send ledger,
   TTL 10 minutes).
 - **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
-  `sandy_scenes`, `sandy_voiceprints`, `sandy_firmware`, `sandy_firmware_chunks`,
+  `sandy_scenes`, `sandy_voiceprints`, `sandy_voice_enroll`, `sandy_firmware`, `sandy_firmware_chunks`,
   `node_pair_challenges`, `cam_upload_nonces`, `camera_inbox`.
 - **Everything else** — `sandy_focus`, `sandy_photos` + the `sandy_photo_files`
   GridFS bucket, `sandy_push_tokens`, `sandy_daily_nudge`, `sandy_nudge_locks`.

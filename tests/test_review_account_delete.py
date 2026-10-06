@@ -59,3 +59,43 @@ def test_photo_bytes_in_gridfs_are_erased():
     assert d["sandy_photo_files.files"].find_one({"_id": "g-theirs"}) is not None
     assert d.sandy_photos.count_documents({"chat_id": "u1"}) == 0
     appdb.reset()
+
+
+def _enrolling(d):
+    from app.features import speaker_id
+
+    assert speaker_id.start_enrollment("u1")
+    assert speaker_id.start_enrollment("u2")
+    d.sandy_voice_enroll.update_one({"_id": "u1"}, {"$push": {"clips": b"\x01" * 64}})
+
+
+def test_voice_learning_clips_go_with_the_account():
+    """Raw recordings of the owner's voice, kept while «صوتي» learns, are the most
+    personal thing on the server; a deleted account takes them too."""
+    d = _db()
+    _enrolling(d)
+    assert account_delete.delete_account("u1")["ok"]
+    assert d.sandy_voice_enroll.find_one({"_id": "u1"}) is None
+    assert d.sandy_voice_enroll.find_one({"_id": "u2"}) is not None
+    appdb.reset()
+
+
+def test_voice_learning_clips_go_with_a_reset():
+    d = _db()
+    _enrolling(d)
+    assert account_delete.wipe_account_data("u1")["ok"]
+    assert d.sandy_voice_enroll.find_one({"_id": "u1"}) is None
+    appdb.reset()
+
+
+def test_an_abandoned_voice_learning_expires_on_its_own():
+    """Learning that never finished (the robot never spoke again) is cleared by the
+    database when its window ends, not only when someone next asks about it."""
+    from app import bootstrap
+
+    d = _db()
+    bootstrap.ensure_indexes()
+    ttl = [ix for ix in d.sandy_voice_enroll.index_information().values()
+           if ix.get("key") == [("until", 1)]]
+    assert ttl and ttl[0].get("expireAfterSeconds") == 0
+    appdb.reset()

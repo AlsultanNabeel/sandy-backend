@@ -128,6 +128,11 @@ def ensure_indexes() -> None:
         ("camera_inbox.expire_at_ttl", lambda: mongo_db.camera_inbox.create_index(
             "expire_at", expireAfterSeconds=0, background=True
         )),
+        # Clips of a voice being learned: gone when the window ends, even if the robot
+        # never speaks again to find it over.
+        ("sandy_voice_enroll.until_ttl", lambda: mongo_db.sandy_voice_enroll.create_index(
+            "until", expireAfterSeconds=0, background=True
+        )),
         # A download reads a release's chunks in order.
         ("sandy_firmware_chunks.version+n", lambda: mongo_db.sandy_firmware_chunks.create_index(
             [("version", 1), ("n", 1)], background=True

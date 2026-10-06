@@ -74,6 +74,12 @@ _BY_USER: List[str] = [
     "sandy_feedback",
 ]
 
+# Keyed by `_id` = the user's id, with no user field.
+_BY_ID: List[str] = [
+    # Raw clips of the owner's voice while «صوتي» learns it.
+    "sandy_voice_enroll",
+]
+
 # STM docs are keyed "<thread>:<user>" and also carry user_id; both are cleared.
 _STM = "sandy_stm"
 
@@ -128,6 +134,15 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
             r = db[name].delete_many(
                 {"$or": [{"user_id": {"$in": forms}},
                          {"chat_id": {"$in": forms}}]})
+            if r.deleted_count:
+                removed[name] = r.deleted_count
+        except PyMongoError as exc:
+            logger.warning("[erase] %s failed for %s: %s", name, user_id, exc)
+            removed[name] = -1
+
+    for name in _BY_ID:
+        try:
+            r = db[name].delete_many({"_id": {"$in": [str(f) for f in forms]}})
             if r.deleted_count:
                 removed[name] = r.deleted_count
         except PyMongoError as exc:
