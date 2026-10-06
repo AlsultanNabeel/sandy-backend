@@ -229,6 +229,10 @@ def _title_from(text: str) -> str:
     return t[:40] if t else "محادثة جديدة"
 
 
+# What of the first exchange the title model reads: the topic is in the opening words.
+_TITLE_INPUT_CHARS = 500
+
+
 def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
     """Small LLM title from the first exchange; runs in the background."""
     from app.integrations.openai_client import chat_fn
@@ -239,7 +243,8 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
                 "اكتب عنوانًا قصيرًا جدًا (كلمتين لأربع كلمات) يلخّص موضوع المحادثة. "
                 "بنفس لغة المستخدم، بدون علامات اقتباس وبدون نقطة في الآخر."
             )},
-            {"role": "user", "content": f"المستخدم: {user_msg}\nساندي: {reply}"},
+            {"role": "user", "content": f"المستخدم: {user_msg[:_TITLE_INPUT_CHARS]}\n"
+                                        f"ساندي: {reply[:_TITLE_INPUT_CHARS]}"},
         ])
         title = (resp.choices[0].message.content or "").strip().strip('"').strip("«»").strip()
         if title:
@@ -395,8 +400,12 @@ def register_conversations_api(app, mongo_db=None):
             update["$set"]["title"] = _title_from(text)
         coll.update_one({"_id": cid, "user_id": uid}, update)
 
-        # First Sandy reply: generate a smart title from the first exchange.
-        if role == "sandy" and not d.get("title_generated"):
+        # First Sandy reply: generate a smart title from the first exchange, once. The
+        # claim is atomic and kept on failure, so a model that is down is not asked again
+        # with every reply (the first message stays the title).
+        if role == "sandy" and not d.get("title_generated") and coll.update_one(
+                {"_id": cid, "user_id": uid, "title_requested": {"$ne": True}},
+                {"$set": {"title_requested": True}}).modified_count:
             last = (d.get("messages") or [])
             last_user = last[-1].get("text", "") if last and last[-1].get("role") == "user" else ""
             _generate_title_async(coll, cid, uid, last_user, text)
