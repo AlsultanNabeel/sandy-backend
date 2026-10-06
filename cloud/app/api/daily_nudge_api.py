@@ -201,6 +201,9 @@ def register_daily_nudge_api(app, mongo_db=None):
         answer = str(body.get("answer") or "").strip()
         if not qid or not answer:
             return jsonify({"error": "bad_request"}), 400
+        # Only a question she asks: the id becomes a field path in the profile.
+        if qid not in {q["id"] for q in _QUESTIONS}:
+            return jsonify({"error": "unknown_question"}), 400
         from app.features import users_store
         uid = current_user_id()
         ok = users_store.record_nudge_answer(uid, qid, answer) if uid else False
