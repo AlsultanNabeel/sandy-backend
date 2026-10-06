@@ -146,6 +146,11 @@ struct AskBar: View {
         .background(RoundedRectangle(cornerRadius: 18).fill(Theme.Colors.surface.opacity(0.55)))
     }
 
+    /// A send that failed gives its words back to the field, unless something new was typed.
+    static func textAfterFailure(sent: String, typed: String) -> String {
+        typed.isEmpty ? sent : typed
+    }
+
     private func send() {
         let message = trimmed
         guard !message.isEmpty, !thinking else { return }
@@ -166,6 +171,7 @@ struct AskBar: View {
             } catch {
                 reply = lang.s("today.askFailed")
                 Announce.say(reply)
+                text = Self.textAfterFailure(sent: message, typed: text)
             }
             thinking = false
             activity = ""
