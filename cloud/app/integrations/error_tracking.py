@@ -1,6 +1,7 @@
 """Optional Sentry error tracking; a no-op without SENTRY_DSN.
 
-Privacy: no PII, no request bodies, secrets scrubbed, breadcrumb text dropped.
+Privacy: no PII, no request bodies or query strings, no frame variables, secrets
+scrubbed, breadcrumb text dropped; performance traces go through the same scrubber.
 """
 
 from __future__ import annotations
@@ -53,8 +54,21 @@ def _log_tag(message: Any) -> str:
     return "[redacted]"
 
 
+def _drop_frame_vars(event: Dict[str, Any]) -> None:
+    """A frame's variables are whatever was being worked on: the user's message, a photo."""
+    for key in ("exception", "threads"):
+        block = event.get(key)
+        values = block.get("values") if isinstance(block, dict) else None
+        for value in values if isinstance(values, list) else []:
+            frames = ((value or {}).get("stacktrace") or {}).get("frames")
+            for frame in frames if isinstance(frames, list) else []:
+                if isinstance(frame, dict):
+                    frame.pop("vars", None)
+
+
 def _before_send(event: Dict[str, Any], hint: Any) -> Optional[Dict[str, Any]]:
     try:
+        _drop_frame_vars(event)
         # Request bodies are users' journals and messages; never send them.
         request = event.get("request")
         if isinstance(request, dict):
@@ -118,7 +132,9 @@ def init_error_tracking() -> bool:
                 LoggingIntegration(level=logging.INFO, event_level=logging.WARNING),
             ],
             send_default_pii=False,
+            include_local_variables=False,
             before_send=_before_send,
+            before_send_transaction=_before_send,
             sample_rate=1.0,
             traces_sample_rate=_float(SENTRY_TRACES_RATE, 0.1),
             max_breadcrumbs=50,

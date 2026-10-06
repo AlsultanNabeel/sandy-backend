@@ -1512,7 +1512,10 @@ nobody re-reads becomes a way of believing things that stopped being true.
    (`sandy_ota_pull.h`). Still open: secure boot and flash encryption are off.
 1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
    starts at boot when `SENTRY_DSN` is set; `before_send` strips request
-   bodies and, since 19 Sep 2026, log breadcrumbs down to their `[tag]`.
+   bodies and query strings and, since 19 Sep 2026, log breadcrumbs down to their
+   `[tag]`. Frame variables are off at the source (`include_local_variables=False`)
+   and stripped again if any arrive, and performance traces pass the same scrubber
+   (`before_send_transaction`).
    Without the DSN, failures are still discovered by the owner using the
    product.
 2. **The robot's body no longer reacts to what she does.** The celebrate /

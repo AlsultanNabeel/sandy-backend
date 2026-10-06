@@ -120,3 +120,49 @@ def test_startup_failure_never_breaks_boot(monkeypatch):
     monkeypatch.setenv("SENTRY_DSN", "https://bad@example.invalid/1")
     monkeypatch.setattr(et, "_started", False)
     assert et.init_error_tracking() in (True, False)   # returns either way, never raises
+
+
+# ── What a crash carries ─────────────────────────────────────────────────────
+
+def test_frame_variables_never_leave():
+    """A stack frame's variables are the message, the photo, the transcript being
+    worked on when it broke."""
+    event = {"exception": {"values": [{"stacktrace": {"frames": [
+        {"function": "run_turn", "vars": {"message": "مصروفي على الدكتور النفسي"}},
+        {"function": "save"},
+    ]}}]}, "threads": {"values": [{"stacktrace": {"frames": [
+        {"function": "worker", "vars": {"text": "سرّي"}}]}}]}}
+    out = et._before_send(event, None)
+    frames = out["exception"]["values"][0]["stacktrace"]["frames"]
+    assert all("vars" not in f for f in frames)
+    assert "vars" not in out["threads"]["values"][0]["stacktrace"]["frames"][0]
+
+
+def test_reporting_starts_without_locals_and_scrubs_traces(monkeypatch):
+    """Locals are off at the source, and a performance trace (which never passes
+    `before_send`) goes through the same scrubber, so its query string is dropped."""
+    import sys
+    import types
+
+    seen = {}
+    fake = types.ModuleType("sentry_sdk")
+    fake.init = lambda **kw: seen.update(kw)
+    integrations = types.ModuleType("sentry_sdk.integrations")
+    flask = types.ModuleType("sentry_sdk.integrations.flask")
+    flask.FlaskIntegration = lambda: None
+    logging_mod = types.ModuleType("sentry_sdk.integrations.logging")
+    logging_mod.LoggingIntegration = lambda **_k: None
+    for name, mod in (("sentry_sdk", fake), ("sentry_sdk.integrations", integrations),
+                      ("sentry_sdk.integrations.flask", flask),
+                      ("sentry_sdk.integrations.logging", logging_mod)):
+        monkeypatch.setitem(sys.modules, name, mod)
+    from app import config
+    monkeypatch.setattr(config, "SENTRY_DSN", "https://k@example.invalid/1")
+    monkeypatch.setattr(et, "_started", False)
+
+    assert et.init_error_tracking() is True
+    assert seen["include_local_variables"] is False
+    trace = seen["before_send_transaction"](
+        {"type": "transaction", "request": {"url": "https://x/api/entries",
+                                             "query_string": "q=مصروفي"}}, None)
+    assert "query_string" not in trace["request"]
