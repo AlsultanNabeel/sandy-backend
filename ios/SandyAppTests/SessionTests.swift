@@ -81,4 +81,18 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(Outbox.shared.isEmpty)
         Outbox.shared.signedOut(discarding: false)
     }
+
+    /// K3: My Life's numbers live in a shared store; the next account on the phone saw them.
+    func testMyLifeNumbersDoNotOutliveTheSession() throws {
+        StubNetwork.install(status: 200, json: "{}")
+        let entry = try JSONDecoder().decode(LogEntry.self, from: Data("""
+            {"id":"e1","kind":"expense","text":"قهوة","at":"\(ISO8601DateFormatter().string(from: Date()))","data":{"amount":7}}
+            """.utf8))
+        LogStore.noteMade(entry)
+        LifeStatsStore.shared.setBudget(api: TestClient.make(), 500)
+        XCTAssertEqual(LifeStatsStore.shared.stats.spent, 7)
+        SessionReset.clearShared()
+        XCTAssertEqual(LifeStatsStore.shared.stats.spent, 0, "the last account's spending showed")
+        XCTAssertEqual(LifeStatsStore.shared.stats.budget ?? 0, 0, "the last account's budget showed")
+    }
 }

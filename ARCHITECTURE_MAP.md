@@ -1138,6 +1138,10 @@ so folders are organisation only.
   day refreshes; the quick-add shortcut focuses it), the rest of the day as a timeline
   with a live "now" mark (`DayRibbon`), untimed tasks, habits as rings, today's spending,
   focus and home controls. The weather is a read-only corner, like the lock-screen clock.
+- **Signing out** (`AppState.signOut`) clears the account's cache files, the widgets,
+  Spotlight and the scheduled notifications, and `App/SessionReset.clearShared` wipes
+  every shared store that holds the account in memory, so the next account on the phone
+  inherits nothing. A new shared store that holds a user's data adds itself there.
 - `Core/Networking/` — `APIClient` split into 9 extensions by domain, behind
   `APIClientProtocol`. **Add new endpoints as an extension, not to the base class.**
   Every value put in a URL goes through `URLEscape` (`query` for a parameter, `segment` for a path

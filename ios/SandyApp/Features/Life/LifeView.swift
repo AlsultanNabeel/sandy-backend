@@ -23,6 +23,13 @@ final class LifeStatsStore: ObservableObject {
         return out
     }
 
+    /// Signed out: the next account starts from nothing, not from these numbers.
+    func reset() {
+        counted = nil
+        countedAt = .distantPast
+        localBudget = nil
+    }
+
     func setBudget(api: APIClient, _ amount: Double) {
         localBudget = amount
         Task { try? await api.setBudget(amount) }

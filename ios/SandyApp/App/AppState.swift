@@ -181,6 +181,7 @@ final class AppState: ObservableObject {
         api.token = nil
         subscriptions.signOut()
         DiskCache.clearAll(except: Outbox.fileKey)
+        SessionReset.clearShared()
         SpotlightIndexer.deleteAll()
 
         // Widgets and scheduled notifications don't check the session, so clear them

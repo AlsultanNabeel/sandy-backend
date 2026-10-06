@@ -716,6 +716,10 @@ final class LogStore: LoadableStore {
         made.append((Date(), entry))
     }
 
+    static func forgetMade() {
+        made = []
+    }
+
     static func addEverywhere(_ entry: LogEntry, userId: String?) {
         everywhere(kind: entry.kind, userId: userId) { rows in
             guard !rows.contains(where: { $0.id == entry.id }) else { return }
