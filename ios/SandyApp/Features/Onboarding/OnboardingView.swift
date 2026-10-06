@@ -577,7 +577,8 @@ struct OnboardingView: View {
         let chosen = interests
         Task {
             do {
-                try await state.api.saveOnboarding(preferredName: name, interests: chosen)
+                // Through the app's state, so Today and the chat greet with it at once.
+                try await state.saveProfile(preferredName: name, interests: chosen)
                 Haptics.play(.success)
                 state.onboardingDoneCached = true
                 state.stage = .chat
