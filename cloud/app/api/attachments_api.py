@@ -1,7 +1,8 @@
 """Chat attachments (features/attachments): upload, and the bytes back for the app.
 
   POST /api/attachments {data (base64), name, mime} -> {item}   images 8 MB, documents 5 MB
-  GET  /api/attachments/<id>/file                               the bytes, owner only
+  GET  /api/attachments/<id>/file                               the bytes, owner only (404 once
+                                                                expired, after KEEP_DAYS)
 
 A refusal is {error, message} with the line to show: too big (413), a type Sandy
 cannot read (415), a document with no text in it (422).
@@ -15,6 +16,7 @@ import binascii
 from flask import Response, jsonify, request
 
 from app.api.auth_handlers import require_tenant
+from app.api.metering import meter_claims
 from app.features import attachments as A
 
 # The largest allowed upload in base64 characters, checked before decoding.
@@ -35,6 +37,10 @@ def register_attachments_api(app):
             data = base64.b64decode(raw, validate=True)
         except (binascii.Error, ValueError):
             return jsonify({"error": "no_data", "message": "ما وصلني الملف."}), 400
+        # A document is read (and kept) on upload: one unit of the day, like a message.
+        over = meter_claims(claims)
+        if over is not None:
+            return jsonify(over[0]), over[1]
         try:
             item = A.save(data, str(body.get("name") or ""), str(body.get("mime") or ""))
         except A.AttachmentError as exc:

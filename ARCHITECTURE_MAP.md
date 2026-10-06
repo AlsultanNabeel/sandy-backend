@@ -481,7 +481,7 @@ runners, which run inside the tenant's context. A row with `encrypted` in its
 
 **Every route that spends money on a provider is metered** through
 `api/metering.py` — the chat routes, image generation and analysis, web and
-place search, photo tagging and `/api/summary`, one unit each against the
+place search, photo tagging, attachment uploads and `/api/summary`, one unit each against the
 caller's tier. A new paid route calls `meter_claims`.
 
 **No route issues a guest token.** `make_token` still honours a `guest` role;
@@ -1144,7 +1144,9 @@ so folders are organisation only.
   upload at once to `POST /api/attachments` (`features/attachments.py`, `sandy_attachments`,
   bytes inline; images 8 MB, documents 5 MB; PDF / Word / text read to at most 20 000
   characters; a Word file whose text part unpacks past 20 MB is refused, `too_big`; a PDF is read page by
-  page until there is enough text, at most 300 pages), wait above the field with their progress, and go with the message as ids:
+  page until there is enough text, at most 300 pages; every attachment, drawn images too, is deleted
+  `KEEP_DAYS` (30) after it is saved by a TTL on `expire_at`, rows from before that got thirty days
+  from the first boot, `attachments.ensure_expiry`), wait above the field with their progress, and go with the message as ids:
   the turn gives the model the photos as images and the documents as text, memory keeps
   «[صورة: name]». An image Sandy draws is saved the same way and comes back as `image` on
   the reply; the history keeps `attachments` on each message.

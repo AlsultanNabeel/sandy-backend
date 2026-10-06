@@ -158,3 +158,37 @@ def test_a_pdf_of_blank_pages_is_read_only_up_to_the_page_cap(monkeypatch):
     with pytest.raises(att.AttachmentError):
         att.extract_text(b"%PDF-1.4", att.PDF)
     assert read["n"] == att.MAX_PDF_PAGES
+
+
+def test_an_attachment_is_kept_thirty_days(brain_db):  # noqa: F811
+    from datetime import timedelta
+
+    with active_user_profile_context(A):
+        item = attachments.save(b"\x89PNG", "p.png", "image/png")
+        doc = attachments.get(item["id"])
+    assert doc["expire_at"] - doc["created_at"] == timedelta(days=attachments.KEEP_DAYS)
+
+
+def test_attachments_from_before_the_limit_get_thirty_days_from_today(brain_db):  # noqa: F811
+    """Turning the limit on must not delete every older attachment at once."""
+    from datetime import datetime, timedelta, timezone
+
+    long_ago = datetime.now(timezone.utc) - timedelta(days=200)
+    brain_db["sandy_attachments"].insert_one({"_id": "old", "user_id": "userA",
+                                              "kind": "image", "created_at": long_ago})
+    from app import bootstrap
+    bootstrap.ensure_indexes()
+    doc = brain_db["sandy_attachments"].find_one({"_id": "old"})
+    left = doc["expire_at"].replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)
+    assert timedelta(days=attachments.KEEP_DAYS - 1) < left <= timedelta(days=attachments.KEEP_DAYS)
+    ttl = [i for i in brain_db["sandy_attachments"].list_indexes()
+           if i.get("expireAfterSeconds") == 0]
+    assert ttl and list(ttl[0]["key"]) == ["expire_at"]
+
+
+def test_an_upload_counts_against_the_day(c, monkeypatch):
+    from app.features import usage_store
+
+    monkeypatch.setattr(usage_store, "check_and_record", lambda *a, **k: "daily_quota_exceeded")
+    r = _up(c, b"\x89PNG fake", "p.png", "image/png")
+    assert r.status_code == 429

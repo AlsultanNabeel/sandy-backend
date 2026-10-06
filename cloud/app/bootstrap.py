@@ -97,6 +97,12 @@ def write_google_credentials() -> None:
         logger.warning("[Bootstrap] Failed to write Google credentials: %s", exc)
 
 
+def _attachments_expiry(mongo_db) -> None:
+    from app.features.attachments import ensure_expiry
+
+    ensure_expiry(mongo_db)
+
+
 def ensure_indexes() -> None:
     """Create every boot-time index independently (on the raw handle, before any tenant)."""
     from app.db import get_db
@@ -122,6 +128,8 @@ def ensure_indexes() -> None:
         ("camera_inbox.expire_at_ttl", lambda: mongo_db.camera_inbox.create_index(
             "expire_at", expireAfterSeconds=0, background=True
         )),
+        # Attachments are kept thirty days (older rows get thirty from the first boot).
+        ("sandy_attachments.expire_at_ttl", lambda: _attachments_expiry(mongo_db)),
         # رموز إثبات الحضور للربط — خمس دقايق وبتروح لحالها.
         ("node_pair_challenges.expires_at_ttl",
          lambda: mongo_db.node_pair_challenges.create_index(

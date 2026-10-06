@@ -13,7 +13,7 @@ import io
 import re
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import Binary
@@ -28,6 +28,9 @@ MAX_FILE_BYTES = 5 * 1024 * 1024
 # What Sandy reads of one document; the rest is cut with a note.
 MAX_TEXT_CHARS = 20_000
 MAX_PER_MESSAGE = 4
+# Every attachment (uploads and the images Sandy draws) is deleted this long after it is
+# saved, by the TTL index on `expire_at`.
+KEEP_DAYS = 30
 # A Word file is a zip: five packed megabytes can unpack to gigabytes. Its text part is
 # read only up to this, far above the MAX_TEXT_CHARS actually used.
 MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
@@ -146,10 +149,20 @@ def save(data: bytes, name: str, mime: str, *, source: str = "upload") -> Dict[s
         "data": Binary(data),
         "text": extract_text(data, mime) if kind == "file" else "",
         "source": source,
-        "created_at": _now(),
     }
+    doc["created_at"] = _now()
+    doc["expire_at"] = doc["created_at"] + timedelta(days=KEEP_DAYS)
     coll.insert_one(doc)
     return public(doc)
+
+
+def ensure_expiry(mongo_db) -> None:
+    """The TTL index, and thirty days from now for rows saved before there was one, so
+    turning the limit on does not delete every older attachment at once. Idempotent."""
+    coll = mongo_db[COLL]
+    coll.update_many({"expire_at": {"$exists": False}},
+                     {"$set": {"expire_at": _now() + timedelta(days=KEEP_DAYS)}})
+    coll.create_index("expire_at", expireAfterSeconds=0, background=True)
 
 
 def public(doc: Dict[str, Any]) -> Dict[str, Any]:
