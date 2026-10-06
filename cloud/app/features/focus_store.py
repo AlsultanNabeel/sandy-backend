@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_focus"
 
+# The end scene (music, light) belongs to the moment the session ends. Nothing ends it on a
+# timer, only the next read, so a session found over longer ago than this is closed without it:
+# opening the app the next morning must not switch the room.
+END_SCENE_LATE = timedelta(minutes=2)
+
 
 def init_focus_store(mongo_db) -> None:
     configure(mongo_db)
@@ -89,8 +94,8 @@ def _aware(dt):
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
-def stop_focus(completed: bool = True) -> Dict[str, Any]:
-    """ينهي الجلسة: completed=True إنجاز (وبيطبّق end_scene)، False إلغاء."""
+def stop_focus(completed: bool = True, end_scene: bool = True) -> Dict[str, Any]:
+    """ينهي الجلسة: completed=True إنجاز (وبيطبّق end_scene إلا لو end_scene=False)، False إلغاء."""
     coll = _coll()
     if coll is None:
         return {"ok": False, "error": "no_session"}
@@ -120,7 +125,7 @@ def stop_focus(completed: bool = True) -> Dict[str, Any]:
         {"$set": {"state": "done" if completed else "cancelled",
                   "ended_at": now, "focused_min": focused_min}},
     )
-    if completed and s.get("end_scene"):
+    if completed and end_scene and s.get("end_scene"):
         try:
             from app.features.scene_store import apply_scene
             apply_scene(s["end_scene"])
@@ -157,7 +162,7 @@ def advance_focus_phase() -> Optional[Dict[str, Any]]:
     label = s.get("label", "")
 
     if phase == "focus" and cycle_idx >= cycles:
-        r = stop_focus(completed=True)
+        r = stop_focus(completed=True, end_scene=now - pe <= END_SCENE_LATE)
         return {"event": "done", "label": label, "cycles": cycles,
                 "minutes": r.get("minutes", 0)}
 
