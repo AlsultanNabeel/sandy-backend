@@ -103,6 +103,7 @@ def publish(version: str, image: bytes, signature_hex: str, *,
     db[_META].insert_one(meta)
     logger.info("[firmware] published %s %s (%d bytes, rollout %d%%)",
                 board, version, len(image), rollout)
+    _prune(board)
     return {"ok": True, "board": board, "version": version, "size": len(image),
             "sha256": sha}
 
@@ -121,7 +122,28 @@ def set_rollout(version: str, rollout: int,
     r = db[_META].update_one({"_id": _key(board, version)}, {"$set": changes})
     if r.matched_count == 0:
         return {"ok": False, "error": "not_found"}
+    _prune(board)
     return {"ok": True, "board": board, "version": version, **changes}
+
+
+def _prune(board: str) -> None:
+    """Keep the newest release out to every board (rollout 100) and every newer one; delete
+    the older ones and their images (about seven megabytes each, kept for ever before). A
+    board behind is offered the stable one, never an older one, so nothing kept is lost."""
+    db = get_db()
+    releases = _releases(board)
+    stable = next((r for r in releases if int(r.get("rollout", 0)) >= 100), None)
+    if db is None or stable is None:
+        return
+    floor = version_key(stable["version"])
+    for old in releases:
+        if version_key(old["version"]) >= floor:
+            continue
+        key = _key(board, old["version"])
+        db[_CHUNKS].delete_many({"version": key})
+        db[_META].delete_one({"_id": key})
+        logger.info("[firmware] deleted %s %s (older than the stable %s)",
+                    board, old["version"], stable["version"])
 
 
 def release(version: str, board: str = BRAIN) -> Optional[Dict[str, Any]]:

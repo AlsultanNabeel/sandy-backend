@@ -217,3 +217,31 @@ def test_a_held_canary_does_not_hide_the_stable_release(db):
     assert fs.manifest_for("dev-behind", "0.11.4")["version"] == "0.11.5"
     assert fs.manifest_for("dev-current", "0.11.5") is None
     assert fs.manifest_for("8421", "0.11.4")["version"] == "0.11.6"
+
+
+def test_releases_older_than_the_stable_one_are_deleted(db):
+    """Every release's image stayed in the database for ever (seven megabytes a release);
+    the owner's rule: keep the newest release out to everyone and everything newer."""
+    fs.publish("0.11.3", b"\xe9" + b"a" * 100, "ab", rollout=100)
+    fs.publish("0.11.4", b"\xe9" + b"b" * 100, "ab", rollout=100)
+    fs.publish("0.11.5", b"\xe9" + b"c" * 100, "ab", rollout=0, canary=["8421"])
+    kept = sorted(d["version"] for d in db["sandy_firmware"].find())
+    assert kept == ["0.11.4", "0.11.5"]
+    assert set(db["sandy_firmware_chunks"].distinct("version")) == {"0.11.4", "0.11.5"}
+    fs.set_rollout("0.11.5", 100)
+    assert [d["version"] for d in db["sandy_firmware"].find()] == ["0.11.5"]
+    assert fs.image_chunks("0.11.4") is None
+
+
+def test_another_board_s_releases_are_left_alone(db):
+    fs.publish("0.4.0", b"\xe9" + b"a" * 100, "ab", rollout=100, board="cam")
+    fs.publish("0.11.4", b"\xe9" + b"b" * 100, "ab", rollout=100)
+    fs.publish("0.11.5", b"\xe9" + b"c" * 100, "ab", rollout=100)
+    assert fs.release("0.4.0", board="cam") is not None
+
+
+def test_the_chunks_are_indexed(db):
+    from app import bootstrap
+    bootstrap.ensure_indexes()
+    keys = [list(i["key"]) for i in db["sandy_firmware_chunks"].list_indexes()]
+    assert ["version", "n"] in keys

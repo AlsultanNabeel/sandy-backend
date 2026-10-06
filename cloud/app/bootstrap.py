@@ -128,6 +128,10 @@ def ensure_indexes() -> None:
         ("camera_inbox.expire_at_ttl", lambda: mongo_db.camera_inbox.create_index(
             "expire_at", expireAfterSeconds=0, background=True
         )),
+        # A download reads a release's chunks in order.
+        ("sandy_firmware_chunks.version+n", lambda: mongo_db.sandy_firmware_chunks.create_index(
+            [("version", 1), ("n", 1)], background=True
+        )),
         # Attachments are kept thirty days (older rows get thirty from the first boot).
         ("sandy_attachments.expire_at_ttl", lambda: _attachments_expiry(mongo_db)),
         # رموز إثبات الحضور للربط — خمس دقايق وبتروح لحالها.
