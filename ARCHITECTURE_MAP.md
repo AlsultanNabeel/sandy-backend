@@ -1142,6 +1142,10 @@ so folders are organisation only.
   Spotlight and the scheduled notifications, and `App/SessionReset.clearShared` wipes
   every shared store that holds the account in memory, so the next account on the phone
   inherits nothing. A new shared store that holds a user's data adds itself there.
+  «Reset my data» (Profile › Account) drops the outbox before the server reset (sent
+  after it, it would bring rows back), then does the same local clearing still signed in
+  (`AppState.resetLocalData`) and builds the main screen again with fresh stores
+  (`dataEpoch`). A write with no one signed in is refused, never queued.
   `AccountSession.generation` moves on every sign-in and sign-out: a `LoadableStore`
   load that began in an earlier session is dropped when it lands (`isCurrentLoad`), and
   a store made in an earlier session saves and publishes nothing (`inItsSession`: no
@@ -1173,11 +1177,11 @@ so folders are organisation only.
   phone, saved to `DiskCache` and reaches every copy of the same rows (the stores on
   screen, else the file on disk), then goes through `Core/Cache/Outbox.swift`, a
   per-account queue on disk sent in order now, on reconnect, or on return to the front.
-  Nothing is sent with no one signed in. A session that ends by itself (a 401) keeps its
+  Nothing is queued or sent with no one signed in. A session that ends by itself (a 401) keeps its
   queue on disk (`DiskCache.clearAll(except:)` spares every account's outbox), and it is
   sent only when the same account signs in again; another account never loads it. A
   sign-out the user chooses sends the queue first and, when something is still waiting,
-  warns before dropping it (`AppState.sendUnsent`, `Outbox.signedOut(discarding:)`).
+  warns before dropping it (`AppState.sendUnsent`, `Outbox.discard`).
   New rows carry their own 32-hex `id` (the blocks POSTs accept it and a resent POST
   returns the row already there). While the outbox holds anything, a reload keeps the
   phone's copy instead of the server's. Only a server refusal undoes a change.

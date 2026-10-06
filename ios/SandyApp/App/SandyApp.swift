@@ -68,7 +68,7 @@ struct RootView: View {
             case .launching:   LaunchView()
             case .auth:        AuthView()
             case .onboarding:  OnboardingView()
-            case .chat:        MainTabView()
+            case .chat:        MainTabView().id(state.dataEpoch)
             }
         }
         // Launch-screen mark fades out over the already-rendered app; never blocks touches.

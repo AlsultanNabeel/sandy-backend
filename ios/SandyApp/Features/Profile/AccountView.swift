@@ -208,8 +208,11 @@ struct AccountView: View {
     }
 
     private func resetData() async {
+        // Unsent changes go before the reset, never after it to bring rows back.
+        Outbox.shared.discard()
         do {
             try await state.api.resetAccountData()
+            state.resetLocalData()
             notice = lang.s("account.reset.done")
             await reload()
         } catch {

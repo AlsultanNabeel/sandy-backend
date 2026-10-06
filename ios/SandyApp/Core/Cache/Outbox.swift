@@ -47,18 +47,21 @@ final class Outbox {
     var isEmpty: Bool { ops.isEmpty }
     var count: Int { ops.count }
 
-    /// The session ended: nothing more is sent for it. `discarding` (a sign-out the user
-    /// chose after the warning, or a deleted account) drops its unsent changes too; else
-    /// they stay on disk for when the same account is back.
-    func signedOut(discarding: Bool) {
-        if discarding { DiskCache.remove(key: Self.fileKey, userId: userId) }
+    /// Drops this account's unsent changes: a sign-out the user chose after the warning, a
+    /// deleted account, or before «reset my data» (sent after it, they would bring back
+    /// rows the reset removed).
+    func discard() {
         ops = []
-        userId = nil
+        save()
     }
 
     /// Queues one write and tries to send it (and anything before it). Throws only when
     /// the server refused it; offline it returns and the write waits.
     func send(_ api: APIClient, _ path: String, method: String, body: (any Encodable)?) async throws {
+        // No one signed in: nothing to queue it for (it must not land in an account's queue).
+        guard api.currentUserId != nil else {
+            throw APIError(message: "انتهت الجلسة، سجّل دخولك من جديد.", kind: .unauthorized)
+        }
         bind(api)
         let op = Op(id: UUID(), method: method, path: path,
                     body: try body.map { try JSONEncoder().encode($0) })

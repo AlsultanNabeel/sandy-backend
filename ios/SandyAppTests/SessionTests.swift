@@ -54,14 +54,13 @@ final class SessionTests: XCTestCase {
     /// is never sent for another one, and is not wiped by the sign-out.
     func testAnEndedSessionKeepsItsUnsentChangeForItsOwnerOnly() async throws {
         let owner = "owner-\(UUID().uuidString.prefix(8))", other = "other-\(UUID().uuidString.prefix(8))"
-        defer { DiskCache.remove(key: Outbox.fileKey, userId: owner) }
         let api = TestClient.make()
         api.token = Self.token(owner)
         StubNetwork.install(status: StubNetwork.offline, json: "{}")
         try await Outbox.shared.send(api, "/api/items", method: "POST", body: ["text": "حليب"])
         XCTAssertEqual(Outbox.shared.count, 1)
 
-        Outbox.shared.signedOut(discarding: false)
+        // The session ends by itself: the token goes, the caches go, the outbox stays.
         api.token = nil
         DiskCache.clearAll(except: Outbox.fileKey)
         await settle { DiskCache.load([Outbox.Op].self, key: Outbox.fileKey, userId: owner)?.count == 1 }
@@ -74,12 +73,40 @@ final class SessionTests: XCTestCase {
         api.token = Self.token(other)
         await Outbox.shared.drain(api)
         XCTAssertEqual(sentWrites(), 0, "another account sent it")
-        Outbox.shared.signedOut(discarding: true)
         api.token = Self.token(owner)
         await Outbox.shared.drain(api)
         XCTAssertEqual(sentWrites(), 1, "the owner's change never went out")
         XCTAssertTrue(Outbox.shared.isEmpty)
-        Outbox.shared.signedOut(discarding: false)
+    }
+
+    /// K5: «reset my data» wiped the server only; the outbox then sent the old changes and
+    /// brought rows back. It is dropped before the reset, not sent.
+    func testTheOutboxIsDroppedNotSentBeforeAReset() async throws {
+        let owner = "reset-\(UUID().uuidString.prefix(8))"
+        let api = TestClient.make()
+        api.token = Self.token(owner)
+        StubNetwork.install(status: StubNetwork.offline, json: "{}")
+        try await Outbox.shared.send(api, "/api/items", method: "POST", body: ["text": "حليب"])
+        Outbox.shared.discard()
+        await settle { DiskCache.load([Outbox.Op].self, key: Outbox.fileKey, userId: owner)?.isEmpty == true }
+        XCTAssertEqual(DiskCache.load([Outbox.Op].self, key: Outbox.fileKey, userId: owner)?.count, 0)
+        StubNetwork.install(status: 200, json: "{}")
+        await Outbox.shared.drain(api)
+        XCTAssertEqual(sentWrites(), 0, "a change from before the reset was sent after it")
+    }
+
+    /// A write with no one signed in is refused, not queued: it used to bind the outbox to
+    /// no account, and the next drain reloaded and sent what had just been dropped.
+    func testAWriteWithNoOneSignedInIsNotQueued() async {
+        let api = TestClient.make()
+        StubNetwork.install(status: 200, json: "{}")
+        do {
+            try await Outbox.shared.send(api, "/api/items", method: "POST", body: ["text": "حليب"])
+            XCTFail("queued with no one signed in")
+        } catch {
+            XCTAssertEqual((error as? APIError)?.kind, .unauthorized)
+        }
+        XCTAssertEqual(sentWrites(), 0)
     }
 
     /// K3: My Life's numbers live in a shared store; the next account on the phone saw them.
@@ -100,7 +127,6 @@ final class SessionTests: XCTestCase {
     /// came back and showed, cached and published the old account's rows.
     func testALateReplyAfterASwitchShowsAndSavesNothing() async throws {
         let first = "first-\(UUID().uuidString.prefix(8))"
-        defer { DiskCache.remove(key: "items.tasks.open", userId: first) }
         let api = TestClient.make()
         api.token = Self.token(first)
         StubNetwork.install(status: 200, json: """

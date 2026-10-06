@@ -14,6 +14,8 @@ final class AppState: ObservableObject {
         }
     }
     @Published var onboarding = OnboardingData()
+    /// Moves when «reset my data» worked: the main screen is built again, its stores fresh.
+    @Published private(set) var dataEpoch = 0
     /// الإقلاع بيجيب بيانات التعارف أصلًا، فالتبويبات ما لازم تعيد الطلب.
     private var onboardingLoaded = false
     /// الميزات اللي أخفاها المالك من السيرفر.
@@ -170,30 +172,43 @@ final class AppState: ObservableObject {
         return Outbox.shared.isEmpty
     }
 
+    /// «Reset my data» worked on the server: the phone forgets the account's data too (the
+    /// local part of a sign-out, the unsent changes dropped before the reset), still signed
+    /// in, and the screens start over from the server.
+    func resetLocalData() {
+        clearLocal()
+        NotificationManager.shared.sessionBegan()
+        dataEpoch &+= 1
+    }
+
+    /// What sign-out and «reset my data» both clear on the phone. Widgets and scheduled
+    /// notifications don't check the session, so they go too.
+    private func clearLocal() {
+        AccountSession.next()
+        DiskCache.clearAll(except: Outbox.fileKey)
+        SessionReset.clearShared()
+        SpotlightIndexer.deleteAll()
+        NotificationManager.shared.clearForSignOut()
+        WidgetData.clearAll()
+    }
+
     /// نلغي توكن الدفع أولاً (والتوكن لسّا صالح) حتى ما يوصل هالجهاز دفع المستخدم القديم.
     /// `keepingUnsent`: the session ended on its own (a 401), so the outbox stays for this
-    /// account's return; a sign-out the user chose (after the warning) drops it.
+    /// account's return (on disk, and loaded only for it); a sign-out the user chose (after
+    /// the warning) drops it.
     func signOut(keepingUnsent: Bool = false) {
         if let deviceToken = NotificationManager.shared.lastDeviceToken,
            let session = api.token {
             let apiRef = api
             Task { try? await apiRef.unregisterPushToken(deviceToken, bearer: session) }
         }
-        AccountSession.next()
         verifyTask?.cancel()
         verifyTask = nil
 
-        Outbox.shared.signedOut(discarding: !keepingUnsent)
+        if !keepingUnsent { Outbox.shared.discard() }
+        clearLocal()
         api.token = nil
         subscriptions.signOut()
-        DiskCache.clearAll(except: Outbox.fileKey)
-        SessionReset.clearShared()
-        SpotlightIndexer.deleteAll()
-
-        // Widgets and scheduled notifications don't check the session, so clear them
-        // or the next account sees this one's data.
-        NotificationManager.shared.clearForSignOut()
-        WidgetData.clearAll()
 
         onboarding = OnboardingData()
         onboardingLoaded = false

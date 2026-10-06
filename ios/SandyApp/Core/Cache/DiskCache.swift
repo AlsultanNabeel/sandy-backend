@@ -56,9 +56,4 @@ enum DiskCache {
             }
         }
     }
-
-    static func remove(key: String, userId: String?) {
-        guard let url = fileURL(key: key, userId: userId) else { return }
-        queue.async { try? FileManager.default.removeItem(at: url) }
-    }
 }
