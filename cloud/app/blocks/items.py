@@ -183,6 +183,27 @@ def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
     return [_base.out(d) for d in cursor]
 
 
+# What a name is matched against, at most: far past any real list, a bound on a lifetime
+# of done items.
+MATCH_POOL = 5000
+
+
+def match_pool(list_name: Optional[str] = None, *, done: Optional[bool] = None,
+               mongo_db=None) -> List[Dict[str, Any]]:
+    """The rows a name is matched against: the whole list (not one capped page, which
+    left the newest of a long list unfindable), oldest first, up to MATCH_POOL."""
+    coll = _base.coll(_base.ITEMS, mongo_db)
+    if coll is None:
+        return []
+    query: Dict[str, Any] = {}
+    if list_name:
+        query["list"] = list_name
+    if done is not None:
+        query["done"] = bool(done)
+    cursor = coll.find(query).sort([("created_at", 1), ("_id", 1)]).limit(MATCH_POOL)
+    return [_base.out(d) for d in cursor]
+
+
 def list_names(mongo_db=None) -> List[str]:
     """Every list this user has rows in, by name."""
     coll = _base.coll(_base.ITEMS, mongo_db)

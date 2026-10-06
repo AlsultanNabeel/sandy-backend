@@ -331,7 +331,7 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             return refused("could not read the due time", due=args["due"])
     qty = _number(args.get("qty"))
     same = match_key(text)
-    for row in items.list_items(name, done=False):
+    for row in items.match_pool(name, done=False):
         if match_key(row.get("text", "")) == same:
             return _add_to_existing(row, qty, due)
     data = {**(args.get("data") or {}), **({"qty": qty} if qty is not None else {})}
@@ -415,7 +415,7 @@ def _check_in(row: Dict[str, Any]) -> Dict[str, Any]:
 def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     name = _list_name(args) or None
     # Open items only, unless the ask is to reopen a done one.
-    pool = items.list_items(name, done=None if args.get("done") is False else False)
+    pool = items.match_pool(name, done=None if args.get("done") is False else False)
     picked = _pick(args, pool, items.get)
     if "rows" not in picked:
         return picked

@@ -61,3 +61,26 @@ def test_a_year_s_summary_totals_every_expense(tenant):
     _expenses(tenant, 600, days_back=max(1, days_in - 1))
     spent = _run("summarize", period="year")["spending"]
     assert spent["total"] == 600 and spent["count"] == 600
+
+
+def _open_rows(tenant, n):
+    long_ago = datetime.now(timezone.utc) - timedelta(days=90)
+    tenant["sandy_items"].insert_many([
+        {"_id": f"o{i}", "user_id": "userA", "list": "shopping", "text": f"غرض رقم {i}",
+         "done": False, "created_at": long_ago + timedelta(minutes=i), "data": {}}
+        for i in range(n)])
+
+
+def test_a_named_item_is_found_past_the_two_hundredth(tenant):
+    _open_rows(tenant, 250)
+    newest = items.add("shopping", "زيت زيتون")
+    out = _run("list_update", list="shopping", match_text="زيت زيتون", done=True)
+    assert out.get("ok") and items.get(newest)["done"]
+
+
+def test_the_same_item_again_is_not_added_twice_in_a_long_list(tenant):
+    _open_rows(tenant, 250)
+    first = items.add("shopping", "زيت زيتون")
+    _run("list_add", list="shopping", text="زيت زيتون", qty=2)
+    same = [d for d in tenant["sandy_items"].find({"text": "زيت زيتون"})]
+    assert len(same) == 1 and same[0]["_id"] == first
