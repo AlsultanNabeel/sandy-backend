@@ -65,16 +65,18 @@ final class PhotosStore: LoadableStore {
     /// A photo is sent at most this many pixels on its long side (the server takes 8 MB).
     static let uploadMaxPixel = 2048
 
-    /// إضافة صورة (JPEG مصغّرة) ثم إعادة جلب. يرجّع نجاح/فشل لتقرّر الورقة تتقفل.
-    func add(api: APIClient, jpeg: Data, name: String, album: String) async -> Bool {
+    /// إضافة صورة (JPEG مصغّرة) ثم إعادة جلب. nil when it saved; else the line the add sheet
+    /// shows (the album's own notice is under the sheet, out of sight).
+    func add(api: APIClient, jpeg: Data, name: String, album: String) async -> String? {
         do {
             try await api.photosAdd(image: jpeg, name: name, album: album)
             clearNotice()
             await load(api: api)
-            return true
+            return nil
+        } catch let error as APIError where error.kind == .server && error.code != nil {
+            return error.message
         } catch {
-            notify("photos.errorAdd")
-            return false
+            return LanguageManager.shared.s("photos.errorAdd")
         }
     }
 

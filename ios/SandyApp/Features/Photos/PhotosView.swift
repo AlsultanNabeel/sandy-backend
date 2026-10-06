@@ -225,7 +225,8 @@ private struct PhotoThumb: View {
 /// ورقة الإضافة: اختيار صورة من المكتبة + اسم/ألبوم اختياريين. تُرسل عبر closure
 /// غير متزامن يرجّع نجاح/فشل لتقرّر الورقة هل تتقفل.
 private struct PhotoAddSheet: View {
-    let onSubmit: (_ jpeg: Data, _ name: String, _ album: String) async -> Bool
+    /// nil when it saved, else the line to show here.
+    let onSubmit: (_ jpeg: Data, _ name: String, _ album: String) async -> String?
 
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
@@ -237,6 +238,7 @@ private struct PhotoAddSheet: View {
     @State private var name = ""
     @State private var album = ""
     @State private var submitting = false
+    @State private var problem: String?
 
     var body: some View {
         SandyPopup(title: lang.s("photos.addTitle")) {
@@ -259,6 +261,10 @@ private struct PhotoAddSheet: View {
                         .resizable().scaledToFit()
                         .frame(maxHeight: 200)
                         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
+                }
+
+                if let problem {
+                    SandyNotice(problem, kind: .gentleWarning)
                 }
 
                 field(prompt: lang.s("photos.namePrompt"),
@@ -292,11 +298,15 @@ private struct PhotoAddSheet: View {
 
     private func loadPicked(_ item: PhotosPickerItem?) {
         guard let item else { return }
+        problem = nil
         Task {
+            // An iCloud photo with no connection, or a file that is not an image, says so.
             if let data = try? await item.loadTransferable(type: Data.self),
                let small = ImageDownscale.jpeg(from: data, maxPixel: PhotosStore.uploadMaxPixel),
                let img = UIImage(data: small) {
                 await MainActor.run { jpeg = small; image = img }
+            } else {
+                await MainActor.run { problem = lang.s("photos.errorPick") }
             }
         }
     }
@@ -304,12 +314,13 @@ private struct PhotoAddSheet: View {
     private func save() {
         guard let jpeg, !submitting else { return }
         submitting = true
+        problem = nil
         Task {
-            let ok = await onSubmit(jpeg,
-                                    name.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    album.trimmingCharacters(in: .whitespacesAndNewlines))
+            let error = await onSubmit(jpeg,
+                                       name.trimmingCharacters(in: .whitespacesAndNewlines),
+                                       album.trimmingCharacters(in: .whitespacesAndNewlines))
             submitting = false
-            if ok { dismiss() }
+            if let error { problem = error } else { dismiss() }
         }
     }
 }

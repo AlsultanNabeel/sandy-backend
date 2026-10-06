@@ -13,6 +13,7 @@ enum L10nPhotos {
             "empty":        .text("لا توجد صور محفوظة بعد — أضف أول صورة."),
             "errorLoad":    .text("تعذّر تحميل الصور. اسحب للتحديث."),
             "errorAdd":     .text("تعذّر حفظ الصورة. أعد المحاولة."),
+            "errorPick":    .text("ما قدرت أفتح هالصورة. لو هي على آي كلاود، تأكد من النت وجرّب كمان مرة."),
             "errorDelete":  .text("تعذّر حذف الصورة. أعد المحاولة."),
 
             // أزرار وإجراءات
@@ -37,6 +38,7 @@ enum L10nPhotos {
             "empty":        .text("No saved photos yet — add your first one."),
             "errorLoad":    .text("Couldn't load your photos. Pull to refresh."),
             "errorAdd":     .text("Couldn't save the photo. Try again."),
+            "errorPick":    .text("Couldn't open that photo. If it's in iCloud, check your connection and try again."),
             "errorDelete":  .text("Couldn't delete the photo. Try again."),
 
             // buttons & actions
