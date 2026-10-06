@@ -87,8 +87,9 @@ struct RootView: View {
             DeepLinkRouter.shared.consumeSharedPending()
             // Settings may have changed while away: the permission cards follow.
             Task { await Permissions.shared.refresh() }
-            // Changes made offline go out as soon as the app is back in front.
-            if state.stage == .chat { Task { await Outbox.shared.drain(state.api) } }
+            // Changes made offline go out as soon as the app is back in front, the parked
+            // ones with them.
+            if state.stage == .chat { Task { await Outbox.shared.retryParked(state.api) } }
         }
     }
 }

@@ -129,12 +129,14 @@ final class APIClient: APIClientProtocol {
             // sign-out/sign-in) must not end the new session.
             if let s = sentToken, s == token { onUnauthorized?() }
             throw APIError(message: human ?? "انتهت الجلسة، سجّل دخولك من جديد.",
-                           code: machine, kind: .unauthorized)
+                           code: machine, kind: .unauthorized, status: code)
         }
         if code >= 400 {
             // `message` للعرض، `error` رمز آلي للتفريع.
+            let wait = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After")
+                .flatMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }
             throw APIError(message: human ?? machine ?? "خطأ \(code)",
-                           code: machine, kind: .server)
+                           code: machine, kind: .server, status: code, retryAfter: wait)
         }
         return data
     }

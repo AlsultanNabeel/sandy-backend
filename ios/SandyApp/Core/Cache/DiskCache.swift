@@ -40,17 +40,17 @@ enum DiskCache {
         }
     }
 
-    /// Every account's copies but their `keep` file (the outbox: unsent changes stay with
+    /// Every account's copies but their `keep` files (the outbox: unsent changes stay with
     /// their owner until they sign in again). On the same serial queue, so a save queued
     /// before it is written and then removed.
-    static func clearAll(except keep: String) {
+    static func clearAll(except keep: String...) {
         guard let root else { return }
-        let kept = safe(keep) + ".json"
+        let kept = Set(keep.map { safe($0) + ".json" })
         queue.async {
             let fm = FileManager.default
             for account in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
                 for file in (try? fm.contentsOfDirectory(at: account, includingPropertiesForKeys: nil)) ?? []
-                where file.lastPathComponent != kept {
+                where !kept.contains(file.lastPathComponent) {
                     try? fm.removeItem(at: file)
                 }
             }

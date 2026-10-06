@@ -171,8 +171,8 @@ final class AppState: ObservableObject {
     /// loses nothing (else they are warned first).
     func sendUnsent() async -> Bool {
         await UndoCenter.shared.commitBeforeSignOut()
-        await Outbox.shared.drain(api)
-        return Outbox.shared.isEmpty
+        await Outbox.shared.retryParked(api)
+        return !Outbox.shared.hasUnsent
     }
 
     /// «Reset my data» worked on the server: the phone forgets the account's data too (the
@@ -190,7 +190,7 @@ final class AppState: ObservableObject {
     /// notifications don't check the session, so they go too.
     private func clearLocal() {
         AccountSession.next()
-        DiskCache.clearAll(except: Outbox.fileKey)
+        DiskCache.clearAll(except: Outbox.fileKey, Outbox.parkedKey)
         SessionReset.clearShared()
         SpotlightIndexer.deleteAll()
         NotificationManager.shared.clearForSignOut()

@@ -299,6 +299,10 @@ struct APIError: LocalizedError {
     /// رمز الخطأ الآلي (`error`) للتفريع بالكود؛ `message` للعرض.
     var code: String? = nil
     var kind: APIErrorKind = .unknown
+    /// The HTTP status when the server answered (nil for no connection or a bad reply).
+    var status: Int? = nil
+    /// How long the server asked to wait before trying again (a 429's `Retry-After`).
+    var retryAfter: TimeInterval? = nil
     var errorDescription: String? { message }
 }
 
