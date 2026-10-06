@@ -230,9 +230,9 @@ private struct TimerSection: View {
         busy = true; notice = ""
         do {
             try await state.api.startFocus(
-                focusMin: Int(focusMin) ?? 25,
-                breakMin: Int(breakMin) ?? 0,
-                cycles: Int(cycles) ?? 1,
+                focusMin: Digits.integer(focusMin) ?? 25,
+                breakMin: Digits.integer(breakMin) ?? 0,
+                cycles: Digits.integer(cycles) ?? 1,
                 scene: startScene, endScene: endScene, label: label)
             await refresh()
         } catch {

@@ -323,7 +323,7 @@ struct SpendingSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(lang.s("blocks.save")) {
-                        let value = Double(budget.replacingOccurrences(of: ",", with: ".")) ?? 0
+                        let value = Digits.number(budget) ?? 0
                         LifeStatsStore.shared.setBudget(api: state.api, value)
                         dismiss()
                     }
