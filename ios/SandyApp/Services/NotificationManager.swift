@@ -166,8 +166,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// What Profile › Notifications calls «reminders»: reminders, timed tasks, habits.
     private static let reminderPrefixes: Set<String> = ["reminder.", "task.", "habit."]
 
-    /// نلغي كل المعلّق بالبادئة ثم نجدول العناصر المستقبلية.
+    /// نلغي كل المعلّق بالبادئة ثم نجدول العناصر المستقبلية. Nothing with no one signed in.
     func sync(prefix: String, items: [NotificationItem]) {
+        guard isSignedIn else { return }
         // Switched off in Profile › Notifications: nothing of this kind rings (they are
         // still remembered below, so turning it back on brings them back).
         let wanted = Self.reminderPrefixes.contains(prefix) && !NotificationPrefs.current.reminders ? [] : items
@@ -192,11 +193,15 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// Local notifications ring without re-checking the session, so clear everything (and
     /// `knownItems`, which nudges rebuild from) or the next account gets these reminders.
     func clearForSignOut() {
+        knownLock.lock()
+        signedIn = false
+        knownItems.removeAll()
+        openTasks = 0
+        habitsLeft = []
+        habitsTotal = 0
+        knownLock.unlock()
         center.removeAllPendingNotificationRequests()
         center.removeAllDeliveredNotifications()
-        knownLock.lock()
-        knownItems.removeAll()
-        knownLock.unlock()
         onDeviceToken = nil
     }
 
@@ -301,9 +306,33 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     private var openTasks = 0
     private var habitsLeft: [String] = []
     private var habitsTotal = 0
+    private var signedIn = false
+
+    /// What the morning and evening nudges would say now; nil with no one signed in.
+    func nudgeInputs() -> (tasks: Int, habitsLeft: [String], habits: Int)? {
+        knownLock.lock()
+        defer { knownLock.unlock() }
+        return signedIn ? (openTasks, habitsLeft, habitsTotal) : nil
+    }
+
+    /// A session began: the stores' counts and items are scheduled from now on. Until then,
+    /// and after `clearForSignOut`, nothing is (the sign-in screen must not ring the last
+    /// account's habit names on the lock screen).
+    func sessionBegan() {
+        knownLock.lock()
+        signedIn = true
+        knownLock.unlock()
+    }
+
+    private var isSignedIn: Bool {
+        knownLock.lock()
+        defer { knownLock.unlock() }
+        return signedIn
+    }
 
     func setOpenTasks(_ count: Int) {
         knownLock.lock()
+        guard signedIn else { knownLock.unlock(); return }
         openTasks = count
         knownLock.unlock()
         scheduleProactiveNudges()
@@ -311,6 +340,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     func setHabits(left: [String], total: Int) {
         knownLock.lock()
+        guard signedIn else { knownLock.unlock(); return }
         habitsLeft = left
         habitsTotal = total
         knownLock.unlock()
@@ -333,11 +363,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
 
     func scheduleProactiveNudges() {
+        guard let (tasks, left, habitCount) = nudgeInputs() else { return }
         knownLock.lock()
         let known = knownItems
-        let tasks = openTasks
-        let left = habitsLeft
-        let habitCount = habitsTotal
         knownLock.unlock()
         center.getNotificationSettings { [weak self] settings in
             guard let self else { return }

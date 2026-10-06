@@ -29,6 +29,9 @@ final class AppState: ObservableObject {
         api.onUnauthorized = { [weak self] in
             Task { @MainActor in self?.signOut(keepingUnsent: true) }
         }
+        // A session kept from last time: the stores may report to notifications before
+        // `restoreSession` runs.
+        if api.token != nil { NotificationManager.shared.sessionBegan() }
         // Pick the first screen before the first frame so a known user skips the launch screen.
         if api.token != nil && onboardingDoneCached {
             stage = .chat
@@ -124,6 +127,7 @@ final class AppState: ObservableObject {
 
     /// لازم يجي بعد ما يجهز التوكن لأن الطلبات مُصادَقة. آمن للتكرار.
     private func setupPush() {
+        NotificationManager.shared.sessionBegan()
         NotificationManager.shared.bindDeviceToken { [weak self] deviceToken in
             guard let self else { return }
             Task { try? await self.api.registerPushToken(deviceToken) }

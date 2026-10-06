@@ -119,4 +119,21 @@ final class SessionTests: XCTestCase {
         XCTAssertNil(DiskCache.load([ListItem].self, key: "items.tasks.open", userId: first),
                      "the store from before the switch still wrote its cache")
     }
+
+    /// S1: after sign-out the morning and evening nudges still had the last account's open
+    /// tasks and habit names, and coming back to the front scheduled them again.
+    func testNudgesForgetTheAccountAndWaitForTheNextSession() throws {
+        let notes = NotificationManager.shared
+        notes.sessionBegan()
+        notes.setOpenTasks(3)
+        notes.setHabits(left: ["ركض"], total: 1)
+        XCTAssertEqual(notes.nudgeInputs()?.habitsLeft, ["ركض"])
+        notes.clearForSignOut()
+        notes.setHabits(left: ["ركض"], total: 1)
+        XCTAssertNil(notes.nudgeInputs(), "nudges were built with no one signed in")
+        notes.sessionBegan()
+        let fresh = try XCTUnwrap(notes.nudgeInputs())
+        XCTAssertEqual(fresh.tasks, 0)
+        XCTAssertEqual(fresh.habitsLeft, [], "the last account's habit names reached the next one")
+    }
 }
