@@ -18,6 +18,25 @@ class CircuitOpenError(Exception):
     pass
 
 
+def _status_of(exc: BaseException) -> Optional[int]:
+    """The HTTP status a provider answered with, when the error carries one (the OpenAI SDK
+    on the error, requests on its response, google-genai as `code`)."""
+    for value in (getattr(exc, "status_code", None),
+                  getattr(getattr(exc, "response", None), "status_code", None),
+                  getattr(exc, "code", None)):
+        if isinstance(value, int) and 100 <= value <= 599:
+            return value
+    return None
+
+
+def counts_as_outage(exc: BaseException) -> bool:
+    """A failure that says the provider is down: no connection, a timeout, a 5xx or a 429.
+    A 4xx is the provider answering that this one request was wrong (a content filter, a
+    prompt too long): it says nothing about the next customer's call."""
+    status = _status_of(exc)
+    return status is None or status >= 500 or status == 429
+
+
 class CircuitBreaker:
 
     _CLOSED = "CLOSED"
@@ -108,5 +127,8 @@ class CircuitBreaker:
         except CircuitOpenError:
             raise
         except Exception as exc:
-            self._on_failure(exc)
+            if counts_as_outage(exc):
+                self._on_failure(exc)
+            else:
+                self._on_success()  # it answered: the service is up
             raise

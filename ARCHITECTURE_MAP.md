@@ -510,6 +510,9 @@ is in `requirements.txt` for exactly this). MQTT is HiveMQ Cloud over TLS.
 Circuit breakers (`utils/circuit_breaker.py`) wrap `openai_client`, `exa_client`,
 `gemini_tts` and `features/weather`. Not wrapped: `azure_flux`, `azure_image`,
 `google_places`, `services/apns`, `embeddings`.
+A breaker counts only outages (`circuit_breaker.counts_as_outage`: no connection, a timeout,
+a 5xx or a 429). A 4xx is the provider answering that one request was wrong (a content
+filter, a prompt too long) and counts as the service being up.
 
 **None of the breakers pass `timeout=`, and that is on purpose.** The class
 supports one and it looks like the missing half; it is not. `_invoke` enforces a
