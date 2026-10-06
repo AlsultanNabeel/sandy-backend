@@ -156,3 +156,57 @@ def test_a_reset_rebuilds_the_voice_instruction(monkeypatch):
     assert tools._cached_system_instruction("u1", False) == "من أول وجديد"
     tools.clear_instruction_cache()
     appdb.reset()
+
+
+def _photo(d):
+    d["sandy_photo_files.files"].insert_one({"_id": "g1"})
+    d["sandy_photo_files.chunks"].insert_one({"files_id": "g1", "n": 0, "data": b"x"})
+    d.sandy_photos.insert_one({"user_id": "u1", "grid_id": "g1"})
+
+
+def test_photo_rows_stay_when_their_files_could_not_go(monkeypatch):
+    """The rows are the only way to find a photo's bytes. Erased after the bytes
+    failed, the bytes stayed for ever; kept, the next try finishes the job."""
+    d = _db()
+    _photo(d)
+    real = account_delete._erase_photo_blobs
+
+    def down(*_a):
+        raise PyMongoError("down")
+
+    monkeypatch.setattr(account_delete, "_erase_photo_blobs", down)
+    r = account_delete.delete_account("u1")
+    assert not r["ok"] and r["error"] == "partial"
+    assert d.sandy_photos.find_one({"grid_id": "g1"}) is not None
+    assert d.sandy_tasks.count_documents({}) == 0   # the rest went
+
+    monkeypatch.setattr(account_delete, "_erase_photo_blobs", real)
+    assert account_delete.delete_account("u1")["ok"]
+    assert d["sandy_photo_files.files"].find_one({"_id": "g1"}) is None
+    assert d.sandy_photos.find_one({"grid_id": "g1"}) is None
+    assert d.sandy_users.find_one({"_id": "u1"}) is None
+    appdb.reset()
+
+
+def test_a_partial_reset_or_delete_tells_the_user(monkeypatch):
+    """A half-done erase answers in words the app shows: what happened and that
+    asking again carries on from where it stopped."""
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    d = _db()
+    c = create_app(mongo_db=d).test_client()
+    appdb.configure(d)
+    monkeypatch.setattr(account_delete, "_erase_photo_blobs",
+                        lambda *_a: (_ for _ in ()).throw(PyMongoError("down")))
+    _photo(d)
+    auth = {"Authorization": f"Bearer {make_token('user', user_id='u1')}"}
+
+    r = c.post("/api/account/reset", json={"confirm": "RESET"}, headers=auth)
+    body = r.get_json()
+    assert r.status_code == 500 and body["error"] == "partial" and body["message"]
+    r = c.delete("/api/account", json={"confirm": "DELETE"}, headers=auth)
+    body = r.get_json()
+    assert r.status_code == 500 and body["error"] == "partial" and body["message"]
+    appdb.reset()

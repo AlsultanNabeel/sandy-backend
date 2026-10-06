@@ -13,6 +13,10 @@ from app.api.auth_handlers import require_tenant
 
 logger = logging.getLogger(__name__)
 
+# Shown by the app as they are. An erase is safe to ask again: it carries on from what is left.
+_PARTIAL_RESET = "ما انمسح كل شي، في جزء ضل. جرّب كمان مرّة وبكمّل من وين وقفت."
+_PARTIAL_DELETE = "ما انحذف كل شي، في جزء ضل وحسابك لسا موجود. جرّب الحذف كمان مرّة وبكمّل من وين وقفت."
+
 
 def register_account_api(app):
     @app.route("/api/account", methods=["GET"])
@@ -48,7 +52,9 @@ def register_account_api(app):
 
         from app.features.account_delete import wipe_account_data
         r = wipe_account_data(uid)
-        return jsonify(r), (200 if r.get("ok") else 500)
+        if not r.get("ok"):
+            return jsonify({**r, "message": _PARTIAL_RESET}), 500
+        return jsonify(r), 200
 
     @app.route("/api/account", methods=["DELETE"])
     @require_tenant
@@ -70,5 +76,5 @@ def register_account_api(app):
         from app.features.account_delete import delete_account
         r = delete_account(uid)
         if not r.get("ok"):
-            return jsonify(r), 500
+            return jsonify({**r, "message": _PARTIAL_DELETE}), 500
         return jsonify(r), 200

@@ -127,6 +127,7 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
 
     forms = _id_forms(user_id)
     removed: Dict[str, int] = {}
+    names = list(names)
     if "sandy_photos" in names:
         try:
             n = _erase_photo_blobs(db, forms)
@@ -135,6 +136,8 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
         except PyMongoError as exc:
             logger.warning("[erase] photo files failed for %s: %s", user_id, exc)
             removed[_PHOTO_BUCKET] = -1
+            # The rows are the only way back to the bytes: kept, the next try finishes.
+            names.remove("sandy_photos")
     for name in names:
         try:
             r = db[name].delete_many(

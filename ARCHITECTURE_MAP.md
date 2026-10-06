@@ -1365,7 +1365,10 @@ hand: `sandy_tasks`, `sandy_reminders`, `sandy_goals`, `sandy_brainstorms`,
 `guest_usage` (keyed on a guest token's `jti`, not a person). Account deletion
 (`features/account_delete.py`) still erases a person's rows in every one of the
 others — most by `user_id` or `chat_id`, `web_chat_history` by `_id` — so a
-deleted account leaves nothing behind.
+deleted account leaves nothing behind. A partial erase answers 500 `partial` with a
+`message`, keeps the account row, and keeps the photo rows when their GridFS bytes
+could not go (the rows are the way back to them), so asking again carries on from
+what is left; the app shows `account.reset.partial` / `account.delete.partial`.
 
 Indexes are created at boot on the raw handle — by each store's `init_*` and
 `init_blocks`, and by `bootstrap.ensure_indexes()` for the rest (pending state,

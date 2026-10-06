@@ -216,7 +216,7 @@ struct AccountView: View {
             // This screen goes with the rebuilt main screen; the «done» shows on the new one.
             NoticeCenter.shared.post(lang.s("account.reset.done"))
         } catch {
-            notice = lang.s("account.reset.failed")
+            notice = lang.s(Self.isPartial(error) ? "account.reset.partial" : "account.reset.failed")
         }
     }
 
@@ -225,7 +225,12 @@ struct AccountView: View {
             try await state.api.deleteAccount()
             state.signOut()
         } catch {
-            notice = lang.s("account.delete.failed")
+            notice = lang.s(Self.isPartial(error) ? "account.delete.partial" : "account.delete.failed")
         }
+    }
+
+    /// The server erased some of it and kept the rest: asking again carries on.
+    private static func isPartial(_ error: Error) -> Bool {
+        (error as? APIError)?.code == "partial"
     }
 }

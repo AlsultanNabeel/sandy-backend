@@ -34,12 +34,14 @@ enum L10nAccount {
             "reset.warn":       .text("بيمسح المحادثات والذاكرة والمهام واليوميات والصور وبصمة صوتك — وبيخلّي حسابك وروبوتك زي ما هنّ. للبداية من جديد."),
             "reset.done":       .text("انمسح كل إشي. صفحة بيضا."),
             "reset.failed":     .text("ما قدرت أمسح. جرّب كمان مرّة."),
+            "reset.partial":    .text("ما انمسح كل شي، في جزء ضل. جرّب كمان مرّة وبكمّل من وين وقفت."),
 
             "danger":           .text("حذف الحساب"),
             "delete":           .text("احذف حسابي"),
             "delete.confirm":   .text("تحذف حسابك نهائيًا؟"),
             "delete.warn":      .text("بيروح كل إشي: بصمة صوتك، يومياتك، صورك، مصاريفك، وكل محادثة حكيتها معها. ما في رجعة."),
             "delete.failed":    .text("ما قدرت أحذف الحساب. جرّب كمان مرّة."),
+            "delete.partial":   .text("ما انحذف كل شي، في جزء ضل وحسابك لسا موجود. جرّب الحذف كمان مرّة وبكمّل من وين وقفت."),
         ],
         en: [
             "title":            .text("Account & robot"),
@@ -66,12 +68,14 @@ enum L10nAccount {
             "reset.warn":       .text("Clears conversations, memory, tasks, journal, photos and your voiceprint — and leaves your account and robot as they are. For starting over."),
             "reset.done":       .text("Everything cleared. Clean slate."),
             "reset.failed":     .text("Couldn't erase it. Try again."),
+            "reset.partial":    .text("Not everything was erased; some is left. Try again and it carries on from where it stopped."),
 
             "danger":           .text("Delete account"),
             "delete":           .text("Delete my account"),
             "delete.confirm":   .text("Delete your account permanently?"),
             "delete.warn":      .text("Everything goes: your voiceprint, journal, photos, expenses, and every conversation you've had with her. This cannot be undone."),
             "delete.failed":    .text("Couldn't delete the account. Try again."),
+            "delete.partial":   .text("Not everything was deleted; some is left and your account still exists. Try deleting again and it carries on from where it stopped."),
         ]
     )
 }
