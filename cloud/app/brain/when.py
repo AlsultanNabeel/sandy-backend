@@ -65,7 +65,7 @@ def _parse_with_model(text: str) -> Optional[str]:
         payload = json.loads(response.choices[0].message.content or "{}")
         iso_value = str(payload.get("remind_at_iso") or "").strip()
         if not payload.get("success") or not iso_value:
-            logger.info("[brain] time not parsed: %s", payload.get("reason") or "unknown")
+            logger.info("[brain] time not parsed by the model")
             return None
         dt = _aware(datetime.fromisoformat(iso_value)).astimezone(USER_TZ)
     except Exception as exc:  # noqa: BLE001 — provider boundary; the caller refuses instead

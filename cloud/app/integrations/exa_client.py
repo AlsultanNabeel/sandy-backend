@@ -54,7 +54,7 @@ def search_exa(
         return []
     try:
         results = _cb.call(_do_search, query, exa_api_key, num_results, timeout)
-        logger.info("[Exa] found %d results for: %s", len(results), query)
+        logger.info("[Exa] found %d results", len(results))
         return results
     except CircuitOpenError:
         logger.warning("[Exa] circuit open, skipping search")

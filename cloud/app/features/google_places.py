@@ -83,14 +83,13 @@ def search_places(
                 }
             )
 
-        logger.info(f"[Places] found {len(results)} places for: {query}")
+        logger.info("[Places] found %d places", len(results))
         return results
 
     except requests.HTTPError as e:
         status = getattr(e.response, "status_code", 0)
-        logger.error("[Places] refused (%s) for %r — the search did not run",
-                     status, query)
+        logger.error("[Places] refused (%s) — the search did not run", status)
         raise PlacesUnavailable(f"Google Places refused the request ({status})") from e
     except requests.RequestException as e:
-        logger.error("[Places] unreachable for %r: %s", query, e)
+        logger.error("[Places] unreachable: %s", e)
         raise PlacesUnavailable("could not reach Google Places") from e

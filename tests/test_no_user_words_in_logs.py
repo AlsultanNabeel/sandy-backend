@@ -12,6 +12,12 @@ APP = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 # file -> the names that hold the user's words there
 WORDS = {
     "api/voice_ws/session.py": {"user_text", "sandy_text", "t"},
+    "brain/fast_path.py": {"raw", "target", "text", "message"},
+    # The model's reason for not reading a time repeats the user's words.
+    "brain/when.py": {"text", "normalized", "payload"},
+    "integrations/exa_client.py": {"query"},
+    "features/google_places.py": {"query"},
+    "features/research.py": {"query", "user_message"},
 }
 
 

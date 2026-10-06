@@ -219,8 +219,7 @@ def _match_device(target: str, devices: List[Dict[str, Any]]) -> Optional[Dict[s
     if len(hits) == 1:
         return hits[0]
     if len(hits) > 1:
-        logger.info("[fast] %r matches %d devices — leaving it to the model",
-                    target, len(hits))
+        logger.info("[fast] %d devices match — leaving it to the model", len(hits))
     return None
 
 
@@ -279,8 +278,8 @@ def try_fast_route(message: str, *, image_state: Any = None) -> Optional[Dict[st
 
         for action in actions:
             if command_payload(device, action).get("ok"):
-                logger.info("[fast] %r → %s(%s, %s) — no model call",
-                            raw[:40], _FAST_TOOL, device.get("name"), action)
+                logger.info("[fast] %s(%s, %s) — no model call",
+                            _FAST_TOOL, device.get("name"), action)
                 return _tool_call(device, action)
         return None
 
