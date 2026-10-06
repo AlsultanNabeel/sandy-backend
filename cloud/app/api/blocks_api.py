@@ -354,7 +354,7 @@ def register_blocks_api(app, mongo_db=None):
         limit = _limit()
         rows = items.list_items(request.args.get("list") or None, done=done,
                                 text=request.args.get("q", "")[:MAX_TEXT_CHARS],
-                                order=order, limit=limit,
+                                order=order, limit=limit, paged=True,
                                 after=_cursor(request.args.get("cursor")))
         out: Dict[str, Any] = {"items": [_shown(r, "data") for r in rows]}
         if len(rows) == min(limit, _base.MAX_LIMIT):

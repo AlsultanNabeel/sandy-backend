@@ -152,11 +152,13 @@ def touched_between(start: datetime, end: datetime, *, limit: int = 200,
 def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
                due_after: Optional[datetime] = None, due_before: Optional[datetime] = None,
                text: str = "", order: str = "created", limit: int = 200,
-               after: Optional[Tuple[datetime, str]] = None,
+               after: Optional[Tuple[datetime, str]] = None, paged: bool = False,
                mongo_db=None) -> List[Dict[str, Any]]:
     """Oldest first, the order a list is read in; ``order="newest"`` or ``"due"`` (soonest
     first) instead; every filter optional. ``after`` is the last row of the page before,
-    as ``(created_at, id)``, for the created orders: the next page starts past it."""
+    as ``(created_at, id)``, for the created orders: the next page starts past it. A paged
+    read (``paged``, or any with ``after``) breaks ties on the id, so rows added in one
+    millisecond are neither repeated nor skipped across pages."""
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None:
         return []
@@ -176,7 +178,8 @@ def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
         past = "$gt" if way == 1 else "$lt"
         query = {"$and": [query, {"$or": [{"created_at": {past: at}},
                                           {"created_at": at, "_id": {past: last_id}}]}]}
-    cursor = coll.find(query).sort([(key, way), ("_id", way)]).limit(_base.clamp(limit))
+    order_by = [(key, way), ("_id", way)] if (paged or after is not None) else [(key, way)]
+    cursor = coll.find(query).sort(order_by).limit(_base.clamp(limit))
     return [_base.out(d) for d in cursor]
 
 
