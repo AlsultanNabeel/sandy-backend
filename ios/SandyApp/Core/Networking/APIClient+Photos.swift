@@ -6,7 +6,7 @@ extension APIClient {
     func photosList(album: String? = nil) async throws -> [AlbumPhoto] {
         var path = "/api/photos"
         if let album, !album.isEmpty {
-            path += "?album=\(photosEncode(album))"
+            path += "?album=\(URLEscape.query(album))"
         }
         let r = try await request(path)
         return (r["items"] as? [[String: Any]] ?? []).map {
@@ -35,20 +35,11 @@ extension APIClient {
     }
 
     func photosDelete(id: String) async throws {
-        _ = try await request("/api/photos/\(photosPathEscape(id))", method: "DELETE")
+        _ = try await request("/api/photos/\(URLEscape.segment(id))", method: "DELETE")
     }
 
     /// Raw image bytes. 30 s (not 15) because the album is often opened on a weak signal.
     func photosFile(id: String) async throws -> Data {
-        try await rawGet("/api/photos/\(photosPathEscape(id))/file", timeout: 30)
-    }
-
-    /// Path-segment encoding: `urlQueryAllowed` would let `/` and `?` through.
-    private func photosPathEscape(_ s: String) -> String {
-        s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
-    }
-
-    private func photosEncode(_ s: String) -> String {
-        s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        try await rawGet("/api/photos/\(URLEscape.segment(id))/file", timeout: 30)
     }
 }

@@ -18,7 +18,7 @@ extension APIClient {
         let trimmed = city.trimmingCharacters(in: .whitespacesAndNewlines)
         let q = trimmed.isEmpty
             ? ""
-            : "?city=\(trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
+            : "?city=\(URLEscape.query(trimmed))"
         let r: WeatherResponse = try await fetch("/api/weather\(q)")
         return WeatherSnapshot(
             city: r.city ?? trimmed,

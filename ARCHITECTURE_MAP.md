@@ -1117,6 +1117,8 @@ so folders are organisation only.
   focus and home controls. The weather is a read-only corner, like the lock-screen clock.
 - `Core/Networking/` — `APIClient` split into 9 extensions by domain, behind
   `APIClientProtocol`. **Add new endpoints as an extension, not to the base class.**
+  Every value put in a URL goes through `URLEscape` (`query` for a parameter, `segment` for a path
+  piece), never `.urlQueryAllowed` alone, which lets `&`, `+`, `=` and `/` through.
 - `Core/Auth/` — Keychain (`…ThisDeviceOnly`), Google sign-in, auth view. `APIClient` keeps its
   token through a `TokenStore` (the shared Keychain by default) and mirrors its address for the
   extensions only when `mirrorsShared`; tests pass an in-memory store and `false`

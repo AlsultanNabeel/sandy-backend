@@ -145,29 +145,29 @@ extension APIClient {
         if let transport { body["transport"] = transport.asDict }
         if let meta { body["meta"] = meta }
         guard !body.isEmpty else { return }
-        _ = try await request("/api/devices/\(enc(name))", method: "PATCH", body: body)
+        _ = try await request("/api/devices/\(URLEscape.segment(name))", method: "PATCH", body: body)
     }
 
     func deleteDevice(name: String) async throws {
-        try await send("/api/devices/\(enc(name))", method: "DELETE")
+        try await send("/api/devices/\(URLEscape.segment(name))", method: "DELETE")
     }
 
     // الأفعال: switch on|off؛ dimmer on|off|set؛ cover open|close|stop؛ media on|off|pause؛ enum set؛ ir send.
     func controlDevice(name: String, action: String, value: String? = nil) async throws {
         var body: [String: String] = ["action": action]
         if let value, !value.isEmpty { body["value"] = value }
-        try await send("/api/devices/\(enc(name))/control", method: "POST", body: body)
+        try await send("/api/devices/\(URLEscape.segment(name))/control", method: "POST", body: body)
     }
 
     // الخادم بيصغّر الصورة ع ٢٤٠×٢٤٠ وبيحوّلها لصيغة الشاشة: فكّ الصور بياكل رام اللوح.
     func sendDeviceImage(name: String, jpegData: Data) async throws {
-        try await send("/api/devices/\(enc(name))/image", method: "POST",
+        try await send("/api/devices/\(URLEscape.segment(name))/image", method: "POST",
                        body: ["image_base64": jpegData.base64EncodedString()])
     }
 
     // آخر إطار من البثّ البعيد؛ `nil` = ما في إطار بعد (مش خطأ).
     func liveFrame(nodeId: String) async throws -> Data? {
-        let r = try await rawGet("/api/nodes/\(enc(nodeId))/snapshot/live", timeout: 8)
+        let r = try await rawGet("/api/nodes/\(URLEscape.segment(nodeId))/snapshot/live", timeout: 8)
         guard r.count > 2, r[r.startIndex] == 0xFF,
               r[r.index(after: r.startIndex)] == 0xD8 else { return nil }
         return r
@@ -190,7 +190,7 @@ extension APIClient {
     // بيرجّع الصورة أو تذكرة منسأل عنها: اللوح ممكن ياخد +٢٠ ثانية، ومهلة طويلة
     // كانت بتوقّف خيط خادم (عنده ١٦ بس).
     func cameraSnapshot(nodeId: String) async throws -> Data {
-        let data = try await rawPost("/api/nodes/\(enc(nodeId))/snapshot", timeout: 20)
+        let data = try await rawPost("/api/nodes/\(URLEscape.segment(nodeId))/snapshot", timeout: 20)
 
         // JPEG بتبدأ بـ FF D8.
         if data.count > 2, data[data.startIndex] == 0xFF,
@@ -206,7 +206,7 @@ extension APIClient {
         let deadline = Date().addingTimeInterval(40)
         while Date() < deadline {
             try await Task.sleep(nanoseconds: 1_500_000_000)
-            let r = try await rawGet("/api/nodes/\(enc(nodeId))/snapshot/\(enc(req))")
+            let r = try await rawGet("/api/nodes/\(URLEscape.segment(nodeId))/snapshot/\(URLEscape.segment(req))")
             if r.count > 2, r[r.startIndex] == 0xFF,
                r[r.index(after: r.startIndex)] == 0xD8 {
                 return r
@@ -222,7 +222,7 @@ extension APIClient {
         // أسماء الحقول مطابقة لرد الخادم حرفيًا (`window_s`).
         struct Body: Encodable { let ssid: String; let password: String; let board: String }
         struct Reply: Decodable { let ok: Bool?; let window_s: Int? }
-        let r: Reply = try await fetch("/api/nodes/\(enc(nodeId))/wifi",
+        let r: Reply = try await fetch("/api/nodes/\(URLEscape.segment(nodeId))/wifi",
                                        method: "POST",
                                        body: Body(ssid: ssid, password: password,
                                                   board: board))
@@ -231,7 +231,7 @@ extension APIClient {
 
     // هلّق نحفظ اسم الزر (وكود إن توفّر).
     func irLearn(name: String, button: String, code: String = "") async throws {
-        try await send("/api/devices/\(enc(name))/ir-learn", method: "POST",
+        try await send("/api/devices/\(URLEscape.segment(name))/ir-learn", method: "POST",
                        body: ["button": button, "code": code])
     }
 
@@ -275,7 +275,7 @@ extension APIClient {
     }
 
     func renameNode(nodeId: String, label: String) async throws {
-        try await send("/api/nodes/\(enc(nodeId))", method: "PATCH",
+        try await send("/api/nodes/\(URLEscape.segment(nodeId))", method: "PATCH",
                        body: ["label": label])
     }
 
@@ -283,17 +283,17 @@ extension APIClient {
     @discardableResult
     func unpairNode(nodeId: String) async throws -> Bool {
         struct Reply: Decodable { let board_wiped: Bool? }
-        let r: Reply = try await fetch("/api/nodes/\(enc(nodeId))", method: "DELETE")
+        let r: Reply = try await fetch("/api/nodes/\(URLEscape.segment(nodeId))", method: "DELETE")
         return r.board_wiped ?? false
     }
 
     // تضع الوحدة بوضع التعلّم (تلتقط الضغطة القادمة).
     func nodeIrLearnStart(nodeId: String) async throws {
-        try await send("/api/nodes/\(enc(nodeId))/ir/learn", method: "POST", body: [String: String]())
+        try await send("/api/nodes/\(URLEscape.segment(nodeId))/ir/learn", method: "POST", body: [String: String]())
     }
 
     func nodeIrLast(nodeId: String) async throws -> (code: String, at: String) {
-        let r: NodeIrLastResponse = try await fetch("/api/nodes/\(enc(nodeId))/ir/last")
+        let r: NodeIrLastResponse = try await fetch("/api/nodes/\(URLEscape.segment(nodeId))/ir/last")
         return (r.code ?? "", r.at ?? "")
     }
 }

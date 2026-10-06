@@ -264,7 +264,7 @@ extension APIClient {
     }
 
     func searchConversations(q: String) async throws -> [ConversationHit] {
-        let r: ConversationSearchResponse = try await fetch("/api/conversations/search?q=\(enc(q))")
+        let r: ConversationSearchResponse = try await fetch("/api/conversations/search?q=\(URLEscape.query(q))")
         return (r.items ?? []).map {
             ConversationHit(id: $0.id ?? "",
                             title: $0.title ?? "",

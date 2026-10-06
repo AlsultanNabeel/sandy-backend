@@ -98,9 +98,6 @@ extension APIClient {
 
     // MARK: - البحث الخارجي (الويب/الأماكن)
 
-    func enc(_ s: String) -> String {
-        s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-    }
 
     private struct WebResearchResponse: Decodable {
         let items: [Row]?
@@ -114,7 +111,7 @@ extension APIClient {
     }
 
     func researchWeb(q: String) async throws -> ListResult<WebResult> {
-        let r: WebResearchResponse = try await fetch("/api/research?kind=web&q=\(enc(q))")
+        let r: WebResearchResponse = try await fetch("/api/research?kind=web&q=\(URLEscape.query(q))")
         let items = (r.items ?? []).map { row in
             WebResult(title: row.title ?? "",
                       url: row.url ?? "",
@@ -141,7 +138,7 @@ extension APIClient {
     }
 
     func researchPlaces(q: String) async throws -> ListResult<PlaceResult> {
-        let r: PlacesResponse = try await fetch("/api/research?kind=places&q=\(enc(q))")
+        let r: PlacesResponse = try await fetch("/api/research?kind=places&q=\(URLEscape.query(q))")
         let items = (r.items ?? []).map { row in
             PlaceResult(name: row.name ?? "",
                         address: row.address ?? "",
