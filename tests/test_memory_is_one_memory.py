@@ -50,7 +50,7 @@ def test_the_voice_prompt_keeps_the_past_record_guard():
 
 def test_every_turn_remembers_which_body_said_it():
     """He can ask "when did I tell you that?" and the answer should be real."""
-    assert '"timestamp": ts, "via": via}' in _STM
+    assert '"timestamp": ts, "via": via' in _STM
     session = (_ROOT / "api/voice_ws/session.py").read_text(encoding="utf-8")
     assert '_ROBOT_CHANNEL = "الروبوت"' in session
     assert "set_voice_channel(_ROBOT_CHANNEL)" in session, (

@@ -164,7 +164,7 @@ def test_a_rewound_turn_takes_back_what_it_did(brain_db):  # noqa: F811
 
 def stm_rewind():
     from app.brain import stm
-    return stm.rewind("userA", "userA")
+    return stm.rewind("userA", "userA", text="رتّبلي القوائم")
 
 
 def test_a_stopped_reply_runs_no_more_tools_and_is_remembered_cut(brain_db):  # noqa: F811

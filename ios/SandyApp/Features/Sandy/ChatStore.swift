@@ -194,7 +194,8 @@ final class ChatStore: ObservableObject {
             // منفصلة: الرسالة بتنحفظ حتى لو الإرسال اتلغى أو فشل.
             let saveUser = Task {
                 if appendUser {
-                    try? await api.appendMessage(cid: cid, role: "user", text: text, attachments: attachments)
+                    try? await api.appendMessage(cid: cid, role: "user", text: text, attachments: attachments,
+                                                 clientMsgId: clientMsgID)
                 }
             }
             // By id, not index: `messages` can be replaced mid-stream (new

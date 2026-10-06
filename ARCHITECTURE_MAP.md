@@ -1169,7 +1169,10 @@ so folders are organisation only.
   Chat: long-press copy / share / select on any message, «write it again» on Sandy's last
   reply and «edit and resend» on the user's last line (both through
   `POST /api/conversations/<cid>/rewind`, which also takes back what that reply did to
-  the blocks: every block write in a turn is journaled with its before-state
+  the blocks, only for the turn of the line it drops: a user line carries the send's
+  `client_msg_id` in the conversation and in memory (`stm.rewind` matches it, else the words),
+  and nothing in memory is touched when nothing was dropped, so editing a line that failed
+  leaves the turn before it alone: every block write in a turn is journaled with its before-state
   (`blocks/_base.journal`, kept on the reply's STM turn as `effects`) and `_base.undo`
   reverses it (a log row it puts back is embedded again, unless sealed); device actions are not undone), a stop button that keeps what arrived
   (`POST …/stop`: a running turn stops before its next tool via `brain/stops.py`, and

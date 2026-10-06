@@ -167,10 +167,22 @@ def _ended(turns: List[Dict[str, Any]], now: datetime) -> List[Dict[str, Any]]:
     return [m for m in turns if not m.get("summarized")]
 
 
-def rewind(thread_id: str, user_id: str) -> List[Dict[str, Any]]:
+def _is_line(turn: Dict[str, Any], msg_id: str, text: str) -> bool:
+    """Whether memory's user turn is the app's line: by its id when both have one, else by
+    its words (memory may add attachment marks after them)."""
+    if msg_id and turn.get("msg_id"):
+        return turn["msg_id"] == msg_id
+    content = str(turn.get("content") or "")
+    return bool(text) and (content == text or content.startswith(text + " "))
+
+
+def rewind(thread_id: str, user_id: str, *, msg_id: str = "",
+           text: str = "") -> List[Dict[str, Any]]:
     """Forget the thread's last exchange (its last user line and any reply after it),
-    so the same line, or an edited one, can be answered again in its place. Returns
-    what that reply did to the blocks (its `effects`), for the caller to take back."""
+    so the same line, or an edited one, can be answered again in its place, only when
+    that line is the one the app names (`msg_id`, else its `text`): a line that was
+    never answered names nothing here, and the turn before it stays. Returns what the
+    forgotten reply did to the blocks (its `effects`), for the caller to take back."""
     coll = _stm_collection()
     if coll is None:
         return []
@@ -179,11 +191,14 @@ def rewind(thread_id: str, user_id: str) -> List[Dict[str, Any]]:
     try:
         doc = coll.find_one({"key": key}, {"_id": 0, "history": 1})
         turns = list((doc or {}).get("history") or [])
-        while turns and turns[-1].get("role") == "assistant":
-            effects = list(turns.pop().get("effects") or []) + effects
-        if turns and turns[-1].get("role") == "user":
-            turns.pop()
-        coll.update_one({"key": key}, {"$set": {"history": turns}})
+        end = len(turns)
+        while end and turns[end - 1].get("role") == "assistant":
+            end -= 1
+        if not end or turns[end - 1].get("role") != "user" or not _is_line(turns[end - 1], msg_id, text):
+            return []
+        for turn in turns[end:]:
+            effects += list(turn.get("effects") or [])
+        coll.update_one({"key": key}, {"$set": {"history": turns[:end - 1]}})
     except PyMongoError as exc:  # memory is never worth a failed reply
         logger.warning("[stm] rewind failed: %s", exc)
     return effects
@@ -230,7 +245,7 @@ def cut_last(thread_id: str, user_id: str, text: str) -> None:
 
 def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
          via: str = "", source: str = "chat",
-         effects: Optional[List[Dict[str, Any]]] = None) -> None:
+         effects: Optional[List[Dict[str, Any]]] = None, msg_id: str = "") -> None:
     """Append the turn to the thread as it is now, read again here: the turn itself may
     have changed it (`undo_last` takes the last reply's effects), and a copy read when the
     turn began would hand them back. Runs in the caller's tenant: the overflow summary is scoped."""
@@ -245,7 +260,9 @@ def save(thread_id: str, user_id: str, user_msg: str, reply: str, *,
         turns = (doc or {}).get("history", []) or []
         to_summarize = _ended(turns, now)
         # `via` is where it was said, so «when did I tell you that?» has an answer.
-        turns.append({"role": "user", "content": user_msg, "timestamp": ts, "via": via})
+        # `msg_id` is the app's client_msg_id: a rewind takes back only the line it names.
+        turns.append({"role": "user", "content": user_msg, "timestamp": ts, "via": via,
+                      **({"msg_id": msg_id} if msg_id else {})})
         if reply:
             # What the reply did to the blocks, so a regenerate or an edit can take it back.
             turns.append({"role": "assistant", "content": reply, "timestamp": ts, "via": via,

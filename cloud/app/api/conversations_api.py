@@ -385,6 +385,10 @@ def register_conversations_api(app, mongo_db=None):
             d = {}
 
         message = {"role": role, "text": text, "ts": _now()}
+        cmid = str(body.get("client_msg_id") or "")
+        if role == "user" and valid_client_id(cmid):
+            # The line's id, so a rewind takes back the turn of this line and no other.
+            message["client_msg_id"] = cmid
         if files:
             message["attachments"] = files
         update = {
@@ -418,20 +422,27 @@ def register_conversations_api(app, mongo_db=None):
         d = coll.find_one({"_id": cid, "user_id": uid}, {"messages": {"$slice": -2}})
         if not d:
             return jsonify({"error": "not_found"}), 404
-        tail = [m.get("role") for m in d.get("messages") or []]
+        msgs = d.get("messages") or []
+        tail = [m.get("role") for m in msgs]
         drop = 0
         if tail and tail[-1] == "sandy":
             drop += 1
         if not keep_user and len(tail) > drop and tail[-1 - drop] == "user":
             drop += 1
+        # The user line whose turn goes: the one before the reply, or the last one.
+        line = next((m for m in reversed(msgs) if m.get("role") == "user"), None)
         for _ in range(drop):
             coll.update_one({"_id": cid, "user_id": uid}, {"$pop": {"messages": 1}})
-        from app.blocks import _base as blocks_base
-        from app.brain import stm
-        # What the dropped reply did (added, changed, deleted) goes back; devices stay as they are.
-        effects = stm.rewind(cid, uid)
-        with active_user_profile_context({"chat_id": uid}):
-            undone = blocks_base.undo(effects, mongo_db)
+        undone = 0
+        if drop and line is not None:
+            from app.blocks import _base as blocks_base
+            from app.brain import stm
+            # What the dropped reply did (added, changed, deleted) goes back; devices stay
+            # as they are. Memory forgets the turn only when it is this line's.
+            effects = stm.rewind(cid, uid, msg_id=str(line.get("client_msg_id") or ""),
+                                 text=str(line.get("text") or ""))
+            with active_user_profile_context({"chat_id": uid}):
+                undone = blocks_base.undo(effects, mongo_db)
         return jsonify({"ok": True, "dropped": drop, "undone": undone}), 200
 
     @app.route("/api/conversations/<cid>/stop", methods=["POST"])

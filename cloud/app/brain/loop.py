@@ -222,12 +222,12 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
              image_state: Optional[Dict[str, Any]] = None,
              conversation_id: Optional[str] = None,
              attachments: Optional[List[Dict[str, Any]]] = None,
-             complete: Optional[Callable] = None) -> Dict[str, Any]:
+             complete: Optional[Callable] = None, client_msg_id: str = "") -> Dict[str, Any]:
     with turn_scope():
         return _run_turn(message, user_id, chat_id, pending_state=pending_state,
                          source=source, image_state=image_state,
                          conversation_id=conversation_id, attachments=attachments or [],
-                         complete=complete or model.complete)
+                         complete=complete or model.complete, client_msg_id=client_msg_id)
 
 
 def _user_content(message: str, attachments: List[Dict[str, Any]]) -> Any:
@@ -256,7 +256,7 @@ def _remembered_line(message: str, attachments: List[Dict[str, Any]]) -> str:
 
 
 def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
-              conversation_id, attachments, complete) -> Dict[str, Any]:
+              conversation_id, attachments, complete, client_msg_id) -> Dict[str, Any]:
     t0 = time.perf_counter()
     began = datetime.now(timezone.utc)
     thread_id = str(conversation_id or chat_id)
@@ -305,7 +305,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                 outcome["tools"])
     stm.save(thread_id, user_id, _remembered_line(message, attachments), remembered,
              via="شات التطبيق" if source == "web" else (source or ""), source=ctx.source,
-             effects=effects)
+             effects=effects, msg_id=client_msg_id)
     return {
         "message": message, "user_id": user_id, "chat_id": chat_id,
         "final_response": text,

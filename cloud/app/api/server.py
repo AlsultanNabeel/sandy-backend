@@ -190,6 +190,7 @@ def create_app(*, mongo_db=None):
                 conversation_id=conversation_id or None,
                 pending_state=loaded_pending,
                 attachments=attachments.for_message(body.get("attachments") or []),
+                client_msg_id=str(body.get("client_msg_id") or ""),
             )
         pending.save(thread_id, user_id, mongo_db, state.get("pending_state"))
         text = state.get("final_response") or ""

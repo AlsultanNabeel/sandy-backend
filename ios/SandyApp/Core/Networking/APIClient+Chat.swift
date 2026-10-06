@@ -37,6 +37,13 @@ private struct MessageAppend: Encodable {
     let role: String
     let text: String
     let attachments: [ChatAttachment]?
+    /// The send's id on a user line: a rewind takes back that line's turn and no other.
+    let clientMsgId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role, text, attachments
+        case clientMsgId = "client_msg_id"
+    }
 }
 
 /// Reports how much of an upload has gone out (0…1).
@@ -235,10 +242,11 @@ extension APIClient {
     }
 
     func appendMessage(cid: String, role: String, text: String,
-                       attachments: [ChatAttachment] = []) async throws {
+                       attachments: [ChatAttachment] = [], clientMsgId: String? = nil) async throws {
         try await send("/api/conversations/\(cid)/messages", method: "POST",
                        body: MessageAppend(role: role, text: text,
-                                           attachments: attachments.isEmpty ? nil : attachments))
+                                           attachments: attachments.isEmpty ? nil : attachments,
+                                           clientMsgId: clientMsgId))
     }
 
     /// Drops the last reply (and, unless `keepUser`, the line it answered) on the server and

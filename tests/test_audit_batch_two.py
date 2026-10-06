@@ -169,9 +169,87 @@ def test_an_undo_written_again_finds_nothing_to_undo(brain_db):  # noqa: F811
     assert "اشتري هدية" not in _open()
     # «Write it again» on the undo's reply: the reply goes, the same line is answered again.
     with active_user_profile_context(A):
-        stm.rewind("userA", "userA")
+        stm.rewind("userA", "userA", text="لا غلط")
     model = ScriptedModel(tools_reply(call("undo_last")), text_reply("ما في شي"))
     _turn(model, "لا غلط")
     tool_msgs = [m for m in model.seen[-1] if m.get("role") == "tool"]
     assert "nothing to undo" in tool_msgs[-1]["content"], \
         "the save handed the first reply its effects back, so they were undone twice"
+
+
+# ── H2. A rewind takes back only the turn it names ───────────────────────────
+
+import uuid  # noqa: E402
+
+import mongomock  # noqa: E402
+import pytest  # noqa: E402
+
+
+@pytest.fixture()
+def api(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    import app.db as appdb
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+    from app.blocks import _base
+    from app.brain import stm
+
+    db = mongomock.MongoClient().db
+    appdb.configure(db)
+    monkeypatch.setattr(stm, "_stm_index_ready", True)
+    undone = []
+    monkeypatch.setattr(_base, "undo", lambda effects, *a, **k: undone.append(list(effects)) or 0)
+    client = create_app(mongo_db=db).test_client()
+    headers = {"Authorization": f"Bearer {make_token('user', user_id='u1')}"}
+    yield client, headers, undone
+    appdb.reset()
+
+
+def _say(client, headers, cid, role, text, cmid=None):
+    body = {"role": role, "text": text, **({"client_msg_id": cmid} if cmid else {})}
+    assert client.post(f"/api/conversations/{cid}/messages", json=body,
+                       headers=headers).status_code == 200
+
+
+_ADDED = [{"op": "created", "coll": "sandy_items", "id": "x", "text": "حليب"}]
+
+
+def test_editing_a_line_that_failed_leaves_the_turn_before_it_alone(api):
+    from app.brain import stm
+
+    client, headers, undone = api
+    cid = uuid.uuid4().hex
+    _say(client, headers, cid, "user", "ضيفي حليب", "a" * 32)
+    _say(client, headers, cid, "sandy", "ضفت")
+    stm.save(cid, "u1", "ضيفي حليب", "ضفت", effects=_ADDED, msg_id="a" * 32)
+    _say(client, headers, cid, "user", "شو الطقس؟", "b" * 32)     # the turn failed: nothing saved
+    client.post(f"/api/conversations/{cid}/rewind", json={}, headers=headers)
+    assert [t["content"] for t in stm.load(cid, "u1")] == ["ضيفي حليب", "ضفت"], \
+        "the milk turn was forgotten for a line that was never answered"
+    assert not any(undone), "the milk Sandy added was deleted in silence"
+
+
+def test_a_rewind_that_drops_nothing_touches_no_memory(api):
+    from app.brain import stm
+
+    client, headers, undone = api
+    cid = uuid.uuid4().hex
+    _say(client, headers, cid, "user", "ضيفي حليب", "a" * 32)
+    _say(client, headers, cid, "sandy", "ضفت")
+    stm.save(cid, "u1", "ضيفي حليب", "ضفت", effects=_ADDED, msg_id="a" * 32)
+    _say(client, headers, cid, "user", "شو الطقس؟", "b" * 32)
+    r = client.post(f"/api/conversations/{cid}/rewind", json={"keep_user": True}, headers=headers)
+    assert r.get_json()["dropped"] == 0
+    assert len(stm.load(cid, "u1")) == 2 and not any(undone)
+
+
+def test_rewinding_the_answered_line_still_takes_it_back(api):
+    from app.brain import stm
+
+    client, headers, undone = api
+    cid = uuid.uuid4().hex
+    _say(client, headers, cid, "user", "ضيفي حليب", "a" * 32)
+    _say(client, headers, cid, "sandy", "ضفت")
+    stm.save(cid, "u1", "ضيفي حليب", "ضفت", effects=_ADDED, msg_id="a" * 32)
+    client.post(f"/api/conversations/{cid}/rewind", json={"keep_user": True}, headers=headers)
+    assert stm.load(cid, "u1") == [] and undone == [_ADDED]
