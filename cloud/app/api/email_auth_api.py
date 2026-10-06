@@ -11,7 +11,12 @@ import re
 from flask import jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app.api.auth_handlers import check_rate_limit, make_token
+from app.api.auth_handlers import (
+    check_rate_limit,
+    failures_over_limit,
+    make_token,
+    note_failures,
+)
 from app.features import users_store
 
 # تحقّق شكلي بسيط.
@@ -80,15 +85,17 @@ def register_email_auth_api(app):
         email = str(body.get("email") or "").strip().lower()
         password = str(body.get("password") or "")
 
-        # حدّ بالأيبي وبالإيميل قبل أي فحص باسورد.
-        if _rate_blocked(
-            (_client_ip(), "email_login"),
-            (email or "unknown", "email_login_acct"),
-        ):
+        # Failures only, per address, per (email, address) and per email alone, checked
+        # before any password: a stranger's guesses never keep the owner out.
+        ip = _client_ip()
+        limits = ((ip, "email_login"), (f"{email or 'unknown'}|{ip}", "email_login_pair"),
+                  (email or "unknown", "email_login_acct"))
+        if failures_over_limit(limits):
             return jsonify({"error": "too_many_attempts"}), 429
 
         user = users_store.get_email_user(email)
         if not user or not check_password_hash(user.get("password_hash") or "", password):
+            note_failures(limits)
             # نفس الردّ للإيميل الغلط والباسوورد الغلط (ما نكشف وجود الحساب).
             return jsonify({"error": "invalid_credentials"}), 401
         return _result_for(user)

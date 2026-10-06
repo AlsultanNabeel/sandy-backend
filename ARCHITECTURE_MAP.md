@@ -510,9 +510,12 @@ moving it is how tokens are revoked). Once a day old it comes back renewed in th
 `X-Sandy-Token` header of any `require_auth` response (`renewed_token`), on the same
 generation only: a revoked token, a deleted account or an expired token is never renewed,
 so a session in use does not end, and one left a week unused does. The app keeps the new
-token when it is still the one it sent. Login
-rate-limited to 5 attempts per 15 minutes per IP, with an in-process sliding
-window as a fail-closed fallback when Mongo is down. `JWT_SECRET` has no default —
+token when it is still the one it sent. Email sign-in counts failed attempts only,
+in a 15-minute window, three ways (`auth_handlers.EMAIL_LOGIN_LIMITS`): 5 per email and
+address, 20 per address, 20 per email alone — so a stranger's guesses never keep the owner
+out and a new address per guess does not guess without end. Registration and pairing keep
+`check_rate_limit` (every attempt). Both fall back to an in-process sliding window when
+Mongo is down. `JWT_SECRET` has no default —
 an empty secret would let anyone forge a token, so it refuses rather than degrade.
 
 ### 2.11 External services

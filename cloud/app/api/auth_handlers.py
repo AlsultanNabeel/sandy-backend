@@ -17,6 +17,7 @@ from typing import Optional, Tuple
 
 import jwt
 from flask import jsonify, make_response, request
+from pymongo.errors import PyMongoError
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,59 @@ def _auth_coll():
         return coll
     except Exception:
         return None
+
+
+# Email sign-in counts failures only, so signing in rightly never uses the limit up: per
+# address, per (email, address), and per email alone with a higher ceiling, so neither a
+# stranger's guesses keep the owner out nor a new address per guess guesses without end.
+EMAIL_LOGIN_LIMITS = {"email_login": 20, "email_login_pair": 5, "email_login_acct": 20}
+
+
+def _memory_failures(key: str, add: bool) -> int:
+    now = time.monotonic()
+    with _ip_hits_lock:
+        dq = _ip_hits.setdefault(f"fail:{key}", deque())
+        while dq and dq[0] <= now - _RATE_WINDOW:
+            dq.popleft()
+        if add:
+            dq.append(now)
+        return len(dq)
+
+
+def _failures(key: str, add: bool) -> int:
+    """Failures of ``key`` in the window, after adding one when ``add``."""
+    coll = _auth_coll()
+    if coll is None:
+        logger.warning("[auth] Mongo unavailable; using in-memory failure count")
+        return _memory_failures(key, add)
+    try:
+        if not add:
+            return int((coll.find_one({"_id": f"fail:{key}"}) or {}).get("count", 0))
+        from pymongo import ReturnDocument
+        now = datetime.now(timezone.utc)
+        doc = coll.find_one_and_update(
+            {"_id": f"fail:{key}"},
+            {"$inc": {"count": 1},
+             "$setOnInsert": {"expire_at": now + timedelta(seconds=_RATE_WINDOW)}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return int((doc or {}).get("count", 1))
+    except PyMongoError as exc:
+        logger.warning("[auth] Mongo unavailable; using in-memory failure count (%s)", exc)
+        return _memory_failures(key, add)
+
+
+def failures_over_limit(checks) -> bool:
+    """True when any ``(key, scope)`` has used up its scope's failures in this window."""
+    return any(_failures(f"{scope}:{key}", add=False) >= EMAIL_LOGIN_LIMITS[scope]
+               for key, scope in checks)
+
+
+def note_failures(checks) -> None:
+    """One more failure on every ``(key, scope)``."""
+    for key, scope in checks:
+        _failures(f"{scope}:{key}", add=True)
 
 
 def check_rate_limit(ip: str, scope: str = "login") -> Tuple[bool, int]:
