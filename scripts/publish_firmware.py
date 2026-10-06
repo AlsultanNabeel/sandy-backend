@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Sign a firmware build and publish it to the robots.
 
-    python3 scripts/publish_firmware.py --key ~/Desktop/.sandy-signing/firmware-signing-key.pem \
-        --canary 8421 [--rollout 0] [--notes "…"]
+    python3 scripts/publish_firmware.py --canary 8421 [--rollout 0] [--notes "…"]
 
 Reads the version from main/include/config.h (SANDY_FW_VERSION) and the image
 from firmware/brain-core/build-retail/sandy-brain-s3.bin (the sale build). Signs
@@ -10,15 +9,17 @@ from firmware/brain-core/build-retail/sandy-brain-s3.bin (the sale build). Signs
 the signature against the public key compiled into the firmware — a release the
 robots would refuse is caught here, not in the field — and uploads.
 
-Needs SANDY_API_BASE (e.g. https://…herokuapp.com) and SANDY_FIRMWARE_TOKEN in
-the environment (or in ~/Desktop/.sandy-publish.env as KEY=value lines).
+The private key is ~/.sandy-signing/firmware-signing-key.pem (outside iCloud, encrypted;
+``--key`` names another); its password is asked for. Needs SANDY_API_BASE (e.g.
+https://…herokuapp.com) and SANDY_FIRMWARE_TOKEN in the environment (or in
+~/.sandy-signing/.sandy-publish.env as KEY=value lines).
 
 Widen a release later:
     python3 scripts/publish_firmware.py --rollout-only 0.9.2 --rollout 25
 
 The camera and the room node (``--board cam`` / ``--board room``):
 
-    python3 scripts/publish_firmware.py --board cam --key … --canary cam-8421
+    python3 scripts/publish_firmware.py --board cam --canary cam-8421
 
 builds the sketch itself with ``arduino-cli`` (the one inside Arduino IDE works)
 from a clean copy whose ``secrets.h`` is ``secrets.example.h`` — so the image
@@ -32,6 +33,7 @@ Their device ids for ``--canary`` are ``cam-<node>`` and ``room-<node>``.
 """
 
 import argparse
+import getpass
 import hashlib
 import json
 import os
@@ -56,7 +58,10 @@ FW = REPO / "firmware" / "brain-core"
 IMAGE = FW / "build-retail" / "sandy-brain-s3.bin"
 CONFIG_H = FW / "main" / "include" / "config.h"
 PUBLIC = FW / "main" / "fw_pubkey.pem"
-ENV_FILE = pathlib.Path("~/Desktop/.sandy-publish.env").expanduser()
+# Off the iCloud-synced Desktop, in a folder only the owner can read (the transfer steps).
+SIGNING_DIR = pathlib.Path("~/.sandy-signing").expanduser()
+DEFAULT_KEY = SIGNING_DIR / "firmware-signing-key.pem"
+ENV_FILE = SIGNING_DIR / ".sandy-publish.env"
 
 # The two Arduino boards: sketch folder, the define that carries the version,
 # the board to build for, their OTA slot, and strings only a dev build has.
@@ -237,7 +242,7 @@ def _post(url: str, token: str, body: bytes, content_type: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--key")
+    ap.add_argument("--key", help=f"the private key (default {DEFAULT_KEY})")
     ap.add_argument("--rollout", type=int, default=0)
     ap.add_argument("--canary", default="")
     ap.add_argument("--notes", default="")
@@ -267,8 +272,8 @@ def main() -> int:
         print(r)
         return 0 if r.get("ok") else 1
 
-    if not a.key:
-        sys.exit("--key is required to publish")
+    if not (pathlib.Path(a.key).expanduser() if a.key else DEFAULT_KEY).exists():
+        sys.exit(f"no signing key at {a.key or DEFAULT_KEY} — pass --key")
     if a.board != "brain":
         return _publish_small(a, base, token)
     version = _version()
@@ -280,13 +285,28 @@ def main() -> int:
                             f"sandy-fw|{version}|{len(image)}|", "brain")
 
 
+def load_signing_key(path: pathlib.Path, ask=lambda: getpass.getpass("signing key password: ")):
+    """The private key, its password asked for when it is encrypted (it should be)."""
+    raw = pathlib.Path(path).expanduser().read_bytes()
+    try:
+        key = serialization.load_pem_private_key(raw, password=None)
+        print(f"warning: {path} is not encrypted — encrypt it with a password "
+              "(openssl pkey -aes256)", file=sys.stderr)
+        return key
+    except TypeError:
+        pass  # encrypted: needs the password
+    try:
+        return serialization.load_pem_private_key(raw, password=ask().encode())
+    except ValueError:
+        sys.exit("wrong password for the signing key")
+
+
 def _sign_and_upload(a, base: str, token: str, version: str, image: bytes,
                      prefix: str, board: str) -> int:
     sha = hashlib.sha256(image).hexdigest()
     message = f"{prefix}{sha}".encode()
 
-    private = serialization.load_pem_private_key(
-        pathlib.Path(a.key).expanduser().read_bytes(), password=None)
+    private = load_signing_key(pathlib.Path(a.key) if a.key else DEFAULT_KEY)
     signature = private.sign(message, ec.ECDSA(hashes.SHA256()))
 
     # The same check the robot will make, against the key built into it.

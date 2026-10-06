@@ -1408,7 +1408,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
 0b. **Firmware updates.** Since 19 Sep 2026 the brain pulls signed releases
    (`sandy_ota.c`, `features/firmware_store`, `api/firmware_api`): a manifest
    signed with the owner's ECDSA P-256 key (`scripts/firmware_keygen.py`;
-   private key off-repo, public key in `main/fw_pubkey.pem`), streamed into the
+   private key off-repo and off iCloud, encrypted, at `~/.sandy-signing/firmware-signing-key.pem`
+   with the publish token beside it; the script asks the key's password; public key in `main/fw_pubkey.pem`), streamed into the
    idle slot with the size and SHA-256 checked before switching, canary ids
    then a stable percentage (`scripts/publish_firmware.py`; a board is offered the newest release
    it is in the rollout of, so a canary held at 0 % never hides the stable one; releases older than

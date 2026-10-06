@@ -296,3 +296,35 @@ def test_no_requirement_nobody_imports():
     from pathlib import Path
     req = (Path(__file__).resolve().parent.parent / "requirements.txt").read_text()
     assert "google-cloud-texttospeech" not in req
+
+
+def _key_file(tmp_path, password):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    enc = (serialization.BestAvailableEncryption(password.encode()) if password
+           else serialization.NoEncryption())
+    path = tmp_path / "firmware-signing-key.pem"
+    path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+                                       serialization.PrivateFormat.PKCS8, enc))
+    return path
+
+
+def test_the_signing_key_is_read_from_outside_icloud_and_asks_its_password(tmp_path):
+    """The owner moved the key off the synced Desktop and encrypted it; the script read
+    only an unencrypted key from the Desktop."""
+    pf = _publisher()
+    assert ".sandy-signing" in str(pf.DEFAULT_KEY) and "Desktop" not in str(pf.DEFAULT_KEY)
+    assert "Desktop" not in str(pf.ENV_FILE)
+
+    asked = []
+    key = pf.load_signing_key(_key_file(tmp_path, "سر-طويل"),
+                              ask=lambda: asked.append(1) or "سر-طويل")
+    assert key is not None and asked == [1]
+
+
+def test_a_wrong_password_stops_the_publish(tmp_path):
+    pf = _publisher()
+    with pytest.raises(SystemExit):
+        pf.load_signing_key(_key_file(tmp_path, "صح"), ask=lambda: "غلط")
