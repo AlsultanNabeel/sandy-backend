@@ -142,8 +142,9 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    model → tool calls → results (JSON tool messages) → model, until it answers in
    text. A tool asking for a yes or a choice does not end the turn: the model is
    told it waits and goes on with the rest of the request; every held action joins
-   one pending, and the reply is what the tools did plus one question, both
-   deterministic (nothing of the model's is streamed once something is held).
+   one pending, and the reply is the model's answer to the rest (what the tools did when it
+   has none) plus one question, which is ours (nothing of the model's is streamed once
+   something is held, and it is told not to say the held action happened).
    When every call of the turn is an answer tool (`loop.ANSWER_TOOLS`: device_control,
    scene_apply, room_restore, image) and each worked with a `reply`, that reply is the
    answer and no second model call restates it. Two or more slow independent calls of one

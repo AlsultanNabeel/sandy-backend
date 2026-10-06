@@ -101,3 +101,16 @@ def test_a_pick_then_a_request_does_both(brain_db):  # noqa: F811
     assert _done(b) and not _done(a)
     assert "خبز" in _open("shopping") and "اختار" in model.seen[0][0]["content"]
     assert state["pending_state"] is None
+
+
+# ── W7. A held delete does not swallow the answer to the rest of the line ────
+
+def test_the_model_s_answer_stays_beside_the_held_question(brain_db):  # noqa: F811
+    with active_user_profile_context(A):
+        gym = items.add("tasks", "روح عالجيم")
+    model = ScriptedModel(tools_reply(call("list_update", id=gym, delete=True)),
+                          text_reply("بكرا عندك اجتماع الساعة عشرة."))
+    state = _turn(model, "احذفي مهمة الجيم وشو عندي بكرا؟")
+    assert state["final_response"].startswith("بكرا عندك اجتماع الساعة عشرة.\nمتأكد إنك بدك تحذف"), \
+        "tomorrow's answer was dropped and only the question came back"
+    assert state["pending_state"] is not None

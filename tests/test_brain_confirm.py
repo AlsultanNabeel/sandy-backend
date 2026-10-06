@@ -17,7 +17,8 @@ def _turn(model, message, pending=None):
 
 
 def _ask_delete(iid):
-    model = ScriptedModel(tools_reply(call("list_update", id=iid, delete=True)))
+    # The model has nothing to add: the reply is the question alone.
+    model = ScriptedModel(tools_reply(call("list_update", id=iid, delete=True)), text_reply(""))
     state = _turn(model, "احذفي مهمة الجيم")
     # The model is told the delete waits and goes on; the question itself is ours.
     assert len(model.seen) == 2 and '"held": true' in model.seen[1][-1]["content"]
@@ -107,9 +108,9 @@ def test_what_was_done_is_said_with_the_question_and_the_steps_after_it_run(gym)
     model = ScriptedModel(
         tools_reply(call("list_update", id=gym, delete=True)),
         tools_reply(call("list_add", list="tasks", text="روح عالمسبح")),
-        text_reply("تمام"))
+        text_reply("ضفت المسبح بداله."))
     state = _turn(model, "احذفي الجيم وحطي المسبح بداله")
-    assert state["final_response"].startswith("ضفت «روح عالمسبح» ✅\nمتأكد إنك بدك تحذف")
+    assert state["final_response"].startswith("ضفت المسبح بداله.\nمتأكد إنك بدك تحذف")
     with active_user_profile_context(A):
         assert "روح عالمسبح" in [i["text"] for i in items.list_items("tasks")]
     assert _exists(gym)

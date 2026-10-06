@@ -47,8 +47,8 @@ def _assistant_msg(reply: model.Reply) -> Dict[str, Any]:
 
 
 # What the model reads for a held call: the system asks, the model goes on with the rest.
-HELD_NOTE = ("مستنّي تأكيده؛ النظام بيسأله بآخر الرد. ما تسأليه انتِ وما تعيدي هالأداة، "
-             "وكمّلي باقي طلبه إذا في.")
+HELD_NOTE = ("مستنّي تأكيده؛ النظام بيسأله بآخر الرد. ما تسأليه انتِ، وما تحكي إنه انعمل، "
+             "وما تعيدي هالأداة، وكمّلي باقي طلبه إذا في.")
 
 
 def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
@@ -57,8 +57,8 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
     stops the reply (`stopped`), no further tool or model call runs.
 
     A delete that waits for a yes does not end the turn: the rest of the request still
-    runs, every held action joins one question, and the reply is what was done plus
-    that question, both deterministic, so the model cannot talk past either."""
+    runs, every held action joins one question, and the reply is the model's answer (or,
+    with none, what the tools did) plus that question, which is ours, never the model's."""
     hooks = model.stream_hooks()
     on_text = None
     if hooks:
@@ -80,7 +80,9 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
             return {"text": ERROR_REPLY, "pending": None, "tools": used, "error": True}
         if not reply.tool_calls:
             if held is not None:
-                return _settled(replies, held, used)
+                # The model's answer to the rest of the line stays (it has the tools'
+                # results), then the question; its own words replace the tools' replies.
+                return _settled([reply.text] if reply.text else replies, held, used)
             return {"text": reply.text or GAVE_UP_REPLY, "pending": None, "tools": used}
         messages.append(_assistant_msg(reply))
         early = _run_side_by_side(reply.tool_calls, ctx)
