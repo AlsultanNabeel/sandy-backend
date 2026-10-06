@@ -55,6 +55,7 @@ enum L10nControl {
             "device.editTitle":  .text("تعديل الجهاز"),
             "device.header":     .text("شو الجهاز اللي حابب تتحكّم فيه؟"),
             "device.delete":     .text("حذف"),
+            "device.play":       .text("شغّل"),
             "device.deleteConfirm": .text("بدك تحذف هالجهاز؟ أوامره بتروح معه."),
             "device.edit":       .text("تعديل"),
 
@@ -175,6 +176,7 @@ enum L10nControl {
             "device.editTitle":  .text("Edit device"),
             "device.header":     .text("What device would you like to control?"),
             "device.delete":     .text("Delete"),
+            "device.play":       .text("Play"),
             "device.deleteConfirm": .text("Delete this device? Its commands go with it."),
             "device.edit":       .text("Edit"),
 

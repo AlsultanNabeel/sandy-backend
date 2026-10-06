@@ -177,6 +177,17 @@ struct DeviceItem: Identifiable {
     var enumValues: [String] {
         (meta["values"] as? [String]) ?? []
     }
+    /// One-shot values (a melody, a gesture, «take a photo», next/previous): buttons that send
+    /// every tap. The server marks them (`meta.momentary`).
+    var momentaryValues: [String] {
+        let marked = Set((meta["momentary"] as? [String]) ?? [])
+        return enumValues.filter { marked.contains($0) }
+    }
+    /// The remembered choices, kept as a picker.
+    var choiceValues: [String] {
+        let marked = Set(momentaryValues)
+        return enumValues.filter { !marked.contains($0) }
+    }
     var dimmerMin: Int { (meta["min"] as? NSNumber)?.intValue ?? 0 }
     var dimmerMax: Int {
         let m = (meta["max"] as? NSNumber)?.intValue ?? 100

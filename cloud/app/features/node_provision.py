@@ -52,7 +52,9 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     },
     "gesture": {
         "name": "sandy_gesture", "label": "حركات ساندي", "control_type": "enum",
-        "meta": {"values": ROBOT_GESTURES},
+        # `momentary`: the values that are one-shot commands, drawn as buttons (a picker
+        # sends only when its value changes, so the same one twice was nothing).
+        "meta": {"values": ROBOT_GESTURES, "momentary": ROBOT_GESTURES},
     },
     "servo": {
         "name": "sandy_head", "label": "رقبة ساندي", "control_type": "dimmer",
@@ -75,7 +77,7 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     },
     "buzzer": {
         "name": "sandy_buzzer", "label": "جرس ساندي", "control_type": "enum",
-        "meta": {"values": ROBOT_MELODIES},
+        "meta": {"values": ROBOT_MELODIES, "momentary": ROBOT_MELODIES},
     },
     "mic_l": {
         "name": "sandy_mic_left", "label": "المايك الشمال", "control_type": "switch",
@@ -99,7 +101,8 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     },
     "speaker_test": {
         "name": "sandy_speaker_test", "label": "أصوات السماعة", "control_type": "enum",
-        "meta": {"values": ["beep", "chime", "alert", "sweep", "soft", "happy"]},
+        "meta": {"values": ["beep", "chime", "alert", "sweep", "soft", "happy"],
+                 "momentary": ["beep", "chime", "alert", "sweep", "soft", "happy"]},
     },
 
     # ── الكاميرا: بادئة `cam/` لأنها بتشارك معرّف الوحدة مع الدماغ ─────────────
@@ -117,7 +120,7 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     },
     "cam/snapshot": {
         "name": "cam_snapshot", "label": "التقاط صورة", "control_type": "enum",
-        "meta": {"values": ["take"]},
+        "meta": {"values": ["take"], "momentary": ["take"]},
     },
     "cam/stream": {
         "name": "cam_stream", "label": "بث مباشر", "control_type": "switch",
@@ -140,7 +143,8 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "room/music": {
         "name": "room_music", "label": "موسيقى الغرفة", "control_type": "enum",
         # قيم handleMusic بـ room-node.ino؛ `play` بدها مجلد ومقطع فمش من القائمة.
-        "meta": {"values": ["stop", "pause", "resume", "next", "prev"]},
+        "meta": {"values": ["stop", "pause", "resume", "next", "prev"],
+                 "momentary": ["next", "prev"]},
     },
 
     "cam/quality": {

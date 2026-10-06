@@ -218,7 +218,39 @@ struct DeviceCard: View {
     // enum — قائمة بخيارات meta.values (set + القيمة).
     @ViewBuilder
     private var enumWidget: some View {
-        if device.enumValues.isEmpty {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            choicePicker
+            momentaryButtons
+        }
+    }
+
+    /// One-shot commands: every tap sends, even the same one twice.
+    @ViewBuilder
+    private var momentaryButtons: some View {
+        let values = device.momentaryValues
+        if values.count > 4 {
+            Menu {
+                ForEach(values, id: \.self) { v in
+                    Button(v) { store.control(api: state.api, device: device, action: "set", value: v) }
+                }
+            } label: {
+                Label(lang.s("control.device.play"), systemImage: "play.circle")
+            }
+            .disabled(store.demo)
+        } else if !values.isEmpty {
+            HStack(spacing: Theme.Spacing.sm) {
+                ForEach(values, id: \.self) { v in
+                    Button(v) { store.control(api: state.api, device: device, action: "set", value: v) }
+                        .buttonStyle(.bordered)
+                }
+            }
+            .disabled(store.demo)
+        }
+    }
+
+    @ViewBuilder
+    private var choicePicker: some View {
+        if device.choiceValues.isEmpty {
             EmptyView()
         } else {
             // segmented لو الخيارات قليلة، وإلا قائمة منسدلة. نفصل الفرعين لأن
@@ -236,21 +268,21 @@ struct DeviceCard: View {
             let binding = Binding(
                 get: {
                     let s = device.state
-                    if s.isEmpty { return device.enumValues.first ?? "" }
-                    return device.enumValues.first { $0.caseInsensitiveCompare(s) == .orderedSame }
-                        ?? device.enumValues.first ?? ""
+                    if s.isEmpty { return device.choiceValues.first ?? "" }
+                    return device.choiceValues.first { $0.caseInsensitiveCompare(s) == .orderedSame }
+                        ?? device.choiceValues.first ?? ""
                 },
                 set: { store.control(api: state.api, device: device, action: "set", value: $0) }
             )
-            if device.enumValues.count <= 3 {
+            if device.choiceValues.count <= 3 {
                 Picker("", selection: binding) {
-                    ForEach(device.enumValues, id: \.self) { v in Text(v).tag(v) }
+                    ForEach(device.choiceValues, id: \.self) { v in Text(v).tag(v) }
                 }
                 .pickerStyle(.segmented)
                 .disabled(store.demo)
             } else {
                 Picker("", selection: binding) {
-                    ForEach(device.enumValues, id: \.self) { v in Text(v).tag(v) }
+                    ForEach(device.choiceValues, id: \.self) { v in Text(v).tag(v) }
                 }
                 .pickerStyle(.menu)
                 .disabled(store.demo)

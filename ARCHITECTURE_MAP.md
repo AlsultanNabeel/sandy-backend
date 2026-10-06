@@ -937,6 +937,10 @@ smaller-sounding job and the one that fails on the customer's air conditioner.
 The mark/space ordering is the whole format: invert it and the replay looks
 perfect on a scope and does nothing in the room.
 
+**One-shot values are marked** (`meta.momentary`: the melodies, the speaker test, the gestures,
+«take a photo», the music's next and previous): the app draws them as buttons that send every tap,
+and keeps a picker only for remembered choices (a picker sends only when its value changes).
+
 **The `ir` catalogue row carries no `meta`, deliberately.**
 `node_provision._refresh_from_catalogue` merges the catalogue's meta over the
 device's on every heartbeat, so a `"buttons": {}` row — even empty — would erase
