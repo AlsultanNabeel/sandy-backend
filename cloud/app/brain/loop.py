@@ -290,9 +290,15 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
             if again is not None:
                 outcome = {**outcome, "text": f"{outcome['text']}\n{_ask(again)}", "pending": again}
 
-    text = outcome["text"]
     # Stopped from the app: memory keeps what was shown, marked as cut.
     shown = stops.take(user_id, thread_id, since=began)
+    if not (outcome.get("error") or outcome.get("stopped") or shown is not None):
+        # Due messages to your future self ride on a reply that went out whole.
+        due = future.due()
+        if due:
+            outcome = {**outcome, "text": f"{outcome['text']}\n\n{due[0]}"}
+            future.mark_delivered(due[1])
+    text = outcome["text"]
     remembered = stops.cut(shown) if shown is not None else text
     logger.info("[turn] %.0fms total — brain%s tools=%s",
                 (time.perf_counter() - t0) * 1000, " (fast)" if outcome.get("fast") else "",
@@ -321,15 +327,11 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
     if outcome is None and not attachments and not note:
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
-        due = None
         try:
             system = context.build_system(user_id, message, history, spoken=ctx.source == "voice",
                                           thread_id=thread_id)
             if note:
                 system += "\n\n" + note
-            due = future.due_context()
-            if due:
-                system += "\n\n" + due[0]
             messages = [{"role": "system", "content": system},
                         *context.history_messages(history),
                         {"role": "user", "content": _user_content(message, list(attachments))}]
@@ -338,7 +340,4 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
         except Exception:  # noqa: BLE001 — the request boundary: answer, never 500
             logger.exception("[brain] turn failed")
             outcome = {"text": ERROR_REPLY, "pending": None, "tools": [], "error": True}
-        if due and not outcome.get("error"):
-            # Delivered only once a real reply carries it.
-            future.mark_delivered(due[1])
     return outcome

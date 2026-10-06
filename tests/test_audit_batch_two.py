@@ -114,3 +114,45 @@ def test_the_model_s_answer_stays_beside_the_held_question(brain_db):  # noqa: F
     assert state["final_response"].startswith("بكرا عندك اجتماع الساعة عشرة.\nمتأكد إنك بدك تحذف"), \
         "tomorrow's answer was dropped and only the question came back"
     assert state["pending_state"] is not None
+
+
+# ── W6. A message to your future self is in the reply, word for word ────────
+
+def _due_message(text="لا تنسى تشرب مي"):
+    from datetime import datetime, timedelta, timezone
+
+    from app.blocks import schedules
+
+    with active_user_profile_context(A):
+        sid = schedules.add("message_to_future_self", text,
+                            datetime.now(timezone.utc) + timedelta(minutes=5))
+    from app.blocks import _base
+    with active_user_profile_context(A):
+        _base.coll(_base.SCHEDULES).update_one(
+            {"_id": sid}, {"$set": {"fire_at": datetime.now(timezone.utc) - timedelta(minutes=1)}})
+    return sid
+
+
+def _status(sid):
+    from app.blocks import schedules
+    with active_user_profile_context(A):
+        return schedules.get(sid)["status"]
+
+
+def test_a_future_message_rides_on_a_held_reply_word_for_word(brain_db):  # noqa: F811
+    sid = _due_message()
+    with active_user_profile_context(A):
+        gym = items.add("tasks", "روح عالجيم")
+    model = ScriptedModel(tools_reply(call("list_update", id=gym, delete=True)), text_reply(""))
+    state = _turn(model, "احذفي مهمة الجيم")
+    assert "لا تنسى تشرب مي" in state["final_response"], \
+        "marked sent while the held reply never showed it"
+    assert _status(sid) == "sent"
+    assert all("لا تنسى تشرب مي" not in str(m.get("content")) for m in model.seen[0]), \
+        "the model is never handed it, so it cannot say it twice"
+
+
+def test_a_future_message_is_not_marked_when_the_turn_failed(brain_db):  # noqa: F811
+    sid = _due_message()
+    state = _turn(lambda *a, **k: None, "مرحبا")
+    assert "لا تنسى" not in state["final_response"] and _status(sid) == "pending"

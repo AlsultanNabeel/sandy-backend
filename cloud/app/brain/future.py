@@ -1,8 +1,9 @@
 """Messages to your future self, delivered into the next chat reply.
 
-Due `message_to_future_self` schedules go into the next chat turn's prompt, and
-are marked "sent" only once a real reply exists, so a failed turn delivers
-nothing. The mark matches on status "pending", so a row is marked once.
+Due `message_to_future_self` schedules are pasted word for word at the end of the
+next chat reply by the code, never handed to the model (so it cannot drop them or
+say them twice), and marked "sent" only when that reply went out whole: not an
+error, not stopped. The mark matches on status "pending", so a row is marked once.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from app.blocks import _base, schedules
 
 KIND = "message_to_future_self"
 MAX_DUE = 3
-MAX_CHARS = 200
 
 
 def _line(row: dict) -> str:
@@ -24,16 +24,16 @@ def _line(row: dict) -> str:
         text = decrypt_field(text)
     created = row.get("created_at")
     day = created.strftime("%Y/%m/%d") if hasattr(created, "strftime") else ""
-    return f"({day}): {text[:MAX_CHARS]}" if day else text[:MAX_CHARS]
+    return f"({day}): {text}" if day else text
 
 
-def due_context(now: Optional[datetime] = None) -> Optional[Tuple[str, List[Any]]]:
-    """(prompt line, ids) for the due messages, None when nothing is due."""
+def due(now: Optional[datetime] = None) -> Optional[Tuple[str, List[Any]]]:
+    """(the lines to add to the reply, ids) for the due messages, None when nothing is due."""
     now = now or datetime.now(timezone.utc)
     rows = schedules.list_schedules(KIND, status="pending", until=now, limit=MAX_DUE)
     if not rows:
         return None
-    text = "[رسالة مجدولة من المستخدم لنفسه: " + " | ".join(_line(r) for r in rows) + "]"
+    text = "\n".join(f"📬 رسالة منك لنفسك {_line(r)}" for r in rows)
     return text, [r["id"] for r in rows]
 
 

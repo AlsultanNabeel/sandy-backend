@@ -150,8 +150,9 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    answer and no second model call restates it. Two or more slow independent calls of one
    step (`loop.SIDE_BY_SIDE`: web_search, weather, recall, summarize, device_state)
    run side by side, each in a copy of the turn's context; the rest run in order.
-4. Due `message_to_future_self` schedules (`future.py`) go into the system prompt
-   and are marked `sent` only when the reply is not an error.
+4. Due `message_to_future_self` schedules (`future.py`) are pasted word for word at the end
+   of the reply by the code, never shown to the model, and marked `sent` only when the reply
+   went out whole (not an error, not stopped).
 5. The turn is written to short-term memory (`stm.save`, with `via`).
 
 **The model call** (`model.py`): the Azure chat deployment through
