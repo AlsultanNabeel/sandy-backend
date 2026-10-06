@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app.db import configure, get_db
 
@@ -93,7 +93,7 @@ def move_token_generation(user_id: str) -> bool:
         return False
     try:
         return coll.update_one({"_id": user_id}, {"$inc": {TOKEN_GEN_FIELD: 1}}).matched_count > 0
-    except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
+    except PyMongoError as exc:
         logger.warning("[users] generation not moved for %s: %s", user_id, exc)
         return False
 
