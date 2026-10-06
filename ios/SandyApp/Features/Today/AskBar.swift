@@ -63,7 +63,7 @@ struct AskBar: View {
                             return
                         }
                         Haptics.play(.listening)
-                        DeepLinkRouter.shared.pending = .call
+                        DeepLinkRouter.shared.ask(.call)
                     }
                     .accessibilityLabel(lang.s("today.holdToTalk"))
             } else {

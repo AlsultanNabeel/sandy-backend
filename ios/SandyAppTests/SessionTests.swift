@@ -202,4 +202,19 @@ final class SessionTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(sent, 1, "the offer outlived the session and went out as the next account")
     }
+
+    /// K6: «talk to Sandy» tapped while signed out waited with no time, and the call (and
+    /// the mic) opened by itself minutes later once sign-in was done.
+    func testACallLinkWaitsAMinuteAtMostAndNotAcrossASignOut() {
+        let router = DeepLinkRouter.shared
+        router.ask(.call)
+        XCTAssertNil(router.take(now: Date().addingTimeInterval(DeepLinkRouter.pendingLife + 1)),
+                     "a call link opened minutes after it was tapped")
+        router.ask(.call)
+        SessionReset.clearShared()
+        XCTAssertNil(router.take(), "a call link outlived the sign-out")
+        router.ask(.chat)
+        XCTAssertEqual(router.take(), .chat)
+        XCTAssertNil(router.take(), "a link is taken once")
+    }
 }

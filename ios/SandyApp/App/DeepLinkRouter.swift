@@ -6,12 +6,33 @@ enum DeepLink: Equatable {
 }
 
 /// Routes sandy://call, call/end, chat, quickadd, focus/stop.
-/// A link arriving before the main screen exists waits in `pending` for `MainTabView`.
+/// A link arriving before the main screen exists waits in `pending` for `MainTabView`, a
+/// minute at most and never across a sign-out: a «talk to Sandy» tapped signed out must not
+/// open the mic minutes later, once sign-in is done.
 @MainActor
 final class DeepLinkRouter: ObservableObject {
     static let shared = DeepLinkRouter()
 
-    @Published var pending: DeepLink?
+    @Published private(set) var pending: DeepLink?
+    private var pendingAt = Date.distantPast
+    static let pendingLife: TimeInterval = 60
+
+    func ask(_ link: DeepLink) {
+        pendingAt = Date()
+        pending = link
+    }
+
+    /// The waiting link, once; nil when there is none or it waited too long.
+    func take(now: Date = Date()) -> DeepLink? {
+        defer { pending = nil }
+        guard let link = pending, now.timeIntervalSince(pendingAt) < Self.pendingLife else { return nil }
+        return link
+    }
+
+    /// Signed out: a waiting link goes with the session.
+    func drop() {
+        pending = nil
+    }
 
     let endCall = PassthroughSubject<Void, Never>()
 
@@ -27,12 +48,12 @@ final class DeepLinkRouter: ObservableObject {
                 endCall.send()
                 CallLiveActivity.shared.end()
             } else if !CallLiveActivity.shared.isCallRunning {
-                pending = .call
+                ask(.call)
             }
         case "chat":
-            pending = .chat
+            ask(.chat)
         case "quickadd":
-            pending = .quickAdd
+            ask(.quickAdd)
         case "focus":
             if path == "/stop" { FocusLiveActivity.shared.stopFromLink() }
         default:

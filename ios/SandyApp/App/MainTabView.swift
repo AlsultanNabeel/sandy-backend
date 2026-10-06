@@ -113,9 +113,8 @@ struct MainTabView: View {
             }
         }
         // `initial` يلتقط رابطًا وصل قبل ما تنبني هالشاشة.
-        .onChange(of: router.pending, initial: true) { _, link in
-            guard let link else { return }
-            router.pending = nil
+        .onChange(of: router.pending, initial: true) { _, waiting in
+            guard waiting != nil, let link = router.take() else { return }
             open(link)
         }
         .onChange(of: spotlight.pendingTab, initial: true) { _, tab in
@@ -170,7 +169,7 @@ struct FloatingTabBar: View {
             SandyOrb(selected: selection == .sandy) {
                 withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.78).reduced) { selection = .sandy }
             } onHold: {
-                DeepLinkRouter.shared.pending = .call
+                DeepLinkRouter.shared.ask(.call)
             }
             .offset(y: -14)
             sideButton(.life)

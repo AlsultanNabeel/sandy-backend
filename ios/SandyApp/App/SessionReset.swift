@@ -20,6 +20,7 @@ enum SessionReset {
         GeminiLiveManager.shared.stop()
         FocusLiveActivity.shared.end()
         UndoCenter.shared.drop()
+        DeepLinkRouter.shared.drop()
         ItemsStore.cancelLoads()
         LifeStatsStore.shared.reset()
         LogStore.forgetMade()
