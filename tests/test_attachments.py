@@ -113,3 +113,48 @@ def test_a_small_word_file_that_unpacks_huge_is_refused():
     with pytest.raises(att.AttachmentError) as err:
         att.extract_text(packed, att.DOCX)
     assert err.value.code == "too_big"
+
+
+def test_a_long_pdf_stops_being_read_once_there_is_enough_text(monkeypatch):
+    """Every page used to be read before the text was cut at 20 000 characters."""
+    import pypdf
+
+    from app.features import attachments as att
+
+    read = {"n": 0}
+
+    class _Page:
+        def extract_text(self):
+            read["n"] += 1
+            return "كلمة " * 400          # 2000 characters a page
+
+    class _Reader:
+        def __init__(self, _stream):
+            self.pages = [_Page() for _ in range(3000)]
+
+    monkeypatch.setattr(pypdf, "PdfReader", _Reader)
+    text = att.extract_text(b"%PDF-1.4", att.PDF)
+    assert read["n"] <= att.MAX_TEXT_CHARS // 2000 + 1, f"{read['n']} pages read"
+    assert len(text) <= att.MAX_TEXT_CHARS + 100
+
+
+def test_a_pdf_of_blank_pages_is_read_only_up_to_the_page_cap(monkeypatch):
+    import pypdf
+
+    from app.features import attachments as att
+
+    read = {"n": 0}
+
+    class _Page:
+        def extract_text(self):
+            read["n"] += 1
+            return ""
+
+    class _Reader:
+        def __init__(self, _stream):
+            self.pages = [_Page() for _ in range(5000)]
+
+    monkeypatch.setattr(pypdf, "PdfReader", _Reader)
+    with pytest.raises(att.AttachmentError):
+        att.extract_text(b"%PDF-1.4", att.PDF)
+    assert read["n"] == att.MAX_PDF_PAGES

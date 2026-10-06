@@ -31,6 +31,8 @@ MAX_PER_MESSAGE = 4
 # A Word file is a zip: five packed megabytes can unpack to gigabytes. Its text part is
 # read only up to this, far above the MAX_TEXT_CHARS actually used.
 MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
+# A PDF is read page by page until there is enough text, and never past this many pages.
+MAX_PDF_PAGES = 300
 
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/heic", "image/webp", "image/gif"}
 TEXT_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json", "text/html"}
@@ -86,9 +88,18 @@ def _docx_text(data: bytes) -> str:
 
 
 def _pdf_text(data: bytes) -> str:
+    """Pages in order until MAX_TEXT_CHARS are in hand (the rest would be cut anyway)."""
     from pypdf import PdfReader
 
-    return "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(data)).pages)
+    parts: List[str] = []
+    size = 0
+    for n, page in enumerate(PdfReader(io.BytesIO(data)).pages):
+        if n >= MAX_PDF_PAGES or size > MAX_TEXT_CHARS:
+            break
+        text = page.extract_text() or ""
+        parts.append(text)
+        size += len(text) + 1
+    return "\n".join(parts)
 
 
 def extract_text(data: bytes, mime: str) -> str:
