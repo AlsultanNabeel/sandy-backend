@@ -141,19 +141,33 @@ def latest_release(board: str = BRAIN) -> Optional[Dict[str, Any]]:
     return max(docs, key=lambda d: version_key(d["version"])) if docs else None
 
 
+def _releases(board: str) -> List[Dict[str, Any]]:
+    """This board's releases, newest first (sorted numerically: "0.10" > "0.9")."""
+    db = get_db()
+    if db is None:
+        return []
+    docs = list(db[_META].find(_board_filter(board), {"_id": 0}).limit(500))
+    return sorted(docs, key=lambda d: version_key(d["version"]), reverse=True)
+
+
 def manifest_for(device_id: str, current: str,
                  board: str = BRAIN) -> Optional[Dict[str, Any]]:
+    """The newest release newer than `current` that this board is in the rollout of. Not
+    the newest release alone: a canary held at 0 % would hide the stable one under it."""
     device_id = (device_id or "").strip()
-    rel = latest_release(board)
-    if not rel:
-        return None
+    board = norm_board(board) or BRAIN
     try:
-        if current and version_key(rel["version"]) <= version_key(current):
-            return None
+        have = version_key(current) if current else None
     except ValueError:
-        pass  # unreadable current version counts as older
-    eligible = device_id in rel.get("canary", []) or bucket(device_id) < rel.get("rollout", 0)
-    if not eligible:
+        have = None  # unreadable current version counts as older
+    rel = None
+    for candidate in _releases(board):
+        if have is not None and version_key(candidate["version"]) <= have:
+            return None
+        if device_id in candidate.get("canary", []) or bucket(device_id) < candidate.get("rollout", 0):
+            rel = candidate
+            break
+    if rel is None:
         return None
     return {
         "version": rel["version"],

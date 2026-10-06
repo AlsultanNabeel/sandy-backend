@@ -1410,7 +1410,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
    signed with the owner's ECDSA P-256 key (`scripts/firmware_keygen.py`;
    private key off-repo, public key in `main/fw_pubkey.pem`), streamed into the
    idle slot with the size and SHA-256 checked before switching, canary ids
-   then a stable percentage (`scripts/publish_firmware.py`), never a downgrade,
+   then a stable percentage (`scripts/publish_firmware.py`; a board is offered the newest release
+   it is in the rollout of, so a canary held at 0 % never hides the stable one), never a downgrade,
    bootloader rollback if the new image cannot reach Wi-Fi. A failed check, download or
    install comes back in five minutes, doubling to an hour (`OTA_FAIL_RETRY_MAX_MS`), not
    after the six-hour period; nothing downloads under `OTA_MIN_RSSI` (-80 dBm), and from

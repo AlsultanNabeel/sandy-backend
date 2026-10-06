@@ -207,3 +207,13 @@ def test_the_publisher_refuses_a_dev_stale_or_secret_brain_image():
     assert "not built from this source" in pf.brain_image_refused(good, "0.11.5", [])
     assert "secrets.h" in pf.brain_image_refused(good + b"SANDY-8421", "0.11.4", [b"SANDY-8421"])
     assert "not an ESP32" in pf.brain_image_refused(b"\x00" + good, "0.11.4", [])
+
+
+def test_a_held_canary_does_not_hide_the_stable_release(db):
+    """Only the newest release was looked at: a canary published at 0 % left every board
+    that was behind on the stable one where it was, for as long as the canary stayed held."""
+    fs.publish("0.11.5", b"\xe9" + b"s" * 100, "ab", rollout=100)
+    fs.publish("0.11.6", b"\xe9" + b"c" * 100, "ab", rollout=0, canary=["8421"])
+    assert fs.manifest_for("dev-behind", "0.11.4")["version"] == "0.11.5"
+    assert fs.manifest_for("dev-current", "0.11.5") is None
+    assert fs.manifest_for("8421", "0.11.4")["version"] == "0.11.6"
