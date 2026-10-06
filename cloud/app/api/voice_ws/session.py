@@ -209,10 +209,10 @@ def _authenticate(ws, remote: str) -> bool:
         except Exception:  # noqa: BLE001
             _m = None
         if isinstance(_m, dict) and _m.get("type") == "hello" and _m.get("token"):
-            from app.api.auth_handlers import verify_token
+            from app.api.auth_handlers import account_allows, verify_token
             claims = verify_token(str(_m.get("token")))
             # أي حساب مسجّل (مش «المالك» بس)؛ الهوية بتقيّد كل قراءة وكتابة بالجلسة.
-            if claims and claims.get("role") in ("owner", "user"):
+            if claims and claims.get("role") in ("owner", "user") and account_allows(claims):
                 uid = str(claims.get("user_id") or "")
                 if not uid:
                     ws.send(json.dumps({"type": "error", "msg": "auth_fail"}))

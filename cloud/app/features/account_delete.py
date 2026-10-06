@@ -190,6 +190,10 @@ def delete_account(user_id: str) -> Dict[str, Any]:
     from app.utils.tenant_version import forget
 
     forget(user_id)
+    # Its tokens stop at once on this worker, within a minute on the others.
+    from app.api.auth_handlers import forget_generation
+
+    forget_generation(user_id)
     try:
         from app.api.voice_ws.tools import clear_instruction_cache
 

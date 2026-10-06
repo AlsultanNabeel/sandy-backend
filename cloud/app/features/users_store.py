@@ -86,17 +86,22 @@ def get_user(user_id: str) -> Optional[Dict[str, Any]]:
 TOKEN_GEN_FIELD = "token_gen"
 
 
+class GenerationUnreadable(Exception):
+    """The account's generation could not be read (no database, or the read failed)."""
+
+
 def token_generation(user_id: str) -> Optional[int]:
-    """The account's token generation (0 until it ever moves), None when there is no account
-    or it cannot be read."""
+    """The account's token generation (0 until it ever moves), None when there is no
+    account; raises `GenerationUnreadable` when it cannot be read."""
     coll = _coll()
-    if coll is None or not user_id:
+    if coll is None:
+        raise GenerationUnreadable("no database")
+    if not user_id:
         return None
     try:
         doc = coll.find_one({"_id": user_id}, {TOKEN_GEN_FIELD: 1})
     except Exception as exc:  # noqa: BLE001 — external call edge (Mongo)
-        logger.warning("[users] token generation read failed: %s", exc)
-        return None
+        raise GenerationUnreadable(str(exc)) from exc
     return int(doc.get(TOKEN_GEN_FIELD) or 0) if doc else None
 
 

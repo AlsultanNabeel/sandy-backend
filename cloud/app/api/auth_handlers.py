@@ -80,21 +80,67 @@ def make_token(role: str, user_id: Optional[str] = None, gen: int = 0) -> str:
     return jwt.encode(payload, _jwt_secret(), algorithm=_JWT_ALGO)
 
 
+# A signed-in token is honoured only while its account exists on the same generation.
+# The answer is kept a minute at most per account and forgotten at once when the account
+# is deleted (`forget_generation`); a read that fails serves the last answer kept, and with
+# none the request goes through, so a database hiccup does not sign everyone out.
+GENERATION_TTL_S = 60
+_generations: dict[str, Tuple[float, Optional[int]]] = {}
+_generations_lock = threading.Lock()
+_clock = time.monotonic
+
+
+def account_generation(user_id: str) -> Optional[int]:
+    """The account's generation, None when there is no account; raises
+    `GenerationUnreadable` when it cannot be read and no answer is kept."""
+    from app.features import users_store
+    with _generations_lock:
+        kept = _generations.get(user_id)
+    if kept and _clock() - kept[0] < GENERATION_TTL_S:
+        return kept[1]
+    try:
+        gen = users_store.token_generation(user_id)
+    except users_store.GenerationUnreadable:
+        if kept:
+            return kept[1]
+        raise
+    with _generations_lock:
+        _generations[user_id] = (_clock(), gen)
+    return gen
+
+
+def forget_generation(user_id: str) -> None:
+    """The account changed (deleted): its next token is checked against the database."""
+    with _generations_lock:
+        _generations.pop(user_id, None)
+
+
+def account_allows(claims: dict) -> bool:
+    """False when a signed-in token's account is gone or moved to another generation."""
+    user_id = claims.get("user_id")
+    if claims.get("role") == "guest" or not user_id:
+        return True
+    from app.features.users_store import GenerationUnreadable
+    try:
+        gen = account_generation(str(user_id))
+    except GenerationUnreadable:
+        logger.warning("[auth] generation unreadable for %s; letting the request through", user_id)
+        return True
+    return gen is not None and gen == int(claims.get("gen") or 0)
+
+
 def renewed_token(claims: dict) -> Optional[str]:
     """A new token for a signed-in account whose token is RENEW_AFTER_HOURS old, on the
-    same generation. None for a guest, a fresh token, a revoked one (the account's
-    generation moved on) or an account that is gone; an expired token never gets here."""
+    same generation. None for a guest or a fresh token; a revoked, orphaned or expired one
+    never gets here (`require_auth` refused it)."""
     user_id = claims.get("user_id")
     if claims.get("role") == "guest" or not user_id:
         return None
     if time.time() - float(claims.get("iat") or 0) < RENEW_AFTER_HOURS * 3600:
         return None
-    from app.features.users_store import token_generation
-    gen = token_generation(str(user_id))
-    if gen is None or gen != int(claims.get("gen") or 0):
-        return None
     try:
-        return make_token(str(claims.get("role")), user_id=str(user_id), gen=gen)
+        return make_token(str(claims.get("role")), user_id=str(user_id),
+                          gen=int(claims.get("gen") or 0))
     except RuntimeError:
         return None
 
@@ -129,7 +175,7 @@ def require_auth(view):
     @functools.wraps(view)
     def _wrapped(*args, **kwargs):
         claims = _claims_from_request()
-        if not claims:
+        if not claims or not account_allows(claims):
             return jsonify({"error": "unauthorized"}), 401
         if claims.get("role") != "guest" and request.headers.get("X-Timezone"):
             # The phone says where it is on every call; kept only when it changed.

@@ -506,7 +506,13 @@ rest resolve it to an empty tenant.
 
 `api/auth_handlers.py`. JWT, HS256. Owner tokens 7 days, guest 48 hours. A signed-in
 token carries its account's generation (`gen`, `sandy_users.token_gen`, 0 until it moves;
-moving it is how tokens are revoked). Once a day old it comes back renewed in the
+moving it is how tokens are revoked). A signed-in token is honoured — by `require_auth` and the
+`/voice` JWT hello alike (`auth_handlers.account_allows`) — only while its account exists on that
+generation: the answer is kept a minute per account (`GENERATION_TTL_S`), forgotten at once when the
+account is deleted (`forget_generation`; the other workers within the minute); a read that fails
+serves the last answer kept, and with none the request goes through rather than signing everyone out.
+There is no server sign-out or password change yet; when one is added it moves the generation and
+calls `forget_generation`. Once a day old it comes back renewed in the
 `X-Sandy-Token` header of any `require_auth` response (`renewed_token`), on the same
 generation only: a revoked token, a deleted account or an expired token is never renewed,
 so a session in use does not end, and one left a week unused does. The app keeps the new
