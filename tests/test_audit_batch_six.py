@@ -45,7 +45,8 @@ def test_the_session_does_not_wait_for_connectivity():
     setting somebody adds back.
     """
     src = CLIENT.read_text(encoding="utf-8")
-    assert "static let session: URLSession" in src
+    # A `var` only so the app tests can answer through a stub (SandyAppTests/StubNetwork).
+    assert "static var session: URLSession = URLSession(configuration: .default)" in src
     code = "\n".join(ln for ln in src.splitlines()
                      if not ln.lstrip().startswith("///"))
     assert "waitsForConnectivity" not in code
