@@ -1231,7 +1231,9 @@ so folders are organisation only.
   (`Features/Profile/SettingsViews.swift`): a switch per kind (reminders, the daily
   nudge, Sandy's proactive nudges) and quiet hours, kept on the phone (`NotificationPrefs`,
   applied by NotificationManager: a kind off is not scheduled, a time inside the quiet
-  hours rings silently) and on the server (`GET/POST /api/notification-settings`,
+  hours rings silently; pulled on every session start, a change the server has not
+  confirmed is kept and sent again rather than overwritten, and sign-out clears them,
+  `NotificationPrefs.pull` / `change` / `clear`) and on the server (`GET/POST /api/notification-settings`,
   `features/notify_prefs.py`: the schedule runner and the daily send skip a kind turned
   off and push silently in the quiet hours). **Alarms**: a reminder with
   `payload.important` (Sandy sets it for «صحّيني»/«ضروري»; the reminder sheet has a switch)

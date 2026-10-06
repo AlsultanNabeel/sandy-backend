@@ -138,6 +138,9 @@ final class AppState: ObservableObject {
         }
         NotificationManager.shared.requestAuthorization()
 
+        let apiRef = api
+        Task { await NotificationPrefs.pull(api: apiRef) }
+
         subscriptions.configure(userId: api.currentUserId)
         Task { await subscriptions.refresh(api: api) }
 
@@ -178,6 +181,8 @@ final class AppState: ObservableObject {
     func resetLocalData() {
         clearLocal()
         NotificationManager.shared.sessionBegan()
+        let apiRef = api
+        Task { await NotificationPrefs.pull(api: apiRef) }
         dataEpoch &+= 1
     }
 

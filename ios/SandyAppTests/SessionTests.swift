@@ -217,4 +217,33 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(router.take(), .chat)
         XCTAssertNil(router.take(), "a link is taken once")
     }
+
+    /// S7: notification settings were pulled only when their screen opened, a change saved
+    /// offline was lost and overwritten by the server's copy, and sign-out kept them for the
+    /// next account.
+    func testNotificationSettingsSurviveOfflineAndFollowTheAccount() async {
+        let api = TestClient.make()
+        api.token = Self.token("prefs")
+        var quiet = NotificationPrefs()
+        quiet.quietStart = "22:00"
+        quiet.quietEnd = "07:00"
+        StubNetwork.install(status: StubNetwork.offline, json: "{}")
+        await NotificationPrefs.change(to: quiet, api: api)
+        XCTAssertTrue(NotificationPrefs.unsent)
+
+        // Back online, the server still has the old copy: ours goes up, theirs does not win.
+        StubNetwork.install(status: 200, json: #"{"reminders":true,"daily":true,"proactive":true,"quiet_start":"","quiet_end":""}"#)
+        await NotificationPrefs.pull(api: api)
+        XCTAssertEqual(NotificationPrefs.current.quietStart, "22:00", "the offline change was overwritten")
+        XCTAssertFalse(NotificationPrefs.unsent)
+        XCTAssertTrue(StubNetwork.requests.contains { $0.httpMethod == "POST" })
+
+        // A pull with nothing unsent takes the server's copy (another phone, a reinstall).
+        await NotificationPrefs.pull(api: api)
+        XCTAssertEqual(NotificationPrefs.current.quietStart, "")
+
+        quiet.save()
+        SessionReset.clearShared()
+        XCTAssertEqual(NotificationPrefs.current, NotificationPrefs(), "the last account's settings stayed")
+    }
 }

@@ -33,6 +33,40 @@ struct NotificationPrefs: Codable, Equatable {
         if let data = try? JSONEncoder().encode(self) { UserDefaults.standard.set(data, forKey: Self.key) }
     }
 
+    /// Changed on the phone and not confirmed by the server yet: the server's copy does not
+    /// win over it, and it is sent again on the next pull.
+    private static let unsentKey = "notifications.prefs.unsent"
+    static var unsent: Bool { UserDefaults.standard.bool(forKey: unsentKey) }
+
+    /// A change on the phone: rings by it at once, and the server's pushes once it hears.
+    static func change(to next: NotificationPrefs, api: APIClient) async {
+        next.save()
+        UserDefaults.standard.set(true, forKey: unsentKey)
+        NotificationManager.shared.preferencesChanged()
+        await push(api: api)
+    }
+
+    private static func push(api: APIClient) async {
+        let sending = current
+        guard (try? await api.saveNotificationSettings(sending)) != nil, current == sending else { return }
+        UserDefaults.standard.set(false, forKey: unsentKey)
+    }
+
+    /// On every session start (with push setup), not only when the screen opens: an unsent
+    /// change goes up; else the server's copy (another phone, a reinstall) becomes the phone's.
+    static func pull(api: APIClient) async {
+        if unsent { await push(api: api); return }
+        guard let saved = try? await api.notificationSettings(), !unsent, saved != current else { return }
+        saved.save()
+        NotificationManager.shared.preferencesChanged()
+    }
+
+    /// Signed out: the next account starts from the defaults and its own server copy.
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: unsentKey)
+    }
+
     /// Inside the quiet hours (the window may cross midnight, e.g. 23:00–07:00).
     func isQuiet(_ date: Date) -> Bool {
         guard let start = Self.minutes(quietStart), let end = Self.minutes(quietEnd), start != end else {
@@ -89,10 +123,12 @@ struct NotificationSettingsView: View {
         .onChange(of: end) { apply() }
     }
 
-    /// The server's copy wins on open (another phone may have changed it).
+    /// The server's copy wins on open (another phone may have changed it), unless a change
+    /// made here has not reached it yet.
     private func load() async {
         await Permissions.shared.refresh()
-        guard let saved = try? await state.api.notificationSettings() else { return }
+        await NotificationPrefs.pull(api: state.api)
+        let saved = NotificationPrefs.current
         prefs = saved
         quiet = !saved.quietStart.isEmpty
         if let s = EditTimes.clock(saved.quietStart) { start = s }
@@ -104,10 +140,7 @@ struct NotificationSettingsView: View {
         next.quietStart = quiet ? EditTimes.clockText(start) : ""
         next.quietEnd = quiet ? EditTimes.clockText(end) : ""
         guard next != NotificationPrefs.current else { return }
-        next.save()
-        // What the phone rings follows at once; the server's pushes once it hears.
-        NotificationManager.shared.preferencesChanged()
-        Task { try? await state.api.saveNotificationSettings(next) }
+        Task { await NotificationPrefs.change(to: next, api: state.api) }
     }
 }
 
