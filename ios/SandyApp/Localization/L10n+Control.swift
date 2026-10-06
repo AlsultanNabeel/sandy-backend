@@ -55,6 +55,7 @@ enum L10nControl {
             "device.editTitle":  .text("تعديل الجهاز"),
             "device.header":     .text("شو الجهاز اللي حابب تتحكّم فيه؟"),
             "device.delete":     .text("حذف"),
+            "device.deleteConfirm": .text("بدك تحذف هالجهاز؟ أوامره بتروح معه."),
             "device.edit":       .text("تعديل"),
 
             "field.label":       .text("الاسم"),
@@ -123,6 +124,7 @@ enum L10nControl {
             "node.rename":       .text("إعادة تسمية"),
             "node.renameTitle":  .text("تعديل اسم الوحدة"),
             "node.unpair":       .text("فكّ الربط"),
+            "node.unpairConfirm": .text("بدك تفكّ ربط هاللوح؟ أجهزته بتنحذف، ولو هو شغّال بتنمسح شبكته منه."),
             // format: %@ = count of outputs
             "node.outputs":      .text("%@ مخارج"),
 
@@ -173,6 +175,7 @@ enum L10nControl {
             "device.editTitle":  .text("Edit device"),
             "device.header":     .text("What device would you like to control?"),
             "device.delete":     .text("Delete"),
+            "device.deleteConfirm": .text("Delete this device? Its commands go with it."),
             "device.edit":       .text("Edit"),
 
             "field.label":       .text("Name"),
@@ -241,6 +244,7 @@ enum L10nControl {
             "node.rename":       .text("Rename"),
             "node.renameTitle":  .text("Edit node name"),
             "node.unpair":       .text("Unpair"),
+            "node.unpairConfirm": .text("Unpair this board? Its devices are deleted, and if it's on, its Wi-Fi is erased from it."),
             // format: %@ = count of outputs
             "node.outputs":      .text("%@ outputs"),
 

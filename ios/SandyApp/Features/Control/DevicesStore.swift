@@ -177,14 +177,16 @@ final class DevicesStore: LoadableStore {
         await load(api: api)
     }
 
-    func unpair(api: APIClient, node: NodeItem) {
+    /// Asked to confirm first (the card does). When the board was off and kept its Wi-Fi
+    /// and keys, says so: it must be released again while connected before it changes hands.
+    func unpair(api: APIClient, node: NodeItem) async {
         nodes.removeAll { $0.id == node.id }
-        Task { @MainActor in
-            do {
-                try await api.unpairNode(nodeId: node.nodeId)
-            } catch {
-                notify("control.deleteFailed")
-            }
+        do {
+            let wiped = try await api.unpairNode(nodeId: node.nodeId)
+            await load(api: api)
+            if !wiped { notify("account.sell.offline") }
+        } catch {
+            notify("control.deleteFailed")
             await load(api: api)
         }
     }

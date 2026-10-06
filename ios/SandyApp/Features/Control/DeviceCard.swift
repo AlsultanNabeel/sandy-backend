@@ -14,6 +14,7 @@ struct DeviceCard: View {
     @State private var sliderValue: Double = 0
     /// تعلّم زر أشعة جديد (الاسم + فتح التنبيه).
     @State private var showLearn = false
+    @State private var confirmDelete = false
     @State private var learnButtonName = ""
 
     /// قدّيش مساحة أعطاها المالك لهاي البطاقة (لما تكون جوّا لوح).
@@ -37,8 +38,14 @@ struct DeviceCard: View {
                     Label(lang.s("control.device.edit"), systemImage: "pencil")
                 }
                 Button(role: .destructive) {
-                    store.delete(api: state.api, device: device)
+                    confirmDelete = true
                 } label: { Label(lang.s("control.device.delete"), systemImage: "trash") }
+            }
+        }
+        .confirmationDialog(lang.s("control.device.deleteConfirm"), isPresented: $confirmDelete,
+                            titleVisibility: .visible) {
+            Button(lang.s("control.device.delete"), role: .destructive) {
+                store.delete(api: state.api, device: device)
             }
         }
         .onAppear { sliderValue = Double(Int(device.state) ?? device.dimmerMin) }
@@ -417,6 +424,7 @@ struct NodeCard: View {
     let node: NodeItem
     @ObservedObject var store: DevicesStore
     let onRename: () -> Void
+    @State private var confirmUnpair = false
 
     var body: some View {
         HStack(spacing: Theme.Spacing.md) {
@@ -470,8 +478,14 @@ struct NodeCard: View {
                     Label(lang.s("control.node.rename"), systemImage: "pencil")
                 }
                 Button(role: .destructive) {
-                    store.unpair(api: state.api, node: node)
+                    confirmUnpair = true
                 } label: { Label(lang.s("control.node.unpair"), systemImage: "minus.circle") }
+            }
+        }
+        .confirmationDialog(lang.s("control.node.unpairConfirm"), isPresented: $confirmUnpair,
+                            titleVisibility: .visible) {
+            Button(lang.s("control.node.unpair"), role: .destructive) {
+                Task { await store.unpair(api: state.api, node: node) }
             }
         }
     }
