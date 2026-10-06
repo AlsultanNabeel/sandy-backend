@@ -167,7 +167,7 @@ def state_block(rows: int = STATE_ROWS) -> str:
     if timers:
         parts.append("أوامر أجهزة جاية:\n" + "\n".join(
             f"- {s.get('text', '')} ({_when(s.get('fire_at'))}) #{s['id']}" for s in timers))
-    devices = _devices_line()
+    devices = devices_line()
     if devices:
         parts.append(devices)
     rang = [s for s in schedules.list_schedules("reminder", fired_since=datetime.now(timezone.utc) - RANG_WINDOW,
@@ -184,7 +184,7 @@ def state_block(rows: int = STATE_ROWS) -> str:
     return "وضعه هلأ (استعملي الـ id لما تعدّلي):\n" + "\n\n".join(parts)
 
 
-def _devices_line() -> str:
+def devices_line() -> str:
     """His devices by name and room, so «طفّي كل الأضواء» or «ضو المطبخ» lands on them
     (their state is read with device_state, when asked)."""
     from app.features.device_store import list_devices

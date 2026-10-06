@@ -106,12 +106,17 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
 
 
 def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
-    """Fresh per-session context: the clock, time since the last message, and recent turns (never cached)."""
+    """Fresh per-session context: the clock, time since the last message, his devices and
+    recent turns (never cached). The devices are here, not in the cached instruction: a
+    device added or renamed moves no tenant version, and «شغّلي الضو» must land on its name."""
+    from app.brain.context import devices_line
     from app.utils.time_awareness import time_awareness_block
 
     history = _load_stm_history() if history is None else history
+    devices = devices_line()
     return ("\n" + _channel_line() + "\n" + time_awareness_block(history)
-            + "\n(هاد وقت بداية المكالمة.)" + _load_stm_context(history))
+            + "\n(هاد وقت بداية المكالمة.)" + (f"\n{devices}" if devices else "")
+            + _load_stm_context(history))
 
 
 def session_context_for(user_id: str, channel: str, label: str,

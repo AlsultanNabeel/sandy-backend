@@ -250,7 +250,8 @@ channels' last turns before its own, without repeating a line (`stm.history`).
 process and in `sandy_prompt_cache` across workers), because building it used to
 take seconds with the microphone running. It holds the persona, the profile and
 the facts — never the recent turns, which are added per session
-(`with_recent_turns`). That per-session part (the clock, time since the last message, the recent turns) is
+(`with_recent_turns`). That per-session part (the clock, time since the last message, his devices by name and room,
+the recent turns) is
 built on a pool thread inside the caller's own profile (`memory.session_context_for`), so the
 clock is in their zone; built on the loop with no user active it read Cairo time. `utils/tenant_version.VERSIONED` names the collections it
 is built from (`sandy_users`, `sandy_entries`): a write there through `scoped()`
@@ -1605,7 +1606,7 @@ room node is **on the per-node topic tree** (§4.5), and nothing is owner-only o
 way to it. The display **has** an Arabic font at 24 and 32 pixels
 (`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed. Servo easing and ten gestures are in
 (`sandy_servo.c`). The visitor approval flow and the JSON profile store are gone.
-The brain **is** told which devices exist: `context._devices_line` lists them by name and room in the prompt. Phase 5 closed three more by deleting what they were about: `tool_health` (no
+The brain **is** told which devices exist: `context.devices_line` lists them by name and room in the chat prompt and in the call's per-session context (`voice_ws/memory.session_context`, uncached). Phase 5 closed three more by deleting what they were about: `tool_health` (no
 tool registry left), the 28-round-trip warm turn (the persona-directive build
 and the old memory layers are gone), and the router-then-reply pair on every
 message (plain chat is one call). Since then: the voiceprint has a client (Robot ›
