@@ -38,3 +38,15 @@ enum Keychain {
         return value
     }
 }
+
+/// Where `APIClient` keeps the session token. The app's is the shared Keychain; tests keep
+/// theirs in memory.
+protocol TokenStore {
+    func load() -> String?
+    func save(_ token: String?)
+}
+
+struct KeychainTokenStore: TokenStore {
+    func load() -> String? { Keychain.loadToken() }
+    func save(_ token: String?) { Keychain.saveToken(token) }
+}

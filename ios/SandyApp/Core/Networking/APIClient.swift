@@ -11,12 +11,16 @@ final class APIClient: APIClientProtocol {
     static let maxRetries = 2
 
     var baseURL: String {
-        didSet { SharedAuth.mirror(baseURL: baseURL) }
+        didSet { if mirrorsShared { SharedAuth.mirror(baseURL: baseURL) } }
     }
     /// يُحفظ تلقائياً بالـKeychain المشترك (nil = خروج)، فالويدجت والمشاركة بيقروه.
     var token: String? {
-        didSet { Keychain.saveToken(token) }
+        didSet { tokenStore.save(token) }
     }
+    /// Where the token is kept (the shared Keychain) and whether the address is mirrored for
+    /// the widget and the share extension. A test passes its own, so it never signs the app out.
+    private let tokenStore: TokenStore
+    private let mirrorsShared: Bool
 
     var onUnauthorized: (() -> Void)?
 
@@ -34,13 +38,15 @@ final class APIClient: APIClientProtocol {
         return obj["user_id"] as? String
     }
 
-    init(baseURL: String) {
+    init(baseURL: String, tokenStore: TokenStore = KeychainTokenStore(), mirrorsShared: Bool = true) {
         self.baseURL = baseURL
+        self.tokenStore = tokenStore
+        self.mirrorsShared = mirrorsShared
         // التعيين بالـinit ما يشغّل didSet.
-        self.token = Keychain.loadToken()
+        self.token = tokenStore.load()
         // توكن قديم قبل مجموعة الوصول المشتركة: إعادة الحفظ بتنقله للإضافات.
-        if token != nil { Keychain.saveToken(token) }
-        SharedAuth.mirror(baseURL: baseURL)
+        if token != nil { tokenStore.save(token) }
+        if mirrorsShared { SharedAuth.mirror(baseURL: baseURL) }
     }
 
     /// Retries only transport failures on safe methods; never cancellation or server errors.
