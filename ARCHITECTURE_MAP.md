@@ -255,7 +255,8 @@ built on a pool thread inside the caller's own profile (`memory.session_context_
 clock is in their zone; built on the loop with no user active it read Cairo time. `utils/tenant_version.VERSIONED` names the collections it
 is built from (`sandy_users`, `sandy_entries`): a write there through `scoped()`
 bumps the version, and `prompt_prewarm` rebuilds it in the background for tenants
-who use voice. Bump `_PROMPT_REV` when the cached text changes shape.
+who use voice. «Reset my data» erases around `scoped()`, so it bumps the version and
+stamps `corrected_at` itself (`account_delete.wipe_account_data`). Bump `_PROMPT_REV` when the cached text changes shape.
 There are two texts per version, one per speaker-gate state (`speaker.speaker_gate(user, channel)`:
 the robot's guarded one once a voiceprint exists, the trusting one for the app's call), kept
 apart in both caches (`_variant`). The build takes the call's channel as an argument (the robot

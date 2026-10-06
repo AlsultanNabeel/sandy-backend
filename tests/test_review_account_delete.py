@@ -136,3 +136,23 @@ def test_a_stop_nobody_took_expires():
            if ix.get("key") == [("at", 1)]]
     assert ttl and ttl[0].get("expireAfterSeconds")
     appdb.reset()
+
+
+def test_a_reset_rebuilds_the_voice_instruction(monkeypatch):
+    """The voice instruction is cached per tenant version, on every worker. A reset
+    that erases the facts without moving the version kept serving the old ones."""
+    from app.api.voice_ws import tools
+    from app.utils import prompt_prewarm, thread_pool
+
+    _db()
+    tools.clear_instruction_cache()
+    built = iter(["حقائق قديمة", "من أول وجديد"])
+    monkeypatch.setattr(tools, "_system_instruction_body", lambda *_a: next(built))
+    monkeypatch.setattr(thread_pool, "submit_background", lambda fn, *a, **_k: fn(*a))
+    monkeypatch.setattr(prompt_prewarm, "schedule", lambda *_a: None)
+
+    assert tools._cached_system_instruction("u1", False) == "حقائق قديمة"
+    assert account_delete.wipe_account_data("u1")["ok"]
+    assert tools._cached_system_instruction("u1", False) == "من أول وجديد"
+    tools.clear_instruction_cache()
+    appdb.reset()

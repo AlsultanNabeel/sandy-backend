@@ -195,7 +195,14 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
 def wipe_account_data(user_id: str, keep_nodes: bool = True) -> Dict[str, Any]:
     """Clear everything the account holds but keep the account (and, by default, its robot)."""
     names = [n for n in _BY_USER if not (keep_nodes and n in ("sandy_nodes", "sandy_devices"))]
-    return _erase(user_id, names)
+    r = _erase(user_id, names)
+    # The rows went around the scoped stores, so nothing moved the voice instruction's
+    # version: every worker would keep the cached one with the erased facts in it.
+    from app.utils.tenant_version import bump_for, mark_corrected
+
+    mark_corrected(user_id)
+    bump_for(user_id)
+    return r
 
 
 def delete_account(user_id: str) -> Dict[str, Any]:
