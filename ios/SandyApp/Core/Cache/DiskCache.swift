@@ -40,6 +40,11 @@ enum DiskCache {
         }
     }
 
+    /// Returns once every save and clear queued before it is on disk (the queue is serial).
+    static func written() async {
+        await withCheckedContinuation { done in queue.async { done.resume() } }
+    }
+
     /// Every account's copies but their `keep` files (the outbox: unsent changes stay with
     /// their owner until they sign in again). On the same serial queue, so a save queued
     /// before it is written and then removed.

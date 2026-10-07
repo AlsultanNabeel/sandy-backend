@@ -41,11 +41,6 @@ final class SessionTests: XCTestCase {
         return "\(b64url("{\"alg\":\"HS256\"}")).\(b64url("{\"user_id\":\"\(uid)\"}")).sig"
     }
 
-    /// Waits for the cache's serial queue to write what was queued before.
-    private func settle(_ check: () -> Bool) async {
-        for _ in 0..<50 where !check() { try? await Task.sleep(nanoseconds: 20_000_000) }
-    }
-
     private func sentWrites() -> Int {
         StubNetwork.requests.filter { $0.url?.path == "/api/items" && $0.httpMethod == "POST" }.count
     }
@@ -63,7 +58,10 @@ final class SessionTests: XCTestCase {
         // The session ends by itself: the token goes, the caches go, the outbox stays.
         api.token = nil
         DiskCache.clearAll(except: Outbox.fileKey)
-        await settle { DiskCache.load([Outbox.Op].self, key: Outbox.fileKey, userId: owner)?.count == 1 }
+        // The wipe walks every account folder on the phone (each run of the tests adds some)
+        // and can take over a second: left running, the next tests' writes queued behind it
+        // and testTheOutboxIsDroppedNotSentBeforeAReset found no file within its second.
+        await DiskCache.written()
         XCTAssertEqual(DiskCache.load([Outbox.Op].self, key: Outbox.fileKey, userId: owner)?.count, 1,
                        "signing out wiped the change made offline")
 
@@ -88,7 +86,7 @@ final class SessionTests: XCTestCase {
         StubNetwork.install(status: StubNetwork.offline, json: "{}")
         try await Outbox.shared.send(api, "/api/items", method: "POST", body: ["text": "حليب"])
         Outbox.shared.discard()
-        await settle { DiskCache.load([Outbox.Op].self, key: Outbox.fileKey, userId: owner)?.isEmpty == true }
+        await DiskCache.written()
         XCTAssertEqual(DiskCache.load([Outbox.Op].self, key: Outbox.fileKey, userId: owner)?.count, 0)
         StubNetwork.install(status: 200, json: "{}")
         await Outbox.shared.drain(api)
@@ -141,7 +139,7 @@ final class SessionTests: XCTestCase {
         await loading.value
         XCTAssertTrue(store.items.isEmpty, "the first account's tasks showed for the second")
         store.items = []
-        await settle { false }
+        await DiskCache.written()
         XCTAssertNil(DiskCache.load([ListItem].self, key: "items.tasks.open", userId: first),
                      "the store from before the switch still wrote its cache")
     }
