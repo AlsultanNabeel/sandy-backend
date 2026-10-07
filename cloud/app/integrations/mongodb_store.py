@@ -16,6 +16,13 @@ _NO_DB_IN_PROD = (
     "empty reads and silently discard every write. See the error above."
 )
 
+# A database address and no name: there is no right name to guess, and a wrong one is a
+# database that answers, empty or someone else's.
+_NO_DB_NAME = (
+    "MONGODB_DB_NAME is not set. Refusing to start: it names the database to use "
+    "(on Heroku a config var, the same as MONGODB_URI), and there is no default."
+)
+
 
 def _connect_mongo(uri: str) -> Any:
     base_kwargs = {
@@ -43,6 +50,9 @@ def init_mongo_connection(
             raise RuntimeError(_NO_DB_IN_PROD)
         logger.warning("[MongoDB] APP_ENV=%s — starting with no database", APP_ENV)
         return None, None
+    if not (mongodb_db_name or "").strip():
+        logger.error("[MongoDB] MONGODB_DB_NAME is not set")
+        raise RuntimeError(_NO_DB_NAME)
 
     try:
         mongo_client = _connect_mongo(mongodb_uri)

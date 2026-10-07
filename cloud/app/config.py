@@ -63,7 +63,8 @@ EXA_API_KEY = os.getenv("EXA_API_KEY", "").strip()
 
 # Database
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
-MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "sany-db").strip()
+# No default: a guessed name opens another database (the old project's) and writes there.
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "").strip()
 
 # The personality when the user has not set one in the app (Persona screen). Kept
 # short on purpose: who she is, and a light tone. The user's own words replace it.

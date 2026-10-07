@@ -62,7 +62,7 @@ Three repos exist on the owner's Desktop; only one is worked in. See
 - `Desktop/Nabeel/Sandy` → read-only archive of the original single-owner project.
 - `Desktop/sandy-web` → the website, a separate repo, deferred.
 
-Deploy target: Heroku app `sandy-robot` (host `sandy-robot-3da0693d32f7.herokuapp.com`), database `sandy-app` (set by config var; the code default is `sany-db`). The
+Deploy target: Heroku app `sandy-robot` (host `sandy-robot-3da0693d32f7.herokuapp.com`), database `sandy-app` (the `MONGODB_DB_NAME` config var; there is no default, and with a database address and no name the server refuses to start, `mongodb_store.init_mongo_connection`). The
 Heroku app name is inherited from the old project; the code and data on it are
 this one's. There is **no staging environment** — production is also what the
 robot on the owner's desk is talking to.
