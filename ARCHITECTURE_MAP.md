@@ -422,6 +422,11 @@ Now:
   `BOARD_STATE_GRACE_S` (15 s) against a heartbeat, which may have left the board before it.
 - Every topic the server publishes a device on is `sandy/node/<id>/<output>` of a node the
   caller paired; `tenant_owns_topic` matches nothing outside that tree.
+- **One robot per account** (the owner's decision): pairing a board when the account
+  already has another answers 409 `one_robot` before any presence code is sent, and the
+  unique index `one_robot_per_account` on `sandy_nodes.user_id` closes the race. The
+  camera and the room node share their robot's id, so they are never «another». An
+  account that already had two when the index came is logged at boot, not unpaired.
 - `node_store.py` is the pairing registry: `code_to_node_id(code)` is a plain
   lowercase-alphanumeric transform (not a hash), so a node flashed with its code
   derives its own topic before it is ever paired — no provisioning handshake.

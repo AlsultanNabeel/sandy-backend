@@ -513,6 +513,9 @@ def register_devices_api(app, mongo_db=None):
         if state == "claimed":
             # "Belongs to another account" is actionable (factory reset it).
             return _bad("already_claimed")
+        if state == "one_robot":
+            # Before any code goes to its face: nothing to type for a robot that cannot pair.
+            return _bad("one_robot", code=409)
         if state in ("bad_code", "no_store"):
             return _bad(state)
         if state == "free" and PAIR_NEEDS_PRESENCE:
@@ -548,6 +551,8 @@ def register_devices_api(app, mongo_db=None):
         pre = pair_precheck(code)
         if pre.get("state") == "claimed":
             return _bad("already_claimed")
+        if pre.get("state") == "one_robot":
+            return _bad("one_robot", code=409)
         if pre.get("state") not in ("free", "ours"):
             return _bad(pre.get("state") or "bad_code")
         if pre.get("state") == "free":

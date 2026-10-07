@@ -25,7 +25,7 @@ def test_one_failed_index_does_not_skip_the_others():
             return _Coll()
 
     node_store.init_node_store(_Db())
-    assert built == ["failed", "code_hash", "node_id_owner_unique"]
+    assert built == ["failed", "code_hash", "node_id_owner_unique", "one_robot_per_account"]
 
 
 # T13: two workers provisioning the same heartbeat: the loser got an uncaught duplicate
@@ -134,3 +134,49 @@ def test_a_release_whose_device_delete_fails_stops(two_owners, monkeypatch):
         r = node_store.unpair_node("8421")
     assert r["ok"] is False and r["error"] == "release_failed"
     assert d["sandy_nodes"].find_one({"node_id": "8421"})        # still his, to finish later
+
+
+# T2: every part has a fixed name per account, so a second robot on the same account found
+# the first one's names and got no device at all: no control, no voice, no IR, in silence.
+# The owner's decision: one robot per account, the second refused in so many words.
+
+def test_a_second_robot_is_refused_and_the_first_still_pairs_again(two_owners):
+    with _as("u1"):
+        assert node_store.pair_node("SANDY-8421")["ok"]
+        assert node_store.pair_precheck("SANDY-9999")["state"] == "one_robot"
+        assert node_store.pair_node("SANDY-9999") == {"ok": False, "error": "one_robot"}
+        # The same robot again (its camera and room node share its id), and after a release.
+        assert node_store.pair_node("SANDY-8421")["already"] is True
+        assert node_store.unpair_node("sandy8421")["ok"]
+        assert node_store.pair_node("SANDY-9999")["ok"]
+
+
+def test_two_robots_at_the_same_moment_one_wins(two_owners, monkeypatch):
+    with _as("u1"):
+        assert node_store.pair_node("SANDY-8421")["ok"]
+        # The second pairing's check ran before the first one's insert landed.
+        real, calls = node_store._has_another_robot, []
+
+        def raced(coll, node_id):
+            calls.append(node_id)
+            return False if len(calls) == 1 else real(coll, node_id)
+
+        monkeypatch.setattr(node_store, "_has_another_robot", raced)
+        assert node_store.pair_node("SANDY-9999") == {"ok": False, "error": "one_robot"}
+        assert two_owners["sandy_nodes"].count_documents({"user_id": "u1"}) == 1
+
+
+def test_the_app_is_told_before_any_code_goes_to_the_robot(two_owners, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "x" * 40)
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+    from app.features import pair_presence
+
+    started = []
+    monkeypatch.setattr(pair_presence, "start", lambda *a: started.append(a) or {"ok": True})
+    with _as("u1"):
+        node_store.pair_node("SANDY-8421")
+    c = create_app(mongo_db=two_owners).test_client()
+    r = c.post("/api/nodes/pair", json={"code": "SANDY-9999"},
+               headers={"Authorization": f"Bearer {make_token('user', 'u1')}"})
+    assert r.status_code == 409 and r.get_json()["error"] == "one_robot" and started == []

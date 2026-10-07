@@ -789,7 +789,8 @@ def test_two_boards_under_one_node_id_do_not_erase_each_other(db):
         after = outputs_now()
         assert {"servo", "screen"} <= after
 
-        # camera first on a fresh node
+    # camera first on a fresh node (another account's: one robot per account)
+    with as_tenant("owner2"):
         node_store.pair_node("sandy0002", "ساندي التانية")
         _ingest_cam_status("sandy0002", CAM_JSON)
         cam_only = {o["id"] for o in node_store.get_node("sandy0002")["outputs"]}

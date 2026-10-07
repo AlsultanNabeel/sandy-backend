@@ -42,6 +42,10 @@ def init_node_store(mongo_db) -> None:
         # One owner per board, enforced by the database (the read-then-insert check races).
         ("node_id_owner_unique", lambda: mongo_db[_COLL].create_index(
             [("node_id", 1)], unique=True, background=True, name="node_id_owner_unique")),
+        # One robot per account (the owner's decision). Not built over an account that has
+        # two already: that is logged here and left to the owner, never unpaired by itself.
+        ("one_robot_per_account", lambda: mongo_db[_COLL].create_index(
+            [("user_id", 1)], unique=True, background=True, name="one_robot_per_account")),
     ]
     for label, job in jobs:
         try:
@@ -189,8 +193,15 @@ def _is_legacy_owner(user_id: Any) -> bool:
         return False
 
 
+def _has_another_robot(coll, node_id: str) -> bool:
+    """One robot per account: the caller already paired a board other than this one. The
+    camera and the room node share their robot's id, so they are never «another»."""
+    return coll.find_one({"node_id": {"$ne": node_id}}, {"_id": 1}) is not None
+
+
 def pair_precheck(code: str) -> Dict[str, Any]:
-    """Pairing state before writing: ``ours``, ``claimed`` by another account, or ``free``."""
+    """Pairing state before writing: ``ours``, ``claimed`` by another account,
+    ``one_robot`` (this account has another), or ``free``."""
     code = (code or "").strip()
     node_id = code_to_node_id(code)
     if len(code) < 4 or not node_id:
@@ -204,6 +215,8 @@ def pair_precheck(code: str) -> Dict[str, Any]:
         claimed = get_db()[_COLL].find_one({"node_id": node_id})
         if claimed is not None and not _is_legacy_owner(claimed.get("user_id")):
             return {"state": "claimed", "node_id": node_id}
+    if _has_another_robot(coll, node_id):
+        return {"state": "one_robot", "node_id": node_id}
     return {"state": "free", "node_id": node_id}
 
 
@@ -228,6 +241,8 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     node_id = code_to_node_id(code)
     if not node_id:
         return {"ok": False, "error": "bad_code"}
+    if _has_another_robot(coll, node_id):
+        return {"ok": False, "error": "one_robot"}
 
     # مطالَبة مرّة وحدة عبر كل الحسابات: أول حساب بيربط بيملك.
     if get_db() is not None:
@@ -254,6 +269,10 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
             "paired_at": _now(),
         })
     except DuplicateKeyError:
+        # Either index: this board went to another account, or this account paired
+        # another board at the same moment (`one_robot_per_account`).
+        if _has_another_robot(coll, node_id):
+            return {"ok": False, "error": "one_robot"}
         logger.warning("[NodeStore] %s claimed concurrently — refusing", node_id)
         return {"ok": False, "error": "already_claimed"}
     _open_key_enrolment(node_id)
