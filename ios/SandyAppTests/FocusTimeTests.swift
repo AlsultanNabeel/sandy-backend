@@ -45,4 +45,19 @@ final class FocusTimeTests: XCTestCase {
         NotificationManager.shared.scheduleFocus(nil)
         XCTAssertEqual(fake.ids("focus.").count, 0, "an ended session still rang")
     }
+
+    /// L6: the timer stopped in the background and came back ten minutes behind; it counts
+    /// from the phase's end, and at zero asks the server once, not every second.
+    func testTheClockCountsFromTheEndAndAsksOnceAtZero() {
+        let now = Date()
+        var clock = FocusClock(endsAt: now.addingTimeInterval(900))
+        XCTAssertEqual(clock.remaining(at: now.addingTimeInterval(600)), 300, "the time away was lost")
+        XCTAssertFalse(clock.shouldRefresh(at: now.addingTimeInterval(600)))
+        let zero = now.addingTimeInterval(901)
+        XCTAssertTrue(clock.shouldRefresh(at: zero))
+        XCTAssertFalse(clock.shouldRefresh(at: zero.addingTimeInterval(1)), "asked again while asking")
+        clock.refreshed()
+        XCTAssertFalse(clock.shouldRefresh(at: zero.addingTimeInterval(2)), "asked every second with no network")
+        XCTAssertTrue(clock.shouldRefresh(at: zero.addingTimeInterval(FocusClock.retryAfter + 1)))
+    }
 }

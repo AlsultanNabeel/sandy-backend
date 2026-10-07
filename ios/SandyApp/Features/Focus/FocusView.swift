@@ -53,8 +53,11 @@ private struct TimerSection: View {
     @EnvironmentObject var lang: LanguageManager
 
     let scenes: [RoomScene]
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var status = FocusStatus()
+    @State private var clock = FocusClock()
+    @State private var now = Date()
     @State private var loaded = false
     @State private var notice = ""
 
@@ -81,9 +84,12 @@ private struct TimerSection: View {
             }
         }
         .onReceive(tick) { _ in
-            guard status.active else { return }
-            if status.remainingSec > 0 { status.remainingSec -= 1 }
-            else { Task { await refresh() } }   // انتهى الطور — زامن مع السيرفر
+            now = Date()
+            // The phase ended: the server says what comes next.
+            if status.active && clock.shouldRefresh(at: now) { Task { await refresh() } }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refresh() } }
         }
         .task {
             await refresh()
@@ -110,7 +116,7 @@ private struct TimerSection: View {
                         .rotationEffect(.degrees(-90))
                         .animation(Animation.linear(duration: 0.5).reduced, value: progress)
                     VStack(spacing: Theme.Spacing.xs) {
-                        Text(clock(status.remainingSec))
+                        Text(clockText(left))
                             .scaledFont(40, weight: .bold, design: .rounded, relativeTo: .largeTitle)
                             .foregroundColor(Theme.Colors.primaryText)
                             .monospacedDigit()
@@ -204,12 +210,15 @@ private struct TimerSection: View {
         }
     }
 
+    /// Seconds left in this phase, from its end.
+    private var left: Int { clock.remaining(at: now) }
+
     private var progress: CGFloat {
         guard status.totalSec > 0 else { return 0 }
-        return CGFloat(status.remainingSec) / CGFloat(status.totalSec)
+        return CGFloat(left) / CGFloat(status.totalSec)
     }
 
-    private func clock(_ sec: Int) -> String {
+    private func clockText(_ sec: Int) -> String {
         AppLocale.number(max(0, sec) / 60, minDigits: 2) + ":" + AppLocale.number(max(0, sec) % 60, minDigits: 2)
     }
 
@@ -218,12 +227,16 @@ private struct TimerSection: View {
             let wasActive = status.active
             let next = try await state.api.getFocusStatus()
             status = next
+            now = Date()
+            clock.endsAt = next.active
+                ? next.phaseEndsAt ?? now.addingTimeInterval(TimeInterval(next.remainingSec)) : nil
+            clock.refreshed()
             // الجلسة خلصت لحالها (آخر دورة) — مش بكبسة إلغاء: هزّة نجاح.
             if wasActive && !next.active && !busy { Haptics.play(.success) }
             // الجزيرة الديناميكية/شاشة القفل تتبع حالة الخادم.
             FocusLiveActivity.shared.sync(next)
         }
-        catch { /* صامت */ }
+        catch { clock.refreshed() }
     }
 
     private func start() async {

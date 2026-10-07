@@ -29,3 +29,31 @@ struct FocusPlan {
         phases = out
     }
 }
+
+/// The focus screen's countdown: read from the phase's end on every tick, so time spent in
+/// the background is not lost; at zero it asks the server once, and again only after
+/// `retryAfter` when that failed (no network), never every second.
+struct FocusClock {
+    static let retryAfter: TimeInterval = 10
+
+    var endsAt: Date?
+    private var asking = false
+    private var lastAsk = Date.distantPast
+
+    init(endsAt: Date? = nil) { self.endsAt = endsAt }
+
+    func remaining(at now: Date) -> Int {
+        endsAt.map { max(0, Int($0.timeIntervalSince(now).rounded(.up))) } ?? 0
+    }
+
+    mutating func shouldRefresh(at now: Date) -> Bool {
+        guard endsAt != nil, remaining(at: now) == 0, !asking,
+              now.timeIntervalSince(lastAsk) >= Self.retryAfter else { return false }
+        asking = true
+        lastAsk = now
+        return true
+    }
+
+    /// The ask came back (with a new end set, or failed).
+    mutating func refreshed() { asking = false }
+}
