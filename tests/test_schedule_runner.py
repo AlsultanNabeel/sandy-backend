@@ -28,7 +28,7 @@ def push(monkeypatch):
     monkeypatch.setattr(push_tokens_store, "tokens_for_user", lambda uid: [f"tok-{uid}"])
     monkeypatch.setattr(push_tokens_store, "unregister_token", lambda t, *a: gone.append(t))
 
-    def send(token, title, body, data=None, silent=False):
+    def send(token, title, body, data=None, silent=False, category=None):
         sent.append((token, body, data))
         return state["ok"], state["status"]
 
@@ -59,7 +59,52 @@ def test_a_reminder_fires_once(brain_db, push):  # noqa: F811
     assert _tick() == {"fired": 0, "failed": 0}
     row = _get(sid)
     assert row["status"] == "sent" and row["fired_at"]
-    assert push["sent"] == [("tok-userA", "دوا", {"kind": "reminder", "schedule_id": sid})]
+    assert push["sent"] == [("tok-userA", "دوا", {"kind": "reminder", "schedule_id": sid,
+                                                   "reminder_id": sid, "reminder_recurrence": "",
+                                                   "alarm": "0", "alarm_focus": "0"})]
+
+
+def test_a_reminder_push_carries_the_phones_buttons(brain_db, monkeypatch):  # noqa: F811
+    """The phone's own reminder category, so «later» and «done» are on it as on a local one."""
+    calls = []
+    monkeypatch.setattr(apns, "is_configured", lambda: True)
+    monkeypatch.setattr(push_tokens_store, "tokens_for_user", lambda uid: ["tok"])
+    monkeypatch.setattr(apns, "send", lambda *a, **k: calls.append(k) or (True, "ok"))
+    _add(payload={"important": True})
+    _tick()
+    assert calls[0]["category"] == R.REMINDER_CATEGORY == "SANDY_REMINDER"
+    assert calls[0]["data"]["alarm"] == "1"
+
+
+def test_only_a_phone_that_did_not_arm_it_gets_the_push(brain_db, push, monkeypatch):  # noqa: F811
+    """The phone rings what it scheduled; the push is the fallback for one that did not."""
+    monkeypatch.setattr(push_tokens_store, "tokens_for_user", lambda uid: ["armed", "other"])
+    sid = _add()
+    with active_user_profile_context(A):
+        assert schedules.arm("armed", [sid]) == 1
+    assert _tick() == {"fired": 1, "failed": 0}
+    assert [t for t, *_ in push["sent"]] == ["other"]
+
+
+def test_every_phone_armed_it_so_nothing_is_pushed(brain_db, push):  # noqa: F811
+    sid = _add()
+    with active_user_profile_context(A):
+        schedules.arm("tok-userA", [sid])
+    assert _tick() == {"fired": 1, "failed": 0}
+    assert push["sent"] == [] and _get(sid)["status"] == "sent"
+
+
+def test_arming_is_the_phones_whole_set_and_a_change_unarms(brain_db):  # noqa: F811
+    a, b = _add(minutes_ago=-60), _add(minutes_ago=-90)
+    with active_user_profile_context(A):
+        schedules.arm("p1", [a, b])
+        schedules.arm("p2", [a])
+        schedules.arm("p1", [b])                    # p1 no longer holds a
+        assert schedules.get(a)["armed"] == ["p2"] and schedules.get(b)["armed"] == ["p1"]
+        schedules.update(b, fire_at=NOW + timedelta(hours=3))
+        assert schedules.get(b)["armed"] == []      # moved: no phone holds the new time yet
+        schedules.update(a, text="دوا الضغط")
+        assert schedules.get(a)["armed"] == ["p2"]  # same time: still rings there
 
 
 def _claim(sid, now=NOW):

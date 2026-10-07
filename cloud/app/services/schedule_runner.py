@@ -10,8 +10,11 @@ leaves the claim to lapse and the row is fired on a later tick; a row claimed
 MAX_FIRE_TRIES times without settling is marked "failed", so a broken one never rings for
 ever. What firing means per kind:
 
-  reminder         APNs when configured (the phone also rings it locally from
-                   GET /api/schedules); stale by > 15 min: no push, still settled.
+  reminder         the phone rings it locally from GET /api/schedules and says so
+                   (`schedules.arm`); APNs, when configured, goes only to the user's
+                   phones that did not arm it, with the phone's reminder category and
+                   keys so «later» and «done» work on it; stale by > 15 min: no push,
+                   still settled.
   scene            a scene's timed revert (`scene_store.apply_scene` writes it), sent
                    through `scene_store._actuate`; a miss retries a minute later, up to
                    MAX_TIMER_TRIES.
@@ -42,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 RUNNABLE = ("reminder", "scene", "daily_nudge", "summary_nudge")
 PUSH_TITLE = "ساندي"
+# The phone's own reminder category and keys (NotificationManager.reminderCategory & co.).
+REMINDER_CATEGORY = "SANDY_REMINDER"
 # A reminder this late is not pushed: the phone already rang it, or it is stale news.
 LOOKBACK_MIN = 15
 MAX_PER_TICK = 50
@@ -156,19 +161,20 @@ def follow_zone(uid: str, old_zone: tzinfo, now: Optional[datetime] = None) -> i
                 if nxt is None:
                     continue
                 res = coll.update_one({"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"]},
-                                      {"$set": {"fire_at": nxt, "series_start": start}})
+                                      {"$set": {"fire_at": nxt, "series_start": start, "armed": []}})
                 moved += res.modified_count
     except Exception as exc:  # noqa: BLE001 — a request is never failed by this; the rows keep their times
         logger.warning("[schedules] zone follow for %s failed: %s", uid, exc)
     return moved
 
 
-def _push(uid: str, text: str, data: Dict[str, Any], silent: bool = False) -> Tuple[int, int]:
+def _push(tokens: List[str], text: str, data: Dict[str, Any], silent: bool = False,
+          category: Optional[str] = None) -> Tuple[int, int]:
     """(devices tried, devices that took it)."""
     tried = took = 0
-    for token in push_tokens_store.tokens_for_user(uid):
+    for token in tokens:
         tried += 1
-        ok, status = apns.send(token, PUSH_TITLE, text, data=data, silent=silent)
+        ok, status = apns.send(token, PUSH_TITLE, text, data=data, silent=silent, category=category)
         if ok:
             took += 1
         elif status == "gone":
@@ -198,7 +204,18 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
     wanted, silent = notify_prefs.push_rule(uid, kind, now)
     if not wanted:
         return True, ""
-    tried, took = _push(uid, text, data, silent=silent)
+    tokens = push_tokens_store.tokens_for_user(uid)
+    category = None
+    if kind == "reminder":
+        # A phone that scheduled it rings it itself; the push is for the others.
+        armed = set(doc.get("armed") or [])
+        tokens = [t for t in tokens if t not in armed]
+        payload = doc.get("payload") or {}
+        data.update({"reminder_id": doc["_id"], "reminder_recurrence": str(doc.get("recurrence") or ""),
+                     "alarm": "1" if payload.get("important") else "0",
+                     "alarm_focus": "1" if payload.get("break_focus") else "0"})
+        category = REMINDER_CATEGORY
+    tried, took = _push(tokens, text, data, silent=silent, category=category)
     if took or (kind == "reminder" and not tried):
         return True, ""
     return False, "no device took the push"

@@ -122,6 +122,8 @@ def update(schedule_id: str, *, text: Optional[str] = None,
         changes["payload"] = validate(SCHEDULE, current["kind"], payload)
     if status is not None:
         changes["status"] = _check_status(status)
+    if fire_at is not None or recurrence is not None:
+        changes["armed"] = []  # no phone holds the new time until it says so (`arm`)
     if (fire_at is not None or recurrence is not None) and not keep_series:
         if changes.get("recurrence", current.get("recurrence")):
             changes["series_start"] = series_start(changes.get("fire_at", current["fire_at"]))
@@ -146,6 +148,19 @@ def snooze(row: Mapping[str, Any], minutes: int, now: datetime) -> Optional[str]
         return add(row.get("kind") or "reminder", row.get("text", ""), at,
                    row.get("payload") or None) or None
     return row["id"] if update(row["id"], fire_at=at, status="pending") else None
+
+
+def arm(token: str, ids: List[str], mongo_db=None) -> int:
+    """The phone with push ``token`` has these reminders scheduled itself, and no others of
+    this user: it is kept on each (`armed`) and the runner pushes it none of them. Rows
+    matched."""
+    coll = _base.coll(_base.SCHEDULES, mongo_db)
+    if coll is None or not token:
+        return 0
+    held = coll.update_many({"_id": {"$in": list(ids)}, "kind": "reminder"},
+                            {"$addToSet": {"armed": token}}).matched_count
+    coll.update_many({"_id": {"$nin": list(ids)}, "armed": token}, {"$pull": {"armed": token}})
+    return held
 
 
 def delete(schedule_id: str, mongo_db=None) -> bool:

@@ -43,6 +43,7 @@ DEFAULT_LIMIT = 100
 # The runner owns sent/failed; the app may only re-arm or cancel.
 APP_STATUSES = ("pending", "cancelled")
 MAX_SNOOZE_MIN = 24 * 60
+MAX_ARMED = 500
 
 _MESSAGES = {
     "invalid_body": "الطلب مش مفهوم.",
@@ -59,6 +60,7 @@ _MESSAGES = {
     "invalid_recurrence": "التكرار مش مفهوم.",
     "invalid_status": "الحالة مش مسموحة.",
     "invalid_minutes": "عدد الدقايق مش صحيح.",
+    "unknown_token": "هالجهاز مش مسجّل للإشعارات.",
     "invalid_period": "الفترة مش معروفة.",
     "not_found": "ما لقيته.",
     "not_saved": "ما قدرت أحفظ، جرّب كمان شوي.",
@@ -482,6 +484,22 @@ def register_blocks_api(app, mongo_db=None):
                               recurrence=_rule(body.get("recurrence")),
                               payload=payload, status=status)
         return _found(ok, schedule_id, schedules.get, "payload")
+
+    @app.route("/api/schedules/armed", methods=["POST"])
+    @require_tenant
+    @_answers_invalid
+    def api_schedules_armed(claims):
+        """{token, ids}: the phone with this push token has these reminders scheduled itself,
+        and no others; the runner pushes it none of them (`schedules.arm`)."""
+        body = _body()
+        token, ids = body.get("token"), body.get("ids")
+        if (not isinstance(token, str) or not isinstance(ids, list) or len(ids) > MAX_ARMED
+                or not all(isinstance(i, str) for i in ids)):
+            raise _Invalid("invalid_body")
+        from app.features import push_tokens_store
+        if token not in push_tokens_store.tokens_for_user(str(current_user_id() or "")):
+            raise _Invalid("unknown_token")
+        return jsonify({"ok": True, "armed": schedules.arm(token, ids)}), 200
 
     @app.route("/api/schedules/<schedule_id>/snooze", methods=["POST"])
     @require_tenant

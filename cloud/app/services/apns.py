@@ -83,10 +83,14 @@ def send(
     body: str,
     data: Optional[Dict[str, Any]] = None,
     silent: bool = False,
+    category: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Send one alert; returns (ok, status). status "gone" means prune the token. Never raises.
-    `silent` (the user's quiet hours): no sound, delivered without lighting the screen."""
+    `silent` (the user's quiet hours): no sound, delivered without lighting the screen.
+    `category`: the app's notification category, for its buttons."""
     aps: Dict[str, Any] = {"alert": {"title": title, "body": body}}
+    if category:
+        aps["category"] = category
     if silent:
         aps["interruption-level"] = "passive"
     else:

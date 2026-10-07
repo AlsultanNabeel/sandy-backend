@@ -45,7 +45,7 @@ ROUTES = [("GET", "/api/entries"), ("POST", "/api/entries"),
           ("PATCH", "/api/items/x"), ("DELETE", "/api/items/x"),
           ("GET", "/api/schedules"), ("POST", "/api/schedules"),
           ("PATCH", "/api/schedules/x"), ("DELETE", "/api/schedules/x"),
-          ("POST", "/api/schedules/x/snooze"),
+          ("POST", "/api/schedules/x/snooze"), ("POST", "/api/schedules/armed"),
           ("GET", "/api/kinds"), ("POST", "/api/summary")]
 
 
@@ -264,6 +264,23 @@ def test_snoozing_a_repeat_rings_once_more_and_keeps_the_series(c, brain_db):  #
     assert row["id"] != sid and row["recurrence"] == "" and row["payload"] == {"important": True}
     series = c.get("/api/schedules?status=pending", headers=_h()).get_json()["items"]
     assert next(x for x in series if x["id"] == sid)["fire_at"] == first
+
+
+def test_the_phone_tells_which_reminders_it_scheduled(c, brain_db):  # noqa: F811
+    from app.features import push_tokens_store
+    push_tokens_store.register_token("userA", "my-phone")
+    mine = c.post("/api/schedules", json={"kind": "reminder", "text": "x", "fire_at": _iso(1)},
+                  headers=_h()).get_json()["id"]
+    theirs = c.post("/api/schedules", json={"kind": "reminder", "text": "y", "fire_at": _iso(1)},
+                    headers=_h("userB")).get_json()["id"]
+    r = c.post("/api/schedules/armed", json={"token": "my-phone", "ids": [mine, theirs]}, headers=_h())
+    assert r.status_code == 200 and r.get_json() == {"ok": True, "armed": 1}
+    assert brain_db["sandy_schedules"].find_one({"_id": mine})["armed"] == ["my-phone"]
+    assert not brain_db["sandy_schedules"].find_one({"_id": theirs}).get("armed")
+    _bad(c.post("/api/schedules/armed", json={"token": "not-mine", "ids": [mine]}, headers=_h()),
+         "unknown_token")
+    _bad(c.post("/api/schedules/armed", json={"token": "my-phone", "ids": "x"}, headers=_h()),
+         "invalid_body")
 
 
 @pytest.mark.parametrize("body", [{}, {"minutes": 0}, {"minutes": "10"}, {"minutes": 1441}])
