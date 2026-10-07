@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from app.utils.tenant_db import scoped
 from app.db import configure, get_db
 
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +32,23 @@ def init_node_store(mongo_db) -> None:
     configure(mongo_db)
     if mongo_db is None:
         return
-    try:
-        mongo_db[_COLL].create_index(
-            [("user_id", 1), ("node_id", 1)], unique=True, background=True
-        )
+    # One try each: a failed one must not skip the rest, least of all the uniqueness ones.
+    jobs = [
+        ("user_id+node_id", lambda: mongo_db[_COLL].create_index(
+            [("user_id", 1), ("node_id", 1)], unique=True, background=True)),
         # Heartbeat ingest looks nodes up by code hash across tenants.
-        mongo_db[_COLL].create_index([("code_hash", 1)], background=True)
+        ("code_hash", lambda: mongo_db[_COLL].create_index(
+            [("code_hash", 1)], background=True)),
         # One owner per board, enforced by the database (the read-then-insert check races).
-        mongo_db[_COLL].create_index(
-            [("node_id", 1)], unique=True, background=True, name="node_id_owner_unique"
-        )
-        logger.info("[NodeStore] ready")
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[NodeStore] index skipped: %s", e)
+        ("node_id_owner_unique", lambda: mongo_db[_COLL].create_index(
+            [("node_id", 1)], unique=True, background=True, name="node_id_owner_unique")),
+    ]
+    for label, job in jobs:
+        try:
+            job()
+        except PyMongoError as e:
+            logger.warning("[NodeStore] index %s skipped: %s", label, e)
+    logger.info("[NodeStore] ready")
 
 
 def _coll():
