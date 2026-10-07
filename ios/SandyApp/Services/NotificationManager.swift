@@ -514,8 +514,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let date: Date
     }
 
-    /// Rings now (a second from now), e.g. the budget passing its mark.
+    /// Rings now (a second from now), e.g. the budget passing its mark; one of Sandy's
+    /// nudges, so not with them switched off or no one signed in.
     func notifyNow(title: String, body: String) {
+        guard isSignedIn, NotificationPrefs.current.proactive else { return }
         addProactive(id: Self.proactivePrefix + "now." + UUID().uuidString, title: title, body: body,
                      trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
     }

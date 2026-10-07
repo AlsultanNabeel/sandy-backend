@@ -65,4 +65,17 @@ final class NotificationTests: XCTestCase {
         XCTAssertTrue(UNUserNotificationCenter.current().delegate === notes)
         XCTAssertNotNil(notes.nudgeInputs(), "a launch with a kept session scheduled nothing")
     }
+
+    /// S11: the budget alert went out with «Sandy's nudges» switched off.
+    func testTheBudgetAlertKeepsToSandysNudgesSwitch() {
+        var prefs = NotificationPrefs()
+        prefs.proactive = false
+        prefs.save()
+        notes.notifyNow(title: "الميزانية", body: "وصلت ٨٠٪")
+        XCTAssertEqual(fake.ids("proactive.now."), [], "rang with Sandy's nudges off")
+        NotificationPrefs().save()
+        notes.clearForSignOut()
+        notes.notifyNow(title: "الميزانية", body: "وصلت ٨٠٪")
+        XCTAssertEqual(fake.ids("proactive.now."), [], "rang with no one signed in")
+    }
 }
