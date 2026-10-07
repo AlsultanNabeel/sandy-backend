@@ -152,4 +152,6 @@ def test_indexes_lead_with_the_tenant(db):
     for name in ("sandy_entries", "sandy_items", "sandy_schedules"):
         info = db[name].index_information()
         custom = [v["key"] for k, v in info.items() if k != "_id_"]
+        # The one exception: the schedule runner's scan across every tenant (ARCHITECTURE_MAP §2.6).
+        custom = [key for key in custom if not (name == "sandy_schedules" and key[0][0] == "status")]
         assert custom and all(key[0][0] == "user_id" for key in custom)
