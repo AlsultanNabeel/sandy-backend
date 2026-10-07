@@ -16,6 +16,7 @@ import pytest
 os.environ.setdefault("JWT_SECRET", "test-secret-for-isolation-more")
 
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
+from brain_fakes import on_node  # noqa: E402
 
 
 def as_tenant(tenant_id):
@@ -44,7 +45,7 @@ def _add_device(name):
     from app.features import device_store
     return device_store.add_device(
         name=name, label=name, control_type="switch",
-        transport={"kind": "mqtt", "topic": f"room/cmd/{name}"},
+        transport=on_node("relay", node_id=f"node{name}"),
     )
 
 

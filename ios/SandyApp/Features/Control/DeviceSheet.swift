@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// شيت جهاز (إضافة أو تعديل): اسم + غرفة + نوع تحكّم + طريقة وصل (وحدة/مخرج أو
-/// موضوع MQTT خام) + ميتا حسب النوع (خيارات enum، حدّا dimmer) + صف تعليم زر
+/// شيت جهاز (إضافة أو تعديل): اسم + غرفة + نوع تحكّم + طريقة وصل (وحدة ومخرج)
+/// + ميتا حسب النوع (خيارات enum، حدّا dimmer) + صف تعليم زر
 /// للريموت. `existing` غير nil ⇒ وضع تعديل. الأخطاء بصوت ساندي.
 struct DeviceSheet: View {
     @EnvironmentObject var state: AppState
@@ -15,10 +15,8 @@ struct DeviceSheet: View {
     @State private var label: String
     @State private var room: String
     @State private var controlType: ControlType
-    @State private var transportKind: TransportKind
     @State private var selectedNodeId: String
     @State private var selectedOutput: String
-    @State private var topic: String
 
     // ميتا حسب النوع
     @State private var enumValuesText: String
@@ -41,11 +39,9 @@ struct DeviceSheet: View {
         _room = State(initialValue: existing?.room ?? "")
         _controlType = State(initialValue: ControlType(rawValue: existing?.controlType ?? "switch") ?? .switch)
         let t = existing?.transport
-        _transportKind = State(initialValue: TransportKind(rawValue: t?.kind ?? "node") ?? .node)
         // المخرج/الوحدة الافتراضيان: قيم الجهاز القائم، وإلا أول وحدة/مخرج متاح.
         _selectedNodeId = State(initialValue: t?.nodeId ?? nodes.first?.nodeId ?? "")
         _selectedOutput = State(initialValue: t?.output ?? nodes.first?.outputs.first ?? "")
-        _topic = State(initialValue: t?.topic ?? "")
         _enumValuesText = State(initialValue: (existing?.enumValues ?? []).joined(separator: "، "))
         _dimmerMin = State(initialValue: existing.map { String($0.dimmerMin) } ?? "0")
         _dimmerMax = State(initialValue: existing.map { String($0.dimmerMax) } ?? "100")
@@ -118,7 +114,6 @@ struct DeviceSheet: View {
             }
             .animation(Animation.easeInOut(duration: 0.25).reduced, value: notice)
             .animation(Animation.easeInOut(duration: 0.2).reduced, value: controlType)
-            .animation(Animation.easeInOut(duration: 0.2).reduced, value: transportKind)
         }
         .environment(\.layoutDirection, lang.lang.layoutDirection)
     }
@@ -131,43 +126,27 @@ struct DeviceSheet: View {
                 .font(Theme.Typography.callout)
                 .foregroundColor(Theme.Colors.secondaryText)
 
-            Picker("", selection: $transportKind) {
-                ForEach(TransportKind.allCases) { k in
-                    Text(lang.s(k.labelKey)).tag(k)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            if transportKind == .node {
-                if nodes.isEmpty {
-                    SandyNotice(lang.s("control.transport.needNode"), kind: .gentleWarning)
-                } else {
-                    SandyCard {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                            Picker(lang.s("control.transport.pickNode"), selection: $selectedNodeId) {
-                                ForEach(nodes) { n in Text(n.label).tag(n.nodeId) }
-                            }
-                            .pickerStyle(.menu)
-                            .onChange(of: selectedNodeId) { _, _ in
-                                // عند تبديل الوحدة، نختار أول مخرج لها.
-                                selectedOutput = outputsForSelectedNode.first ?? ""
-                            }
-                            if !outputsForSelectedNode.isEmpty {
-                                Picker(lang.s("control.transport.pickOutput"), selection: $selectedOutput) {
-                                    ForEach(outputsForSelectedNode, id: \.self) { o in Text(o).tag(o) }
-                                }
-                                .pickerStyle(.menu)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
+            if nodes.isEmpty {
+                SandyNotice(lang.s("control.transport.needNode"), kind: .gentleWarning)
             } else {
                 SandyCard {
-                    TextField(lang.s("control.transport.topicPlaceholder"), text: $topic)
-                        .font(Theme.Typography.body)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        Picker(lang.s("control.transport.pickNode"), selection: $selectedNodeId) {
+                            ForEach(nodes) { n in Text(n.label).tag(n.nodeId) }
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: selectedNodeId) { _, _ in
+                            // عند تبديل الوحدة، نختار أول مخرج لها.
+                            selectedOutput = outputsForSelectedNode.first ?? ""
+                        }
+                        if !outputsForSelectedNode.isEmpty {
+                            Picker(lang.s("control.transport.pickOutput"), selection: $selectedOutput) {
+                                ForEach(outputsForSelectedNode, id: \.self) { o in Text(o).tag(o) }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -277,12 +256,7 @@ struct DeviceSheet: View {
     // ── جاهزية الحفظ ──
     private var canSave: Bool {
         guard !trimmedLabel.isEmpty else { return false }
-        switch transportKind {
-        case .node:
-            return !selectedNodeId.isEmpty && !selectedOutput.isEmpty
-        case .mqtt:
-            return !topic.trimmingCharacters(in: .whitespaces).isEmpty
-        }
+        return !selectedNodeId.isEmpty && !selectedOutput.isEmpty
     }
 
     // ── بناء الميتا حسب النوع ──
@@ -324,15 +298,7 @@ struct DeviceSheet: View {
     }
 
     private func buildTransport() -> DeviceTransport {
-        switch transportKind {
-        case .node:
-            return DeviceTransport(kind: "node", topic: "",
-                                   nodeId: selectedNodeId, output: selectedOutput)
-        case .mqtt:
-            return DeviceTransport(kind: "mqtt",
-                                   topic: topic.trimmingCharacters(in: .whitespaces),
-                                   nodeId: "", output: "")
-        }
+        DeviceTransport(kind: "node", nodeId: selectedNodeId, output: selectedOutput)
     }
 
     private func save() {

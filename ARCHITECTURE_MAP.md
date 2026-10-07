@@ -397,8 +397,11 @@ Now:
 - `command_payload(device, action, value)` is the **only** validator. It returns
   the payload or refuses with the list of allowed values so Sandy asks instead of
   guessing. This is what ends "turn the light on → applied the off scene".
-- Transports: `{"kind":"mqtt","topic":…}`, `{"kind":"node","node_id":…,"output":…}`,
-  `{"kind":"wifi_api","url":…}`.
+- One transport: `{"kind":"node","node_id":…,"output":…}`, an output on a node the tenant
+  paired. The raw `mqtt` topic (any tenant could publish anywhere outside the node tree on the
+  server's own broker login) and `wifi_api` (never sent at all) were removed; a row saved with
+  either is still listed, reaches nothing (`device_topic` is None, Sandy says it is no longer
+  supported), and the app shows it as «not supported» with a delete.
 - A device's `online` is not stored: every read takes it from the board behind it
   (`node_store.part_present`: the brain's `online` and not in safe mode, the camera's
   `cam_online`, the room's `room_online`; a board never heard from is not connected).
@@ -411,9 +414,8 @@ Now:
   `mic_*` on unless `mic_*_muted`, written by `device_store.set_board_states`), so a relative
   «a little lower» starts from the real volume. A command's state stands
   `BOARD_STATE_GRACE_S` (15 s) against a heartbeat, which may have left the board before it.
-- The `sandy/node/` namespace is **reserved** for the ownership-checked `node`
-  transport. A raw `mqtt` transport is refused if it targets it — otherwise a
-  tenant could aim a device at another tenant's node with a free-form topic.
+- Every topic the server publishes a device on is `sandy/node/<id>/<output>` of a node the
+  caller paired; `tenant_owns_topic` matches nothing outside that tree.
 - `node_store.py` is the pairing registry: `code_to_node_id(code)` is a plain
   lowercase-alphanumeric transform (not a hash), so a node flashed with its code
   derives its own topic before it is ever paired — no provisioning handshake.

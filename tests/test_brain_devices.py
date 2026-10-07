@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from brain_fakes import A, brain_db  # noqa: F401
+from brain_fakes import A, brain_db, on_node  # noqa: F401
 
 from app.blocks import items, schedules
 from app.brain import tools, voice
@@ -29,12 +29,9 @@ def room(brain_db, monkeypatch):  # noqa: F811
     client = _Room()
     monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: client)
     with active_user_profile_context(A):
-        device_store.add_device("lamp", "ضو الصالة", "dimmer", {"kind": "mqtt", "topic": "room/cmd/lamp"},
-                                room="الصالة")
-        device_store.add_device("kitchen", "ضو المطبخ", "switch", {"kind": "mqtt", "topic": "room/cmd/kitchen"},
-                                room="المطبخ")
-        device_store.add_device("ac", "المكيف", "switch", {"kind": "mqtt", "topic": "room/cmd/ac"},
-                                room="الصالة")
+        device_store.add_device("lamp", "ضو الصالة", "dimmer", on_node("lamp"), room="الصالة")
+        device_store.add_device("kitchen", "ضو المطبخ", "switch", on_node("kitchen"), room="المطبخ")
+        device_store.add_device("ac", "المكيف", "switch", on_node("ac"), room="الصالة")
         yield client
 
 
@@ -63,19 +60,19 @@ def test_a_device_command_waits_for_its_time_and_a_scene_leaves_it(room):
 
 def test_a_room_or_several_at_once(room):
     out = _run("device_control", room="الصالة", action="off")
-    assert out["ok"] and {t for t, _ in room.sent} == {"room/cmd/lamp", "room/cmd/ac"}
+    assert out["ok"] and {t for t, _ in room.sent} == {"sandy/node/n1/lamp", "sandy/node/n1/ac"}
     room.sent.clear()
     _run("device_control", devices=["ضو الصالة", "ضو المطبخ"], action="off")
-    assert {t for t, _ in room.sent} == {"room/cmd/lamp", "room/cmd/kitchen"}
+    assert {t for t, _ in room.sent} == {"sandy/node/n1/lamp", "sandy/node/n1/kitchen"}
 
 
 def test_dim_a_little_from_where_it_is(room):
     device_store.set_state("lamp", "70")
     _run("device_control", device="lamp", action="set", by=-20)
-    assert room.sent[-1] == ("room/cmd/lamp", "50")
+    assert room.sent[-1] == ("sandy/node/n1/lamp", "50")
     device_store.set_state("lamp", "on")
     _run("device_control", device="lamp", action="set", by=20)
-    assert room.sent[-1] == ("room/cmd/lamp", "100")
+    assert room.sent[-1] == ("sandy/node/n1/lamp", "100")
 
 
 def test_an_offline_device_says_it_did_not_work(room):

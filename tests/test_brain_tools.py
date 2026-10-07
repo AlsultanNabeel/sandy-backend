@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pytest
-from brain_fakes import A, brain_db  # noqa: F401 — fixture
+from brain_fakes import A, brain_db, on_node  # noqa: F401 — fixture
 
 from app.blocks import entries, items, schedules
 from app.blocks.kinds import LIST, LOG, SCHEDULE, names
@@ -175,10 +175,9 @@ def test_device_control_calls_the_same_handler_and_gate(tenant_a, monkeypatch):
             return True
 
     monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
-    device_store.add_device("living_light", "ضوء الصالة", "switch",
-                            {"kind": "mqtt", "topic": "room/cmd/light"})
+    device_store.add_device("living_light", "ضوء الصالة", "switch", on_node("room/light"))
     out = _run("device_control", device="living_light", action="on")
-    assert out["ok"] and sent == {"topic": "room/cmd/light", "payload": "on"}
+    assert out["ok"] and sent == {"topic": "sandy/node/n1/room/light", "payload": "on"}
     out = _run("device_control", device="غسالة", action="on")
     assert out["ok"] is False and "ضوء الصالة" in out["reply"]
 

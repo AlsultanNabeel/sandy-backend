@@ -150,6 +150,15 @@ struct DeviceCard: View {
     // ── أداة التحكّم حسب النوع ──
     @ViewBuilder
     private var controlWidget: some View {
+        if !device.transport.isSupported {
+            unsupportedWidget
+        } else {
+            typedWidget
+        }
+    }
+
+    @ViewBuilder
+    private var typedWidget: some View {
         switch device.controlType {
         case "switch":  switchWidget
         case "dimmer":  dimmerWidget
@@ -385,6 +394,23 @@ struct DeviceCard: View {
     // كان `default: switchWidget` — يعني أي نوع جديد بيرسم مفتاح تشغيل/إطفاء.
     // وهاد بالضبط اللي صار مع الشاشة: ظهرت كمفتاح، وكل ضغطة بترجع لحالها لأن
     // اللوح ما بيفهم «on». مفتاح بيكذب أسوأ من سطر بيقول ما بعرف.
+    // جهاز انحفظ بطريقة وصل انشالت (موضوع MQTT خام أو عنوان ويب): ما بيوصله أمر، فبدل
+    // أداة تحكّم بتكذب، جملة بتقول هيك وزر يحذفه.
+    private var unsupportedWidget: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text(lang.s("control.device.unsupported"))
+                .font(Theme.Typography.caption)
+                .foregroundColor(Theme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            if !store.demo {
+                Button(role: .destructive) { confirmDelete = true } label: {
+                    Label(lang.s("control.device.delete"), systemImage: "trash")
+                        .font(Theme.Typography.callout)
+                }
+            }
+        }
+    }
+
     private var unknownWidget: some View {
         Text(String(format: lang.s("control.unknownType"), device.controlType))
             .font(Theme.Typography.caption)

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import mongomock
 import pytest
+from brain_fakes import on_node
 
 
 U = "cust-1"
@@ -98,8 +99,7 @@ def test_unpairing_one_robot_leaves_another_tenants_devices_alone(db):
             {"kind": "node", "node_id": "abc123", "output": "room/light"})
         assert refused["error"] == "node_not_paired"
         # A device of their own, on their own transport.
-        device_store.add_device("lamp", "لمبتي", "switch",
-                                {"kind": "mqtt", "topic": "home/lamp"})
+        device_store.add_device("lamp", "لمبتي", "switch", on_node("lamp", node_id="theirs"))
 
     with user_profiles.active_user_profile_context(P):
         node_id, _ = _paired_robot_with_a_light()

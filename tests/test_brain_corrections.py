@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from brain_fakes import A, ScriptedModel, brain_db, call, tools_reply  # noqa: F401
+from brain_fakes import A, ScriptedModel, brain_db, call, on_node, tools_reply  # noqa: F401
 
 from app.blocks import entries, items, schedules
 from app.brain import context, loop, tools
@@ -88,14 +88,14 @@ def test_the_room_goes_back_to_how_it_was_before_the_scene(tenant, monkeypatch):
             return True
 
     monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
-    device_store.add_device("lamp", "الضو", "dimmer", {"kind": "mqtt", "topic": "room/cmd/lamp"})
+    device_store.add_device("lamp", "الضو", "dimmer", on_node("lamp"))
     device_store.set_state("lamp", "80")
     scene_store.add_scene("dim", actions=[{"device": "lamp", "value": "10"}])
     assert scene_store.apply_scene("dim")["sent"] == 1
     assert device_store.get_device("lamp")["state"] == "10"
 
     out = _run("room_restore")
-    assert out["ok"] and sent[-1] == ("room/cmd/lamp", "80")
+    assert out["ok"] and sent[-1] == ("sandy/node/n1/lamp", "80")
     assert device_store.get_device("lamp")["state"] == "80"
     assert _run("room_restore")["ok"] is False      # once only
 

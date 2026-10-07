@@ -18,9 +18,3 @@ enum ControlType: String, CaseIterable, Identifiable {
     var labelKey: String { "control.type.\(rawValue)" }
 }
 
-/// طريقة الوصل بالواجهة — وحدة ساندي (مخرج) أو إم كيو تي تي خام.
-enum TransportKind: String, CaseIterable, Identifiable {
-    case node, mqtt
-    var id: String { rawValue }
-    var labelKey: String { rawValue == "node" ? "control.transport.node" : "control.transport.mqtt" }
-}

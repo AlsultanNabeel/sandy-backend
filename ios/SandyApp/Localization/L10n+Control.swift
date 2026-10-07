@@ -56,6 +56,7 @@ enum L10nControl {
             "device.editTitle":  .text("تعديل الجهاز"),
             "device.header":     .text("شو الجهاز اللي حابب تتحكّم فيه؟"),
             "device.delete":     .text("حذف"),
+            "device.unsupported": .text("مش مدعوم: طريقة وصل هالجهاز انشالت، فما بيوصله أمر. احذفه وضيفه من جديد على وحدة ساندي."),
             "device.play":       .text("شغّل"),
             "device.deleteConfirm": .text("بدك تحذف هالجهاز؟ أوامره بتروح معه."),
             "device.edit":       .text("تعديل"),
@@ -76,11 +77,8 @@ enum L10nControl {
             "type.ir":      .text("ريموت"),
 
             // Transport picker
-            "transport.node":    .text("وحدة ساندي"),
-            "transport.mqtt":    .text("متقدّم (إم كيو تي تي)"),
             "transport.pickNode":.text("اختر الوحدة"),
             "transport.pickOutput":.text("اختر المخرج"),
-            "transport.topicPlaceholder": .text("مثلاً: home/livingroom/light"),
             "transport.needNode":.text("اربط وحدة ساندي أول حتى تقدر توصل الجهاز فيها."),
 
             // Type-specific meta
@@ -178,6 +176,7 @@ enum L10nControl {
             "device.editTitle":  .text("Edit device"),
             "device.header":     .text("What device would you like to control?"),
             "device.delete":     .text("Delete"),
+            "device.unsupported": .text("Not supported: this device's connection was removed, so no command reaches it. Delete it and add it again on a Sandy node."),
             "device.play":       .text("Play"),
             "device.deleteConfirm": .text("Delete this device? Its commands go with it."),
             "device.edit":       .text("Edit"),
@@ -198,11 +197,8 @@ enum L10nControl {
             "type.ir":      .text("Remote"),
 
             // Transport picker
-            "transport.node":    .text("Sandy node"),
-            "transport.mqtt":    .text("Advanced (MQTT)"),
             "transport.pickNode":.text("Pick a node"),
             "transport.pickOutput":.text("Pick an output"),
-            "transport.topicPlaceholder": .text("e.g. home/livingroom/light"),
             "transport.needNode":.text("Pair a Sandy node first so you can connect the device to it."),
 
             // Type-specific meta

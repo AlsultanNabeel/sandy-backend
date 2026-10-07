@@ -3,9 +3,11 @@
 Only registered devices with validated actions can be actuated; unknown ones are
 refused, never guessed. Pure data + validation: ``command_payload`` returns the
 payload, the caller sends it. Collection ``sandy_devices``: name (slug), label,
-room, control_type, transport ({"kind": "node", node_id, output} or
-{"kind": "mqtt", topic}), meta, state, last_seen, updated_at. `online` is not
-stored: it is read from the device's board each time (`_with_presence`).
+room, control_type, transport ({"kind": "node", node_id, output}: an output on a
+board the tenant paired, the only way a device is reached), meta, state, last_seen,
+updated_at. `online` is not stored: it is read from the device's board each time
+(`_with_presence`). A row saved with a raw MQTT topic or a web address before those
+were removed is listed but reaches nothing (`device_topic` is None).
 """
 
 from __future__ import annotations
@@ -412,11 +414,9 @@ def delete_devices_for_node(node_id: str) -> int:
 
 
 def device_topic(device: Dict[str, Any]) -> Optional[str]:
-    """MQTT topic for a device, from its transport."""
+    """MQTT topic for a device, from its transport; None for anything but a node output."""
     t = device.get("transport") or {}
     kind = str(t.get("kind", "")).strip().lower()
-    if kind == "mqtt":
-        return str(t.get("topic", "")).strip() or None
     if kind == "node":
         node_id = str(t.get("node_id", "")).strip()
         output = str(t.get("output", "")).strip()
@@ -430,15 +430,13 @@ def _topic_query(topic: str) -> Dict[str, Any]:
 
     If the two ever disagree the actuation is refused (a test pins them equal).
     """
-    if topic.startswith("sandy/node/"):
-        rest = topic[len("sandy/node/"):]
-        node_id, _, output = rest.partition("/")
-        if not node_id or not output:
-            return {"_id": {"$exists": False}}   # can match nothing
-        return {"transport.kind": "node",
-                "transport.node_id": node_id,
-                "transport.output": output}
-    return {"transport.kind": "mqtt", "transport.topic": topic}
+    rest = topic[len("sandy/node/"):] if topic.startswith("sandy/node/") else ""
+    node_id, _, output = rest.partition("/")
+    if not node_id or not output:
+        return {"_id": {"$exists": False}}   # can match nothing
+    return {"transport.kind": "node",
+            "transport.node_id": node_id,
+            "transport.output": output}
 
 
 def tenant_owns_topic(topic: str) -> bool:
@@ -457,27 +455,18 @@ def tenant_owns_topic(topic: str) -> bool:
 
 
 def _valid_transport(transport: Any) -> bool:
+    """Only an output on a node. A raw MQTT topic let a tenant publish anywhere outside the
+    node tree on the server's own broker login, and a web address was never sent at all."""
     if not isinstance(transport, dict):
         return False
-    kind = str(transport.get("kind", "")).strip().lower()
-    if kind == "mqtt":
-        topic = str(transport.get("topic", "")).strip()
-        # sandy/node/... is reserved for the ownership-checked "node" transport.
-        return bool(topic) and not topic.startswith("sandy/node/")
-    if kind == "node":
-        return bool(str(transport.get("node_id", "")).strip()) and bool(
-            str(transport.get("output", "")).strip()
-        )
-    if kind == "wifi_api":
-        return bool(str(transport.get("url", "")).strip())
-    return False
+    return (str(transport.get("kind", "")).strip().lower() == "node"
+            and bool(str(transport.get("node_id", "")).strip())
+            and bool(str(transport.get("output", "")).strip()))
 
 
 def _transport_owned(transport: Any) -> bool:
     """A ``node`` transport must point at a node this tenant paired."""
     t = transport if isinstance(transport, dict) else {}
-    if str(t.get("kind", "")).strip().lower() != "node":
-        return True
     node_id = str(t.get("node_id", "")).strip()
     if not node_id:
         return False

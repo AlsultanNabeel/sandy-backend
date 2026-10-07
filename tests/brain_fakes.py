@@ -51,3 +51,14 @@ def tools_reply(*calls: ToolCall) -> Reply:
 
 def text_reply(text: str) -> Reply:
     return Reply(text=text)
+
+
+def on_node(output: str, node_id: str = "n1") -> Dict[str, Any]:
+    """A device transport: ``output`` on a node the active tenant paired, paired here if it
+    is not yet. A raw MQTT topic is no transport any more; every device is a node output."""
+    from app.utils.user_profiles import current_user_id
+
+    appdb.get_db()["sandy_nodes"].update_one(
+        {"node_id": node_id}, {"$setOnInsert": {"user_id": current_user_id(), "telemetry": {}}},
+        upsert=True)
+    return {"kind": "node", "node_id": node_id, "output": output}

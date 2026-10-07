@@ -40,9 +40,48 @@ def test_pending_key_is_tenant_scoped():
 
 # ── device transport validation ──────────────────────────────────────────────
 
-def test_transport_rejects_reserved_node_namespace():
-    # A raw mqtt topic must not target the ownership-checked node namespace.
+def test_a_device_is_a_node_output_only():
+    """Audit T7: a raw MQTT topic let any tenant publish anywhere outside the node tree on
+    the server's own broker login (and, were that login confined, every refused publish
+    would drop the server off the broker for everyone); a web address was never sent."""
     assert _valid_transport({"kind": "mqtt", "topic": "sandy/node/x/relay"}) is False
-    # A normal room topic and a proper node transport are fine.
-    assert _valid_transport({"kind": "mqtt", "topic": "room/cmd/light"}) is True
+    assert _valid_transport({"kind": "mqtt", "topic": "room/cmd/light"}) is False
+    assert _valid_transport({"kind": "wifi_api", "url": "http://192.168.1.5/on"}) is False
     assert _valid_transport({"kind": "node", "node_id": "x", "output": "relay1"}) is True
+
+
+def test_a_device_saved_with_a_raw_topic_is_listed_and_reaches_nothing(monkeypatch):
+    """Rows saved before raw topics were removed stay visible (the app marks them «not
+    supported» with a delete), and no command is published for them."""
+    import mongomock
+
+    from app import db as appdb
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    from app.features import device_store
+    from app.utils.user_profiles import active_user_profile_context
+
+    d = mongomock.MongoClient().db
+    appdb.configure(d)
+    sent = []
+
+    class _Client:
+        def send_to_topic(self, topic, payload):
+            sent.append(topic)
+            return True
+
+    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
+    try:
+        d["sandy_devices"].insert_one({"user_id": "u1", "name": "lamp", "label": "لمبتي",
+                                       "control_type": "switch",
+                                       "transport": {"kind": "mqtt", "topic": "home/lamp"}})
+        with active_user_profile_context({"chat_id": "u1", "relation": "user"}):
+            assert [x["transport"]["kind"] for x in device_store.list_devices()] == ["mqtt"]
+            out = tools.execute("device_control", {"device": "lamp", "action": "on"},
+                                TurnCtx(user_id="u1"))
+            assert out["ok"] is False and "ما عادت مدعومة" in out["reply"] and sent == []
+            assert device_store.update_device(
+                "lamp", transport={"kind": "mqtt", "topic": "x/y"})["error"] == "bad_transport"
+            assert device_store.delete_device("lamp")["ok"]
+    finally:
+        appdb.reset()

@@ -134,28 +134,23 @@ struct PlaceResult: Identifiable {
 
 // ── الأجهزة والوحدات — /api/devices و /api/nodes ──
 
-/// موضوع MQTT خام، أو مخرج على وحدة ساندي مربوطة.
+/// مخرج على وحدة ساندي مربوطة — الطريقة الوحيدة اللي بيوصل فيها جهاز. جهاز انحفظ قبل
+/// بموضوع MQTT خام أو عنوان ويب بيوصل بنوعه، وما بيوصله أمر (`isSupported`).
 struct DeviceTransport: Equatable {
-    let kind: String        // "mqtt" | "node"
-    let topic: String       // عند mqtt
-    let nodeId: String      // عند node
-    let output: String      // عند node
+    let kind: String
+    let nodeId: String
+    let output: String
+
+    var isSupported: Bool { kind == "node" }
 
     var asDict: [String: Any] {
-        switch kind {
-        case "node":
-            return ["kind": "node", "node_id": nodeId, "output": output]
-        default:
-            return ["kind": "mqtt", "topic": topic]
-        }
+        ["kind": "node", "node_id": nodeId, "output": output]
     }
 
     static func from(_ raw: [String: Any]) -> DeviceTransport {
-        let kind = raw["kind"] as? String ?? "mqtt"
-        return DeviceTransport(kind: kind,
-                               topic: raw["topic"] as? String ?? "",
-                               nodeId: raw["node_id"] as? String ?? "",
-                               output: raw["output"] as? String ?? "")
+        DeviceTransport(kind: raw["kind"] as? String ?? "",
+                        nodeId: raw["node_id"] as? String ?? "",
+                        output: raw["output"] as? String ?? "")
     }
 }
 

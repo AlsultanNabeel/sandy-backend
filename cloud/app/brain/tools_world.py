@@ -108,7 +108,7 @@ def _actuate_one(device: Dict[str, Any], action: str, value: Any) -> Tuple[bool,
     payload = res["payload"]
     topic = device_topic(device)
     if not topic:
-        return False, f"{label} مش مربوط بمخرج صحيح — راجع إعداده بالتطبيق."
+        return False, f"{label} مربوط بطريقة ما عادت مدعومة، فما بقدر أوصله. احذفه من التحكّم بالتطبيق."
     if device.get("board_gone"):
         # Its board said it went: the broker would take the command and drop it.
         return False, offline_line(label)

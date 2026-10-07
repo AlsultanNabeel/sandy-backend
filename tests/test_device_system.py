@@ -17,6 +17,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-for-devices")
 
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 from app.features import device_store, node_store  # noqa: E402
+from brain_fakes import on_node  # noqa: E402
 
 
 def as_tenant(tenant_id):
@@ -36,7 +37,7 @@ def db():
 def _add_light(name="living_light", label="ضوء الصالة"):
     return device_store.add_device(
         name=name, label=label, control_type="dimmer",
-        transport={"kind": "mqtt", "topic": "room/cmd/light"},
+        transport=on_node("light"),
         room="salon", meta={"min": 0, "max": 100},
     )
 
@@ -95,10 +96,10 @@ def test_add_validates_and_rejects_duplicates(db):
         assert _add_light()["ok"] is True
         assert _add_light()["error"] == "exists"
         assert device_store.add_device("BadName!", "x", "switch",
-                                       {"kind": "mqtt", "topic": "t"})["error"] == "bad_name"
+                                       on_node("t"))["error"] == "bad_name"
         assert device_store.add_device("x", "x", "telepathy",
-                                       {"kind": "mqtt", "topic": "t"})["error"] == "bad_control_type"
-        assert device_store.add_device("x", "x", "switch", {"kind": "mqtt"})["error"] == "bad_transport"
+                                       on_node("t"))["error"] == "bad_control_type"
+        assert device_store.add_device("x", "x", "switch", {"kind": "node"})["error"] == "bad_transport"
 
 
 def test_registry_starts_empty_no_seeding(db):
@@ -123,13 +124,13 @@ def test_update_and_delete(db):
         assert device_store.delete_device("living_light")["error"] == "not_found"
 
 
-def test_device_topic_for_mqtt_and_node():
-    assert device_store.device_topic(
-        {"transport": {"kind": "mqtt", "topic": "room/cmd/fan"}}) == "room/cmd/fan"
+def test_device_topic_is_a_node_output_only():
     assert device_store.device_topic(
         {"transport": {"kind": "node", "node_id": "n_abc", "output": "relay1"}}
     ) == "sandy/node/n_abc/relay1"
-    assert device_store.device_topic({"transport": {"kind": "mqtt"}}) is None
+    # A row saved with a raw topic before those were removed reaches nothing.
+    assert device_store.device_topic(
+        {"transport": {"kind": "mqtt", "topic": "room/cmd/fan"}}) is None
 
 
 # ── Node pairing ────────────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ def test_control_on_actuates_real_topic(db, mock_actuation):
     with as_tenant("t1"):
         _add_light()
         out = device_control({"device": "living_light", "action": "on"}, None)
-    assert mock_actuation["topic"] == "room/cmd/light"
+    assert mock_actuation["topic"] == "sandy/node/n1/light"
     assert mock_actuation["payload"] == "on"
     assert "شغّلت" in out["reply"]
 
@@ -201,8 +202,7 @@ def test_control_bad_action_refuses_without_actuating(db, mock_actuation):
     from app.brain.tools_world import device_control
 
     with as_tenant("t1"):
-        device_store.add_device("salon_curtain", "ستارة", "cover",
-                                {"kind": "mqtt", "topic": "room/cmd/curtain"})
+        device_store.add_device("salon_curtain", "ستارة", "cover", on_node("curtain"))
         out = device_control({"device": "salon_curtain", "action": "on"}, None)
     assert "المتاح" in out["reply"]               # tells the allowed actions
     assert "topic" not in mock_actuation          # refused, nothing sent
@@ -214,10 +214,10 @@ def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, m
     from app.features.scene_store import _actuate
 
     with as_tenant("t1"):
-        _add_light()  # dimmer "living_light" -> room/cmd/light
+        _add_light()  # dimmer "living_light" -> sandy/node/n1/light
         r = _actuate([{"device": "living_light", "value": "on"}])
     assert r == {"sent": 1, "missed": [], "offline": [], "skipped": []}
-    assert mock_actuation["topic"] == "room/cmd/light"
+    assert mock_actuation["topic"] == "sandy/node/n1/light"
     assert mock_actuation["payload"] == "on"
 
 
@@ -233,23 +233,25 @@ def test_scene_actuates_registry_device_via_validated_path(db, mock_actuation, m
 def test_tenant_owns_only_its_own_device_topic(db):
     with as_tenant("tenant-a"):
         _add_light(name="a_light")
-        assert device_store.tenant_owns_topic("room/cmd/light") is True
+        assert device_store.tenant_owns_topic("sandy/node/n1/light") is True
 
     # Same topic string, different tenant, no device registered -> refused.
     with as_tenant("tenant-b"):
-        assert device_store.tenant_owns_topic("room/cmd/light") is False
+        assert device_store.tenant_owns_topic("sandy/node/n1/light") is False
 
 
 def test_unknown_topic_is_refused_even_for_a_tenant_with_devices(db):
     with as_tenant("tenant-a"):
         _add_light(name="a_light")
-        assert device_store.tenant_owns_topic("room/cmd/curtain") is False
+        assert device_store.tenant_owns_topic("sandy/node/n1/curtain") is False
+        # A topic outside the node tree is no device of anyone's.
+        assert device_store.tenant_owns_topic("room/cmd/light") is False
         assert device_store.tenant_owns_topic("") is False
 
 
 def test_ownership_fails_closed_without_a_tenant(db):
     # No active profile => no tenant => the scoped read returns nothing.
-    assert device_store.tenant_owns_topic("room/cmd/light") is False
+    assert device_store.tenant_owns_topic("sandy/node/n1/light") is False
 
 
 def test_node_transport_topic_is_owned_by_the_pairing_tenant(db):
@@ -466,10 +468,6 @@ def test_the_ownership_check_finds_exactly_what_it_used_to_scan_for(db):
     with as_tenant("owner"):
         node_store.pair_node("sandybrain01", "ساندي")
         node_store.ingest_status("sandybrain01", True, [], ROBOT_OUTPUTS, "0.6.0")
-        device_store.add_device(
-            name="lamp", label="لمبة", control_type="switch",
-            transport={"kind": "mqtt", "topic": "room/cmd/light"}, room="صالة",
-        )
 
         for dev in device_store.list_devices():
             raw = device_store.get_device(dev["name"])

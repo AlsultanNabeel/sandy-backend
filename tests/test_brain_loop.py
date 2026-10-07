@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from brain_fakes import (A, ScriptedModel, brain_db, call, text_reply,  # noqa: F401
+from brain_fakes import (A, ScriptedModel, brain_db, call, on_node, text_reply,  # noqa: F401
                          tools_reply)
 
 from app.blocks import items
@@ -97,11 +97,10 @@ def test_fast_path_still_wins_with_no_model_call(brain_db, monkeypatch):  # noqa
 
     monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
     with active_user_profile_context(A):
-        device_store.add_device("living_light", "الضو", "switch",
-                                {"kind": "mqtt", "topic": "room/cmd/light"})
+        device_store.add_device("living_light", "الضو", "switch", on_node("room/light"))
     model = ScriptedModel()
     state = _turn(model, "شغل الضو")
-    assert model.seen == [] and sent == {"room/cmd/light": "on"}
+    assert model.seen == [] and sent == {"sandy/node/n1/room/light": "on"}
     assert state["routed_by"] == "fast_path" and "شغّلت" in state["final_response"]
 
 
