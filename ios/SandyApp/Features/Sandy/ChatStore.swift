@@ -153,13 +153,20 @@ final class ChatStore: ObservableObject {
     private var streamingCmid: String?
 
     /// يرسل، يخزّن السؤال والرد، ويرجّع رد ساندي (ليقرأه الـView بالصوت).
-    /// `appendUser: false` answers the line already last (regenerate).
+    /// `appendUser: false` answers the line already last (regenerate); with `resendID` that
+    /// line is sent again as the message it was («أعد المحاولة»).
     func send(api: APIClient, text: String, attachments: [ChatAttachment] = [],
-              appendUser: Bool = true) async -> String? {
+              appendUser: Bool = true, resendID: String? = nil) async -> String? {
         sendTask?.cancel()
         sendGeneration += 1
         let generation = sendGeneration
-        if appendUser { messages.append(ChatMessage(role: "user", text: text, attachments: attachments)) }
+        // مفتاح الرسالة: نفسه بكل محاولة، فالخادم ما بيشغّل الدور مرتين.
+        let clientMsgID = resendID ?? Self.newID()
+        let savesUser = appendUser || resendID != nil
+        if appendUser {
+            messages.append(ChatMessage(role: "user", text: text, attachments: attachments,
+                                        clientMsgId: clientMsgID))
+        }
         let userLine = messages.last { $0.role == "user" }
         let userLineID = userLine?.id
         // A regenerate answers the line with the attachments it had.
@@ -178,8 +185,6 @@ final class ChatStore: ObservableObject {
             currentID = cid
             UserDefaults.standard.set(cid, forKey: currentKey)
         }
-        // مفتاح الرسالة: نفسه بكل محاولة، فالخادم ما بيشغّل الدور مرتين.
-        let clientMsgID = Self.newID()
         streamingCid = cid
         streamingCmid = clientMsgID
         let t = Task { @MainActor () -> String? in
@@ -194,7 +199,8 @@ final class ChatStore: ObservableObject {
             // الرسالة من الطلب نفسه، مش من القاعدة، فما داعي ننتظر الحفظ. مهمة
             // منفصلة: الرسالة بتنحفظ حتى لو الإرسال اتلغى أو فشل.
             let saveUser = Task {
-                if appendUser {
+                // Sent again under its id, the server keeps the line once.
+                if savesUser {
                     try? await api.appendMessage(cid: cid, role: "user", text: text, attachments: attachments,
                                                  clientMsgId: clientMsgID)
                 }
@@ -326,11 +332,16 @@ final class ChatStore: ObservableObject {
         }
     }
 
-    /// A failed line, sent again in its place.
+    /// A failed line, sent again as the same message: last, so the reply follows it, and under
+    /// its own id, so a turn the server already ran is answered from its ledger, not run again.
     func retry(api: APIClient, _ message: ChatMessage) async -> String? {
-        messages.removeAll { $0.id == message.id }
+        guard let idx = messages.firstIndex(where: { $0.id == message.id }) else { return nil }
+        var line = messages.remove(at: idx)
+        line.failed = false
+        messages.append(line)
         errorMessage = ""
-        return await send(api: api, text: message.text, attachments: message.attachments)
+        return await send(api: api, text: line.text, appendUser: false,
+                          resendID: line.clientMsgId ?? Self.newID())
     }
 
     /// Sandy's last reply, written again: dropped here and on the server, the same line re-answered.

@@ -241,11 +241,12 @@ def create_app(*, mongo_db=None):
         refused = _conversation_refusal(user_id, body)
         if refused is not None:
             return refused
-        # Idempotency: a retried send (same client_msg_id) is answered from
-        # the ledger — never run, never metered twice.
+        # Idempotency: a retried send (same client_msg_id, same conversation) is
+        # answered from the ledger — never run, never metered twice.
         cmid = _client_msg_id(body)
+        cid = (body.get("conversation_id") or "").strip()
         if cmid:
-            turn, cached = claim_turn(mongo_db, user_id, cmid)
+            turn, cached = claim_turn(mongo_db, user_id, cmid, cid)
             if turn == "done":
                 return jsonify(cached), 200
             if turn == "processing":
@@ -254,7 +255,7 @@ def create_app(*, mongo_db=None):
         _over = _meter_or_error(role, user_id)
         if _over:
             if cmid:
-                release_turn(mongo_db, user_id, cmid)
+                release_turn(mongo_db, user_id, cmid, cid)
             return jsonify(_limit_response(_over)), 429
 
         try:
@@ -262,10 +263,10 @@ def create_app(*, mongo_db=None):
         except Exception:
             logger.exception("[web_agent] user pipeline failed")
             if cmid:
-                finish_turn(mongo_db, user_id, cmid, error=True)
+                finish_turn(mongo_db, user_id, cmid, error=True, cid=cid)
             return jsonify({"error": "internal_error"}), 500
         if cmid:
-            finish_turn(mongo_db, user_id, cmid, result)
+            finish_turn(mongo_db, user_id, cmid, result, cid=cid)
         return jsonify(result), 200
 
     @app.route("/api/agent/stream", methods=["POST"])
@@ -296,8 +297,9 @@ def create_app(*, mongo_db=None):
 
         # A retry of a send the network cut: replay the stored reply, or wait for the running one.
         cmid = _client_msg_id(body)
+        cid = (body.get("conversation_id") or "").strip()
         if cmid:
-            turn, cached = claim_turn(mongo_db, user_id, cmid)
+            turn, cached = claim_turn(mongo_db, user_id, cmid, cid)
             if turn == "done":
                 return Response(_sse({**cached, "done": True}),
                                 mimetype="text/event-stream", headers=sse_headers)
@@ -306,7 +308,7 @@ def create_app(*, mongo_db=None):
                     deadline = time.monotonic() + _DUPLICATE_WAIT_S
                     last_ping = time.monotonic()
                     while time.monotonic() < deadline:
-                        status, result = turn_status(mongo_db, user_id, cmid)
+                        status, result = turn_status(mongo_db, user_id, cmid, cid)
                         if status == "done":
                             yield _sse({**(result or {}), "done": True})
                             return
@@ -325,7 +327,7 @@ def create_app(*, mongo_db=None):
         _over = _meter_or_error(role, user_id)
         if _over:
             if cmid:
-                release_turn(mongo_db, user_id, cmid)
+                release_turn(mongo_db, user_id, cmid, cid)
             return jsonify(_limit_response(_over)), 429
 
         chunk_queue: "queue.Queue" = queue.Queue()
@@ -338,12 +340,12 @@ def create_app(*, mongo_db=None):
             try:
                 outcome["result"] = _run_authenticated_agent(claims, body)
                 if cmid:
-                    finish_turn(mongo_db, user_id, cmid, outcome["result"])
+                    finish_turn(mongo_db, user_id, cmid, outcome["result"], cid=cid)
             except Exception:
                 logger.exception("[web_agent_stream] user pipeline failed")
                 outcome["error"] = True
                 if cmid:
-                    finish_turn(mongo_db, user_id, cmid, error=True)
+                    finish_turn(mongo_db, user_id, cmid, error=True, cid=cid)
             finally:
                 clear_stream_hooks()
                 chunk_queue.put(None)  # sentinel: no more chunks

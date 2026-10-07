@@ -9,6 +9,9 @@ struct ChatMessage: Identifiable {
     var failed = false
     /// Photos and documents sent with it, or the picture Sandy drew.
     var attachments: [ChatAttachment] = []
+    /// A line of the user's: the id its send went under, so «أعد المحاولة» sends it again as
+    /// the same message (the server answers a turn it already ran from its ledger).
+    var clientMsgId: String?
 }
 
 /// A chat attachment kept on the server (`/api/attachments`); the bytes come by id.

@@ -14,7 +14,9 @@ Collection `conversations`: {_id, user_id, title, created_at, updated_at, messag
 
 The app may pick a new chat's id itself; the first write creates it
 (`ensure_conversation`), and an id belonging to another user is refused.
-`agent_turns` makes chat sends idempotent per `client_msg_id` (claim_turn / finish_turn).
+`agent_turns` makes chat sends idempotent per `client_msg_id` within the user and the
+conversation (claim_turn / finish_turn): «أعد المحاولة» after a reply lost on the way gets
+the stored reply, and the turn's tools never run twice.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
 
 from flask import jsonify, request
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from app.api.auth_handlers import require_auth
 from app.utils.tenant_db import ScopedCollection, scoped
@@ -50,10 +52,11 @@ SEARCH_EMBEDS_PER_MIN = 20
 # Client-chosen ids: nothing that could smuggle an operator or a path.
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
-# Processed ids are remembered for _TURN_TTL_S; a "processing" turn older than
-# _TURN_STALE_S is presumed abandoned and may be claimed again.
+# Processed ids are remembered for _TURN_TTL_S (a day: the app's «أعد المحاولة» can come
+# long after the reply was lost); a "processing" turn older than _TURN_STALE_S is presumed
+# abandoned and may be claimed again.
 _TURNS = "agent_turns"
-_TURN_TTL_S = 600
+_TURN_TTL_S = 86400
 _TURN_STALE_S = 180
 # A running turn holds a rewind back at most this long, so one that hung never locks it.
 _REWIND_WAIT_S = 120
@@ -112,8 +115,7 @@ def _turns(mongo_db, uid: str) -> ScopedCollection:
                 try:
                     raw.create_index([("user_id", 1), ("client_msg_id", 1)],
                                      unique=True, name="user_client_msg_unique")
-                    raw.create_index("created_at", expireAfterSeconds=_TURN_TTL_S,
-                                     name="created_at_ttl")
+                    _ensure_turn_ttl(mongo_db, raw)
                     _turn_index_ready[key] = mongo_db
                 except Exception:  # noqa: BLE001 — retried on the next call
                     logger.warning("[turns] index creation failed", exc_info=True)
@@ -128,15 +130,37 @@ def _age_s(ts) -> float:
     return (datetime.now(timezone.utc) - ts).total_seconds()
 
 
-def claim_turn(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
-    """Claim the turn for (uid, client_msg_id).
+def _ensure_turn_ttl(mongo_db, raw) -> None:
+    """The ledger's TTL index at _TURN_TTL_S; one made before with another expiry is changed
+    in place (a second index on the same key with other options is refused)."""
+    try:
+        raw.create_index("created_at", expireAfterSeconds=_TURN_TTL_S, name="created_at_ttl")
+    except OperationFailure as e:
+        if e.code not in (85, 86):  # IndexOptionsConflict, IndexKeySpecsConflict
+            raise
+        mongo_db.command("collMod", _TURNS, index={"name": "created_at_ttl",
+                                                    "expireAfterSeconds": _TURN_TTL_S})
+
+
+def _turn_key(cmid: str, cid: str) -> Optional[str]:
+    """The ledger's key: the send's id within its conversation, so the same id in another
+    conversation is its own turn. None when either id is malformed."""
+    if not valid_client_id(cmid) or (cid and not valid_client_id(cid)):
+        return None
+    return f"{cid}.{cmid}" if cid else cmid
+
+
+def claim_turn(mongo_db, uid: str, cmid: str, cid: str = "") -> Tuple[str, Optional[dict]]:
+    """Claim the turn for (uid, conversation, client_msg_id).
 
     ("new", None): run it and call finish_turn · ("done", result): already answered ·
     ("processing", None): running elsewhere. A failed or stale turn is re-claimed by
     compare-and-set on `attempt`. No db/user/valid key → no ledger.
     """
-    if mongo_db is None or not uid or not valid_client_id(cmid):
+    key = _turn_key(cmid, cid)
+    if mongo_db is None or not uid or key is None:
         return "new", None
+    cmid = key
     coll = _turns(mongo_db, uid)
     now = datetime.now(timezone.utc)
     try:
@@ -167,11 +191,12 @@ def claim_turn(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
     return "processing", None
 
 
-def turn_status(mongo_db, uid: str, cmid: str) -> Tuple[str, Optional[dict]]:
+def turn_status(mongo_db, uid: str, cmid: str, cid: str = "") -> Tuple[str, Optional[dict]]:
     """("done", result) / ("processing"|"error"|"missing", None)."""
-    if mongo_db is None or not uid or not valid_client_id(cmid):
+    key = _turn_key(cmid, cid)
+    if mongo_db is None or not uid or key is None:
         return "missing", None
-    d = _turns(mongo_db, uid).find_one({"client_msg_id": cmid})
+    d = _turns(mongo_db, uid).find_one({"client_msg_id": key})
     if d is None:
         return "missing", None
     status = d.get("status") or "processing"
@@ -189,25 +214,27 @@ def turn_running(mongo_db, uid: str) -> bool:
 
 
 def finish_turn(mongo_db, uid: str, cmid: str, result: Optional[dict] = None,
-                error: bool = False) -> None:
+                error: bool = False, cid: str = "") -> None:
     """Record how a claimed turn ended (best-effort)."""
-    if mongo_db is None or not uid or not valid_client_id(cmid):
+    key = _turn_key(cmid, cid)
+    if mongo_db is None or not uid or key is None:
         return
     coll = _turns(mongo_db, uid)
     fields = {"status": "error"} if error else {"status": "done", "result": result or {}}
     # The result holds an image only as an attachment reference, so it is always small.
     try:
-        coll.update_one({"client_msg_id": cmid}, {"$set": fields})
+        coll.update_one({"client_msg_id": key}, {"$set": fields})
     except Exception:  # noqa: BLE001
         logger.warning("[turns] finish failed", exc_info=True)
 
 
-def release_turn(mongo_db, uid: str, cmid: str) -> None:
+def release_turn(mongo_db, uid: str, cmid: str, cid: str = "") -> None:
     """Forget a claim that never ran (e.g. refused by the quota)."""
-    if mongo_db is None or not uid or not valid_client_id(cmid):
+    key = _turn_key(cmid, cid)
+    if mongo_db is None or not uid or key is None:
         return
     try:
-        _turns(mongo_db, uid).delete_one({"client_msg_id": cmid, "status": "processing"})
+        _turns(mongo_db, uid).delete_one({"client_msg_id": key, "status": "processing"})
     except Exception:  # noqa: BLE001
         logger.warning("[turns] release failed", exc_info=True)
 
@@ -401,6 +428,10 @@ def register_conversations_api(app, mongo_db=None):
         message = {"role": role, "text": text, "ts": _now()}
         cmid = str(body.get("client_msg_id") or "")
         if role == "user" and valid_client_id(cmid):
+            # A line sent again under its own id («أعد المحاولة») is in this conversation already.
+            if coll.find_one({"_id": cid, "user_id": uid, "messages.client_msg_id": cmid},
+                             {"_id": 1}) is not None:
+                return jsonify({"ok": True}), 200
             # The line's id, so a rewind takes back the turn of this line and no other.
             message["client_msg_id"] = cmid
         if files:
@@ -473,7 +504,7 @@ def register_conversations_api(app, mongo_db=None):
         body = request.get_json(silent=True) or {}
         partial = str(body.get("partial") or "")[:_MAX_MESSAGE_CHARS]
         from app.brain import stm, stops
-        status, _ = turn_status(mongo_db, uid, str(body.get("client_msg_id") or ""))
+        status, _ = turn_status(mongo_db, uid, str(body.get("client_msg_id") or ""), cid)
         if status == "processing":
             stops.request(uid, cid, partial)
         else:

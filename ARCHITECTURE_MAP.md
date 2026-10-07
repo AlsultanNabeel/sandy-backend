@@ -1329,7 +1329,11 @@ so folders are organisation only.
   reverses it (a log row it puts back is embedded again, unless sealed); device actions are not undone), a stop button that keeps what arrived
   (`POST …/stop`: a running turn stops before its next tool via `brain/stops.py`, and
   memory keeps only the shown part with a «cut here» note), and a failed line marked
-  with «أعد المحاولة».
+  with «أعد المحاولة», which sends that line again as the same message: its `client_msg_id`
+  (kept on the line, `ChatMessage.clientMsgId`), so a turn the server already ran, its reply
+  lost on the way, is answered from the ledger and its tools do not run again
+  (`conversations_api.claim_turn`, per user and conversation, kept a day), and the line is
+  kept once in the conversation (`POST …/messages` ignores a user line whose id is there).
   Attachments (`Features/Sandy/ChatAttachments.swift`): photos, the camera and documents
   upload at once to `POST /api/attachments` (`features/attachments.py`, `sandy_attachments`,
   bytes inline; images 8 MB, documents 5 MB; PDF / Word / text read to at most 20 000
@@ -1448,7 +1452,7 @@ Written today, and what reads it:
 - **Conversation** — `sandy_stm`, `sandy_pending_state`, `sandy_prompt_cache`,
   `sandy_cache_stamps`, `conversations` (the app's chat threads, filtered by
   `user_id` by hand in `conversations_api.py`), `agent_turns` (the send ledger,
-  TTL 10 minutes) and `turn_stops` (a stopped reply, `_id` `<user>:<thread>`, TTL a day).
+  keyed by the send's `client_msg_id` within its conversation, TTL a day) and `turn_stops` (a stopped reply, `_id` `<user>:<thread>`, TTL a day).
 - **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
   `sandy_scenes`, `sandy_voiceprints`, `sandy_voice_enroll`, `sandy_firmware`, `sandy_firmware_chunks`,
   `node_pair_challenges`, `node_sightings`, `cam_upload_nonces`, `camera_inbox`.
