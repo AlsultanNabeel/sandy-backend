@@ -371,8 +371,11 @@ tenant could register a device and then be refused permission to switch it on.
 Now:
 
 - **`device_store.tenant_owns_topic(topic)`** answers *"does this topic actuate a
-  device in the calling tenant's registry?"* The tenant-scoped read is the
-  enforcement — another tenant's topic simply is not in this tenant's collection.
+  device in the calling tenant's registry, on a node the tenant still has paired?"* The
+  tenant-scoped reads are the enforcement — another tenant's topic simply is not in this
+  tenant's collection, and a device row left behind by a release that stopped halfway
+  drives nothing. A release (`node_store.unpair_node`) whose device delete fails stops
+  before the node row goes (`release_failed`, 503) so asking again finishes it.
 - **`room_device.send_to_topic()`** gates on that. Every registry-driven path goes
   through it: the `device_control` tool, `/api/devices/<name>/control`, IR learn,
   and scene actuation. It is the only way a device is sent to: the name-based

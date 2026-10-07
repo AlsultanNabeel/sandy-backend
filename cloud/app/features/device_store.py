@@ -402,12 +402,13 @@ def learn_ir_button(name: str, button: str, code: str) -> Dict[str, Any]:
     return {"ok": True, "name": d["name"], "button": button}
 
 
-def delete_devices_for_node(node_id: str) -> int:
-    """Remove this tenant's devices that go through a node (on unpair)."""
+def delete_devices_for_node(node_id: str) -> Optional[int]:
+    """Remove this tenant's devices that go through a node (on unpair); how many, or None
+    when the delete failed, so the release stops instead of leaving them behind."""
     coll = _coll()
     node_id = (node_id or "").strip()
     if coll is None or not node_id:
-        return 0
+        return None
     try:
         r = coll.delete_many({"transport.kind": "node",
                               "transport.node_id": node_id})
@@ -415,7 +416,7 @@ def delete_devices_for_node(node_id: str) -> int:
     except PyMongoError as exc:
         logger.warning("[device_store] releasing devices for %s failed: %s",
                        node_id, exc)
-        return 0
+        return None
 
 
 def device_topic(device: Dict[str, Any]) -> Optional[str]:
@@ -445,15 +446,21 @@ def _topic_query(topic: str) -> Dict[str, Any]:
 
 
 def tenant_owns_topic(topic: str) -> bool:
-    """True when ``topic`` actuates a device of the current tenant (the scoped read is the check)."""
+    """True when ``topic`` actuates a device of the current tenant on a node the tenant
+    still has paired (the scoped reads are the check). The node is asked too: a device row
+    left behind by a release that failed halfway must not drive a robot sold on."""
     coll = _coll()
     if coll is None:
         return False
     topic = (topic or "").strip()
     if not topic:
         return False
+    query = _topic_query(topic)
     try:
-        return coll.find_one(_topic_query(topic), {"_id": 1}) is not None
+        if coll.find_one(query, {"_id": 1}) is None:
+            return False
+        from app.features.node_store import get_node
+        return get_node(query["transport.node_id"]) is not None
     except Exception as e:  # noqa: BLE001 — a lookup failure must not actuate
         logger.warning("[DeviceStore] ownership check failed for %s: %s", topic, e)
         return False

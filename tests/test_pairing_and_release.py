@@ -67,3 +67,70 @@ def test_a_device_added_at_the_same_moment_is_exists_not_an_error(monkeypatch):
         assert r == {"ok": False, "error": "exists"}
     finally:
         appdb.reset()
+
+
+# T1: actuation asked only whether the device row was the caller's, not whether the node
+# still was. A release whose device delete failed (swallowed, «0 removed») went on, and the
+# old owner kept moving the neck, the screen and the IR of a robot sold to someone else.
+
+@pytest.fixture
+def two_owners():
+    import mongomock
+
+    from app import db as appdb
+    from app.features import device_store
+
+    d = mongomock.MongoClient().db
+    device_store.init_device_store(d)
+    node_store.init_node_store(d)
+    yield d
+    appdb.reset()
+
+
+def _as(uid):
+    from app.utils.user_profiles import active_user_profile_context
+    return active_user_profile_context({"chat_id": uid, "relation": "user"})
+
+
+def test_a_device_left_behind_does_not_drive_a_robot_sold_on(two_owners):
+    from app.features import device_store
+
+    d = two_owners
+    with _as("seller"):
+        d["sandy_nodes"].insert_one({"node_id": "8421", "user_id": "seller"})
+        assert device_store.add_device("sandy_head", "رقبة", "dimmer",
+                                       {"kind": "node", "node_id": "8421", "output": "servo"})["ok"]
+        assert device_store.tenant_owns_topic("sandy/node/8421/servo")
+    # The robot changed hands with the seller's row still there.
+    d["sandy_nodes"].update_one({"node_id": "8421"}, {"$set": {"user_id": "buyer"}})
+    with _as("seller"):
+        assert device_store.tenant_owns_topic("sandy/node/8421/servo") is False
+
+
+def test_a_release_whose_device_delete_fails_stops(two_owners, monkeypatch):
+    from pymongo.errors import AutoReconnect
+
+    from app.features import device_store
+
+    d = two_owners
+    monkeypatch.setattr(node_store, "_wipe_board", lambda node_id: True)
+    with _as("seller"):
+        d["sandy_nodes"].insert_one({"node_id": "8421", "user_id": "seller"})
+        device_store.add_device("sandy_head", "رقبة", "dimmer",
+                                {"kind": "node", "node_id": "8421", "output": "servo"})
+        real = device_store._coll
+
+        class _Failing:
+            def __init__(self, coll):
+                self._coll = coll
+
+            def delete_many(self, *a, **k):
+                raise AutoReconnect("database went away")
+
+            def __getattr__(self, name):
+                return getattr(self._coll, name)
+
+        monkeypatch.setattr(device_store, "_coll", lambda: _Failing(real()))
+        r = node_store.unpair_node("8421")
+    assert r["ok"] is False and r["error"] == "release_failed"
+    assert d["sandy_nodes"].find_one({"node_id": "8421"})        # still his, to finish later

@@ -357,6 +357,9 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
     # Devices before the node row, so a racing heartbeat can't re-provision them.
 
     devices_removed = delete_devices_for_node(node_id)
+    if devices_removed is None:
+        # Its devices would outlive it, with nothing left to refuse them: stop here.
+        return {"ok": False, "error": "release_failed", "board_wiped": board_wiped}
     # A sold robot must enrol a fresh voice key.
     try:
         from app.features.device_keys import cam_key_id, revoke_key

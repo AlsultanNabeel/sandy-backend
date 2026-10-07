@@ -608,5 +608,7 @@ def register_devices_api(app, mongo_db=None):
 
         r = unpair_node(node_id)
         if not r.get("ok"):
-            return _bad(r.get("error", "unpair_failed"), code=404)
+            # A release that stopped halfway is the server's, and asking again finishes it.
+            return _bad(r.get("error", "unpair_failed"),
+                        code=503 if r.get("error") == "release_failed" else 404)
         return jsonify(r), 200
