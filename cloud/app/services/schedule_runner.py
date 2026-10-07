@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any, Dict, List, Optional, Tuple
 
 from dateutil.rrule import rrulestr
+from pymongo.errors import PyMongoError
 
 from app.blocks import _base, schedules
 from app.features import notify_prefs, push_tokens_store
@@ -164,7 +165,7 @@ def follow_zone(uid: str, old_zone: tzinfo, now: Optional[datetime] = None) -> i
                 res = coll.update_one({"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"]},
                                       {"$set": {"fire_at": nxt, "series_start": start, "armed": []}})
                 moved += res.modified_count
-    except Exception as exc:  # noqa: BLE001 — a request is never failed by this; the rows keep their times
+    except PyMongoError as exc:  # a request is never failed by this; the rows keep their times
         logger.warning("[schedules] zone follow for %s failed: %s", uid, exc)
     return moved
 
@@ -245,7 +246,7 @@ def _ring_robot(uid: str, text: str, now: datetime) -> None:
             client = room_device.get_room_device_client()
             for topic, payload in sends:
                 client.send_to_topic(topic, payload)
-    except Exception as exc:  # noqa: BLE001 — the robot never fails a reminder
+    except (PyMongoError, OSError, RuntimeError) as exc:  # the robot never fails a reminder
         logger.warning("[schedules] robot ring for %s failed: %s", uid, exc)
 
 

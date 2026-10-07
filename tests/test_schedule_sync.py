@@ -21,6 +21,7 @@ def pushes(monkeypatch, brain_db):  # noqa: F811
     monkeypatch.setattr(apns, "send_background", lambda token, data: sent.append((token, data)) or (True, "ok"))
     monkeypatch.setattr(schedule_sync, "DEBOUNCE_S", 0)
     monkeypatch.setattr(schedule_sync, "submit_background", lambda fn, *a, **k: fn(*a))
+    monkeypatch.setattr(schedule_sync, "_waiting", set())   # another test's send may still wait
     with active_user_profile_context(A):
         yield sent
 

@@ -11,6 +11,7 @@ mongomock DB with ``apns.send`` monkeypatched. The headline guarantees:
 """
 
 import os
+from datetime import datetime, timedelta, timezone
 
 import mongomock
 import pytest
@@ -92,6 +93,10 @@ def test_scheduler_idle_without_keys(db, monkeypatch):
     assert nudge_scheduler._scheduler is None
 
 
+# A user with no zone saved is on the default (Cairo, UTC+3 in October): eight there.
+EIGHT_IN_CAIRO = datetime(2026, 10, 7, 5, 0, tzinfo=timezone.utc)
+
+
 def test_daily_send_delivers_and_prunes_dead_tokens(db, monkeypatch):
     push_tokens_store.register_token("u1", "live")
     push_tokens_store.register_token("u1", "dead")
@@ -104,13 +109,13 @@ def test_daily_send_delivers_and_prunes_dead_tokens(db, monkeypatch):
 
     sent = []
 
-    def fake_send(token, title, body, data=None, silent=False):
+    def fake_send(token, title, body, data=None, silent=False, category=None):
         sent.append(token)
         return (False, "gone") if token == "dead" else (True, "ok")
 
     monkeypatch.setattr(apns, "send", fake_send)
 
-    delivered = nudge_scheduler.run_daily_send(db)
+    delivered = nudge_scheduler.run_daily_send(db, EIGHT_IN_CAIRO)
     assert delivered == 1
     assert set(sent) == {"live", "dead"}
     assert push_tokens_store.tokens_for_user("u1") == ["live"]  # dead pruned
@@ -125,8 +130,9 @@ def test_daily_send_is_deduped_per_day(db, monkeypatch):
     )
     monkeypatch.setattr(apns, "send", lambda *a, **k: (True, "ok"))
 
-    assert nudge_scheduler.run_daily_send(db) == 1
-    assert nudge_scheduler.run_daily_send(db) == 0  # lock held → skipped
+    assert nudge_scheduler.run_daily_send(db, EIGHT_IN_CAIRO) == 1
+    # Lock held → skipped, a quarter hour later the same morning.
+    assert nudge_scheduler.run_daily_send(db, EIGHT_IN_CAIRO + timedelta(minutes=15)) == 0
 
 
 # ── refactored nudge builder (question vs cached agenda) ─────────────────────
