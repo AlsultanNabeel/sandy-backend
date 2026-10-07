@@ -7,13 +7,7 @@ struct PersonaView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
 
-    @State private var dialect = "palestinian"
-    @State private var customInstructions = ""
-    @State private var availableDialects: [DialectOption] = []
-    @State private var loading = true
-    @State private var saving = false
-    @State private var savedNotice = false
-    @State private var errorMessage = ""
+    @StateObject private var form = PersonaForm()
 
     var body: some View {
         ZStack {
@@ -30,18 +24,27 @@ struct PersonaView: View {
                     dialectCard
                     customInstructionsCard
 
-                    if savedNotice { SandyNotice(lang.s("persona.saved"), kind: .info) }
-                    if !errorMessage.isEmpty { SandyNotice(errorMessage, kind: .gentleWarning) }
+                    if form.savedNotice { SandyNotice(lang.s("persona.saved"), kind: .info) }
+                    if !form.errorKey.isEmpty { SandyNotice(lang.s(form.errorKey), kind: .gentleWarning) }
 
-                    SandyButton(title: saving ? "..." : lang.s("persona.save"),
-                               systemImage: "checkmark.circle.fill",
-                               style: .primary, fillWidth: true) { save() }
-                        .disabled(saving || loading)
+                    if form.loadFailed {
+                        // Nothing was read: saving now would write the defaults over what is kept.
+                        SandyButton(title: lang.s("common.retry"), systemImage: "arrow.clockwise",
+                                   style: .primary, fillWidth: true) {
+                            Task { await form.load(api: state.api) }
+                        }
+                        .disabled(form.loading)
+                    } else {
+                        SandyButton(title: form.saving ? "..." : lang.s("persona.save"),
+                                   systemImage: "checkmark.circle.fill",
+                                   style: .primary, fillWidth: true) { form.save(api: state.api) }
+                            .disabled(!form.canSave)
 
-                    if !customInstructions.isEmpty || dialect != "palestinian" {
-                        SandyButton(title: lang.s("persona.reset"), systemImage: "arrow.counterclockwise",
-                                   style: .secondary, fillWidth: true) { reset() }
-                            .disabled(saving || loading)
+                        if form.loaded && (!form.customInstructions.isEmpty || form.dialect != "palestinian") {
+                            SandyButton(title: lang.s("persona.reset"), systemImage: "arrow.counterclockwise",
+                                       style: .secondary, fillWidth: true) { form.reset(api: state.api) }
+                                .disabled(!form.canSave)
+                        }
                     }
                 }
                 .padding(Theme.Spacing.md)
@@ -49,20 +52,20 @@ struct PersonaView: View {
         }
         .navigationTitle(lang.s("persona.title"))
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .task { await form.load(api: state.api) }
     }
 
     private var dialectCard: some View {
         SandyCard {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 SectionHeader(title: lang.s("persona.dialectLabel"))
-                Picker(lang.s("persona.dialectLabel"), selection: $dialect) {
-                    ForEach(availableDialects) { option in
+                Picker(lang.s("persona.dialectLabel"), selection: $form.dialect) {
+                    ForEach(form.availableDialects) { option in
                         Text(option.label).tag(option.key)
                     }
                 }
                 .pickerStyle(.segmented)
-                .disabled(loading || availableDialects.isEmpty)
+                .disabled(!form.loaded || form.availableDialects.isEmpty)
             }
         }
     }
@@ -72,18 +75,18 @@ struct PersonaView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 SectionHeader(title: lang.s("persona.customLabel"))
                 ZStack(alignment: .topLeading) {
-                    if customInstructions.isEmpty {
+                    if form.customInstructions.isEmpty {
                         Text(lang.s("persona.customPlaceholder"))
                             .font(Theme.Typography.body)
                             .foregroundColor(Theme.Colors.tertiaryText)
                             .padding(.horizontal, Theme.Spacing.sm)
                             .padding(.vertical, Theme.Spacing.sm)
                     }
-                    TextEditor(text: $customInstructions)
+                    TextEditor(text: $form.customInstructions)
                         .font(Theme.Typography.body)
                         .frame(minHeight: 110)
                         .scrollContentBackground(.hidden)
-                        .disabled(loading)
+                        .disabled(!form.loaded)
                 }
                 .padding(Theme.Spacing.xs)
                 .background(Theme.Colors.surface)
@@ -95,37 +98,61 @@ struct PersonaView: View {
             }
         }
     }
+}
 
-    private func load() async {
+/// What the persona screen holds. Nothing can be saved until the saved persona was read:
+/// after a failed load the fields hold the defaults, and saving them wrote over the user's own.
+@MainActor
+final class PersonaForm: ObservableObject {
+    @Published var dialect = "palestinian"
+    @Published var customInstructions = ""
+    @Published private(set) var availableDialects: [DialectOption] = []
+    @Published private(set) var loading = false
+    @Published private(set) var loaded = false
+    @Published private(set) var loadFailed = false
+    @Published private(set) var saving = false
+    @Published private(set) var savedNotice = false
+    /// A localization key, empty when there is nothing to say.
+    @Published private(set) var errorKey = ""
+
+    var canSave: Bool { loaded && !saving }
+
+    func load(api: APIClient) async {
         loading = true
+        defer { loading = false }
         do {
-            let persona = try await state.api.getPersona()
+            let persona = try await api.getPersona()
             dialect = persona.dialect
             customInstructions = persona.customInstructions
             availableDialects = persona.availableDialects
+            loaded = true
+            loadFailed = false
+            errorKey = ""
         } catch {
-            errorMessage = lang.s("persona.loadError")
+            if !loaded { loadFailed = true }
+            errorKey = "persona.loadError"
         }
-        loading = false
     }
 
-    private func save() {
+    func save(api: APIClient) {
+        guard canSave else { return }
         saving = true
-        withAnimation { errorMessage = ""; savedNotice = false }
+        withAnimation { errorKey = ""; savedNotice = false }
         Task {
             do {
-                try await state.api.savePersona(dialect: dialect, customInstructions: customInstructions)
+                try await api.savePersona(dialect: dialect, customInstructions: customInstructions)
                 withAnimation { savedNotice = true }
             } catch {
-                withAnimation { errorMessage = lang.s("persona.saveError") }
+                withAnimation { errorKey = "persona.saveError" }
             }
             saving = false
         }
     }
 
-    private func reset() {
+    func reset(api: APIClient) {
+        guard canSave else { return }
         dialect = "palestinian"
         customInstructions = ""
-        save()
+        save(api: api)
     }
 }
