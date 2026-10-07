@@ -84,6 +84,8 @@ struct FocusStatus {
     var remainingSec: Int = 0
     var totalSec: Int = 0
     var demo: Bool = false
+    /// When the phase now ends, from the server's clock (`phase_ends_at_ms`).
+    var phaseEndsAt: Date? = nil
     var isBreak: Bool { phase == "break" }
 }
 

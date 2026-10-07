@@ -13,6 +13,7 @@ extension APIClient {
         let remaining_sec: Int?
         let total_sec: Int?
         let demo: Bool?
+        let phase_ends_at_ms: Double?
     }
 
     func getFocusStatus() async throws -> FocusStatus {
@@ -28,7 +29,8 @@ extension APIClient {
             breakMin: r.break_min ?? 0,
             remainingSec: r.remaining_sec ?? 0,
             totalSec: r.total_sec ?? 0,
-            demo: r.demo ?? false)
+            demo: r.demo ?? false,
+            phaseEndsAt: r.phase_ends_at_ms.flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0 / 1000) : nil })
     }
 
     private struct FocusStart: Encodable {

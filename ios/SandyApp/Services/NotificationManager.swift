@@ -718,6 +718,28 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         return trigger(at: item.date, repeats: item.repeats).nextTriggerDate()
     }
 
+    // MARK: - Focus
+
+    private static let focusPrefix = "focus."
+
+    /// A running session's changes of phase, each rung at its time, so a locked phone hears
+    /// the break, the next round and the end; nil clears them (the session ended).
+    func scheduleFocus(_ plan: FocusPlan?) {
+        center.getPendingNotificationRequests { [weak self] reqs in
+            guard let self else { return }
+            self.center.removePendingNotificationRequests(
+                withIdentifiers: reqs.map(\.identifier).filter { $0.hasPrefix(Self.focusPrefix) })
+            guard let plan, self.isSignedIn else { return }
+            let lang = AppLocale.lang
+            for (i, phase) in plan.phases.enumerated() {
+                let next = i + 1 < plan.phases.count ? plan.phases[i + 1] : nil
+                let key = next == nil ? "focus.notif.done" : next!.isBreak ? "focus.notif.break" : "focus.notif.focus"
+                self.schedule(id: Self.focusPrefix + String(i), title: translate(lang, "focus.notif.title"),
+                              body: translate(lang, key), at: phase.endsAt)
+            }
+        }
+    }
+
     // MARK: - Alarms
 
     static let alarmKey = "alarm"

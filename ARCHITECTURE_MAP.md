@@ -1398,7 +1398,10 @@ so folders are organisation only.
   their own screen (they drive the Live Activity), opened from Today. Their phases advance
   when the session is read (`focus_store._catch_up`, no timer); a session found over more than
   `END_SCENE_LATE` (two minutes) ago is closed without its end scene, so opening the app the
-  next day does not switch the room.
+  next day does not switch the room. The Live Activity is read again each time the app comes back
+  to the front (`FocusLiveActivity.refresh`), is marked stale at its phase's end, and every change
+  of phase to the session's end (`FocusPlan`, from `phase_ends_at_ms`) rings as a local
+  notification (`focus.` ids), so a locked phone hears the break, the next round and the end.
 - `Services/` — `GeminiLiveManager` (in-app live voice; one shared call that outlives its screen — `CallBar` over the tabs brings it back, the end button, the Live Activity or sign-out end it), `SpeechManager` (reply playback only),
   `NotificationManager`, `SubscriptionManager` (RevenueCat configured once, the account switched with
   `logIn` on sign-in and before a purchase or restore, `logOut` on sign-out; the paid features open

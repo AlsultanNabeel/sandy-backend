@@ -20,7 +20,7 @@ final class FocusLiveActivity {
         let now = Date()
         let remaining = max(0, status.remainingSec)
         let total = max(status.totalSec, remaining)
-        let ends = now.addingTimeInterval(TimeInterval(remaining))
+        let ends = status.phaseEndsAt ?? now.addingTimeInterval(TimeInterval(remaining))
         let state = SandyFocusAttributes.ContentState(
             phaseStartedAt: ends.addingTimeInterval(-TimeInterval(total)),
             phaseEndsAt: ends,
@@ -35,8 +35,10 @@ final class FocusLiveActivity {
             return
         }
         lastState = state
-        let content = ActivityContent(state: state,
-                                      staleDate: ends.addingTimeInterval(60))
+        // The phone locked, nothing updates this: each change of phase rings instead, and the
+        // lock screen marks the countdown stale at its end until the app is back.
+        NotificationManager.shared.scheduleFocus(FocusPlan(status, phaseEndsAt: ends))
+        let content = ActivityContent(state: state, staleDate: ends)
 
         // بعد إعادة تشغيل التطبيق: نتبنّى النشاط الموجود بدل ما نفتح تاني.
         if activity == nil { activity = Activity<SandyFocusAttributes>.activities.first }
@@ -55,12 +57,22 @@ final class FocusLiveActivity {
     /// وأي نشاط تركيز متروك من تشغيل سابق.
     func end() {
         lastState = nil
+        NotificationManager.shared.scheduleFocus(nil)
         activity = nil
         let all = Activity<SandyFocusAttributes>.activities
         guard !all.isEmpty else { return }
         Task {
             for a in all { await a.end(nil, dismissalPolicy: .immediate) }
         }
+    }
+
+    /// Back in front with an activity up: the session is read again, so the lock screen is
+    /// on the right phase (or gone) whether or not the focus screen is open.
+    func refresh(api: APIClient) async {
+        guard !Activity<SandyFocusAttributes>.activities.isEmpty,
+              let status = try? await api.getFocusStatus() else { return }
+        sync(status)
+        changed.send()
     }
 
     /// ينهي الجلسة بالخادم كمكتملة (مش ملغاة) ويشيل النشاط. Only while a focus activity

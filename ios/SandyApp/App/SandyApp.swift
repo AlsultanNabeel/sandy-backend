@@ -113,6 +113,8 @@ struct RootView: View {
             if state.stage == .chat { Task { await Outbox.shared.retryParked(state.api) } }
             // A reminder made away from the phone while it was in the background rings here.
             if state.stage == .chat { Task { await SchedulesStore.reloadReminders(api: state.api) } }
+            // A focus session moved on while away: the lock screen follows.
+            if state.stage == .chat { Task { await FocusLiveActivity.shared.refresh(api: state.api) } }
         }
     }
 }
