@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from pymongo.errors import PyMongoError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app.utils.tenant_db import scoped
 from app.db import configure, get_db
@@ -239,16 +239,21 @@ def add_device(name: str, label: str, control_type: str,
         return {"ok": False, "error": "node_not_paired"}
     if coll.find_one({"name": name}):
         return {"ok": False, "error": "exists"}
-    coll.insert_one({
-        "name": name,
-        "label": (label or name).strip(),
-        "room": (room or "").strip(),
-        "control_type": ctype,
-        "transport": transport,
-        "meta": meta or {},
-        "state": "",
-        "updated_at": _now(),
-    })
+    try:
+        coll.insert_one({
+            "name": name,
+            "label": (label or name).strip(),
+            "room": (room or "").strip(),
+            "control_type": ctype,
+            "transport": transport,
+            "meta": meta or {},
+            "state": "",
+            "updated_at": _now(),
+        })
+    except DuplicateKeyError:
+        # Added between the check and the insert: two workers provisioning the same
+        # heartbeat, or a hand-made device at that moment.
+        return {"ok": False, "error": "exists"}
     return {"ok": True, "name": name}
 
 
