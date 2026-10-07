@@ -42,6 +42,7 @@ MAX_DATA_CHARS = 8000
 DEFAULT_LIMIT = 100
 # The runner owns sent/failed; the app may only re-arm or cancel.
 APP_STATUSES = ("pending", "cancelled")
+MAX_SNOOZE_MIN = 24 * 60
 
 _MESSAGES = {
     "invalid_body": "الطلب مش مفهوم.",
@@ -57,6 +58,7 @@ _MESSAGES = {
     "fire_at_in_past": "الوقت لازم يكون بالمستقبل.",
     "invalid_recurrence": "التكرار مش مفهوم.",
     "invalid_status": "الحالة مش مسموحة.",
+    "invalid_minutes": "عدد الدقايق مش صحيح.",
     "invalid_period": "الفترة مش معروفة.",
     "not_found": "ما لقيته.",
     "not_saved": "ما قدرت أحفظ، جرّب كمان شوي.",
@@ -480,6 +482,22 @@ def register_blocks_api(app, mongo_db=None):
                               recurrence=_rule(body.get("recurrence")),
                               payload=payload, status=status)
         return _found(ok, schedule_id, schedules.get, "payload")
+
+    @app.route("/api/schedules/<schedule_id>/snooze", methods=["POST"])
+    @require_tenant
+    @_answers_invalid
+    def api_schedules_snooze(claims, schedule_id):
+        """{minutes} (1–1440): ring it again that long from now; answers the row that will ring."""
+        minutes = _body().get("minutes")
+        if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= MAX_SNOOZE_MIN:
+            raise _Invalid("invalid_minutes")
+        current = schedules.get(schedule_id)
+        if current is None or current.get("kind") != "reminder" or current.get("status") == "cancelled":
+            raise _Invalid("not_found", 404)
+        rings = schedules.snooze(current, minutes, datetime.now(timezone.utc))
+        if not rings:
+            raise _Invalid("not_saved", 503)
+        return _saved(rings, schedules.get, "payload")
 
     @app.route("/api/schedules/<schedule_id>", methods=["DELETE"])
     @require_tenant

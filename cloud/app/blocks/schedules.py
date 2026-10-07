@@ -11,7 +11,7 @@ ring's own time, and «every day at 8» is eight on whatever clock the user is o
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from app.blocks import _base
@@ -132,6 +132,18 @@ def update(schedule_id: str, *, text: Optional[str] = None,
                         {**({"$set": changes} if changes else {}),
                          **({"$unset": unset} if unset else {})})
     return True
+
+
+def snooze(row: Mapping[str, Any], minutes: int, now: datetime) -> Optional[str]:
+    """Ring a reminder that rang once more, ``minutes`` from now; the id that will ring.
+    A one-off goes back to pending at the new time; a repeat gets a one-time copy (its
+    payload kept, so an alarm stays an alarm) and its series is left as it is. Shared by
+    `POST /api/schedules/<id>/snooze` (the notification's «later») and `schedule_update`."""
+    at = now + timedelta(minutes=minutes)
+    if row.get("recurrence"):
+        return add(row.get("kind") or "reminder", row.get("text", ""), at,
+                   row.get("payload") or None) or None
+    return row["id"] if update(row["id"], fire_at=at, status="pending") else None
 
 
 def delete(schedule_id: str, mongo_db=None) -> bool:

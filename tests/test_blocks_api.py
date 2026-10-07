@@ -1,7 +1,7 @@
 """/api/entries, /api/items, /api/schedules, /api/kinds, /api/summary (rebuild phase 3)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import pytest
@@ -45,6 +45,7 @@ ROUTES = [("GET", "/api/entries"), ("POST", "/api/entries"),
           ("PATCH", "/api/items/x"), ("DELETE", "/api/items/x"),
           ("GET", "/api/schedules"), ("POST", "/api/schedules"),
           ("PATCH", "/api/schedules/x"), ("DELETE", "/api/schedules/x"),
+          ("POST", "/api/schedules/x/snooze"),
           ("GET", "/api/kinds"), ("POST", "/api/summary")]
 
 
@@ -232,6 +233,52 @@ def test_schedules_crud_and_filters(c):
     _bad(c.patch(f"/api/schedules/{sid}", json={"status": "sent"}, headers=_h()), "invalid_status")
     assert c.delete(f"/api/schedules/{sid}", headers=_h()).get_json()["ok"] is True
     _bad(c.delete(f"/api/schedules/{sid}", headers=_h()), "not_found", 404)
+
+
+def _rang(c, sid, brain_db):  # noqa: F811
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    brain_db["sandy_schedules"].update_one({"_id": sid}, {"$set": {"fired_at": now}})
+    return now
+
+
+def test_snoozing_a_one_off_that_rang_puts_it_back(c, brain_db):  # noqa: F811
+    sid = c.post("/api/schedules", json={"kind": "reminder", "text": "المي", "fire_at": _iso(1)},
+                 headers=_h()).get_json()["id"]
+    brain_db["sandy_schedules"].update_one({"_id": sid}, {"$set": {"status": "sent"}})
+    now = _rang(c, sid, brain_db)
+    r = c.post(f"/api/schedules/{sid}/snooze", json={"minutes": 10}, headers=_h())
+    row = r.get_json()["item"]
+    assert r.status_code == 200 and row["id"] == sid and row["status"] == "pending"
+    at = datetime.fromisoformat(row["fire_at"])
+    assert now + timedelta(minutes=9) < at < now + timedelta(minutes=11)
+    assert [x["id"] for x in c.get("/api/schedules?status=pending", headers=_h()).get_json()["items"]] == [sid]
+
+
+def test_snoozing_a_repeat_rings_once_more_and_keeps_the_series(c, brain_db):  # noqa: F811
+    first = _iso(1, hour=8)
+    sid = c.post("/api/schedules", json={"kind": "reminder", "text": "الرياضة", "fire_at": first,
+                                         "recurrence": "daily", "payload": {"important": True}},
+                 headers=_h()).get_json()["id"]
+    _rang(c, sid, brain_db)
+    row = c.post(f"/api/schedules/{sid}/snooze", json={"minutes": 10}, headers=_h()).get_json()["item"]
+    assert row["id"] != sid and row["recurrence"] == "" and row["payload"] == {"important": True}
+    series = c.get("/api/schedules?status=pending", headers=_h()).get_json()["items"]
+    assert next(x for x in series if x["id"] == sid)["fire_at"] == first
+
+
+@pytest.mark.parametrize("body", [{}, {"minutes": 0}, {"minutes": "10"}, {"minutes": 1441}])
+def test_a_snooze_needs_its_minutes(c, body):
+    sid = c.post("/api/schedules", json={"kind": "reminder", "text": "x", "fire_at": _iso(1)},
+                 headers=_h()).get_json()["id"]
+    _bad(c.post(f"/api/schedules/{sid}/snooze", json=body, headers=_h()), "invalid_minutes")
+
+
+def test_a_snooze_of_what_is_gone(c):
+    _bad(c.post("/api/schedules/nope/snooze", json={"minutes": 5}, headers=_h()), "not_found", 404)
+    sid = c.post("/api/schedules", json={"kind": "reminder", "text": "x", "fire_at": _iso(1)},
+                 headers=_h()).get_json()["id"]
+    c.patch(f"/api/schedules/{sid}", json={"status": "cancelled"}, headers=_h())
+    _bad(c.post(f"/api/schedules/{sid}/snooze", json={"minutes": 5}, headers=_h()), "not_found", 404)
 
 
 @pytest.mark.parametrize("body, code", [

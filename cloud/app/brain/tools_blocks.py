@@ -600,12 +600,11 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             if at is None:
                 return refused("it does not repeat; cancel it instead")
         elif shift:
-            if r.get("recurrence") and _rang_lately(r):
-                # A repeating one that just rang: snooze this ring, the series stays as it is.
-                snooze = W.now_utc() + timedelta(minutes=shift)
-                schedules.add(r.get("kind") or "reminder", r.get("text", ""), snooze,
-                              r.get("payload") or None)
-                moved = snooze
+            if _rang_lately(r):
+                # Just rang: snooze this ring (a repeat's series stays as it is), as the
+                # notification's «later» does.
+                schedules.snooze(r, shift, W.now_utc())
+                moved = W.now_utc() + timedelta(minutes=shift)
                 continue
             # From its own time, not from now: «أجّليه كمان نص ساعة» adds to what is set.
             base = max(W.aware_utc(r["fire_at"]), W.now_utc())
