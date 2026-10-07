@@ -470,10 +470,12 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
                   capabilities: Optional[List[str]] = None,
                   outputs: Optional[List[Dict[str, Any]]] = None,
                   firmware_version: str = "",
-                  telemetry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                  telemetry: Optional[Dict[str, Any]] = None,
+                  heard: bool = True) -> Dict[str, Any]:
     """Heartbeat update by node_id, cross-tenant; best-effort, never raises.
 
     ``online=None`` leaves online/last_seen alone (camera and room node report their own).
+    ``heard=False`` (the broker's retained copy) keeps last_seen: it is not the board now.
     """
     if get_db() is None:
         return {"ok": False, "error": "no_store"}
@@ -487,7 +489,8 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
         update: Dict[str, Any] = {}
         if online is not None:
             update["online"] = bool(online)
-            update["last_seen"] = _now()
+            if heard:
+                update["last_seen"] = _now()
         if capabilities is not None:
             update["capabilities"] = _clean_caps(capabilities)
         if isinstance(outputs, list):

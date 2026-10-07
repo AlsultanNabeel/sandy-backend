@@ -33,7 +33,7 @@ def test_the_network_thread_is_not_the_one_doing_the_work(monkeypatch):
 
     started = []
 
-    def _slow(topic, raw):
+    def _slow(topic, raw, retained=False):
         started.append(threading_ident())
         time.sleep(0.4)
 

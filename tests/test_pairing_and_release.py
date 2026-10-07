@@ -180,3 +180,41 @@ def test_the_app_is_told_before_any_code_goes_to_the_robot(two_owners, monkeypat
     r = c.post("/api/nodes/pair", json={"code": "SANDY-9999"},
                headers={"Authorization": f"Bearer {make_token('user', 'u1')}"})
     assert r.status_code == 409 and r.get_json()["error"] == "one_robot" and started == []
+
+
+# T10: the heartbeat is retained on the broker, so every server restart got each board's
+# last «online» again and stamped last_seen now: a board gone for days read «seen now».
+
+def test_a_retained_heartbeat_does_not_move_last_seen(two_owners):
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    from app.integrations import mqtt_ingest
+
+    long_ago = datetime.now(timezone.utc) - timedelta(days=3)
+    two_owners["sandy_nodes"].insert_one({"node_id": "8421", "user_id": "u1",
+                                          "online": True, "last_seen": long_ago})
+    beat = json.dumps({"online": True}).encode()
+    mqtt_ingest._handle_message("sandy/node/8421/status", beat, retained=True)
+    seen = two_owners["sandy_nodes"].find_one({"node_id": "8421"})["last_seen"]
+    assert abs((seen.replace(tzinfo=timezone.utc) - long_ago).total_seconds()) < 1
+    mqtt_ingest._handle_message("sandy/node/8421/status", beat)          # the board, live
+    seen = two_owners["sandy_nodes"].find_one({"node_id": "8421"})["last_seen"]
+    assert datetime.now(timezone.utc) - seen.replace(tzinfo=timezone.utc) < timedelta(seconds=5)
+
+
+def test_the_retained_flag_reaches_the_handler(monkeypatch):
+    from app.integrations import mqtt_ingest
+
+    got = []
+
+    class _Pool:
+        _work_queue = type("Q", (), {"qsize": staticmethod(lambda: 0)})()
+
+        def submit(self, fn, *args):
+            got.append(args)
+
+    monkeypatch.setattr(mqtt_ingest, "_INGEST", _Pool())
+    msg = type("M", (), {"topic": "sandy/node/8421/status", "payload": b"{}", "retain": True})()
+    mqtt_ingest._on_message(None, None, msg)
+    assert got == [("sandy/node/8421/status", b"{}", True)]

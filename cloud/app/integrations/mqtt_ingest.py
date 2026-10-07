@@ -100,12 +100,14 @@ def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
     topic = str(msg.topic)
     payload = bytes(msg.payload or b"")
     try:
-        _INGEST.submit(_handle_message, topic, payload)
+        _INGEST.submit(_handle_message, topic, payload, bool(getattr(msg, "retain", False)))
     except RuntimeError:      # pool shut down at exit
         logger.debug("[mqtt_ingest] ingest pool closed; message dropped")
 
 
-def _handle_message(topic: str, raw: bytes) -> None:
+def _handle_message(topic: str, raw: bytes, retained: bool = False) -> None:
+    """One message. ``retained``: the broker's stored copy, handed over on (re)subscribing —
+    every server restart gets each board's last heartbeat again, however old."""
     try:
         from app.features.node_store import ingest_status, set_last_ir
 
@@ -148,6 +150,8 @@ def _handle_message(topic: str, raw: bytes) -> None:
         ingest_status(
             node_id,
             online=bool(data.get("online", True)),
+            # A stored copy says nothing about when the board was last heard.
+            heard=not retained,
             capabilities=data.get("capabilities"),
             outputs=data.get("outputs"),
             firmware_version=str(data.get("firmware_version", "")),

@@ -954,6 +954,8 @@ on first boot, before it has ever been paired.
 The brain subscribes with a single wildcard (`sandy/node/<id>/#`) and dispatches on
 the suffix, so adding a control cannot be half-done by forgetting a subscription.
 
+The heartbeat is retained on the broker, so every server restart is handed each board's
+last one again: a retained copy (`msg.retain`) sets `online` but never moves `last_seen`.
 The heartbeat carries `capabilities`, `outputs`, `firmware_version`, live per-mic
 levels, and the current gain/mute/volume/noise settings. **Those three key names
 are the backend's spelling** — `mqtt_ingest` reads them exactly and silently
