@@ -303,6 +303,10 @@ def test_the_phone_tells_which_reminders_it_scheduled(c, brain_db):  # noqa: F81
          "unknown_token")
     _bad(c.post("/api/schedules/armed", json={"token": "my-phone", "ids": "x"}, headers=_h()),
          "invalid_body")
+    r = c.post("/api/schedules/armed", json={"token": "my-phone", "ids": [mine], "once": [mine]}, headers=_h())
+    assert r.status_code == 200 and brain_db["sandy_schedules"].find_one({"_id": mine})["armed_once"] == ["my-phone"]
+    _bad(c.post("/api/schedules/armed", json={"token": "my-phone", "ids": [mine], "once": "x"}, headers=_h()),
+         "invalid_body")
 
 
 @pytest.mark.parametrize("body", [{}, {"minutes": 0}, {"minutes": "10"}, {"minutes": 1441}])

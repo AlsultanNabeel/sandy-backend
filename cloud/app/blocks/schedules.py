@@ -123,7 +123,8 @@ def update(schedule_id: str, *, text: Optional[str] = None,
     if status is not None:
         changes["status"] = _check_status(status)
     if fire_at is not None or recurrence is not None:
-        changes["armed"] = []  # no phone holds the new time until it says so (`arm`)
+        # no phone holds the new time until it says so (`arm`)
+        changes["armed"], changes["armed_once"] = [], []
     if (fire_at is not None or recurrence is not None) and not keep_series:
         if changes.get("recurrence", current.get("recurrence")):
             changes["series_start"] = series_start(changes.get("fire_at", current["fire_at"]))
@@ -152,16 +153,23 @@ def snooze(row: Mapping[str, Any], minutes: int, now: datetime,
     return row["id"] if update(row["id"], fire_at=at, status="pending") else None
 
 
-def arm(token: str, ids: List[str], mongo_db=None) -> int:
+def arm(token: str, ids: List[str], once: Optional[List[str]] = None, mongo_db=None) -> int:
     """The phone with push ``token`` has these reminders scheduled itself, and no others of
-    this user: it is kept on each (`armed`) and the runner pushes it none of them. Rows
-    matched."""
+    this user: it is kept on each (`armed`) and the runner pushes it none of them. A repeat
+    in ``once`` is held there for its next ring only (its first time is past what the phone's
+    own repeat can start at): it is kept in `armed_once` too, and once that ring is settled
+    the runner pushes the ones after it. Rows matched."""
     coll = _base.coll(_base.SCHEDULES, mongo_db)
     if coll is None or not token:
         return 0
+    once = [i for i in (once or []) if i in ids]
+    whole = [i for i in ids if i not in once]
     held = coll.update_many({"_id": {"$in": list(ids)}, "kind": "reminder"},
                             {"$addToSet": {"armed": token}}).matched_count
-    coll.update_many({"_id": {"$nin": list(ids)}, "armed": token}, {"$pull": {"armed": token}})
+    coll.update_many({"_id": {"$in": once}, "kind": "reminder"}, {"$addToSet": {"armed_once": token}})
+    coll.update_many({"_id": {"$in": whole}, "armed_once": token}, {"$pull": {"armed_once": token}})
+    coll.update_many({"_id": {"$nin": list(ids)}, "$or": [{"armed": token}, {"armed_once": token}]},
+                     {"$pull": {"armed": token, "armed_once": token}})
     return held
 
 

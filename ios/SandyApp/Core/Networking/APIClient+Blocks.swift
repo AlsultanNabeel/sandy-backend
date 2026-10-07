@@ -229,13 +229,15 @@ extension APIClient {
     private struct Armed: Encodable {
         let token: String
         let ids: [String]
+        let once: [String]
     }
 
     /// The reminders the phone with this push token scheduled itself, the whole set; the
-    /// server pushes it none of them. Not queued: only the newest set matters. `bearer`:
-    /// sign-out passes the session it is about to clear.
-    func reportArmed(token: String, ids: [String], bearer: String? = nil) async throws {
-        try await send("/api/schedules/armed", method: "POST", body: Armed(token: token, ids: ids),
-                       bearer: bearer)
+    /// server pushes it none of them, and of a repeat in `once` (held here as its next ring)
+    /// none but that ring. Not queued: only the newest set matters. `bearer`: sign-out passes
+    /// the session it is about to clear.
+    func reportArmed(token: String, ids: [String], once: [String], bearer: String? = nil) async throws {
+        try await send("/api/schedules/armed", method: "POST",
+                       body: Armed(token: token, ids: ids, once: once), bearer: bearer)
     }
 }

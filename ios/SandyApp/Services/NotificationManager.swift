@@ -223,11 +223,15 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let candidates = (NotificationPrefs.current.reminders ? known : [:])
             .filter { Self.reminderPrefixes.contains($0.key) }
             .flatMap { prefix, items in
-                items.compactMap { it -> (id: String, item: NotificationItem, next: Date)? in
-                    Self.nextRing(it, after: now).map { (prefix + it.id, it, $0) }
+                items.compactMap { raw -> (id: String, item: NotificationItem, next: Date)? in
+                    let it = prefix == "reminder." ? Self.firstRing(raw, after: now) : raw
+                    return Self.nextRing(it, after: now).map { (prefix + it.id, it, $0) }
                 }
             }
             .sorted { $0.next < $1.next }
+        // Repeats held here as their first ring only.
+        let once = Set(candidates.filter { $0.item.repeats == .none }.map(\.item.id))
+            .intersection((known["reminder."] ?? []).filter { $0.repeats != .none }.map(\.id))
         center.getPendingNotificationRequests { [weak self] reqs in
             guard let self else { return }
             let ids = reqs.map(\.identifier)
@@ -254,7 +258,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             self.center.getPendingNotificationRequests { now in
                 let armed = Set(now.map(\.identifier).filter { $0.hasPrefix("reminder.") }
                     .map { String(Self.baseId($0).dropFirst("reminder.".count)) })
-                if known["reminder."] != nil { self.reportArmed(armed.sorted()) }
+                if known["reminder."] != nil {
+                    self.reportArmed(armed.sorted(), once: armed.intersection(once).sorted())
+                }
             }
         }
     }
@@ -266,21 +272,22 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     var armingAPI: () -> APIClient = { APIClient(baseURL: Backend.currentURL) }
     static var armDelay: UInt64 = 1_000_000_000
     private var armTask: Task<Void, Never>?
-    /// The last set, sent again once the push token is registered.
-    private var armedIds: [String]?
+    /// The last set (and its repeats held for one ring), sent again once the push token is
+    /// registered.
+    private var armedIds: (ids: [String], once: [String])?
 
     /// `POST /api/schedules/armed` with this phone's whole set; only the newest matters, so
     /// it is not queued, and with no push token there is nothing to tell.
-    private func reportArmed(_ ids: [String]) {
+    private func reportArmed(_ ids: [String], once: [String]) {
         DispatchQueue.main.async {
-            self.armedIds = ids
+            self.armedIds = (ids, once)
             self.armTask?.cancel()
             guard let token = self.lastDeviceToken, self.isSignedIn else { return }
             let api = self.armingAPI()
             self.armTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: Self.armDelay)
                 guard !Task.isCancelled else { return }
-                try? await api.reportArmed(token: token, ids: ids)
+                try? await api.reportArmed(token: token, ids: ids, once: once)
             }
         }
     }
@@ -288,7 +295,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// The push token reached the server: the set waiting for it goes now.
     @MainActor
     func pushTokenRegistered() {
-        if let ids = armedIds { reportArmed(ids) }
+        if let set = armedIds { reportArmed(set.ids, once: set.once) }
     }
 
     /// Signing out: the server hears this phone holds none, then forgets its token (both
@@ -298,7 +305,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         armTask?.cancel()
         armedIds = nil
         guard let token = lastDeviceToken else { return }
-        try? await api.reportArmed(token: token, ids: [], bearer: bearer)
+        try? await api.reportArmed(token: token, ids: [], once: [], bearer: bearer)
         try? await api.unregisterPushToken(token, bearer: bearer)
     }
 
@@ -686,6 +693,18 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
         return UNCalendarNotificationTrigger(dateMatching: Calendar.current.dateComponents(fields, from: date),
                                              repeats: repeats != .none)
+    }
+
+    /// A repeat whose first time is later than its trigger would first match (a daily one
+    /// that starts next Monday) rings that first time as a one-off; the next sync after it
+    /// rings, by then within one repeat of now, schedules the repeat itself.
+    private static func firstRing(_ item: NotificationItem, after now: Date) -> NotificationItem {
+        guard item.repeats != .none, item.date > now,
+              let natural = trigger(at: item.date, repeats: item.repeats).nextTriggerDate(),
+              natural < item.date.addingTimeInterval(-60) else { return item }
+        var first = item
+        first.repeats = .none
+        return first
     }
 
     /// When it would ring next; nil for a one-off already past.

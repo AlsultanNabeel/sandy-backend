@@ -107,6 +107,30 @@ def test_arming_is_the_phones_whole_set_and_a_change_unarms(brain_db):  # noqa: 
         assert schedules.get(a)["armed"] == ["p2"]  # same time: still rings there
 
 
+def test_a_repeat_armed_for_its_next_ring_only_is_pushed_after_it(brain_db, push):  # noqa: F811
+    """A repeat whose first time is past the phone's own repeat (F29) is scheduled there as
+    one ring: the server leaves that ring to the phone and pushes the ones after it."""
+    sid = _add(recurrence="FREQ=DAILY", minutes_ago=1)
+    with active_user_profile_context(A):
+        assert schedules.arm("tok-userA", [sid], once=[sid]) == 1
+        assert schedules.get(sid)["armed_once"] == ["tok-userA"]
+    assert _tick() == {"fired": 1, "failed": 0}
+    assert push["sent"] == []                         # the phone rang the first
+    row = _get(sid)
+    assert row["armed"] == [] and row["armed_once"] == []
+    assert _tick(now=NOW + timedelta(days=1)) == {"fired": 1, "failed": 0}
+    assert [t for t, *_ in push["sent"]] == ["tok-userA"]  # the next is the server's
+
+
+def test_a_phone_holding_the_whole_repeat_keeps_it_armed(brain_db, push):  # noqa: F811
+    sid = _add(recurrence="FREQ=DAILY", minutes_ago=1)
+    with active_user_profile_context(A):
+        schedules.arm("tok-userA", [sid], once=[sid])
+        schedules.arm("tok-userA", [sid])             # now it holds the repeat itself
+    _tick()
+    assert _get(sid)["armed"] == ["tok-userA"]
+
+
 def _claim(sid, now=NOW):
     with active_user_profile_context(A):
         coll = R._base.coll(R._base.SCHEDULES)

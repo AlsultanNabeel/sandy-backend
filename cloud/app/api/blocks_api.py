@@ -489,17 +489,19 @@ def register_blocks_api(app, mongo_db=None):
     @require_tenant
     @_answers_invalid
     def api_schedules_armed(claims):
-        """{token, ids}: the phone with this push token has these reminders scheduled itself,
-        and no others; the runner pushes it none of them (`schedules.arm`)."""
+        """{token, ids, once?}: the phone with this push token has these reminders scheduled
+        itself, and no others; the runner pushes it none of them, and of a repeat in `once`
+        only its next ring (`schedules.arm`)."""
         body = _body()
-        token, ids = body.get("token"), body.get("ids")
+        token, ids, once = body.get("token"), body.get("ids"), body.get("once", [])
         if (not isinstance(token, str) or not isinstance(ids, list) or len(ids) > MAX_ARMED
-                or not all(isinstance(i, str) for i in ids)):
+                or not all(isinstance(i, str) for i in ids)
+                or not isinstance(once, list) or not all(isinstance(i, str) for i in once)):
             raise _Invalid("invalid_body")
         from app.features import push_tokens_store
         if token not in push_tokens_store.tokens_for_user(str(current_user_id() or "")):
             raise _Invalid("unknown_token")
-        return jsonify({"ok": True, "armed": schedules.arm(token, ids)}), 200
+        return jsonify({"ok": True, "armed": schedules.arm(token, ids, once)}), 200
 
     @app.route("/api/schedules/<schedule_id>/snooze", methods=["POST"])
     @require_tenant

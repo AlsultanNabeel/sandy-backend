@@ -129,7 +129,11 @@ def _claim(coll, doc: Dict[str, Any], now: datetime) -> Optional[datetime]:
 
 def _settle(coll, doc: Dict[str, Any], lease: datetime, change: Dict[str, Any]) -> None:
     """Write the outcome and let the claim go; a claim that lapsed and was taken again is
-    not overwritten."""
+    not overwritten. A row moving to its next time stays armed only on the phones that hold
+    its repeat: one that held just the ring that went (`armed_once`) is pushed the rest."""
+    if "fire_at" in change and doc.get("armed_once"):
+        change = {**change, "armed_once": [],
+                  "armed": [t for t in doc.get("armed") or [] if t not in doc["armed_once"]]}
     coll.update_one({"_id": doc["_id"], "claimed_until": lease},
                     {"$set": change, "$unset": {"claimed_until": "", "fire_tries": ""}})
 
@@ -163,7 +167,8 @@ def follow_zone(uid: str, old_zone: tzinfo, now: Optional[datetime] = None) -> i
                 if nxt is None:
                     continue
                 res = coll.update_one({"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"]},
-                                      {"$set": {"fire_at": nxt, "series_start": start, "armed": []}})
+                                      {"$set": {"fire_at": nxt, "series_start": start,
+                                                "armed": [], "armed_once": []}})
                 moved += res.modified_count
     except PyMongoError as exc:  # a request is never failed by this; the rows keep their times
         logger.warning("[schedules] zone follow for %s failed: %s", uid, exc)

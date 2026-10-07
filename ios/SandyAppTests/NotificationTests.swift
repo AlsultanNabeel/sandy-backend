@@ -174,4 +174,22 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(notes.map(\.id), ["h1"])
         XCTAssertEqual(notes.first?.repeats, .daily)
     }
+
+    /// F29: «every day from next Monday» had a daily trigger, which rang from tomorrow. The
+    /// first time is one ring, told to the server as that ring only, so it pushes the rest.
+    func testARepeatStartingLaterRingsFirstOnItsDayAndIsArmedForThatRingOnly() async throws {
+        notes.handleDeviceToken(Data([0xab, 0xcd]))
+        notes.sync(prefix: "reminder.", items: [reminder("later", in: 3 * 86_400, repeats: .daily),
+                                                reminder("soon", in: 3600, repeats: .daily)])
+        let later = try XCTUnwrap(fake.pending["reminder.later"]?.trigger as? UNCalendarNotificationTrigger)
+        XCTAssertFalse(later.repeats, "the repeat rings before its first day")
+        let first = try XCTUnwrap(later.nextTriggerDate())
+        XCTAssertEqual(first.timeIntervalSinceNow, 3 * 86_400, accuracy: 120)
+        let soon = try XCTUnwrap(fake.pending["reminder.soon"]?.trigger as? UNCalendarNotificationTrigger)
+        XCTAssertTrue(soon.repeats)
+        await waitFor { !sent("/api/schedules/armed").isEmpty }
+        let body = try XCTUnwrap(sent("/api/schedules/armed").last)
+        XCTAssertEqual((body["ids"] as? [String])?.sorted(), ["later", "soon"])
+        XCTAssertEqual(body["once"] as? [String], ["later"])
+    }
 }
