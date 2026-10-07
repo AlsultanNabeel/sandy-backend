@@ -11,6 +11,11 @@ in this sibling folder and map to a separate test target.
 `ios/SandyApp.xcodeproj` already has the `SandyAppTests` target, mapped to this
 folder as a synchronized group. Open the project and press `⌘U`.
 
+From the terminal, run `scripts/run_ios_tests.sh` (pass `-only-testing:SandyAppTests/<Suite>`
+for less). Every run, pass or fail, is kept in `ios/test-results/<date-time>/` (`latest`
+points at the newest): the whole log, the result bundle, and `failures.txt` naming each
+failed test with its message, so a failure that comes and goes is known the first time.
+
 ## What's covered today
 
 - [APIClientTests.swift](APIClientTests.swift) — the network-free JWT payload

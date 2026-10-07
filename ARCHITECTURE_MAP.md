@@ -1512,6 +1512,9 @@ before a model or prompt change, never in CI. First run on `gpt-4.1` (4 Oct 2026
 the misses were «خلص الحليب» and «لازم أخلص التقرير» answered without adding, and
 «ذكريني كل يوم» made a habit instead of a reminder.
 
+The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
+run's log, result bundle and failed tests by name in `ios/test-results/` (not in git).
+
 CI (`.github/workflows/tests.yml`): pytest with coverage → Codecov → `bandit -ll`
 → `ruff check` → a secret scan that fails the build if a `.env`, key, or
 service-account JSON is ever tracked.

@@ -81,3 +81,6 @@ xcuserdata/
 
 # Local-only tool: the laptop stands in for the robot (mic + speaker). Kept off the repo.
 scripts/voice_laptop_client.py
+
+# App test runs (scripts/run_ios_tests.sh)
+ios/test-results/
