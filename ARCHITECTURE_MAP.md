@@ -1408,7 +1408,9 @@ so folders are organisation only.
   to the front (`FocusLiveActivity.refresh`), is marked stale at its phase's end, and every change
   of phase to the session's end (`FocusPlan`, from `phase_ends_at_ms`) rings as a local
   notification (`focus.` ids), so a locked phone hears the break, the next round and the end.
-- `Services/` — `GeminiLiveManager` (in-app live voice; one shared call that outlives its screen — `CallBar` over the tabs brings it back, the end button, the Live Activity or sign-out end it), `SpeechManager` (reply playback only),
+- `Services/` — `GeminiLiveManager` (in-app live voice; one shared call that outlives its screen — `CallBar` over the tabs brings it back, the end button, the Live Activity or sign-out end it), `SpeechManager` (reply playback only: nothing is read during a live call, whose mic a switch
+  to playback would silence, and once read the audio session is given back with
+  `notifyOthersOnDeactivation`, so music lowered under the reply comes back up),
   `NotificationManager`, `SubscriptionManager` (RevenueCat configured once, the account switched with
   `logIn` on sign-in and before a purchase or restore, `logOut` on sign-out; the paid features open
   when the server has the purchase, asked a few times while the webhook lands; a failed refresh keeps
