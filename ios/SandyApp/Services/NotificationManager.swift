@@ -164,20 +164,23 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             return
         }
 
-        let id = response.notification.request.identifier
-        // الدفع البعيد للتنبيه اليومي بيحمل "kind" → الرئيسية. المحلّي بيُعرف ببادئة هويته.
-        let userInfo = response.notification.request.content.userInfo
-        let route: NotifRoute? = (userInfo["kind"] != nil)
-            ? .dailyNudge
-            : Self.route(forIdentifier: id)
+        let route = Self.route(kind: response.notification.request.content.userInfo["kind"] as? String,
+                               identifier: response.notification.request.identifier)
         if let route {
             DispatchQueue.main.async { self.pendingRoute = route }
         }
         completionHandler()
     }
 
-    /// nil = يفتح التطبيق بس.
-    static func route(forIdentifier id: String) -> NotifRoute? {
+    /// A server push carries its `kind` (a reminder opens the reminders, anything else Today);
+    /// a local one is known by its id's prefix. nil = just opens the app.
+    static func route(kind: String?, identifier: String) -> NotifRoute? {
+        if kind == "reminder" { return .reminders }
+        if kind != nil { return .dailyNudge }
+        return route(forIdentifier: identifier)
+    }
+
+    private static func route(forIdentifier id: String) -> NotifRoute? {
         if id.hasPrefix(weeklyID) { return .insights }
         if id.hasPrefix(headsUpPrefix + "task.") { return .tasks }
         if id.hasPrefix(headsUpPrefix) { return .reminders }
@@ -190,28 +193,91 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// What Profile › Notifications calls «reminders»: reminders, timed tasks, habits.
     private static let reminderPrefixes: Set<String> = ["reminder.", "task.", "habit."]
 
-    /// نلغي كل المعلّق بالبادئة ثم نجدول العناصر المستقبلية. Nothing with no one signed in.
+    /// This kind's items are now `items`: everything known is scheduled again. Nothing with
+    /// no one signed in.
     func sync(prefix: String, items: [NotificationItem]) {
         guard isSignedIn else { return }
-        // Switched off in Profile › Notifications: nothing of this kind rings (they are
-        // still remembered below, so turning it back on brings them back).
-        let wanted = Self.reminderPrefixes.contains(prefix) && !NotificationPrefs.current.reminders ? [] : items
-        center.getPendingNotificationRequests { [weak self] reqs in
-            guard let self else { return }
-            let stale = reqs.map(\.identifier).filter { $0.hasPrefix(prefix) }
-            self.center.removePendingNotificationRequests(withIdentifiers: stale)
-            for it in wanted {
-                self.schedule(id: prefix + it.id, title: it.title, body: it.body,
-                              at: it.date, repeats: it.repeats,
-                              category: it.category, userInfo: it.userInfo,
-                              alarm: it.alarm, breaksFocus: it.breaksFocus)
-            }
-        }
         // عناصر كل نوع، منها بتنبني تنبيهات «بعد ساعة».
         knownLock.lock()
         knownItems[prefix] = items
         knownLock.unlock()
+        rearm()
         scheduleProactiveNudges()
+    }
+
+    /// Replaces the pending requests of every kind known in this run with its items (a kind
+    /// not reported yet, after a launch with no screen, is left as it is). Switched off in
+    /// Profile › Notifications, nothing of these kinds rings (they stay known, so turning it
+    /// back on brings them back). Then the server hears which reminders are armed.
+    private func rearm() {
+        knownLock.lock()
+        let known = knownItems
+        knownLock.unlock()
+        let wanted = NotificationPrefs.current.reminders
+            ? known.filter { Self.reminderPrefixes.contains($0.key) }.flatMap { prefix, items in
+                items.map { (prefix + $0.id, $0) }
+              }
+            : []
+        center.getPendingNotificationRequests { [weak self] reqs in
+            guard let self else { return }
+            let stale = reqs.map(\.identifier).filter { id in known.keys.contains { id.hasPrefix($0) } }
+            self.center.removePendingNotificationRequests(withIdentifiers: stale)
+            for (id, it) in wanted {
+                self.schedule(id: id, title: it.title, body: it.body,
+                              at: it.date, repeats: it.repeats,
+                              category: it.category, userInfo: it.userInfo,
+                              alarm: it.alarm, breaksFocus: it.breaksFocus)
+            }
+            // Only what was really scheduled: the server pushes the rest.
+            self.center.getPendingNotificationRequests { now in
+                let armed = Set(now.map(\.identifier).filter { $0.hasPrefix("reminder.") }
+                    .map { String(Self.baseId($0).dropFirst("reminder.".count)) })
+                if known["reminder."] != nil { self.reportArmed(armed.sorted()) }
+            }
+        }
+    }
+
+    // MARK: - Armed reminders (the server pushes the others)
+
+    /// The client the set is sent with, and the pause that gathers a burst of syncs into one
+    /// report; tests set both.
+    var armingAPI: () -> APIClient = { APIClient(baseURL: Backend.currentURL) }
+    static var armDelay: UInt64 = 1_000_000_000
+    private var armTask: Task<Void, Never>?
+    /// The last set, sent again once the push token is registered.
+    private var armedIds: [String]?
+
+    /// `POST /api/schedules/armed` with this phone's whole set; only the newest matters, so
+    /// it is not queued, and with no push token there is nothing to tell.
+    private func reportArmed(_ ids: [String]) {
+        DispatchQueue.main.async {
+            self.armedIds = ids
+            self.armTask?.cancel()
+            guard let token = self.lastDeviceToken, self.isSignedIn else { return }
+            let api = self.armingAPI()
+            self.armTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: Self.armDelay)
+                guard !Task.isCancelled else { return }
+                try? await api.reportArmed(token: token, ids: ids)
+            }
+        }
+    }
+
+    /// The push token reached the server: the set waiting for it goes now.
+    @MainActor
+    func pushTokenRegistered() {
+        if let ids = armedIds { reportArmed(ids) }
+    }
+
+    /// Signing out: the server hears this phone holds none, then forgets its token (both
+    /// with the session that is ending), so it pushes again instead of counting on it.
+    @MainActor
+    func leave(api: APIClient, bearer: String) async {
+        armTask?.cancel()
+        armedIds = nil
+        guard let token = lastDeviceToken else { return }
+        try? await api.reportArmed(token: token, ids: [], bearer: bearer)
+        try? await api.unregisterPushToken(token, bearer: bearer)
     }
 
     /// Local notifications ring without re-checking the session, so clear everything (and
@@ -227,6 +293,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         center.removeAllPendingNotificationRequests()
         center.removeAllDeliveredNotifications()
         onDeviceToken = nil
+        DispatchQueue.main.async {
+            self.armTask?.cancel()
+            self.armedIds = nil
+        }
     }
 
     // MARK: - Reminder actions
@@ -381,9 +451,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// Profile › Notifications changed: everything the phone rings is scheduled again.
     func preferencesChanged() {
         knownLock.lock()
-        let known = knownItems
+        let anything = !knownItems.isEmpty
         knownLock.unlock()
-        for (prefix, items) in known { sync(prefix: prefix, items: items) }
+        if anything && isSignedIn { rearm() }
         scheduleProactiveNudges()
     }
 

@@ -43,6 +43,30 @@ final class NotificationTests: XCTestCase {
         fake = FakeScheduler()
         notes.center = fake
         notes.sessionBegan()
+        NotificationManager.armDelay = 0
+        api = TestClient.make()
+        api.token = SessionTests.token("notes-\(UUID().uuidString.prefix(8))")
+        notes.armingAPI = { [unowned self] in self.api }
+        StubNetwork.install(json: "{}")
+    }
+
+    private var api: APIClient!
+
+    /// The bodies of what went to `path`, in order.
+    private func sent(_ path: String) -> [[String: Any]] {
+        StubNetwork.requests.filter { $0.url?.path == path }.compactMap {
+            try? JSONSerialization.jsonObject(with: StubNetwork.body(of: $0)) as? [String: Any]
+        }
+    }
+
+    private func waitFor(_ check: () -> Bool) async {
+        for _ in 0..<100 where !check() { try? await Task.sleep(nanoseconds: 20_000_000) }
+    }
+
+    private func reminder(_ id: String, in seconds: TimeInterval, repeats: NotificationRepeat = .none,
+                          alarm: Bool = false) -> NotificationItem {
+        NotificationItem(id: id, title: "تذكير", body: id, date: Date().addingTimeInterval(seconds),
+                         repeats: repeats, alarm: alarm)
     }
 
     override func tearDown() async throws {
@@ -91,5 +115,36 @@ final class NotificationTests: XCTestCase {
         let daily = try XCTUnwrap(fake.pending["reminder.daily"]?.trigger as? UNCalendarNotificationTrigger)
         XCTAssertEqual(once.dateComponents.timeZone, TimeZone.current, "a one-off floats with the clock")
         XCTAssertNil(daily.dateComponents.timeZone, "a repeat is pinned to one zone")
+    }
+
+    /// S8: the phone tells the server every reminder it scheduled (the whole set), so the
+    /// server's push goes only to what the phone does not ring; tasks are not reminders.
+    func testThePhoneTellsTheServerWhichRemindersItScheduled() async throws {
+        notes.handleDeviceToken(Data([0xab, 0xcd]))
+        notes.sync(prefix: "task.", items: [reminder("t1", in: 3600)])
+        notes.sync(prefix: "reminder.", items: [reminder("b", in: 7200), reminder("a", in: 3600)])
+        await waitFor { !sent("/api/schedules/armed").isEmpty }
+        let body = try XCTUnwrap(sent("/api/schedules/armed").last)
+        XCTAssertEqual(body["token"] as? String, "abcd")
+        XCTAssertEqual((body["ids"] as? [String])?.sorted(), ["a", "b"])
+    }
+
+    /// S8: a reminder pushed by the server opened Today, not the reminders.
+    func testAReminderPushOpensTheReminders() {
+        XCTAssertEqual(NotificationManager.route(kind: "reminder", identifier: "x"), .reminders)
+        XCTAssertEqual(NotificationManager.route(kind: "daily_nudge", identifier: "x"), .dailyNudge)
+        XCTAssertEqual(NotificationManager.route(kind: nil, identifier: "task.1"), .tasks)
+    }
+
+    /// S8: a phone leaving the account says it holds none first, so the server pushes again
+    /// rather than count on a phone that left.
+    func testLeavingTheAccountEmptiesTheSetBeforeTheTokenGoes() async throws {
+        notes.handleDeviceToken(Data([0xab, 0xcd]))
+        await notes.leave(api: api, bearer: "old-session")
+        let paths = StubNetwork.requests.compactMap { $0.url?.path }
+        XCTAssertEqual(paths, ["/api/schedules/armed", "/api/push/unregister"])
+        XCTAssertEqual(sent("/api/schedules/armed").first?["ids"] as? [String], [])
+        XCTAssertEqual(StubNetwork.requests.first?.value(forHTTPHeaderField: "Authorization"),
+                       "Bearer old-session")
     }
 }

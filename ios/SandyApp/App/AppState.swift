@@ -131,7 +131,10 @@ final class AppState: ObservableObject {
         NotificationManager.shared.sessionBegan()
         NotificationManager.shared.bindDeviceToken { [weak self] deviceToken in
             guard let self else { return }
-            Task { try? await self.api.registerPushToken(deviceToken) }
+            Task {
+                guard (try? await self.api.registerPushToken(deviceToken)) != nil else { return }
+                NotificationManager.shared.pushTokenRegistered()
+            }
         }
         NotificationManager.shared.requestAuthorization()
 
@@ -199,10 +202,9 @@ final class AppState: ObservableObject {
     /// account's return (on disk, and loaded only for it); a sign-out the user chose (after
     /// the warning) drops it.
     func signOut(keepingUnsent: Bool = false) {
-        if let deviceToken = NotificationManager.shared.lastDeviceToken,
-           let session = api.token {
+        if let session = api.token {
             let apiRef = api
-            Task { try? await apiRef.unregisterPushToken(deviceToken, bearer: session) }
+            Task { await NotificationManager.shared.leave(api: apiRef, bearer: session) }
         }
         verifyTask?.cancel()
         verifyTask = nil
