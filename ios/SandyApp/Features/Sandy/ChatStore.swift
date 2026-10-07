@@ -185,6 +185,8 @@ final class ChatStore: ObservableObject {
             currentID = cid
             UserDefaults.standard.set(cid, forKey: currentKey)
         }
+        // No bubble of this reply yet: one kept from the reply before would be what «stop» saves.
+        streamingID = nil
         streamingCid = cid
         streamingCmid = clientMsgID
         let t = Task { @MainActor () -> String? in
@@ -193,6 +195,7 @@ final class ChatStore: ObservableObject {
                     sending = false
                     replying = false
                     activity = ""
+                    streamingID = nil
                 }
             }
             // حفظ رسالة المستخدم وتشغيل ساندي مستقلّان — /api/agent بياخد نص
