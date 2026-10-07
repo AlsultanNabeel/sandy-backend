@@ -117,6 +117,16 @@ final class ItemsStore: LoadableStore {
 
     var isHabits: Bool { list == "habits" }
 
+    /// A task done away from the screens (the widget's ✓): off every open tasks copy, so its
+    /// notification goes with the next publish, or at once with no list open.
+    static func doneElsewhere(_ id: String, userId: String?) {
+        let stores = live.all.filter { $0.list == "tasks" && !$0.done && $0.restored }
+        editCopies(stores, rows: \.items, key: key("tasks", false), userId: userId) { rows in
+            rows.removeAll { $0.id == id }
+        }
+        if stores.isEmpty { NotificationManager.shared.forget(prefix: "task.", id: id) }
+    }
+
     /// Signed out: every list's load still on its way is cancelled.
     static func cancelLoads() {
         for store in live.all { store.loadTask?.cancel() }

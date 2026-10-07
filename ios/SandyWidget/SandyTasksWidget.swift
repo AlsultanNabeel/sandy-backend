@@ -95,7 +95,10 @@ private enum WidgetTaskCache {
 // MARK: - النيّة: كمّل مهمة
 
 /// بتشيل المهمة من الكاش فورًا وبتبعت PATCH؛ لو فشل بترجّعها مكانها.
-struct CompleteTaskIntent: AppIntent {
+/// Declared the same in `SandyApp/Core/Intents/CompleteTaskIntent.swift` (KEEP the title and
+/// parameter identical): as a `LiveActivityIntent` the system runs the app's, which also takes
+/// the task's notification away; this body runs only when the app cannot be launched for it.
+struct CompleteTaskIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Complete task"
     static let description = IntentDescription("Marks a Sandy task as done.")
     static let isDiscoverable = false

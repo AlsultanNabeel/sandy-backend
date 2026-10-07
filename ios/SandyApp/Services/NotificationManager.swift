@@ -265,6 +265,17 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
     }
 
+    /// One item gone with no store open to report it: it is known and scheduled no more.
+    func forget(prefix: String, id: String) {
+        knownLock.lock()
+        knownItems[prefix]?.removeAll { $0.id == id }
+        knownLock.unlock()
+        let ids = [prefix + id, Self.headsUpPrefix + prefix + id]
+            + (1...Self.alarmAgainCount).map { prefix + id + Self.againSuffix + String($0) }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+    }
+
     // MARK: - Armed reminders (the server pushes the others)
 
     /// The client the banner buttons and the armed set are sent with, and the pause that

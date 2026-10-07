@@ -336,4 +336,16 @@ final class NotificationTests: XCTestCase {
         XCTAssertTrue(up.rings.allSatisfy { $0.at > Date() && $0.at > yesterday })
         XCTAssertEqual(up.rings, up.rings.sorted { $0.at < $1.at })
     }
+
+    /// E5: ✓ on the tasks widget did not take the task's notification away, so it rang (an
+    /// alarm, for an important one) on a task already done; the ✓ runs in the app now.
+    func testATaskDoneFromTheWidgetDoesNotRing() async throws {
+        notes.sync(prefix: "task.", items: [reminder("t1", in: 3600, alarm: true), reminder("t2", in: 7200)])
+        XCTAssertNotNil(fake.pending["task.t1"])
+        try await CompleteTaskIntent.complete("t1", api: api)
+        XCTAssertTrue(fake.ids("task.t1").isEmpty, "the done task still rings")
+        XCTAssertNotNil(fake.pending["task.t2"])
+        let patch = try XCTUnwrap(sent("/api/items/t1").first)
+        XCTAssertEqual(patch["done"] as? Bool, true)
+    }
 }

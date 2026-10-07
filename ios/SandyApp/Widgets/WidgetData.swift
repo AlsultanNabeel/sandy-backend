@@ -34,6 +34,17 @@ enum WidgetData {
         }
     }
 
+    /// A task done away from the screens (the widget's ✓): off the widget's rows and count.
+    static func taskDone(_ id: String) {
+        guard let store, let data = store.data(forKey: Key.openTasks),
+              var rows = try? JSONSerialization.jsonObject(with: data) as? [[String: String]],
+              let i = rows.firstIndex(where: { $0["id"] == id }) else { return }
+        rows.remove(at: i)
+        if let data = try? JSONSerialization.data(withJSONObject: rows) { store.set(data, forKey: Key.openTasks) }
+        store.set(max(0, store.integer(forKey: Key.activeTasks) - 1), forKey: Key.activeTasks)
+        reload()
+    }
+
     static func syncLanguage() {
         reload()
     }

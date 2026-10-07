@@ -1392,7 +1392,9 @@ so folders are organisation only.
   cuts a reply, and a turn opens only on voiced speech (`_ONSET_VOICED_MS`), so a door or
   the TV no longer becomes a question she answers; `gemini-3.8-live` is the first model tried.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
-  Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
+  Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`; a
+  `LiveActivityIntent` declared in both targets, so it runs in the app, through the outbox, and
+  takes the task's notification away, `CompleteTaskIntent`),
   Spotlight and the reminder banner buttons all write to the blocks. A reminder from Siri is
   sent under the phone's own id and rung on the phone under it (`SchedulesStore.addedElsewhere`). Focus sessions keep
   their own screen (they drive the Live Activity), opened from Today. Their phases advance
