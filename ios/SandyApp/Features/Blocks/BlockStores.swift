@@ -718,9 +718,15 @@ final class SchedulesStore: LoadableStore {
         guard kind == "reminder" else { return }
         // Same prefix the old reminders used, so their notifications are replaced, not doubled.
         NotificationManager.shared.sync(prefix: "reminder.", items: Self.notes(items))
-        let next = items.first
-        WidgetData.setNextReminder(text: next?.text,
-                                   date: next.flatMap { NotificationManager.parseISO($0.fireAt) })
+        WidgetData.setUpcomingReminders(Self.upcoming(items))
+    }
+
+    /// The widget's next rings: each reminder's next one (a repeat's from its rule), soonest first.
+    static func upcoming(_ rows: [ScheduleItem], now: Date = Date()) -> UpcomingReminders {
+        let rings = notes(rows).compactMap { note in
+            NotificationManager.nextRing(note, after: now).map { UpcomingReminders.Ring(text: note.body, at: $0) }
+        }
+        return UpcomingReminders(rings: Array(rings.sorted { $0.at < $1.at }.prefix(UpcomingReminders.limit)))
     }
 
     /// What the phone rings for these reminders.

@@ -713,7 +713,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
 
     /// When it would ring next; nil for a one-off already past.
-    private static func nextRing(_ item: NotificationItem, after now: Date) -> Date? {
+    static func nextRing(_ item: NotificationItem, after now: Date) -> Date? {
         if item.repeats == .none { return item.date > now ? item.date : nil }
         return trigger(at: item.date, repeats: item.repeats).nextTriggerDate()
     }

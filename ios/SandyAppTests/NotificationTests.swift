@@ -311,4 +311,29 @@ final class NotificationTests: XCTestCase {
         call.stop()
         await fulfillment(of: [changed], timeout: 2)
     }
+
+    /// E3: the widget had one entry, renewed hourly, so «next reminder at nine» stayed up
+    /// until three; it shows each until its time, then the next.
+    func testTheWidgetShowsEachReminderUntilItsTimeThenTheNext() {
+        let now = Date()
+        let a = UpcomingReminders.Ring(text: "a", at: now.addingTimeInterval(3600))
+        let b = UpcomingReminders.Ring(text: "b", at: now.addingTimeInterval(7200))
+        let old = UpcomingReminders.Ring(text: "old", at: now.addingTimeInterval(-60))
+        let line = UpcomingReminders(rings: [b, old, a]).timeline(from: now)
+        XCTAssertEqual(line.map(\.ring?.text), ["a", "b", nil])
+        XCTAssertEqual(line.map(\.date), [now, a.at, b.at])
+    }
+
+    /// E3: the app writes each reminder's next ring, a repeat's too (not its past time).
+    func testTheAppWritesTheNextRingOfEachReminder() throws {
+        let yesterday = Date().addingTimeInterval(-86_400)
+        let rows = [Self.row("d", recurrence: "FREQ=DAILY", in: -86_400),
+                    Self.row("o", recurrence: "", in: 1800),
+                    Self.row("gone", recurrence: "", in: -60)]
+        let up = SchedulesStore.upcoming(rows)
+        XCTAssertEqual(Set(up.rings.map(\.text)).count, 1)  // all rows share a text
+        XCTAssertEqual(up.rings.count, 2)
+        XCTAssertTrue(up.rings.allSatisfy { $0.at > Date() && $0.at > yesterday })
+        XCTAssertEqual(up.rings, up.rings.sorted { $0.at < $1.at })
+    }
 }

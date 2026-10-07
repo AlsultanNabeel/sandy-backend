@@ -8,17 +8,14 @@ enum WidgetData {
     private static var store: UserDefaults? { UserDefaults(suiteName: suiteName) }
 
     enum Key {
-        static let reminderText = "next_reminder_text"
-        static let reminderAt = "next_reminder_at"   // timeIntervalSince1970
         static let activeTasks = "active_tasks"
         static let lang = "app_lang"  // "ar" | "en"
         /// لازم يضل مطابق لـ ios/SandyWidget/SandyTasksWidget.swift.
         static let openTasks = "open_tasks"
     }
 
-    static func setNextReminder(text: String?, date: Date?) {
-        store?.set(text, forKey: Key.reminderText)
-        store?.set(date?.timeIntervalSince1970 ?? 0, forKey: Key.reminderAt)
+    static func setUpcomingReminders(_ upcoming: UpcomingReminders) {
+        store?.set(try? JSONEncoder().encode(upcoming), forKey: UpcomingReminders.key)
         reload()
     }
 
@@ -45,7 +42,7 @@ enum WidgetData {
     /// Clears its own keys, not the whole suite (shared with `SharedAuth`).
     static func clearAll() {
         guard let store else { return }
-        for key in [Key.reminderText, Key.reminderAt, Key.activeTasks, Key.openTasks] {
+        for key in [UpcomingReminders.key, Key.activeTasks, Key.openTasks] {
             store.removeObject(forKey: key)
         }
         WidgetCenter.shared.reloadAllTimelines()

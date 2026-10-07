@@ -1,4 +1,4 @@
-// التذكير الجاي + عدد المهام النشطة من لقطة التطبيق بمجموعة التطبيقات (بلا شبكة ولا توكن).
+// التذكيرات الجاية + عدد المهام النشطة من لقطة التطبيق بمجموعة التطبيقات (بلا شبكة ولا توكن).
 
 import WidgetKit
 import SwiftUI
@@ -26,24 +26,33 @@ struct SandyProvider: TimelineProvider {
         completion(currentEntry())
     }
 
+    /// One entry per reminder's time: each shows until it rings, then the next. The app
+    /// reloads the timeline whenever its reminders change.
     func getTimeline(in context: Context, completion: @escaping (Timeline<SandyEntry>) -> Void) {
-        // التطبيق يعمل reload فوري عند أي تغيير؛ نحدّث احتياطًا كل ساعة.
-        let next = Calendar.current.date(byAdding: .hour, value: 1, to: Date())
-            ?? Date().addingTimeInterval(3600)
-        completion(Timeline(entries: [currentEntry()], policy: .after(next)))
+        let entries = upcoming.timeline(from: Date()).map { entry(at: $0.date, ring: $0.ring) }
+        completion(Timeline(entries: entries, policy: .atEnd))
     }
 
     private func currentEntry() -> SandyEntry {
-        let text = store?.string(forKey: "next_reminder_text")
-        let at = store?.double(forKey: "next_reminder_at") ?? 0
-        let count = store?.integer(forKey: "active_tasks") ?? 0
-        let lang = store?.string(forKey: "app_lang") ?? "ar"
-        return SandyEntry(
-            date: Date(),
-            reminderText: (text?.isEmpty == false) ? text : nil,
-            reminderAt: at > 0 ? Date(timeIntervalSince1970: at) : nil,
-            activeTasks: count,
-            isArabic: lang != "en")
+        let now = Date()
+        return entry(at: now, ring: upcoming.timeline(from: now).first?.ring)
+    }
+
+    private var upcoming: UpcomingReminders {
+        guard let data = store?.data(forKey: UpcomingReminders.key),
+              let up = try? JSONDecoder().decode(UpcomingReminders.self, from: data) else {
+            return UpcomingReminders(rings: [])
+        }
+        return up
+    }
+
+    private func entry(at date: Date, ring: UpcomingReminders.Ring?) -> SandyEntry {
+        SandyEntry(
+            date: date,
+            reminderText: ring?.text,
+            reminderAt: ring?.at,
+            activeTasks: store?.integer(forKey: "active_tasks") ?? 0,
+            isArabic: (store?.string(forKey: "app_lang") ?? "ar") != "en")
     }
 }
 

@@ -1408,7 +1408,9 @@ so folders are organisation only.
   `Localization/Digits.swift` is the one reading of a typed number (Arabic-Indic and Persian
   digits; a comma or ٬ groups thousands; a point or ٫ starts the fraction); every numeric field
   goes through it instead of `Int(…)` / `Double(…)`, which return nil for «٥٠».
-- `Widgets/` — home-screen widgets.
+- `Widgets/` — home-screen widgets. The app writes the next five reminders' rings to the app group
+  (`UpcomingReminders`, a file kept identical in `SandyWidget/`); the widget makes one entry per
+  ring, so each shows until its time and then the next, with no app running.
 
 The Xcode project is in the repo (`ios/SandyApp.xcodeproj`, with `SandyWidget/`,
 `SandyAppTests/`, `SandyAppUITests/`); its targets use synchronized groups, so
