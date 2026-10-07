@@ -282,4 +282,33 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(note.content.body, "اتصل بأمي")
         XCTAssertEqual(note.content.categoryIdentifier, NotificationManager.reminderCategory)
     }
+
+    /// F24: a reminder made on the robot or in another place reached the phone only if the
+    /// app was opened in time; the server's silent push now reloads and schedules it.
+    func testASilentPushSchedulesTheRemindersMadeElsewhere() async throws {
+        let row = Self.row("robot1", recurrence: "", in: 3600)
+        let json = String(decoding: try JSONEncoder().encode([row]), as: UTF8.self)
+        StubNetwork.install { req in
+            req.httpMethod == "GET" ? (200, Data("{\"items\":\(json)}".utf8)) : (200, Data("{}".utf8))
+        }
+        let done = expectation(description: "fetched")
+        var result: UIBackgroundFetchResult?
+        AppDelegate().application(UIApplication.shared, didReceiveRemoteNotification: ["sync": "schedules"]) {
+            result = $0
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 5)
+        XCTAssertEqual(result, .newData)
+        XCTAssertNotNil(fake.pending["reminder.robot1"], "the robot's reminder was not scheduled")
+    }
+
+    /// F24: a reminder made during the app's call did not reach the screens (or the
+    /// notifications) until the next reload; the call's end says the blocks changed.
+    func testTheEndOfACallSaysTheBlocksChanged() async {
+        let changed = expectation(forNotification: .sandyBlocksChanged, object: nil)
+        let call = GeminiLiveManager.shared
+        call.phase = .listening
+        call.stop()
+        await fulfillment(of: [changed], timeout: 2)
+    }
 }

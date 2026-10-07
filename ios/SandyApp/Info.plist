@@ -54,6 +54,8 @@
 	<array>
 		<!-- A live voice call keeps going with the screen locked. -->
 		<string>audio</string>
+		<!-- The server's silent push wakes the app to schedule reminders made elsewhere. -->
+		<string>remote-notification</string>
 	</array>
 </dict>
 </plist>

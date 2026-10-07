@@ -670,7 +670,7 @@ after three and «every day at 8» is eight on the user's clock across a DST cha
 deleted through `blocks/schedules.py` (the robot, the app's call, Sandy in chat, the routes), put
 back or taken away by an undo, sends the user's phones a silent background push
 (`apns.send_background`, `{"sync": "schedules"}`, changes two seconds apart go as one), so a
-reminder made away from the phone is scheduled there. Idle without push keys. Apple may hold a
+reminder made away from the phone is scheduled there (the app's `remote-notification` background mode; `AppDelegate` reloads the reminders through `SchedulesStore.reloadReminders`, which schedules them and arms them). The app also reloads them each time it comes back to the front, and the end of its own call posts `sandyBlocksChanged`. Idle without push keys. Apple may hold a
 silent push and never wakes an app the user swiped away; the visible fallback for that is below.
 
 A recurring row that fails stays armed for its next time with `last_error`. A

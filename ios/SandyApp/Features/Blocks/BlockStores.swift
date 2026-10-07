@@ -576,6 +576,13 @@ final class SchedulesStore: LoadableStore {
         bannerEdit(userId: userId) { rows in upsert(ring, into: &rows) }
     }
 
+    /// The reminders fetched again (back in front, a silent push): into the store on screen,
+    /// or one made for it, which schedules them and tells the server.
+    static func reloadReminders(api: APIClient) async {
+        let store = live.all.first { $0.kind == "reminder" } ?? SchedulesStore()
+        await store.load(api: api)
+    }
+
     /// A reminder added away from the screens (Siri): every copy has it, and with no store
     /// open the phone's reminders are scheduled again from the copy on disk.
     static func addedElsewhere(_ row: ScheduleItem, userId: String?) {

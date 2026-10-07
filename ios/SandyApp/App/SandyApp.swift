@@ -28,6 +28,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         NotificationManager.shared.handleDeviceToken(deviceToken)
     }
 
+    /// The server's silent push (`{"sync": "schedules"}`): a reminder changed away from this
+    /// phone (the robot, chat, another phone), so the reminders are fetched and scheduled
+    /// here, and the server hears which this phone now rings.
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard userInfo["sync"] as? String == "schedules" else { completionHandler(.noData); return }
+        Task { @MainActor in
+            await SchedulesStore.reloadReminders(api: NotificationManager.shared.client())
+            completionHandler(.newData)
+        }
+    }
+
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         Logger(subsystem: Bundle.main.bundleIdentifier ?? "SandyApp", category: "push")
@@ -98,6 +111,8 @@ struct RootView: View {
             // Changes made offline go out as soon as the app is back in front, the parked
             // ones with them.
             if state.stage == .chat { Task { await Outbox.shared.retryParked(state.api) } }
+            // A reminder made away from the phone while it was in the background rings here.
+            if state.stage == .chat { Task { await SchedulesStore.reloadReminders(api: state.api) } }
         }
     }
 }

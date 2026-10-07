@@ -65,6 +65,9 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
     /// Shared by user stop and a dropped connection, so a drop also releases mic and audio session.
     private func teardown() {
+        // A call that ran may have added or changed reminders and lists: the screens and the
+        // phone's notifications reload.
+        if inCall || phase != .idle { NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil) }
         ws?.cancel(with: .goingAway, reason: nil)
         ws = nil
         audio.stop()
