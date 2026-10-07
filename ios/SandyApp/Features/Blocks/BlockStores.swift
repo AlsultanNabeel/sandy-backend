@@ -576,6 +576,20 @@ final class SchedulesStore: LoadableStore {
         bannerEdit(userId: userId) { rows in upsert(ring, into: &rows) }
     }
 
+    /// A reminder added away from the screens (Siri): every copy has it, and with no store
+    /// open the phone's reminders are scheduled again from the copy on disk.
+    static func addedElsewhere(_ row: ScheduleItem, userId: String?) {
+        let stores = live.all.filter { $0.kind == "reminder" && $0.restored }
+        bannerEdit(userId: userId) { rows in upsert(row, into: &rows) }
+        guard stores.isEmpty else { return }
+        var rows = DiskCache.load([ScheduleItem].self, key: "schedules.reminder", userId: userId) ?? []
+        if !rows.contains(where: { $0.id == row.id }) {
+            rows = byTime(rows + [row])
+            DiskCache.save(rows, key: "schedules.reminder", userId: userId)
+        }
+        NotificationManager.shared.sync(prefix: "reminder.", items: notes(rows))
+    }
+
     private static func bannerEdit(userId: String?, _ change: (inout [ScheduleItem]) -> Void) {
         editCopies(live.all.filter { $0.kind == "reminder" && $0.restored }, rows: \.items,
                    key: "schedules.reminder", userId: userId) { rows in
@@ -695,8 +709,17 @@ final class SchedulesStore: LoadableStore {
     private func publish() {
         // Only reminders ring on the phone; a message to future self arrives in chat.
         guard kind == "reminder" else { return }
+        // Same prefix the old reminders used, so their notifications are replaced, not doubled.
+        NotificationManager.shared.sync(prefix: "reminder.", items: Self.notes(items))
+        let next = items.first
+        WidgetData.setNextReminder(text: next?.text,
+                                   date: next.flatMap { NotificationManager.parseISO($0.fireAt) })
+    }
+
+    /// What the phone rings for these reminders.
+    private static func notes(_ rows: [ScheduleItem]) -> [NotificationItem] {
         let title = AppLocale.isArabic ? "تذكير" : "Reminder"
-        let notes = items.compactMap { s -> NotificationItem? in
+        return rows.compactMap { s -> NotificationItem? in
             guard let date = NotificationManager.parseISO(s.fireAt) else { return nil }
             let rule = s.recurrence ?? ""
             // The category puts «later / done / delete» on the banner; the info lets them act
@@ -708,11 +731,6 @@ final class SchedulesStore: LoadableStore {
                                                NotificationManager.reminderRecurrenceKey: rule],
                                     alarm: s.isAlarm, breaksFocus: s.breaksFocus)
         }
-        // Same prefix the old reminders used, so their notifications are replaced, not doubled.
-        NotificationManager.shared.sync(prefix: "reminder.", items: notes)
-        let next = items.first
-        WidgetData.setNextReminder(text: next?.text,
-                                   date: next.flatMap { NotificationManager.parseISO($0.fireAt) })
     }
 }
 

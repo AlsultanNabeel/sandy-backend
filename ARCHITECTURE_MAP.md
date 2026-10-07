@@ -1393,7 +1393,8 @@ so folders are organisation only.
   the TV no longer becomes a question she answers; `gemini-3.8-live` is the first model tried.
   `APIClient+Blocks` is the only client of `/api/entries|items|schedules|kinds|summary`.
   Siri intents, the share extension, the tasks widget's ✓ (`PATCH /api/items/<id>`),
-  Spotlight and the reminder banner buttons all write to the blocks. Focus sessions keep
+  Spotlight and the reminder banner buttons all write to the blocks. A reminder from Siri is
+  sent under the phone's own id and rung on the phone under it (`SchedulesStore.addedElsewhere`). Focus sessions keep
   their own screen (they drive the Live Activity), opened from Today. Their phases advance
   when the session is read (`focus_store._catch_up`, no timer); a session found over more than
   `END_SCENE_LATE` (two minutes) ago is closed without its end scene, so opening the app the

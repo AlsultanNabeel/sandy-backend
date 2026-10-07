@@ -81,9 +81,20 @@ struct AddReminderIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let api = try IntentAPI.make()
-        try await api.addSchedule(text: text, at: date)
+        try await Self.add(api: try IntentAPI.make(), text: text, at: date)
         return .result(dialog: IntentAPI.dialog("ضفت التذكير: \(text)", "Added reminder: \(text)"))
+    }
+
+    /// Sent under the phone's own id, and rung on the phone under that id like any reminder
+    /// (the server leaves a reminder to the phone that schedules it).
+    @MainActor
+    static func add(api: APIClient, text: String, at date: Date) async throws {
+        let id = ClientID.make()
+        try await api.addSchedule(id: id, text: text, at: date)
+        SchedulesStore.addedElsewhere(ScheduleItem(id: id, kind: "reminder", text: text,
+                                                   fireAt: ISO8601DateFormatter().string(from: date),
+                                                   recurrence: "", status: "pending"),
+                                      userId: api.currentUserId)
     }
 }
 

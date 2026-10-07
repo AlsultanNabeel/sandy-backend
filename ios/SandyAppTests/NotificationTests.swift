@@ -272,4 +272,14 @@ final class NotificationTests: XCTestCase {
         await waitFor { fake.pending["reminder.o1"] != nil }
         XCTAssertNotNil(fake.pending["reminder.o1"], "the new ring waited for the server (answering in three seconds)")
     }
+
+    /// E1: a reminder added from Siri or Shortcuts went to the server only, so the phone
+    /// never rang it; it is scheduled under the id the server keeps.
+    func testAReminderFromSiriRingsOnThePhone() async throws {
+        try await AddReminderIntent.add(api: api, text: "اتصل بأمي", at: Date().addingTimeInterval(7200))
+        let id = try XCTUnwrap(sent("/api/schedules").first?["id"] as? String)
+        let note = try XCTUnwrap(fake.pending["reminder." + id], "the reminder was not scheduled")
+        XCTAssertEqual(note.content.body, "اتصل بأمي")
+        XCTAssertEqual(note.content.categoryIdentifier, NotificationManager.reminderCategory)
+    }
 }
