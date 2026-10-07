@@ -62,13 +62,48 @@ def test_a_reminder_fires_once(brain_db, push):  # noqa: F811
     assert push["sent"] == [("tok-userA", "دوا", {"kind": "reminder", "schedule_id": sid})]
 
 
+def _claim(sid, now=NOW):
+    with active_user_profile_context(A):
+        coll = R._base.coll(R._base.SCHEDULES)
+        return R._claim(coll, coll.find_one({"_id": sid}), now)
+
+
 def test_the_claim_is_won_once(brain_db):  # noqa: F811
     sid = _add()
     with active_user_profile_context(A):
         coll = R._base.coll(R._base.SCHEDULES)
         doc = coll.find_one({"_id": sid})
-        assert R._claim(coll, doc, NOW)[0] is True
-        assert R._claim(coll, doc, NOW)[0] is False
+        assert R._claim(coll, doc, NOW) is not None
+        assert R._claim(coll, doc, NOW) is None
+
+
+def test_a_row_being_fired_still_reads_pending(brain_db):  # noqa: F811
+    sid = _add()
+    assert _claim(sid) is not None
+    with active_user_profile_context(A):
+        assert [r["id"] for r in schedules.list_schedules("reminder", status="pending")] == [sid]
+
+
+def test_a_worker_killed_mid_fire_does_not_lose_the_row(brain_db, push):  # noqa: F811
+    """Claimed, then the worker died (a restart, a deploy): it rings once the claim lapses."""
+    sid = _add()
+    assert _claim(sid) is not None
+    assert _tick(now=NOW + timedelta(minutes=1)) == {"fired": 0, "failed": 0}
+    assert _tick(now=NOW + R.CLAIM_LEASE + timedelta(seconds=1))["fired"] == 1
+    row = _get(sid)
+    assert row["status"] == "sent" and not row.get("claimed_until") and len(push["sent"]) == 1
+
+
+def test_a_row_that_never_finishes_firing_fails_after_three_tries(brain_db, push, caplog):  # noqa: F811
+    sid = _add(recurrence="FREQ=DAILY")
+    now = NOW
+    for _ in range(R.MAX_FIRE_TRIES):
+        assert _claim(sid, now) is not None
+        now = now + R.CLAIM_LEASE + timedelta(seconds=1)
+    assert _tick(now=now) == {"fired": 0, "failed": 1}
+    row = _get(sid)
+    assert row["status"] == "failed" and row["last_error"] and push["sent"] == []
+    assert sid in caplog.text
 
 
 def test_a_future_reminder_waits(brain_db, push):  # noqa: F811

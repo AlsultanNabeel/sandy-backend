@@ -1,9 +1,14 @@
 """Once-a-minute runner for due `sandy_schedules` rows (§2.12): everything that fires.
 
-Each due row is claimed with a compare-and-set on (status "pending", its fire_at):
-a one-off moves to "sent", a recurring one to its next RRULE time. Only the
-worker whose update matched fires it, so two workers or two dynos never fire
-the same row twice. What firing means per kind:
+Each due row is claimed with a compare-and-set on (status "pending", its fire_at, its
+claim): the claim marks it being fired (`claimed_until`, CLAIM_LEASE ahead, and
+`fire_tries`) and leaves it pending, so every screen and count still reads it as
+pending. Only the worker whose update matched fires it, so two workers or two dynos
+never fire the same row twice. Once fired it is settled: a one-off moves to "sent", a
+recurring one to its next RRULE time. A worker killed in between (a restart, a deploy)
+leaves the claim to lapse and the row is fired on a later tick; a row claimed
+MAX_FIRE_TRIES times without settling is marked "failed", so a broken one never rings for
+ever. What firing means per kind:
 
   reminder         APNs when configured (the phone also rings it locally from
                    GET /api/schedules); stale by > 15 min: no push, still settled.
@@ -40,13 +45,17 @@ PUSH_TITLE = "ساندي"
 # A reminder this late is not pushed: the phone already rang it, or it is stale news.
 LOOKBACK_MIN = 15
 MAX_PER_TICK = 50
+# How long a claim holds a row: firing takes seconds; past this the worker is taken as gone.
+CLAIM_LEASE = timedelta(minutes=5)
+MAX_FIRE_TRIES = 3
 
 _started = False
 _scheduler = None
 
 
 def _due_query(now: datetime) -> Dict[str, Any]:
-    return {"status": "pending", "kind": {"$in": list(RUNNABLE)}, "fire_at": {"$lte": now}}
+    return {"status": "pending", "kind": {"$in": list(RUNNABLE)}, "fire_at": {"$lte": now},
+            "$or": [{"claimed_until": None}, {"claimed_until": {"$lte": now}}]}
 
 
 def _aware(dt: datetime) -> datetime:
@@ -92,16 +101,40 @@ def _next_time(doc: Dict[str, Any], now: datetime) -> Optional[datetime]:
         return None
 
 
-def _claim(coll, doc: Dict[str, Any], now: datetime) -> Tuple[bool, Optional[datetime]]:
-    """(won, next fire time or None) — the atomic claim."""
-    nxt = _next_time(doc, now)
-    change = {"fire_at": nxt} if nxt else {"status": "sent"}
+def _claim(coll, doc: Dict[str, Any], now: datetime) -> Optional[datetime]:
+    """The atomic claim: the lease it holds the row until, or None when another worker
+    has it, or when the row has been claimed MAX_FIRE_TRIES times and never settled
+    (then it is marked failed)."""
+    held = {"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"],
+            "claimed_until": doc.get("claimed_until")}
+    tries = int(doc.get("fire_tries") or 0) + 1
+    if tries > MAX_FIRE_TRIES:
+        res = coll.update_one(held, {"$set": {"status": "failed", "last_error": "never finished firing"},
+                                     "$unset": {"claimed_until": "", "fire_tries": ""}})
+        if res.modified_count:
+            logger.warning("[schedules] %s %s claimed %d times and never settled; marked failed",
+                           doc["kind"], doc["_id"], MAX_FIRE_TRIES)
+        return None
+    lease = now + CLAIM_LEASE
+    res = coll.update_one(held, {"$set": {"claimed_until": lease, "fire_tries": tries}})
+    return lease if res.modified_count == 1 else None
+
+
+def _settle(coll, doc: Dict[str, Any], lease: datetime, change: Dict[str, Any]) -> None:
+    """Write the outcome and let the claim go; a claim that lapsed and was taken again is
+    not overwritten."""
+    coll.update_one({"_id": doc["_id"], "claimed_until": lease},
+                    {"$set": change, "$unset": {"claimed_until": "", "fire_tries": ""}})
+
+
+def _settle_fired(coll, doc: Dict[str, Any], lease: datetime, nxt: Optional[datetime],
+                  now: datetime) -> None:
+    change: Dict[str, Any] = {"fire_at": nxt} if nxt else {"status": "sent"}
+    change["fired_at"] = now
     if doc.get("recurrence") and not doc.get("series_start"):
         # Saved before the start was kept: its count runs from this ring on.
         change["series_start"] = schedules.series_start(doc["fire_at"])
-    res = coll.update_one({"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"]},
-                          {"$set": {**change, "fired_at": now}})
-    return res.modified_count == 1, nxt
+    _settle(coll, doc, lease, change)
 
 
 def follow_zone(uid: str, old_zone: tzinfo, now: Optional[datetime] = None) -> int:
@@ -171,20 +204,19 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
     return False, "no device took the push"
 
 
-def _settle_failure(coll, doc: Dict[str, Any], nxt: Optional[datetime],
+def _settle_failure(coll, doc: Dict[str, Any], lease: datetime, nxt: Optional[datetime],
                     error: str, now: datetime) -> None:
     if doc["kind"] == "scene":
         # Import here for the same reason as in _fire.
         from app.features.scene_store import MAX_TIMER_TRIES
         tries = int((doc.get("payload") or {}).get("tries") or 0) + 1
         if tries < MAX_TIMER_TRIES:
-            coll.update_one({"_id": doc["_id"]}, {"$set": {
-                "status": "pending", "fire_at": now + timedelta(minutes=1),
-                "payload.tries": tries, "last_error": error}})
+            _settle(coll, doc, lease, {"fire_at": now + timedelta(minutes=1), "fired_at": now,
+                                       "payload.tries": tries, "last_error": error})
             return
     # A recurring row stays armed for its next time; the error is kept on it.
-    change = {"last_error": error} if nxt else {"status": "failed", "last_error": error}
-    coll.update_one({"_id": doc["_id"]}, {"$set": change})
+    change: Dict[str, Any] = ({"fire_at": nxt} if nxt else {"status": "failed"})
+    _settle(coll, doc, lease, {**change, "fired_at": now, "last_error": error})
 
 
 def run_due(uid: str, now: Optional[datetime] = None) -> Dict[str, int]:
@@ -195,9 +227,12 @@ def run_due(uid: str, now: Optional[datetime] = None) -> Dict[str, int]:
     if coll is None:
         return counts
     for doc in list(coll.find(_due_query(now)).sort("fire_at", 1).limit(MAX_PER_TICK)):
-        won, nxt = _claim(coll, doc, now)
-        if not won:
+        lease = _claim(coll, doc, now)
+        if lease is None:
+            if int(doc.get("fire_tries") or 0) >= MAX_FIRE_TRIES:
+                counts["failed"] += 1
             continue
+        nxt = _next_time(doc, now)
         try:
             ok, error = _fire(doc, uid, now)
         except Exception as exc:  # noqa: BLE001 — one row never stops the tick
@@ -205,9 +240,10 @@ def run_due(uid: str, now: Optional[datetime] = None) -> Dict[str, int]:
             ok, error = False, type(exc).__name__
         if ok:
             counts["fired"] += 1
+            _settle_fired(coll, doc, lease, nxt, now)
         else:
             counts["failed"] += 1
-            _settle_failure(coll, doc, nxt, error, now)
+            _settle_failure(coll, doc, lease, nxt, error, now)
     return counts
 
 

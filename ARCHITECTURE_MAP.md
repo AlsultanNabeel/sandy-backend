@@ -643,11 +643,15 @@ lists what is deliberately not migrated.
 
 **The schedule runner** (`services/schedule_runner.py`) is the one job that fires
 anything, on the leader-elected scheduler (§2.1), once a minute. A due row
-(`status` pending, `fire_at` ≤ now) is claimed by a compare-and-set on its own
-`(status, fire_at)`: a one-off moves to `sent`, a recurring one to its next RRULE
-time (anchored in local time, so "every day at 8" survives DST), and only the
-worker whose update matched fires it, so nothing fires twice across workers or
-dynos. `fired_at` and `last_error` are set on the row. A repeating row keeps where its
+(`status` pending, `fire_at` ≤ now, no live claim) is claimed by a compare-and-set on its
+own `(status, fire_at, claimed_until)`: the claim marks it being fired (`claimed_until`, five
+minutes ahead, and `fire_tries`) while it stays `pending`, so every screen, the brain and the
+summaries read it as pending with no change. Only the worker whose update matched fires it, so
+nothing fires twice across workers or dynos. Then it is settled: a one-off moves to `sent`, a
+recurring one to its next RRULE time (anchored in local time, so "every day at 8" survives DST),
+and the claim goes. A worker killed in between leaves the claim to lapse and a later tick fires
+it; a row claimed three times without settling (`MAX_FIRE_TRIES`) is marked `failed` with a log
+line. `fired_at` and `last_error` are set on the row. A repeating row keeps where its
 series began (`series_start`, the wall time on the user's clock with no zone, set on add
 and on a new time or repeat, kept by a skipped occurrence; a row saved before it existed
 gets it at its next ring), and the next time is counted from there, so «three days» ends
