@@ -488,7 +488,10 @@ Who calls what:
   `/api/voice/tts`, and the `/voice` socket for live calls. The share extension
   uses `/api/agent`, `/api/analyze-image`, `/api/photos`, `/api/entries` and
   `/api/items`.
-- **The boards** — `/voice` (the brain), `/api/cam/upload` (the camera),
+- **The boards** — `/voice` (the brain), `/api/cam/upload` (the camera: signed, its time
+  at most two minutes behind or thirty seconds ahead, each signature remembered past that
+  window so it is used once, a failed replay check refused with 503, the body read only up
+  to its cap),
   `/api/firmware/manifest` and `/api/firmware/image/<version>` (OTA).
 - **The owner's tooling** — `/api/firmware/publish` and `/rollout`
   (`scripts/publish_firmware.py`), `/api/diagnose` and `/health` (by hand).

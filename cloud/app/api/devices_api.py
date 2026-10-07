@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from flask import Response, jsonify, request
 
@@ -38,12 +40,19 @@ PAIR_NEEDS_PRESENCE = True
 _CAM_REQ_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 _CAM_MAX_UPLOAD_BYTES = 512 * 1024
 _CAM_NONCES = "cam_upload_nonces"
+# How far the camera's timestamp may be from ours: behind, for a slow upload over a weak
+# link; ahead, only for a clock a little fast, since a time ahead stretches how long a
+# signature stays good.
+_CAM_PAST_MS = 120_000
+_CAM_FUTURE_MS = 30_000
+# Every signature is remembered for longer than it can be accepted, so it is used once.
+_CAM_NONCE_KEPT = timedelta(milliseconds=_CAM_PAST_MS + _CAM_FUTURE_MS) + timedelta(seconds=30)
 
 
-def _cam_signature_fresh(sig: str) -> bool:
-    """True the first time a signature is seen (stored in Mongo so both workers agree; fails open without a db)."""
-    from datetime import datetime, timedelta, timezone
-
+def _cam_signature_fresh(sig: str) -> Optional[bool]:
+    """True the first time a signature is seen (stored in Mongo so both workers agree),
+    False for one seen before, None when the check could not be made, which is refused:
+    a database error used to let a replayed upload through. Open without a db (dev)."""
     from pymongo.errors import DuplicateKeyError, PyMongoError
 
     from app.db import get_db
@@ -54,13 +63,14 @@ def _cam_signature_fresh(sig: str) -> bool:
     try:
         db[_CAM_NONCES].insert_one({
             "_id": sig[:80],
-            "expire_at": datetime.now(timezone.utc) + timedelta(minutes=3),
+            "expire_at": datetime.now(timezone.utc) + _CAM_NONCE_KEPT,
         })
         return True
     except DuplicateKeyError:
         return False
-    except PyMongoError:
-        return True
+    except PyMongoError as exc:
+        logger.warning("[cam] replay check failed: %s", exc)
+        return None
 
 
 CAMERA_OFFLINE = "الكاميرا مش متصلة هلأ — تأكد إنها شغّالة وعلى الواي فاي."
@@ -362,11 +372,12 @@ def register_devices_api(app, mongo_db=None):
 
         # Every rejection is logged with its reason; the board only sees 400.
         try:
-            age = abs(time.time() * 1000 - int(ts))
+            behind = time.time() * 1000 - int(ts)
         except ValueError:
             logger.warning("[cam] upload rejected: unreadable timestamp %r", ts[:32])
             return _bad("bad_ts")
-        if age > 120_000:
+        age = abs(behind)
+        if behind > _CAM_PAST_MS or -behind > _CAM_FUTURE_MS:
             # Usually a board that booted with its clock at 1970, before time sync.
             logger.warning("[cam] upload rejected: timestamp is %.0f minutes off — "
                         "the board's clock is probably not synced", age / 60000)
@@ -395,7 +406,9 @@ def register_devices_api(app, mongo_db=None):
                         "has its own key", node_id)
             return _bad("auth_fail", code=401)
 
-        jpeg = request.get_data(cache=False)
+        # Read up to the cap and no further: a body with no length used to be read whole
+        # (up to the app's 16 MB) before anything checked the signature.
+        jpeg = request.stream.read(_CAM_MAX_UPLOAD_BYTES + 1)
         if len(jpeg) > _CAM_MAX_UPLOAD_BYTES:
             return _bad("too_large", code=413)
 
@@ -418,7 +431,10 @@ def register_devices_api(app, mongo_db=None):
 
         # One use per signature. Keyed with the body hash too: old firmware signs to
         # the second, so two frames in one second share a signature but not bytes.
-        if not _cam_signature_fresh(sig + hashlib.sha256(jpeg).hexdigest()[:16]):
+        fresh = _cam_signature_fresh(sig + hashlib.sha256(jpeg).hexdigest()[:16])
+        if fresh is None:
+            return _bad("unavailable", code=503)
+        if not fresh:
             logger.warning("[cam] upload rejected: replayed signature for %s", node_id)
             return _bad("replay", code=401)
         if own_key and record["state"] == "issued":
