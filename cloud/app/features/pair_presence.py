@@ -51,10 +51,16 @@ def _publish(node_id: str, code: str) -> bool:
 
 
 def start(node_id: str, tenant: str) -> Dict[str, Any]:
-    """Make and send a code for (node, account), replacing any earlier one."""
+    """Make and send a code for (node, account), replacing any earlier one; a board that is
+    not there (`node_store.unpaired_board_present`) gets none: the broker would take the
+    code and the app would say «look at her screen» for five minutes."""
     db = get_db()
     if db is None or not node_id or not tenant:
         return {"ok": False, "error": "no_store"}
+    from app.features.node_store import unpaired_board_present
+
+    if not unpaired_board_present(node_id):
+        return {"ok": False, "error": "not_connected"}
     code = f"{secrets.randbelow(10 ** DIGITS):0{DIGITS}d}"
     db[_COLL].update_one(
         {"node_id": node_id, "tenant": tenant},

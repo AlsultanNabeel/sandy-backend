@@ -171,6 +171,7 @@ struct NodePairSheet: View {
              "presence_locked":   return lang.s("control.node.presenceExpired")
         case "already_claimed":   return lang.s("control.node.alreadyClaimed")
         case "one_robot":         return lang.s("control.node.oneRobot")
+        case "not_connected":     return lang.s("control.node.notConnected")
         case "too_many_attempts": return lang.s("control.node.tooMany")
         default:                  return lang.s("control.node.pairFailed")
         }

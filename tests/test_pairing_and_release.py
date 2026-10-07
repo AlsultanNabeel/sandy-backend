@@ -18,14 +18,15 @@ def test_one_failed_index_does_not_skip_the_others():
             if not built and not kw.get("name"):
                 built.append("failed")
                 raise OperationFailure("index build failed")
-            built.append(kw.get("name") or keys[0][0])
+            built.append(kw.get("name") or (keys if isinstance(keys, str) else keys[0][0]))
 
     class _Db(dict):
         def __getitem__(self, name):
             return _Coll()
 
     node_store.init_node_store(_Db())
-    assert built == ["failed", "code_hash", "node_id_owner_unique", "one_robot_per_account"]
+    assert built == ["failed", "code_hash", "node_id_owner_unique", "one_robot_per_account",
+                     "last_seen"]
 
 
 # T13: two workers provisioning the same heartbeat: the loser got an uncaught duplicate
@@ -218,3 +219,68 @@ def test_the_retained_flag_reaches_the_handler(monkeypatch):
     msg = type("M", (), {"topic": "sandy/node/8421/status", "payload": b"{}", "retain": True})()
     mqtt_ingest._on_message(None, None, msg)
     assert got == [("sandy/node/8421/status", b"{}", True)]
+
+
+# F20: «sent» for the presence code meant only that the broker took it, and the server
+# dropped an unpaired board's heartbeats, so it never knew whether the robot was there: a
+# robot off, on its setup network or in safe mode never showed the code, and the app said
+# «look at her screen» for five minutes, then «expired».
+
+@pytest.fixture
+def pairing(two_owners, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "x" * 40)
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+    from app.features import pair_presence
+
+    shown = []
+    monkeypatch.setattr(pair_presence, "_publish",
+                        lambda node_id, code: shown.append((node_id, code)) or True)
+    c = create_app(mongo_db=two_owners).test_client()
+    h = {"Authorization": f"Bearer {make_token('user', 'u1')}"}
+    return c, h, shown
+
+
+def _beat(body, retained=False):
+    import json
+
+    from app.integrations import mqtt_ingest
+    mqtt_ingest._handle_message("sandy/node/sandy8421/status", json.dumps(body).encode(),
+                                retained=retained)
+
+
+def _pair(c, h):
+    return c.post("/api/nodes/pair", json={"code": "SANDY-8421"}, headers=h)
+
+
+def test_a_robot_never_heard_gets_no_code_and_the_app_is_told(pairing):
+    c, h, shown = pairing
+    r = _pair(c, h)
+    assert r.status_code == 409 and r.get_json()["error"] == "not_connected" and shown == []
+
+
+@pytest.mark.parametrize("last", [{"online": False}, {"online": True, "safe": True}])
+def test_a_robot_that_went_or_is_in_safe_mode_gets_no_code(pairing, last):
+    c, h, shown = pairing
+    _beat({"online": True})
+    _beat(last)
+    assert _pair(c, h).get_json()["error"] == "not_connected" and shown == []
+
+
+def test_a_heartbeat_half_a_minute_old_or_retained_is_not_there(pairing, two_owners):
+    from datetime import datetime, timedelta, timezone
+
+    c, h, shown = pairing
+    _beat({"online": True}, retained=True)           # the broker's copy, at a server restart
+    assert _pair(c, h).get_json()["error"] == "not_connected"
+    _beat({"online": True})
+    two_owners["node_sightings"].update_one({"_id": "sandy8421"}, {"$set": {
+        "last_seen": datetime.now(timezone.utc) - timedelta(seconds=40)}})
+    assert _pair(c, h).get_json()["error"] == "not_connected" and shown == []
+
+
+def test_a_robot_heard_just_now_gets_its_code(pairing):
+    c, h, shown = pairing
+    _beat({"online": True})
+    r = _pair(c, h)
+    assert r.status_code == 202 and shown and shown[0][0] == "sandy8421"

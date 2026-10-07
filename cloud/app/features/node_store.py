@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.utils.tenant_db import scoped
@@ -26,6 +26,12 @@ _COLL = "sandy_nodes"
 MAX_NODES = 100
 
 KNOWN_CAPABILITIES = frozenset({"relay", "pwm", "servo", "buzzer", "ir", "audio"})
+
+# A board nobody paired is heard here, keyed by its id (its heartbeat is otherwise dropped),
+# so pairing can say «not connected» instead of sending its face a code it will never show.
+_SIGHTINGS = "node_sightings"
+# Its heartbeat comes every five seconds: six missed is gone.
+PRESENT_WITHIN = timedelta(seconds=30)
 
 
 def init_node_store(mongo_db) -> None:
@@ -46,6 +52,9 @@ def init_node_store(mongo_db) -> None:
         # two already: that is logged here and left to the owner, never unpaired by itself.
         ("one_robot_per_account", lambda: mongo_db[_COLL].create_index(
             [("user_id", 1)], unique=True, background=True, name="one_robot_per_account")),
+        # A sighting is only for pairing now: a day old is long gone.
+        ("node_sightings.last_seen_ttl", lambda: mongo_db[_SIGHTINGS].create_index(
+            "last_seen", expireAfterSeconds=24 * 3600, background=True)),
     ]
     for label, job in jobs:
         try:
@@ -484,7 +493,14 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
         # Read once; both merges and provisioning use it.
         current = get_node_any_tenant(node_id)
         if current is None:
-            # Not paired yet.
+            # Not paired yet: only that it is there, for pairing.
+            if online is not None and heard:
+                tel = telemetry if isinstance(telemetry, dict) else {}
+                get_db()[_SIGHTINGS].update_one(
+                    {"_id": node_id},
+                    {"$set": {"online": bool(online), "safe": bool(tel.get("safe")),
+                              "last_seen": _now()}},
+                    upsert=True)
             return {"ok": False}
         update: Dict[str, Any] = {}
         if online is not None:
@@ -518,6 +534,28 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
     except Exception as e:  # noqa: BLE001
         logger.debug("[NodeStore] ingest_status failed: %s", e)
         return {"ok": False, "error": "exception"}
+
+
+def unpaired_board_present(node_id: str) -> bool:
+    """A board nobody paired is there and can show a pairing code: its last heartbeat came
+    within `PRESENT_WITHIN`, it did not say it went (its MQTT will), and it is not in safe
+    mode (which takes no pairing code). A board on its setup network, on a wrong network or
+    switched off sends none."""
+    db = get_db()
+    if db is None:
+        return False
+    try:
+        doc = db[_SIGHTINGS].find_one({"_id": (node_id or "").strip()})
+    except PyMongoError as exc:
+        logger.warning("[NodeStore] sighting of %s not read: %s", node_id, exc)
+        return False
+    if not doc or not doc.get("online") or doc.get("safe"):
+        return False
+    seen = doc.get("last_seen")
+    if not isinstance(seen, datetime):
+        return False
+    seen = seen if seen.tzinfo else seen.replace(tzinfo=timezone.utc)
+    return _now() - seen <= PRESENT_WITHIN
 
 
 def set_last_ir(node_id: str, code: str) -> Dict[str, Any]:

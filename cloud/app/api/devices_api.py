@@ -524,7 +524,8 @@ def register_devices_api(app, mongo_db=None):
             tenant = str(claims.get("user_id") or "")
             ch = pair_presence.start(pre["node_id"], tenant)
             if not ch.get("ok"):
-                return _bad(ch.get("error", "pair_failed"))
+                error = ch.get("error", "pair_failed")
+                return _bad(error, code=409 if error == "not_connected" else 400)
             return jsonify({"ok": True, "needs_presence": True, "node_id": pre["node_id"],
                             "sent": ch.get("sent", False),
                             "expires_in": ch.get("expires_in")}), 202

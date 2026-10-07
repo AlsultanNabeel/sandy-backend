@@ -117,6 +117,7 @@ NOT_ERASED: Dict[str, str] = {
     "sandy_auth": "sign-in attempt counters keyed by email and address, gone in their window",
     "sandy_device_keys": "a board's own key, keyed by device; unpairing (done first) revokes it",
     "node_pair_challenges": "pairing proofs keyed by node, five minutes then TTL",
+    "node_sightings": "boards nobody paired, keyed by board, a day then TTL; no person in it",
     "cam_upload_nonces": "replay guard for camera uploads, no person in it, TTL",
     "camera_inbox": "a camera frame waiting for its request, keyed by node, two minutes then TTL",
     "sandy_firmware": "firmware releases, the same for every board",

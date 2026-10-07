@@ -427,6 +427,11 @@ Now:
   unique index `one_robot_per_account` on `sandy_nodes.user_id` closes the race. The
   camera and the room node share their robot's id, so they are never «another». An
   account that already had two when the index came is logged at boot, not unpaired.
+- **A board nobody paired is heard** (`node_sightings`, keyed by board, a day TTL): its
+  heartbeat, otherwise dropped, records that it is there. Pairing sends the presence code
+  only to a board heard within `PRESENT_WITHIN` (30 s), that did not say it went and is not
+  in safe mode (`node_store.unpaired_board_present`); otherwise 409 `not_connected`, and
+  the app says to turn it on and put it on the home network.
 - `node_store.py` is the pairing registry: `code_to_node_id(code)` is a plain
   lowercase-alphanumeric transform (not a hash), so a node flashed with its code
   derives its own topic before it is ever paired — no provisioning handshake.
@@ -1388,7 +1393,7 @@ Written today, and what reads it:
   TTL 10 minutes) and `turn_stops` (a stopped reply, `_id` `<user>:<thread>`, TTL a day).
 - **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
   `sandy_scenes`, `sandy_voiceprints`, `sandy_voice_enroll`, `sandy_firmware`, `sandy_firmware_chunks`,
-  `node_pair_challenges`, `cam_upload_nonces`, `camera_inbox`.
+  `node_pair_challenges`, `node_sightings`, `cam_upload_nonces`, `camera_inbox`.
 - **Everything else** — `sandy_focus`, `sandy_photos` + the `sandy_photo_files`
   GridFS bucket, `sandy_push_tokens`, `sandy_daily_nudge`, `sandy_nudge_locks`.
 

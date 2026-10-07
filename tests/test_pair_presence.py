@@ -20,6 +20,9 @@ def env(monkeypatch):
                         lambda node_id, code: sent.append((node_id, code)) or True)
     db = mongomock.MongoClient().db
     app = create_app(mongo_db=db)
+    # The robot is on and on the broker: its heartbeat came a moment ago.
+    from app.integrations import mqtt_ingest
+    mqtt_ingest._handle_message("sandy/node/sandy8421/status", b'{"online": true}')
     return app.test_client(), db, sent
 
 
