@@ -327,3 +327,9 @@ def test_the_voice_loop_asks_the_gate_with_the_call_args():
     from app.api.voice_ws import session
     src = inspect.getsource(session)
     assert "gate_on and _is_sensitive_call(fc.name, dict(fc.args or {}))" in src
+
+
+def test_the_due_scan_has_an_index_that_leads_with_status(brain_db):  # noqa: F811
+    """The tick reads every tenant: an index led by the tenant cannot serve it."""
+    keys = [list(ix["key"]) for ix in brain_db[R._base.SCHEDULES].index_information().values()]
+    assert [("status", 1), ("fire_at", 1)] in keys

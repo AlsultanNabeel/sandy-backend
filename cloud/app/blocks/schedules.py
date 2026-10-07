@@ -26,7 +26,9 @@ STATUSES = ("pending", "sent", "failed", "cancelled")
 def init_schedules_store(mongo_db) -> None:
     if mongo_db is None:
         return
-    for keys in ([("user_id", 1), ("status", 1), ("fire_at", 1)],
+    # The runner's due scan crosses every tenant, so it has its own index, led by status.
+    for keys in ([("status", 1), ("fire_at", 1)],
+                 [("user_id", 1), ("status", 1), ("fire_at", 1)],
                  [("user_id", 1), ("kind", 1), ("fire_at", 1)],
                  [("user_id", 1), ("migrated_from.collection", 1), ("migrated_from.id", 1)]):
         try:

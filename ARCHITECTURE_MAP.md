@@ -351,7 +351,10 @@ One forgotten filter there was a cross-tenant leak. **Never reintroduce a raw
 collection handle on a request path.**
 
 Index creation is the one exception: it runs on the raw handle at boot, before any
-request sets a tenant. Indexes lead with the tenant field (`user_id`, or `chat_id` on the older collections).
+request sets a tenant. Indexes lead with the tenant field (`user_id`, or `chat_id` on the older collections),
+except `sandy_schedules`' `(status, fire_at)`, which serves the runner's scan across every tenant.
+Sent, failed and cancelled schedules are kept for good (the owner's decision); that index keeps the
+scan to the pending rows however many there are.
 
 Three request-path collections are keyed by hand, each on the caller's id on every
 call: `sandy_stm` (`<thread>:<user>` plus a `user_id` field), `sandy_pending_state`
