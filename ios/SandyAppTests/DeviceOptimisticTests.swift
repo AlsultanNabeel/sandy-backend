@@ -26,5 +26,13 @@ final class DeviceOptimisticTests: XCTestCase {
         store.control(api: api, device: lamp, action: "on")
         await store.load(api: api)                            // answers «off»: the old state
         XCTAssertEqual(store.devices.first?.state, "on", "the refresh undid the switch")
+
+        // Once the slow command lands the store reloads (devices and nodes) by itself. Waited
+        // for here: left running, those two requests landed in whichever test came next and
+        // were counted as its own (ItemPagesTests saw four requests where it made two).
+        let reloaded = { StubNetwork.requests.filter { $0.url?.path == "/api/devices" }.count >= 3
+                         && StubNetwork.requests.filter { $0.url?.path == "/api/nodes" }.count >= 3 }
+        for _ in 0..<60 where !reloaded() { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertTrue(reloaded(), "the reload after the command never came")
     }
 }
