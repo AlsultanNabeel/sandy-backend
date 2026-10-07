@@ -78,4 +78,18 @@ final class NotificationTests: XCTestCase {
         notes.notifyNow(title: "الميزانية", body: "وصلت ٨٠٪")
         XCTAssertEqual(fake.ids("proactive.now."), [], "rang with no one signed in")
     }
+
+    /// S6: a one-off reminder had a wall time with no zone, so after a flight it rang at
+    /// that hour on the new clock; a repeat follows the clock on purpose.
+    func testAOneOffKeepsItsMomentAcrossAZoneChangeAndARepeatFollowsTheClock() throws {
+        let at = Date().addingTimeInterval(5 * 3600)
+        notes.sync(prefix: "reminder.", items: [
+            NotificationItem(id: "once", title: "تذكير", body: "المي", date: at),
+            NotificationItem(id: "daily", title: "تذكير", body: "الدوا", date: at, repeats: .daily),
+        ])
+        let once = try XCTUnwrap(fake.pending["reminder.once"]?.trigger as? UNCalendarNotificationTrigger)
+        let daily = try XCTUnwrap(fake.pending["reminder.daily"]?.trigger as? UNCalendarNotificationTrigger)
+        XCTAssertEqual(once.dateComponents.timeZone, TimeZone.current, "a one-off floats with the clock")
+        XCTAssertNil(daily.dateComponents.timeZone, "a repeat is pinned to one zone")
+    }
 }

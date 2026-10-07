@@ -460,8 +460,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 }
                 self.center.removePendingNotificationRequests(withIdentifiers: stale)
                 for h in heads {
+                    // An hour before a moment: a moment too.
                     let comps = Calendar.current.dateComponents(
-                        [.year, .month, .day, .hour, .minute], from: h.date)
+                        [.timeZone, .year, .month, .day, .hour, .minute], from: h.date)
                     self.addProactive(
                         id: h.id,
                         title: translate(lang, "blocks.notif.headsUp.title"),
@@ -576,9 +577,11 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             }
         }
         // The matching components decide the repeat: time of day, plus weekday or day of month.
+        // A one-off is a moment (it keeps it across a zone change, like the server's); a repeat
+        // is a time on whatever clock the phone is on (the server moves it the same way).
         let fields: Set<Calendar.Component>
         switch repeats {
-        case .none:    fields = [.year, .month, .day, .hour, .minute]
+        case .none:    fields = [.timeZone, .year, .month, .day, .hour, .minute]
         case .daily:   fields = [.hour, .minute]
         case .weekly:  fields = [.weekday, .hour, .minute]
         case .monthly: fields = [.day, .hour, .minute]
