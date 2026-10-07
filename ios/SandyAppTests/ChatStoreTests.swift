@@ -84,4 +84,30 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertEqual(sent("/messages").filter { field($0, "role") == "sandy" }.count, 1,
                        "the reply before was saved a second time")
     }
+
+    /// M4: opening another conversation or a new one while a reply streamed cancelled it with
+    /// nothing saved, so the question was left with no answer.
+    func testLeavingWhileAReplyStreamsKeepsWhatArrived() async {
+        StubNetwork.install { request in
+            guard request.url?.path == "/api/agent/stream" else { return (200, Data(#"{"ok":true}"#.utf8)) }
+            return (200, Data(("data: {\"text\":\"نص الرد\"}\n\n"
+                               + "data: {\"reply\":\"نص الرد كامل\",\"done\":true}\n\n").utf8))
+        }
+        StubNetwork.pause("/api/agent/stream", after: "\n\n", by: 1.0)
+        let api = TestClient.make()
+        let store = ChatStore()
+        let sending = Task { await store.send(api: api, text: "سؤال طويل") }
+        await settle { store.messages.count == 2 }           // her first words are showing
+        XCTAssertEqual(store.messages.last?.text, "نص الرد")
+
+        store.startNew(api: api)
+        _ = await sending.value
+        await settle { sent("/messages").count >= 2 && !sent("/stop").isEmpty }
+
+        XCTAssertTrue(store.messages.isEmpty)
+        let kept = sent("/messages").filter { field($0, "role") == "sandy" }.map { field($0, "text") }
+        XCTAssertEqual(kept, ["نص الرد"], "what arrived was not kept in the conversation left")
+        XCTAssertEqual(sent("/stop").first.flatMap { field($0, "partial") }, "نص الرد")
+        try? await Task.sleep(nanoseconds: 1_000_000_000)   // past the rest of the stream
+    }
 }

@@ -91,8 +91,9 @@ final class ChatStore: ObservableObject {
     }
 
     func open(api: APIClient, id: String) async {
-        // A reply still streaming belongs to the conversation being left.
-        sendTask?.cancel()
+        // The conversation on screen, its reply still coming: it stays as it is.
+        if id == currentID && replying { return }
+        leave(api)
         if let r = try? await api.getConversation(id: id) {
             messages = r.messages
             saveLines(api, id: id)
@@ -106,9 +107,16 @@ final class ChatStore: ObservableObject {
         UserDefaults.standard.set(id, forKey: currentKey)
     }
 
+    /// A reply still coming belongs to the conversation being left: it stops there and what
+    /// arrived is kept in it, as with «stop». Cancelled bare, nothing of it was saved and the
+    /// question was left with no answer.
+    private func leave(_ api: APIClient) {
+        if replying { stop(api: api) } else { sendTask?.cancel() }
+    }
+
     /// محادثة جديدة فورية (كسولة): يصفّي العرض، والإنشاء الفعلي عند أول رسالة.
-    func startNew() {
-        sendTask?.cancel()
+    func startNew(api: APIClient) {
+        leave(api)
         messages = []
         errorMessage = ""
         currentID = nil
@@ -119,7 +127,7 @@ final class ChatStore: ObservableObject {
     func delete(api: APIClient, id: String) async {
         guard let idx = conversations.firstIndex(where: { $0.id == id }) else { return }
         let removed = conversations.remove(at: idx)
-        if id == currentID { startNew() }
+        if id == currentID { startNew(api: api) }
         UndoCenter.shared.offer(
             String(format: LanguageManager.shared.s("blocks.deletedToast"), removed.title),
             icon: "trash",

@@ -29,12 +29,19 @@ enum StubNetwork {
         StubURLProtocol.handler = nil
         StubURLProtocol.delays = [:]
         StubURLProtocol.headers = [:]
+        StubURLProtocol.pauses = [:]
     }
 
     /// Answer requests of this method only after `seconds`, without holding up the others
     /// (a command still on its way while a refresh comes back).
     static func delay(_ method: String, by seconds: TimeInterval) {
         StubURLProtocol.delays[method] = seconds
+    }
+
+    /// Answer `path` up to the first `marker` at once and the rest after `seconds`: a reply
+    /// that streamed its first words and has not finished.
+    static func pause(_ path: String, after marker: String, by seconds: TimeInterval) {
+        StubURLProtocol.pauses[path] = (Data(marker.utf8), seconds)
     }
 
     /// What the app sent, in order (the body read whole, also for uploads).
@@ -62,6 +69,7 @@ final class StubURLProtocol: URLProtocol {
     static var delays: [String: TimeInterval] = [:]
     /// Headers added to every response (a renewed token).
     static var headers: [String: String] = [:]
+    static var pauses: [String: (marker: Data, seconds: TimeInterval)] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -83,6 +91,16 @@ final class StubURLProtocol: URLProtocol {
                 return
             }
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            if let pause = Self.pauses[self.request.url?.path ?? ""],
+               let cut = body.range(of: pause.marker) {
+                self.client?.urlProtocol(self, didLoad: body[..<cut.upperBound])
+                DispatchQueue.global().asyncAfter(deadline: .now() + pause.seconds) { [weak self] in
+                    guard let self else { return }
+                    self.client?.urlProtocol(self, didLoad: body[cut.upperBound...])
+                    self.client?.urlProtocolDidFinishLoading(self)
+                }
+                return
+            }
             self.client?.urlProtocol(self, didLoad: body)
             self.client?.urlProtocolDidFinishLoading(self)
         }

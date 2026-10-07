@@ -80,7 +80,7 @@ struct ChatView: View {
             }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // محادثة جديدة — يحفظ الحالية بالسجل ويبدأ نظيفة.
-                Button { store.startNew() } label: {
+                Button { store.startNew(api: state.api) } label: {
                     Image(systemName: "square.and.pencil")
                         .foregroundColor(Theme.Colors.accent)
                 }
@@ -586,7 +586,7 @@ private struct ChatHistorySheet: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        store.startNew(); dismiss()
+                        store.startNew(api: state.api); dismiss()
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }

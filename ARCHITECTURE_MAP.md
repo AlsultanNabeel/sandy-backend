@@ -1326,7 +1326,8 @@ so folders are organisation only.
   keeps both actions closed from «stop» until the server has the stop, and resends nothing when the
   rewind was refused: every block write in a turn is journaled with its before-state
   (`blocks/_base.journal`, kept on the reply's STM turn as `effects`) and `_base.undo`
-  reverses it (a log row it puts back is embedded again, unless sealed); device actions are not undone), a stop button that keeps what arrived
+  reverses it (a log row it puts back is embedded again, unless sealed); device actions are not undone), a stop button that keeps what arrived, as does opening another conversation or a
+  new one while a reply streams (`ChatStore.leave`)
   (`POST …/stop`: a running turn stops before its next tool via `brain/stops.py`, and
   memory keeps only the shown part with a «cut here» note), and a failed line marked
   with «أعد المحاولة», which sends that line again as the same message: its `client_msg_id`
