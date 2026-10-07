@@ -8,8 +8,12 @@ final class ImagesStore: LoadableStore {
 
     private var task: Task<Void, Never>?
 
-    /// يصفّي النواتج (عند تبديل الوضع أو اختيار صورة جديدة).
+    /// يصفّي النواتج (عند تبديل الوضع أو اختيار صورة جديدة). A request still running is
+    /// called off, or its picture would land under the mode switched to.
     func reset() {
+        task?.cancel()
+        task = nil
+        endLoad(beginLoad())
         resultImage = nil
         caption = ""
         clearNotice()
@@ -18,6 +22,7 @@ final class ImagesStore: LoadableStore {
     func generate(api: APIClient, prompt: String) async {
         await run {
             let data = try await api.generateImage(prompt: prompt)
+            try Task.checkCancellation()
             self.resultImage = UIImage(data: data)
             if self.resultImage == nil { self.notify("images.error") }
         }
@@ -29,6 +34,7 @@ final class ImagesStore: LoadableStore {
         }
         await run {
             let out = try await api.editImage(image: data, prompt: prompt)
+            try Task.checkCancellation()
             self.resultImage = UIImage(data: out)
             if self.resultImage == nil { self.notify("images.error") }
         }
@@ -39,7 +45,9 @@ final class ImagesStore: LoadableStore {
             notify("images.error"); return
         }
         await run {
-            self.caption = try await api.describeImage(image: data, question: question)
+            let caption = try await api.describeImage(image: data, question: question)
+            try Task.checkCancellation()
+            self.caption = caption
         }
     }
 
