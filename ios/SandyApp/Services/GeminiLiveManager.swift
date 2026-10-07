@@ -41,6 +41,12 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     init(audio: LiveAudio = LiveAudioBridge()) {
         self.audio = audio
         super.init()
+        audio.onLost = { [weak self] in
+            Task { @MainActor in
+                guard let self, !self.stopped else { return }
+                self.fail("انقطع الصوت")
+            }
+        }
     }
 
 
@@ -69,8 +75,8 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         teardown()
     }
 
-    /// The call cannot go on (its sound did not start): everything is let go, as when it
-    /// drops, and the screen says why.
+    /// The call cannot go on (its sound did not start, or did not come back after an
+    /// interruption): everything is let go, as when it drops, and the screen says why.
     private func fail(_ line: String) {
         stopped = true
         teardown()
@@ -205,11 +211,13 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
 // MARK: - جسر الصوت (خيوط الصوت اللحظية)
 
-/// The call's sound: the mic sent up, her voice played.
+/// The call's sound: the mic sent up, her voice played. `onLost` when it stopped and could
+/// not start again (an interruption that did not end well).
 protocol LiveAudio: AnyObject {
     var send: ((Data) -> Void)? { get set }
     var onMouth: ((CGFloat) -> Void)? { get set }
     var onSpeaking: ((Bool) -> Void)? { get set }
+    var onLost: (() -> Void)? { get set }
     func start(duplex: Bool) throws
     func stop()
     func enqueuePlayback(_ data: Data)
@@ -225,6 +233,7 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
     var send: ((Data) -> Void)?
     var onMouth: ((CGFloat) -> Void)?
     var onSpeaking: ((Bool) -> Void)?
+    var onLost: (() -> Void)?
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -252,6 +261,8 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
     /// Bumped by `flushPlayback`; completions of buffers from before a flush must not count down.
     private var generation = 0
     private var started = false
+    /// The system took the audio (a phone call, Siri): nothing is sent or played until it ends.
+    private var interrupted = false
     private var configObserver: NSObjectProtocol?
     /// Logged once per reply: tells «no sound» apart from «sound going somewhere you can't hear».
     private var renderedThisReply = true
@@ -283,7 +294,7 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
                 cancelled = false  // نصف-مزدوج أحسن من صدى
             }
         }
-        lock.lock(); echoCancelled = cancelled; lock.unlock()
+        lock.lock(); echoCancelled = cancelled; interrupted = false; lock.unlock()
 
         engine.attach(player)
 
@@ -356,7 +367,7 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
                 Self.log.error("restart after configuration change failed: \(error.localizedDescription, privacy: .public)")
             }
         }
-        player.play()
+        playIfRunning()
         Self.log.notice("rewired: \(self.describe(), privacy: .public)")
     }
 
@@ -371,20 +382,43 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
 
     private var interruptionObserver: NSObjectProtocol?
 
+    /// A phone call or Siri takes the audio and stops the engine: she goes quiet and nothing is
+    /// sent until it ends; then the call goes on, or, when the sound cannot come back, ends.
     private func handleInterruption(_ note: Notification) {
         guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         lock.lock(); let live = started; lock.unlock()
         guard live else { return }
-        try? AVAudioSession.sharedInstance().setActive(true)
-        if !engine.isRunning { try? engine.start() }
-        player.play()
+        switch type {
+        case .began:
+            flushPlayback()
+            lock.lock(); interrupted = true; lock.unlock()
+        case .ended:
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                if !engine.isRunning { try engine.start() }
+                lock.lock(); interrupted = false; lock.unlock()
+                playIfRunning()
+            } catch {
+                Self.log.error("resume after interruption failed: \(error.localizedDescription, privacy: .public)")
+                onLost?()
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    /// `play()` on a player whose engine is not running raises; the engine is stopped by an
+    /// interruption or a route change, and audio can still arrive then.
+    private func playIfRunning() {
+        if engine.isRunning, !player.isPlaying { player.play() }
     }
 
     /// Lets go of everything `start` set up, also after a start that failed halfway.
     func stop() {
         lock.lock()
         started = false
+        interrupted = false
         lock.unlock()
         if let o = interruptionObserver {
             NotificationCenter.default.removeObserver(o)
@@ -405,10 +439,12 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
         lock.lock()
         let sp = speaking
         let duplex = echoCancelled
+        let paused = interrupted
         let now = CFAbsoluteTimeGetCurrent()
         let sinceOut = now - lastPlaybackAt
         let intoReply = now - replyStartedAt
         lock.unlock()
+        if paused { return }
         if duplex {
             // أول ربع ثانية من كل ردّ: إلغاء الصدى لسا ما سمع شي، وصدى أول كلمة ممكن ينحسب مقاطعة.
             if sp && intoReply < 0.25 { return }
@@ -443,8 +479,9 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
     func enqueuePlayback(_ data: Data) {
         guard let buf = makeBuffer(data) else { return }
         lock.lock()
-        // A frame in flight when `stop()` ran would `play()` a stopped engine, which raises.
-        guard started else { lock.unlock(); return }
+        // A frame in flight when `stop()` ran, or during an interruption, would `play()` a
+        // stopped engine, which raises.
+        guard started, !interrupted, engine.isRunning else { lock.unlock(); return }
         lastPlaybackAt = CFAbsoluteTimeGetCurrent()
         pendingBuffers += 1
         let wasSpeaking = speaking
@@ -472,7 +509,7 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
                 self.onMouth?(0)
             }
         }
-        if !player.isPlaying { player.play() }
+        playIfRunning()
     }
 
     /// Drop everything queued so she goes quiet now, not at the end of the buffered sentence.
@@ -485,7 +522,7 @@ final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
         speaking = false
         lock.unlock()
         player.stop()
-        player.play()
+        playIfRunning()
         if was { onSpeaking?(false) }
         onMouth?(0)
     }
