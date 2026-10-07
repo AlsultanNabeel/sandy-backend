@@ -665,6 +665,13 @@ after three and «every day at 8» is eight on the user's clock across a DST cha
 | `daily_nudge`, `summary_nudge` | push text only; `failed` when no device took it (no APNs, no token, every send refused). |
 | `message_to_future_self` | not fired here: the next chat reply delivers it (§2.3). |
 
+**The phone hears of every change** (`services/schedule_sync.py`): a reminder added, changed or
+deleted through `blocks/schedules.py` (the robot, the app's call, Sandy in chat, the routes), put
+back or taken away by an undo, sends the user's phones a silent background push
+(`apns.send_background`, `{"sync": "schedules"}`, changes two seconds apart go as one), so a
+reminder made away from the phone is scheduled there. Idle without push keys. Apple may hold a
+silent push and never wakes an app the user swiped away; the visible fallback for that is below.
+
 A recurring row that fails stays armed for its next time with `last_error`. A
 migrated row more than 15 minutes late is settled without firing: its old store
 already fired it, and the migrated scene timers in particular were never marked,

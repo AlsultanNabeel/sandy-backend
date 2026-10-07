@@ -99,6 +99,10 @@ def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:
             done += 1
     if facts:
         fact_changed()
+    if any(e.get("coll") == SCHEDULES for e in effects or []):
+        # A reminder put back or taken away must reach the phone too.
+        from app.services import schedule_sync
+        schedule_sync.changed()
     return done
 
 

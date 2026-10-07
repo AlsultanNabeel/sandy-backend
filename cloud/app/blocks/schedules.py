@@ -87,6 +87,7 @@ def add(kind: str, text: str, fire_at: datetime, payload: Optional[Mapping[str, 
         doc["series_start"] = series_start(fire_at)
     coll.insert_one(doc)
     _base.noted("created", _base.SCHEDULES, doc["_id"], text=doc["text"])
+    _phone_told(kind)
     return doc["_id"]
 
 
@@ -131,6 +132,7 @@ def update(schedule_id: str, *, text: Optional[str] = None,
         coll.update_one({"_id": schedule_id},
                         {**({"$set": changes} if changes else {}),
                          **({"$unset": unset} if unset else {})})
+        _phone_told(current["kind"])
     return True
 
 
@@ -150,8 +152,21 @@ def delete(schedule_id: str, mongo_db=None) -> bool:
     coll = _base.coll(_base.SCHEDULES, mongo_db)
     if coll is None or not schedule_id:
         return False
+    row = coll.find_one({"_id": schedule_id}, {"kind": 1})
+    if row is None:
+        return False
     _base.noted("deleted", _base.SCHEDULES, schedule_id, coll)
-    return coll.delete_one({"_id": schedule_id}).deleted_count > 0
+    gone = coll.delete_one({"_id": schedule_id}).deleted_count > 0
+    if gone:
+        _phone_told(row["kind"])
+    return gone
+
+
+def _phone_told(kind: str) -> None:
+    """Every write here reaches the user's phones (`services/schedule_sync`)."""
+    from app.services import schedule_sync
+
+    schedule_sync.changed(kind)
 
 
 def list_schedules(kind: Optional[str] = None, *, status: Optional[str] = None,

@@ -86,6 +86,21 @@ def send(
 ) -> Tuple[bool, str]:
     """Send one alert; returns (ok, status). status "gone" means prune the token. Never raises.
     `silent` (the user's quiet hours): no sound, delivered without lighting the screen."""
+    aps: Dict[str, Any] = {"alert": {"title": title, "body": body}}
+    if silent:
+        aps["interruption-level"] = "passive"
+    else:
+        aps["sound"] = "default"
+    return _post(token, {"aps": aps, **(data or {})}, "alert", "10")
+
+
+def send_background(token: str, data: Dict[str, Any]) -> Tuple[bool, str]:
+    """A silent push that wakes the app to sync (no alert, no sound); Apple may hold or drop
+    it, and never delivers it to an app the user swiped away. Same answer as `send`."""
+    return _post(token, {"aps": {"content-available": 1}, **data}, "background", "5")
+
+
+def _post(token: str, payload: Dict[str, Any], push_type: str, priority: str) -> Tuple[bool, str]:
     if not is_configured():
         return False, "not_configured"
     token = (token or "").strip()
@@ -97,22 +112,14 @@ def send(
         return False, "no_provider_token"
 
     host = _SANDBOX_HOST if os.getenv("APNS_USE_SANDBOX", "").strip() in ("1", "true", "True") else _PROD_HOST
-    aps: Dict[str, Any] = {"alert": {"title": title, "body": body}}
-    if silent:
-        aps["interruption-level"] = "passive"
-    else:
-        aps["sound"] = "default"
-    payload: Dict[str, Any] = {"aps": aps}
-    if data:
-        payload.update(data)
-
     try:
         resp = _http().post(
             f"{host}/3/device/{token}",
             headers={
                 "authorization": f"bearer {provider}",
                 "apns-topic": os.getenv("APNS_BUNDLE_ID", "").strip(),
-                "apns-push-type": "alert",
+                "apns-push-type": push_type,
+                "apns-priority": priority,
             },
             content=json.dumps(payload).encode("utf-8"),
         )
