@@ -155,3 +155,13 @@ def test_a_signed_in_call_sends_the_phones_zone(tenant, monkeypatch):
     app.test_client().get("/ping", headers={"Authorization": f"Bearer {token}",
                                             "X-Timezone": "Asia/Dubai"})
     assert tenant["sandy_users"].find_one({"_id": "userA"})["timezone"] == "Asia/Dubai"
+
+
+@pytest.mark.parametrize("rule", ["FREQ=SOMETIMES", "FREQ=DAILY;BYHOUR=99"])
+def test_a_repeat_the_runner_cannot_read_is_refused(tenant, rule):
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert not _run("schedule", text="الدوا", when=later.isoformat(), recurrence=rule)["ok"]
+    assert schedules.list_schedules("reminder") == []
+    sid = schedules.add("reminder", "الدوا", later)
+    assert not _run("schedule_update", id=sid, recurrence=rule)["ok"]
+    assert schedules.get(sid)["recurrence"] == ""

@@ -413,7 +413,7 @@ def register_blocks_api(app, mongo_db=None):
         if value is None:
             return None
         rule = W.recurrence_rule(value if isinstance(value, str) else "?")
-        if rule is None or (rule and not _rrule_ok(rule)):
+        if rule is None:
             raise _Invalid("invalid_recurrence")
         return rule
 
@@ -504,12 +504,3 @@ def register_blocks_api(app, mongo_db=None):
         if not result["ok"]:
             raise _Invalid("summary_failed", 503)
         return jsonify({"ok": True, "text": result["text"], "count": result["count"]}), 200
-
-
-def _rrule_ok(rule: str) -> bool:
-    from dateutil.rrule import rrulestr
-    try:
-        rrulestr(rule.removeprefix("RRULE:"), dtstart=datetime.now(timezone.utc))
-    except (ValueError, TypeError):
-        return False
-    return True

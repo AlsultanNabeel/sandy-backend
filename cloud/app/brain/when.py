@@ -8,6 +8,8 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Tuple
 
+from dateutil.rrule import rrulestr
+
 from app.utils.arabic_days import (
     find_day_in_text, has_explicit_time, next_weekday_date, parse_date_from_text,
     resolve_day_name_to_iso,
@@ -245,13 +247,21 @@ def period_range(period: str, now: Optional[datetime] = None) -> Tuple[datetime,
 
 
 def recurrence_rule(value: str) -> Optional[str]:
-    """RRULE for a named repeat or a raw ``FREQ=`` rule; None when unreadable."""
+    """RRULE for a named repeat or a raw ``FREQ=`` rule; None when unreadable, by the same
+    parser the schedule runner uses, so a rule saved here is one it can repeat."""
     v = str(value or "").strip()
     if not v:
         return ""
     if v.lower() in RECURRENCES:
         return RECURRENCES[v.lower()]
-    return v.upper() if v.upper().startswith("FREQ=") else None
+    rule = v.upper()
+    if not rule.startswith("FREQ="):
+        return None
+    try:
+        rrulestr(rule, dtstart=datetime.now(timezone.utc))
+    except (ValueError, TypeError):
+        return None
+    return rule
 
 
 def iso(dt: Optional[datetime]) -> str:
