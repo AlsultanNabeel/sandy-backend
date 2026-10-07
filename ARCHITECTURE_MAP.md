@@ -523,9 +523,11 @@ Datetimes go out as ISO in the user's zone and come in as ISO (naive = user's
 zone; a bare date in `until`/`to` covers its day). **The user's zone is their own**
 (`utils/time.py`): the app sends `X-Timezone` (the phone's IANA zone) on every
 signed-in call, `require_auth` keeps it on `sandy_users.timezone` when it changed,
-and `USER_TZ` is one tzinfo that answers with the active tenant's zone (cached five
-minutes; `USER_TIMEZONE` when none is known), in requests and in the background
-runners, which run inside the tenant's context. A row with `encrypted` in its
+and `USER_TZ` is one tzinfo that answers with the active tenant's zone (cached a
+minute; `USER_TIMEZONE` when none is known), in requests and in the background
+runners, which run inside the tenant's context. When the zone changes, every pending
+repeat is moved to its next time on the new clock (`schedule_runner.follow_zone`, the
+claim's compare-and-set); a one-off keeps its moment. A row with `encrypted` in its
 `data`/`payload` is decrypted for its owner and re-sealed on edit; a
 `message_to_future_self` is sealed at rest.
 

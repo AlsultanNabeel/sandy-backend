@@ -182,3 +182,21 @@ def test_every_day_at_eight_stays_at_eight_across_a_clock_change(tenant):
         now = W.aware_utc(schedules.get(sid)["fire_at"])
         rings.append(now.astimezone(ny).strftime("%m-%d %H:%M"))
     assert rings == ["11-01 08:00", "11-02 08:00", "11-03 08:00"]
+
+
+def test_a_repeat_follows_the_users_new_clock(tenant):
+    """Every day at eight in Riyadh, then he flies to London: eight in London."""
+    riyadh, london = ZoneInfo("Asia/Riyadh"), ZoneInfo("Europe/London")
+    tenant["sandy_users"].insert_one({"_id": "userA"})
+    T.note_zone("userA", "Asia/Riyadh")
+    tomorrow = (datetime.now(riyadh) + timedelta(days=2)).replace(hour=8, minute=0, second=0,
+                                                                  microsecond=0)
+    sid = schedules.add("reminder", "الدوا", tomorrow.astimezone(timezone.utc), recurrence="FREQ=DAILY")
+    old = schedules.add("reminder", "المي", tomorrow.astimezone(timezone.utc), recurrence="FREQ=DAILY")
+    tenant["sandy_schedules"].update_one({"_id": old}, {"$unset": {"series_start": ""}})
+    once = schedules.add("reminder", "موعد", tomorrow.astimezone(timezone.utc))
+    T.note_zone("userA", "Europe/London")
+    for row_id in (sid, old):
+        at = W.aware_utc(schedules.get(row_id)["fire_at"]).astimezone(london)
+        assert (at.hour, at.minute) == (8, 0)
+    assert W.aware_utc(schedules.get(once)["fire_at"]) == tomorrow   # a one-off keeps its moment

@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ZONE = os.getenv("USER_TIMEZONE", "Africa/Cairo")
 _DEFAULT = ZoneInfo(DEFAULT_ZONE)
-# How long a user's zone is trusted before it is read again (another worker may have changed it).
-_TTL_SECONDS = 300
+# How long a user's zone is trusted before it is read again (another worker may have changed it,
+# and the schedule runner on this one rings repeats by it).
+_TTL_SECONDS = 60
 _cache: Dict[str, Tuple[ZoneInfo, float]] = {}
 _lock = threading.Lock()
 
@@ -48,15 +49,22 @@ def zone_for(user_id: Optional[str]) -> ZoneInfo:
 
 
 def note_zone(user_id: Optional[str], name: Optional[str]) -> None:
-    """Keep the zone the phone sent when it changed (travel, a new phone)."""
+    """Keep the zone the phone sent when it changed (travel, a new phone); the user's
+    repeating reminders move onto the new clock."""
     zone = _zone_or_none(name or "")
-    if not user_id or zone is None or zone_for(user_id).key == zone.key:
+    if not user_id or zone is None:
+        return
+    old = zone_for(user_id)
+    if old.key == zone.key:
         return
     from app.features import users_store
 
     if users_store.set_timezone(user_id, zone.key):
         with _lock:
             _cache[user_id] = (zone, time.monotonic() + _TTL_SECONDS)
+        from app.services import schedule_runner
+
+        schedule_runner.follow_zone(user_id, old)
 
 
 def current_zone() -> ZoneInfo:

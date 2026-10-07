@@ -22,7 +22,7 @@ scene revert hours later would switch someone's lights for no reason.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any, Dict, List, Optional, Tuple
 
 from dateutil.rrule import rrulestr
@@ -102,6 +102,32 @@ def _claim(coll, doc: Dict[str, Any], now: datetime) -> Tuple[bool, Optional[dat
     res = coll.update_one({"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"]},
                           {"$set": {**change, "fired_at": now}})
     return res.modified_count == 1, nxt
+
+
+def follow_zone(uid: str, old_zone: tzinfo, now: Optional[datetime] = None) -> int:
+    """The user's clock moved (`utils/time.note_zone`): every pending repeat is set to its next
+    time on the new clock, by the same compare-and-set as a claim. A one-off keeps its moment.
+    A row saved before its series' start was kept is anchored first on the clock it was set on."""
+    now = now or datetime.now(timezone.utc)
+    moved = 0
+    try:
+        with active_user_profile_context(_profile_for(uid)):
+            coll = _base.coll(_base.SCHEDULES)
+            if coll is None:
+                return 0
+            for doc in list(coll.find({"status": "pending", "recurrence": {"$nin": ["", None]},
+                                       "fire_at": {"$gt": now}})):
+                start = doc.get("series_start") or _aware(doc["fire_at"]).astimezone(
+                    old_zone).replace(tzinfo=None).isoformat(timespec="seconds")
+                nxt = _next_time({**doc, "series_start": start}, now)
+                if nxt is None:
+                    continue
+                res = coll.update_one({"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"]},
+                                      {"$set": {"fire_at": nxt, "series_start": start}})
+                moved += res.modified_count
+    except Exception as exc:  # noqa: BLE001 — a request is never failed by this; the rows keep their times
+        logger.warning("[schedules] zone follow for %s failed: %s", uid, exc)
+    return moved
 
 
 def _push(uid: str, text: str, data: Dict[str, Any], silent: bool = False) -> Tuple[int, int]:
