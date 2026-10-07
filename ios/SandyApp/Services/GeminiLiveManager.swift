@@ -34,8 +34,14 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     @Published var errorText = ""
 
     private var ws: URLSessionWebSocketTask?
-    private let audio = LiveAudioBridge()
+    private let audio: LiveAudio
     private var stopped = false
+
+    /// `audio` is the call's sound; tests pass their own.
+    init(audio: LiveAudio = LiveAudioBridge()) {
+        self.audio = audio
+        super.init()
+    }
 
 
     func start(baseURL: String, token: String) {
@@ -61,6 +67,15 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     func stop() {
         stopped = true
         teardown()
+    }
+
+    /// The call cannot go on (its sound did not start): everything is let go, as when it
+    /// drops, and the screen says why.
+    private func fail(_ line: String) {
+        stopped = true
+        teardown()
+        errorText = line
+        Haptics.play(.failure)
     }
 
     /// Shared by user stop and a dropped connection, so a drop also releases mic and audio session.
@@ -137,7 +152,8 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         }
     }
 
-    private func handleText(_ text: String) {
+    /// A text frame from the server (internal for tests).
+    func handleText(_ text: String) {
         guard let d = text.data(using: .utf8),
               let m = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let type = m["type"] as? String else { return }
@@ -149,8 +165,8 @@ final class GeminiLiveManager: NSObject, ObservableObject {
                 try audio.start(duplex: duplex)
                 phase = .listening
             } catch {
-                errorText = "ما قدرت أشغّل الصوت"
-                phase = .idle
+                // Not a call left open with no sound: the socket and the call bar go too.
+                fail("ما قدرت أشغّل الصوت")
             }
         case "end_turn":
             audio.markEndTurn()
@@ -189,8 +205,20 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
 // MARK: - جسر الصوت (خيوط الصوت اللحظية)
 
+/// The call's sound: the mic sent up, her voice played.
+protocol LiveAudio: AnyObject {
+    var send: ((Data) -> Void)? { get set }
+    var onMouth: ((CGFloat) -> Void)? { get set }
+    var onSpeaking: ((Bool) -> Void)? { get set }
+    func start(duplex: Bool) throws
+    func stop()
+    func enqueuePlayback(_ data: Data)
+    func flushPlayback()
+    func markEndTurn()
+}
+
 /// Unchecked Sendable: shared mutable state is guarded by `lock` (taps run on a real-time thread).
-private final class LiveAudioBridge: @unchecked Sendable {
+final class LiveAudioBridge: LiveAudio, @unchecked Sendable {
     /// Audio graph diagnostics (Console filter: SandyVoice); the server log can't see the phone.
     private static let log = Logger(subsystem: "com.sandy.app", category: "SandyVoice")
 
@@ -229,6 +257,17 @@ private final class LiveAudioBridge: @unchecked Sendable {
     private var renderedThisReply = true
 
     func start(duplex: Bool) throws {
+        do {
+            try startEngine(duplex: duplex)
+        } catch {
+            // Taps already on and an engine half up: a failed start leaves nothing behind, or
+            // the next call puts a second tap on the bus, which raises.
+            stop()
+            throw error
+        }
+    }
+
+    private func startEngine(duplex: Bool) throws {
         let s = AVAudioSession.sharedInstance()
         try s.setCategory(.playAndRecord, mode: .voiceChat,
                           options: [.defaultToSpeaker, .allowBluetooth])
@@ -255,9 +294,10 @@ private final class LiveAudioBridge: @unchecked Sendable {
 
         connectOutput()
         engine.prepare()
+        // Started before the engine runs, so a failure on the way is undone by `stop()`.
+        lock.lock(); started = true; lock.unlock()
         try engine.start()
         player.play()
-        lock.lock(); started = true; lock.unlock()
         Self.log.notice("started: echoCancel=\(cancelled) \(self.describe(), privacy: .public)")
 
         // Resume after an interruption (call, Siri, alarm) instead of leaving a silent call open.
@@ -341,12 +381,11 @@ private final class LiveAudioBridge: @unchecked Sendable {
         player.play()
     }
 
+    /// Lets go of everything `start` set up, also after a start that failed halfway.
     func stop() {
         lock.lock()
-        let wasStarted = started
         started = false
         lock.unlock()
-        guard wasStarted else { return }
         if let o = interruptionObserver {
             NotificationCenter.default.removeObserver(o)
             interruptionObserver = nil
@@ -358,7 +397,7 @@ private final class LiveAudioBridge: @unchecked Sendable {
         engine.inputNode.removeTap(onBus: 0)
         engine.mainMixerNode.removeTap(onBus: 0)
         player.stop()
-        engine.stop()
+        if engine.isRunning { engine.stop() }
     }
 
 
