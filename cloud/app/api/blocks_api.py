@@ -505,14 +505,20 @@ def register_blocks_api(app, mongo_db=None):
     @require_tenant
     @_answers_invalid
     def api_schedules_snooze(claims, schedule_id):
-        """{minutes} (1–1440): ring it again that long from now; answers the row that will ring."""
-        minutes = _body().get("minutes")
+        """{minutes} (1–1440), {id} for a repeat's copy when the phone names it (a resend
+        answers the copy already made): ring it again that long from now; answers the row
+        that will ring."""
+        body = _body()
+        minutes = body.get("minutes")
         if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= MAX_SNOOZE_MIN:
             raise _Invalid("invalid_minutes")
+        cid = _client_id(body)
+        if cid and schedules.get(cid):
+            return _saved(cid, schedules.get, "payload")
         current = schedules.get(schedule_id)
         if current is None or current.get("kind") != "reminder" or current.get("status") == "cancelled":
             raise _Invalid("not_found", 404)
-        rings = schedules.snooze(current, minutes, datetime.now(timezone.utc))
+        rings = schedules.snooze(current, minutes, datetime.now(timezone.utc), copy_id=cid)
         if not rings:
             raise _Invalid("not_saved", 503)
         return _saved(rings, schedules.get, "payload")

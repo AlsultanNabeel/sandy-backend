@@ -266,6 +266,28 @@ def test_snoozing_a_repeat_rings_once_more_and_keeps_the_series(c, brain_db):  #
     assert next(x for x in series if x["id"] == sid)["fire_at"] == first
 
 
+def test_a_repeat_snoozed_with_the_phones_id_gets_one_copy(c, brain_db):  # noqa: F811
+    sid = c.post("/api/schedules", json={"kind": "reminder", "text": "الدوا", "fire_at": _iso(1, hour=8),
+                                         "recurrence": "daily"}, headers=_h()).get_json()["id"]
+    copy = "c" * 32
+    first = c.post(f"/api/schedules/{sid}/snooze", json={"minutes": 10, "id": copy}, headers=_h())
+    again = c.post(f"/api/schedules/{sid}/snooze", json={"minutes": 10, "id": copy}, headers=_h())
+    assert first.get_json()["id"] == copy and again.get_json()["id"] == copy
+    assert brain_db["sandy_schedules"].count_documents({"text": "الدوا"}) == 2  # the series and one copy
+
+
+def test_a_snooze_copy_id_must_be_well_formed_and_not_another_users(c):
+    sid = c.post("/api/schedules", json={"kind": "reminder", "text": "x", "fire_at": _iso(1),
+                                         "recurrence": "daily"}, headers=_h()).get_json()["id"]
+    _bad(c.post(f"/api/schedules/{sid}/snooze", json={"minutes": 5, "id": "not-hex"}, headers=_h()),
+         "invalid_id")
+    theirs = "b" * 32
+    c.post("/api/schedules", json={"id": theirs, "kind": "reminder", "text": "y", "fire_at": _iso(1)},
+           headers=_h("userB"))
+    _bad(c.post(f"/api/schedules/{sid}/snooze", json={"minutes": 5, "id": theirs}, headers=_h()),
+         "id_taken", 409)
+
+
 def test_the_phone_tells_which_reminders_it_scheduled(c, brain_db):  # noqa: F811
     from app.features import push_tokens_store
     push_tokens_store.register_token("userA", "my-phone")
