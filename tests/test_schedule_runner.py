@@ -413,3 +413,63 @@ def test_the_due_scan_has_an_index_that_leads_with_status(brain_db):  # noqa: F8
     """The tick reads every tenant: an index led by the tenant cannot serve it."""
     keys = [list(ix["key"]) for ix in brain_db[R._base.SCHEDULES].index_information().values()]
     assert [("status", 1), ("fire_at", 1)] in keys
+
+
+# ── the robot rings too ──────────────────────────────────────────────────────
+
+@pytest.fixture
+def robot(monkeypatch):
+    """One paired robot with a buzzer and a screen; records what is sent to it."""
+    from app.features import device_store
+    from app.integrations import room_device
+    state = {"online": True}
+    sent = []
+
+    def on_output(output):
+        if output not in ("buzzer", "screen"):
+            return []
+        return [{"name": f"sandy_{output}", "control_type": "enum" if output == "buzzer" else "text",
+                 "meta": {"max_bytes": 255} if output == "screen" else {"values": ["alert"]},
+                 "transport": {"kind": "node", "node_id": "n1", "output": output},
+                 "online": state["online"], "board_gone": not state["online"]}]
+
+    class Client:
+        def send_to_topic(self, topic, payload):
+            sent.append((topic, payload))
+            return True
+
+    monkeypatch.setattr(device_store, "devices_on_output", on_output)
+    monkeypatch.setattr(room_device, "get_room_device_client", lambda: Client())
+    return {"sent": sent, "state": state}
+
+
+def test_a_reminder_rings_on_the_robot_when_it_is_on(brain_db, robot):  # noqa: F811
+    _add(text="الدوا")
+    assert _tick()["fired"] == 1
+    assert robot["sent"] == [("sandy/node/n1/buzzer", "alert"), ("sandy/node/n1/screen", "⏰ الدوا")]
+
+
+def test_a_robot_that_is_off_is_left_alone(brain_db, robot):  # noqa: F811
+    robot["state"]["online"] = False
+    _add()
+    assert _tick()["fired"] == 1 and robot["sent"] == []
+
+
+def test_the_robot_keeps_the_users_switches(brain_db, robot):  # noqa: F811
+    from app.features import notify_prefs
+    brain_db["sandy_users"].insert_one({"_id": "userA"})
+    notify_prefs.save("userA", {"quiet_start": "00:00", "quiet_end": "23:59"})
+    _add(text="الدوا")
+    _tick()
+    assert robot["sent"] == [("sandy/node/n1/screen", "⏰ الدوا")]   # quiet hours: no sound
+    robot["sent"].clear()
+    notify_prefs.save("userA", {"reminders": False})
+    _add(text="المي")
+    _tick()
+    assert robot["sent"] == []
+
+
+def test_a_stale_reminder_does_not_ring_the_robot(brain_db, robot):  # noqa: F811
+    _add(minutes_ago=R.LOOKBACK_MIN + 5)
+    _tick()
+    assert robot["sent"] == []

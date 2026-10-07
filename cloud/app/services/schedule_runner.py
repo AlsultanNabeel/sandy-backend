@@ -13,8 +13,9 @@ ever. What firing means per kind:
   reminder         the phone rings it locally from GET /api/schedules and says so
                    (`schedules.arm`); APNs, when configured, goes only to the user's
                    phones that did not arm it, with the phone's reminder category and
-                   keys so «later» and «done» work on it; stale by > 15 min: no push,
-                   still settled.
+                   keys so «later» and «done» work on it; the user's robot, when it is
+                   on, plays the alert and shows the reminder on its face (only the face
+                   in quiet hours); stale by > 15 min: no push, no ring, still settled.
   scene            a scene's timed revert (`scene_store.apply_scene` writes it), sent
                    through `scene_store._actuate`; a miss retries a minute later, up to
                    MAX_TIMER_TRIES.
@@ -195,6 +196,8 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
         payload = doc.get("payload") or {}
         r = _actuate([{"device": payload.get("device", ""), "value": payload.get("value", "")}])
         return (True, "") if r["sent"] else (False, "device missed")
+    if kind == "reminder" and not late:
+        _ring_robot(uid, text, now)
     if not apns.is_configured():
         # A reminder still rings on the phone; a push-only nudge reached no one.
         return (True, "") if kind == "reminder" else (False, "apns not configured")
@@ -219,6 +222,39 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
     if took or (kind == "reminder" and not tried):
         return True, ""
     return False, "no device took the push"
+
+
+def _ring_robot(uid: str, text: str, now: datetime) -> None:
+    """A reminder rings on the user's robot too when it is on: the alert melody and the words
+    on its face; only the face in the quiet hours, nothing with reminders switched off.
+    Best effort: the phone is what rings it, so a miss here fails nothing."""
+    wanted, silent = notify_prefs.push_rule(uid, "reminder", now)
+    if not wanted:
+        return
+    try:
+        # Import here: the device stack pulls in MQTT (C9).
+        from app.features import device_store
+        from app.integrations import room_device
+        wanted_parts = [("screen", _face_text(text))]
+        if not silent:
+            wanted_parts.insert(0, ("buzzer", "alert"))
+        sends = [(device_store.device_topic(d), payload) for output, payload in wanted_parts
+                 for d in device_store.devices_on_output(output) if d.get("online")]
+        sends = [(topic, payload) for topic, payload in sends if topic]
+        if sends:
+            client = room_device.get_room_device_client()
+            for topic, payload in sends:
+                client.send_to_topic(topic, payload)
+    except Exception as exc:  # noqa: BLE001 — the robot never fails a reminder
+        logger.warning("[schedules] robot ring for %s failed: %s", uid, exc)
+
+
+def _face_text(text: str, limit: int = 255) -> str:
+    """The reminder as her face shows it, cut on a character to the screen's byte limit."""
+    shown = f"⏰ {text}".strip()
+    while len(shown.encode("utf-8")) > limit:
+        shown = shown[:-1]
+    return shown
 
 
 def _settle_failure(coll, doc: Dict[str, Any], lease: datetime, nxt: Optional[datetime],
