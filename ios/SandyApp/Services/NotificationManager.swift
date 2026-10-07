@@ -49,6 +49,29 @@ enum NotificationRepeat {
     }
 }
 
+/// What the manager asks of the system's notification center; tests hand it one that only
+/// records.
+protocol NotificationScheduler: AnyObject {
+    var delegate: UNUserNotificationCenterDelegate? { get set }
+    func add(_ request: UNNotificationRequest, withCompletionHandler completionHandler: ((Error?) -> Void)?)
+    func getPendingNotificationRequests(completionHandler: @escaping ([UNNotificationRequest]) -> Void)
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String])
+    func removeDeliveredNotifications(withIdentifiers identifiers: [String])
+    func removeAllPendingNotificationRequests()
+    func removeAllDeliveredNotifications()
+    func setNotificationCategories(_ categories: Set<UNNotificationCategory>)
+    /// The user lets the app notify (allowed, provisional or ephemeral).
+    func notificationsAllowed(_ done: @escaping (Bool) -> Void)
+}
+
+extension UNUserNotificationCenter: NotificationScheduler {
+    func notificationsAllowed(_ done: @escaping (Bool) -> Void) {
+        getNotificationSettings { settings in
+            done([.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus))
+        }
+    }
+}
+
 enum NotifRoute: String, Identifiable {
     case reminders, tasks, future, dailyNudge, insights
     var id: String { rawValue }
@@ -63,7 +86,8 @@ enum ReminderNotificationAction: String {
 
 final class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
-    private let center = UNUserNotificationCenter.current()
+    /// The system's center; a test swaps in its own.
+    var center: NotificationScheduler = UNUserNotificationCenter.current()
 
     /// النقر على إشعار → الواجهة تفتح شاشتها وتصفّره.
     @Published var pendingRoute: NotifRoute?
@@ -94,7 +118,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     /// آمن للنداء المتكرّر — النظام يعرض الطلب مرّة، والتسجيل idempotent.
     func requestAuthorization() {
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             guard granted else { return }
             #if canImport(UIKit)
             DispatchQueue.main.async {
@@ -275,8 +299,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                         try await api.updateSchedule(id: reminderId, status: "cancelled")
                     } else {
                         // Removing it above also removed the repeat; put the same trigger back.
-                        try await self.center.add(UNNotificationRequest(
-                            identifier: notifId, content: content, trigger: notification.trigger))
+                        self.center.add(UNNotificationRequest(
+                            identifier: notifId, content: content, trigger: notification.trigger),
+                                        withCompletionHandler: nil)
                     }
                 case .delete:
                     SchedulesStore.bannerAction(id: reminderId, movedTo: nil, userId: api.currentUserId)
@@ -367,11 +392,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         knownLock.lock()
         let known = knownItems
         knownLock.unlock()
-        center.getNotificationSettings { [weak self] settings in
+        center.notificationsAllowed { [weak self] allowed in
             guard let self else { return }
-            let allowed: [UNAuthorizationStatus] = [.authorized, .provisional, .ephemeral]
             // Denied, or proactive nudges switched off in Profile › Notifications.
-            guard allowed.contains(settings.authorizationStatus), NotificationPrefs.current.proactive else {
+            guard allowed, NotificationPrefs.current.proactive else {
                 self.center.getPendingNotificationRequests { reqs in
                     let ours = reqs.map(\.identifier).filter { $0.hasPrefix(Self.proactivePrefix) }
                     self.center.removePendingNotificationRequests(withIdentifiers: ours)
@@ -503,7 +527,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         content.body = body
         Self.applyQuiet(content, at: (trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate()
                         ?? (trigger as? UNTimeIntervalNotificationTrigger)?.nextTriggerDate())
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger),
+                   withCompletionHandler: nil)
     }
 
     /// هوية ثابتة بتستبدل القديم. الماضي يُتجاهل.
@@ -544,7 +569,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 let again = UNTimeIntervalNotificationTrigger(timeInterval: later.timeIntervalSinceNow,
                                                               repeats: false)
                 center.add(UNNotificationRequest(identifier: id + Self.againSuffix + String(n),
-                                                 content: content, trigger: again))
+                                                 content: content, trigger: again),
+                           withCompletionHandler: nil)
             }
         }
         // The matching components decide the repeat: time of day, plus weekday or day of month.
@@ -557,7 +583,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
         let comps = Calendar.current.dateComponents(fields, from: date)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: repeats != .none)
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger),
+                   withCompletionHandler: nil)
     }
 
     // MARK: - Alarms
