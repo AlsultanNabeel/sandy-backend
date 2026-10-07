@@ -267,9 +267,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     // MARK: - Armed reminders (the server pushes the others)
 
-    /// The client the set is sent with, and the pause that gathers a burst of syncs into one
-    /// report; tests set both.
-    var armingAPI: () -> APIClient = { APIClient(baseURL: Backend.currentURL) }
+    /// The client the banner buttons and the armed set are sent with, and the pause that
+    /// gathers a burst of syncs into one report; tests set both.
+    var client: () -> APIClient = { APIClient(baseURL: Backend.currentURL) }
     static var armDelay: UInt64 = 1_000_000_000
     private var armTask: Task<Void, Never>?
     /// The last set (and its repeats held for one ring), sent again once the push token is
@@ -283,7 +283,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             self.armedIds = (ids, once)
             self.armTask?.cancel()
             guard let token = self.lastDeviceToken, self.isSignedIn else { return }
-            let api = self.armingAPI()
+            let api = self.client()
             self.armTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: Self.armDelay)
                 guard !Task.isCancelled else { return }
@@ -361,49 +361,52 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
 
     /// Backend first, then re-arm or leave cancelled, then tell an open reminders screen to refetch.
-    /// On failure the next reminders load rebuilds notifications from the server.
-    private func perform(_ action: ReminderNotificationAction,
-                         reminderId: String,
-                         notification: UNNotificationRequest,
-                         completion: @escaping () -> Void) {
-        let notifId = Self.baseId(notification.identifier)
-        center.removeDeliveredNotifications(withIdentifiers: [notifId])
-        center.removePendingNotificationRequests(withIdentifiers: [notifId])
-
+    /// On failure the next reminders load rebuilds notifications from the server. A repeat
+    /// keeps its own repeating notification through «later» and «done»; a server push is
+    /// answered the same way, its local notification being `reminder.<id>`.
+    func perform(_ action: ReminderNotificationAction,
+                 reminderId: String,
+                 notification: UNNotificationRequest,
+                 completion: @escaping () -> Void) {
         let content = notification.content
         let recurrence = content.userInfo[Self.reminderRecurrenceKey] as? String ?? ""
         let alarm = content.userInfo[Self.alarmKey] as? String == "1"
         let breaksFocus = content.userInfo[Self.focusKey] as? String == "1"
-        let info = [Self.reminderIdKey: reminderId,
-                    Self.reminderRecurrenceKey: recurrence]
+        let notifId = "reminder." + reminderId
+        center.removeDeliveredNotifications(withIdentifiers: [Self.baseId(notification.identifier), notifId])
+        if recurrence.isEmpty || action == .delete {
+            center.removePendingNotificationRequests(withIdentifiers: [notifId])
+        }
 
         // ObservableObject: ننفّذ ع الخيط الرئيسي.
         Task { @MainActor [weak self] in
             guard let self else { completion(); return }
-            let api = APIClient(baseURL: Backend.currentURL)
+            let api = self.client()
             do {
                 switch action {
                 case .snooze:
-                    let at = Date().addingTimeInterval(TimeInterval(Self.snoozeMinutes * 60))
-                    SchedulesStore.bannerAction(id: reminderId, movedTo: at, userId: api.currentUserId)
-                    try await api.updateSchedule(id: reminderId, at: at)
-                    // One shot on purpose: repeating from the snoozed time would ring late every day after.
-                    self.schedule(id: notifId, title: content.title, body: content.body,
-                                  at: at, category: Self.reminderCategory, userInfo: info,
+                    // The row that rings: a one-off itself, a repeat a one-time copy (the series stays).
+                    let rang = ScheduleItem(id: reminderId, kind: "reminder", text: content.body, fireAt: "",
+                                            recurrence: recurrence, status: "pending",
+                                            payload: alarm ? ["important": .bool(true),
+                                                              "break_focus": .bool(breaksFocus)] : nil)
+                    let ring = SchedulesStore.snoozed(rang, minutes: Self.snoozeMinutes)
+                    SchedulesStore.bannerSnoozed(ring, userId: api.currentUserId)
+                    try await api.snoozeSchedule(id: reminderId, minutes: Self.snoozeMinutes,
+                                                 copyId: ring.id == reminderId ? nil : ring.id)
+                    self.schedule(id: "reminder." + ring.id, title: content.title, body: content.body,
+                                  at: NotificationManager.parseISO(ring.fireAt) ?? Date(),
+                                  category: Self.reminderCategory,
+                                  userInfo: [Self.reminderIdKey: ring.id, Self.reminderRecurrenceKey: ""],
                                   alarm: alarm, breaksFocus: breaksFocus)
                 case .done:
                     // A repeating one keeps its repeating notification; a one-off is closed.
                     if recurrence.isEmpty {
-                        SchedulesStore.bannerAction(id: reminderId, movedTo: nil, userId: api.currentUserId)
+                        SchedulesStore.bannerRemoved(id: reminderId, userId: api.currentUserId)
                         try await api.updateSchedule(id: reminderId, status: "cancelled")
-                    } else {
-                        // Removing it above also removed the repeat; put the same trigger back.
-                        self.center.add(UNNotificationRequest(
-                            identifier: notifId, content: content, trigger: notification.trigger),
-                                        withCompletionHandler: nil)
                     }
                 case .delete:
-                    SchedulesStore.bannerAction(id: reminderId, movedTo: nil, userId: api.currentUserId)
+                    SchedulesStore.bannerRemoved(id: reminderId, userId: api.currentUserId)
                     try await api.deleteSchedule(id: reminderId)
                 }
                 self.remindersChanged &+= 1

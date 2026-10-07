@@ -565,18 +565,42 @@ final class SchedulesStore: LoadableStore {
         }
     }
 
-    /// A banner button (later / done / delete) acted while no screen was asked:
+    /// A banner button (done / delete) took a reminder away while no screen was asked:
     /// every copy of the reminders follows.
-    static func bannerAction(id: String, movedTo: Date?, userId: String?) {
+    static func bannerRemoved(id: String, userId: String?) {
+        bannerEdit(userId: userId) { rows in rows.removeAll { $0.id == id } }
+    }
+
+    /// «Later» on a banner: the row that will ring (`snoozed`) is in every copy.
+    static func bannerSnoozed(_ ring: ScheduleItem, userId: String?) {
+        bannerEdit(userId: userId) { rows in upsert(ring, into: &rows) }
+    }
+
+    private static func bannerEdit(userId: String?, _ change: (inout [ScheduleItem]) -> Void) {
         editCopies(live.all.filter { $0.kind == "reminder" && $0.restored }, rows: \.items,
                    key: "schedules.reminder", userId: userId) { rows in
-            if let at = movedTo, let i = rows.firstIndex(where: { $0.id == id }) {
-                rows[i].fireAt = isoOut.string(from: at)
-            } else if movedTo == nil {
-                rows.removeAll { $0.id == id }
-            }
+            change(&rows)
             rows = byTime(rows)
         }
+    }
+
+    private static func upsert(_ row: ScheduleItem, into rows: inout [ScheduleItem]) {
+        if let i = rows.firstIndex(where: { $0.id == row.id }) { rows[i] = row } else { rows.append(row) }
+    }
+
+    /// The row that rings `minutes` from now after «later», as the server makes it: a
+    /// one-off itself at the new time, a repeat a one-time copy under a new id (its payload
+    /// kept, so an alarm stays an alarm) while its series stays where it is.
+    static func snoozed(_ item: ScheduleItem, minutes: Int, now: Date = Date()) -> ScheduleItem {
+        let at = isoOut.string(from: now.addingTimeInterval(TimeInterval(minutes * 60)))
+        guard !(item.recurrence ?? "").isEmpty else {
+            var moved = item
+            moved.fireAt = at
+            moved.status = "pending"
+            return moved
+        }
+        return ScheduleItem(id: ClientID.make(), kind: item.kind, text: item.text, fireAt: at,
+                            recurrence: "", status: "pending", payload: item.payload)
     }
 
     private static func rule(_ name: String?) -> String? {
@@ -655,15 +679,17 @@ final class SchedulesStore: LoadableStore {
         return true
     }
 
-    /// Later: the same reminder, `minutes` from now.
+    /// Later: it rings again `minutes` from now (`snoozed`), through the snooze route.
     func snooze(api: APIClient, _ item: ScheduleItem, minutes: Int) {
-        let at = Date().addingTimeInterval(TimeInterval(minutes * 60))
-        var new = item
-        new.fireAt = isoOut.string(from: at)
+        let ring = Self.snoozed(item, minutes: minutes)
+        let copy = ring.id != item.id
         optimistic("blocks.errorSave",
-                   apply: { self.replace(new) },
-                   rollback: { self.replace(item) },
-                   call: { try await api.updateSchedule(id: item.id, at: at) })
+                   apply: { self.everywhere { Self.upsert(ring, into: &$0) } },
+                   rollback: { self.everywhere { rows in
+                       if copy { rows.removeAll { $0.id == ring.id } } else { Self.upsert(item, into: &rows) }
+                   } },
+                   call: { try await api.snoozeSchedule(id: item.id, minutes: minutes,
+                                                        copyId: copy ? ring.id : nil) })
     }
 
     private func publish() {

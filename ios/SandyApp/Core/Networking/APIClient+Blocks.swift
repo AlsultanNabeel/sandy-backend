@@ -222,6 +222,18 @@ extension APIClient {
                                              text: text, recurrence: recurrence, payload: payload))
     }
 
+    private struct Snooze: Encodable {
+        let minutes: Int
+        let id: String?
+    }
+
+    /// «Later»: it rings again `minutes` from now; a repeat's one-time copy takes `copyId`
+    /// (the phone's own, so it is known offline and a resend makes no second).
+    func snoozeSchedule(id: String, minutes: Int, copyId: String? = nil) async throws {
+        try await queued("/api/schedules/\(id)/snooze", method: "POST",
+                         body: Snooze(minutes: minutes, id: copyId))
+    }
+
     func deleteSchedule(id: String) async throws {
         try await queued("/api/schedules/\(id)", method: "DELETE")
     }

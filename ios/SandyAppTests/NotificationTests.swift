@@ -46,7 +46,7 @@ final class NotificationTests: XCTestCase {
         NotificationManager.armDelay = 0
         api = TestClient.make()
         api.token = SessionTests.token("notes-\(UUID().uuidString.prefix(8))")
-        notes.armingAPI = { [unowned self] in self.api }
+        notes.client = { [unowned self] in self.api }
         StubNetwork.install(json: "{}")
     }
 
@@ -74,6 +74,7 @@ final class NotificationTests: XCTestCase {
         notes.center = original
         if let savedPrefs { UserDefaults.standard.set(savedPrefs, forKey: "notifications.prefs") }
         else { UserDefaults.standard.removeObject(forKey: "notifications.prefs") }
+        Outbox.shared.discard()
         StubNetwork.uninstall()
         try await super.tearDown()
     }
@@ -191,5 +192,71 @@ final class NotificationTests: XCTestCase {
         let body = try XCTUnwrap(sent("/api/schedules/armed").last)
         XCTAssertEqual((body["ids"] as? [String])?.sorted(), ["later", "soon"])
         XCTAssertEqual(body["once"] as? [String], ["later"])
+    }
+
+    private static func row(_ id: String, recurrence: String, in seconds: TimeInterval = -60) -> ScheduleItem {
+        ScheduleItem(id: id, kind: "reminder", text: "الدوا",
+                     fireAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(seconds)),
+                     recurrence: recurrence, status: "pending")
+    }
+
+    /// A reminders store holding `rows`, as loaded from the server.
+    private func loaded(_ rows: [ScheduleItem]) async throws -> SchedulesStore {
+        let json = String(decoding: try JSONEncoder().encode(rows), as: UTF8.self)
+        StubNetwork.install { req in
+            req.httpMethod == "GET" ? (200, Data("{\"items\":\(json)}".utf8)) : (200, Data("{}".utf8))
+        }
+        let store = SchedulesStore()
+        await store.load(api: api)
+        return store
+    }
+
+    /// F23: «later» in the app sent a new time only: a repeat moved its whole series
+    /// («every day at 8» became 8:15 for good). It goes through the snooze route now, and a
+    /// repeat rings a one-time copy under the phone's own id.
+    func testLaterOnARepeatRingsACopyAndLeavesTheSeries() async throws {
+        let series = Self.row("s1", recurrence: "FREQ=DAILY")
+        let store = try await loaded([series])
+        store.snooze(api: api, series, minutes: 15)
+        await waitFor { !sent("/api/schedules/s1/snooze").isEmpty }
+        let body = try XCTUnwrap(sent("/api/schedules/s1/snooze").first)
+        XCTAssertEqual(body["minutes"] as? Int, 15)
+        let copyId = try XCTUnwrap(body["id"] as? String)
+        XCTAssertEqual(store.items.first { $0.id == "s1" }?.fireAt, series.fireAt, "the series moved")
+        let copy = try XCTUnwrap(store.items.first { $0.id == copyId })
+        XCTAssertEqual(copy.recurrence, "")
+        XCTAssertTrue(StubNetwork.requests.allSatisfy { $0.httpMethod != "PATCH" })
+    }
+
+    /// F23: a one-off that rang goes back to pending at the new time, with no copy.
+    func testLaterOnAOneOffMovesIt() async throws {
+        let once = Self.row("o1", recurrence: "")
+        let store = try await loaded([once])
+        store.snooze(api: api, once, minutes: 60)
+        await waitFor { !sent("/api/schedules/o1/snooze").isEmpty }
+        XCTAssertNil(sent("/api/schedules/o1/snooze").first?["id"])
+        XCTAssertEqual(store.items.map(\.id), ["o1"])
+        let at = try XCTUnwrap(NotificationManager.parseISO(store.items[0].fireAt))
+        XCTAssertEqual(at.timeIntervalSinceNow, 3600, accuracy: 5)
+    }
+
+    /// F23: «later» on a repeat's banner dropped its repeating notification until the next
+    /// sync and rang the snooze on the series' id; the series keeps ringing, the copy rings
+    /// under its own id.
+    func testLaterFromTheBannerOfARepeatKeepsItsRepeatAndRingsTheCopy() async throws {
+        notes.sync(prefix: "reminder.", items: [reminder("s1", in: 3600, repeats: .daily)])
+        let content = UNMutableNotificationContent()
+        content.body = "الدوا"
+        content.userInfo = [NotificationManager.reminderIdKey: "s1",
+                            NotificationManager.reminderRecurrenceKey: "FREQ=DAILY"]
+        let request = UNNotificationRequest(identifier: "reminder.s1", content: content, trigger: nil)
+        let done = expectation(description: "answered")
+        notes.perform(.snooze, reminderId: "s1", notification: request) { done.fulfill() }
+        await fulfillment(of: [done], timeout: 5)
+        XCTAssertNotNil(fake.pending["reminder.s1"], "the series' repeat was dropped")
+        let copyId = try XCTUnwrap(sent("/api/schedules/s1/snooze").first?["id"] as? String)
+        let copy = try XCTUnwrap(fake.pending["reminder." + copyId])
+        XCTAssertEqual(copy.content.userInfo[NotificationManager.reminderIdKey] as? String, copyId)
+        XCTAssertEqual(copy.content.userInfo[NotificationManager.reminderRecurrenceKey] as? String, "")
     }
 }
