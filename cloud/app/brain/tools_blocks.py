@@ -604,7 +604,8 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             if r.get("recurrence") and _rang_lately(r):
                 # A repeating one that just rang: snooze this ring, the series stays as it is.
                 snooze = W.now_utc() + timedelta(minutes=shift)
-                schedules.add(r.get("kind") or "reminder", r.get("text", ""), snooze)
+                schedules.add(r.get("kind") or "reminder", r.get("text", ""), snooze,
+                              r.get("payload") or None)
                 moved = snooze
                 continue
             # From its own time, not from now: «أجّليه كمان نص ساعة» adds to what is set.

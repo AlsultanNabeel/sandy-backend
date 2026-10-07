@@ -108,6 +108,16 @@ def test_snooze_a_repeating_one_leaves_the_series(tenant):
     assert len(snoozes) == 1 and snoozes[0]["text"] == "الرياضة"
 
 
+def test_a_snoozed_repeating_alarm_is_still_an_alarm(tenant):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    sid = schedules.add("reminder", "الصحيان", now + timedelta(days=1),
+                        {"important": True, "break_focus": True}, recurrence="FREQ=DAILY")
+    tenant["sandy_schedules"].update_one({"_id": sid}, {"$set": {"fired_at": now}})
+    assert _run("schedule_update", id=sid, shift_minutes=10)["ok"]
+    snooze = next(s for s in schedules.list_schedules("reminder", status="pending") if s["id"] != sid)
+    assert snooze["payload"] == {"important": True, "break_focus": True}
+
+
 def test_a_due_is_taken_off_a_task(tenant):
     iid = items.add("tasks", "التقرير", due=datetime.now(timezone.utc) + timedelta(days=1))
     assert _run("list_update", id=iid, no_due=True)["ok"]
