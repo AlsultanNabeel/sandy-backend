@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from dateutil.rrule import rrulestr
 
-from app.blocks import _base
+from app.blocks import _base, schedules
 from app.features import notify_prefs, push_tokens_store
 from app.services import apns
 from app.utils.time import USER_TZ
@@ -72,7 +72,8 @@ def users_with_due(mongo_db, now: Optional[datetime] = None) -> List[str]:
 
 
 def next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optional[datetime]:
-    """First occurrence of the RRULE (anchored at ``first``) strictly after ``after``; None when it ended."""
+    """First occurrence of the RRULE (anchored at ``first``, the series' start,
+    `schedules.series_anchor`) strictly after ``after``; None when it ended."""
     # Anchored in local time so "every day at 8" survives DST changes.
     start = first.astimezone(USER_TZ)
     rule = rrulestr(recurrence.removeprefix("RRULE:"), dtstart=start)
@@ -85,7 +86,7 @@ def _next_time(doc: Dict[str, Any], now: datetime) -> Optional[datetime]:
     if not rule:
         return None
     try:
-        return next_occurrence(rule, _aware(doc["fire_at"]), now)
+        return next_occurrence(rule, schedules.series_anchor(doc), now)
     except (ValueError, TypeError) as exc:
         logger.warning("[schedules] bad recurrence on %s: %s", doc.get("_id"), exc)
         return None
@@ -95,6 +96,9 @@ def _claim(coll, doc: Dict[str, Any], now: datetime) -> Tuple[bool, Optional[dat
     """(won, next fire time or None) — the atomic claim."""
     nxt = _next_time(doc, now)
     change = {"fire_at": nxt} if nxt else {"status": "sent"}
+    if doc.get("recurrence") and not doc.get("series_start"):
+        # Saved before the start was kept: its count runs from this ring on.
+        change["series_start"] = schedules.series_start(doc["fire_at"])
     res = coll.update_one({"_id": doc["_id"], "status": "pending", "fire_at": doc["fire_at"]},
                           {"$set": {**change, "fired_at": now}})
     return res.modified_count == 1, nxt

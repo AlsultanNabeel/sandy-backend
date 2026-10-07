@@ -618,7 +618,7 @@ Every user feature is a row in one of three collections, reached through
 |---|---|---|
 | `blocks/entries.py` | `sandy_entries` | LOG — what happened or what Sandy learned: `{kind, text, data, at, source, embedding, migrated_from}` |
 | `blocks/items.py` | `sandy_items` | LISTS — anything ticked off: `{list, text, done, due, priority, data, created_at, done_at, migrated_from}` |
-| `blocks/schedules.py` | `sandy_schedules` | SCHEDULES — anything that fires: `{kind, text, fire_at, recurrence (RRULE), payload, status, migrated_from}` |
+| `blocks/schedules.py` | `sandy_schedules` | SCHEDULES — anything that fires: `{kind, text, fire_at, recurrence (RRULE), series_start, payload, status, migrated_from}` |
 | `blocks/kinds.py` | — | The kinds table: every log kind, list and schedule kind with labels, SF Symbol, the words a user says for it (`aliases`) and typed `data` fields. `validate()` refuses an unknown kind or an undeclared/mistyped field. A `project:` row matches any `project:<name>` list. |
 
 Each module is add / get / update / delete / list with filters (kind or list,
@@ -642,7 +642,11 @@ anything, on the leader-elected scheduler (§2.1), once a minute. A due row
 `(status, fire_at)`: a one-off moves to `sent`, a recurring one to its next RRULE
 time (anchored in local time, so "every day at 8" survives DST), and only the
 worker whose update matched fires it, so nothing fires twice across workers or
-dynos. `fired_at` and `last_error` are set on the row.
+dynos. `fired_at` and `last_error` are set on the row. A repeating row keeps where its
+series began (`series_start`, the wall time on the user's clock with no zone, set on add
+and on a new time or repeat, kept by a skipped occurrence; a row saved before it existed
+gets it at its next ring), and the next time is counted from there, so «three days» ends
+after three and «every day at 8» is eight on the user's clock across a DST change.
 
 | Kind | Firing |
 |---|---|

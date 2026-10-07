@@ -1,16 +1,22 @@
 """SCHEDULES block (sandy_schedules): anything that fires at a time.
 
-{user_id, kind, text, fire_at, recurrence (RRULE or ""), payload, status, migrated_from}
+{user_id, kind, text, fire_at, recurrence (RRULE or ""), series_start, payload, status,
+migrated_from}
+
+A repeating row keeps where its series began (`series_start`: the wall time on the user's
+clock, no zone), so a rule with a count or an end is counted from there and not from each
+ring's own time, and «every day at 8» is eight on whatever clock the user is on now.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from app.blocks import _base
 from app.blocks.kinds import SCHEDULE, validate
+from app.utils.time import USER_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +33,22 @@ def init_schedules_store(mongo_db) -> None:
             mongo_db[_base.SCHEDULES].create_index(keys, background=True)
         except Exception as exc:  # noqa: BLE001 — one failed index must not skip the rest
             logger.warning("[blocks] schedules index %s skipped: %s", keys, exc)
+
+
+def series_start(fire_at: datetime) -> str:
+    """The wall time on the user's clock a series starts at, kept without a zone."""
+    at = fire_at if fire_at.tzinfo else fire_at.replace(tzinfo=timezone.utc)
+    return at.astimezone(USER_TZ).replace(tzinfo=None).isoformat(timespec="seconds")
+
+
+def series_anchor(doc: Mapping[str, Any]) -> datetime:
+    """Where a repeating row's series begins, on the user's current clock; a row saved
+    before the start was kept is anchored at its own time."""
+    start = doc.get("series_start")
+    if start:
+        return datetime.fromisoformat(start).replace(tzinfo=USER_TZ)
+    at = doc["fire_at"]
+    return (at if at.tzinfo else at.replace(tzinfo=timezone.utc)).astimezone(USER_TZ)
 
 
 def _check_status(status: str) -> str:
@@ -59,6 +81,8 @@ def add(kind: str, text: str, fire_at: datetime, payload: Optional[Mapping[str, 
         "created_at": created_at or _base.now(),
         "migrated_from": _base.migrated_ref(migrated_from),
     }
+    if doc["recurrence"]:
+        doc["series_start"] = series_start(fire_at)
     coll.insert_one(doc)
     _base.noted("created", _base.SCHEDULES, doc["_id"], text=doc["text"])
     return doc["_id"]
@@ -74,15 +98,17 @@ def get(schedule_id: str, mongo_db=None) -> Optional[Dict[str, Any]]:
 def update(schedule_id: str, *, text: Optional[str] = None,
            fire_at: Optional[datetime] = None, recurrence: Optional[str] = None,
            payload: Optional[Mapping[str, Any]] = None, status: Optional[str] = None,
-           mongo_db=None) -> bool:
-    """Change fields; True when the schedule exists."""
+           keep_series: bool = False, mongo_db=None) -> bool:
+    """Change fields; True when the schedule exists. A new time or repeat starts the
+    series again from the row's time, unless ``keep_series`` (a skipped occurrence)."""
     coll = _base.coll(_base.SCHEDULES, mongo_db)
     if coll is None or not schedule_id:
         return False
-    current = coll.find_one({"_id": schedule_id}, {"kind": 1})
+    current = coll.find_one({"_id": schedule_id}, {"kind": 1, "fire_at": 1, "recurrence": 1})
     if current is None:
         return False
     changes: Dict[str, Any] = {}
+    unset: Dict[str, str] = {}
     if text is not None:
         changes["text"] = str(text).strip()
     if fire_at is not None:
@@ -93,9 +119,16 @@ def update(schedule_id: str, *, text: Optional[str] = None,
         changes["payload"] = validate(SCHEDULE, current["kind"], payload)
     if status is not None:
         changes["status"] = _check_status(status)
-    if changes:
+    if (fire_at is not None or recurrence is not None) and not keep_series:
+        if changes.get("recurrence", current.get("recurrence")):
+            changes["series_start"] = series_start(changes.get("fire_at", current["fire_at"]))
+        else:
+            unset["series_start"] = ""
+    if changes or unset:
         _base.noted("updated", _base.SCHEDULES, schedule_id, coll)
-        coll.update_one({"_id": schedule_id}, {"$set": changes})
+        coll.update_one({"_id": schedule_id},
+                        {**({"$set": changes} if changes else {}),
+                         **({"$unset": unset} if unset else {})})
     return True
 
 

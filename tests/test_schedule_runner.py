@@ -95,6 +95,16 @@ def test_a_recurrence_that_ended_is_sent(brain_db, push):  # noqa: F811
     assert _get(sid)["status"] == "sent"
 
 
+def test_a_repeat_with_a_count_ends_after_that_many(brain_db, push):  # noqa: F811
+    """The count runs from the series' start, not from each ring's own time."""
+    sid = _add(recurrence="FREQ=DAILY;COUNT=2")
+    assert _tick()["fired"] == 1
+    assert _tick(now=NOW + timedelta(days=1))["fired"] == 1
+    assert _get(sid)["status"] == "sent"
+    assert _tick(now=NOW + timedelta(days=2))["fired"] == 0
+    assert len(push["sent"]) == 2
+
+
 def test_without_apns_a_reminder_is_settled_and_nothing_is_pushed(brain_db, monkeypatch):  # noqa: F811
     monkeypatch.setattr(apns, "send", lambda *a, **k: pytest.fail("pushed"))
     sid = _add()

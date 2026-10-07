@@ -556,8 +556,7 @@ def _skipped(row: Dict[str, Any]) -> Optional[Any]:
     rule = str(row.get("recurrence") or "")
     if not rule:
         return None
-    at = W.aware_utc(row["fire_at"])
-    return next_occurrence(rule, at, at)
+    return next_occurrence(rule, schedules.series_anchor(row), W.aware_utc(row["fire_at"]))
 
 
 def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -617,7 +616,7 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         if flags and r.get("kind") == "reminder":
             payload = {**(r.get("payload") or {}), **flags}
         schedules.update(r["id"], text=args.get("text"), fire_at=at, recurrence=rule, status=status,
-                         payload=payload)
+                         payload=payload, keep_series=bool(args.get("skip_next")))
         moved = at or moved
     if cancel:
         return {"ok": True, "changed": len(rows), "reply": f"لغيت {_names(rows)} ✅"}

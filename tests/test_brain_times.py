@@ -165,3 +165,20 @@ def test_a_repeat_the_runner_cannot_read_is_refused(tenant, rule):
     sid = schedules.add("reminder", "الدوا", later)
     assert not _run("schedule_update", id=sid, recurrence=rule)["ok"]
     assert schedules.get(sid)["recurrence"] == ""
+
+
+def test_every_day_at_eight_stays_at_eight_across_a_clock_change(tenant):
+    """New York leaves summer time on 1 Nov 2026: the ring stays at eight on his clock."""
+    from app.services import schedule_runner as R
+    tenant["sandy_users"].insert_one({"_id": "userA"})
+    T.note_zone("userA", "America/New_York")
+    ny = ZoneInfo("America/New_York")
+    first = datetime(2026, 10, 31, 8, 0, tzinfo=ny).astimezone(timezone.utc)
+    sid = schedules.add("reminder", "الدوا", first, recurrence="FREQ=DAILY")
+    rings = []
+    now = first
+    for _ in range(3):
+        assert R.run_due("userA", now + timedelta(seconds=30))["fired"] == 1
+        now = W.aware_utc(schedules.get(sid)["fire_at"])
+        rings.append(now.astimezone(ny).strftime("%m-%d %H:%M"))
+    assert rings == ["11-01 08:00", "11-02 08:00", "11-03 08:00"]
