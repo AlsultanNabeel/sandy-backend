@@ -19,6 +19,10 @@ final class ChatStore: ObservableObject {
     /// nil = محادثة جديدة "كسولة": معرّفها بيتولّد محليًا مع أول رسالة، والخادم
     /// بينشئها مع أول طلب بيحملها (بلا محادثات فاضية وبلا رحلة إنشاء منفصلة).
     @Published private(set) var currentID: String?
+    /// The field holds the last line, being edited; sending replaces it and its reply. It is
+    /// this conversation's: another one opened, or a new one, ends it (it used to go along and
+    /// drop the other conversation's last line, or the message itself in an empty one).
+    @Published var editingLast = false
 
     private var sendTask: Task<String?, Never>?
     /// Bumped per send. A superseded send's cleanup must not clear `sending`
@@ -45,6 +49,7 @@ final class ChatStore: ObservableObject {
         messages = []
         conversations = []
         currentID = nil
+        editingLast = false
         errorMessage = ""
         sending = false
         replying = false
@@ -103,6 +108,7 @@ final class ChatStore: ObservableObject {
             return
         }
         errorMessage = ""
+        if id != currentID { editingLast = false }
         currentID = id
         UserDefaults.standard.set(id, forKey: currentKey)
     }
@@ -118,6 +124,7 @@ final class ChatStore: ObservableObject {
     func startNew(api: APIClient) {
         leave(api)
         messages = []
+        editingLast = false
         errorMessage = ""
         currentID = nil
         UserDefaults.standard.removeObject(forKey: currentKey)

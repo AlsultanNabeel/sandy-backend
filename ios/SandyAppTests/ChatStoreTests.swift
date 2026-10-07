@@ -110,4 +110,18 @@ final class ChatStoreTests: XCTestCase {
         XCTAssertEqual(sent("/stop").first.flatMap { field($0, "partial") }, "نص الرد")
         try? await Task.sleep(nanoseconds: 1_000_000_000)   // past the rest of the stream
     }
+
+    /// M5: «edit» stayed on after another conversation or a new one was opened, so the next
+    /// send there dropped that conversation's last line and its reply.
+    func testOpeningAnotherConversationEndsTheEdit() async {
+        StubNetwork.install(json: #"{"id":"c2","title":"","messages":[{"role":"user","text":"قديم"}]}"#)
+        let api = TestClient.make()
+        let store = ChatStore()
+        store.editingLast = true
+        await store.open(api: api, id: "c2")
+        XCTAssertFalse(store.editingLast, "the edit went along to another conversation")
+        store.editingLast = true
+        store.startNew(api: api)
+        XCTAssertFalse(store.editingLast, "the edit went along to a new conversation")
+    }
 }

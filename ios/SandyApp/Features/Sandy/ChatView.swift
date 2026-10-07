@@ -36,8 +36,6 @@ struct ChatView: View {
     @AppStorage("sandy_voice_replies") private var voiceReplies = true
     /// عرض شاشة المكالمة الصوتية الحيّة.
     @State private var showLive = false
-    /// The field holds the last message being edited; sending replaces it and its reply.
-    @State private var editingLast = false
     /// A message opened for picking part of its text.
     @State private var selecting: SelectableMessage?
 
@@ -97,6 +95,8 @@ struct ChatView: View {
             }
         }
         .task { await store.bootstrap(api: state.api) }
+        // An edit ended by opening another conversation takes its line out of the field too.
+        .onChange(of: store.editingLast) { _, editing in if !editing { input = "" } }
         // نوقف صوت ساندي عند مغادرة الشاشة.
         .onDisappear { speech.stopSpeaking() }
         .sheet(item: $selecting) { m in
@@ -193,7 +193,7 @@ struct ChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: Theme.Spacing.xs) {
-            if editingLast { editBanner }
+            if store.editingLast { editBanner }
             if !composer.items.isEmpty { AttachmentStrip(composer: composer) }
             inputRow
         }
@@ -216,7 +216,7 @@ struct ChatView: View {
                 .foregroundColor(Theme.Colors.secondaryText)
             Spacer()
             Button(lang.s("chat.cancelEdit")) {
-                editingLast = false
+                store.editingLast = false
                 input = ""
             }
             .font(Theme.Typography.caption)
@@ -289,7 +289,7 @@ struct ChatView: View {
            m.id == store.messages.last(where: { $0.role == "user" })?.id {
             Button {
                 input = m.text
-                editingLast = true
+                store.editingLast = true
                 inputFocused = true
             } label: {
                 Label(lang.s("chat.editMessage"), systemImage: "pencil")
@@ -422,8 +422,8 @@ struct ChatView: View {
         speech.stopSpeaking()               // لو عم تقرأ رد قديم، تسكت
 
         // ساندي تقرأ ردها بصوت جيميني الحقيقي (لو السمّاعة شغّالة).
-        if editingLast {
-            editingLast = false
+        if store.editingLast {
+            store.editingLast = false
             speak { await store.editLast(api: state.api, to: text) }
         } else {
             speak { await store.send(api: state.api, text: text, attachments: attachments) }
