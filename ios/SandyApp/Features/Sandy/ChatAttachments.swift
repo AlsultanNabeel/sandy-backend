@@ -30,12 +30,31 @@ final class AttachmentComposer: ObservableObject {
     var isFull: Bool { items.count >= Self.maxItems }
 
     static let maxItems = 4
-    /// Longest side of a photo sent to Sandy: plenty to see, a fraction of the bytes.
-    private static let maxSide: CGFloat = 1600
+    /// Longest side of a photo sent to Sandy, in pixels: plenty to see, a fraction of the bytes.
+    nonisolated static let maxSide: CGFloat = 1600
 
+    /// A photo from the library, made small from its file bytes, off the main thread.
+    func addPhoto(_ data: Data, api: APIClient) {
+        guard !isFull else { return }
+        Task {
+            let jpeg = await Task.detached(priority: .userInitiated) { Self.jpeg(from: data) }.value
+            if let jpeg { add(jpeg, api: api) }
+        }
+    }
+
+    /// A photo from the camera, made small off the main thread.
     func addImage(_ image: UIImage, api: APIClient) {
-        guard !isFull, let data = Self.jpeg(image) else { return }
-        start(Pending(name: "photo.jpg", isImage: true, preview: image), data: data, mime: "image/jpeg", api: api)
+        guard !isFull else { return }
+        Task {
+            let jpeg = await Task.detached(priority: .userInitiated) { Self.jpeg(image) }.value
+            if let jpeg { add(jpeg, api: api) }
+        }
+    }
+
+    private func add(_ jpeg: Data, api: APIClient) {
+        guard !isFull else { return }
+        start(Pending(name: "photo.jpg", isImage: true, preview: UIImage(data: jpeg)),
+              data: jpeg, mime: "image/jpeg", api: api)
     }
 
     func addFile(at url: URL, api: APIClient) {
@@ -82,12 +101,24 @@ final class AttachmentComposer: ObservableObject {
         items = []
     }
 
-    private static func jpeg(_ image: UIImage) -> Data? {
-        let side = max(image.size.width, image.size.height)
+    /// At most `maxSide` pixels on the long side, decoding only what that size needs.
+    nonisolated static func jpeg(from data: Data) -> Data? {
+        ImageDownscale.jpeg(from: data, maxPixel: Int(maxSide), quality: 0.8)
+    }
+
+    /// At most `maxSide` pixels on the long side. Drawn at one pixel a point: the renderer's
+    /// default is the screen's scale, which made a «1600» photo 4800 wide, bigger than it came.
+    nonisolated static func jpeg(_ image: UIImage) -> Data? {
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        let side = max(pixels.width, pixels.height)
         guard side > maxSide else { return image.jpegData(compressionQuality: 0.8) }
-        let scale = maxSide / side
-        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let small = UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        let size = CGSize(width: (pixels.width * maxSide / side).rounded(),
+                          height: (pixels.height * maxSide / side).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let small = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
         return small.jpegData(compressionQuality: 0.8)
     }
 }
@@ -127,8 +158,8 @@ struct AttachButton: View {
             photos = []
             for item in picked {
                 Task {
-                    if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
-                        composer.addImage(image, api: state.api)
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        composer.addPhoto(data, api: state.api)
                     }
                 }
             }
