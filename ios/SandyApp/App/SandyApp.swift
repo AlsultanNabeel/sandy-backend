@@ -6,10 +6,18 @@ import UIKit
 import GoogleSignIn
 #endif
 
-/// بس لمسك توكن جهاز APNs وتمريره لـ NotificationManager.
+/// The launch, and the APNs device token handed to NotificationManager.
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    /// A session is kept on this phone; a test answers for it.
+    var hasSession: () -> Bool = { APIClient(baseURL: Backend.currentURL).token != nil }
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // A banner button or a silent push can launch the app with no screen: the notification
+        // delegate and the buttons' category are set before this returns, and a kept session
+        // lets what they schedule go through.
+        let notes = NotificationManager.shared
+        if hasSession() { notes.sessionBegan() }
         // No call runs at launch: clear any call Live Activity a killed run left behind.
         CallLiveActivity.endStale()
         return true

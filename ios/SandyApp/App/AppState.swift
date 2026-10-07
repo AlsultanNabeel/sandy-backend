@@ -35,9 +35,6 @@ final class AppState: ObservableObject {
                 self?.signOut(keepingUnsent: true)
             }
         }
-        // A session kept from last time: the stores may report to notifications before
-        // `restoreSession` runs.
-        if api.token != nil { NotificationManager.shared.sessionBegan() }
         // Pick the first screen before the first frame so a known user skips the launch screen.
         if api.token != nil && onboardingDoneCached {
             stage = .chat

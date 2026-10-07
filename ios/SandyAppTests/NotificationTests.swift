@@ -53,4 +53,16 @@ final class NotificationTests: XCTestCase {
         StubNetwork.uninstall()
         try await super.tearDown()
     }
+
+    /// S2: a banner button pressed with the app closed launches it with no screen; the
+    /// delegate was set only once a screen touched the manager, and nothing was scheduled
+    /// with no session marked, so «later», «done» and «delete» were lost.
+    func testALaunchWithNoScreenIsReadyForTheBannerButtons() {
+        notes.clearForSignOut()
+        let launch = AppDelegate()
+        launch.hasSession = { true }
+        _ = launch.application(UIApplication.shared, didFinishLaunchingWithOptions: nil)
+        XCTAssertTrue(UNUserNotificationCenter.current().delegate === notes)
+        XCTAssertNotNil(notes.nudgeInputs(), "a launch with a kept session scheduled nothing")
+    }
 }

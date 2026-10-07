@@ -1252,7 +1252,9 @@ so folders are organisation only.
   a store made in an earlier session saves and publishes nothing (`inItsSession`: no
   cache file, widget, notification or Spotlight entry for the account that left).
   `NotificationManager` schedules nothing with no one signed in (`sessionBegan` /
-  `clearForSignOut`, which also forgets the nudges' task count and habit names).
+  `clearForSignOut`, which also forgets the nudges' task count and habit names). The launch
+  (`AppDelegate`) sets it up and marks a kept session, so a banner button or a silent push
+  that launches the app with no screen is answered.
 - `Core/Networking/` — `APIClient` split into 9 extensions by domain, behind
   `APIClientProtocol`. **Add new endpoints as an extension, not to the base class.**
   Every value put in a URL goes through `URLEscape` (`query` for a parameter, `segment` for a path
