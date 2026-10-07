@@ -385,6 +385,9 @@ Now:
   (two robots) is passed over rather than guessed, as is a word no device answers to,
   and the result names them (`skipped`). `list_scenes` shows the words as the devices
   they mean, so the app's editor offers and saves real devices only.
+  The built-ins name only what a board has (the room light and music); the copies seeded
+  before lose their curtain, fan and colour actions at boot (`_drop_boardless_builtin_actions`),
+  while a scene the user made keeps its words.
 
 ### 2.8 Device registry
 

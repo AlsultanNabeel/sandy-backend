@@ -12,6 +12,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from pymongo.errors import PyMongoError
+
 from app.blocks import _base, schedules
 from app.db import configure, get_db
 from app.utils.tenant_db import scoped
@@ -39,33 +41,25 @@ MAX_SCENES = 200
 # A revert the device misses is retried a minute later, this many times in all.
 MAX_TIMER_TRIES = 5
 
-# Seeded once per user; the owner can edit freely.
+# Seeded once per user; the owner can edit freely. Only what a board has: the room light and
+# the room music (no board has a curtain, a fan or a light colour).
 _BUILTIN: Dict[str, Dict[str, Any]] = {
     "study":      {"label": "دراسة",     "icon": "📚", "actions": [
-        {"device": "light", "value": "85"}, {"device": "color", "value": "cool"},
-        {"device": "music", "value": "off"}, {"device": "fan", "value": "on"},
-        {"device": "curtain", "value": "open"}]},
+        {"device": "light", "value": "85"}, {"device": "music", "value": "off"}]},
     "read":       {"label": "قراءة",     "icon": "📖", "actions": [
-        {"device": "light", "value": "60"}, {"device": "color", "value": "warm"},
-        {"device": "music", "value": "off"}]},
+        {"device": "light", "value": "60"}, {"device": "music", "value": "off"}]},
     "brainstorm": {"label": "عصف ذهني",  "icon": "💡", "actions": [
-        {"device": "light", "value": "90"}, {"device": "color", "value": "white"},
-        {"device": "music", "value": "on"}]},
+        {"device": "light", "value": "90"}, {"device": "music", "value": "on"}]},
     "relax":      {"label": "راحة",      "icon": "🌙", "actions": [
-        {"device": "light", "value": "35"}, {"device": "color", "value": "warm"},
-        {"device": "music", "value": "on"}]},
+        {"device": "light", "value": "35"}, {"device": "music", "value": "on"}]},
     "movie":      {"label": "فيلم",      "icon": "🎬", "actions": [
-        {"device": "light", "value": "10"}, {"device": "color", "value": "blue"},
-        {"device": "music", "value": "off"}, {"device": "curtain", "value": "close"}]},
+        {"device": "light", "value": "10"}, {"device": "music", "value": "off"}]},
     "sleep":      {"label": "نوم",       "icon": "😴", "actions": [
-        {"device": "light", "value": "off"}, {"device": "music", "value": "off"},
-        {"device": "fan", "value": "on"}, {"device": "curtain", "value": "close"}]},
+        {"device": "light", "value": "off"}, {"device": "music", "value": "off"}]},
     "morning":    {"label": "صباح",      "icon": "☀️", "actions": [
-        {"device": "light", "value": "100"}, {"device": "curtain", "value": "open"},
-        {"device": "music", "value": "on"}]},
+        {"device": "light", "value": "100"}, {"device": "music", "value": "on"}]},
     "off":        {"label": "إطفاء",     "icon": "⏻", "actions": [
-        {"device": "light", "value": "off"}, {"device": "music", "value": "off"},
-        {"device": "fan", "value": "off"}]},
+        {"device": "light", "value": "off"}, {"device": "music", "value": "off"}]},
 }
 
 
@@ -80,6 +74,23 @@ def init_scene_store(mongo_db) -> None:
         logger.info("[SceneStore] ready")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[SceneStore] index skipped: {e}")
+    _drop_boardless_builtin_actions(mongo_db)
+
+
+def _drop_boardless_builtin_actions(mongo_db) -> None:
+    """At boot, on the raw handle: the built-ins every account was seeded with before had a
+    curtain, a fan and a light colour, which no board has, so each «morning» said it passed
+    them over. They go from the seeded built-ins too; a scene the user made keeps its words."""
+    words = sorted(w for w, (output, _label) in _LEGACY.items() if output is None)
+    try:
+        r = mongo_db[_COLL].update_many(
+            {"builtin": True, "actions.device": {"$in": words}},
+            {"$pull": {"actions": {"device": {"$in": words}}}})
+        if r.modified_count:
+            logger.info("[SceneStore] %d built-in scene(s) lost actions no board has",
+                        r.modified_count)
+    except PyMongoError as e:
+        logger.warning("[SceneStore] built-in clean-up skipped: %s", e)
 
 
 def _coll():

@@ -27,15 +27,22 @@ def test_morning_presses_the_room_light_and_plays_the_music(robot, broker):  # n
     assert (f"sandy/node/{NODE}/room/light", "on") in broker.sent
     assert (f"sandy/node/{NODE}/room/music", "resume") in broker.sent
     assert device_store.get_device("room_light")["state"] == "on"
-    # The curtain is no device of his: passed over, and said so.
-    assert "الستارة" in out["reply"] and "تخطّيتها" in out["reply"]
+    assert out["ok"] and "تخطّي" not in out["reply"]
 
 
 def test_sleep_turns_off_and_stops(robot, broker):  # noqa: F811
     out = _apply("sleep")
     assert (f"sandy/node/{NODE}/room/light", "off") in broker.sent
     assert (f"sandy/node/{NODE}/room/music", "stop") in broker.sent
-    assert "المروحة" in out["reply"] and "الستارة" in out["reply"]
+    assert out["ok"]
+
+
+def test_a_room_word_no_board_has_is_passed_over_and_named(robot, broker):  # noqa: F811
+    scene_store.add_scene("airy", actions=[{"device": "light", "value": "on"},
+                                           {"device": "curtain", "value": "open"}])
+    out = _apply("airy")
+    assert (f"sandy/node/{NODE}/room/light", "on") in broker.sent
+    assert "الستارة" in out["reply"] and "تخطّيتها" in out["reply"]
 
 
 def test_a_level_on_the_light_is_on_or_off(robot, broker):  # noqa: F811
@@ -48,7 +55,9 @@ def test_the_editor_is_shown_the_real_devices(robot):  # noqa: F811
     assert {"device": "room_light", "value": "on"} in morning["actions"]
     assert {"device": "room_music", "value": "resume"} in morning["actions"]
     # A word no device of his answers to stays as it was written.
-    assert {"device": "curtain", "value": "open"} in morning["actions"]
+    scene_store.add_scene("airy", actions=[{"device": "curtain", "value": "open"}])
+    airy = next(s for s in scene_store.list_scenes() if s["name"] == "airy")
+    assert airy["actions"] == [{"device": "curtain", "value": "open"}]
 
 
 def test_two_rooms_are_not_guessed(robot, broker):  # noqa: F811
@@ -74,8 +83,10 @@ def test_the_app_is_told_what_was_passed_over(robot, broker, monkeypatch):  # no
     from app.api.auth_handlers import make_token
     from app.api.server import create_app
 
+    scene_store.add_scene("airy", actions=[{"device": "light", "value": "on"},
+                                           {"device": "curtain", "value": "open"}])
     c = create_app(mongo_db=robot).test_client()
-    r = c.post("/api/life/scenes/apply", json={"name": "morning"},
+    r = c.post("/api/life/scenes/apply", json={"name": "airy"},
                headers={"Authorization": f"Bearer {make_token('user', 'userA')}"})
     body = r.get_json()
     assert r.status_code == 200 and body["online"] is True and body["skipped"] == ["الستارة"]
@@ -105,3 +116,25 @@ def test_another_scene_keeps_what_it_found(robot, broker):  # noqa: F811
     broker.sent.clear()
     tools.execute("room_restore", {}, TurnCtx(user_id="userA"))
     assert broker.sent == [(f"sandy/node/{NODE}/room/light", "on")]   # as «dark» found it
+
+
+# The built-ins had a curtain, a fan and a light colour, which no board has, so every
+# «morning» or «sleep» said it passed them over.
+
+def test_no_built_in_names_what_no_board_has():
+    boardless = {w for w, (output, _label) in scene_store._LEGACY.items() if output is None}
+    for name, spec in scene_store._BUILTIN.items():
+        assert not {a["device"] for a in spec["actions"]} & boardless, name
+
+
+def test_the_seeded_built_ins_lose_them_at_boot_and_his_own_scenes_keep_them(brain_db):  # noqa: F811
+    brain_db["sandy_scenes"].insert_many([
+        {"user_id": "userA", "name": "morning", "builtin": True, "actions": [
+            {"device": "light", "value": "100"}, {"device": "curtain", "value": "open"},
+            {"device": "music", "value": "on"}]},
+        {"user_id": "userA", "name": "airy", "builtin": False, "actions": [
+            {"device": "curtain", "value": "open"}]},
+    ])
+    scene_store.init_scene_store(brain_db)
+    rows = {d["name"]: [a["device"] for a in d["actions"]] for d in brain_db["sandy_scenes"].find()}
+    assert rows == {"morning": ["light", "music"], "airy": ["curtain"]}
