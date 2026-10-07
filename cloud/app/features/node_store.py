@@ -33,6 +33,15 @@ _SIGHTINGS = "node_sightings"
 # Its heartbeat comes every five seconds: six missed is gone.
 PRESENT_WITHIN = timedelta(seconds=30)
 
+# A release's erase, kept until the board shows it was wiped: the erase goes once on a
+# broker that keeps nothing for a clean session, so a board off at release kept the
+# seller's Wi-Fi and broker login for ever while the app said done.
+_PENDING_ERASE = "node_pending_erase"
+# Sent again on its heartbeats, at most this often.
+ERASE_RESEND = timedelta(minutes=1)
+# Long enough for a robot in a box between owners; past it the row goes by itself.
+ERASE_KEPT_DAYS = 30
+
 
 def init_node_store(mongo_db) -> None:
     configure(mongo_db)
@@ -55,6 +64,8 @@ def init_node_store(mongo_db) -> None:
         # A sighting is only for pairing now: a day old is long gone.
         ("node_sightings.last_seen_ttl", lambda: mongo_db[_SIGHTINGS].create_index(
             "last_seen", expireAfterSeconds=24 * 3600, background=True)),
+        ("node_pending_erase.since_ttl", lambda: mongo_db[_PENDING_ERASE].create_index(
+            "since", expireAfterSeconds=ERASE_KEPT_DAYS * 24 * 3600, background=True)),
     ]
     for label, job in jobs:
         try:
@@ -252,6 +263,10 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
         return {"ok": False, "error": "bad_code"}
     if _has_another_robot(coll, node_id):
         return {"ok": False, "error": "one_robot"}
+    # Paired again, by anyone: an erase still waiting from its last release must never
+    # reach it. Dropped before the claim, so an erase on its way finds nothing to send.
+    if get_db() is not None:
+        get_db()[_PENDING_ERASE].delete_one({"_id": node_id})
 
     # مطالَبة مرّة وحدة عبر كل الحسابات: أول حساب بيربط بيملك.
     if get_db() is not None:
@@ -326,10 +341,10 @@ def rename_node(node_id: str, label: str) -> Dict[str, Any]:
     return {"ok": True, "node_id": node_id}
 
 
-def _erase_command(node_id: str) -> Optional[str]:
-    """``erase:<ms>:<hmac>``, signed like the voice hello: the board's own key, or the
-    shared one while it has none. The board refuses anything unsigned or more than
-    five minutes old, so a word on the broker can no longer wipe a robot."""
+def _erase_command(node_id: str, key: Optional[bytes] = None) -> Optional[str]:
+    """``erase:<ms>:<hmac>``, signed like the voice hello: with ``key``, else the board's
+    own key, or the shared one while it has none. The board refuses anything unsigned or
+    more than five minutes old, so a word on the broker can no longer wipe a robot."""
     import hashlib
     import hmac
     import time
@@ -337,8 +352,9 @@ def _erase_command(node_id: str) -> Optional[str]:
     from app.api.voice_ws._config import _HMAC_KEY
     from app.features.device_keys import get_key
 
-    record = get_key(node_id)
-    key = record["key"] if record else _HMAC_KEY
+    if key is None:
+        record = get_key(node_id)
+        key = record["key"] if record else _HMAC_KEY
     if not key:
         return None
     ms = str(int(time.time() * 1000))
@@ -373,12 +389,16 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
     if coll is None:
         return {"ok": False, "error": "no_store"}
     node_id = (node_id or "").strip()
-    if not coll.find_one({"node_id": node_id}, {"_id": 1}):
+    node = coll.find_one({"node_id": node_id})
+    if not node:
         return {"ok": False, "error": "not_found"}
 
     # Wipe the board first, while the caller still owns it (account deletion also
-    # comes through here). An offline board doesn't block the release.
-    board_wiped = _wipe_board(node_id)
+    # comes through here). An offline board doesn't block the release. «Wiped» only when
+    # it was there to take it: the broker keeps nothing for a board that is off.
+    board_wiped = _wipe_board(node_id) and part_present(node, "") is True
+    # Whether it took is unknown (no word comes back): keep it until the board shows it.
+    _keep_erase(node_id)
 
     from app.features.device_store import delete_devices_for_node
 
@@ -401,7 +421,76 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "not_found",
                 "devices_removed": devices_removed, "board_wiped": board_wiped}
     return {"ok": True, "node_id": node_id,
-            "devices_removed": devices_removed, "board_wiped": board_wiped}
+            "devices_removed": devices_removed, "board_wiped": board_wiped,
+            "erase_pending": True}
+
+
+def _keep_erase(node_id: str) -> None:
+    """The release's erase, kept for the board's next heartbeats (`_erase_if_pending`):
+    its own key, sealed (it is revoked next and the board still checks with it), and the
+    restart count and network it had, which is how its wipe shows (both reset or change)."""
+    from app.features.device_keys import KeyUnreadable, get_key
+    from app.utils.ltm_crypto import encrypt_field
+
+    db = get_db()
+    if db is None:
+        return
+    try:
+        record = get_key(node_id)
+        node = db[_COLL].find_one({"node_id": node_id}) or {}
+        tel = node.get("telemetry") or {}
+        db[_PENDING_ERASE].update_one({"_id": node_id}, {"$set": {
+            "key": encrypt_field(record["hex"]) if record else None,
+            "boots": tel.get("boots") if isinstance(tel.get("boots"), int) else None,
+            "ssid": str(tel.get("ssid") or "") or None,
+            "since": _now(), "sent_at": None,
+        }}, upsert=True)
+    except (PyMongoError, KeyUnreadable) as exc:  # the release itself must still go through
+        logger.warning("[NodeStore] erase of %s not kept for later: %s", node_id, exc)
+
+
+def _erase_if_pending(node_id: str, telemetry: Dict[str, Any]) -> None:
+    """A released board's heartbeat: send its erase again, unless it shows it was wiped
+    (its restart count fell below the one at release, or it is on another network), or it
+    belongs to an account again, which it is never sent to."""
+    from app.utils.ltm_crypto import decrypt_field
+
+    db = get_db()
+    pending = db[_PENDING_ERASE].find_one({"_id": node_id})
+    if pending is None:
+        return
+    tel = telemetry if isinstance(telemetry, dict) else {}
+    boots, ssid = tel.get("boots"), str(tel.get("ssid") or "")
+    wiped = (isinstance(boots, int) and isinstance(pending.get("boots"), int)
+             and boots < pending["boots"])
+    moved = bool(ssid and pending.get("ssid") and ssid != pending["ssid"])
+    if wiped or moved:
+        db[_PENDING_ERASE].delete_one({"_id": node_id})
+        logger.info("[NodeStore] %s shows it was wiped (%s); erase dropped", node_id,
+                    "restart count reset" if wiped else "another network")
+        return
+    # Claimed by the send, at most once a minute across workers.
+    now = _now()
+    claimed = db[_PENDING_ERASE].find_one_and_update(
+        {"_id": node_id, "$or": [{"sent_at": None}, {"sent_at": {"$lt": now - ERASE_RESEND}}]},
+        {"$set": {"sent_at": now}})
+    if claimed is None:
+        return
+    if get_node_any_tenant(node_id) is not None:
+        # Paired again while this ran: never wipe someone's robot.
+        db[_PENDING_ERASE].delete_one({"_id": node_id})
+        return
+    from app.api.voice_ws._config import _HMAC_KEY
+    from app.integrations.room_device import get_room_device_client
+
+    # It checks with one key: its own if it still has one, else the shared. Both go.
+    own = bytes.fromhex(decrypt_field(claimed["key"])) if claimed.get("key") else None
+    for key in [k for k in (own, _HMAC_KEY) if k]:
+        command = _erase_command(node_id, key)
+        if command:
+            get_room_device_client().publish_service(
+                f"sandy/node/{node_id}/factory_reset", command)
+    logger.info("[NodeStore] erase sent again to released board %s", node_id)
 
 
 # ── Heartbeat ingest (firmware-facing, runs outside a tenant) ────────────────
@@ -493,7 +582,7 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
         # Read once; both merges and provisioning use it.
         current = get_node_any_tenant(node_id)
         if current is None:
-            # Not paired yet: only that it is there, for pairing.
+            # Not paired yet: only that it is there, for pairing, and an erase it still owes.
             if online is not None and heard:
                 tel = telemetry if isinstance(telemetry, dict) else {}
                 get_db()[_SIGHTINGS].update_one(
@@ -501,6 +590,8 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
                     {"$set": {"online": bool(online), "safe": bool(tel.get("safe")),
                               "last_seen": _now()}},
                     upsert=True)
+                if online:
+                    _erase_if_pending(node_id, tel)
             return {"ok": False}
         update: Dict[str, Any] = {}
         if online is not None:

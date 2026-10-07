@@ -243,6 +243,7 @@ def test_releasing_a_robot_wipes_it_and_clears_devices_before_the_node_row(db,
 
     with user_profiles.active_user_profile_context(P):
         node_id, _ = _paired_robot_with_a_light()
+        node_store.ingest_status(node_id, True)              # it is on and on the broker
         out = node_store.unpair_node(node_id)
 
     assert seen, "the board was released without being told to erase itself"

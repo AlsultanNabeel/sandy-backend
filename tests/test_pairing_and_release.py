@@ -26,7 +26,7 @@ def test_one_failed_index_does_not_skip_the_others():
 
     node_store.init_node_store(_Db())
     assert built == ["failed", "code_hash", "node_id_owner_unique", "one_robot_per_account",
-                     "last_seen"]
+                     "last_seen", "since"]
 
 
 # T13: two workers provisioning the same heartbeat: the loser got an uncaught duplicate
@@ -284,3 +284,99 @@ def test_a_robot_heard_just_now_gets_its_code(pairing):
     _beat({"online": True})
     r = _pair(c, h)
     assert r.status_code == 202 and shown and shown[0][0] == "sandy8421"
+
+
+# F28: the erase went once, unkept, to a board on a clean session that takes it for five
+# minutes; after that its key was revoked, its node deleted and its heartbeats dropped. A
+# robot off at release was never wiped and kept the seller's Wi-Fi and broker login, while
+# the app said done.
+
+SHARED = b"shared-test-key"
+
+
+@pytest.fixture
+def released(two_owners, monkeypatch):
+    """u1's robot, heard on «Home» after 7 restarts, given its own key, then released while
+    it was off; returns what reaches the broker after that."""
+    from app.api.voice_ws import _config
+    from app.features import device_keys
+    from app.integrations import room_device
+
+    monkeypatch.setattr(_config, "_HMAC_KEY", SHARED)
+    sent = []
+
+    class _Broker:
+        def publish_service(self, topic, payload):
+            sent.append((topic, payload))
+            return True
+
+        def send_to_topic(self, topic, payload):
+            return True
+
+    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Broker())
+    with _as("u1"):
+        node_store.pair_node("SANDY-8421")
+        node_store.ingest_status("sandy8421", True, telemetry={"boots": 7, "ssid": "Home"})
+        device_keys.open_enrolment("sandy8421")
+        own = device_keys.issue_key("sandy8421")
+        _beat({"online": False})                          # its MQTT will: it went off
+        out = node_store.unpair_node("sandy8421")
+    sent.clear()
+    return {"out": out, "sent": sent, "own": bytes.fromhex(own), "db": two_owners}
+
+
+def _signed_by(command, key, node_id="sandy8421"):
+    import hashlib
+    import hmac
+
+    _, ms, mac = command.split(":")
+    return hmac.compare_digest(
+        mac, hmac.new(key, f"factory_reset|{node_id}|{ms}".encode(), hashlib.sha256).hexdigest())
+
+
+def test_a_robot_off_at_release_is_wiped_when_it_comes_back(released):
+    assert released["out"]["board_wiped"] is False and released["out"]["erase_pending"]
+    _beat({"online": True, "boots": 7, "ssid": "Home"})   # back, still on the seller's Wi-Fi
+    commands = [p for t, p in released["sent"] if t == "sandy/node/sandy8421/factory_reset"]
+    # It checks with one key, its own if it kept it, else the shared: both go.
+    assert len(commands) == 2
+    assert _signed_by(commands[0], released["own"]) and _signed_by(commands[1], SHARED)
+
+
+def test_it_goes_again_at_most_once_a_minute(released):
+    from datetime import datetime, timedelta, timezone
+
+    _beat({"online": True, "boots": 7, "ssid": "Home"})
+    _beat({"online": True, "boots": 7, "ssid": "Home"})
+    assert len(released["sent"]) == 2
+    released["db"]["node_pending_erase"].update_one({"_id": "sandy8421"}, {"$set": {
+        "sent_at": datetime.now(timezone.utc) - timedelta(minutes=2)}})
+    _beat({"online": True, "boots": 7, "ssid": "Home"})
+    assert len(released["sent"]) == 4
+
+
+@pytest.mark.parametrize("after", [{"boots": 1, "ssid": "Home"}, {"boots": 9, "ssid": "Buyer"}])
+def test_a_board_that_shows_it_was_wiped_is_left_alone(released, after):
+    _beat({"online": True, **after})          # restarts counted from one again, or a new network
+    _beat({"online": True, **after})
+    assert released["sent"] == []
+    assert released["db"]["node_pending_erase"].count_documents({}) == 0
+
+
+def test_never_to_a_board_paired_to_another_account(released, monkeypatch):
+    # The buyer pairs it (presence shown on its face) before it was ever heard again.
+    with _as("buyer"):
+        monkeypatch.setattr(node_store, "_wipe_board", lambda node_id: True)
+        assert node_store.pair_node("SANDY-8421")["ok"]
+    assert released["db"]["node_pending_erase"].count_documents({}) == 0
+    _beat({"online": True, "boots": 7, "ssid": "Home"})
+    assert released["sent"] == []
+
+
+def test_never_to_a_board_paired_while_the_erase_was_on_its_way(released):
+    # The pending row is still there, but the board belongs to an account by the time the
+    # send checks: nothing goes, and the row is dropped.
+    released["db"]["sandy_nodes"].insert_one({"node_id": "sandy8421", "user_id": "buyer"})
+    node_store._erase_if_pending("sandy8421", {"boots": 7, "ssid": "Home"})
+    assert released["sent"] == []
+    assert released["db"]["node_pending_erase"].count_documents({}) == 0

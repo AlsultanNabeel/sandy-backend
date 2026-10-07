@@ -246,6 +246,7 @@ def test_selling_a_robot_wipes_it_before_releasing_it(monkeypatch):
         db["sandy_users"].insert_one({"_id": "u1", "user_id": "u1"})
         with user_profiles.active_user_profile_context(profile):
             node_id = node_store.pair_node("ABC123", label="روبوت")["node_id"]
+            node_store.ingest_status(node_id, True)          # it is on and on the broker
             out = node_store.unpair_node(node_id)
     finally:
         room_device.get_room_device_client = real

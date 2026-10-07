@@ -944,6 +944,17 @@ with the board's own voice key (the shared key while it has none) over
 its clock unset, or more than five minutes off (`voice_verify_signed`). A bare `erase` on
 the broker no longer wipes a robot.
 
+A release keeps its erase (`node_pending_erase`, keyed by board, thirty days TTL): the
+broker keeps nothing for a board on a clean session, so a robot off at release used to
+keep the seller's Wi-Fi and broker login. Its sealed own key, restart count (`boots`) and
+network (`ssid`) at release are kept with it; each heartbeat of the released board sends the
+erase again (at most once a minute, signed with its own key and with the shared one, since
+it checks with whichever it still has) until it shows the wipe: `boots` lower than at release
+(the erase empties the settings store) or another network. Pairing the board again, by
+anyone, drops the row first, and the send checks the board is still nobody's: an erase never
+reaches a paired robot. `board_wiped` in the release's answer is true only when the erase
+went and the board was there to take it; otherwise the app says it erases itself once back.
+
 A camera whose last word was its MQTT will (`telemetry.cam_online` false) is refused at
 once (409 `camera_offline`): no photo ticket, no stream switch, no «pending» for ever; the
 app's live view says so, or that nothing arrived in ten seconds, instead of a placeholder.

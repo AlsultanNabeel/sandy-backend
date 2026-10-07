@@ -26,7 +26,7 @@ enum L10nAccount {
             "sell.confirm":     .text("تفكّ ربط هالروبوت؟"),
             "sell.warn":        .text("بينمسح من اللوح اسم شبكتك وكلمة سرّها، وبيصير حدا تاني يقدر يربطه. للبيع أو الإهداء."),
             "sell.done":        .text("انفكّ وانمسح. جاهز لصاحبه الجديد."),
-            "sell.offline":     .text("انفكّ من حسابك، بس اللوح كان مطفي فما انمسح. شغّله وفكّه وهو متصل قبل ما تبيعه."),
+            "sell.offline":     .text("انفكّ من حسابك. اللوح ما كان متصل فلسا ما انمسح، ورح ينمسح لحاله أول ما يرجع على الشبكة. شغّله على شبكة البيت قبل ما تبيعه."),
             "sell.failed":      .text("ما قدرت أفكّه. جرّب كمان مرّة."),
 
             "reset":            .text("صفّر كل البيانات"),
@@ -60,7 +60,7 @@ enum L10nAccount {
             "sell.confirm":     .text("Release this robot?"),
             "sell.warn":        .text("Your network name and password are erased from the board, and someone else can pair it. For selling or giving away."),
             "sell.done":        .text("Released and wiped. Ready for its next owner."),
-            "sell.offline":     .text("Released from your account, but the board was off so nothing was erased. Power it on and release it while connected before selling."),
+            "sell.offline":     .text("Released from your account. The board wasn't connected, so it isn't erased yet; it erases itself as soon as it's back online. Turn it on at home before selling it."),
             "sell.failed":      .text("Couldn't release it. Try again."),
 
             "reset":            .text("Erase all data"),
