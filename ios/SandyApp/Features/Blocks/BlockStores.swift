@@ -170,15 +170,23 @@ final class ItemsStore: LoadableStore {
         let todays = items.filter { $0.isScheduled(on: Date()) }
         NotificationManager.shared.setHabits(left: todays.filter { checkedToday[$0.id] == nil }.map(\.text),
                                              total: todays.count)
+        NotificationManager.shared.sync(prefix: "habit.", items: Self.habitNotes(items))
+    }
+
+    /// Each habit with a time rings on its days: one daily request when that is every day,
+    /// else one weekly request per day.
+    static func habitNotes(_ habits: [ListItem]) -> [NotificationItem] {
         let title = AppLocale.isArabic ? "عادة" : "Habit"
         var notes: [NotificationItem] = []
-        for habit in items {
+        for habit in habits {
             guard let at = EditTimes.clock(habit.habitTime) else { continue }
-            if habit.habitDays.isEmpty {
+            let days = Set(habit.habitDays)
+            if days.isEmpty || days.isSuperset(of: 1...7) {
                 notes.append(NotificationItem(id: habit.id, title: title, body: habit.text,
                                               date: at, repeats: .daily))
+                continue
             }
-            for day in habit.habitDays {
+            for day in days.sorted() {
                 // Any date on that weekday at that time: a weekly trigger matches weekday and clock.
                 let shift = (day - Calendar.current.component(.weekday, from: at) + 7) % 7
                 let date = Calendar.current.date(byAdding: .day, value: shift, to: at) ?? at
@@ -186,7 +194,7 @@ final class ItemsStore: LoadableStore {
                                               date: date, repeats: .weekly))
             }
         }
-        NotificationManager.shared.sync(prefix: "habit.", items: notes)
+        return notes
     }
 
     private func saveChecks() {

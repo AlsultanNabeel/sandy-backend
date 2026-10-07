@@ -147,4 +147,31 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(StubNetwork.requests.first?.value(forHTTPHeaderField: "Authorization"),
                        "Bearer old-session")
     }
+
+    /// S9: an alarm takes three requests and the system keeps sixty-four, dropping the rest
+    /// without a word; the nearest go under a cap, and only those are told to the server.
+    func testTheNearestFitUnderTheSystemsLimitAndOnlyThoseAreArmed() async throws {
+        notes.handleDeviceToken(Data([0xab, 0xcd]))
+        let alarms = (0..<30).map { reminder(String(format: "r%02d", $0), in: Double($0 + 1) * 3600, alarm: true) }
+        notes.sync(prefix: "reminder.", items: alarms.reversed())
+        let items = fake.pending.keys.filter { !$0.hasPrefix(NotificationManager.proactivePrefix) }
+        XCTAssertLessThanOrEqual(items.count, NotificationManager.itemBudget)
+        XCTAssertLessThanOrEqual(fake.pending.count, 64)
+        XCTAssertNotNil(fake.pending["reminder.r00"], "the nearest was left out")
+        XCTAssertNil(fake.pending["reminder.r29"], "the farthest went past the cap")
+        await waitFor { !sent("/api/schedules/armed").isEmpty }
+        let armed = try XCTUnwrap(sent("/api/schedules/armed").last?["ids"] as? [String])
+        XCTAssertEqual(Set(armed), Set(items.filter { !$0.contains(".again") }.map { String($0.dropFirst("reminder.".count)) }),
+                       "a reminder not scheduled was told to the server")
+    }
+
+    /// S9: a habit kept every day took seven weekly requests instead of one daily.
+    func testAnEveryDayHabitIsOneDailyRequest() {
+        let days: [JSONValue] = (1...7).map { .number(Double($0)) }
+        let habit = ListItem(id: "h1", list: "habits", text: "مشي", done: false,
+                             data: ["days": .array(days), "time": .string("07:30")])
+        let notes = ItemsStore.habitNotes([habit])
+        XCTAssertEqual(notes.map(\.id), ["h1"])
+        XCTAssertEqual(notes.first?.repeats, .daily)
+    }
 }

@@ -205,22 +205,44 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         scheduleProactiveNudges()
     }
 
-    /// Replaces the pending requests of every kind known in this run with its items (a kind
-    /// not reported yet, after a launch with no screen, is left as it is). Switched off in
-    /// Profile › Notifications, nothing of these kinds rings (they stay known, so turning it
-    /// back on brings them back). Then the server hears which reminders are armed.
+    /// Requests the items may take: the system keeps sixty-four and drops the rest without a
+    /// word, and the nudges, the heads-ups and an alert now need the others.
+    static let itemBudget = 50
+    static let headsUpLimit = 6
+
+    /// Replaces the pending requests of every kind known in this run with its items, the
+    /// nearest first while they fit under `itemBudget` (an alarm takes three; a kind not
+    /// reported yet, after a launch with no screen, is left as it is and counted). Switched
+    /// off in Profile › Notifications, nothing of these kinds rings (they stay known, so
+    /// turning it back on brings them back). Then the server hears which reminders are armed.
     private func rearm() {
         knownLock.lock()
         let known = knownItems
         knownLock.unlock()
-        let wanted = NotificationPrefs.current.reminders
-            ? known.filter { Self.reminderPrefixes.contains($0.key) }.flatMap { prefix, items in
-                items.map { (prefix + $0.id, $0) }
-              }
-            : []
+        let now = Date()
+        let candidates = (NotificationPrefs.current.reminders ? known : [:])
+            .filter { Self.reminderPrefixes.contains($0.key) }
+            .flatMap { prefix, items in
+                items.compactMap { it -> (id: String, item: NotificationItem, next: Date)? in
+                    Self.nextRing(it, after: now).map { (prefix + it.id, it, $0) }
+                }
+            }
+            .sorted { $0.next < $1.next }
         center.getPendingNotificationRequests { [weak self] reqs in
             guard let self else { return }
-            let stale = reqs.map(\.identifier).filter { id in known.keys.contains { id.hasPrefix($0) } }
+            let ids = reqs.map(\.identifier)
+            let stale = ids.filter { id in known.keys.contains { id.hasPrefix($0) } }
+            let others = ids.filter { id in
+                !stale.contains(id) && Self.reminderPrefixes.contains { id.hasPrefix($0) }
+            }.count
+            var left = Self.itemBudget - others
+            var wanted: [(String, NotificationItem)] = []
+            for c in candidates {
+                let cost = c.item.alarm && c.item.repeats == .none ? 1 + Self.alarmAgainCount : 1
+                guard cost <= left else { continue }
+                left -= cost
+                wanted.append((c.id, c.item))
+            }
             self.center.removePendingNotificationRequests(withIdentifiers: stale)
             for (id, it) in wanted {
                 self.schedule(id: id, title: it.title, body: it.body,
@@ -563,7 +585,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                 out.append(HeadsUp(id: headsUpPrefix + prefix + it.id, text: it.body, date: at))
             }
         }
-        return out
+        return Array(out.sorted { $0.date < $1.date }.prefix(headsUpLimit))
     }
 
     /// Today at that time, or tomorrow when it has passed.
@@ -646,9 +668,15 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                            withCompletionHandler: nil)
             }
         }
-        // The matching components decide the repeat: time of day, plus weekday or day of month.
-        // A one-off is a moment (it keeps it across a zone change, like the server's); a repeat
-        // is a time on whatever clock the phone is on (the server moves it the same way).
+        center.add(UNNotificationRequest(identifier: id, content: content,
+                                         trigger: Self.trigger(at: date, repeats: repeats)),
+                   withCompletionHandler: nil)
+    }
+
+    /// The matching components decide the repeat: time of day, plus weekday or day of month.
+    /// A one-off is a moment (it keeps it across a zone change, like the server's); a repeat
+    /// is a time on whatever clock the phone is on (the server moves it the same way).
+    private static func trigger(at date: Date, repeats: NotificationRepeat) -> UNCalendarNotificationTrigger {
         let fields: Set<Calendar.Component>
         switch repeats {
         case .none:    fields = [.timeZone, .year, .month, .day, .hour, .minute]
@@ -656,10 +684,14 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         case .weekly:  fields = [.weekday, .hour, .minute]
         case .monthly: fields = [.day, .hour, .minute]
         }
-        let comps = Calendar.current.dateComponents(fields, from: date)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: repeats != .none)
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger),
-                   withCompletionHandler: nil)
+        return UNCalendarNotificationTrigger(dateMatching: Calendar.current.dateComponents(fields, from: date),
+                                             repeats: repeats != .none)
+    }
+
+    /// When it would ring next; nil for a one-off already past.
+    private static func nextRing(_ item: NotificationItem, after now: Date) -> Date? {
+        if item.repeats == .none { return item.date > now ? item.date : nil }
+        return trigger(at: item.date, repeats: item.repeats).nextTriggerDate()
     }
 
     // MARK: - Alarms
