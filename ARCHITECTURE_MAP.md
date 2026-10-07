@@ -1086,6 +1086,16 @@ mean the shared login has to keep working for ever, which is the thing being
 retired. The voice socket authenticates against a different key, so it still works
 after the shared login is revoked — that is what makes revoking it possible.
 
+Only a paired board is handed its row: a board nobody paired reaches the broker with the
+shared login its factory partition carries (`scripts/provision_brain.py` writes it, and a
+factory reset keeps it), which is what lets a new or wiped robot heartbeat and show its
+pairing code before any account is behind it. **That shared factory login must stay on the
+broker**, or no new robot can pair. Issuing and revoking are the owner's, by hand on the
+broker (the free plan has no API): a release lists the board's login
+(`broker_creds.note_released`, `broker_logins_to_revoke`), the owner's `/api/diagnose` shows
+the list (accounts in `SANDY_OWNER_ACCOUNTS` only, the app's «why isn't a part showing?»),
+and a row leaves it once its login is no longer the one in `SANDY_BROKER_CREDS`.
+
 The camera and the room node have no voice link and take theirs from their own
 `secrets.h` at flash time. Issuing is a config table (`SANDY_BROKER_CREDS`) rather
 than an API call because programmatic issuing needs the broker's paid plan;

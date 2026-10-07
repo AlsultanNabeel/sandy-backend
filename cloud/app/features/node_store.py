@@ -399,6 +399,9 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
     board_wiped = _wipe_board(node_id) and part_present(node, "") is True
     # Whether it took is unknown (no word comes back): keep it until the board shows it.
     _keep_erase(node_id)
+    # Its own broker login is still live; the owner revokes it on the broker.
+    from app.features.broker_creds import note_released
+    note_released(node_id)
 
     from app.features.device_store import delete_devices_for_node
 

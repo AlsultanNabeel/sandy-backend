@@ -253,6 +253,11 @@ def register_devices_api(app, mongo_db=None):
             "camera_devices_exist":
                 sorted(n for n in provisioned if n.startswith("cam_")),
         }
+        from app.api.metering import is_owner_account
+        if is_owner_account(str(claims.get("user_id") or "")):
+            # The project owner's own work, for every customer's released board.
+            from app.features.broker_creds import to_revoke
+            report["broker_logins_to_revoke"] = to_revoke()
         return jsonify(report), 200
 
     @app.route("/api/devices/<name>/image", methods=["POST"])

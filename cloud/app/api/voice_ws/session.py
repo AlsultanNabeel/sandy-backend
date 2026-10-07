@@ -296,11 +296,12 @@ def _authenticate(ws, remote: str) -> bool:
             set_voice_channel(_ROBOT_CHANNEL)
 
             # هون بيتسلّم اللوح بيانات الوسيط الخاصة فيه: المصافحة موثّقة بمفتاح غير
-            # مفتاح الوسيط المشترك. بلا سطر بالجدول بيضلّ ع بياناته الحالية.
+            # مفتاح الوسيط المشترك. بلا سطر بالجدول بيضلّ ع بياناته الحالية. بس للوح
+            # المقترن: اللوح الجديد بيوصل الوسيط بدخول المصنع، وبيقترن فيه.
             reply: Dict[str, Any] = {"type": "auth_ok"}
             try:
                 from app.features.broker_creds import creds_for_device
-                creds = creds_for_device(device_id)
+                creds = creds_for_device(device_id) if owner else None
                 if creds:
                     reply["broker"] = creds
             except (ImportError, ValueError, TypeError, AttributeError) as exc:

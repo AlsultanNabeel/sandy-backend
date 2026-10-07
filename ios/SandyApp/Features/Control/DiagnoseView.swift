@@ -16,6 +16,9 @@ struct DiagnoseView: View {
                 if let report {
                     boards(report)
                     checks(report)
+                    if let logins = report.brokerLoginsToRevoke, !logins.isEmpty {
+                        toRevoke(logins)
+                    }
                 } else if failed {
                     SandyNotice(lang.s("robot.diag.failed"), kind: .gentleWarning)
                 } else {
@@ -86,6 +89,23 @@ struct DiagnoseView: View {
         }
     }
 
+    /// The project owner's account only (the server sends it to no one else): released
+    /// boards whose own broker login is still live, to revoke on the broker by hand.
+    private func toRevoke(_ logins: [DiagnoseReport.Revoke]) -> some View {
+        SandyCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                SectionHeader(title: lang.s("robot.diag.revokeTitle"))
+                Text(lang.s("robot.diag.revokeHow"))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(logins, id: \.device) { l in
+                    line("key.slash", "\(l.user) — \(l.device)", Theme.Colors.warn)
+                }
+            }
+        }
+    }
+
     private func line(_ icon: String, _ text: String, _ color: Color) -> some View {
         HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             Image(systemName: icon).foregroundColor(color).accessibilityHidden(true)
@@ -127,8 +147,20 @@ struct DiagnoseReport: Decodable {
         }
     }
 
+    struct Revoke: Decodable {
+        let device: String
+        let user: String
+    }
+
     let nodes: [Node]
     let checks: Checks
+    /// Only on the project owner's account.
+    let brokerLoginsToRevoke: [Revoke]?
+
+    enum CodingKeys: String, CodingKey {
+        case nodes, checks
+        case brokerLoginsToRevoke = "broker_logins_to_revoke"
+    }
 }
 
 extension APIClient {

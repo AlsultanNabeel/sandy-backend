@@ -471,3 +471,106 @@ def test_a_body_is_read_only_up_to_the_cap(cam, monkeypatch):
     monkeypatch.setattr(devices_api, "_CAM_MAX_UPLOAD_BYTES", 100)
     r = c.post("/api/cam/upload", data=JPEG, headers={"X-Sandy-Node": "8421"})
     assert r.status_code == 400                   # headers first, nothing read
+
+
+# The broker logins (the owner's decision): only a paired board is handed its own login,
+# a release lists it for the owner to revoke on the broker, and the list is on his diagnose.
+# A new board must still pair: it reaches the broker with its factory login, heartbeats,
+# and shows the code, before any account is behind it.
+
+@pytest.fixture
+def fleet(two_owners, monkeypatch):
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    from app import config
+    from app.api.voice_ws import _config as vcfg
+    from app.api.voice_ws import session as sess
+    from app.features import broker_creds, pair_presence
+    from app.integrations import room_device
+
+    monkeypatch.setenv("JWT_SECRET", "x" * 40)
+    monkeypatch.setattr(vcfg, "_HMAC_KEY", SHARED)
+    monkeypatch.setattr(sess, "_HMAC_KEY", SHARED)
+    monkeypatch.setattr(sess, "set_voice_identity", lambda *_: None)
+    monkeypatch.setattr(sess, "set_voice_channel", lambda *_: None)
+    monkeypatch.setattr(config, "SANDY_BROKER_CREDS",
+                        json.dumps({"sandy8421": {"user": "node-8421", "pass": "p"}}))
+    monkeypatch.setattr(config, "SANDY_OWNER_ACCOUNTS", "owner")
+    broker_creds.reset_cache()
+    shown = []
+    monkeypatch.setattr(pair_presence, "_publish",
+                        lambda node_id, code: shown.append(code) or True)
+
+    class _Broker:
+        def publish_service(self, topic, payload):
+            return True
+
+        def send_to_topic(self, topic, payload):
+            return True
+
+    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Broker())
+
+    class _WS:
+        def __init__(self, hello):
+            self._hello, self.sent = json.dumps(hello), []
+
+        def receive(self, timeout=None):
+            return self._hello
+
+        def send(self, data):
+            self.sent.append(json.loads(data) if data.startswith("{") else data)
+
+    def handshake():
+        ts = int(time.time() * 1000)
+        mac = hmac.new(SHARED, f"sandy8421{ts}".encode(), hashlib.sha256).hexdigest()
+        ws = _WS({"type": "hello", "device_id": "sandy8421", "ts": ts, "hmac": mac})
+        sess._authenticate(ws, "test")
+        return next(m for m in ws.sent if isinstance(m, dict) and m.get("type") == "auth_ok")
+
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+
+    c = create_app(mongo_db=two_owners).test_client()
+    yield {"c": c, "handshake": handshake, "shown": shown,
+           "h": lambda uid: {"Authorization": f"Bearer {make_token('user', uid)}"}}
+    broker_creds.reset_cache()
+
+
+def test_a_new_board_pairs_from_its_first_heartbeat_to_its_own_login(fleet):
+    c, h = fleet["c"], fleet["h"]("u1")
+    # Out of the box: on the broker with its factory login, heartbeating, nobody's yet.
+    _beat({"online": True})
+    # Woken before pairing: no login of its own is handed to a board nobody paired.
+    assert "broker" not in fleet["handshake"]()
+    # The app starts pairing: the code goes to its face.
+    r = c.post("/api/nodes/pair", json={"code": "SANDY-8421"}, headers=h)
+    assert r.status_code == 202 and len(fleet["shown"]) == 1
+    # The owner types what it shows.
+    r = c.post("/api/nodes/pair/confirm",
+               json={"code": "SANDY-8421", "presence": fleet["shown"][0]}, headers=h)
+    assert r.status_code == 200 and r.get_json()["node_id"] == "sandy8421"
+    # Paired: the next handshake hands it its own login (and its own voice key).
+    reply = fleet["handshake"]()
+    assert reply["broker"] == {"user": "node-8421", "pass": "p"} and reply.get("device_key")
+
+
+def test_a_release_lists_its_login_for_the_owner_only(fleet, monkeypatch):
+    from app import config
+    from app.features import broker_creds
+
+    c = fleet["c"]
+    with _as("u1"):
+        node_store.pair_node("SANDY-8421")
+        node_store.unpair_node("sandy8421")
+    owner = c.get("/api/diagnose", headers=fleet["h"]("owner")).get_json()
+    assert owner["broker_logins_to_revoke"][0]["user"] == "node-8421"
+    assert "broker_logins_to_revoke" not in c.get(
+        "/api/diagnose", headers=fleet["h"]("u1")).get_json()
+    # Revoked on the broker and its row removed from the table: it leaves the list.
+    monkeypatch.setattr(config, "SANDY_BROKER_CREDS", "{}")
+    broker_creds.reset_cache()
+    assert c.get("/api/diagnose", headers=fleet["h"]("owner")).get_json()[
+        "broker_logins_to_revoke"] == []
