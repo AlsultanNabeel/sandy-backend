@@ -104,7 +104,7 @@ package import in a test with no credentials. Do not add import-time side effect
 | Path | Role |
 |---|---|
 | `app/config.py` | The central env-var module. New code imports from here rather than calling `os.getenv` at a call site; older modules (`auth_handlers`, `ltm_crypto`, integrations/*, …) still read the environment directly. |
-| `app/bootstrap.py` | `init_runtime()` (Mongo on `app.db`, the stores' indexes, MQTT ingest), then `bootstrap()`: `validate_config` (fatal → `RuntimeError`), Google creds, Sentry, `ensure_indexes`, and — on the elected worker — the nudge scheduler and the blocks' indexes + the schedule runner. Idempotent. |
+| `app/bootstrap.py` | `init_runtime()` (Mongo on `app.db`, the stores' indexes, MQTT ingest), then `bootstrap()`: `validate_config` (fatal → `RuntimeError`: no database, no chat model, or in prod no valid `SANDY_LTM_KEY`, `ltm_crypto.encryption_ready`, since without it sensitive fields are written as plain text; dev and tests run without it), Google creds, Sentry, `ensure_indexes`, and — on the elected worker — the nudge scheduler and the blocks' indexes + the schedule runner. Idempotent. |
 | `app/db.py` | The single Mongo handle. Every store reads through `get_db()`. |
 | `app/errors.py` | Typed error taxonomy. |
 | `app/brain/` | The agent: the loop, its tools, short-term memory, held confirmations, persona, the fast path (§2.3–§2.5). |

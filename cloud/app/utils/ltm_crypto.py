@@ -50,6 +50,13 @@ def _get_fernet():
         return None
 
 
+def encryption_ready() -> bool:
+    """True when SANDY_LTM_KEY is set and a valid Fernet key; in prod the server refuses to
+    start without it (`config.validate_config`), since every sensitive field would be
+    written as plain text."""
+    return _get_fernet() is not None
+
+
 def encrypt_field(value: str) -> str:
     """يشفّر النص، أو يرجّعه زي ما هو لو التشفير معطّل."""
     if not value:

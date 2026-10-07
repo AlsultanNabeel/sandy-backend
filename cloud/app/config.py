@@ -100,7 +100,8 @@ SANDY_FIRMWARE_TOKEN: str = os.getenv("SANDY_FIRMWARE_TOKEN", "").strip()
 
 
 def validate_config() -> tuple[list[str], list[str]]:
-    """(fatal, warnings) at boot: fatal = no database or no chat brain; warnings = prod security gaps."""
+    """(fatal, warnings) at boot: fatal = no database, no chat brain, or (in prod) no
+    encryption key; warnings = prod security gaps."""
     fatal: list[str] = []
     warnings: list[str] = []
 
@@ -120,6 +121,14 @@ def validate_config() -> tuple[list[str], list[str]]:
         )
 
     if APP_ENV == "prod":
+        from app.utils.ltm_crypto import encryption_ready
+
+        if not encryption_ready():
+            fatal.append(
+                "SANDY_LTM_KEY is missing or not a valid Fernet key in prod. Refusing to "
+                "start: moods, messages to future self and device keys would be stored "
+                "as plain text. Set it on Heroku (the key the data was sealed with)."
+            )
         if not JWT_SECRET:
             warnings.append("JWT_SECRET is empty in prod (tokens are insecure).")
         # Not fatal (chat/voice/robot still work), but sign-in will be refused.
