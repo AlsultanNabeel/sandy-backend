@@ -259,4 +259,17 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(copy.content.userInfo[NotificationManager.reminderIdKey] as? String, copyId)
         XCTAssertEqual(copy.content.userInfo[NotificationManager.reminderRecurrenceKey] as? String, "")
     }
+
+    /// S3: «later» waited for the server before scheduling the new ring; on a weak network
+    /// the app was suspended first and the reminder never rang again.
+    func testLaterFromTheBannerRingsBeforeTheServerAnswers() async throws {
+        StubNetwork.delay("POST", by: 3)
+        let content = UNMutableNotificationContent()
+        content.body = "المي"
+        content.userInfo = [NotificationManager.reminderIdKey: "o1", NotificationManager.reminderRecurrenceKey: ""]
+        let request = UNNotificationRequest(identifier: "reminder.o1", content: content, trigger: nil)
+        notes.perform(.snooze, reminderId: "o1", notification: request) {}
+        await waitFor { fake.pending["reminder.o1"] != nil }
+        XCTAssertNotNil(fake.pending["reminder.o1"], "the new ring waited for the server (answering in three seconds)")
+    }
 }

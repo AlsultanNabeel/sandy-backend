@@ -391,14 +391,16 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                                             payload: alarm ? ["important": .bool(true),
                                                               "break_focus": .bool(breaksFocus)] : nil)
                     let ring = SchedulesStore.snoozed(rang, minutes: Self.snoozeMinutes)
-                    SchedulesStore.bannerSnoozed(ring, userId: api.currentUserId)
-                    try await api.snoozeSchedule(id: reminderId, minutes: Self.snoozeMinutes,
-                                                 copyId: ring.id == reminderId ? nil : ring.id)
+                    // Ringing first: on a weak network the app may be suspended before the
+                    // server answers, and the outbox sends the change on the next chance.
                     self.schedule(id: "reminder." + ring.id, title: content.title, body: content.body,
                                   at: NotificationManager.parseISO(ring.fireAt) ?? Date(),
                                   category: Self.reminderCategory,
                                   userInfo: [Self.reminderIdKey: ring.id, Self.reminderRecurrenceKey: ""],
                                   alarm: alarm, breaksFocus: breaksFocus)
+                    SchedulesStore.bannerSnoozed(ring, userId: api.currentUserId)
+                    try await api.snoozeSchedule(id: reminderId, minutes: Self.snoozeMinutes,
+                                                 copyId: ring.id == reminderId ? nil : ring.id)
                 case .done:
                     // A repeating one keeps its repeating notification; a one-off is closed.
                     if recurrence.isEmpty {
