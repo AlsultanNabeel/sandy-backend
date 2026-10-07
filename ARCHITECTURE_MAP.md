@@ -670,7 +670,9 @@ already fired it, and the migrated scene timers in particular were never marked,
 so replaying them would switch lights hours later.
 
 The daily nudge push itself still runs on its own scheduler
-(`services/nudge_scheduler.py`, 08:00 local, one worker per day by a Mongo lock);
+(`services/nudge_scheduler.py`: every quarter hour, to each user whose own clock is in the
+eight o'clock hour, once per user and local day by a Mongo lock, quiet hours read inside
+their context so on their clock);
 `/api/daily-nudge` builds the day's nudge from the blocks (open tasks, overdue,
 pending reminders) and the last STM turn ("was up late").
 
