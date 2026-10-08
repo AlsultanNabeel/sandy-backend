@@ -192,5 +192,8 @@
 #define VOICE_EARS_INVERT          1    // set 1 if she turns the wrong way
 
 // ─── Echo cancellation (inside the audio front end) ───
-// The reference leads the real echo by the TX DMA depth (~60 ms), so pre-fill that much silence.
-#define VOICE_REF_DELAY_MS         60
+// How far ahead of its echo the reference is fed: the mic and the amp are paired on their
+// own clocks (sandy_voice.c, ref_measure), and the echo cancelling needs the reference to come
+// first. Under ~50 ms (the amp's queue). Tune with scripts/echo_probe.py: the echo should sit
+// this far after the reference, the same every time.
+#define VOICE_REF_LEAD_MS          10

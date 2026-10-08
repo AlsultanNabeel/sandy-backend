@@ -120,12 +120,12 @@ static esp_err_t status_get(httpd_req_t *req) {
     char body[320];
     snprintf(body, sizeof(body),
              "state=%s\nrate=%d\nseconds=%d\nfeed=%d\nout=%d\nrows=%d\n"
-             "feed_start_ms=%lld\nout_start_ms=%lld\nvolume=%d\nref_delay_ms=%d\n"
+             "feed_start_ms=%lld\nout_start_ms=%lld\nvolume=%d\nref_lead_ms=%d\n"
              "mic_gain_shift=%d\nbarge_ms=%d\n",
              state_name(), VOICE_IN_RATE, PROBE_SECONDS, s_feed_n, s_out_n, s_rows_n,
              s_feed_t0_us ? (long long)((s_feed_t0_us - s_t0_us) / 1000) : -1LL,
              s_out_t0_us ? (long long)((s_out_t0_us - s_t0_us) / 1000) : -1LL,
-             s_volume, VOICE_REF_DELAY_MS, VOICE_MIC_GAIN_SHIFT, VOICE_BARGE_MS);
+             s_volume, VOICE_REF_LEAD_MS, VOICE_MIC_GAIN_SHIFT, VOICE_BARGE_MS);
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_sendstr(req, body);
     return ESP_OK;

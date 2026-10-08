@@ -102,7 +102,7 @@ def analyse(feed: np.ndarray, out: np.ndarray, rows: list[dict], info: dict) -> 
     active = np.array([np.any(playing[i * block:(i + 1) * block]) for i in range(nb)])
     idx = np.repeat(active, block)
     print(f"\nfront end fed {len(ref) / RATE:.1f} s, output {len(out) / RATE:.1f} s, "
-          f"volume {info.get('volume')}%, reference delay {info.get('ref_delay_ms')} ms")
+          f"volume {info.get('volume')}%, reference lead {info.get('ref_lead_ms')} ms")
     print(f"speaker playing in {active.mean() * 100:.0f}% of it")
 
     for name, ch in (("left mic", left), ("right mic", right)):

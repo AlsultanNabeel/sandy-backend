@@ -124,9 +124,8 @@ static volatile int64_t s_squelch_until_ms;
 static uint8_t s_rx_carry;
 static volatile bool s_rx_has_carry;
 
-// The audio front end: spk_task writes a 16 kHz copy of what the amp plays (the
-// reference); mic_task feeds it with both mics; proc_task reads one clean voice back.
-static StreamBufferHandle_t s_ref_stream;     // 16k mono reference (PSRAM)
+// The audio front end: spk_task keeps a 16 kHz copy of what the amp plays (the
+// reference, s_ref_ring); mic_task feeds it with both mics; proc_task reads one clean voice back.
 static const esp_afe_sr_iface_t *s_afe;
 static esp_afe_sr_data_t *s_afe_data;
 static int s_afe_feed_chunk;                  // samples per channel per feed()
@@ -446,6 +445,10 @@ static esp_err_t i2s_start(void) {
     // Mic: two INMP441 on I2S_NUM_0, RX, 32-bit STEREO (one per slot), mixed to mono.
     // Mono mode read the empty slot.
     i2s_chan_config_t rx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    // 10 ms buffers, ten to a read: a read returns as its last sample is heard, which is
+    // what the echo reference is timed against (ref_measure). 80 ms of slack.
+    rx_cfg.dma_frame_num = 160;
+    rx_cfg.dma_desc_num = 8;
     I2S_TRY("mic channel", i2s_new_channel(&rx_cfg, NULL, &s_rx_chan));
     i2s_std_config_t rx_std = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(VOICE_IN_RATE),
@@ -752,12 +755,92 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
     }
 }
 
-// Drain server audio into the speaker; idles when there's nothing to play.
+// The echo reference: every sample handed to the amp, silence included, in order, at 16 kHz.
+// The amp never stops (spk_task writes silence when there is nothing to say), so a sample's
+// place in this ring is its place on the amp's clock; the mic side pairs each mic sample with
+// the reference sample played at the same moment (ref_pair_*), never with "whatever is queued".
+#define REF_RING_SAMPLES   32768                 // ~2 s, a power of two
+#define REF_RING_MASK      (REF_RING_SAMPLES - 1)
+// What the amp still has queued when a write returns: the whole DMA ring (6 × 240 at 24 kHz).
+#define SPK_DMA_QUEUED_16K (6 * 240 * 2 / 3)
+static int16_t *s_ref_ring;
+static portMUX_TYPE s_ref_mux = portMUX_INITIALIZER_UNLOCKED;
+static int64_t s_ref_written;      // reference samples ever written (under s_ref_mux)
+static int64_t s_ref_written_us;   // when the amp took the last of them (under s_ref_mux)
+
+// Down to 16 kHz (2 of every 3 samples), into the ring. Leftovers wait for the next chunk.
+static void ref_push(const int16_t *sp, int ns) {
+    static int16_t carry[2];
+    static int     carried;
+    static int16_t ref[SPK_CHUNK_BYTES / 3 + 2];
+    int i = 0, k = 0;
+    if (carried) {
+        int16_t g[3];
+        int have = carried;
+        for (int c = 0; c < carried; c++) g[c] = carry[c];
+        while (have < 3 && i < ns) g[have++] = sp[i++];
+        if (have == 3) {
+            ref[k++] = g[0];
+            ref[k++] = (int16_t)(((int32_t)g[1] + g[2]) >> 1);
+            carried = 0;
+        } else {
+            for (int c = 0; c < have; c++) carry[c] = g[c];
+            carried = have;
+        }
+    }
+    for (; i + 2 < ns; i += 3) {
+        ref[k++] = sp[i];
+        ref[k++] = (int16_t)(((int32_t)sp[i + 1] + sp[i + 2]) >> 1);
+    }
+    for (; i < ns && carried < 2; i++) carry[carried++] = sp[i];
+    const int64_t at = esp_timer_get_time();
+    taskENTER_CRITICAL(&s_ref_mux);
+    for (int j = 0; j < k; j++) s_ref_ring[(s_ref_written + j) & REF_RING_MASK] = ref[j];
+    s_ref_written += k;
+    s_ref_written_us = at;
+    taskEXIT_CRITICAL(&s_ref_mux);
+}
+
+// Hands one chunk to the amp and records what it took as the reference. Returns the bytes
+// it took (fewer than n: the amp did not take all of it in time).
+static size_t spk_write(int16_t *buf, size_t n, int *spk_fails) {
+    size_t written = 0;
+    esp_err_t wr = i2s_channel_write(s_tx_chan, buf, n, &written,
+                                     pdMS_TO_TICKS(SPK_WRITE_TIMEOUT_MS));
+    if (written) ref_push(buf, (int)(written / sizeof(int16_t)));
+    if (wr == ESP_OK && written == n) {
+        if (*spk_fails) {
+            *spk_fails = 0;
+            if (s_spk_fault) {
+                s_spk_fault = false;
+                status_set(SANDY_PART_VOICE, SANDY_ST_OK);
+            }
+        }
+        return written;
+    }
+    if (++*spk_fails % SPK_FAILS_BEFORE_RESTART == 0) {
+        // The rest of this chunk is lost; a wedged amp channel gets restarted.
+        i2s_channel_disable(s_tx_chan);
+        esp_err_t en = i2s_channel_enable(s_tx_chan);
+        ESP_LOGW(TAG, "speaker write failed (%s, %u of %u bytes) — restarted (%s)",
+                 esp_err_to_name(wr), (unsigned)written, (unsigned)n, esp_err_to_name(en));
+        if (*spk_fails == SPK_FAILS_BEFORE_RESTART * 2 && !s_spk_fault) {
+            s_spk_fault = true;
+            status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
+        }
+    }
+    return written;
+}
+
+// Drain server audio into the speaker; silence when there's nothing to play, so the amp's
+// clock and the echo reference never stop.
 static void spk_task(void *arg) {
+    static int16_t silence[SPK_CHUNK_BYTES / sizeof(int16_t)];
     uint8_t buf[SPK_CHUNK_BYTES];
     bool playing = false;
     int64_t first_seen = 0;   // when data first appeared while idle
     int64_t last_stop = 0;    // when playback last went idle
+    int64_t dry_since = 0;    // playing, but nothing arrived since then
     int spk_fails = 0;        // amp writes in a row that did not finish
     health_watch();
     for (;;) {
@@ -785,25 +868,17 @@ static void spk_task(void *arg) {
                     s_after_until_ms = 0;
                     if (s_session_active) VOICE_FACE(MOOD_FOCUSED);
                 }
-                // ≥ 2 ticks: under 10 ms rounds to 0 at 100 Hz and busy-spins, starving the mic task.
-                vTaskDelay(pdMS_TO_TICKS(20));
-                continue;
+            } else if (first_seen == 0) {
+                first_seen = now_ms();
             }
-            if (first_seen == 0) first_seen = now_ms();
             // Start once cushioned, or after 250 ms so a short reply never sticks (half-duplex would stay muted).
-            if (avail >= s_prebuf || (now_ms() - first_seen) > 250) {
+            if (avail && (avail >= s_prebuf || (now_ms() - first_seen) > 250)) {
                 playing = true;
                 s_playing = true;
+                dry_since = 0;
                 s_after_until_ms = 0;
                 VOICE_FACE(s_talk_mood);    // talking face
                 VOICE_LED(LED_STATE_TALKING);
-                // Fresh playback: pre-fill the reference with silence equal to the TX DMA depth.
-                if (s_ref_stream && xStreamBufferIsEmpty(s_ref_stream)) {
-                    static const int16_t zeros[320] = {0};   // 20ms pieces
-                    for (int ms = 0; ms < VOICE_REF_DELAY_MS; ms += 20) {
-                        xStreamBufferSend(s_ref_stream, zeros, sizeof(zeros), 0);
-                    }
-                }
                 // Restart right after a stop = audible mid-reply gap.
                 if (last_stop && (now_ms() - last_stop) < 2000) {
                     s_spk_gaps++;
@@ -824,20 +899,22 @@ static void spk_task(void *arg) {
                              (unsigned)(s_prebuf / 48));
                 }
             } else {
-                vTaskDelay(pdMS_TO_TICKS(20));  // same zero-tick trap as above
+                // Nothing to say yet: the amp plays silence, which paces this loop.
+                spk_write(silence, sizeof(silence), &spk_fails);
                 continue;
             }
         }
-        // 300 ms tolerance so brief gaps don't re-arm the cushion.
-        size_t n = xStreamBufferReceive(s_spk_stream, buf, sizeof(buf), pdMS_TO_TICKS(300));
+        // Never wait here: a pause in the writes is a pause on the amp the reference never saw.
+        size_t n = xStreamBufferReceive(s_spk_stream, buf, sizeof(buf), 0) & ~(size_t)1;
         if (n) {
+            dry_since = 0;
 #if SPK_VOL_SHIFT
             int16_t *s = (int16_t *)buf;
             for (int i = 0; i < (int)(n / sizeof(int16_t)); i++) {
                 s[i] = (int16_t)(((int32_t)s[i] * SPK_VOL_MUL) >> SPK_VOL_SHIFT);
             }
 #endif
-            // Runtime volume BEFORE taking the echo reference, so the AEC sees what the amp plays.
+            // Runtime volume BEFORE the reference is taken, so the AEC sees what the amp plays.
             {
                 int16_t *v = (int16_t *)buf;
                 int64_t sum = 0;
@@ -850,84 +927,86 @@ static void spk_task(void *arg) {
                 int lvl = ns ? (int)(sum / ns) / 30 : 0;
                 s_out_level = lvl > 100 ? 100 : lvl;
             }
-            // Echo reference: post-volume, 24k→16k (2 of every 3 samples). Leftover samples
-            // wait for the next chunk; dropping them drifted the AEC alignment.
-            if (s_ref_stream) {
-                static int16_t ref[SPK_CHUNK_BYTES / 3 + 2];
-                static int16_t carry[2];
-                static int     carried;
-                int ns = (int)(n / sizeof(int16_t)), k = 0;
-                const int16_t *sp = (const int16_t *)buf;
-                int i = 0;
-                if (carried) {
-                    int16_t g[3];
-                    int have = carried;
-                    for (int c = 0; c < carried; c++) g[c] = carry[c];
-                    while (have < 3 && i < ns) g[have++] = sp[i++];
-                    if (have == 3) {
-                        ref[k++] = g[0];
-                        ref[k++] = (int16_t)(((int32_t)g[1] + g[2]) >> 1);
-                        carried = 0;
-                    } else {
-                        for (int c = 0; c < have; c++) carry[c] = g[c];
-                        carried = have;
-                    }
-                }
-                for (; i + 2 < ns; i += 3) {
-                    ref[k++] = sp[i];
-                    ref[k++] = (int16_t)(((int32_t)sp[i + 1] + sp[i + 2]) >> 1);
-                }
-                for (; i < ns && carried < 2; i++) carry[carried++] = sp[i];
-                if (k) xStreamBufferSend(s_ref_stream, ref, k * sizeof(int16_t), 0);
-            }
-            size_t written = 0;
-            esp_err_t wr = i2s_channel_write(s_tx_chan, buf, n, &written,
-                                             pdMS_TO_TICKS(SPK_WRITE_TIMEOUT_MS));
-            s_spk_play_bytes += written;
-            if (wr == ESP_OK && written == n) {
-                if (spk_fails) {
-                    spk_fails = 0;
-                    if (s_spk_fault) {
-                        s_spk_fault = false;
-                        status_set(SANDY_PART_VOICE, SANDY_ST_OK);
-                    }
-                }
-            } else if (++spk_fails % SPK_FAILS_BEFORE_RESTART == 0) {
-                // The rest of this chunk is lost; a wedged amp channel gets restarted.
-                i2s_channel_disable(s_tx_chan);
-                esp_err_t en = i2s_channel_enable(s_tx_chan);
-                ESP_LOGW(TAG, "speaker write failed (%s, %u of %u bytes) — restarted (%s)",
-                         esp_err_to_name(wr), (unsigned)written, (unsigned)n,
-                         esp_err_to_name(en));
-                if (spk_fails == SPK_FAILS_BEFORE_RESTART * 2 && !s_spk_fault) {
-                    s_spk_fault = true;
-                    status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
-                }
-            }
-        } else {
-            playing = false;
-            s_playing = false;
-            s_out_level = 0;
-            first_seen = 0;
-            last_stop = now_ms();
-            // Done talking: the reply's after face for a moment, else listening, while open.
-            if (s_session_active) {
-                if (s_after_mood < MOOD_COUNT) {
-                    VOICE_FACE(s_after_mood);
-                    s_after_until_ms = now_ms() + AFTER_FACE_MS;
-                } else {
-                    VOICE_FACE(MOOD_FOCUSED);
-                }
-                VOICE_LED(LED_STATE_LISTENING);
-            }
-            s_after_mood = MOOD_COUNT;
-            s_talk_mood = MOOD_HAPPY;
-            // Per-reply health: rx≈played, dropped=0, gaps=0 is clean.
-            ESP_LOGI(TAG, "playback report: rx=%u played=%u dropped=%u gaps=%d",
-                     (unsigned)s_spk_rx_bytes, (unsigned)s_spk_play_bytes,
-                     (unsigned)s_spk_drop_bytes, s_spk_gaps);
+            s_spk_play_bytes += spk_write((int16_t *)buf, n, &spk_fails);
+            continue;
         }
+        // 300 ms dry: the reply has ended (shorter gaps keep the cushion), meanwhile silence.
+        if (!dry_since) dry_since = now_ms();
+        if (now_ms() - dry_since < 300) {
+            s_out_level = 0;
+            spk_write(silence, sizeof(silence), &spk_fails);
+            continue;
+        }
+        playing = false;
+        s_playing = false;
+        s_out_level = 0;
+        first_seen = 0;
+        last_stop = now_ms();
+        // Done talking: the reply's after face for a moment, else listening, while open.
+        if (s_session_active) {
+            if (s_after_mood < MOOD_COUNT) {
+                VOICE_FACE(s_after_mood);
+                s_after_until_ms = now_ms() + AFTER_FACE_MS;
+            } else {
+                VOICE_FACE(MOOD_FOCUSED);
+            }
+            VOICE_LED(LED_STATE_LISTENING);
+        }
+        s_after_mood = MOOD_COUNT;
+        s_talk_mood = MOOD_HAPPY;
+        // Per-reply health: rx≈played, dropped=0, gaps=0 is clean.
+        ESP_LOGI(TAG, "playback report: rx=%u played=%u dropped=%u gaps=%d",
+                 (unsigned)s_spk_rx_bytes, (unsigned)s_spk_play_bytes,
+                 (unsigned)s_spk_drop_bytes, s_spk_gaps);
     }
+}
+
+// The pairing of mic and reference samples: mic sample c goes with reference sample
+// c + s_ref_offset, the one the amp plays at the moment c is heard, plus VOICE_REF_LEAD_MS
+// so the reference stays ahead of its echo. Measured from both I2S clocks (ref_measure),
+// set once they run and again as each call opens (she is quiet then), never mid-reply.
+static int64_t s_ref_offset;
+static bool s_ref_aligned;
+static volatile bool s_ref_realign;   // the session manager asks; mic_task sets it
+
+// mic_task, after each read: where the amp is now against how many mic samples are in.
+static void ref_measure(int64_t mic_heard) {
+    static double est;
+    static int n;
+    taskENTER_CRITICAL(&s_ref_mux);
+    const int64_t w = s_ref_written, w_us = s_ref_written_us;
+    taskEXIT_CRITICAL(&s_ref_mux);
+    if (!w_us) return;
+    const int64_t playing = w - SPK_DMA_QUEUED_16K +
+                            (esp_timer_get_time() - w_us) * VOICE_IN_RATE / 1000000;
+    const double x = (double)(playing - mic_heard);
+    est = n ? est * 0.9 + x * 0.1 : x;
+    if (n < 30) { n++; return; }
+    if (s_ref_aligned && !s_ref_realign) return;
+    const int64_t offset = (int64_t)(est + 0.5) + VOICE_REF_LEAD_MS * VOICE_IN_RATE / 1000;
+    if (s_ref_aligned && offset != s_ref_offset) {
+        ESP_LOGI(TAG, "echo reference realigned (moved %+lld samples)",
+                 (long long)(offset - s_ref_offset));
+    } else if (!s_ref_aligned) {
+        ESP_LOGI(TAG, "echo reference aligned to the amp's clock");
+    }
+    s_ref_offset = offset;
+    s_ref_aligned = true;
+    s_ref_realign = false;
+}
+
+// mic_task: the reference for mic samples [c, c + n): silence where the ring has none.
+static void ref_pair(int64_t c, int16_t *out, int n) {
+    memset(out, 0, (size_t)n * sizeof(int16_t));
+    if (!s_ref_aligned) return;
+    const int64_t from = c + s_ref_offset;
+    taskENTER_CRITICAL(&s_ref_mux);
+    const int64_t w = s_ref_written;
+    for (int i = 0; i < n; i++) {
+        const int64_t r = from + i;
+        if (r < w && r >= w - REF_RING_SAMPLES) out[i] = s_ref_ring[r & REF_RING_MASK];
+    }
+    taskEXIT_CRITICAL(&s_ref_mux);
 }
 
 // The audio front end (esp-sr AFE), set up once: input "MMR" = left mic, right mic, the
@@ -1314,7 +1393,7 @@ static void mic_task(void *arg) {
     // Stereo: 2 int32 slots per frame.
     int32_t *raw = malloc(MIC_FRAME_SAMPLES * 2 * sizeof(int32_t));
     int16_t *feed = malloc((size_t)s_afe_feed_chunk * 3 * sizeof(int16_t));
-    int16_t *ref = malloc((size_t)s_afe_feed_chunk * sizeof(int16_t));
+    int16_t *ref = malloc((size_t)MIC_FRAME_SAMPLES * sizeof(int16_t));
     if (!raw || !feed || !ref) {
         // The allocations fail independently; free all (free(NULL) is a no-op).
         free(raw);
@@ -1325,6 +1404,8 @@ static void mic_task(void *arg) {
         vTaskDelete(NULL);
         return;
     }
+    // Mic samples read since boot: a sample's number is its moment on the mic's clock.
+    static int64_t s_mic_heard;
     // One-pole DC blocker per mic: y[n] = x[n] - x[n-1] + R*y[n-1].
     int32_t dcx[2] = {0, 0}, dcy[2] = {0, 0};
     int fill = 0;
@@ -1376,6 +1457,12 @@ static void mic_task(void *arg) {
             ESP_LOGI(TAG, "mic up (first frame, %u bytes)", (unsigned)bytes_read);
         }
         int frames = bytes_read / (2 * sizeof(int32_t));
+        // Mic samples heard before this block; the block's last one was heard just now.
+        const int64_t heard = s_mic_heard;
+        s_mic_heard += frames;
+        ref_measure(s_mic_heard);
+        // The reference for this block: what the amp played as each sample was heard.
+        ref_pair(heard, ref, frames);
         // Snapshot controls once per frame so a change can't split a block.
         const int  gain_l  = mic_get_gain(MIC_LEFT);
         const int  gain_r  = mic_get_gain(MIC_RIGHT);
@@ -1409,15 +1496,9 @@ static void mic_task(void *arg) {
             ear_prev_l = le;
             ear_prev_r = re;
 #endif
-            if (fill == 0) {
-                // This chunk's reference: what the amp played, silence when it was quiet.
-                size_t want = (size_t)s_afe_feed_chunk * sizeof(int16_t);
-                size_t got = s_ref_stream ? xStreamBufferReceive(s_ref_stream, ref, want, 0) : 0;
-                if (got < want) memset((uint8_t *)ref + got, 0, want - got);
-            }
             feed[3 * fill]     = ch[0];
             feed[3 * fill + 1] = ch[1];
-            feed[3 * fill + 2] = ref[fill];
+            feed[3 * fill + 2] = ref[i];
             if (++fill == s_afe_feed_chunk) {
                 echo_probe_feed(feed, s_afe_feed_chunk);
                 s_afe->feed(s_afe_data, feed);
@@ -1758,9 +1839,9 @@ static void voice_task(void *arg) {
     }
 
     // The reference the front end cancels against (spk_task writes, mic_task reads).
-    s_ref_stream = xStreamBufferCreateWithCaps(32 * 1024, 1, MALLOC_CAP_SPIRAM);
+    s_ref_ring = heap_caps_calloc(REF_RING_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM);
     // BEFORE the audio tasks: they read the front end's handle and chunk size.
-    if (!s_ref_stream || !afe_init()) {
+    if (!s_ref_ring || !afe_init()) {
         ESP_LOGE(TAG, "audio front end unavailable — voice disabled");
         status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
@@ -1893,6 +1974,7 @@ static void voice_task(void *arg) {
                 }
                 ESP_LOGI(TAG, "opening voice session");
                 s_tx_open_until = 0;
+                s_ref_realign = true;   // she is quiet now: re-measure the echo reference
 #if ENABLE_COMMANDS
                 // Free the command model BEFORE opening: TLS needs its ~70 KB.
                 s_mn_want = false;
