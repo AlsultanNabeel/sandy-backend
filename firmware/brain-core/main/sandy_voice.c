@@ -57,6 +57,7 @@
 #include "sandy_audio_ctl.h"
 #include "sandy_net_busy.h"
 #include "sandy_health.h"
+#include "sandy_echo_probe.h"
 #include <math.h>   // sqrt for the per-mic level meters
 #if ENABLE_BUZZER
 #include "sandy_buzzer.h"
@@ -951,6 +952,9 @@ static bool afe_init(void) {
     s_wake_ready = cfg->wakenet_init;
     s_afe = esp_afe_handle_from_config(cfg);
     s_afe_data = s_afe ? s_afe->create_from_config(cfg) : NULL;
+#if ENABLE_REMOTE
+    afe_config_print(cfg);   // dev: the echo settings in force, for the echo probe's report
+#endif
     afe_config_free(cfg);
     if (!s_afe_data) {
         ESP_LOGE(TAG, "audio front end did not start (psram free=%u)",
@@ -1415,6 +1419,7 @@ static void mic_task(void *arg) {
             feed[3 * fill + 1] = ch[1];
             feed[3 * fill + 2] = ref[fill];
             if (++fill == s_afe_feed_chunk) {
+                echo_probe_feed(feed, s_afe_feed_chunk);
                 s_afe->feed(s_afe_data, feed);
                 fill = 0;
             }
@@ -1491,6 +1496,8 @@ static void proc_task(void *arg) {
         const size_t bytes = (size_t)frames * sizeof(int16_t);
         bool sandy_talking = s_playing ||
                              (now_ms() - s_last_rx_audio_ms) < VOICE_HALF_DUPLEX_TAIL_MS;
+        const bool probe_talking = sandy_talking;
+        bool barged = false;
 
 #if ENABLE_COMMANDS
         // Swap the command model's SRAM with the voice link on request; s_mn stays
@@ -1544,6 +1551,7 @@ static void proc_task(void *arg) {
                 buzzer_play(MELODY_CURIOUS);
 #endif
                 barge_in("wake word");
+                barged = true;
                 sandy_talking = false;
             }
             // Speech or her own audio keeps the session alive.
@@ -1565,6 +1573,7 @@ static void proc_task(void *arg) {
                     if (s_preroll) xStreamBufferSend(s_preroll, out, bytes, 0);
                     if (speech_ms >= VOICE_BARGE_MS) {
                         barge_in("voice");
+                        barged = true;
                         preroll_flush();
                         s_tx_open_until = now_ms() + TX_HANGOVER_MS;
                     }
@@ -1590,6 +1599,7 @@ static void proc_task(void *arg) {
 #else
         if (s_authed) mic_send(out, bytes);
 #endif
+        echo_probe_out(res->data, frames, probe_talking, vad, speech, avg, near_level, barged);
 
         int64_t t = now_ms();
         if (t - last_diag > 1500) {

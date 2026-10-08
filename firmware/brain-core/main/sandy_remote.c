@@ -17,6 +17,7 @@
 #include "esp_heap_caps.h"
 #include "sandy_wifi.h"
 #include "sandy_nvs.h"
+#include "sandy_echo_probe.h"
 #include "config.h"
 #include "lwip/sockets.h"
 
@@ -187,6 +188,7 @@ static void start_http(void) {
     httpd_uri_t upd  = { .uri = "/update", .method = HTTP_POST, .handler = update_post };
     httpd_register_uri_handler(srv, &root);
     httpd_register_uri_handler(srv, &upd);
+    echo_probe_register(srv);
 }
 
 static void http_task(void *arg) {

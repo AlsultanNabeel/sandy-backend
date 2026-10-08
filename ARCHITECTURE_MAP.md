@@ -848,6 +848,7 @@ Wi-Fi and the board's keys went with it), `nvs_used`/`nvs_total` (entries in the
 | `sandy_wifi.c` | association; power save is explicitly **off** (`WIFI_PS_NONE`) for real-time audio |
 | `sandy_led.c` `sandy_servo.c` `sandy_buzzer.c` `sandy_motors.c` `sandy_sensor.c` `sandy_touch.c` `sandy_ears.c` `sandy_mic.c` `sandy_spktest.c` `sandy_ota.c` `sandy_nvs.c` `sandy_remote.c` | peripherals, OTA, remote log |
 | `sandy_audio_ctl.c` | mic gain/mute, volume; persisted in NVS (noise is the front end's job now) |
+| `sandy_echo_probe.c` | dev builds only (`ENABLE_REMOTE`, so never the sale build): on the dev web server, `/echo/arm` records ten seconds of what the front end is fed (both mics and the reference, as it sees them) and what it gives back, from the moment she starts talking, plus each fetched chunk's barge-in inputs; `/echo/status`, `/echo/feed`, `/echo/out`, `/echo/frames` hand it over. `scripts/echo_probe.py <ip>` arms it, writes four WAVs and reports the echo removed, where the echo sits against the reference, clipping and the barge-ins (§10) |
 | `sandy_screen.c` | owner text/picture on the display, Arabic fonts 24/32 |
 | `sandy_ir.c` | IR learn + replay (§4.5) |
 | `sandy_provision.c` | first-run SoftAP setup (§4.5) |
@@ -1573,6 +1574,12 @@ whether the server has a key configured at all — without touching the robot.
 To prove the board's own key works, compute the HMAC where the secret lives
 (never paste it into a browser), generate candidate timestamps a little in the
 future, and have the page pick the one nearest its own clock.
+
+**Echo cancelling on the robot:** with the dev firmware on the LAN,
+`~/sandy_app_venv/bin/python scripts/echo_probe.py <board ip>` arms the probe, waits for her
+to talk, and reports what the front end did with her own voice. Measure before touching the
+barge-in thresholds: on 9 Oct 2026 the reference wandered up to 300 ms behind the echo and the
+cancelling added 8 dB instead of removing any.
 
 **Serial log:** `Desktop/سجل-ساندي.command` on the owner's machine. On macOS the
 port must be opened *before* `stty` is applied and read from that same descriptor

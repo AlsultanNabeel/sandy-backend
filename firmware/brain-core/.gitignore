@@ -1,6 +1,6 @@
 build/
-build-retail/
-build-matrix/
+# build-retail (publish), build-matrix (feature matrix), build-dev (LAN uploads), …
+build-*/
 build-matrix-*.log
 sdkconfig
 sdkconfig.old

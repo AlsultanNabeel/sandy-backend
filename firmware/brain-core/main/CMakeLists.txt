@@ -19,6 +19,7 @@ idf_component_register(
         "sandy_ears.c"
         "sandy_spktest.c"
         "sandy_remote.c"
+        "sandy_echo_probe.c"
         "sandy_ir.c"
         "sandy_led.c"
         "sandy_status.c"
