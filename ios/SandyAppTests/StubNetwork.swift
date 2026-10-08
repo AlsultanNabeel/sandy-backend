@@ -79,10 +79,14 @@ final class StubURLProtocol: URLProtocol {
         seen.httpBody = StubNetwork.body(of: request)
         Self.requests.append(seen)
         let (status, body) = Self.handler?(seen) ?? (500, Data())
-        let response = HTTPURLResponse(url: request.url!, statusCode: status,
-                                       httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "application/json"]
-                                           .merging(Self.headers) { _, new in new })!
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
+                                             headerFields: ["Content-Type": "application/json"]
+                                                 .merging(Self.headers) { _, new in new })
+        else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
         let deliver = { [weak self] in
             guard let self else { return }
             // `StubNetwork.offline`: no answer at all, as with no connection.

@@ -4,20 +4,19 @@ import XCTest
 /// Audit batch nine: the focus timer and its lock-screen activity follow the clock.
 @MainActor
 final class FocusTimeTests: XCTestCase {
-    private var fake: FakeScheduler!
-    private var original: NotificationScheduler!
+    private lazy var fake = FakeScheduler()
+    private var original: NotificationScheduler?
 
     override func setUp() async throws {
         try await super.setUp()
         original = NotificationManager.shared.center
-        fake = FakeScheduler()
         NotificationManager.shared.center = fake
         NotificationManager.shared.sessionBegan()
     }
 
     override func tearDown() async throws {
         NotificationManager.shared.clearForSignOut()
-        NotificationManager.shared.center = original
+        if let original { NotificationManager.shared.center = original }
         try await super.tearDown()
     }
 

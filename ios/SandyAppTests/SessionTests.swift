@@ -20,11 +20,12 @@ final class SessionTests: XCTestCase {
     }
 
     /// K1: a renewal for a request sent before a sign-out or a switch is not taken.
-    func testARenewalForAnotherSessionIsNotTaken() {
+    func testARenewalForAnotherSessionIsNotTaken() throws {
         let api = TestClient.make()
         api.token = "second"
-        let resp = HTTPURLResponse(url: URL(string: "https://example.test")!, statusCode: 200,
-                                   httpVersion: nil, headerFields: [APIClient.renewedHeader: "first-renewed"])!
+        let resp = try XCTUnwrap(HTTPURLResponse(url: URL(string: "https://example.test")!, statusCode: 200,
+                                                 httpVersion: nil,
+                                                 headerFields: [APIClient.renewedHeader: "first-renewed"]))
         api.keepRenewed(resp, sent: "first")
         XCTAssertEqual(api.token, "second")
         api.token = nil

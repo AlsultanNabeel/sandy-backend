@@ -5,11 +5,10 @@ import XCTest
 /// what the server refused for good.
 @MainActor
 final class OutboxTests: XCTestCase {
-    private var api: APIClient!
+    private lazy var api = TestClient.make()
 
     override func setUp() async throws {
         try await super.setUp()
-        api = TestClient.make()
         api.token = SessionTests.token("outbox-\(UUID().uuidString.prefix(8))")
     }
 

@@ -744,7 +744,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             let lang = AppLocale.lang
             for (i, phase) in plan.phases.enumerated() {
                 let next = i + 1 < plan.phases.count ? plan.phases[i + 1] : nil
-                let key = next == nil ? "focus.notif.done" : next!.isBreak ? "focus.notif.break" : "focus.notif.focus"
+                let key = next.map { $0.isBreak ? "focus.notif.break" : "focus.notif.focus" } ?? "focus.notif.done"
                 self.schedule(id: Self.focusPrefix + String(i), title: translate(lang, "focus.notif.title"),
                               body: translate(lang, key), at: phase.endsAt)
             }

@@ -11,10 +11,10 @@ final class URLEscapeTests: XCTestCase {
         XCTAssertEqual(URLEscape.query("البحر"), "البحر".addingPercentEncoding(withAllowedCharacters: .alphanumerics))
     }
 
-    func testAPathSegmentStaysOneSegment() {
-        XCTAssertEqual(URLEscape.segment("ضو/صالون?x#y"),
-                       "ضو".addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "%2F"
-                       + "صالون".addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "%3Fx%23y")
+    func testAPathSegmentStaysOneSegment() throws {
+        let light = try XCTUnwrap("ضو".addingPercentEncoding(withAllowedCharacters: .alphanumerics))
+        let salon = try XCTUnwrap("صالون".addingPercentEncoding(withAllowedCharacters: .alphanumerics))
+        XCTAssertEqual(URLEscape.segment("ضو/صالون?x#y"), light + "%2F" + salon + "%3Fx%23y")
     }
 
     override func tearDown() { StubNetwork.uninstall() }

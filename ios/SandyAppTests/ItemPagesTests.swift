@@ -13,7 +13,7 @@ final class ItemPagesTests: XCTestCase {
 
     func testAnOpenListFollowsEveryPage() async throws {
         StubNetwork.install { request in
-            let cursor = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            let cursor = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
                 .queryItems?.first { $0.name == "cursor" }?.value
             if cursor == nil {
                 return (200, Data(#"{"items":[\#(self.rows(0..<100))],"next":"c1"}"#.utf8))

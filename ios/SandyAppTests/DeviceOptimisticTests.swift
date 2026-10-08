@@ -9,7 +9,7 @@ final class DeviceOptimisticTests: XCTestCase {
 
     func testARefreshDuringACommandKeepsWhatWasAsked() async throws {
         StubNetwork.install { request in
-            let path = request.url!.path
+            let path = request.url?.path ?? ""
             if request.httpMethod == "POST" {
                 return (200, Data(#"{"ok":true,"sent":true}"#.utf8))
             }

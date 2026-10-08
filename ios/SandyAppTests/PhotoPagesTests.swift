@@ -15,7 +15,7 @@ final class PhotoPagesTests: XCTestCase {
 
     func testTheNextPageComesWhenAsked() async {
         StubNetwork.install { request in
-            let url = request.url!.absoluteString
+            let url = request.url?.absoluteString ?? ""
             if url.contains("/albums") { return (200, Data(#"{"items":[]}"#.utf8)) }
             if url.contains("before=") { return (200, self.page(200..<250, next: nil)) }
             return (200, self.page(0..<200, next: "2026-01-01T00:00:00+00:00|p199"))
@@ -28,7 +28,7 @@ final class PhotoPagesTests: XCTestCase {
         await store.loadMore(api: api)
         XCTAssertEqual(store.photos.count, 250)
         XCTAssertFalse(store.hasMore)
-        let asked = StubNetwork.requests.map { $0.url!.absoluteString }
+        let asked = StubNetwork.requests.compactMap { $0.url?.absoluteString }
         XCTAssertTrue(asked.contains { $0.contains("before=2026-01-01T00%3A00%3A00%2B00%3A00%7Cp199")
                                        || $0.contains("before=2026-01-01T00:00:00%2B00:00%7Cp199") },
                       asked.joined(separator: "\n"))

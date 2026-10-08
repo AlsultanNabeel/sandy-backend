@@ -5,7 +5,7 @@ import UIKit
 /// A photo for the album is made at most 2048 px on its long side before upload: a
 /// full-size iPhone photo was sent whole and refused past the server's 8 MB.
 final class ImageDownscaleTests: XCTestCase {
-    private func bigPNG(width: Int, height: Int) -> Data {
+    private func bigPNG(width: Int, height: Int) throws -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
@@ -13,11 +13,11 @@ final class ImageDownscaleTests: XCTestCase {
                 UIColor.systemTeal.setFill()
                 ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
             }
-        return image.pngData()!
+        return try XCTUnwrap(image.pngData())
     }
 
     func testABigPhotoIsMadeSmallAndJPEG() throws {
-        let jpeg = try XCTUnwrap(ImageDownscale.jpeg(from: bigPNG(width: 6000, height: 4000),
+        let jpeg = try XCTUnwrap(ImageDownscale.jpeg(from: try bigPNG(width: 6000, height: 4000),
                                                     maxPixel: 2048))
         XCTAssertEqual(Array(jpeg.prefix(2)), [0xFF, 0xD8])
         let image = try XCTUnwrap(UIImage(data: jpeg))
@@ -26,7 +26,7 @@ final class ImageDownscaleTests: XCTestCase {
     }
 
     func testASmallPhotoKeepsItsSize() throws {
-        let jpeg = try XCTUnwrap(ImageDownscale.jpeg(from: bigPNG(width: 800, height: 600),
+        let jpeg = try XCTUnwrap(ImageDownscale.jpeg(from: try bigPNG(width: 800, height: 600),
                                                     maxPixel: 2048))
         let image = try XCTUnwrap(UIImage(data: jpeg))
         XCTAssertEqual(image.size.width * image.scale, 800)

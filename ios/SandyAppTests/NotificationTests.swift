@@ -30,8 +30,8 @@ final class FakeScheduler: NotificationScheduler {
 /// Audit batch nine: notifications on the phone.
 @MainActor
 final class NotificationTests: XCTestCase {
-    private var fake: FakeScheduler!
-    private var original: NotificationScheduler!
+    private lazy var fake = FakeScheduler()
+    private var original: NotificationScheduler?
     private var savedPrefs: Data?
     private let notes = NotificationManager.shared
 
@@ -40,17 +40,15 @@ final class NotificationTests: XCTestCase {
         savedPrefs = UserDefaults.standard.data(forKey: "notifications.prefs")
         NotificationPrefs().save()
         original = notes.center
-        fake = FakeScheduler()
         notes.center = fake
         notes.sessionBegan()
         NotificationManager.armDelay = 0
-        api = TestClient.make()
         api.token = SessionTests.token("notes-\(UUID().uuidString.prefix(8))")
         notes.client = { [unowned self] in self.api }
         StubNetwork.install(json: "{}")
     }
 
-    private var api: APIClient!
+    private lazy var api = TestClient.make()
 
     /// The bodies of what went to `path`, in order.
     private func sent(_ path: String) -> [[String: Any]] {
@@ -71,7 +69,7 @@ final class NotificationTests: XCTestCase {
 
     override func tearDown() async throws {
         notes.clearForSignOut()
-        notes.center = original
+        if let original { notes.center = original }
         if let savedPrefs { UserDefaults.standard.set(savedPrefs, forKey: "notifications.prefs") }
         else { UserDefaults.standard.removeObject(forKey: "notifications.prefs") }
         Outbox.shared.discard()

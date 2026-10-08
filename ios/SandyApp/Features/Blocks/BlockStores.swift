@@ -860,7 +860,11 @@ final class LogStore: LoadableStore {
             if let i = rows.firstIndex(where: { $0.id == entry.id }) { rows[i] = entry }
         }
         everywhere(kind: entry.kind, userId: userId, put)
-        for store in live.all where store.found != nil { put(&store.found!) }
+        for store in live.all {
+            guard var rows = store.found else { continue }
+            put(&rows)
+            store.found = rows
+        }
     }
 
     func add(api: APIClient, kind: String, text: String, amount: Double?, category: String? = nil,

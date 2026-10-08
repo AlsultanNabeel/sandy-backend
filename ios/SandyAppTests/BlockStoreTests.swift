@@ -4,11 +4,10 @@ import XCTest
 /// Audit batch four: the block stores keep what the user just did.
 @MainActor
 final class BlockStoreTests: XCTestCase {
-    private var api: APIClient!
+    private lazy var api = TestClient.make()
 
     override func setUp() async throws {
         try await super.setUp()
-        api = TestClient.make()
         api.token = SessionTests.token("blocks-\(UUID().uuidString.prefix(8))")
     }
 

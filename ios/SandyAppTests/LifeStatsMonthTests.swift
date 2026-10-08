@@ -7,7 +7,7 @@ import XCTest
 final class LifeStatsMonthTests: XCTestCase {
     func testThisMonthIsTheGregorianMonthOnAHijriPhone() throws {
         var hijri = Calendar(identifier: .islamicUmmAlQura)
-        hijri.timeZone = TimeZone(identifier: "Asia/Riyadh")!
+        hijri.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Riyadh"))
         var greg = Calendar(identifier: .gregorian)
         greg.timeZone = hijri.timeZone
         // 25 Oct 2026; 2 Oct 2026 is in the same Gregorian month and the previous Hijri one.
