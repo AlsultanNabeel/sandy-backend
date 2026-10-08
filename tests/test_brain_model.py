@@ -4,6 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace as NS
 
 from app.brain import model
+from app.integrations import openai_client
 
 
 def _msg(content=None, calls=()):
@@ -43,8 +44,20 @@ def test_primary_down_falls_to_openai_direct(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("azure down")
 
+    # Azure as the primary is what the fallback hangs on; set here, not by a local .env.
+    monkeypatch.setattr(openai_client, "azure_is_primary", lambda: True)
     monkeypatch.setattr(model, "_primary", boom)
     monkeypatch.setattr(model, "_openai_direct", lambda m, t: _resp(_msg("من الاحتياطي")))
     assert model.complete([], []).text == "من الاحتياطي"
     monkeypatch.setattr(model, "_openai_direct", lambda m, t: None)
+    assert model.complete([], []) is None
+
+
+def test_with_openai_direct_as_the_primary_there_is_no_second_try(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("openai down")
+
+    monkeypatch.setattr(openai_client, "azure_is_primary", lambda: False)
+    monkeypatch.setattr(model, "_primary", boom)
+    monkeypatch.setattr(model, "_openai_direct", lambda m, t: _resp(_msg("مرة تانية")))
     assert model.complete([], []) is None

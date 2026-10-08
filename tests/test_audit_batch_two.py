@@ -44,9 +44,12 @@ def test_an_iso_time_in_the_past_or_too_far_is_refused(brain_db):  # noqa: F811
     from datetime import datetime, timedelta
 
     from app.brain import when
+    from app.utils.time import USER_TZ
 
-    now = datetime.now().replace(microsecond=0)
     with active_user_profile_context(A):
+        # A written time with no zone is his clock, so the test writes it on his clock,
+        # not the machine's (CI runs on UTC).
+        now = datetime.now(USER_TZ).replace(microsecond=0, tzinfo=None)
         assert when.parse_when((now - timedelta(hours=1)).isoformat()) is None, \
             "a reminder an hour ago was saved for ten at night"
         assert when.parse_when((now + timedelta(days=500)).isoformat()) is None
