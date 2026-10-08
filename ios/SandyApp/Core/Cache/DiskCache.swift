@@ -5,7 +5,7 @@ import Foundation
 enum DiskCache {
     private static let queue = DispatchQueue(label: "sandy.diskcache", qos: .utility)
 
-    private static var root: URL? {
+    static var root: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("SandyCache", isDirectory: true)
     }

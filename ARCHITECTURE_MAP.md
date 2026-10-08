@@ -1523,7 +1523,9 @@ the misses were «خلص الحليب» and «لازم أخلص التقرير»
 «ذكريني كل يوم» made a habit instead of a reminder.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
-run's log, result bundle and failed tests by name in `ios/test-results/` (not in git).
+run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
+bundle's principal class (`SandyAppTests/TestRun.swift`, `INFOPLIST_KEY_NSPrincipalClass`)
+removes the cache folders of the accounts the tests made once the run ends.
 
 CI (`.github/workflows/tests.yml`): pytest with coverage → Codecov → `bandit -ll`
 → `ruff check` → a secret scan that fails the build if a `.env`, key, or
