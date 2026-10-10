@@ -1403,7 +1403,9 @@ static void barge_in(const char *why) {
     s_squelch_until_ms = now_ms() + SPK_SQUELCH_MS;  // stale tail only
     s_rx_has_carry = false;
     s_spk_flush = true;
-    s_last_rx_audio_ms = 0;   // kill the half-duplex tail now
+    // End the half-duplex tail now, but keep it a time: zero sent the no-reply check back to
+    // the call's opening, so stopping her after ninety seconds hung the call up.
+    s_last_rx_audio_ms = now_ms() - VOICE_HALF_DUPLEX_TAIL_MS;
     s_session_voice_ms = now_ms();
     s_barge_pending = true;
 }
