@@ -273,6 +273,8 @@ static volatile bool s_server_closed; // the server closed the socket cleanly: t
 // The server repeats {"type":"working"} while a tool runs (a search, a picture): each one keeps
 // the call open, up to VOICE_WORKING_MAX_MS from the first, so a slow tool's answer is heard.
 static volatile int64_t s_working_since;   // 0: no tool running
+// This call got an auth_ok: a drop after it is the link, before it the server was never reached.
+static volatile bool s_call_authed;
 static int64_t s_clock_started_ms;
 
 static void on_clock_sync(struct timeval *tv) {
@@ -589,6 +591,7 @@ static bool frame_mood(const char *msg, int len, sandy_mood_t *out) {
 static void on_ws_text(const char *msg, int len) {
     if (text_has(msg, len, "auth_ok")) {
         s_authed = true;
+        s_call_authed = true;
         s_auth_refused = false;
         s_preroll_due = true;       // the words said while we were connecting
         s_link_lost_ms = 0;         // back on the air, drop the grace timer
@@ -773,8 +776,9 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
         // Stalled upload dropped the link; the client reconnects itself, so the
         // session manager waits instead of hanging up.
         if (s_session_active && !s_link_lost_ms) s_link_lost_ms = now_ms();
-        // Mid-conversation: dropped link. Before auth: server unreachable.
-        status_set(SANDY_PART_LINK, s_session_active ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
+        // After this call's auth_ok: a dropped link. Before it: the server was never reached
+        // (the call is marked open as soon as the socket starts, so that was no test).
+        status_set(SANDY_PART_LINK, s_call_authed ? SANDY_ST_LINK_DROPPED : SANDY_ST_NO_SERVER);
         ESP_LOGW(TAG, "disconnected");
         break;
     default:
@@ -2102,6 +2106,7 @@ static void voice_task(void *arg) {
                 s_auth_refused = false;
                 s_server_closed = false;   // a close of the call before belongs to it
                 s_working_since = 0;
+                s_call_authed = false;
                 // One TLS session at a time (sandy_net_busy.h): wait out a short manifest fetch,
                 // else drop the wake. Held until ws_close.
                 for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {
