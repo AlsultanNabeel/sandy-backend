@@ -469,7 +469,7 @@ paired the code. **A heartbeat cannot nominate its own owner.**
 
 ### 2.9 HTTP surface
 
-88 HTTP route handlers on 71 paths, plus two WebSockets (`/voice`, `/voice/enroll`).
+89 HTTP route handlers on 72 paths, plus two WebSockets (`/voice`, `/voice/enroll`).
 All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
 Registered by explicit `register_*_api(app, …)` calls in `api/server.py` — there
 are no Flask blueprints, so **route discovery means reading `server.py`'s
@@ -482,7 +482,7 @@ Who calls what:
   account (get / reset / delete), chat (`/api/agent`, `/api/agent/stream`),
   conversations (list, create, get, rename, delete, messages, search), the blocks
   (below), `/api/summary`, `/api/kinds`, daily nudge (+ answer), devices and nodes
-  (control, IR learn, pairing, snapshots, Wi-Fi), `/api/life/focus` (+ start /
+  (control, IR learn, pairing, snapshots, Wi-Fi, the room light's arm), `/api/life/focus` (+ start /
   stop / history), `/api/life/scenes` (+ actions / apply / delete), photos
   (+ albums, file; `GET /api/photos` is a page of 200 newest first with `next` to pass back as `before`,
   its text search and the album counts run over the whole album in the database), images (`/api/image`, `/api/image/edit`, `/api/analyze-image`),
@@ -963,6 +963,7 @@ sandy/node/<node_id>/ir/learned                    captured IR code
 sandy/node/<node_id>/cam/request · command · wifi · flash · flash_level · flash_mode · stream · framesize (in)
 sandy/node/<node_id>/cam/snapshot · status · event (out)
 sandy/node/<node_id>/room/light · music            room node commands
+sandy/node/<node_id>/room/light_arm                the light arm's setup (service channel, not a device)
 sandy/node/<node_id>/room/status                   room heartbeat → ingest_status
 ```
 
@@ -1220,7 +1221,13 @@ what makes the text-size control real rather than decorative.
   the log mirror on port 23; the sale build `publish_firmware.py` makes defines
   `SANDY_RETAIL` and has neither. The room node follows the same rule for LAN upload.
 - **`firmware/room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
-  `sandy/node/<id>/room/`.
+  `sandy/node/<id>/room/`. The servo's rest, on and off angles and the press length are the
+  owner's, set from the app (Control › the node › «ضبط ذراع الضو», `RoomArmView`) through
+  `POST /api/nodes/<id>/room/light-arm` (`features/room_arm.py`) on the `room/light_arm`
+  service channel: `goto:<deg>`, `try:on|off:<rest>,<on>,<off>,<ms>` (a trial press that leaves
+  the light's state alone), `set:…` (kept in the board's NVS). Both sides check the same limits
+  (10–170°, rest at least 10° inside the two presses, 150–1500 ms); the heartbeat's `arm`
+  (`room_arm`) carries what is saved.
 
 ---
 

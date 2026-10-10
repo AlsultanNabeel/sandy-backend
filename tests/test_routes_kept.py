@@ -56,6 +56,7 @@ KEPT = {
     "/api/nodes": {"GET"},
     "/api/nodes/<node_id>": {"PATCH", "DELETE"},
     "/api/nodes/<node_id>/ir/last": {"GET"},
+    "/api/nodes/<node_id>/room/light-arm": {"POST"},
     "/api/nodes/<node_id>/ir/learn": {"POST"},
     "/api/nodes/<node_id>/snapshot": {"POST"},
     "/api/nodes/<node_id>/snapshot/<req_id>": {"GET"},

@@ -6,6 +6,7 @@
   PATCH/DELETE /api/nodes/<node_id> · POST /api/nodes/<node_id>/wifi {ssid,password,board?}
   POST /api/nodes/<node_id>/snapshot · GET /api/nodes/<node_id>/snapshot/<req_id>
   POST /api/nodes/<node_id>/ir/learn · GET /api/nodes/<node_id>/ir/last
+  POST /api/nodes/<node_id>/room/light-arm {action, angle | rest,on,off,hold_ms}
   POST /api/cam/upload (HMAC, no session) · GET /api/diagnose
 """
 
@@ -616,6 +617,15 @@ def register_devices_api(app, mongo_db=None):
         except Exception:  # noqa: BLE001
             sent = False
         return jsonify({"ok": True, "sent": sent}), 200
+
+    @app.route("/api/nodes/<node_id>/room/light-arm", methods=["POST"])
+    @require_tenant
+    def api_node_room_light_arm(claims, node_id):
+        """The room light's arm: move it, try a press, or save its angles and hold (room_arm)."""
+        from app.features.room_arm import command
+
+        reply, status = command(node_id, request.get_json(silent=True) or {})
+        return jsonify(reply), status
 
     @app.route("/api/nodes/<node_id>/ir/last", methods=["GET"])
     @require_tenant

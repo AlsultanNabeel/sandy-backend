@@ -110,7 +110,7 @@ class RoomDeviceClient:
     # Exact allowlist of service channels (full match, not substring).
     _SERVICE_CHANNELS = frozenset({
         "cam/command", "cam/request", "cam/wifi", "wifi", "screen_img",
-        "factory_reset", "pair_code",
+        "factory_reset", "pair_code", "room/light_arm",
     })
     _SERVICE_TOPIC = re.compile(r"^sandy/node/([a-z0-9]{1,64})/(.+)$")
 

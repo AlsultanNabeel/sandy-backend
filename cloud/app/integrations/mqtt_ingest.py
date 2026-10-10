@@ -239,7 +239,7 @@ def _ingest_room_status(node_id: str, payload: str) -> None:
     ]
 
     telemetry = {f"room_{k}": v for k, v in data.items()
-                 if k in ("ip", "board", "light", "rssi", "fw", "uptime_s", "heap")}
+                 if k in ("ip", "board", "light", "rssi", "fw", "uptime_s", "heap", "arm")}
     telemetry["room_online"] = True
     ingest_status(
         node_id,

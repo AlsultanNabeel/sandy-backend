@@ -125,6 +125,8 @@ _TELEMETRY_KEYS = {
     "cam_fw": str, "cam_online": bool, "cam_stream_key": str,
     "room_ip": str, "room_board": str, "room_light": str,
     "room_fw": str, "room_online": bool, "room_uptime_s": int, "room_heap": int,
+    # The light arm's saved setup, "rest,on,off,hold_ms" (features/room_arm.py).
+    "room_arm": str,
     "ssid": str,
     # dBm; below about -75 the link can't carry live voice.
     "rssi": int, "room_rssi": int,
