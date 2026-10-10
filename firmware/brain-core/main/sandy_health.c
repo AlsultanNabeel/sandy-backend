@@ -11,6 +11,7 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -31,16 +32,18 @@ typedef struct {
     uint32_t magic;
     uint32_t crashes;   // crash restarts in a row, none followed by a stable run
     uint32_t ours;      // health_restart() was the last restart
+    char starved[64];   // the tasks the watchdog last caught, said once at the next boot
 } guard_t;
 static RTC_NOINIT_ATTR guard_t s_guard;
 
 static bool s_safe;
+static char s_caught[sizeof(((guard_t *)0)->starved)];   // what the watchdog caught last boot
 static uint32_t s_boots;   // restarts since the first boot, from the settings store
 
 // Tasks whose stack headroom the heartbeat reports: ours, and the libraries' that carry
 // the network. A name not running (feature off, not started yet) is skipped.
 static const char *const STACK_TASKS[] = {
-    "main", "voice", "voice_mic", "voice_proc", "voice_spk", "voice_tx", "lvgl",
+    "main", "voice", "voice_mic", "voice_feed", "voice_proc", "voice_spk", "voice_tx", "lvgl",
     "mqtt_status", "mqtt_task", "websocket_task", "wifi_retry", "ota_health", "ota_check",
     "servo_gest", "buzzer", "led_fx", "nvs_defer", "ir_rx", "provision", "health",
 };
@@ -59,13 +62,35 @@ static void stable_cb(void *arg) {
     s_guard.crashes = 0;
 }
 
+// The watchdog's own report goes to the serial port only; this keeps the names of the
+// tasks it caught for the next boot's log, which also reaches the network log.
+static void IRAM_ATTR keep_starved(void *opaque, const char *msg) {
+    (void)opaque;
+    if (msg[0] == 'T') return;   // the heading, "Task watchdog got triggered…": names only
+    size_t at = strnlen(s_guard.starved, sizeof(s_guard.starved) - 1);
+    while (*msg && at < sizeof(s_guard.starved) - 1) s_guard.starved[at++] = *msg++;
+    s_guard.starved[at] = '\0';
+}
+
+void IRAM_ATTR esp_task_wdt_isr_user_handler(void) {
+    s_guard.starved[0] = '\0';
+    int cpus = 0;
+    esp_task_wdt_print_triggered_tasks(keep_starved, NULL, &cpus);
+}
+
 void health_boot(void) {
     const esp_reset_reason_t r = esp_reset_reason();
     if (s_guard.magic != GUARD_MAGIC || r == ESP_RST_POWERON) {
         s_guard.magic = GUARD_MAGIC;
         s_guard.crashes = 0;
         s_guard.ours = 0;
+        s_guard.starved[0] = '\0';
     }
+    if (r == ESP_RST_TASK_WDT && s_guard.starved[0]) {
+        // Said by the monitor, once the network log is up to carry it.
+        memcpy(s_caught, s_guard.starved, sizeof(s_caught) - 1);
+    }
+    s_guard.starved[0] = '\0';
     const bool ours = r == ESP_RST_SW && s_guard.ours;
     s_guard.ours = 0;
     if (is_crash(r) || ours) s_guard.crashes++;
@@ -152,6 +177,10 @@ static void monitor_task(void *arg) {
     for (;;) {
         health_feed();
         vTaskDelay(pdMS_TO_TICKS(2000));
+        if (s_caught[0]) {
+            ESP_LOGE(TAG, "the watchdog restarted her; it caught:%s", s_caught);
+            s_caught[0] = '\0';
+        }
         check_stacks();
         const int64_t now = esp_timer_get_time() / 1000;
         const size_t free_b = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
