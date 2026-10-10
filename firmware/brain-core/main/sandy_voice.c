@@ -141,8 +141,8 @@ static volatile int s_ear_l, s_ear_r;
 // When the WS dropped mid-session (0 = up). Outside the wake-word guard: always written.
 static volatile int64_t s_link_lost_ms;
 
-// Server refused this device (key or clock). Latched until the back-off passes,
-// instead of retrying every five seconds.
+// Server refused this device (key or clock). Holds wake words off until the back-off
+// passes, instead of retrying every five seconds; the next call clears it.
 static volatile bool    s_auth_refused;
 static volatile int64_t s_auth_refused_at;
 #define VOICE_AUTH_BACKOFF_MS  (10 * 60 * 1000)
@@ -2059,6 +2059,10 @@ static void voice_task(void *arg) {
                 VOICE_LED(LED_STATE_IDLE);
             } else if (s_wake_req) {
                 s_wake_req = false;
+                // The back-off is over: this call is a fresh try, and only a refusal of it
+                // may end it. Left latched, the session manager closed every call a tick
+                // after it opened, and her voice was gone until the power was cut.
+                s_auth_refused = false;
                 // One TLS session at a time (sandy_net_busy.h): wait out a short manifest fetch,
                 // else drop the wake. Held until ws_close.
                 for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {
