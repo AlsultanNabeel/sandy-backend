@@ -167,6 +167,8 @@
 #define VOICE_SESSION_IDLE_MS      8000
 // A call never outlives this, whatever the room says.
 #define VOICE_SESSION_MAX_MS       (20 * 60 * 1000)
+// A tool the server is running (it says "working") keeps the call open this long at most.
+#define VOICE_WORKING_MAX_MS       60000
 // Talk going on with no reply from her this long is not a conversation with her.
 #define VOICE_NO_REPLY_MS          90000
 // Allowed time for a mid-call reconnect (~5 s) before giving up the conversation.

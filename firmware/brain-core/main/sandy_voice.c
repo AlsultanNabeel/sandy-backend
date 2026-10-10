@@ -270,6 +270,9 @@ static volatile bool s_clock_bad;    // the server said our time is off: resync 
 static volatile bool s_not_paired;   // the server opens no call: no account paired this board
 static volatile bool s_server_failed; // the server failed on its side: end the call, no back-off
 static volatile bool s_server_closed; // the server closed the socket cleanly: the call is over
+// The server repeats {"type":"working"} while a tool runs (a search, a picture): each one keeps
+// the call open, up to VOICE_WORKING_MAX_MS from the first, so a slow tool's answer is heard.
+static volatile int64_t s_working_since;   // 0: no tool running
 static int64_t s_clock_started_ms;
 
 static void on_clock_sync(struct timeval *tv) {
@@ -656,6 +659,10 @@ static void on_ws_text(const char *msg, int len) {
         s_clock_bad = true;
         status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
         ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
+    } else if (text_has(msg, len, "\"working\"")) {
+        const int64_t t = now_ms();
+        if (!s_working_since) s_working_since = t;
+        if (t - s_working_since < VOICE_WORKING_MAX_MS) s_session_voice_ms = t;
     } else if (text_has(msg, len, "server_error")) {
         // The server's fault (a database read, its storage key): not ours, so no lockout and
         // the key is kept; the call ends now instead of fifteen seconds of listening to nobody.
@@ -720,6 +727,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
             if (ev->data_len > 0 && now_ms() >= s_squelch_until_ms &&
                 xSemaphoreTake(s_spk_wr_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_last_rx_audio_ms = now_ms();
+                s_working_since = 0;   // her answer is here: the tool is done
                 const uint8_t *p = (const uint8_t *)ev->data_ptr;
                 size_t len = (size_t)ev->data_len;
                 s_spk_rx_bytes += len;
@@ -2088,6 +2096,7 @@ static void voice_task(void *arg) {
                 // after it opened, and her voice was gone until the power was cut.
                 s_auth_refused = false;
                 s_server_closed = false;   // a close of the call before belongs to it
+                s_working_since = 0;
                 // One TLS session at a time (sandy_net_busy.h): wait out a short manifest fetch,
                 // else drop the wake. Held until ws_close.
                 for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {

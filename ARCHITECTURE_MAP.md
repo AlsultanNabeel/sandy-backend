@@ -744,6 +744,11 @@ keeps a moment after speaking. The names are the firmware's `MOOD_MAP`
 `end_turn` face for `AFTER_FACE_MS` (2.5 s) before listening again; a barge-in drops
 both. Firmware that predates it ignores both frames.
 
+**While a tool runs** (a search, a picture), the server sends `{"type":"working"}` to the
+device at once and every `_WORKING_EVERY_S` (3 s) until the tool calls return: the app shows a
+line, and the robot keeps the call open on each (`VOICE_WORKING_MAX_MS`, 60 s, at most), since
+its eight-second idle limit used to close a call before a slow tool's answer.
+
 **A call ends by itself on the server too** (`session._call_watchdog`), for the robot and the
 app alike: `call_idle` after `SANDY_CALL_IDLE_S` (90 s) with neither the user's voice (a pitched
 frame, so a TV or a fan does not count) nor hers, and `call_time_limit` at `SANDY_CALL_MAX_MIN`
@@ -865,7 +870,8 @@ The paid cloud link is open **only** between a wake word and the silence after i
    was a real deadlock once; do not reverse it.
 3. `ws_open()` → hello → `auth_ok` → `MOOD_FOCUSED`, streaming.
 4. Silence for `VOICE_SESSION_IDLE_MS` (8 s) → close, reload the command model,
-   back to idle.
+   back to idle. A `working` frame (a tool running on the server) counts as activity for up to
+   `VOICE_WORKING_MAX_MS`.
 5. Link lost mid-call → `VOICE_RECONNECT_GRACE_MS` (15 s) of grace before hanging
    up, so a blip does not end a sentence.
 6. Two caps the room cannot stretch: `VOICE_SESSION_MAX_MS` (20 min) for any call, and

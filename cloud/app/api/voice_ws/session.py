@@ -818,6 +818,17 @@ _UNHEARD_QUESTION = "(سؤال صوتي ما انكتب نصّه)"
 _HAS_LETTERS = re.compile(r"[^\W\d_]")
 
 
+# «عم أشتغل» كل هالقد والأداة شغّالة: أقل من مهلة السكون بالروبوت (تمن ثواني) بكتير.
+_WORKING_EVERY_S = 3.0
+
+
+async def _keep_saying_working(send_msg, every: float = _WORKING_EVERY_S) -> None:
+    """Repeat {"type": "working"} until cancelled (when the tool calls return)."""
+    while True:
+        await asyncio.sleep(every)
+        await send_msg({"type": "working"})
+
+
 def _she_has_not_spoken_yet(state: Dict[str, Any]) -> bool:
     """سكّرنا الدور، وهي لسا ما طلع منها ولا صوت."""
     closed = state.get("turn_closed_at")
@@ -1362,49 +1373,54 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
 
         # Tool calls: dispatch them and return the result to Live.
         if response.tool_call:
-            # للتطبيق بس: «لحظة، عم دوّر» وقت الأداة بدل ما تبيّن معلّقة.
-            if get_voice_channel() == _APP_CHANNEL:
-                await send_msg({"type": "working"})
-            fn_responses: List[types.FunctionResponse] = []
-            for fc in response.tool_call.function_calls:
-                # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.
-                if gate_on and _is_sensitive_call(fc.name, dict(fc.args or {})):
-                    verified = await loop.run_in_executor(
-                        None, _verify_owner, recent.snapshot(), get_voice_identity()
+            # «لحظة، عم دوّر» وقت الأداة: التطبيق بيعرض جملة، والروبوت بيمدّد مهلة السكون
+            # عليها. بتتكرّر لحد ما ترجع الأدوات، وإلا أداة أبطأ من تمن ثواني (بحث، صورة)
+            # بتسكّر جلسة الروبوت قبل الرد، والأداة بتنحسب وما حدا بيسمع نتيجتها.
+            await send_msg({"type": "working"})
+            keep_working = asyncio.ensure_future(_keep_saying_working(send_msg))
+            try:
+                fn_responses: List[types.FunctionResponse] = []
+                for fc in response.tool_call.function_calls:
+                    # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.
+                    if gate_on and _is_sensitive_call(fc.name, dict(fc.args or {})):
+                        verified = await loop.run_in_executor(
+                            None, _verify_owner, recent.snapshot(), get_voice_identity()
+                        )
+                        if verified is None:
+                            fn_responses.append(types.FunctionResponse(
+                                id=fc.id, name=fc.name,
+                                response={"output": (
+                                    "[لم يُنفَّذ] التحقق من الصوت مش جاهز هلّق. لا تنفّذي "
+                                    "الأمر — قولي إنك مش قادرة تتأكدي من صوته هلّق، "
+                                    "وخلّيه يجرّب كمان شوي."
+                                )},
+                            ))
+                            continue
+                        if not verified:
+                            fn_responses.append(types.FunctionResponse(
+                                id=fc.id, name=fc.name,
+                                response={"output": (
+                                    "ما قدرت أتأكد إنه صوتك. لا تنفّذي الأمر — "
+                                    "اسألي بلطف: مين معي؟"
+                                )},
+                            ))
+                            continue
+                    # Deletes and bulk changes hold for `confirm` inside the brain.
+                    # The identity travels with the tool call.
+                    result = await loop.run_in_executor(
+                        tools_pool, _dispatch_tool, fc.name,
+                        dict(fc.args or {}), get_voice_identity()
                     )
-                    if verified is None:
-                        fn_responses.append(types.FunctionResponse(
-                            id=fc.id, name=fc.name,
-                            response={"output": (
-                                "[لم يُنفَّذ] التحقق من الصوت مش جاهز هلّق. لا تنفّذي "
-                                "الأمر — قولي إنك مش قادرة تتأكدي من صوته هلّق، "
-                                "وخلّيه يجرّب كمان شوي."
-                            )},
-                        ))
-                        continue
-                    if not verified:
-                        fn_responses.append(types.FunctionResponse(
-                            id=fc.id, name=fc.name,
-                            response={"output": (
-                                "ما قدرت أتأكد إنه صوتك. لا تنفّذي الأمر — "
-                                "اسألي بلطف: مين معي؟"
-                            )},
-                        ))
-                        continue
-                # Deletes and bulk changes hold for `confirm` inside the brain.
-                # The identity travels with the tool call.
-                result = await loop.run_in_executor(
-                    tools_pool, _dispatch_tool, fc.name,
-                    dict(fc.args or {}), get_voice_identity()
-                )
-                fn_responses.append(
-                    types.FunctionResponse(
-                        id=fc.id,
-                        name=fc.name,
-                        response={"output": result.get("reply", "")},
+                    fn_responses.append(
+                        types.FunctionResponse(
+                            id=fc.id,
+                            name=fc.name,
+                            response={"output": result.get("reply", "")},
+                        )
                     )
-                )
-            await session.send_tool_response(function_responses=fn_responses)
+                await session.send_tool_response(function_responses=fn_responses)
+            finally:
+                keep_working.cancel()
 
         # Server is going away: stop relaying.
         if response.go_away:
