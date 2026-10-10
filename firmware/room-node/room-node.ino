@@ -51,14 +51,22 @@
 
 // ===== إعدادات =====
 #define SERVO_PIN        13      // إشارة السيرفو (برتقالي)
+// الافتراضي؛ صاحب اللوح بيضبطها من التطبيق (room/light_arm) وبتنحفظ بالذاكرة.
 #define LIGHT_REST_ANGLE 120     // النص: الذراع أفقي بلا كبس (مرجع الكبس)
 #define LIGHT_ON_ANGLE   80      // كبسة أعلى القلّاب = تشغيل
 #define LIGHT_OFF_ANGLE  160     // كبسة أسفل القلّاب = إطفاء
 #define PRESS_HOLD_MS    400     // مدة كل مرحلة من الكبسة
+// حدود الضبط: برّاها السيرفو بيضرب بآخره، والكبسة القصيرة ما بتوصل.
+#define ARM_ANGLE_MIN    10
+#define ARM_ANGLE_MAX    170
+#define ARM_GAP_MIN      10      // الراحة بعيدة عن الكبستين هالقد على الأقل
+#define ARM_HOLD_MIN_MS  150
+#define ARM_HOLD_MAX_MS  1500
+#define ARM_JOG_HOLD_MS  2000    // «حرّك لزاوية»: بيضل هناك هالقد وبعدين بيرتاح
 #define OTA_HOSTNAME     "sandy-room"
 // بيروحوا بكل نبضة.
 #define SANDY_ROOM_BOARD_ID   "sandy-room-node"
-#define SANDY_ROOM_FW_VERSION "0.4.1"
+#define SANDY_ROOM_FW_VERSION "0.5.0"
 
 // DFPlayer Mini — تسلسلي 9600 على UART2
 #define DF_PIN_ESP_RX      26    // ESP RX  ← وصّل DF TX
@@ -83,6 +91,9 @@
 #define CLOCK_SANE_EPOCH            1700000000L
 #define ROOM_NVS                    "sandyroom"
 
+// زوايا الذراع ومدة الكبسة. قبل أي دالة: أردوينو بيحط تعريفات الدوال فوقها.
+struct ArmSetup { int rest, on, off, holdMs; };
+
 // ===== globals =====
 static WiFiClientSecure g_tcp;
 static PubSubClient     g_mqtt(g_tcp);
@@ -105,16 +116,22 @@ static void feedWatchdog() { esp_task_wdt_reset(); }
 // ===== الإضاءة: كبسة سيرفو بمراحل بلا delay =====
 // الحلقة ما بتوقف، والأمر الجديد وقت الكبسة بيستبدل اللي مستني.
 
-enum PressPhase { PRESS_IDLE, PRESS_REST, PRESS_PUSH, PRESS_BACK };
+static ArmSetup g_arm = { LIGHT_REST_ANGLE, LIGHT_ON_ANGLE, LIGHT_OFF_ANGLE, PRESS_HOLD_MS };
+
+enum PressPhase { PRESS_IDLE, PRESS_REST, PRESS_PUSH, PRESS_BACK, PRESS_JOG };
 static PressPhase    g_pressPhase   = PRESS_IDLE;
 static unsigned long g_pressStepMs  = 0;
 static int           g_pressTarget  = -1;   // 1 = تشغيل، 0 = إطفاء
 static int           g_pressPending = -1;   // أمر وصل وقت الكبسة
+static ArmSetup      g_pressArm;            // زوايا هالكبسة (المحفوظة، أو المجرّبة)
+static bool          g_pressTrial   = false; // تجربة: ما بتغيّر حالة الضو
 
-static void pressStart(int on) {
+static void pressStart(int on, const ArmSetup& arm, bool trial) {
   g_pressTarget = on;
+  g_pressArm    = arm;
+  g_pressTrial  = trial;
   g_servo.attach(SERVO_PIN);
-  g_servo.write(LIGHT_REST_ANGLE);   // ابدأ من النص: كل أمر حركة حقيقية
+  g_servo.write(arm.rest);           // ابدأ من النص: كل أمر حركة حقيقية
   g_pressPhase  = PRESS_REST;
   g_pressStepMs = millis();
 }
@@ -124,25 +141,35 @@ static void pressLoop() {
     if (g_pressPending >= 0) {
       int next = g_pressPending;
       g_pressPending = -1;
-      pressStart(next);
+      pressStart(next, g_arm, false);
     }
     return;
   }
-  if (millis() - g_pressStepMs < PRESS_HOLD_MS) return;
+  if (g_pressPhase == PRESS_JOG) {
+    if (millis() - g_pressStepMs < ARM_JOG_HOLD_MS) return;
+    g_servo.detach();
+    g_pressPhase = PRESS_IDLE;
+    return;
+  }
+  if (millis() - g_pressStepMs < (unsigned long)g_pressArm.holdMs) return;
   g_pressStepMs = millis();
   switch (g_pressPhase) {
     case PRESS_REST:
-      g_servo.write(g_pressTarget ? LIGHT_ON_ANGLE : LIGHT_OFF_ANGLE);
+      g_servo.write(g_pressTarget ? g_pressArm.on : g_pressArm.off);
       g_pressPhase = PRESS_PUSH;
       break;
     case PRESS_PUSH:
-      g_servo.write(LIGHT_REST_ANGLE);   // ارجع للنص: ما يعيق الكبس باليد
+      g_servo.write(g_pressArm.rest);    // ارجع للنص: ما يعيق الكبس باليد
       g_pressPhase = PRESS_BACK;
       break;
     case PRESS_BACK:
       g_servo.detach();                  // بلا طنين، والمفتاح حرّ باليد
-      g_lightState = g_pressTarget ? "on" : "off";
-      Serial.printf("[LIGHT] %s\n", g_lightState);
+      if (g_pressTrial) {
+        Serial.printf("[ARM] تجربة كبسة %s خلصت\n", g_pressTarget ? "تشغيل" : "إطفاء");
+      } else {
+        g_lightState = g_pressTarget ? "on" : "off";
+        Serial.printf("[LIGHT] %s\n", g_lightState);
+      }
       g_pressPhase = PRESS_IDLE;
       // نفس الحالة مرتين = كبسة وحدة.
       if (g_pressPending == g_pressTarget) g_pressPending = -1;
@@ -171,8 +198,84 @@ static void handleLight(const String& value) {
     Serial.printf("[LIGHT] أمر مش مفهوم، انتجاهل: %.20s\n", value.c_str());
     return;
   }
-  if (g_pressPhase == PRESS_IDLE) pressStart(on);
+  if (g_pressPhase == PRESS_IDLE || g_pressPhase == PRESS_JOG) pressStart(on, g_arm, false);
   else g_pressPending = on;
+}
+
+// ---- ضبط الذراع (room/light_arm) — من التطبيق، مش جهاز معلن ----
+//   goto:<زاوية>                      حرّك وخلّيه هناك شوي (ليشوف صاحب اللوح وين صار)
+//   try:on|off:<راحة>,<تشغيل>,<إطفاء>,<مدة>  كبسة كاملة بقيم مش محفوظة؛ حالة الضو ما بتتغيّر
+//   set:<راحة>,<تشغيل>,<إطفاء>,<مدة>         احفظ واستعمل
+static bool parseArm(const String& csv, ArmSetup* out) {
+  int v[4], at = 0;
+  for (int k = 0; k < 4; k++) {
+    int comma = csv.indexOf(',', at);
+    String part = comma < 0 ? csv.substring(at) : csv.substring(at, comma);
+    // المدة أربع خانات، فمش parseBoundedInt (لحد تلاتة).
+    if (part.length() == 0 || part.length() > 4) return false;
+    for (size_t c = 0; c < part.length(); c++) if (!isDigit(part[c])) return false;
+    v[k] = part.toInt();
+    if ((comma < 0) != (k == 3)) return false;
+    at = comma + 1;
+  }
+  ArmSetup a = { v[0], v[1], v[2], v[3] };
+  const bool angles = a.rest >= ARM_ANGLE_MIN && a.rest <= ARM_ANGLE_MAX &&
+                      a.on   >= ARM_ANGLE_MIN && a.on   <= ARM_ANGLE_MAX &&
+                      a.off  >= ARM_ANGLE_MIN && a.off  <= ARM_ANGLE_MAX;
+  // الراحة بين الكبستين وبعيدة عنهم، وإلا كبسة وحدة بتعمل التنتين.
+  const int lo = a.on < a.off ? a.on : a.off, hi = a.on < a.off ? a.off : a.on;
+  const bool between = a.rest - lo >= ARM_GAP_MIN && hi - a.rest >= ARM_GAP_MIN;
+  const bool hold = a.holdMs >= ARM_HOLD_MIN_MS && a.holdMs <= ARM_HOLD_MAX_MS;
+  if (!angles || !between || !hold) return false;
+  *out = a;
+  return true;
+}
+
+static void loadArm() {
+  Preferences p;
+  if (!p.begin(ROOM_NVS, true)) return;
+  ArmSetup a = { p.getUChar("arm_rest", LIGHT_REST_ANGLE), p.getUChar("arm_on", LIGHT_ON_ANGLE),
+                 p.getUChar("arm_off", LIGHT_OFF_ANGLE), p.getUShort("arm_hold", PRESS_HOLD_MS) };
+  p.end();
+  char csv[24];
+  snprintf(csv, sizeof(csv), "%d,%d,%d,%d", a.rest, a.on, a.off, a.holdMs);
+  if (parseArm(String(csv), &a)) g_arm = a;   // قيم تالفة بالذاكرة: الافتراضي
+  Serial.printf("[ARM] راحة %d، تشغيل %d، إطفاء %d، مدة %d\n", g_arm.rest, g_arm.on, g_arm.off, g_arm.holdMs);
+}
+
+static void handleArm(const String& value) {
+  if (g_pressPhase != PRESS_IDLE && g_pressPhase != PRESS_JOG) {
+    Serial.println("[ARM] الذراع عم يكبس هلّق — انتجاهل");
+    return;
+  }
+  int deg;
+  ArmSetup a;
+  if (value.startsWith("goto:") && parseBoundedInt(value.substring(5), ARM_ANGLE_MIN, ARM_ANGLE_MAX, &deg)) {
+    g_servo.attach(SERVO_PIN);
+    g_servo.write(deg);
+    g_pressPhase  = PRESS_JOG;
+    g_pressStepMs = millis();
+    Serial.printf("[ARM] لزاوية %d\n", deg);
+  } else if ((value.startsWith("try:on:") || value.startsWith("try:off:")) &&
+             parseArm(value.substring(value.indexOf(':', 4) + 1), &a)) {
+    pressStart(value.startsWith("try:on:") ? 1 : 0, a, true);
+  } else if (value.startsWith("set:") && parseArm(value.substring(4), &a)) {
+    Preferences p;
+    if (!p.begin(ROOM_NVS, false)) {
+      Serial.println("[ARM] الذاكرة ما فتحت — ما انحفظ");
+      return;
+    }
+    p.putUChar("arm_rest", a.rest);
+    p.putUChar("arm_on", a.on);
+    p.putUChar("arm_off", a.off);
+    p.putUShort("arm_hold", a.holdMs);
+    p.end();
+    g_arm = a;
+    g_lastStatusPubMs = 0;   // النبضة الجاية فورًا تبيّن القيم الجديدة
+    Serial.printf("[ARM] انحفظ: راحة %d، تشغيل %d، إطفاء %d، مدة %d\n", a.rest, a.on, a.off, a.holdMs);
+  } else {
+    Serial.printf("[ARM] أمر مش مفهوم: %.40s\n", value.c_str());
+  }
 }
 
 // ---- DFPlayer Mini: إطارات أوامر خام ----
@@ -342,6 +445,10 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
       return;
     }
   }
+  if (out == "light_arm") {
+    handleArm(value);
+    return;
+  }
   Serial.printf("[MQTT] لا معالج للمخرج %.16s\n", out.c_str());
 }
 
@@ -371,6 +478,11 @@ static bool mqttReconnect() {
       Serial.printf("[MQTT] الاشتراك فشل: %s\n", topic.c_str());
       ok = false;
     }
+  }
+  // ضبط الذراع: قناة خدمة، مش مخرج معلن، فما بتطلع جهاز بالتطبيق.
+  if (!g_mqtt.subscribe((g_topicBase + "/light_arm").c_str(), 1)) {
+    Serial.println("[MQTT] الاشتراك فشل: light_arm");
+    ok = false;
   }
   if (!ok) {
     // اتصال بلا اشتراك ما بيسمع شي: منعيد من الأول.
@@ -407,10 +519,11 @@ static void publishStatus() {
   int n = snprintf(buf, sizeof(buf),
                    "{\"online\":true,\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,"
                    "\"light\":\"%s\",\"ip\":\"%s\",\"board\":\"%s\",\"fw\":\"%s\","
-                   "\"outputs\":[%s]}",
+                   "\"arm\":\"%d,%d,%d,%d\",\"outputs\":[%s]}",
                    now / 1000UL, (int)WiFi.RSSI(), (unsigned)ESP.getFreeHeap(),
                    g_lightState, WiFi.localIP().toString().c_str(),
-                   SANDY_ROOM_BOARD_ID, SANDY_ROOM_FW_VERSION, outputs);
+                   SANDY_ROOM_BOARD_ID, SANDY_ROOM_FW_VERSION,
+                   g_arm.rest, g_arm.on, g_arm.off, g_arm.holdMs, outputs);
   // نبضة مقطوعة = JSON مكسور، والخادم بيرميها.
   if (n < 0 || (size_t)n >= sizeof(buf)) {
     Serial.println("[STATUS] النبضة أطول من المخزن — ما انبعتت");
@@ -485,6 +598,7 @@ void setup() {
                     WIFI_SSID, WIFI_PASSWORD);
   roomBuildTopics();
   dfSetup();
+  loadArm();
   if (g_id.wifiSsid.length()) connectWiFi();
 
   // تحقّق من شهادة الوسيط.
