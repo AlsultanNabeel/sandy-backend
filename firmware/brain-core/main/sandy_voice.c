@@ -268,6 +268,7 @@ static bool clock_is_set(void) {
 #define CLOCK_UNSET_SHOW_MS  60000   // after this long unset, she says so
 static volatile bool s_clock_bad;    // the server said our time is off: resync first
 static volatile bool s_not_paired;   // the server opens no call: no account paired this board
+static volatile bool s_server_failed; // the server failed on its side: end the call, no back-off
 static int64_t s_clock_started_ms;
 
 static void on_clock_sync(struct timeval *tv) {
@@ -654,6 +655,12 @@ static void on_ws_text(const char *msg, int len) {
         s_clock_bad = true;
         status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
         ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
+    } else if (text_has(msg, len, "server_error")) {
+        // The server's fault (a database read, its storage key): not ours, so no lockout and
+        // the key is kept; the call ends now instead of fifteen seconds of listening to nobody.
+        s_server_failed = true;
+        status_set(SANDY_PART_LINK, SANDY_ST_NO_SERVER);
+        ESP_LOGW(TAG, "the server failed on its side — the next wake word tries again");
     } else if (text_has(msg, len, "auth_fail") ||
                text_has(msg, len, "auth_not_configured") ||
                text_has(msg, len, "bad_handshake")) {
@@ -2004,10 +2011,11 @@ static void voice_task(void *arg) {
         health_feed();
         net_tick();
         clock_tick();
-        if (s_session_active && (s_auth_refused || s_clock_bad || s_not_paired)) {
+        if (s_session_active && (s_auth_refused || s_clock_bad || s_not_paired || s_server_failed)) {
             // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
+            s_server_failed = false;   // nothing to back off from: the next wake word asks again
             if (s_not_paired) {
                 // Not a fault to back off from: the next wake word asks again, so a
                 // pairing in the app takes effect at once.

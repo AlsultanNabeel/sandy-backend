@@ -782,7 +782,7 @@ actually means:
 | `auth_not_configured` | the server has no `SANDY_WS_HMAC_KEY` at all |
 | `key_unknown` | signed with `kv` 2, but the server holds no key for that board (unpaired or revoked); the board drops its key and falls back to the shared one |
 | `not_paired` | after `auth_ok`: no account has paired this board, so no call opens (nothing is billed); the board shows `NOT_PAIRED` and asks again on the next wake word, no backoff |
-| `server_error` | the server's fault, not the board's: a key record it cannot decrypt (`device_keys.KeyUnreadable`, a wrong or changed `SANDY_LTM_KEY`), any other failure on its side during the handshake (a database read), or no Gemini key. `bad_handshake` is kept for a hello that does not parse. The board keeps its key and is not locked out; the camera gets 503 `key_unreadable` for the same case, never a 401 |
+| `server_error` | the server's fault, not the board's: a key record it cannot decrypt (`device_keys.KeyUnreadable`, a wrong or changed `SANDY_LTM_KEY`), any other failure on its side during the handshake (a database read), or no Gemini key. `bad_handshake` is kept for a hello that does not parse. The board keeps its key, is not locked out, and ends the call at once (status `NO_SERVER`); the camera gets 503 `key_unreadable` for the same case, never a 401 |
 
 The `ts` must be wall-clock, so the firmware opens no session until SNTP has set the clock
 (`clock_start`: the router first, then three public servers; never blocking). A wake word
