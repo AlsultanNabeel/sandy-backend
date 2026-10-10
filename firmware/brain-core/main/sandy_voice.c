@@ -663,9 +663,12 @@ static void on_ws_text(const char *msg, int len) {
         status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
         ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
     } else if (text_has(msg, len, "\"working\"")) {
+#if ENABLE_WAKEWORD
+        // Always-on build: no idle close to hold off.
         const int64_t t = now_ms();
         if (!s_working_since) s_working_since = t;
         if (t - s_working_since < VOICE_WORKING_MAX_MS) s_session_voice_ms = t;
+#endif
     } else if (text_has(msg, len, "server_error")) {
         // The server's fault (a database read, its storage key): not ours, so no lockout and
         // the key is kept; the call ends now instead of fifteen seconds of listening to nobody.
