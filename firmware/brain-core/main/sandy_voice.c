@@ -2186,8 +2186,10 @@ static void voice_task(void *arg) {
             } else {
                 ESP_LOGW(TAG, "link did not come back in %dms, ending session",
                          VOICE_RECONNECT_GRACE_MS);
-                s_link_lost_ms = 0;
-                s_session_voice_ms = 0;   // fall into the close branch next tick
+                // Now, not on the next tick: the client's next failed reconnect lands first,
+                // sets the link lost again and starts a second grace.
+                session_heap_report();
+                session_end();
             }
         } else if (!s_playing && now_ms() - s_session_open_ms > VOICE_SESSION_MAX_MS) {
             ESP_LOGW(TAG, "session reached its %d min cap, closing", VOICE_SESSION_MAX_MS / 60000);
