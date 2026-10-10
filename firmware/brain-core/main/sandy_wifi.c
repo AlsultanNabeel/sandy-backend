@@ -324,6 +324,16 @@ esp_err_t wifi_sandy_start(void) {
     WIFI_TRY("wifi start", esp_wifi_start());
     // No modem sleep: DTIM naps turn the audio stream into bursts and choppy playback.
     WIFI_TRY("power save off", esp_wifi_set_ps(WIFI_PS_NONE));
+    // Full transmit power (20 dBm, in quarter dBm), said once so the log shows what the radio has.
+    WIFI_TRY("tx power", esp_wifi_set_max_tx_power(80));
+    {
+        int8_t q = 0;
+        wifi_ps_type_t ps = WIFI_PS_MIN_MODEM;
+        esp_wifi_get_max_tx_power(&q);
+        esp_wifi_get_ps(&ps);
+        ESP_LOGI(TAG, "radio: tx power %d.%02d dBm, power save %s", q / 4, (q % 4) * 25,
+                 ps == WIFI_PS_NONE ? "off" : "ON");
+    }
 
     xTaskCreate(_retry_task, "wifi_retry", 3072, NULL, 3, &s_retry_task);
 
