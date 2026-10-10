@@ -73,6 +73,28 @@ def lag_ms(ref: np.ndarray, mic: np.ndarray, max_ms: int = 400) -> tuple[float, 
     return (peak - k) * 1000 / RATE, sharp
 
 
+def lag_track(ref: np.ndarray, mic: np.ndarray) -> list[tuple[float, float, float]]:
+    """(time s, echo lag ms, peak sharpness) for each quarter second she talks, 700–3500 Hz.
+
+    A steady lag is a reference on the amp's clock; one that jumps cannot be cancelled.
+    """
+    win, k, n = RATE // 4, int(0.3 * RATE), 1 << 15
+    freqs = np.fft.rfftfreq(n, 1 / RATE)
+    band = (freqs > 700) & (freqs < 3500)
+    out = []
+    for s in range(k, len(ref) - win - k, win // 2):
+        r = ref[s:s + win].astype(np.float64)
+        if np.sqrt(np.mean(r * r)) < 500:
+            continue
+        cross = np.fft.rfft(mic[s - k:s + win + k].astype(np.float64), n) * np.conj(np.fft.rfft(r, n))
+        cross /= np.abs(cross) + 1e-9
+        cross[~band] = 0
+        cc = np.abs(np.fft.irfft(cross, n)[:2 * k + 1])
+        p = int(np.argmax(cc))
+        out.append((s / RATE, (p - k) * 1000 / RATE, float(cc[p] / np.median(cc))))
+    return out
+
+
 def coherence(ref: np.ndarray, mic: np.ndarray, lag: int, seg: int = 512) -> float:
     """Mean magnitude-squared coherence over 300–3400 Hz, mic shifted by the lag."""
     if lag > 0:
@@ -123,7 +145,14 @@ def analyse(feed: np.ndarray, out: np.ndarray, rows: list[dict], info: dict) -> 
         print(f"{name} mic: echo {ms:+.1f} ms after the reference (peak sharpness {sharp:.0f}) "
               f"— {verdict}; reference/echo likeness {coh:.2f}")
 
-    # The output trails the feed by the front end's own delay; compare powers over the
+    track = [t for t in lag_track(ref, left) if t[2] >= 12]
+    if track:
+        lags = np.array([t[1] for t in track])
+        print(f"echo lag per quarter second (left mic, {len(track)} clear windows): "
+              f"median {np.median(lags):+.1f} ms, from {lags.min():+.1f} to {lags.max():+.1f} ms "
+              f"({np.mean(np.abs(lags - np.median(lags)) <= 2) * 100:.0f}% within 2 ms of it)")
+
+        # The output trails the feed by the front end's own delay; compare powers over the
     # stretches where she talked, by the rows' talking flag.
     talk_out = np.zeros(len(out), dtype=bool)
     for a, b in zip(rows, rows[1:] + [None]):
@@ -159,11 +188,16 @@ def main() -> int:
     ap.add_argument("host")
     ap.add_argument("--out", default="echo_probe_out")
     ap.add_argument("--now", action="store_true", help="record at once")
+    ap.add_argument("--voice", action="store_true",
+                    help="record from the next near speech (the caller's words, no call needed)")
     ap.add_argument("--wait", type=int, default=180, help="seconds to wait for her to talk")
     a = ap.parse_args()
 
-    print(fetch(a.host, "/echo/arm?now" if a.now else "/echo/arm", 10).decode())
-    if not a.now:
+    arm = "/echo/arm?now" if a.now else "/echo/arm?voice" if a.voice else "/echo/arm"
+    print(fetch(a.host, arm, 10).decode())
+    if a.voice:
+        print("armed — speak to her now (no wake word needed)")
+    elif not a.now:
         print("armed — say the wake word now and ask her something long, then stay quiet")
     deadline = time.time() + a.wait
     while (s := status(a.host))["state"] != "done":

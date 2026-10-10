@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "sandy_audio_ctl.h"
+#include "sandy_voice.h"
 
 static const char *TAG = "echo_probe";
 
@@ -17,7 +18,7 @@ static const char *TAG = "echo_probe";
 #define PROBE_ROWS      2048           // one per fetched chunk (~32 ms): ten seconds is ~320
 #define SEND_PIECE      4096
 
-typedef enum { PROBE_IDLE, PROBE_ARMED, PROBE_REC, PROBE_DONE } probe_state_t;
+typedef enum { PROBE_IDLE, PROBE_ARMED, PROBE_ARMED_VOICE, PROBE_REC, PROBE_DONE } probe_state_t;
 
 typedef struct {
     uint32_t at_ms;      // since the recording started
@@ -63,7 +64,9 @@ void echo_probe_feed(const int16_t *lrr, int frames) {
 
 void echo_probe_out(const int16_t *pcm, int frames, bool talking, bool vad, bool speech,
                     int level, int bar, bool barge) {
-    if (s_state == PROBE_ARMED && talking) start_recording();
+    if ((s_state == PROBE_ARMED && talking) || (s_state == PROBE_ARMED_VOICE && speech)) {
+        start_recording();
+    }
     if (s_state != PROBE_REC || s_out_n >= PROBE_SAMPLES) return;
     if (!s_out_n) s_out_t0_us = esp_timer_get_time();
     if (s_rows_n < PROBE_ROWS) {
@@ -85,6 +88,7 @@ void echo_probe_out(const int16_t *pcm, int frames, bool talking, bool vad, bool
 static const char *state_name(void) {
     switch (s_state) {
     case PROBE_ARMED: return "armed";
+    case PROBE_ARMED_VOICE: return "armed for a voice";
     case PROBE_REC:   return "recording";
     case PROBE_DONE:  return "done";
     default:          return "idle";
@@ -108,6 +112,10 @@ static esp_err_t arm_get(httpd_req_t *req) {
     s_state = PROBE_IDLE;
     if (strstr(q, "now")) {
         start_recording();
+    } else if (strstr(q, "voice")) {
+        // What the uplink makes of the caller's own words: from the first near speech.
+        s_state = PROBE_ARMED_VOICE;
+        ESP_LOGW(TAG, "armed: recording starts at the next near speech");
     } else {
         s_state = PROBE_ARMED;
         ESP_LOGW(TAG, "armed: recording starts when she starts talking");
@@ -171,6 +179,13 @@ static esp_err_t frames_get(httpd_req_t *req) {
     return httpd_resp_sendstr_chunk(req, NULL);
 }
 
+// A call without saying the wake word, to test the link from the laptop.
+static esp_err_t wake_get(httpd_req_t *req) {
+    voice_dev_wake();
+    httpd_resp_sendstr(req, "waking");
+    return ESP_OK;
+}
+
 void echo_probe_register(httpd_handle_t srv) {
     const httpd_uri_t uris[] = {
         { .uri = "/echo/arm",    .method = HTTP_GET, .handler = arm_get },
@@ -178,6 +193,7 @@ void echo_probe_register(httpd_handle_t srv) {
         { .uri = "/echo/feed",   .method = HTTP_GET, .handler = feed_get },
         { .uri = "/echo/out",    .method = HTTP_GET, .handler = out_get },
         { .uri = "/echo/frames", .method = HTTP_GET, .handler = frames_get },
+        { .uri = "/echo/wake",   .method = HTTP_GET, .handler = wake_get },
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(srv, &uris[i]);

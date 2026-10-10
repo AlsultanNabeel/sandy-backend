@@ -1,4 +1,5 @@
 #pragma once
+#include "config.h"
 #include "esp_err.h"
 #include <stdbool.h>
 
@@ -22,3 +23,13 @@ bool voice_verify_signed(const char *msg, const char *mac_hex);
 
 // Current speaker level 0..100, for the mouth animation.
 int voice_output_level(void);
+
+// An image is being written to flash: the echo cancelling stops (mic audio is dropped)
+// until false, so the update's flash writes leave the other tasks their time. Nothing is
+// lost: no call can be open while an update holds the network.
+void voice_hold_for_update(bool hold);
+
+#if ENABLE_REMOTE
+// Dev only: open a session as if the wake word was heard (the echo probe's /echo/wake).
+void voice_dev_wake(void);
+#endif

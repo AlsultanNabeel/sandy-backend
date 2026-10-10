@@ -413,7 +413,9 @@ static ota_result_t ota_check_once(void) {
     }
 
     esp_ota_handle_t h;
+    voice_hold_for_update(true);   // until the restart, or until this attempt is given up
     if (esp_ota_begin(slot, size, &h) != ESP_OK) {
+        voice_hold_for_update(false);
         esp_http_client_cleanup(c);
         status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
@@ -445,11 +447,13 @@ static ota_result_t ota_check_once(void) {
     if (fail || total != size || strcasecmp(digest_hex, sha) != 0) {
         ESP_LOGE(TAG, "update %s: download did not match what was signed — discarded", version);
         esp_ota_abort(h);
+        voice_hold_for_update(false);
         status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
     if (esp_ota_end(h) != ESP_OK || esp_ota_set_boot_partition(slot) != ESP_OK) {
         ESP_LOGE(TAG, "update %s: image not installed — trying again", version);
+        voice_hold_for_update(false);
         status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }

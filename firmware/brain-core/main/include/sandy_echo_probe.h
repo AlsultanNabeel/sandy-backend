@@ -1,7 +1,8 @@
 #pragma once
 // Dev only (ENABLE_REMOTE): records ten seconds of what the audio front end is fed
 // (both mics and the speaker reference, interleaved exactly as it sees them) and what it
-// gives back (the voice after echo cancelling), starting the moment she starts talking.
+// gives back (the voice after echo cancelling), starting the moment she starts talking, or
+// (/echo/arm?voice) at the next near speech, to hear what the uplink makes of a voice.
 // Fetched over the dev web server; scripts/echo_probe.py arms it, downloads and analyses.
 #include <stdbool.h>
 #include <stdint.h>

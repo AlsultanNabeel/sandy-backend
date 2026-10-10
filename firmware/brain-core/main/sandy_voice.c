@@ -235,7 +235,11 @@ static volatile uint32_t s_tx_lock_drops;
 // النزول أبطأ من الطلوع بقصد: التقطيع أسوأ من التأخير.
 #define SPK_CALM_REPLIES    4
 
-static size_t s_prebuf = SPK_PREBUF_MIN;
+// The first call starts at 300 ms (on this Wi-Fi the first reply grew it there anyway).
+static size_t s_prebuf = SPK_PREBUF_MIN + 2 * SPK_PREBUF_STEP;
+// Her audio played in this call, in ms: the echo cancelling has learned the room only after
+// a few seconds of it, so no voice stops her before VOICE_BARGE_AFTER_MS.
+static volatile int32_t s_played_ms;
 static int    s_calm_replies;
 // 3>>3 = 0.375 of full scale.
 #define SPK_VOL_MUL         3
@@ -447,8 +451,6 @@ static esp_err_t i2s_start(void) {
     i2s_chan_config_t rx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     // 10 ms buffers, ten to a read: a read returns as its last sample is heard, which is
     // what the echo reference is timed against (ref_measure). 80 ms of slack.
-    rx_cfg.dma_frame_num = 160;
-    rx_cfg.dma_desc_num = 8;
     I2S_TRY("mic channel", i2s_new_channel(&rx_cfg, NULL, &s_rx_chan));
     i2s_std_config_t rx_std = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(VOICE_IN_RATE),
@@ -763,7 +765,15 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
 #define REF_RING_MASK      (REF_RING_SAMPLES - 1)
 // What the amp still has queued when a write returns: the whole DMA ring (6 × 240 at 24 kHz).
 #define SPK_DMA_QUEUED_16K (6 * 240 * 2 / 3)
+// One writer (spk_task) and one reader (mic_task) that stays far behind the writer, so the
+// samples are copied with no lock; only the two counters are read and written under s_ref_mux.
+// No PSRAM access inside it: with interrupts off on a core while the other writes flash (cache
+// off), that access stalls and the interrupt watchdog restarted her.
 static int16_t *s_ref_ring;
+// Mic frames (left, right, reference) from mic_task to feed_task: half a second.
+#define MIC_Q_BYTES (VOICE_IN_RATE / 2 * 3 * sizeof(int16_t))
+static StreamBufferHandle_t s_mic_q;
+static volatile bool s_update_hold;       // an update is writing flash: feed nothing
 static portMUX_TYPE s_ref_mux = portMUX_INITIALIZER_UNLOCKED;
 static int64_t s_ref_written;      // reference samples ever written (under s_ref_mux)
 static int64_t s_ref_written_us;   // when the amp took the last of them (under s_ref_mux)
@@ -795,8 +805,11 @@ static void ref_push(const int16_t *sp, int ns) {
     for (; i < ns && carried < 2; i++) carry[carried++] = sp[i];
     const int64_t at = esp_timer_get_time();
     taskENTER_CRITICAL(&s_ref_mux);
-    for (int j = 0; j < k; j++) s_ref_ring[(s_ref_written + j) & REF_RING_MASK] = ref[j];
-    s_ref_written += k;
+    const int64_t w = s_ref_written;
+    taskEXIT_CRITICAL(&s_ref_mux);
+    for (int j = 0; j < k; j++) s_ref_ring[(w + j) & REF_RING_MASK] = ref[j];
+    taskENTER_CRITICAL(&s_ref_mux);
+    s_ref_written = w + k;
     s_ref_written_us = at;
     taskEXIT_CRITICAL(&s_ref_mux);
 }
@@ -927,7 +940,9 @@ static void spk_task(void *arg) {
                 int lvl = ns ? (int)(sum / ns) / 30 : 0;
                 s_out_level = lvl > 100 ? 100 : lvl;
             }
-            s_spk_play_bytes += spk_write((int16_t *)buf, n, &spk_fails);
+            const size_t took = spk_write((int16_t *)buf, n, &spk_fails);
+            s_spk_play_bytes += took;
+            s_played_ms += (int32_t)(took / (VOICE_OUT_RATE * 2 / 1000));
             continue;
         }
         // 300 ms dry: the reply has ended (shorter gaps keep the cushion), meanwhile silence.
@@ -964,29 +979,42 @@ static void spk_task(void *arg) {
 // The pairing of mic and reference samples: mic sample c goes with reference sample
 // c + s_ref_offset, the one the amp plays at the moment c is heard, plus VOICE_REF_LEAD_MS
 // so the reference stays ahead of its echo. Measured from both I2S clocks (ref_measure),
-// set once they run and again as each call opens (she is quiet then), never mid-reply.
+// set once they run, again as each call opens, and whenever it slips between replies.
 static int64_t s_ref_offset;
 static bool s_ref_aligned;
 static volatile bool s_ref_realign;   // the session manager asks; mic_task sets it
 
 // mic_task, after each read: where the amp is now against how many mic samples are in.
+// The last second of readings must agree before the pairing is set or moved: one reading
+// wobbles by up to a DMA buffer (10 ms, 160 samples), their mean by a few samples.
+#define REF_READINGS   10
 static void ref_measure(int64_t mic_heard) {
-    static double est;
-    static int n;
+    static int64_t seen[REF_READINGS];
+    static int at, n;   // next slot; readings held, up to REF_READINGS
     taskENTER_CRITICAL(&s_ref_mux);
     const int64_t w = s_ref_written, w_us = s_ref_written_us;
     taskEXIT_CRITICAL(&s_ref_mux);
     if (!w_us) return;
     const int64_t playing = w - SPK_DMA_QUEUED_16K +
                             (esp_timer_get_time() - w_us) * VOICE_IN_RATE / 1000000;
-    const double x = (double)(playing - mic_heard);
-    est = n ? est * 0.9 + x * 0.1 : x;
-    if (n < 30) { n++; return; }
-    if (s_ref_aligned && !s_ref_realign) return;
-    const int64_t offset = (int64_t)(est + 0.5) + VOICE_REF_LEAD_MS * VOICE_IN_RATE / 1000;
-    if (s_ref_aligned && offset != s_ref_offset) {
-        ESP_LOGI(TAG, "echo reference realigned (moved %+lld samples)",
-                 (long long)(offset - s_ref_offset));
+    seen[at] = playing - mic_heard;
+    at = (at + 1) % REF_READINGS;
+    if (n < REF_READINGS && ++n < REF_READINGS) return;
+    int64_t lo = seen[0], hi = seen[0], sum = 0;
+    for (int i = 0; i < REF_READINGS; i++) {
+        if (seen[i] < lo) lo = seen[i];
+        if (seen[i] > hi) hi = seen[i];
+        sum += seen[i];
+    }
+    if (hi - lo > 240) return;   // moving: a stall just now, wait for it to settle
+    const int64_t offset = sum / REF_READINGS + VOICE_REF_LEAD_MS * VOICE_IN_RATE / 1000;
+    // Between replies a stall that cost either side samples is taken back; never while she
+    // talks, where a jump costs the cancelling what it has learned.
+    const bool quiet = !s_playing && now_ms() - s_last_rx_audio_ms > 1000;
+    const int64_t off_by = offset - s_ref_offset;
+    if (s_ref_aligned && !s_ref_realign && !(quiet && (off_by > 80 || off_by < -80))) return;
+    if (s_ref_aligned && off_by) {
+        ESP_LOGI(TAG, "echo reference realigned (moved %+lld samples)", (long long)off_by);
     } else if (!s_ref_aligned) {
         ESP_LOGI(TAG, "echo reference aligned to the amp's clock");
     }
@@ -1002,11 +1030,12 @@ static void ref_pair(int64_t c, int16_t *out, int n) {
     const int64_t from = c + s_ref_offset;
     taskENTER_CRITICAL(&s_ref_mux);
     const int64_t w = s_ref_written;
+    taskEXIT_CRITICAL(&s_ref_mux);
+    // Kept a second clear of the writer, which may be filling the oldest slots right now.
     for (int i = 0; i < n; i++) {
         const int64_t r = from + i;
-        if (r < w && r >= w - REF_RING_SAMPLES) out[i] = s_ref_ring[r & REF_RING_MASK];
+        if (r < w && r >= w - REF_RING_SAMPLES / 2) out[i] = s_ref_ring[r & REF_RING_MASK];
     }
-    taskEXIT_CRITICAL(&s_ref_mux);
 }
 
 // The audio front end (esp-sr AFE), set up once: input "MMR" = left mic, right mic, the
@@ -1387,17 +1416,42 @@ static int apply_gain(const int16_t *in, int16_t *out, int n) {
     return (int)(sum_abs / (n ? n : 1));
 }
 
-// Reads both mics, applies each one's gain and mute, and feeds the front end: left,
-// right and the reference (what the amp plays), interleaved, in its chunk size.
+// Hands the mic task's frames (left, right, reference) to the front end in its chunk size.
+// Its own task: feed() can hold for tens of ms, and the mic must never wait for it.
+static void feed_task(void *arg) {
+    const size_t chunk = (size_t)s_afe_feed_chunk * 3 * sizeof(int16_t);
+    int16_t *feed = malloc(chunk);
+    if (!feed) {
+        ESP_LOGE(TAG, "front-end feed buffer alloc failed");
+        status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);
+        vTaskDelete(NULL);
+        return;
+    }
+    size_t fill = 0;
+    health_watch();
+    for (;;) {
+        health_feed();
+        fill += xStreamBufferReceive(s_mic_q, (uint8_t *)feed + fill, chunk - fill,
+                                     pdMS_TO_TICKS(1000));
+        if (fill < chunk) continue;
+        fill = 0;
+        if (s_update_hold) continue;
+        echo_probe_feed(feed, s_afe_feed_chunk);
+        s_afe->feed(s_afe_data, feed);
+    }
+}
+
+// Reads both mics, applies each one's gain and mute, pairs each sample with the reference
+// (what the amp played as it was heard) and queues them for feed_task.
 static void mic_task(void *arg) {
     // Stereo: 2 int32 slots per frame.
     int32_t *raw = malloc(MIC_FRAME_SAMPLES * 2 * sizeof(int32_t));
-    int16_t *feed = malloc((size_t)s_afe_feed_chunk * 3 * sizeof(int16_t));
+    int16_t *frames3 = malloc((size_t)MIC_FRAME_SAMPLES * 3 * sizeof(int16_t));
     int16_t *ref = malloc((size_t)MIC_FRAME_SAMPLES * sizeof(int16_t));
-    if (!raw || !feed || !ref) {
+    if (!raw || !frames3 || !ref) {
         // The allocations fail independently; free all (free(NULL) is a no-op).
         free(raw);
-        free(feed);
+        free(frames3);
         free(ref);
         ESP_LOGE(TAG, "mic buffers alloc failed");
         status_set(SANDY_PART_VOICE, SANDY_ST_LOW_MEMORY);   // S4.2: no subsystem fails silently
@@ -1406,9 +1460,19 @@ static void mic_task(void *arg) {
     }
     // Mic samples read since boot: a sample's number is its moment on the mic's clock.
     static int64_t s_mic_heard;
-    // One-pole DC blocker per mic: y[n] = x[n] - x[n-1] + R*y[n-1].
-    int32_t dcx[2] = {0, 0}, dcy[2] = {0, 0};
-    int fill = 0;
+    // A high-pass per mic (second-order Butterworth at VOICE_MIC_HPF_HZ): takes the DC off,
+    // and the Wi-Fi's own transmit bursts, which reach the mics as a rumble under 300 Hz.
+    float hb0, hb1, hb2, ha1, ha2;
+    {
+        const float w = 2.0f * (float)M_PI * VOICE_MIC_HPF_HZ / VOICE_IN_RATE;
+        const float c = cosf(w), al = sinf(w) / (2.0f * 0.70710678f), a0 = 1.0f + al;
+        hb0 = (1.0f + c) / 2.0f / a0;
+        hb1 = -(1.0f + c) / a0;
+        hb2 = hb0;
+        ha1 = -2.0f * c / a0;
+        ha2 = (1.0f - al) / a0;
+    }
+    float hx1[2] = {0}, hx2[2] = {0}, hy1[2] = {0}, hy2[2] = {0};
     bool first_frame = true;
     int64_t failing_since = 0;   // first failed read of the current run, 0 = reading fine
     int restarts = 0;            // channel restarts without a good read in between
@@ -1480,10 +1544,11 @@ static void mic_task(void *arg) {
             };
             int16_t ch[2];
             for (int c = 0; c < 2; c++) {
-                int32_t y = in[c] - dcx[c] + (dcy[c] - (dcy[c] >> 6));  // R ≈ 0.984
-                dcx[c] = in[c];
-                dcy[c] = y;
-                ch[c] = (int16_t)(y > 32767 ? 32767 : y < -32768 ? -32768 : y);
+                const float x = (float)in[c];
+                const float y = hb0 * x + hb1 * hx1[c] + hb2 * hx2[c] - ha1 * hy1[c] - ha2 * hy2[c];
+                hx2[c] = hx1[c]; hx1[c] = x;
+                hy2[c] = hy1[c]; hy1[c] = y;
+                ch[c] = (int16_t)(y > 32767.0f ? 32767 : y < -32768.0f ? -32768 : (int32_t)y);
             }
             sum_sq_l += (int64_t)ch[0] * ch[0];
             sum_sq_r += (int64_t)ch[1] * ch[1];
@@ -1496,13 +1561,21 @@ static void mic_task(void *arg) {
             ear_prev_l = le;
             ear_prev_r = re;
 #endif
-            feed[3 * fill]     = ch[0];
-            feed[3 * fill + 1] = ch[1];
-            feed[3 * fill + 2] = ref[i];
-            if (++fill == s_afe_feed_chunk) {
-                echo_probe_feed(feed, s_afe_feed_chunk);
-                s_afe->feed(s_afe_data, feed);
-                fill = 0;
+            frames3[3 * i]     = ch[0];
+            frames3[3 * i + 1] = ch[1];
+            frames3[3 * i + 2] = ref[i];
+        }
+        // To the feeder; never wait here, or the mic's DMA overruns and samples are lost.
+        const size_t want = (size_t)frames * 3 * sizeof(int16_t);
+        if (xStreamBufferSpacesAvailable(s_mic_q) >= want) {
+            xStreamBufferSend(s_mic_q, frames3, want, 0);
+        } else {
+            // The feeder fell half a second behind (core 1 too busy): this block is lost,
+            // mic and reference together, so the pairing holds.
+            static int64_t s_drop_logged;
+            if (now_ms() - s_drop_logged > 5000) {
+                s_drop_logged = now_ms();
+                ESP_LOGW(TAG, "echo cancelling fell behind — a mic block dropped");
             }
         }
 #if ENABLE_SERVO
@@ -1530,7 +1603,7 @@ static void proc_task(void *arg) {
         return;
     }
     int64_t last_diag = 0;
-    int speech_ms = 0;   // how long the current near speech has lasted
+    int speech_ms = 0;   // near speech over her playing, unbroken so far
     // The last ~1.5 s of levels: the wake word's loudness is taken from it.
     enum { LEVEL_SLOTS = 48 };
     int levels[LEVEL_SLOTS] = {0};
@@ -1572,8 +1645,19 @@ static void proc_task(void *arg) {
             near_level = caller_level * VOICE_NEAR_PCT / 100;
             if (near_level < VOICE_NEAR_MIN) near_level = VOICE_NEAR_MIN;
         }
-        if (!vad) speech_ms = 0;
-        else if (speech) speech_ms += frames * 1000 / VOICE_IN_RATE;
+        // Only over her audible playing, and only unbroken: a chunk under the bar starts it
+        // again. Counted from before her reply, or across gaps, it stopped her as soon as she
+        // began (her own echo and the Wi-Fi's rumble pass the bar in short bursts, 256 ms at
+        // most in the probe's recordings).
+        // Over her, the bar is the caller's own loudness, not a share of it: what is left of
+        // her echo sits well under it, a person talking over her does not.
+        int barge_level = caller_level * VOICE_BARGE_PCT / 100;
+        if (barge_level < near_level) barge_level = near_level;
+        if (vad && avg >= barge_level && s_playing && s_played_ms >= VOICE_BARGE_AFTER_MS) {
+            speech_ms += frames * 1000 / VOICE_IN_RATE;
+        } else {
+            speech_ms = 0;
+        }
         const size_t bytes = (size_t)frames * sizeof(int16_t);
         bool sandy_talking = s_playing ||
                              (now_ms() - s_last_rx_audio_ms) < VOICE_HALF_DUPLEX_TAIL_MS;
@@ -1706,6 +1790,12 @@ static bool ws_open(void) {
         .task_prio = 7,
         .reconnect_timeout_ms = 5000,
         .network_timeout_ms = 10000,
+        // The library's 4 KB ran out on a read error (TLS error path, 164 bytes left) and
+        // panicked her mid-call.
+        .task_stack = 6144,
+        // Core 0, with Wi-Fi: decrypting her audio on core 1 left the echo cancelling behind.
+        .task_core_id_set = true,
+        .task_core_id = 0,
     };
     xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     s_client = esp_websocket_client_init(&cfg);
@@ -1840,8 +1930,9 @@ static void voice_task(void *arg) {
 
     // The reference the front end cancels against (spk_task writes, mic_task reads).
     s_ref_ring = heap_caps_calloc(REF_RING_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    s_mic_q = xStreamBufferCreateWithCaps(MIC_Q_BYTES, 1, MALLOC_CAP_SPIRAM);
     // BEFORE the audio tasks: they read the front end's handle and chunk size.
-    if (!s_ref_ring || !afe_init()) {
+    if (!s_ref_ring || !s_mic_q || !afe_init()) {
         ESP_LOGE(TAG, "audio front end unavailable — voice disabled");
         status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);
         vTaskDelete(NULL);
@@ -1860,10 +1951,11 @@ static void voice_task(void *arg) {
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
 
-    // Audio tasks on core 1 (WiFi/TLS on core 0; the front-end reader too), playback highest. Uplink task at 6
-    // (may wait), 3 KB stack (internal RAM). Separate checks so the log says which failed.
+    // Core 1: the amp (highest), the mics and the echo cancelling's feed, about all it has.
+    // Core 0: Wi-Fi/TLS, the uplink (6, may wait; 3 KB internal stack), the front-end reader,
+    // the face. Separate checks so the log says which failed.
     int audio_task_fail = 0;
-    if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 3072, NULL, 6, NULL, 1) != pdPASS) {
+    if (xTaskCreatePinnedToCore(ws_tx_task, "voice_tx", 3072, NULL, 6, NULL, 0) != pdPASS) {
         audio_task_fail++;
         ESP_LOGE(TAG, "audio task voice_tx create FAILED");
     }
@@ -1871,9 +1963,16 @@ static void voice_task(void *arg) {
         audio_task_fail++;
         ESP_LOGE(TAG, "audio task voice_spk create FAILED");
     }
-    if (xTaskCreatePinnedToCore(mic_task, "voice_mic", 5120, NULL, 8, NULL, 1) != pdPASS) {
+    if (xTaskCreatePinnedToCore(mic_task, "voice_mic", 4096, NULL, 8, NULL, 1) != pdPASS) {
         audio_task_fail++;
         ESP_LOGE(TAG, "audio task voice_mic create FAILED");
+    }
+    // The echo cancelling runs inside feed(): about two thirds of a core. Core 1, where the
+    // front end's reader is not, and below the face (5) and the uplink (6): it takes what they
+    // leave, the half-second queue covers its slow moments, and they never starve behind it.
+    if (xTaskCreatePinnedToCore(feed_task, "voice_feed", 5120, NULL, 4, NULL, 1) != pdPASS) {
+        audio_task_fail++;
+        ESP_LOGE(TAG, "audio task voice_feed create FAILED");
     }
     // The front end's own worker runs on core 1; reading it can wait on core 0.
     if (xTaskCreatePinnedToCore(proc_task, "voice_proc", 6144, NULL, 8, NULL, 0) != pdPASS) {
@@ -1884,7 +1983,7 @@ static void voice_task(void *arg) {
     status_set(SANDY_PART_SYSTEM, SANDY_ST_OK);
     if (audio_task_fail) {
         // Out of internal RAM for stacks: say so on her face.
-        ESP_LOGE(TAG, "%d of 4 audio tasks did not start (heap_int free=%u largest=%u)",
+        ESP_LOGE(TAG, "%d of 5 audio tasks did not start (heap_int free=%u largest=%u)",
                  audio_task_fail,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
@@ -2003,9 +2102,10 @@ static void voice_task(void *arg) {
                     s_session_open_ms = now_ms();
                     s_link_lost_ms = 0;
                     s_session_active = true;
-                    // المخزن بيرجع لأصغر قيمة مع كل مكالمة، عشان يقيس الشبكة الحالية.
-                    s_prebuf = SPK_PREBUF_MIN;
+                    // The cushion is the last call's: starting each call at the smallest one
+                    // made her first reply stop and start again until it had grown.
                     s_calm_replies = 0;
+                    s_played_ms = 0;
                     VOICE_SESSION(true);
                 } else {
                     // A failed open must clear the wake face and say why, or she stares, deaf.
@@ -2072,6 +2172,19 @@ esp_err_t voice_init(void) {
     // 12 KB: aec_create_from_config goes deep.
     xTaskCreate(voice_task, "voice", 12288, NULL, 5, NULL);
     return ESP_OK;
+}
+
+#if ENABLE_REMOTE
+void voice_dev_wake(void) {
+#if ENABLE_WAKEWORD
+    if (!s_session_active) s_wake_req = true;
+#endif
+}
+#endif
+
+void voice_hold_for_update(bool hold) {
+    s_update_hold = hold;
+    ESP_LOGW(TAG, "echo cancelling %s for an update", hold ? "paused" : "back on");
 }
 
 int voice_output_level(void) {

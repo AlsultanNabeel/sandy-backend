@@ -830,8 +830,9 @@ esp_err_t face_init(void) {
         s_ready = true;
         xSemaphoreGive(s_mutex);
     }
+    // Core 0: core 1 carries the audio (the amp, the mics, the echo cancelling's feed).
     if (xTaskCreatePinnedToCore(_lvgl_task, "lvgl", LVGL_TASK_STACK, NULL,
-                                LVGL_TASK_PRIORITY, NULL, 1) != pdPASS) {
+                                LVGL_TASK_PRIORITY, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "no memory for the display task — the face will not move");
         return ESP_ERR_NO_MEM;
     }

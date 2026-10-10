@@ -18,6 +18,7 @@
 #include "sandy_wifi.h"
 #include "sandy_nvs.h"
 #include "sandy_echo_probe.h"
+#include "sandy_voice.h"
 #include "config.h"
 #include "lwip/sockets.h"
 
@@ -110,7 +111,17 @@ static esp_err_t root_get(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static esp_err_t update_write(httpd_req_t *req);
+
+// The echo cancelling waits while flash is written (sandy_voice.h); on success she restarts.
 static esp_err_t update_post(httpd_req_t *req) {
+    voice_hold_for_update(true);
+    const esp_err_t e = update_write(req);
+    voice_hold_for_update(false);
+    return e;
+}
+
+static esp_err_t update_write(httpd_req_t *req) {
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     if (!part) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no OTA partition");
@@ -181,6 +192,7 @@ static void start_http(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 20;
+    cfg.max_uri_handlers = 12;   // the upload and the echo probe's
     // Default 4 KB stack; internal RAM is scarce.
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }

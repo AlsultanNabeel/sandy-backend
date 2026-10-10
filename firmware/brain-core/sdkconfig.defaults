@@ -105,3 +105,7 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
 # ── QR code on her face at setup ──
 CONFIG_LV_USE_QRCODE=y
+
+# The audio front end (two mics, echo cancelling, separation, wake word) needs the full
+# 240 MHz: at 160 the mic task fell behind and lost ~14% of the mic samples.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y

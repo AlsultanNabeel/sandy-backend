@@ -171,11 +171,22 @@
 #define VOICE_NO_REPLY_MS          90000
 // Allowed time for a mid-call reconnect (~5 s) before giving up the conversation.
 #define VOICE_RECONNECT_GRACE_MS   15000
-// Speech over her this long (the front end's voice detector) stops her: long enough
-// that a cough or a word to someone else does not, short enough to feel instant.
-#define VOICE_BARGE_MS             200
+// Unbroken near speech over her playing this long stops her: long enough that a cough, a
+// word to someone else or a burst of her own echo does not (256 ms the longest measured),
+// short enough to feel like being heard.
+#define VOICE_BARGE_MS             400
+// …and only at this share of how loud the caller is (VOICE_NEAR_PCT is for being heard at
+// all): the echo cancelling leaves her voice audible at the start of a reply.
+#define VOICE_BARGE_PCT            70
+// …and not before she has played this long in the call: until then the echo cancelling has
+// not learned the room, and her first reply stopped itself.
+#define VOICE_BARGE_AFTER_MS       4000
 // The detector calls speech over this long after the last word (esp-sr vad_min_noise_ms).
 #define VOICE_VAD_END_MS           300
+// The mics' high-pass. The Wi-Fi's transmit bursts reach the left mic as a rumble under
+// 300 Hz, pulsing with the uplink (measured with scripts/echo_probe.py), which the voice
+// detector took for speech; little of a voice's meaning is below this.
+#define VOICE_MIC_HPF_HZ           200
 // Only the person who said the wake word: during a session, speech counts when it is at
 // least this share of how loud the caller is (set by the wake word, then following their
 // own speech, so walking away a few metres keeps them). Voices from another room are far
