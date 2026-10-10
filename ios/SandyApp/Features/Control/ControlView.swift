@@ -256,6 +256,30 @@ struct ControlView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(store.demo)
+                        // ذراع ضو الغرفة: بس لما لوح الغرفة معلن الضو.
+                        if node.outputs.contains("room/light") {
+                            NavigationLink {
+                                RoomArmView(node: node)
+                                    .environmentObject(state)
+                                    .environmentObject(lang)
+                            } label: {
+                                HStack(spacing: Theme.Spacing.sm) {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .scaledFont(Theme.Icon.sm, weight: .semibold)
+                                    Text(lang.s("control.arm.entry"))
+                                        .font(Theme.Typography.caption)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.forward")
+                                        .scaledFont(Theme.Icon.sm, weight: .semibold)
+                                        .foregroundColor(Theme.Colors.tertiaryText)
+                                }
+                                .foregroundColor(Theme.Colors.accent)
+                                .padding(.horizontal, Theme.Spacing.md)
+                                .padding(.vertical, Theme.Spacing.sm)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(store.demo)
+                        }
                     }
                 }
             }

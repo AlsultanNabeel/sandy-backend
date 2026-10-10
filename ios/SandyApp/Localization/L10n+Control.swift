@@ -130,6 +130,25 @@ enum L10nControl {
             // format: %@ = count of outputs
             "node.outputs":      .text("%@ مخارج"),
 
+            // ── ضبط ذراع ضو الغرفة (RoomArmView) ──
+            "arm.entry":        .text("ضبط ذراع الضو"),
+            "arm.title":        .text("ضبط ذراع الضو"),
+            "arm.hint":         .text("حرّك كل شريط واضغط «جرّب» لتشوف وين بيوصل الذراع. التجربة ما بتغيّر حالة الضو المحفوظة."),
+            "arm.rest":         .text("الراحة (الذراع بعيد عن المفتاح)"),
+            "arm.on":           .text("كبسة التشغيل"),
+            "arm.off":          .text("كبسة الإطفاء"),
+            "arm.hold":         .text("مدة الكبسة"),
+            "arm.degrees":      .text("%@°"),
+            "arm.ms":           .text("%@ م.ث"),
+            "arm.goto":         .text("جرّب"),
+            "arm.tryOn":        .text("جرّب كبسة تشغيل"),
+            "arm.tryOff":       .text("جرّب كبسة إطفاء"),
+            "arm.save":         .text("احفظ"),
+            "arm.saved":        .text("انحفظ. كل كبسة بعد هيك بهالقيم."),
+            "arm.restBetween":  .text("الراحة لازم تكون بين الكبستين، وبعيدة عن كل وحدة عشر درجات على الأقل."),
+            "arm.offline":      .text("لوح الغرفة مش متصل هلّق."),
+            "arm.failed":       .text("ما وصل الأمر للوح. جرّب كمان شوي."),
+
             // common
             "save":     .text("حفظ"),
             "text.send": .text("إرسال"),
@@ -251,6 +270,25 @@ enum L10nControl {
             "node.unpairConfirm": .text("Unpair this board? Its devices are deleted, and if it's on, its Wi-Fi is erased from it."),
             // format: %@ = count of outputs
             "node.outputs":      .text("%@ outputs"),
+
+            // ── Room light arm (RoomArmView) ──
+            "arm.entry":        .text("Set up the light arm"),
+            "arm.title":        .text("Light arm"),
+            "arm.hint":         .text("Move a slider and tap «Try» to see where the arm goes. Trying does not change the light's saved state."),
+            "arm.rest":         .text("Rest (clear of the switch)"),
+            "arm.on":           .text("On press"),
+            "arm.off":          .text("Off press"),
+            "arm.hold":         .text("Press length"),
+            "arm.degrees":      .text("%@°"),
+            "arm.ms":           .text("%@ ms"),
+            "arm.goto":         .text("Try"),
+            "arm.tryOn":        .text("Try an on press"),
+            "arm.tryOff":       .text("Try an off press"),
+            "arm.save":         .text("Save"),
+            "arm.saved":        .text("Saved. Every press uses these now."),
+            "arm.restBetween":  .text("Rest must sit between the two presses, at least ten degrees from each."),
+            "arm.offline":      .text("The room board isn't connected right now."),
+            "arm.failed":       .text("The command didn't reach the board. Try again in a moment."),
 
             // common
             "save":     .text("Save"),

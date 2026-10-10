@@ -327,6 +327,16 @@ extension APIClient {
         try Self.reachedTheBoard(r)
     }
 
+    /// ذراع ضو الغرفة: `goto` (مع `angle`)، `try_on`/`try_off`/`save` (مع قيم `RoomArm`).
+    /// التجربة ما بتغيّر حالة الضو. 409 `room_offline` لما لوح الغرفة مش متصل.
+    func roomLightArm(nodeId: String, action: String, angle: Int? = nil, arm: RoomArm? = nil) async throws {
+        var body: [String: Any] = ["action": action]
+        if let angle { body["angle"] = angle }
+        if let arm { body.merge(arm.body) { $1 } }
+        _ = try await request("/api/nodes/\(URLEscape.segment(nodeId))/room/light-arm",
+                              method: "POST", body: body)
+    }
+
     func nodeIrLast(nodeId: String) async throws -> (code: String, at: String) {
         let r: NodeIrLastResponse = try await fetch("/api/nodes/\(URLEscape.segment(nodeId))/ir/last")
         return (r.code ?? "", r.at ?? "")
