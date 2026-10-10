@@ -1408,11 +1408,13 @@ static int64_t s_tx_open_until;
 static void preroll_flush(void) {
     if (!s_preroll) return;
     uint8_t tmp[1024];
-    size_t n;
+    size_t n, total = 0;
     while ((n = xStreamBufferReceive(s_preroll, tmp, sizeof(tmp), 0)) > 0) {
         mic_send(tmp, n);
         s_tx_protected += (uint32_t)n;   // the catch-up rule leaves these alone
+        total += n;
     }
+    if (total) ESP_LOGI(TAG, "sent %u ms of held audio first", (unsigned)(total / 32));
 }
 
 // Someone talks over her: silence her here at once (no round trip), and tell the server.
@@ -1703,6 +1705,9 @@ static void proc_task(void *arg) {
 
 #if ENABLE_WAKEWORD
         if (!s_session_active) {
+            // Woken, the call not open yet (freeing memory, waiting out an update check, the
+            // socket): keep what is said, or the start of the question is lost.
+            if (s_wake_req && s_preroll) xStreamBufferSend(s_preroll, out, bytes, 0);
 #if ENABLE_COMMANDS
             // Offline command words on the idle audio.
             if (!sandy_talking && commands_feed(res->data, frames)) {
