@@ -269,6 +269,7 @@ static bool clock_is_set(void) {
 static volatile bool s_clock_bad;    // the server said our time is off: resync first
 static volatile bool s_not_paired;   // the server opens no call: no account paired this board
 static volatile bool s_server_failed; // the server failed on its side: end the call, no back-off
+static volatile bool s_server_closed; // the server closed the socket cleanly: the call is over
 static int64_t s_clock_started_ms;
 
 static void on_clock_sync(struct timeval *tv) {
@@ -749,6 +750,15 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *even
                 s_spk_drop_bytes += (uint32_t)ev->data_len;
             }
         }
+        break;
+    case WEBSOCKET_EVENT_CLOSED:
+        // A clean close from the server (its watchdog, an error it sent first): the client
+        // does not reconnect after one, so waiting the reconnect grace was fifteen seconds
+        // of "listening" to nobody. The session manager ends the call (not this task: it
+        // would destroy the client from inside its own task).
+        s_authed = false;
+        if (s_session_active) s_server_closed = true;
+        ESP_LOGW(TAG, "the server closed the call");
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
         s_authed = false;
@@ -2027,6 +2037,10 @@ static void voice_task(void *arg) {
 #endif
                 VOICE_FACE(MOOD_CONFUSED);
             }
+        } else if (s_session_active && s_server_closed) {
+            s_server_closed = false;
+            session_heap_report();
+            session_end();
         } else if (!s_session_active && s_wake_req && !identity_complete()) {
             // No server to call and no name to call it with: say so, not "no internet".
             s_wake_req = false;
@@ -2073,6 +2087,7 @@ static void voice_task(void *arg) {
                 // may end it. Left latched, the session manager closed every call a tick
                 // after it opened, and her voice was gone until the power was cut.
                 s_auth_refused = false;
+                s_server_closed = false;   // a close of the call before belongs to it
                 // One TLS session at a time (sandy_net_busy.h): wait out a short manifest fetch,
                 // else drop the wake. Held until ws_close.
                 for (int i = 0; i < 50 && !net_claim(NET_OWNER_VOICE); i++) {
