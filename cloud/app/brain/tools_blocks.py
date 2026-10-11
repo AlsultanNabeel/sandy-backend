@@ -145,9 +145,13 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     row of the kind. Encrypted rows are sealed again and never embedded."""
     kind = str(args.get("kind") or "").strip() or None
     pool = [_entry_row(e) for e in entries.list_entries(kind, exclude=("summary",), limit=MAX_ROWS * 2)]
-    if args.get("id") or args.get("match_text"):
-        picked = _pick(args, pool, lambda i: _entry_row(e) if (e := entries.get(i)) else None)
-    else:
+    def getter(i):
+        return _entry_row(e) if (e := entries.get(i)) else None
+
+    picked = _held_rows(ctx, getter)
+    if picked is None and (args.get("id") or args.get("match_text")):
+        picked = _pick(args, pool, getter)
+    elif picked is None:
         picked = {"rows": pool[:1]} if pool else refused("nothing logged to change")
     if "rows" not in picked:
         return picked
@@ -382,6 +386,16 @@ def _pick(args: Dict[str, Any], rows: List[Dict[str, Any]], getter) -> Dict[str,
     return refused("not found" if m["status"] == "not_found" else "say which one")
 
 
+def _held_rows(ctx: TurnCtx, getter) -> Optional[Dict[str, Any]]:
+    """On a yes, the rows the question named, by id: a row added since is never caught by
+    a search run again. None when this is not such a replay."""
+    if not (ctx.confirmed and ctx.held_ids):
+        return None
+    rows = [r for r in (getter(i) for i in ctx.held_ids) if r]
+    return {"rows": rows} if rows else refused(
+        "the rows asked about are gone", reply="ما لقيت اللي سألتك عنه، شكله انحذف أو تغيّر.")
+
+
 def _names(rows: List[Dict[str, Any]]) -> str:
     shown = "» و«".join(r.get("text", "") for r in rows[:3])
     return f"«{shown}»" + (f" وكمان {len(rows) - 3}" if len(rows) > 3 else "")
@@ -394,7 +408,7 @@ def _held(picked: Dict[str, Any], verb: str, asks: bool, args: Dict[str, Any],
     if ctx.confirmed or not (asks or len(rows) > 1 or picked.get("guessed")):
         return None
     guess = f" (أقرب إشي لـ«{args.get('match_text')}»)" if picked.get("guessed") else ""
-    return needs_confirmation(f"{verb} {_names(rows)}{guess}")
+    return needs_confirmation(f"{verb} {_names(rows)}{guess}", [r["id"] for r in rows])
 
 
 def _number(value: Any) -> Optional[float]:
@@ -416,7 +430,7 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     name = _list_name(args) or None
     # Open items only, unless the ask is to reopen a done one.
     pool = items.match_pool(name, done=None if args.get("done") is False else False)
-    picked = _pick(args, pool, items.get)
+    picked = _held_rows(ctx, items.get) or _pick(args, pool, items.get)
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
@@ -567,7 +581,10 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     # Just rang: a one-time reminder is no longer pending, but «أجّليه» still means it.
     pool += [r for r in schedules.list_schedules("reminder", fired_since=W.now_utc() - RANG_WINDOW)
              if r["id"] not in known and r.get("status") == "sent"]
-    picked = _pick(args, pool, lambda i: next((r for r in pool if r["id"] == i), None))
+    def getter(i):
+        return next((r for r in pool if r["id"] == i), None)
+
+    picked = _held_rows(ctx, getter) or _pick(args, pool, getter)
     if "rows" not in picked:
         return picked
     rows = picked["rows"]

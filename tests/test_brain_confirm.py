@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from brain_fakes import A, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
-from app.blocks import items
+from app.blocks import entries, items
 from app.brain import confirm, loop, voice
 from app.brain import pending as P
 from app.utils.user_profiles import active_user_profile_context
@@ -112,6 +112,41 @@ def test_voice_a_new_request_drops_the_hold(gym):
         assert out["reply"].startswith("[لم يُنفَّذ]") and "نفّذيه هلأ" in out["reply"]
         assert "ما في إشي" in voice.dispatch("confirm", {"answer": "اه"}, "userA")["reply"]
     assert _exists(gym)
+
+
+def test_a_yes_deletes_the_newest_row_that_was_asked_about_not_one_logged_since(brain_db):  # noqa: F811
+    with active_user_profile_context(A):
+        asked = entries.add("expense", "قهوة", {"amount": 5})
+    model = ScriptedModel(tools_reply(call("log_update", kind="expense", delete=True)),
+                          text_reply(""))
+    held = _turn(model, "احذفي آخر مصروف")["pending_state"]
+    with active_user_profile_context(A):
+        since = entries.add("expense", "غدا", {"amount": 40})
+    _turn(ScriptedModel(), "اه", pending=held)
+    with active_user_profile_context(A):
+        assert entries.get(asked) is None and entries.get(since) is not None
+
+
+def test_a_yes_deletes_only_the_rows_the_question_named(brain_db):  # noqa: F811
+    with active_user_profile_context(A):
+        named = [items.add("tasks", "تمرين جيم الصبح"), items.add("tasks", "تمرين جيم المسا")]
+    model = ScriptedModel(tools_reply(call("list_update", list="tasks", match_text="تمرين جيم",
+                                           all_matching=True, delete=True)), text_reply(""))
+    held = _turn(model, "احذفي كل مهام الجيم")["pending_state"]
+    with active_user_profile_context(A):
+        since = items.add("tasks", "تمرين جيم الجمعة")
+    _turn(ScriptedModel(), "اه", pending=held)
+    with active_user_profile_context(A):
+        assert [items.get(i) for i in named] == [None, None]
+        assert items.get(since) is not None
+
+
+def test_a_yes_on_a_row_gone_since_says_so(gym):
+    held = _ask_delete(gym)["pending_state"]
+    with active_user_profile_context(A):
+        items.delete(gym)
+    state = _turn(ScriptedModel(), "اه", pending=held)
+    assert "ما لقيت اللي سألتك عنه" in state["final_response"]
 
 
 def test_an_unclear_answer_is_answered_and_asked_once_more_then_let_go(gym):

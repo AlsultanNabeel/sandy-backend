@@ -203,7 +203,9 @@ breaks the turn); `needs_confirmation` / `needs_choice` when it will not act yet
 **Confirmation** (`confirm.py`, `pending.py`): deletes, cancels and multi-row
 changes return `needs_confirmation`; two matching rows return `needs_choice`. The
 loop stores a `brain_confirm` pending (10 minutes, a nonce, `consumed_at`; its
-`steps` are every held `{tool, args, summary}` of the turn) and asks «متأكد إنك بدك …؟
+`steps` are every held `{tool, args, summary, ids}` of the turn, `ids` the rows the question
+names: a yes acts on those by id (`ctx.held_ids`, `tools_blocks._held_rows`) and never searches
+again, so a row added since is not caught, and one gone since is said) and asks «متأكد إنك بدك …؟
 (اه/لأ)» or lists the candidates. `confirm.read` is the one yes/no resolver, and it
 reads only the opening of the reply: yes/no words, the held action's own verb
 («احذفيها»، «الغيه» for a cancel), filler («متأكد»، «يا ساندي»), and phrases like

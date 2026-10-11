@@ -28,12 +28,13 @@ def hold(steps: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def with_step(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
-              summary: str) -> Dict[str, Any]:
+              summary: str, ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """``held`` with one more action (the same call twice is held once); what waits behind
-    it still does."""
+    it still does. ``ids`` are the rows the question names, which a yes acts on."""
     steps = list((held or {}).get("steps") or [])
     if not any(s["tool"] == name and s["args"] == args for s in steps):
-        steps.append({"tool": name, "args": args, "summary": summary})
+        steps.append({"tool": name, "args": args, "summary": summary,
+                      **({"ids": ids} if ids else {})})
     out = hold(steps)
     if (held or {}).get("then"):
         out["then"] = held["then"]
@@ -186,11 +187,13 @@ def run_held(pending: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     """Runs every held action; ok only when all of them were. The yes covers these steps
     only: whatever the same message asks next («اه واحذفي كمان…») asks again."""
     ctx.confirmed = True
+    results = []
     try:
-        results = [tools.execute(s["tool"], s.get("args") or {}, ctx)
-                   for s in pending.get("steps") or []]
+        for s in pending.get("steps") or []:
+            ctx.held_ids = s.get("ids")
+            results.append(tools.execute(s["tool"], s.get("args") or {}, ctx))
     finally:
-        ctx.confirmed = False
+        ctx.confirmed, ctx.held_ids = False, None
     out: Dict[str, Any] = {"ok": bool(results) and all(r.get("ok") for r in results),
                            "reply": "\n".join(r["reply"] for r in results if r.get("reply"))}
     if any(r.get("broke") for r in results):
@@ -227,7 +230,7 @@ def add(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
     waits behind whatever is already asked."""
     if result.get("needs_confirmation"):
         if held is None or held.get("action") != CHOOSE:
-            return with_step(held, name, args, result["summary"])
+            return with_step(held, name, args, result["summary"], result.get("ids"))
     elif held is None:
         return hold_choice(name, args, result["candidates"])
     return {**held, "then": add(held.get("then"), name, args, result)}

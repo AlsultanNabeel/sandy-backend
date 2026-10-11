@@ -115,7 +115,7 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
         args = {**base, "id": row_id}
         result = tools.execute(name, args, TurnCtx(user_id=chat_id, source="voice"))
         if result.get("needs_confirmation"):
-            waiting = confirm.with_step(waiting, name, args, result["summary"])
+            waiting = confirm.with_step(waiting, name, args, result["summary"], result.get("ids"))
         else:
             results.append(_tagged(result)["reply"])
     if rest:
