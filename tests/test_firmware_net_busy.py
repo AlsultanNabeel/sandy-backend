@@ -71,12 +71,16 @@ def test_voice_claims_before_opening_and_releases_on_every_exit():
     failed = body[opened:body.index("} else if (s_link_lost_ms")]
     assert failed.count("net_release(NET_OWNER_VOICE)") == 1
 
-    # Exit 3: the session closes — idle, refused, its time cap, or talk she never
-    # answers — through one function that gives the socket back before the claim.
-    assert body.count("session_end();") == 4
+    # Exit 3: the session closes — for any reason, however many there are — only through
+    # one function that gives the socket back before the claim. Nothing else ends a
+    # session or closes the socket, and nothing leaves the session loop holding it.
+    assert "session_end();" in body
     assert "ws_close();" not in body
     end = _fn(v, "static void session_end(")
     assert end.index("ws_close();") < end.index("net_release(NET_OWNER_VOICE)")
+    assert v.count("s_session_active = false;") == 1 and "s_session_active = false;" in end
+    loop = body[body.index("for (;;)"):]
+    assert not re.search(r"\b(return|break)\s*;", loop), "a way out of the loop skips the release"
 
     # No other ways in or out that could leak or skip the lock.
     assert body.count("net_claim(") == 1
