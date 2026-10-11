@@ -70,8 +70,13 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
         P.save(VOICE_THREAD, chat_id, db, again)
         return {"handled": True,
                 "reply": f"ما فهمت اه ولا لأ — اسأليه مرة تانية: {confirm.question(held['summary'])}"}
-    out = ({"handled": True, "reply": confirm.CANCELLED_REPLY} if said == "no"
-           else _tagged(confirm.run_held(held, TurnCtx(user_id=chat_id, source="voice"))))
+    if said == "no":
+        out = {"handled": True, "reply": confirm.CANCELLED_REPLY}
+    elif said == "drop":
+        out = {"handled": True, "ok": False,
+               "reply": f"[لم يُنفَّذ] {confirm.dropped(held['summary'])}"}
+    else:
+        out = _tagged(confirm.run_held(held, TurnCtx(user_id=chat_id, source="voice")))
     if rest:
         out["reply"] += "\nقال كمان إشي بعد جوابه: نفّذيه هلأ."
     return _ask_next(held, chat_id, out)

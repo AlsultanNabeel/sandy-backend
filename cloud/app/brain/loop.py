@@ -206,6 +206,11 @@ def _resolve_pending(pending: Dict[str, Any], message: str,
     if said == "no":
         outcome = {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
         settled = f"قال لأ على «{summary}»، فما انعمل"
+    elif said == "drop":
+        # A new request instead of an answer: the hold goes, and the user is told so.
+        outcome = {"text": confirm.dropped(summary), "pending": None, "tools": [],
+                   "dropped": True}
+        settled = f"ما جاوب على «{summary}» وطلب إشي تاني، فانلغى وما انعمل"
     else:
         result = confirm.run_held(pending, ctx)
         text = result.get("reply") or ("تم ✅" if result.get("ok") else GAVE_UP_REPLY)
@@ -284,7 +289,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
             # A «no» says nothing of its own here: the model's reply is the answer. A pick
             # that still waits for a yes asks it last, after the rest was answered; what
             # waited behind the answered question comes next, and the rest's own hold after.
-            first = _done(settled) if settled["tools"] else ""
+            first = _done(settled) if settled["tools"] or settled.get("dropped") else ""
             waiting = confirm.then(settled["pending"], confirm.following(held))
             outcome = {**_asked_first(waiting, first, outcome),
                        "tools": settled["tools"] + outcome["tools"]}

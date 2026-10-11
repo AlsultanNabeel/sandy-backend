@@ -83,6 +83,37 @@ def test_a_no_with_more_hands_the_rest_to_the_model(gym):
         assert items.get(gym)["done"]
 
 
+@pytest.mark.parametrize("request_", ["اعملي تذكير بكرا الساعة 5", "كمّلي القصة",
+                                      "امشي معي بالخطة", "شيلي الحليب من القائمة"])
+def test_a_new_request_that_opens_with_a_verb_drops_the_hold_and_goes_to_the_model(gym, request_):
+    # The opening verb is not a yes: nothing is deleted, the hold goes, the model answers.
+    held = _ask_delete(gym)["pending_state"]
+    model = ScriptedModel(text_reply("تمام"))
+    state = _turn(model, request_, pending=held)
+    assert _exists(gym)
+    assert state["pending_state"] is None
+    assert model.seen and "فانلغى وما انعمل" in model.seen[0][0]["content"]
+    assert state["final_response"] == f"{confirm.dropped(held['summary'])}\nتمام"
+
+
+@pytest.mark.parametrize("yes", ["اه", "احذفها", "احذفيها", "نفذي"])
+def test_a_yes_or_a_verb_alone_still_runs_it(gym, yes):
+    held = _ask_delete(gym)["pending_state"]
+    model = ScriptedModel()
+    state = _turn(model, yes, pending=held)
+    assert model.seen == [] and state["pending_state"] is None
+    assert not _exists(gym)
+
+
+def test_voice_a_new_request_drops_the_hold(gym):
+    with active_user_profile_context(A):
+        voice.dispatch("list_update", {"id": gym, "delete": True}, "userA")
+        out = voice.dispatch("confirm", {"answer": "اعملي تذكير بكرا الساعة 5"}, "userA")
+        assert out["reply"].startswith("[لم يُنفَّذ]") and "نفّذيه هلأ" in out["reply"]
+        assert "ما في إشي" in voice.dispatch("confirm", {"answer": "اه"}, "userA")["reply"]
+    assert _exists(gym)
+
+
 def test_an_unclear_answer_is_answered_and_asked_once_more_then_let_go(gym):
     held = _ask_delete(gym)["pending_state"]
     state = _turn(ScriptedModel(text_reply("الجو حلو اليوم")), "كيف الطقس؟", pending=held)

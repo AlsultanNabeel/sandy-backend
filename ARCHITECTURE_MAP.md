@@ -209,7 +209,9 @@ reads only the opening of the reply: yes/no words, the held action's own verb
 («احذفيها»، «الغيه» for a cancel), filler («متأكد»، «يا ساندي»), and phrases like
 «مش مشكلة». «خلص» next to a yes or the verb is «go on», alone it is «drop it»; a
 negated verb («لا تحذفها») is a no; cancellation wins a mixed reply; a yes followed by
-«بس» is not a yes. Whatever follows the opening is a new request (`rest`), and the yes does not cover it:
+«بس» is not a yes. A verb is a yes only alone: a verb with more after it and no yes word
+(«اعملي تذكير بكرا»، «شيلي الحليب») is a new request, so the hold is dropped (`drop`, the
+user is told with `confirm.dropped`) and the message goes to the model. Whatever follows the opening is a new request (`rest`), and the yes does not cover it:
 `run_held` marks the turn confirmed only while the held steps run, so a delete in the rest asks again. `pick`
 reads the opening only, like a yes: several («الأولى والتالتة»), a bare number word is that one
 («اتنين» is the second), «الاتنين»/«كلهم» are all, «كل» only as the last word; a number further on

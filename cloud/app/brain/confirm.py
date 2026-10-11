@@ -136,22 +136,24 @@ def _is_verb(word: str, roots: Tuple[str, ...]) -> bool:
 
 
 def read(text: str, held: Optional[Dict[str, Any]] = None) -> Tuple[str, bool]:
-    """(yes | no | other, whether a new request follows the answer). Cancellation wins a
-    mixed answer («اه بس لا»): it is the safe side of a destructive hold."""
+    """(yes | no | drop | other, whether a new request follows the answer). Cancellation
+    wins a mixed answer («اه بس لا»): it is the safe side of a destructive hold. A verb is
+    a yes only with nothing after it: «احذفيها» is, «اعملي تذكير بكرا» is a new request,
+    so the hold is dropped (`drop`) and the message goes to the model."""
     v = _norm_answer(text)
     if v in _AFFIRM_ALONE:
         return "yes", False
     for phrase in _YES_PHRASES:
         v = re.sub(rf"(^| ){phrase}(?= |$)", r"\1اه", v)
     words, roots = v.split(), _verbs(held)
-    yes = no = soft = False
+    yes = no = soft = affirmed = False
     end = len(words)
     for i, w in enumerate(words):
         if _is_verb(w, roots):
             negated = i > 0 and words[i - 1] in _NEGATORS
             no, yes = no or negated, yes or not negated
         elif w in _AFFIRM:
-            yes = True
+            yes = affirmed = True
         elif w in _CANCEL or w.startswith("الغ"):
             no = True
         elif w in _SOFT_CANCEL:
@@ -162,6 +164,8 @@ def read(text: str, held: Optional[Dict[str, Any]] = None) -> Tuple[str, bool]:
     rest = end < len(words)
     if no or (soft and not yes):
         return "no", rest
+    if yes and rest and not affirmed:
+        return "drop", True
     if yes and rest and words[end - 1] == "بس":
         # «اه بس خليني أفكر»: a yes with a «but» after it is not a yes.
         return "other", rest
@@ -169,8 +173,13 @@ def read(text: str, held: Optional[Dict[str, Any]] = None) -> Tuple[str, bool]:
 
 
 def answer(text: str, held: Optional[Dict[str, Any]] = None) -> str:
-    """yes | no | other."""
+    """yes | no | drop | other."""
     return read(text, held)[0]
+
+
+def dropped(summary: str) -> str:
+    """What is said when a new request took the place of the answer."""
+    return f"اعتبرتك ما بدك {summary}، فما عملت إشي."
 
 
 def run_held(pending: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
