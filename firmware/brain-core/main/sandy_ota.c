@@ -41,41 +41,62 @@ static const char *TAG = "ota";
 static volatile bool s_confirmed;
 
 // ── Remembering what was tried ──
-// The version is saved as "trying" before restart; booting anything else means the
-// bootloader rolled back, so it failed. Stops re-downloading a bad release forever.
+// The version is saved as "trying" before the boot slot is switched, and stays saved until
+// that version is confirmed; booting anything else while it is there means the bootloader
+// rolled back, so it failed. Stops re-downloading a bad release forever.
 
-static void ota_nvs_note_trying(const char *version) {
+static bool ota_nvs_note_trying(const char *version) {
+    nvs_handle_t h;
+    if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    bool ok = nvs_set_str(h, "trying", version) == ESP_OK && nvs_commit(h) == ESP_OK;
+    nvs_close(h);
+    if (!ok) ESP_LOGW(TAG, "could not note the version being tried");
+    return ok;
+}
+
+// Drops the note of `version` on trial: it was confirmed, or never switched to.
+static void ota_nvs_drop_trying(const char *version) {
     nvs_handle_t h;
     if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    if (nvs_set_str(h, "trying", version) != ESP_OK || nvs_commit(h) != ESP_OK) {
-        ESP_LOGW(TAG, "could not note the version being tried");
+    char trying[24] = {0};
+    size_t len = sizeof(trying);
+    if (nvs_get_str(h, "trying", trying, &len) == ESP_OK && strcmp(trying, version) == 0) {
+        nvs_erase_key(h, "trying");
+        if (nvs_commit(h) != ESP_OK) ESP_LOGW(TAG, "could not clear the trial note");
     }
     nvs_close(h);
 }
 
+// A note naming another version: that one was switched to and the bootloader came back here.
+// The note of this version itself is left for the trial (ota_confirmed) to clear.
 static void ota_nvs_check_last_try(void) {
     nvs_handle_t h;
     if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     char trying[24] = {0};
     size_t len = sizeof(trying);
-    if (nvs_get_str(h, "trying", trying, &len) == ESP_OK && trying[0]) {
-        if (strcmp(trying, SANDY_FW_VERSION) != 0) {
-            char bad[24] = {0};
-            size_t blen = sizeof(bad);
-            uint8_t tries = 0;
-            if (nvs_get_str(h, "bad", bad, &blen) == ESP_OK && strcmp(bad, trying) == 0) {
-                nvs_get_u8(h, "bad_n", &tries);
-            }
-            tries++;
-            nvs_set_str(h, "bad", trying);
-            nvs_set_u8(h, "bad_n", tries);
-            ESP_LOGE(TAG, "update %s failed its trial (%u) — back on %s",
-                     trying, (unsigned)tries, SANDY_FW_VERSION);
+    if (nvs_get_str(h, "trying", trying, &len) == ESP_OK && trying[0] &&
+        strcmp(trying, SANDY_FW_VERSION) != 0) {
+        char bad[24] = {0};
+        size_t blen = sizeof(bad);
+        uint8_t tries = 0;
+        if (nvs_get_str(h, "bad", bad, &blen) == ESP_OK && strcmp(bad, trying) == 0) {
+            nvs_get_u8(h, "bad_n", &tries);
         }
+        tries++;
+        nvs_set_str(h, "bad", trying);
+        nvs_set_u8(h, "bad_n", tries);
+        ESP_LOGE(TAG, "update %s failed its trial (%u) — back on %s",
+                 trying, (unsigned)tries, SANDY_FW_VERSION);
         nvs_erase_key(h, "trying");
         if (nvs_commit(h) != ESP_OK) ESP_LOGW(TAG, "could not record the trial");
     }
     nvs_close(h);
+}
+
+// This image is good: updates may run, and its trial note goes.
+static void ota_confirmed(void) {
+    s_confirmed = true;
+    ota_nvs_drop_trying(SANDY_FW_VERSION);
 }
 
 static bool ota_version_is_bad(const char *version) {
@@ -132,7 +153,7 @@ static void _health_task(void *arg) {
                 if (ota_server_answers()) {
                     esp_err_t e = esp_ota_mark_app_valid_cancel_rollback();
                     if (e == ESP_OK) {
-                        s_confirmed = true;
+                        ota_confirmed();
                         ESP_LOGI(TAG, "image confirmed — rollback cancelled");
                     } else {
                         ESP_LOGW(TAG, "could not confirm image: %s", esp_err_to_name(e));
@@ -158,13 +179,13 @@ void ota_start_health_watch(void) {
     esp_ota_img_states_t st;
 
     if (esp_ota_get_state_partition(p, &st) != ESP_OK) {
-        s_confirmed = true;   // can't tell; assume fine
+        ota_confirmed();   // can't tell; assume fine
         return;
     }
     if (st != ESP_OTA_IMG_PENDING_VERIFY) {
         // Nothing pending: confirmed image, wired flash, or rollback off.
         // Rollback arms on the first OTA update, not after a cable flash.
-        s_confirmed = true;
+        ota_confirmed();
         ESP_LOGI(TAG, "image state %d — nothing pending, rollback idle", (int)st);
         return;
     }
@@ -172,14 +193,14 @@ void ota_start_health_watch(void) {
 #if !ENABLE_WIFI
     // No network in this build: waiting would roll back forever.
     ESP_LOGW(TAG, "no network in this build — confirming image now");
-    if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) s_confirmed = true;
+    if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) ota_confirmed();
     return;
 #else
     ESP_LOGW(TAG, "first boot of a new image — proving it can still be reached");
     // Opens HTTPS, so same stack as an update check.
     if (xTaskCreate(_health_task, "ota_health", 6144, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "no memory for the trial — confirming rather than rolling back blind");
-        if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) s_confirmed = true;
+        if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) ota_confirmed();
     }
 #endif
 }
@@ -451,13 +472,19 @@ static ota_result_t ota_check_once(void) {
         status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
-    if (esp_ota_end(h) != ESP_OK || esp_ota_set_boot_partition(slot) != ESP_OK) {
+    // Noted before the switch: a trial that fails must find its version written down,
+    // or the old image takes the same release again a minute later.
+    bool installed = esp_ota_end(h) == ESP_OK && ota_nvs_note_trying(version);
+    if (installed && esp_ota_set_boot_partition(slot) != ESP_OK) {
+        ota_nvs_drop_trying(version);
+        installed = false;
+    }
+    if (!installed) {
         ESP_LOGE(TAG, "update %s: image not installed — trying again", version);
         voice_hold_for_update(false);
         status_set(SANDY_PART_UPDATE, SANDY_ST_OK);
         return OTA_RETRY;
     }
-    ota_nvs_note_trying(version);
     ESP_LOGW(TAG, "update %s installed — restarting", version);
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();

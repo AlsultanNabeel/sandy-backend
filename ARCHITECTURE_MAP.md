@@ -1656,7 +1656,10 @@ nobody re-reads becomes a way of believing things that stopped being true.
    then a stable percentage (`scripts/publish_firmware.py`; a board is offered the newest release
    it is in the rollout of, so a canary held at 0 % never hides the stable one; releases older than
    the newest one out to everyone are deleted with their chunks, `firmware_store._prune`), never a downgrade,
-   bootloader rollback if the new image cannot reach Wi-Fi. A failed check, download or
+   bootloader rollback if the new image cannot reach Wi-Fi. The version is noted as `trying` before
+   the boot slot is switched and stays noted until that image is confirmed (`ota_confirmed`), so an
+   old image the bootloader came back to finds it, counts the failed trial and, after
+   `OTA_BAD_MAX_TRIES` (2), is not offered it again. A failed check, download or
    install comes back in five minutes, doubling to an hour (`OTA_FAIL_RETRY_MAX_MS`), not
    after the six-hour period; nothing downloads under `OTA_MIN_RSSI` (-80 dBm), and from
    the download to the restart her face says `UPDATING - DO NOT UNPLUG` (status
