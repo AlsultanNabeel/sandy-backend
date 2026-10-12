@@ -1395,8 +1395,9 @@ so folders are organisation only.
   `ReviewPrompter` (asks for a rating after every fifth finished task, or after a week
   with ten replies; never within ten minutes of an error; at most every 120 days).
   The robot screen (`Features/Sandy/RobotView.swift`) holds everything about her: her
-  state now and quick buttons, her body (`RobotControlView`: face, movement, screen,
-  light, sound, camera), the parts test, her board's Wi-Fi, «why isn't a part showing?»
+  state now and quick buttons (mood, gestures, melodies, light), the rest of her parts on
+  the same screen (`RobotPartsSection`: neck, screen text and image, sound and mics,
+  camera, any part the app has no place for), the parts test, her board's Wi-Fi, «why isn't a part showing?»
   (`DiagnoseView`, `GET /api/diagnose` in plain words) and linking/unlinking. Room
   scenes (`RoomScenesSection`) are in home control; the scene editor offers the account's own
   devices and the values each takes. Project lists Sandy made from chat

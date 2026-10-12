@@ -1,15 +1,15 @@
 import SwiftUI
 
 /// روبوت ساندي — كل إشي بيخصّها بمكان واحد: حالتها هلأ (متّصلة، وشها، الواي فاي)،
-/// جسمها (الوش والشاشة والإضاءة والصوت والكاميرا)، فحص القطع، شبكة اللوح، ليش قطعة
-/// مش ظاهرة، وربطها أو فكّها. مشاهد الغرفة مش هون: إلها التحكّم بالبيت.
+/// أزرارها السريعة، وكل قطع جسمها (الرقبة والشاشة والصوت والكاميرا)، فحص القطع، شبكة
+/// اللوح، ليش قطعة مش ظاهرة، وربطها أو فكّها. مشاهد الغرفة مش هون: إلها التحكّم بالبيت.
 struct RobotView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
 
     /// Her state now (the live pulse) and her quick buttons.
     @StateObject private var store = RobotStore()
-    /// Her parts are devices: the body screen, the parts test and the board's Wi-Fi read them.
+    /// Her parts are devices: the parts section, the parts test and the board's Wi-Fi read them.
     @StateObject private var devices = DevicesStore()
 
     @Environment(\.scenePhase) private var scenePhase
@@ -32,6 +32,7 @@ struct RobotView: View {
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
                     RobotLiveSection(store: store)
+                    RobotPartsSection(store: devices)
                     links
                 }
                 .padding(Theme.Spacing.md)
@@ -58,9 +59,6 @@ struct RobotView: View {
     private var links: some View {
         SandyCard {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                row("figure.wave", "robot.hub.body", "robot.hub.bodyNote") {
-                    RobotControlView(store: devices)
-                }
                 if let node = robotNode {
                     row("waveform.badge.magnifyingglass", "robot.hub.test", "robot.hub.testNote") {
                         RobotTestView(store: devices, node: node)

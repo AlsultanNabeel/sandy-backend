@@ -1,20 +1,12 @@
 import PhotosUI
 import SwiftUI
 
-/// صفحة الروبوت — جسم ساندي، منفصل عن أجهزة البيت.
+/// قطع ساندي اللي مش بالأزرار السريعة فوق — الرقبة والشاشة والصوت والكاميرا، وأي
+/// قطعة تانية أعلنها اللوح. على شاشة الروبوت نفسها، تحت حالتها: كل إشي بمكان واحد.
 ///
-/// ليش صفحة لحالها: صفحة التحكّم كانت بتحطّ رقبتها ووشها ومايكاتها بنفس القائمة
-/// مع لمبة الصالة والمروحة. هدول إشيان مختلفان — الأول جسمها والتاني بيتك —
-/// والخلط بينهن كان بيعمل قائمة طويلة ما إلها موضوع واحد، وكل مرّة بدك تلاقي
-/// إشي لازم تقرا كل شي.
-///
-/// وليش أقسام مش قائمة وحدة: البطاقات المرصوفة تحت بعض كلها بنفس الوزن، فالعين
-/// ما عندها وين تمسك. الأقسام بتعطي جواب سريع لسؤال «وين إعدادات الصوت؟» بدون
-/// ما تقرا كل بطاقة بالطريق.
-///
-/// الترتيب مقصود: **اللي بتشوفه** (الوش والحركة والشاشة والإضاءة) قبل **اللي
-/// بتسمعه** (المايكات والسماعة) قبل **الكاميرا**. اللي بتلمسه كل يوم فوق.
-struct RobotControlView: View {
+/// المزاج والحركات والنغمات والإضاءة مش هون: إلهن أزرار سريعة فوق (`RobotLiveSection`)،
+/// وبطاقة تانية لنفس القطعة بتكرّر نفس الأمر.
+struct RobotPartsSection: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: DevicesStore
@@ -26,12 +18,8 @@ struct RobotControlView: View {
     /// أسماء الأجهزة اللي بيزرعها الخادم (node_provision.PART_CATALOGUE).
     /// مكتوبة هون مرّة وحدة بدل ما تتناثر نصوص بكل الملف.
     private enum Part {
-        static let face        = "sandy_face"
-        static let gesture     = "sandy_gesture"
         static let head        = "sandy_head"
         static let screen      = "sandy_screen"
-        static let led         = "sandy_led"
-        static let buzzer      = "sandy_buzzer"
         static let micLeft     = "sandy_mic_left"
         static let micRight    = "sandy_mic_right"
         static let micLeftGain  = "sandy_mic_left_gain"
@@ -48,73 +36,25 @@ struct RobotControlView: View {
         // الوضوح جنب الدقّة بالقصد: الاتنين بيتلخبطوا ببعض، وبعدهن عن بعض
         // بيخلّي المالك يكبّر الدقّة ويستغرب إنّ الصورة ضلّت مغبّشة.
         static let camQuality   = "cam_quality"
+
+        /// The parts the quick buttons above already drive.
+        static let quick: Set<String> = [SandyMood.Device.face, SandyMood.Device.gesture,
+                                         SandyMood.Device.buzzer, SandyMood.Device.led]
     }
 
+    /// The order: what you see (neck, screen), what you hear (sound), then the camera.
     var body: some View {
-        Group {
-            if store.robotDevices.isEmpty {
-                ScrollView { emptyState.padding(Theme.Spacing.md) }
-            } else {
-                board
-            }
+        VStack(spacing: Theme.Spacing.md) {
+            section("robot.control.neck", icon: "arrow.left.and.right.circle",
+                    hint: "robot.control.neck.hint", parts: [Part.head])
+            screenSection
+            section("robot.control.sound", icon: "speaker.wave.2.fill",
+                    hint: "robot.control.sound.hint",
+                    parts: [Part.volume, Part.speakerTest,
+                            Part.micLeft, Part.micRight, Part.micLeftGain, Part.micRightGain])
+            cameraSection
+            leftovers
         }
-        .navigationTitle(lang.s("robot.control.title"))
-        .refreshable { await store.load(api: state.api) }
-    }
-
-    /// أقسامها كبطاقات — الموجود منها بس، وكل وحدة بأي حجم وبأي ترتيب.
-    ///
-    /// الترتيب اللي كان — بتشوفه، بتسمعه، بتصوّر — تخمين معقول عن أغلب الناس
-    /// ومش معرفة عن أي حدا. اللي بيحرّك الرقبة كل يوم وبيلمس الصوت مرّة بالشهر
-    /// بده العكس، وهو أدرى.
-    ///
-    /// والمقاسات الابتدائية: الأقسام اللي فيها قطع كتير بتبدأ كبيرة، والباقي
-    /// وسط. وكلها بتقدر تصير مربّع — والقطع جواها بتعرف تتكيّف لحالها.
-    @ViewBuilder
-    private var board: some View {
-        let names = Set(store.robotDevices.map(\.name))
-        CardBoard("robot") {
-            if !names.isDisjoint(with: [Part.face, Part.head, Part.gesture]) {
-                BoardCard("expression", titleKey: "robot.control.expression",
-                          icon: "face.smiling", defaultSize: .large) { expressionSection }
-            }
-            if names.contains(Part.screen) {
-                BoardCard("screen", titleKey: "robot.control.screen",
-                          icon: "textformat", defaultSize: .large) { screenSection }
-            }
-            if names.contains(Part.led) {
-                BoardCard("light", titleKey: "robot.control.light",
-                          icon: "lightbulb.fill", defaultSize: .medium) { lightSection }
-            }
-            if !names.isDisjoint(with: [Part.volume, Part.speakerTest, Part.buzzer,
-                                        Part.micLeft, Part.micRight]) {
-                BoardCard("sound", titleKey: "robot.control.sound",
-                          icon: "speaker.wave.2.fill", defaultSize: .large) { soundSection }
-            }
-            if !names.isDisjoint(with: [Part.camFlash, Part.camSnapshot, Part.camFrameSize]) {
-                BoardCard("camera", titleKey: "robot.control.camera",
-                          icon: "camera.fill", defaultSize: .large) { cameraSection }
-            }
-            BoardCard("other", titleKey: "robot.control.other",
-                      icon: "ellipsis.circle", defaultSize: .medium) { leftovers }
-        }
-    }
-
-    private var expressionSection: some View {
-        section("robot.control.expression", hint: "robot.control.expression.hint",
-                parts: [Part.face, Part.head, Part.gesture])
-    }
-
-    private var lightSection: some View {
-        section("robot.control.light", hint: "robot.control.light.hint",
-                parts: [Part.led])
-    }
-
-    private var soundSection: some View {
-        section("robot.control.sound", hint: "robot.control.sound.hint",
-                parts: [Part.volume, Part.speakerTest, Part.buzzer,
-                        Part.micLeft, Part.micRight,
-                        Part.micLeftGain, Part.micRightGain])
     }
 
     // ── الكاميرا: مدخل للنظر، وبعده الإعدادات ───────────────────────────────
@@ -131,12 +71,7 @@ struct RobotControlView: View {
             || store.robotDevices.contains { $0.name == Part.camSnapshot }
 
         if hasCamera, let node = store.nodes.first {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                SectionHeader(title: lang.s("robot.control.camera"))
-                Text(lang.s("robot.control.camera.hint"))
-                    .font(Theme.Typography.caption)
-                    .foregroundColor(Theme.Colors.secondaryText)
-
+            card("robot.control.camera", icon: "camera.fill", hint: "robot.control.camera.hint") {
                 NavigationLink {
                     CameraView(node: node)
                         .environmentObject(state)
@@ -178,12 +113,7 @@ struct RobotControlView: View {
     @ViewBuilder
     private var screenSection: some View {
         if let screen = store.robotDevices.first(where: { $0.name == Part.screen }) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                SectionHeader(title: lang.s("robot.control.screen"))
-                Text(lang.s("robot.control.screen.hint"))
-                    .font(Theme.Typography.caption)
-                    .foregroundColor(Theme.Colors.secondaryText)
-
+            card("robot.control.screen", icon: "textformat", hint: "robot.control.screen.hint") {
                 DeviceCard(device: screen, store: store)
 
                 // PhotosPicker builds its label off the main actor: resolve first.
@@ -241,17 +171,13 @@ struct RobotControlView: View {
     /// قسم واحد. ما بيظهر إذا ولا وحدة من قطعه موجودة — لوح بلا كاميرا ما إله
     /// عنوان «كاميرا» فاضي تحته.
     @ViewBuilder
-    private func section(_ titleKey: String, hint hintKey: String,
+    private func section(_ titleKey: String, icon: String, hint hintKey: String,
                          parts: [String]) -> some View {
         let present = parts.compactMap { name in
             store.robotDevices.first { $0.name == name }
         }
         if !present.isEmpty {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                SectionHeader(title: lang.s(titleKey))
-                Text(lang.s(hintKey))
-                    .font(Theme.Typography.caption)
-                    .foregroundColor(Theme.Colors.secondaryText)
+            card(titleKey, icon: icon, hint: hintKey) {
                 ForEach(present) { device in
                     DeviceCard(device: device, store: store)
                 }
@@ -259,23 +185,22 @@ struct RobotControlView: View {
         }
     }
 
-    /// أي قطعة أعلنها اللوح وما إلها مكان بالأقسام فوق.
+    /// أي قطعة أعلنها اللوح وما إلها مكان بالأقسام فوق ولا بالأزرار السريعة.
     ///
     /// موجود عشان فيرموير أحدث من التطبيق ما يخلّي قطعة تختفي بصمت. تظهر تحت
     /// عنوان عام — أقل جمالًا من مكانها الصح، وأصدق بكتير من غيابها.
     @ViewBuilder
     private var leftovers: some View {
-        let placed: Set<String> = [
-            Part.face, Part.head, Part.gesture, Part.screen, Part.led,
-            Part.volume, Part.speakerTest, Part.buzzer,
+        let placed: Set<String> = Part.quick.union([
+            Part.head, Part.screen,
+            Part.volume, Part.speakerTest,
             Part.micLeft, Part.micRight, Part.micLeftGain, Part.micRightGain,
             Part.camFlash, Part.camFlashLvl, Part.camFlashMode,
             Part.camSnapshot, Part.camStream, Part.camFrameSize, Part.camQuality,
-        ]
+        ])
         let rest = store.robotDevices.filter { !placed.contains($0.name) }
         if !rest.isEmpty {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                SectionHeader(title: lang.s("robot.control.other"))
+            card("robot.control.other", icon: "ellipsis.circle", hint: nil) {
                 ForEach(rest) { device in
                     DeviceCard(device: device, store: store)
                 }
@@ -283,19 +208,22 @@ struct RobotControlView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: Theme.Spacing.md) {
-            Image(systemName: "figure.wave")
-                .scaledFont(Theme.Icon.xl, relativeTo: .largeTitle)
-                .foregroundColor(Theme.Colors.secondaryText)
-            Text(lang.s("robot.control.empty.title"))
+    /// A section in the same card as the quick buttons above: a title, a line on it, its parts.
+    private func card<Content: View>(_ titleKey: String, icon: String, hint hintKey: String?,
+                                     @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Label(lang.s(titleKey), systemImage: icon)
                 .font(Theme.Typography.headline)
-            Text(lang.s("robot.control.empty.hint"))
-                .font(Theme.Typography.subheadline)
-                .foregroundColor(Theme.Colors.secondaryText)
-                .multilineTextAlignment(.center)
+                .foregroundColor(Theme.Colors.primaryText)
+            if let hintKey {
+                Text(lang.s(hintKey))
+                    .font(Theme.Typography.caption)
+                    .foregroundColor(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            content()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.xxl)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sandyCard(.secondary)
     }
 }
