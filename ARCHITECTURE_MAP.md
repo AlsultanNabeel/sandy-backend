@@ -1249,7 +1249,9 @@ so folders are organisation only.
 - `App/` — `SandyApp`, `AppState` (holds the base URL), `MainTabView`. **Three tabs**:
   Today, Sandy (the orb in the middle of the tab bar: tap = chat, hold = live call) and
   My Life. Profile opens from the avatar on Today and holds memory (the `fact` log),
-  robot, photos, weather settings, persona and account.
+  robot, photos, weather settings, persona and account. A tab bar button always shows
+  its tab at the root: tapping it with a screen pushed in that tab rebuilds the tab's
+  stack (its root's disappearing while the tab is shown marks it as pushed).
 - `Features/Today/` — one screen: a sentence about the day, the ask bar (`AskBar`: one
   field for everything, sent to `/api/agent/stream`; Sandy decides what it is and the
   day refreshes; the quick-add shortcut focuses it), the rest of the day as a timeline

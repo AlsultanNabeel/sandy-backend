@@ -30,6 +30,12 @@ struct MainTabView: View {
     @EnvironmentObject var lang: LanguageManager
 
     @State private var selection: MainTab = .today
+    /// Tabs with a screen pushed over their root. Tapping such a tab's button takes it
+    /// back to its root, as «back» all the way would.
+    @State private var deep: Set<MainTab> = []
+    /// Bumped to rebuild a tab's stack at its root: its pushes are `NavigationLink`s with
+    /// destinations, which no path binding can pop.
+    @State private var resets: [MainTab: Int] = [:]
 
     @ObservedObject private var notifs = NotificationManager.shared
 
@@ -46,17 +52,9 @@ struct MainTabView: View {
     var body: some View {
         VStack(spacing: 0) {
             TabView(selection: $selection) {
-                NavigationStack { TodayView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.today)
-
-                NavigationStack { SandyHubView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.sandy)
-
-                NavigationStack { LifeView() }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tag(MainTab.life)
+                stack(.today) { TodayView() }
+                stack(.sandy) { SandyHubView() }
+                stack(.life) { LifeView() }
             }
             // Above the tab bar and clear of a list's add field.
             .undoOverlay(bottom: 72)
@@ -67,7 +65,7 @@ struct MainTabView: View {
                     .padding(.bottom, 6)
             }
             if !keyboardUp {
-                FloatingTabBar(selection: $selection)
+                FloatingTabBar(selection: selection, select: select)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -132,6 +130,25 @@ struct MainTabView: View {
         }
     }
 
+    /// One tab's stack. Its root leaving the screen while its tab is the one shown means
+    /// a screen was pushed over it; a tab switch hides it with the selection already moved.
+    private func stack<Root: View>(_ tab: MainTab, @ViewBuilder root: () -> Root) -> some View {
+        NavigationStack {
+            root()
+                .onAppear { deep.remove(tab) }
+                .onDisappear { if selection == tab { deep.insert(tab) } }
+        }
+        .id(resets[tab, default: 0])
+        .toolbar(.hidden, for: .tabBar)
+        .tag(tab)
+    }
+
+    /// A tab bar button: shows the tab, at its root.
+    private func select(_ tab: MainTab) {
+        if deep.remove(tab) != nil { resets[tab, default: 0] += 1 }
+        withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.78).reduced) { selection = tab }
+    }
+
     private func open(_ link: DeepLink) {
         switch link {
         case .chat:
@@ -159,7 +176,9 @@ struct MainTabView: View {
 
 // MARK: - FloatingTabBar
 struct FloatingTabBar: View {
-    @Binding var selection: MainTab
+    let selection: MainTab
+    /// Shows a tab at its root.
+    let select: (MainTab) -> Void
     @EnvironmentObject var lang: LanguageManager
 
     /// Today and My Life on the sides; Sandy is the orb in the middle. Tap talks to her in
@@ -168,7 +187,7 @@ struct FloatingTabBar: View {
         HStack(spacing: 0) {
             sideButton(.today)
             SandyOrb(selected: selection == .sandy) {
-                withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.78).reduced) { selection = .sandy }
+                select(.sandy)
             } onHold: {
                 DeepLinkRouter.shared.ask(.call)
             }
@@ -189,7 +208,7 @@ struct FloatingTabBar: View {
     private func sideButton(_ tab: MainTab) -> some View {
         let selected = selection == tab
         return Button {
-            withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.78).reduced) { selection = tab }
+            select(tab)
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: tab.icon).scaledFont(19, weight: .semibold)
