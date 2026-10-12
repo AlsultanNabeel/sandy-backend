@@ -1274,6 +1274,25 @@ static void mic_send(const void *pcm, size_t bytes) {
     xStreamBufferSend(s_tx_stream, pcm, bytes, 0);
 }
 
+// A socket write can take far past the watchdog's ten seconds on a link that drips: the poll
+// waits TX_SEND_TIMEOUT_MS, the TLS write the socket's own timeout (ten seconds, partial writes
+// retried), and a failed write then waits for the client's lock with no limit while its task
+// reads. So the two sends are not watched; instead the time a send began is kept, and the
+// session manager hangs up and calls again when one has hung past TX_STUCK_MS.
+#define TX_STUCK_MS  20000
+static volatile int64_t s_tx_send_since;   // 0: no send in progress
+
+static void tx_send_begin(void) {
+    s_tx_send_since = now_ms();
+    health_unwatch();
+}
+
+static void tx_send_end(void) {
+    health_watch();
+    health_feed();
+    s_tx_send_since = 0;
+}
+
 // Drains the uplink buffer on its own task, so slow writes block nothing real-time.
 static void ws_tx_task(void *arg) {
     (void)arg;
@@ -1312,9 +1331,10 @@ static void ws_tx_task(void *arg) {
             // Ahead of the audio: the server stops her reply without waiting to be sure itself.
             s_barge_pending = false;
             static const char barge[] = "{\"type\":\"barge_in\"}";
+            tx_send_begin();
             esp_websocket_client_send_text(s_client, barge, sizeof(barge) - 1,
                                            pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
-            health_feed();   // each send may take TX_SEND_TIMEOUT_MS
+            tx_send_end();
         }
 
         // Catch up to real time: drop the oldest past TX_MAX_LATENCY_BYTES, counted and logged.
@@ -1331,8 +1351,11 @@ static void ws_tx_task(void *arg) {
         size_t n = xStreamBufferReceive(s_tx_stream, chunk, TX_CHUNK_BYTES, 0);
         if (n) {
             s_tx_protected = s_tx_protected > n ? s_tx_protected - (uint32_t)n : 0;
-            if (esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
-                                              pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS)) < 0) {
+            tx_send_begin();
+            const int sent = esp_websocket_client_send_bin(s_client, (const char *)chunk, n,
+                                                           pdMS_TO_TICKS(TX_SEND_TIMEOUT_MS));
+            tx_send_end();
+            if (sent < 0) {
                 // Count failed writes.
                 s_tx_drop_bytes += n;
                 static int64_t s_last_fail_log;
@@ -2043,6 +2066,28 @@ static void voice_task(void *arg) {
         health_feed();
         net_tick();
         clock_tick();
+        if (s_session_active && s_tx_send_since && now_ms() - s_tx_send_since > TX_STUCK_MS) {
+            // An uplink write hung (unwatched, see tx_send_begin): the link is barely moving.
+            // Stop the client so the write gives up (its socket times out, the lock it then
+            // waits for is freed when the client's task stops), end the call, and dial again:
+            // the conversation lives on the server, so the next call carries on with it.
+            ESP_LOGW(TAG, "uplink send stuck for %d s — hanging up",
+                     (int)((now_ms() - s_tx_send_since) / 1000));
+            status_set(SANDY_PART_LINK, SANDY_ST_LINK_STALL);
+            esp_websocket_client_handle_t c = s_client;   // stable: ws_tx_task holds the lock
+            health_unwatch();
+            if (c) esp_websocket_client_stop(c);
+            health_watch();
+            session_heap_report();
+            session_end();
+            // Once in two minutes at most: on a link that stays this bad, every call would hang
+            // the same way, and each one opens a paid model session.
+            static int64_t s_redialed_at;
+            if (!s_redialed_at || now_ms() - s_redialed_at > 120000) {
+                s_redialed_at = now_ms();
+                s_wake_req = true;
+            }
+        }
         if (s_session_active && (s_auth_refused || s_clock_bad || s_not_paired || s_server_failed)) {
             // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
@@ -2144,7 +2189,7 @@ static void voice_task(void *arg) {
                          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                          (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
-                // Waits for the uplink's socket lock (one send, up to 4 s).
+                // Waits for the uplink's socket lock (one send: on a dripping link, tens of seconds).
                 health_unwatch();
                 const bool opened = ws_open();
                 health_watch();
