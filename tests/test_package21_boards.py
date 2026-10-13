@@ -45,3 +45,27 @@ def test_the_camera_takes_a_snapshot_command_on_the_topic_it_subscribes_to():
     # The camera never publishes on it, so no topic is kept for it.
     assert "g_topicSnapshot" not in mqtt
     assert "TOPIC_SUFFIX_SNAPSHOT" not in _src(CAM / "config.h")
+
+
+# ── D6: the app offered picture sizes the camera clips without a word ──
+
+def test_the_app_offers_no_picture_size_past_the_cameras_largest():
+    from app.features.node_provision import PART_CATALOGUE
+
+    control = _src(CAM / "cam_control.ino")
+    order = re.findall(r'\{"([\w\d]+)",\s*FRAMESIZE_(\w+)\}', control)
+    assert len(order) >= 10, "the camera's size table stopped matching"
+    config = _src(CAM / "config.h")
+    largest = re.search(r"#define CAMERA_MAX_FRAME_SIZE\s+(\w+)", config).group(1)
+    if largest == "CAMERA_DEFAULT_FRAME_SIZE":
+        largest = re.search(r"#define CAMERA_DEFAULT_FRAME_SIZE\s+FRAMESIZE_(\w+)",
+                            config).group(1)
+    names = [name for name, _ in order]
+    cap = [size for _, size in order].index(largest.removeprefix("FRAMESIZE_"))
+    allowed = set(names[:cap + 1])
+
+    offered = list(PART_CATALOGUE["cam/framesize"]["meta"]["values"])
+    assert set(offered) <= allowed, (
+        f"{sorted(set(offered) - allowed)} are past the camera's largest ({largest}): "
+        "it clips them and the server records a size the photo never had")
+    assert offered == names[:cap + 1], "every size up to the largest, smallest first"

@@ -1028,6 +1028,9 @@ once (409 `camera_offline`): no photo ticket, no stream switch, no «pending» f
 app's live view says so, or that nothing arrived in ten seconds, instead of a placeholder.
 A photo's `snapshot` command carries `flash` only when the caller chose one; without it the
 camera uses the mode its owner saved (`cam/flash_mode`), so a flash set off stays off.
+The picture sizes offered (`node_provision.CAM_FRAME_SIZES`) stop at the camera's largest,
+`CAMERA_MAX_FRAME_SIZE` (VGA, its frame buffer is allocated once at that size); a larger one was
+clipped by the board while the server recorded it.
 
 `node_id` is derived on the board from `SANDY_PAIR_CODE` in `secrets.h` using the
 **same transform as `node_store.code_to_node_id`** — lowercase, alphanumerics

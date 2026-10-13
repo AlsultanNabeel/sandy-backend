@@ -38,10 +38,10 @@ ROBOT_LED = [
     "police", "party", "sunrise", "ocean", "candle", "solid",
 ]
 
-# بنفس أسماء الفيرموير حرفيًا (kFrameSizes بـ cam_control).
+# بنفس أسماء الفيرموير حرفيًا (kFrameSizes بـ cam_control)، لحد أكبر حجم الكاميرا بتقبله
+# (`CAMERA_MAX_FRAME_SIZE`): الأكبر كانت تقصّه بصمت والخادم يسجّله حالة.
 CAM_FRAME_SIZES = [
-    "96X96", "QQVGA", "QCIF", "HQVGA", "240X240", "QVGA", "CIF",
-    "HVGA", "VGA", "SVGA", "XGA", "HD", "SXGA", "UXGA",
+    "96X96", "QQVGA", "QCIF", "HQVGA", "240X240", "QVGA", "CIF", "HVGA", "VGA",
 ]
 
 # output id -> how to present it. `name` is the device slug, unique per tenant.
