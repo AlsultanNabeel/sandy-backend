@@ -177,6 +177,31 @@ static esp_err_t update_write(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// The setup page needs port 80 while it is up (sandy_provision.c): it releases this server
+// first and resumes it once the network is back. The lock keeps the boot task and the
+// setup task from starting or stopping it at the same time.
+static httpd_handle_t    s_http;
+static SemaphoreHandle_t s_http_lock;
+static bool              s_http_released;
+
+static void bind_http(void) {
+    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.lru_purge_enable = true;
+    cfg.recv_wait_timeout = 20;
+    cfg.max_uri_handlers = 12;   // the upload and the echo probe's
+    // Default 4 KB stack; internal RAM is scarce.
+    if (httpd_start(&s_http, &cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "httpd start failed");
+        s_http = NULL;
+        return;
+    }
+    httpd_uri_t root = { .uri = "/",       .method = HTTP_GET,  .handler = root_get };
+    httpd_uri_t upd  = { .uri = "/update", .method = HTTP_POST, .handler = update_post };
+    httpd_register_uri_handler(s_http, &root);
+    httpd_register_uri_handler(s_http, &upd);
+    echo_probe_register(s_http);
+}
+
 static void start_http(void) {
     // Wait for an address: wifi_sandy_start() returns before association, and a
     // server bound too early answered nothing.
@@ -185,22 +210,35 @@ static void start_http(void) {
         vTaskDelay(pdMS_TO_TICKS(500));
     }
     if (!wifi_sandy_is_connected()) {
-        ESP_LOGE(TAG, "http: no IP after 60s — remote flashing unavailable");
+        ESP_LOGE(TAG, "http: no IP after 60s — remote flashing waits for the network");
         return;
     }
+    xSemaphoreTake(s_http_lock, portMAX_DELAY);
+    if (!s_http && !s_http_released) bind_http();
+    xSemaphoreGive(s_http_lock);
+}
 
-    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.lru_purge_enable = true;
-    cfg.recv_wait_timeout = 20;
-    cfg.max_uri_handlers = 12;   // the upload and the echo probe's
-    // Default 4 KB stack; internal RAM is scarce.
-    httpd_handle_t srv = NULL;
-    if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
-    httpd_uri_t root = { .uri = "/",       .method = HTTP_GET,  .handler = root_get };
-    httpd_uri_t upd  = { .uri = "/update", .method = HTTP_POST, .handler = update_post };
-    httpd_register_uri_handler(srv, &root);
-    httpd_register_uri_handler(srv, &upd);
-    echo_probe_register(srv);
+void remote_http_release(void) {
+    if (!s_http_lock) { s_http_released = true; return; }   // before init: nothing bound yet
+    xSemaphoreTake(s_http_lock, portMAX_DELAY);
+    s_http_released = true;
+    if (s_http) {
+        httpd_stop(s_http);
+        s_http = NULL;
+        ESP_LOGW(TAG, "remote flashing paused — the setup page needs port 80");
+    }
+    xSemaphoreGive(s_http_lock);
+}
+
+void remote_http_resume(void) {
+    if (!s_http_lock) { s_http_released = false; return; }
+    xSemaphoreTake(s_http_lock, portMAX_DELAY);
+    s_http_released = false;
+    if (!s_http && wifi_sandy_is_connected()) {
+        bind_http();
+        if (s_http) ESP_LOGI(TAG, "remote flashing back on port 80");
+    }
+    xSemaphoreGive(s_http_lock);
 }
 
 static void http_task(void *arg) {
@@ -213,6 +251,7 @@ esp_err_t remote_init(void) {
     // PSRAM, to spare internal RAM. Safe: esp_log never writes with the cache disabled.
     s_logbuf = xStreamBufferCreateWithCaps(LOG_BUF_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_log_lock = xSemaphoreCreateMutex();
+    s_http_lock = xSemaphoreCreateMutex();
     s_old_vprintf = esp_log_set_vprintf(log_vprintf);
     // Stack in PSRAM (no flash access). The name "logsrv" is load-bearing:
     // publish_firmware.py checks retail images leave it out.

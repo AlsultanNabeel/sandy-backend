@@ -1117,6 +1117,12 @@ Three things here are load-bearing and easy to undo by accident:
 - **`_retry_task` yields** while `s_switching` or `provision_is_active()`. A blind
   `esp_wifi_connect()` inside a scan or a credential test makes both fail, and it
   reads as a wrong password.
+- **The page before the radio.** The owner's build serves LAN flashing on port 80
+  (`sandy_remote.c`); the setup page takes the port from it (`remote_http_release`) before
+  binding and gives it back once the network returns (`remote_http_resume`). A page that
+  still cannot bind leaves the radio alone and is tried again in `PROVISION_RETRY_MS`
+  (30 s): it used to raise an access point with no page and no code on her face, and log
+  twice a second.
 
 The window is long on purpose: a robot that enters setup whenever the router is
 slow is worse than one that never does. It doubles as the recovery path when an

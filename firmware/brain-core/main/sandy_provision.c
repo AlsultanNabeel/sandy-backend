@@ -7,6 +7,7 @@
 #include "sandy_screen.h"
 #include "sandy_status.h"
 #include "sandy_identity.h"
+#include "sandy_remote.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -50,6 +51,9 @@ static void html_escape(const char *in, char *out, size_t cap) {
 }
 
 static const char *TAG = "provision";
+
+// A setup page that could not bind its port is tried again after this long.
+#define PROVISION_RETRY_MS 30000
 
 static httpd_handle_t s_httpd = NULL;
 static volatile bool  s_active = false;
@@ -365,7 +369,9 @@ static esp_err_t to_the_page(httpd_req_t *req, httpd_err_code_t err) {
 
 // ─── Bringing the access point up ───
 
-static void start_ap(void) {
+// The page first, then the radio: an access point with no page behind it is a network
+// nobody can use, and it showed no code on her face either.
+static bool start_ap(void) {
     char pass[65];
     build_ap_identity(s_ap_ssid, sizeof(s_ap_ssid), pass, sizeof(pass));
 
@@ -383,6 +389,29 @@ static void start_ap(void) {
         esp_netif_dhcps_start(s_ap_netif);
     }
 
+#if ENABLE_REMOTE
+    // The owner's build serves LAN flashing on port 80; it is handed back in stop_ap.
+    remote_http_release();
+#endif
+    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.lru_purge_enable = true;
+    // POST handler holds body, decode buffer and reply at once; 4 KB overflowed.
+    cfg.stack_size = 6144;
+    if (httpd_start(&s_httpd, &cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "cannot bind the setup page — trying again in %d s",
+                 PROVISION_RETRY_MS / 1000);
+        s_httpd = NULL;
+#if ENABLE_REMOTE
+        remote_http_resume();
+#endif
+        return false;
+    }
+    httpd_uri_t root = { .uri = "/",          .method = HTTP_GET,  .handler = root_get };
+    httpd_uri_t post = { .uri = "/provision", .method = HTTP_POST, .handler = provision_post };
+    httpd_register_uri_handler(s_httpd, &root);
+    httpd_register_uri_handler(s_httpd, &post);
+    httpd_register_err_handler(s_httpd, HTTPD_404_NOT_FOUND, to_the_page);
+
     wifi_config_t ap = { 0 };
     size_t sn = strlen(s_ap_ssid);
     if (sn > sizeof(ap.ap.ssid)) sn = sizeof(ap.ap.ssid);
@@ -398,22 +427,6 @@ static void start_ap(void) {
     // APSTA: the station side must stay up to scan and to test the chosen network.
     esp_wifi_set_mode(WIFI_MODE_APSTA);
     esp_wifi_set_config(WIFI_IF_AP, &ap);
-
-    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.lru_purge_enable = true;
-    // POST handler holds body, decode buffer and reply at once; 4 KB overflowed.
-    cfg.stack_size = 6144;
-    if (httpd_start(&s_httpd, &cfg) != ESP_OK) {
-        // Port 80 may still be held by the remote-flash server; the loop retries.
-        ESP_LOGE(TAG, "cannot bind the setup page — port 80 busy");
-        s_httpd = NULL;
-        return;
-    }
-    httpd_uri_t root = { .uri = "/",          .method = HTTP_GET,  .handler = root_get };
-    httpd_uri_t post = { .uri = "/provision", .method = HTTP_POST, .handler = provision_post };
-    httpd_register_uri_handler(s_httpd, &root);
-    httpd_register_uri_handler(s_httpd, &post);
-    httpd_register_err_handler(s_httpd, HTTPD_404_NOT_FOUND, to_the_page);
 
     s_dns_run = true;
     if (!s_dns_task &&
@@ -435,6 +448,7 @@ static void start_ap(void) {
 
     // Password not logged: dev builds ship the log off the board.
     ESP_LOGW(TAG, "setup mode — join '%s' and open http://192.168.4.1", s_ap_ssid);
+    return true;
 }
 
 static void stop_ap(void) {
@@ -444,6 +458,9 @@ static void stop_ap(void) {
     s_active = false;
     // Remove the setup code once the home network is back.
     screen_dismiss();
+#if ENABLE_REMOTE
+    remote_http_resume();
+#endif
     ESP_LOGI(TAG, "network found — setup mode off");
 }
 
@@ -459,6 +476,7 @@ static void provision_task(void *arg) {
     const int step_ms = 500;
     bool ever_up = false;
     int64_t down_since = esp_timer_get_time() / 1000;
+    int64_t retry_at = 0;   // a page that could not start waits this long, not half a second
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(step_ms));
@@ -467,11 +485,12 @@ static void provision_task(void *arg) {
         if (wifi_sandy_is_connected()) {
             ever_up = true;
             down_since = 0;
+            retry_at = 0;
             if (s_active) stop_ap();
             continue;
         }
         if (!down_since) down_since = now;
-        if (s_active) continue;
+        if (s_active || now < retry_at) continue;
 
         int64_t wait = PROVISION_WINDOW_MS;
         if (!wifi_sandy_ssid()[0]) wait = 0;
@@ -480,7 +499,7 @@ static void provision_task(void *arg) {
             ESP_LOGW(TAG, "no network for %lld s%s — raising the setup access point",
                      (long long)((now - down_since) / 1000),
                      wifi_sandy_password_rejected() ? " (password refused)" : "");
-            start_ap();   // if port 80 was busy it stays down, and the next step retries
+            if (!start_ap()) retry_at = now + PROVISION_RETRY_MS;
         }
     }
 }
