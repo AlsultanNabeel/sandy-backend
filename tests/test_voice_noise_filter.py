@@ -88,7 +88,7 @@ class _Reader:
             yield c
 
 
-def test_the_tv_under_his_level_opens_no_turn_and_keeps_the_call_quiet():
+def test_the_tv_under_his_level_opens_no_turn():
     from app.api.voice_ws.session import _device_to_live
     from app.api.voice_ws.speaker import _RecentAudio
 
@@ -98,21 +98,9 @@ def test_the_tv_under_his_level_opens_no_turn_and_keeps_the_call_quiet():
     tv = [_tone(200, 700)] * 6
     session = _Session()
     state: dict = {}
-    marks = []
-
-    async def run():
-        async def frames():
-            for i, c in enumerate(room + near + pause + tv + pause):
-                if i == len(room + near + pause):
-                    marks.append(state.get("user_voice_at"))
-                yield c
-        reader = _Reader([])
-        reader.frames = frames
-        await _device_to_live(reader, session, _RecentAudio(), verify=False, live_state=state)
-
-    asyncio.run(run())
+    asyncio.run(_device_to_live(_Reader(room + near + pause + tv + pause), session,
+                                _RecentAudio(), verify=False, live_state=state))
     assert session.starts == 1 and session.ends == 1, "the TV opened a turn"
-    assert state.get("user_voice_at") == marks[0], "the TV moved the call's quiet clock"
 
 
 # ── The live side: an invented turn's reply is never played ──
@@ -158,7 +146,7 @@ def _relay(monkeypatch, heard: str, suspect: bool):
     saved = []
     monkeypatch.setattr(sess, "_save_voice_turn", lambda *a: saved.append(a))
     ws = _Ws()
-    state = {"turn_suspect": suspect, "user_voice_at": 50.0, "voice_at_before_turn": 10.0}
+    state = {"turn_suspect": suspect}
     asyncio.run(sess._live_to_device(ws, _Live(heard), _RecentAudio(), state))
     time.sleep(0.1)   # the save runs on an executor
     return ws, state, saved
@@ -168,13 +156,13 @@ def test_an_invented_quiet_turn_is_dropped_with_its_reply(monkeypatch):
     ws, state, saved = _relay(monkeypatch, "¿Qué?", suspect=True)
     assert not ws.audio(), "her answer to the TV was played"
     assert not saved, "the invented turn was kept in memory"
-    assert state["user_voice_at"] == 10.0, "the quiet clock was not put back"
+    assert "understood_at" not in state, "the invented turn kept the call from ending"
     assert any(json.loads(d).get("type") == "end_turn" for d in ws.sent if isinstance(d, str))
 
 
 def test_the_same_words_said_close_and_clearly_go_through(monkeypatch):
-    ws, _, saved = _relay(monkeypatch, "¿Qué?", suspect=False)
-    assert ws.audio() and saved
+    ws, state, saved = _relay(monkeypatch, "¿Qué?", suspect=False)
+    assert ws.audio() and saved and "understood_at" in state
 
 
 def test_a_quiet_turn_with_real_words_is_answered(monkeypatch):

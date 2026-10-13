@@ -763,8 +763,8 @@ not kept and the quiet clock is put back. Gemini Live gives no confidence or no-
 probability for its transcript, so none is used.
 
 **A call ends by itself on the server too** (`session._call_watchdog`), for the robot and the
-app alike: `call_idle` after `SANDY_CALL_IDLE_S` (90 s) with neither the user's voice (a pitched
-frame, so a TV or a fan does not count) nor hers, and `call_time_limit` at `SANDY_CALL_MAX_MIN`
+app alike: `call_idle` after `SANDY_CALL_IDLE_S` (90 s) with neither a turn she understood (`understood_at`:
+words in its transcript, not dropped by `noise`, so a TV in the room does not hold it) nor her voice, and `call_time_limit` at `SANDY_CALL_MAX_MIN`
 (20 min). The deadline is set once per call, so a GoAway reconnect neither resets nor extends it;
 the reason goes to the device as `{"type":"error","msg":…}` (the app shows a sentence,
 `GeminiLiveManager.errorLine`; the board logs it and stays unlocked).

@@ -790,8 +790,9 @@ async def _call_watchdog(state: Dict[str, Any]) -> None:
     """Return once the call is over, with the reason in `state["ended"]`:
     `user_ended` when `end_call` ran and her goodbye never finished,
     `call_time_limit` at `state["call_deadline"]`, or `call_idle` after `_CALL_IDLE_S` with
-    neither the user's voice (a pitched frame, so a TV's hum or a fan does not count) nor
-    hers. One per bridge; the deadline and the last voices live in `state`, so a GoAway
+    neither a turn she understood (`understood_at`: words in its transcript, not dropped as
+    far or invented, so a TV in the room does not hold the call) nor her voice. One per
+    bridge; the deadline and the last turns live in `state`, so a GoAway
     reconnect neither resets nor extends them."""
     while True:
         now = time.monotonic()
@@ -804,7 +805,7 @@ async def _call_watchdog(state: Dict[str, Any]) -> None:
             state["ended"] = state.get("deadline_reason") or "call_time_limit"
             return
         heard = max(float(state.get("call_started") or now),
-                    float(state.get("user_voice_at") or 0),
+                    float(state.get("understood_at") or 0),
                     float(state.get("her_voice_at") or 0))
         if now - heard >= _CALL_IDLE_S:
             state["ended"] = "call_idle"
@@ -938,8 +939,6 @@ async def _device_to_live_auto(reader: "_DeviceReader", session,
             room = min(min(r for _, r in window), _VAD_ROOM_MAX)
             if rms >= max(room * _VAD_FLOOR_FACTOR, _VAD_RMS_FLOOR):
                 state["turn_closed_at"] = time.monotonic()
-                if _voiced(samples):
-                    state["user_voice_at"] = state["turn_closed_at"]
 
         recent.add(chunk)
         for i in range(0, len(chunk), _CHUNK_BYTES):
@@ -1177,8 +1176,6 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
 
                 # Speech onset: open an activity. Keep `recent` (verification needs a few seconds).
                 speaking = True
-                # Put back if this turn turns out to be an invention (`_live_to_device`).
-                state["voice_at_before_turn"] = state.get("user_voice_at")
                 turn_levels = held_levels
                 held_levels = []
                 silence_ms = 0.0
@@ -1208,7 +1205,6 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 if talking:
                     speech_ms += ms
                     turn_levels.append(rms)
-                    state["user_voice_at"] = time.monotonic()   # the call is not idle
                 silence_ms = 0.0 if talking else silence_ms + ms
 
                 # A startup backlog is one question, not four: no turn closes until
@@ -1426,16 +1422,18 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             invented = _holding() and noise.is_invention(user_text)
             if invented:
                 # Noise the recogniser wrote as a phrase: her answer is never played, the
-                # turn is not kept, and the call's quiet clock is put back.
+                # turn is not kept, and the call's quiet clock does not move.
                 logger.info("[voice_ws] dropped an invented turn (%d chars, quiet or "
                             "short) and its reply", len(user_text))
                 _held_out.clear()
                 _hold["since"] = None
                 live_state["turn_suspect"] = False
-                live_state["user_voice_at"] = live_state.get("voice_at_before_turn")
                 user_text = sandy_text = ""
             elif _holding():
                 await _let_go()
+            if _HAS_LETTERS.search(user_text):
+                # A turn she understood: what keeps the call from ending as idle.
+                live_state["understood_at"] = time.monotonic()
             done: Dict[str, Any] = {"type": "end_turn"}
             if get_voice_channel() == _ROBOT_CHANNEL and sandy_text:
                 # The face she keeps for a moment after the reply, then back to listening.

@@ -174,7 +174,7 @@ _APP_TURNS_BY_GEMINI: bool = os.getenv("SANDY_APP_TURNS", "ours").strip().lower(
 # المايك المفتوح بالتطبيق (بيخلّي المقاطعة ممكنة)؛ SANDY_APP_DUPLEX=0 للتراجع.
 _APP_DUPLEX: bool = os.getenv("SANDY_APP_DUPLEX", "1").strip().lower() not in {"0", "false", "off", "no"}
 _APP_SILENCE_MS = 900
-# A call ends by itself after this long with neither the user's voice nor hers, and at
+# A call ends by itself after this long with neither a turn she understood nor her voice, and at
 # this maximum whatever happens, for the robot and the app alike. Both from the settings.
 _CALL_IDLE_S = float(os.getenv("SANDY_CALL_IDLE_S", "90"))
 _CALL_MAX_S = float(os.getenv("SANDY_CALL_MAX_MIN", "20")) * 60

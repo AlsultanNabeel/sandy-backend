@@ -1,4 +1,4 @@
-"""A call ends by itself: after a stretch with nobody talking, and at a hard maximum.
+"""A call ends by itself: after a stretch with no turn she understood, and at a hard maximum.
 
 Before, a call streaming silence (or a TV) stayed open for as long as the socket did:
 the keepalive kept it up and every GoAway reconnected it, paying Gemini by the minute.
@@ -126,10 +126,42 @@ def test_a_call_nobody_talks_in_ends_after_the_quiet_stretch(live):
     assert ws.errors() == ["call_idle"]
 
 
-def test_a_call_that_never_stops_ends_at_the_maximum(live):
+def test_a_voice_she_never_understands_ends_after_the_quiet_stretch(live):
+    """The TV in the room: a voice all along, and no turn she understood."""
+    ws = _Socket(_voice())
+    took = live(ws, idle_s=0.6, max_s=60, within_s=8)
+    assert took < 5
+    assert ws.errors() == ["call_idle"]
+
+
+class _Talking(_Gemini):
+    """Understands a turn every few hundred milliseconds."""
+
+    async def receive(self):
+        from types import SimpleNamespace as NS
+
+        def content(**kw):
+            base = dict(input_transcription=None, output_transcription=None,
+                        interrupted=None, model_turn=None, turn_complete=None)
+            base.update(kw)
+            return NS(server_content=NS(**base), tool_call=None, go_away=None,
+                      session_resumption_update=None)
+        while True:
+            await asyncio.sleep(0.3)
+            yield content(input_transcription=NS(text="شو الطقس؟"))
+            yield content(turn_complete=True)
+
+
+def test_a_call_that_never_stops_ends_at_the_maximum(live, monkeypatch):
+    from app.api.voice_ws import session as sess
+
+    async def _open(client, config):
+        return _Manager(), _Talking(), "fake-live", None
+    monkeypatch.setattr(sess, "_open_live_session", _open)
+    monkeypatch.setattr(sess, "_save_voice_turn", lambda *a: None)
     ws = _Socket(_voice())
     took = live(ws, idle_s=0.6, max_s=2.0, within_s=10)
-    assert 1.5 < took < 8, "someone talking must keep it past the quiet stretch"
+    assert 1.5 < took < 8, "turns she understands must keep it past the quiet stretch"
     assert ws.errors() == ["call_time_limit"]
 
 
