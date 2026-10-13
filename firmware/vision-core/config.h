@@ -109,7 +109,6 @@
 #define SANDY_TOPIC_ROOT    "sandy/node/"
 #define TOPIC_SUFFIX_REQUEST   "/cam/request"
 #define TOPIC_SUFFIX_COMMAND   "/cam/command"
-#define TOPIC_SUFFIX_SNAPSHOT  "/cam/snapshot"
 #define TOPIC_SUFFIX_STATUS    "/cam/status"
 #define TOPIC_SUFFIX_EVENT     "/cam/event"
 #define TOPIC_SUFFIX_WIFI      "/cam/wifi"

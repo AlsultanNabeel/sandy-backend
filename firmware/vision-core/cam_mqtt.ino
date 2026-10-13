@@ -17,8 +17,8 @@ void handleCamWifiCommand(const String& value);
 
 // ===== هوية العقدة =====
 // المواضيع من كود الاقتران بنفس تحويل node_store.code_to_node_id.
-static String g_topicRequest, g_topicCommand, g_topicSnapshot,
-              g_topicStatus,  g_topicEvent,   g_topicWifi,    g_topicErase;
+static String g_topicRequest, g_topicCommand, g_topicStatus,
+              g_topicEvent,   g_topicWifi,    g_topicErase;
 
 // طلب تغيير شبكة مستنّي `camLoop`: التبديل بيحجز ٢٥ ثانية ورد نداء MQTT ما لازم ينام.
 static volatile bool g_wifiPending = false;
@@ -40,7 +40,6 @@ static void camBuildTopics() {
   String base = String(SANDY_TOPIC_ROOT) + camNodeId();
   g_topicRequest  = base + TOPIC_SUFFIX_REQUEST;
   g_topicCommand  = base + TOPIC_SUFFIX_COMMAND;
-  g_topicSnapshot = base + TOPIC_SUFFIX_SNAPSHOT;
   g_topicStatus   = base + TOPIC_SUFFIX_STATUS;
   g_topicEvent    = base + TOPIC_SUFFIX_EVENT;
   g_topicWifi     = base + TOPIC_SUFFIX_WIFI;
@@ -128,9 +127,8 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // آخر مقطع من الموضوع = اسم المخرج.
     int slash = t.lastIndexOf('/');
     String out = slash >= 0 ? t.substring(slash + 1) : String();
-    // مواضيعنا الراجعة علينا مش أوامر.
-    if (out == "status" || out == "snapshot" || out == "event" ||
-        out == "request" || out == "command") return;
+    // مواضيعنا الراجعة علينا مش أوامر. `snapshot` أمر من التطبيق، ما بننشر عليه.
+    if (out == "status" || out == "event" || out == "request" || out == "command") return;
     if (handleSimpleOutput(out, value)) return;
     g_log.printf("[CB] unhandled topic '%s'\n", t.c_str());
   }
