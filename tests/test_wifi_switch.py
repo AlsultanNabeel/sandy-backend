@@ -32,7 +32,7 @@ def test_a_board_you_do_not_own_is_never_touched():
     hardware.
     """
     with patch("app.features.node_store.get_node", return_value=None), _sent() as c:
-        res = wifi_switch.switch_network("someone-elses", "Net", "pw")
+        res = wifi_switch.switch_network("someone-elses", "Net", "password")
     assert res == {"ok": False, "error": "not_yours"}
     c.assert_not_called()
 
@@ -45,8 +45,8 @@ def test_a_newline_cannot_be_smuggled_into_either_field():
     test is what keeps that true if the format is ever revisited.
     """
     with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
-        assert wifi_switch.switch_network("n1", "Ne\nt", "pw")["error"] == "bad_chars"
-        assert wifi_switch.switch_network("n1", "Net", "p\nw")["error"] == "bad_chars"
+        assert wifi_switch.switch_network("n1", "Ne\nt", "password")["error"] == "bad_chars"
+        assert wifi_switch.switch_network("n1", "Net", "pass\nword")["error"] == "bad_chars"
 
 
 def test_impossible_credentials_are_refused_here_not_on_the_board():
@@ -57,21 +57,46 @@ def test_impossible_credentials_are_refused_here_not_on_the_board():
     during which it is off the network and answering nobody.
     """
     with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
-        assert wifi_switch.switch_network("n1", "x" * 33, "pw")["error"] == "too_long"
+        assert wifi_switch.switch_network("n1", "x" * 33, "password")["error"] == "too_long"
         assert wifi_switch.switch_network("n1", "Net", "y" * 65)["error"] == "too_long"
         assert wifi_switch.switch_network("n1", "", "pw")["error"] == "no_ssid"
+
+
+def test_the_name_is_counted_in_bytes_as_the_board_counts_it():
+    """Seventeen Arabic letters are thirty-four bytes: past 802.11's thirty-two."""
+    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
+        assert wifi_switch.switch_network("n1", "ش" * 17, "password")["error"] == "too_long"
+    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+         _sent() as c:
+        c.return_value.publish_service.return_value = True
+        assert wifi_switch.switch_network("n1", "ش" * 16, "password")["ok"] is True
+
+
+def test_a_password_wpa2_cannot_take_is_refused_before_it_is_sent():
+    """A WPA2 password is 8 to 63 characters, or 64 hex digits; an open network has none.
+
+    The board refused the rest after the request had gone, and the app said «done»."""
+    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+         _sent() as c:
+        c.return_value.publish_service.return_value = True
+        assert wifi_switch.switch_network("n1", "Net", "12345")["error"] == "bad_password"
+        assert wifi_switch.switch_network("n1", "Net", "z" * 64)["error"] == "bad_password"
+        assert wifi_switch.switch_network("n1", "Net", "ab" * 32)["ok"] is True
+        assert wifi_switch.switch_network("n1", "Net", "x" * 63)["ok"] is True
+        assert wifi_switch.switch_network("n1", "Net", "12345678")["ok"] is True
+        assert wifi_switch.switch_network("n1", "Open", "")["ok"] is True
 
 
 def test_a_good_request_reaches_the_boards_service_channel():
     with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
-        res = wifi_switch.switch_network("n1", "Home", "hunter2")
+        res = wifi_switch.switch_network("n1", "Home", "hunter22")
 
     assert res["ok"] is True
     topic, payload = c.return_value.publish_service.call_args[0]
     assert topic == "sandy/node/n1/wifi"
-    assert payload == "Home\nhunter2"
+    assert payload == "Home\nhunter22"
 
 
 def test_success_is_not_claimed_before_the_board_says_so():
@@ -84,7 +109,7 @@ def test_success_is_not_claimed_before_the_board_says_so():
     with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
-        res = wifi_switch.switch_network("n1", "Home", "pw")
+        res = wifi_switch.switch_network("n1", "Home", "password")
 
     assert res["window_s"] >= 25, (
         "the app would stop waiting before the board has finished trying and "
@@ -121,14 +146,14 @@ def test_the_two_boards_are_addressed_separately():
          _sent() as c:
         c.return_value.publish_service.return_value = True
 
-        wifi_switch.switch_network("n1", "Home", "pw", board="brain")
+        wifi_switch.switch_network("n1", "Home", "password", board="brain")
         assert c.return_value.publish_service.call_args[0][0] == "sandy/node/n1/wifi"
 
-        wifi_switch.switch_network("n1", "Home", "pw", board="camera")
+        wifi_switch.switch_network("n1", "Home", "password", board="camera")
         assert c.return_value.publish_service.call_args[0][0] == "sandy/node/n1/cam/wifi"
 
     with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
-        assert wifi_switch.switch_network("n1", "Home", "pw",
+        assert wifi_switch.switch_network("n1", "Home", "password",
                                           board="nonsense")["error"] == "bad_board"
 
 

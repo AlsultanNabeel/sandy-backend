@@ -173,6 +173,7 @@ struct NodeWiFiView: View {
         case "no_node":   return lang.s("wifi.err.noNode")
         case "bad_board": return lang.s("wifi.err.badBoard")
         case "too_long":  return lang.s("wifi.err.tooLong")
+        case "bad_password": return lang.s("wifi.err.badPassword")
         case "bad_chars": return lang.s("wifi.err.badChars")
         default:          return api.message
         }

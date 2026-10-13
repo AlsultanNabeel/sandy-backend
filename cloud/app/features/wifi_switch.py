@@ -14,8 +14,13 @@ logger = logging.getLogger(__name__)
 # The board rolls back after 25 s; the app waits a little longer.
 SWITCH_WINDOW_S = 35
 
+# Counted in bytes, as 802.11 and the boards count them: an Arabic name is two a letter.
 SSID_MAX = 32
+# WPA2: an open network has none; otherwise a passphrase of 8 to 63 characters, or the
+# key itself as 64 hex digits. Anything else the board refuses after the request was sent.
+PASS_MIN = 8
 PASS_MAX = 64
+_HEX = set("0123456789abcdefABCDEF")
 
 
 # Brain and camera share a node id, so the caller must say which board moves.
@@ -41,8 +46,11 @@ def switch_network(node_id: str, ssid: str, password: str,
         return {"ok": False, "error": "bad_board"}
     if not ssid:
         return {"ok": False, "error": "no_ssid"}
-    if len(ssid) > SSID_MAX or len(password) > PASS_MAX:
+    if len(ssid.encode("utf-8")) > SSID_MAX or len(password.encode("utf-8")) > PASS_MAX:
         return {"ok": False, "error": "too_long"}
+    if password and (len(password.encode("utf-8")) < PASS_MIN
+                     or (len(password.encode("utf-8")) == PASS_MAX and not set(password) <= _HEX)):
+        return {"ok": False, "error": "bad_password"}
     # Newline is the wire separator; SSIDs/passwords may contain anything else.
     if "\n" in ssid or "\n" in password:
         return {"ok": False, "error": "bad_chars"}

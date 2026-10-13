@@ -29,6 +29,7 @@ enum L10nWiFi {
             "err.noNode":   .text("ما في وحدة محدّدة."),
             "err.badBoard": .text("لوح غير معروف."),
             "err.tooLong":  .text("الاسم أطول من اثنين وثلاثين حرف أو كلمة السر أطول من أربعة وستين."),
+            "err.badPassword": .text("كلمة السر لازم تكون من ثمانية لثلاثة وستين حرف، أو فاضية لو الشبكة مفتوحة."),
             "err.badChars": .text("في سطر جديد جوّا الاسم أو كلمة السر — شيله."),
             "rolledBack":  .text("ما قدرت توصل للشبكة الجديدة ورجعت للقديمة. تأكّد من الاسم وكلمة السر."),
         ],
@@ -52,6 +53,7 @@ enum L10nWiFi {
             "err.noNode":   .text("No node selected."),
             "err.badBoard": .text("Unknown board."),
             "err.tooLong":  .text("The name is over 32 characters or the password over 64."),
+            "err.badPassword": .text("The password must be 8 to 63 characters, or empty for an open network."),
             "err.badChars": .text("There's a newline in the name or password — remove it."),
             "rolledBack":  .text("It couldn't reach the new network and went back to the old one. Check the name and password."),
         ]
