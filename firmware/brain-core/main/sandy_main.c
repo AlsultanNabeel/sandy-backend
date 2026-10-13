@@ -19,6 +19,7 @@
 #include "sandy_mqtt.h"
 #include "sandy_ota.h"
 #include "sandy_voice.h"
+#include "sandy_clock.h"
 #include "sandy_ears.h"
 #include "sandy_spktest.h"
 #include "sandy_remote.h"
@@ -190,6 +191,8 @@ void app_main(void) {
     health_watch();
     for (;;) {
         health_feed();
+        // The clock is the network's, not the voice's: safe mode checks a signed erase with it.
+        clock_poll();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

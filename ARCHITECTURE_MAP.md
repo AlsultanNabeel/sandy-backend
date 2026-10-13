@@ -803,7 +803,7 @@ actually means:
 | `server_error` | the server's fault, not the board's: a key record it cannot decrypt (`device_keys.KeyUnreadable`, a wrong or changed `SANDY_LTM_KEY`), any other failure on its side during the handshake (a database read), or no Gemini key. `bad_handshake` is kept for a hello that does not parse. The board keeps its key, is not locked out, and ends the call at once (status `NO_SERVER`); the camera gets 503 `key_unreadable` for the same case, never a 401 |
 
 The `ts` must be wall-clock, so the firmware opens no session until SNTP has set the clock
-(`clock_start`: the router first, then three public servers; never blocking). A wake word
+(`sandy_clock.c`, started by `app_main`'s loop once Wi-Fi is up, safe mode too, where a signed erase is checked against it: the router first, then three public servers; never blocking). A wake word
 before that gets a local cue and status `NO_CLOCK` (part `CLOCK`), shown on its own after a
 minute unset. `replay` resyncs the clock and ends the call, with no ten-minute lockout —
 that backoff is for the key refusals only.
@@ -877,7 +877,7 @@ The paid cloud link is open **only** between a wake word and the silence after i
 
 1. Wake word detected locally (`Hi Andy`) → buzzer cue, `MOOD_CURIOUS`, `s_wake_req`. She
    listens from boot, before Wi-Fi: a wake word with no network gets a sad tone, a worried
-   face and `NO_WIFI` on the spot; the session manager starts the clock once Wi-Fi is up.
+   face and `NO_WIFI` on the spot; `app_main` starts the clock once Wi-Fi is up (`clock_poll`).
 2. Session manager frees the ~70 KB MultiNet command model **before** opening the
    socket — its internal SRAM is exactly what the TLS task needs. This ordering
    was a real deadlock once; do not reverse it.

@@ -9,6 +9,7 @@
 // Both mics and the speaker reference go through the esp-sr audio front end (echo cancelling,
 // the two mics separated into one voice, voice detection, the wake word); only speech goes up.
 
+#include "sandy_clock.h"
 #include "sandy_voice.h"
 #include "config.h"
 #include "sandy_identity.h"
@@ -30,7 +31,6 @@
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_netif.h"
-#include "esp_netif_sntp.h"
 #include "driver/i2s_std.h"
 #include "mbedtls/md.h"
 #include "mbedtls/platform_util.h"   // zeroize key bytes
@@ -257,16 +257,9 @@ static int64_t now_ms(void) {
     return esp_timer_get_time() / 1000;
 }
 
-// SNTP has set the clock (post-2023).
-static bool clock_is_set(void) {
-    return time(NULL) > 1700000000;  // ~2023-11
-}
-
 // The hello must fall inside the server's 30 s replay window, so no session opens until
-// SNTP has set the clock. The router is asked first (it answers on the LAN even when the
-// internet is slow), then three public servers. Runs in the background: never blocks.
+// the clock is set (sandy_clock.c, started by app_main once there is a network).
 #define CLOCK_UNSET_SHOW_MS  60000   // after this long unset, she says so
-static volatile bool s_clock_bad;    // the server said our time is off: resync first
 static volatile bool s_not_paired;   // the server opens no call: no account paired this board
 static volatile bool s_server_failed; // the server failed on its side: end the call, no back-off
 static volatile bool s_server_closed; // the server closed the socket cleanly: the call is over
@@ -275,41 +268,6 @@ static volatile bool s_server_closed; // the server closed the socket cleanly: t
 static volatile int64_t s_working_since;   // 0: no tool running
 // This call got an auth_ok: a drop after it is the link, before it the server was never reached.
 static volatile bool s_call_authed;
-static int64_t s_clock_started_ms;
-
-static void on_clock_sync(struct timeval *tv) {
-    (void)tv;
-    s_clock_bad = false;
-    ESP_LOGI(TAG, "clock synced");
-}
-
-static void clock_start(void) {
-    static char gw[16];
-    esp_netif_ip_info_t ip;
-    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (sta && esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.gw.addr) {
-        esp_ip4addr_ntoa(&ip.gw, gw, sizeof(gw));
-    } else {
-        snprintf(gw, sizeof(gw), "pool.ntp.org");   // no gateway yet: one public server twice
-    }
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(4,
-        ESP_SNTP_SERVER_LIST(gw, "time.google.com", "time.cloudflare.com", "pool.ntp.org"));
-    cfg.sync_cb = on_clock_sync;
-    cfg.wait_for_sync = false;
-    if (s_clock_started_ms) esp_netif_sntp_deinit();   // a resync: start over, same servers
-    if (esp_netif_sntp_init(&cfg) != ESP_OK) {
-        ESP_LOGW(TAG, "sntp init failed");
-        return;
-    }
-    s_clock_started_ms = now_ms();
-    ESP_LOGI(TAG, "clock: asking %s, then public servers", gw);
-}
-
-// Ready to sign a hello: set, and not refused by the server since the last sync.
-static bool clock_ok(void) {
-    return clock_is_set() && !s_clock_bad;
-}
-
 // ── This board's own voice key ──
 // Right after pairing, the server answers a shared-key hello with "device_key";
 // it is saved and signs later hellos ("kv":2), after which the shared key is
@@ -660,7 +618,7 @@ static void on_ws_text(const char *msg, int len) {
         ESP_LOGW(TAG, "server opens no call: this board is not paired — pair it in the app");
     } else if (text_has(msg, len, "replay")) {
         // Our time is off, not our key: resync and try again, no ten-minute lockout.
-        s_clock_bad = true;
+        clock_refuse();
         status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
         ESP_LOGE(TAG, "server says our clock is off — resyncing before the next session");
     } else if (text_has(msg, len, "\"working\"")) {
@@ -1931,13 +1889,11 @@ static void session_end(void) {
 }
 #endif
 
-// From the session manager: the Wi-Fi status after a few seconds without it, and the
-// clock started once there is a network.
+// From the session manager: the Wi-Fi status after a few seconds without it.
 static void net_tick(void) {
     static int64_t down_since;
     if (wifi_sandy_is_connected()) {
         down_since = 0;
-        if (!s_clock_started_ms) clock_start();
         return;
     }
     if (!down_since) down_since = now_ms();
@@ -1951,14 +1907,14 @@ static void net_tick(void) {
 // From the session manager: resync after a refusal, and say so when it stays unset.
 static void clock_tick(void) {
     static bool resyncing;
-    if (s_clock_bad && !resyncing && !s_session_active) {
+    if (clock_refused() && !resyncing && !s_session_active) {
         resyncing = true;
-        clock_start();
+        clock_resync();
     }
-    if (!s_clock_bad) resyncing = false;
+    if (!clock_refused()) resyncing = false;
     if (clock_ok()) {
         status_set(SANDY_PART_CLOCK, SANDY_ST_OK);
-    } else if (s_clock_started_ms && now_ms() - s_clock_started_ms > CLOCK_UNSET_SHOW_MS) {
+    } else if (clock_started_ms() && now_ms() - clock_started_ms() > CLOCK_UNSET_SHOW_MS) {
         status_set(SANDY_PART_CLOCK, SANDY_ST_NO_CLOCK);
     }
 }
@@ -2087,7 +2043,7 @@ static void voice_task(void *arg) {
                 s_wake_req = true;
             }
         }
-        if (s_session_active && (s_auth_refused || s_clock_bad || s_not_paired || s_server_failed)) {
+        if (s_session_active && (s_auth_refused || clock_refused() || s_not_paired || s_server_failed)) {
             // Refused: end now (a clock refusal resyncs; see clock_tick).
             ESP_LOGW(TAG, "closing the session the server refused");
             session_end();
