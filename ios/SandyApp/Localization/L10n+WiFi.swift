@@ -20,7 +20,7 @@ enum L10nWiFi {
             "password":    .text("كلمة السر"),
             "send":        .text("انقلها للشبكة"),
             "trying":      .text("عم تجرّب… %@ ثانية"),
-            "safety":      .text("لو كلمة السر غلط، بترجع للشبكة القديمة لحالها خلال نص دقيقة. ما في خطر."),
+            "safety":      .text("لو كلمة السر غلط أو الشبكة بلا إنترنت، بترجع للشبكة القديمة لحالها خلال أقل من دقيقة. ما في خطر."),
             "sendFailed":  .text("ما قدرت أبعت الطلب."),
             "err.offline":  .text("ما وصلت للخادم. هاي مشكلة نت جهازك، مش الروبوت."),
             "err.session":  .text("انتهت جلستك. سجّل دخولك وجرّب كمان مرّة."),
@@ -31,7 +31,7 @@ enum L10nWiFi {
             "err.tooLong":  .text("الاسم أطول من اثنين وثلاثين حرف أو كلمة السر أطول من أربعة وستين."),
             "err.badPassword": .text("كلمة السر لازم تكون من ثمانية لثلاثة وستين حرف، أو فاضية لو الشبكة مفتوحة."),
             "err.badChars": .text("في سطر جديد جوّا الاسم أو كلمة السر — شيله."),
-            "rolledBack":  .text("ما قدرت توصل للشبكة الجديدة ورجعت للقديمة. تأكّد من الاسم وكلمة السر."),
+            "rolledBack":  .text("ما قدرت توصل للشبكة الجديدة أو للإنترنت منها، ورجعت للقديمة. تأكّد من الاسم وكلمة السر وإنه في إنترنت."),
         ],
         en: [
             "title":       .text("Wi-Fi network"),
@@ -44,7 +44,7 @@ enum L10nWiFi {
             "password":    .text("Password"),
             "send":        .text("Move it over"),
             "trying":      .text("Trying… %@ s"),
-            "safety":      .text("If the password is wrong it returns to the old network by itself within half a minute. Nothing to lose."),
+            "safety":      .text("If the password is wrong or the network has no internet, it returns to the old network by itself within a minute. Nothing to lose."),
             "sendFailed":  .text("Couldn't send the request."),
             "err.offline":  .text("Couldn't reach the server. That's your phone's connection, not the robot."),
             "err.session":  .text("Your session expired. Sign in and try again."),
@@ -55,7 +55,7 @@ enum L10nWiFi {
             "err.tooLong":  .text("The name is over 32 characters or the password over 64."),
             "err.badPassword": .text("The password must be 8 to 63 characters, or empty for an open network."),
             "err.badChars": .text("There's a newline in the name or password — remove it."),
-            "rolledBack":  .text("It couldn't reach the new network and went back to the old one. Check the name and password."),
+            "rolledBack":  .text("It couldn't reach the new network or the internet through it, and went back to the old one. Check the name, the password and the internet."),
         ]
     )
 }

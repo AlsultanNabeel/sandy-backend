@@ -10,6 +10,7 @@
 #include "sandy_remote.h"
 #include "sandy_health.h"
 #include "sandy_face.h"
+#include "sandy_reach.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -56,9 +57,12 @@ static const char *TAG = "provision";
 
 // A setup page that could not bind its port is tried again after this long.
 #define PROVISION_RETRY_MS 30000
+// With the setup network up for want of a server, the server is asked again this often.
+#define PROVISION_PROBE_MS 60000
 
 static httpd_handle_t s_httpd = NULL;
 static volatile bool  s_active = false;
+static bool           s_for_server;   // raised on a working network that reaches no server
 static char           s_ap_ssid[33];
 static esp_netif_t   *s_ap_netif;   // created once; start_ap may run again
 
@@ -115,10 +119,10 @@ static const char PAGE_TAIL[] =
     "<label>Password · كلمة السر</label>"
     "<input name=pass type=password placeholder='Leave empty if open · فاضية إذا مفتوحة'>"
     "<button type=submit>Connect · اتصل</button></form>"
-    "<p style='margin-top:24px;font-size:12px'>She will test it before saving. "
-    "If it fails, this page comes back.</p>"
-    "<p class=ar style='font-size:12px'>رح تجرّبها قبل ما تحفظها. إذا ما زبطت، "
-    "بترجع هالصفحة.</p></body></html>";
+    "<p style='margin-top:24px;font-size:12px'>She will test it, and that she can reach "
+    "the internet through it, before saving. If it fails, this page comes back.</p>"
+    "<p class=ar style='font-size:12px'>رح تجرّبها، وتتأكّد إنه في إنترنت منها، قبل ما "
+    "تحفظها. إذا ما زبطت، بترجع هالصفحة.</p></body></html>";
 
 // Strongest first.
 static int by_signal(const void *a, const void *b) {
@@ -301,7 +305,8 @@ static esp_err_t provision_post(httpd_req_t *req) {
     ESP_LOGW(TAG, "'%s' refused (%d) — staying in setup", ssid, (int)r);
     // Name the failure: "wrong password" for an out-of-range router misleads.
     screen_show_text(r == WIFI_SWITCH_BAD_PASSWORD ? "Wrong password"
-                                                  : "Could not reach that network");
+                     : r == WIFI_SWITCH_NO_SERVER   ? "That network has no internet"
+                                                    : "Could not reach that network");
     return ESP_OK;
 }
 
@@ -387,7 +392,7 @@ static void setup_face_on(void) {
 
 // The page first, then the radio: an access point with no page behind it is a network
 // nobody can use, and it showed no code on her face either.
-static bool start_ap(void) {
+static bool start_ap(bool for_server) {
     char pass[65];
     build_ap_identity(s_ap_ssid, sizeof(s_ap_ssid), pass, sizeof(pass));
 
@@ -453,7 +458,8 @@ static bool start_ap(void) {
     }
 
     s_active = true;
-    status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
+    s_for_server = for_server;
+    if (!for_server) status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
 
     // A QR that joins in one tap, and the same in text for typing. The password exists
     // only here: on her face, never in the log.
@@ -473,27 +479,31 @@ static void stop_ap(void) {
     if (s_httpd) { httpd_stop(s_httpd); s_httpd = NULL; }
     esp_wifi_set_mode(WIFI_MODE_STA);
     s_active = false;
+    s_for_server = false;
     // Remove the setup code once the home network is back.
     screen_dismiss();
 #if ENABLE_REMOTE
     remote_http_resume();
 #endif
-    ESP_LOGI(TAG, "network found — setup mode off");
+    ESP_LOGI(TAG, "network and server back — setup mode off");
 }
 
 // ─── The watcher ───
-// Up whenever she has been without a network long enough, at boot or later, and down
-// as soon as it is back; never a restart either way.
+// Up whenever she has been without a way out long enough, at boot or later, and down as
+// soon as it is back; never a restart either way.
 //   - at boot: PROVISION_WINDOW_MS, or at once with nothing saved;
 //   - the router refusing the password: the same window;
-//   - a network that worked and is gone: PROVISION_LOST_MS (a router reboot is not a move).
+//   - a network that worked and is gone: PROVISION_LOST_MS (a router reboot is not a move);
+//   - a network that works and reaches no server: PROVISION_NO_SERVER_MS, asked by a probe.
 
 static void provision_task(void *arg) {
     (void)arg;
     const int step_ms = 500;
     bool ever_up = false;
     int64_t down_since = esp_timer_get_time() / 1000;
+    int64_t up_since = 0;
     int64_t retry_at = 0;   // a page that could not start waits this long, not half a second
+    int64_t probe_at = 0;   // the server is asked at most once a minute
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(step_ms));
@@ -502,10 +512,31 @@ static void provision_task(void *arg) {
         if (wifi_sandy_is_connected()) {
             ever_up = true;
             down_since = 0;
-            retry_at = 0;
-            if (s_active) stop_ap();
+            if (!up_since) up_since = now;
+            // Raised for no network: the network is back.
+            if (s_active && !s_for_server) stop_ap();
+            const int64_t seen = reach_last_ms();
+            const int64_t quiet = now - (seen > up_since ? seen : up_since);
+            if (s_active) {
+                // Raised for no server: down at the server's next word.
+                if (quiet < PROVISION_PROBE_MS) {
+                    stop_ap();
+                } else if (now >= probe_at) {
+                    probe_at = now + PROVISION_PROBE_MS;
+                    if (reach_probe() == REACH_OK) stop_ap();
+                }
+            } else if (quiet >= PROVISION_NO_SERVER_MS && now >= probe_at && now >= retry_at) {
+                probe_at = now + PROVISION_PROBE_MS;
+                if (reach_probe() == REACH_FAIL) {
+                    ESP_LOGW(TAG, "on '%s' but no word from the server for %lld min — "
+                             "raising the setup access point", wifi_sandy_ssid(),
+                             (long long)(quiet / 60000));
+                    if (!start_ap(true)) retry_at = now + PROVISION_RETRY_MS;
+                }
+            }
             continue;
         }
+        up_since = 0;
         if (!down_since) down_since = now;
         if (s_active || now < retry_at) continue;
 
@@ -516,7 +547,7 @@ static void provision_task(void *arg) {
             ESP_LOGW(TAG, "no network for %lld s%s — raising the setup access point",
                      (long long)((now - down_since) / 1000),
                      wifi_sandy_password_rejected() ? " (password refused)" : "");
-            if (!start_ap()) retry_at = now + PROVISION_RETRY_MS;
+            if (!start_ap(false)) retry_at = now + PROVISION_RETRY_MS;
         }
     }
 }

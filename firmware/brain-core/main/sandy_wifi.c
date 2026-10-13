@@ -15,6 +15,8 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "sandy_identity.h"
+#include "sandy_reach.h"
+#include "esp_timer.h"
 
 // WPA2 floor with a password; an empty password means an open network.
 static wifi_auth_mode_t auth_threshold(const char *pass) {
@@ -226,8 +228,9 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     }
     nvs_close(h);
 
-    ESP_LOGW(TAG, "trying network '%s' (%d s, then back to '%s')",
-             ssid, WIFI_TRY_WINDOW_MS / 1000, old_ssid);
+    ESP_LOGW(TAG, "trying network '%s' (%d s for an address and %d for the server, "
+             "then back to '%s')", ssid, WIFI_TRY_WINDOW_MS / 1000,
+             WIFI_REACH_WINDOW_MS / 1000, old_ssid);
 
     wifi_config_t cfg = { 0 };
     set_wifi_field(cfg.sta.ssid, sizeof(cfg.sta.ssid), ssid);
@@ -255,6 +258,25 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     }
     const bool bad_pass = !ok && wifi_sandy_password_rejected();
 
+    // An address is not a way out: the server has to answer through it, or the board is
+    // kept on a network that reaches nothing (a phone hotspot with no data, a sign-in page)
+    // with the setup network never coming up, since the Wi-Fi itself is fine. Asked on a fresh
+    // connection only: the broker's session from the old network can look alive for a while.
+    // A board with no server address cannot ask.
+    bool no_server = false;
+    if (ok) {
+        const int64_t got_ip = esp_timer_get_time() / 1000;
+        ok = false;
+        for (;;) {
+            const int64_t now = esp_timer_get_time() / 1000;
+            if (now - got_ip >= WIFI_REACH_WINDOW_MS || !wifi_sandy_is_connected()) break;
+            const reach_t r = reach_probe();
+            if (r == REACH_OK || r == REACH_UNSET) { ok = true; break; }
+            vTaskDelay(pdMS_TO_TICKS(r == REACH_BUSY ? 500 : 2000));
+        }
+        no_server = !ok;
+    }
+
     if (nvs_open(WIFI_NS, NVS_READWRITE, &h) == ESP_OK) {
         esp_err_t e = ESP_OK;
         if (ok) {
@@ -277,7 +299,8 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     }
 
     ESP_LOGW(TAG, "'%s' %s — going back to '%s'", ssid,
-             bad_pass ? "refused the password" : "did not come up", old_ssid);
+             bad_pass ? "refused the password"
+                      : no_server ? "has no way to the server" : "did not come up", old_ssid);
     xEventGroupClearBits(s_eg, WIFI_CONNECTED_BIT);
     s_ip[0] = '\0';
     s_bad_pass_count = 0;
@@ -290,7 +313,8 @@ wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass) {
     esp_wifi_set_config(WIFI_IF_STA, &back);
     esp_wifi_connect();
     s_switching = false;
-    return bad_pass ? WIFI_SWITCH_BAD_PASSWORD : WIFI_SWITCH_FAILED;
+    if (bad_pass) return WIFI_SWITCH_BAD_PASSWORD;
+    return no_server ? WIFI_SWITCH_NO_SERVER : WIFI_SWITCH_FAILED;
 }
 
 esp_err_t wifi_sandy_start(void) {

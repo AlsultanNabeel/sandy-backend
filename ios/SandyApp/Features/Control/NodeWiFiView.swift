@@ -190,7 +190,7 @@ struct NodeWiFiView: View {
     private func send() async {
         notice = ""
         let target = ssid.trimmingCharacters(in: .whitespaces)
-        var window = 35
+        var window = 55
         do {
             window = try await state.api.switchNodeWiFi(
                 nodeId: node.nodeId, ssid: target, password: password, board: board)

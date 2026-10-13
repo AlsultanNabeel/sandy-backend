@@ -6,6 +6,7 @@
 #include "sandy_identity.h"
 #include "sandy_voice.h"
 #include "sandy_net_busy.h"
+#include "sandy_reach.h"
 #include "sandy_nvs.h"
 
 #include <stdatomic.h>
@@ -254,17 +255,6 @@ static void ota_retry_in(int64_t ms) {
 // Timer and MQTT tasks both start checks; atomic so only one downloads.
 static atomic_bool        s_ota_running;
 
-static bool api_base(char *out, size_t cap) {
-    const char *u = identity()->voice_uri;
-    const char *host = strstr(u, "://");
-    if (!host) return false;
-    host += 3;
-    const char *slash = strchr(host, '/');
-    int hlen = slash ? (int)(slash - host) : (int)strlen(host);
-    int n = snprintf(out, cap, "https://%.*s", hlen, host);
-    return n > 0 && n < (int)cap;
-}
-
 static bool json_str(const char *js, const char *key, char *out, size_t cap) {
     char pat[32];
     snprintf(pat, sizeof(pat), "\"%s\"", key);
@@ -353,7 +343,7 @@ static bool ota_server_answers(void) {
     if (!net_claim(NET_OWNER_OTA)) return false;   // a call is on; ask later
     char base[96], url[256];
     bool ok = false;
-    if (api_base(base, sizeof(base))) {
+    if (reach_api_base(base, sizeof(base))) {
         snprintf(url, sizeof(url), "%s/api/firmware/manifest?device_id=%s&v=%s",
                  base, identity()->device_id, SANDY_FW_VERSION);
         esp_http_client_handle_t c = http_open(url);
@@ -362,6 +352,7 @@ static bool ota_server_answers(void) {
             int st = esp_http_client_get_status_code(c);
             ok = st == 200 || st == 204;
             esp_http_client_cleanup(c);
+            if (ok) reach_mark();
         }
     }
     net_release(NET_OWNER_OTA);
@@ -370,7 +361,7 @@ static bool ota_server_answers(void) {
 
 static ota_result_t ota_check_once(void) {
     char base[96], url[256];
-    if (!api_base(base, sizeof(base))) return OTA_DONE;
+    if (!reach_api_base(base, sizeof(base))) return OTA_DONE;
     snprintf(url, sizeof(url), "%s/api/firmware/manifest?device_id=%s&v=%s",
              base, identity()->device_id, SANDY_FW_VERSION);
 

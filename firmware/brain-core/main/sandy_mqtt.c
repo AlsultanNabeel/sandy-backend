@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "sandy_audio_ctl.h"
 #include "sandy_wifi.h"
+#include "sandy_reach.h"
 #include "sandy_ir.h"
 #include "sandy_voice.h"
 #include "sandy_net_busy.h"
@@ -543,6 +544,8 @@ static bool s_trying_new;                       // applied, waiting for its subs
 static int  s_new_fails;
 // The disconnect that applies a new credential is ours, not a failure of it.
 static bool s_own_disconnect;
+// Connected to the broker: the server is reachable from this network (sandy_reach.h).
+static volatile bool s_up;
 #define NEW_CREDS_MAX_FAILS 3
 
 // نسخة كاملة من الإعداد: `esp_mqtt_set_config` بترجّع أي حقل ناقص للافتراضي.
@@ -559,6 +562,8 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_CONNECTED: {
             ESP_LOGI(TAG, "connected");
             s_backoff_ms = 0;
+            s_up = true;
+            reach_mark();
             // A new credential is kept only once the broker also accepts the subscription
             // (MQTT_EVENT_SUBSCRIBED): connected with no permission on this tree hears nothing.
             // One wildcard subscription: new outputs only need a dispatch case.
@@ -604,6 +609,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             break;
 
         case MQTT_EVENT_DISCONNECTED:
+            s_up = false;
             if (s_own_disconnect) {
                 s_own_disconnect = false;
             } else if (s_trying_new && ++s_new_fails >= NEW_CREDS_MAX_FAILS) {
@@ -836,6 +842,7 @@ static void _status_task(void *arg) {
         health_unwatch();
         _apply_pending_credentials();
         mqtt_publish_status();
+        if (s_up) reach_mark();   // still connected: still reachable
         health_watch();
     }
 }

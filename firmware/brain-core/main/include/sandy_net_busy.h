@@ -7,6 +7,7 @@ typedef enum {
     NET_OWNER_NONE  = 0,
     NET_OWNER_VOICE = 1,   // voice session: from the wake word to ws_close
     NET_OWNER_OTA   = 2,   // update check: manifest fetch and download
+    NET_OWNER_REACH = 3,   // is the server there from this network (sandy_reach.c)
 } net_owner_t;
 
 // True if `owner` now holds the network (or already did).

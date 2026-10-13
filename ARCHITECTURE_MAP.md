@@ -1105,7 +1105,18 @@ reconnects (`wifi_sandy_hold`) — a connect in progress made it fail — and li
 strongest first, once each; a field takes a hidden network's name. The page and its answers are in
 English and Arabic. The chosen credentials go through `wifi_sandy_switch`, which proves them
 before saving and reverts on failure, so a typo cannot leave a board booting onto
-a network that does not exist.
+a network that does not exist. Proving them is an address within `WIFI_TRY_WINDOW_MS` (25 s)
+and then Sandy's server answering through it within `WIFI_REACH_WINDOW_MS` (20 s):
+`sandy_reach.c::reach_probe`, `GET /health` over TLS against the server's real certificate
+(any status), on a fresh connection; a phone hotspot with no data or a sign-in page fails it
+(`WIFI_SWITCH_NO_SERVER`) and the board goes back. The server's `SWITCH_WINDOW_S` (55 s) is
+how long the app waits.
+
+On a network that works and reaches nothing, the setup network comes up too: after
+`PROVISION_NO_SERVER_MS` (10 min) with no word from the server — the broker connected
+(`reach_mark` on connect and every heartbeat while connected), a call's `auth_ok`, an update
+check, or a probe — and a probe failing; the station stays on the network meanwhile, the
+server is asked once a minute, and its first answer takes the setup network down.
 
 Three things here are load-bearing and easy to undo by accident:
 

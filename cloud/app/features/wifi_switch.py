@@ -11,8 +11,9 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-# The board rolls back after 25 s; the app waits a little longer.
-SWITCH_WINDOW_S = 35
+# The brain waits 25 s for an address and 20 more for the server to answer through it,
+# then rolls back; the app waits a little longer.
+SWITCH_WINDOW_S = 55
 
 # Counted in bytes, as 802.11 and the boards count them: an Arabic name is two a letter.
 SSID_MAX = 32

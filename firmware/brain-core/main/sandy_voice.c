@@ -10,6 +10,7 @@
 // the two mics separated into one voice, voice detection, the wake word); only speech goes up.
 
 #include "sandy_clock.h"
+#include "sandy_reach.h"
 #include "sandy_voice.h"
 #include "config.h"
 #include "sandy_identity.h"
@@ -549,6 +550,7 @@ static bool frame_mood(const char *msg, int len, sandy_mood_t *out) {
 // One whole control message from the server.
 static void on_ws_text(const char *msg, int len) {
     if (text_has(msg, len, "auth_ok")) {
+        reach_mark();   // the server answered through this network
         s_authed = true;
         s_call_authed = true;
         s_auth_refused = false;

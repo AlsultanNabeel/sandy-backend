@@ -12,6 +12,9 @@ const char *wifi_sandy_ip(void);
 // وإذا فشلت خلال WIFI_TRY_WINDOW_MS بنرجع للقديمة. بيانات التجربة بتنمسح عند الإقلاع.
 
 #define WIFI_TRY_WINDOW_MS 25000
+// After the address, this long for Sandy's server to answer through it: an address alone is
+// also what a phone hotspot with no data gives, and the board would be kept on it.
+#define WIFI_REACH_WINDOW_MS 20000
 
 typedef enum {
     WIFI_SWITCH_OK = 0,        // الجديدة اشتغلت وانحفظت
@@ -19,6 +22,7 @@ typedef enum {
     WIFI_SWITCH_BUSY,          // في تجربة شغّالة
     WIFI_SWITCH_BAD_ARGS,
     WIFI_SWITCH_BAD_PASSWORD,  // الراوتر رفض كلمة السر — رجعنا للقديمة
+    WIFI_SWITCH_NO_SERVER,     // اتصلت بس الخادم ما ردّ منها (بلا إنترنت) — رجعنا للقديمة
 } wifi_switch_result_t;
 
 // Router refused the password (not "no router"); cleared on a successful connect.
@@ -28,7 +32,7 @@ bool wifi_sandy_password_rejected(void);
 // fail. Always paired with a release.
 void wifi_sandy_hold(bool hold);
 
-// بتحجز لحدّ ما تخلص التجربة (٢٥ ثانية كحدّ أقصى). من مهمّة MQTT، مش من ISR.
+// بتحجز لحدّ ما تخلص التجربة (٢٥ ثانية للعنوان و٢٠ للخادم كحدّ أقصى). من مهمّة، مش من ISR.
 wifi_switch_result_t wifi_sandy_switch(const char *ssid, const char *pass);
 
 // يمسح كل إشي محفوظ ويعيد التشغيل (للبيع أو الإهداء).

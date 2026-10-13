@@ -54,7 +54,7 @@ def test_the_radio_moves_only_once_the_page_is_up():
 
 def test_a_page_that_cannot_start_is_retried_slowly_not_every_half_second():
     task = _block(_src("sandy_provision.c"), "static void provision_task(")
-    assert "PROVISION_RETRY_MS" in task and "start_ap()" in task
+    assert "PROVISION_RETRY_MS" in task and "start_ap(" in task
 
 
 # ── B4: in safe mode the setup network's password is only on her face ──
@@ -106,3 +106,38 @@ def test_the_camera_scans_with_the_station_held_and_again_for_each_page():
     assert "g_setupScanWanted = true" in get
     tick = _block(_cam("cam_setup.ino"), "void camSetupTick(")
     assert "g_setupScanWanted" in tick and "setupScan()" in tick
+
+
+# ── F21: a network with an address and no internet ──
+
+def test_a_switch_is_kept_only_once_sandys_server_answers_through_it():
+    switch = _block(_src("sandy_wifi.c"), "wifi_switch_result_t wifi_sandy_switch(")
+    got_ip = switch.index("wifi_sandy_ip()[0]")
+    probe = switch.index("reach_probe()")
+    save = switch.index("nvs_set_str(h, K_SSID, ssid)")
+    assert got_ip < probe < save
+    # A fresh connection only: the old network's broker session can look alive a while.
+    assert "reach_last_ms()" not in switch
+    assert "WIFI_SWITCH_NO_SERVER" in switch
+    reach = _src("sandy_reach.c")
+    probe_fn = _block(reach, "reach_t reach_probe(")
+    assert "esp_crt_bundle_attach" in probe_fn and "/health" in probe_fn
+    assert "net_claim(" in probe_fn and "net_release(" in probe_fn
+    assert '"sandy_reach.c"' in _src("CMakeLists.txt")
+
+
+def test_the_broker_a_call_and_an_update_mark_the_server_as_reached():
+    assert "reach_mark();" in _block(_src("sandy_mqtt.c"), "static void _status_task(")
+    voice = _src("sandy_voice.c")
+    auth = voice[voice.index('if (text_has(msg, len, "auth_ok"))'):]
+    assert "reach_mark();" in auth[:auth.index("}")]
+    assert "reach_mark();" in _block(_src("sandy_ota.c"), "static bool ota_server_answers(void) {")
+
+
+def test_the_setup_network_comes_up_after_ten_minutes_with_no_server_and_goes_with_it():
+    config = (MAIN / "include" / "config.h").read_text(encoding="utf-8")
+    assert "#define PROVISION_NO_SERVER_MS (10 * 60 * 1000)" in config
+    task = _block(_src("sandy_provision.c"), "static void provision_task(")
+    up = task[task.index("if (wifi_sandy_is_connected())"):task.index("continue;")]
+    assert "PROVISION_NO_SERVER_MS" in up and "reach_probe()" in up
+    assert "start_ap(true)" in up and "stop_ap()" in up
