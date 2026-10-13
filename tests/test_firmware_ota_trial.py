@@ -115,3 +115,44 @@ def test_a_call_is_not_counted_against_the_trial_and_is_never_cut_by_a_rollback(
     # The server is not asked while a call holds the network.
     ask = body.index("ota_server_answers()")
     assert "!in_call" in body[body.rindex("if (", 0, body.rindex("if (", 0, ask)):ask]
+
+
+# ── The small boards' watchdog through an update check ──
+
+def test_a_small_board_feeds_its_watchdog_around_every_network_step():
+    src = _src(SMALL)
+    get = _block(src, "static int sandyOtaGet(")
+    # Before the connect, after it, after the status line, after each header line.
+    connect = get.index("c.connect(")
+    assert get.rindex("sandyOtaFeed();", 0, connect) < connect
+    assert get.index("sandyOtaFeed();", connect) < get.index("c.print(")
+    first = get.index("readStringUntil")
+    assert get.index("sandyOtaFeed();", first) < get.index("while (c.connected()")
+    headers = _block(get, "while (c.connected() || c.available())")
+    assert headers.index("sandyOtaFeed();") > headers.index("readStringUntil")
+    check = _block(src, "static unsigned long sandyOtaCheckOnce(")
+    manifest = _block(check, "while ((long)js.length() < len")
+    assert "sandyOtaFeed();" in manifest
+    assert "g_otaCfg.feed" not in check            # one way to feed, through sandyOtaFeed
+
+
+def test_every_step_of_a_check_has_a_deadline_under_the_shortest_watchdog():
+    import re
+
+    src = _src(SMALL)
+    connect = int(re.search(r"#define SANDY_OTA_CONNECT_TIMEOUT_MS\s+(\d+)", src).group(1))
+    read = int(re.search(r"#define SANDY_OTA_NET_TIMEOUT_MS\s+(\d+)", src).group(1))
+    room = _src(FIRMWARE / "room-node" / "room-node.ino")
+    watchdog = int(re.search(r"#define ROOM_WDT_TIMEOUT_MS\s+(\d+)", room).group(1))
+    # The connect is a TCP connect and a TLS handshake, each with this deadline.
+    assert 2 * connect < watchdog and read < watchdog
+    get = _block(src, "static int sandyOtaGet(")
+    assert "c.connect(g_otaCfg.host, 443, SANDY_OTA_CONNECT_TIMEOUT_MS)" in get
+    assert "c.setHandshakeTimeout(SANDY_OTA_CONNECT_TIMEOUT_MS / 1000)" in get
+
+
+def test_a_small_board_checks_in_the_pass_after_the_one_that_reached_the_broker():
+    loop = _block(_src(SMALL), "static void sandyOtaLoop(")
+    assert "const bool justOnline = online && !g_otaOnlineLastPass;" in loop
+    check = loop.index("sandyOtaCheckOnce()")
+    assert "justOnline" in loop[loop.rindex("if (!online", 0, check):check]

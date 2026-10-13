@@ -31,7 +31,9 @@ static const char SANDY_FW_PUBKEY[] =
 #define SANDY_OTA_RETRY_MS        (15UL * 60UL * 1000UL)         // اللوح كان مشغول أو الخادم ما ردّ
 #define SANDY_OTA_HEALTH_MS       (60UL * 1000UL)                // دقيقة ع الوسيط = الصورة سليمة
 #define SANDY_OTA_HEALTH_LIMIT_MS (5UL * 60UL * 1000UL)          // خمس دقايق بلا وسيط = رجوع
-#define SANDY_OTA_NET_TIMEOUT_MS  15000
+#define SANDY_OTA_NET_TIMEOUT_MS  15000                          // قراءة: سطر أو قطعة
+// الاتصال = TCP + مصافحة TLS، كل وحدة بمهلتها؛ مجموعهن تحت أقصر حارس (الغرفة، تلاتين ثانية).
+#define SANDY_OTA_CONNECT_TIMEOUT_MS 8000
 #define SANDY_OTA_MANIFEST_MAX    1024
 #define SANDY_OTA_BUF             2048
 #define SANDY_OTA_NVS             "sandyota"
@@ -49,6 +51,7 @@ struct SandyOtaConfig {
 
 static SandyOtaConfig g_otaCfg;
 static unsigned long  g_otaNextCheckMs = 0;
+static bool           g_otaOnlineLastPass = false;
 static bool           g_otaPendingVerify = false;
 static unsigned long  g_otaHealthySinceMs = 0;
 
@@ -126,19 +129,31 @@ static bool sandyOtaSignatureOk(const char* version, long size, const char* sha,
   return r == 0;
 }
 
+// المراقب بيتغذّى قبل وبعد كل خطوة شبكة، وكل خطوة إلها مهلتها، فالتعليق الحقيقي لسا بيوقّعه.
+static void sandyOtaFeed() {
+  if (g_otaCfg.feed) g_otaCfg.feed();
+}
+
 // GET بسيط؛ العميل بيوقف عند أول بايت بالجسم.
 static int sandyOtaGet(WiFiClientSecure& c, const String& path, long* contentLength) {
   *contentLength = -1;
-  if (!c.connect(g_otaCfg.host, 443)) return -1;
+  sandyOtaFeed();
+  c.setHandshakeTimeout(SANDY_OTA_CONNECT_TIMEOUT_MS / 1000);
+  bool connected = c.connect(g_otaCfg.host, 443, SANDY_OTA_CONNECT_TIMEOUT_MS);
+  c.setTimeout(SANDY_OTA_NET_TIMEOUT_MS);   // connect() بيحط مهلته للقراءة كمان
+  sandyOtaFeed();
+  if (!connected) return -1;
   c.print(String("GET ") + path + " HTTP/1.1\r\nHost: " + g_otaCfg.host +
           "\r\nUser-Agent: sandy-" + g_otaCfg.board + "/" + g_otaCfg.version +
           "\r\nConnection: close\r\n\r\n");
   String line = c.readStringUntil('\n');
+  sandyOtaFeed();
   int sp = line.indexOf(' ');
   if (!line.startsWith("HTTP/1.") || sp < 0) return -1;
   int status = line.substring(sp + 1, sp + 4).toInt();
   while (c.connected() || c.available()) {
     String h = c.readStringUntil('\n');
+    sandyOtaFeed();
     h.trim();
     if (h.length() == 0) break;
     String lower = h;
@@ -181,8 +196,6 @@ static unsigned long sandyOtaCheckOnce() {
 
   WiFiClientSecure c;
   c.setCACert(g_otaCfg.caRoots);
-  c.setTimeout(SANDY_OTA_NET_TIMEOUT_MS);
-  c.setHandshakeTimeout(SANDY_OTA_NET_TIMEOUT_MS / 1000);
   long len;
   int status = sandyOtaGet(c, path, &len);
   if (status == 204) {
@@ -201,9 +214,11 @@ static unsigned long sandyOtaCheckOnce() {
   while ((long)js.length() < len && millis() - t0 < SANDY_OTA_NET_TIMEOUT_MS) {
     while (c.available() && (long)js.length() < len) js += (char)c.read();
     if (!c.connected() && !c.available()) break;
+    sandyOtaFeed();
     delay(5);
   }
   c.stop();
+  sandyOtaFeed();
 
   char version[24], sha[65], sig[161], url[96];
   long size = sandyOtaJsonNum(js, "size");
@@ -253,7 +268,7 @@ static unsigned long sandyOtaCheckOnce() {
   long total = 0;
   unsigned long lastByte = millis();
   while (!fail && total < size) {
-    if (g_otaCfg.feed) g_otaCfg.feed();
+    sandyOtaFeed();
     int avail = c.available();
     if (avail <= 0) {
       if (!c.connected() || millis() - lastByte > SANDY_OTA_NET_TIMEOUT_MS) { fail = true; break; }
@@ -277,6 +292,7 @@ static unsigned long sandyOtaCheckOnce() {
 
   unsigned char digest[32] = {0};
   char digestHex[65] = {0};
+  sandyOtaFeed();
   if (!fail && mbedtls_md_finish(&md, digest) != 0) fail = true;
   mbedtls_md_free(&md);
   for (int i = 0; i < 32; i++) snprintf(digestHex + 2 * i, 3, "%02x", digest[i]);
@@ -292,6 +308,7 @@ static unsigned long sandyOtaCheckOnce() {
     Serial.printf("[OTA] %s: ما قدرنا نسجّل التجربة — ما بنبدّل\n", version);
     return SANDY_OTA_RETRY_MS;
   }
+  sandyOtaFeed();
   if (!Update.end(true)) {
     sandyOtaDropTrying(version);
     Serial.printf("[OTA] %s: ما انقفل التحديث: %s\n", version, Update.errorString());
@@ -330,6 +347,9 @@ static void sandyOtaBegin(const SandyOtaConfig& cfg) {
 // `online` = موصول ع الوسيط هلّق.
 static void sandyOtaLoop(bool online) {
   unsigned long now = millis();
+  // الدورة اللي وصلنا فيها للوسيط صرفت وقتها ع اتصاله: الفحص بالدورة اللي بعدها.
+  const bool justOnline = online && !g_otaOnlineLastPass;
+  g_otaOnlineLastPass = online;
   if (g_otaPendingVerify) {
     if (online) {
       if (!g_otaHealthySinceMs) g_otaHealthySinceMs = now ? now : 1;
@@ -348,7 +368,7 @@ static void sandyOtaLoop(bool online) {
     }
     return;   // ما في تحديث جديد قبل ما هاد يثبت
   }
-  if (!online || (long)(now - g_otaNextCheckMs) < 0) return;
+  if (!online || justOnline || (long)(now - g_otaNextCheckMs) < 0) return;
   if (g_otaCfg.idle && !g_otaCfg.idle()) {
     g_otaNextCheckMs = now + 30000UL;   // مشغول — بنرجع بعد نص دقيقة
     return;
