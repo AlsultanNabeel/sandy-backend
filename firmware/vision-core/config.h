@@ -67,7 +67,15 @@
 #define CAMERA_SERIAL_BAUD 115200
 #define CAMERA_BOOT_DELAY_MS 500
 #define CAMERA_WIFI_POLL_DELAY_MS 500
-#define CAMERA_XCLK_FREQ_HZ 20000000
+// Ten, not twenty: at twenty the sensor kept failing its start on a marginal supply and
+// ribbon; ten is enough for VGA.
+#define CAMERA_XCLK_FREQ_HZ 10000000
+// Tries at starting the sensor at boot, each after a power cycle and a longer wait.
+#define CAM_INIT_TRIES      4
+#define CAM_INIT_WAIT_MS    300
+// Lower than the radio's full 19.5 dBm: its transmit bursts drew the supply down under the
+// sensor. Enough for a room's router.
+#define CAM_WIFI_TX_POWER   WIFI_POWER_15dBm
 
 // دقّة متوسطة عند الإقلاع: مخازن المستشعر بالذاكرة الداخلية بتكبر مع الدقّة،
 // وبـ UXGA ما ضلّ مكان لمصافحة TLS مع الوسيط (SSL - Memory allocation failed).

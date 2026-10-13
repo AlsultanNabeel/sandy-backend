@@ -209,9 +209,12 @@ static void setupStart(bool forServer) {
   if (pass.length() < 8) pass = "sandysetup";
 
   WiFi.mode(WIFI_AP_STA);   // الطرف العادي ضروري للمسح ولتجربة الشبكة المختارة
+  WiFi.setTxPower(CAM_WIFI_TX_POWER);   // a mode change resets it
+
   if (!WiFi.softAP(ssid.c_str(), pass.c_str(), 1, 0, 2)) {
     g_log.println("[SETUP] ما قدرنا نطلّع الشبكة الاحتياطية");
     WiFi.mode(WIFI_STA);
+    WiFi.setTxPower(CAM_WIFI_TX_POWER);   // a mode change resets it
     return;
   }
 
@@ -229,6 +232,7 @@ static void setupStart(bool forServer) {
     g_setupHttpd = NULL;
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
+    WiFi.setTxPower(CAM_WIFI_TX_POWER);   // a mode change resets it
     return;
   }
   httpd_uri_t root = {};
@@ -248,6 +252,7 @@ static void setupStop() {
   if (g_setupHttpd) { httpd_stop(g_setupHttpd); g_setupHttpd = NULL; }
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(CAM_WIFI_TX_POWER);   // a mode change resets it
   g_setupActive = false;
   g_setupForServer = false;
   if (g_setupLock && xSemaphoreTake(g_setupLock, pdMS_TO_TICKS(500)) == pdTRUE) {

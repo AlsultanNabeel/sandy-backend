@@ -200,13 +200,13 @@ void setup() {
     flashOff();
   }
 
-  WiFi.onEvent(onWiFiEvent);
-  connectWiFi();
-
+  // الحساس قبل الراديو: سحب الراديو وقت يقلع كان يوقّع تشغيل الحساس.
   // لو فشلت، `camReinitTick` بيعيد المحاولة من الحلقة.
   setupCamera();
-
   if (g_cameraReady) settingsLoadFromNvs();
+
+  WiFi.onEvent(onWiFiEvent);
+  connectWiFi();
 
   static SandyOtaConfig ota;
   static String otaDeviceId = "cam-" + camNodeId();

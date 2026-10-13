@@ -170,6 +170,7 @@ void connectWiFi() {
   loadWifiCreds();
   Serial.printf("[WIFI] connecting to '%s' ...\n", g_ssid.c_str());
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(CAM_WIFI_TX_POWER);   // its bursts drew the supply down under the sensor
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(false);

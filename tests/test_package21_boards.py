@@ -206,3 +206,20 @@ def test_the_server_keeps_the_brownout_count_and_weak_power(monkeypatch):
         {"brownouts": 4, "power_weak": True, "faults": {"power": "power_low"}})
     assert kept["brownouts"] == 4 and kept["power_weak"] is True
     assert kept["faults"] == {"power": "power_low"}
+
+
+# ── The camera's sensor failed at boot: started before the radio, tried more, clocked lower ──
+
+def test_the_camera_starts_its_sensor_before_wifi_with_spaced_retries():
+    main = _fn(_src(CAM / "vision-core.ino"), "void setup(")
+    assert main.index("setupCamera();") < main.index("connectWiFi();"), (
+        "the radio's start-up draw is what the sensor's start keeps losing to")
+    setup = _fn(_src(CAM / "cam_capture.ino"), "void setupCamera(")
+    assert "CAM_INIT_TRIES" in setup and "camWait(" in setup
+    config = _src(CAM / "config.h")
+    assert int(re.search(r"#define CAM_INIT_TRIES\s+(\d+)", config).group(1)) >= 3
+    xclk = int(re.search(r"#define CAMERA_XCLK_FREQ_HZ\s+(\d+)", config).group(1))
+    assert xclk <= 10_000_000
+    wifi = _fn(_src(CAM / "cam_wifi.ino"), "void connectWiFi(")
+    assert "WiFi.setTxPower(CAM_WIFI_TX_POWER)" in wifi
+    assert "#define CAM_WIFI_TX_POWER" in config

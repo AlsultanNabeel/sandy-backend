@@ -1288,7 +1288,10 @@ what makes the text-size control real rather than decorative.
   connection through it within `CAM_REACH_WINDOW_MS`, `camBrokerReachable`: its name resolves and
   its port takes a connection, no TLS on the camera's RAM), and the setup network drops itself
   once the home network is back. As on the brain, a network that works with no broker for
-  `CAM_SETUP_NO_SERVER_MS` (10 min) raises it too, and the broker's next answer takes it down. A sensor that failed at boot is retried from the
+  `CAM_SETUP_NO_SERVER_MS` (10 min) raises it too, and the broker's next answer takes it down. The sensor starts before the radio, up to `CAM_INIT_TRIES` (4) times, each after a power
+  cycle and a wait doubling from 300 ms, its clock at 10 MHz, and the radio transmits at
+  `CAM_WIFI_TX_POWER` (15 dBm, set again after each mode change): the radio's draw was what it lost to.
+  A sensor that failed at boot is retried from the
   loop (30 s, doubling to 5 min) instead of waiting for a reboot. Like the brain,
   the owner's own build (a `secrets.h` with `SANDY_OTA_PASSWORD`) has LAN upload and
   the log mirror on port 23; the sale build `publish_firmware.py` makes defines

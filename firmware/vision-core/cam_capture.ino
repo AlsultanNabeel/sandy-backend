@@ -59,14 +59,19 @@ void setupCamera() {
 
   camera_config_t cfg = buildCameraConfig();
 
+  // Several tries, each after a power cycle and a longer wait: a sensor that missed its
+  // start once (the supply settling) usually takes the next.
   esp_err_t err = esp_camera_init(&cfg);
-  if (err != ESP_OK) {
-    g_log.printf("[CAM] init attempt 1 failed: 0x%x — retrying...\n", err);
+  unsigned long wait = CAM_INIT_WAIT_MS;
+  for (int attempt = 2; err != ESP_OK && attempt <= CAM_INIT_TRIES; attempt++) {
+    g_log.printf("[CAM] init failed: 0x%x — try %d of %d in %lu ms\n",
+                 err, attempt, CAM_INIT_TRIES, wait);
     esp_camera_deinit();
     digitalWrite(PWDN_GPIO_NUM, HIGH);
-    delay(300);
+    camWait(wait);
     digitalWrite(PWDN_GPIO_NUM, LOW);
-    delay(300);
+    camWait(wait);
+    wait *= 2;
     err = esp_camera_init(&cfg);
   }
 
