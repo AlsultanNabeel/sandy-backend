@@ -97,3 +97,21 @@ def test_a_small_board_notes_the_version_before_it_switches():
     switch = body.index("Update.end(true)")   # this is what sets the boot slot
     assert note < switch < body.index("ESP.restart()")
     assert "sandyOtaDropTrying(version)" in body[switch:]
+
+
+# ── A call during the brain's trial ──
+
+def test_a_call_is_not_counted_against_the_trial_and_is_never_cut_by_a_rollback():
+    body = _block(_src(BRAIN / "sandy_ota.c"), "static void _health_task(")
+    assert "const bool in_call = net_owner() == NET_OWNER_VOICE;" in body
+    assert "if (in_call) call_ms += now - last;" in body
+    assert "now - start - call_ms" in body
+    rollbacks = [i for i in range(len(body)) if body.startswith("_roll_back(", i)]
+    assert len(rollbacks) == 2
+    for at in rollbacks:
+        cond = body[body.rindex("if (", 0, at):at]
+        assert "!in_call" in cond, f"a rollback with a call on: {cond!r}"
+        assert "trial_ms" in cond, f"a deadline that counts the call: {cond!r}"
+    # The server is not asked while a call holds the network.
+    ask = body.index("ota_server_answers()")
+    assert "!in_call" in body[body.rindex("if (", 0, body.rindex("if (", 0, ask)):ask]

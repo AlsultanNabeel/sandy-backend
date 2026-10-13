@@ -131,17 +131,24 @@ static void _roll_back(const char *why) {
 }
 
 // Trial: Wi-Fi up, stable for a minute, then the update server answers; each step has a deadline.
+// A call holds the network, so the server cannot be asked: its time is not counted against the
+// deadlines, and nothing rolls back while one is on (that would cut it off mid-sentence).
 static void _health_task(void *arg) {
     (void)arg;
     const int64_t start = esp_timer_get_time() / 1000;
-    int64_t up_since = 0;
+    int64_t last = start, call_ms = 0, up_since = 0;
     bool ever_up = false;
 
     for (;;) {
         const int64_t now = esp_timer_get_time() / 1000;
+        const bool in_call = net_owner() == NET_OWNER_VOICE;
+        if (in_call) call_ms += now - last;
+        last = now;
+        const int64_t trial_ms = now - start - call_ms;
+
         if (!wifi_sandy_is_connected()) {
             up_since = 0;
-            if (!ever_up && now - start > OTA_HEALTH_TIMEOUT_MS) {
+            if (!ever_up && !in_call && trial_ms > OTA_HEALTH_TIMEOUT_MS) {
                 status_set(SANDY_PART_NET, SANDY_ST_NO_WIFI);
                 _roll_back("no network in two minutes");
                 break;
@@ -149,7 +156,7 @@ static void _health_task(void *arg) {
         } else {
             if (!up_since) up_since = now;
             ever_up = true;
-            if (now - up_since >= OTA_HEALTH_STABLE_MS) {
+            if (!in_call && now - up_since >= OTA_HEALTH_STABLE_MS) {
                 if (ota_server_answers()) {
                     esp_err_t e = esp_ota_mark_app_valid_cancel_rollback();
                     if (e == ESP_OK) {
@@ -163,7 +170,8 @@ static void _health_task(void *arg) {
                 vTaskDelay(pdMS_TO_TICKS(15000));   // one TLS handshake per try
             }
         }
-        if (now - start > OTA_HEALTH_TIMEOUT_MS + OTA_HEALTH_STABLE_MS + OTA_HEALTH_SERVER_MS) {
+        if (!in_call &&
+            trial_ms > OTA_HEALTH_TIMEOUT_MS + OTA_HEALTH_STABLE_MS + OTA_HEALTH_SERVER_MS) {
             _roll_back(ever_up ? "the network never held and the server never answered"
                                : "no network");
             break;
