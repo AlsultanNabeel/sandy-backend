@@ -17,6 +17,10 @@ bool voice_session_is_active(void);
 // proves the real output path. Returns false if the buffer is full.
 bool voice_play_local_pcm(const int16_t *pcm, size_t bytes);
 
+// Loads this board's own voice key from NVS. At boot, before MQTT and in safe mode too:
+// without it a signed command (`voice_verify_signed`) is checked with the shared key.
+void voice_key_init(void);
+
 // A command from the server signed like the voice hello: HMAC-SHA256 over `msg` with this
 // board's own key, or the shared key while it has none. `mac_hex` is 64 hex digits.
 bool voice_verify_signed(const char *msg, const char *mac_hex);

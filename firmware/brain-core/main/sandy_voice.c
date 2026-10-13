@@ -314,7 +314,8 @@ static bool clock_ok(void) {
 // Right after pairing, the server answers a shared-key hello with "device_key";
 // it is saved and signs later hellos ("kv":2), after which the shared key is
 // refused for this board. "key_unknown" drops it and the board re-enrols.
-// Only the voice and websocket tasks touch it, never at once; written once per pairing.
+// Loaded at boot (voice_key_init), safe mode too: a signed erase or Wi-Fi command is checked
+// with it. Written only by the websocket task, once per pairing.
 #define DEVKEY_NS  "sandy_vkey"
 #define DEVKEY_HEX 64
 static char s_dev_key[DEVKEY_HEX + 1];   // hex; "" = use the shared key
@@ -327,7 +328,7 @@ static bool is_hex_key(const char *s) {
     return true;
 }
 
-static void devkey_load(void) {
+void voice_key_init(void) {
     s_dev_key[0] = '\0';
     nvs_handle_t h;
     if (nvs_open(DEVKEY_NS, NVS_READONLY, &h) == ESP_OK) {
@@ -1965,8 +1966,6 @@ static void clock_tick(void) {
 static void voice_task(void *arg) {
     // She listens from boot, network or not: a wake word with no Wi-Fi gets a local
     // answer instead of silence. The network is the session manager's to wait for.
-    devkey_load();
-
     if (i2s_start() != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed, voice disabled");
         status_set(SANDY_PART_VOICE, SANDY_ST_VOICE_OFF);

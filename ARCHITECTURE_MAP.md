@@ -989,7 +989,7 @@ sandy/node/<node_id>/room/status                   room heartbeat → ingest_sta
 `factory_reset` takes only `erase:<unix ms>:<hmac>`, signed by `node_store._erase_command`
 with the board's own voice key (the shared key while it has none) over
 `factory_reset|<node_id>|<ms>`; the board refuses it unsigned, on a wrong signature, with
-its clock unset, or more than five minutes off (`voice_verify_signed`). A bare `erase` on
+its clock unset, or more than five minutes off (`voice_verify_signed`). The own key is loaded at boot (`voice_key_init`, before MQTT), in safe mode too, where the voice task never starts. A bare `erase` on
 the broker no longer wipes a robot.
 
 A release keeps its erase (`node_pending_erase`, keyed by board, thirty days TTL): the

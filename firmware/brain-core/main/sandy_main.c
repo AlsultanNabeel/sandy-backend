@@ -97,6 +97,8 @@ void app_main(void) {
     health_init();
     // See sandy_identity.h.
     TRY_INIT("identity", identity_init());
+    // Before MQTT, safe mode too: the rescue commands (erase, Wi-Fi) are signed with it.
+    voice_key_init();
 #if ENABLE_WIFI
     TRY_INIT("wifi", wifi_sandy_start());
 #endif
