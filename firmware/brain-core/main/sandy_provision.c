@@ -1,6 +1,7 @@
 #include "config.h"
 #if ENABLE_PROVISION
 
+#include "sandy_nvs.h"
 #include "sandy_provision.h"
 #include "sandy_wifi.h"
 #include "sandy_screen.h"
@@ -286,6 +287,7 @@ static esp_err_t provision_post(httpd_req_t *req) {
     if (r == WIFI_SWITCH_OK) {
         ESP_LOGW(TAG, "'%s' accepted — restarting on it", ssid);
         screen_show_text("Connected");
+        nvs_flush_deferred();   // a setting changed in the last seconds stays
         vTaskDelay(pdMS_TO_TICKS(1200));
         esp_restart();
     }

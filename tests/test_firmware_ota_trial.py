@@ -156,3 +156,25 @@ def test_a_small_board_checks_in_the_pass_after_the_one_that_reached_the_broker(
     assert "const bool justOnline = online && !g_otaOnlineLastPass;" in loop
     check = loop.index("sandyOtaCheckOnce()")
     assert "justOnline" in loop[loop.rindex("if (!online", 0, check):check]
+
+
+# ── Settings saved before every restart ──
+
+def test_every_brain_restart_saves_the_deferred_settings_first():
+    """A volume or neck change waits a few seconds before it is written; a restart
+    that does not write it first loses it. The factory reset is the one exception:
+    it has just erased the store."""
+    import re
+
+    restart = re.compile(r"\besp_restart\(\);|esp_ota_mark_app_invalid_rollback_and_reboot\(\);")
+    checked = 0
+    for path in sorted(BRAIN.glob("*.c")):
+        src = _src(path)
+        for m in restart.finditer(src):
+            fn_start = src.rindex("\n}", 0, m.start())   # the end of the function before
+            before = src[fn_start:m.start()]
+            if "nvs_flash_erase()" in before:
+                continue
+            assert "nvs_flush_deferred();" in before, f"{path.name}: a restart that drops settings"
+            checked += 1
+    assert checked >= 4   # install, rollback, setup, health_restart (and the dev upload)

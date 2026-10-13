@@ -6,6 +6,7 @@
 #include "sandy_identity.h"
 #include "sandy_voice.h"
 #include "sandy_net_busy.h"
+#include "sandy_nvs.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -125,6 +126,7 @@ esp_err_t ota_init(void) {
 static void _roll_back(const char *why) {
     ESP_LOGE(TAG, "%s — rolling back to the previous image", why);
     vTaskDelay(pdMS_TO_TICKS(1500));   // let the face and the log land
+    nvs_flush_deferred();   // a volume or neck change of the last seconds stays
     esp_ota_mark_app_invalid_rollback_and_reboot();
     // No previous image (first flash): carry on.
     ESP_LOGW(TAG, "no previous image to roll back to — staying put");
@@ -494,6 +496,7 @@ static ota_result_t ota_check_once(void) {
         return OTA_RETRY;
     }
     ESP_LOGW(TAG, "update %s installed — restarting", version);
+    nvs_flush_deferred();
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
     return OTA_DONE;
