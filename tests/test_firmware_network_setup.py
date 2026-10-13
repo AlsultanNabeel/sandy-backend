@@ -68,3 +68,24 @@ def test_safe_mode_starts_the_face_when_the_setup_network_comes_up():
     # Only then: safe mode still boots without the face.
     main = _block(_src("sandy_main.c"), "void app_main(")
     assert "face_init()" not in main[:main.index("} else {")]
+
+
+# ── D3: two «Connect» presses on the camera's setup page ──
+
+CAM = ROOT / "firmware" / "vision-core"
+
+
+def _cam(name: str) -> str:
+    return (CAM / name).read_text(encoding="utf-8")
+
+
+def test_the_camera_switches_on_its_own_copy_and_takes_no_second_request_meanwhile():
+    tick = _block(_cam("cam_mqtt.ino"), "void camWifiTick(")
+    # Copied before the switch, which holds them for half a minute.
+    assert "camSwitchNetwork(g_wifiSsid" not in tick
+    copy = tick.index("String ssid = g_wifiSsid")
+    assert copy < tick.index("camSwitchNetwork(")
+    # The request stays taken until the switch is over, so a second one is refused.
+    assert tick.index("camSwitchNetwork(") < tick.index("g_wifiPending = false")
+    queue = _block(_cam("cam_mqtt.ino"), "bool camQueueWifi(")
+    assert "if (g_wifiPending) return false;" in queue

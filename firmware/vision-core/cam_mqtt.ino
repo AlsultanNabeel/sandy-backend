@@ -238,11 +238,14 @@ bool camQueueWifi(const String& ssid, const String& pass) {
   return true;
 }
 
-// تغيير الشبكة من الحلقة الرئيسية (بيحجز ٢٥ ثانية).
+// تغيير الشبكة من الحلقة الرئيسية (بيحجز ٢٥ ثانية). التبديل ع نسخة محلّية، والطلب بيضل
+// محجوز لحدّ ما يخلص: ضغطة «اتصل» تانية من صفحة الإعداد (مهمّة تانية) كانت تكتب فوق
+// النصين بنص التبديل، فينحفظ اسم الأولى مع كلمة سر التانية.
 void camWifiTick() {
   if (!g_wifiPending) return;
+  String ssid = g_wifiSsid, pass = g_wifiPass;
+  bool ok = camSwitchNetwork(ssid, pass);
   g_wifiPending = false;
-  bool ok = camSwitchNetwork(g_wifiSsid, g_wifiPass);
   // النتيجة بتبيّن بالنبضة الجاية (اسم الشبكة).
   g_log.printf("[WIFI] switch %s\n", ok ? "ok" : "rolled back");
 }

@@ -131,6 +131,10 @@ static esp_err_t setupPost(httpd_req_t* req) {
   body[got] = '\0';
 
   String form(body);
+  if (g_wifiPending) {
+    return setupReply(req, "Still trying",
+                      "It is still testing the network you sent. Wait for this page to come back.");
+  }
   if (!camQueueWifi(formField(form, "ssid"), formField(form, "pass"))) {
     return setupReply(req, "Not accepted",
                       "Pick a network name; a password is empty or 8 to 64 characters.");
