@@ -27,6 +27,7 @@ typedef enum {
     SANDY_ST_UPDATING,      // downloading and installing an update: do not unplug
     SANDY_ST_NOT_SET_UP,    // no identity (pairing code, servers): nothing can connect
     SANDY_ST_NOT_PAIRED,    // set up, but no account has paired it: no call until the app does
+    SANDY_ST_POWER_LOW,     // brownouts in a row: the supply cannot carry her
     SANDY_ST_COUNT
 } sandy_status_t;
 
@@ -43,6 +44,7 @@ typedef enum {
     SANDY_PART_CLOCK,
     SANDY_PART_UPDATE,
     SANDY_PART_IDENTITY,
+    SANDY_PART_POWER,       // the supply (brownouts)
     SANDY_PART_COUNT
 } sandy_part_t;
 

@@ -161,3 +161,48 @@ def test_the_ears_and_the_speaker_test_cannot_be_built_beside_voice_and_never_ha
     # Built alone, a part that will not start says so and the boot goes on (TRY_INIT).
     for name in ("sandy_ears.c", "sandy_spktest.c"):
         assert "ESP_ERROR_CHECK" not in _src(MAIN / name), f"{name} still halts the boot"
+
+
+# ── B6: a brownout reset the crash count and was counted nowhere ──
+
+def test_a_brownout_neither_counts_as_a_crash_nor_clears_the_count():
+    health = _src(MAIN / "sandy_health.c")
+    boot = _fn(health, "void health_boot(")
+    brown = boot[boot.index("if (r == ESP_RST_BROWNOUT)"):boot.index("} else if (is_crash(r)")]
+    # The owner's decision: neutral, the crash count neither moves nor clears.
+    assert "s_guard.crashes" not in brown, "a brownout touched the crash count"
+    # Its own count instead, in the settings store: ever, and in a row.
+    count = _fn(health, "static void count_boot(")
+    assert '"brownouts"' in count and '"brown_row"' in count
+    assert "s_brownout_row++" in count and "HEALTH_POWER_WEAK_AFTER" in count
+    assert "SANDY_PART_POWER, SANDY_ST_POWER_LOW" in count
+    # A stable run ends the row, written by the monitor rather than the timer task.
+    stable = _fn(health, "static void stable_cb(")
+    assert "s_row_to_clear = true" in stable and "SANDY_PART_POWER, SANDY_ST_OK" in stable
+    assert "clear_brownout_row()" in _fn(health, "static void monitor_task(")
+
+    config = _src(MAIN / "include" / "config.h")
+    assert re.search(r"#define HEALTH_POWER_WEAK_AFTER\s+\d", config)
+
+
+def test_weak_power_is_a_status_of_its_own_and_in_the_heartbeat():
+    status_h = _src(MAIN / "include" / "sandy_status.h")
+    assert "SANDY_ST_POWER_LOW" in status_h and "SANDY_PART_POWER" in status_h
+    table = _src(MAIN / "sandy_status.c")
+    assert "[SANDY_ST_POWER_LOW]" in table and '[SANDY_PART_POWER]' in table
+    assert '"power_low"' in table and '"POWER LOW"' in table
+
+    json_fn = _fn(_src(MAIN / "sandy_health.c"), "int health_json(")
+    assert '\\"brownouts\\":%lu' in json_fn and '\\"power_weak\\":%s' in json_fn
+    # The health members had 640 bytes and nearly filled them; two more need room.
+    cap = int(re.search(r"HEALTH_CAP = (\d+)", _src(MAIN / "sandy_mqtt.c")).group(1))
+    assert cap >= 768
+
+
+def test_the_server_keeps_the_brownout_count_and_weak_power(monkeypatch):
+    from app.features import node_store
+
+    kept = node_store._clean_telemetry(
+        {"brownouts": 4, "power_weak": True, "faults": {"power": "power_low"}})
+    assert kept["brownouts"] == 4 and kept["power_weak"] is True
+    assert kept["faults"] == {"power": "power_low"}

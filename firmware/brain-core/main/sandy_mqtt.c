@@ -839,7 +839,7 @@ void mqtt_publish_status(void) {
     // Not on the 3 KB task stack (it overflowed): PSRAM, once, under s_status_lock since
     // the status timer and connect handler both publish. Worst case ~1500 bytes: past
     // CONFIG_MQTT_BUFFER_SIZE, which the client sends in pieces.
-    enum { BUF_CAP = 2048, HEALTH_CAP = 640 };
+    enum { BUF_CAP = 2048, HEALTH_CAP = 768 };
     static char *buf, *health;
     if (xSemaphoreTake(s_status_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
     if (!buf) buf = heap_caps_malloc(BUF_CAP + HEALTH_CAP, MALLOC_CAP_SPIRAM);

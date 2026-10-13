@@ -39,6 +39,12 @@ static RTC_NOINIT_ATTR guard_t s_guard;
 static bool s_safe;
 static char s_caught[sizeof(((guard_t *)0)->starved)];   // what the watchdog caught last boot
 static uint32_t s_boots;   // restarts since the first boot, from the settings store
+// Brownouts, in the settings store: a sagging supply may not leave RTC memory standing.
+static uint32_t s_brownouts_ever;   // since the first boot
+static uint32_t s_brownout_row;     // in a row, no clean start or stable run between
+static bool s_clean_start;          // this boot was neither a crash nor a brownout
+static volatile bool s_power_weak;
+static volatile bool s_row_to_clear;   // a stable run ended the row; the monitor saves it
 
 // Tasks whose stack headroom the heartbeat reports: ours, and the libraries' that carry
 // the network. A name not running (feature off, not started yet) is skipped.
@@ -60,6 +66,11 @@ static void stable_cb(void *arg) {
     if (s_guard.crashes) ESP_LOGI(TAG, "stable for %d min — crash count cleared",
                                   HEALTH_STABLE_MS / 60000);
     s_guard.crashes = 0;
+    // The supply held through it: the brownout row ends (saved by the monitor, a flash
+    // write is not for the timer task).
+    if (s_brownout_row) s_row_to_clear = true;
+    s_power_weak = false;
+    status_set(SANDY_PART_POWER, SANDY_ST_OK);
 }
 
 // The watchdog's own report goes to the serial port only; this keeps the names of the
@@ -93,8 +104,16 @@ void health_boot(void) {
     s_guard.starved[0] = '\0';
     const bool ours = r == ESP_RST_SW && s_guard.ours;
     s_guard.ours = 0;
-    if (is_crash(r) || ours) s_guard.crashes++;
-    else s_guard.crashes = 0;
+    if (r == ESP_RST_BROWNOUT) {
+        // Neutral (the owner's decision): a weak supply is not her code crashing, and
+        // clearing the count let a crash loop that browns out between crashes never reach
+        // safe mode. Counted on its own once the settings store is open (count_boot).
+    } else if (is_crash(r) || ours) {
+        s_guard.crashes++;
+    } else {
+        s_guard.crashes = 0;
+        s_clean_start = true;
+    }
 
     s_safe = s_guard.crashes >= HEALTH_SAFE_AFTER_CRASHES;
     if (s_safe) {
@@ -169,6 +188,16 @@ static void check_stacks(void) {
     }
 }
 
+// After a stable run: the brownout row is over, in the store too.
+static void clear_brownout_row(void) {
+    s_row_to_clear = false;
+    s_brownout_row = 0;
+    nvs_handle_t h;
+    if (nvs_open("sandy", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_set_u32(h, "brown_row", 0) == ESP_OK) nvs_commit(h);
+    nvs_close(h);
+}
+
 // Every two seconds: internal RAM, and a LOW_MEMORY that promised a restart.
 static void monitor_task(void *arg) {
     (void)arg;
@@ -182,6 +211,7 @@ static void monitor_task(void *arg) {
             s_caught[0] = '\0';
         }
         check_stacks();
+        if (s_row_to_clear) clear_brownout_row();
         const int64_t now = esp_timer_get_time() / 1000;
         const size_t free_b = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         const size_t big = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
@@ -209,15 +239,36 @@ static void monitor_task(void *arg) {
     }
 }
 
-// One NVS write per boot: the count survives power cuts, unlike the crash guard.
+// One NVS write per boot: the counts survive power cuts, unlike the crash guard.
 static void count_boot(void) {
     nvs_handle_t h;
     if (nvs_open("sandy", NVS_READWRITE, &h) != ESP_OK) return;
     if (nvs_get_u32(h, "boots", &s_boots) != ESP_OK) s_boots = 0;
     s_boots++;
-    if (nvs_set_u32(h, "boots", s_boots) == ESP_OK) nvs_commit(h);
+    bool ok = nvs_set_u32(h, "boots", s_boots) == ESP_OK;
+    if (nvs_get_u32(h, "brownouts", &s_brownouts_ever) != ESP_OK) s_brownouts_ever = 0;
+    if (nvs_get_u32(h, "brown_row", &s_brownout_row) != ESP_OK) s_brownout_row = 0;
+    if (esp_reset_reason() == ESP_RST_BROWNOUT) {
+        s_brownouts_ever++;
+        s_brownout_row++;
+        ok = nvs_set_u32(h, "brownouts", s_brownouts_ever) == ESP_OK && ok;
+        ok = nvs_set_u32(h, "brown_row", s_brownout_row) == ESP_OK && ok;
+    } else if (s_clean_start && s_brownout_row) {
+        // A crash leaves the row standing (a weak supply crashes too); a clean start ends it.
+        s_brownout_row = 0;
+        ok = nvs_set_u32(h, "brown_row", 0) == ESP_OK && ok;
+    }
+    if (ok) nvs_commit(h);
     nvs_close(h);
+
+    s_power_weak = s_brownout_row >= HEALTH_POWER_WEAK_AFTER;
+    if (s_power_weak) {
+        ESP_LOGE(TAG, "%lu brownouts in a row — the power supply is too weak",
+                 (unsigned long)s_brownout_row);
+        status_set(SANDY_PART_POWER, SANDY_ST_POWER_LOW);
+    }
 }
+
 
 int health_json(char *out, size_t cap) {
     char faults[160];
@@ -225,10 +276,12 @@ int health_json(char *out, size_t cap) {
     int nvs_used, nvs_total;
     nvs_sandy_usage(&nvs_used, &nvs_total);
     int k = snprintf(out, cap,
-                     "\"boot\":%d,\"boots\":%lu,\"heap_min\":%u,\"heap_big\":%u,"
+                     "\"boot\":%d,\"boots\":%lu,\"brownouts\":%lu,\"power_weak\":%s,"
+                     "\"heap_min\":%u,\"heap_big\":%u,"
                      "\"safe\":%s,\"nvs_wiped\":%s,\"nvs_used\":%d,\"nvs_total\":%d,"
                      "\"faults\":{%s},\"stacks\":{",
                      (int)esp_reset_reason(), (unsigned long)s_boots,
+                     (unsigned long)s_brownouts_ever, s_power_weak ? "true" : "false",
                      (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                      s_safe ? "true" : "false", nvs_sandy_wiped() ? "true" : "false",

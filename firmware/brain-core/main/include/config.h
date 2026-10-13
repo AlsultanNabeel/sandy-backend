@@ -137,6 +137,10 @@
 // them, and she boots in safe mode: network and updates only, no voice, no body.
 #define HEALTH_SAFE_AFTER_CRASHES  3
 #define HEALTH_STABLE_MS           (10 * 60 * 1000)
+// A brownout (the supply sagged) is neither a crash nor a clean start: it leaves the crash
+// count as it is and is counted on its own. This many in a row with no stable run between
+// and she says her power is weak (status POWER_LOW), on her face and in the heartbeat.
+#define HEALTH_POWER_WEAK_AFTER    2
 // Internal RAM this low (free, or the largest block TLS needs) for this long, outside a
 // call, and she restarts cleanly; so does a LOW_MEMORY status left standing outside a call.
 // These restarts count toward safe mode, so a board that is always short ends there.

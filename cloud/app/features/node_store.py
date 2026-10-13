@@ -139,6 +139,9 @@ _TELEMETRY_KEYS = {
     # The brain's health: last reset reason, restarts ever, least internal RAM it had,
     # its largest block now, safe mode, each part not OK, each task's least stack headroom.
     "boot": int, "boots": int, "heap_min": int, "heap_big": int, "safe": bool,
+    # Brownouts since the first boot, and whether enough came in a row that she says her
+    # power is weak (also `faults.power`); neither counts toward safe mode.
+    "brownouts": int, "power_weak": bool,
     # The settings store: erased at this boot to recover (Wi-Fi and keys lost), and how full.
     "nvs_wiped": bool, "nvs_used": int, "nvs_total": int,
     "faults": dict, "stacks": dict,

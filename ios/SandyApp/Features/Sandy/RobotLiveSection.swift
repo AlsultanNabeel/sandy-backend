@@ -14,6 +14,9 @@ struct RobotLiveSection: View {
         VStack(spacing: Theme.Spacing.md) {
             if let node = store.live {
                 hero(node)
+                if node.powerWeak {
+                    SandyNotice(lang.s("robot.live.powerWeak"), kind: .gentleWarning)
+                }
                 stats(node)
                 if store.has(SandyMood.Device.face) { moodGrid }
                 if store.has(SandyMood.Device.gesture) {

@@ -131,6 +131,12 @@ static const status_face_t TABLE[SANDY_ST_COUNT] = {
         "لسا ما حدا ربطني. اربطني من التطبيق أول، وبعدين احكي معي.",
         5, "not_paired",
     },
+    // The supply sags under the radio or the amp and she restarts: a stronger one fixes it.
+    [SANDY_ST_POWER_LOW] = {
+        MOOD_WORRIED, LED_STATE_OFF, "POWER LOW",
+        "الكهربا عندي ضعيفة وعم بطفى لحالي. جرّب شاحن أقوى، خمس فولت وأمبيرين.",
+        6, "power_low",
+    },
 };
 
 static const char *const PART_NAME[SANDY_PART_COUNT] = {
@@ -144,6 +150,7 @@ static const char *const PART_NAME[SANDY_PART_COUNT] = {
     [SANDY_PART_CLOCK]  = "clock",
     [SANDY_PART_UPDATE] = "update",
     [SANDY_PART_IDENTITY] = "identity",
+    [SANDY_PART_POWER]  = "power",
 };
 
 sandy_status_t status_get(void)
