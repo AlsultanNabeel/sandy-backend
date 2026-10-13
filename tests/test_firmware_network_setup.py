@@ -55,3 +55,16 @@ def test_the_radio_moves_only_once_the_page_is_up():
 def test_a_page_that_cannot_start_is_retried_slowly_not_every_half_second():
     task = _block(_src("sandy_provision.c"), "static void provision_task(")
     assert "PROVISION_RETRY_MS" in task and "start_ap()" in task
+
+
+# ── B4: in safe mode the setup network's password is only on her face ──
+
+def test_safe_mode_starts_the_face_when_the_setup_network_comes_up():
+    start = _block(_src("sandy_provision.c"), "static bool start_ap(")
+    wake = start.index("setup_face_on();")
+    assert wake < start.index("screen_show_qr(")
+    on = _block(_src("sandy_provision.c"), "static void setup_face_on(")
+    assert "health_safe_mode()" in on and "face_init()" in on
+    # Only then: safe mode still boots without the face.
+    main = _block(_src("sandy_main.c"), "void app_main(")
+    assert "face_init()" not in main[:main.index("} else {")]

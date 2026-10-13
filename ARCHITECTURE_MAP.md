@@ -1123,6 +1123,9 @@ Three things here are load-bearing and easy to undo by accident:
   still cannot bind leaves the radio alone and is tried again in `PROVISION_RETRY_MS`
   (30 s): it used to raise an access point with no page and no code on her face, and log
   twice a second.
+- **Safe mode starts the face for it.** Safe mode boots without the face, and the setup
+  network's password is shown only there; `setup_face_on` starts the face the first time the
+  setup network comes up in safe mode, and not before.
 
 The window is long on purpose: a robot that enters setup whenever the router is
 slow is worse than one that never does. It doubles as the recovery path when an

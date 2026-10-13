@@ -8,6 +8,8 @@
 #include "sandy_status.h"
 #include "sandy_identity.h"
 #include "sandy_remote.h"
+#include "sandy_health.h"
+#include "sandy_face.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -369,6 +371,20 @@ static esp_err_t to_the_page(httpd_req_t *req, httpd_err_code_t err) {
 
 // ─── Bringing the access point up ───
 
+// Safe mode leaves the face off, and the setup network's password is shown only there:
+// without it the network was there and nobody could join it. Started here, when it is
+// needed and not before, so a fault in the display cannot take the network part down.
+static void setup_face_on(void) {
+#if ENABLE_FACE
+    static bool started;
+    if (!health_safe_mode() || started) return;
+    started = true;
+    esp_err_t e = face_init();
+    if (e == ESP_OK) ESP_LOGW(TAG, "safe mode: face on to show the setup network");
+    else ESP_LOGE(TAG, "safe mode: no face for the setup code (%s)", esp_err_to_name(e));
+#endif
+}
+
 // The page first, then the radio: an access point with no page behind it is a network
 // nobody can use, and it showed no code on her face either.
 static bool start_ap(void) {
@@ -441,6 +457,7 @@ static bool start_ap(void) {
 
     // A QR that joins in one tap, and the same in text for typing. The password exists
     // only here: on her face, never in the log.
+    setup_face_on();
     char msg[192], qr[128];
     snprintf(msg, sizeof(msg), "Scan to set up — or join %s\npassword %s", s_ap_ssid, pass);
     snprintf(qr, sizeof(qr), "WIFI:T:WPA;S:%s;P:%s;;", s_ap_ssid, pass);
