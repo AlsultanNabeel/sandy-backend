@@ -19,6 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "cloud"))
 from app.features import wifi_switch  # noqa: E402
 
 
+# Boards from before the signed command: these tests are about the checks before anything
+# is sent and the plain wire form those boards read (tests/test_signed_wifi_command.py has
+# the signed one).
+_OLD_FIRMWARE = {"node_id": "n1", "firmware_version": "0.11.6", "telemetry": {"cam_fw": "0.4.1"}}
+
+
 def _sent():
     """Capture what would go to the broker."""
     return patch("app.integrations.room_device.get_room_device_client")
@@ -44,7 +50,7 @@ def test_a_newline_cannot_be_smuggled_into_either_field():
     exactly why the separator is the one character they cannot contain. This
     test is what keeps that true if the format is ever revisited.
     """
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE):
         assert wifi_switch.switch_network("n1", "Ne\nt", "password")["error"] == "bad_chars"
         assert wifi_switch.switch_network("n1", "Net", "pass\nword")["error"] == "bad_chars"
 
@@ -56,7 +62,7 @@ def test_impossible_credentials_are_refused_here_not_on_the_board():
     seconds of a robot trying to associate with something that cannot exist,
     during which it is off the network and answering nobody.
     """
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE):
         assert wifi_switch.switch_network("n1", "x" * 33, "password")["error"] == "too_long"
         assert wifi_switch.switch_network("n1", "Net", "y" * 65)["error"] == "too_long"
         assert wifi_switch.switch_network("n1", "", "pw")["error"] == "no_ssid"
@@ -64,9 +70,9 @@ def test_impossible_credentials_are_refused_here_not_on_the_board():
 
 def test_the_name_is_counted_in_bytes_as_the_board_counts_it():
     """Seventeen Arabic letters are thirty-four bytes: past 802.11's thirty-two."""
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE):
         assert wifi_switch.switch_network("n1", "ش" * 17, "password")["error"] == "too_long"
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
         assert wifi_switch.switch_network("n1", "ش" * 16, "password")["ok"] is True
@@ -76,7 +82,7 @@ def test_a_password_wpa2_cannot_take_is_refused_before_it_is_sent():
     """A WPA2 password is 8 to 63 characters, or 64 hex digits; an open network has none.
 
     The board refused the rest after the request had gone, and the app said «done»."""
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
         assert wifi_switch.switch_network("n1", "Net", "12345")["error"] == "bad_password"
@@ -88,7 +94,7 @@ def test_a_password_wpa2_cannot_take_is_refused_before_it_is_sent():
 
 
 def test_a_good_request_reaches_the_boards_service_channel():
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
         res = wifi_switch.switch_network("n1", "Home", "hunter22")
@@ -106,7 +112,7 @@ def test_success_is_not_claimed_before_the_board_says_so():
     rolled back reports the old one. Treating "sent" as "done" would show the
     owner a network his robot is not on.
     """
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
         res = wifi_switch.switch_network("n1", "Home", "password")
@@ -142,7 +148,7 @@ def test_the_two_boards_are_addressed_separately():
     """
     from unittest.mock import patch
 
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}), \
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
 
@@ -152,7 +158,7 @@ def test_the_two_boards_are_addressed_separately():
         wifi_switch.switch_network("n1", "Home", "password", board="camera")
         assert c.return_value.publish_service.call_args[0][0] == "sandy/node/n1/cam/wifi"
 
-    with patch("app.features.node_store.get_node", return_value={"node_id": "n1"}):
+    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE):
         assert wifi_switch.switch_network("n1", "Home", "password",
                                           board="nonsense")["error"] == "bad_board"
 

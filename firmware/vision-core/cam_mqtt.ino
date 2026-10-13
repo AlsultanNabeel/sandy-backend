@@ -13,6 +13,7 @@ static unsigned long g_mqttBackoffMs = MQTT_RECONNECT_INTERVAL_MS;
 
 const char* camStreamKey();
 bool camCommandAllowed();
+void handleCamWifiCommand(const String& value);
 
 // ===== هوية العقدة =====
 // المواضيع من كود الاقتران بنفس تحويل node_store.code_to_node_id.
@@ -105,10 +106,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // قناة الأوامر: فلاش، إعدادات، بث، سلسلة لقطات
   if (t == g_topicWifi) {
-    // "<اسم>\n<كلمة السر>" (السطر الجديد ما بيكون جوّاهن).
-    int nl = value.indexOf('\n');
-    if (nl < 0) { g_log.println("[WIFI] no password line"); return; }
-    camQueueWifi(value.substring(0, nl), value.substring(nl + 1));
+    handleCamWifiCommand(value);   // موقّع ومختوم (cam_wifi.ino)
     return;
   }
 

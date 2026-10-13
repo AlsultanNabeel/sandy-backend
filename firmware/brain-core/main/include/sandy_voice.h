@@ -24,6 +24,8 @@ void voice_key_init(void);
 // A command from the server signed like the voice hello: HMAC-SHA256 over `msg` with this
 // board's own key, or the shared key while it has none. `mac_hex` is 64 hex digits.
 bool voice_verify_signed(const char *msg, const char *mac_hex);
+// The same HMAC itself, for a command that also carries something sealed with the key.
+bool voice_key_hmac(const char *msg, unsigned char out[32]);
 
 // Current speaker level 0..100, for the mouth animation.
 int voice_output_level(void);

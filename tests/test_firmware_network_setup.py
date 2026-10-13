@@ -158,3 +158,43 @@ def test_the_cameras_setup_network_comes_up_after_ten_minutes_with_no_broker():
     up = tick[tick.index("if (WiFi.status() == WL_CONNECTED)"):]
     assert "CAM_SETUP_NO_SERVER_MS" in up and "camBrokerReachable()" in up
     assert "mqttIsConnected()" in up and "setupStart(true)" in up
+
+
+# ── The Wi-Fi command is signed and its password sealed (decision, group P2) ──
+
+def test_the_brain_takes_only_a_signed_fresh_unseen_wifi_command():
+    mqtt = _src("sandy_mqtt.c")
+    handle = _block(mqtt, "static void _handle_wifi(")
+    assert 'strncmp(val, "wifi:", 5)' in handle and "strchr(val, '\\n')" not in handle
+    order = ["clock not set", "WIFI_CMD_WINDOW_MS", "ms <= s_wifi_last_ms",
+             "voice_verify_signed(msg, f[3])", "s_wifi_last_ms = ms", "xTaskCreate(_wifi_switch_task"]
+    at = [handle.index(k) for k in order]
+    assert at == sorted(at)
+    # The same texts the server signs and seals (wifi_switch._signed_command).
+    assert '"wifi|%s|%.*s|%.*s|%.*s"' in handle and '"wifi-pass|%s|%.*s|%d"' in handle
+    # Safe mode still takes it: a rescue command.
+    dispatch = _block(mqtt, "static void _dispatch(")
+    assert 'strcmp(out, "wifi")' in dispatch[:dispatch.index("safe mode — ignoring")]
+
+
+def test_the_camera_takes_only_a_signed_fresh_unseen_wifi_command_under_its_own_id():
+    mqtt = _block(_cam("cam_mqtt.ino"), "static void mqttCallback(")
+    assert "handleCamWifiCommand(value)" in mqtt and "indexOf('\\n')" not in mqtt
+    handle = _block(_cam("cam_wifi.ino"), "void handleCamWifiCommand(")
+    order = ["CAM_CLOCK_SANE_EPOCH", "CAM_WIFI_CMD_WINDOW_MS", "signedAt <= g_wifiLastMs",
+             'hmacHex(String("wifi|")', "camQueueWifi("]
+    at = [handle.index(k) for k in order]
+    assert at == sorted(at)
+    assert 'camNodeId() + ":cam"' in handle and 'String("wifi-pass|")' in handle
+
+
+def test_the_versions_the_server_signs_for_are_the_ones_built_here():
+    import re
+
+    from app.features.wifi_switch import SIGNED_FROM
+    from app.features.firmware_store import version_key
+    brain = re.search(r'SANDY_FW_VERSION "([^"]+)"',
+                      (MAIN / "include" / "config.h").read_text()).group(1)
+    cam = re.search(r'SANDY_CAM_FW_VERSION\s+"([^"]+)"', _cam("config.h")).group(1)
+    assert version_key(brain) >= version_key(SIGNED_FROM["brain"])
+    assert version_key(cam) >= version_key(SIGNED_FROM["camera"])

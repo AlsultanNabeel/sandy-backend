@@ -1001,6 +1001,17 @@ never the rest of its identity or its own key. It is kept like the brain's (`nod
 (`_erase_cam_if_pending`, once a minute at most, both keys) until it comes back on another network;
 pairing the robot again drops it first, and a send finds the robot paired is dropped.
 
+`wifi` and `cam/wifi` are signed the same way (`wifi_switch._signed_command`, keys from
+`node_store.signing_keys`: the board's own, the shared one while it has none, both while its own
+is only issued): `wifi:<ms>:<ssid hex>:<sealed hex>:<hmac>`, the HMAC over
+`wifi|<signer>|<ms>|<ssid hex>|<sealed hex>` (signer `<node_id>` or `<node_id>:cam`), and the
+password, zero-padded to 64 bytes, XORed with HMAC over `wifi-pass|<signer>|<ms>|0` and `…|1`,
+so the broker never carries it. The board refuses it unsigned, with its clock unset, more than
+two minutes off, or not newer than the last one it took (a recorded one is never replayed); the
+brain checks it in safe mode too, and the setup pages are not touched. Boards from before it
+(brain under `0.12.0`, camera under `0.5.0`, `wifi_switch.SIGNED_FROM`, read from the heartbeat's
+version) still get `<ssid>\n<password>` until they update; one with no version is sent the signed one.
+
 A release keeps its erase (`node_pending_erase`, keyed by board, thirty days TTL): the
 broker keeps nothing for a board on a clean session, so a robot off at release used to
 keep the seller's Wi-Fi and broker login. Its sealed own key, restart count (`boots`) and

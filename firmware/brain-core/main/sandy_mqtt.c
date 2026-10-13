@@ -9,6 +9,7 @@
 #include "sandy_led.h"
 #include "sandy_screen.h"
 #include "mbedtls/base64.h"
+#include "mbedtls/platform_util.h"
 #include "esp_heap_caps.h"
 #include "sandy_audio_ctl.h"
 #include "sandy_wifi.h"
@@ -28,6 +29,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -287,31 +289,107 @@ static void _handle_screen(const char *val) {
 #endif
 }
 
-// تغيير الشبكة. الحمولة: "<اسم>\n<كلمة السر>" (السطر الجديد الحرف الوحيد اللي ما بيكون جوّاهن).
-// بيحجز لحدّ ٢٥ ثانية، فبيتنفّذ ع مهمّة لحاله: معالج MQTT ما لازم ينام.
+// تغيير الشبكة، موقّع زي المسح (node_store.signing_keys، wifi_switch._signed_command):
+//   "wifi:<ms>:<اسم بالسداسي>:<كلمة السر مختومة بالسداسي>:<hmac>"
+// التوقيع HMAC-SHA256 ع "wifi|<عقدة>|<ms>|<اسم>|<مختومة>" بمفتاح اللوح (المشترك لما ما عنده)،
+// وكلمة السر (٦٤ بايت محشية أصفار) XOR مع HMAC ع "wifi-pass|<عقدة>|<ms>|0" و"…|1".
+// مرفوض بلا توقيع، بساعة مش مضبوطة، أبعد من دقيقتين، أو مش أحدث من آخر واحد انقبل:
+// أمر مسجّل ما بينعاد. بيحجز لحدّ ٤٥ ثانية، فبيتنفّذ ع مهمّة لحاله: معالج MQTT ما لازم ينام.
+#define WIFI_CMD_WINDOW_MS (2 * 60 * 1000)
 typedef struct { char ssid[33]; char pass[65]; } wifi_req_t;
+static long long s_wifi_last_ms;   // آخر أمر انقبل
 
 static void _wifi_switch_task(void *arg) {
     wifi_req_t *req = (wifi_req_t *)arg;
     wifi_switch_result_t r = wifi_sandy_switch(req->ssid, req->pass);
+    mbedtls_platform_zeroize(req, sizeof(*req));
     free(req);
     // النتيجة بتبيّن بالنبضة الجاية (اسم الشبكة).
     ESP_LOGI(TAG, "wifi switch result=%d", (int)r);
     vTaskDelete(NULL);
 }
 
+static int _unhex(const char *hex, size_t n, unsigned char *out) {
+    for (size_t i = 0; i < n; i++) {
+        int hi = -1, lo = -1;
+        for (int k = 0; k < 2; k++) {
+            char c = (char)tolower((unsigned char)hex[2 * i + k]);
+            int v = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
+            if (k == 0) hi = v; else lo = v;
+        }
+        if (hi < 0 || lo < 0) return -1;
+        out[i] = (unsigned char)((hi << 4) | lo);
+    }
+    return 0;
+}
+
 static void _handle_wifi(const char *val) {
-    const char *nl = strchr(val, '\n');
-    if (!nl) { ESP_LOGW(TAG, "wifi: no password line"); return; }
+    // The fields: ms, ssid hex (2..64), sealed hex (128), hmac (64).
+    const char *f[4];
+    if (strncmp(val, "wifi:", 5) != 0) {
+        ESP_LOGW(TAG, "wifi refused: not a signed command");
+        return;
+    }
+    f[0] = val + 5;
+    for (int i = 1; i < 4; i++) {
+        const char *c = strchr(f[i - 1], ':');
+        if (!c) { ESP_LOGW(TAG, "wifi refused: not a signed command"); return; }
+        f[i] = c + 1;
+    }
+    const size_t ms_len = (size_t)(f[1] - f[0] - 1);
+    const size_t ssid_hex = (size_t)(f[2] - f[1] - 1);
+    const size_t sealed_hex = (size_t)(f[3] - f[2] - 1);
+    if (ms_len == 0 || ms_len > 15 || ssid_hex < 2 || ssid_hex > 64 || ssid_hex % 2 ||
+        sealed_hex != 128 || strlen(f[3]) != 64) {
+        ESP_LOGW(TAG, "wifi refused: malformed");
+        return;
+    }
+    long long ms = 0;
+    for (size_t i = 0; i < ms_len; i++) {
+        if (f[0][i] < '0' || f[0][i] > '9') { ESP_LOGW(TAG, "wifi refused: malformed"); return; }
+        ms = ms * 10 + (f[0][i] - '0');
+    }
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    const long long now = (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (tv.tv_sec < 1700000000) { ESP_LOGW(TAG, "wifi refused: clock not set"); return; }
+    if (llabs(now - ms) > WIFI_CMD_WINDOW_MS) {
+        ESP_LOGW(TAG, "wifi refused: signed %lld s away from now", (now - ms) / 1000);
+        return;
+    }
+    if (ms <= s_wifi_last_ms) { ESP_LOGW(TAG, "wifi refused: already taken (a replay)"); return; }
+
+    // The signed text, without the trailing ":<hmac>".
+    char msg[256];
+    int n = snprintf(msg, sizeof(msg), "wifi|%s|%.*s|%.*s|%.*s", s_node_id, (int)ms_len, f[0],
+                     (int)ssid_hex, f[1], (int)sealed_hex, f[2]);
+    if (n <= 0 || n >= (int)sizeof(msg)) return;
+    if (!voice_verify_signed(msg, f[3])) { ESP_LOGE(TAG, "wifi refused: bad signature"); return; }
 
     wifi_req_t *req = calloc(1, sizeof(wifi_req_t));
     if (!req) return;
-    size_t slen = (size_t)(nl - val);
-    if (slen >= sizeof(req->ssid)) { free(req); return; }
-    memcpy(req->ssid, val, slen);
-    snprintf(req->pass, sizeof(req->pass), "%s", nl + 1);
-
-    if (xTaskCreate(_wifi_switch_task, "wifi_switch", 4096, req, 5, NULL) != pdPASS) {
+    unsigned char sealed[64], stream[64];
+    bool ok = _unhex(f[1], ssid_hex / 2, (unsigned char *)req->ssid) == 0 &&
+              _unhex(f[2], sizeof(sealed), sealed) == 0;
+    for (int i = 0; ok && i < 2; i++) {
+        snprintf(msg, sizeof(msg), "wifi-pass|%s|%.*s|%d", s_node_id, (int)ms_len, f[0], i);
+        ok = voice_key_hmac(msg, stream + 32 * i);
+    }
+    for (int i = 0; ok && i < 64; i++) req->pass[i] = (char)(sealed[i] ^ stream[i]);
+    mbedtls_platform_zeroize(stream, sizeof(stream));
+    mbedtls_platform_zeroize(sealed, sizeof(sealed));
+    // Zero padding after the password; a name or password carrying a zero byte is not one.
+    if (!ok || strlen(req->ssid) != ssid_hex / 2) {
+        mbedtls_platform_zeroize(req, sizeof(*req));
+        free(req);
+        ESP_LOGW(TAG, "wifi refused: could not open it");
+        return;
+    }
+    s_wifi_last_ms = ms;
+    ESP_LOGW(TAG, "signed wifi command — trying '%s'", req->ssid);
+    if (xTaskCreate(_wifi_switch_task, "wifi_switch", 6144, req, 5, NULL) != pdPASS) {
+        mbedtls_platform_zeroize(req, sizeof(*req));
         free(req);
     }
 }

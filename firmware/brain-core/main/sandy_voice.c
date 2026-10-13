@@ -324,11 +324,8 @@ static int hex_nibble(char c) {
     return (c >= 'a' && c <= 'f') ? c - 'a' + 10 : 0;
 }
 
-bool voice_verify_signed(const char *msg, const char *mac_hex) {
-    if (!msg || !mac_hex || strlen(mac_hex) != 64) return false;
-    for (int i = 0; i < 64; i++) {
-        if (!isxdigit((unsigned char)mac_hex[i])) return false;
-    }
+bool voice_key_hmac(const char *msg, unsigned char out[32]) {
+    if (!msg) return false;
     unsigned char own[DEVKEY_HEX / 2];
     const unsigned char *key = (const unsigned char *)identity()->hmac_key;
     size_t key_len = strlen(identity()->hmac_key);
@@ -340,13 +337,21 @@ bool voice_verify_signed(const char *msg, const char *mac_hex) {
         key = own;
         key_len = sizeof(own);
     }
-    if (key_len == 0) return false;
-
-    unsigned char mac[32];
-    const int hr = mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), key, key_len,
-                                   (const unsigned char *)msg, strlen(msg), mac);
+    const int hr = key_len ? mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
+                                             key, key_len, (const unsigned char *)msg,
+                                             strlen(msg), out)
+                           : -1;
     mbedtls_platform_zeroize(own, sizeof(own));
-    if (hr != 0) return false;
+    return hr == 0;
+}
+
+bool voice_verify_signed(const char *msg, const char *mac_hex) {
+    if (!msg || !mac_hex || strlen(mac_hex) != 64) return false;
+    for (int i = 0; i < 64; i++) {
+        if (!isxdigit((unsigned char)mac_hex[i])) return false;
+    }
+    unsigned char mac[32];
+    if (!voice_key_hmac(msg, mac)) return false;
     // Constant time: how far a guess matched must not show in how long it took.
     unsigned char diff = 0;
     for (int i = 0; i < 32; i++) {

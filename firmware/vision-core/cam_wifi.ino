@@ -259,3 +259,76 @@ void handleCamFactoryReset(const String& value) {
   delay(300);
   ESP.restart();
 }
+
+// ── أمر تغيير الشبكة الموقّع ──
+// زي الدماغ (`sandy_mqtt.c::_handle_wifi`) بمعرّف الكاميرا: "wifi:<ms>:<اسم سداسي>:<مختومة>:<hmac>"،
+// التوقيع ع "wifi|<عقدة>:cam|<ms>|<اسم>|<مختومة>" بمفتاحها الخاص (المشترك لما ما عندها)، وكلمة
+// السر (٦٤ بايت) XOR مع HMAC ع "wifi-pass|<عقدة>:cam|<ms>|0" و"…|1". مرفوض بلا توقيع، بساعة
+// مش مضبوطة، أبعد من دقيقتين، أو مش أحدث من آخر واحد انقبل.
+#define CAM_WIFI_CMD_WINDOW_MS (2LL * 60LL * 1000LL)
+static long long g_wifiLastMs = 0;
+
+static bool camHexBytes(const String& hex, uint8_t* out, size_t n) {
+  if (hex.length() != n * 2) return false;
+  for (size_t i = 0; i < n; i++) {
+    int hi = hexNibble(hex[2 * i]), lo = hexNibble(hex[2 * i + 1]);
+    if (hi < 0 || lo < 0) return false;
+    out[i] = (uint8_t)((hi << 4) | lo);
+  }
+  return true;
+}
+
+void handleCamWifiCommand(const String& value) {
+  int c1 = value.indexOf(':', 5), c2 = c1 < 0 ? -1 : value.indexOf(':', c1 + 1);
+  int c3 = c2 < 0 ? -1 : value.indexOf(':', c2 + 1);
+  if (!value.startsWith("wifi:") || c3 < 0) {
+    g_log.println("[WIFI] مرفوض: مش أمر موقّع");
+    return;
+  }
+  String ms = value.substring(5, c1), ssidHex = value.substring(c1 + 1, c2);
+  String sealedHex = value.substring(c2 + 1, c3), mac = value.substring(c3 + 1);
+  if (ms.length() == 0 || ms.length() > 15 || ssidHex.length() < 2 || ssidHex.length() > 64 ||
+      ssidHex.length() % 2 || sealedHex.length() != 128 || mac.length() != 64) {
+    g_log.println("[WIFI] مرفوض: صيغة غلط");
+    return;
+  }
+  for (size_t i = 0; i < ms.length(); i++) {
+    if (ms[i] < '0' || ms[i] > '9') { g_log.println("[WIFI] مرفوض: صيغة غلط"); return; }
+  }
+  time_t now = time(nullptr);
+  if (now < CAM_CLOCK_SANE_EPOCH) { g_log.println("[WIFI] مرفوض: الساعة مش مضبوطة"); return; }
+  long long signedAt = atoll(ms.c_str());
+  if (llabs((long long)now * 1000LL - signedAt) > CAM_WIFI_CMD_WINDOW_MS) {
+    g_log.println("[WIFI] مرفوض: موقّع بوقت بعيد عن هلّق");
+    return;
+  }
+  if (signedAt <= g_wifiLastMs) { g_log.println("[WIFI] مرفوض: أمر معاد"); return; }
+
+  ownKeyLoad();
+  String signer = camNodeId() + ":cam";
+  String want = hmacHex(String("wifi|") + signer + "|" + ms + "|" + ssidHex + "|" + sealedHex);
+  mac.toLowerCase();
+  uint8_t diff = 0;
+  for (int i = 0; i < 64; i++) diff |= (uint8_t)(want[i] ^ mac[i]);
+  if (diff) { g_log.println("[WIFI] مرفوض: توقيع غلط"); return; }
+
+  uint8_t ssidRaw[33] = {0}, sealed[64], stream[64], k[32];
+  bool ok = camHexBytes(ssidHex, ssidRaw, ssidHex.length() / 2) &&
+            camHexBytes(sealedHex, sealed, sizeof(sealed));
+  for (int i = 0; ok && i < 2; i++) {
+    ok = parseKeyHex(hmacHex(String("wifi-pass|") + signer + "|" + ms + "|" + String(i)), k);
+    memcpy(stream + 32 * i, k, 32);
+  }
+  char pass[65] = {0};
+  for (int i = 0; ok && i < 64; i++) pass[i] = (char)(sealed[i] ^ stream[i]);
+  memset(stream, 0, sizeof(stream));
+  memset(k, 0, sizeof(k));
+  // أصفار الحشو بعد كلمة السر؛ اسم فيه بايت صفر مش اسم.
+  if (!ok || strlen((char*)ssidRaw) != ssidHex.length() / 2) {
+    memset(pass, 0, sizeof(pass));
+    g_log.println("[WIFI] مرفوض: ما انفتح");
+    return;
+  }
+  if (camQueueWifi(String((char*)ssidRaw), String(pass))) g_wifiLastMs = signedAt;
+  memset(pass, 0, sizeof(pass));
+}

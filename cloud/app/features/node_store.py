@@ -376,17 +376,24 @@ def _erase_command(node_id: str, key: Optional[bytes] = None,
     return f"erase:{ms}:{mac}"
 
 
-def _erase_commands(node_id: str, signer: Optional[str] = None) -> List[str]:
-    """The erase as the board will check it. A key only issued, not confirmed, may never
-    have been saved on the board, which then still checks with the shared key: both go."""
+def signing_keys(signer: str) -> List[bytes]:
+    """The keys a board may check a signed command with: its own, and the shared one while
+    it has none. A key only issued, not confirmed, may never have been saved on the board,
+    which then still checks with the shared key: both. Raises ``KeyUnreadable``."""
     from app.api.voice_ws._config import _HMAC_KEY
     from app.features.device_keys import get_key
 
-    record = get_key(signer or node_id)
+    record = get_key(signer)
     keys = [record["key"]] if record else []
     if not record or record.get("state") != "confirmed":
         keys.append(_HMAC_KEY)
-    return [c for c in (_erase_command(node_id, k, signer) for k in keys if k) if c]
+    return [k for k in keys if k]
+
+
+def _erase_commands(node_id: str, signer: Optional[str] = None) -> List[str]:
+    """The erase as the board will check it, once per key it may check it with."""
+    keys = signing_keys(signer or node_id)
+    return [c for c in (_erase_command(node_id, k, signer) for k in keys) if c]
 
 
 def _wipe_board(node_id: str) -> bool:
