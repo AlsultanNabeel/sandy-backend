@@ -296,8 +296,9 @@ SHARED = b"shared-test-key"
 
 @pytest.fixture
 def released(two_owners, monkeypatch):
-    """u1's robot, heard on «Home» after 7 restarts, given its own key, then released while
-    it was off; returns what reaches the broker after that."""
+    """u1's robot, heard on «Home» after 7 restarts, given its own key, its camera on «Home»
+    with its own key too, then released while both were off; returns what reaches the
+    broker after that."""
     from app.api.voice_ws import _config
     from app.features import device_keys
     from app.integrations import room_device
@@ -319,10 +320,24 @@ def released(two_owners, monkeypatch):
         node_store.ingest_status("sandy8421", True, telemetry={"boots": 7, "ssid": "Home"})
         device_keys.open_enrolment("sandy8421")
         own = device_keys.issue_key("sandy8421")
+        _cam_beat("Home")
+        device_keys.open_enrolment("sandy8421:cam")
+        cam_own = device_keys.issue_key("sandy8421:cam")
         _beat({"online": False})                          # its MQTT will: it went off
         out = node_store.unpair_node("sandy8421")
     sent.clear()
-    return {"out": out, "sent": sent, "own": bytes.fromhex(own), "db": two_owners}
+    return {"out": out, "sent": sent, "own": bytes.fromhex(own),
+            "cam_own": bytes.fromhex(cam_own), "db": two_owners}
+
+
+def _cam_beat(ssid):
+    """The camera's own heartbeat, through the real ingest."""
+    import json
+
+    from app.integrations.mqtt_ingest import _ingest_cam_status
+
+    _ingest_cam_status("sandy8421", json.dumps({
+        "online": True, "ssid": ssid, "outputs": [{"id": "snapshot", "kind": "pwm"}]}))
 
 
 def _signed_by(command, key, node_id="sandy8421"):
@@ -360,7 +375,7 @@ def test_a_board_that_shows_it_was_wiped_is_left_alone(released, after):
     _beat({"online": True, **after})          # restarts counted from one again, or a new network
     _beat({"online": True, **after})
     assert released["sent"] == []
-    assert released["db"]["node_pending_erase"].count_documents({}) == 0
+    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421"}) == 0
 
 
 def test_never_to_a_board_paired_to_another_account(released, monkeypatch):
@@ -379,7 +394,48 @@ def test_never_to_a_board_paired_while_the_erase_was_on_its_way(released):
     released["db"]["sandy_nodes"].insert_one({"node_id": "sandy8421", "user_id": "buyer"})
     node_store._erase_if_pending("sandy8421", {"boots": 7, "ssid": "Home"})
     assert released["sent"] == []
-    assert released["db"]["node_pending_erase"].count_documents({}) == 0
+    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421"}) == 0
+
+
+# F3: the camera, off at the release, kept the seller's Wi-Fi: its erase went once and
+# nothing kept it. It is kept now, tied to the release, beside the brain's.
+
+CAM_TOPIC = "sandy/node/sandy8421/cam/factory_reset"
+
+
+def test_a_camera_off_at_release_is_wiped_when_it_comes_back(released):
+    _cam_beat("Home")                                   # back, still on the seller's Wi-Fi
+    commands = [p for t, p in released["sent"] if t == CAM_TOPIC]
+    assert len(commands) == 2
+    assert _signed_by(commands[0], released["cam_own"], "sandy8421:cam")
+    assert _signed_by(commands[1], SHARED, "sandy8421:cam")
+    # Never the brain's erase on its topic, nor the brain's signature on the camera's.
+    assert not any(t == "sandy/node/sandy8421/factory_reset" for t, _ in released["sent"])
+    assert not _signed_by(commands[0], released["own"], "sandy8421:cam")
+
+
+def test_a_camera_back_on_another_network_was_wiped_and_is_left_alone(released):
+    _cam_beat("Buyer")
+    _cam_beat("Buyer")
+    assert released["sent"] == []
+    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421:cam"}) == 0
+
+
+def test_the_camera_erase_goes_when_the_robot_is_paired_again_before_it_came_back(
+        released, monkeypatch):
+    with _as("buyer"):
+        monkeypatch.setattr(node_store, "_wipe_board", lambda node_id: True)
+        assert node_store.pair_node("SANDY-8421")["ok"]
+    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421:cam"}) == 0
+    _cam_beat("Home")
+    assert not [t for t, _ in released["sent"] if t == CAM_TOPIC]
+
+
+def test_never_to_a_camera_whose_robot_was_paired_while_the_erase_was_on_its_way(released):
+    released["db"]["sandy_nodes"].insert_one({"node_id": "sandy8421", "user_id": "buyer"})
+    node_store._erase_cam_if_pending("sandy8421", {"cam_online": True, "cam_ssid": "Home"})
+    assert released["sent"] == []
+    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421:cam"}) == 0
 
 
 # T12: a time up to two minutes ahead was accepted while a signature was remembered three

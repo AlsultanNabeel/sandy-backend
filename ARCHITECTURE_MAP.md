@@ -996,7 +996,10 @@ the broker no longer wipes a robot. The camera has its own (`cam/factory_reset`,
 sent with the brain's at a release): signed over `factory_reset|<node_id>:cam|<ms>` with the camera's own
 key (the shared one while it has none), checked the same way (`cam_wifi.ino`), and it forgets by name
 only its networks (`sandywifi`, the first one's `ws`/`wp` in `sandyid`) and its settings (`sandycam`),
-never the rest of its identity or its own key. A camera off at the release is not sent it again.
+never the rest of its identity or its own key. It is kept like the brain's (`node_pending_erase`, row
+`<node_id>:cam`, its sealed own key and network at release) and sent again on the camera's heartbeats
+(`_erase_cam_if_pending`, once a minute at most, both keys) until it comes back on another network;
+pairing the robot again drops it first, and a send finds the robot paired is dropped.
 
 A release keeps its erase (`node_pending_erase`, keyed by board, thirty days TTL): the
 broker keeps nothing for a board on a clean session, so a robot off at release used to

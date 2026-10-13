@@ -43,6 +43,12 @@ ERASE_RESEND = timedelta(minutes=1)
 ERASE_KEPT_DAYS = 30
 
 
+def _cam_pending_id(node_id: str) -> str:
+    """The camera's own row there: the robot's id with its camera's key id."""
+    from app.features.device_keys import cam_key_id
+    return cam_key_id(node_id)
+
+
 def init_node_store(mongo_db) -> None:
     configure(mongo_db)
     if mongo_db is None:
@@ -266,9 +272,10 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     if _has_another_robot(coll, node_id):
         return {"ok": False, "error": "one_robot"}
     # Paired again, by anyone: an erase still waiting from its last release must never
-    # reach it. Dropped before the claim, so an erase on its way finds nothing to send.
+    # reach it or its camera. Dropped before the claim, so an erase on its way finds nothing.
     if get_db() is not None:
-        get_db()[_PENDING_ERASE].delete_one({"_id": node_id})
+        get_db()[_PENDING_ERASE].delete_many(
+            {"_id": {"$in": [node_id, _cam_pending_id(node_id)]}})
 
     # مطالَبة مرّة وحدة عبر كل الحسابات: أول حساب بيربط بيملك.
     if get_db() is not None:
@@ -469,8 +476,9 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
 def _keep_erase(node_id: str) -> None:
     """The release's erase, kept for the board's next heartbeats (`_erase_if_pending`):
     its own key, sealed (it is revoked next and the board still checks with it), and the
-    restart count and network it had, which is how its wipe shows (both reset or change)."""
-    from app.features.device_keys import KeyUnreadable, get_key
+    restart count and network it had, which is how its wipe shows (both reset or change).
+    The camera's is kept beside it (`_erase_cam_if_pending`): its own key and network."""
+    from app.features.device_keys import KeyUnreadable, cam_key_id, get_key
     from app.utils.ltm_crypto import encrypt_field
 
     db = get_db()
@@ -478,12 +486,18 @@ def _keep_erase(node_id: str) -> None:
         return
     try:
         record = get_key(node_id)
+        cam = get_key(cam_key_id(node_id))
         node = db[_COLL].find_one({"node_id": node_id}) or {}
         tel = node.get("telemetry") or {}
         db[_PENDING_ERASE].update_one({"_id": node_id}, {"$set": {
             "key": encrypt_field(record["hex"]) if record else None,
             "boots": tel.get("boots") if isinstance(tel.get("boots"), int) else None,
             "ssid": str(tel.get("ssid") or "") or None,
+            "since": _now(), "sent_at": None,
+        }}, upsert=True)
+        db[_PENDING_ERASE].update_one({"_id": _cam_pending_id(node_id)}, {"$set": {
+            "key": encrypt_field(cam["hex"]) if cam else None,
+            "ssid": str(tel.get("cam_ssid") or "") or None,
             "since": _now(), "sent_at": None,
         }}, upsert=True)
     except (PyMongoError, KeyUnreadable) as exc:  # the release itself must still go through
@@ -494,8 +508,6 @@ def _erase_if_pending(node_id: str, telemetry: Dict[str, Any]) -> None:
     """A released board's heartbeat: send its erase again, unless it shows it was wiped
     (its restart count fell below the one at release, or it is on another network), or it
     belongs to an account again, which it is never sent to."""
-    from app.utils.ltm_crypto import decrypt_field
-
     db = get_db()
     pending = db[_PENDING_ERASE].find_one({"_id": node_id})
     if pending is None:
@@ -510,28 +522,58 @@ def _erase_if_pending(node_id: str, telemetry: Dict[str, Any]) -> None:
         logger.info("[NodeStore] %s shows it was wiped (%s); erase dropped", node_id,
                     "restart count reset" if wiped else "another network")
         return
-    # Claimed by the send, at most once a minute across workers.
-    now = _now()
-    claimed = db[_PENDING_ERASE].find_one_and_update(
-        {"_id": node_id, "$or": [{"sent_at": None}, {"sent_at": {"$lt": now - ERASE_RESEND}}]},
-        {"$set": {"sent_at": now}})
-    if claimed is None:
+    if _resend_erase(node_id, node_id, None, f"sandy/node/{node_id}/factory_reset"):
+        logger.info("[NodeStore] erase sent again to released board %s", node_id)
+
+
+def _erase_cam_if_pending(node_id: str, telemetry: Dict[str, Any]) -> None:
+    """A released robot's camera heard again: send its erase, unless it shows it was wiped.
+    A wiped camera has no network to come back on, so one that is back on another network
+    was wiped and set up again; on the same one it was not."""
+    db = get_db()
+    pending_id = _cam_pending_id(node_id)
+    pending = db[_PENDING_ERASE].find_one({"_id": pending_id})
+    if pending is None:
         return
-    if get_node_any_tenant(node_id) is not None:
-        # Paired again while this ran: never wipe someone's robot.
-        db[_PENDING_ERASE].delete_one({"_id": node_id})
+    ssid = str((telemetry or {}).get("cam_ssid") or "")
+    if ssid and pending.get("ssid") and ssid != pending["ssid"]:
+        db[_PENDING_ERASE].delete_one({"_id": pending_id})
+        logger.info("[NodeStore] the camera of %s is on another network; erase dropped",
+                    node_id)
         return
+    if _resend_erase(pending_id, node_id, pending_id,
+                     f"sandy/node/{node_id}/cam/factory_reset"):
+        logger.info("[NodeStore] erase sent again to the camera of released board %s",
+                    node_id)
+
+
+def _resend_erase(pending_id: str, node_id: str, signer: Optional[str], topic: str) -> bool:
+    """One pending erase sent again: claimed at most once a minute across workers, never to
+    a robot paired again since (the row goes), signed with the kept own key and the shared
+    one, since the board checks with whichever it still has."""
     from app.api.voice_ws._config import _HMAC_KEY
     from app.integrations.room_device import get_room_device_client
+    from app.utils.ltm_crypto import decrypt_field
 
-    # It checks with one key: its own if it still has one, else the shared. Both go.
+    db = get_db()
+    now = _now()
+    claimed = db[_PENDING_ERASE].find_one_and_update(
+        {"_id": pending_id,
+         "$or": [{"sent_at": None}, {"sent_at": {"$lt": now - ERASE_RESEND}}]},
+        {"$set": {"sent_at": now}})
+    if claimed is None:
+        return False
+    if get_node_any_tenant(node_id) is not None:
+        # Paired again while this ran: never wipe someone's robot.
+        db[_PENDING_ERASE].delete_one({"_id": pending_id})
+        return False
     own = bytes.fromhex(decrypt_field(claimed["key"])) if claimed.get("key") else None
+    client = get_room_device_client()
     for key in [k for k in (own, _HMAC_KEY) if k]:
-        command = _erase_command(node_id, key)
+        command = _erase_command(node_id, key, signer)
         if command:
-            get_room_device_client().publish_service(
-                f"sandy/node/{node_id}/factory_reset", command)
-    logger.info("[NodeStore] erase sent again to released board %s", node_id)
+            client.publish_service(topic, command)
+    return True
 
 
 # ── Heartbeat ingest (firmware-facing, runs outside a tenant) ────────────────
@@ -633,6 +675,10 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
                     upsert=True)
                 if online:
                     _erase_if_pending(node_id, tel)
+            elif heard and isinstance(telemetry, dict) and telemetry.get("cam_online") is True \
+                    and "cam_ssid" in telemetry:
+                # The camera's own heartbeat (it reports no `online` for the node).
+                _erase_cam_if_pending(node_id, telemetry)
             return {"ok": False}
         update: Dict[str, Any] = {}
         if online is not None:
