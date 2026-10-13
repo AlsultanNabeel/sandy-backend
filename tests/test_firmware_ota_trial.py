@@ -178,3 +178,19 @@ def test_every_brain_restart_saves_the_deferred_settings_first():
             assert "nvs_flush_deferred();" in before, f"{path.name}: a restart that drops settings"
             checked += 1
     assert checked >= 4   # install, rollback, setup, health_restart (and the dev upload)
+
+
+def test_a_small_board_buries_a_release_after_two_failed_trials_like_the_brain():
+    import re
+
+    src = _src(SMALL)
+    brain = _src(BRAIN / "sandy_ota.c")
+    small_max = int(re.search(r"#define SANDY_OTA_BAD_MAX_TRIES\s+(\d+)", src).group(1))
+    brain_max = int(re.search(r"#define OTA_BAD_MAX_TRIES\s+(\d+)", brain).group(1))
+    assert small_max == brain_max == 2
+    # The count goes up only for the same version, and one failure buries nothing.
+    failed = _block(_block(src, "static void sandyOtaBegin("), "trying != cfg.version")
+    assert 'p.getString("bad", "") == trying ? p.getUChar("bad_n", 0) : 0' in failed
+    assert 'p.putUChar("bad_n", tries)' in failed
+    is_bad = _block(src, "static bool sandyOtaIsBad(")
+    assert "tries >= SANDY_OTA_BAD_MAX_TRIES" in is_bad

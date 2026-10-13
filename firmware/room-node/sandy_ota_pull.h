@@ -37,6 +37,8 @@ static const char SANDY_FW_PUBKEY[] =
 #define SANDY_OTA_MANIFEST_MAX    1024
 #define SANDY_OTA_BUF             2048
 #define SANDY_OTA_NVS             "sandyota"
+// تجارب بتفشل فيها النسخة قبل ما تندفن (متل الدماغ): انقطاع كهربا وحيد ما بيدفنها.
+#define SANDY_OTA_BAD_MAX_TRIES   2
 
 struct SandyOtaConfig {
   const char* board;          // "cam" | "room" — نفس أسماء الخادم
@@ -167,8 +169,9 @@ static bool sandyOtaIsBad(const char* version) {
   Preferences p;
   if (!p.begin(SANDY_OTA_NVS, true)) return false;
   String bad = p.getString("bad", "");
+  uint8_t tries = p.getUChar("bad_n", 0);
   p.end();
-  return bad.length() && bad == version;
+  return bad.length() && bad == version && tries >= SANDY_OTA_BAD_MAX_TRIES;
 }
 
 // «قيد التجربة» بيضل مكتوب لحد ما النسخة تثبت؛ الإقلاع على غيرها وهو موجود يعني رجعنا.
@@ -231,7 +234,7 @@ static unsigned long sandyOtaCheckOnce() {
   }
   if (sandyOtaVersionCmp(version, g_otaCfg.version) <= 0) return SANDY_OTA_PERIOD_MS;
   if (sandyOtaIsBad(version)) {
-    Serial.printf("[OTA] %s فشلت قبل هيك — ما بنعيدها\n", version);
+    Serial.printf("[OTA] %s فشلت تجربتها %d مرات — ما بنعيدها\n", version, SANDY_OTA_BAD_MAX_TRIES);
     return SANDY_OTA_PERIOD_MS;
   }
   if (!sandyOtaSignatureOk(version, size, sha, sig)) {
@@ -334,9 +337,13 @@ static void sandyOtaBegin(const SandyOtaConfig& cfg) {
   if (!p.begin(SANDY_OTA_NVS, false)) return;
   String trying = p.getString("trying", "");
   if (trying.length() && trying != cfg.version) {
+    uint8_t tries = p.getString("bad", "") == trying ? p.getUChar("bad_n", 0) : 0;
+    tries++;
     p.putString("bad", trying);
+    p.putUChar("bad_n", tries);
     p.remove("trying");
-    Serial.printf("[OTA] %s فشلت ورجعنا لـ %s\n", trying.c_str(), cfg.version);
+    Serial.printf("[OTA] %s فشلت تجربتها (%u) ورجعنا لـ %s\n", trying.c_str(), (unsigned)tries,
+                  cfg.version);
   }
   p.end();
   // علامتنا إحنا بتضل لحد ما التجربة تنجح؛ صورة مش تحت التجربة ثابتة من قبل.

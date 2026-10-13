@@ -1676,7 +1676,7 @@ nobody re-reads becomes a way of believing things that stopped being true.
    against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`) and pull signed releases too
    (`sandy_ota_pull.h`, one file kept identical in both sketches), with the same trial note: written
    before `Update.end` switches the slot, cleared only once the image held the broker a minute, and a
-   version the board came back from is never taken again. A check feeds the board's watchdog before
+   version the board came back from twice (`SANDY_OTA_BAD_MAX_TRIES`, as the brain's) is never taken again. A check feeds the board's watchdog before
    and after every network step, each step with its own deadline under the room's thirty-second
    watchdog (`SANDY_OTA_CONNECT_TIMEOUT_MS` for the TCP connect and again for the handshake,
    `SANDY_OTA_NET_TIMEOUT_MS` per read), and never runs in the loop pass that reached the broker. Still open: secure boot and flash encryption are off.
