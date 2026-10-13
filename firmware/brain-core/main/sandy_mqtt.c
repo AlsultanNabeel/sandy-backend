@@ -539,7 +539,7 @@ static char s_user[65], s_pass[129];           // the credential that last conne
 // board unable to reach the broker, with nothing to go back to.
 static char s_new_user[65], s_new_pass[129];
 static volatile bool s_creds_pending;          // received, not applied yet
-static bool s_trying_new;                       // applied, waiting for CONNECTED
+static bool s_trying_new;                       // applied, waiting for its subscription
 static int  s_new_fails;
 #define NEW_CREDS_MAX_FAILS 3
 
@@ -557,16 +557,8 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
         case MQTT_EVENT_CONNECTED: {
             ESP_LOGI(TAG, "connected");
             s_backoff_ms = 0;
-            if (s_trying_new) {
-                // It works: now it is kept, and the old one goes.
-                s_trying_new = false;
-                snprintf(s_user, sizeof(s_user), "%s", s_new_user);
-                snprintf(s_pass, sizeof(s_pass), "%s", s_new_pass);
-                s_cfg.credentials.username = s_user;
-                s_cfg.credentials.authentication.password = s_pass;
-                creds_store(s_user, s_pass);
-                ESP_LOGW(TAG, "this board's own broker credential works — stored");
-            }
+            // A new credential is kept only once the broker also accepts the subscription
+            // (MQTT_EVENT_SUBSCRIBED): connected with no permission on this tree hears nothing.
             // One wildcard subscription: new outputs only need a dispatch case.
             char sub[80];
             snprintf(sub, sizeof(sub), "%s/#", s_base);
@@ -589,8 +581,23 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             if (ev->data_len > 0 && (uint8_t)ev->data[0] == 0x80) {
                 ESP_LOGE(TAG, "the broker refused our subscription — check this board's "
                               "credential permissions on %s/#", s_base);
+                if (s_trying_new) {
+                    // The old one is still stored: back to it, and reconnect with it.
+                    creds_revert("no permission on this board's topics");
+                    esp_mqtt_client_disconnect(s_client);
+                }
             } else {
                 ESP_LOGI(TAG, "subscribed");
+                if (s_trying_new) {
+                    // It works: now it is kept, and the old one goes.
+                    s_trying_new = false;
+                    snprintf(s_user, sizeof(s_user), "%s", s_new_user);
+                    snprintf(s_pass, sizeof(s_pass), "%s", s_new_pass);
+                    s_cfg.credentials.username = s_user;
+                    s_cfg.credentials.authentication.password = s_pass;
+                    creds_store(s_user, s_pass);
+                    ESP_LOGW(TAG, "this board's own broker credential works — stored");
+                }
             }
             break;
 

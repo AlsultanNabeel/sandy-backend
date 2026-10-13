@@ -1124,7 +1124,7 @@ its own, and the shared one is deleted.
 
 The brain is handed its credential **on the voice handshake** (`voice_ws/session.py`
 → `broker_creds.creds_for_device`) and tries it live; it is stored in NVS only once the
-broker accepts it (`MQTT_EVENT_CONNECTED`). A refusal, or three failed connects, puts the
+broker accepts it and its subscription (`MQTT_EVENT_SUBSCRIBED`, not refused). A refusal of either, or three failed connects, puts the
 old one back (`creds_revert`), so a wrong key can never strand the board. Not over
 the broker, deliberately: delivering a broker credential over the broker would
 mean the shared login has to keep working for ever, which is the thing being

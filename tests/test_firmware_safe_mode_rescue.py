@@ -67,3 +67,25 @@ def test_a_replay_refusal_still_resyncs_the_clock():
     voice = _src("sandy_voice.c")
     assert "clock_refuse();" in voice
     assert "clock_resync();" in _block(voice, "static void clock_tick(")
+
+
+# ── J2: a broker credential is kept only once it can hear its commands ──
+
+def _handler() -> str:
+    return _block(_src("sandy_mqtt.c"), "static void _handler(")
+
+
+def test_a_new_broker_credential_is_not_stored_on_connect():
+    connected = _handler()[_handler().index("case MQTT_EVENT_CONNECTED"):
+                           _handler().index("case MQTT_EVENT_SUBSCRIBED")]
+    assert "creds_store(" not in connected
+    assert "s_trying_new = false" not in connected
+
+
+def test_it_is_stored_when_the_subscription_is_accepted_and_dropped_when_refused():
+    h = _handler()
+    sub = h[h.index("case MQTT_EVENT_SUBSCRIBED"):h.index("case MQTT_EVENT_DISCONNECTED")]
+    refused, accepted = sub.split("} else {", 1)
+    assert "0x80" in refused and "creds_revert(" in refused
+    assert "esp_mqtt_client_disconnect(s_client)" in refused
+    assert "creds_store(s_user, s_pass)" in accepted and "s_trying_new = false" in accepted
