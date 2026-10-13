@@ -253,15 +253,15 @@ def test_the_brain_publishes_under_its_own_node():
 
 
 def test_the_brain_ignores_outputs_that_belong_to_other_boards():
-    """The brain subscribes to the whole tree, so it receives the room's traffic.
+    """The camera's and the room's traffic is not the brain's.
 
-    Without an explicit skip, every camera and room message logged "unknown
-    output" — and a warning that fires on normal traffic is a warning nobody
-    reads when something is actually wrong.
+    It used to subscribe to the whole tree and skip them by name; now it subscribes one
+    level deep, and anything deeper that still arrives is dropped before the dispatch, so
+    no "unknown output" warning fires on normal traffic.
     """
     fw = _read("firmware/brain-core/main/sandy_mqtt.c")
-    assert 'strncmp(out, "cam/", 4)' in fw
-    assert 'strncmp(out, "room/", 5)' in fw
+    assert '"%s/+", s_base' in fw
+    assert "if (strchr(out, '/')) break;" in fw
 
 
 def test_the_room_node_listens_on_its_own_tree():
