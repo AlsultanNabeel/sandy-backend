@@ -138,3 +138,15 @@ def test_the_pairing_code_timer_clears_only_its_own_code():
     assert "screen_shown() == s_pair_shown" in expired and "screen_dismiss()" in expired
     shown = _fn(mqtt, "static void _handle_pair_code(")
     assert shown.index("screen_show_text(text)") < shown.index("s_pair_shown = screen_shown()")
+
+
+# ── J6: a long IR code and the next one sharing one buffer ──
+
+def test_an_ir_code_is_written_only_once_the_last_one_has_left():
+    body = _fn(_src(MAIN / "sandy_ir.c"), "static void ir_send_text(")
+    # The previous code is still being read out of `sym` until it is done.
+    drain = body.index("rmt_tx_wait_all_done(s_tx, IR_TX_DRAIN_MS)")
+    assert drain < body.index("sym[nsym]"), "the buffer is overwritten while it is still sent"
+    # And the wait after a send is as long as the code, not one fixed second.
+    assert "rmt_tx_wait_all_done(s_tx, 1000)" not in body
+    assert "total_us" in body and "rmt_tx_wait_all_done(s_tx, wait_ms)" in body

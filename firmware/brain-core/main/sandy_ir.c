@@ -33,6 +33,9 @@ static rmt_encoder_handle_t s_copy;
 
 // RMT symbol halves are 15 bits: 32767 ticks = 32.7 ms.
 #define IR_MAX_TICKS       32767
+// The longest code there can be (every half at its longest), plus a margin: the most a
+// send waits for the one before it to leave.
+#define IR_TX_DRAIN_MS     ((IR_MAX_SYMBOLS * 2 * IR_MAX_TICKS) / 1000 + 200)
 // Learn mode times out; while it waits, app buttons are refused.
 #define IR_LEARN_TIMEOUT_MS 20000
 
@@ -125,10 +128,17 @@ static void ir_rx_task(void *arg) {
 // ─── Transmit ───
 
 static void ir_send_text(const char *code) {
+    // The driver reads the symbols out of here while it sends: a code is written only
+    // once the one before it has left (a long one and a quick second press garbled both).
     static rmt_symbol_word_t sym[IR_MAX_SYMBOLS];
+    if (rmt_tx_wait_all_done(s_tx, IR_TX_DRAIN_MS) != ESP_OK) {
+        ESP_LOGW(TAG, "the last code is still going out — nothing sent");
+        return;
+    }
     size_t nsym = 0;
     unsigned dur[2] = {0, 0};
     int slot = 0;
+    uint64_t total_us = 0;
 
     const char *p = code;
     while (*p && nsym < IR_MAX_SYMBOLS) {
@@ -147,6 +157,7 @@ static void ir_send_text(const char *code) {
         p = end;
         if (v > IR_MAX_TICKS) v = IR_MAX_TICKS;   // 15-bit field; a gap this long is a gap
         dur[slot++] = (unsigned)v;
+        total_us += v;
         if (slot == 2) {
             // Even index = mark (carrier on).
             sym[nsym].level0    = 1;
@@ -164,6 +175,7 @@ static void ir_send_text(const char *code) {
         sym[nsym].level1    = 0;
         sym[nsym].duration1 = 1000;
         nsym++;
+        total_us += 1000;
     }
 
     if (nsym == 0) {
@@ -178,7 +190,12 @@ static void ir_send_text(const char *code) {
         ESP_LOGE(TAG, "transmit failed: %s", esp_err_to_name(e));
         return;
     }
-    rmt_tx_wait_all_done(s_tx, 1000);
+    // As long as this code lasts: a fixed second let a longer one still be sending when
+    // the next press wrote over it.
+    const int wait_ms = (int)(total_us / 1000) + 100;
+    if (rmt_tx_wait_all_done(s_tx, wait_ms) != ESP_OK) {
+        ESP_LOGW(TAG, "code still going out after %d ms — the next one waits for it", wait_ms);
+    }
     ESP_LOGI(TAG, "sent %u symbols", (unsigned)nsym);
 }
 
