@@ -1042,8 +1042,12 @@ only. Keep those two in lockstep; if one drifts the robot goes quiet and nothing
 says why. Deriving rather than provisioning means the board knows its own topics
 on first boot, before it has ever been paired.
 
-The brain subscribes with a single wildcard (`sandy/node/<id>/#`) and dispatches on
-the suffix, so adding a control cannot be half-done by forgetting a subscription.
+The brain subscribes with a single wildcard one level deep (`sandy/node/<id>/+`) and
+dispatches on the suffix, so adding a control cannot be half-done by forgetting a
+subscription. One level, not `#`: the camera's `cam/` and the room's `room/` branches share
+the id, and their heartbeats and events reached the robot every few seconds for nothing.
+Every command the brain takes is one level deep; one under a branch would never arrive.
+Its own heartbeat still comes back (it is at that level) and is skipped by name.
 
 The heartbeat is retained on the broker, so every server restart is handed each board's
 last one again: a retained copy (`msg.retain`) sets `online` but never moves `last_seen`.

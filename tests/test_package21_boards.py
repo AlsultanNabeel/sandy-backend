@@ -104,3 +104,19 @@ def test_the_server_turns_an_instant_refusal_into_words(monkeypatch):
             assert err["message"] == camera_client._ERROR_TEXT[code]
     finally:
         appdb.reset()
+
+
+# ── J3: the brain heard the camera's and the room's whole branches, every few seconds ──
+
+def test_the_brain_subscribes_one_level_under_its_id():
+    mqtt = _src(MAIN / "sandy_mqtt.c")
+    connected = mqtt[mqtt.index("case MQTT_EVENT_CONNECTED:"):mqtt.index("case MQTT_EVENT_SUBSCRIBED:")]
+    assert 'snprintf(sub, sizeof(sub), "%s/+", s_base);' in connected, (
+        "one level: the cam/ and room/ branches (heartbeats, events) stay off the robot")
+    assert '"%s/#"' not in mqtt
+    # Every command the brain takes is one level deep, so none is lost to the narrower filter.
+    dispatch = _fn(mqtt, "static void _dispatch(")
+    for out in re.findall(r'!strcmp\(out, "([^"]+)"\)\)\s+\w', dispatch):
+        assert "/" not in out, f"{out} is two levels deep and the brain no longer hears it"
+    # Nothing two levels deep reaches the dispatch, so it no longer checks for it.
+    assert '"cam/"' not in dispatch and '"room/"' not in dispatch

@@ -518,8 +518,6 @@ static void _handle_factory_reset(const char *val) {
 }
 
 static void _dispatch(const char *out, const char *val, bool retained) {
-    // مخارج الكاميرا وعقدة الغرفة ع نفس الشجرة؛ منتجاهلها بدل تحذير «مخرج مجهول».
-    if (!strncmp(out, "cam/", 4) || !strncmp(out, "room/", 5)) return;
     if (retained && _is_one_shot(out)) {
         ESP_LOGW(TAG, "ignoring a retained %s — one-shot commands must be live", out);
         return;
@@ -644,9 +642,11 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             reach_mark();
             // A new credential is kept only once the broker also accepts the subscription
             // (MQTT_EVENT_SUBSCRIBED): connected with no permission on this tree hears nothing.
-            // One wildcard subscription: new outputs only need a dispatch case.
+            // One wildcard subscription: new outputs only need a dispatch case. One level
+            // (`+`), not `#`: the camera's and the room node's branches share this id, and
+            // their heartbeats and events reached her every few seconds, all for nothing.
             char sub[80];
-            snprintf(sub, sizeof(sub), "%s/#", s_base);
+            snprintf(sub, sizeof(sub), "%s/+", s_base);
             if (esp_mqtt_client_subscribe(s_client, sub, 1) < 0) {
                 // Connected but unsubscribed obeys nothing: start over.
                 ESP_LOGE(TAG, "subscribe to %s could not be sent — reconnecting", sub);
@@ -665,7 +665,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // SUBACK 0x80 = refused (no permission on this tree).
             if (ev->data_len > 0 && (uint8_t)ev->data[0] == 0x80) {
                 ESP_LOGE(TAG, "the broker refused our subscription — check this board's "
-                              "credential permissions on %s/#", s_base);
+                              "credential permissions on %s/+", s_base);
                 if (s_trying_new) {
                     // The old one is still stored: back to it, and reconnect with it.
                     creds_revert("no permission on this board's topics");
@@ -741,7 +741,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // Our own status echoing back is not a command.
             if (!strcmp(out, "status")) break;
 
-            // فرع الكاميرا (نفس معرّف الوحدة، واشتراك `#`): أي موضوع فيه شرطة مش إلنا، بصمت.
+            // الاشتراك مستوى واحد، بس ما منثق بالوسيط: موضوع أعمق (فرع الكاميرا أو الغرفة) مش إلنا.
             if (strchr(out, '/')) break;
 
             // Whole and short: stays on the stack. 512 fits a 255-byte line plus "text:".
