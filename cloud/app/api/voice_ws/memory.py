@@ -136,13 +136,25 @@ def session_context_for(user_id: str, channel: str, label: str,
         return session_context(history)
 
 
+# Ending the call: only a tool hangs up, so she never says it is done unless it ran.
+_END_CALL_ROBOT = (
+    "إنهاء المكالمة بيصير بأداة end_call بس. «سكّري» لحالها، أو «سكّري المكالمة» أو «خلصنا» "
+    "أو «باي»، معناها سكّري المكالمة: ودّعيه بكلمة قصيرة واستعملي الأداة. «سكّري» مع غرض من "
+    "قوائمه («سكّر» بقائمة الأغراض) هي للقائمة. إذا مش واضح أي وحدة بده، اسأليه. "
+    "ممنوع تقولي «سكّرت» إلا لما الأداة تشتغل.")
+_END_CALL_APP = (
+    "ما عندك طريقة تسكّري فيها المكالمة: إذا طلب يسكّرها، قوليله يكبس زر الإنهاء. "
+    "ممنوع تقولي «سكّرت».")
+
+
 def _channel_line() -> str:
     """Where this call is happening, so she knows she is heard, not read."""
-    where = ("بتحكي معه بالصوت من خلال جسمك، الروبوت اللي بالغرفة"
-             if get_voice_channel() == "الروبوت" else
+    robot = get_voice_channel() == "الروبوت"
+    where = ("بتحكي معه بالصوت من خلال جسمك، الروبوت اللي بالغرفة" if robot else
              "بمكالمة صوتية مباشرة معه من التطبيق، بيسمعك وبتسمعيه")
     return (f"هلأ إنتِ {where}. ردّك بينسمع: جمل قصيرة، بدون إيموجي ولا رموز. "
-            "ردّي بلغة آخر جملة حكاها، عربي أو إنجليزي، بدون ما تخلطي بينهم.")
+            "ردّي بلغة آخر جملة حكاها، عربي أو إنجليزي، بدون ما تخلطي بينهم.\n"
+            + (_END_CALL_ROBOT if robot else _END_CALL_APP))
 
 
 def _save_voice_turn(user_text: str, sandy_text: str,

@@ -31,8 +31,20 @@ CONFIRM_TOOL = {
 }
 
 
-def declarations() -> List[Dict[str, Any]]:
-    return tools.declarations() + [CONFIRM_TOOL]
+# Ends the call itself, not a brain tool: the session handles it (voice_ws/session.py) and
+# hangs up once her goodbye has played. Only the robot gets it: the app has its own end
+# button, and a socket the server closes reads there as a lost connection.
+END_CALL = "end_call"
+END_CALL_TOOL = {
+    "name": END_CALL,
+    "description": ("سكّري المكالمة هلّق. لما يطلب ينهيها («سكّري» لحالها، «سكّري المكالمة»، "
+                    "«خلصنا»، «باي»). المكالمة بتسكّر بعد جملة الوداع."),
+    "parameters": {"type": "object", "properties": {}},
+}
+
+
+def declarations(end_call: bool = False) -> List[Dict[str, Any]]:
+    return tools.declarations() + [CONFIRM_TOOL] + ([END_CALL_TOOL] if end_call else [])
 
 
 def _tagged(result: Dict[str, Any]) -> Dict[str, Any]:

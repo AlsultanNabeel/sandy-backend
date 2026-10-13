@@ -70,6 +70,7 @@ from app.api.voice_ws.memory import (
     set_voice_identity,
 )
 from app.api.metering import voice_seconds_left
+from app.brain.voice import END_CALL
 from app.features.usage_store import add_voice_seconds
 from app.api.voice_ws.tools import (
     _build_cached_instruction,
@@ -81,6 +82,10 @@ from app.api.voice_ws.tools import (
 
 # How long a reply may keep streaming after the robot stops sending audio.
 _REPLY_DRAIN_S = 20
+# After `end_call`: her goodbye still playing on the board, waited for at most this long.
+_GOODBYE_MAX_S = 8.0
+# Her audio out: 24 kHz, 16-bit mono.
+_OUT_BYTES_PER_S = 2 * 24000
 
 # Enough for a generous enrolment (16 kHz · 16-bit · mono = 32 KB/s → ~2 min).
 _ENROLL_MAX_BYTES = 4 * 1024 * 1024
@@ -602,7 +607,7 @@ async def _live_session(ws, remote: str) -> None:
         _context = await _loop.run_in_executor(
             None, session_context_for, _who, _channel, _label, _recent)
         system_instruction = with_recent_turns(_base, _context)
-        live_tools = _build_live_tools(types)
+        live_tools = _build_live_tools(types, end_call=_channel == _ROBOT_CHANNEL)
 
         voice_name = (GEMINI_TTS_VOICE or "Aoede").strip()
         config_kwargs: Dict[str, Any] = dict(
@@ -783,12 +788,18 @@ async def _live_session(ws, remote: str) -> None:
 
 async def _call_watchdog(state: Dict[str, Any]) -> None:
     """Return once the call is over, with the reason in `state["ended"]`:
+    `user_ended` when `end_call` ran and her goodbye never finished,
     `call_time_limit` at `state["call_deadline"]`, or `call_idle` after `_CALL_IDLE_S` with
     neither the user's voice (a pitched frame, so a TV's hum or a fan does not count) nor
     hers. One per bridge; the deadline and the last voices live in `state`, so a GoAway
     reconnect neither resets nor extends them."""
     while True:
         now = time.monotonic()
+        asked = state.get("end_asked_at")
+        if asked is not None and now - float(asked) >= 2 * _GOODBYE_MAX_S:
+            # `end_call` ran and no reply ever finished: hang up anyway.
+            state["ended"] = "user_ended"
+            return
         if now >= float(state["call_deadline"]):
             state["ended"] = state.get("deadline_reason") or "call_time_limit"
             return
@@ -1254,7 +1265,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
     _face = {"mood": ""}
     _audio = {"at": time.monotonic(), "chunks": 0, "wait": 0.0,
               "send": 0.0, "worst": 0.0}
-    _turn_audio = {"n": 0}
+    # This reply's audio: bytes sent and when its first chunk left (her goodbye's length).
+    _turn_audio: Dict[str, Any] = {"n": 0, "first": None}
 
     async def _handle(response) -> bool:
         """Process one Live response; True stops the session. Relays audio, saves STM, gates tools."""
@@ -1316,6 +1328,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     live_state["last_out_at"] = time.monotonic()
                     live_state["her_voice_at"] = live_state["last_out_at"]
                     _turn_audio["n"] += len(part.inline_data.data)
+                    if _turn_audio["first"] is None:
+                        _turn_audio["first"] = time.monotonic()
                     # `wait` (nothing to send) + `send` vs the audio's duration
                     # shows whether stutter is Gemini, this dyno, or the link.
                     _now = time.monotonic()
@@ -1362,7 +1376,10 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         "%d bytes of audio (%.1fs)",
                         len(user_text), len(sandy_text), _turn_audio["n"],
                         _turn_audio["n"] / 2 / 24000)
+            goodbye_s = _turn_audio["n"] / _OUT_BYTES_PER_S
+            goodbye_from = _turn_audio["first"]
             _turn_audio["n"] = 0
+            _turn_audio["first"] = None
             if user_text and sandy_text:
                 # مش `await`: كتابة القاعدة ما لازم توقف بثّ الصوت.
                 loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text,
@@ -1370,6 +1387,14 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
 
             _user_buf.clear()
             _sandy_buf.clear()
+
+            if live_state.get("end_after_reply"):
+                # Hang up once the goodbye has played: a clean close ends the board's call.
+                left = goodbye_s - (time.monotonic() - goodbye_from) if goodbye_from else 0.0
+                await asyncio.sleep(min(max(left, 0.0) + 0.5, _GOODBYE_MAX_S))
+                live_state["ended"] = "user_ended"
+                logger.info("[voice_ws] call ended: user_ended (she said goodbye)")
+                return True
 
         # Tool calls: dispatch them and return the result to Live.
         if response.tool_call:
@@ -1381,6 +1406,16 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             try:
                 fn_responses: List[types.FunctionResponse] = []
                 for fc in response.tool_call.function_calls:
+                    if fc.name == END_CALL:
+                        # The session's own: the call closes after the reply this starts.
+                        live_state["end_after_reply"] = True
+                        live_state["end_asked_at"] = time.monotonic()
+                        fn_responses.append(types.FunctionResponse(
+                            id=fc.id, name=fc.name,
+                            response={"output": ("تمام: المكالمة بتسكّر بعد هالجملة. "
+                                                 "ودّعيه بكلمة قصيرة وبس.")},
+                        ))
+                        continue
                     # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.
                     if gate_on and _is_sensitive_call(fc.name, dict(fc.args or {})):
                         verified = await loop.run_in_executor(

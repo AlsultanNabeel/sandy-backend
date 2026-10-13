@@ -388,10 +388,10 @@ def _system_instruction_body(chat_id: str, gate_on: bool) -> str:
     return "\n".join(parts)
 
 
-def _build_live_tools(types) -> List:
-    """The brain's tools (and `confirm`) for LiveConnectConfig."""
+def _build_live_tools(types, end_call: bool = False) -> List:
+    """The brain's tools (and `confirm`, and `end_call` on the robot) for LiveConnectConfig."""
     from app.brain.voice import declarations
-    return [types.Tool(function_declarations=declarations())]
+    return [types.Tool(function_declarations=declarations(end_call))]
 
 
 def _dispatch_tool(name: str, args: Dict[str, Any], user_id: str = "") -> Dict[str, Any]:
