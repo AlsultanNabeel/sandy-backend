@@ -319,18 +319,11 @@ def test_each_board_gets_its_own_client_id():
 
     Every brain used to connect as the same fixed name, so two robots on the
     same broker kicked each other off in a loop that never settles. Per-device
-    credentials do not help: the collision is on the id, not the login. The
-    camera and the room node already derive theirs from the chip's own id.
+    credentials do not help: the collision is on the id, not the login.
     """
     fw = _read("firmware/brain-core/main/sandy_mqtt.c")
     assert '"sandy-brain-%s", s_node_id' in fw, (
         "the client id is fixed again — two robots will fight over it")
-
-    for path, prefix in (("firmware/vision-core/cam_mqtt.ino", "sandy-cam-"),
-                         ("firmware/room-node/room-node.ino", "sandy-room-")):
-        src = _read(path)
-        assert prefix in src and "getEfuseMac()" in src, (
-            f"{path} no longer derives a unique client id")
 
 
 def test_the_server_hands_a_board_its_own_broker_key():

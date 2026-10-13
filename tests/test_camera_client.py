@@ -57,16 +57,12 @@ def test_a_photo_with_no_flash_chosen_leaves_the_owners_mode(monkeypatch):
     """Audit F11: the app's photo sends an empty body and the server put «auto» in every
     command, which the camera takes over its saved mode: an owner who set the flash off for
     the night was flashed. Without the field the board keeps its own (cam_control.ino)."""
-    from pathlib import Path
 
     sent = _capture_sent(monkeypatch)
     camera_client.start_snapshot(NODE)
     assert "flash" not in sent[0][1]
     camera_client.start_snapshot(NODE, flash="off")
     assert sent[1][1]["flash"] == "off"
-    board = (Path(__file__).resolve().parent.parent
-             / "firmware/vision-core/cam_control.ino").read_text(encoding="utf-8")
-    assert 'parseFlashMode(jsonStr(payload, "flash", ""), g_flashMode)' in board
 
 
 def test_the_app_photo_route_chooses_no_flash(monkeypatch, db):

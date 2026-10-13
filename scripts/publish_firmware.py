@@ -16,20 +16,6 @@ https://…herokuapp.com) and SANDY_FIRMWARE_TOKEN in the environment (or in
 
 Widen a release later:
     python3 scripts/publish_firmware.py --rollout-only 0.9.2 --rollout 25
-
-The camera and the room node (``--board cam`` / ``--board room``):
-
-    python3 scripts/publish_firmware.py --board cam --canary cam-8421
-
-builds the sketch itself with ``arduino-cli`` (the one inside Arduino IDE works)
-from a clean copy whose ``secrets.h`` is ``secrets.example.h`` — so the image
-carries no pairing code, broker key or Wi-Fi password: the board keeps its own
-in NVS (``sandy_identity.h``), and the image is downloadable by anyone. It still
-refuses an image that contains any value from your real ``secrets.h``, or the
-LAN upload / telnet code of a dev build. The signed message names the board —
-``sandy-fw|<board>|<version>|<size>|<sha256>`` — so a camera never accepts a
-brain image. ``--image`` skips the build and publishes a file you built.
-Their device ids for ``--canary`` are ``cam-<node>`` and ``room-<node>``.
 """
 
 import argparse
@@ -39,10 +25,7 @@ import json
 import os
 import pathlib
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import urllib.request
 import uuid
 
@@ -63,40 +46,6 @@ SIGNING_DIR = pathlib.Path("~/.sandy-signing").expanduser()
 DEFAULT_KEY = SIGNING_DIR / "firmware-signing-key.pem"
 ENV_FILE = SIGNING_DIR / ".sandy-publish.env"
 
-# The two Arduino boards: sketch folder, the define that carries the version,
-# the board to build for, their OTA slot, and strings only a dev build has.
-SMALL_BOARDS = {
-    "cam": {
-        "sketch": REPO / "firmware" / "vision-core",
-        "version_re": r'#define\s+SANDY_CAM_FW_VERSION\s+"([^"]+)"',
-        "version_file": "config.h",
-        "fqbn": "esp32:esp32:esp32cam",
-        "slot": 0x1E0000,
-        "dev_markers": [b"ESP32-CAM serial mirror", b"[TELNET]"],
-    },
-    "room": {
-        "sketch": REPO / "firmware" / "room-node",
-        "version_re": r'#define\s+SANDY_ROOM_FW_VERSION\s+"([^"]+)"',
-        "version_file": "room-node.ino",
-        "fqbn": "esp32:esp32:esp32",
-        "slot": 0x140000,
-        "dev_markers": [b"[OTA] LAN ready"],
-    },
-}
-_ARDUINO_CLI_CANDIDATES = [
-    "arduino-cli",
-    "/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli",
-]
-
-
-def _arduino_cli() -> str:
-    for c in _ARDUINO_CLI_CANDIDATES:
-        path = shutil.which(c) or (c if pathlib.Path(c).exists() else None)
-        if path:
-            return path
-    sys.exit("arduino-cli not found — install it (brew install arduino-cli) or pass --image")
-
-
 _SECRET_NAME = re.compile(r"PASS|KEY|PAIR|USER|SSID|TOKEN|HOST", re.I)
 
 
@@ -116,70 +65,8 @@ def _secret_values(sketch: pathlib.Path) -> list:
             and not v.endswith(public_hosts)]
 
 
-def _build_small(board: str) -> bytes:
-    """Build from a clean copy with the example secrets. Never the real ones."""
-    cfg = SMALL_BOARDS[board]
-    cli = _arduino_cli()
-    with tempfile.TemporaryDirectory() as tmp:
-        dst = pathlib.Path(tmp) / cfg["sketch"].name
-        shutil.copytree(cfg["sketch"], dst,
-                        ignore=shutil.ignore_patterns("secrets.h", "build"))
-        shutil.copy(dst / "secrets.example.h", dst / "secrets.h")
-        # The sale build: LAN upload and the log mirror off, whatever secrets say.
-        with open(dst / "secrets.h", "a") as f:
-            f.write("\n#define SANDY_RETAIL 1\n")
-        out = pathlib.Path(tmp) / "out"
-        r = subprocess.run([cli, "compile", "--fqbn", cfg["fqbn"],
-                            "--output-dir", str(out), str(dst)],
-                           capture_output=True, text=True)
-        if r.returncode != 0:
-            sys.exit(f"build failed:\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
-        return (out / f"{dst.name}.ino.bin").read_bytes()
-
-
-def _publish_small(a, base: str, token: str) -> int:
-    cfg = SMALL_BOARDS[a.board]
-    src = (cfg["sketch"] / cfg["version_file"]).read_text()
-    m = re.search(cfg["version_re"], src)
-    if not m:
-        sys.exit(f"version not found in {cfg['version_file']}")
-    version = m.group(1)
-    image = pathlib.Path(a.image).expanduser().read_bytes() if a.image else _build_small(a.board)
-    refused = small_image_refused(a.board, image, version, _secret_values(cfg["sketch"]))
-    if refused:
-        sys.exit(f"refusing the {a.board} image: {refused}")
-    return _sign_and_upload(a, base, token, version, image,
-                            f"sandy-fw|{a.board}|{version}|{len(image)}|", a.board)
-
-
 # Strings only a dev brain carries: the remote log task, the LAN upload task and page.
 BRAIN_DEV_MARKERS = (b"logsrv\x00", b"http_up\x00", b"Sandy brain-core &middot;")
-
-
-def small_image_refused(board: str, image: bytes, version: str, secrets: list) -> str:
-    """Why this camera or room image must not be published, or "" when it may. The same
-    checks as the brain's, a passed --image included."""
-    cfg = SMALL_BOARDS[board]
-    if image[:1] != b"\xe9":
-        return "not an ESP32 app image"
-    if len(image) > cfg["slot"]:
-        return f"{len(image)} bytes does not fit the {board} slot ({cfg['slot']})"
-    for marker in cfg["dev_markers"]:
-        if marker in image:
-            return (f"a dev build ({marker.decode()!r} is inside) — build with SANDY_RETAIL "
-                    "(the default here)")
-    # An old .bin under today's version would install, report the old version, and be
-    # offered again for ever.
-    if version.encode() + b"\x00" not in image:
-        return f"it was not built from this source: version {version} is not inside — rebuild"
-    for secret in secrets:
-        if secret in image:
-            return ("it contains a value from your real secrets.h — it would be public on the "
-                    "server. Build with secrets.example.h (the default).")
-    if b"sandyota" not in image:
-        return ("it has no updater (sandy_ota_pull.h) — a board that installs it could never "
-                "update again")
-    return ""
 
 
 def brain_image_refused(image: bytes, version: str, secrets: list) -> str:
@@ -247,13 +134,11 @@ def main() -> int:
     ap.add_argument("--canary", default="")
     ap.add_argument("--notes", default="")
     ap.add_argument("--rollout-only", metavar="VERSION")
-    ap.add_argument("--board", choices=["brain", *SMALL_BOARDS], default="brain")
-    ap.add_argument("--image", help="cam/room: publish this .bin instead of building")
     ap.add_argument("--check", action="store_true",
-                    help="brain: run every refusal on build-retail, then stop (no key, no upload)")
+                    help="run every refusal on build-retail, then stop (no key, no upload)")
     a = ap.parse_args()
 
-    if a.check and a.board == "brain":
+    if a.check:
         image = IMAGE.read_bytes()
         refused = brain_image_refused(image, _version(), _secret_values(FW / "main"))
         if refused:
@@ -267,22 +152,19 @@ def main() -> int:
     if a.rollout_only:
         r = _post(f"{base}/api/firmware/rollout", token,
                   json.dumps({"version": a.rollout_only, "rollout": a.rollout,
-                              "board": a.board}).encode(),
+                              "board": "brain"}).encode(),
                   "application/json")
         print(r)
         return 0 if r.get("ok") else 1
 
     if not (pathlib.Path(a.key).expanduser() if a.key else DEFAULT_KEY).exists():
         sys.exit(f"no signing key at {a.key or DEFAULT_KEY} — pass --key")
-    if a.board != "brain":
-        return _publish_small(a, base, token)
     version = _version()
     image = IMAGE.read_bytes()
     refused = brain_image_refused(image, version, _secret_values(FW / "main"))
     if refused:
         sys.exit(f"{IMAGE}: {refused}")
-    return _sign_and_upload(a, base, token, version, image,
-                            f"sandy-fw|{version}|{len(image)}|", "brain")
+    return _sign_and_upload(a, base, token, version, image)
 
 
 def load_signing_key(path: pathlib.Path, ask=lambda: getpass.getpass("signing key password: ")):
@@ -301,10 +183,9 @@ def load_signing_key(path: pathlib.Path, ask=lambda: getpass.getpass("signing ke
         sys.exit("wrong password for the signing key")
 
 
-def _sign_and_upload(a, base: str, token: str, version: str, image: bytes,
-                     prefix: str, board: str) -> int:
+def _sign_and_upload(a, base: str, token: str, version: str, image: bytes) -> int:
     sha = hashlib.sha256(image).hexdigest()
-    message = f"{prefix}{sha}".encode()
+    message = f"sandy-fw|{version}|{len(image)}|{sha}".encode()
 
     private = load_signing_key(pathlib.Path(a.key) if a.key else DEFAULT_KEY)
     signature = private.sign(message, ec.ECDSA(hashes.SHA256()))
@@ -318,7 +199,7 @@ def _sign_and_upload(a, base: str, token: str, version: str, image: bytes,
 
     boundary = uuid.uuid4().hex
     parts = []
-    for name, value in (("version", version), ("board", board),
+    for name, value in (("version", version), ("board", "brain"),
                         ("signature", signature.hex()),
                         ("rollout", str(a.rollout)), ("canary", a.canary),
                         ("notes", a.notes)):
@@ -330,7 +211,7 @@ def _sign_and_upload(a, base: str, token: str, version: str, image: bytes,
     parts.append(f"--{boundary}--\r\n".encode())
     r = _post(f"{base}/api/firmware/publish", token, b"".join(parts),
               f"multipart/form-data; boundary={boundary}")
-    print(f"{board} {version}, {len(image)} bytes, sha256 {sha[:16]}…")
+    print(f"brain {version}, {len(image)} bytes, sha256 {sha[:16]}…")
     print(r)
     return 0 if r.get("ok") else 1
 

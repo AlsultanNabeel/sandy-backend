@@ -19,7 +19,6 @@ firmwares.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 import mongomock
@@ -31,11 +30,6 @@ from app.features import device_store, node_store  # noqa: E402
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 
 _ROOT = Path(__file__).resolve().parent.parent
-
-
-# The room node's device table — one row per output, name and kind, and the
-# heartbeat is built from it (`{ "light", "relay", handleLight }`).
-_ROOM_TABLE = re.compile(r'\{\s*"(\w+)",\s*"(\w+)",\s*handle\w+\s*\}')
 
 
 def _read(rel: str) -> str:
@@ -189,110 +183,9 @@ def test_the_room_lamp_becomes_a_device_on_its_own(db):
         assert "stop" in music["meta"]["values"]
 
 
-def test_the_room_heartbeat_declares_kinds_the_server_accepts():
-    """An unknown `kind` is dropped silently, and the device never appears.
-
-    That failure has no error anywhere: the board publishes, the server parses,
-    the entry is discarded, and the app is simply missing a lamp. So the two
-    ends are pinned to each other here.
-    """
-    from app.features.node_store import KNOWN_CAPABILITIES
-
-    ino = _read("firmware/room-node/room-node.ino")
-    kinds = {k for _, k in _ROOM_TABLE.findall(ino)}
-    assert kinds, "the room heartbeat declares no outputs at all"
-    assert kinds <= set(KNOWN_CAPABILITIES), (
-        f"room node declares kinds the server drops: {kinds - set(KNOWN_CAPABILITIES)}")
-
-
-def test_every_declared_room_output_has_a_catalogue_entry():
-    """A declared output with no catalogue row is ignored, not drawn."""
-    from app.features.node_provision import PART_CATALOGUE
-
-    ino = _read("firmware/room-node/room-node.ino")
-    declared = {name for name, _ in _ROOM_TABLE.findall(ino)}
-    assert declared == {"light", "music"}
-    for out in declared:
-        assert f"room/{out}" in PART_CATALOGUE, (
-            f"the room node declares {out} and the catalogue cannot draw it")
-
-
 def test_the_server_listens_to_the_room_heartbeat():
     """The subscription is the difference between working and invisible."""
     src = _read("cloud/app/integrations/mqtt_ingest.py")
     assert '_ROOM_STATUS_SUB = "sandy/node/+/room/status"' in src
     assert "_ROOM_STATUS_SUB, 1" in src, "declared but never subscribed"
     assert '"/room/status"' in src, "subscribed but never routed"
-
-
-# ── the two firmwares ────────────────────────────────────────────────────────
-
-def test_no_global_room_tree_is_left_in_any_firmware():
-    for rel in ("firmware/brain-core/main/sandy_voice.c",
-                "firmware/brain-core/main/sandy_mqtt.c",
-                "firmware/room-node/room-node.ino"):
-        src = _read(rel)
-        code = "\n".join(ln for ln in src.splitlines()
-                         if not ln.lstrip().startswith("//"))
-        assert "room/cmd" not in code, (
-            f"{rel} still publishes or listens on the global room tree")
-
-
-def test_the_brain_publishes_under_its_own_node():
-    fw = _read("firmware/brain-core/main/sandy_mqtt.c")
-    # Every outgoing topic is built in one place, from the node's own base.
-    assert '"%s/%s", s_base, suffix' in fw, (
-        "the brain no longer builds its topics from its own node base")
-    assert '"room/%s", out' in fw, "the room prefix is gone"
-
-    voice = _read("firmware/brain-core/main/sandy_voice.c")
-    # Bare output names in the command table — a full topic here would be
-    # concatenated into sandy/node/<id>/room/room/cmd/light and land nowhere.
-    for out in ('"light"', '"fan"', '"music"'):
-        assert f"CMD_ROOM,   {out}," in voice, f"command table lost {out}"
-
-
-def test_the_brain_ignores_outputs_that_belong_to_other_boards():
-    """The camera's and the room's traffic is not the brain's.
-
-    It used to subscribe to the whole tree and skip them by name; now it subscribes one
-    level deep, and anything deeper that still arrives is dropped before the dispatch, so
-    no "unknown output" warning fires on normal traffic.
-    """
-    fw = _read("firmware/brain-core/main/sandy_mqtt.c")
-    assert '"%s/+", s_base' in fw
-    assert "if (strchr(out, '/')) break;" in fw
-
-
-def test_the_room_node_listens_on_its_own_tree():
-    ino = _read("firmware/room-node/room-node.ino")
-    assert '"sandy/node/" + g_nodeId + "/room"' in ino
-    # One exact topic per declared output — a wildcard also delivered the node's
-    # own heartbeat back to it, and anything anyone wrote under the tree.
-    assert 'String topic = g_topicBase + "/" + DEVICES[i].name;' in ino
-    assert "g_mqtt.subscribe(topic.c_str(), 1)" in ino
-    assert '"/#"' not in ino
-    # Its heartbeat moves with it; a status left on the old tree would be one
-    # customer's room reporting into everybody's.
-    assert 'g_topicStatus = g_topicBase + "/status"' in ino
-    assert "SANDY_PAIR_CODE" in _read("firmware/room-node/secrets.example.h"), (
-        "the room node has no pairing code, so it cannot know which tree is its")
-
-
-def test_all_three_firmwares_derive_the_node_id_identically():
-    """Lowercase, alphanumerics only, from the pairing code.
-
-    Three separate implementations of one rule. If they ever disagree, two boards
-    sit on two trees and the symptom is "the command did nothing" with no error
-    anywhere — so the rule is pinned here rather than trusted.
-    """
-    sources = {
-        "brain": _read("firmware/brain-core/main/sandy_mqtt.c"),
-        "camera": _read("firmware/vision-core/cam_mqtt.ino"),
-        "room": _read("firmware/room-node/room-node.ino"),
-    }
-    for name, src in sources.items():
-        assert re.search(r"c\s*-\s*'A'\s*\+\s*'a'", src), (
-            f"{name} no longer lowercases the pairing code")
-        assert re.search(r"c >= 'a' && c <= 'z'\) \|\| \(c >= '0' && c <= '9'", src), (
-            f"{name} no longer strips the pairing code to alphanumerics")

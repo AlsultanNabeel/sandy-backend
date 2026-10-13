@@ -6,9 +6,8 @@ busy server, and a board that cannot encode fast enough. The signal strength
 separates the first from the other two immediately — below roughly -75 dBm the
 link cannot carry real-time audio no matter how healthy everything else is.
 
-The camera and the room node had been reporting it for a while. The brain — the
-only board that carries live audio, and so the only one where it matters — was
-not. Diagnosing "slow net" therefore meant guessing between the router, the
+The brain, the only board that carries live audio, was not reporting it.
+Diagnosing "slow net" therefore meant guessing between the router, the
 server and the code, which is the same shape of problem as the disconnect reason
 that was being logged and thrown away.
 """
@@ -72,22 +71,6 @@ def test_signal_strength_survives_the_heartbeat_allowlist(db):
         node = node_store.get_node("8421") or {}
         assert node["telemetry"]["rssi"] == -77, "signal strength was filtered out"
 
-
-def test_each_board_keeps_its_own_signal_strength(db):
-    """Three boards share a node id. A single `rssi` field written by all of them
-    would flip between them every five seconds and mean nothing — the same bug
-    the camera's address already had."""
-    assert "room_rssi" in node_store._TELEMETRY_KEYS
-
-    ino = _read("firmware/room-node/room-node.ino")
-    assert '\\"rssi\\"' in ino, "the room node stopped reporting its own"
-
-    ingest = _read("cloud/app/integrations/mqtt_ingest.py")
-    room = ingest[ingest.index("def _ingest_room_status"):]
-    assert 'f"room_{k}"' in room, "the room node's telemetry is not namespaced"
-    room_fn = room[room.index("def _ingest_room_status"):]
-    assert '"rssi"' in room_fn[:room_fn.index("ingest_status(\n")], (
-        "the room node's signal strength is no longer forwarded")
 
 def test_the_warning_distinguishes_a_weak_radio_from_a_stalled_link():
     """The old single state told the owner to move closer to the router. When

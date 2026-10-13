@@ -98,8 +98,8 @@ static void log_server_task(void *arg) {
 
 // ─── OTA upload (HTTP) ───
 static esp_err_t root_get(httpd_req_t *req) {
-    // The flash script matches this marker before sending, so brain firmware never
-    // reaches the room node or the camera. Keep SANDY_BOARD_ID in step with it.
+    // The flash script matches this marker before sending, so a binary built for
+    // another board never reaches the brain. Keep SANDY_BOARD_ID in step with it.
     static char page[240];
     snprintf(page, sizeof(page),
              "<h3>Sandy brain-core &middot; ESP32-S3</h3>"

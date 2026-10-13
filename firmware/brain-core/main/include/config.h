@@ -154,8 +154,8 @@
 // Reported in every heartbeat. Bump with each flash.
 #define SANDY_FW_VERSION "0.12.1"
 
-// The flash script checks this against the board before sending a binary:
-// sandy-brain-s3 (this), sandy-room-node, sandy-cam are not interchangeable.
+// The flash script checks this against the board before sending a binary, so one
+// built for another board is never written here.
 #define SANDY_BOARD_ID "sandy-brain-s3"
 #define MQTT_RECONNECT_MS       5000
 

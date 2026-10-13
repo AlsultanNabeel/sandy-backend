@@ -8,10 +8,6 @@ void      mqtt_publish_status(void);    // call manually if needed; auto every 5
 // Publish to sandy/node/<id>/<suffix>.
 bool      mqtt_publish_node(const char *suffix, const char *payload);
 
-// Publish to sandy/node/<id>/room/<out>; `out` is the bare name ("light"), not a topic.
-// Returns false if MQTT isn't connected.
-bool      mqtt_publish_room(const char *out, const char *payload);
-
 // Store this board's own broker login (sent in the voice handshake) and use it.
 // Returns true only if it changed; identical values are not rewritten, to spare flash.
 bool      mqtt_sandy_set_credentials(const char *user, const char *pass);

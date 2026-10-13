@@ -37,11 +37,3 @@ def test_fire_and_forget_work_uses_the_shared_pool():
                 offenders.append(f"{rel}:{node.lineno}")
 
     assert not offenders, f"raw threads against C3: {offenders}"
-
-
-def test_the_map_does_not_contradict_itself_about_the_camera():
-    """§5 said in bold that `firmware/vision-core/` does not exist while §4.6 said it was
-    flashed and answering on the broker. A map that lies is worse than no map."""
-    mp = (ROOT / "ARCHITECTURE_MAP.md").read_text()
-    assert (ROOT / "firmware" / "vision-core").exists()
-    assert "**this directory does not exist.**" not in mp

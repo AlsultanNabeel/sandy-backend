@@ -114,50 +114,6 @@ def test_the_small_boards_get_their_board_in_the_url(db, monkeypatch):
     assert c.get("/api/firmware/manifest?board=evil").status_code == 400
 
 
-def test_both_small_boards_carry_the_same_updater_and_the_real_key():
-    """One updater, two copies — Arduino sketches cannot share a file.
-
-    They must not drift, and the public key in them must be the one the publish
-    script signs against, or every update is refused in the field.
-    """
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent
-    cam = (root / "firmware" / "vision-core" / "sandy_ota_pull.h").read_text()
-    room = (root / "firmware" / "room-node" / "sandy_ota_pull.h").read_text()
-    assert cam == room, "vision-core and room-node have different sandy_ota_pull.h"
-    pem = (root / "firmware" / "brain-core" / "main" / "fw_pubkey.pem").read_text()
-    body = [ln for ln in pem.splitlines() if ln and "-----" not in ln]
-    for line in body:
-        assert f'"{line}\\n"' in cam, "the updater's public key is not fw_pubkey.pem"
-    assert '"sandy-fw|%s|%s|%ld|%s"' in cam, "the board is not in the signed message"
-    assert 'extern "C" bool verifyRollbackLater()' in cam
-
-
-def test_both_small_boards_keep_their_identity_out_of_the_image():
-    """One update image goes to every robot and is downloadable by anyone.
-
-    So the pairing code, the broker login and the Wi-Fi cannot live in it: they
-    live in the board's NVS, written by the first cable flash, and an image built
-    with the example values leaves them alone.
-    """
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent
-    cam = (root / "firmware" / "vision-core" / "sandy_identity.h").read_text()
-    assert cam == (root / "firmware" / "room-node" / "sandy_identity.h").read_text()
-    assert 'strncmp(v, "YOUR_", 5) == 0' in cam and '"XXXX"' in cam
-    for sketch in ("firmware/vision-core/vision-core.ino", "firmware/room-node/room-node.ino"):
-        src = (root / sketch).read_text()
-        assert "sandyIdentityLoad(SANDY_PAIR_CODE, SANDY_MQTT_HOST" in src, sketch
-        assert "sandyOtaBegin(ota)" in src and "sandyOtaLoop(" in src, sketch
-    # Nothing reads the compiled identity directly any more.
-    for f in list((root / "firmware" / "vision-core").glob("cam_*.ino")) + [root / "firmware" / "room-node" / "room-node.ino"]:
-        code = "\n".join(ln for ln in f.read_text().splitlines()
-                         if not ln.lstrip().startswith("//") and "sandyIdentityLoad" not in ln
-                         and "SANDY_MQTT_USER, SANDY_MQTT_PASS" not in ln)
-        for name in ("SANDY_MQTT_USER", "SANDY_MQTT_PASS", "SECRET_SSID"):
-            assert name not in code, f"{f.name} still reads {name} from the image"
-
-
 def test_the_publisher_refuses_an_image_that_carries_a_secret(tmp_path):
     import importlib.util
     from pathlib import Path
@@ -170,27 +126,10 @@ def test_the_publisher_refuses_an_image_that_carries_a_secret(tmp_path):
         '#define SANDY_MQTT_HOST "abc.s1.eu.hivemq.cloud"\n'
         '#define SANDY_PAIR_CODE "SANDY-8421"\n'
         '#define SANDY_UPLOAD_HOST "x.herokuapp.com"\n'
-        '#define OTA_HOSTNAME "sandy-room"\n'
+        '#define OTA_HOSTNAME "sandy-brain"\n'
         '#define SANDY_WS_HMAC_KEY "YOUR_SHARED_UPLOAD_KEY"\n')
     found = set(pf._secret_values(tmp_path))
     assert found == {b"HomeNet123", b"abc.s1.eu.hivemq.cloud", b"SANDY-8421"}
-    assert set(pf.SMALL_BOARDS) == {"cam", "room"}
-    assert pf.SMALL_BOARDS["room"]["slot"] == fs.BOARD_SLOT_BYTES["room"]
-    assert pf.SMALL_BOARDS["cam"]["slot"] == fs.BOARD_SLOT_BYTES["cam"]
-
-
-def test_the_partition_tables_match_the_server_slots():
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent
-    for sketch, board in (("vision-core", "cam"), ("room-node", "room")):
-        rows = [ln.split(",") for ln in (root / "firmware" / sketch / "partitions.csv").read_text().splitlines()
-                if ln.strip() and not ln.startswith("#")]
-        apps = [r for r in rows if r[1].strip() == "app"]
-        assert [r[2].strip() for r in apps] == ["ota_0", "ota_1"], sketch
-        for r in apps:
-            assert int(r[4], 16) == fs.BOARD_SLOT_BYTES[board], sketch
-        assert rows[0][0].strip() == "nvs" and rows[0][3].strip() == "0x9000", (
-            f"{sketch}: moving NVS would wipe the saved identity and Wi-Fi")
 
 
 def test_the_publisher_refuses_a_dev_stale_or_secret_brain_image():
@@ -245,23 +184,6 @@ def test_the_chunks_are_indexed(db):
     bootstrap.ensure_indexes()
     keys = [list(i["key"]) for i in db["sandy_firmware_chunks"].list_indexes()]
     assert ["version", "n"] in keys
-
-
-def test_the_publisher_refuses_a_stale_camera_or_room_image():
-    """A .bin passed with --image was published under today's version without a look:
-    an old one would install, report the old version, and be offered again for ever."""
-    import importlib.util
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent
-    spec = importlib.util.spec_from_file_location("pf", root / "scripts" / "publish_firmware.py")
-    pf = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(pf)
-    good = b"\xe9" + b"x" * 64 + b"0.4.2\x00" + b"sandyota" + b"y" * 64
-    assert pf.small_image_refused("cam", good, "0.4.2", []) == ""
-    assert "not built from this source" in pf.small_image_refused("cam", good, "0.4.3", [])
-    assert "dev build" in pf.small_image_refused("cam", good + b"[TELNET]", "0.4.2", [])
-    assert "no updater" in pf.small_image_refused("room", good.replace(b"sandyota", b"x"), "0.4.2", [])
-    assert "secrets.h" in pf.small_image_refused("room", good + b"SANDY-8421", "0.4.2", [b"SANDY-8421"])
 
 
 def _publisher():

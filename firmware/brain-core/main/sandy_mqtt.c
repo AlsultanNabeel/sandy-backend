@@ -647,8 +647,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // A new credential is kept only once the broker also accepts the subscription
             // (MQTT_EVENT_SUBSCRIBED): connected with no permission on this tree hears nothing.
             // One wildcard subscription: new outputs only need a dispatch case. One level
-            // (`+`), not `#`: the camera's and the room node's branches share this id, and
-            // their heartbeats and events reached her every few seconds, all for nothing.
+            // (`+`), not `#`: every command she takes is one level under her id.
             char sub[80];
             snprintf(sub, sizeof(sub), "%s/+", s_base);
             if (esp_mqtt_client_subscribe(s_client, sub, 1) < 0) {
@@ -905,12 +904,6 @@ bool mqtt_publish_node(const char *suffix, const char *payload) {
     return id >= 0;
 }
 
-bool mqtt_publish_room(const char *out, const char *payload) {
-    if (!out) return false;
-    char suffix[64];
-    snprintf(suffix, sizeof(suffix), "room/%s", out);
-    return mqtt_publish_node(suffix, payload);
-}
 
 static void _apply_pending_credentials(void);
 

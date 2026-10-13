@@ -1078,43 +1078,26 @@ static bool afe_init(void) {
 #if ENABLE_COMMANDS
 // ─── Local command words ("Sandy ...") ───
 // To add one: get phonemes with `python tools/gen_phonemes.py "SANDY YOUR PHRASE"`
-// and add a row { id, phrase, phonemes, action, output, payload }:
-//   id: unique small int; phrase: for logs, SANDY + 2–4 words, distinct in sound;
-//   action: CMD_ROOM (publish payload to room/<output>), CMD_ALLOFF, CMD_OPEN (voice session);
-//   output: bare room output name (not a topic) for CMD_ROOM, else NULL;
-//   payload: "on" / "off" / "0".."100" for CMD_ROOM, else NULL.
+// and add a row { id, phrase, phonemes }:
+//   id: unique small int; phrase: for logs, SANDY + 2–4 words, distinct in sound.
+// Every command opens the voice session; the cloud does the rest.
 // Keep the list short; raise CMD_DET_THRESHOLD toward 0.9 on false hits.
-
-typedef enum { CMD_ROOM, CMD_ALLOFF, CMD_OPEN } cmd_act_t;
 
 typedef struct {
     int          id;
     const char  *phrase;    // English, "SANDY ...", ALL CAPS
     const char  *phonemes;  // from tools/gen_phonemes.py
-    cmd_act_t    act;
-    const char  *output;    // bare room output for CMD_ROOM, else NULL
-    const char  *payload;   // MQTT payload for CMD_ROOM, else NULL
 } sandy_cmd_t;
 
 static const sandy_cmd_t SANDY_COMMANDS[] = {
-    // ── Room control: local over MQTT ──
-    {  1, "SANDY TURN ON THE LIGHT",   "SaNDm TkN nN jc LiT",     CMD_ROOM,   "light",   "on"  },
-    {  2, "SANDY TURN OFF THE LIGHT",  "SaNDm TkN eF jc LiT",     CMD_ROOM,   "light",   "off" },
-    {  3, "SANDY TURN ON THE FAN",     "SaNDm TkN nN jc FaN",     CMD_ROOM,   "fan",     "on"  },
-    {  4, "SANDY TURN OFF THE FAN",    "SaNDm TkN eF jc FaN",     CMD_ROOM,   "fan",     "off" },
-    {  5, "SANDY PLAY MUSIC",          "SaNDm PLd MYoZgK",        CMD_ROOM,   "music",   "on"  },
-    {  6, "SANDY TURN OFF MUSIC",      "SaNDm TkN eF MYoZgK",     CMD_ROOM,   "music",   "off" },
-    {  7, "SANDY TURN EVERYTHING OFF", "SaNDm TkN fVRmvgl eF",    CMD_ALLOFF, NULL,      NULL  },  // light+fan+music off
-
-    // ── Need the cloud: for now these just open the voice session ──
-    {  8, "SANDY WHAT TIME IS IT",     "SaNDm WcT TiM gZ gT",     CMD_OPEN, NULL, NULL },  // → tell the time
-    {  9, "SANDY GOOD MORNING",        "SaNDm GwD MeRNgl",        CMD_OPEN, NULL, NULL },  // → morning briefing
-    { 10, "SANDY LETS READ",           "SaNDm LfTS RfD",          CMD_OPEN, NULL, NULL },  // → reading focus
-    { 11, "SANDY LETS WORK",           "SaNDm LfTS WkK",          CMD_OPEN, NULL, NULL },  // → work focus
-    { 12, "SANDY LETS START WORKING",  "SaNDm LfTS STnRT WkKgl",  CMD_OPEN, NULL, NULL },  // → work focus (alt phrasing)
-    { 13, "SANDY LETS THINK TOGETHER", "SaNDm LfTS vglK TcGfjk",  CMD_OPEN, NULL, NULL },  // → brainstorm session
-    { 14, "SANDY I WANT TO SLEEP",     "SaNDm i WnNT To SLmP",    CMD_OPEN, NULL, NULL },  // → sleep focus
-    { 15, "HEY SANDY",                 "hd SaNDm",                CMD_OPEN, NULL, NULL },  // → just start talking to her
+    {  8, "SANDY WHAT TIME IS IT",     "SaNDm WcT TiM gZ gT"     },  // → tell the time
+    {  9, "SANDY GOOD MORNING",        "SaNDm GwD MeRNgl"        },  // → morning briefing
+    { 10, "SANDY LETS READ",           "SaNDm LfTS RfD"          },  // → reading focus
+    { 11, "SANDY LETS WORK",           "SaNDm LfTS WkK"          },  // → work focus
+    { 12, "SANDY LETS START WORKING",  "SaNDm LfTS STnRT WkKgl"  },  // → work focus (alt phrasing)
+    { 13, "SANDY LETS THINK TOGETHER", "SaNDm LfTS vglK TcGfjk"  },  // → brainstorm session
+    { 14, "SANDY I WANT TO SLEEP",     "SaNDm i WnNT To SLmP"    },  // → sleep focus
+    { 15, "HEY SANDY",                 "hd SaNDm"                },  // → just start talking to her
 };
 #define SANDY_COMMANDS_N (sizeof(SANDY_COMMANDS) / sizeof(SANDY_COMMANDS[0]))
 
@@ -1157,29 +1140,12 @@ static bool commands_init(void) {
     return s_mn_buf != NULL;
 }
 
-// Returns true if it should open the voice session.
+// Returns true if it should open the voice session: every known command does.
 static bool commands_dispatch(int id) {
     for (size_t i = 0; i < SANDY_COMMANDS_N; i++) {
         if (SANDY_COMMANDS[i].id != id) continue;
-        const sandy_cmd_t *c = &SANDY_COMMANDS[i];
-        ESP_LOGI(TAG, "command: %s", c->phrase);
-        switch (c->act) {
-        case CMD_OPEN:
-            return true;                       // caller opens the voice session
-        case CMD_ALLOFF:
-#if ENABLE_MQTT
-            mqtt_publish_room("light", "off");
-            mqtt_publish_room("fan",   "off");
-            mqtt_publish_room("music", "off");
-#endif
-            return false;
-        case CMD_ROOM:
-        default:
-#if ENABLE_MQTT
-            mqtt_publish_room(c->output, c->payload);
-#endif
-            return false;
-        }
+        ESP_LOGI(TAG, "command: %s", SANDY_COMMANDS[i].phrase);
+        return true;
     }
     ESP_LOGW(TAG, "command id %d not in table", id);
     return false;

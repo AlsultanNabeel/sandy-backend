@@ -6,10 +6,10 @@ the SANDY_COMMANDS table in main/sandy_voice.c needs a phoneme string. This
 prints one for each phrase you pass — paste it into the table's `phonemes` field.
 
 Usage (run inside the ESP-IDF python env, or any env with g2p_en):
-    python tools/gen_phonemes.py "SANDY TURN ON THE LIGHT" "SANDY FAN OFF"
+    python tools/gen_phonemes.py "SANDY GOOD MORNING" "HEY SANDY"
 
 Output:
-    SANDY TURN ON THE LIGHT  ->  "SaNDm TkN nN jc LiT"
+    SANDY GOOD MORNING  ->  "SaNDm GwD MeRNgl"
 
 Setup once:  pip install g2p_en   (first run downloads a little nltk data).
 The alphabet map below is Espressif's (from managed_components/.../tool/multinet_g2p.py).

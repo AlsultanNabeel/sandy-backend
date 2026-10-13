@@ -1,4 +1,4 @@
-"""An update on trial is remembered until it is confirmed, on all three boards.
+"""An update on trial is remembered until it is confirmed.
 
 A new image used to clear its own "trying" note the moment it booted. When its trial
 then failed and the bootloader went back to the old image, the old one found no note,
@@ -64,41 +64,6 @@ def test_the_brain_notes_the_version_before_it_switches_the_boot_slot():
     assert "ota_nvs_drop_trying(version)" in body[switch:]
 
 
-# ── The camera and the room node (one updater, kept identical) ──
-
-SMALL = FIRMWARE / "vision-core" / "sandy_ota_pull.h"
-
-
-def test_the_small_boards_share_one_updater():
-    assert _src(SMALL) == _src(FIRMWARE / "room-node" / "sandy_ota_pull.h")
-
-
-def test_a_small_board_keeps_its_own_trial_note_at_boot():
-    begin = _block(_src(SMALL), "static void sandyOtaBegin(")
-    failed = _block(begin, "trying != cfg.version")
-    assert 'p.remove("trying")' in failed
-    assert 'p.remove("trying")' not in begin.replace(failed, "")
-    # Only an image that is not on trial drops a note naming itself.
-    assert "if (!g_otaPendingVerify) sandyOtaDropTrying(cfg.version);" in begin
-
-
-def test_a_small_board_clears_the_note_only_when_its_image_holds():
-    src = _src(SMALL)
-    loop = _block(src, "static void sandyOtaLoop(")
-    valid = loop.index("esp_ota_mark_app_valid_cancel_rollback()")
-    assert loop.index("sandyOtaDropTrying(g_otaCfg.version)") > valid
-    drop = _block(src, "static void sandyOtaDropTrying(")
-    assert '== version) p.remove("trying")' in drop
-
-
-def test_a_small_board_notes_the_version_before_it_switches():
-    body = _block(_src(SMALL), "static unsigned long sandyOtaCheckOnce(")
-    note = body.index("sandyOtaNoteTrying(version)")
-    switch = body.index("Update.end(true)")   # this is what sets the boot slot
-    assert note < switch < body.index("ESP.restart()")
-    assert "sandyOtaDropTrying(version)" in body[switch:]
-
-
 # ── A call during the brain's trial ──
 
 def test_a_call_is_not_counted_against_the_trial_and_is_never_cut_by_a_rollback():
@@ -115,47 +80,6 @@ def test_a_call_is_not_counted_against_the_trial_and_is_never_cut_by_a_rollback(
     # The server is not asked while a call holds the network.
     ask = body.index("ota_server_answers()")
     assert "!in_call" in body[body.rindex("if (", 0, body.rindex("if (", 0, ask)):ask]
-
-
-# ── The small boards' watchdog through an update check ──
-
-def test_a_small_board_feeds_its_watchdog_around_every_network_step():
-    src = _src(SMALL)
-    get = _block(src, "static int sandyOtaGet(")
-    # Before the connect, after it, after the status line, after each header line.
-    connect = get.index("c.connect(")
-    assert get.rindex("sandyOtaFeed();", 0, connect) < connect
-    assert get.index("sandyOtaFeed();", connect) < get.index("c.print(")
-    first = get.index("readStringUntil")
-    assert get.index("sandyOtaFeed();", first) < get.index("while (c.connected()")
-    headers = _block(get, "while (c.connected() || c.available())")
-    assert headers.index("sandyOtaFeed();") > headers.index("readStringUntil")
-    check = _block(src, "static unsigned long sandyOtaCheckOnce(")
-    manifest = _block(check, "while ((long)js.length() < len")
-    assert "sandyOtaFeed();" in manifest
-    assert "g_otaCfg.feed" not in check            # one way to feed, through sandyOtaFeed
-
-
-def test_every_step_of_a_check_has_a_deadline_under_the_shortest_watchdog():
-    import re
-
-    src = _src(SMALL)
-    connect = int(re.search(r"#define SANDY_OTA_CONNECT_TIMEOUT_MS\s+(\d+)", src).group(1))
-    read = int(re.search(r"#define SANDY_OTA_NET_TIMEOUT_MS\s+(\d+)", src).group(1))
-    room = _src(FIRMWARE / "room-node" / "room-node.ino")
-    watchdog = int(re.search(r"#define ROOM_WDT_TIMEOUT_MS\s+(\d+)", room).group(1))
-    # The connect is a TCP connect and a TLS handshake, each with this deadline.
-    assert 2 * connect < watchdog and read < watchdog
-    get = _block(src, "static int sandyOtaGet(")
-    assert "c.connect(g_otaCfg.host, 443, SANDY_OTA_CONNECT_TIMEOUT_MS)" in get
-    assert "c.setHandshakeTimeout(SANDY_OTA_CONNECT_TIMEOUT_MS / 1000)" in get
-
-
-def test_a_small_board_checks_in_the_pass_after_the_one_that_reached_the_broker():
-    loop = _block(_src(SMALL), "static void sandyOtaLoop(")
-    assert "const bool justOnline = online && !g_otaOnlineLastPass;" in loop
-    check = loop.index("sandyOtaCheckOnce()")
-    assert "justOnline" in loop[loop.rindex("if (!online", 0, check):check]
 
 
 # ── Settings saved before every restart ──
@@ -178,19 +102,3 @@ def test_every_brain_restart_saves_the_deferred_settings_first():
             assert "nvs_flush_deferred();" in before, f"{path.name}: a restart that drops settings"
             checked += 1
     assert checked >= 4   # install, rollback, setup, health_restart (and the dev upload)
-
-
-def test_a_small_board_buries_a_release_after_two_failed_trials_like_the_brain():
-    import re
-
-    src = _src(SMALL)
-    brain = _src(BRAIN / "sandy_ota.c")
-    small_max = int(re.search(r"#define SANDY_OTA_BAD_MAX_TRIES\s+(\d+)", src).group(1))
-    brain_max = int(re.search(r"#define OTA_BAD_MAX_TRIES\s+(\d+)", brain).group(1))
-    assert small_max == brain_max == 2
-    # The count goes up only for the same version, and one failure buries nothing.
-    failed = _block(_block(src, "static void sandyOtaBegin("), "trying != cfg.version")
-    assert 'p.getString("bad", "") == trying ? p.getUChar("bad_n", 0) : 0' in failed
-    assert 'p.putUChar("bad_n", tries)' in failed
-    is_bad = _block(src, "static bool sandyOtaIsBad(")
-    assert "tries >= SANDY_OTA_BAD_MAX_TRIES" in is_bad
