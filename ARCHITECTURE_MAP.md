@@ -1291,6 +1291,16 @@ what makes the text-size control real rather than decorative.
   (10–170°, rest at least 10° inside the two presses, 150–1500 ms); the heartbeat's `arm`
   (`room_arm`) carries what is saved.
 
+  Its network is changed the camera's way, with no cable: a saved network (`sandywifi`) wins over
+  the first one in its identity, and a switch is tried before it is saved — an address, then the
+  broker taking a connection through it (`roomBrokerReachable`), the old one back otherwise, a
+  «trying» mark cleared at boot (`room_net.ino`). With no network for a minute and a half (at once
+  with none saved), or ten minutes on one that reaches no broker, it raises
+  `Sandy-Room-<last four of the code>`, password `sandy<code>`, and a page at
+  `http://192.168.4.1` that scans on each opening and sends the choice through that switch
+  (`room_setup.ino`); it goes once the network and the broker are back, and the
+  fifteen-minute offline restart waits while it is up. There is no `room/wifi` over the broker yet.
+
 ---
 
 ## 6. iPhone app

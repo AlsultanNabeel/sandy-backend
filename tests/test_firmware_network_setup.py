@@ -198,3 +198,46 @@ def test_the_versions_the_server_signs_for_are_the_ones_built_here():
     cam = re.search(r'SANDY_CAM_FW_VERSION\s+"([^"]+)"', _cam("config.h")).group(1)
     assert version_key(brain) >= version_key(SIGNED_FROM["brain"])
     assert version_key(cam) >= version_key(SIGNED_FROM["camera"])
+
+
+# ── The room node gets the camera's way back: a saved network and a setup page ──
+
+ROOM = ROOT / "firmware" / "room-node"
+
+
+def _room(name: str) -> str:
+    return (ROOM / name).read_text(encoding="utf-8")
+
+
+def test_the_room_node_saves_a_network_only_once_it_works_and_reaches_the_broker():
+    wifi = _room("room_net.ino")
+    switch = _block(wifi, "bool roomSwitchNetwork(")
+    marker = switch.index("putBool(ROOM_WIFI_K_TRYING, true)")
+    begin = switch.index("WiFi.begin(ssid.c_str()")
+    probe = switch.index("roomBrokerReachable()")
+    save = switch.index("putString(ROOM_WIFI_K_SSID, ssid)")
+    assert marker < begin < probe < save
+    assert "WiFi.begin(oldSsid.c_str(), oldPass.c_str())" in switch   # back to the old one
+    assert "feedWatchdog()" in switch                                 # 45 s under a 30 s watchdog
+    load = _block(wifi, "void roomLoadWifi() {")
+    assert "ROOM_WIFI_K_TRYING" in load and "remove(ROOM_WIFI_K_TRYING)" in load
+
+
+def test_the_room_node_raises_a_setup_page_like_the_camera():
+    setup = _room("room_setup.ino")
+    tick = _block(setup, "void roomSetupTick(")
+    assert "ROOM_SETUP_WINDOW_MS" in tick and "ROOM_SETUP_NO_SERVER_MS" in tick
+    assert "setupStart(false)" in tick and "setupStart(true)" in tick
+    start = _block(setup, "static void setupStart(")
+    assert "WIFI_AP_STA" in start and "httpd_start(" in start
+    # The page answers before the radio moves, and a second press waits for the first.
+    post = _block(setup, "static esp_err_t setupPost(")
+    assert "g_roomWifiPending" in post and "roomQueueWifi(" in post
+    tick_wifi = _block(_room("room_net.ino"), "void roomWifiTick(")
+    assert tick_wifi.index("String ssid = g_roomWifiSsid") < tick_wifi.index("roomSwitchNetwork(")
+    assert tick_wifi.index("roomSwitchNetwork(") < tick_wifi.index("g_roomWifiPending = false")
+    main = _room("room-node.ino")
+    loop = _block(main, "void loop(")
+    assert "roomWifiTick();" in loop and "roomSetupTick();" in loop
+    assert "!roomSetupActive()" in loop     # no offline restart under the setup page
+    assert "g_id.wifiSsid.c_str()" not in main   # the saved network wins over the first one

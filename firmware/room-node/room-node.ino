@@ -9,6 +9,8 @@
 //   sandy/node/<معرّف>/room/status  → نبضة كل 5 ثواني، و«متّصل/مقطوع» محفوظة
 //
 // التحديث: نسخة موقّعة من الخادم (sandy_ota_pull.h)؛ ترقية الشبكة المحلية بـ `SANDY_DEV` بس.
+// الشبكة: المحفوظة بتغلب الأولى، والتبديل بيتجرّب قبل الحفظ (room_net.ino)؛ بلا شبكة صفحة إعداد
+// ع شبكة احتياطية «Sandy-Room-<آخر أربع>» (room_setup.ino)، زي الكاميرا.
 //
 // البناء: لوحة esp32:esp32:esp32 (حزمة 3.3.11)، ومكتبتين بالنسخ اللي انجرّبت فيهن:
 //   arduino-cli lib install "PubSubClient@2.8" "ESP32Servo@3.2.1"
@@ -20,6 +22,7 @@
 #include <ESP32Servo.h>
 #include <Preferences.h>
 #include "esp_task_wdt.h"
+#include "esp_http_server.h"   // صفحة الإعداد (room_setup.ino)
 #include "secrets.h"
 #include "sandy_ca_roots.h"
 #include <time.h>
@@ -66,7 +69,7 @@
 #define OTA_HOSTNAME     "sandy-room"
 // بيروحوا بكل نبضة.
 #define SANDY_ROOM_BOARD_ID   "sandy-room-node"
-#define SANDY_ROOM_FW_VERSION "0.5.0"
+#define SANDY_ROOM_FW_VERSION "0.6.0"
 
 // DFPlayer Mini — تسلسلي 9600 على UART2
 #define DF_PIN_ESP_RX      26    // ESP RX  ← وصّل DF TX
@@ -533,26 +536,14 @@ static void publishStatus() {
 }
 
 // ===== WiFi =====
-static void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(false);
-  WiFi.begin(g_id.wifiSsid.c_str(), g_id.wifiPass.c_str());
-  g_lastWifiAttemptMs = millis();
-  Serial.printf("[WIFI] connecting to '%s' ...\n", g_id.wifiSsid.c_str());
-}
-
-// مهلة متضاعفة لدقيقة، عشان ما نقطع محاولة شغّالة ولا نغرق الراوتر.
-static void ensureWiFi() {
-  unsigned long now = millis();
-  if (now - g_lastWifiAttemptMs < g_wifiRetryMs) return;
-  g_lastWifiAttemptMs = now;
-  g_wifiRetryMs = min(g_wifiRetryMs * 2, (unsigned long)WIFI_RETRY_MAX_MS);
-  Serial.printf("[WIFI] إعادة محاولة (الجاية بعد %lus)\n", g_wifiRetryMs / 1000UL);
-  WiFi.disconnect();
-  WiFi.begin(g_id.wifiSsid.c_str(), g_id.wifiPass.c_str());
-}
+// الشبكة المحفوظة والتبديل (room_net.ino)، وصفحة الإعداد (room_setup.ino).
+void roomLoadWifi();
+void connectWiFi();
+void ensureWiFi();
+void roomWifiTick();
+void roomSetupTick();
+bool roomSetupActive();
+const char* roomSsid();
 
 // الراوتر كمان مصدر وقت: شبكات كتير بتسدّ خوادم الوقت العامة.
 static void startClock() {
@@ -599,7 +590,8 @@ void setup() {
   roomBuildTopics();
   dfSetup();
   loadArm();
-  if (g_id.wifiSsid.length()) connectWiFi();
+  roomLoadWifi();
+  if (roomSsid()[0]) connectWiFi();
 
   // تحقّق من شهادة الوسيط.
   g_tcp.setCACert(SANDY_CA_ROOTS);
@@ -630,9 +622,13 @@ void loop() {
   pressLoop();
   dfLoop();
 
+  // تبديل من صفحة الإعداد، والصفحة نفسها: بلا هويّة كمان (الشبكة أول شي).
+  roomWifiTick();
+  roomSetupTick();
+
   bool online = false;
-  if (!g_id.complete() || !g_id.wifiSsid.length()) {
-    // بلا هويّة ما في اتصال؛ الموسيقى والمفتاح المحلي شغّالين.
+  if (!g_id.complete() || !roomSsid()[0]) {
+    // بلا هويّة أو شبكة ما في اتصال؛ الموسيقى والمفتاح المحلي شغّالين.
   } else if (WiFi.status() != WL_CONNECTED) {
     g_netServicesReady = false;
     ensureWiFi();
@@ -656,7 +652,9 @@ void loop() {
   }
 
   if (online) g_lastOnlineMs = millis();
-  else if (g_id.complete() && millis() - g_lastOnlineMs > OFFLINE_REBOOT_MS && roomIdle()) {
+  // صفحة الإعداد طالعة: إعادة التشغيل كانت تسكّرها ع اللي عم يختار شبكة.
+  else if (g_id.complete() && millis() - g_lastOnlineMs > OFFLINE_REBOOT_MS && roomIdle() &&
+           !roomSetupActive()) {
     Serial.println("[ROOM] ربع ساعة بلا وسيط — إعادة تشغيل");
     delay(100);
     ESP.restart();
