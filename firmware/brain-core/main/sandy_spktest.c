@@ -48,9 +48,11 @@ static void play_silence(int ms) {
     }
 }
 
-static void spktest_task(void *arg) {
+// A failure is returned, not fatal: TRY_INIT says it and the boot goes on.
+static esp_err_t spk_start(void) {
     i2s_chan_config_t cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&cfg, &s_tx, NULL));
+    esp_err_t e = i2s_new_channel(&cfg, &s_tx, NULL);
+    if (e != ESP_OK) return e;
     i2s_std_config_t std = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SR),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
@@ -64,9 +66,16 @@ static void spktest_task(void *arg) {
             .invert_flags = {0},
         },
     };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_tx, &std));
-    ESP_ERROR_CHECK(i2s_channel_enable(s_tx));
+    e = i2s_channel_init_std_mode(s_tx, &std);
+    if (e == ESP_OK) e = i2s_channel_enable(s_tx);
+    if (e != ESP_OK) {
+        i2s_del_channel(s_tx);
+        s_tx = NULL;
+    }
+    return e;
+}
 
+static void spktest_task(void *arg) {
     for (;;) {
         ESP_LOGI(TAG, "beep x3");
         for (int i = 0; i < 3; i++) {
@@ -78,7 +87,12 @@ static void spktest_task(void *arg) {
 }
 
 esp_err_t spktest_init(void) {
-    xTaskCreate(spktest_task, "spktest", 4096, NULL, 5, NULL);
+    esp_err_t e = spk_start();
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "the speaker's I2S would not start: %s", esp_err_to_name(e));
+        return e;
+    }
+    if (xTaskCreate(spktest_task, "spktest", 4096, NULL, 5, NULL) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(TAG, "ready — speaker triple-beep test");
     return ESP_OK;
 }

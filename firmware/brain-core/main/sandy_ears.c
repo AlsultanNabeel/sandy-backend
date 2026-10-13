@@ -25,7 +25,8 @@ static int32_t s_buf[FRAMES * 2];
 
 static esp_err_t i2s_start(void) {
     i2s_chan_config_t cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&cfg, NULL, &s_rx));
+    esp_err_t e = i2s_new_channel(&cfg, NULL, &s_rx);
+    if (e != ESP_OK) return e;
     i2s_std_config_t std = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(VOICE_IN_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,
@@ -39,9 +40,13 @@ static esp_err_t i2s_start(void) {
             .invert_flags = {0},
         },
     };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_rx, &std));
-    ESP_ERROR_CHECK(i2s_channel_enable(s_rx));
-    return ESP_OK;
+    e = i2s_channel_init_std_mode(s_rx, &std);
+    if (e == ESP_OK) e = i2s_channel_enable(s_rx);
+    if (e != ESP_OK) {
+        i2s_del_channel(s_rx);
+        s_rx = NULL;
+    }
+    return e;
 }
 
 static void ears_task(void *arg) {
@@ -78,9 +83,14 @@ static void ears_task(void *arg) {
     }
 }
 
+// A failure is returned, not fatal: TRY_INIT says it and the boot goes on.
 esp_err_t ears_init(void) {
-    ESP_ERROR_CHECK(i2s_start());
-    xTaskCreate(ears_task, "ears", 4096, NULL, 4, NULL);
+    esp_err_t e = i2s_start();
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "the mics' I2S would not start: %s", esp_err_to_name(e));
+        return e;
+    }
+    if (xTaskCreate(ears_task, "ears", 4096, NULL, 4, NULL) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(TAG, "ready — stereo INMP441 direction sensing");
     return ESP_OK;
 }

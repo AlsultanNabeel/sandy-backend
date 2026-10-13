@@ -38,6 +38,15 @@
 #define ENABLE_IR       1   // needs MQTT — IR learn + replay over RMT
 #define ENABLE_LED      1   // on-board WS2812 status LED
 
+// The ears and the speaker test open the very I2S ports the voice holds (the mics, the
+// amp): beside it they failed at boot. They are bench tools for a board without voice.
+#if ENABLE_EARS && ENABLE_VOICE
+#error "ENABLE_EARS uses the mics' I2S port the voice holds: turn one of them off"
+#endif
+#if ENABLE_SPK_TEST && ENABLE_VOICE
+#error "ENABLE_SPK_TEST uses the speaker's I2S port the voice holds: turn one of them off"
+#endif
+
 // ─── GPIO Pins (ESP32-S3-DevKitC-1 N16R8) ───
 // Do not use: 33-37 octal PSRAM, 0/3/45/46 strapping, 43/44 UART0, 19/20 USB, 48 RGB LED.
 

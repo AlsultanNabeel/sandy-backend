@@ -150,3 +150,14 @@ def test_an_ir_code_is_written_only_once_the_last_one_has_left():
     # And the wait after a send is as long as the code, not one fixed second.
     assert "rmt_tx_wait_all_done(s_tx, 1000)" not in body
     assert "total_us" in body and "rmt_tx_wait_all_done(s_tx, wait_ms)" in body
+
+
+# ── A9: the ears or the speaker test with voice took the voice's I2S and halted the boot ──
+
+def test_the_ears_and_the_speaker_test_cannot_be_built_beside_voice_and_never_halt():
+    config = _src(MAIN / "include" / "config.h")
+    assert re.search(r"#if ENABLE_EARS && ENABLE_VOICE\s*\n#error", config)
+    assert re.search(r"#if ENABLE_SPK_TEST && ENABLE_VOICE\s*\n#error", config)
+    # Built alone, a part that will not start says so and the boot goes on (TRY_INIT).
+    for name in ("sandy_ears.c", "sandy_spktest.c"):
+        assert "ESP_ERROR_CHECK" not in _src(MAIN / name), f"{name} still halts the boot"
