@@ -1672,7 +1672,9 @@ nobody re-reads becomes a way of believing things that stopped being true.
    would install and be offered again for ever), or one carrying a value from the real
    `secrets.h`; `--check` runs the refusals without a key or an upload. The Arduino boards verify TLS
    against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`) and pull signed releases too
-   (`sandy_ota_pull.h`). Still open: secure boot and flash encryption are off.
+   (`sandy_ota_pull.h`, one file kept identical in both sketches), with the same trial note: written
+   before `Update.end` switches the slot, cleared only once the image held the broker a minute, and a
+   version the board came back from is never taken again. Still open: secure boot and flash encryption are off.
 1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
    starts at boot when `SENTRY_DSN` is set; `before_send` strips request
    bodies and query strings and, since 19 Sep 2026, log breadcrumbs down to their

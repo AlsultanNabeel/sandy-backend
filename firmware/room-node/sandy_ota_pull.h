@@ -4,7 +4,8 @@
 //   ٢. توقيع ECDSA P-256 ع `sandy-fw|<لوح>|<نسخة>|<حجم>|<sha256>` (اسم اللوح جوّا
 //      التوقيع، فصورة الدماغ ما بتنركّب ع كاميرا).
 //   ٣. التنزيل ع القسم الفاضي، والتبديل بس لو الحجم والبصمة طابقوا الموقّع.
-//   ٤. تحت التجربة: بلا وسيط خلال خمس دقايق (أو المراقب قام) بيرجع للقديمة، والفاشلة ما بتنعاد.
+//   ٤. تحت التجربة: بلا وسيط خلال خمس دقايق (أو المراقب قام) بيرجع للقديمة، والفاشلة ما بتنعاد
+//      (علامة «قيد التجربة» بتنكتب قبل التبديل وبتنمسح بس لما النسخة تثبت).
 // ما في نزول لنسخة أقدم.
 
 #ifndef SANDY_OTA_PULL_H
@@ -155,6 +156,23 @@ static bool sandyOtaIsBad(const char* version) {
   return bad.length() && bad == version;
 }
 
+// «قيد التجربة» بيضل مكتوب لحد ما النسخة تثبت؛ الإقلاع على غيرها وهو موجود يعني رجعنا.
+static bool sandyOtaNoteTrying(const char* version) {
+  Preferences p;
+  if (!p.begin(SANDY_OTA_NVS, false)) return false;
+  bool ok = p.putString("trying", version) > 0;
+  p.end();
+  return ok;
+}
+
+// بس لو العلامة لهاي النسخة: ثبتت، أو ما انبدّل إلها.
+static void sandyOtaDropTrying(const char* version) {
+  Preferences p;
+  if (!p.begin(SANDY_OTA_NVS, false)) return;
+  if (p.getString("trying", "") == version) p.remove("trying");
+  p.end();
+}
+
 // بيرجّع لمتى نأجّل الفحص الجاي.
 static unsigned long sandyOtaCheckOnce() {
   char path[200];
@@ -268,15 +286,16 @@ static unsigned long sandyOtaCheckOnce() {
     Serial.printf("[OTA] %s: اللي نزل مش هو الموقّع — انرمى\n", version);
     return SANDY_OTA_RETRY_MS;
   }
-  if (!Update.end(true)) {
-    Serial.printf("[OTA] %s: ما انقفل التحديث: %s\n", version, Update.errorString());
+  // قبل التبديل: لو التجربة فشلت ورجعنا للقديمة، لازم تلاقي مين فشل وإلا بتنزّلها من جديد.
+  if (!sandyOtaNoteTrying(version)) {
+    Update.abort();
+    Serial.printf("[OTA] %s: ما قدرنا نسجّل التجربة — ما بنبدّل\n", version);
     return SANDY_OTA_RETRY_MS;
   }
-  // لو رجعنا للقديمة، الإقلاع الجاي بيعرف مين فشل.
-  Preferences p;
-  if (p.begin(SANDY_OTA_NVS, false)) {
-    p.putString("trying", version);
-    p.end();
+  if (!Update.end(true)) {
+    sandyOtaDropTrying(version);
+    Serial.printf("[OTA] %s: ما انقفل التحديث: %s\n", version, Update.errorString());
+    return SANDY_OTA_RETRY_MS;
   }
   Serial.printf("[OTA] %s جاهزة — إعادة تشغيل\n", version);
   delay(200);
@@ -299,10 +318,12 @@ static void sandyOtaBegin(const SandyOtaConfig& cfg) {
   String trying = p.getString("trying", "");
   if (trying.length() && trying != cfg.version) {
     p.putString("bad", trying);
+    p.remove("trying");
     Serial.printf("[OTA] %s فشلت ورجعنا لـ %s\n", trying.c_str(), cfg.version);
   }
-  if (trying.length()) p.remove("trying");
   p.end();
+  // علامتنا إحنا بتضل لحد ما التجربة تنجح؛ صورة مش تحت التجربة ثابتة من قبل.
+  if (!g_otaPendingVerify) sandyOtaDropTrying(cfg.version);
   if (g_otaPendingVerify) Serial.printf("[OTA] %s تحت التجربة\n", cfg.version);
 }
 
@@ -315,6 +336,7 @@ static void sandyOtaLoop(bool online) {
       if (now - g_otaHealthySinceMs >= SANDY_OTA_HEALTH_MS) {
         esp_ota_mark_app_valid_cancel_rollback();
         g_otaPendingVerify = false;
+        sandyOtaDropTrying(g_otaCfg.version);
         Serial.printf("[OTA] %s ثبتت — صارت النسخة المعتمدة\n", g_otaCfg.version);
       }
     } else {

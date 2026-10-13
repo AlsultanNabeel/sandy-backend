@@ -62,3 +62,38 @@ def test_the_brain_notes_the_version_before_it_switches_the_boot_slot():
     assert note < switch < body.index("esp_restart()")
     # A switch that failed leaves no note behind to be counted as a failed trial.
     assert "ota_nvs_drop_trying(version)" in body[switch:]
+
+
+# ── The camera and the room node (one updater, kept identical) ──
+
+SMALL = FIRMWARE / "vision-core" / "sandy_ota_pull.h"
+
+
+def test_the_small_boards_share_one_updater():
+    assert _src(SMALL) == _src(FIRMWARE / "room-node" / "sandy_ota_pull.h")
+
+
+def test_a_small_board_keeps_its_own_trial_note_at_boot():
+    begin = _block(_src(SMALL), "static void sandyOtaBegin(")
+    failed = _block(begin, "trying != cfg.version")
+    assert 'p.remove("trying")' in failed
+    assert 'p.remove("trying")' not in begin.replace(failed, "")
+    # Only an image that is not on trial drops a note naming itself.
+    assert "if (!g_otaPendingVerify) sandyOtaDropTrying(cfg.version);" in begin
+
+
+def test_a_small_board_clears_the_note_only_when_its_image_holds():
+    src = _src(SMALL)
+    loop = _block(src, "static void sandyOtaLoop(")
+    valid = loop.index("esp_ota_mark_app_valid_cancel_rollback()")
+    assert loop.index("sandyOtaDropTrying(g_otaCfg.version)") > valid
+    drop = _block(src, "static void sandyOtaDropTrying(")
+    assert '== version) p.remove("trying")' in drop
+
+
+def test_a_small_board_notes_the_version_before_it_switches():
+    body = _block(_src(SMALL), "static unsigned long sandyOtaCheckOnce(")
+    note = body.index("sandyOtaNoteTrying(version)")
+    switch = body.index("Update.end(true)")   # this is what sets the boot slot
+    assert note < switch < body.index("ESP.restart()")
+    assert "sandyOtaDropTrying(version)" in body[switch:]
