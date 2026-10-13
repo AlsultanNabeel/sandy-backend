@@ -72,6 +72,7 @@ def test_a_release_sends_the_camera_its_own_erase_signed_with_its_own_key(monkey
         kid = device_keys.cam_key_id("node3")
         device_keys.open_enrolment(kid)
         cam_key = device_keys.issue_key(kid)
+        device_keys.confirm_key(kid)
         assert node_store._wipe_board("node3")
         cam = [p for t, p in sent if t == "sandy/node/node3/cam/factory_reset"]
         assert len(cam) == 1
@@ -124,3 +125,40 @@ def test_the_camera_takes_only_a_signed_recent_erase():
     assert handler.index("camEraseSigned(value)") < handler.index("camForgetNetworkAndSettings()")
     mqtt = (CAM / "cam_mqtt.ino").read_text(encoding="utf-8")
     assert "handleCamFactoryReset(value)" in mqtt and "g_topicErase.c_str()" in mqtt
+
+
+# ── F6: a key only issued may not be on the board yet ──
+
+def _released(monkeypatch, confirm: bool):
+    sent = []
+
+    class _Client:
+        def publish_service(self, topic, payload):
+            sent.append((topic, payload))
+            return True
+
+    monkeypatch.setattr("app.integrations.room_device.get_room_device_client",
+                        lambda: _Client())
+    monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"shared-secret")
+    appdb.configure(mongomock.MongoClient()["t"])
+    try:
+        device_keys.open_enrolment("node4")
+        own = device_keys.issue_key("node4")
+        if confirm:
+            device_keys.confirm_key("node4")
+        assert node_store._wipe_board("node4")
+    finally:
+        appdb.reset()
+    return [p for t, p in sent if t == "sandy/node/node4/factory_reset"], bytes.fromhex(own)
+
+
+def test_an_erase_under_an_unconfirmed_key_goes_with_both_keys(monkeypatch):
+    brain, own = _released(monkeypatch, confirm=False)
+    assert len(brain) == 2
+    assert any(_check(c, "node4", own) for c in brain)
+    assert any(_check(c, "node4", b"shared-secret") for c in brain)
+
+
+def test_a_confirmed_key_alone_signs_it(monkeypatch):
+    brain, own = _released(monkeypatch, confirm=True)
+    assert len(brain) == 1 and _check(brain[0], "node4", own)

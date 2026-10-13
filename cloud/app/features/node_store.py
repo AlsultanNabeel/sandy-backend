@@ -369,6 +369,19 @@ def _erase_command(node_id: str, key: Optional[bytes] = None,
     return f"erase:{ms}:{mac}"
 
 
+def _erase_commands(node_id: str, signer: Optional[str] = None) -> List[str]:
+    """The erase as the board will check it. A key only issued, not confirmed, may never
+    have been saved on the board, which then still checks with the shared key: both go."""
+    from app.api.voice_ws._config import _HMAC_KEY
+    from app.features.device_keys import get_key
+
+    record = get_key(signer or node_id)
+    keys = [record["key"]] if record else []
+    if not record or record.get("state") != "confirmed":
+        keys.append(_HMAC_KEY)
+    return [c for c in (_erase_command(node_id, k, signer) for k in keys if k) if c]
+
+
 def _wipe_board(node_id: str) -> bool:
     """Tell the board, and its camera, to forget their network credentials. Best effort;
     the answer is the brain's (the camera says nothing back either)."""
@@ -376,12 +389,14 @@ def _wipe_board(node_id: str) -> bool:
     try:
         from app.integrations.room_device import get_room_device_client
 
-        command = _erase_command(node_id)
-        if not command:
+        commands = _erase_commands(node_id)
+        if not commands:
             logger.warning("[NodeStore] no key to sign the factory reset of %s", node_id)
             return False
-        return bool(get_room_device_client().publish_service(
-            f"sandy/node/{node_id}/factory_reset", command))
+        client = get_room_device_client()
+        sent = [client.publish_service(f"sandy/node/{node_id}/factory_reset", c)
+                for c in commands]
+        return any(sent)
     except Exception as exc:  # noqa: BLE001 — an offline board must not block the release
         logger.warning("[NodeStore] factory reset not delivered to %s: %s",
                        node_id, exc)
@@ -395,10 +410,9 @@ def _wipe_camera(node_id: str) -> None:
         from app.features.device_keys import cam_key_id
         from app.integrations.room_device import get_room_device_client
 
-        command = _erase_command(node_id, signer=cam_key_id(node_id))
-        if command:
-            get_room_device_client().publish_service(
-                f"sandy/node/{node_id}/cam/factory_reset", command)
+        client = get_room_device_client()
+        for command in _erase_commands(node_id, cam_key_id(node_id)):
+            client.publish_service(f"sandy/node/{node_id}/cam/factory_reset", command)
     except Exception as exc:  # noqa: BLE001 — a camera that is off must not block the release
         logger.warning("[NodeStore] camera erase not delivered to %s: %s", node_id, exc)
 
