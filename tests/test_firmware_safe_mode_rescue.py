@@ -8,7 +8,6 @@ safe mode never starts: a robot that crashed its way into safe mode could not be
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 MAIN = Path(__file__).resolve().parent.parent / "firmware" / "brain-core" / "main"
