@@ -141,3 +141,20 @@ def test_the_setup_network_comes_up_after_ten_minutes_with_no_server_and_goes_wi
     up = task[task.index("if (wifi_sandy_is_connected())"):task.index("continue;")]
     assert "PROVISION_NO_SERVER_MS" in up and "reach_probe()" in up
     assert "start_ap(true)" in up and "stop_ap()" in up
+
+
+def test_the_camera_also_keeps_a_network_only_once_its_broker_answers_through_it():
+    switch = _block(_cam("cam_wifi.ino"), "bool camSwitchNetwork(")
+    got_ip = switch.index("WiFi.localIP() != IPAddress(0, 0, 0, 0)")
+    probe = switch.index("camBrokerReachable()")
+    save = switch.index("p.putString(WIFI_K_SSID, ssid)")
+    assert got_ip < probe < save and "CAM_REACH_WINDOW_MS" in switch
+    reach = _block(_cam("cam_wifi.ino"), "bool camBrokerReachable(")
+    assert "hostByName" in reach and "connect(" in reach
+
+
+def test_the_cameras_setup_network_comes_up_after_ten_minutes_with_no_broker():
+    tick = _block(_cam("cam_setup.ino"), "void camSetupTick(")
+    up = tick[tick.index("if (WiFi.status() == WL_CONNECTED)"):]
+    assert "CAM_SETUP_NO_SERVER_MS" in up and "camBrokerReachable()" in up
+    assert "mqttIsConnected()" in up and "setupStart(true)" in up

@@ -16,6 +16,8 @@ static uint32_t      g_wifiDropCount     = 0;
 #define WIFI_K_PASS     "pass"
 #define WIFI_K_TRYING   "trying"
 #define WIFI_TRY_WINDOW_MS 25000
+// بعد العنوان، هالقد لحدّ ما الوسيط يرد منها: عنوان لحاله بتعطيه كمان نقطة جوال بلا بيانات.
+#define CAM_REACH_WINDOW_MS 20000
 
 static String g_ssid;
 static String g_pass;
@@ -69,7 +71,20 @@ static void loadWifiCreds() {
   p.end();
 }
 
-// بتحجز لحدّ ٢٥ ثانية؛ من الحلقة الرئيسية مش من رد نداء MQTT.
+// الوسيط بيرد من هالشبكة: اسمه بيتحلّ ومنفذه بياخد اتصال. بلا تشفير عن قصد: جلسة تشفير
+// تانية فوق جلسة الوسيط كتير ع رام الكاميرا. بلا وسيط معروف (هويّة ناقصة) ما في شي نسأله.
+bool camBrokerReachable() {
+  if (!g_id.mqttHost.length()) return true;
+  if (WiFi.status() != WL_CONNECTED) return false;
+  IPAddress ip;
+  if (!WiFi.hostByName(g_id.mqttHost.c_str(), ip) || ip == IPAddress((uint32_t)0)) return false;
+  WiFiClient c;
+  bool ok = c.connect(ip, SANDY_MQTT_PORT, 5000);
+  c.stop();
+  return ok;
+}
+
+// بتحجز لحدّ ٤٥ ثانية؛ من الحلقة الرئيسية مش من رد نداء MQTT.
 bool camSwitchNetwork(const String &ssid, const String &pass) {
   if (!ssid.length() || ssid.length() > 32 || pass.length() > 64) return false;
   if (g_switching) return false;
@@ -80,8 +95,9 @@ bool camSwitchNetwork(const String &ssid, const String &pass) {
   Preferences p;
   if (p.begin(WIFI_NS, false)) { p.putBool(WIFI_K_TRYING, true); p.end(); }
 
-  Serial.printf("[WIFI] trying '%s' (%d s, then back to '%s')\n",
-                ssid.c_str(), WIFI_TRY_WINDOW_MS / 1000, oldSsid.c_str());
+  Serial.printf("[WIFI] trying '%s' (%d s for an address, %d for the broker, then back to '%s')\n",
+                ssid.c_str(), WIFI_TRY_WINDOW_MS / 1000, CAM_REACH_WINDOW_MS / 1000,
+                oldSsid.c_str());
 
   WiFi.disconnect();
   WiFi.begin(ssid.c_str(), pass.c_str());
@@ -97,6 +113,19 @@ bool camSwitchNetwork(const String &ssid, const String &pass) {
     }
   }
 
+  // عنوان مش كفاية: الوسيط لازم يرد منها، وإلا بنرجع (شبكة بلا إنترنت كانت تنحفظ والكاميرا
+  // تعلق عليها، وصفحة الإعداد ما بتطلع لأنه الشبكة نفسها شغّالة).
+  bool noServer = false;
+  if (ok) {
+    unsigned long t1 = millis();
+    ok = false;
+    while (millis() - t1 < CAM_REACH_WINDOW_MS && WiFi.status() == WL_CONNECTED) {
+      if (camBrokerReachable()) { ok = true; break; }
+      camWait(2000);
+    }
+    noServer = !ok;
+  }
+
   if (p.begin(WIFI_NS, false)) {
     if (ok) { p.putString(WIFI_K_SSID, ssid); p.putString(WIFI_K_PASS, pass); }
     p.remove(WIFI_K_TRYING);
@@ -110,8 +139,8 @@ bool camSwitchNetwork(const String &ssid, const String &pass) {
     return true;
   }
 
-  Serial.printf("[WIFI] '%s' did not come up — back to '%s'\n",
-                ssid.c_str(), oldSsid.c_str());
+  Serial.printf("[WIFI] '%s' %s — back to '%s'\n", ssid.c_str(),
+                noServer ? "has no way to the broker" : "did not come up", oldSsid.c_str());
   WiFi.disconnect();
   WiFi.begin(oldSsid.c_str(), oldPass.c_str());
   g_switching = false;

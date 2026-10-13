@@ -1262,8 +1262,11 @@ what makes the text-size control real rather than decorative.
   When its network does not answer for a minute and a half (or none is saved) it
   raises its own, `Sandy-Cam-<pair code>` with password `sandy<pair code>`, and serves
   a page at `http://192.168.4.1` to pick a new one (`cam_setup.ino`; each opening of the page scans again with the station's connect attempt held, `g_wifiHold`, since a scan during it fails and left the list empty); the choice goes
-  through the same tested switch as `cam/wifi`, and the setup network drops itself
-  once the home network is back. A sensor that failed at boot is retried from the
+  through the same tested switch as `cam/wifi` (an address, then the broker answering a
+  connection through it within `CAM_REACH_WINDOW_MS`, `camBrokerReachable`: its name resolves and
+  its port takes a connection, no TLS on the camera's RAM), and the setup network drops itself
+  once the home network is back. As on the brain, a network that works with no broker for
+  `CAM_SETUP_NO_SERVER_MS` (10 min) raises it too, and the broker's next answer takes it down. A sensor that failed at boot is retried from the
   loop (30 s, doubling to 5 min) instead of waiting for a reboot. Like the brain,
   the owner's own build (a `secrets.h` with `SANDY_OTA_PASSWORD`) has LAN upload and
   the log mirror on port 23; the sale build `publish_firmware.py` makes defines

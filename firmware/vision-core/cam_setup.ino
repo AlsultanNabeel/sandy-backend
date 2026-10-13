@@ -8,11 +8,20 @@
 
 #define CAM_SETUP_WINDOW_MS 90000
 #define CAM_SETUP_TICK_MS   2000
+// قرار صاحب المشروع: شبكة شغّالة بلا وسيط عشر دقايق بتطلّع الإعداد كمان، والوسيط بيرجّعها.
+#define CAM_SETUP_NO_SERVER_MS (10UL * 60UL * 1000UL)
+#define CAM_SETUP_PROBE_MS     60000UL
+
+bool camBrokerReachable();
+bool mqttIsConnected();
 
 static httpd_handle_t g_setupHttpd = NULL;
 static bool           g_setupActive = false;
 static unsigned long  g_setupLastOnlineMs = 0;
 static unsigned long  g_setupLastTickMs = 0;
+static unsigned long  g_setupLastServerMs = 0;   // آخر مرّة الوسيط كان متّصل أو ردّ
+static unsigned long  g_setupLastProbeMs = 0;
+static bool           g_setupForServer = false;  // طالعة لأنه ما في وسيط، والشبكة شغّالة
 static String         g_setupOptions;   // آخر مسح، جاهز للصفحة
 // كل فتح للصفحة بيطلب مسح جديد من الحلقة، وبيستنّى لحدّ ما يخلص (الجيل بيتغيّر).
 static volatile bool     g_setupScanWanted = false;
@@ -189,7 +198,7 @@ static void setupScan() {
   g_setupScanGen++;
 }
 
-static void setupStart() {
+static void setupStart(bool forServer) {
   // لو خادم البث لسا ماسك المنفذ، منستنّى لحدّ ما يطفي لحاله.
   if (camHttpRunning()) return;
 
@@ -230,6 +239,7 @@ static void setupStart() {
   httpd_register_uri_handler(g_setupHttpd, &post);
 
   g_setupActive = true;
+  g_setupForServer = forServer;
   // كلمة السر مش بالسجل.
   g_log.printf("[SETUP] ما في شبكة — ادخل ع '%s' وافتح http://192.168.4.1\n", ssid.c_str());
 }
@@ -239,11 +249,12 @@ static void setupStop() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   g_setupActive = false;
+  g_setupForServer = false;
   if (g_setupLock && xSemaphoreTake(g_setupLock, pdMS_TO_TICKS(500)) == pdTRUE) {
     g_setupOptions = "";
     xSemaphoreGive(g_setupLock);
   }
-  g_log.println("[SETUP] الشبكة رجعت — صفحة الإعداد سكّرت");
+  g_log.println("[SETUP] الشبكة والوسيط رجعوا — صفحة الإعداد سكّرت");
 }
 
 void camSetupTick() {
@@ -258,12 +269,30 @@ void camSetupTick() {
 
   if (WiFi.status() == WL_CONNECTED) {
     g_setupLastOnlineMs = now;
-    if (g_setupActive) setupStop();
+    if (mqttIsConnected()) g_setupLastServerMs = now;
+    unsigned long quiet = now - g_setupLastServerMs;
+    if (g_setupActive) {
+      // طالعة لأنه ما في شبكة: الشبكة رجعت. لأنه ما في وسيط: أول ردّ منه.
+      if (!g_setupForServer || quiet < CAM_SETUP_PROBE_MS) {
+        setupStop();
+      } else if (now - g_setupLastProbeMs >= CAM_SETUP_PROBE_MS) {
+        g_setupLastProbeMs = now;
+        if (camBrokerReachable()) { g_setupLastServerMs = now; setupStop(); }
+      }
+    } else if (quiet >= CAM_SETUP_NO_SERVER_MS && now - g_setupLastProbeMs >= CAM_SETUP_PROBE_MS) {
+      g_setupLastProbeMs = now;
+      if (camBrokerReachable()) {
+        g_setupLastServerMs = now;
+      } else {
+        g_log.println("[SETUP] الشبكة شغّالة بس الوسيط ما بيرد من عشر دقايق — صفحة الإعداد");
+        setupStart(true);
+      }
+    }
     return;
   }
   if (g_setupActive) return;
   // بلا شبكة محفوظة ما في شي نستنّاه.
   bool haveSsid = camSsid()[0] != '\0';
   if (haveSsid && now - g_setupLastOnlineMs < CAM_SETUP_WINDOW_MS) return;
-  setupStart();
+  setupStart(false);
 }
