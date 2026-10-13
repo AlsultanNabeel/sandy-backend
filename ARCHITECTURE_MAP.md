@@ -980,7 +980,7 @@ sandy/node/<node_id>/mic_l_gain · mic_r_gain       digital gain, 0..300
 sandy/node/<node_id>/volume · speaker_test
 sandy/node/<node_id>/status                        heartbeat → ingest_status
 sandy/node/<node_id>/ir/learned                    captured IR code
-sandy/node/<node_id>/cam/request · command · wifi · flash · flash_level · flash_mode · stream · framesize (in)
+sandy/node/<node_id>/cam/request · command · wifi · factory_reset · flash · flash_level · flash_mode · stream · framesize (in)
 sandy/node/<node_id>/cam/snapshot · status · event (out)
 sandy/node/<node_id>/room/light · music            room node commands
 sandy/node/<node_id>/room/light_arm                the light arm's setup (service channel, not a device)
@@ -991,7 +991,11 @@ sandy/node/<node_id>/room/status                   room heartbeat → ingest_sta
 with the board's own voice key (the shared key while it has none) over
 `factory_reset|<node_id>|<ms>`; the board refuses it unsigned, on a wrong signature, with
 its clock unset, or more than five minutes off (`voice_verify_signed`). The own key is loaded at boot (`voice_key_init`, before MQTT), in safe mode too, where the voice task never starts. A bare `erase` on
-the broker no longer wipes a robot.
+the broker no longer wipes a robot. The camera has its own (`cam/factory_reset`, `node_store._wipe_camera`,
+sent with the brain's at a release): signed over `factory_reset|<node_id>:cam|<ms>` with the camera's own
+key (the shared one while it has none), checked the same way (`cam_wifi.ino`), and it forgets by name
+only its networks (`sandywifi`, the first one's `ws`/`wp` in `sandyid`) and its settings (`sandycam`),
+never the rest of its identity or its own key. A camera off at the release is not sent it again.
 
 A release keeps its erase (`node_pending_erase`, keyed by board, thirty days TTL): the
 broker keeps nothing for a board on a clean session, so a robot off at release used to

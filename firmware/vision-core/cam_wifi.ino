@@ -165,3 +165,68 @@ void ensureWiFiConnected() {
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());
   g_wifiRetryMs = min(g_wifiRetryMs * 2, (unsigned long)WIFI_RETRY_MAX_MS);
 }
+
+// ── المسح الموقّع بعد فك الربط ──
+// الأمر ع `cam/factory_reset`: "erase:<ms>:<hmac>"، والتوقيع HMAC-SHA256 ع
+// "factory_reset|<عقدة>:cam|<ms>" بمفتاح الكاميرا الخاص، أو المشترك لما ما عندها خاص
+// (نفس الدماغ، `node_store._erase_command`). مرفوض بلا توقيع، أو بساعة مش مضبوطة،
+// أو أبعد من خمس دقايق.
+#define CAM_ERASE_WINDOW_MS (5LL * 60LL * 1000LL)
+
+// بالاسم بس: الشبكة (المحفوظة والأولى) وإعدادات الكاميرا. الهويّة (الكود، الوسيط، المفتاح
+// المشترك) ومفتاح الكاميرا الخاص ما بينلمسوا، فالكاميرا بتضل بتعرف حالها وبتنقرن من جديد.
+static void camForgetNetworkAndSettings() {
+  Preferences p;
+  if (p.begin(WIFI_NS, false)) {
+    p.remove(WIFI_K_SSID);
+    p.remove(WIFI_K_PASS);
+    p.remove(WIFI_K_TRYING);
+    p.end();
+  }
+  if (p.begin(SANDY_ID_NVS, false)) {
+    p.remove("ws");
+    p.remove("wp");
+    p.end();
+  }
+  settingsClear();   // نطاق الإعدادات لحاله (وفيه الشبكة القديمة قبل `sandywifi`)
+}
+
+static bool camEraseSigned(const String& value) {
+  if (!value.startsWith("erase:")) return false;
+  int colon = value.indexOf(':', 6);
+  if (colon < 0) return false;
+  String ms = value.substring(6, colon);
+  String mac = value.substring(colon + 1);
+  if (ms.length() == 0 || ms.length() > 15 || mac.length() != 64) return false;
+  for (size_t i = 0; i < ms.length(); i++) {
+    if (ms[i] < '0' || ms[i] > '9') return false;
+  }
+  time_t now = time(nullptr);
+  if (now < CAM_CLOCK_SANE_EPOCH) {
+    g_log.println("[ERASE] مرفوض: الساعة مش مضبوطة");
+    return false;
+  }
+  long long signedAt = atoll(ms.c_str());
+  if (llabs((long long)now * 1000LL - signedAt) > CAM_ERASE_WINDOW_MS) {
+    g_log.println("[ERASE] مرفوض: موقّع بوقت بعيد عن هلّق");
+    return false;
+  }
+  ownKeyLoad();
+  String want = hmacHex(String("factory_reset|") + camNodeId() + ":cam|" + ms);
+  mac.toLowerCase();
+  // وقت ثابت: قدّيش طابق التخمين ما بيبيّن من مدة المقارنة.
+  uint8_t diff = 0;
+  for (int i = 0; i < 64; i++) diff |= (uint8_t)(want[i] ^ mac[i]);
+  return diff == 0;
+}
+
+void handleCamFactoryReset(const String& value) {
+  if (!camEraseSigned(value)) {
+    g_log.println("[ERASE] مسح مرفوض: مش موقّع صح");
+    return;
+  }
+  g_log.println("[ERASE] مسح موقّع — الشبكة والإعدادات بتنمسح، وإعادة تشغيل");
+  camForgetNetworkAndSettings();
+  delay(300);
+  ESP.restart();
+}

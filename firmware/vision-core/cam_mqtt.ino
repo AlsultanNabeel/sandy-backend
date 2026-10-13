@@ -17,7 +17,7 @@ bool camCommandAllowed();
 // ===== هوية العقدة =====
 // المواضيع من كود الاقتران بنفس تحويل node_store.code_to_node_id.
 static String g_topicRequest, g_topicCommand, g_topicSnapshot,
-              g_topicStatus,  g_topicEvent,   g_topicWifi;
+              g_topicStatus,  g_topicEvent,   g_topicWifi,    g_topicErase;
 
 // طلب تغيير شبكة مستنّي `camLoop`: التبديل بيحجز ٢٥ ثانية ورد نداء MQTT ما لازم ينام.
 static volatile bool g_wifiPending = false;
@@ -43,6 +43,7 @@ static void camBuildTopics() {
   g_topicStatus   = base + TOPIC_SUFFIX_STATUS;
   g_topicEvent    = base + TOPIC_SUFFIX_EVENT;
   g_topicWifi     = base + TOPIC_SUFFIX_WIFI;
+  g_topicErase    = base + TOPIC_SUFFIX_ERASE;
   g_log.printf("[MQTT] node id = %s\n", camNodeId().c_str());
 }
 
@@ -113,6 +114,11 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   if (t == g_topicCommand) {
     handleCamCommand(value);
+    return;
+  }
+
+  if (t == g_topicErase) {
+    handleCamFactoryReset(value);
     return;
   }
 
@@ -187,6 +193,7 @@ static bool mqttReconnect() {
     bool subOk = g_mqtt.subscribe(g_topicRequest.c_str(), 0);  // QoS 0 — لا PUBACK يعلّق الـ TLS write
     subOk = g_mqtt.subscribe(g_topicCommand.c_str(), 0) && subOk;
     subOk = g_mqtt.subscribe(g_topicWifi.c_str(), 0) && subOk;
+    subOk = g_mqtt.subscribe(g_topicErase.c_str(), 0) && subOk;
     // اشتراك بالاسم مش `cam/+`: النجمة كانت ترجّع كل منشوراتنا وتأخّر الطلبات لحدّ ما الخادم يستسلم.
     // لازم نسمع ع `snapshot` و`quality` لأنّ النبضة بتعلنهم.
     static const char* kSimpleOutputs[] = {

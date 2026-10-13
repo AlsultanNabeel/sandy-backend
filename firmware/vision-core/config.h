@@ -113,6 +113,7 @@
 #define TOPIC_SUFFIX_STATUS    "/cam/status"
 #define TOPIC_SUFFIX_EVENT     "/cam/event"
 #define TOPIC_SUFFIX_WIFI      "/cam/wifi"
+#define TOPIC_SUFFIX_ERASE     "/cam/factory_reset"   // موقّع، بعد فك الربط (cam_wifi.ino)
 
 // ===== Flash LED (AI-Thinker on-board white LED) =====
 // قوية، فبنتحكّم بشدّتها بـ PWM ومع مؤقت أمان.

@@ -343,10 +343,14 @@ def rename_node(node_id: str, label: str) -> Dict[str, Any]:
     return {"ok": True, "node_id": node_id}
 
 
-def _erase_command(node_id: str, key: Optional[bytes] = None) -> Optional[str]:
+def _erase_command(node_id: str, key: Optional[bytes] = None,
+                   signer: Optional[str] = None) -> Optional[str]:
     """``erase:<ms>:<hmac>``, signed like the voice hello: with ``key``, else the board's
     own key, or the shared one while it has none. The board refuses anything unsigned or
-    more than five minutes old, so a word on the broker can no longer wipe a robot."""
+    more than five minutes old, so a word on the broker can no longer wipe a robot.
+
+    ``signer`` is the key id named in the signed text and whose key signs it: the node for
+    the brain, ``cam_key_id(node)`` for its camera, so one board's erase is not another's."""
     import hashlib
     import hmac
     import time
@@ -354,18 +358,21 @@ def _erase_command(node_id: str, key: Optional[bytes] = None) -> Optional[str]:
     from app.api.voice_ws._config import _HMAC_KEY
     from app.features.device_keys import get_key
 
+    signer = signer or node_id
     if key is None:
-        record = get_key(node_id)
+        record = get_key(signer)
         key = record["key"] if record else _HMAC_KEY
     if not key:
         return None
     ms = str(int(time.time() * 1000))
-    mac = hmac.new(key, f"factory_reset|{node_id}|{ms}".encode(), hashlib.sha256).hexdigest()
+    mac = hmac.new(key, f"factory_reset|{signer}|{ms}".encode(), hashlib.sha256).hexdigest()
     return f"erase:{ms}:{mac}"
 
 
 def _wipe_board(node_id: str) -> bool:
-    """Tell the board to forget its network credentials. Best effort."""
+    """Tell the board, and its camera, to forget their network credentials. Best effort;
+    the answer is the brain's (the camera says nothing back either)."""
+    _wipe_camera(node_id)
     try:
         from app.integrations.room_device import get_room_device_client
 
@@ -379,6 +386,21 @@ def _wipe_board(node_id: str) -> bool:
         logger.warning("[NodeStore] factory reset not delivered to %s: %s",
                        node_id, exc)
         return False
+
+
+def _wipe_camera(node_id: str) -> None:
+    """The camera's own erase, signed with its own key (shared while it has none) over its
+    own key id: it forgets its network and settings, never its identity or key."""
+    try:
+        from app.features.device_keys import cam_key_id
+        from app.integrations.room_device import get_room_device_client
+
+        command = _erase_command(node_id, signer=cam_key_id(node_id))
+        if command:
+            get_room_device_client().publish_service(
+                f"sandy/node/{node_id}/cam/factory_reset", command)
+    except Exception as exc:  # noqa: BLE001 — a camera that is off must not block the release
+        logger.warning("[NodeStore] camera erase not delivered to %s: %s", node_id, exc)
 
 
 def unpair_node(node_id: str) -> Dict[str, Any]:
