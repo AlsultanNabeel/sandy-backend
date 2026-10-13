@@ -1250,7 +1250,7 @@ what makes the text-size control real rather than decorative.
 
   When its network does not answer for a minute and a half (or none is saved) it
   raises its own, `Sandy-Cam-<pair code>` with password `sandy<pair code>`, and serves
-  a page at `http://192.168.4.1` to pick a new one (`cam_setup.ino`); the choice goes
+  a page at `http://192.168.4.1` to pick a new one (`cam_setup.ino`; each opening of the page scans again with the station's connect attempt held, `g_wifiHold`, since a scan during it fails and left the list empty); the choice goes
   through the same tested switch as `cam/wifi`, and the setup network drops itself
   once the home network is back. A sensor that failed at boot is retried from the
   loop (30 s, doubling to 5 min) instead of waiting for a reboot. Like the brain,

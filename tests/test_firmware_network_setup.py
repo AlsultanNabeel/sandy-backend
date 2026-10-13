@@ -89,3 +89,20 @@ def test_the_camera_switches_on_its_own_copy_and_takes_no_second_request_meanwhi
     assert tick.index("camSwitchNetwork(") < tick.index("g_wifiPending = false")
     queue = _block(_cam("cam_mqtt.ino"), "bool camQueueWifi(")
     assert "if (g_wifiPending) return false;" in queue
+
+
+# ── D7: the camera's setup page listed no networks ──
+
+def test_the_camera_scans_with_the_station_held_and_again_for_each_page():
+    scan = _block(_cam("cam_setup.ino"), "static void setupScan(")
+    # The station's connect attempt makes a scan fail: hold it, then retry once on a failure.
+    assert scan.index("g_wifiHold = true") < scan.index("WiFi.scanNetworks(")
+    assert "WiFi.disconnect(" in scan and scan.count("WiFi.scanNetworks(") == 2
+    assert "g_wifiHold = false" in scan
+    ensure = _block(_cam("cam_wifi.ino"), "void ensureWiFiConnected(")
+    assert "g_wifiHold" in ensure
+    # Every opening of the page asks for a fresh list.
+    get = _block(_cam("cam_setup.ino"), "static esp_err_t setupRootGet(")
+    assert "g_setupScanWanted = true" in get
+    tick = _block(_cam("cam_setup.ino"), "void camSetupTick(")
+    assert "g_setupScanWanted" in tick and "setupScan()" in tick

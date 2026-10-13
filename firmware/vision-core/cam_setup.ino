@@ -14,6 +14,13 @@ static bool           g_setupActive = false;
 static unsigned long  g_setupLastOnlineMs = 0;
 static unsigned long  g_setupLastTickMs = 0;
 static String         g_setupOptions;   // آخر مسح، جاهز للصفحة
+// كل فتح للصفحة بيطلب مسح جديد من الحلقة، وبيستنّى لحدّ ما يخلص (الجيل بيتغيّر).
+static volatile bool     g_setupScanWanted = false;
+static volatile uint32_t g_setupScanGen = 0;
+static SemaphoreHandle_t g_setupLock = NULL;
+// صفحة الإعداد عم تمسح: محاولة اتصال شغّالة بتفشّل المسح (`ensureWiFiConnected` بتستنّى).
+static volatile bool     g_wifiHold = false;   // القائمة بتنكتب بالحلقة وبتنقرا بمهمّة الصفحة
+#define CAM_SETUP_SCAN_WAIT_MS 6000
 
 static String htmlEscape(const String& in) {
   String out;
@@ -105,10 +112,21 @@ static esp_err_t setupReply(httpd_req_t* req, const char* title, const char* bod
 }
 
 static esp_err_t setupRootGet(httpd_req_t* req) {
+  // مسح جديد مع كل فتح: الراوتر يمكن انشعل هلّق، والمسح الأول غالبًا فشل.
+  uint32_t gen = g_setupScanGen;
+  g_setupScanWanted = true;
+  for (int waited = 0; g_setupScanGen == gen && waited < CAM_SETUP_SCAN_WAIT_MS; waited += 100) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  String options;
+  if (g_setupLock && xSemaphoreTake(g_setupLock, pdMS_TO_TICKS(500)) == pdTRUE) {
+    options = g_setupOptions;
+    xSemaphoreGive(g_setupLock);
+  }
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   httpd_resp_send_chunk(req, SETUP_PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
-  if (g_setupOptions.length()) {
-    httpd_resp_send_chunk(req, g_setupOptions.c_str(), g_setupOptions.length());
+  if (options.length()) {
+    httpd_resp_send_chunk(req, options.c_str(), options.length());
   }
   httpd_resp_send_chunk(req, SETUP_PAGE_TAIL, HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, NULL, 0);
@@ -144,9 +162,18 @@ static esp_err_t setupPost(httpd_req_t* req) {
                     "If not, this page comes back in about half a minute.");
 }
 
-// المسح بيحجز ثانيتين تلاتة؛ من الحلقة بس.
+// المسح بيحجز ثانيتين تلاتة؛ من الحلقة بس. المحطة دايمًا عم تحاول تتصل بالشبكة المحفوظة
+// (وهاد سبب طلوع الصفحة)، والمسح وقتها بيفشل: بنوقف المحاولة، وبنعيد مرّة لو فشل.
 static void setupScan() {
+  g_wifiHold = true;
+  WiFi.disconnect(false, false);
   int n = WiFi.scanNetworks(false, false);
+  if (n < 0) {
+    camWait(300);
+    n = WiFi.scanNetworks(false, false);
+  }
+  g_wifiHold = false;
+  g_log.printf("[SETUP] المسح: %d شبكة\n", n);
   String opts;
   for (int i = 0; i < n && i < 20; i++) {
     String ssid = WiFi.SSID(i);
@@ -155,7 +182,11 @@ static void setupScan() {
     opts += "<option value=\"" + htmlEscape(ssid) + "\">";
   }
   WiFi.scanDelete();
-  g_setupOptions = opts;
+  if (g_setupLock && xSemaphoreTake(g_setupLock, pdMS_TO_TICKS(500)) == pdTRUE) {
+    g_setupOptions = opts;
+    xSemaphoreGive(g_setupLock);
+  }
+  g_setupScanGen++;
 }
 
 static void setupStart() {
@@ -176,6 +207,7 @@ static void setupStart() {
   }
 
   // قبل الخادم: الصفحة بتقرا القائمة من مهمّة تانية.
+  if (!g_setupLock) g_setupLock = xSemaphoreCreateMutex();
   setupScan();
 
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
@@ -207,11 +239,19 @@ static void setupStop() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   g_setupActive = false;
-  g_setupOptions = "";
+  if (g_setupLock && xSemaphoreTake(g_setupLock, pdMS_TO_TICKS(500)) == pdTRUE) {
+    g_setupOptions = "";
+    xSemaphoreGive(g_setupLock);
+  }
   g_log.println("[SETUP] الشبكة رجعت — صفحة الإعداد سكّرت");
 }
 
 void camSetupTick() {
+  // الصفحة انفتحت: مسح هلّق، مش بعد التكّة (الصفحة مستنّية)، وبلا ما نقاطع تبديل.
+  if (g_setupActive && g_setupScanWanted && !g_wifiPending) {
+    g_setupScanWanted = false;
+    setupScan();
+  }
   unsigned long now = millis();
   if (now - g_setupLastTickMs < CAM_SETUP_TICK_MS) return;
   g_setupLastTickMs = now;

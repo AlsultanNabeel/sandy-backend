@@ -159,8 +159,8 @@ void ensureWiFiConnected() {
   unsigned long now = millis();
   if (now - g_lastWifiAttemptMs < g_wifiRetryMs) return;
   g_lastWifiAttemptMs = now;
-  // ما منقاطع تجربة شغّالة.
-  if (g_switching) return;
+  // ما منقاطع تجربة شغّالة ولا مسح صفحة الإعداد.
+  if (g_switching || g_wifiHold) return;
   WiFi.disconnect();
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());
   g_wifiRetryMs = min(g_wifiRetryMs * 2, (unsigned long)WIFI_RETRY_MAX_MS);
