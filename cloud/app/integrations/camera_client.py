@@ -156,6 +156,8 @@ _ERROR_TEXT = {
     "capture_failed": "الكاميرا ما قدرت تصوّر. جرّب كمان مرّة.",
     "upload_failed": "الصورة انأخذت بس ما قدرت توصل للخادم. تأكد من شبكة الكاميرا.",
     "camera_busy": "الكاميرا مشغولة بلقطة تانية.",
+    # Refused at once, before the sensor ran: the last photo or the stream started a moment ago.
+    "too_soon": "الكاميرا لسا صوّرت قبل لحظة. استنى ثانيتين وجرّب.",
 }
 
 

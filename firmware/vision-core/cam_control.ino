@@ -377,6 +377,14 @@ static void publishAck(const char* cmd, bool ok, const String& detail) {
   mqttPublishEvent(out.c_str());
 }
 
+// رفض لقطة فوري بمعرّف طلبها ورمز سببه، فالخادم بيرد عالتطبيق هلّق بدل ما يستنّى أربعين ثانية.
+// المعرّف مفحوص قبل (`camValidId`)، فما في حقن بالـ JSON.
+static void refuseSnapshot(const String& id, const char* code, const char* detail) {
+  String out = "{\"cmd\":\"snapshot\",\"ok\":false,\"detail\":\"" + String(detail) +
+               "\",\"id\":\"" + id + "\",\"error\":\"" + String(code) + "\"}";
+  mqttPublishEvent(out.c_str());
+}
+
 // ── تنفيذ الأوامر ──
 void handleCamCommand(const String& payload) {
   String cmd = jsonStr(payload, "cmd", "");
@@ -422,8 +430,8 @@ void handleCamCommand(const String& payload) {
   if (cmd == "snapshot") {
     String id = jsonStr(payload, "id", String("s") + String(millis()));
     if (!camValidId(id)) { publishAck("snapshot", false, "bad id"); return; }
-    if (g_snapshotPending) { publishAck("snapshot", false, "busy"); return; }
-    if (!camCommandAllowed()) { publishAck("snapshot", false, "too soon"); return; }
+    if (g_snapshotPending) { refuseSnapshot(id, "camera_busy", "busy"); return; }
+    if (!camCommandAllowed()) { refuseSnapshot(id, "too_soon", "too soon"); return; }
     g_snapshotSettleMs = (unsigned int)clampInt(jsonInt(payload, "settle_ms", 0), 0, CAPTURE_MAX_SETTLE_MS);
     g_snapshotFlash = parseFlashMode(jsonStr(payload, "flash", ""), g_flashMode);
     g_currentRequestId = id;

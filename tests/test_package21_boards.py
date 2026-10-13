@@ -69,3 +69,38 @@ def test_the_app_offers_no_picture_size_past_the_cameras_largest():
         f"{sorted(set(offered) - allowed)} are past the camera's largest ({largest}): "
         "it clips them and the server records a size the photo never had")
     assert offered == names[:cap + 1], "every size up to the largest, smallest first"
+
+
+# ── F12: the camera's instant «no» carried no request id, so the app waited forty seconds ──
+
+def test_an_instant_refusal_names_the_request_and_says_why():
+    body = _fn(_src(CAM / "cam_control.ino"), "void handleCamCommand(")
+    snap = body[body.index('if (cmd == "snapshot")'):body.index('if (cmd == "burst")')]
+    # Only a malformed id goes without one: the server never sent it, so nobody waits on it.
+    assert snap.count('publishAck("snapshot", false') == 1 and '"bad id"' in snap, (
+        "a refusal with no id is thrown away")
+    assert 'refuseSnapshot(id, "camera_busy"' in snap
+    assert 'refuseSnapshot(id, "too_soon"' in snap
+    helper = _fn(_src(CAM / "cam_control.ino"), "static void refuseSnapshot(")
+    assert '\\"id\\"' in helper and '\\"error\\"' in helper
+
+
+def test_the_server_turns_an_instant_refusal_into_words(monkeypatch):
+    import json
+
+    import mongomock
+
+    import app.db as appdb
+    from app.integrations import camera_client
+
+    appdb.configure(mongomock.MongoClient()["t"])
+    try:
+        for code in ("camera_busy", "too_soon"):
+            camera_client.on_event("n1", json.dumps(
+                {"cmd": "snapshot", "ok": False, "detail": "x", "id": f"r-{code}",
+                 "error": code}))
+            err = camera_client.fetch_snapshot_error("n1", f"r-{code}")
+            assert err and err["error"] == code
+            assert err["message"] == camera_client._ERROR_TEXT[code]
+    finally:
+        appdb.reset()
