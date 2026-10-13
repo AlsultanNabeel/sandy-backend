@@ -753,6 +753,15 @@ device at once and every `_WORKING_EVERY_S` (3 s) until the tool calls return: t
 line, and the robot keeps the call open on each (`VOICE_WORKING_MAX_MS`, 60 s, at most), since
 its eight-second idle limit used to close a call before a slow tool's answer.
 
+**Not every voice is a turn** (`voice_ws/noise.py`, the robot's call, in any language): a voice
+under `NEAR_FACTOR` (40%) of his own level in this call (the median of his last turns) is far
+talk or the TV and opens no turn, so nothing reaches Gemini and the quiet clock runs on. A turn
+that was quiet (under 60%) or very short (under 400 ms of voice) is `suspect`: her reply is held
+until its transcript shows it is not a recogniser's stock phrase for noise («¿Qué?», «Gracias»,
+«شكرا على المشاهدة»); when that phrase is the whole turn the reply is never played, the turn is
+not kept and the quiet clock is put back. Gemini Live gives no confidence or no-speech
+probability for its transcript, so none is used.
+
 **A call ends by itself on the server too** (`session._call_watchdog`), for the robot and the
 app alike: `call_idle` after `SANDY_CALL_IDLE_S` (90 s) with neither the user's voice (a pitched
 frame, so a TV or a fan does not count) nor hers, and `call_time_limit` at `SANDY_CALL_MAX_MIN`

@@ -48,7 +48,7 @@ from app.api.voice_ws._config import (
     _VAD_STUCK_MS,
     _VAD_MIN_UTTER_MS,
 )
-from app.api.voice_ws import face
+from app.api.voice_ws import face, noise
 from app.api.voice_ws.speaker import (
     _RecentAudio,
     _is_sensitive_call,
@@ -990,6 +990,10 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
     held_ms = 0.0
     # Of the held time, how much was a voice (pitched), not noise: only that interrupts her.
     held_voiced_ms = 0.0
+    # The voiced frames' loudness, held and in the open turn: far or near (`noise`).
+    held_levels: List[float] = []
+    turn_levels: List[float] = []
+    far_dropped = 0
     backlog = reader.pending()
     draining = backlog > _BACKLOG_FRAMES
     if draining:
@@ -1021,7 +1025,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
         While she is already answering, only a real interruption (long enough to be
         speech) closes it: every activity_end cancels the generation in progress.
         """
-        nonlocal speaking, silence_ms, utter_ms, speech_ms
+        nonlocal speaking, silence_ms, utter_ms, speech_ms, turn_levels
         # Measured in speech, not elapsed time (the closing silence is inside utter_ms).
         if state.get("replying") and _she_is_really_answering(state) \
                 and speech_ms < _barge_bar_ms(state):
@@ -1032,6 +1036,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             silence_ms = 0.0
             utter_ms = 0.0
             speech_ms = 0.0
+            turn_levels = []
             return
         if utter_ms >= _VAD_MIN_UTTER_MS:
             # This turn's own audio (16 kHz, 16-bit = 32 bytes a millisecond).
@@ -1040,6 +1045,12 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             await _verify_and_inject(session, recent.snapshot())
         await session.send_realtime_input(activity_end=types.ActivityEnd())
         state["replying"] = True
+        # Quiet or very short: her reply waits until its transcript is known (`noise`).
+        turn_level = noise.level(turn_levels)
+        state["turn_suspect"] = noise.suspect(state, turn_level, speech_ms)
+        if not state["turn_suspect"]:
+            noise.learn(state, turn_level)
+        turn_levels = []
         # للقياس: من هون لأول صوت منها هو الانتظار اللي بيحسّه المستخدم.
         state["turn_closed_at"] = time.monotonic()
         logger.info("[voice_ws] turn closed after %.1fs of speech (%s)",
@@ -1119,8 +1130,6 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
             # Nothing is speech until the room is known (the board's preroll is the room).
             is_speech = (len(window) >= _VAD_FLOOR_MIN_FRAMES
                          and rms >= threshold)
-            if is_speech and _voiced(samples):
-                state["user_voice_at"] = time.monotonic()   # the call is not idle
             loudest = max(loudest, rms)
             # عدّ الصمت بس لحد أول فتح للبوابة.
             if is_speech or frames:
@@ -1141,11 +1150,26 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 held_ms += ms
                 if _voiced(samples):
                     held_voiced_ms += ms
+                    held_levels = (held_levels + [rms])[-64:]
                 while held_ms > _HELD_MS_MAX and len(held) > 1:
                     # The dropped frame's time leaves with it.
                     held_ms -= len(held.pop(0)) / 2 / 16000 * 1000
                 held_voiced_ms = min(held_voiced_ms, held_ms)
                 if held_voiced_ms < (_barge_bar_ms(state) if answering else _ONSET_VOICED_MS):
+                    continue
+                if not barged and noise.far(state, noise.level(held_levels)):
+                    # Far below his own level: distant talk or the TV. No turn, nothing to
+                    # Gemini, and the call's quiet clock keeps running.
+                    if far_dropped % 20 == 0:
+                        logger.info("[voice_ws] voice at %.0f, under %.0f%% of his level "
+                                    "%.0f — far away or the TV, not a turn",
+                                    noise.level(held_levels) or 0, noise.NEAR_FACTOR * 100,
+                                    noise.near_level(state) or 0)
+                    far_dropped += 1
+                    held.clear()
+                    held_ms = 0.0
+                    held_voiced_ms = 0.0
+                    held_levels = []
                     continue
                 if answering:
                     logger.info("[voice_ws] %.1fs of speech while she answers — "
@@ -1153,6 +1177,10 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
 
                 # Speech onset: open an activity. Keep `recent` (verification needs a few seconds).
                 speaking = True
+                # Put back if this turn turns out to be an invention (`_live_to_device`).
+                state["voice_at_before_turn"] = state.get("user_voice_at")
+                turn_levels = held_levels
+                held_levels = []
                 silence_ms = 0.0
                 utter_ms = 0.0
                 await session.send_realtime_input(activity_start=types.ActivityStart())
@@ -1168,6 +1196,7 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 held.clear()
                 held_ms = 0.0
                 held_voiced_ms = 0.0
+                held_levels = []
 
             if speaking:
                 recent.add(chunk)
@@ -1178,6 +1207,8 @@ async def _device_to_live(reader: "_DeviceReader", session, recent: "_RecentAudi
                 talking = is_speech and _voiced(samples)
                 if talking:
                     speech_ms += ms
+                    turn_levels.append(rms)
+                    state["user_voice_at"] = time.monotonic()   # the call is not idle
                 silence_ms = 0.0 if talking else silence_ms + ms
 
                 # A startup backlog is one question, not four: no turn closes until
@@ -1267,6 +1298,30 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
               "send": 0.0, "worst": 0.0}
     # This reply's audio: bytes sent and when its first chunk left (her goodbye's length).
     _turn_audio: Dict[str, Any] = {"n": 0, "first": None}
+    # A suspect turn's reply (`noise.suspect`), held until its transcript is known.
+    _held_out: List[bytes] = []
+    _hold: Dict[str, Any] = {"since": None}
+
+    def _holding() -> bool:
+        return bool(live_state.get("turn_suspect"))
+
+    async def _let_go() -> None:
+        """Not an invention after all: send what was held, and stop holding."""
+        live_state["turn_suspect"] = False
+        _hold["since"] = None
+        for data in _held_out:
+            await send_bytes(data)
+        if _held_out:
+            live_state["her_voice_at"] = time.monotonic()
+        _held_out.clear()
+
+    async def _maybe_let_go() -> None:
+        heard = "".join(_user_buf)
+        if heard.strip() and not noise.could_be_invention(heard):
+            await _let_go()
+        elif not heard.strip() and _hold["since"] is not None \
+                and time.monotonic() - _hold["since"] >= noise.HOLD_MAX_S:
+            await _let_go()
 
     async def _handle(response) -> bool:
         """Process one Live response; True stops the session. Relays audio, saves STM, gates tools."""
@@ -1298,13 +1353,15 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     logger.info("[voice_ws] Gemini heard the user (first "
                                 "transcript fragment)")
                 _user_buf.append(t)
+                if _holding():
+                    await _maybe_let_go()
 
         # Sandy's transcript (native-audio models put no text in model_turn parts).
         if response.server_content and response.server_content.output_transcription:
             t = response.server_content.output_transcription.text
             if t:
                 _sandy_buf.append(t)
-                if get_voice_channel() == _ROBOT_CHANNEL:
+                if get_voice_channel() == _ROBOT_CHANNEL and not _holding():
                     mood = face.mood_of("".join(_sandy_buf))
                     if mood and mood != _face["mood"]:
                         _face["mood"] = mood
@@ -1315,6 +1372,9 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             # ونزّل علامة «عم ترد» هون كمان، وإلا بتضلّ مرفوعة وبتنبلع كل جملة بعدها.
             live_state["replying"] = False
             live_state.pop("last_out_at", None)
+            live_state["turn_suspect"] = False
+            _held_out.clear()
+            _hold["since"] = None
             _face["mood"] = ""
             await send_msg({"type": "interrupted"})
 
@@ -1326,7 +1386,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         logger.info("[voice_ws] first reply audio → device")
                     _seen["audio_out"] += len(part.inline_data.data)
                     live_state["last_out_at"] = time.monotonic()
-                    live_state["her_voice_at"] = live_state["last_out_at"]
+                    if not _holding():
+                        live_state["her_voice_at"] = live_state["last_out_at"]
                     _turn_audio["n"] += len(part.inline_data.data)
                     if _turn_audio["first"] is None:
                         _turn_audio["first"] = time.monotonic()
@@ -1340,7 +1401,13 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     if _closed is not None:
                         logger.info("[voice_ws] first audio %.0fms after the user stopped",
                                     (_now - _closed) * 1000)
-                    await send_bytes(part.inline_data.data)
+                    if _holding():
+                        _held_out.append(part.inline_data.data)
+                        if _hold["since"] is None:
+                            _hold["since"] = time.monotonic()
+                        await _maybe_let_go()
+                    else:
+                        await send_bytes(part.inline_data.data)
                     _audio["at"] = time.monotonic()
                     _audio["chunks"] += 1
                     _audio["wait"] += _wait
@@ -1356,6 +1423,19 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             # their own spaces (this text is stored as memory).
             user_text = "".join(_user_buf).strip()
             sandy_text = "".join(_sandy_buf).strip()
+            invented = _holding() and noise.is_invention(user_text)
+            if invented:
+                # Noise the recogniser wrote as a phrase: her answer is never played, the
+                # turn is not kept, and the call's quiet clock is put back.
+                logger.info("[voice_ws] dropped an invented turn (%d chars, quiet or "
+                            "short) and its reply", len(user_text))
+                _held_out.clear()
+                _hold["since"] = None
+                live_state["turn_suspect"] = False
+                live_state["user_voice_at"] = live_state.get("voice_at_before_turn")
+                user_text = sandy_text = ""
+            elif _holding():
+                await _let_go()
             done: Dict[str, Any] = {"type": "end_turn"}
             if get_voice_channel() == _ROBOT_CHANNEL and sandy_text:
                 # The face she keeps for a moment after the reply, then back to listening.
