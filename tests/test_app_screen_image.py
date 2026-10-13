@@ -3,7 +3,7 @@ iPhone photo is HEIC the server cannot open, and a full-size one is past its 8 M
 from pathlib import Path
 
 SRC = (Path(__file__).resolve().parent.parent / "ios" / "SandyApp" / "Features" / "Control"
-       / "RobotControlView.swift").read_text(encoding="utf-8")
+       / "RobotPartsSection.swift").read_text(encoding="utf-8")
 
 
 def test_the_screen_photo_is_made_a_small_jpeg_first():
