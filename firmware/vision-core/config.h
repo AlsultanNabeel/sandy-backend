@@ -138,7 +138,7 @@
 // الفيديو ما بيمشي عبر MQTT، فخادم صور مباشر.
 // اسم اللوح ونسخته بكل نبضة، عشان نعرف أي لوح هاد.
 #define SANDY_CAM_BOARD_ID        "sandy-cam"
-#define SANDY_CAM_FW_VERSION      "0.5.0"
+#define SANDY_CAM_FW_VERSION      "0.5.1"
 
 #define CAM_HTTP_PORT             80
 // مفتاح البث المحلي: الفاضي معناه «مفتاح عشوائي كل إقلاع» (بيوصل التطبيق عبر الخادم)، مش «بلا حماية».
