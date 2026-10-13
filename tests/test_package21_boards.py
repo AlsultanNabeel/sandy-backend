@@ -120,3 +120,21 @@ def test_the_brain_subscribes_one_level_under_its_id():
         assert "/" not in out, f"{out} is two levels deep and the brain no longer hears it"
     # Nothing two levels deep reaches the dispatch, so it no longer checks for it.
     assert '"cam/"' not in dispatch and '"room/"' not in dispatch
+
+
+# ── J7: the pairing code's timer cleared whatever was on the screen five minutes later ──
+
+def test_the_pairing_code_timer_clears_only_its_own_code():
+    screen = _src(MAIN / "sandy_screen.c")
+    header = _src(MAIN / "include" / "sandy_screen.h")
+    assert "uint32_t screen_shown(void);" in header
+    # Every new thing on the screen moves the count, the dismiss too.
+    for sig in ("void screen_show_text(", "void screen_show_qr(", "bool screen_image_end(",
+                "void screen_dismiss("):
+        assert "s_shown_seq++" in _fn(screen, sig), f"{sig} does not count what it shows"
+
+    mqtt = _src(MAIN / "sandy_mqtt.c")
+    expired = _fn(mqtt, "static void _pair_code_expired(")
+    assert "screen_shown() == s_pair_shown" in expired and "screen_dismiss()" in expired
+    shown = _fn(mqtt, "static void _handle_pair_code(")
+    assert shown.index("screen_show_text(text)") < shown.index("s_pair_shown = screen_shown()")

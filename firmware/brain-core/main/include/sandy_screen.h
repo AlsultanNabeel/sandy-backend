@@ -41,6 +41,10 @@ bool screen_image_end(void);
 
 void screen_dismiss(void);
 
+// A number that moves each time something is put on the screen or taken off it, so a
+// timer can take down what it showed and nothing that came after.
+uint32_t screen_shown(void);
+
 // Called only by sandy_face on the LVGL task, so all LVGL calls stay on one task.
 struct _lv_obj_t;
 void screen_lvgl_build(struct _lv_obj_t *parent);

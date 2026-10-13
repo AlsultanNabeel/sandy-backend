@@ -33,6 +33,8 @@ static lv_obj_t *s_qr;          // built on first use
 static lv_obj_t *s_qr_caption;
 static bool     s_dirty;
 static bool     s_showing;
+// Moves with everything put on or taken off the screen (screen_shown).
+static volatile uint32_t s_shown_seq;
 
 // ── Text size ──
 // LVGL's only Arabic font is 16 px; the other sizes are generated (main/fonts).
@@ -234,6 +236,7 @@ void screen_show_text(const char *text) {
     s_want_text  = true;
     s_want_image = false;
     s_dirty      = true;
+    s_shown_seq++;
     unlock();
     ESP_LOGI(TAG, "text queued (%d chars)", (int)strlen(s_text));
 }
@@ -247,6 +250,7 @@ void screen_show_qr(const char *payload, const char *caption) {
     s_want_text  = false;
     s_want_image = false;
     s_dirty      = true;
+    s_shown_seq++;
     unlock();
 }
 
@@ -255,7 +259,12 @@ void screen_dismiss(void) {
     s_want_dismiss = true;
     s_want_text = s_want_image = false;
     s_dirty = true;
+    s_shown_seq++;
     unlock();
+}
+
+uint32_t screen_shown(void) {
+    return s_shown_seq;
 }
 
 bool screen_image_begin(int total_chunks) {
@@ -332,6 +341,7 @@ bool screen_image_end(void) {
         s_want_text    = false;
         s_want_dismiss = false;
         s_dirty        = true;
+        s_shown_seq++;
     }
     int have = s_have_count, want = s_expect_chunks;
     size_t bytes = s_rx_bytes;

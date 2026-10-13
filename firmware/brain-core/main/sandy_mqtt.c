@@ -449,10 +449,13 @@ static bool _is_one_shot(const char *out) {
 // Pairing shows six server-sent digits on her face; typing them proves you're in front of her.
 // Five minutes, like the server's code, then the face returns.
 static esp_timer_handle_t s_pair_timer;
+// What the screen showed with the code: anything put up since (owner text, a picture,
+// the setup network's code) is not the timer's to take down.
+static uint32_t s_pair_shown;
 
 static void _pair_code_expired(void *arg) {
     (void)arg;
-    screen_dismiss();
+    if (screen_shown() == s_pair_shown) screen_dismiss();
 }
 
 static void _handle_pair_code(const char *val) {
@@ -464,6 +467,7 @@ static void _handle_pair_code(const char *val) {
     // Two groups of three, easy to read and type.
     snprintf(text, sizeof(text), "رمز الربط\n\n%.3s  %.3s", val, val + 3);
     screen_show_text(text);
+    s_pair_shown = screen_shown();
     buzzer_play(MELODY_NOTIFY);
     if (!s_pair_timer) {
         const esp_timer_create_args_t a = { .callback = _pair_code_expired, .name = "pair_code" };
