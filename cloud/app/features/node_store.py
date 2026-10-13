@@ -129,6 +129,8 @@ _TELEMETRY_KEYS = {
     "cam_ip": str, "cam_board": str, "cam_ssid": str,
     # cam_stream_key: random per boot; the app needs it to open the local stream.
     "cam_fw": str, "cam_online": bool, "cam_stream_key": str,
+    # The camera's sensor: "ok", "retrying" (failed, being tried again) or "failed".
+    "cam_sensor": str,
     "room_ip": str, "room_board": str, "room_light": str,
     "room_fw": str, "room_online": bool, "room_uptime_s": int, "room_heap": int,
     # The light arm's saved setup, "rest,on,off,hold_ms" (features/room_arm.py).

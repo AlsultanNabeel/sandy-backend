@@ -223,3 +223,40 @@ def test_the_camera_starts_its_sensor_before_wifi_with_spaced_retries():
     wifi = _fn(_src(CAM / "cam_wifi.ino"), "void connectWiFi(")
     assert "WiFi.setTxPower(CAM_WIFI_TX_POWER)" in wifi
     assert "#define CAM_WIFI_TX_POWER" in config
+
+
+# ── The camera says how its sensor is, and the app shows it ──
+
+def test_the_camera_heartbeat_says_how_its_sensor_is():
+    capture = _src(CAM / "cam_capture.ino")
+    state = _fn(capture, "const char* camSensorState(")
+    for word in ('"ok"', '"retrying"', '"failed"'):
+        assert word in state
+    beat = _fn(_src(CAM / "cam_mqtt.ino"), "static void publishCamStatus(")
+    assert '\\"sensor\\":\\"%s\\"' in beat and "camSensorState()" in beat
+
+
+def test_the_server_keeps_the_sensor_state_and_reads_it_from_older_cameras():
+    from app.features import node_store
+    from app.integrations import mqtt_ingest
+
+    seen = {}
+    real = node_store.ingest_status
+
+    def capture(node_id, **kw):
+        seen.update(kw.get("telemetry") or {})
+
+    node_store.ingest_status = capture
+    try:
+        out = '[{"id":"flash","kind":"relay"}]'
+        for payload, want in (
+                ('{"sensor":"retrying","camera_ready":false,"outputs":%s}' % out, "retrying"),
+                ('{"camera_ready":false,"outputs":%s}' % out, "failed"),
+                ('{"camera_ready":true,"outputs":%s}' % out, "ok"),
+                ('{"sensor":"bogus","camera_ready":true,"outputs":%s}' % out, "ok")):
+            seen.clear()
+            mqtt_ingest._ingest_cam_status("n1", payload)
+            assert seen.get("cam_sensor") == want, payload
+    finally:
+        node_store.ingest_status = real
+    assert node_store._clean_telemetry({"cam_sensor": "failed"}) == {"cam_sensor": "failed"}

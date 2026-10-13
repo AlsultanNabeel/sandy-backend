@@ -18,6 +18,7 @@ struct RobotLiveSection: View {
                     SandyNotice(lang.s("robot.live.powerWeak"), kind: .gentleWarning)
                 }
                 stats(node)
+                if let sensor = node.cameraSensor { cameraSensorTile(sensor) }
                 if store.has(SandyMood.Device.face) { moodGrid }
                 if store.has(SandyMood.Device.gesture) {
                     chips("live.gestures", icon: "figure.wave", device: SandyMood.Device.gesture,
@@ -119,6 +120,19 @@ struct RobotLiveSection: View {
             lines.append(String(format: lang.s("robot.live.roomFirmware"), room))
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// The camera's sensor in words, so a failed start is said instead of a silent camera.
+    private func cameraSensorTile(_ sensor: String) -> some View {
+        let tint: Color
+        let icon: String
+        switch sensor {
+        case "ok":       tint = Theme.Colors.success; icon = "camera.fill"
+        case "retrying": tint = Theme.Colors.warn;    icon = "arrow.clockwise.circle"
+        default:         tint = Theme.Colors.danger;  icon = "exclamationmark.triangle.fill"
+        }
+        return statTile(icon: icon, title: lang.s("robot.live.cameraSensor"),
+                        value: lang.s("robot.live.cameraSensor." + sensor), tint: tint)
     }
 
     private func statTile(icon: String, title: String, value: String, tint: Color) -> some View {

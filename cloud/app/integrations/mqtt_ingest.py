@@ -199,6 +199,13 @@ def _ingest_cam_status(node_id: str, payload: str) -> None:
     telemetry = {f"cam_{k}": v for k, v in data.items()
                  if k in ("ip", "board", "ssid", "boot", "fw", "stream_key")}
     telemetry["cam_online"] = True
+    # The sensor: ok, retrying or failed. A camera from before `sensor` says only
+    # `camera_ready`, read as ok or failed.
+    sensor = data.get("sensor")
+    if sensor not in ("ok", "retrying", "failed") and isinstance(data.get("camera_ready"), bool):
+        sensor = "ok" if data["camera_ready"] else "failed"
+    if sensor in ("ok", "retrying", "failed"):
+        telemetry["cam_sensor"] = sensor
     ingest_status(
         node_id,
         online=None,

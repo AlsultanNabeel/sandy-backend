@@ -247,6 +247,7 @@ void camWifiTick() {
 }
 
 esp_reset_reason_t camBootReason();
+const char* camSensorState();
 
 static void publishCamStatus() {
   if (!g_mqtt.connected()) return;
@@ -264,7 +265,7 @@ static void publishCamStatus() {
   char buf[760];
   int n = snprintf(buf, sizeof(buf),
            "{\"uptime_s\":%lu,\"rssi\":%d,\"heap\":%u,\"psram\":%u,"
-           "\"camera_ready\":%s,\"flash_on\":%s,\"stream\":%s,\"boot\":%d,"
+           "\"camera_ready\":%s,\"sensor\":\"%s\",\"flash_on\":%s,\"stream\":%s,\"boot\":%d,"
            "\"fw\":\"%s\",\"stream_key\":\"%s\",\"online\":true,"
            "\"ip\":\"%s\",\"ssid\":\"%s\",\"board\":\"%s\","
            "\"outputs\":[{\"id\":\"flash\",\"kind\":\"relay\"},"
@@ -279,6 +280,7 @@ static void publishCamStatus() {
            (unsigned)ESP.getFreeHeap(),
            (unsigned)ESP.getFreePsram(),
            g_cameraReady ? "true" : "false",
+           camSensorState(),
            flashIsOn() ? "true" : "false",
            camHttpRunning() ? "true" : "false",
            (int)camBootReason(),

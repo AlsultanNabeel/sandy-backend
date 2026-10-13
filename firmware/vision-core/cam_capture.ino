@@ -95,6 +95,12 @@ void setupCamera() {
 static unsigned long g_camReinitGapMs = CAM_REINIT_FIRST_MS;
 static unsigned long g_camReinitLastMs = 0;
 
+// للنبضة: شغّال، أو عم يرجع يجرّب (لسا التباعد ما وصل لآخره)، أو فاشل (صار كل خمس دقايق).
+const char* camSensorState() {
+  if (g_cameraReady) return "ok";
+  return g_camReinitGapMs < CAM_REINIT_MAX_MS ? "retrying" : "failed";
+}
+
 void camReinitTick() {
   if (g_cameraReady) return;
   if (millis() - g_camReinitLastMs < g_camReinitGapMs) return;

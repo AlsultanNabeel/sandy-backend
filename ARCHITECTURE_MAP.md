@@ -1292,7 +1292,9 @@ what makes the text-size control real rather than decorative.
   cycle and a wait doubling from 300 ms, its clock at 10 MHz, and the radio transmits at
   `CAM_WIFI_TX_POWER` (15 dBm, set again after each mode change): the radio's draw was what it lost to.
   A sensor that failed at boot is retried from the
-  loop (30 s, doubling to 5 min) instead of waiting for a reboot. Like the brain,
+  loop (30 s, doubling to 5 min) instead of waiting for a reboot. Its heartbeat says how the sensor is (`sensor`: `ok`,
+  `retrying` while the gap is still growing, `failed` once it is at five minutes); the server keeps
+  it as `cam_sensor` (read from `camera_ready` for a camera before it) and the app's robot card shows it. Like the brain,
   the owner's own build (a `secrets.h` with `SANDY_OTA_PASSWORD`) has LAN upload and
   the log mirror on port 23; the sale build `publish_firmware.py` makes defines
   `SANDY_RETAIL` and has neither. The room node follows the same rule for LAN upload.

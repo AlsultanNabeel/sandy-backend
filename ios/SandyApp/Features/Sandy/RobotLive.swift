@@ -27,6 +27,8 @@ struct RobotLiveNode: Equatable {
     var roomFirmware: String? = nil
     /// Brownouts in a row: her supply cannot carry her (the board's `power_weak`).
     var powerWeak = false
+    /// The camera's sensor: "ok", "retrying" or "failed"; nil with no camera heard.
+    var cameraSensor: String? = nil
 }
 
 /// كتالوج جسم ساندي — بنفس أسماء الفيرموير حرفيًا (node_provision.py). احتياط
@@ -85,7 +87,10 @@ extension APIClient {
                 volume: int("volume"),
                 cameraFirmware: (t["cam_fw"] as? String).flatMap { $0.isEmpty ? nil : $0 },
                 roomFirmware: (t["room_fw"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-                powerWeak: t["power_weak"] as? Bool ?? false)
+                powerWeak: t["power_weak"] as? Bool ?? false,
+                cameraSensor: (t["cam_sensor"] as? String).flatMap {
+                    ["ok", "retrying", "failed"].contains($0) ? $0 : nil
+                })
         }
         return (nodes, r["demo"] as? Bool ?? false)
     }
