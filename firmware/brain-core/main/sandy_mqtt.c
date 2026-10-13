@@ -541,6 +541,8 @@ static char s_new_user[65], s_new_pass[129];
 static volatile bool s_creds_pending;          // received, not applied yet
 static bool s_trying_new;                       // applied, waiting for its subscription
 static int  s_new_fails;
+// The disconnect that applies a new credential is ours, not a failure of it.
+static bool s_own_disconnect;
 #define NEW_CREDS_MAX_FAILS 3
 
 // نسخة كاملة من الإعداد: `esp_mqtt_set_config` بترجّع أي حقل ناقص للافتراضي.
@@ -602,7 +604,9 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             break;
 
         case MQTT_EVENT_DISCONNECTED:
-            if (s_trying_new && ++s_new_fails >= NEW_CREDS_MAX_FAILS) {
+            if (s_own_disconnect) {
+                s_own_disconnect = false;
+            } else if (s_trying_new && ++s_new_fails >= NEW_CREDS_MAX_FAILS) {
                 creds_revert("no connection in three tries");
             }
             _schedule_reconnect();
@@ -916,8 +920,8 @@ static void _apply_pending_credentials(void) {
         s_trying_new = true;
         s_new_fails = 0;
         // Disconnect, not reconnect: the library ignores reconnect on a live link, and a
-        // clean DISCONNECT doesn't fire the "offline" will.
-        esp_mqtt_client_disconnect(s_client);
+        // clean DISCONNECT doesn't fire the "offline" will. Not counted as a failed try.
+        s_own_disconnect = esp_mqtt_client_disconnect(s_client) == ESP_OK;
         ESP_LOGI(TAG, "reconnecting with the new credential");
     } else {
         s_cfg.credentials.username = s_user;

@@ -88,3 +88,15 @@ def test_it_is_stored_when_the_subscription_is_accepted_and_dropped_when_refused
     assert "0x80" in refused and "creds_revert(" in refused
     assert "esp_mqtt_client_disconnect(s_client)" in refused
     assert "creds_store(s_user, s_pass)" in accepted and "s_trying_new = false" in accepted
+
+
+# ── J4: applying a new credential is not its first failure ──
+
+def test_the_disconnect_that_applies_a_new_credential_is_not_counted():
+    src = _src("sandy_mqtt.c")
+    apply = _block(src, "static void _apply_pending_credentials(void) {")
+    assert "s_own_disconnect = esp_mqtt_client_disconnect(s_client) == ESP_OK;" in apply
+    h = _handler()
+    gone = h[h.index("case MQTT_EVENT_DISCONNECTED"):h.index("case MQTT_EVENT_DATA")]
+    assert gone.index("if (s_own_disconnect)") < gone.index("++s_new_fails")
+    assert "s_own_disconnect = false;" in gone
