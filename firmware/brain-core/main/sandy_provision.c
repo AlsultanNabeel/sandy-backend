@@ -416,8 +416,9 @@ static bool start_ap(bool for_server) {
 #endif
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    // POST handler holds body, decode buffer and reply at once; 4 KB overflowed.
-    cfg.stack_size = 6144;
+    // POST handler holds body, decode buffer and reply at once; 4 KB overflowed. It also runs
+    // the switch, whose server check is a TLS handshake on top of those buffers.
+    cfg.stack_size = 8192;
     if (httpd_start(&s_httpd, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "cannot bind the setup page — trying again in %d s",
                  PROVISION_RETRY_MS / 1000);
