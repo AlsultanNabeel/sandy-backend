@@ -442,7 +442,9 @@ def register_devices_api(app, mongo_db=None):
             return _bad("unavailable", code=503)
         if not fresh:
             logger.warning("[cam] upload rejected: replayed signature for %s", node_id)
-            return _bad("replay", code=401)
+            # Not a 401: camera firmware up to 0.4.1 drops its own key on any 401, and a
+            # replay says nothing about the key (two identical frames in one second).
+            return _bad("replay", code=409)
         if own_key and record["state"] == "issued":
             confirm_key(kid)
 

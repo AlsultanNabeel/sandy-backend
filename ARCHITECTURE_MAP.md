@@ -497,7 +497,8 @@ Who calls what:
   `/api/items`.
 - **The boards** — `/voice` (the brain), `/api/cam/upload` (the camera: signed, its time
   at most two minutes behind or thirty seconds ahead, each signature remembered past that
-  window so it is used once, a failed replay check refused with 503, the body read only up
+  window so it is used once (a replay answers 409, not 401: the camera drops its own key only on
+  `key_unknown`, and older camera firmware on any 401), a failed replay check refused with 503, the body read only up
   to its cap),
   `/api/firmware/manifest` and `/api/firmware/image/<version>` (OTA).
 - **The owner's tooling** — `/api/firmware/publish` and `/rollout`

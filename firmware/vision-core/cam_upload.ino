@@ -329,8 +329,9 @@ bool uploadSnapshot(const String& id, const uint8_t* data, size_t len) {
       int colon = at >= 0 ? body.indexOf(':', at) : -1;
       int q = colon >= 0 ? body.indexOf('"', colon) : -1;
       if (q >= 0) ownKeyStore(body.substring(q + 1, q + 1 + 64));
-    } else if (code == 401 && g_hasOwnKey) {
-      // أي رفض لمفتاحنا الخاص (انفكّ الاقتران أو تدوّر) بيمسحه.
+    } else if (code == 401 && g_hasOwnKey && body.indexOf("\"key_unknown\"") >= 0) {
+      // بس لما الخادم يقول إنه ما عنده مفتاحنا (انفكّ الاقتران): رفض تاني (توقيع معاد،
+      // جسم ما طابق بصمته) ما بيعني إنه المفتاح راح، ومسحه كان بيقفل الرفع للأبد.
       ownKeyDrop();
     }
     return ok;

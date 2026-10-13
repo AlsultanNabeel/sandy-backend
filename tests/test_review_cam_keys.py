@@ -92,7 +92,7 @@ def test_the_same_upload_twice_is_a_replay(client):
     ts = str(int(time.time() * 1000))
     assert _post_v2(c, SHARED, ts=ts).status_code == 200
     r = _post_v2(c, SHARED, ts=ts)
-    assert r.status_code == 401 and r.get_json()["error"] == "replay"
+    assert r.status_code == 409 and r.get_json()["error"] == "replay"
 
 
 def test_ids_and_size_are_checked_before_anything_else(client):
@@ -117,3 +117,15 @@ def test_an_unreadable_camera_key_is_not_a_refusal(client, monkeypatch):
     monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
     r = _post(c, own, kv=2)
     assert r.status_code == 503 and r.get_json()["error"] == "key_unreadable"
+
+
+def test_the_camera_drops_its_own_key_only_when_the_server_does_not_know_it():
+    """A replay or a body that did not match its hash is not a lost key; dropping the key
+    on those locked a working camera out of uploading until it was paired again."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "firmware" / "vision-core"
+           / "cam_upload.ino").read_text(encoding="utf-8")
+    drop = src[src.index("ownKeyDrop();", src.index("bool ok = code == 200;")) - 300:
+               src.index("ownKeyDrop();", src.index("bool ok = code == 200;"))]
+    assert 'body.indexOf("\\"key_unknown\\"") >= 0' in drop
