@@ -744,7 +744,7 @@ static void _handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
             // Our own status echoing back is not a command.
             if (!strcmp(out, "status")) break;
 
-            // الاشتراك مستوى واحد، بس ما منثق بالوسيط: موضوع أعمق (فرع الكاميرا أو الغرفة) مش إلنا.
+            // الاشتراك مستوى واحد، بس ما منثق بالوسيط: موضوع أعمق مش أمر إلنا.
             if (strchr(out, '/')) break;
 
             // Whole and short: stays on the stack. 512 fits a 255-byte line plus "text:".

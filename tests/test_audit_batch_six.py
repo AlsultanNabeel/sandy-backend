@@ -61,18 +61,12 @@ def test_no_call_site_reaches_for_the_shared_session_by_accident():
 
     The base class is not the only place that builds a request: the photo
     upload, the project import and the chat byte stream each make their own,
-    and a policy applied to one file and not the others is not a policy.
-
-    `CameraView` is the one deliberate exception and carries its reason — it
-    probes the robot on the local network, and `waitsForConnectivity` would
-    hold a reachability check open instead of answering the question it exists
-    to ask.
+    and a policy applied to one file and not the others is not a policy. There
+    is no exception: the camera's local probe, the one there was, went with it.
     """
     offenders = []
     for path in _swift_sources():
         rel = path.relative_to(IOS)
-        if str(rel) == "Features/Control/CameraView.swift":
-            continue
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if "URLSession.shared" in line and not line.lstrip().startswith("//"):
                 offenders.append(f"{rel}:{i}")

@@ -165,8 +165,8 @@ def test_the_board_identifies_itself_by_its_node():
             "this board announces a model name again; the owner lookup cannot "
             "resolve it and its voice sessions become anonymous")
         assert '#define SANDY_PAIR_CODE     "8421"' in sec, (
-            "the brain and the camera are on different node ids again — they "
-            "are one robot and must share one id")
+            "the board announces another pairing code; its node id no longer "
+            "matches the one its owner paired")
 
 
 def test_a_robot_can_only_be_claimed_once():

@@ -146,7 +146,7 @@ def test_a_second_robot_is_refused_and_the_first_still_pairs_again(two_owners):
         assert node_store.pair_node("SANDY-8421")["ok"]
         assert node_store.pair_precheck("SANDY-9999")["state"] == "one_robot"
         assert node_store.pair_node("SANDY-9999") == {"ok": False, "error": "one_robot"}
-        # The same robot again (its camera and room node share its id), and after a release.
+        # The same robot again, and after a release.
         assert node_store.pair_node("SANDY-8421")["already"] is True
         assert node_store.unpair_node("sandy8421")["ok"]
         assert node_store.pair_node("SANDY-9999")["ok"]

@@ -16,7 +16,7 @@ struct RobotView: View {
     /// الشاشة ظاهرة فعلًا — رجوع التطبيق للواجهة ما بيشغّل النبض لتبويب مخفي.
     @State private var visible = false
 
-    /// The board that speaks: the robot (a room node has no audio).
+    /// The board that speaks: the robot.
     private var robotNode: NodeItem? {
         devices.nodes.first { $0.capabilities.contains("audio") }
     }

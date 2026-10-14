@@ -65,9 +65,8 @@ def test_the_network_thread_is_not_the_one_doing_the_work(monkeypatch):
 
 
 def test_the_ingest_stays_in_order():
-    """One worker, not the shared pool. Heartbeats and photo slices arrive in an
-    order that means something: eight threads would write an older node state
-    over a newer one, and hand the camera its pieces shuffled."""
+    """One worker, not the shared pool. Heartbeats arrive in an order that means
+    something: eight threads would write an older node state over a newer one."""
     import app.integrations.mqtt_ingest as mi
 
     assert mi._INGEST._max_workers == 1

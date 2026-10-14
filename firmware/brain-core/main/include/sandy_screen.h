@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 // Owner's text or picture over the face; stays until dismissed, then the face returns.
-// Images arrive as raw 240×240 RGB565 (no decoder on the board), chunked over MQTT
-// like camera snapshots, reassembled in PSRAM to keep internal RAM for voice.
+// Images arrive as raw 240×240 RGB565 (no decoder on the board), chunked over MQTT,
+// reassembled in PSRAM to keep internal RAM for voice.
 
 #define SCREEN_W 240
 #define SCREEN_H 240

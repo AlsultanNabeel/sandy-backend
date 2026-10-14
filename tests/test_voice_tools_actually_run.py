@@ -2,10 +2,10 @@
 
 The owner's report: she claims she added the reminder, played the sound, started
 the brainstorm — and none of it happened. In weeks, exactly one thing ever
-worked: the camera flash.
+worked: a device switched straight over the broker (the camera's flash, since removed).
 
-That one exception is the whole diagnosis. The flash is the only tool that
-touches neither an account nor the database.
+That one exception is the whole diagnosis. It was the only tool that touched
+neither an account nor the database.
 """
 from __future__ import annotations
 
