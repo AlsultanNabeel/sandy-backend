@@ -18,7 +18,7 @@ firmware for every board.
 | Surface | What it is |
 |---|---|
 | The robot | ESP32-S3 with a mic, speaker, display face, servo and sensors. Streams audio live to the backend over a WebSocket. |
-| iPhone app | SwiftUI client — chat, voice, and the control surface for the robot and room devices. |
+| iPhone app | SwiftUI client — chat, voice, and the control surface for the robot and your own devices. |
 
 Same personality, same backend, same memory. Only the transport changes.
 
@@ -86,7 +86,7 @@ cannot widen its own scope. With no database *or* no authenticated tenant
 | Conversation | Text and voice, one memory across both, short- and long-term |
 | Lists, log & schedules | Tasks, shopping, goals, habits, reading, projects; expenses, journal, moods; reminders with recurrence and messages to your future self — all rows in the three blocks; confirmation before anything destructive |
 | Focus | Pomodoro sessions that can start and end a scene |
-| Room control | Saved scenes driving a room node over MQTT — lights, colour, music, fan, curtain. The node declares its outputs in its heartbeat, so its devices appear in the app on their own |
+| Device control | Saved scenes driving the robot's parts and your own devices over MQTT, IR gear through the robot's remote. The robot declares its outputs in its heartbeat, so its parts appear in the app on their own |
 | Research | Web research and places lookup |
 | Images | Generation, editing and description |
 | Push | APNs delivery of reminders and the daily nudge (the app also rings reminders locally from `/api/schedules`) |
@@ -120,10 +120,8 @@ cloud/            backend
   app/integrations/ external clients
   app/services/     APNs push, the schedule runner and the nudge scheduler
   app/utils/        tenancy, background thread pool, circuit breaker, profiles
-firmware/         every board's program
-  brain-core/     ESP32-S3 robot brain (ESP-IDF, C)
-  vision-core/    ESP32-CAM (Arduino)
-  room-node/      room controller (Arduino)
+firmware/
+  brain-core/     ESP32-S3 robot brain (ESP-IDF, C), the only board
 ios/              iPhone client (SwiftUI)
 tests/  scripts/
 ```

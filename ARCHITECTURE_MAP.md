@@ -28,11 +28,14 @@ The owner's north star, in his words: *she talks, she answers, she remembers, an
 I can shape how she answers.* Everything else is secondary.
 
 - **The robot** is her body: mics, speaker, a display that is her face, a neck
-  servo, an on-board LED, and a separate camera board.
+  servo, an on-board LED, a buzzer and an IR remote. It is one board, the brain,
+  and the only one: the camera board and the room node were removed on 14 Oct 2026
+  (tag `before-remove-cam-room` holds them).
 - **The app** (iPhone) is the same assistant over a different transport, plus
   the control surface for the hardware. Android is deferred — §7.
-- **The room node** lets a user add their own devices (lights, fan, curtain, IR
-  gear) so she can act on the physical world beyond her own body.
+- **The user's own devices** (lights, an air conditioner, IR gear) are rows in
+  the device registry (§2.8) on the robot's outputs, its IR remote above all, so
+  she can act on the room beyond her own body.
 
 It is a **multi-tenant product**, not one person's house. Every design decision
 below should be read through that lens; where the code still assumes a single
@@ -45,13 +48,11 @@ owner, it is called out as a defect, not a style.
 ```
 cloud/                the Python backend — the brain and the API
 firmware/             every board's program, one folder each:
-  brain-core/         ESP32-S3 robot brain (ESP-IDF, C) — voice, face, servo, MQTT
-  vision-core/        ESP32-CAM (Arduino) — camera board
-  room-node/          classic ESP32 (Arduino) — the room node (sandy/node/<id>/room/*)
+  brain-core/         ESP32-S3 robot brain (ESP-IDF, C) — voice, face, servo, IR, MQTT
 ios/SandyApp/         SwiftUI iPhone client
 tests/                backend tests (pytest + mongomock)
 scripts/              migration into the blocks, voice-WS probe, board provisioning,
-                      firmware keygen/publish, CA-roots and hardware-doc generators, C checks
+                      firmware keygen/publish, hardware-doc generator, C checks
 docs/                 NOT IN GIT — see §11
 ```
 
@@ -110,8 +111,8 @@ package import in a test with no credentials. Do not add import-time side effect
 | `app/brain/` | The agent: the loop, its tools, short-term memory, held confirmations, persona, the fast path (§2.3–§2.5). |
 | `app/blocks/` | The data layer — log / lists / schedules + the kinds table (§2.12). |
 | `app/api/` | HTTP routes and the `/voice` WebSocket (§2.9). |
-| `app/features/` | What is not a block: devices, nodes, scenes, focus, photos, users, usage, speaker id, firmware, device keys, research, weather, vision, account deletion. |
-| `app/integrations/` | Clients for everything external: the chat client (`openai_client.chat_fn`), embeddings, Exa, Places, FLUX/Azure images, Gemini TTS, MQTT, the camera, Sentry. |
+| `app/features/` | What is not a block: devices, nodes, scenes, focus, photos, users, usage, speaker id, firmware, device keys, research, weather, image analysis and generation (`vision`), account deletion. |
+| `app/integrations/` | Clients for everything external: the chat client (`openai_client.chat_fn`), embeddings, Exa, Places, FLUX/Azure images, Gemini TTS, MQTT (`mqtt_ingest` in, `device_publisher` out), Sentry. |
 | `app/services/` | APNs, the `sandy_schedules` runner (once a minute) and the daily-nudge scheduler. |
 | `app/utils/` | Tenancy (`tenant_db`, `tenant_version`), `ltm_crypto`, circuit breaker, background thread pool, process leader, profiles, time, Arabic days. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
 
@@ -383,21 +384,20 @@ Now:
   tenant's collection, and a device row left behind by a release that stopped halfway
   drives nothing. A release (`node_store.unpair_node`) whose device delete fails stops
   before the node row goes (`release_failed`, 503) so asking again finishes it.
-- **`room_device.send_to_topic()`** gates on that. Every registry-driven path goes
-  through it: the `device_control` tool, `/api/devices/<name>/control`, IR learn,
-  and scene actuation. It is the only way a device is sent to: the name-based
-  `room_device.send()` and its room vocabulary had no caller left and are gone.
-- **Scenes written in the old room words** («light», «music», «fan», «curtain», «color»:
-  the built-ins, and scenes saved before devices were rows) are read at apply time
-  (`scene_store._resolve`, `_LEGACY`): a word is the tenant's one device on that output
-  (`room/light`, `room/music`, `buzzer`), its value as that device takes it (a level on a
-  switch is on or off; «on»/«off» on the music resume or stop). Two devices on one output
-  (two robots) is passed over rather than guessed, as is a word no device answers to,
-  and the result names them (`skipped`). `list_scenes` shows the words as the devices
-  they mean, so the app's editor offers and saves real devices only.
-  The built-ins name only what a board has (the room light and music); the copies seeded
-  before lose their curtain, fan and colour actions at boot (`_drop_boardless_builtin_actions`),
-  while a scene the user made keeps its words.
+- **`device_publisher.send_to_topic()`** (`integrations/device_publisher.py`, the
+  server's one publisher) gates on that. Every registry-driven path goes through it: the
+  `device_control` tool, `/api/devices/<name>/control`, IR learn, and scene actuation.
+  A node's service channels (`wifi`, `screen_img`, `factory_reset`, `pair_code`, named one
+  by one) go through `publish_service`, whose caller checks the node is the tenant's.
+- **Scenes written in the old words** («light», «music», «fan», «curtain», «color», «buzzer»,
+  saved before devices were rows) are read at apply time (`scene_store._resolve`, `_LEGACY`):
+  «buzzer» is the tenant's one device on that output; the rest name nothing a board has (the
+  light and the music were the room node's), so they are passed over and the result names them
+  (`skipped`), and the rest of the scene still runs. Two devices on one output is passed over
+  rather than guessed. `list_scenes` shows the words as the devices they mean, so the app's
+  editor offers and saves real devices only. Nothing seeds scenes any more: the built-ins every
+  account was given were all the room node's light and music; the rows already seeded are the
+  user's, deleted like any other.
 
 ### 2.8 Device registry
 
@@ -406,7 +406,7 @@ Now:
 > Devices are **data, not code**. Each tenant owns a list. Adding a device is a
 > row, never new code per device.
 
-- Control types: `switch`, `dimmer`, `enum`, `media`, `cover`, `ir`, `text` (free text for her screen, limited by `meta.max_bytes`, default 255). A dimmer with `meta.levels_only` (every catalogued one: the neck, the gains, the volume, the flash's strength) takes a number only; «on»/«off» is refused with its range and the app draws no switch.
+- Control types: `switch`, `dimmer`, `enum`, `media`, `cover`, `ir`, `text` (free text for her screen, limited by `meta.max_bytes`, default 255). A dimmer with `meta.levels_only` (every catalogued one: the neck, the gains, the volume) takes a number only; «on»/«off» is refused with its range and the app draws no switch.
 - `command_payload(device, action, value)` is the **only** validator. It returns
   the payload or refuses with the list of allowed values so Sandy asks instead of
   guessing. This is what ends "turn the light on → applied the off scene".
@@ -416,12 +416,17 @@ Now:
   either is still listed, reaches nothing (`device_topic` is None, Sandy says it is no longer
   supported), and the app shows it as «not supported» with a delete.
 - A device's `online` is not stored: every read takes it from the board behind it
-  (`node_store.part_present`: the brain's `online` and not in safe mode, the camera's
-  `cam_online`, the room's `room_online`; a board never heard from is not connected).
-  A board that said it went sets `board_gone`, and nothing is sent to it: the boards hold
-  clean sessions, so the broker would take the command and drop it. `/api/devices/<name>/control`
-  answers it 409 `device_offline` (`camera_offline` for a camera part), apart from a send the
-  broker refused (200, `sent: false`).
+  (`node_store.part_present`: the brain's `online` and not in safe mode; a board never heard
+  from is not connected). A board that said it went sets `board_gone`, and nothing is sent to
+  it: the board holds a clean session, so the broker would take the command and drop it.
+  `/api/devices/<name>/control` answers it 409 `device_offline`, apart from a send the broker
+  refused (200, `sent: false`).
+- **A retired board's rows are passed over, never deleted** (`node_store.retired_output`: an
+  output under a branch, `cam/…` or `room/…`). The device rows of the camera and the room node
+  stay in `sandy_devices`, and every read (`list_devices`, `get_device`, `get_devices`,
+  `devices_on_output`) skips them, `device_topic` is None for them and `tenant_owns_topic`
+  refuses their topics; a new device on such an output is refused. A node's stored outputs and
+  `cam_*` / `room_*` fields are not shown (`node_store._public`) and go at its next heartbeat.
 - A device's `state` is the last command sent (`set_state`, with `state_at`) or what the
   brain's heartbeat says (`node_provision.board_states`: `volume`, `mic_*_gain` as levels,
   `mic_*` on unless `mic_*_muted`, written by `device_store.set_board_states`), so a relative
@@ -431,8 +436,7 @@ Now:
   caller paired; `tenant_owns_topic` matches nothing outside that tree.
 - **One robot per account** (the owner's decision): pairing a board when the account
   already has another answers 409 `one_robot` before any presence code is sent, and the
-  unique index `one_robot_per_account` on `sandy_nodes.user_id` closes the race. The
-  camera and the room node share their robot's id, so they are never «another». An
+  unique index `one_robot_per_account` on `sandy_nodes.user_id` closes the race. An
   account that already had two when the index came is logged at boot, not unpaired.
 - **A board nobody paired is heard** (`node_sightings`, keyed by board, a day TTL): its
   heartbeat, otherwise dropped, records that it is there. Pairing sends the presence code
@@ -473,7 +477,7 @@ paired the code. **A heartbeat cannot nominate its own owner.**
 
 ### 2.9 HTTP surface
 
-89 HTTP route handlers on 72 paths, plus two WebSockets (`/voice`, `/voice/enroll`).
+85 HTTP route handlers on 68 paths, plus two WebSockets (`/voice`, `/voice/enroll`).
 All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
 Registered by explicit `register_*_api(app, …)` calls in `api/server.py` — there
 are no Flask blueprints, so **route discovery means reading `server.py`'s
@@ -486,7 +490,7 @@ Who calls what:
   account (get / reset / delete), chat (`/api/agent`, `/api/agent/stream`),
   conversations (list, create, get, rename, delete, messages, search), the blocks
   (below), `/api/summary`, `/api/kinds`, daily nudge (+ answer), devices and nodes
-  (control, IR learn, pairing, snapshots, Wi-Fi, the room light's arm), `/api/life/focus` (+ start /
+  (control, IR learn, pairing, Wi-Fi), `/api/life/focus` (+ start /
   stop / history), `/api/life/scenes` (+ actions / apply / delete), photos
   (+ albums, file; `GET /api/photos` is a page of 200 newest first with `next` to pass back as `before`,
   its text search and the album counts run over the whole album in the database), images (`/api/image`, `/api/image/edit`, `/api/analyze-image`),
@@ -495,12 +499,10 @@ Who calls what:
   `/api/voice/tts`, and the `/voice` socket for live calls. The share extension
   uses `/api/agent`, `/api/analyze-image`, `/api/photos`, `/api/entries` and
   `/api/items`.
-- **The boards** — `/voice` (the brain), `/api/cam/upload` (the camera: signed, its time
-  at most two minutes behind or thirty seconds ahead, each signature remembered past that
-  window so it is used once (a replay answers 409, not 401: the camera drops its own key only on
-  `key_unknown`, and older camera firmware on any 401), a failed replay check refused with 503, the body read only up
-  to its cap),
-  `/api/firmware/manifest` and `/api/firmware/image/<version>` (OTA).
+- **The robot** — `/voice`, `/api/firmware/manifest` and `/api/firmware/image/<version>`
+  (OTA; a `board` other than `brain` is a retired camera or room board asking, refused 400,
+  never handed the brain's image). The camera's routes (the snapshot pair, `/api/cam/upload`)
+  and the light arm's went with those boards; `tests/test_routes_kept.py` pins them as gone.
 - **The owner's tooling** — `/api/firmware/publish` and `/rollout`
   (`scripts/publish_firmware.py`), `/api/diagnose` and `/health` (by hand).
 - **RevenueCat** — `/webhook/revenuecat`. Events are saved in the order they happened
@@ -801,7 +803,7 @@ actually means:
 | `auth_not_configured` | the server has no `SANDY_WS_HMAC_KEY` at all |
 | `key_unknown` | signed with `kv` 2, but the server holds no key for that board (unpaired or revoked); the board drops its key and falls back to the shared one |
 | `not_paired` | after `auth_ok`: no account has paired this board, so no call opens (nothing is billed); the board shows `NOT_PAIRED` and asks again on the next wake word, no backoff |
-| `server_error` | the server's fault, not the board's: a key record it cannot decrypt (`device_keys.KeyUnreadable`, a wrong or changed `SANDY_LTM_KEY`), any other failure on its side during the handshake (a database read), or no Gemini key. `bad_handshake` is kept for a hello that does not parse. The board keeps its key, is not locked out, and ends the call at once (status `NO_SERVER`); the camera gets 503 `key_unreadable` for the same case, never a 401 |
+| `server_error` | the server's fault, not the board's: a key record it cannot decrypt (`device_keys.KeyUnreadable`, a wrong or changed `SANDY_LTM_KEY`), any other failure on its side during the handshake (a database read), or no Gemini key. `bad_handshake` is kept for a hello that does not parse. The board keeps its key, is not locked out, and ends the call at once (status `NO_SERVER`) |
 
 The `ts` must be wall-clock, so the firmware opens no session until SNTP has set the clock
 (`sandy_clock.c`, started by `app_main`'s loop once Wi-Fi is up, safe mode too, where a signed erase is checked against it: the router first, then three public servers; never blocking). A wake word
@@ -968,9 +970,9 @@ returns to idle. If you add another early-return path, clear the face on it.
 
 ### 4.5 MQTT topics — the current contract
 
-Moved to the per-node namespace 14 Aug 2026 — commit `061cf82`. The room node
-followed on 23 Aug 2026; **nothing global is left.** All three boards are flashed
-and verified on this tree.
+Moved to the per-node namespace 14 Aug 2026 — commit `061cf82`; **nothing global is
+left.** The robot is the only board on it: the camera's `cam/` branch and the room node's
+`room/` branch went with those boards on 14 Oct 2026.
 
 ```
 sandy/node/<node_id>/mood · servo · gesture · buzzer · base · led · autonomous · focus · ota
@@ -979,38 +981,34 @@ sandy/node/<node_id>/mic_l · mic_r                 mute (payload "on" = unmuted
 sandy/node/<node_id>/mic_l_gain · mic_r_gain       digital gain, 0..300
 sandy/node/<node_id>/volume · speaker_test
 sandy/node/<node_id>/status                        heartbeat → ingest_status
-sandy/node/<node_id>/ir/learned                    captured IR code
-sandy/node/<node_id>/cam/request · command · wifi · factory_reset · flash · flash_level · flash_mode · stream · framesize (in)
-sandy/node/<node_id>/cam/snapshot · status · event (out)
-sandy/node/<node_id>/room/light · music            room node commands
-sandy/node/<node_id>/room/light_arm                the light arm's setup (service channel, not a device)
-sandy/node/<node_id>/room/status                   room heartbeat → ingest_status
+sandy/node/<node_id>/ir · ir/learned               IR learn / replay, captured IR code
 ```
+
+The server subscribes to exactly `sandy/node/+/status` and `sandy/node/+/ir/learned`, and
+`mqtt_ingest._handle_message` reads a heartbeat only from `sandy/node/<id>/status`. A camera
+or room board still flashed with the old firmware publishes under `cam/` and `room/`, which
+`+` never matches: it is never heard, and its uploads and update checks are refused (§2.9).
 
 `factory_reset` takes only `erase:<unix ms>:<hmac>`, signed by `node_store._erase_command`
 with the board's own voice key (the shared key while it has none; both, each in its own message, while its own
 key is only issued and may not be saved on the board, `_erase_commands`) over
 `factory_reset|<node_id>|<ms>`; the board refuses it unsigned, on a wrong signature, with
 its clock unset, or more than five minutes off (`voice_verify_signed`). The own key is loaded at boot (`voice_key_init`, before MQTT), in safe mode too, where the voice task never starts. A bare `erase` on
-the broker no longer wipes a robot. The camera has its own (`cam/factory_reset`, `node_store._wipe_camera`,
-sent with the brain's at a release): signed over `factory_reset|<node_id>:cam|<ms>` with the camera's own
-key (the shared one while it has none), checked the same way (`cam_wifi.ino`), and it forgets by name
-only its networks (`sandywifi`, the first one's `ws`/`wp` in `sandyid`) and its settings (`sandycam`),
-never the rest of its identity or its own key. It is kept like the brain's (`node_pending_erase`, row
-`<node_id>:cam`, its sealed own key and network at release) and sent again on the camera's heartbeats
-(`_erase_cam_if_pending`, once a minute at most, both keys) until it comes back on another network;
-pairing the robot again drops it first, and a send finds the robot paired is dropped.
+the broker no longer wipes a robot. A release sends the robot's erase only; the camera's pending
+erase rows (`<node_id>:cam` in `node_pending_erase`) left from before are never read and lapse
+with the thirty-day TTL.
 
-`wifi` and `cam/wifi` are signed the same way (`wifi_switch._signed_command`, keys from
+`wifi` is signed the same way (`wifi_switch._signed_command`, keys from
 `node_store.signing_keys`: the board's own, the shared one while it has none, both while its own
 is only issued): `wifi:<ms>:<ssid hex>:<sealed hex>:<hmac>`, the HMAC over
-`wifi|<signer>|<ms>|<ssid hex>|<sealed hex>` (signer `<node_id>` or `<node_id>:cam`), and the
+`wifi|<signer>|<ms>|<ssid hex>|<sealed hex>` (signer `<node_id>`), and the
 password, zero-padded to 64 bytes, XORed with HMAC over `wifi-pass|<signer>|<ms>|0` and `…|1`,
 so the broker never carries it. The board refuses it unsigned, with its clock unset, more than
 two minutes off, or not newer than the last one it took (a recorded one is never replayed); the
-brain checks it in safe mode too, and the setup pages are not touched. Boards from before it
-(brain under `0.12.0`, camera under `0.5.0`, `wifi_switch.SIGNED_FROM`, read from the heartbeat's
-version) still get `<ssid>\n<password>` until they update; one with no version is sent the signed one.
+brain checks it in safe mode too, and the setup page is not touched. A brain from before it (under
+`0.12.0`, `wifi_switch.SIGNED_FROM`, read from the heartbeat's version) still gets
+`<ssid>\n<password>` until it updates; one with no version is sent the signed one. A `board`
+other than `brain` (an app from before the camera's removal) is refused, never sent to the brain.
 
 A release keeps its erase (`node_pending_erase`, keyed by board, thirty days TTL): the
 broker keeps nothing for a board on a clean session, so a robot off at release used to
@@ -1023,19 +1021,6 @@ anyone, drops the row first, and the send checks the board is still nobody's: an
 reaches a paired robot. `board_wiped` in the release's answer is true only when the erase
 went and the board was there to take it; otherwise the app says it erases itself once back.
 
-A camera whose last word was its MQTT will (`telemetry.cam_online` false) is refused at
-once (409 `camera_offline`): no photo ticket, no stream switch, no «pending» for ever; the
-app's live view says so, or that nothing arrived in ten seconds, instead of a placeholder.
-A photo's `snapshot` command carries `flash` only when the caller chose one; without it the
-camera uses the mode its owner saved (`cam/flash_mode`), so a flash set off stays off.
-The picture sizes offered (`node_provision.CAM_FRAME_SIZES`) stop at the camera's largest,
-`CAMERA_MAX_FRAME_SIZE` (VGA, its frame buffer is allocated once at that size); a larger one was
-clipped by the board while the server recorded it.
-A photo the camera refuses at once (another one in hand, `camera_busy`; the last heavy command
-under `CAM_COMMAND_MIN_GAP_MS` ago, `too_soon`) comes back on `cam/event` with the request's id and
-that code (`refuseSnapshot`), and the server answers the app with its sentence
-(`camera_client._ERROR_TEXT`) instead of waiting out the ticket.
-
 `node_id` is derived on the board from `SANDY_PAIR_CODE` in `secrets.h` using the
 **same transform as `node_store.code_to_node_id`** — lowercase, alphanumerics
 only. Keep those two in lockstep; if one drifts the robot goes quiet and nothing
@@ -1044,9 +1029,7 @@ on first boot, before it has ever been paired.
 
 The brain subscribes with a single wildcard one level deep (`sandy/node/<id>/+`) and
 dispatches on the suffix, so adding a control cannot be half-done by forgetting a
-subscription. One level, not `#`: the camera's `cam/` and the room's `room/` branches share
-the id, and their heartbeats and events reached the robot every few seconds for nothing.
-Every command the brain takes is one level deep; one under a branch would never arrive.
+subscription. One level, not `#`: anything deeper is no command of hers. Every command the brain takes is one level deep; one under a branch would never arrive.
 Its own heartbeat still comes back (it is at that level) and is skipped by name.
 
 The heartbeat is retained on the broker, so every server restart is handed each board's
@@ -1056,23 +1039,14 @@ levels, and the current gain/mute/volume/noise settings. **Those three key names
 are the backend's spelling** — `mqtt_ingest` reads them exactly and silently
 ignores anything else.
 
-#### Three boards, one node id
+#### One board, its whole outputs
 
-The brain, the camera and the room node share a pairing code and therefore a node
-id: they are one robot, not three boxes. Each writes in its own **namespace** —
-the camera under `cam/`, the room node under `room/`, the brain in the bare one —
-and each has its own heartbeat topic, because `+` matches a single level and
-`sandy/node/+/status` never sees `…/cam/status` or `…/room/status`. A board whose
-heartbeat topic nobody subscribes to works perfectly and is invisible: it obeys
-commands and never appears in the app, because what registers a device is the
-board *declaring an output*.
-
-`node_store._merge_outputs` replaces only the namespaces the arriving heartbeat
-speaks for. It was a boolean (camera or not) until 23 Aug 2026, which was correct
-with two boards and silently wrong with three — the room's outputs read as "not
-camera", so brain and room heartbeats deleted each other five seconds apart, for
-ever. A heartbeat declaring nothing keeps everything: silence is not a claim that
-the hardware is gone.
+A heartbeat that declares outputs replaces the node's whole list (`node_store._merge_outputs`);
+one declaring nothing keeps everything, since silence is not a claim that the hardware is gone.
+It used to replace only its own namespace, when the brain, the camera and the room node shared
+the id and took turns heartbeating; an output under a branch is now a retired board's
+(`retired_output`), dropped from what is kept and refused from what arrives. Telemetry merges by
+key and keeps only the keys `_TELEMETRY_KEYS` still knows, so the old `cam_*` and `room_*` go too.
 
 Declared `kind` values must be in `node_store.KNOWN_CAPABILITIES`. Anything else
 is dropped **silently** — the board publishes, the server parses, the entry
@@ -1192,8 +1166,7 @@ broker (the free plan has no API): a release lists the board's login
 the list (accounts in `SANDY_OWNER_ACCOUNTS` only, the app's «why isn't a part showing?»),
 and a row leaves it once its login is no longer the one in `SANDY_BROKER_CREDS`.
 
-The camera and the room node have no voice link and take theirs from their own
-`secrets.h` at flash time. Issuing is a config table (`SANDY_BROKER_CREDS`) rather
+Issuing is a config table (`SANDY_BROKER_CREDS`) rather
 than an API call because programmatic issuing needs the broker's paid plan;
 `creds_for_device` is the seam where that swaps in.
 
@@ -1204,7 +1177,7 @@ credential each was using. Per-device credentials do not help with that; only th
 id does.
 
 **The backend is a broker client too**, and the easy one to forget. `mqtt_ingest`
-and `room_device` connect with `SANDY_MQTT_USER` / `SANDY_MQTT_PASS`, and unlike a
+and `device_publisher` connect with `SANDY_MQTT_USER` / `SANDY_MQTT_PASS`, and unlike a
 board the server is not scoped to one node — it listens to every tenant's
 heartbeats and publishes to every tenant's devices, so its filter is `sandy/node/#`.
 Revoking the shared credential without repointing those two vars cuts the server
@@ -1213,14 +1186,13 @@ node reads offline, and no device is ever provisioned — because what registers
 device is a heartbeat.
 
 **One topic filter per board.** The free broker plan gives a credential exactly one
-permission, which is the other reason the room had to leave the global tree: the
-brain needed its own subtree *and* the global one, and that is not expressible.
+permission, which is why nothing global is left: a board's own subtree is all it gets.
 Steps to issue the credentials live in `docs/مفاتيح-الوسيط.md` (untracked — `docs/`
 is gitignored).
 
 ### 4.6 Hardware reality — read before promising a control surface
 
-Updated 23 Aug 2026. **This table is the answer**, and the only other place that
+Updated 14 Oct 2026. **This table is the answer**, and the only other place that
 describes the hardware is `firmware/brain-core/HARDWARE.md` — generated by
 `scripts/gen_hardware_doc.py` from the firmware itself, with
 `tests/test_device_system.py` failing the suite when it drifts. (`docs/HARDWARE_CAPABILITIES.md`
@@ -1228,7 +1200,6 @@ was named here twice and does not exist; the generator has never written it.)
 
 | Part | Reachable from the backend | Physically working |
 |---|---|---|
-| Camera (ESP32-CAM) | Yes — flash, snapshot, stream, framesize, quality | Yes — `firmware/vision-core/`, flashed and on the broker |
 | Face / display | Yes — all 25 moods | Yes |
 | Microphones | Yes — per-channel gain, mute, live level | Yes |
 | Speaker | Yes — volume 0..100, test tone | Yes, through the voice path |
@@ -1238,8 +1209,7 @@ was named here twice and does not exist; the generator has never written it.)
 | Base motors | Topic exists | `ENABLE_MOTORS = 0` |
 | Buzzer | Yes — 17 melodies | Yes — passive piezo on GPIO 17 |
 | Distance sensor | No | Dropped; `ENABLE_SENSOR = 0` |
-| Room light (room node) | Yes — `room/light`, provisioned from its heartbeat | Yes — servo presses the wall switch |
-| Room music (room node) | Yes — `room/music`, stop/pause/resume/next/prev | Yes — DFPlayer over UART2 |
+| IR remote | Yes — learn and replay (`ir`, `ir/learned`), in scenes too | Written, not yet tried on hardware |
 
 "Mute the left mic, speak, and watch only the right meter move" now works end to
 end — that is the point of per-channel metering, and it is how you tell a dead mic
@@ -1248,10 +1218,14 @@ from a cross-wired one without a multimeter.
 **Everything in the first column is true of the source, not of the board on the
 desk, until it is flashed.**
 
-The camera board program is no longer missing — `firmware/vision-core/` exists, is
-flashed, and answers on the broker. Neither is the IR code (`main/sandy_ir.c`, on the brain; §4.5), though
-it is written and not yet tried on hardware. Nor is two-mic separation: the esp-sr
-front end does it (`sandy_voice.c`, input "MMR").
+The IR code (`main/sandy_ir.c`, on the brain; §4.5) is written and not yet tried on
+hardware; `tests/test_ir_scenes_still_work.py` holds its server half. Two-mic separation is
+the esp-sr front end's (`sandy_voice.c`, input "MMR").
+
+The camera board and the room node (the light servo and the DFPlayer) were removed on 14 Oct
+2026, firmware, server and app; the tag `before-remove-cam-room` holds them. The brain's local
+command words that published to the room node (light, fan, music, all off) went with it; the
+ones left only open a call.
 
 The Arabic display font is done: `main/fonts/` now carries the typeface at
 twenty-four and thirty-two pixels alongside LVGL's built-in sixteen, which is
@@ -1261,61 +1235,8 @@ what makes the text-size control real rather than decorative.
 
 ## 5. The other boards
 
-- **`firmware/vision-core/`** (ESP32-CAM) — the camera board's own program. It exists,
-  it is flashed, and it answers on the broker (§4.6). This section used to say
-  in bold that it did not exist, while §4.6 two pages later said it was working
-  — the map contradicting itself, which is worse than either answer.
-
-  What it has to do is set by what the backend already expects.
-  `app/integrations/camera_client.py` publishes the request, holds the pieces
-  and hands back one JPEG; the sketch derives its `node_id` from
-  `SANDY_PAIR_CODE` in its own `secrets.h`, which must be **flashed with the
-  same code as its robot's brain** — that is what makes the two boards one node
-  instead of two things to pair. Topics are built once in `setupMQTT()` before
-  any subscribe, because empty topics leave the board publishing into
-  `sandy/node//cam/...` and looking healthy while nobody hears it.
-
-  For the record, because it cost a long time: every fix aimed at the camera
-  before that sketch existed was aimed at plumbing that was already correct. The
-  snapshot request was published exactly right and nothing was subscribed; no
-  `cam/status` heartbeat was ever sent, so the address the live view needs never
-  arrived, and "couldn't get the address" was the literal truth.
-
-  When its network does not answer for a minute and a half (or none is saved) it
-  raises its own, `Sandy-Cam-<pair code>` with password `sandy<pair code>`, and serves
-  a page at `http://192.168.4.1` to pick a new one (`cam_setup.ino`; each opening of the page scans again with the station's connect attempt held, `g_wifiHold`, since a scan during it fails and left the list empty); the choice goes
-  through the same tested switch as `cam/wifi` (an address, then the broker answering a
-  connection through it within `CAM_REACH_WINDOW_MS`, `camBrokerReachable`: its name resolves and
-  its port takes a connection, no TLS on the camera's RAM), and the setup network drops itself
-  once the home network is back. As on the brain, a network that works with no broker for
-  `CAM_SETUP_NO_SERVER_MS` (10 min) raises it too, and the broker's next answer takes it down. The sensor starts before the radio, up to `CAM_INIT_TRIES` (4) times, each after a power
-  cycle and a wait doubling from 300 ms, its clock at 10 MHz, and the radio transmits at
-  `CAM_WIFI_TX_POWER` (15 dBm, set again after each mode change): the radio's draw was what it lost to.
-  A sensor that failed at boot is retried from the
-  loop (30 s, doubling to 5 min) instead of waiting for a reboot. Its heartbeat says how the sensor is (`sensor`: `ok`,
-  `retrying` while the gap is still growing, `failed` once it is at five minutes); the server keeps
-  it as `cam_sensor` (read from `camera_ready` for a camera before it) and the app's robot card shows it. Like the brain,
-  the owner's own build (a `secrets.h` with `SANDY_OTA_PASSWORD`) has LAN upload and
-  the log mirror on port 23; the sale build `publish_firmware.py` makes defines
-  `SANDY_RETAIL` and has neither. The room node follows the same rule for LAN upload.
-- **`firmware/room-node/`** (classic ESP32) — the room node: light servo and DFPlayer, under
-  `sandy/node/<id>/room/`. The servo's rest, on and off angles and the press length are the
-  owner's, set from the app (Control › the node › «ضبط ذراع الضو», `RoomArmView`) through
-  `POST /api/nodes/<id>/room/light-arm` (`features/room_arm.py`) on the `room/light_arm`
-  service channel: `goto:<deg>`, `try:on|off:<rest>,<on>,<off>,<ms>` (a trial press that leaves
-  the light's state alone), `set:…` (kept in the board's NVS). Both sides check the same limits
-  (10–170°, rest at least 10° inside the two presses, 150–1500 ms); the heartbeat's `arm`
-  (`room_arm`) carries what is saved.
-
-  Its network is changed the camera's way, with no cable: a saved network (`sandywifi`) wins over
-  the first one in its identity, and a switch is tried before it is saved — an address, then the
-  broker taking a connection through it (`roomBrokerReachable`), the old one back otherwise, a
-  «trying» mark cleared at boot (`room_net.ino`). With no network for a minute and a half (at once
-  with none saved), or ten minutes on one that reaches no broker, it raises
-  `Sandy-Room-<last four of the code>`, password `sandy<code>`, and a page at
-  `http://192.168.4.1` that scans on each opening and sends the choice through that switch
-  (`room_setup.ino`); it goes once the network and the broker are back, and the
-  fifteen-minute offline restart waits while it is up. There is no `room/wifi` over the broker yet.
+There are none. The robot's brain (§4) is the only board; the camera board and the room node
+were removed on 14 Oct 2026 (§4.6).
 
 ---
 
@@ -1475,9 +1396,10 @@ so folders are organisation only.
   The robot screen (`Features/Sandy/RobotView.swift`) holds everything about her: her
   state now and quick buttons (mood, gestures, melodies, light), the rest of her parts on
   the same screen (`RobotPartsSection`: neck, screen text and image, sound and mics,
-  camera, any part the app has no place for), the parts test, her board's Wi-Fi, «why isn't a part showing?»
-  (`DiagnoseView`, `GET /api/diagnose` in plain words) and linking/unlinking. Room
-  scenes (`RoomScenesSection`) are in home control; the scene editor offers the account's own
+  any part the app has no place for), the parts test, her board's Wi-Fi (`NodeWiFiView`, the
+  robot only), «why isn't a part showing?»
+  (`DiagnoseView`, `GET /api/diagnose` in plain words) and linking/unlinking. Scenes
+  (`ScenesSection`, `DeviceScene`) are in home control; the scene editor offers the account's own
   devices and the values each takes. Project lists Sandy made from chat
   («project:<name>») get a card each in My Life.
   Habits: a committed day is one on which every habit due that day was kept; the
@@ -1560,7 +1482,7 @@ Written today, and what reads it:
   keyed by the send's `client_msg_id` within its conversation, TTL a day) and `turn_stops` (a stopped reply, `_id` `<user>:<thread>`, TTL a day).
 - **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
   `sandy_scenes`, `sandy_voiceprints`, `sandy_voice_enroll`, `sandy_firmware`, `sandy_firmware_chunks`,
-  `node_pair_challenges`, `node_sightings`, `cam_upload_nonces`, `camera_inbox`.
+  `node_pair_challenges`, `node_sightings`.
 - **Everything else** — `sandy_focus`, `sandy_photos` + the `sandy_photo_files`
   GridFS bucket, `sandy_push_tokens`, `sandy_daily_nudge`, `sandy_nudge_locks`.
 
@@ -1593,7 +1515,7 @@ settings). Every field the code writes to that row is in one of the two;
 
 Indexes are created at boot on the raw handle — by each store's `init_*` and
 `init_blocks`, and by `bootstrap.ensure_indexes()` for the rest (pending state,
-prompt cache, camera and pairing TTLs, conversations, focus, and one active focus session
+prompt cache, pairing TTLs, conversations, focus, and one active focus session
 per user, `focus_store.ensure_one_active`, which first closes the extra ones, the newest kept) — one `try` per
 index, so one failure cannot skip the rest. `sandy_stm`'s three are created on
 first use by `brain/stm.py::_ensure_stm_indexes`, same one-try-each rule, and
@@ -1604,7 +1526,7 @@ cross-channel read from scanning every conversation on the server.
 
 ## 9. Tests and CI
 
-87 test files, pytest + mongomock, no hardware and no live credentials needed.
+141 test files, pytest + mongomock, no hardware and no live credentials needed.
 `tests/test_device_system.py` carries the headline guarantee: the brain may only
 act on a **registered** device with a **validated** action, and refuses with the
 allowed list rather than guessing. `tests/test_routes_kept.py` pins every route a
@@ -1718,10 +1640,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
    issued its own key in `auth_ok` (`features/device_keys`, NVS `sandy_vkey/k`)
    — but only in the `ENROL_WINDOW_MIN` minutes after the owner pairs (or
    re-pairs) it (`node_store.pair_node` → `open_enrolment`). It then signs
-   with it (`"kv": 2`) and the shared key is refused for that board. The camera
-   does the same over `/api/cam/upload` (`X-Sandy-Kv: 2`, Preferences
-   `sandy_ckey/k`) under its own id `<node>:cam`, so camera and brain never
-   share a key. Un-pairing revokes both (`key_unknown`). What is left: inside
+   with it (`"kv": 2`) and the shared key is refused for that board.
+   Un-pairing revokes it (`key_unknown`). What is left: inside
    the window, someone holding the shared key who connects as that board first
    gets its key (the real board is then refused — visible, not silent).
    Closing it fully means writing each board's key at flash time.
@@ -1750,14 +1670,7 @@ nobody re-reads becomes a way of believing things that stopped being true.
    refuses an image that still contains it (`brain_image_refused`: the log task, the upload
    task or its page), one whose version string is not this source's (a stale build-retail
    would install and be offered again for ever), or one carrying a value from the real
-   `secrets.h`; `--check` runs the refusals without a key or an upload. The Arduino boards verify TLS
-   against `sandy_ca_roots.h` (`scripts/gen_ca_roots.py`) and pull signed releases too
-   (`sandy_ota_pull.h`, one file kept identical in both sketches), with the same trial note: written
-   before `Update.end` switches the slot, cleared only once the image held the broker a minute, and a
-   version the board came back from twice (`SANDY_OTA_BAD_MAX_TRIES`, as the brain's) is never taken again. A check feeds the board's watchdog before
-   and after every network step, each step with its own deadline under the room's thirty-second
-   watchdog (`SANDY_OTA_CONNECT_TIMEOUT_MS` for the TCP connect and again for the handshake,
-   `SANDY_OTA_NET_TIMEOUT_MS` per read), and never runs in the loop pass that reached the broker. Still open: secure boot and flash encryption are off.
+   `secrets.h`; `--check` runs the refusals without a key or an upload. Still open: secure boot and flash encryption are off.
 1. **Sentry is wired but only as good as its DSN.** `integrations/error_tracking`
    starts at boot when `SENTRY_DSN` is set; `before_send` strips request
    bodies and query strings and, since 19 Sep 2026, log breadcrumbs down to their
@@ -1809,9 +1722,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
 ### Checked and closed since the last version of this list
 
 The firmware **is** built in CI (`idf.py build`, §9), so "never compiled" is no
-longer true. The control page **exists** (`ios/SandyApp/Features/Control/`). The
-room node is **on the per-node topic tree** (§4.5), and nothing is owner-only on the
-way to it. The display **has** an Arabic font at 24 and 32 pixels
+longer true. The control page **exists** (`ios/SandyApp/Features/Control/`). Nothing
+global is left on the broker (§4.5), and nothing is owner-only on the way to a device. The display **has** an Arabic font at 24 and 32 pixels
 (`firmware/brain-core/main/fonts/`). `feature_flags.py` (unused) was removed. Servo easing and ten gestures are in
 (`sandy_servo.c`). The visitor approval flow and the JSON profile store are gone.
 The brain **is** told which devices exist: `context.devices_line` lists them by name and room in the chat prompt and in the call's per-session context (`voice_ws/memory.session_context`, uncached). Phase 5 closed three more by deleting what they were about: `tool_health` (no
