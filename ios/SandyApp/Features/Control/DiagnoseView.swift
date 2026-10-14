@@ -3,7 +3,7 @@ import SwiftUI
 /// «ليش قطعة مش ظاهرة؟» — the server's check (`GET /api/diagnose`) in plain words: each
 /// board (connected or not, its version, when it was last heard), parts a board has that
 /// the app does not know yet, parts the app knows that no board has announced, and
-/// whether the screen and the camera were set up.
+/// whether the screen was set up.
 struct DiagnoseView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
@@ -82,9 +82,6 @@ struct DiagnoseView: View {
                 line(c.screenDeviceExists ? "checkmark.circle.fill" : "xmark.circle.fill",
                      lang.s(c.screenDeviceExists ? "robot.diag.screenOk" : "robot.diag.screenMissing"),
                      c.screenDeviceExists ? Theme.Colors.success : Theme.Colors.warn)
-                line(c.cameraDevicesExist.isEmpty ? "xmark.circle.fill" : "checkmark.circle.fill",
-                     lang.s(c.cameraDevicesExist.isEmpty ? "robot.diag.cameraMissing" : "robot.diag.cameraOk"),
-                     c.cameraDevicesExist.isEmpty ? Theme.Colors.secondaryText : Theme.Colors.success)
             }
         }
     }
@@ -137,13 +134,11 @@ struct DiagnoseReport: Decodable {
         let declaredButNoCatalogueEntry: [String]
         let catalogueHasButBoardNeverDeclared: [String]
         let screenDeviceExists: Bool
-        let cameraDevicesExist: [String]
 
         enum CodingKeys: String, CodingKey {
             case declaredButNoCatalogueEntry = "declared_but_no_catalogue_entry"
             case catalogueHasButBoardNeverDeclared = "catalogue_has_but_board_never_declared"
             case screenDeviceExists = "screen_device_exists"
-            case cameraDevicesExist = "camera_devices_exist"
         }
     }
 

@@ -18,7 +18,6 @@ struct RobotLiveSection: View {
                     SandyNotice(lang.s("robot.live.powerWeak"), kind: .gentleWarning)
                 }
                 stats(node)
-                if let sensor = node.cameraSensor { cameraSensorTile(sensor) }
                 if store.has(SandyMood.Device.face) { moodGrid }
                 if store.has(SandyMood.Device.gesture) {
                     chips("live.gestures", icon: "figure.wave", device: SandyMood.Device.gesture,
@@ -106,33 +105,10 @@ struct RobotLiveSection: View {
             statTile(icon: wifiIcon(node.rssi), title: lang.s("robot.live.wifi"),
                      value: wifiText(node), tint: wifiColor(node.rssi))
             statTile(icon: "cpu", title: lang.s("robot.live.firmware"),
-                     value: firmwareText(node), tint: Theme.Colors.accent)
+                     value: node.firmwareVersion.isEmpty ? lang.s("robot.live.unknown")
+                                                         : node.firmwareVersion,
+                     tint: Theme.Colors.accent)
         }
-    }
-
-    /// The brain's version, with the camera's and the room node's under it when they report one.
-    private func firmwareText(_ node: RobotLiveNode) -> String {
-        var lines = [node.firmwareVersion.isEmpty ? lang.s("robot.live.unknown") : node.firmwareVersion]
-        if let cam = node.cameraFirmware {
-            lines.append(String(format: lang.s("robot.live.cameraFirmware"), cam))
-        }
-        if let room = node.roomFirmware {
-            lines.append(String(format: lang.s("robot.live.roomFirmware"), room))
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    /// The camera's sensor in words, so a failed start is said instead of a silent camera.
-    private func cameraSensorTile(_ sensor: String) -> some View {
-        let tint: Color
-        let icon: String
-        switch sensor {
-        case "ok":       tint = Theme.Colors.success; icon = "camera.fill"
-        case "retrying": tint = Theme.Colors.warn;    icon = "arrow.clockwise.circle"
-        default:         tint = Theme.Colors.danger;  icon = "exclamationmark.triangle.fill"
-        }
-        return statTile(icon: icon, title: lang.s("robot.live.cameraSensor"),
-                        value: lang.s("robot.live.cameraSensor." + sensor), tint: tint)
     }
 
     private func statTile(icon: String, title: String, value: String, tint: Color) -> some View {

@@ -4,7 +4,7 @@ import SwiftUI
 /// يملكها الستور — فإلغاء إيماءة الواجهة (سحب/تنقّل) ما يلغي الجلب.
 @MainActor
 final class RobotStore: LoadableStore {
-    @Published var scenes: [RoomScene] = []
+    @Published var scenes: [DeviceScene] = []
     /// رسالة ودّية بصوت ساندي (فاضية = ما في خطأ/إشعار).
     /// اسم المشهد الجاري تطبيقه (لمؤشّر الزر داخل بطاقته).
     @Published var applying = ""
@@ -127,7 +127,7 @@ final class RobotStore: LoadableStore {
     }
 
     /// يطبّق مشهداً وينشر نتيجته (متّصل/غير متّصل/خطأ) كإشعار ودّي.
-    func apply(api: APIClient, scene: RoomScene) async {
+    func apply(api: APIClient, scene: DeviceScene) async {
         applying = scene.name; clearNotice()
         do {
             let r = try await api.applyScene(name: scene.name)
@@ -161,7 +161,7 @@ final class RobotStore: LoadableStore {
     }
 
     /// تعديل أفعال مشهد قائم ثم إعادة جلب. يرجّع نجاح/فشل.
-    func update(api: APIClient, scene: RoomScene, actions: [SceneAction]) async -> Bool {
+    func update(api: APIClient, scene: DeviceScene, actions: [SceneAction]) async -> Bool {
         do {
             try await api.setSceneActions(name: scene.name, actions: actions)
             clearNotice()
@@ -174,13 +174,12 @@ final class RobotStore: LoadableStore {
     }
 
     /// حذف مشهد ثم إعادة جلب.
-    func remove(api: APIClient, scene: RoomScene) async {
+    func remove(api: APIClient, scene: DeviceScene) async {
         do {
             try await api.deleteScene(name: scene.name)
             await load(api: api)
         } catch {
-            notify(error.localizedDescription == "builtin"
-                                              ? "robot.builtinDel" : "robot.saveError")
+            notify("robot.saveError")
         }
     }
 }

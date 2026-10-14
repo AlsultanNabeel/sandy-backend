@@ -18,9 +18,3 @@ widget extension (`SandyWidget/`) and the tests (`SandyAppTests/`,
 The app talks to the production backend by default
 (`Core/Networking/Backend.swift`, `defaultURL`). Sign-in is Apple, Google or
 email; there is no developer/owner password login any more.
-
-## Local network
-
-Only the local camera stream uses plain `http://<device-ip>`. Allow that with
-`NSAppTransportSecurity › NSAllowsLocalNetworking = YES` — do **not** enable
-`NSAllowsArbitraryLoads`, which turns off TLS checks for every host.

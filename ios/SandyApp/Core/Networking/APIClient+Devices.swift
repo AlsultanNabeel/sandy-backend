@@ -41,7 +41,7 @@ private struct NodeListResponse: Decodable {
                 outputs = (try? c.decode([String].self, forKey: .outputs)) ?? []
             }
             // قاموس مختلط الأنواع بينفكّ مفتاح مفتاح: قيمة ما بنقراها (قاموس `faults` أو `stacks`)
-            // بتنشال لحالها بدل ما تفضّي كل التليمتري. غيابه مش خطأ: عقدة الغرفة ما بتبعث تليمتري.
+            // بتنشال لحالها بدل ما تفضّي كل التليمتري. غيابه مش خطأ: روبوت لسا ما بعت نبضة.
             if let raw = try? c.decode([String: OptionalTelemetry].self, forKey: .telemetry) {
                 telemetry = raw.compactMapValues { $0.value?.any }
             } else {
@@ -177,8 +177,8 @@ extension APIClient {
 
     /// The server answers 200 with `"sent": false` when the command never left it (the broker
     /// is down): that is not «done». An answer without the field (an older server) is taken as
-    /// sent. A board it knows is gone is refused before that, 409 `device_offline` (or
-    /// `camera_offline`), which `isNotConnected` reads.
+    /// sent. A board it knows is gone is refused before that, 409 `device_offline`, which
+    /// `isNotConnected` reads.
     static func reachedTheBoard(_ reply: [String: Any]) throws {
         if (reply["sent"] as? Bool) == false {
             throw APIError(message: AppLocale.isArabic
@@ -189,21 +189,13 @@ extension APIClient {
     }
 
     static func isNotConnected(_ error: APIError) -> Bool {
-        error.code == "device_offline" || error.code == "camera_offline"
+        error.code == "device_offline"
     }
 
     // الخادم بيصغّر الصورة ع ٢٤٠×٢٤٠ وبيحوّلها لصيغة الشاشة: فكّ الصور بياكل رام اللوح.
     func sendDeviceImage(name: String, jpegData: Data) async throws {
         try await send("/api/devices/\(URLEscape.segment(name))/image", method: "POST",
                        body: ["image_base64": jpegData.base64EncodedString()])
-    }
-
-    // آخر إطار من البثّ البعيد؛ `nil` = ما في إطار بعد (مش خطأ).
-    func liveFrame(nodeId: String) async throws -> Data? {
-        let r = try await rawGet("/api/nodes/\(URLEscape.segment(nodeId))/snapshot/live", timeout: 8)
-        guard r.count > 2, r[r.startIndex] == 0xFF,
-              r[r.index(after: r.startIndex)] == 0xD8 else { return nil }
-        return r
     }
 
     // يفضّي الحساب بس بيخلّيه (والروبوت يضل ملكه) — منفصل عن الحذف.
@@ -220,45 +212,15 @@ extension APIClient {
                                        body: ["confirm": "DELETE"])
     }
 
-    // بيرجّع الصورة أو تذكرة منسأل عنها: اللوح ممكن ياخد +٢٠ ثانية، ومهلة طويلة
-    // كانت بتوقّف خيط خادم (عنده ١٦ بس).
-    func cameraSnapshot(nodeId: String) async throws -> Data {
-        let data = try await rawPost("/api/nodes/\(URLEscape.segment(nodeId))/snapshot", timeout: 20)
-
-        // JPEG بتبدأ بـ FF D8.
-        if data.count > 2, data[data.startIndex] == 0xFF,
-           data[data.index(after: data.startIndex)] == 0xD8 {
-            return data
-        }
-        struct Ticket: Decodable { let req_id: String? }
-        guard let req = (try? JSONDecoder().decode(Ticket.self, from: data))?.req_id else {
-            throw APIError(message: "no_photo")
-        }
-
-        // ٤٠ ثانية بتغطّي أبطأ ردّ شفناه؛ السؤال رخيص (كل ثانية ونص).
-        let deadline = Date().addingTimeInterval(40)
-        while Date() < deadline {
-            try await Task.sleep(nanoseconds: 1_500_000_000)
-            let r = try await rawGet("/api/nodes/\(URLEscape.segment(nodeId))/snapshot/\(URLEscape.segment(req))")
-            if r.count > 2, r[r.startIndex] == 0xFF,
-               r[r.index(after: r.startIndex)] == 0xD8 {
-                return r
-            }
-        }
-        throw APIError(message: "no_photo")
-    }
-
     // بترجع أول ما ينبعت الطلب؛ النتيجة الحقيقية بحقل `ssid` بالنبضة الجاية (اللوح بياخد لحد ٢٥ ث).
     @discardableResult
-    func switchNodeWiFi(nodeId: String, ssid: String, password: String,
-                        board: String = "brain") async throws -> Int {
+    func switchNodeWiFi(nodeId: String, ssid: String, password: String) async throws -> Int {
         // أسماء الحقول مطابقة لرد الخادم حرفيًا (`window_s`).
-        struct Body: Encodable { let ssid: String; let password: String; let board: String }
+        struct Body: Encodable { let ssid: String; let password: String }
         struct Reply: Decodable { let ok: Bool?; let window_s: Int? }
         let r: Reply = try await fetch("/api/nodes/\(URLEscape.segment(nodeId))/wifi",
                                        method: "POST",
-                                       body: Body(ssid: ssid, password: password,
-                                                  board: board))
+                                       body: Body(ssid: ssid, password: password))
         return r.window_s ?? 35
     }
 
@@ -325,16 +287,6 @@ extension APIClient {
         let r = try await request("/api/nodes/\(URLEscape.segment(nodeId))/ir/learn",
                                   method: "POST", body: [String: String]())
         try Self.reachedTheBoard(r)
-    }
-
-    /// ذراع ضو الغرفة: `goto` (مع `angle`)، `try_on`/`try_off`/`save` (مع قيم `RoomArm`).
-    /// التجربة ما بتغيّر حالة الضو. 409 `room_offline` لما لوح الغرفة مش متصل.
-    func roomLightArm(nodeId: String, action: String, angle: Int? = nil, arm: RoomArm? = nil) async throws {
-        var body: [String: Any] = ["action": action]
-        if let angle { body["angle"] = angle }
-        if let arm { body.merge(arm.body) { $1 } }
-        _ = try await request("/api/nodes/\(URLEscape.segment(nodeId))/room/light-arm",
-                              method: "POST", body: body)
     }
 
     func nodeIrLast(nodeId: String) async throws -> (code: String, at: String) {

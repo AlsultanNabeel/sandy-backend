@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// تبويب الفوكس — مؤقّت بومودورو + إحصائيات. المؤقّت بيربط جلسته بمشهد بداية/نهاية
-/// من مشاهد الغرفة، فبيقرأ القائمة من نفس `RobotStore` (للقراءة فقط)؛ إدارة المشاهد
+/// من المشاهد، فبيقرأ القائمة من نفس `RobotStore` (للقراءة فقط)؛ إدارة المشاهد
 /// نفسها صارت بتبويب الروبوت. يطابق studio.focus.* بالويب.
 struct FocusView: View {
     @EnvironmentObject var state: AppState
@@ -52,7 +52,7 @@ private struct TimerSection: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
 
-    let scenes: [RoomScene]
+    let scenes: [DeviceScene]
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var status = FocusStatus()

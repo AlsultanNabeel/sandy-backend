@@ -17,7 +17,7 @@ enum L10nTabs {
             "life":     .text("حياتي"),
             // عناوين شاشات الميزات (تُفتح من جوّا هَب أو من أرشيف البروفايل).
             "focus":    .text("الفوكس"),
-            "robot":    .text("مشاهد الغرفة"),   // مش الروبوت: هاي سيناريوهات الأجهزة
+            "robot":    .text("المشاهد"),   // مش الروبوت: هاي سيناريوهات الأجهزة
             "search":   .text("البحث"),
             "images":   .text("الصور"),
             "memory":   .text("الذاكرة"),
@@ -27,7 +27,7 @@ enum L10nTabs {
             "sandy":    .text("Sandy"),
             "life":     .text("Life"),
             "focus":    .text("Focus"),
-            "robot":    .text("Room scenes"),   // not the robot: these are device scenes
+            "robot":    .text("Scenes"),   // not the robot: these are device scenes
             "search":   .text("Search"),
             "images":   .text("Images"),
             "memory":   .text("Memory"),

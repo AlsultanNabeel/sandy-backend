@@ -27,13 +27,12 @@ final class DevicesStore: LoadableStore {
     /// الأول جسمها، والتاني بيتك — والخلط بينهن بيعمل قائمة طويلة ما إلها
     /// موضوع واحد.
     ///
-    /// البادئة هي المعيار لأنها هي اللي بيكتبها الخادم: `sandy_` للروبوت،
-    /// و`cam_` للكاميرا. جهاز أضافه المالك بإيده ما بيبلّش فيهن، فبيضل بالبيت
-    /// وين مكانه.
-    static let robotPrefixes = ["sandy_", "cam_"]
+    /// البادئة هي المعيار لأنها هي اللي بيكتبها الخادم: `sandy_` للروبوت. جهاز
+    /// أضافه المالك بإيده ما بيبلّش فيها، فبيضل بالبيت وين مكانه.
+    static let robotPrefix = "sandy_"
 
     private func isRobotPart(_ device: DeviceItem) -> Bool {
-        Self.robotPrefixes.contains { device.name.hasPrefix($0) }
+        device.name.hasPrefix(Self.robotPrefix)
     }
 
     /// أجهزة البيت وبس — بلا أجزاء الروبوت.

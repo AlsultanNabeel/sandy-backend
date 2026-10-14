@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// روبوت ساندي — كل إشي بيخصّها بمكان واحد: حالتها هلأ (متّصلة، وشها، الواي فاي)،
-/// أزرارها السريعة، وكل قطع جسمها (الرقبة والشاشة والصوت والكاميرا)، فحص القطع، شبكة
-/// اللوح، ليش قطعة مش ظاهرة، وربطها أو فكّها. مشاهد الغرفة مش هون: إلها التحكّم بالبيت.
+/// أزرارها السريعة، وكل قطع جسمها (الرقبة والشاشة والصوت)، فحص القطع، شبكة
+/// اللوح، ليش قطعة مش ظاهرة، وربطها أو فكّها. المشاهد مش هون: إلها التحكّم بالبيت.
 struct RobotView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
@@ -106,15 +106,15 @@ struct RobotView: View {
     }
 }
 
-/// مشاهد الغرفة — بالتحكّم بالبيت: تشغيلها، وإضافتها، وتعديلها، وحذفها. نفس `RobotStore`
+/// المشاهد — بالتحكّم بالبيت: تشغيلها، وإضافتها، وتعديلها، وحذفها. نفس `RobotStore`
 /// اللي بيقرأ منه الفوكس مشاهد البداية والنهاية.
-struct RoomScenesSection: View {
+struct ScenesSection: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @ObservedObject var store: RobotStore
     /// The devices a scene can switch: the same rows as home control.
     let devices: [DeviceItem]
-    @State private var editing: RoomScene?
+    @State private var editing: DeviceScene?
     @State private var showAdd = false
 
     var body: some View {
@@ -144,7 +144,7 @@ struct RoomScenesSection: View {
         }
     }
 
-    private func sceneCard(_ scene: RoomScene) -> some View {
+    private func sceneCard(_ scene: DeviceScene) -> some View {
         SandyCard {
             HStack(spacing: Theme.Spacing.md) {
                 Text(scene.icon).font(.title2)
@@ -211,7 +211,7 @@ private struct SceneEditorSheet: View {
 
     let store: RobotStore
     /// nil = إضافة مشهد جديد، غير nil = تعديل أفعال مشهد قائم.
-    let scene: RoomScene?
+    let scene: DeviceScene?
     /// His devices, what an action can name.
     let devices: [DeviceItem]
 

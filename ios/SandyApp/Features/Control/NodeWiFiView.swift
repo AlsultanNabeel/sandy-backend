@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// نقل لوح لشبكة تانية — بلا كبل وبلا حرق.
+/// نقل الروبوت لشبكة تانية — بلا كبل وبلا حرق.
 ///
 /// **الشاشة كلها مبنية حوالين خطر واحد:** الطريقة الوحيدة اللي بنوصل فيها للوح
 /// هي الشبكة اللي هو عليها. كلمة سر غلط بتقطعه، وبتقطع معها القناة اللي كنّا رح
@@ -23,13 +23,6 @@ struct NodeWiFiView: View {
     /// node this screen opened with is an old copy: the result is read from the fresh one).
     var onFinished: () async -> NodeItem? = { nil }
 
-    /// أي لوح — الدماغ ولا الكاميرا.
-    ///
-    /// اللوحان تحت معرّف وحدة واحد بالتصميم، فـ«انقل ساندي» جملة ناقصة لمّا
-    /// يكونوا ع شبكتين. والاختيار صريح مش مخفي: نقل الاتنين سوا معناه إنه غلطة
-    /// وحدة بتوقّف التنين، وهاد بيضيّع الفائدة الأساسية — إنه واحد بيضل واصل
-    /// ويقولك شو صار للتاني.
-    @State private var board: String = "brain"
     @State private var ssid = ""
     @State private var password = ""
     @State private var phase: Phase = .idle
@@ -41,32 +34,18 @@ struct NodeWiFiView: View {
         case done(success: Bool)
     }
 
-    private var currentSSID: String {
-        board == "camera" ? (node.telemetry?.camSSID ?? "")
-                          : (node.telemetry?.ssid ?? "")
-    }
+    private var currentSSID: String { node.telemetry?.ssid ?? "" }
 
-    private var currentIP: String {
-        board == "camera" ? (node.telemetry?.camIP ?? "")
-                          : (node.telemetry?.ip ?? "")
-    }
+    private var currentIP: String { node.telemetry?.ip ?? "" }
 
-    /// The board picker is held only while a try runs; after one failed it can change.
-    static func boardLocked(during phase: Phase) -> Bool {
-        if case .trying = phase { return true }
-        return false
-    }
-
-    /// Whether the board is on `target` by the node as read after the try.
-    static func landed(on target: String, fresh: NodeItem?, board: String) -> Bool {
-        let now = board == "camera" ? fresh?.telemetry?.camSSID : fresh?.telemetry?.ssid
-        return now == target
+    /// Whether the robot is on `target` by the node as read after the try.
+    static func landed(on target: String, fresh: NodeItem?) -> Bool {
+        fresh?.telemetry?.ssid == target
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
-                boardPicker
                 currentCard
                 form
                 safetyNote
@@ -77,15 +56,6 @@ struct NodeWiFiView: View {
         }
         .navigationTitle(lang.s("wifi.title"))
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var boardPicker: some View {
-        Picker("", selection: $board) {
-            Text(lang.s("wifi.board.brain")).tag("brain")
-            Text(lang.s("wifi.board.camera")).tag("camera")
-        }
-        .pickerStyle(.segmented)
-        .disabled(Self.boardLocked(during: phase))
     }
 
     // ── الوضع الحالي ─────────────────────────────────────────────────────────
@@ -102,15 +72,6 @@ struct NodeWiFiView: View {
                     Text(currentSSID.isEmpty ? lang.s("wifi.unknown") : currentSSID)
                         .font(Theme.Typography.headline)
                         .foregroundColor(Theme.Colors.primaryText)
-                    // عنوان **اللوح المختار**، مش الدماغ دايمًا.
-                    //
-                    // كان بيعرض `ip` بأي حالة. فتختار «الكاميرا»، بيتبدّل اسم
-                    // الشبكة وبيضلّ العنوان تبع الدماغ — فالشاشة بتقول إنّ
-                    // اللوحين ع نفس العنوان، وهاد مستحيل.
-                    //
-                    // وهي مش تجميلة: العنوان هو اللي بيوريك إذا اللوحين فعلًا ع
-                    // نفس الشبكة. وبدونه صحيح، فرق الشبكات بيضلّ مخفي — والبثّ
-                    // المحلي بيفشل بلا سبب ظاهر.
                     Text(currentIP)
                         .font(Theme.Typography.caption.monospacedDigit())
                         .foregroundColor(Theme.Colors.tertiaryText)
@@ -171,7 +132,6 @@ struct NodeWiFiView: View {
         case "not_yours": return lang.s("wifi.err.notYours")
         case "not_sent":  return lang.s("wifi.err.notSent")
         case "no_node":   return lang.s("wifi.err.noNode")
-        case "bad_board": return lang.s("wifi.err.badBoard")
         case "too_long":  return lang.s("wifi.err.tooLong")
         case "bad_password": return lang.s("wifi.err.badPassword")
         case "bad_chars": return lang.s("wifi.err.badChars")
@@ -193,7 +153,7 @@ struct NodeWiFiView: View {
         var window = 55
         do {
             window = try await state.api.switchNodeWiFi(
-                nodeId: node.nodeId, ssid: target, password: password, board: board)
+                nodeId: node.nodeId, ssid: target, password: password)
         } catch {
             // **بنعرض سبب الخادم، مش تخمين.**
             //
@@ -216,7 +176,7 @@ struct NodeWiFiView: View {
         let fresh = await onFinished()
 
         // النتيجة من النبضة: الاسم اللي بيرجّعه اللوح هو اللي هو عليه فعلًا.
-        let ok = Self.landed(on: target, fresh: fresh, board: board)
+        let ok = Self.landed(on: target, fresh: fresh)
         phase = .done(success: ok)
         notice = ok ? "" : lang.s("wifi.rolledBack")
         if ok { dismiss() }

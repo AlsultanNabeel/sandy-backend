@@ -8,10 +8,10 @@ final class NodeDecodeTests: XCTestCase {
 
     private let body = #"""
     {"items":[{"node_id":"abc123","label":"ساندي","capabilities":["relay"],
-      "outputs":[{"id":"sandy_face","kind":"pwm"},{"id":"cam_snapshot","kind":"camera"}],
+      "outputs":[{"id":"sandy_face","kind":"pwm"},{"id":"ir","kind":"ir"}],
       "firmware_version":"0.11.6","online":true,"last_seen":"","paired_at":"",
-      "telemetry":{"ssid":"Home","ip":"192.168.1.5","cam_ip":"192.168.1.6",
-                   "cam_stream_key":"k","mic_l":3,"faults":{},"stacks":{"voice":812}}}],
+      "telemetry":{"ssid":"Home","ip":"192.168.1.5","board":"sandy-brain-s3",
+                   "mic_l":3,"faults":{},"stacks":{"voice":812}}}],
      "demo":false}
     """#
 
@@ -24,12 +24,12 @@ final class NodeDecodeTests: XCTestCase {
     func testTheTelemetrySurvivesTheMapsInIt() async throws {
         let n = try await node()
         XCTAssertEqual(n.telemetry?.ssid, "Home", "one map in the heartbeat emptied all of it")
-        XCTAssertEqual(n.telemetry?.camIP, "192.168.1.6")
+        XCTAssertEqual(n.telemetry?.board, "sandy-brain-s3")
         XCTAssertEqual(n.telemetry?.micLeft, 3)
     }
 
     func testTheOutputsAreTheirIds() async throws {
         let n = try await node()
-        XCTAssertEqual(n.outputs, ["sandy_face", "cam_snapshot"])
+        XCTAssertEqual(n.outputs, ["sandy_face", "ir"])
     }
 }

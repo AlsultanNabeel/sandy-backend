@@ -39,12 +39,6 @@
 		<key>UIImageRespectsSafeAreaInsets</key>
 		<false/>
 	</dict>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<!-- Plain http only on the local network (camera LAN stream); internet stays HTTPS-only. -->
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 	<!-- Chat attachments: a photo taken for Sandy, and saving the images she draws. -->
 	<key>NSCameraUsageDescription</key>
 	<string>ساندي بتستعمل الكاميرا لما تصوّر إشي وتبعتلها ياه بالشات.</string>

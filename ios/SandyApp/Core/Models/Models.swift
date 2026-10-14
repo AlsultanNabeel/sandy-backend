@@ -73,7 +73,7 @@ struct ListResult<T> {
     let demo: Bool
 }
 
-// ── الفوكس + مشاهد الغرفة ──
+// ── الفوكس + المشاهد ──
 
 struct FocusStatus {
     var active: Bool = false
@@ -98,7 +98,7 @@ struct SceneAction: Identifiable, Equatable {
     var value: String
 }
 
-struct RoomScene: Identifiable {
+struct DeviceScene: Identifiable {
     let name: String
     var label: String
     var icon: String
@@ -231,19 +231,10 @@ struct NodeTelemetry {
     let volume: Int?           // ٠..١٠٠
     /// عنوان اللوح ع الشبكة المحلية، بيتغيّر مع الراوتر فبيجي بكل نبضة.
     let ip: String?
-    /// أي لوح: `sandy-brain-s3` أو الكاميرا أو عقدة الغرفة (اللبس بينهم بيحرق لوح).
+    /// أي لوح: `sandy-brain-s3` (اللبس بين الألواح بيحرق لوح).
     let board: String?
-    /// عنوان الكاميرا مستقل عن `ip`: اللوحين تحت معرّف واحد والبث بيروح من الكاميرا مباشرة.
-    let camIP: String?
-    let camBoard: String?
     /// اسم الشبكة الحالية؛ بعد التغيير بيبيّن إذا اللوح انتقل أو رجع.
     let ssid: String?
-    /// شبكة الكاميرا — مستقلة زي عنوانها.
-    let camSSID: String?
-    /// مفتاح البث المحلي — الكاميرا بتولّده كل إقلاع والخادم بيعطيه لصاحبها بس.
-    let camStreamKey: String?
-    /// زوايا ذراع ضو الغرفة المحفوظة باللوح (لوح غرفة بنسخة بتعرفها بس).
-    let roomArm: RoomArm?
 
     /// أول ما تسمع فيه صوت — بينفع لسؤال «هل المايكين شغّالين أصلًا؟»
     var hasMicReadings: Bool { micLeft != nil || micRight != nil }
@@ -261,46 +252,8 @@ struct NodeTelemetry {
         volume        = i("volume")
         ip            = d["ip"] as? String
         board         = d["board"] as? String
-        camIP         = d["cam_ip"] as? String
-        camBoard      = d["cam_board"] as? String
         ssid          = d["ssid"] as? String
-        camSSID       = d["cam_ssid"] as? String
-        camStreamKey  = d["cam_stream_key"] as? String
-        roomArm       = RoomArm(wire: d["room_arm"] as? String)
     }
-}
-
-/// ذراع ضو الغرفة: وين بيرتاح، لوين بيكبس للتشغيل وللإطفاء، وقديش بيضل كابس.
-/// الحدود نفسها بالخادم (`features/room_arm.py`) وباللوح.
-struct RoomArm: Equatable {
-    var rest: Int
-    var on: Int
-    var off: Int
-    var holdMs: Int
-
-    static let angles = 10...170
-    static let hold = 150...1500
-    static let gapMin = 10
-    /// قيم اللوح الافتراضية، لما يكون لسا ما بلّغ عن قيمه.
-    static let standard = RoomArm(rest: 120, on: 80, off: 160, holdMs: 400)
-
-    /// «راحة،تشغيل،إطفاء،مدة» من نبضة اللوح.
-    init?(wire: String?) {
-        let n = (wire ?? "").split(separator: ",").compactMap { Int($0) }
-        guard n.count == 4 else { return nil }
-        self.init(rest: n[0], on: n[1], off: n[2], holdMs: n[3])
-    }
-
-    init(rest: Int, on: Int, off: Int, holdMs: Int) {
-        self.rest = rest; self.on = on; self.off = off; self.holdMs = holdMs
-    }
-
-    /// الراحة بين الكبستين وبعيدة عنهم، وإلا كبسة وحدة بتعمل التنتين.
-    var restBetween: Bool {
-        rest - min(on, off) >= Self.gapMin && max(on, off) - rest >= Self.gapMin
-    }
-
-    var body: [String: Any] { ["rest": rest, "on": on, "off": off, "hold_ms": holdMs] }
 }
 
 struct PairResult {

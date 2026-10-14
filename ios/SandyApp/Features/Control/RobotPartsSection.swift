@@ -1,7 +1,7 @@
 import PhotosUI
 import SwiftUI
 
-/// قطع ساندي اللي مش بالأزرار السريعة فوق — الرقبة والشاشة والصوت والكاميرا، وأي
+/// قطع ساندي اللي مش بالأزرار السريعة فوق — الرقبة والشاشة والصوت، وأي
 /// قطعة تانية أعلنها اللوح. على شاشة الروبوت نفسها، تحت حالتها: كل إشي بمكان واحد.
 ///
 /// المزاج والحركات والنغمات والإضاءة مش هون: إلهن أزرار سريعة فوق (`RobotLiveSection`)،
@@ -27,22 +27,12 @@ struct RobotPartsSection: View {
         static let volume      = "sandy_volume"
         static let speakerTest = "sandy_speaker_test"
 
-        static let camFlash     = "cam_flash"
-        static let camFlashLvl  = "cam_flash_level"
-        static let camFlashMode = "cam_flash_mode"
-        static let camSnapshot  = "cam_snapshot"
-        static let camStream    = "cam_stream"
-        static let camFrameSize = "cam_framesize"
-        // الوضوح جنب الدقّة بالقصد: الاتنين بيتلخبطوا ببعض، وبعدهن عن بعض
-        // بيخلّي المالك يكبّر الدقّة ويستغرب إنّ الصورة ضلّت مغبّشة.
-        static let camQuality   = "cam_quality"
-
         /// The parts the quick buttons above already drive.
         static let quick: Set<String> = [SandyMood.Device.face, SandyMood.Device.gesture,
                                          SandyMood.Device.buzzer, SandyMood.Device.led]
     }
 
-    /// The order: what you see (neck, screen), what you hear (sound), then the camera.
+    /// The order: what you see (neck, screen), then what you hear (sound).
     var body: some View {
         VStack(spacing: Theme.Spacing.md) {
             section("robot.control.neck", icon: "arrow.left.and.right.circle",
@@ -52,56 +42,7 @@ struct RobotPartsSection: View {
                     hint: "robot.control.sound.hint",
                     parts: [Part.volume, Part.speakerTest,
                             Part.micLeft, Part.micRight, Part.micLeftGain, Part.micRightGain])
-            cameraSection
             leftovers
-        }
-    }
-
-    // ── الكاميرا: مدخل للنظر، وبعده الإعدادات ───────────────────────────────
-    //
-    // «التقط صورة» كزرّ بقائمة إعدادات كان بيشتغل مضبوط وما بيوريك إشي — الأمر
-    // بيوصل والصورة بترجع وبتنرمى. فالمدخل للعرض صار أول إشي بالقسم، والإعدادات
-    // (فلاش، دقّة) تحته: بتفتح الكاميرا عشان تشوف، مش عشان تظبّط.
-    @ViewBuilder
-    private var cameraSection: some View {
-        let settings = [Part.camFlash, Part.camFlashLvl,
-                        Part.camFlashMode, Part.camFrameSize, Part.camQuality]
-            .compactMap { name in store.robotDevices.first { $0.name == name } }
-        let hasCamera = !settings.isEmpty
-            || store.robotDevices.contains { $0.name == Part.camSnapshot }
-
-        if hasCamera, let node = store.nodes.first {
-            card("robot.control.camera", icon: "camera.fill", hint: "robot.control.camera.hint") {
-                NavigationLink {
-                    CameraView(node: node)
-                        .environmentObject(state)
-                        .environmentObject(lang)
-                } label: {
-                    HStack(spacing: Theme.Spacing.md) {
-                        Image(systemName: "eye.circle.fill")
-                            .scaledFont(Theme.Icon.lg)
-                            .foregroundColor(Theme.Colors.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(lang.s("robot.control.camera.open"))
-                                .font(Theme.Typography.headline)
-                                .foregroundColor(Theme.Colors.primaryText)
-                            Text(lang.s("robot.control.camera.open.hint"))
-                                .font(Theme.Typography.caption)
-                                .foregroundColor(Theme.Colors.secondaryText)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.forward")
-                            .scaledFont(Theme.Icon.sm, weight: .semibold)
-                            .foregroundColor(Theme.Colors.tertiaryText)
-                    }
-                    .sandyCard()
-                }
-                .buttonStyle(.plain)
-
-                ForEach(settings) { device in
-                    DeviceCard(device: device, store: store)
-                }
-            }
         }
     }
 
@@ -168,8 +109,8 @@ struct RobotPartsSection: View {
 
     // ── أقسام ────────────────────────────────────────────────────────────────
 
-    /// قسم واحد. ما بيظهر إذا ولا وحدة من قطعه موجودة — لوح بلا كاميرا ما إله
-    /// عنوان «كاميرا» فاضي تحته.
+    /// قسم واحد. ما بيظهر إذا ولا وحدة من قطعه موجودة — لوح بلا رقبة ما إله
+    /// عنوان «رقبة» فاضي تحته.
     @ViewBuilder
     private func section(_ titleKey: String, icon: String, hint hintKey: String,
                          parts: [String]) -> some View {
@@ -195,8 +136,6 @@ struct RobotPartsSection: View {
             Part.head, Part.screen,
             Part.volume, Part.speakerTest,
             Part.micLeft, Part.micRight, Part.micLeftGain, Part.micRightGain,
-            Part.camFlash, Part.camFlashLvl, Part.camFlashMode,
-            Part.camSnapshot, Part.camStream, Part.camFrameSize, Part.camQuality,
         ])
         let rest = store.robotDevices.filter { !placed.contains($0.name) }
         if !rest.isEmpty {

@@ -28,17 +28,17 @@ extension APIClient {
         }
     }
 
-    func getScenes() async throws -> ListResult<RoomScene> {
+    func getScenes() async throws -> ListResult<DeviceScene> {
         let r: ScenesResponse = try await fetch("/api/life/scenes")
-        let parsed: [RoomScene] = (r.items ?? []).compactMap { row in
+        let parsed: [DeviceScene] = (r.items ?? []).compactMap { row in
             guard let name = row.name, !name.isEmpty else { return nil }
             let acts = (row.actions ?? []).map { a in
                 SceneAction(device: a.device ?? "", value: a.value?.value ?? "")
             }
-            return RoomScene(name: name,
-                             label: row.label ?? name,
-                             icon: row.icon ?? "🎛️",
-                             actions: acts)
+            return DeviceScene(name: name,
+                               label: row.label ?? name,
+                               icon: row.icon ?? "🎛️",
+                               actions: acts)
         }
         return ListResult(items: parsed, demo: r.demo ?? false)
     }
@@ -60,7 +60,7 @@ extension APIClient {
     }
 
     // ok = طُبّق المشهد، online = وصل لجهاز واحد على الأقل، passedOver = اللي تخطّاه: أجهزة لوحها
-    // غايب، وكلمات الغرفة القديمة اللي ما في جهاز عنده إلها.
+    // غايب، والكلمات القديمة (متل ضو الغرفة) اللي ما في جهاز عنده إلها.
     @discardableResult
     func applyScene(name: String) async throws -> (ok: Bool, online: Bool, passedOver: [String]) {
         let r: ApplySceneResponse = try await fetch("/api/life/scenes/apply", method: "POST",

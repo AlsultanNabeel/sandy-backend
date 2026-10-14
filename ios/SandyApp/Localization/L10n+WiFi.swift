@@ -11,8 +11,6 @@ enum L10nWiFi {
     static let table = L10nTable(
         ar: [
             "title":       .text("شبكة الواي فاي"),
-            "board.brain":  .text("الدماغ"),
-            "board.camera": .text("الكاميرا"),
             "current":     .text("الشبكة الحالية"),
             "unknown":     .text("غير معروفة"),
             "new":         .text("شبكة جديدة"),
@@ -27,7 +25,6 @@ enum L10nWiFi {
             "err.notYours": .text("هالوحدة مش مربوطة بحسابك."),
             "err.notSent":  .text("الخادم ما قدر يوصل الرسالة للوسيط. الروبوت غالبًا مطفي أو مقطوع."),
             "err.noNode":   .text("ما في وحدة محدّدة."),
-            "err.badBoard": .text("لوح غير معروف."),
             "err.tooLong":  .text("الاسم أطول من اثنين وثلاثين حرف أو كلمة السر أطول من أربعة وستين."),
             "err.badPassword": .text("كلمة السر لازم تكون من ثمانية لثلاثة وستين حرف، أو فاضية لو الشبكة مفتوحة."),
             "err.badChars": .text("في سطر جديد جوّا الاسم أو كلمة السر — شيله."),
@@ -35,8 +32,6 @@ enum L10nWiFi {
         ],
         en: [
             "title":       .text("Wi-Fi network"),
-            "board.brain":  .text("Brain"),
-            "board.camera": .text("Camera"),
             "current":     .text("Current network"),
             "unknown":     .text("Unknown"),
             "new":         .text("New network"),
@@ -51,7 +46,6 @@ enum L10nWiFi {
             "err.notYours": .text("This node isn't paired to your account."),
             "err.notSent":  .text("The server couldn't reach the broker. The robot is probably off or disconnected."),
             "err.noNode":   .text("No node selected."),
-            "err.badBoard": .text("Unknown board."),
             "err.tooLong":  .text("The name is over 32 characters or the password over 64."),
             "err.badPassword": .text("The password must be 8 to 63 characters, or empty for an open network."),
             "err.badChars": .text("There's a newline in the name or password — remove it."),

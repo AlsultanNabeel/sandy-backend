@@ -77,14 +77,6 @@ final class APIClient: APIClientProtocol {
 
     // النقل الأساسي: منطق الشبكة والأخطاء مكتوب مرة واحدة هون.
     /// نداء بيرجّع البايتات زي ما هي — للردود اللي مش JSON.
-    func rawPost(_ path: String, timeout: TimeInterval = 30) async throws -> Data {
-        let data = try await perform(path, method: "POST",
-                                     bodyData: Data("{}".utf8),
-                                     auth: true, timeout: timeout)
-        guard !data.isEmpty else { throw APIError(message: "رد فاضي") }
-        return data
-    }
-
     func rawGet(_ path: String, timeout: TimeInterval = 15) async throws -> Data {
         try await perform(path, method: "GET", bodyData: nil,
                           auth: true, timeout: timeout)

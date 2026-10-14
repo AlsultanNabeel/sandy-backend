@@ -22,15 +22,4 @@ final class RobotLivePowerTests: XCTestCase {
         let node = try XCTUnwrap(live.nodes.first)
         XCTAssertFalse(node.powerWeak)
     }
-
-    /// The camera's sensor state is read as sent; an unknown word is no state at all.
-    func testCameraSensorIsRead() async throws {
-        StubNetwork.install(json: #"""
-            {"items":[{"node_id":"abc","online":true,"telemetry":{"cam_sensor":"retrying"}},
-                      {"node_id":"def","online":true,"telemetry":{"cam_sensor":"weird"}}]}
-            """#)
-        let live = try await TestClient.make().getRobotLive()
-        XCTAssertEqual(live.nodes.first?.cameraSensor, "retrying")
-        XCTAssertNil(live.nodes.last?.cameraSensor)
-    }
 }
