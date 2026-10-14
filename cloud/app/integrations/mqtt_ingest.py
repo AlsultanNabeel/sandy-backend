@@ -1,10 +1,10 @@
-"""Inbound MQTT listener for Sandy nodes (room_device is publish-only).
+"""Inbound MQTT listener for Sandy nodes (device_publisher is publish-only).
 
-  sandy/node/<id>/status       -> node_store.ingest_status (brain heartbeat)
-  sandy/node/<id>/cam/status   -> node_store.ingest_status (camera, `cam/` outputs)
-  sandy/node/<id>/room/status  -> node_store.ingest_status (room node, `room/` outputs)
+  sandy/node/<id>/status       -> node_store.ingest_status (the robot's heartbeat)
   sandy/node/<id>/ir/learned   -> node_store.set_last_ir
-  sandy/node/<id>/cam/event    -> camera_client.on_event
+
+Nothing else is subscribed: a camera or room board still flashed with old firmware
+publishes under `cam/` and `room/`, which `+` never matches, so it is never heard.
 
 Runs outside any tenant context, keyed by node_id. No-op when MQTT isn't configured.
 """
@@ -43,11 +43,6 @@ _INGEST_MAX_PENDING = 200
 
 _STATUS_SUB = "sandy/node/+/status"
 _IR_SUB = "sandy/node/+/ir/learned"
-# Photos arrive over signed HTTPS (/api/cam/upload), not the broker.
-# `+` matches one level only, so each board's status topic needs its own subscription.
-_CAM_STATUS_SUB = "sandy/node/+/cam/status"
-_ROOM_STATUS_SUB = "sandy/node/+/room/status"
-_CAM_EVENT_SUB = "sandy/node/+/cam/event"
 
 _started = False
 _lock = threading.Lock()
@@ -61,9 +56,6 @@ _stats = {
     "granted_qos": None,     # None until the broker answers SUBSCRIBE
     "status": 0,
     "ir": 0,
-    "cam_status": 0,
-    "cam_event": 0,
-    "room_status": 0,
     "errors": 0,
     "dropped": 0,              # messages refused because the ingest queue was full
     "rebuilds": 0,
@@ -122,24 +114,10 @@ def _handle_message(topic: str, raw: bytes, retained: bool = False) -> None:
                 set_last_ir(node_id, payload)
             return
 
-        if topic.endswith("/cam/status"):
-            _stats["cam_status"] += 1
-            _ingest_cam_status(node_id, payload)
+        # status (retained JSON heartbeat): the robot's own, one level under its id, never
+        # an old camera's or room board's under a branch.
+        if topic != f"sandy/node/{node_id}/status":
             return
-
-        if topic.endswith("/room/status"):
-            _stats["room_status"] += 1
-            _ingest_room_status(node_id, payload)
-            return
-
-        if topic.endswith("/cam/event"):
-            _stats["cam_event"] += 1
-            logger.info("[camera] %s event: %s", node_id, payload[:160])
-            from app.integrations.camera_client import on_event
-            on_event(node_id, payload)
-            return
-
-        # status (retained JSON heartbeat)
         _stats["status"] += 1
         data = {}
         if payload:
@@ -162,108 +140,9 @@ def _handle_message(topic: str, raw: bytes, retained: bool = False) -> None:
         logger.warning("[mqtt_ingest] %s failed: %s", topic, e)
 
 
-def _ingest_cam_status(node_id: str, payload: str) -> None:
-    """The camera's heartbeat, merged into the node it shares an id with.
-
-    Outputs are namespaced `cam/...` and added to the brain's, never written over them.
-    """
-    from app.features.node_store import ingest_status
-
-    data = {}
-    if payload:
-        try:
-            data = json.loads(payload)
-        except (json.JSONDecodeError, ValueError):
-            return
-
-    if not isinstance(data, dict):
-        return
-
-    # The camera reports its own state (`cam_online`), not the whole node's.
-    # `online:false` is the broker's last-will.
-    online_flag = data.get("online")
-    cam_outputs = data.get("outputs")
-    if not isinstance(cam_outputs, list):
-        if isinstance(online_flag, bool):
-            ingest_status(node_id, online=None,
-                          telemetry={"cam_online": online_flag})
-        return
-
-    namespaced = [
-        {"id": f"cam/{o.get('id')}", "kind": o.get("kind")}
-        for o in cam_outputs
-        if isinstance(o, dict) and o.get("id")
-    ]
-
-    # Only the camera's own; node_store merges them with the brain's by namespace.
-    telemetry = {f"cam_{k}": v for k, v in data.items()
-                 if k in ("ip", "board", "ssid", "boot", "fw", "stream_key")}
-    telemetry["cam_online"] = True
-    # The sensor: ok, retrying or failed. A camera from before `sensor` says only
-    # `camera_ready`, read as ok or failed.
-    sensor = data.get("sensor")
-    if sensor not in ("ok", "retrying", "failed") and isinstance(data.get("camera_ready"), bool):
-        sensor = "ok" if data["camera_ready"] else "failed"
-    if sensor in ("ok", "retrying", "failed"):
-        telemetry["cam_sensor"] = sensor
-    ingest_status(
-        node_id,
-        online=None,
-        capabilities=None,
-        outputs=namespaced,
-        firmware_version="",
-        # `cam_` prefix: boards share a node id, so a bare `ip` would overwrite the brain's.
-        telemetry=telemetry,
-    )
-
-
-def _ingest_room_status(node_id: str, payload: str) -> None:
-    """The room node's heartbeat, merged like the camera's under a `room/` prefix."""
-    from app.features.node_store import ingest_status
-
-    data = {}
-    if payload:
-        try:
-            data = json.loads(payload)
-        except (json.JSONDecodeError, ValueError):
-            return
-
-    if not isinstance(data, dict):
-        return
-
-    online_flag = data.get("online")
-    room_outputs = data.get("outputs")
-    if not isinstance(room_outputs, list):
-        if isinstance(online_flag, bool):
-            ingest_status(node_id, online=None,
-                          telemetry={"room_online": online_flag})
-        return
-
-    namespaced = [
-        {"id": f"room/{o.get('id')}", "kind": o.get("kind")}
-        for o in room_outputs
-        if isinstance(o, dict) and o.get("id")
-    ]
-
-    telemetry = {f"room_{k}": v for k, v in data.items()
-                 if k in ("ip", "board", "light", "rssi", "fw", "uptime_s", "heap", "arm")}
-    telemetry["room_online"] = True
-    ingest_status(
-        node_id,
-        online=None,
-        capabilities=None,
-        outputs=namespaced,
-        firmware_version="",
-        # `room_` prefix for the same reason as `cam_`.
-        telemetry=telemetry,
-    )
-
-
 def _on_connect(client, userdata, flags, reason_code, properties=None) -> None:  # noqa: ANN001
     try:
-        client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1),
-                          (_CAM_STATUS_SUB, 1),
-                          (_CAM_EVENT_SUB, 1), (_ROOM_STATUS_SUB, 1)])
+        client.subscribe([(_STATUS_SUB, 1), (_IR_SUB, 1)])
         _stats["connects"] += 1
         logger.info("[mqtt_ingest] worker %d connected, subscribe sent "
                     "(rc=%s)", os.getpid(), reason_code)
@@ -287,8 +166,7 @@ def _on_subscribe(client, userdata, mid, reason_codes, properties=None) -> None:
     if any(c >= 128 for c in codes):
         logger.error(
             "[mqtt_ingest] worker %d: broker REFUSED a subscription %s "
-            "(order: status, IR, cam/status, cam/event, "
-            "room/status) — 128 means denied, "
+            "(order: status, IR) — 128 means denied, "
             "usually a credential without permission on that topic",
             os.getpid(), codes)
     else:

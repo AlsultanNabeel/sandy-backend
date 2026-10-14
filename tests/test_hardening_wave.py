@@ -70,7 +70,7 @@ def test_a_device_saved_with_a_raw_topic_is_listed_and_reaches_nothing(monkeypat
             sent.append(topic)
             return True
 
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher", lambda: _Client())
     try:
         d["sandy_devices"].insert_one({"user_id": "u1", "name": "lamp", "label": "لمبتي",
                                        "control_type": "switch",

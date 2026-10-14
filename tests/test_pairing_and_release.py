@@ -296,12 +296,11 @@ SHARED = b"shared-test-key"
 
 @pytest.fixture
 def released(two_owners, monkeypatch):
-    """u1's robot, heard on «Home» after 7 restarts, given its own key, its camera on «Home»
-    with its own key too, then released while both were off; returns what reaches the
-    broker after that."""
+    """u1's robot, heard on «Home» after 7 restarts, given its own key, then released while
+    it was off; returns what reaches the broker after that."""
     from app.api.voice_ws import _config
     from app.features import device_keys
-    from app.integrations import room_device
+    from app.integrations import device_publisher
 
     monkeypatch.setattr(_config, "_HMAC_KEY", SHARED)
     sent = []
@@ -314,30 +313,16 @@ def released(two_owners, monkeypatch):
         def send_to_topic(self, topic, payload):
             return True
 
-    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Broker())
+    monkeypatch.setattr(device_publisher, "get_device_publisher", lambda: _Broker())
     with _as("u1"):
         node_store.pair_node("SANDY-8421")
         node_store.ingest_status("sandy8421", True, telemetry={"boots": 7, "ssid": "Home"})
         device_keys.open_enrolment("sandy8421")
         own = device_keys.issue_key("sandy8421")
-        _cam_beat("Home")
-        device_keys.open_enrolment("sandy8421:cam")
-        cam_own = device_keys.issue_key("sandy8421:cam")
         _beat({"online": False})                          # its MQTT will: it went off
         out = node_store.unpair_node("sandy8421")
     sent.clear()
-    return {"out": out, "sent": sent, "own": bytes.fromhex(own),
-            "cam_own": bytes.fromhex(cam_own), "db": two_owners}
-
-
-def _cam_beat(ssid):
-    """The camera's own heartbeat, through the real ingest."""
-    import json
-
-    from app.integrations.mqtt_ingest import _ingest_cam_status
-
-    _ingest_cam_status("sandy8421", json.dumps({
-        "online": True, "ssid": ssid, "outputs": [{"id": "snapshot", "kind": "pwm"}]}))
+    return {"out": out, "sent": sent, "own": bytes.fromhex(own), "db": two_owners}
 
 
 def _signed_by(command, key, node_id="sandy8421"):
@@ -397,137 +382,6 @@ def test_never_to_a_board_paired_while_the_erase_was_on_its_way(released):
     assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421"}) == 0
 
 
-# F3: the camera, off at the release, kept the seller's Wi-Fi: its erase went once and
-# nothing kept it. It is kept now, tied to the release, beside the brain's.
-
-CAM_TOPIC = "sandy/node/sandy8421/cam/factory_reset"
-
-
-def test_a_camera_off_at_release_is_wiped_when_it_comes_back(released):
-    _cam_beat("Home")                                   # back, still on the seller's Wi-Fi
-    commands = [p for t, p in released["sent"] if t == CAM_TOPIC]
-    assert len(commands) == 2
-    assert _signed_by(commands[0], released["cam_own"], "sandy8421:cam")
-    assert _signed_by(commands[1], SHARED, "sandy8421:cam")
-    # Never the brain's erase on its topic, nor the brain's signature on the camera's.
-    assert not any(t == "sandy/node/sandy8421/factory_reset" for t, _ in released["sent"])
-    assert not _signed_by(commands[0], released["own"], "sandy8421:cam")
-
-
-def test_a_camera_back_on_another_network_was_wiped_and_is_left_alone(released):
-    _cam_beat("Buyer")
-    _cam_beat("Buyer")
-    assert released["sent"] == []
-    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421:cam"}) == 0
-
-
-def test_the_camera_erase_goes_when_the_robot_is_paired_again_before_it_came_back(
-        released, monkeypatch):
-    with _as("buyer"):
-        monkeypatch.setattr(node_store, "_wipe_board", lambda node_id: True)
-        assert node_store.pair_node("SANDY-8421")["ok"]
-    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421:cam"}) == 0
-    _cam_beat("Home")
-    assert not [t for t, _ in released["sent"] if t == CAM_TOPIC]
-
-
-def test_never_to_a_camera_whose_robot_was_paired_while_the_erase_was_on_its_way(released):
-    released["db"]["sandy_nodes"].insert_one({"node_id": "sandy8421", "user_id": "buyer"})
-    node_store._erase_cam_if_pending("sandy8421", {"cam_online": True, "cam_ssid": "Home"})
-    assert released["sent"] == []
-    assert released["db"]["node_pending_erase"].count_documents({"_id": "sandy8421:cam"}) == 0
-
-
-# T12: a time up to two minutes ahead was accepted while a signature was remembered three
-# minutes, so the same upload could be replayed in its fourth minute; a database error let
-# a replay through; a body with no length was read whole before the signature was checked.
-
-@pytest.fixture
-def cam(monkeypatch):
-    import mongomock
-    from flask import Flask
-
-    from app import db as appdb
-    from app.api import devices_api
-    from app.api.voice_ws import _config as vcfg
-
-    d = mongomock.MongoClient().db
-    appdb.configure(d)
-    monkeypatch.setattr(vcfg, "_HMAC_KEY", SHARED)
-    import app.integrations.camera_client as cc
-    monkeypatch.setattr(cc, "store_snapshot", lambda *a, **k: None)
-    d["sandy_nodes"].insert_one({"node_id": "8421", "user_id": "owner-1"})
-    app = Flask(__name__)
-    devices_api.register_devices_api(app, d)
-    yield app.test_client(), d
-    appdb.reset()
-
-
-JPEG = b"\xff\xd8" + b"x" * 200
-
-
-def _upload(c, ahead_ms=0, body=JPEG):
-    import hashlib
-    import hmac
-    import time
-
-    ts = str(int(time.time() * 1000) + ahead_ms)
-    sig = hmac.new(SHARED, f"8421live{ts}".encode(), hashlib.sha256).hexdigest()
-    return c.post("/api/cam/upload", data=body, headers={
-        "X-Sandy-Node": "8421", "X-Sandy-Req": "live", "X-Sandy-Ts": ts,
-        "X-Sandy-Sig": sig, "Content-Type": "image/jpeg"})
-
-
-def test_a_time_ahead_is_allowed_thirty_seconds(cam):
-    c, _ = cam
-    assert _upload(c, ahead_ms=20_000).status_code == 200
-    assert _upload(c, ahead_ms=60_000).get_json()["error"] == "stale"
-
-
-def test_a_signature_is_remembered_past_the_whole_window():
-    from datetime import timedelta
-
-    from app.api import devices_api
-
-    accepted_for = timedelta(milliseconds=devices_api._CAM_PAST_MS + devices_api._CAM_FUTURE_MS)
-    assert devices_api._CAM_NONCE_KEPT > accepted_for
-
-
-def test_a_database_error_is_refused_not_let_through(cam, monkeypatch):
-    from pymongo.errors import AutoReconnect
-
-    from app.api import devices_api
-
-    c, d = cam
-
-    class _Down:
-        def insert_one(self, *a, **k):
-            raise AutoReconnect("down")
-
-    real = d.__class__.__getitem__
-    monkeypatch.setattr(d.__class__, "__getitem__",
-                        lambda self, name: _Down() if name == devices_api._CAM_NONCES
-                        else real(self, name))
-    assert _upload(c).status_code == 503
-
-
-def test_a_body_is_read_only_up_to_the_cap(cam, monkeypatch):
-    """`get_data` reads the whole body, whatever its size, when no length came with it;
-    the upload reads the stream up to its cap instead (a test client cannot send a body
-    with no length, so the call itself is what is pinned)."""
-    import flask
-
-    from app.api import devices_api
-
-    c, _ = cam
-    monkeypatch.setattr(flask.Request, "get_data",
-                        lambda self, *a, **k: pytest.fail("the whole body was read"))
-    monkeypatch.setattr(devices_api, "_CAM_MAX_UPLOAD_BYTES", 300)
-    assert _upload(c).status_code == 200
-    monkeypatch.setattr(devices_api, "_CAM_MAX_UPLOAD_BYTES", 100)
-    r = c.post("/api/cam/upload", data=JPEG, headers={"X-Sandy-Node": "8421"})
-    assert r.status_code == 400                   # headers first, nothing read
-
 
 # The broker logins (the owner's decision): only a paired board is handed its own login,
 # a release lists it for the owner to revoke on the broker, and the list is on his diagnose.
@@ -545,7 +399,7 @@ def fleet(two_owners, monkeypatch):
     from app.api.voice_ws import _config as vcfg
     from app.api.voice_ws import session as sess
     from app.features import broker_creds, pair_presence
-    from app.integrations import room_device
+    from app.integrations import device_publisher
 
     monkeypatch.setenv("JWT_SECRET", "x" * 40)
     monkeypatch.setattr(vcfg, "_HMAC_KEY", SHARED)
@@ -567,7 +421,7 @@ def fleet(two_owners, monkeypatch):
         def send_to_topic(self, topic, payload):
             return True
 
-    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Broker())
+    monkeypatch.setattr(device_publisher, "get_device_publisher", lambda: _Broker())
 
     class _WS:
         def __init__(self, hello):

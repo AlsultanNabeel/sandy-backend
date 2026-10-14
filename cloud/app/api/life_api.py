@@ -1,4 +1,4 @@
-"""Web API for room scenes and focus sessions (the rest of حياتي lives on the blocks)."""
+"""Web API for scenes and focus sessions (the rest of حياتي lives on the blocks)."""
 
 from __future__ import annotations
 

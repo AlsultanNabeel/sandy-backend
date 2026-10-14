@@ -38,15 +38,9 @@ ROBOT_LED = [
     "police", "party", "sunrise", "ocean", "candle", "solid",
 ]
 
-# بنفس أسماء الفيرموير حرفيًا (kFrameSizes بـ cam_control)، لحد أكبر حجم الكاميرا بتقبله
-# (`CAMERA_MAX_FRAME_SIZE`): الأكبر كانت تقصّه بصمت والخادم يسجّله حالة.
-CAM_FRAME_SIZES = [
-    "96X96", "QQVGA", "QCIF", "HQVGA", "240X240", "QVGA", "CIF", "HVGA", "VGA",
-]
-
 # output id -> how to present it. `name` is the device slug, unique per tenant.
-# `levels_only`: a dimmer the board takes only a number for (an angle, a gain, a volume, the
-# flash's strength); «on»/«off» there is refused rather than sent, and the app draws no switch.
+# `levels_only`: a dimmer the board takes only a number for (an angle, a gain, a volume);
+# «on»/«off» there is refused rather than sent, and the app draws no switch.
 PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "mood": {
         "name": "sandy_face", "label": "وش ساندي", "control_type": "enum",
@@ -107,53 +101,12 @@ PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
                  "momentary": ["beep", "chime", "alert", "sweep", "soft", "happy"]},
     },
 
-    # ── الكاميرا: بادئة `cam/` لأنها بتشارك معرّف الوحدة مع الدماغ ─────────────
-    "cam/flash": {
-        "name": "cam_flash", "label": "فلاش الكاميرا", "control_type": "switch",
-    },
-    "cam/flash_level": {
-        "name": "cam_flash_level", "label": "قوة الفلاش", "control_type": "dimmer",
-        # القيمة الخام اللي الفيرموير بيكتبها ع الطرف.
-        "meta": {"min": 0, "max": 255, "levels_only": True},
-    },
-    "cam/flash_mode": {
-        "name": "cam_flash_mode", "label": "وضع الفلاش", "control_type": "enum",
-        "meta": {"values": ["off", "on", "auto"]},
-    },
-    "cam/snapshot": {
-        "name": "cam_snapshot", "label": "التقاط صورة", "control_type": "enum",
-        "meta": {"values": ["take"], "momentary": ["take"]},
-    },
-    "cam/stream": {
-        "name": "cam_stream", "label": "بث مباشر", "control_type": "switch",
-    },
-    "cam/framesize": {
-        "name": "cam_framesize", "label": "دقة الصورة", "control_type": "enum",
-        "meta": {"values": CAM_FRAME_SIZES},
-    },
     "ir": {
         "name": "sandy_ir", "label": "ريموت ساندي", "control_type": "ir",
         # بلا `meta` بالقصد: الأزرار بيتعلّمها المالك، وميتا الكتالوج بتندمج بكل
         # نبضة، فحتى `{"buttons": {}}` كانت رح تدهس أزراره.
     },
 
-    # ── عقدة الغرفة: بادئة `room/` لنفس السبب ────────────────────────────────
-    "room/light": {
-        "name": "room_light", "label": "ضوء الغرفة", "control_type": "switch",
-        # مفتاح مش تعتيم: السيرفو بيكبس القلّاب ميكانيكيًا.
-    },
-    "room/music": {
-        "name": "room_music", "label": "موسيقى الغرفة", "control_type": "enum",
-        # قيم handleMusic بـ room-node.ino؛ `play` بدها مجلد ومقطع فمش من القائمة.
-        "meta": {"values": ["stop", "pause", "resume", "next", "prev"],
-                 "momentary": ["next", "prev"]},
-    },
-
-    "cam/quality": {
-        "name": "cam_quality", "label": "وضوح الصورة", "control_type": "enum",
-        # المستشعر من 10 لـ 63 والأصغر أوضح، فبنعرض أسماء واللوح بيترجمها.
-        "meta": {"values": ["high", "medium", "low"]},
-    },
 }
 
 ROBOT_ROOM = "ساندي"

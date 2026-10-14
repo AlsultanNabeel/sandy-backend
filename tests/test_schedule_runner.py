@@ -445,7 +445,7 @@ def test_the_due_scan_has_an_index_that_leads_with_status(brain_db):  # noqa: F8
 def robot(monkeypatch):
     """One paired robot with a buzzer and a screen; records what is sent to it."""
     from app.features import device_store
-    from app.integrations import room_device
+    from app.integrations import device_publisher
     state = {"online": True}
     sent = []
 
@@ -463,7 +463,7 @@ def robot(monkeypatch):
             return True
 
     monkeypatch.setattr(device_store, "devices_on_output", on_output)
-    monkeypatch.setattr(room_device, "get_room_device_client", lambda: Client())
+    monkeypatch.setattr(device_publisher, "get_device_publisher", lambda: Client())
     return {"sent": sent, "state": state}
 
 

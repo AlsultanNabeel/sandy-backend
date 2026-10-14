@@ -66,52 +66,51 @@ def test_publish_endpoint_needs_the_token(db, monkeypatch):
     assert c.get(m["url"]).data == b"img"
 
 
-def test_each_board_has_its_own_line_of_releases(db):
-    """A camera release never reaches the brain, and the brain's keys never move.
+def _retired_release(db, board, version, data):
+    """A release of the camera or the room board, as published before they were removed."""
+    key = f"{board}:{version}"
+    db["sandy_firmware"].insert_one({"_id": key, "board": board, "version": version,
+                                     "size": len(data), "sha256": "x", "signature": "cd",
+                                     "rollout": 100, "canary": []})
+    db["sandy_firmware_chunks"].insert_one({"version": key, "n": 0, "data": data})
 
-    Robots already in the field ask without a board and must keep finding the
-    brain's releases exactly where they were.
-    """
+
+def test_a_retired_boards_releases_are_kept_and_never_offered(db):
+    """The camera and the room board were removed; their releases stay in the database,
+    and nothing reads them: not the robot's manifest, not its image, not its newest."""
+    _retired_release(db, "cam", "9.0.0", b"camera")
     fs.publish("1.0.0", b"brain", "ab", rollout=100)
-    fs.publish("0.5.0", b"camera", "cd", rollout=100, board="cam")
-    fs.publish("0.5.0", b"room", "ef", rollout=100, board="room")
-
     assert fs.manifest_for("x", "0.9")["version"] == "1.0.0"
-    assert fs.manifest_for("x", "0.4.0", "cam")["signature"] == "cd"
-    assert fs.manifest_for("x", "0.4.0", "room")["signature"] == "ef"
-    assert b"".join(fs.image_chunks("0.5.0", "cam")) == b"camera"
-    assert b"".join(fs.image_chunks("0.5.0", "room")) == b"room"
-    assert fs.image_chunks("0.5.0") is None               # no brain 0.5.0
-    assert db["sandy_firmware"].find_one({"_id": "1.0.0"}) is not None
-    # A camera version does not block a brain version and the other way round.
-    assert fs.publish("0.6.0", b"brain", "ab")["error"] == "not_newer"
-    assert fs.publish("0.6.0", b"camera", "cd", board="cam")["ok"]
-    assert fs.publish("1.0.0", b"x", "ab", board="nope")["error"] == "bad_board"
+    assert fs.latest_release()["version"] == "1.0.0"
+    assert fs.image_chunks("9.0.0") is None and fs.release("9.0.0") is None
+    fs.publish("1.1.0", b"brain", "ab", rollout=100)        # prunes 1.0.0, not the camera's
+    assert db["sandy_firmware"].find_one({"_id": "cam:9.0.0"}) is not None
 
 
-def test_a_board_image_must_fit_its_own_slot(db):
-    room_slot = fs.BOARD_SLOT_BYTES["room"]
-    assert fs.publish("1.0.0", b"x" * (room_slot + 1), "ab", board="room")["error"] == "bad_size"
-    assert fs.publish("1.0.0", b"x" * (room_slot + 1), "ab", board="cam")["ok"]
-
-
-def test_the_small_boards_get_their_board_in_the_url(db, monkeypatch):
+def test_an_old_board_asking_by_name_is_refused(db, monkeypatch):
+    """A camera or room board still flashed with old firmware asks with `board=`; it is
+    refused, never handed the brain's image."""
     from app import config
     from app.api.server import create_app
     monkeypatch.setenv("JWT_SECRET", "x" * 32)
     monkeypatch.setattr(config, "SANDY_FIRMWARE_TOKEN", "t0k", raising=False)
+    _retired_release(db, "room", "0.5.0", b"roomimg")
+    fs.publish("1.0.0", b"img", "ab", rollout=100)
     c = create_app(mongo_db=db).test_client()
-    data = {"version": "0.5.0", "signature": "ab", "board": "room", "rollout": "100",
-            "image": (io.BytesIO(b"roomimg"), "fw.bin")}
+    for board in ("room", "cam", "evil"):
+        assert c.get(f"/api/firmware/manifest?board={board}&device_id=a&v=0.4.0").status_code == 400
+        assert c.get(f"/api/firmware/image/0.5.0?board={board}").status_code == 400
+    assert c.get("/api/firmware/manifest?board=brain&device_id=a&v=0.9").get_json()["version"] == "1.0.0"
+    assert c.get("/api/firmware/image/0.5.0").status_code == 404
+    data = {"version": "2.0.0", "signature": "ab", "board": "cam", "rollout": "100",
+            "image": (io.BytesIO(b"x"), "fw.bin")}
     r = c.post("/api/firmware/publish", data=data, content_type="multipart/form-data",
                headers={"Authorization": "Bearer t0k"})
-    assert r.status_code == 200, r.get_json()
-    assert c.get("/api/firmware/manifest?device_id=a&v=0.4.0").status_code == 204
-    m = c.get("/api/firmware/manifest?board=room&device_id=a&v=0.4.0").get_json()
-    assert m["url"] == "/api/firmware/image/0.5.0?board=room"
-    img = c.get(m["url"])
-    assert img.data == b"roomimg" and img.headers["Content-Length"] == "7"
-    assert c.get("/api/firmware/manifest?board=evil").status_code == 400
+    assert r.status_code == 400 and r.get_json()["error"] == "bad_board"
+
+
+def test_an_image_must_fit_the_slot(db):
+    assert fs.publish("1.0.0", b"x" * (fs.MAX_IMAGE_BYTES + 1), "ab")["error"] == "bad_size"
 
 
 def test_the_publisher_refuses_an_image_that_carries_a_secret(tmp_path):
@@ -170,13 +169,6 @@ def test_releases_older_than_the_stable_one_are_deleted(db):
     fs.set_rollout("0.11.5", 100)
     assert [d["version"] for d in db["sandy_firmware"].find()] == ["0.11.5"]
     assert fs.image_chunks("0.11.4") is None
-
-
-def test_another_board_s_releases_are_left_alone(db):
-    fs.publish("0.4.0", b"\xe9" + b"a" * 100, "ab", rollout=100, board="cam")
-    fs.publish("0.11.4", b"\xe9" + b"b" * 100, "ab", rollout=100)
-    fs.publish("0.11.5", b"\xe9" + b"c" * 100, "ab", rollout=100)
-    assert fs.release("0.4.0", board="cam") is not None
 
 
 def test_the_chunks_are_indexed(db):

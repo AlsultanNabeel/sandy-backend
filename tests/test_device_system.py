@@ -160,7 +160,7 @@ def mock_actuation(monkeypatch):
             return True
 
     monkeypatch.setattr(
-        "app.integrations.room_device.get_room_device_client", lambda: _Client()
+        "app.integrations.device_publisher.get_device_publisher", lambda: _Client()
     )
     return sent
 
@@ -494,28 +494,17 @@ def test_a_topic_from_another_account_is_still_refused(db):
         assert device_store.tenant_owns_topic("") is False
 
 
-def test_the_camera_reports_its_address_the_same_way_the_brain_does(db):
-    """One heartbeat shape for every board, so one code path reads them all.
-
-    "What is the camera's IP?" had no answer anywhere in the system: the router
-    hands out an address that changes, and the camera told nobody. A simple
-    question ended in scanning 254 addresses and guessing which board replied.
-
-    The camera now sends `ip` and `board` — the same two fields the brain sends,
-    landing in the same telemetry allowlist, needing no new server code. This
-    test is what keeps that true: if either board renames a field, it fails here
-    rather than showing an empty row in the app.
-    """
+def test_a_heartbeat_that_declares_nothing_keeps_the_parts(db):
+    """Silence is not a claim that the hardware is gone: only a heartbeat that declares
+    outputs replaces them, and then whole, since the robot is the only board."""
+    BRAIN = [{"id": "servo", "kind": "servo"}, {"id": "screen", "kind": "pwm"}]
     with as_tenant("owner"):
-        node_store.pair_node("sandycam01", "الكاميرا")
-        node_store.ingest_status(
-            "sandycam01", True, [], [], "0.2.0",
-            telemetry={"ip": "192.168.1.117", "board": "sandy-cam",
-                       "uptime": 900, "heap": 120000},
-        )
-        node = node_store.get_node("sandycam01")
-        assert node["telemetry"]["ip"] == "192.168.1.117"
-        assert node["telemetry"]["board"] == "sandy-cam"
+        node_store.pair_node("sandy0001", "ساندي")
+        node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.0")
+        node_store.ingest_status("sandy0001", True, [], [], "0.9.0")
+        assert {o["id"] for o in node_store.get_node("sandy0001")["outputs"]} == {"servo", "screen"}
+        node_store.ingest_status("sandy0001", True, [], [{"id": "led", "kind": "pwm"}], "0.9.0")
+        assert [o["id"] for o in node_store.get_node("sandy0001")["outputs"]] == ["led"]
 
 
 # ── The display: free text, and a picture that must not be trusted ───────────
@@ -610,46 +599,6 @@ def test_a_wide_photo_is_cropped_not_squashed():
     assert (pixel & 0x001F) > 20, f"centre is not blue: {pixel:04x}"
 
 
-def test_the_camera_appears_in_the_app_like_any_other_board(db):
-    """It is a different board and it needs no special case anywhere.
-
-    It declares its outputs in a heartbeat, the catalogue says how to draw them,
-    and provisioning does the rest — the same path the brain uses. The moment
-    the camera needs its own branch in the provisioning logic, that logic has
-    stopped being a rule and become a list.
-    """
-    # `cam/`-prefixed, because the camera shares a node id with the brain: it is
-    # part of Sandy, not a second box. The prefix is what stops `flash` from
-    # sitting beside `servo` in one list and colliding the day somebody puts a
-    # flash on the brain — and it carries straight through to the topic, since
-    # device_topic joins node id and output id with a slash.
-    CAM_OUTPUTS = [
-        {"id": "cam/flash", "kind": "relay"},
-        {"id": "cam/flash_level", "kind": "pwm"},
-        {"id": "cam/flash_mode", "kind": "pwm"},
-        {"id": "cam/snapshot", "kind": "pwm"},
-        {"id": "cam/stream", "kind": "relay"},
-        {"id": "cam/framesize", "kind": "pwm"},
-    ]
-    with as_tenant("owner"):
-        node_store.pair_node("sandycam01", "الكاميرا")
-        node_store.ingest_status("sandycam01", True, [], CAM_OUTPUTS, "0.2.0",
-                                 telemetry={"ip": "192.168.1.117", "board": "sandy-cam"})
-
-        names = {d["name"] for d in device_store.list_devices()}
-        assert {"cam_flash", "cam_flash_level", "cam_flash_mode",
-                "cam_snapshot", "cam_stream", "cam_framesize"} <= names
-
-        flash = device_store.get_device("cam_flash")
-        assert device_store.command_payload(flash, "on")["payload"] == "on"
-        # And the topic lands in the camera's branch, which is where it listens.
-        assert device_store.device_topic(flash) == "sandy/node/sandycam01/cam/flash"
-
-        size = device_store.get_device("cam_framesize")
-        assert device_store.command_payload(size, "set", "VGA")["ok"] is True
-        assert device_store.command_payload(size, "set", "8K")["ok"] is False
-
-
 def test_the_light_offers_effects_and_still_says_when_audio_is_leaving(db):
     """The privacy states must never be dropped in favour of the pretty ones.
 
@@ -726,137 +675,6 @@ def test_the_display_device_is_reachable_end_to_end(db):
         assert device_store.tenant_owns_topic(topic) is True
 
 
-def test_two_boards_under_one_node_id_do_not_erase_each_other(db):
-    """The brain and the camera share a node id, and both send a heartbeat.
-
-    That is deliberate — the camera is part of Sandy, not a second box — but it
-    means two different heartbeats arrive five seconds apart claiming to
-    describe the same node. If the camera's simply replaced `outputs`, the app
-    would flicker between a robot with a neck and a robot with a flash, twice
-    every ten seconds, and nobody would be able to describe the bug.
-
-    So a camera heartbeat replaces only the `cam/` entries and leaves the rest
-    alone. This runs them in both orders, because "works if the brain goes
-    first" is not a property anybody can rely on over a network.
-    """
-    from app.integrations.mqtt_ingest import _ingest_cam_status
-
-    BRAIN = [{"id": "servo", "kind": "servo"}, {"id": "screen", "kind": "pwm"}]
-    CAM_JSON = ('{"outputs":[{"id":"flash","kind":"relay"},'
-                '{"id":"snapshot","kind":"pwm"}],"ip":"192.168.1.117",'
-                '"board":"sandy-cam"}')
-
-    def outputs_now():
-        return {o["id"] for o in node_store.get_node("sandy0001")["outputs"]}
-
-    with as_tenant("owner"):
-        node_store.pair_node("sandy0001", "ساندي")
-
-        # brain first, then camera
-        node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.0")
-        _ingest_cam_status("sandy0001", CAM_JSON)
-        assert outputs_now() == {"servo", "screen", "cam/flash", "cam/snapshot"}
-
-        # ...and a brain heartbeat afterwards must not wipe the camera's half
-        node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.0")
-        after = outputs_now()
-        assert {"servo", "screen"} <= after
-
-    # camera first on a fresh node (another account's: one robot per account)
-    with as_tenant("owner2"):
-        node_store.pair_node("sandy0002", "ساندي التانية")
-        _ingest_cam_status("sandy0002", CAM_JSON)
-        cam_only = {o["id"] for o in node_store.get_node("sandy0002")["outputs"]}
-        assert cam_only == {"cam/flash", "cam/snapshot"}
-
-        # and its address landed under its own key, which is how anyone finds
-        # the camera at all. `cam_ip`, not `ip`: the brain owns `ip`, and a
-        # single shared field flips between two boards every five seconds.
-        assert node_store.get_node("sandy0002")["telemetry"]["cam_ip"] \
-            == "192.168.1.117"
-
-
-def test_the_two_boards_stop_erasing_each_other(db):
-    """Brain and camera share a node id; each heartbeat must speak only for itself.
-
-    This is the bug behind "the camera has no address" and "the address is fine"
-    both being true minutes apart with nothing changed. Every write replaced the
-    whole field, so the brain's heartbeat wiped the camera's outputs and address,
-    the camera's wiped the microphone levels, and five seconds later it swapped
-    back. Whatever you looked for was there about half the time.
-
-    Ten alternating heartbeats: if the merge is wrong, one side is gone by the
-    end. A single round trip would pass either way, which is why this runs ten.
-    """
-    from app.integrations.mqtt_ingest import _ingest_cam_status
-
-    BRAIN = [{"id": "servo", "kind": "servo"}, {"id": "screen", "kind": "pwm"}]
-    # `board` included because the real brain sends it — and the point of this
-    # test is that the two boards' names stop overwriting each other too.
-    BRAIN_TELEMETRY = {"mic_l": 40, "mic_r": 44, "volume": 80,
-                       "ip": "192.168.1.102", "board": "sandy-brain-s3"}
-    CAM_JSON = ('{"outputs":[{"id":"flash","kind":"relay"}],'
-                '"ip":"192.168.1.117","board":"sandy-cam"}')
-
-    with as_tenant("owner"):
-        node_store.pair_node("sandy0001", "ساندي")
-
-        for _ in range(5):
-            node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.1",
-                                     telemetry=BRAIN_TELEMETRY)
-            _ingest_cam_status("sandy0001", CAM_JSON)
-
-        node = node_store.get_node("sandy0001")
-        outputs = {o["id"] for o in node["outputs"]}
-        assert {"servo", "screen", "cam/flash"} <= outputs, outputs
-
-        tele = node["telemetry"]
-        # Each board's address under its own key, and the brain's readings
-        # survived — that is the whole point.
-        #
-        # This assertion used to read `tele["ip"] == <the camera>` with a
-        # comment calling it "the last one written". That was the bug written
-        # down as though it were the design: one field, two boards, flipping
-        # every five seconds. The live view read it and pointed at the brain
-        # half the time, and the brain serves no video.
-        assert tele.get("ip") == "192.168.1.102"          # the brain's, kept
-        assert tele.get("cam_ip") == "192.168.1.117"      # the camera's, its own
-        assert tele.get("board") == "sandy-brain-s3"
-        assert tele.get("cam_board") == "sandy-cam"
-        assert tele.get("mic_l") == 40 and tele.get("volume") == 80
-
-        # ...and in the other order neither address moves.
-        node_store.ingest_status("sandy0001", True, [], BRAIN, "0.9.1",
-                                 telemetry=BRAIN_TELEMETRY)
-        node = node_store.get_node("sandy0001")
-        assert node["telemetry"]["ip"] == "192.168.1.102"
-        assert node["telemetry"]["cam_ip"] == "192.168.1.117"
-        assert "cam/flash" in {o["id"] for o in node["outputs"]}
-
-
-def test_the_cameras_command_channel_is_not_mistaken_for_a_device(db):
-    """`cam/command` is a channel, not a control, and authorising it as one
-    silently refused every photo.
-
-    send_to_topic authorises by finding a device whose transport builds the
-    topic. No device produces `cam/command` — it is the camera's service channel
-    — so every snapshot request was dropped at the boundary and the app reported
-    that the camera might be off. Nothing had left the server.
-    """
-    from app.features.device_store import tenant_owns_topic
-
-    with as_tenant("owner"):
-        node_store.pair_node("sandy0001", "ساندي")
-        node_store.ingest_status("sandy0001", True, [],
-                                 [{"id": "cam/flash", "kind": "relay"}], "0.3.0")
-
-        # Still false — and correctly so. The point is that nothing routes a
-        # camera command through this check any more.
-        assert tenant_owns_topic("sandy/node/sandy0001/cam/command") is False
-        # A real control still authorises the normal way.
-        assert tenant_owns_topic("sandy/node/sandy0001/cam/flash") is True
-
-
 def test_the_catalogue_can_correct_a_part_after_it_exists(db):
     """A part provisioned once must not keep the wrong widget for ever.
 
@@ -909,37 +727,3 @@ def test_correcting_the_widget_leaves_the_owners_own_words_alone(db):
         assert after["room"] == "غرفتي"
 
 
-def test_the_two_boards_do_not_overwrite_each_others_address(db):
-    """One node id, two boards, one `ip` field — the live view's real bug.
-
-    The brain and the camera share a node id by design, and telemetry merges by
-    key. Both were sending `ip`, so the single field flipped between the two
-    boards every five seconds. The stream view read it and pointed at the brain
-    half the time — and the brain serves no video — so the live view failed
-    roughly every other attempt with nothing in the pattern to explain it.
-
-    The camera's address now lives under `cam_ip`, the same way its outputs live
-    under `cam/`. Two boards under one id each write in their own space.
-    """
-    import json
-
-    from app.integrations import mqtt_ingest
-
-    with as_tenant("owner"):
-        node_store.pair_node("sandybrain01", "ساندي")
-        # The brain says where it is.
-        node_store.ingest_status(
-            "sandybrain01", True, [], [{"id": "servo", "kind": "servo"}],
-            "0.9.1", telemetry={"ip": "192.168.1.50", "board": "sandy-brain-s3"})
-
-    # Then the camera's heartbeat lands.
-    mqtt_ingest._ingest_cam_status("sandybrain01", json.dumps({
-        "ip": "192.168.1.77", "board": "sandy-cam",
-        "outputs": [{"id": "flash", "kind": "relay"}],
-    }))
-
-    with as_tenant("owner"):
-        tele = node_store.get_node("sandybrain01")["telemetry"]
-
-    assert tele["ip"] == "192.168.1.50", "the camera overwrote the brain's address"
-    assert tele["cam_ip"] == "192.168.1.77", "the camera's own address was lost"

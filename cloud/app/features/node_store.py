@@ -43,12 +43,6 @@ ERASE_RESEND = timedelta(minutes=1)
 ERASE_KEPT_DAYS = 30
 
 
-def _cam_pending_id(node_id: str) -> str:
-    """The camera's own row there: the robot's id with its camera's key id."""
-    from app.features.device_keys import cam_key_id
-    return cam_key_id(node_id)
-
-
 def init_node_store(mongo_db) -> None:
     configure(mongo_db)
     if mongo_db is None:
@@ -107,12 +101,15 @@ def _public(d: Dict[str, Any]) -> Dict[str, Any]:
         "node_id": d.get("node_id", ""),
         "label": d.get("label", ""),
         "capabilities": d.get("capabilities", []),
-        "outputs": d.get("outputs", []),
+        # A retired board's outputs and fields stay on the row until the next heartbeat.
+        "outputs": [o for o in d.get("outputs") or []
+                    if isinstance(o, dict) and not retired_output(o.get("id"))],
         "firmware_version": d.get("firmware_version", ""),
         "online": bool(d.get("online", False)),
         "last_seen": _iso(d.get("last_seen")),
         "paired_at": _iso(d.get("paired_at")),
-        "telemetry": d.get("telemetry", {}),
+        "telemetry": {k: v for k, v in (d.get("telemetry") or {}).items()
+                      if k in _TELEMETRY_KEYS},
     }
 
 
@@ -123,21 +120,10 @@ _TELEMETRY_KEYS = {
     "mic_l_muted": bool, "mic_r_muted": bool,
     "volume": int,
     "uptime": int, "heap": int, "mood": int,
-    # Boards share a node id, so each board's fields get their own prefix.
     "ip": str, "board": str,
-    "cam_boot": int,
-    "cam_ip": str, "cam_board": str, "cam_ssid": str,
-    # cam_stream_key: random per boot; the app needs it to open the local stream.
-    "cam_fw": str, "cam_online": bool, "cam_stream_key": str,
-    # The camera's sensor: "ok", "retrying" (failed, being tried again) or "failed".
-    "cam_sensor": str,
-    "room_ip": str, "room_board": str, "room_light": str,
-    "room_fw": str, "room_online": bool, "room_uptime_s": int, "room_heap": int,
-    # The light arm's saved setup, "rest,on,off,hold_ms" (features/room_arm.py).
-    "room_arm": str,
     "ssid": str,
     # dBm; below about -75 the link can't carry live voice.
-    "rssi": int, "room_rssi": int,
+    "rssi": int,
     # The brain's health: last reset reason, restarts ever, least internal RAM it had,
     # its largest block now, safe mode, each part not OK, each task's least stack headroom.
     "boot": int, "boots": int, "heap_min": int, "heap_big": int, "safe": bool,
@@ -196,7 +182,7 @@ def _clean_outputs(outputs: Any) -> List[Dict[str, Any]]:
             continue
         oid = str(o.get("id", "")).strip()[:32]
         kind = str(o.get("kind", "")).strip().lower()
-        if oid and kind in KNOWN_CAPABILITIES:
+        if oid and kind in KNOWN_CAPABILITIES and not retired_output(oid):
             clean.append({"id": oid, "kind": kind})
     return clean
 
@@ -227,8 +213,7 @@ def _is_legacy_owner(user_id: Any) -> bool:
 
 
 def _has_another_robot(coll, node_id: str) -> bool:
-    """One robot per account: the caller already paired a board other than this one. The
-    camera and the room node share their robot's id, so they are never «another»."""
+    """One robot per account: the caller already paired a board other than this one."""
     return coll.find_one({"node_id": {"$ne": node_id}}, {"_id": 1}) is not None
 
 
@@ -277,10 +262,9 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
     if _has_another_robot(coll, node_id):
         return {"ok": False, "error": "one_robot"}
     # Paired again, by anyone: an erase still waiting from its last release must never
-    # reach it or its camera. Dropped before the claim, so an erase on its way finds nothing.
+    # reach it. Dropped before the claim, so an erase on its way finds nothing.
     if get_db() is not None:
-        get_db()[_PENDING_ERASE].delete_many(
-            {"_id": {"$in": [node_id, _cam_pending_id(node_id)]}})
+        get_db()[_PENDING_ERASE].delete_one({"_id": node_id})
 
     # مطالَبة مرّة وحدة عبر كل الحسابات: أول حساب بيربط بيملك.
     if get_db() is not None:
@@ -320,9 +304,8 @@ def pair_node(code: str, label: str = "") -> Dict[str, Any]:
 def _open_key_enrolment(node_id: str) -> None:
     """Pairing is when the owner vouches for the board: open its voice-key enrolment."""
     try:
-        from app.features.device_keys import cam_key_id, open_enrolment
+        from app.features.device_keys import open_enrolment
         open_enrolment(node_id)
-        open_enrolment(cam_key_id(node_id))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[NodeStore] key enrolment not opened for %s: %s", node_id, exc)
 
@@ -361,8 +344,7 @@ def _erase_command(node_id: str, key: Optional[bytes] = None,
     own key, or the shared one while it has none. The board refuses anything unsigned or
     more than five minutes old, so a word on the broker can no longer wipe a robot.
 
-    ``signer`` is the key id named in the signed text and whose key signs it: the node for
-    the brain, ``cam_key_id(node)`` for its camera, so one board's erase is not another's."""
+    ``signer`` is the key id named in the signed text and whose key signs it."""
     import hashlib
     import hmac
     import time
@@ -402,17 +384,15 @@ def _erase_commands(node_id: str, signer: Optional[str] = None) -> List[str]:
 
 
 def _wipe_board(node_id: str) -> bool:
-    """Tell the board, and its camera, to forget their network credentials. Best effort;
-    the answer is the brain's (the camera says nothing back either)."""
-    _wipe_camera(node_id)
+    """Tell the board to forget its network credentials. Best effort."""
     try:
-        from app.integrations.room_device import get_room_device_client
+        from app.integrations.device_publisher import get_device_publisher
 
         commands = _erase_commands(node_id)
         if not commands:
             logger.warning("[NodeStore] no key to sign the factory reset of %s", node_id)
             return False
-        client = get_room_device_client()
+        client = get_device_publisher()
         sent = [client.publish_service(f"sandy/node/{node_id}/factory_reset", c)
                 for c in commands]
         return any(sent)
@@ -420,20 +400,6 @@ def _wipe_board(node_id: str) -> bool:
         logger.warning("[NodeStore] factory reset not delivered to %s: %s",
                        node_id, exc)
         return False
-
-
-def _wipe_camera(node_id: str) -> None:
-    """The camera's own erase, signed with its own key (shared while it has none) over its
-    own key id: it forgets its network and settings, never its identity or key."""
-    try:
-        from app.features.device_keys import cam_key_id
-        from app.integrations.room_device import get_room_device_client
-
-        client = get_room_device_client()
-        for command in _erase_commands(node_id, cam_key_id(node_id)):
-            client.publish_service(f"sandy/node/{node_id}/cam/factory_reset", command)
-    except Exception as exc:  # noqa: BLE001 — a camera that is off must not block the release
-        logger.warning("[NodeStore] camera erase not delivered to %s: %s", node_id, exc)
 
 
 def unpair_node(node_id: str) -> Dict[str, Any]:
@@ -470,9 +436,8 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "release_failed", "board_wiped": board_wiped}
     # A sold robot must enrol a fresh voice key.
     try:
-        from app.features.device_keys import cam_key_id, revoke_key
+        from app.features.device_keys import revoke_key
         revoke_key(node_id)
-        revoke_key(cam_key_id(node_id))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[NodeStore] could not revoke the voice key of %s: %s",
                        node_id, exc)
@@ -488,9 +453,8 @@ def unpair_node(node_id: str) -> Dict[str, Any]:
 def _keep_erase(node_id: str) -> None:
     """The release's erase, kept for the board's next heartbeats (`_erase_if_pending`):
     its own key, sealed (it is revoked next and the board still checks with it), and the
-    restart count and network it had, which is how its wipe shows (both reset or change).
-    The camera's is kept beside it (`_erase_cam_if_pending`): its own key and network."""
-    from app.features.device_keys import KeyUnreadable, cam_key_id, get_key
+    restart count and network it had, which is how its wipe shows (both reset or change)."""
+    from app.features.device_keys import KeyUnreadable, get_key
     from app.utils.ltm_crypto import encrypt_field
 
     db = get_db()
@@ -498,18 +462,12 @@ def _keep_erase(node_id: str) -> None:
         return
     try:
         record = get_key(node_id)
-        cam = get_key(cam_key_id(node_id))
         node = db[_COLL].find_one({"node_id": node_id}) or {}
         tel = node.get("telemetry") or {}
         db[_PENDING_ERASE].update_one({"_id": node_id}, {"$set": {
             "key": encrypt_field(record["hex"]) if record else None,
             "boots": tel.get("boots") if isinstance(tel.get("boots"), int) else None,
             "ssid": str(tel.get("ssid") or "") or None,
-            "since": _now(), "sent_at": None,
-        }}, upsert=True)
-        db[_PENDING_ERASE].update_one({"_id": _cam_pending_id(node_id)}, {"$set": {
-            "key": encrypt_field(cam["hex"]) if cam else None,
-            "ssid": str(tel.get("cam_ssid") or "") or None,
             "since": _now(), "sent_at": None,
         }}, upsert=True)
     except (PyMongoError, KeyUnreadable) as exc:  # the release itself must still go through
@@ -534,119 +492,87 @@ def _erase_if_pending(node_id: str, telemetry: Dict[str, Any]) -> None:
         logger.info("[NodeStore] %s shows it was wiped (%s); erase dropped", node_id,
                     "restart count reset" if wiped else "another network")
         return
-    if _resend_erase(node_id, node_id, None, f"sandy/node/{node_id}/factory_reset"):
+    if _resend_erase(node_id):
         logger.info("[NodeStore] erase sent again to released board %s", node_id)
 
 
-def _erase_cam_if_pending(node_id: str, telemetry: Dict[str, Any]) -> None:
-    """A released robot's camera heard again: send its erase, unless it shows it was wiped.
-    A wiped camera has no network to come back on, so one that is back on another network
-    was wiped and set up again; on the same one it was not."""
-    db = get_db()
-    pending_id = _cam_pending_id(node_id)
-    pending = db[_PENDING_ERASE].find_one({"_id": pending_id})
-    if pending is None:
-        return
-    ssid = str((telemetry or {}).get("cam_ssid") or "")
-    if ssid and pending.get("ssid") and ssid != pending["ssid"]:
-        db[_PENDING_ERASE].delete_one({"_id": pending_id})
-        logger.info("[NodeStore] the camera of %s is on another network; erase dropped",
-                    node_id)
-        return
-    if _resend_erase(pending_id, node_id, pending_id,
-                     f"sandy/node/{node_id}/cam/factory_reset"):
-        logger.info("[NodeStore] erase sent again to the camera of released board %s",
-                    node_id)
-
-
-def _resend_erase(pending_id: str, node_id: str, signer: Optional[str], topic: str) -> bool:
+def _resend_erase(node_id: str) -> bool:
     """One pending erase sent again: claimed at most once a minute across workers, never to
     a robot paired again since (the row goes), signed with the kept own key and the shared
     one, since the board checks with whichever it still has."""
     from app.api.voice_ws._config import _HMAC_KEY
-    from app.integrations.room_device import get_room_device_client
+    from app.integrations.device_publisher import get_device_publisher
     from app.utils.ltm_crypto import decrypt_field
 
     db = get_db()
     now = _now()
     claimed = db[_PENDING_ERASE].find_one_and_update(
-        {"_id": pending_id,
+        {"_id": node_id,
          "$or": [{"sent_at": None}, {"sent_at": {"$lt": now - ERASE_RESEND}}]},
         {"$set": {"sent_at": now}})
     if claimed is None:
         return False
     if get_node_any_tenant(node_id) is not None:
         # Paired again while this ran: never wipe someone's robot.
-        db[_PENDING_ERASE].delete_one({"_id": pending_id})
+        db[_PENDING_ERASE].delete_one({"_id": node_id})
         return False
     own = bytes.fromhex(decrypt_field(claimed["key"])) if claimed.get("key") else None
-    client = get_room_device_client()
+    client = get_device_publisher()
     for key in [k for k in (own, _HMAC_KEY) if k]:
-        command = _erase_command(node_id, key, signer)
+        command = _erase_command(node_id, key)
         if command:
-            client.publish_service(topic, command)
+            client.publish_service(f"sandy/node/{node_id}/factory_reset", command)
     return True
 
 
 # ── Heartbeat ingest (firmware-facing, runs outside a tenant) ────────────────
-# Several boards share one node id; each heartbeat merges only its own board's
-# outputs and telemetry, or they erase each other in a loop.
 
-def _output_namespace(output_id: Any) -> str:
-    """The board prefix of an output id: ``cam/``, ``room/``, or "" for the brain."""
-    oid = str(output_id or "")
-    head, sep, _ = oid.partition("/")
-    return head + sep if sep else ""
+def retired_output(output_id: Any) -> bool:
+    """An output under a branch (``cam/flash``, ``room/light``): one of the boards that
+    shared the robot's id before the robot was its only board. Its rows stay in the
+    database and are passed over everywhere: never listed, never sent to."""
+    return "/" in str(output_id or "")
 
 
 def part_present(node: Optional[Dict[str, Any]], output: Any) -> Optional[bool]:
     """Whether the board that serves ``output`` is there now.
 
-    False when it said it went (its MQTT will: ``online`` for the brain, ``cam_online`` and
-    ``room_online`` for the others) or, for the brain, when it runs in safe mode, which takes
-    none of its outputs; None when that board was never heard from.
+    False when it said it went (its MQTT will, ``online``) or runs in safe mode, which takes
+    none of its outputs, and for a retired output; None when the board was never heard from.
     """
     if not node:
         return None
-    tel = node.get("telemetry") or {}
-    ns = _output_namespace(output)
-    if ns == "cam/":
-        return tel.get("cam_online") if isinstance(tel.get("cam_online"), bool) else None
-    if ns == "room/":
-        return tel.get("room_online") if isinstance(tel.get("room_online"), bool) else None
-    if ns:
-        return None
+    if retired_output(output):
+        return False
     if not node.get("last_seen"):
         return None
-    return bool(node.get("online")) and not tel.get("safe")
+    return bool(node.get("online")) and not (node.get("telemetry") or {}).get("safe")
 
 
 def _merge_outputs(node_id: str, incoming: List[Dict[str, Any]],
                    current: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """Replace only the namespaces this heartbeat declares; declaring nothing keeps everything.
+    """The heartbeat's outputs are the whole board; declaring nothing keeps what it had
+    (silence is not a claim that the hardware is gone). A retired board's outputs go.
 
     ``current`` is the node document when the caller already read it.
     """
     fresh = _clean_outputs(incoming)
-    claimed = {_output_namespace(o.get("id")) for o in fresh}
-
+    if fresh:
+        return fresh
     if current is None:
         current = get_node_any_tenant(node_id) or {}
-    existing = current.get("outputs") or []
-    kept = [
-        o for o in existing
-        if isinstance(o, dict) and _output_namespace(o.get("id")) not in claimed
-    ]
-    return kept + fresh
+    return [o for o in current.get("outputs") or []
+            if isinstance(o, dict) and not retired_output(o.get("id"))]
 
 
 def _merge_telemetry(current: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
-    """Update only the keys this heartbeat carries."""
+    """Update only the keys this heartbeat carries. A key no longer known (a retired board's
+    `cam_*` and `room_*`) is dropped."""
     fresh = _clean_telemetry(incoming)
     existing = current.get("telemetry") or {}
     if not isinstance(existing, dict):
         existing = {}
-    return {**existing, **fresh}
+    return {**{k: v for k, v in existing.items() if k in _TELEMETRY_KEYS}, **fresh}
 
 
 def get_node_any_tenant(node_id: str) -> Optional[Dict[str, Any]]:
@@ -659,7 +585,7 @@ def get_node_any_tenant(node_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def ingest_status(node_id: str, online: Optional[bool] = True,
+def ingest_status(node_id: str, online: bool = True,
                   capabilities: Optional[List[str]] = None,
                   outputs: Optional[List[Dict[str, Any]]] = None,
                   firmware_version: str = "",
@@ -667,7 +593,6 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
                   heard: bool = True) -> Dict[str, Any]:
     """Heartbeat update by node_id, cross-tenant; best-effort, never raises.
 
-    ``online=None`` leaves online/last_seen alone (camera and room node report their own).
     ``heard=False`` (the broker's retained copy) keeps last_seen: it is not the board now.
     """
     if get_db() is None:
@@ -678,7 +603,7 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
         current = get_node_any_tenant(node_id)
         if current is None:
             # Not paired yet: only that it is there, for pairing, and an erase it still owes.
-            if online is not None and heard:
+            if heard:
                 tel = telemetry if isinstance(telemetry, dict) else {}
                 get_db()[_SIGHTINGS].update_one(
                     {"_id": node_id},
@@ -687,16 +612,10 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
                     upsert=True)
                 if online:
                     _erase_if_pending(node_id, tel)
-            elif heard and isinstance(telemetry, dict) and telemetry.get("cam_online") is True \
-                    and "cam_ssid" in telemetry:
-                # The camera's own heartbeat (it reports no `online` for the node).
-                _erase_cam_if_pending(node_id, telemetry)
             return {"ok": False}
-        update: Dict[str, Any] = {}
-        if online is not None:
-            update["online"] = bool(online)
-            if heard:
-                update["last_seen"] = _now()
+        update: Dict[str, Any] = {"online": bool(online)}
+        if heard:
+            update["last_seen"] = _now()
         if capabilities is not None:
             update["capabilities"] = _clean_caps(capabilities)
         if isinstance(outputs, list):
@@ -705,8 +624,6 @@ def ingest_status(node_id: str, online: Optional[bool] = True,
             update["firmware_version"] = str(firmware_version)[:32]
         if telemetry is not None:
             update["telemetry"] = _merge_telemetry(current, telemetry)
-        if not update:
-            return {"ok": True}
         r = get_db()[_COLL].update_one({"node_id": node_id}, {"$set": update})
         if r.matched_count == 0:
             return {"ok": False}   # unpaired between the read and the write

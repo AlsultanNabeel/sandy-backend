@@ -184,11 +184,20 @@ def _with_presence(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return docs
 
 
+def _retired(d: Dict[str, Any]) -> bool:
+    """A device on a retired board's output (`node_store.retired_output`): its row stays in
+    the database and is passed over by every read, so nothing lists it or sends to it."""
+    from app.features.node_store import retired_output
+
+    t = d.get("transport") or {}
+    return t.get("kind") == "node" and retired_output(t.get("output"))
+
+
 def list_devices() -> List[Dict[str, Any]]:
     coll = _coll()
     if coll is None:
         return []
-    docs = list(coll.find({}).sort("name", 1).limit(MAX_DEVICES))
+    docs = [d for d in coll.find({}).sort("name", 1).limit(MAX_DEVICES) if not _retired(d)]
     return [_public(d) for d in _with_presence(docs)]
 
 
@@ -197,7 +206,7 @@ def get_device(name: str) -> Optional[Dict[str, Any]]:
     if coll is None:
         return None
     d = coll.find_one({"name": (name or "").strip().lower()})
-    return _with_presence([d])[0] if d else None
+    return _with_presence([d])[0] if d and not _retired(d) else None
 
 
 def get_devices(names: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -206,12 +215,13 @@ def get_devices(names: List[str]) -> Dict[str, Dict[str, Any]]:
     wanted = sorted({(n or "").strip().lower() for n in names if (n or "").strip()})
     if coll is None or not wanted:
         return {}
-    docs = list(coll.find({"name": {"$in": wanted}}).limit(len(wanted)))
+    docs = [d for d in coll.find({"name": {"$in": wanted}}).limit(len(wanted))
+            if not _retired(d)]
     return {d["name"]: d for d in _with_presence(docs)}
 
 
 def devices_on_output(output: str) -> List[Dict[str, Any]]:
-    """This tenant's node devices on ``output`` (``room/light``), one per paired node."""
+    """This tenant's node devices on ``output`` (``buzzer``), one per paired node."""
     coll = _coll()
     output = (output or "").strip()
     if coll is None or not output:
@@ -420,7 +430,10 @@ def delete_devices_for_node(node_id: str) -> Optional[int]:
 
 
 def device_topic(device: Dict[str, Any]) -> Optional[str]:
-    """MQTT topic for a device, from its transport; None for anything but a node output."""
+    """MQTT topic for a device, from its transport; None for anything but a node output,
+    and for a retired board's."""
+    if _retired(device):
+        return None
     t = device.get("transport") or {}
     kind = str(t.get("kind", "")).strip().lower()
     if kind == "node":
@@ -456,6 +469,9 @@ def tenant_owns_topic(topic: str) -> bool:
     if not topic:
         return False
     query = _topic_query(topic)
+    from app.features.node_store import retired_output
+    if retired_output(query.get("transport.output")):
+        return False
     try:
         if coll.find_one(query, {"_id": 1}) is None:
             return False
@@ -471,9 +487,12 @@ def _valid_transport(transport: Any) -> bool:
     node tree on the server's own broker login, and a web address was never sent at all."""
     if not isinstance(transport, dict):
         return False
+    from app.features.node_store import retired_output
+
+    output = str(transport.get("output", "")).strip()
     return (str(transport.get("kind", "")).strip().lower() == "node"
             and bool(str(transport.get("node_id", "")).strip())
-            and bool(str(transport.get("output", "")).strip()))
+            and bool(output) and not retired_output(output))
 
 
 def _transport_owned(transport: Any) -> bool:

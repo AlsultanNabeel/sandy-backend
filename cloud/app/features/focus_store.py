@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_focus"
 
-# The end scene (music, light) belongs to the moment the session ends. Nothing ends it on a
+# The end scene belongs to the moment the session ends. Nothing ends it on a
 # timer, only the next read, so a session found over longer ago than this is closed without it:
-# opening the app the next morning must not switch the room.
+# opening the app the next morning must not switch the devices.
 END_SCENE_LATE = timedelta(minutes=2)
 
 

@@ -95,12 +95,12 @@ def test_fast_path_still_wins_with_no_model_call(brain_db, monkeypatch):  # noqa
             sent[topic] = payload
             return True
 
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher", lambda: _Client())
     with active_user_profile_context(A):
-        device_store.add_device("living_light", "الضو", "switch", on_node("room/light"))
+        device_store.add_device("living_light", "الضو", "switch", on_node("light"))
     model = ScriptedModel()
     state = _turn(model, "شغل الضو")
-    assert model.seen == [] and sent == {"sandy/node/n1/room/light": "on"}
+    assert model.seen == [] and sent == {"sandy/node/n1/light": "on"}
     assert state["routed_by"] == "fast_path" and "شغّلت" in state["final_response"]
 
 

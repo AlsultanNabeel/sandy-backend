@@ -27,7 +27,7 @@ class _Room:
 @pytest.fixture
 def room(brain_db, monkeypatch):  # noqa: F811
     client = _Room()
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: client)
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher", lambda: client)
     with active_user_profile_context(A):
         device_store.add_device("lamp", "ضو الصالة", "dimmer", on_node("lamp"), room="الصالة")
         device_store.add_device("kitchen", "ضو المطبخ", "switch", on_node("kitchen"), room="المطبخ")

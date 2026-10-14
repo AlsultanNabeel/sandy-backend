@@ -17,7 +17,7 @@ def _kitchen(db):
     db["sandy_nodes"].insert_one({"node_id": "x", "user_id": "userA", "telemetry": {}})
     with active_user_profile_context(A):
         assert device_store.add_device("kitchen", "ضو المطبخ", "switch",
-                                       {"kind": "node", "node_id": "x", "output": "room/light"},
+                                       {"kind": "node", "node_id": "x", "output": "light"},
                                        room="المطبخ")["ok"]
 
 

@@ -56,20 +56,6 @@ Every row here was declared by the board itself in a heartbeat and matched to a 
 | `ir` | ir | ريموت ساندي | ir | on / off |
 | `screen_size` | pwm | حجم الكتابة | enum | `small`, `medium`, `large` |
 
-### Presented but not declared
-
-The catalogue knows how to show these; no board has offered one. Either a part that is not fitted, or firmware older than the entry.
-
-- `cam/flash` — فلاش الكاميرا
-- `cam/flash_level` — قوة الفلاش
-- `cam/flash_mode` — وضع الفلاش
-- `cam/snapshot` — التقاط صورة
-- `cam/stream` — بث مباشر
-- `cam/framesize` — دقة الصورة
-- `room/light` — ضوء الغرفة
-- `room/music` — موسيقى الغرفة
-- `cam/quality` — وضوح الصورة
-
 ## Pins
 
 Wiring, and what happens if two things claim one pin, is in `firmware/brain-core/WIRING.md`. This is only the assignment.

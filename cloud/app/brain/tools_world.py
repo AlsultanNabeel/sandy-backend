@@ -98,7 +98,7 @@ def _relative(device: Dict[str, Any], by: Any) -> Optional[str]:
 def _actuate_one(device: Dict[str, Any], action: str, value: Any) -> Tuple[bool, str]:
     """(it happened, what to say). Not sent means not done, and the reply says so."""
     from app.features.device_store import command_payload, device_topic, set_state
-    from app.integrations.room_device import get_room_device_client
+    from app.integrations.device_publisher import get_device_publisher
 
     label = device.get("label", device.get("name", ""))
     res = command_payload(device, action, value)
@@ -113,7 +113,7 @@ def _actuate_one(device: Dict[str, Any], action: str, value: Any) -> Tuple[bool,
         # Its board said it went: the broker would take the command and drop it.
         return False, offline_line(label)
     try:
-        sent = get_room_device_client().send_to_topic(topic, payload)
+        sent = get_device_publisher().send_to_topic(topic, payload)
     except Exception:  # noqa: BLE001 — the broker boundary; reported as not sent
         logger.warning("[brain] device send failed", exc_info=True)
         sent = False
@@ -176,7 +176,7 @@ def device_state(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 def scene_apply(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     from app.features.scene_store import apply_scene
 
-    # apply_scene sends each action once; it reports how many reached the room.
+    # apply_scene sends each action once; it reports how many reached their device.
     r = apply_scene(str(args.get("name", "")))
     if not r.get("ok"):
         return _no(SCENES_HINT)
@@ -188,7 +188,7 @@ def scene_apply(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
 def _passed_over(r: Dict[str, Any]) -> str:
     """What a scene or a restore left out, by name: the devices whose board is gone, the
-    room words no device of his answers to, and the ones the command did not reach."""
+    legacy words no device of his answers to, and the ones the command did not reach."""
     parts = []
     if r.get("skipped"):
         parts.append(f" ما عندك {'، '.join(r['skipped'])}، فتخطّيتها.")

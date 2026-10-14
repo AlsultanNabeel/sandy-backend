@@ -129,4 +129,4 @@ def test_the_versions_the_server_signs_for_are_the_ones_built_here():
     from app.features.firmware_store import version_key
     brain = re.search(r'SANDY_FW_VERSION "([^"]+)"',
                       (MAIN / "include" / "config.h").read_text()).group(1)
-    assert version_key(brain) >= version_key(SIGNED_FROM["brain"])
+    assert version_key(brain) >= version_key(SIGNED_FROM)

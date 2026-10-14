@@ -29,11 +29,6 @@ class KeyUnreadable(RuntimeError):
     with "unknown key", which makes the board throw its key away."""
 
 
-def cam_key_id(node_id: str) -> str:
-    """Camera's key id: shares the node id, but must not share the robot's key."""
-    return f"{(node_id or '').strip()}:cam"
-
-
 def _coll():
     db = get_db()
     return None if db is None else db[_COLL]

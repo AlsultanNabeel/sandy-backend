@@ -87,7 +87,7 @@ def test_the_room_goes_back_to_how_it_was_before_the_scene(tenant, monkeypatch):
             sent.append((topic, payload))
             return True
 
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher", lambda: _Client())
     device_store.add_device("lamp", "الضو", "dimmer", on_node("lamp"))
     device_store.set_state("lamp", "80")
     scene_store.add_scene("dim", actions=[{"device": "lamp", "value": "10"}])

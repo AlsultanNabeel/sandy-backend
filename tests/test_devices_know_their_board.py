@@ -26,14 +26,9 @@ def brain_beat(**fields) -> None:
     _beat("status", {"online": True,
                      "outputs": [{"id": "volume", "kind": "audio"},
                                  {"id": "mic_l", "kind": "audio"},
-                                 {"id": "mic_l_gain", "kind": "audio"}],
+                                 {"id": "mic_l_gain", "kind": "audio"},
+                                 {"id": "buzzer", "kind": "buzzer"}],
                      **fields})
-
-
-def room_beat() -> None:
-    _beat("room/status", {"online": True,
-                          "outputs": [{"id": "light", "kind": "servo"},
-                                      {"id": "music", "kind": "audio"}]})
 
 
 @pytest.fixture
@@ -41,7 +36,6 @@ def robot(brain_db):  # noqa: F811
     brain_db["sandy_nodes"].insert_one({"node_id": NODE, "user_id": "userA", "label": "ساندي",
                                         "outputs": [], "telemetry": {}})
     brain_beat(volume=70)
-    room_beat()
     with active_user_profile_context(A):
         yield brain_db
 
@@ -52,15 +46,47 @@ def _online() -> dict:
 
 def test_a_device_whose_board_answers_is_connected(robot):
     on = _online()
-    assert on["sandy_volume"] and on["room_light"] and on["room_music"]
-    assert device_store.get_device("room_light")["online"]
+    assert on["sandy_volume"] and on["sandy_buzzer"]
+    assert device_store.get_device("sandy_buzzer")["online"]
 
 
-def test_the_room_going_leaves_the_brain_connected(robot):
-    _beat("room/status", {"online": False})          # the room node's MQTT will
-    on = _online()
-    assert not on["room_light"] and not on["room_music"]
-    assert on["sandy_volume"]
+# The camera and the room board were removed (14 Oct 2026). Their rows stay in the
+# database; the server passes them over, and an old board still on the broker is not heard.
+
+def test_a_retired_boards_devices_are_passed_over(robot, broker):
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+
+    robot["sandy_devices"].insert_one({
+        "user_id": "userA", "name": "room_light", "label": "ضوء الغرفة",
+        "control_type": "switch", "transport": {"kind": "node", "node_id": NODE,
+                                                "output": "room/light"}})
+    assert "room_light" not in _online()
+    assert device_store.get_device("room_light") is None
+    assert not device_store.tenant_owns_topic(f"sandy/node/{NODE}/room/light")
+    out = tools.execute("device_control", {"device": "room_light", "action": "on"},
+                        TurnCtx(user_id="userA"))
+    assert out["ok"] is False and broker.sent == []
+    assert robot["sandy_devices"].count_documents({"name": "room_light"}) == 1   # kept
+
+
+def test_an_old_board_on_the_broker_is_not_heard(robot):
+    robot["sandy_nodes"].update_one({"node_id": NODE}, {"$set": {
+        "outputs": [{"id": "volume", "kind": "audio"}, {"id": "cam/flash", "kind": "relay"}],
+        "telemetry": {"cam_ip": "192.168.1.6", "ip": "192.168.1.5"}}})
+    _beat("room/status", {"online": True, "outputs": [{"id": "light", "kind": "servo"}]})
+    _beat("cam/status", {"ip": "192.168.1.7", "outputs": [{"id": "flash", "kind": "relay"}]})
+    _beat("cam/event", {"cmd": "snapshot"})
+    assert {d["name"] for d in device_store.list_devices()} == {
+        "sandy_volume", "sandy_mic_left", "sandy_mic_left_gain", "sandy_buzzer"}
+    from app.features.node_store import list_nodes
+    node = list_nodes()[0]
+    assert "cam/flash" not in [o["id"] for o in node["outputs"]]
+    assert "cam_ip" not in node["telemetry"]
+    brain_beat()                                     # the next heartbeat drops them for good
+    stored = robot["sandy_nodes"].find_one({"node_id": NODE})
+    assert all("/" not in o["id"] for o in stored["outputs"])
+    assert "cam_ip" not in stored["telemetry"]
 
 
 def test_the_brain_going_or_in_safe_mode_is_not_connected(robot):
@@ -68,14 +94,13 @@ def test_the_brain_going_or_in_safe_mode_is_not_connected(robot):
     assert not _online()["sandy_volume"]
     _beat("status", {"online": False})               # the brain's MQTT will
     assert not _online()["sandy_volume"]
-    assert _online()["room_light"]
 
 
 def test_sandy_reads_it_too(robot):
     from app.brain import tools
     from app.brain.ctx import TurnCtx
 
-    rows = tools.execute("device_state", {"device": "room_light"}, TurnCtx(user_id="userA"))
+    rows = tools.execute("device_state", {"device": "sandy_buzzer"}, TurnCtx(user_id="userA"))
     assert rows["devices"][0]["connected"] is True
 
 
@@ -94,7 +119,7 @@ class _Broker:
 @pytest.fixture
 def broker(robot, monkeypatch):
     b = _Broker()
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: b)
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher", lambda: b)
     return b
 
 
@@ -102,27 +127,28 @@ def test_a_gone_board_is_not_sent_and_she_says_not_connected(robot, broker):
     from app.brain import tools
     from app.brain.ctx import TurnCtx
 
-    device_store.set_state("room_light", "off")
-    _beat("room/status", {"online": False})
-    out = tools.execute("device_control", {"device": "room_light", "action": "on"},
+    device_store.set_state("sandy_buzzer", "happy")
+    _beat("status", {"online": False})
+    out = tools.execute("device_control", {"device": "sandy_buzzer", "action": "alert"},
                         TurnCtx(user_id="userA"))
     assert out["ok"] is False and "مش متّصل" in out["reply"]
     assert not out["reply"].startswith("ما اشتغل")      # not «it did not work, try again»
     assert broker.sent == []
-    assert device_store.get_device("room_light")["state"] == "off"
+    assert device_store.get_device("sandy_buzzer")["state"] == "happy"
 
 
-def test_a_scene_goes_on_without_the_gone_board_and_names_it(robot, broker):
+def test_a_scene_goes_on_without_the_retired_room_light_and_names_it(robot, broker):
+    """A scene saved with the room board's «light» still runs the rest and says what it
+    passed over, instead of failing whole."""
     from app.brain import tools
     from app.brain.ctx import TurnCtx
     from app.features import scene_store
 
     scene_store.add_scene("evening", actions=[{"device": "sandy_volume", "value": "30"},
-                                              {"device": "room_light", "value": "on"}])
-    _beat("room/status", {"online": False})
+                                              {"device": "light", "value": "on"}])
     out = tools.execute("scene_apply", {"name": "evening"}, TurnCtx(user_id="userA"))
     assert broker.sent == [(f"sandy/node/{NODE}/volume", "30")]
-    assert "ضوء الغرفة" in out["reply"] and "تخطّيته" in out["reply"]
+    assert "ضو الغرفة" in out["reply"] and "تخطّيتها" in out["reply"]
 
 
 def test_the_app_is_told_not_connected_apart_from_not_reached(robot, broker, monkeypatch):
@@ -132,13 +158,15 @@ def test_the_app_is_told_not_connected_apart_from_not_reached(robot, broker, mon
 
     c = create_app(mongo_db=robot).test_client()
     h = {"Authorization": f"Bearer {make_token('user', 'userA')}"}
-    _beat("room/status", {"online": False})
-    r = c.post("/api/devices/room_light/control", json={"action": "on"}, headers=h)
-    assert r.status_code == 409 and r.get_json()["error"] == "device_offline"
     r = c.post("/api/devices/sandy_volume/control", json={"action": "set", "value": "40"},
                headers=h)
     assert r.status_code == 200 and r.get_json()["sent"] is True
     assert broker.sent == [(f"sandy/node/{NODE}/volume", "40")]
+    _beat("status", {"online": False})
+    r = c.post("/api/devices/sandy_volume/control", json={"action": "set", "value": "50"},
+               headers=h)
+    assert r.status_code == 409 and r.get_json()["error"] == "device_offline"
+    assert len(broker.sent) == 1
 
 
 # Audit F8: a device's state was written only by commands; the volume and the mics the
@@ -180,14 +208,13 @@ def test_a_heartbeat_older_than_a_command_does_not_write_over_it(robot, broker):
 
 
 # Audit F9: every dimmer had an on/off switch in the app and the server passed the word on;
-# the brain logs it away (the reply said «sent», the state «off») and the camera reads it as
-# 0, setting the flash to its lowest and keeping it.
+# the brain logs it away (the reply said «sent», the state «off»).
 
 def test_no_catalogued_dimmer_takes_on_or_off():
     from app.features.node_provision import PART_CATALOGUE
 
     dimmers = {o: s for o, s in PART_CATALOGUE.items() if s["control_type"] == "dimmer"}
-    assert {"servo", "volume", "mic_l_gain", "mic_r_gain", "cam/flash_level"} <= set(dimmers)
+    assert {"servo", "volume", "mic_l_gain", "mic_r_gain"} <= set(dimmers)
     assert all(s["meta"].get("levels_only") for s in dimmers.values())
 
 

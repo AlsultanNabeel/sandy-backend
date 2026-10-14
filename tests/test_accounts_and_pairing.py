@@ -237,9 +237,9 @@ def test_selling_a_robot_wipes_it_before_releasing_it(monkeypatch):
             order.append(("wipe", topic, node_store._coll().count_documents({})))
             return True
 
-    import app.integrations.room_device as room_device
-    real = room_device.get_room_device_client
-    room_device.get_room_device_client = lambda: _Client()
+    import app.integrations.device_publisher as device_publisher
+    real = device_publisher.get_device_publisher
+    device_publisher.get_device_publisher = lambda: _Client()
     try:
         profile = {"user_id": "u1", "chat_id": "u1", "relation": "user",
                    "permissions": "all", "is_guest": False}
@@ -249,7 +249,7 @@ def test_selling_a_robot_wipes_it_before_releasing_it(monkeypatch):
             node_store.ingest_status(node_id, True)          # it is on and on the broker
             out = node_store.unpair_node(node_id)
     finally:
-        room_device.get_room_device_client = real
+        device_publisher.get_device_publisher = real
         appdb.reset()
 
     assert order, "the board was released without being told to erase itself"

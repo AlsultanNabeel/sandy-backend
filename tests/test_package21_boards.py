@@ -1,4 +1,4 @@
-"""Package 21: the broker, the parts, the camera and the power.
+"""Package 21: the broker, the parts and the power.
 
 Read from the sources, like the other firmware checks: each test names what a board
 did wrong and fails if the code drifts back to it.
@@ -32,41 +32,18 @@ def _fn(src: str, sig: str) -> str:
     raise AssertionError(f"unbalanced braces after {sig}")
 
 
-def test_the_server_turns_an_instant_refusal_into_words(monkeypatch):
-    import json
-
-    import mongomock
-
-    import app.db as appdb
-    from app.integrations import camera_client
-
-    appdb.configure(mongomock.MongoClient()["t"])
-    try:
-        for code in ("camera_busy", "too_soon"):
-            camera_client.on_event("n1", json.dumps(
-                {"cmd": "snapshot", "ok": False, "detail": "x", "id": f"r-{code}",
-                 "error": code}))
-            err = camera_client.fetch_snapshot_error("n1", f"r-{code}")
-            assert err and err["error"] == code
-            assert err["message"] == camera_client._ERROR_TEXT[code]
-    finally:
-        appdb.reset()
-
-
-# ── J3: the brain heard the camera's and the room's whole branches, every few seconds ──
+# ── J3: the brain subscribes one level deep, where every command it takes is ──
 
 def test_the_brain_subscribes_one_level_under_its_id():
     mqtt = _src(MAIN / "sandy_mqtt.c")
     connected = mqtt[mqtt.index("case MQTT_EVENT_CONNECTED:"):mqtt.index("case MQTT_EVENT_SUBSCRIBED:")]
     assert 'snprintf(sub, sizeof(sub), "%s/+", s_base);' in connected, (
-        "one level: the cam/ and room/ branches (heartbeats, events) stay off the robot")
+        "one level: nothing deeper than a command reaches the robot")
     assert '"%s/#"' not in mqtt
     # Every command the brain takes is one level deep, so none is lost to the narrower filter.
     dispatch = _fn(mqtt, "static void _dispatch(")
     for out in re.findall(r'!strcmp\(out, "([^"]+)"\)\)\s+\w', dispatch):
         assert "/" not in out, f"{out} is two levels deep and the brain no longer hears it"
-    # Nothing two levels deep reaches the dispatch, so it no longer checks for it.
-    assert '"cam/"' not in dispatch and '"room/"' not in dispatch
 
 
 # ── J7: the pairing code's timer cleared whatever was on the screen five minutes later ──
@@ -153,29 +130,3 @@ def test_the_server_keeps_the_brownout_count_and_weak_power(monkeypatch):
         {"brownouts": 4, "power_weak": True, "faults": {"power": "power_low"}})
     assert kept["brownouts"] == 4 and kept["power_weak"] is True
     assert kept["faults"] == {"power": "power_low"}
-
-
-def test_the_server_keeps_the_sensor_state_and_reads_it_from_older_cameras():
-    from app.features import node_store
-    from app.integrations import mqtt_ingest
-
-    seen = {}
-    real = node_store.ingest_status
-
-    def capture(node_id, **kw):
-        seen.update(kw.get("telemetry") or {})
-
-    node_store.ingest_status = capture
-    try:
-        out = '[{"id":"flash","kind":"relay"}]'
-        for payload, want in (
-                ('{"sensor":"retrying","camera_ready":false,"outputs":%s}' % out, "retrying"),
-                ('{"camera_ready":false,"outputs":%s}' % out, "failed"),
-                ('{"camera_ready":true,"outputs":%s}' % out, "ok"),
-                ('{"sensor":"bogus","camera_ready":true,"outputs":%s}' % out, "ok")):
-            seen.clear()
-            mqtt_ingest._ingest_cam_status("n1", payload)
-            assert seen.get("cam_sensor") == want, payload
-    finally:
-        node_store.ingest_status = real
-    assert node_store._clean_telemetry({"cam_sensor": "failed"}) == {"cam_sensor": "failed"}

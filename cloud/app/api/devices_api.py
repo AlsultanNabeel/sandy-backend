@@ -1,24 +1,18 @@
-"""Control-tab API: device registry, node pairing, direct control, camera. Guests get nothing.
+"""Control-tab API: device registry, node pairing, direct control. Guests get nothing.
 
   GET/POST /api/devices · PATCH/DELETE /api/devices/<name>
   POST /api/devices/<name>/control {action,value?} · /image {image_base64} · /ir-learn {button,code}
   GET /api/nodes · POST /api/nodes/pair {code,label?} · POST /api/nodes/pair/confirm {code,presence,label?}
-  PATCH/DELETE /api/nodes/<node_id> · POST /api/nodes/<node_id>/wifi {ssid,password,board?}
-  POST /api/nodes/<node_id>/snapshot · GET /api/nodes/<node_id>/snapshot/<req_id>
+  PATCH/DELETE /api/nodes/<node_id> · POST /api/nodes/<node_id>/wifi {ssid,password}
   POST /api/nodes/<node_id>/ir/learn · GET /api/nodes/<node_id>/ir/last
-  POST /api/nodes/<node_id>/room/light-arm {action, angle | rest,on,off,hold_ms}
-  POST /api/cam/upload (HMAC, no session) · GET /api/diagnose
+  GET /api/diagnose
 """
 
 from __future__ import annotations
 
 import logging
-import re
-import time
-from datetime import datetime, timedelta, timezone
-from typing import Optional
 
-from flask import Response, jsonify, request
+from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
 from app.utils.user_profiles import (
@@ -33,58 +27,9 @@ def _is_guest(claims) -> bool:
     return claims.get("role") == "guest"
 
 
-# رفع الكاميرا: شكل المعرّفات، وسقف الحجم، وبصمات التواقيع المستعملة.
-_CAM_NODE_RE = re.compile(r"[a-z0-9]{1,32}")
 # A free robot is claimed only with the code shown on its own screen; turning
 # this off means a photo of the box is enough to take someone's robot.
 PAIR_NEEDS_PRESENCE = True
-_CAM_REQ_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
-_CAM_MAX_UPLOAD_BYTES = 512 * 1024
-_CAM_NONCES = "cam_upload_nonces"
-# How far the camera's timestamp may be from ours: behind, for a slow upload over a weak
-# link; ahead, only for a clock a little fast, since a time ahead stretches how long a
-# signature stays good.
-_CAM_PAST_MS = 120_000
-_CAM_FUTURE_MS = 30_000
-# Every signature is remembered for longer than it can be accepted, so it is used once.
-_CAM_NONCE_KEPT = timedelta(milliseconds=_CAM_PAST_MS + _CAM_FUTURE_MS) + timedelta(seconds=30)
-
-
-def _cam_signature_fresh(sig: str) -> Optional[bool]:
-    """True the first time a signature is seen (stored in Mongo so both workers agree),
-    False for one seen before, None when the check could not be made, which is refused:
-    a database error used to let a replayed upload through. Open without a db (dev)."""
-    from pymongo.errors import DuplicateKeyError, PyMongoError
-
-    from app.db import get_db
-
-    db = get_db()
-    if db is None:
-        return True
-    try:
-        db[_CAM_NONCES].insert_one({
-            "_id": sig[:80],
-            "expire_at": datetime.now(timezone.utc) + _CAM_NONCE_KEPT,
-        })
-        return True
-    except DuplicateKeyError:
-        return False
-    except PyMongoError as exc:
-        logger.warning("[cam] replay check failed: %s", exc)
-        return None
-
-
-CAMERA_OFFLINE = "الكاميرا مش متصلة هلأ — تأكد إنها شغّالة وعلى الواي فاي."
-
-
-def _camera_offline(node: dict | None) -> bool:
-    """The camera's last heartbeat said it went away (its MQTT will): a photo or a stream
-    asked of it would wait forever, so it is refused at once instead."""
-    return ((node or {}).get("telemetry") or {}).get("cam_online") is False
-
-
-def _offline_reply():
-    return jsonify({"error": "camera_offline", "message": CAMERA_OFFLINE}), 409
 
 
 def _bad(error: str, extra: dict | None = None, code: int = 400):
@@ -162,7 +107,7 @@ def register_devices_api(app, mongo_db=None):
             set_state,
         )
         from app.brain.tools_world import offline_line
-        from app.integrations.room_device import get_room_device_client
+        from app.integrations.device_publisher import get_device_publisher
 
         body = request.get_json(silent=True) or {}
         device = get_device(name)
@@ -177,14 +122,12 @@ def register_devices_api(app, mongo_db=None):
             return _bad("bad_transport")
         if device.get("board_gone"):
             # Its board said it went: the broker would take the command and drop it.
-            if str((device.get("transport") or {}).get("output", "")).startswith("cam/"):
-                return _offline_reply()
             return jsonify({"error": "device_offline",
                             "message": offline_line(device.get("label") or name)}), 409
         payload = res["payload"]
         sent = False
         try:
-            sent = get_room_device_client().send_to_topic(topic, payload)
+            sent = get_device_publisher().send_to_topic(topic, payload)
         except Exception:  # noqa: BLE001 — control must not 500
             sent = False
         if sent:
@@ -251,8 +194,6 @@ def register_devices_api(app, mongo_db=None):
             "catalogue_has_but_board_never_declared":
                 sorted(set(PART_CATALOGUE) - declared),
             "screen_device_exists": "sandy_screen" in provisioned,
-            "camera_devices_exist":
-                sorted(n for n in provisioned if n.startswith("cam_")),
         }
         from app.api.metering import is_owner_account
         if is_owner_account(str(claims.get("user_id") or "")):
@@ -297,199 +238,6 @@ def register_devices_api(app, mongo_db=None):
         if not res.get("ok"):
             return _bad(res.get("error", "send_failed"), res)
         return jsonify(res), 200
-
-    @app.route("/api/nodes/<node_id>/snapshot", methods=["POST"])
-    @require_tenant
-    def api_node_snapshot(claims, node_id):
-        """Ask the camera for a photo: the JPEG if it lands within ~3 s, else 202 with a ticket."""
-        from app.features.node_store import get_node
-        from app.integrations.camera_client import (
-            fetch_snapshot,
-            fetch_snapshot_error,
-            start_snapshot,
-        )
-
-        node = get_node(node_id)
-        if node is None:
-            return _bad("not_found", code=404)
-        if _camera_offline(node):
-            return _offline_reply()
-
-        body = request.get_json(silent=True) or {}
-        try:
-            settle_ms = int(body.get("settle_ms", 0) or 0)
-        except (TypeError, ValueError):
-            return _bad("bad_settle_ms")
-        req_id = start_snapshot(
-            node_id,
-            settle_ms=settle_ms,
-            flash=str(body.get("flash") or ""),
-        )
-        if not req_id:
-            return _bad("not_sent", code=502)
-
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
-            jpeg = fetch_snapshot(node_id, req_id)
-            if jpeg:
-                return Response(jpeg, mimetype="image/jpeg")
-            failed = fetch_snapshot_error(node_id, req_id)
-            if failed:
-                return jsonify(failed), 502
-            time.sleep(0.3)
-        return jsonify({"pending": True, "req_id": req_id}), 202
-
-    @app.route("/api/cam/upload", methods=["POST"])
-    def api_cam_upload():
-        """The camera posts a finished JPEG here (photos don't travel over MQTT).
-
-        Authenticated by HMAC over node + request + timestamp (+ body hash on newer
-        firmware) with a replay window. Uses the camera's own key (``X-Sandy-Kv: 2``)
-        once it has one, else the shared key; right after pairing the reply carries its
-        own key (features/device_keys, separate id from the robot's).
-        """
-        import hashlib
-        import hmac as _hmac
-
-        # Same key as the voice link.
-        from app.api.voice_ws._config import _HMAC_KEY as key
-        if not key:
-            return _bad("auth_not_configured", code=503)
-
-        node_id = (request.headers.get("X-Sandy-Node") or "").strip()
-        req_id = (request.headers.get("X-Sandy-Req") or "").strip()
-        ts = (request.headers.get("X-Sandy-Ts") or "").strip()
-        sig = (request.headers.get("X-Sandy-Sig") or "").strip()
-        if not (node_id and req_id and ts and sig):
-            logger.warning(
-                "[cam] upload rejected: missing headers "
-                "(node=%s req=%s ts=%s sig=%s)",
-                bool(node_id), bool(req_id), bool(ts), bool(sig))
-            return _bad("missing_headers")
-        # Validate ids first: they become storage keys and log lines.
-        if not (_CAM_NODE_RE.fullmatch(node_id) and _CAM_REQ_RE.fullmatch(req_id)):
-            logger.warning("[cam] upload rejected: malformed node/request id")
-            return _bad("bad_id")
-        # Size before reading the body.
-        if (request.content_length or 0) > _CAM_MAX_UPLOAD_BYTES:
-            logger.warning("[cam] upload rejected: %s bytes is too big",
-                           request.content_length)
-            return _bad("too_large", code=413)
-
-        # Every rejection is logged with its reason; the board only sees 400.
-        try:
-            behind = time.time() * 1000 - int(ts)
-        except ValueError:
-            logger.warning("[cam] upload rejected: unreadable timestamp %r", ts[:32])
-            return _bad("bad_ts")
-        age = abs(behind)
-        if behind > _CAM_PAST_MS or -behind > _CAM_FUTURE_MS:
-            # Usually a board that booted with its clock at 1970, before time sync.
-            logger.warning("[cam] upload rejected: timestamp is %.0f minutes off — "
-                        "the board's clock is probably not synced", age / 60000)
-            return _bad("stale")
-
-        from app.features.device_keys import (
-            KEY_VERSION, KeyUnreadable, cam_key_id, confirm_key, get_key, issue_key,
-        )
-        kid = cam_key_id(node_id)
-        own_key = (request.headers.get("X-Sandy-Kv") or "").strip() == str(KEY_VERSION)
-        try:
-            record = get_key(kid)
-        except KeyUnreadable:
-            # Not a 401: that makes the camera drop a key that is still good.
-            logger.error("[cam] key record of %s cannot be read — check SANDY_LTM_KEY",
-                         node_id)
-            return _bad("key_unreadable", code=503)
-        if own_key:
-            if record is None:
-                # The camera falls back to the shared key until it's paired again.
-                logger.warning("[cam] upload rejected: no key on record for %s", node_id)
-                return _bad("key_unknown", code=401)
-            key = record["key"]
-        elif record is not None and record["state"] == "confirmed":
-            logger.warning("[cam] upload rejected: shared key refused for %s — it "
-                        "has its own key", node_id)
-            return _bad("auth_fail", code=401)
-
-        # Read up to the cap and no further: a body with no length used to be read whole
-        # (up to the app's 16 MB) before anything checked the signature.
-        jpeg = request.stream.read(_CAM_MAX_UPLOAD_BYTES + 1)
-        if len(jpeg) > _CAM_MAX_UPLOAD_BYTES:
-            return _bad("too_large", code=413)
-
-        # The signature covers the body hash on newer firmware; old firmware
-        # (no hash) is still accepted with a warning.
-        body_hash = (request.headers.get("X-Sandy-Body-Sha256") or "").strip().lower()
-        if body_hash:
-            if not _hmac.compare_digest(hashlib.sha256(jpeg).hexdigest(), body_hash):
-                logger.warning("[cam] upload rejected: body does not match its hash")
-                return _bad("auth_fail", code=401)
-            signed = f"{node_id}{req_id}{ts}{body_hash}"
-        else:
-            logger.warning("[cam] %s signs without a body hash — old firmware", node_id)
-            signed = f"{node_id}{req_id}{ts}"
-        expected = _hmac.new(key, signed.encode(), hashlib.sha256).hexdigest()
-        if not _hmac.compare_digest(expected, sig):
-            logger.warning(
-                "[cam] upload rejected: bad signature for %s", node_id)
-            return _bad("auth_fail", code=401)
-
-        # One use per signature. Keyed with the body hash too: old firmware signs to
-        # the second, so two frames in one second share a signature but not bytes.
-        fresh = _cam_signature_fresh(sig + hashlib.sha256(jpeg).hexdigest()[:16])
-        if fresh is None:
-            return _bad("unavailable", code=503)
-        if not fresh:
-            logger.warning("[cam] upload rejected: replayed signature for %s", node_id)
-            # Not a 401: camera firmware up to 0.4.1 drops its own key on any 401, and a
-            # replay says nothing about the key (two identical frames in one second).
-            return _bad("replay", code=409)
-        if own_key and record["state"] == "issued":
-            confirm_key(kid)
-
-        # JPEG magic bytes: refuse truncated or misrouted bodies here.
-        if len(jpeg) < 100 or jpeg[:2] != b"\xff\xd8":
-            logger.warning("[cam] upload rejected: not a jpeg (%d bytes, starts %r)",
-                        len(jpeg), jpeg[:4])
-            return _bad("not_a_jpeg")
-
-        from app.integrations.camera_client import store_snapshot
-        store_snapshot(node_id, req_id, jpeg)
-        logger.info(
-            "[cam] upload ok: %s %s (%d bytes)", node_id, req_id, len(jpeg))
-        reply = {"ok": True, "bytes": len(jpeg)}
-        if not own_key:
-            try:
-                from app.features.node_store import get_node_any_tenant
-                if get_node_any_tenant(node_id):
-                    fresh = issue_key(kid)   # None outside the pairing window
-                    if fresh:
-                        reply["device_key"] = fresh
-            except Exception as exc:  # noqa: BLE001 — enrolment is extra, not a gate
-                logger.warning("[cam] key issue failed for %s: %s", node_id, exc)
-        return jsonify(reply), 200
-
-    @app.route("/api/nodes/<node_id>/snapshot/<req_id>", methods=["GET"])
-    @require_tenant
-    def api_node_snapshot_fetch(claims, node_id, req_id):
-        """Collect a photo by ticket: 200 JPEG, 202 not yet, 502 the camera said it failed, 404 not yours."""
-        from app.features.node_store import get_node
-        from app.integrations.camera_client import fetch_snapshot, fetch_snapshot_error
-
-        node = get_node(node_id)
-        if node is None:
-            return _bad("not_found", code=404)
-        jpeg = fetch_snapshot(node_id, req_id)
-        if jpeg:
-            return Response(jpeg, mimetype="image/jpeg")
-        failed = fetch_snapshot_error(node_id, req_id)
-        if failed:
-            return jsonify(failed), 502
-        if _camera_offline(node):
-            # Gone while we waited: no photo is coming, say so instead of «not yet» forever.
-            return _offline_reply()
-        return jsonify({"pending": True, "req_id": req_id}), 202
 
     @app.route("/api/devices/<name>/ir-learn", methods=["POST"])
     @require_tenant
@@ -607,7 +355,7 @@ def register_devices_api(app, mongo_db=None):
     def api_nodes_ir_learn_start(claims, node_id):
         """Arm IR learn mode; the ingest listener stores the captured code for /ir/last."""
         from app.features.node_store import get_node
-        from app.integrations.room_device import get_room_device_client
+        from app.integrations.device_publisher import get_device_publisher
 
         # Ownership: only a node this tenant paired.
         if get_node(node_id.strip()) is None:
@@ -615,19 +363,10 @@ def register_devices_api(app, mongo_db=None):
         sent = False
         try:
             topic = f"sandy/node/{node_id.strip()}/ir"
-            sent = get_room_device_client().send_to_topic(topic, "learn")
+            sent = get_device_publisher().send_to_topic(topic, "learn")
         except Exception:  # noqa: BLE001
             sent = False
         return jsonify({"ok": True, "sent": sent}), 200
-
-    @app.route("/api/nodes/<node_id>/room/light-arm", methods=["POST"])
-    @require_tenant
-    def api_node_room_light_arm(claims, node_id):
-        """The room light's arm: move it, try a press, or save its angles and hold (room_arm)."""
-        from app.features.room_arm import command
-
-        reply, status = command(node_id, request.get_json(silent=True) or {})
-        return jsonify(reply), status
 
     @app.route("/api/nodes/<node_id>/ir/last", methods=["GET"])
     @require_tenant

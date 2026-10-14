@@ -18,7 +18,7 @@ from app.features import device_keys, wifi_switch
 
 
 def _open(command: str, signer: str, key: bytes):
-    """What the board does (sandy_mqtt.c::_handle_wifi, cam_mqtt.ino): check, then open."""
+    """What the board does (sandy_mqtt.c::_handle_wifi): check, then open."""
     tag, ms, ssid_hex, sealed_hex, mac = command.split(":")
     assert tag == "wifi"
     want = hmac.new(key, f"wifi|{signer}|{ms}|{ssid_hex}|{sealed_hex}".encode(),
@@ -32,11 +32,11 @@ def _open(command: str, signer: str, key: bytes):
     return bytes.fromhex(ssid_hex).decode(), plain.split(b"\0")[0].decode()
 
 
-def _sent_payloads(node, board="brain"):
+def _sent_payloads(node):
     with patch("app.features.node_store.get_node", return_value=node), \
-         patch("app.integrations.room_device.get_room_device_client") as c:
+         patch("app.integrations.device_publisher.get_device_publisher") as c:
         c.return_value.publish_service.return_value = True
-        res = wifi_switch.switch_network(node["node_id"], "بيت: 5G", "hunter2:22", board=board)
+        res = wifi_switch.switch_network(node["node_id"], "بيت: 5G", "hunter2:22")
     assert res["ok"] is True
     return [call[0] for call in c.return_value.publish_service.call_args_list]
 
@@ -75,19 +75,6 @@ def test_a_key_only_issued_sends_it_under_both_keys_and_a_new_board_the_shared_o
         appdb.reset()
 
 
-def test_the_camera_is_signed_with_its_own_key_id(monkeypatch):
-    monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"shared-secret")
-    appdb.configure(mongomock.MongoClient()["t"])
-    try:
-        node = {"node_id": "n4", "telemetry": {"cam_fw": "0.5.0"}}
-        (topic, payload), = _sent_payloads(node, board="camera")
-        assert topic == "sandy/node/n4/cam/wifi"
-        assert _open(payload, "n4:cam", b"shared-secret") == ("بيت: 5G", "hunter2:22")
-        assert _open(payload, "n4", b"shared-secret") is None
-    finally:
-        appdb.reset()
-
-
 def test_a_board_on_older_firmware_still_gets_the_old_form_until_it_updates(monkeypatch):
     """Boards in the field must keep working: they read only "<ssid>\\n<password>"."""
     monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"shared-secret")
@@ -95,8 +82,5 @@ def test_a_board_on_older_firmware_still_gets_the_old_form_until_it_updates(monk
     try:
         (_, brain), = _sent_payloads({"node_id": "n5", "firmware_version": "0.11.6"})
         assert brain == "بيت: 5G\nhunter2:22"
-        (_, cam), = _sent_payloads({"node_id": "n5", "telemetry": {"cam_fw": "0.4.1"}},
-                                   board="camera")
-        assert cam == "بيت: 5G\nhunter2:22"
     finally:
         appdb.reset()

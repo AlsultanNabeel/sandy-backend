@@ -56,10 +56,7 @@ KEPT = {
     "/api/nodes": {"GET"},
     "/api/nodes/<node_id>": {"PATCH", "DELETE"},
     "/api/nodes/<node_id>/ir/last": {"GET"},
-    "/api/nodes/<node_id>/room/light-arm": {"POST"},
     "/api/nodes/<node_id>/ir/learn": {"POST"},
-    "/api/nodes/<node_id>/snapshot": {"POST"},
-    "/api/nodes/<node_id>/snapshot/<req_id>": {"GET"},
     "/api/nodes/<node_id>/wifi": {"POST"},
     "/api/nodes/pair": {"POST"},
     "/api/nodes/pair/confirm": {"POST"},
@@ -75,9 +72,8 @@ KEPT = {
     "/api/subscription": {"GET"},
     "/api/voice/tts": {"POST"},
     "/api/weather": {"GET"},
-    # The boards and the firmware tooling.
+    # The robot and the firmware tooling.
     "/voice": {"GET"},
-    "/api/cam/upload": {"POST"},
     "/api/firmware/manifest": {"GET"},
     "/api/firmware/image/<version>": {"GET"},
     "/api/firmware/publish": {"POST"},
@@ -91,6 +87,9 @@ GONE = (
     "/api/future-messages", "/api/gifts", "/api/insights/weekly", "/api/timeline",
     "/api/share/saved", "/api/plans", "/api/memory", "/api/guest-usage/status",
     "/api/chat/history",
+    # The camera and the room board (removed 14 Oct 2026).
+    "/api/cam/upload", "/api/nodes/<node_id>/snapshot", "/api/nodes/<node_id>/snapshot/<req_id>",
+    "/api/nodes/<node_id>/room/light-arm",
 )
 
 

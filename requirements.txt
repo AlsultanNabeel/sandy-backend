@@ -21,7 +21,7 @@ websockets>=13.0
 flask-sock>=0.7.0
 flask-cors>=4.0.0
 PyJWT>=2.8.0
-paho-mqtt>=2.0  # heartbeat ingest + room-node commands on sandy/node/<id>/*
+paho-mqtt>=2.0  # heartbeat ingest + the robot's commands on sandy/node/<id>/*
 
 # Error reporting. Optional at runtime: with no SENTRY_DSN the integration is a
 # no-op, so this being installed never changes behaviour on its own. Pinned to

@@ -50,7 +50,7 @@ def to_rgb565(image_bytes: bytes) -> bytes:
 
 
 def send_image(node_id: str, image_bytes: bytes) -> Dict[str, Any]:
-    from app.integrations.room_device import get_room_device_client
+    from app.integrations.device_publisher import get_device_publisher
 
     node_id = (node_id or "").strip()
     if not node_id:
@@ -68,7 +68,7 @@ def send_image(node_id: str, image_bytes: bytes) -> Dict[str, Any]:
     if len(chunks) > MAX_CHUNKS:
         return {"ok": False, "error": "too_many_chunks"}
 
-    client = get_room_device_client()
+    client = get_device_publisher()
     topic = _topic(node_id, "screen_img")
     total = len(chunks)
 

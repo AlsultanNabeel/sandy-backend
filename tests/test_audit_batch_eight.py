@@ -53,7 +53,7 @@ def _paired_robot_with_a_light():
     node_id = result.get("node_id") or node_store.code_to_node_id("ABC123")
     device_store.add_device(
         "light", "نور الغرفة", "switch",
-        {"kind": "node", "node_id": node_id, "output": "room/light"})
+        {"kind": "node", "node_id": node_id, "output": "light"})
     topic = device_store.device_topic(device_store.get_device("light"))
     return node_id, topic
 
@@ -96,7 +96,7 @@ def test_unpairing_one_robot_leaves_another_tenants_devices_alone(db):
     with user_profiles.active_user_profile_context(other):
         refused = device_store.add_device(
             "light", "نور جاري", "switch",
-            {"kind": "node", "node_id": "abc123", "output": "room/light"})
+            {"kind": "node", "node_id": "abc123", "output": "light"})
         assert refused["error"] == "node_not_paired"
         # A device of their own, on their own transport.
         device_store.add_device("lamp", "لمبتي", "switch", on_node("lamp", node_id="theirs"))
@@ -227,7 +227,7 @@ def test_releasing_a_robot_wipes_it_and_clears_devices_before_the_node_row(db,
     """
     monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"test-shared-key")  # signs the wipe
     import app.features.node_store as node_store
-    import app.integrations.room_device as room_device
+    import app.integrations.device_publisher as device_publisher
     from app.features import device_store
     from app.utils import user_profiles
 
@@ -239,7 +239,7 @@ def test_releasing_a_robot_wipes_it_and_clears_devices_before_the_node_row(db,
                          db["sandy_devices"].count_documents({})))
             return True
 
-    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Client())
+    monkeypatch.setattr(device_publisher, "get_device_publisher", lambda: _Client())
 
     with user_profiles.active_user_profile_context(P):
         node_id, _ = _paired_robot_with_a_light()
@@ -261,7 +261,7 @@ def test_deleting_an_account_also_wipes_the_boards_it_releases(db, monkeypatch):
     a person can ask for produced the weakest hardware erase — the board kept
     the seller's Wi-Fi name and password."""
     monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"test-shared-key")  # signs the wipe
-    import app.integrations.room_device as room_device
+    import app.integrations.device_publisher as device_publisher
     from app.features import node_store
     from app.features.account_delete import delete_account
     from app.utils import user_profiles
@@ -273,7 +273,7 @@ def test_deleting_an_account_also_wipes_the_boards_it_releases(db, monkeypatch):
             wiped.append(topic)
             return True
 
-    monkeypatch.setattr(room_device, "get_room_device_client", lambda: _Client())
+    monkeypatch.setattr(device_publisher, "get_device_publisher", lambda: _Client())
 
     with user_profiles.active_user_profile_context(P):
         _paired_robot_with_a_light()

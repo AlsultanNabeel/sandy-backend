@@ -122,8 +122,6 @@ NOT_ERASED: Dict[str, str] = {
                                "owner to revoke; goes when the login leaves the table",
     "node_pending_erase": "a released board's erase it still owes, keyed by board; it must "
                           "outlive the account that released it, thirty days then TTL",
-    "cam_upload_nonces": "replay guard for camera uploads, no person in it, TTL",
-    "camera_inbox": "a camera frame waiting for its request, keyed by node, two minutes then TTL",
     "sandy_firmware": "firmware releases, the same for every board",
     "sandy_firmware_chunks": "firmware release bytes, the same for every board",
     "sandy_runtime": "process settings (the live voice model), no person in it",

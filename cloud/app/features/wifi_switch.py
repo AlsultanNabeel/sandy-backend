@@ -1,4 +1,4 @@
-"""Move a board onto a different Wi-Fi network, from the app.
+"""Move the robot onto a different Wi-Fi network, from the app.
 
 Nothing is committed here: the board tries the new network and rolls back by
 itself if it fails. Which network answered shows up in its next heartbeat's `ssid`.
@@ -27,32 +27,17 @@ PASS_MAX = 64
 _HEX = set("0123456789abcdefABCDEF")
 
 
-# Brain and camera share a node id, so the caller must say which board moves.
-BOARDS = {
-    "brain": "wifi",
-    "camera": "cam/wifi",
-}
-
-# The first firmware of each board that reads only the signed command. Older boards read
+# The first firmware that reads only the signed command. Older ones read
 # "<ssid>\n<password>" and nothing else, so they keep getting it until they update.
-SIGNED_FROM = {
-    "brain": "0.12.0",
-    "camera": "0.5.0",
-}
+SIGNED_FROM = "0.12.0"
 
 
-def _firmware(node: Dict[str, Any], board: str) -> str:
-    if board == "camera":
-        return str((node.get("telemetry") or {}).get("cam_fw") or "")
-    return str(node.get("firmware_version") or "")
-
-
-def _reads_signed(node: Dict[str, Any], board: str) -> bool:
+def _reads_signed(node: Dict[str, Any]) -> bool:
     """A board that never said its version is taken as new: signed is the safe side."""
     from app.features.firmware_store import version_key
 
-    version = _firmware(node, board)
-    return not version or version_key(version) >= version_key(SIGNED_FROM[board])
+    version = str(node.get("firmware_version") or "")
+    return not version or version_key(version) >= version_key(SIGNED_FROM)
 
 
 def _signed_command(signer: str, ssid: str, password: str, key: bytes, ms: str) -> str:
@@ -72,26 +57,25 @@ def _signed_command(signer: str, ssid: str, password: str, key: bytes, ms: str) 
     return f"wifi:{ms}:{ssid_hex}:{sealed}:{mac}"
 
 
-def _payloads(node: Dict[str, Any], node_id: str, board: str,
+def _payloads(node: Dict[str, Any], node_id: str,
               ssid: str, password: str) -> Optional[list]:
     """What goes on the wire, once per key the board may check it with; None with no key."""
-    from app.features.device_keys import cam_key_id
     from app.features.node_store import signing_keys
 
-    if not _reads_signed(node, board):
+    if not _reads_signed(node):
         return [f"{ssid}\n{password}"]
-    signer = cam_key_id(node_id) if board == "camera" else node_id
     ms = str(int(time.time() * 1000))
-    keys = signing_keys(signer)
-    return [_signed_command(signer, ssid, password, k, ms) for k in keys] or None
+    keys = signing_keys(node_id)
+    return [_signed_command(node_id, ssid, password, k, ms) for k in keys] or None
 
 
 def switch_network(node_id: str, ssid: str, password: str,
                    board: str = "brain") -> Dict[str, Any]:
-    """Ask one board to move to `ssid`. Returns immediately."""
+    """Ask the robot to move to `ssid`. Returns immediately. `board` is what an older app
+    still sends; anything but the brain is refused, never sent to the brain instead."""
     from app.features.device_keys import KeyUnreadable
     from app.features.node_store import get_node
-    from app.integrations.room_device import get_room_device_client
+    from app.integrations.device_publisher import get_device_publisher
 
     node_id = (node_id or "").strip()
     ssid = (ssid or "").strip()
@@ -99,7 +83,7 @@ def switch_network(node_id: str, ssid: str, password: str,
 
     if not node_id:
         return {"ok": False, "error": "no_node"}
-    if board not in BOARDS:
+    if board != "brain":
         return {"ok": False, "error": "bad_board"}
     if not ssid:
         return {"ok": False, "error": "no_ssid"}
@@ -119,19 +103,19 @@ def switch_network(node_id: str, ssid: str, password: str,
         return {"ok": False, "error": "not_yours"}
 
     try:
-        payloads = _payloads(node, node_id, board, ssid, password)
+        payloads = _payloads(node, node_id, ssid, password)
     except KeyUnreadable:
-        logger.error("[wifi] %s/%s: its key record cannot be read", node_id, board)
+        logger.error("[wifi] %s: its key record cannot be read", node_id)
         return {"ok": False, "error": "key_unreadable"}
     if not payloads:
-        logger.warning("[wifi] no key to sign the switch of %s/%s", node_id, board)
+        logger.warning("[wifi] no key to sign the switch of %s", node_id)
         return {"ok": False, "error": "not_sent"}
 
-    topic = f"sandy/node/{node_id}/{BOARDS[board]}"
-    client = get_room_device_client()
+    topic = f"sandy/node/{node_id}/wifi"
+    client = get_device_publisher()
     sent = [client.publish_service(topic, p) for p in payloads]
     if not any(sent):
         return {"ok": False, "error": "not_sent"}
 
-    logger.info("[wifi] asked %s/%s to try '%s'", node_id, board, ssid)
+    logger.info("[wifi] asked %s to try '%s'", node_id, ssid)
     return {"ok": True, "window_s": SWITCH_WINDOW_S, "ssid": ssid, "board": board}

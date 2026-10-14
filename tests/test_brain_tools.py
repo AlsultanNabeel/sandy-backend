@@ -174,10 +174,10 @@ def test_device_control_calls_the_same_handler_and_gate(tenant_a, monkeypatch):
             sent["topic"], sent["payload"] = topic, payload
             return True
 
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client", lambda: _Client())
-    device_store.add_device("living_light", "ضوء الصالة", "switch", on_node("room/light"))
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher", lambda: _Client())
+    device_store.add_device("living_light", "ضوء الصالة", "switch", on_node("light"))
     out = _run("device_control", device="living_light", action="on")
-    assert out["ok"] and sent == {"topic": "sandy/node/n1/room/light", "payload": "on"}
+    assert out["ok"] and sent == {"topic": "sandy/node/n1/light", "payload": "on"}
     out = _run("device_control", device="غسالة", action="on")
     assert out["ok"] is False and "ضوء الصالة" in out["reply"]
 

@@ -51,9 +51,9 @@ def test_the_board_takes_only_a_signed_recent_command():
     assert '!strcmp(val, "erase")' not in src
 
 
-# ── F3: the camera has its own signed erase ──
+# ── F3 (since the camera's removal): a release sends the robot's erase only ──
 
-def test_a_release_sends_the_camera_its_own_erase_signed_with_its_own_key(monkeypatch):
+def test_a_release_sends_only_the_robots_erase(monkeypatch):
     sent = []
 
     class _Client:
@@ -61,21 +61,13 @@ def test_a_release_sends_the_camera_its_own_erase_signed_with_its_own_key(monkey
             sent.append((topic, payload))
             return True
 
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client",
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher",
                         lambda: _Client())
     monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"shared-secret")
     appdb.configure(mongomock.MongoClient()["t"])
     try:
-        kid = device_keys.cam_key_id("node3")
-        device_keys.open_enrolment(kid)
-        cam_key = device_keys.issue_key(kid)
-        device_keys.confirm_key(kid)
         assert node_store._wipe_board("node3")
-        cam = [p for t, p in sent if t == "sandy/node/node3/cam/factory_reset"]
-        assert len(cam) == 1
-        assert _check(cam[0], "node3:cam", bytes.fromhex(cam_key))
-        brain = [p for t, p in sent if t == "sandy/node/node3/factory_reset"]
-        assert brain and not _check(brain[0], "node3:cam", bytes.fromhex(cam_key))
+        assert {t for t, _ in sent} == {"sandy/node/node3/factory_reset"}
     finally:
         appdb.reset()
 
@@ -90,7 +82,7 @@ def _released(monkeypatch, confirm: bool):
             sent.append((topic, payload))
             return True
 
-    monkeypatch.setattr("app.integrations.room_device.get_room_device_client",
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher",
                         lambda: _Client())
     monkeypatch.setattr("app.api.voice_ws._config._HMAC_KEY", b"shared-secret")
     appdb.configure(mongomock.MongoClient()["t"])

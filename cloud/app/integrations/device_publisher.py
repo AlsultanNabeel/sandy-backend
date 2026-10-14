@@ -1,8 +1,8 @@
-"""Publish-only MQTT client for every board's commands (the robot, its camera, its room node).
+"""Publish-only MQTT client for the robot's commands.
 
 A device is sent to by its topic (`send_to_topic`), once `device_store.command_payload`
 has validated the value and only when the topic is one of the caller's own devices; a
-node's service channels (camera, network) go through `publish_service`.
+node's service channels (network, erase, screen picture) go through `publish_service`.
 
 Broker creds: SANDY_MQTT_HOST / _PORT / _USER / _PASS. No-op when unconfigured.
 """
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _CONNECT_WAIT_S = 3.0
 
 
-class RoomDeviceClient:
+class DevicePublisher:
     """Publish-only MQTT client. No-op when unconfigured."""
 
     def __init__(self):
@@ -54,7 +54,7 @@ class RoomDeviceClient:
                 c = mqtt.Client(
                     mqtt.CallbackAPIVersion.VERSION2,
                     # Unique id: dynos share pids, and duplicate ids kick each other off.
-                    client_id=f"sandy-room-{os.getpid()}-{uuid.uuid4().hex[:8]}",
+                    client_id=f"sandy-publish-{os.getpid()}-{uuid.uuid4().hex[:8]}",
                     clean_session=True,
                 )
                 c.username_pw_set(self._user, self._pass)
@@ -67,14 +67,14 @@ class RoomDeviceClient:
                 self._client = c
                 return c
             except Exception as e:  # noqa: BLE001
-                logger.warning("[room_device] MQTT connect failed: %s", e)
+                logger.warning("[publisher] MQTT connect failed: %s", e)
                 self._client = None
                 return None
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:  # noqa: ANN001
         if getattr(reason_code, "is_failure", False) or (
                 isinstance(reason_code, int) and reason_code != 0):
-            logger.warning("[room_device] broker refused: %s", reason_code)
+            logger.warning("[publisher] broker refused: %s", reason_code)
             self._connected.clear()
             return
         self._connected.set()
@@ -87,12 +87,12 @@ class RoomDeviceClient:
         if c is None:
             return False
         if not self._connected.wait(_CONNECT_WAIT_S):
-            logger.warning("[room_device] broker not connected — %s not sent", topic)
+            logger.warning("[publisher] broker not connected — %s not sent", topic)
             return False
         try:
             return c.publish(topic, payload, qos=1).rc == 0
         except Exception as e:  # noqa: BLE001
-            logger.warning("[room_device] publish failed (%s): %s", topic, e)
+            logger.warning("[publisher] publish failed (%s): %s", topic, e)
             return False
 
     def send_to_topic(self, topic: str, payload: str) -> bool:
@@ -103,38 +103,37 @@ class RoomDeviceClient:
         from app.features.device_store import tenant_owns_topic
 
         if not tenant_owns_topic(topic):
-            logger.warning("[room_device] send_to_topic refused: topic not owned by caller")
+            logger.warning("[publisher] send_to_topic refused: topic not owned by caller")
             return False
         return self._publish(topic, str(payload))
 
     # Exact allowlist of service channels (full match, not substring).
     _SERVICE_CHANNELS = frozenset({
-        "cam/command", "cam/request", "cam/wifi", "cam/factory_reset", "wifi", "screen_img",
-        "factory_reset", "pair_code", "room/light_arm",
+        "wifi", "screen_img", "factory_reset", "pair_code",
     })
     _SERVICE_TOPIC = re.compile(r"^sandy/node/([a-z0-9]{1,64})/(.+)$")
 
     def publish_service(self, topic: str, payload: str) -> bool:
-        """Publish on a node's service channel (camera, network — not devices).
+        """Publish on a node's service channel (network, erase — not devices).
 
         Ownership of the node is checked by the caller.
         """
         topic = (topic or "").strip()
         m = self._SERVICE_TOPIC.match(topic)
         if not m or m.group(2) not in self._SERVICE_CHANNELS:
-            logger.warning("[room_device] publish_service refused: %s", topic)
+            logger.warning("[publisher] publish_service refused: %s", topic)
             return False
         return self._publish(topic, str(payload))
 
 
-_room_client: Optional[RoomDeviceClient] = None
-_room_client_lock = threading.Lock()
+_publisher: Optional[DevicePublisher] = None
+_publisher_lock = threading.Lock()
 
 
-def get_room_device_client() -> RoomDeviceClient:
-    global _room_client
-    if _room_client is None:
-        with _room_client_lock:
-            if _room_client is None:
-                _room_client = RoomDeviceClient()
-    return _room_client
+def get_device_publisher() -> DevicePublisher:
+    global _publisher
+    if _publisher is None:
+        with _publisher_lock:
+            if _publisher is None:
+                _publisher = DevicePublisher()
+    return _publisher

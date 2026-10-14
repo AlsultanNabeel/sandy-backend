@@ -1,10 +1,12 @@
-"""Firmware update endpoints (features/firmware_store); ``board`` = brain (default), cam or room.
+"""Firmware update endpoints for the robot (features/firmware_store).
 
-  GET  /api/firmware/manifest?device_id=&v=[&board=]   what this board should run (204 = nothing)
-  GET  /api/firmware/image/<version>[?board=]          the signed image, streamed
+  GET  /api/firmware/manifest?device_id=&v=   what the robot should run (204 = nothing)
+  GET  /api/firmware/image/<version>          the signed image, streamed
   POST /api/firmware/publish | /api/firmware/rollout   Bearer SANDY_FIRMWARE_TOKEN
 
-The GETs are public: robots have no account, and boards verify the signature.
+The GETs are public: robots have no account, and boards verify the signature. A
+``board`` other than ``brain`` is a retired camera or room board asking: 400, nothing
+offered.
 """
 
 from __future__ import annotations
@@ -32,27 +34,22 @@ def register_firmware_api(app):
     def firmware_manifest():
         device_id = (request.args.get("device_id") or "").strip()[:64]
         current = (request.args.get("v") or "").strip()[:32]
-        board = firmware_store.norm_board(request.args.get("board"))
-        if board is None:
+        if not firmware_store.is_brain(request.args.get("board")):
             return jsonify({"error": "bad_board"}), 400
-        m = firmware_store.manifest_for(device_id, current, board)
+        m = firmware_store.manifest_for(device_id, current)
         if not m:
             return "", 204
         m["url"] = f"/api/firmware/image/{m['version']}"
-        if board != firmware_store.BRAIN:
-            m["url"] += f"?board={board}"
         return jsonify(m), 200
 
     @app.route("/api/firmware/image/<version>", methods=["GET"])
     def firmware_image(version):
-        board = firmware_store.norm_board(request.args.get("board"))
-        if board is None:
+        if not firmware_store.is_brain(request.args.get("board")):
             return jsonify({"error": "bad_board"}), 400
-        chunks = firmware_store.image_chunks(version, board)
+        chunks = firmware_store.image_chunks(version)
         if chunks is None:
             return jsonify({"error": "not_found"}), 404
-        # Small boards read exactly Content-Length bytes (no chunked decoder).
-        rel = firmware_store.release(version, board)
+        rel = firmware_store.release(version)
         size = rel.get("size") if rel else None
         headers = {"Content-Length": str(size)} if size else {}
         return Response(chunks, mimetype="application/octet-stream", headers=headers)
@@ -70,11 +67,12 @@ def register_firmware_api(app):
             rollout = int(form.get("rollout") or 0)
         except ValueError:
             return jsonify({"error": "bad_rollout"}), 400
+        if not firmware_store.is_brain(form.get("board")):
+            return jsonify({"error": "bad_board"}), 400
         canary = [c for c in (form.get("canary") or "").split(",") if c.strip()]
         r = firmware_store.publish(
             form.get("version") or "", image, form.get("signature") or "",
-            rollout=rollout, canary=canary, notes=form.get("notes") or "",
-            board=form.get("board") or firmware_store.BRAIN)
+            rollout=rollout, canary=canary, notes=form.get("notes") or "")
         return jsonify(r), (200 if r.get("ok") else 400)
 
     @app.route("/api/firmware/rollout", methods=["POST"])
@@ -86,8 +84,9 @@ def register_firmware_api(app):
             rollout = int(body.get("rollout"))
         except (TypeError, ValueError):
             return jsonify({"error": "bad_rollout"}), 400
+        if not firmware_store.is_brain(body.get("board")):
+            return jsonify({"error": "bad_board"}), 400
         canary = body.get("canary")
         r = firmware_store.set_rollout(str(body.get("version") or ""), rollout,
-                                       canary if isinstance(canary, list) else None,
-                                       board=str(body.get("board") or firmware_store.BRAIN))
+                                       canary if isinstance(canary, list) else None)
         return jsonify(r), (200 if r.get("ok") else 400)

@@ -151,8 +151,7 @@ def main() -> int:
 
     if a.rollout_only:
         r = _post(f"{base}/api/firmware/rollout", token,
-                  json.dumps({"version": a.rollout_only, "rollout": a.rollout,
-                              "board": "brain"}).encode(),
+                  json.dumps({"version": a.rollout_only, "rollout": a.rollout}).encode(),
                   "application/json")
         print(r)
         return 0 if r.get("ok") else 1
@@ -199,7 +198,7 @@ def _sign_and_upload(a, base: str, token: str, version: str, image: bytes) -> in
 
     boundary = uuid.uuid4().hex
     parts = []
-    for name, value in (("version", version), ("board", "brain"),
+    for name, value in (("version", version),
                         ("signature", signature.hex()),
                         ("rollout", str(a.rollout)), ("canary", a.canary),
                         ("notes", a.notes)):

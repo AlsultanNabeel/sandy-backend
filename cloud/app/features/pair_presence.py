@@ -41,9 +41,9 @@ def _aware(dt: Any) -> datetime:
 
 def _publish(node_id: str, code: str) -> bool:
     try:
-        from app.integrations.room_device import get_room_device_client
+        from app.integrations.device_publisher import get_device_publisher
 
-        return bool(get_room_device_client().publish_service(
+        return bool(get_device_publisher().publish_service(
             f"sandy/node/{node_id}/pair_code", code))
     except Exception as exc:  # noqa: BLE001 — the owner retries
         logger.warning("[pair_presence] could not reach %s: %s", node_id, exc)

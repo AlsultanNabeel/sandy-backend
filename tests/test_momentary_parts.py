@@ -1,12 +1,10 @@
 """A one-shot command is a button, not a remembered choice: a picker only sends when its
-value changes, so «take a photo» (its only value) never fired from the card, and the same
-melody or gesture twice in a row was the second time nothing. The catalogue marks them
+value changes, so the same melody or gesture twice in a row was the second time nothing. The catalogue marks them
 (`meta.momentary`: the values that are one-shot) and the app draws those as buttons."""
 from app.features.node_provision import PART_CATALOGUE
 
 ONE_SHOT = {
     "sandy_buzzer": None, "sandy_speaker_test": None, "sandy_gesture": None,
-    "cam_snapshot": None, "room_music": ["next", "prev"],
 }
 
 

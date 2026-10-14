@@ -240,7 +240,7 @@ def _ring_robot(uid: str, text: str, now: datetime) -> None:
     try:
         # Import here: the device stack pulls in MQTT (C9).
         from app.features import device_store
-        from app.integrations import room_device
+        from app.integrations import device_publisher
         wanted_parts = [("screen", _face_text(text))]
         if not silent:
             wanted_parts.insert(0, ("buzzer", "alert"))
@@ -248,7 +248,7 @@ def _ring_robot(uid: str, text: str, now: datetime) -> None:
                  for d in device_store.devices_on_output(output) if d.get("online")]
         sends = [(topic, payload) for topic, payload in sends if topic]
         if sends:
-            client = room_device.get_room_device_client()
+            client = device_publisher.get_device_publisher()
             for topic, payload in sends:
                 client.send_to_topic(topic, payload)
     except (PyMongoError, OSError, RuntimeError) as exc:  # the robot never fails a reminder

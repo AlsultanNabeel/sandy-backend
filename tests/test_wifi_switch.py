@@ -22,12 +22,12 @@ from app.features import wifi_switch  # noqa: E402
 # Boards from before the signed command: these tests are about the checks before anything
 # is sent and the plain wire form those boards read (tests/test_signed_wifi_command.py has
 # the signed one).
-_OLD_FIRMWARE = {"node_id": "n1", "firmware_version": "0.11.6", "telemetry": {"cam_fw": "0.4.1"}}
+_OLD_FIRMWARE = {"node_id": "n1", "firmware_version": "0.11.6", "telemetry": {}}
 
 
 def _sent():
     """Capture what would go to the broker."""
-    return patch("app.integrations.room_device.get_room_device_client")
+    return patch("app.integrations.device_publisher.get_device_publisher")
 
 
 def test_a_board_you_do_not_own_is_never_touched():
@@ -122,57 +122,40 @@ def test_success_is_not_claimed_before_the_board_says_so():
         "rolling back, and report a failure that has not happened yet")
 
 
-def test_the_service_channel_allows_wifi_and_the_camera_and_nothing_else():
-    """A node's service channels are named, not matched by pattern.
+def test_the_service_channels_are_named_one_by_one():
+    """A node's service channels are named, not matched by pattern: "anything under
+    sandy/node/" would let a typo reach hardware. The retired boards' are gone."""
+    from app.integrations.device_publisher import DevicePublisher
 
-    "Anything under sandy/node/" would let a typo reach hardware; "anything with
-    cam/ in it" silently blocks every channel added later — which is what
-    happened when this one was added.
-    """
-    from app.integrations.room_device import RoomDeviceClient
+    allowed = DevicePublisher._SERVICE_CHANNELS
+    assert allowed == {"wifi", "screen_img", "factory_reset", "pair_code"}
+    publisher = DevicePublisher()
+    sent = []
+    publisher._publish = lambda topic, payload: sent.append(topic) or True
+    for ok in ("sandy/node/8421/wifi", "sandy/node/8421/screen_img",
+               "sandy/node/8421/factory_reset", "sandy/node/8421/pair_code"):
+        assert publisher.publish_service(ok, "x") is True, ok
+    for bad in ("sandy/node/8421/cam/wifi", "sandy/node/8421/cam/command",
+                "sandy/node/8421/room/light_arm", "sandy/node/8421/wifi/extra",
+                "sandy/node//wifi", "evil/sandy/node/8421/wifi", "sandy/node/84 21/wifi"):
+        assert publisher.publish_service(bad, "x") is False, bad
 
-    allowed = RoomDeviceClient._SERVICE_CHANNELS
-    assert "wifi" in allowed and "cam/wifi" in allowed and "cam/command" in allowed
-    assert not any(c in ("", "/", "sandy/node/", "cam/") for c in allowed), (
-        "a channel this broad authorises everything")
 
-
-def test_the_two_boards_are_addressed_separately():
-    """They share a node id, so "move Sandy" is an incomplete sentence.
-
-    The camera is part of Sandy rather than a second box, which is why one id
-    covers both — and why the board has to be named. Moving both at once would
-    mean one wrong password takes out the pair, losing the thing that makes this
-    safe at all: one board still connected, able to tell you what happened to
-    the other.
-    """
-    from unittest.mock import patch
-
+def test_only_the_robot_is_moved_and_an_older_apps_camera_is_refused():
+    """An app from before the camera was removed may still ask for `board="camera"`. That
+    is refused, never sent to the robot instead: moving the robot when the owner meant the
+    camera could strand it."""
     with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE), \
          _sent() as c:
         c.return_value.publish_service.return_value = True
 
-        wifi_switch.switch_network("n1", "Home", "password", board="brain")
+        wifi_switch.switch_network("n1", "Home", "password")
         assert c.return_value.publish_service.call_args[0][0] == "sandy/node/n1/wifi"
-
-        wifi_switch.switch_network("n1", "Home", "password", board="camera")
-        assert c.return_value.publish_service.call_args[0][0] == "sandy/node/n1/cam/wifi"
-
-    with patch("app.features.node_store.get_node", return_value=_OLD_FIRMWARE):
-        assert wifi_switch.switch_network("n1", "Home", "password",
-                                          board="nonsense")["error"] == "bad_board"
-
-
-def test_the_cameras_network_name_has_its_own_field():
-    """`ssid` belongs to the brain, the way `ip` does.
-
-    Telemetry merges by key under one node id, so a shared field flips between
-    the two boards every five seconds — which already happened once with the
-    address, and made the live view fail every other try for no visible reason.
-    """
-    from app.features.node_store import _TELEMETRY_KEYS
-
-    assert "cam_ssid" in _TELEMETRY_KEYS and "ssid" in _TELEMETRY_KEYS
+        c.reset_mock()
+        for board in ("camera", "room", "nonsense"):
+            assert wifi_switch.switch_network("n1", "Home", "password",
+                                              board=board)["error"] == "bad_board"
+        c.return_value.publish_service.assert_not_called()
 
 
 def test_every_channel_that_is_not_a_device_uses_the_service_path():
@@ -182,8 +165,7 @@ def test_every_channel_that_is_not_a_device_uses_the_service_path():
     builds this topic?" — right for a control, wrong for a channel, because no
     device declares a channel and the publish is refused with nothing said.
 
-    It cost the camera (`cam/command`), and then the picture on the display
-    (`screen_img`) — text worked and pictures did not, which reads like an image
+    It cost the picture on the display (`screen_img`): text worked and pictures did not, which reads like an image
     problem and was a routing one. This test is the pattern rather than the
     instance: anything published to a topic no device declares goes through
     `publish_service`.
@@ -191,10 +173,10 @@ def test_every_channel_that_is_not_a_device_uses_the_service_path():
     import re
     from pathlib import Path
 
-    from app.integrations.room_device import RoomDeviceClient
+    from app.integrations.device_publisher import DevicePublisher
 
-    channels = {"cam/command", "cam/wifi", "wifi", "screen_img"}
-    allowed = RoomDeviceClient._SERVICE_CHANNELS
+    channels = {"wifi", "screen_img", "factory_reset", "pair_code"}
+    allowed = DevicePublisher._SERVICE_CHANNELS
     for ch in channels:
         assert any(a.strip("/") in ch for a in allowed), (
             f"{ch} is a channel but no service entry allows it — every publish "
@@ -207,7 +189,7 @@ def test_every_channel_that_is_not_a_device_uses_the_service_path():
         for line in re.findall(r".*send_to_topic\(.*", path.read_text(encoding="utf-8")):
             if line.strip().startswith("#"):
                 continue
-            if any(ch in line for ch in ("screen_img", "cam/", "/wifi")):
+            if any(ch in line for ch in ("screen_img", "/wifi", "factory_reset", "pair_code")):
                 offenders.append(f"{path.name}: {line.strip()[:70]}")
     assert not offenders, (
         "a channel is being published through the device path again — it will "
