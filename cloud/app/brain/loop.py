@@ -56,7 +56,7 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
     """{"text", "pending", "tools"} after at most MAX_STEPS model calls. Once the app
     stops the reply (`stopped`), no further tool or model call runs.
 
-    A delete that waits for a yes does not end the turn: the rest of the request still
+    A bulk change that waits for a yes does not end the turn: the rest of the request still
     runs, every held action joins one question, and the reply is the model's answer (or,
     with none, what the tools did) plus that question, which is ours, never the model's."""
     hooks = model.stream_hooks()

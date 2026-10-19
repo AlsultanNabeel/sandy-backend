@@ -55,7 +55,8 @@ def test_a_device_command_waits_for_its_time_and_a_scene_leaves_it(room):
     scene_store.apply_scene("calm")
     assert schedules.get(out["id"])["status"] == "pending"
     # His to see and cancel, like a reminder.
-    assert _run("schedule_update", id=out["id"], cancel=True).get("needs_confirmation")
+    assert _run("schedule_update", id=out["id"], cancel=True)["ok"]
+    assert schedules.get(out["id"])["status"] == "cancelled"
 
 
 def test_a_room_or_several_at_once(room):
@@ -99,8 +100,7 @@ def test_voice_asks_which_one_and_takes_the_answer(brain_db):  # noqa: F811
         out = voice.dispatch("confirm", {"answer": "الأولى"}, "userA")
         assert items.get(a)["done"] and not items.get(b)["done"]
         out = voice.dispatch("list_update", {"list": "tasks", "match_text": "حليب", "delete": True}, "userA")
-        assert "متأكد" in out["reply"]           # one left: no choice, only the yes
-        assert voice.dispatch("confirm", {"answer": "اه"}, "userA")["ok"]
+        assert out["ok"]                        # one left: no choice and no question
         assert items.get(b) is None
 
 

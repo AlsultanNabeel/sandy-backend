@@ -24,17 +24,25 @@ def _open(lst="tasks"):
 
 # ── W1. A yes to one delete is not a yes to the next request ─────────────────
 
-def test_a_yes_with_a_new_delete_after_it_asks_again(brain_db):  # noqa: F811
+def _six(word):
     with active_user_profile_context(A):
-        gym = items.add("tasks", "روح عالجيم")
-        report = items.add("tasks", "تقرير الشغل")
-    held = _turn(ScriptedModel(tools_reply(call("list_update", id=gym, delete=True))),
-                 "احذفي مهمة الجيم")["pending_state"]
-    model = ScriptedModel(tools_reply(call("list_update", id=report, delete=True)))
-    state = _turn(model, "اه واحذفي كمان مهمة التقرير", pending=held)
-    assert "روح عالجيم" not in _open(), "the held delete itself runs"
-    assert "تقرير الشغل" in _open(), "the delete in the same line ran with no question"
-    assert "متأكد إنك بدك تحذف «تقرير الشغل»" in state["final_response"]
+        return [items.add("tasks", f"{word} {n}") for n in range(6)]
+
+
+def _bulk(word):
+    """A bulk delete (six rows), the one kind that still waits for a yes."""
+    return call("list_update", list="tasks", match_text=word, all_matching=True, delete=True)
+
+
+def test_a_yes_with_a_new_delete_after_it_asks_again(brain_db):  # noqa: F811
+    _six("جيم"), _six("شغل")
+    held = _turn(ScriptedModel(tools_reply(_bulk("جيم"))), "احذفي كل مهام الجيم")["pending_state"]
+    model = ScriptedModel(tools_reply(_bulk("شغل")))
+    state = _turn(model, "اه واحذفي كمان كل مهام الشغل", pending=held)
+    assert not any(t.startswith("جيم") for t in _open()), "the held delete itself runs"
+    assert len([t for t in _open() if t.startswith("شغل")]) == 6, \
+        "the delete in the same line ran with no question"
+    assert "متأكد إنك بدك تحذف «شغل 0»" in state["final_response"]
     assert state["pending_state"] is not None
 
 
@@ -109,9 +117,8 @@ def test_a_pick_then_a_request_does_both(brain_db):  # noqa: F811
 # ── W7. A held delete does not swallow the answer to the rest of the line ────
 
 def test_the_model_s_answer_stays_beside_the_held_question(brain_db):  # noqa: F811
-    with active_user_profile_context(A):
-        gym = items.add("tasks", "روح عالجيم")
-    model = ScriptedModel(tools_reply(call("list_update", id=gym, delete=True)),
+    _six("جيم")
+    model = ScriptedModel(tools_reply(_bulk("جيم")),
                           text_reply("بكرا عندك اجتماع الساعة عشرة."))
     state = _turn(model, "احذفي مهمة الجيم وشو عندي بكرا؟")
     assert state["final_response"].startswith("بكرا عندك اجتماع الساعة عشرة.\nمتأكد إنك بدك تحذف"), \
@@ -287,23 +294,18 @@ def test_a_rewind_waits_for_a_running_turn_but_not_for_ever(api):
 
 # ── A pick that waits for a yes, and the rest of the line holds something too ──
 
-def test_a_pick_waiting_for_a_yes_keeps_its_question_and_the_next_waits_behind_it(brain_db):  # noqa: F811
+def test_a_pick_runs_and_a_bulk_delete_after_it_waits_for_its_own_yes(brain_db):  # noqa: F811
     with active_user_profile_context(A):
         items.add("tasks", "اتصل بأحمد")
-        items.add("tasks", "اتصل بأحمد الشغل")
-        report = items.add("tasks", "تقرير الشغل")
+        items.add("tasks", "اتصل بأحمد البيت")
+    _six("شغل")
     held = _turn(ScriptedModel(tools_reply(call("list_update", list="tasks",
                                                 match_text="أحمد", delete=True))),
                  "احذفي مهمة اتصل بأحمد")["pending_state"]
     assert held and held["action"] == "choose"
-    model = ScriptedModel(tools_reply(call("list_update", id=report, delete=True)), text_reply(""))
-    state = _turn(model, "التانية واحذفي كمان مهمة التقرير", pending=held)
-    assert state["final_response"].endswith("متأكد إنك بدك تحذف «اتصل بأحمد الشغل»؟ (اه/لأ)"), \
-        "the pick's own question was lost to the next hold"
-    assert "تقرير الشغل" not in state["final_response"].splitlines()[-1]
-    state = _turn(ScriptedModel(), "اه", pending=state["pending_state"])
-    assert "اتصل بأحمد الشغل" not in _open() and "تقرير الشغل" in _open()
-    assert "متأكد إنك بدك تحذف «تقرير الشغل»" in state["final_response"], \
-        "the second hold is asked after the first is answered"
+    model = ScriptedModel(tools_reply(_bulk("شغل")), text_reply(""))
+    state = _turn(model, "التانية واحذفي كمان كل مهام الشغل", pending=held)
+    assert "اتصل بأحمد البيت" not in _open(), "one row picked goes at once"
+    assert state["final_response"].endswith("؟ (اه/لأ)") and "«شغل 0»" in state["final_response"]
     _turn(ScriptedModel(), "اه", pending=state["pending_state"])
     assert _open() == ["اتصل بأحمد"]

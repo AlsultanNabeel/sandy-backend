@@ -110,14 +110,13 @@ def test_list_update_ambiguous_names_the_candidates(tenant_a):
     assert len(out["candidates"]) == 2
 
 
-def test_delete_and_bulk_need_confirmation_and_change_nothing(tenant_a):
-    a = items.add("tasks", "جيم الصبح")
-    b = items.add("tasks", "جيم المسا")
-    out = _run("list_update", match_text="جيم الصبح", delete=True)
-    assert out["needs_confirmation"] and "جيم الصبح" in out["summary"]
+def test_a_bulk_change_needs_confirmation_and_changes_nothing(tenant_a):
+    ids = [items.add("tasks", f"جيم {n}") for n in range(6)]
     out = _run("list_update", match_text="جيم", all_matching=True, done=True)
-    assert out["needs_confirmation"]
-    assert items.get(a) and items.get(b) and not items.get(a)["done"]
+    assert out["needs_confirmation"] and "جيم 0" in out["summary"]
+    assert not any(items.get(i)["done"] for i in ids)
+    out = _run("list_update", match_text="جيم", all_matching=True, delete=True)
+    assert out["needs_confirmation"] and all(items.get(i) for i in ids)
 
 
 def test_confirmed_delete_runs(tenant_a):
@@ -143,14 +142,11 @@ def test_schedule_refuses_an_unreadable_time(tenant_a):
     assert schedules.list_schedules() == []
 
 
-def test_schedule_update_moves_and_cancel_needs_yes(tenant_a):
+def test_schedule_update_moves_and_cancels(tenant_a):
     sid = _run("schedule", kind="reminder", text="دكتور", when=_future())["id"]
     later = _future(days=3, hour=10)
     assert _run("schedule_update", match_text="دكتور", when=later)["ok"]
-    assert _run("schedule_update", match_text="دكتور", cancel=True)["needs_confirmation"]
-    assert schedules.get(sid)["status"] == "pending"
-    ctx = TurnCtx(user_id="userA", confirmed=True)
-    assert tools.execute("schedule_update", {"id": sid, "cancel": True}, ctx)["ok"]
+    assert _run("schedule_update", match_text="دكتور", cancel=True)["ok"]
     assert schedules.get(sid)["status"] == "cancelled"
 
 

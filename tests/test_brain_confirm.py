@@ -1,4 +1,5 @@
-"""Delete / bulk wait for a yes, read by the Arabic yes/no resolver."""
+"""A bulk change (more than five rows at once) waits for a yes, read by the Arabic yes/no
+resolver; one row or a few named ones run at once (tests/test_brain_deletes.py)."""
 from __future__ import annotations
 
 import pytest
@@ -16,9 +17,13 @@ def _turn(model, message, pending=None):
                              pending_state=pending, complete=model)
 
 
-def _ask_delete(iid):
+# Six rows at once: a bulk delete, the one kind that still asks.
+BULK = {"list": "tasks", "match_text": "جيم", "all_matching": True, "delete": True}
+
+
+def _ask_delete(ids):
     # The model has nothing to add: the reply is the question alone.
-    model = ScriptedModel(tools_reply(call("list_update", id=iid, delete=True)), text_reply(""))
+    model = ScriptedModel(tools_reply(call("list_update", **BULK)), text_reply(""))
     state = _turn(model, "احذفي مهمة الجيم")
     # The model is told the delete waits and goes on; the question itself is ours.
     assert len(model.seen) == 2 and '"held": true' in model.seen[1][-1]["content"]
@@ -28,17 +33,23 @@ def _ask_delete(iid):
 @pytest.fixture
 def gym(brain_db):  # noqa: F811
     with active_user_profile_context(A):
-        return items.add("tasks", "روح عالجيم")
+        return [items.add("tasks", f"جيم {n}") for n in range(6)]
 
 
-def _exists(iid):
+def _exists(ids):
+    """Every row is still there."""
     with active_user_profile_context(A):
-        return items.get(iid) is not None
+        return all(items.get(i) is not None for i in ids)
+
+
+def _gone(ids):
+    with active_user_profile_context(A):
+        return all(items.get(i) is None for i in ids)
 
 
 def test_delete_asks_and_holds(gym):
     state = _ask_delete(gym)
-    assert state["final_response"].startswith("متأكد إنك بدك تحذف «روح عالجيم»")
+    assert state["final_response"].startswith("متأكد إنك بدك تحذف «جيم 0»")
     assert state["pending_state"]["type"] == confirm.PENDING_TYPE
     assert _exists(gym)
 
@@ -51,7 +62,7 @@ def test_arabic_yes_runs_it_without_a_model_call(gym, yes):
     state = _turn(model, yes, pending=held)
     assert model.seen == [] and state["pending_state"] is None
     assert "حذفت" in state["final_response"]
-    assert not _exists(gym)
+    assert _gone(gym)
 
 
 @pytest.mark.parametrize("no", ["لا", "لأ", "بلاش", "الغيها", "اه بس لا", "خلص", "لا تحذفها"])
@@ -66,21 +77,21 @@ def test_a_yes_with_more_runs_it_and_hands_the_rest_to_the_model(gym):
     held = _ask_delete(gym)["pending_state"]
     model = ScriptedModel(tools_reply(call("list_add", list="shopping", text="خبز")))
     state = _turn(model, "اه وضيفي خبز", pending=held)
-    assert not _exists(gym)
+    assert _gone(gym)
     assert "حذفت" in model.seen[0][0]["content"]          # told what the yes already did
-    assert state["final_response"].startswith("حذفت «روح عالجيم» ✅\n")
+    assert state["final_response"].startswith("حذفت «جيم 0»")
     with active_user_profile_context(A):
         assert [i["text"] for i in items.list_items("shopping")] == ["خبز"]
 
 
 def test_a_no_with_more_hands_the_rest_to_the_model(gym):
     held = _ask_delete(gym)["pending_state"]
-    model = ScriptedModel(tools_reply(call("list_update", id=gym, done=True)))
+    model = ScriptedModel(tools_reply(call("list_update", id=gym[0], done=True)))
     state = _turn(model, "لا، بس خلّصيها", pending=held)
     assert "قال لأ" in model.seen[0][0]["content"]
     assert not state["final_response"].startswith(confirm.CANCELLED_REPLY)
     with active_user_profile_context(A):
-        assert items.get(gym)["done"]
+        assert items.get(gym[0])["done"]
 
 
 @pytest.mark.parametrize("request_", ["اعملي تذكير بكرا الساعة 5", "كمّلي القصة",
@@ -102,12 +113,12 @@ def test_a_yes_or_a_verb_alone_still_runs_it(gym, yes):
     model = ScriptedModel()
     state = _turn(model, yes, pending=held)
     assert model.seen == [] and state["pending_state"] is None
-    assert not _exists(gym)
+    assert _gone(gym)
 
 
 def test_voice_a_new_request_drops_the_hold(gym):
     with active_user_profile_context(A):
-        voice.dispatch("list_update", {"id": gym, "delete": True}, "userA")
+        voice.dispatch("list_update", BULK, "userA")
         out = voice.dispatch("confirm", {"answer": "اعملي تذكير بكرا الساعة 5"}, "userA")
         assert out["reply"].startswith("[لم يُنفَّذ]") and "نفّذيه هلأ" in out["reply"]
         assert "ما في إشي" in voice.dispatch("confirm", {"answer": "اه"}, "userA")["reply"]
@@ -144,7 +155,8 @@ def test_a_yes_deletes_only_the_rows_the_question_named(brain_db):  # noqa: F811
 def test_a_yes_on_a_row_gone_since_says_so(gym):
     held = _ask_delete(gym)["pending_state"]
     with active_user_profile_context(A):
-        items.delete(gym)
+        for i in gym:
+            items.delete(i)
     state = _turn(ScriptedModel(), "اه", pending=held)
     assert "ما لقيت اللي سألتك عنه" in state["final_response"]
 
@@ -158,21 +170,28 @@ def test_an_unclear_answer_is_answered_and_asked_once_more_then_let_go(gym):
     assert state["pending_state"] is None and state["final_response"] == "ههه" and _exists(gym)
 
 
-def test_two_deletes_in_one_turn_wait_as_one_question(brain_db):  # noqa: F811
+def _bulk(word):
     with active_user_profile_context(A):
-        a, b = items.add("tasks", "مهمة أ"), items.add("tasks", "مهمة ب")
-    model = ScriptedModel(tools_reply(call("list_update", id=a, delete=True),
-                                      call("list_update", id=b, delete=True)))
-    state = _turn(model, "احذفي التنتين")
-    assert "«مهمة أ»" in state["final_response"] and "«مهمة ب»" in state["final_response"]
+        return [items.add("tasks", f"{word} {n}") for n in range(6)]
+
+
+def _bulk_args(word):
+    return {**BULK, "match_text": word}
+
+
+def test_two_bulk_deletes_in_one_turn_wait_as_one_question(brain_db):  # noqa: F811
+    a, b = _bulk("شغل"), _bulk("بيت")
+    model = ScriptedModel(tools_reply(call("list_update", cid="c1", **_bulk_args("شغل")),
+                                      call("list_update", cid="c2", **_bulk_args("بيت"))))
+    state = _turn(model, "احذفي كل مهام الشغل والبيت")
+    assert "«شغل 0»" in state["final_response"] and "«بيت 0»" in state["final_response"]
     _turn(ScriptedModel(), "اه", pending=state["pending_state"])
-    with active_user_profile_context(A):
-        assert items.get(a) is None and items.get(b) is None
+    assert _gone(a) and _gone(b)
 
 
 def test_what_was_done_is_said_with_the_question_and_the_steps_after_it_run(gym):
     model = ScriptedModel(
-        tools_reply(call("list_update", id=gym, delete=True)),
+        tools_reply(call("list_update", **BULK)),
         tools_reply(call("list_add", list="tasks", text="روح عالمسبح")),
         text_reply("ضفت المسبح بداله."))
     state = _turn(model, "احذفي الجيم وحطي المسبح بداله")
@@ -197,19 +216,19 @@ def test_the_hold_round_trips_through_the_pending_store(gym, brain_db):  # noqa:
 
 def test_voice_holds_then_confirm_tool_resolves_with_the_same_resolver(gym):
     with active_user_profile_context(A):
-        out = voice.dispatch("list_update", {"id": gym, "delete": True}, "userA")
+        out = voice.dispatch("list_update", BULK, "userA")
         assert "متأكد" in out["reply"] and "ok" not in out
         assert _exists(gym)
         assert "مرة تانية" in voice.dispatch("confirm", {"answer": "يمكن"}, "userA")["reply"]
         assert _exists(gym)
         out = voice.dispatch("confirm", {"answer": "اه صح"}, "userA")
-        assert out["ok"] and not _exists(gym)
+        assert out["ok"] and _gone(gym)
         assert "ما في إشي" in voice.dispatch("confirm", {"answer": "اه"}, "userA")["reply"]
 
 
 def test_voice_cancel(gym):
     with active_user_profile_context(A):
-        voice.dispatch("list_update", {"id": gym, "delete": True}, "userA")
+        voice.dispatch("list_update", BULK, "userA")
         out = voice.dispatch("confirm", {"answer": "لأ"}, "userA")
     assert out["reply"] == confirm.CANCELLED_REPLY and _exists(gym)
 
@@ -222,7 +241,7 @@ def test_voice_marks_what_did_not_happen(brain_db):  # noqa: F811
 
 def test_voice_lets_go_after_a_second_unclear_answer_like_chat(gym):
     with active_user_profile_context(A):
-        voice.dispatch("list_update", {"id": gym, "delete": True}, "userA")
+        voice.dispatch("list_update", BULK, "userA")
         voice.dispatch("confirm", {"answer": "يمكن"}, "userA")
         out = voice.dispatch("confirm", {"answer": "يمكن بعدين"}, "userA")
         assert out["reply"].startswith("[لم يُنفَّذ]")
@@ -230,28 +249,27 @@ def test_voice_lets_go_after_a_second_unclear_answer_like_chat(gym):
     assert _exists(gym)
 
 
-def test_voice_two_deletes_wait_as_one(brain_db):  # noqa: F811
+def test_voice_two_bulk_deletes_wait_as_one(brain_db):  # noqa: F811
+    a, b = _bulk("شغل"), _bulk("بيت")
     with active_user_profile_context(A):
-        a, b = items.add("tasks", "مهمة أ"), items.add("tasks", "مهمة ب")
-        voice.dispatch("list_update", {"id": a, "delete": True}, "userA")
-        out = voice.dispatch("list_update", {"id": b, "delete": True}, "userA")
-        assert "«مهمة أ»" in out["reply"] and "«مهمة ب»" in out["reply"]
+        voice.dispatch("list_update", _bulk_args("شغل"), "userA")
+        out = voice.dispatch("list_update", _bulk_args("بيت"), "userA")
+        assert "«شغل 0»" in out["reply"] and "«بيت 0»" in out["reply"]
         assert voice.dispatch("confirm", {"answer": "اه"}, "userA")["ok"]
-        assert items.get(a) is None and items.get(b) is None
+    assert _gone(a) and _gone(b)
 
 
 def test_voice_a_which_one_waits_behind_a_held_yes_instead_of_replacing_it(gym):
     with active_user_profile_context(A):
         items.add("tasks", "اتصل بأحمد")
         ahmad2 = items.add("tasks", "اتصل بأحمد الشغل")
-        voice.dispatch("list_update", {"id": gym, "delete": True}, "userA")
+        voice.dispatch("list_update", BULK, "userA")
         out = voice.dispatch("list_update", {"list": "tasks", "match_text": "أحمد",
                                              "delete": True}, "userA")
         assert "متأكد إنك بدك تحذف" in out["reply"], "the held yes is still the question"
         out = voice.dispatch("confirm", {"answer": "اه"}, "userA")
-        assert not _exists(gym) and "أي وحدة" in out["reply"], "the «which one?» was dropped"
+        assert _gone(gym) and "أي وحدة" in out["reply"], "the «which one?» was dropped"
         out = voice.dispatch("confirm", {"answer": "التانية"}, "userA")
-        assert "اتصل بأحمد الشغل" in out["reply"] and _exists(ahmad2)
-        voice.dispatch("confirm", {"answer": "اه"}, "userA")
-        assert not _exists(ahmad2)
+        # One row picked: it goes at once, with no second question.
+        assert "حذفت «اتصل بأحمد الشغل»" in out["reply"] and items.get(ahmad2) is None
         assert "ما في إشي" in voice.dispatch("confirm", {"answer": "اه"}, "userA")["reply"]

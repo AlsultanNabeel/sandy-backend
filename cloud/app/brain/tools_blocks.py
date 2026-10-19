@@ -157,7 +157,7 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return picked
     rows = picked["rows"]
     delete = bool(args.get("delete"))
-    held = _held(picked, "تحذف" if delete else "تعدّل", delete, args, ctx)
+    held = _held(picked, "تحذف" if delete else "تعدّل", args, ctx)
     if held:
         return held
     amount = args.get("amount")
@@ -401,11 +401,16 @@ def _names(rows: List[Dict[str, Any]]) -> str:
     return f"«{shown}»" + (f" وكمان {len(rows) - 3}" if len(rows) > 3 else "")
 
 
-def _held(picked: Dict[str, Any], verb: str, asks: bool, args: Dict[str, Any],
+# More rows than this in one change is a bulk one, and waits for a yes; one row, or a few
+# named ones, run at once.
+BULK_ROWS = 5
+
+
+def _held(picked: Dict[str, Any], verb: str, args: Dict[str, Any],
           ctx: TurnCtx) -> Optional[Dict[str, Any]]:
-    """The question when the change waits for a yes (asked for, several rows, or a guess)."""
+    """The question when the change waits for a yes: a bulk one, or a guess."""
     rows = picked["rows"]
-    if ctx.confirmed or not (asks or len(rows) > 1 or picked.get("guessed")):
+    if ctx.confirmed or not (len(rows) > BULK_ROWS or picked.get("guessed")):
         return None
     guess = f" (أقرب إشي لـ«{args.get('match_text')}»)" if picked.get("guessed") else ""
     return needs_confirmation(f"{verb} {_names(rows)}{guess}", [r["id"] for r in rows])
@@ -436,7 +441,7 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     rows = picked["rows"]
     delete = bool(args.get("delete"))
     verb = "تحذف" if delete else ("تخلّص" if args.get("done") else "تعدّل")
-    held = _held(picked, verb, delete, args, ctx)
+    held = _held(picked, verb, args, ctx)
     if held:
         return held
     due: Any = None if args.get("no_due") else items._UNSET
@@ -589,7 +594,7 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return picked
     rows = picked["rows"]
     cancel = bool(args.get("cancel"))
-    held = _held(picked, "تلغي" if cancel else "تعدّل", cancel, args, ctx)
+    held = _held(picked, "تلغي" if cancel else "تعدّل", args, ctx)
     if held:
         return held
     rule: Optional[str] = None

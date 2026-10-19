@@ -1,6 +1,6 @@
 """A held action across turns: its lifecycle, and where it waits (`sandy_pending_state`).
 
-A delete or bulk change asks «متأكد؟» and waits for the next turn. The dict carries
+A bulk change (more than five rows at once) asks «متأكد؟» and waits for the next turn. The dict carries
 ``expires_at`` and ``consumed_at``; `live` is the only judge of whether it still holds.
 The document id bakes in the tenant (``<chat_id>:<thread_id>``): ``thread_id`` is
 client-supplied and may be guessable ("default"), so it can never be the only key.

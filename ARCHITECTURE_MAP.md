@@ -201,8 +201,10 @@ kind needs no tool change.
 `reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
 breaks the turn); `needs_confirmation` / `needs_choice` when it will not act yet.
 
-**Confirmation** (`confirm.py`, `pending.py`): deletes, cancels and multi-row
-changes return `needs_confirmation`; two matching rows return `needs_choice`. The
+**Confirmation** (`confirm.py`, `pending.py`): one row, or a few named ones, is deleted,
+cancelled or changed at once, on chat and voice alike; only a bulk change, more than
+`tools_blocks.BULK_ROWS` (5) rows at once, returns `needs_confirmation` (a fuzzy guess too);
+two matching rows return `needs_choice`. The
 loop stores a `brain_confirm` pending (10 minutes, a nonce, `consumed_at`; its
 `steps` are every held `{tool, args, summary, ids}` of the turn, `ids` the rows the question
 names: a yes acts on those by id (`ctx.held_ids`, `tools_blocks._held_rows`) and never searches

@@ -1,4 +1,5 @@
-"""Held actions: a delete or bulk change waits for the user's yes, or for which one.
+"""Held actions: a bulk change (more than five rows at once) waits for the user's yes,
+and two rows that match wait for which one.
 
 The pending dict's lifecycle and store are `brain/pending.py`; yes/no is read by
 one normalized resolver, below, on chat and voice alike.

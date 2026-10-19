@@ -1518,7 +1518,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                                 )},
                             ))
                             continue
-                    # Deletes and bulk changes hold for `confirm` inside the brain.
+                    # Bulk changes (more than five rows) hold for `confirm` inside the brain.
                     # The identity travels with the tool call.
                     result = await loop.run_in_executor(
                         tools_pool, _dispatch_tool, fc.name,

@@ -90,14 +90,13 @@ def test_ambiguous_delete_asks_which_one(two_milks):
     assert len(model.seen) == 2  # the rest of the request still runs, then the question
 
 
-def test_first_then_yes_deletes_only_that_one(two_milks):
+def test_first_deletes_only_that_one(two_milks):
     asked = _turn(ScriptedModel(tools_reply(call("list_update", list="tasks",
                                                  match_text="حليب", delete=True))),
                   "احذفي مهمة الحليب")
     chosen = _turn(ScriptedModel(), "الأولى", asked["pending_state"])
-    assert chosen["final_response"].startswith("متأكد إنك بدك تحذف")
-    done = _turn(ScriptedModel(), "اه", chosen["pending_state"])
-    assert done["pending_state"] is None
+    assert chosen["final_response"].startswith("حذفت")
+    assert chosen["pending_state"] is None
     with active_user_profile_context(A):
         left = [i["id"] for i in items.list_items("tasks")]
     assert len(left) == 1 and left[0] in two_milks

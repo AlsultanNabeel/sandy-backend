@@ -142,7 +142,7 @@ def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
     result = tools.execute(name, args or {}, TurnCtx(user_id=chat_id, source="voice"))
     if result.get("needs_confirmation") or result.get("needs_choice"):
         db = get_db()
-        # Two deletes in one breath wait as one: the question names both, one yes runs both.
+        # Two bulk changes in one breath wait as one: the question names both, one yes runs both.
         # A «which one?» waits behind what is already asked, as in chat.
         held = confirm.add(confirm.live(P.load(VOICE_THREAD, chat_id, db)),
                            name, args or {}, result)
