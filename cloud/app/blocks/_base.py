@@ -43,9 +43,14 @@ def journal() -> Iterator[List[Dict[str, Any]]]:
 
 def noted(op: str, name: str, doc_id: str, handle=None, text: str = "") -> None:
     """Note a write. For "updated" / "deleted" pass the handle: the row as it is now is
-    kept (without its vector) to put back. A created row's `text` names it in an undo."""
+    kept (without its vector) to put back. A created row's `text` names it in an undo.
+    It goes to the turn's journal when one is open, and to `changes` (a delete always, so
+    every delete can be put back for seven days)."""
+    from app.blocks import changes
+
     entries = _journal.get()
-    if entries is None or not doc_id:
+    keeping = op == "deleted" or changes.current_turn() is not None
+    if (entries is None and not keeping) or not doc_id:
         return
     before = None
     if op != "created" and handle is not None:
@@ -53,7 +58,10 @@ def noted(op: str, name: str, doc_id: str, handle=None, text: str = "") -> None:
         if before is None:
             return
     label = text or str((before or {}).get("text") or "")
-    entries.append({"op": op, "coll": name, "id": doc_id, "before": before, "text": label})
+    if entries is not None:
+        entries.append({"op": op, "coll": name, "id": doc_id, "before": before, "text": label})
+    if keeping:
+        changes.keep(op, name, doc_id, before, label)
 
 
 def fact_changed() -> None:
@@ -90,6 +98,9 @@ def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:
             facts = row.get("kind") == "fact"
         if e.get("op") != "created" and before and e.get("coll") == ENTRIES:
             before = _with_vector(before)
+        if before and e.get("coll") == SCHEDULES:
+            # No phone holds a reminder put back until it says so (`schedules.arm`).
+            before = {**before, "armed": [], "armed_once": []}
         if e.get("op") == "created":
             done += handle.delete_one({"_id": e["id"]}).deleted_count
         elif e.get("op") == "updated" and before:

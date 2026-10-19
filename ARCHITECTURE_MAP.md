@@ -212,7 +212,7 @@ kind needs no tool change.
 | `web_search` | `features/research.web_answer`: Exa snippets summarised in one model call, with sources |
 | `weather` | `features/weather` (the city as itself, nothing appended); with no city, `home_city`: the city the app last showed weather for (`/api/weather` keeps it on `sandy_users.city`); with none saved she asks which city (no default, no guess from the zone; the route answers 400 `city_required`) |
 | `image` | `vision.generate_image_with_azure` on the model's own prompt (FLUX, then Azure DALL-E); one a turn, a second is refused (so it never runs side by side) |
-| `undo_last` | takes back the previous reply's journaled block writes: added rows go, edited, deleted and cancelled ones come back; devices are not undone |
+| `undo` | «تراجعي»، «لا رجّعيه»، «غلطت رجّعيها» take back the last change (everything one reply, or one tool of a call, wrote), however much was said since; `match_text` one row by name («رجّعي الحليب»), `count` the last that many rows. A deleted row comes back as it was (same id, text, dates, reminder, place in its list), an edited or cancelled one gets its old values, an added one goes; devices are not undone. Read from `blocks.changes`, seven days back |
 
 **A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
 `reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
@@ -261,6 +261,7 @@ for a refusal. A held action is "not done yet", neither.
 | Related past | `brain/context.py::similar_entries` | nothing for a message under three words; else the 8 nearest entries that are not facts, chat summaries or habit ticks, from the Atlas vector index `entries_vector` (tenant in its filter); text search when there is no vector or no hit |
 | Conversation summaries | `brain/stm.py::_summarize` | one `summary` entry (`data.thread_id`) per conversation, in the background: when a message comes after a 30-minute pause, or when a thread passes 24 messages and drops to its newest 12; turns are marked `summarized` so none is summarised twice. The chat prompt carries them (`context.conversation_block`): this thread's newest two, oldest first, and the two other conversations closest to the message (same embedding as the related entries, three words or more) |
 | Held actions | `brain/pending.py` | `sandy_pending_state`, keyed `<chat_id>:<thread_id>`, TTL 1 hour |
+| What was changed | `blocks/changes.py` | `sandy_changes`, TTL seven days on `at`: every delete, from anywhere (the app's screens too), keeps the row as it was, so a delete is soft: the row leaves its list at once and waits there, marked deleted, until the TTL takes it; while Sandy's turn runs (`changes.recording(ctx.turn_id)`, chat per reply, a call per Gemini turn) her adds and edits are kept with it. What `undo` reads; `_base.noted` writes it |
 
 **One memory across every channel.** App chat (`/api/agent`), the robot's voice
 (`/voice`, HMAC hello → the paired node's `user_id`) and in-app live voice
@@ -1493,7 +1494,7 @@ uses, and the only thing to rebuild is the client.
 Written today, and what reads it:
 
 - **The blocks** — `sandy_entries`, `sandy_items`, `sandy_schedules` (§2.12),
-  through `scoped()` on `user_id`.
+  through `scoped()` on `user_id`, and `sandy_changes` (what was deleted or changed, seven days, §2.5).
 - **Identity and access** — `sandy_users` (profile, onboarding, persona,
   subscription), `sandy_auth` (login rate limit), `sandy_usage_daily`,
   `sandy_usage_rl`.

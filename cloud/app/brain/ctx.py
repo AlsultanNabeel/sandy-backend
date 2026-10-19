@@ -10,8 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple
 class TurnCtx:
     user_id: str
     message: str = ""
-    # The conversation's memory thread (its last reply's effects are what undo_last takes back).
+    # The conversation's memory thread.
     thread_id: str = ""
+    # The change group this turn's writes are kept under (`blocks.changes`), for undo.
+    turn_id: str = ""
     source: str = "chat"            # blocks.entries.SOURCES: chat | voice | app
     confirmed: bool = False         # set only when replaying a held action after "yes"
     # On that replay, the rows the question named: the yes acts on these, never a new search.

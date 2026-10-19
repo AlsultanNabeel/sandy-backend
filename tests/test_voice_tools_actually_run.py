@@ -25,7 +25,7 @@ class _Recorder:
         self.chat_id = None
         self.result = result or {"handled": True, "ok": True, "reply": "تمام"}
 
-    def __call__(self, name, args, chat_id):
+    def __call__(self, name, args, chat_id, turn=""):
         from app.utils.user_profiles import current_user_id
         self.chat_id, self.tenant = chat_id, current_user_id()
         return self.result

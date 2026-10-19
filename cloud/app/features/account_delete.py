@@ -68,6 +68,8 @@ _BY_USER: List[str] = [
     "sandy_entries",
     "sandy_items",
     "sandy_schedules",
+    # What was deleted or changed in the blocks, kept seven days for undo.
+    "sandy_changes",
     # Chat attachments and the images Sandy drew (bytes inline).
     "sandy_attachments",
     # Notes sent from Profile › Support.

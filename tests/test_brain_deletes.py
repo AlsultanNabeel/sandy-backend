@@ -201,3 +201,88 @@ def test_a_turn_that_breaks_after_a_yes_ran_is_answered_not_raised(brain_db, mon
     monkeypatch.setattr(confirm, "following", _boom)
     state = _turn(ScriptedModel(), "اه", pending=held)      # raised before: a resend ran it again
     assert _left(ids) == [] and state["final_response"] == loop.AFTER_WRITES_REPLY
+
+
+# ── undo: a delete is kept seven days and comes back as it was ────────────────
+
+def _say(text, *calls_, answer="تمام"):
+    model = ScriptedModel(*(tools_reply(c) for c in calls_), text_reply(answer))
+    return _turn(model, text)
+
+
+def test_undo_brings_a_deleted_row_back_exactly_even_after_other_talk(brain_db):  # noqa: F811
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    with active_user_profile_context(A):
+        first = items.add("tasks", "أولى", created_at=now - timedelta(minutes=3))
+        gym = items.add("tasks", "جيم", due=now + timedelta(days=1), data={"repeat": "weekly"},
+                        priority="high", created_at=now - timedelta(minutes=2))
+        items.add("tasks", "تالتة", created_at=now - timedelta(minutes=1))
+        was = items.get(gym)
+        order = [i["id"] for i in items.list_items("tasks")]
+    _say("احذفي مهمة الجيم", call("list_delete", id=gym))
+    assert _left([gym]) == []
+    _turn(ScriptedModel(text_reply("الجو حلو")), "كيف الطقس؟")
+    _turn(ScriptedModel(text_reply("ههه")), "احكيلي نكتة")
+    state = _say("لا رجّعيه", call("undo"), answer="رجّعته ✅")
+    with active_user_profile_context(A):
+        assert items.get(gym) == was, "the same id, text, due, data and priority"
+        assert [i["id"] for i in items.list_items("tasks")] == order, "its place in the list"
+    assert "رجّعته" in state["final_response"] and first
+
+
+def test_undo_by_name_and_several_back(brain_db):  # noqa: F811
+    milk, bread, eggs = _add("حليب", "خبز", "بيض")
+    _say("شيلي الحليب", call("list_delete", id=milk))
+    _say("شيلي الخبز", call("list_delete", id=bread))
+    _say("شيلي البيض", call("list_delete", id=eggs))
+    _say("رجّعي الحليب", call("undo", match_text="الحليب"))
+    assert _left([milk, bread, eggs]) == [milk]
+    _say("رجّعي آخر تنين", call("undo", count=2))
+    assert _left([milk, bread, eggs]) == [milk, bread, eggs]
+
+
+def test_undo_puts_back_a_cancelled_reminder_and_takes_away_an_add(brain_db):  # noqa: F811
+    from datetime import datetime, timedelta, timezone
+
+    from app.blocks import schedules
+
+    with active_user_profile_context(A):
+        sid = schedules.add("reminder", "الدوا", datetime.now(timezone.utc) + timedelta(hours=2))
+    _say("الغي تذكير الدوا", call("schedule_cancel", id=sid))
+    _say("لا رجّعيه", call("undo"))
+    with active_user_profile_context(A):
+        assert schedules.get(sid)["status"] == "pending"
+    _say("ضيفي جبنة", call("list_add", list="shopping", text="جبنة"))
+    _say("غلطت رجّعيها", call("undo"))
+    with active_user_profile_context(A):
+        assert [i["text"] for i in items.list_items("shopping")] == []
+
+
+def test_voice_undo_takes_back_the_whole_turn(brain_db):  # noqa: F811
+    milk, bread = _add("حليب", "خبز")
+    with active_user_profile_context(A):
+        voice.dispatch("list_delete", {"id": milk}, "userA", turn="t1")
+        voice.dispatch("list_delete", {"id": bread}, "userA", turn="t1")
+        out = voice.dispatch("undo", {}, "userA", turn="t2")
+    assert out["ok"] and _left([milk, bread]) == [milk, bread]
+
+
+def test_a_delete_from_the_app_can_be_put_back_too_and_is_gone_after_seven_days(brain_db):  # noqa: F811
+    from app.blocks import changes
+
+    milk, = _add("حليب")
+    with active_user_profile_context(A):
+        items.delete(milk)                       # the app's DELETE /api/items/<id>
+        (kept,) = changes.recent()
+        assert kept["op"] == "deleted" and kept["before"]["text"] == "حليب"
+    info = brain_db[changes.CHANGES].index_information()
+    assert info["at_ttl"]["expireAfterSeconds"] == 7 * 86400
+    _say("رجّعي الحليب", call("undo", match_text="حليب"))
+    assert _left([milk]) == [milk]
+
+
+def test_nothing_to_undo_says_so(brain_db):  # noqa: F811
+    out = _run("undo")
+    assert out["ok"] is False and "ما في إشي" in out["reply"]

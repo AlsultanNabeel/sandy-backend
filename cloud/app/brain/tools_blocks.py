@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.brain.categorize import categorize_later
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.utils.time import USER_TZ
-from app.blocks import _base, entries, items, schedules
+from app.blocks import _base, changes, entries, items, schedules
 from app.blocks.kinds import LIST, LOG, SCHEDULE, KindError, by_alias, get_kind, names
 from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
@@ -124,19 +124,33 @@ def budget_note(user_id: str) -> str:
     return f"{state}: صرف {spent:g} من {budget:g}. نبّهيه بلطف."
 
 
-def undo_last(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    """«لا، احذفيه» / «غلط» right after she did something: what her previous reply added
-    goes, what it changed or deleted comes back. Devices are not undone."""
-    from app.blocks import _base
-    from app.brain import stm
-
-    effects = stm.take_last_effects(ctx.thread_id or ctx.user_id, ctx.user_id)
-    if not effects:
-        return refused("nothing to undo: the last reply changed nothing in the lists, log or reminders")
-    undone = _base.undo(effects)
-    names = [decrypt_field(e["text"]) for e in effects if e.get("text")]
-    return {"ok": bool(undone), "undone": undone, "items": names,
-            "reply": "رجّعت عنه ✅ " + "، ".join(f"«{n}»" for n in names[:3])}
+def undo(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """«تراجعي»، «لا رجّعيه»، «غلطت رجّعيها»، «رجّعي الحليب»، «رجّعي آخر تلاتة»: what was
+    deleted comes back as it was, what was changed gets its old values, what was added
+    goes. With nothing named, everything the last change did (one reply, or one tool of a
+    call), however much was said since; `match_text` names a row, `count` takes the last
+    that many rows. Seven days back (`blocks.changes`). Devices are not undone."""
+    recent = [c for c in changes.recent() if c.get("turn") != ctx.turn_id]
+    if not recent:
+        return refused("nothing to undo", reply="ما في إشي غيّرته بآخر أسبوع لأرجّعه.")
+    said = str(args.get("match_text") or "").strip()
+    count = _minutes(args.get("count"))
+    if said:
+        rows = [{"id": c["_id"], "text": decrypt_field(c.get("label") or "")} for c in recent]
+        m = match_rows(said, rows)
+        if m["status"] not in ("matched", "ambiguous") or m.get("tier") == "fuzzy":
+            return refused("nothing by that name to undo", reply=f"ما لقيت «{said}» بين اللي غيّرته.")
+        picked = [next(c for c in recent if c["_id"] == m["matches"][0]["id"])]
+    elif count and count > 0:
+        picked = recent[:count]
+    else:
+        picked = [c for c in recent if c.get("turn") == recent[0].get("turn")]
+    done = changes.undo(picked)
+    names = list(dict.fromkeys(decrypt_field(c.get("label") or "") for c in picked))
+    if not done:
+        return refused("nothing put back", reply="ما قدرت أرجّعه: شكله تغيّر من بعدها.")
+    return {"ok": True, "undone": done, "items": names,
+            "reply": "رجّعته زي ما كان ✅ " + "، ".join(f"«{n}»" for n in names[:3] if n)}
 
 
 def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

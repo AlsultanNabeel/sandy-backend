@@ -202,12 +202,12 @@ def test_no_take_it_back_undoes_what_the_last_reply_did(brain_db):  # noqa: F811
                         text_reply("ضفته")), "ضيفي حليب")
     with active_user_profile_context(A):
         assert [i["text"] for i in items.list_items("shopping")] == ["حليب"]
-    state = _turn(ScriptedModel(tools_reply(call("undo_last")), text_reply("شلته")), "لا خلص احذفيه")
-    assert state["tools_used"] == ["undo_last"]
+    state = _turn(ScriptedModel(tools_reply(call("undo")), text_reply("شلته")), "لا خلص احذفيه")
+    assert state["tools_used"] == ["undo"]
     with active_user_profile_context(A):
         assert items.list_items("shopping") == []
     # Asked again, there is nothing left to take back.
-    model = ScriptedModel(tools_reply(call("undo_last")), text_reply("ما في"))
+    model = ScriptedModel(tools_reply(call("undo")), text_reply("ما في"))
     _turn(model, "كمان مرة")
     assert json.loads(model.seen[1][-1]["content"])["ok"] is False
 

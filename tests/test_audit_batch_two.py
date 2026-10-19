@@ -175,12 +175,12 @@ def test_an_undo_written_again_finds_nothing_to_undo(brain_db):  # noqa: F811
 
     _turn(ScriptedModel(tools_reply(call("list_add", list="tasks", text="اشتري هدية")),
                         text_reply("ضفتها")), "ضيفي مهمة اشتري هدية")
-    _turn(ScriptedModel(tools_reply(call("undo_last")), text_reply("رجّعت")), "لا غلط")
+    _turn(ScriptedModel(tools_reply(call("undo")), text_reply("رجّعت")), "لا غلط")
     assert "اشتري هدية" not in _open()
     # «Write it again» on the undo's reply: the reply goes, the same line is answered again.
     with active_user_profile_context(A):
         stm.rewind("userA", "userA", text="لا غلط")
-    model = ScriptedModel(tools_reply(call("undo_last")), text_reply("ما في شي"))
+    model = ScriptedModel(tools_reply(call("undo")), text_reply("ما في شي"))
     _turn(model, "لا غلط")
     tool_msgs = [m for m in model.seen[-1] if m.get("role") == "tool"]
     assert "nothing to undo" in tool_msgs[-1]["content"], \

@@ -12,6 +12,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from app.blocks import changes
+from app.blocks._base import new_id
 from app.brain import confirm, tools
 from app.brain import pending as P
 from app.brain.ctx import TurnCtx
@@ -135,11 +137,17 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
     return _ask_next(held, chat_id, {"handled": True, "reply": "\n".join(results)}, waiting)
 
 
-def dispatch(name: str, args: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
-    """Run one voice tool call for ``chat_id`` (the caller sets the tenant context)."""
+def dispatch(name: str, args: Dict[str, Any], chat_id: str, turn: str = "") -> Dict[str, Any]:
+    """Run one voice tool call for ``chat_id`` (the caller sets the tenant context). What it
+    writes is kept under ``turn`` (the call's turn, so «تراجعي» takes back all of it)."""
+    with changes.recording(turn or new_id()):
+        return _dispatch(name, args, chat_id, turn)
+
+
+def _dispatch(name: str, args: Dict[str, Any], chat_id: str, turn: str) -> Dict[str, Any]:
     if name == "confirm":
         return _answer_held(str((args or {}).get("answer") or ""), chat_id)
-    result = tools.execute(name, args or {}, TurnCtx(user_id=chat_id, source="voice"))
+    result = tools.execute(name, args or {}, TurnCtx(user_id=chat_id, source="voice", turn_id=turn))
     if result.get("needs_confirmation") or result.get("needs_choice"):
         db = get_db()
         # Two bulk changes in one breath wait as one: the question names both, one yes runs both.

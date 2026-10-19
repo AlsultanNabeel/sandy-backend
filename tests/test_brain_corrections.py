@@ -60,7 +60,7 @@ def test_forget_a_fact_is_gone_at_once(tenant):
     assert entries.get(eid) is None
 
 
-def test_undo_last_brings_back_a_cancelled_reminder(tenant):
+def test_undo_brings_back_a_cancelled_reminder(tenant):
     from datetime import datetime, timedelta, timezone
     sid = schedules.add("reminder", "الدوا", datetime.now(timezone.utc) + timedelta(hours=1))
     model = ScriptedModel(tools_reply(call("schedule_cancel", id=sid)))
@@ -68,7 +68,7 @@ def test_undo_last_brings_back_a_cancelled_reminder(tenant):
                   source="web", complete=model)
     assert schedules.get(sid)["status"] == "cancelled"
     loop.run_turn("لا رجّعيه", user_id="userA", chat_id="userA", source="web",
-                  complete=ScriptedModel(tools_reply(call("undo_last"))))
+                  complete=ScriptedModel(tools_reply(call("undo"))))
     assert schedules.get(sid)["status"] == "pending"
 
 

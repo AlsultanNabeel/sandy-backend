@@ -34,7 +34,7 @@ def _is_sensitive_call(name: str, args=None) -> bool:
     """With SANDY_REQUIRE_SPEAKER_AUTH=1 these wait for the owner's voice: deletes,
     cancels, bulk changes, future-self messages, and `confirm`, which only ever
     runs one of those."""
-    if name in ("confirm", "list_delete", "log_delete", "schedule_cancel"):
+    if name in ("confirm", "list_delete", "log_delete", "schedule_cancel", "undo"):
         return True
     args = args or {}
     if name in ("list_update", "log_update", "schedule_update"):

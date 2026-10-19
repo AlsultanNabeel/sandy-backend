@@ -30,7 +30,7 @@ CASES = [
         {"say": "جبت البندورة", "tools": ["list_update"],
          "item": {"list": "shopping", "has": "بندورة", "done": True}}]},
     {"name": "shopping more of", "setup": [{"item": {"list": "shopping", "text": "حليب"}}], "steps": [
-        {"say": "كمان حليب", "not_tools": ["undo_last"]}]},
+        {"say": "كمان حليب", "not_tools": ["undo"]}]},
     {"name": "task add", "steps": [
         {"say": "لازم أخلص التقرير تبع الشغل", "tools": ["list_add"], "item": {"list": "tasks", "has": "التقرير"}}]},
     {"name": "task done", "setup": [{"item": {"list": "tasks", "text": "أدفع فاتورة الكهربا"}}], "steps": [
@@ -84,7 +84,7 @@ CASES = [
         {"say": "قديش صرفت اليوم؟", "reply_has": ["65", "٦٥", "خمسة وستين", "خمس وستين"]}]},
     {"name": "undo", "steps": [
         {"say": "ضيفي جبنة للأغراض", "tools": ["list_add"]},
-        {"say": "لا غلط ارجعي عنه", "tools": ["undo_last"], "no_item": {"list": "shopping", "has": "جبنة"}}]},
+        {"say": "لا غلط ارجعي عنه", "tools": ["undo"], "no_item": {"list": "shopping", "has": "جبنة"}}]},
 
     # ── Devices and the world ──
     {"name": "device on", "steps": [
@@ -115,6 +115,6 @@ CASES = [
         {"say": "ضيفي بيض للأغراض وذكريني بعد ساعتين أطلع الزبالة", "tools": ["list_add", "schedule"],
          "item": {"list": "shopping", "has": "بيض"}, "schedule": {"has": "الزبالة"}}]},
     {"name": "remembers the thread", "steps": [
-        {"say": "بدي أعمل عزومة يوم الجمعة لصحابي", "not_tools": ["undo_last"]},
+        {"say": "بدي أعمل عزومة يوم الجمعة لصحابي", "not_tools": ["undo"]},
         {"say": "ضيفي لحمة وفحم إلها", "tools": ["list_add"], "item": {"list": "shopping", "has": "فحم"}}]},
 ]

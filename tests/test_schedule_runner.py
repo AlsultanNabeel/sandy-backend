@@ -413,6 +413,7 @@ def test_the_turn_writes_a_mood_when_the_model_records_one(brain_db):  # noqa: F
     ("list_update", {"match_text": "حليب", "done": True}, False),
     ("schedule_cancel", {"match_text": "دوا"}, True),
     ("log_delete", {"kind": "expense"}, True),
+    ("undo", {}, True),
     ("log_update", {"kind": "expense", "amount": 4}, False),
     ("schedule_update", {"match_text": "دوا", "all_matching": True, "when": "بكرا"}, True),
     ("schedule_update", {"match_text": "دوا", "when": "بكرا"}, False),

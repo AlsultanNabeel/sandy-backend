@@ -144,9 +144,12 @@ def _schemas() -> List[Dict[str, Any]]:
          "parameters": _obj({"city": {**_S, "description": "فاضية = مدينته المحفوظة"}}, [])},
         {"name": "image", "description": "ولّدي صورة من وصف.",
          "parameters": _obj({"prompt": _S}, ["prompt"])},
-        {"name": "undo_last",
-         "description": "ارجعي عن كل اللي عملتيه بردّك اللي قبل: اللي ضفتيه بينشال، واللي عدّلتيه أو حذفتيه أو لغيتيه بيرجع (الأجهزة لأ).",
-         "parameters": _obj({}, [])},
+        {"name": "undo",
+         "description": ("تراجعي عن آخر تغيير («تراجعي»، «لا رجّعيه»، «غلطت رجّعيها»)، حتى لو صار "
+                         "كلام بالنص: المحذوف بيرجع زي ما كان، المعدّل بيرجع لقبل، والمضاف بينشال "
+                         "(الأجهزة لأ). لعنصر معيّن match_text («رجّعي الحليب»)، ولآخر كم عنصر count."),
+         "parameters": _obj({"match_text": {**_S, "description": "اسم العنصر اللي بدّه يرجع"},
+                             "count": {**_I, "description": "قديش عنصر من آخر التغييرات"}}, [])},
     ]
 
 
@@ -157,7 +160,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "schedule_cancel": B.schedule_cancel, "log_delete": B.log_delete,
     "device_control": X.device_control, "device_state": X.device_state, "scene_apply": X.scene_apply,
     "web_search": X.web_search, "weather": X.weather, "image": X.image,
-    "undo_last": B.undo_last, "log_update": B.log_update, "room_restore": X.room_restore,
+    "undo": B.undo, "log_update": B.log_update, "room_restore": X.room_restore,
 }
 
 

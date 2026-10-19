@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.blocks import _base as blocks_base
+from app.blocks import changes
 from app.brain import confirm, context, future, honesty, model, stm, stops, tools
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
@@ -277,12 +278,13 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     began = datetime.now(timezone.utc)
     thread_id = str(conversation_id or chat_id)
     ctx = TurnCtx(user_id=str(user_id), message=message, thread_id=thread_id,
-                  source="voice" if source == "voice" else "chat", image_state=image_state)
+                  source="voice" if source == "voice" else "chat", image_state=image_state,
+                  turn_id=blocks_base.new_id())
     held = confirm.live(pending_state)
     _, history = stm.history(thread_id, user_id)
     # Everything the turn writes is journaled, a confirmed «yes» included, so a rewritten
     # or edited reply can take it all back.
-    with blocks_base.journal() as effects:
+    with blocks_base.journal() as effects, changes.recording(ctx.turn_id):
         try:
             outcome = _settle(held, message, ctx, image_state, user_id, thread_id, history,
                               complete, attachments, began)
