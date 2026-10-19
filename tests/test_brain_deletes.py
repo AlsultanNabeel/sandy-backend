@@ -161,3 +161,25 @@ def test_a_few_rows_by_id_in_one_call(brain_db):  # noqa: F811
     ids = _add("حليب", "خبز", "بيض")
     out = _run("list_delete", ids=ids[:2] + ["0" * 32])
     assert out["ok"] and _left(ids) == ids[2:] and "ما لقيتهم" in out["reply"]
+
+
+# ── an edit that changes nothing says so ─────────────────────────────────────
+
+def test_an_edit_that_changes_nothing_is_not_a_success(brain_db):  # noqa: F811
+    from datetime import datetime, timedelta, timezone
+
+    from app.blocks import entries, schedules
+
+    milk, = _add("حليب")
+    with active_user_profile_context(A):
+        eid = entries.add("expense", "غدا", {"amount": 40})
+        sid = schedules.add("reminder", "الدوا", datetime.now(timezone.utc) + timedelta(hours=2))
+    for name, args in [("log_update", {"kind": "expense"}),           # the 19 Oct «deleted»
+                       ("log_update", {"id": eid, "amount": 40}),
+                       ("list_update", {"id": milk}),
+                       ("list_update", {"id": milk, "text": "حليب"}),
+                       ("schedule_update", {"id": sid})]:
+        out = _run(name, **args)
+        assert out["ok"] is False and out["reply"].startswith("ما تغيّر شي"), (name, args, out)
+    assert _run("log_update", id=eid, amount=45)["ok"]
+    assert _run("list_update", id=milk, text="حليب لوز")["ok"]

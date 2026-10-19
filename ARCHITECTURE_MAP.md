@@ -200,7 +200,9 @@ kind needs no tool change.
 
 **A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
 `reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
-breaks the turn); `needs_confirmation` / `needs_choice` when it will not act yet.
+breaks the turn); `needs_confirmation` / `needs_choice` when it will not act yet. An edit
+(`list_update`, `log_update`, `schedule_update`) that leaves every row as it was is not a
+success: «ما تغيّر شي» (`tools_blocks.NOTHING_CHANGED`), so the model is never told it changed what it did not.
 
 **Confirmation** (`confirm.py`, `pending.py`): one row, or a few named ones, is deleted,
 cancelled or changed at once, on chat and voice alike; only a bulk change, more than

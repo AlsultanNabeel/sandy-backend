@@ -152,6 +152,7 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if held:
         return held
     amount = args.get("amount")
+    before = [entries.get(r["id"]) for r in rows]
     for r in rows:
         current = entries.get(r["id"]) or {}
         data = dict(current.get("data") or {})
@@ -169,6 +170,8 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             entries.update(r["id"], text=text, data=data, embed=embed)
         except KindError as exc:
             return refused(str(exc))
+    if _same([b for b in before if b], entries.get):
+        return refused("nothing changed", reply=NOTHING_CHANGED)
     return {"ok": True, "changed": len(rows), "reply": f"عدّلت {_names(rows)} ✅"}
 
 
@@ -453,6 +456,14 @@ def _held(picked: Dict[str, Any], verb: str, ctx: TurnCtx) -> Optional[Dict[str,
     return needs_confirmation(f"{verb} {_names(rows)}", [r["id"] for r in rows])
 
 
+NOTHING_CHANGED = "ما تغيّر شي: ما في حقل جديد يتغيّر، والعنصر زي ما هو."
+
+
+def _same(before: List[Dict[str, Any]], fetch) -> bool:
+    """Every row is as it was before the edit: nothing the user asked for was changed."""
+    return all(fetch(r["id"]) == r for r in before)
+
+
 def _number(value: Any) -> Optional[float]:
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
@@ -488,6 +499,7 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     extra = args.get("data") if isinstance(args.get("data"), dict) else {}
     qty = _number(args.get("qty"))
     replies = []
+    before = [items.get(r["id"]) for r in rows]
     for r in rows:
         if args.get("done") and r.get("list") == "habits":
             replies.append(_check_in(r)["reply"])
@@ -503,6 +515,8 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             return refused(str(exc))
     if replies and len(replies) == len(rows):
         return {"ok": True, "changed": len(rows), "reply": "\n".join(replies)}
+    if not replies and _same([b for b in before if b], items.get):
+        return refused("nothing changed", reply=NOTHING_CHANGED)
     done_verb = "خلّصت" if args.get("done") else "عدّلت"
     return {"ok": True, "changed": len(rows), "reply": "\n".join([*replies, f"{done_verb} {_names(rows)} ✅"])}
 
@@ -647,6 +661,7 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             return refused("could not read the time; pass shift_minutes or the user's words",
                            when=args["when"])
     moved = None
+    before = [schedules.get(r["id"]) for r in rows]
     for r in rows:
         at = fire_at
         if args.get("skip_next"):
@@ -671,6 +686,8 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         schedules.update(r["id"], text=args.get("text"), fire_at=at, recurrence=rule, status=status,
                          payload=payload, keep_series=bool(args.get("skip_next")))
         moved = at or moved
+    if _same([b for b in before if b], schedules.get) and not moved:
+        return refused("nothing changed", reply=NOTHING_CHANGED)
     when = f" لـ{W.local_text(moved)}" if moved else ""
     return {"ok": True, "changed": len(rows), "when": W.local_text(moved) if moved else None,
             "reply": f"عدّلت {_names(rows)}{when} ✅"}
