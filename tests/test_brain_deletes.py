@@ -183,3 +183,21 @@ def test_an_edit_that_changes_nothing_is_not_a_success(brain_db):  # noqa: F811
         assert out["ok"] is False and out["reply"].startswith("ما تغيّر شي"), (name, args, out)
     assert _run("log_update", id=eid, amount=45)["ok"]
     assert _run("list_update", id=milk, text="حليب لوز")["ok"]
+
+
+# ── a turn that broke after it wrote is answered, never raised ────────────────
+
+def test_a_turn_that_breaks_after_a_yes_ran_is_answered_not_raised(brain_db, monkeypatch):  # noqa: F811
+    from app.brain import confirm
+
+    ids = _add(*[f"جيم {n}" for n in range(6)], list_name="tasks")
+    model = ScriptedModel(tools_reply(call("list_delete", list="tasks", match_text="جيم",
+                                           all_matching=True)), text_reply(""))
+    held = _turn(model, "احذفي كل مهام الجيم")["pending_state"]
+
+    def _boom(*a, **k):
+        raise RuntimeError("broke after the yes ran")
+
+    monkeypatch.setattr(confirm, "following", _boom)
+    state = _turn(ScriptedModel(), "اه", pending=held)      # raised before: a resend ran it again
+    assert _left(ids) == [] and state["final_response"] == loop.AFTER_WRITES_REPLY

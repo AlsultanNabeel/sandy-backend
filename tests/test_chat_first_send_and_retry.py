@@ -181,3 +181,58 @@ def test_rewind_drops_the_last_reply_and_the_threads_memory_of_it(env, monkeypat
     # Not someone else's.
     assert c.post(f"/api/conversations/{cid}/rewind", json={}, headers=_h("u2")).status_code == 404
     appdb.reset()
+
+
+# ── a send the app cut and sent again runs its tools once ────────────────────
+
+@pytest.fixture()
+def real_turn(monkeypatch):
+    """The real brain behind the route, with a scripted model that logs one expense."""
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    from brain_fakes import ScriptedModel, call, text_reply, tools_reply
+
+    from app import db as appdb
+    from app.api.server import create_app
+    from app.blocks import entries, init_blocks
+    from app.brain import model
+    from app.features import usage_store
+
+    db = mongomock.MongoClient().db
+    appdb.configure(db)
+    init_blocks(db)
+    monkeypatch.setattr(entries, "embed_text", lambda text: None)
+    monkeypatch.setattr(usage_store, "check_and_record", lambda *a, **k: None)
+    scripted = ScriptedModel(*[r for _ in range(4) for r in (
+        tools_reply(call("remember", kind="expense", text="قهوة", data={"amount": 5})),
+        text_reply("سجّلتها"))])
+    monkeypatch.setattr(model, "complete", scripted)
+    app = create_app(mongo_db=db)
+    yield app.test_client(), db
+    appdb.reset()
+
+
+def _coffees(db):
+    """Every run of the turn writes one more: a second run is a second row."""
+    return db["sandy_entries"].count_documents({"text": "قهوة"})
+
+
+def test_a_resent_stream_runs_its_tools_once(real_turn):
+    c, db = real_turn
+    body = {"message": "صرفت خمسة على قهوة", "client_msg_id": uuid.uuid4().hex}
+    first = _sse_done(c.post("/api/agent/stream", json=body, headers=_h("u1")))
+    again = _sse_done(c.post("/api/agent/stream", json=body, headers=_h("u1")))
+    assert first["reply"] == again["reply"] and _coffees(db) == 1
+
+
+def test_a_turn_that_fails_after_its_tools_ran_is_not_run_again(real_turn, monkeypatch):
+    c, db = real_turn
+
+    def _down(*a, **k):
+        raise RuntimeError("database went away after the tools ran")
+
+    monkeypatch.setattr("app.brain.future.due", _down)
+    body = {"message": "صرفت خمسة على قهوة", "client_msg_id": uuid.uuid4().hex}
+    c.post("/api/agent/stream", json=body, headers=_h("u1")).get_data()
+    c.post("/api/agent/stream", json=body, headers=_h("u1")).get_data()
+    c.post("/api/agent", json=body, headers=_h("u1"))
+    assert _coffees(db) == 1, "the app's resend logged the coffee again"

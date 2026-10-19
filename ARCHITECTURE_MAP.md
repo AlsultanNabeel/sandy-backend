@@ -167,6 +167,14 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    went out whole (not an error, not stopped).
 5. The turn is written to short-term memory (`stm.save`, with `via`).
 
+**A turn that wrote is never raised.** The app sends a message again under the same
+`client_msg_id` when the stream is cut, and the send ledger runs a turn again only when
+its first run ended in an error. So once a turn has written anything (`blocks_base.journal`
+is not empty), a failure after it is answered with `AFTER_WRITES_REPLY` and the ledger
+keeps it as done; the stop and future-self checks after the reply cannot fail the turn
+either. A resend never runs its tools a second time
+(`tests/test_chat_first_send_and_retry.py`).
+
 **The model call** (`model.py`): the Azure chat deployment through
 `openai_client.chat_fn()` — the process's one chat client, behind the `openai`
 breaker and the param-quirk adapter — then OpenAI direct (`OPENAI_MODEL`), then

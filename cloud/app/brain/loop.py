@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 MAX_STEPS = 6
 ERROR_REPLY = "حصل خطأ، حاول مرة ثانية."
 GAVE_UP_REPLY = "ما قدرت أكمّل هالطلب، جرّب تحكيه بطريقة تانية."
+# A turn that broke after it wrote: it happened, so it is answered (and kept in the send
+# ledger as done), never run again by a resend.
+AFTER_WRITES_REPLY = "صار خطأ بنص الطلب بعد ما نفّذت جزء منه. شوف القوائم قبل ما تعيده."
 # Tools whose `reply` is already the answer: when every call of the turn is one of these
 # and worked, that reply goes out with no second model call to restate it.
 ANSWER_TOOLS = frozenset({"device_control", "scene_apply", "room_restore", "image"})
@@ -280,43 +283,34 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     # Everything the turn writes is journaled, a confirmed «yes» included, so a rewritten
     # or edited reply can take it all back.
     with blocks_base.journal() as effects:
-        resolved = _resolve_pending(held, message, ctx) if held else None
-        settled = resolved if resolved is not None and resolved.get("rest") else None
-        outcome = _answer(None if settled else resolved, message, ctx, image_state, user_id,
-                          thread_id, history, complete, attachments, began,
-                          note=settled["rest"] if settled else "")
-        if settled:
-            # A «no» says nothing of its own here: the model's reply is the answer. A pick
-            # that still waits for a yes asks it last, after the rest was answered; what
-            # waited behind the answered question comes next, and the rest's own hold after.
-            first = _done(settled) if settled["tools"] or settled.get("dropped") else ""
-            waiting = confirm.then(settled["pending"], confirm.following(held))
-            outcome = {**_asked_first(waiting, first, outcome),
-                       "tools": settled["tools"] + outcome["tools"]}
-        elif resolved is not None:
-            # Answered: what it still waits for, then what waited behind it.
-            waiting = confirm.then(resolved["pending"], confirm.following(held))
-            outcome = _asked_first(waiting, "", {**resolved, "text": _done(resolved),
-                                                 "pending": None})
-        elif held and not outcome.get("error") and not outcome.get("stopped"):
-            # Neither yes nor no: the message was answered, and the question is asked once
-            # more; a second unclear answer lets it go, and what waited behind it is asked.
-            waiting = confirm.asked_again(held) or confirm.following(held)
-            outcome = _asked_first(waiting, "", outcome)
+        try:
+            outcome = _settle(held, message, ctx, image_state, user_id, thread_id, history,
+                              complete, attachments, began)
+        except Exception:
+            # Once something was written the turn has happened: it is answered, never raised,
+            # or the app's resend of the same message would run its tools again.
+            if not effects:
+                raise
+            logger.exception("[brain] turn failed after it wrote %d row(s)", len(effects))
+            outcome = {"text": AFTER_WRITES_REPLY, "pending": None, "tools": [], "error": True}
 
     if not (outcome.get("error") or outcome.get("stopped")):
         # Nothing is said to be done that no tool of the turn did (`honesty`).
         question = confirm.ask(outcome["pending"]) if outcome.get("pending") else ""
         outcome = {**outcome, "text": honesty.correct(outcome["text"], ctx.worked, ctx.results,
                                                        question)}
-    # Stopped from the app: memory keeps what was shown, marked as cut.
-    shown = stops.take(user_id, thread_id, since=began)
-    if not (outcome.get("error") or outcome.get("stopped") or shown is not None):
-        # Due messages to your future self ride on a reply that went out whole.
-        due = future.due()
-        if due:
-            outcome = {**outcome, "text": f"{outcome['text']}\n\n{due[0]}"}
-            future.mark_delivered(due[1])
+    shown = None
+    try:
+        # Stopped from the app: memory keeps what was shown, marked as cut.
+        shown = stops.take(user_id, thread_id, since=began)
+        if not (outcome.get("error") or outcome.get("stopped") or shown is not None):
+            # Due messages to your future self ride on a reply that went out whole.
+            due = future.due()
+            if due:
+                outcome = {**outcome, "text": f"{outcome['text']}\n\n{due[0]}"}
+                future.mark_delivered(due[1])
+    except Exception:  # noqa: BLE001 — the turn is done: what rides on it never undoes it
+        logger.exception("[brain] after the turn: the stop or the future-self check failed")
     text = outcome["text"]
     remembered = stops.cut(shown) if shown is not None else text
     logger.info("[turn] %.0fms total — brain%s tools=%s",
@@ -336,6 +330,35 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                              "image_bytes": ctx.artifacts.get("image_bytes"),
                              "caption": ctx.artifacts.get("caption", "")},
     }
+
+
+def _settle(held, message, ctx, image_state, user_id, thread_id, history, complete,
+            attachments, began) -> Dict[str, Any]:
+    """The turn's outcome: the held question's answer first, then the rest of the message."""
+    resolved = _resolve_pending(held, message, ctx) if held else None
+    settled = resolved if resolved is not None and resolved.get("rest") else None
+    outcome = _answer(None if settled else resolved, message, ctx, image_state, user_id,
+                      thread_id, history, complete, attachments, began,
+                      note=settled["rest"] if settled else "")
+    if settled:
+        # A «no» says nothing of its own here: the model's reply is the answer. A pick
+        # that still waits for a yes asks it last, after the rest was answered; what
+        # waited behind the answered question comes next, and the rest's own hold after.
+        first = _done(settled) if settled["tools"] or settled.get("dropped") else ""
+        waiting = confirm.then(settled["pending"], confirm.following(held))
+        outcome = {**_asked_first(waiting, first, outcome),
+                   "tools": settled["tools"] + outcome["tools"]}
+    elif resolved is not None:
+        # Answered: what it still waits for, then what waited behind it.
+        waiting = confirm.then(resolved["pending"], confirm.following(held))
+        outcome = _asked_first(waiting, "", {**resolved, "text": _done(resolved),
+                                             "pending": None})
+    elif held and not outcome.get("error") and not outcome.get("stopped"):
+        # Neither yes nor no: the message was answered, and the question is asked once
+        # more; a second unclear answer lets it go, and what waited behind it is asked.
+        waiting = confirm.asked_again(held) or confirm.following(held)
+        outcome = _asked_first(waiting, "", outcome)
+    return outcome
 
 
 def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, complete,
