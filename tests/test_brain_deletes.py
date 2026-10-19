@@ -286,3 +286,33 @@ def test_a_delete_from_the_app_can_be_put_back_too_and_is_gone_after_seven_days(
 def test_nothing_to_undo_says_so(brain_db):  # noqa: F811
     out = _run("undo")
     assert out["ok"] is False and "ما في إشي" in out["reply"]
+
+
+# ── a «which one?» answered with all of them is one change, not seven ─────────
+
+def _seven_ahmads():
+    with active_user_profile_context(A):
+        return [items.add("tasks", f"اتصل بأحمد {w}") for w in
+                ("الشغل", "البيت", "الجامعة", "النادي", "المكتب", "الجيران", "الصبح")]
+
+
+def test_all_of_a_which_one_over_five_rows_asks_once(brain_db):  # noqa: F811
+    ids = _seven_ahmads()
+    model = ScriptedModel(tools_reply(call("list_delete", list="tasks", match_text="أحمد")))
+    held = _turn(model, "احذفي مهمة أحمد")["pending_state"]
+    assert held["action"] == "choose"
+    state = _turn(ScriptedModel(), "كلهم", pending=held)
+    assert len(_left(ids)) == 7, "seven rows went with no question"
+    assert state["final_response"].startswith("متأكد إنك بدك تحذف")
+    _turn(ScriptedModel(), "اه", pending=state["pending_state"])
+    assert _left(ids) == []
+
+
+def test_voice_all_of_a_which_one_over_five_rows_asks_once(brain_db):  # noqa: F811
+    ids = _seven_ahmads()
+    with active_user_profile_context(A):
+        voice.dispatch("list_delete", {"list": "tasks", "match_text": "أحمد"}, "userA")
+        out = voice.dispatch("confirm", {"answer": "كلهم"}, "userA")
+        assert "متأكد" in out["reply"] and len(_left(ids)) == 7
+        voice.dispatch("confirm", {"answer": "اه"}, "userA")
+    assert _left(ids) == []

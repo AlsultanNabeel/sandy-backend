@@ -41,7 +41,7 @@ def match_score(a: str, b: str) -> float:
 
 def match_rows(reference: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """``{"status": matched|ambiguous|not_found|missing, "row", "matches", "tier"}``;
-    ``tier`` says how: exact, contained, or fuzzy (a guess the user should confirm)."""
+    ``tier`` says how: exact, contained, or fuzzy (a guess, never acted on: the tool names it and the model asks)."""
     ref = match_key(reference)
     if not ref:
         return {"status": "missing", "row": None, "matches": []}

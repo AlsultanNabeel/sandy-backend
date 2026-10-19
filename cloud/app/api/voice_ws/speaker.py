@@ -32,8 +32,8 @@ def speaker_gate(user_id: str, channel: str) -> bool:
 
 def _is_sensitive_call(name: str, args=None) -> bool:
     """With SANDY_REQUIRE_SPEAKER_AUTH=1 these wait for the owner's voice: deletes,
-    cancels, bulk changes, future-self messages, and `confirm`, which only ever
-    runs one of those."""
+    cancels, undo, bulk changes, future-self messages, and `confirm`, which only ever
+    runs a held bulk change or a pick."""
     if name in ("confirm", "list_delete", "log_delete", "schedule_cancel", "undo"):
         return True
     args = args or {}

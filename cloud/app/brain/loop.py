@@ -180,17 +180,11 @@ def _resolve_choice(pending: Dict[str, Any], message: str,
     ids, rest = confirm.pick(message, pending.get("candidates") or [])
     if ids is None:
         return None
-    name = pending.get("tool", "")
-    base = {k: v for k, v in (pending.get("args") or {}).items()
-            if k not in ("match_text", "all_matching")}
-    held, replies = None, []
-    for row_id in ids:
-        args = {**base, "id": row_id}
-        result = tools.execute(name, args, ctx)
-        held, waiting = _hold(held, name, args, result)
-        if not waiting and result.get("reply"):
-            replies.append(result["reply"])
-    outcome = _settled(replies, held, [name])
+    name, args = confirm.picked_call(pending, ids)
+    # The chosen rows are one call: more than five of them is a bulk change and asks.
+    result = tools.execute(name, args, ctx)
+    held, waiting = _hold(None, name, args, result)
+    outcome = _settled([] if waiting or not result.get("reply") else [result["reply"]], held, [name])
     if rest:
         outcome["rest"] = _rest_note(f"اختار، والنتيجة: {outcome['text']}")
     return outcome

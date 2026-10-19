@@ -236,7 +236,8 @@ negated verb («لا تحذفها») is a no; cancellation wins a mixed reply; a
 «بس» is not a yes. A verb is a yes only alone: a verb with more after it and no yes word
 («اعملي تذكير بكرا»، «شيلي الحليب») is a new request, so the hold is dropped (`drop`, the
 user is told with `confirm.dropped`) and the message goes to the model. Whatever follows the opening is a new request (`rest`), and the yes does not cover it:
-`run_held` marks the turn confirmed only while the held steps run, so a delete in the rest asks again. `pick`
+`run_held` marks the turn confirmed only while the held steps run, so a delete in the rest asks again. The rows a pick chooses are one call by `ids` (`confirm.picked_call`), so «كلهم» over
+five rows is a bulk change and asks once. `pick`
 reads the opening only, like a yes: several («الأولى والتالتة»), a bare number word is that one
 («اتنين» is the second), «الاتنين»/«كلهم» are all, «كل» only as the last word; a number further on
 («ضيفي ٢ بيض») or «كل شي تمام» is not a pick, and a request after the pick goes to the model. On voice there is no text turn to read, so the

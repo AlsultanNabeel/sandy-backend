@@ -218,6 +218,13 @@ _BOTH = {"الاتنين", "الاثنين", "التنتين", "الثنتين"}
 _ARABIC_NUMS = "١٢٣٤٥٦٧٨٩"
 
 
+def picked_call(pending: Dict[str, Any], ids: List[str]) -> Tuple[str, Dict[str, Any]]:
+    """The held tool, called again on the rows the user chose by id."""
+    base = {k: v for k, v in (pending.get("args") or {}).items()
+            if k not in ("match_text", "all_matching", "id", "ids")}
+    return pending.get("tool", ""), {**base, "ids": list(ids)}
+
+
 def hold_choice(name: str, args: Dict[str, Any],
                 candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
     return P.create({"type": PENDING_TYPE, "action": CHOOSE, "tool": name,

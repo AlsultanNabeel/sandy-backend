@@ -122,16 +122,13 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
         P.save(VOICE_THREAD, chat_id, get_db(), again)
         return {"handled": True,
                 "reply": f"ما فهمت أي وحدة — اسأليه مرة تانية:\n{confirm.choice_question(held['candidates'])}"}
-    name = held.get("tool", "")
-    base = {k: v for k, v in (held.get("args") or {}).items() if k not in ("match_text", "all_matching")}
-    waiting, results = None, []
-    for row_id in ids:
-        args = {**base, "id": row_id}
-        result = tools.execute(name, args, TurnCtx(user_id=chat_id, source="voice"))
-        if result.get("needs_confirmation"):
-            waiting = confirm.with_step(waiting, name, args, result["summary"], result.get("ids"))
-        else:
-            results.append(_tagged(result)["reply"])
+    name, args = confirm.picked_call(held, ids)
+    # The chosen rows are one call: more than five of them is a bulk change and asks.
+    result = tools.execute(name, args, TurnCtx(user_id=chat_id, source="voice"))
+    waiting = None
+    if result.get("needs_confirmation"):
+        waiting = confirm.with_step(None, name, args, result["summary"], result.get("ids"))
+    results = [] if waiting else [_tagged(result)["reply"]]
     if rest:
         results.append("قال كمان إشي بعد اختياره: نفّذيه هلأ.")
     return _ask_next(held, chat_id, {"handled": True, "reply": "\n".join(results)}, waiting)
