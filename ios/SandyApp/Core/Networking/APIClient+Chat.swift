@@ -84,7 +84,7 @@ extension APIClient {
         attachments: [ChatAttachment] = [],
         onStep: (@MainActor (String) -> Void)? = nil,
         onChunk: @MainActor @escaping (String) -> Void
-    ) async throws -> (reply: String, image: ChatAttachment?) {
+    ) async throws -> (reply: String, image: ChatAttachment?, undo: ChatUndo?) {
         guard let url = URL(string: baseURL + "/api/agent/stream") else {
             throw APIError(message: "عنوان غير صالح")
         }
@@ -133,6 +133,7 @@ extension APIClient {
         var finalReply = ""
         var sawDone = false
         var image: ChatAttachment?
+        var undo: ChatUndo?
         do {
             for try await line in bytes.lines {
                 guard line.hasPrefix("data: "),
@@ -149,6 +150,10 @@ extension APIClient {
                     // A picture Sandy drew, kept on the server as an attachment.
                     if let drawn = obj["image"] as? [String: Any], let id = drawn["id"] as? String {
                         image = ChatAttachment(id: id, kind: "image", name: drawn["name"] as? String ?? "")
+                    }
+                    // The reply deleted or changed something: «تراجع» can take it back.
+                    if let made = obj["undo"] as? [String: Any], let turn = made["turn"] as? String {
+                        undo = ChatUndo(turn: turn, label: made["label"] as? String ?? "")
                     }
                     sawDone = true
                     break
@@ -168,7 +173,7 @@ extension APIClient {
         if !sawDone {
             throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
         }
-        return (finalReply, image)
+        return (finalReply, image, undo)
     }
 
     // MARK: - المرفقات

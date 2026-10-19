@@ -530,3 +530,40 @@ def test_an_expense_with_no_category_gets_one_from_its_words(c, monkeypatch):
     r = c.post("/api/entries", json={"kind": "expense", "text": "كولا",
                                      "data": {"amount": 5, "category": "fun"}}, headers=_h())
     assert r.get_json()["item"]["data"]["category"] == "fun"
+
+
+# ── «تراجع» under a reply that deleted or changed something ──────────────────
+
+def test_a_reply_that_deleted_offers_its_undo_and_the_button_puts_it_back(c, monkeypatch):
+    from brain_fakes import ScriptedModel, call, tools_reply
+
+    from app.brain import model
+
+    with active_user_profile_context({"chat_id": "userA", "relation": "user"}):
+        milk = items.add("shopping", "حليب")
+    monkeypatch.setattr(model, "complete", ScriptedModel(
+        tools_reply(call("list_delete", id=milk)), text_reply("شلت الحليب ✅")))
+    out = c.post("/api/agent", json={"message": "شيلي الحليب"}, headers=_h()).get_json()
+    assert out["undo"]["turn"] and "حليب" in out["undo"]["label"]
+    with active_user_profile_context({"chat_id": "userA", "relation": "user"}):
+        assert items.get(milk) is None
+    r = c.post("/api/undo", json={"turn": out["undo"]["turn"]}, headers=_h())
+    assert r.status_code == 200 and r.get_json()["undone"] == 1
+    with active_user_profile_context({"chat_id": "userA", "relation": "user"}):
+        assert items.get(milk)["text"] == "حليب"
+    # Pressed twice, or by someone else: nothing more to put back.
+    assert c.post("/api/undo", json={"turn": out["undo"]["turn"]}, headers=_h()).status_code == 404
+    assert c.post("/api/undo", json={"turn": out["undo"]["turn"]},
+                  headers=_h("userB")).status_code == 404
+
+
+def test_a_reply_that_only_added_or_read_offers_no_undo(c, monkeypatch):
+    from brain_fakes import ScriptedModel, call, tools_reply
+
+    from app.brain import model
+
+    monkeypatch.setattr(model, "complete", ScriptedModel(
+        tools_reply(call("list_add", list="shopping", text="خبز")), text_reply("ضفت الخبز")))
+    out = c.post("/api/agent", json={"message": "ضيفي خبز"}, headers=_h()).get_json()
+    assert "undo" not in out
+    assert c.post("/api/undo", json={}, headers=_h()).status_code == 400

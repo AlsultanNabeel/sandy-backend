@@ -275,6 +275,7 @@ final class ChatStore: ObservableObject {
                     }
                     reply = result.reply
                     drawn = result.image.map { [$0] } ?? []
+                    if let made = result.undo { ChatStep.offerUndo(made, api: api) }
                 } catch let e as APIError where e.kind == .connection && !bestPartial.isEmpty {
                     // كل المحاولات انقطعت بس وصل جزء من الرد: نحتفظ فيه.
                     reply = bestPartial
@@ -453,6 +454,25 @@ enum ChatStep {
         let key = "chat.step." + tool
         let text = lang.s(key)
         return text == key ? lang.s("chat.step.other") : text
+    }
+
+    /// A reply deleted or changed something: the «… · تراجع» bar for a few seconds, which
+    /// puts it back on the server; the tabs reload either way it ends.
+    @MainActor
+    static func offerUndo(_ made: ChatUndo, api: APIClient) {
+        let lang = LanguageManager.shared
+        UndoCenter.shared.offer(String(format: lang.s("chat.undo.offer"), made.label),
+                                icon: "arrow.uturn.backward") {
+            Task { @MainActor in
+                do {
+                    try await api.undoReply(turn: made.turn)
+                    NoticeCenter.shared.post(lang.s("chat.undo.done"))
+                } catch {
+                    NoticeCenter.shared.post(lang.s("chat.undo.failed"))
+                }
+                NotificationCenter.default.post(name: .sandyBlocksChanged, object: nil)
+            }
+        }
     }
 }
 

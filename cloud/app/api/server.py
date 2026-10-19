@@ -196,6 +196,9 @@ def create_app(*, mongo_db=None):
         text = state.get("final_response") or ""
         made = state.get("execution_result") or {}
         result = {"reply": text, "role": role}
+        if state.get("undo"):
+            # The «تراجع» the app shows under this reply for a few seconds (`POST /api/undo`).
+            result["undo"] = state["undo"]
         img_bytes = made.get("image_bytes")
         if img_bytes:
             # Kept as an attachment: the chat shows it, and its history brings it back.

@@ -167,6 +167,7 @@ struct AskBar: View {
                     reply = partial
                 }
                 reply = out.reply
+                if let made = out.undo { ChatStep.offerUndo(made, api: state.api) }
                 Announce.say(String(format: lang.s("a11y.replyArrived"), reply))
             } catch {
                 reply = lang.s("today.askFailed")

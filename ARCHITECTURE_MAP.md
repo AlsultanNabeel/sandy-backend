@@ -549,6 +549,7 @@ capped at 2000 characters and `data`/`payload` at 8000 of JSON:
 | `POST /api/schedules/<id>/snooze` | `{minutes}` (1–1440), `id` optional: a reminder rings again that long from now (`schedules.snooze`, shared with `schedule_update`): a one-off goes back to pending at the new time, a repeat gets a one-time copy with its payload (under the phone's `id` when given, so an offline snooze knows what will ring and a resend answers the copy already made; another user's id is 409 `id_taken`) and its series is left alone; answers the row that will ring (`id`, `item`); a cancelled or unknown one is 404 |
 | `GET /api/kinds` | `kinds.KINDS` as `{name, block, labels:{ar,en}, icon, prefix, fields:{name: type}}` — the app builds its screens from it |
 | `GET /api/stats` | My Life's numbers over the whole log in the user's zone: entries per day for 30 days, and this month's spending (in all and `by_category`), habit check-ins and entries (summaries left out), plus the monthly `budget`; the app adds what it made since |
+| `POST /api/undo` | `{turn}`: the «تراجع» under a reply puts back what that reply deleted or changed (`changes.of_turn`, `changes.undo`); 404 `nothing_to_undo` once nothing of it is left, or for another user's turn. A chat reply that deleted or changed rows carries `undo: {turn, label}` (`loop._undo_offer`; an add alone offers none) |
 | `POST /api/budget` | `{amount}`: the monthly spending limit on `sandy_users.budget` (0 removes it); the app rings at 80% and 100%, and `remember` of an expense tells the model past 80% |
 | (expense category) | an expense saved with no `data.category` (app sheet on "automatic", or Sandy leaving it out) gets one from its words in the background (`brain/categorize.py`, one short model call; "other" when no model) |
 | `POST /api/summary` | `{period, focus?}` → `{text, count}`: the brain's `summarize` rows, one model call (`brain/summary.py`); metered; nothing recorded → a fixed sentence, no call |
@@ -1344,6 +1345,9 @@ so folders are organisation only.
   parked beside the queue (`outbox.parked`, on disk, kept by a 401 sign-out like the queue)
   with a notice, so it neither holds the rest up nor is lost, and is queued again when the
   app comes back to the front and before a sign-out, whose warning counts it.
+  A chat or ask-bar reply that deleted or changed something (`undo` on the reply,
+  `ChatUndo`) offers «تغيّر «…» · تراجع» through the same `UndoCenter` bar for four seconds
+  (`ChatStep.offerUndo`); its «تراجع» calls `POST /api/undo` and the tabs reload.
   Done ticks and deletes (lists, reminders, log, conversations) go through
   `Core/Stores/UndoCenter.swift`: one «تراجع» offer at a time; a delete leaves the
   screen at once and reaches the server only when the offer ends (4 s, the next offer,

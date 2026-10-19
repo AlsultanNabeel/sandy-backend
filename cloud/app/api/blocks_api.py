@@ -29,7 +29,7 @@ from pymongo.errors import DuplicateKeyError
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.api.auth_handlers import require_auth, require_tenant
 from app.api.metering import meter_claims
-from app.blocks import _base, entries, habits, items, schedules
+from app.blocks import _base, changes, entries, habits, items, schedules
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, KindError, get_kind
 from app.brain import summary
 from app.brain.categorize import categorize_later
@@ -66,6 +66,8 @@ _MESSAGES = {
     "not_saved": "ما قدرت أحفظ، جرّب كمان شوي.",
     "invalid_id": "رقم التعريف مش صحيح.",
     "invalid_amount": "المبلغ مش صحيح.",
+    "invalid_turn": "ما في رد محدد للتراجع عنه.",
+    "nothing_to_undo": "ما ضل إشي من هالرد لأرجّعه.",
     "id_taken": "رقم التعريف مستعمل.",
     "summary_failed": "ما قدرت أعمل الملخّص هلّق، جرّب كمان شوي.",
 }
@@ -309,6 +311,20 @@ def register_blocks_api(app, mongo_db=None):
         out["budget"] = users_store.get_budget(current_user_id())
         out["habit_progress"] = habits.progress()
         return jsonify(out), 200
+
+    @app.route("/api/undo", methods=["POST"])
+    @require_tenant
+    @_answers_invalid
+    def api_undo(claims):
+        """{turn}: the «تراجع» under a reply puts back what that reply deleted or changed
+        (`blocks.changes`); 404 when nothing of it is left to put back."""
+        turn = str(_body().get("turn") or "")
+        if not turn:
+            raise _Invalid("invalid_turn")
+        picked = changes.of_turn(turn)
+        if not picked:
+            raise _Invalid("nothing_to_undo", 404)
+        return jsonify({"ok": True, "undone": changes.undo(picked)}), 200
 
     @app.route("/api/budget", methods=["POST"])
     @require_tenant

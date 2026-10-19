@@ -55,6 +55,11 @@ extension APIClient {
         try await queued("/api/budget", method: "POST", body: Budget(amount: amount))
     }
 
+    /// «تراجع» after a reply: what that reply deleted or changed comes back.
+    func undoReply(turn: String) async throws {
+        try await send("/api/undo", method: "POST", body: ["turn": turn])
+    }
+
     /// My Life's numbers, counted on the server over the whole log.
     func stats() async throws -> LifeStats {
         try await fetch("/api/stats")

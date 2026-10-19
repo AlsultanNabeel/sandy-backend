@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.blocks import _base as blocks_base
 from app.blocks import changes
+from app.utils.ltm_crypto import decrypt_field
 from app.brain import confirm, context, future, honesty, model, stm, stops, tools
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
@@ -324,6 +325,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     return {
         "message": message, "user_id": user_id, "chat_id": chat_id,
         "final_response": text,
+        "undo": _undo_offer(ctx.turn_id),
         "pending_state": outcome["pending"],
         "routed_by": "fast_path" if outcome.get("fast") else "brain",
         "tools_used": outcome["tools"],
@@ -332,6 +334,16 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                              "image_bytes": ctx.artifacts.get("image_bytes"),
                              "caption": ctx.artifacts.get("caption", "")},
     }
+
+
+def _undo_offer(turn: str) -> Optional[Dict[str, Any]]:
+    """What the app's «تراجع» under the reply takes back: the turn's deletes and edits (an
+    add alone offers none). None when the turn deleted and changed nothing."""
+    made = [c for c in changes.of_turn(turn) if c["op"] in ("deleted", "updated")]
+    if not made:
+        return None
+    names = list(dict.fromkeys(decrypt_field(c.get("label") or "") for c in made))
+    return {"turn": turn, "label": "، ".join(f"«{n}»" for n in names[:3] if n)}
 
 
 def _settle(held, message, ctx, image_state, user_id, thread_id, history, complete,

@@ -14,6 +14,13 @@ struct ChatMessage: Identifiable {
     var clientMsgId: String?
 }
 
+/// What a reply deleted or changed, for the «تراجع» shown after it (`POST /api/undo`).
+struct ChatUndo: Equatable {
+    let turn: String
+    /// The rows it names, as «حليب»، «خبز».
+    let label: String
+}
+
 /// A chat attachment kept on the server (`/api/attachments`); the bytes come by id.
 struct ChatAttachment: Codable, Hashable, Identifiable {
     let id: String
