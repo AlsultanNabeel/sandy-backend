@@ -38,7 +38,7 @@ def test_with_no_id_the_newest_of_the_kind_is_the_one(tenant):
     now = datetime.now(timezone.utc)
     entries.add("expense", "قهوة", {"amount": 5}, at=now - timedelta(minutes=5))
     newest = entries.add("expense", "غدا", {"amount": 50}, at=now)
-    out = _run("log_update", kind="expense", delete=True)
+    out = _run("log_delete", kind="expense")
     assert out["ok"] and "«غدا»" in out["reply"]
     assert entries.get(newest) is None and len(entries.list_entries("expense")) == 1
 
@@ -56,14 +56,14 @@ def test_a_changed_fact_is_updated_and_sealed_again(tenant):
 
 def test_forget_a_fact_is_gone_at_once(tenant):
     eid = entries.add("fact", "بحب القهوة كتير")
-    assert _run("log_update", match_text="القهوة", delete=True)["ok"]
+    assert _run("log_delete", match_text="القهوة")["ok"]
     assert entries.get(eid) is None
 
 
 def test_undo_last_brings_back_a_cancelled_reminder(tenant):
     from datetime import datetime, timedelta, timezone
     sid = schedules.add("reminder", "الدوا", datetime.now(timezone.utc) + timedelta(hours=1))
-    model = ScriptedModel(tools_reply(call("schedule_update", id=sid, cancel=True)))
+    model = ScriptedModel(tools_reply(call("schedule_cancel", id=sid)))
     loop.run_turn("الغي تذكير الدوا", user_id="userA", chat_id="userA",
                   source="web", complete=model)
     assert schedules.get(sid)["status"] == "cancelled"

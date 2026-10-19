@@ -140,33 +140,19 @@ def undo_last(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
 
 def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    """«لا قصدي أربعين مش خمسين»، «احذفي هالمصروف»، «نقلت بيت جديد»، «انسي إني بحب القهوة»:
-    a log row is changed or deleted, not logged again. With no id and no text, the newest
-    row of the kind. Encrypted rows are sealed again and never embedded."""
-    kind = str(args.get("kind") or "").strip() or None
-    pool = [_entry_row(e) for e in entries.list_entries(kind, exclude=("summary",), limit=MAX_ROWS * 2)]
-    def getter(i):
-        return _entry_row(e) if (e := entries.get(i)) else None
-
-    picked = _held_rows(ctx, getter)
-    if picked is None and (args.get("id") or args.get("match_text")):
-        picked = _pick(args, pool, getter)
-    elif picked is None:
-        picked = {"rows": pool[:1]} if pool else refused(
-            "nothing logged to change",
-            reply=f"ما لقيت ولا {_kind_ar(kind) or 'إشي'} مسجّل.")
+    """«لا قصدي أربعين مش خمسين»، «نقلت بيت جديد»: a log row is changed, not logged
+    again. With no id and no text, the newest row of the kind. Encrypted rows are sealed
+    again and never embedded. Deleting is `log_delete`."""
+    kind, pool, getter = _log_pool(args)
+    picked = _log_targets(args, ctx, kind, pool, getter)
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
-    delete = bool(args.get("delete"))
-    held = _held(picked, "تحذف" if delete else "تعدّل", ctx)
+    held = _held(picked, "تعدّل", ctx)
     if held:
         return held
     amount = args.get("amount")
     for r in rows:
-        if delete:
-            entries.delete(r["id"])
-            continue
         current = entries.get(r["id"]) or {}
         data = dict(current.get("data") or {})
         extra = args.get("data") if isinstance(args.get("data"), dict) else {}
@@ -183,8 +169,28 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             entries.update(r["id"], text=text, data=data, embed=embed)
         except KindError as exc:
             return refused(str(exc))
-    verb = "حذفت" if delete else "عدّلت"
-    return {"ok": True, "changed": len(rows), "reply": f"{verb} {_names(rows)} ✅"}
+    return {"ok": True, "changed": len(rows), "reply": f"عدّلت {_names(rows)} ✅"}
+
+
+def _log_pool(args: Dict[str, Any]):
+    kind = str(args.get("kind") or "").strip() or None
+    pool = [_entry_row(e) for e in entries.list_entries(kind, exclude=("summary",), limit=MAX_ROWS * 2)]
+
+    def getter(i):
+        return _entry_row(e) if (e := entries.get(i)) else None
+    return kind, pool, getter
+
+
+def _log_targets(args: Dict[str, Any], ctx: TurnCtx, kind: Optional[str], pool, getter):
+    """The log rows a change or a delete names: by id, by name, else the newest of the kind."""
+    picked = _held_rows(ctx, getter)
+    if picked is not None:
+        return picked
+    if args.get("id") or args.get("ids") or args.get("match_text"):
+        return _named(args, pool, getter)
+    if pool:
+        return {"rows": pool[:1]}
+    return refused("nothing logged", reply=f"ما لقيت ولا {_kind_ar(kind) or 'إشي'} مسجّل.")
 
 
 def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:
@@ -407,6 +413,18 @@ def _pick(args: Dict[str, Any], rows: List[Dict[str, Any]], getter) -> Dict[str,
     return _not_found(said) if m["status"] == "not_found" else refused("say which one")
 
 
+def _named(args: Dict[str, Any], rows: List[Dict[str, Any]], getter) -> Dict[str, Any]:
+    """`_pick`, and several rows named at once by `ids`; an id that is not there is counted
+    (`missing`), and none there at all is «ما لقيت»."""
+    ids = list(dict.fromkeys([str(i) for i in [args.get("id"), *(args.get("ids") or [])] if i]))
+    if not ids:
+        return _pick(args, rows, getter)
+    found = [r for r in (getter(i) for i in ids) if r]
+    if not found:
+        return _not_found("")
+    return {"rows": found, "missing": len(ids) - len(found)}
+
+
 def _held_rows(ctx: TurnCtx, getter) -> Optional[Dict[str, Any]]:
     """On a yes, the rows the question named, by id: a row added since is never caught by
     a search run again. None when this is not such a replay."""
@@ -454,13 +472,11 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     name = _list_name(args) or None
     # Open items only, unless the ask is to reopen a done one.
     pool = items.match_pool(name, done=None if args.get("done") is False else False)
-    picked = _held_rows(ctx, items.get) or _pick(args, pool, items.get)
+    picked = _held_rows(ctx, items.get) or _named(args, pool, items.get)
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
-    delete = bool(args.get("delete"))
-    verb = "تحذف" if delete else ("تخلّص" if args.get("done") else "تعدّل")
-    held = _held(picked, verb, ctx)
+    held = _held(picked, "تخلّص" if args.get("done") else "تعدّل", ctx)
     if held:
         return held
     due: Any = None if args.get("no_due") else items._UNSET
@@ -473,9 +489,6 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     qty = _number(args.get("qty"))
     replies = []
     for r in rows:
-        if delete:
-            items.delete(r["id"])
-            continue
         if args.get("done") and r.get("list") == "habits":
             replies.append(_check_in(r)["reply"])
             continue
@@ -490,7 +503,7 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             return refused(str(exc))
     if replies and len(replies) == len(rows):
         return {"ok": True, "changed": len(rows), "reply": "\n".join(replies)}
-    done_verb = "حذفت" if delete else ("خلّصت" if args.get("done") else "عدّلت")
+    done_verb = "خلّصت" if args.get("done") else "عدّلت"
     return {"ok": True, "changed": len(rows), "reply": "\n".join([*replies, f"{done_verb} {_names(rows)} ✅"])}
 
 
@@ -597,10 +610,14 @@ def _skipped(row: Dict[str, Any]) -> Optional[Any]:
     return next_occurrence(rule, schedules.series_anchor(row), W.aware_utc(row["fire_at"]))
 
 
+def _reminders() -> List[Dict[str, Any]]:
+    """Reminders and the device timers he asked for: the daily nudge, a scene's own reverts
+    and sealed messages are not his to edit or cancel here."""
+    return schedules.list_schedules("reminder", status="pending") + _device_timers()
+
+
 def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
-    # Reminders and the device timers he asked for: the daily nudge, a scene's own reverts and
-    # sealed messages are not his to edit here.
-    pool = schedules.list_schedules("reminder", status="pending") + _device_timers()
+    pool = _reminders()
     known = {r["id"] for r in pool}
     # Just rang: a one-time reminder is no longer pending, but «أجّليه» still means it.
     pool += [r for r in schedules.list_schedules("reminder", fired_since=W.now_utc() - RANG_WINDOW)
@@ -608,12 +625,11 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     def getter(i):
         return next((r for r in pool if r["id"] == i), None)
 
-    picked = _held_rows(ctx, getter) or _pick(args, pool, getter)
+    picked = _held_rows(ctx, getter) or _named(args, pool, getter)
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
-    cancel = bool(args.get("cancel"))
-    held = _held(picked, "تلغي" if cancel else "تعدّل", ctx)
+    held = _held(picked, "تعدّل", ctx)
     if held:
         return held
     rule: Optional[str] = None
@@ -632,9 +648,6 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
                            when=args["when"])
     moved = None
     for r in rows:
-        if cancel:
-            schedules.update(r["id"], status="cancelled")
-            continue
         at = fire_at
         if args.get("skip_next"):
             at = _skipped(r)
@@ -658,8 +671,66 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         schedules.update(r["id"], text=args.get("text"), fire_at=at, recurrence=rule, status=status,
                          payload=payload, keep_series=bool(args.get("skip_next")))
         moved = at or moved
-    if cancel:
-        return {"ok": True, "changed": len(rows), "reply": f"لغيت {_names(rows)} ✅"}
     when = f" لـ{W.local_text(moved)}" if moved else ""
     return {"ok": True, "changed": len(rows), "when": W.local_text(moved) if moved else None,
             "reply": f"عدّلت {_names(rows)}{when} ✅"}
+
+
+# ── deleting: one tool per block, so a delete is never a flag an edit forgets ─────
+
+def _remove(picked: Dict[str, Any], ctx: TurnCtx, ask: str, said: str, remove,
+            everything: bool) -> Dict[str, Any]:
+    """Deletes (or cancels) the rows at once; a bulk one (the whole list or kind, or more
+    than BULK_ROWS rows) waits for one yes."""
+    if "rows" not in picked:
+        return picked
+    rows = picked["rows"]
+    if not rows:
+        return refused("nothing there", reply="ما في إشي هون أصلاً.")
+    if not ctx.confirmed and (everything or len(rows) > BULK_ROWS):
+        return needs_confirmation(f"{ask} {_names(rows)}", [r["id"] for r in rows])
+    gone = [r for r in rows if remove(r["id"])]
+    if not gone:
+        return _not_found("")
+    missing = picked.get("missing", 0) + len(rows) - len(gone)
+    reply = f"{said} {_names(gone)} ✅" + (f" (وفي {missing} ما لقيتهم)" if missing else "")
+    return {"ok": True, "changed": len(gone), "reply": reply}
+
+
+def list_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """«شيلي الحليب»، «احذفي مهمة الجيم»، «فضّي قائمة التسوق»."""
+    name = _list_name(args) or None
+    everything = bool(args.get("everything"))
+    if everything and not name:
+        return refused("everything needs a list", reply="أي قائمة بدك أفضّي؟")
+    pool = items.match_pool(name, done=False)
+    picked = _held_rows(ctx, items.get) or (
+        {"rows": pool} if everything else _named(args, pool, items.get))
+    return _remove(picked, ctx, "تحذف", "حذفت", items.delete, everything)
+
+
+def log_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """«احذفي آخر مصروف»، «احذفي هالمصروف»، «انسي إني بحب القهوة»."""
+    kind, pool, getter = _log_pool(args)
+    everything = bool(args.get("everything"))
+    if everything and not kind:
+        return refused("everything needs a kind", reply="شو بدك أحذف بالزبط؟")
+    picked = _held_rows(ctx, getter) or (
+        {"rows": pool} if everything else _log_targets(args, ctx, kind, pool, getter))
+    return _remove(picked, ctx, "تحذف", "حذفت", entries.delete, everything)
+
+
+def schedule_cancel(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """«الغي تذكير الدوا»، «الغي كل التذكيرات»."""
+    pool = _reminders()
+
+    def getter(i):
+        return next((r for r in pool if r["id"] == i), None)
+
+    def cancel(i):
+        return schedules.update(i, status="cancelled")
+
+    everything = bool(args.get("everything"))
+    picked = _held_rows(ctx, getter) or (
+        {"rows": pool} if everything else _named(args, pool, getter))
+    return _remove(picked, ctx, "تلغي", "لغيت", cancel, everything)

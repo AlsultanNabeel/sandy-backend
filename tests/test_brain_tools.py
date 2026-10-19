@@ -29,9 +29,9 @@ def tenant_a(brain_db):  # noqa: F811
         yield brain_db
 
 
-def test_sixteen_tools_and_every_one_has_a_handler():
+def test_nineteen_tools_and_every_one_has_a_handler():
     specs = tools.openai_tools()
-    assert len(specs) == 16
+    assert len(specs) == 19
     assert {s["function"]["name"] for s in specs} == set(tools.HANDLERS)
 
 
@@ -115,14 +115,14 @@ def test_a_bulk_change_needs_confirmation_and_changes_nothing(tenant_a):
     out = _run("list_update", match_text="جيم", all_matching=True, done=True)
     assert out["needs_confirmation"] and "جيم 0" in out["summary"]
     assert not any(items.get(i)["done"] for i in ids)
-    out = _run("list_update", match_text="جيم", all_matching=True, delete=True)
+    out = _run("list_delete", match_text="جيم", all_matching=True)
     assert out["needs_confirmation"] and all(items.get(i) for i in ids)
 
 
 def test_confirmed_delete_runs(tenant_a):
     iid = items.add("tasks", "جيم")
     ctx = TurnCtx(user_id="userA", confirmed=True)
-    assert tools.execute("list_update", {"id": iid, "delete": True}, ctx)["ok"]
+    assert tools.execute("list_delete", {"id": iid}, ctx)["ok"]
     assert items.get(iid) is None
 
 
@@ -146,7 +146,7 @@ def test_schedule_update_moves_and_cancels(tenant_a):
     sid = _run("schedule", kind="reminder", text="دكتور", when=_future())["id"]
     later = _future(days=3, hour=10)
     assert _run("schedule_update", match_text="دكتور", when=later)["ok"]
-    assert _run("schedule_update", match_text="دكتور", cancel=True)["ok"]
+    assert _run("schedule_cancel", match_text="دكتور")["ok"]
     assert schedules.get(sid)["status"] == "cancelled"
 
 

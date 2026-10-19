@@ -42,12 +42,13 @@ CASES = [
     {"name": "habit days", "steps": [
         {"say": "بدي عادة رياضة أيام الأحد والتلاتا والخميس الساعة ستة المسا", "tools": ["list_add"],
          "item": {"list": "habits", "has": "رياضة"}}]},
-    {"name": "delete asks first", "setup": [{"item": {"list": "tasks", "text": "أروح عالجيم"}}], "steps": [
-        {"say": "احذفي مهمة الجيم", "pending": True},
-        {"say": "اه", "pending": False, "no_item": {"list": "tasks", "has": "الجيم"}}]},
-    {"name": "delete then no", "setup": [{"item": {"list": "tasks", "text": "أروح عالجيم"}}], "steps": [
-        {"say": "احذفي مهمة الجيم", "pending": True},
-        {"say": "لا خليها", "pending": False, "item": {"list": "tasks", "has": "الجيم", "done": False}}]},
+    {"name": "delete at once", "setup": [{"item": {"list": "tasks", "text": "أروح عالجيم"}}], "steps": [
+        {"say": "احذفي مهمة الجيم", "tools": ["list_delete"], "pending": False,
+         "no_item": {"list": "tasks", "has": "الجيم"}}]},
+    {"name": "empty a list asks first", "setup": [{"item": {"list": "shopping", "text": "حليب"}},
+                                                 {"item": {"list": "shopping", "text": "خبز"}}], "steps": [
+        {"say": "فضّيلي قائمة التسوق", "pending": True},
+        {"say": "لا خليها", "pending": False, "item": {"list": "shopping", "has": "حليب", "done": False}}]},
 
     # ── Reminders ──
     {"name": "reminder relative", "steps": [
@@ -61,14 +62,16 @@ CASES = [
     {"name": "reminder move", "setup": [{"reminder": {"text": "اجتماع الفريق"}}], "steps": [
         {"say": "أجلي تذكير الاجتماع ساعة", "tools": ["schedule_update"], "schedule": {"has": "اجتماع"}}]},
     {"name": "reminder cancel", "setup": [{"reminder": {"text": "أشتري هدية"}}], "steps": [
-        {"say": "الغي تذكير الهدية", "pending": True},
-        {"say": "اه الغيه", "no_schedule": "هدية"}]},
+        {"say": "الغي تذكير الهدية", "tools": ["schedule_cancel"], "no_schedule": "هدية"}]},
     {"name": "reminder before another", "setup": [{"reminder": {"text": "اجتماع المدير", "in_hours": 5}}], "steps": [
         {"say": "ذكريني قبل اجتماع المدير بربع ساعة", "tools": ["schedule"]}]},
 
     # ── The log ──
     {"name": "expense", "steps": [
         {"say": "صرفت خمسين شيكل عالغدا", "tools": ["remember"], "entry": {"kind": "expense", "amount": 50}}]},
+    {"name": "delete the last expense", "steps": [
+        {"say": "صرفت عشرين على قهوة", "tools": ["remember"]},
+        {"say": "احذفي آخر مصروف", "tools": ["log_delete"], "no_entry": {"kind": "expense"}}]},
     {"name": "expense fix", "steps": [
         {"say": "صرفت خمسين على البنزين", "tools": ["remember"]},
         {"say": "لا قصدي ستين مش خمسين", "tools": ["log_update"], "entry": {"kind": "expense", "amount": 60}}]},

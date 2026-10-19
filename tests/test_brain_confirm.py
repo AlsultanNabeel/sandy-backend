@@ -18,12 +18,12 @@ def _turn(model, message, pending=None):
 
 
 # Six rows at once: a bulk delete, the one kind that still asks.
-BULK = {"list": "tasks", "match_text": "جيم", "all_matching": True, "delete": True}
+BULK = {"list": "tasks", "match_text": "جيم", "all_matching": True}
 
 
 def _ask_delete(ids):
     # The model has nothing to add: the reply is the question alone.
-    model = ScriptedModel(tools_reply(call("list_update", **BULK)), text_reply(""))
+    model = ScriptedModel(tools_reply(call("list_delete", **BULK)), text_reply(""))
     state = _turn(model, "احذفي مهمة الجيم")
     # The model is told the delete waits and goes on; the question itself is ours.
     assert len(model.seen) == 2 and '"held": true' in model.seen[1][-1]["content"]
@@ -118,7 +118,7 @@ def test_a_yes_or_a_verb_alone_still_runs_it(gym, yes):
 
 def test_voice_a_new_request_drops_the_hold(gym):
     with active_user_profile_context(A):
-        voice.dispatch("list_update", BULK, "userA")
+        voice.dispatch("list_delete", BULK, "userA")
         out = voice.dispatch("confirm", {"answer": "اعملي تذكير بكرا الساعة 5"}, "userA")
         assert out["reply"].startswith("[لم يُنفَّذ]") and "نفّذيه هلأ" in out["reply"]
         assert "ما في إشي" in voice.dispatch("confirm", {"answer": "اه"}, "userA")["reply"]
@@ -128,7 +128,7 @@ def test_voice_a_new_request_drops_the_hold(gym):
 def test_a_yes_deletes_the_newest_row_that_was_asked_about_not_one_logged_since(brain_db):  # noqa: F811
     with active_user_profile_context(A):
         asked = entries.add("expense", "قهوة", {"amount": 5})
-    model = ScriptedModel(tools_reply(call("log_update", kind="expense", delete=True)),
+    model = ScriptedModel(tools_reply(call("log_delete", kind="expense")),
                           text_reply(""))
     held = _turn(model, "احذفي آخر مصروف")["pending_state"]
     with active_user_profile_context(A):
@@ -141,8 +141,8 @@ def test_a_yes_deletes_the_newest_row_that_was_asked_about_not_one_logged_since(
 def test_a_yes_deletes_only_the_rows_the_question_named(brain_db):  # noqa: F811
     with active_user_profile_context(A):
         named = [items.add("tasks", "تمرين جيم الصبح"), items.add("tasks", "تمرين جيم المسا")]
-    model = ScriptedModel(tools_reply(call("list_update", list="tasks", match_text="تمرين جيم",
-                                           all_matching=True, delete=True)), text_reply(""))
+    model = ScriptedModel(tools_reply(call("list_delete", list="tasks", match_text="تمرين جيم",
+                                           all_matching=True)), text_reply(""))
     held = _turn(model, "احذفي كل مهام الجيم")["pending_state"]
     with active_user_profile_context(A):
         since = items.add("tasks", "تمرين جيم الجمعة")
@@ -181,8 +181,8 @@ def _bulk_args(word):
 
 def test_two_bulk_deletes_in_one_turn_wait_as_one_question(brain_db):  # noqa: F811
     a, b = _bulk("شغل"), _bulk("بيت")
-    model = ScriptedModel(tools_reply(call("list_update", cid="c1", **_bulk_args("شغل")),
-                                      call("list_update", cid="c2", **_bulk_args("بيت"))))
+    model = ScriptedModel(tools_reply(call("list_delete", cid="c1", **_bulk_args("شغل")),
+                                      call("list_delete", cid="c2", **_bulk_args("بيت"))))
     state = _turn(model, "احذفي كل مهام الشغل والبيت")
     assert "«شغل 0»" in state["final_response"] and "«بيت 0»" in state["final_response"]
     _turn(ScriptedModel(), "اه", pending=state["pending_state"])
@@ -191,7 +191,7 @@ def test_two_bulk_deletes_in_one_turn_wait_as_one_question(brain_db):  # noqa: F
 
 def test_what_was_done_is_said_with_the_question_and_the_steps_after_it_run(gym):
     model = ScriptedModel(
-        tools_reply(call("list_update", **BULK)),
+        tools_reply(call("list_delete", **BULK)),
         tools_reply(call("list_add", list="tasks", text="روح عالمسبح")),
         text_reply("ضفت المسبح بداله."))
     state = _turn(model, "احذفي الجيم وحطي المسبح بداله")
@@ -211,12 +211,12 @@ def test_an_expired_hold_is_ignored(gym):
 def test_the_hold_round_trips_through_the_pending_store(gym, brain_db):  # noqa: F811
     held = _ask_delete(gym)["pending_state"]
     P.save("userA", "userA", brain_db, held)
-    assert confirm.live(P.load("userA", "userA", brain_db))["steps"][0]["tool"] == "list_update"
+    assert confirm.live(P.load("userA", "userA", brain_db))["steps"][0]["tool"] == "list_delete"
 
 
 def test_voice_holds_then_confirm_tool_resolves_with_the_same_resolver(gym):
     with active_user_profile_context(A):
-        out = voice.dispatch("list_update", BULK, "userA")
+        out = voice.dispatch("list_delete", BULK, "userA")
         assert "متأكد" in out["reply"] and "ok" not in out
         assert _exists(gym)
         assert "مرة تانية" in voice.dispatch("confirm", {"answer": "يمكن"}, "userA")["reply"]
@@ -228,7 +228,7 @@ def test_voice_holds_then_confirm_tool_resolves_with_the_same_resolver(gym):
 
 def test_voice_cancel(gym):
     with active_user_profile_context(A):
-        voice.dispatch("list_update", BULK, "userA")
+        voice.dispatch("list_delete", BULK, "userA")
         out = voice.dispatch("confirm", {"answer": "لأ"}, "userA")
     assert out["reply"] == confirm.CANCELLED_REPLY and _exists(gym)
 
@@ -241,7 +241,7 @@ def test_voice_marks_what_did_not_happen(brain_db):  # noqa: F811
 
 def test_voice_lets_go_after_a_second_unclear_answer_like_chat(gym):
     with active_user_profile_context(A):
-        voice.dispatch("list_update", BULK, "userA")
+        voice.dispatch("list_delete", BULK, "userA")
         voice.dispatch("confirm", {"answer": "يمكن"}, "userA")
         out = voice.dispatch("confirm", {"answer": "يمكن بعدين"}, "userA")
         assert out["reply"].startswith("[لم يُنفَّذ]")
@@ -252,8 +252,8 @@ def test_voice_lets_go_after_a_second_unclear_answer_like_chat(gym):
 def test_voice_two_bulk_deletes_wait_as_one(brain_db):  # noqa: F811
     a, b = _bulk("شغل"), _bulk("بيت")
     with active_user_profile_context(A):
-        voice.dispatch("list_update", _bulk_args("شغل"), "userA")
-        out = voice.dispatch("list_update", _bulk_args("بيت"), "userA")
+        voice.dispatch("list_delete", _bulk_args("شغل"), "userA")
+        out = voice.dispatch("list_delete", _bulk_args("بيت"), "userA")
         assert "«شغل 0»" in out["reply"] and "«بيت 0»" in out["reply"]
         assert voice.dispatch("confirm", {"answer": "اه"}, "userA")["ok"]
     assert _gone(a) and _gone(b)
@@ -263,9 +263,8 @@ def test_voice_a_which_one_waits_behind_a_held_yes_instead_of_replacing_it(gym):
     with active_user_profile_context(A):
         items.add("tasks", "اتصل بأحمد")
         ahmad2 = items.add("tasks", "اتصل بأحمد الشغل")
-        voice.dispatch("list_update", BULK, "userA")
-        out = voice.dispatch("list_update", {"list": "tasks", "match_text": "أحمد",
-                                             "delete": True}, "userA")
+        voice.dispatch("list_delete", BULK, "userA")
+        out = voice.dispatch("list_delete", {"list": "tasks", "match_text": "أحمد"}, "userA")
         assert "متأكد إنك بدك تحذف" in out["reply"], "the held yes is still the question"
         out = voice.dispatch("confirm", {"answer": "اه"}, "userA")
         assert _gone(gym) and "أي وحدة" in out["reply"], "the «which one?» was dropped"

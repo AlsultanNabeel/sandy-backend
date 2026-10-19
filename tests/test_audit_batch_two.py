@@ -31,7 +31,7 @@ def _six(word):
 
 def _bulk(word):
     """A bulk delete (six rows), the one kind that still waits for a yes."""
-    return call("list_update", list="tasks", match_text=word, all_matching=True, delete=True)
+    return call("list_delete", list="tasks", match_text=word, all_matching=True)
 
 
 def test_a_yes_with_a_new_delete_after_it_asks_again(brain_db):  # noqa: F811
@@ -153,7 +153,7 @@ def test_a_future_message_rides_on_a_held_reply_word_for_word(brain_db):  # noqa
     sid = _due_message()
     with active_user_profile_context(A):
         gym = items.add("tasks", "روح عالجيم")
-    model = ScriptedModel(tools_reply(call("list_update", id=gym, delete=True)), text_reply(""))
+    model = ScriptedModel(tools_reply(call("list_delete", id=gym)), text_reply(""))
     state = _turn(model, "احذفي مهمة الجيم")
     assert "لا تنسى تشرب مي" in state["final_response"], \
         "marked sent while the held reply never showed it"
@@ -299,8 +299,8 @@ def test_a_pick_runs_and_a_bulk_delete_after_it_waits_for_its_own_yes(brain_db):
         items.add("tasks", "اتصل بأحمد")
         items.add("tasks", "اتصل بأحمد البيت")
     _six("شغل")
-    held = _turn(ScriptedModel(tools_reply(call("list_update", list="tasks",
-                                                match_text="أحمد", delete=True))),
+    held = _turn(ScriptedModel(tools_reply(call("list_delete", list="tasks",
+                                                match_text="أحمد"))),
                  "احذفي مهمة اتصل بأحمد")["pending_state"]
     assert held and held["action"] == "choose"
     model = ScriptedModel(tools_reply(_bulk("شغل")), text_reply(""))

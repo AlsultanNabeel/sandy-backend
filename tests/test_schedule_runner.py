@@ -408,10 +408,12 @@ def test_the_turn_writes_a_mood_when_the_model_records_one(brain_db):  # noqa: F
 # ── speaker gate on the brain's tools ────────────────────────────────────────
 
 @pytest.mark.parametrize("name, args, sensitive", [
-    ("list_update", {"match_text": "حليب", "delete": True}, True),
+    ("list_delete", {"match_text": "حليب"}, True),
     ("list_update", {"match_text": "حليب", "all_matching": True, "done": True}, True),
     ("list_update", {"match_text": "حليب", "done": True}, False),
-    ("schedule_update", {"match_text": "دوا", "cancel": True}, True),
+    ("schedule_cancel", {"match_text": "دوا"}, True),
+    ("log_delete", {"kind": "expense"}, True),
+    ("log_update", {"kind": "expense", "amount": 4}, False),
     ("schedule_update", {"match_text": "دوا", "all_matching": True, "when": "بكرا"}, True),
     ("schedule_update", {"match_text": "دوا", "when": "بكرا"}, False),
     ("schedule", {"kind": "message_to_future_self", "text": "x", "when": "بكرا"}, True),

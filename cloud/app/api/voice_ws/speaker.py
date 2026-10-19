@@ -34,13 +34,11 @@ def _is_sensitive_call(name: str, args=None) -> bool:
     """With SANDY_REQUIRE_SPEAKER_AUTH=1 these wait for the owner's voice: deletes,
     cancels, bulk changes, future-self messages, and `confirm`, which only ever
     runs one of those."""
-    if name == "confirm":
+    if name in ("confirm", "list_delete", "log_delete", "schedule_cancel"):
         return True
     args = args or {}
-    if name == "list_update":
-        return bool(args.get("delete") or args.get("all_matching"))
-    if name == "schedule_update":
-        return bool(args.get("cancel") or args.get("all_matching"))
+    if name in ("list_update", "log_update", "schedule_update"):
+        return bool(args.get("all_matching"))
     return name == "schedule" and args.get("kind") == "message_to_future_self"
 
 

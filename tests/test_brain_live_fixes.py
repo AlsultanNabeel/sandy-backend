@@ -82,8 +82,8 @@ def two_milks(db):
 
 
 def test_ambiguous_delete_asks_which_one(two_milks):
-    model = ScriptedModel(tools_reply(call("list_update", list="tasks",
-                                           match_text="حليب", delete=True)))
+    model = ScriptedModel(tools_reply(call("list_delete", list="tasks",
+                                           match_text="حليب")))
     state = _turn(model, "احذفي مهمة الحليب")
     assert state["pending_state"]["action"] == confirm.CHOOSE
     assert "١. أشتري حليب" in state["final_response"]
@@ -91,8 +91,8 @@ def test_ambiguous_delete_asks_which_one(two_milks):
 
 
 def test_first_deletes_only_that_one(two_milks):
-    asked = _turn(ScriptedModel(tools_reply(call("list_update", list="tasks",
-                                                 match_text="حليب", delete=True))),
+    asked = _turn(ScriptedModel(tools_reply(call("list_delete", list="tasks",
+                                                 match_text="حليب"))),
                   "احذفي مهمة الحليب")
     chosen = _turn(ScriptedModel(), "الأولى", asked["pending_state"])
     assert chosen["final_response"].startswith("حذفت")
@@ -109,8 +109,8 @@ def test_pick_reads_numbers_ordinals_and_all(said, count):
 
 
 def test_a_new_request_instead_of_a_choice_is_answered_and_asked_once_more(two_milks):
-    asked = _turn(ScriptedModel(tools_reply(call("list_update", list="tasks",
-                                                 match_text="حليب", delete=True))),
+    asked = _turn(ScriptedModel(tools_reply(call("list_delete", list="tasks",
+                                                 match_text="حليب"))),
                   "احذفي مهمة الحليب")
     model = ScriptedModel(text_reply("مشمس"))
     state = _turn(model, "شو الطقس اليوم؟", asked["pending_state"])

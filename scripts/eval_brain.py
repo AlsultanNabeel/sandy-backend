@@ -123,6 +123,8 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
             bad.append(f"التذكير «{want['has']}» مش متكرر")
     if "no_schedule" in step and _has(schedules.list_schedules("reminder", status="pending"), step["no_schedule"]):
         bad.append(f"لسا في تذكير «{step['no_schedule']}»")
+    if "no_entry" in step and entries.list_entries(step["no_entry"]["kind"]):
+        bad.append(f"لسا في {step['no_entry']['kind']} بالسجلّ")
     if "entry" in step:
         want = step["entry"]
         rows = entries.list_entries(want["kind"])

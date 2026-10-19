@@ -106,7 +106,7 @@ def test_fast_path_still_wins_with_no_model_call(brain_db, monkeypatch):  # noqa
 
 def test_fast_path_steps_aside_while_a_confirmation_is_held(brain_db):  # noqa: F811
     from app.brain import confirm
-    held = confirm.hold([{"tool": "list_update", "args": {"id": "x", "delete": True}, "summary": "تحذف «x»"}])
+    held = confirm.hold([{"tool": "list_delete", "args": {"id": "x"}, "summary": "تحذف «x»"}])
     model = ScriptedModel(text_reply("تمام"))
     state = _turn(model, "لا", pending=held)
     assert state["final_response"] == confirm.CANCELLED_REPLY and model.seen == []
@@ -149,7 +149,7 @@ def test_a_rewound_turn_takes_back_what_it_did(brain_db):  # noqa: F811
         gone = items.add("tasks", "بتنحذف")
     model = ScriptedModel(tools_reply(call("list_add", list="shopping", text="حليب"),
                                       call("list_update", cid="c2", id=keep, text="معدّلة"),
-                                      call("list_update", cid="c3", id=gone, delete=True)),
+                                      call("list_delete", cid="c3", id=gone)),
                           text_reply("تمام"))
     _turn(model, "رتّبلي القوائم")
     effects = stm_rewind()

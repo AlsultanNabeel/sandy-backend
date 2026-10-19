@@ -72,7 +72,7 @@ def test_cancel_a_reminder_reaches_reminders_only_and_a_sealed_message_stays_sea
     later = datetime.now(timezone.utc) + timedelta(days=3)
     schedules.add("message_to_future_self", "سر بيني وبينك", later)
     schedules.add("scene", "light → off", later)
-    out = _run("schedule_update", match_text="سر بيني وبينك", cancel=True)
+    out = _run("schedule_cancel", match_text="سر بيني وبينك")
     assert out["ok"] is False
     rows = _run("recall", query="")["rows"]
     texts = [r["text"] for r in rows]
