@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.blocks import _base as blocks_base
-from app.brain import confirm, context, future, model, stm, stops, tools
+from app.brain import confirm, context, future, honesty, model, stm, stops, tools
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
 from app.utils.tenant_version import turn_scope
@@ -304,6 +304,11 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
             waiting = confirm.asked_again(held) or confirm.following(held)
             outcome = _asked_first(waiting, "", outcome)
 
+    if not (outcome.get("error") or outcome.get("stopped")):
+        # Nothing is said to be done that no tool of the turn did (`honesty`).
+        question = confirm.ask(outcome["pending"]) if outcome.get("pending") else ""
+        outcome = {**outcome, "text": honesty.correct(outcome["text"], ctx.worked, ctx.results,
+                                                       question)}
     # Stopped from the app: memory keeps what was shown, marked as cut.
     shown = stops.take(user_id, thread_id, since=began)
     if not (outcome.get("error") or outcome.get("stopped") or shown is not None):

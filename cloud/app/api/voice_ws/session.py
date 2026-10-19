@@ -70,6 +70,7 @@ from app.api.voice_ws.memory import (
     set_voice_identity,
 )
 from app.api.metering import voice_seconds_left
+from app.brain import honesty
 from app.brain.voice import END_CALL
 from app.features.usage_store import add_voice_seconds
 from app.api.voice_ws.tools import (
@@ -1285,6 +1286,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
 
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
+    # The tools of this turn that worked: what she may say she did (`honesty`).
+    _turn_worked: List[str] = []
 
     # `_first`: first message of any kind from Gemini; `_audio_out`: what reached the speaker.
     _seen = {"any": False, "user_text": False, "audio_out": 0}
@@ -1465,6 +1468,16 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
 
             _user_buf.clear()
             _sandy_buf.clear()
+            fix = honesty.voice_correction(sandy_text, _turn_worked)
+            _turn_worked.clear()
+            if fix:
+                # She has said it already; she is told at once to put it right.
+                try:
+                    await session.send_client_content(
+                        turns=[types.Content(role="user", parts=[types.Part(text=fix)])],
+                        turn_complete=True)
+                except Exception as exc:  # noqa: BLE001 — external call edge (Gemini)
+                    logger.warning("[voice_ws] honesty correction not sent: %s", exc)
 
             if live_state.get("end_after_reply"):
                 # Hang up once the goodbye has played: a clean close ends the board's call.
@@ -1524,6 +1537,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         tools_pool, _dispatch_tool, fc.name,
                         dict(fc.args or {}), get_voice_identity()
                     )
+                    if result.get("ok"):
+                        _turn_worked.append(fc.name)
                     fn_responses.append(
                         types.FunctionResponse(
                             id=fc.id,

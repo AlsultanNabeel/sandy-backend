@@ -184,7 +184,11 @@ def execute(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(f"unknown tool {name}")
     logger.info("[brain] tool %s args=%s", name, sorted(args or {}))
     try:
-        return handler(dict(args or {}), ctx)
+        result = handler(dict(args or {}), ctx)
     except Exception as exc:  # noqa: BLE001 — one tool never breaks the turn
         logger.exception("[brain] tool %s raised", name)
-        return {"ok": False, "broke": True, "error": f"tool failed: {type(exc).__name__}"}
+        result = {"ok": False, "broke": True, "error": f"tool failed: {type(exc).__name__}"}
+    ctx.results.append((name, result))
+    if result.get("ok"):
+        ctx.worked.append(name)
+    return result

@@ -154,6 +154,14 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    answer and no second model call restates it. Two or more slow independent calls of one
    step (`loop.SIDE_BY_SIDE`: web_search, weather, recall, summarize, device_state)
    run side by side, each in a copy of the turn's context; the rest run in order.
+3b. **Nothing is said to be done that no tool did** (`honesty.py`): a reply that says she
+   deleted, removed, added, changed or cancelled («حذفت»، «شلت»، «ضفت»، «عدّلت»، «لغيت», a
+   negated one aside) must have a tool of that kind that worked in the same turn
+   (`ctx.worked`, kept by `tools.execute`). The sentence that claims it is taken out and
+   what the tools really said goes in its place («ما لقيت…»), or `NOTHING_DONE`; a held
+   question stays last. On the call her words are heard already, so at the turn's end
+   (`session._handle`, `_turn_worked`) she is told to put it right (`VOICE_CORRECTION`, a
+   turn of its own that she answers). The prompt's own rule is no longer the guarantee.
 4. Due `message_to_future_self` schedules (`future.py`) are pasted word for word at the end
    of the reply by the code, never shown to the model, and marked `sent` only when the reply
    went out whole (not an error, not stopped).

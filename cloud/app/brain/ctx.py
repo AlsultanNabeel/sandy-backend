@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -19,6 +19,10 @@ class TurnCtx:
     image_state: Optional[Dict[str, Any]] = None
     # Things a tool made that are not for the model (image bytes).
     artifacts: Dict[str, Any] = field(default_factory=dict)
+    # Every tool call of the turn and its result, in order (`tools.execute`), and the names
+    # of those that worked: what the reply may say was done (`honesty`).
+    results: List[Tuple[str, Dict[str, Any]]] = field(default_factory=list)
+    worked: List[str] = field(default_factory=list)
 
 
 def needs_confirmation(summary: str, ids: Optional[List[str]] = None) -> Dict[str, Any]:
