@@ -82,3 +82,39 @@ def test_voice_one_delete_runs_at_once(brain_db):  # noqa: F811
     with active_user_profile_context(A):
         out = voice.dispatch("list_update", {"id": milk, "delete": True}, "userA")
     assert out["ok"] and _left([milk]) == []
+
+
+# ── what is not there is said to be not there ────────────────────────────────
+
+def _run(name, **args):
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+
+    with active_user_profile_context(A):
+        return tools.execute(name, args, TurnCtx(user_id="userA"))
+
+
+def test_a_row_that_is_not_there_is_said_to_be_not_there(brain_db):  # noqa: F811
+    _add("خبز")
+    out = _run("list_update", list="shopping", match_text="حليب", delete=True)
+    assert out["ok"] is False and "ما لقيت «حليب»" in out["reply"]
+    out = _run("list_update", id="0" * 32, delete=True)
+    assert out["ok"] is False and "ما لقيت" in out["reply"]
+    out = _run("log_update", kind="expense", delete=True)
+    assert out["ok"] is False and "ما لقيت" in out["reply"]
+    out = _run("schedule_update", match_text="الدكتور", cancel=True)
+    assert out["ok"] is False and "ما لقيت «الدكتور»" in out["reply"]
+
+
+def test_a_near_spelling_is_not_acted_on_and_the_closest_is_named(brain_db):  # noqa: F811
+    net, = _add("دفع فاتورة النت", list_name="tasks")
+    out = _run("list_update", match_text="دفع فاتورة المي", delete=True)
+    assert out["ok"] is False and "needs_confirmation" not in out
+    assert "ما لقيت «دفع فاتورة المي»" in out["reply"] and "«دفع فاتورة النت»" in out["reply"]
+    assert _left([net]) == [net]
+
+
+def test_voice_says_what_is_not_there(brain_db):  # noqa: F811
+    with active_user_profile_context(A):
+        out = voice.dispatch("list_update", {"match_text": "حليب", "delete": True}, "userA")
+    assert out["reply"].startswith("[لم يُنفَّذ] ما لقيت «حليب»")

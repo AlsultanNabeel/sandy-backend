@@ -39,10 +39,10 @@ def test_done_on_a_habit_ticks_today_and_keeps_the_habit(tenant):
     assert len(entries.list_entries("habit")) == 1      # once a day
 
 
-def test_a_near_spelling_asks_before_it_acts(tenant):
+def test_a_near_spelling_is_not_acted_on(tenant):
     net = items.add("tasks", "دفع فاتورة النت")
     out = _run("list_update", match_text="دفع فاتورة المي", done=True)
-    assert out.get("needs_confirmation") and "أقرب إشي" in out["summary"]
+    assert out["ok"] is False and "أقرب إشي «دفع فاتورة النت»" in out["reply"]
     assert not items.get(net)["done"]
 
 

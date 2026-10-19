@@ -152,12 +152,14 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if picked is None and (args.get("id") or args.get("match_text")):
         picked = _pick(args, pool, getter)
     elif picked is None:
-        picked = {"rows": pool[:1]} if pool else refused("nothing logged to change")
+        picked = {"rows": pool[:1]} if pool else refused(
+            "nothing logged to change",
+            reply=f"ما لقيت ولا {_kind_ar(kind) or 'إشي'} مسجّل.")
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
     delete = bool(args.get("delete"))
-    held = _held(picked, "تحذف" if delete else "تعدّل", args, ctx)
+    held = _held(picked, "تحذف" if delete else "تعدّل", ctx)
     if held:
         return held
     amount = args.get("amount")
@@ -368,22 +370,41 @@ def _add_to_existing(row: Dict[str, Any], qty: Optional[float], due: Any) -> Dic
             "reply": f"«{row['text']}» كانت موجودة، عدّلتها: {'، '.join(parts)} ✅"}
 
 
+def _kind_ar(kind: Optional[str]) -> str:
+    row = get_kind(LOG, kind) if kind else None
+    return row.ar if row else ""
+
+
+def _not_found(said: str, closest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Nothing by that name: said so, with the nearest spelling when there is one. A near
+    spelling is never acted on («فاتورة المي» is not «فاتورة النت»)."""
+    reply = f"ما لقيت «{said}»" if said else "ما لقيت هالإشي، شكله انحذف أو تغيّر"
+    if closest is not None:
+        return refused("not found", closest={"id": closest["id"], "text": closest["text"]},
+                       reply=f"{reply}؛ أقرب إشي «{closest['text']}». قصدك هو؟")
+    return refused("not found", reply=f"{reply}.")
+
+
 def _pick(args: Dict[str, Any], rows: List[Dict[str, Any]], getter) -> Dict[str, Any]:
     """``{"rows": [...]}`` for the target(s), or a refusal the model can act on."""
     if args.get("id"):
         row = getter(str(args["id"]))
-        return {"rows": [row]} if row else refused("no row with that id")
-    m = match_rows(str(args.get("match_text") or ""), rows)
+        return {"rows": [row]} if row else _not_found("")
+    said = str(args.get("match_text") or "").strip()
+    m = match_rows(said, rows)
+    if m["status"] == "matched" and m["tier"] == "fuzzy":
+        return _not_found(said, m["row"])
     if m["status"] == "matched":
-        # A near-spelling is a guess («فاتورة المي» → «فاتورة النت»): it waits for a yes.
-        return {"rows": [m["row"]], "guessed": m["tier"] == "fuzzy"}
+        return {"rows": [m["row"]]}
     if m["status"] == "ambiguous":
-        if args.get("all_matching"):
+        if args.get("all_matching") and m["tier"] != "fuzzy":
             return {"rows": m["matches"]}
+        if m["tier"] == "fuzzy":
+            return _not_found(said, m["matches"][0])
         return refused("ambiguous", needs_choice=True, candidates=[
             {"id": r["id"], "text": r["text"], **({"due": W.iso(r["due"])} if r.get("due") else {})}
             for r in m["matches"][:8]])
-    return refused("not found" if m["status"] == "not_found" else "say which one")
+    return _not_found(said) if m["status"] == "not_found" else refused("say which one")
 
 
 def _held_rows(ctx: TurnCtx, getter) -> Optional[Dict[str, Any]]:
@@ -406,14 +427,12 @@ def _names(rows: List[Dict[str, Any]]) -> str:
 BULK_ROWS = 5
 
 
-def _held(picked: Dict[str, Any], verb: str, args: Dict[str, Any],
-          ctx: TurnCtx) -> Optional[Dict[str, Any]]:
-    """The question when the change waits for a yes: a bulk one, or a guess."""
+def _held(picked: Dict[str, Any], verb: str, ctx: TurnCtx) -> Optional[Dict[str, Any]]:
+    """The question when the change is a bulk one and waits for a yes."""
     rows = picked["rows"]
-    if ctx.confirmed or not (len(rows) > BULK_ROWS or picked.get("guessed")):
+    if ctx.confirmed or len(rows) <= BULK_ROWS:
         return None
-    guess = f" (أقرب إشي لـ«{args.get('match_text')}»)" if picked.get("guessed") else ""
-    return needs_confirmation(f"{verb} {_names(rows)}{guess}", [r["id"] for r in rows])
+    return needs_confirmation(f"{verb} {_names(rows)}", [r["id"] for r in rows])
 
 
 def _number(value: Any) -> Optional[float]:
@@ -441,7 +460,7 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     rows = picked["rows"]
     delete = bool(args.get("delete"))
     verb = "تحذف" if delete else ("تخلّص" if args.get("done") else "تعدّل")
-    held = _held(picked, verb, args, ctx)
+    held = _held(picked, verb, ctx)
     if held:
         return held
     due: Any = None if args.get("no_due") else items._UNSET
@@ -594,7 +613,7 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return picked
     rows = picked["rows"]
     cancel = bool(args.get("cancel"))
-    held = _held(picked, "تلغي" if cancel else "تعدّل", args, ctx)
+    held = _held(picked, "تلغي" if cancel else "تعدّل", ctx)
     if held:
         return held
     rule: Optional[str] = None
