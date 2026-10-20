@@ -127,3 +127,9 @@ def test_a_ready_index_that_finds_nothing_logs_nothing(brain_db, monkeypatch, ca
     with caplog.at_level(logging.WARNING, logger="app.brain.context"):
         _search_finds_nothing(monkeypatch, [READY])
     assert not [r for r in caplog.records if "entries_vector" in r.getMessage()]
+
+
+def test_boot_says_the_index_is_there(caplog):
+    with caplog.at_level(logging.INFO, logger="app.blocks.vector_index"):
+        vector_index.ensure_in_background(_db(_Entries([READY]))).result(5)
+    assert any("entries_vector is there" in r.getMessage() for r in caplog.records)

@@ -47,6 +47,8 @@ def ensure_in_background(db: Any) -> Future:
         try:
             if ensure(db) == "created":
                 logger.info("[vector_index] %s was missing, created it (Atlas builds it in a minute or so)", NAME)
+            else:
+                logger.info("[vector_index] %s is there, left as it is", NAME)
         except PyMongoError as exc:
             logger.warning("[vector_index] could not make %s: %s (related memories fall back to word search)",
                            NAME, exc)
