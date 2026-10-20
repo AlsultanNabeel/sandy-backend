@@ -147,6 +147,11 @@ class ScopedCollection:
         }}
         return list(self._raw.aggregate([stage, {"$project": {path: 0}}]))
 
+    def search_index(self, name: str) -> Optional[Dict[str, Any]]:
+        """Atlas's description of search index ``name`` on this collection, or None.
+        Index metadata, not tenant rows."""
+        return next(iter(self._raw.list_search_indexes(name)), None)
+
     # ── writes ───────────────────────────────────────────────────────────────
     # Every write marks the tenant's cached context stale (utils/tenant_version.py).
     def _note_write(self) -> None:

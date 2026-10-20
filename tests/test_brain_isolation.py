@@ -4,7 +4,7 @@ from __future__ import annotations
 from brain_fakes import A, B, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
 from app.utils.ltm_crypto import encrypt_field
-from app.blocks import entries, items, schedules
+from app.blocks import entries, items, schedules, vector_index
 from app.brain import context, loop, tools
 from app.brain.ctx import TurnCtx
 from app.utils.user_profiles import active_user_profile_context
@@ -63,7 +63,7 @@ def test_similar_entries_search_the_index_inside_the_tenant(brain_db, monkeypatc
     with active_user_profile_context(A):
         rows = context.similar_entries("بدي أروح سباحة بكرا", k=1)
     assert [e["text"] for e in rows] == ["بحر"] and "user_id" not in rows[0]
-    assert seen["tenant"] == "userA" and seen["index"] == context.VECTOR_INDEX and seen["k"] == 1
+    assert seen["tenant"] == "userA" and seen["index"] == vector_index.NAME and seen["k"] == 1
     assert seen["filter"] == {"kind": {"$nin": ["fact", "summary", "habit"]}}
 
 

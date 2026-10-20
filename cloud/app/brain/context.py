@@ -13,7 +13,7 @@ from app.brain import stm
 from app.brain.persona import build_effective_persona
 from app.brain.tools_blocks import RANG_WINDOW
 from app.utils.ltm_crypto import decrypt_field
-from app.blocks import _base, entries, habits
+from app.blocks import _base, entries, habits, vector_index
 from app.blocks.kinds import LIST, LOG, get_kind
 from app.utils.time import USER_TZ
 from app.utils.time_awareness import time_awareness_block
@@ -26,8 +26,6 @@ STATE_ROWS = 15
 TOP_ENTRIES = 8
 # Log kinds the state block leaves out: facts have their own block, the rest are not edited by hand.
 _NOT_SHOWN = ("fact", "summary", "habit", "mood")
-# Atlas vector index on sandy_entries.embedding (filters: user_id, kind); see ARCHITECTURE_MAP.
-VECTOR_INDEX = "entries_vector"
 # Messages of the conversation the model sees: all the thread keeps, older ones as its summary.
 RECENT_TURNS = stm.MAX_STM_MESSAGES
 # This conversation's newest summaries, and the other conversations' closest ones.
@@ -239,10 +237,14 @@ def similar_entries(message: str, k: int = TOP_ENTRIES, kind: Optional[str] = No
     base_q: Dict[str, Any] = {"kind": kind or {"$nin": ["fact", "summary", "habit"]}}
     if vector:
         try:
-            docs = coll.vector_search(vector, index=VECTOR_INDEX, k=k, filter=base_q)
-        except (PyMongoError, NotImplementedError) as exc:  # no index, or no Atlas (tests)
-            logger.warning("[context] vector search unavailable: %s", exc)
+            docs = coll.vector_search(vector, index=vector_index.NAME, k=k, filter=base_q)
+        except (PyMongoError, NotImplementedError) as exc:  # no Atlas (tests)
+            logger.warning("[context] vector search unavailable, word search instead: %s", exc)
             docs = []
+        else:
+            reason = None if docs else vector_index.not_ready_reason(coll)
+            if reason:
+                logger.warning("[context] vector index %s %s, word search instead", vector_index.NAME, reason)
         if docs:
             return [_base.out(d) for d in docs]
     words = _words(message)

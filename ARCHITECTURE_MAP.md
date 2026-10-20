@@ -1734,8 +1734,14 @@ nobody re-reads becomes a way of believing things that stopped being true.
 7. **Related-memory recall: fixed.** `context.similar_entries` now asks the
    Atlas vector index `entries_vector` (on `sandy_entries.embedding`, filter fields
    `user_id` and `kind`) through `ScopedCollection.vector_search`, which puts the
-   tenant in the `$vectorSearch` filter. The index lives in Atlas, not in code: a
-   new database needs it created again (1536 dims, cosine). Encrypted rows (moods,
+   tenant in the `$vectorSearch` filter. The index lives in Atlas, but its definition
+   lives in `blocks/vector_index.py` (1536 dims, cosine, filters `user_id` and `kind`):
+   every boot runs `vector_index.ensure` once on the shared pool, which makes it when
+   it is missing and leaves one that is there alone; a failure is a warning and boot
+   carries on. `scripts/ensure_vector_index.py` does the same by hand. A missing index
+   makes `$vectorSearch` return nothing, not an error, so an empty answer is checked
+   (`vector_index.not_ready_reason`, once per process when ready) and a missing or
+   still-building index is logged by name before the word search. Encrypted rows (moods,
    facts) are never embedded, so they are never found this way.
 8. **`submit_background`'s ten workers carry two model calls per turn** (the STM
    summary and the conversation title) with no future ever read. Both go through

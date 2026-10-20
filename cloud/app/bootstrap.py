@@ -198,6 +198,13 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
     except Exception as exc:
         logger.warning("[Bootstrap] Mongo index setup failed: %s", exc)
 
+    # The Atlas vector index is made on Atlas's time, never boot's.
+    from app.blocks import vector_index
+    from app.db import get_db
+
+    if get_db() is not None:
+        vector_index.ensure_in_background(get_db())
+
     # ── Periodic jobs: one worker per machine (kernel file lock) ─────────────
     # Per-day / per-timer claims still make them safe across dynos. mqtt_ingest
     # is deliberately not elected: each worker keeps its own listener.
