@@ -67,6 +67,13 @@ PHRASES = {
                      "en": "Something went wrong partway, after part of it was done. "
                            "Check your lists before asking again."},
     "done": {"ar": "تم ✅", "en": "Done ✅"},
+    "cancelled": {"ar": "تمام، ما عملت إشي.", "en": "OK, I didn't do anything."},
+    "confirm_question": {"ar": "متأكد إنك بدك {summary}؟ (اه/لأ)",
+                         "en": "Are you sure you want to {summary}? (yes/no)"},
+    "dropped": {"ar": "اعتبرتك ما بدك {summary}، فما عملت إشي.",
+                "en": "I took it you don't want to {summary}, so I didn't do it."},
+    "choice_question": {"ar": "لقيت أكتر من وحدة:\n{rows}\nأي وحدة؟ (رقمها، أو «كلهم»)",
+                        "en": "I found more than one:\n{rows}\nWhich one? (its number, or «all»)"},
     "nothing_done": {"ar": "لسا ما عملت هالإشي فعلياً. احكيلي مرة تانية شو بدك بالزبط وبعمله هلّق.",
                      "en": "I haven't actually done that yet. Tell me once more exactly what you "
                            "want and I'll do it now."},

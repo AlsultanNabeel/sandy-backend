@@ -109,7 +109,7 @@ def test_fast_path_steps_aside_while_a_confirmation_is_held(brain_db):  # noqa: 
     held = confirm.hold([{"tool": "list_delete", "args": {"id": "x"}, "summary": "تحذف «x»"}])
     model = ScriptedModel(text_reply("تمام"))
     state = _turn(model, "لا", pending=held)
-    assert state["final_response"] == confirm.CANCELLED_REPLY and model.seen == []
+    assert state["final_response"] == lang.PHRASES["cancelled"]["ar"] and model.seen == []
 
 
 def test_image_bytes_reach_the_reply(brain_db, monkeypatch):  # noqa: F811

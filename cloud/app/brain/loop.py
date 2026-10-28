@@ -169,7 +169,7 @@ def _resolve_choice(pending: Dict[str, Any], message: str,
     read from the opening only; a request after it («التانية وضيفي خبز») goes to the model."""
     said, rest = confirm.read(message)
     if said == "no":
-        outcome = {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
+        outcome = {"text": lang.say("cancelled"), "pending": None, "tools": []}
         if rest:
             outcome["rest"] = _rest_note("قال لأ على «أي وحدة؟»، فما انعمل")
         return outcome
@@ -199,7 +199,7 @@ def _resolve_pending(pending: Dict[str, Any], message: str,
     summary = pending.get("summary", "")
     used = [s.get("tool", "") for s in pending.get("steps") or []]
     if said == "no":
-        outcome = {"text": confirm.CANCELLED_REPLY, "pending": None, "tools": []}
+        outcome = {"text": lang.say("cancelled"), "pending": None, "tools": []}
         settled = f"قال لأ على «{summary}»، فما انعمل"
     elif said == "drop":
         # A new request instead of an answer: the hold goes, and the user is told so.

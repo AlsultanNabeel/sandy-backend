@@ -86,3 +86,42 @@ def test_an_english_reply_that_lies_is_answered_in_english():
     assert out == lang.PHRASES["nothing_done"]["en"]
     with lang.using("ar"):
         assert honesty.correct("حذفت الحليب.", [], []) == lang.PHRASES["nothing_done"]["ar"]
+
+
+# ── a held question is answered in English as in Arabic ─────────────────────
+
+def test_english_yes_and_no():
+    from app.brain import confirm
+    held = {"summary": "delete «milk»"}
+    for yes in ("yes", "yeah", "sure", "go ahead", "do it", "yes please", "ok go ahead",
+                "absolutely", "of course", "yes delete it", "delete it", "alright"):
+        assert confirm.answer(yes, held) == "yes", yes
+    for no in ("no", "nope", "cancel", "never mind", "no thanks", "don't", "don't delete it",
+               "leave it", "forget it", "no wait"):
+        assert confirm.answer(no, held) == "no", no
+    assert confirm.read("yes and add bread", held) == ("yes", True)
+
+
+def test_english_picks():
+    from app.brain import confirm
+    rows = [{"id": "a", "text": "milk"}, {"id": "b", "text": "bread"}, {"id": "c", "text": "eggs"}]
+    assert confirm.pick("the first one", rows) == (["a"], False)
+    assert confirm.pick("second", rows) == (["b"], False)
+    assert confirm.pick("the last one", rows) == (["c"], False)
+    assert confirm.pick("first and third", rows) == (["a", "c"], False)
+    assert confirm.pick("all of them", rows) == (["a", "b", "c"], False)
+    assert confirm.pick("number 2", rows) == (["b"], False)
+    assert confirm.pick("both", rows[:2]) == (["a", "b"], False)
+
+
+def test_the_questions_come_in_the_turns_language():
+    from app.brain import confirm
+    rows = [{"id": "a", "text": "milk"}, {"id": "b", "text": "bread"}]
+    with lang.using("en"):
+        assert confirm.question("delete «milk»") == "Are you sure you want to delete «milk»? (yes/no)"
+        q = confirm.choice_question(rows)
+        assert q.startswith("I found more than one:") and "1. milk" in q and "Which one?" in q
+        assert lang.say("cancelled") == "OK, I didn't do anything."
+    with lang.using("ar"):
+        assert confirm.question("تحذف «حليب»") == "متأكد إنك بدك تحذف «حليب»؟ (اه/لأ)"
+        assert confirm.choice_question(rows).startswith("لقيت أكتر من وحدة:")

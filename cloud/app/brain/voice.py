@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from app.blocks import changes
 from app.blocks._base import new_id
-from app.brain import confirm, tools
+from app.brain import confirm, lang, tools
 from app.brain import pending as P
 from app.brain.ctx import TurnCtx
 from app.db import get_db
@@ -85,7 +85,7 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
         return {"handled": True,
                 "reply": f"ما فهمت اه ولا لأ — اسأليه مرة تانية: {confirm.question(held['summary'])}"}
     if said == "no":
-        out = {"handled": True, "reply": confirm.CANCELLED_REPLY}
+        out = {"handled": True, "reply": lang.say("cancelled")}
     elif said == "drop":
         out = {"handled": True, "ok": False,
                "reply": f"[لم يُنفَّذ] {confirm.dropped(held['summary'])}"}
@@ -111,7 +111,7 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
     """«الأولى» after «أي وحدة؟», as in chat: each chosen row is acted on, and what still
     needs a yes waits as one question."""
     if confirm.answer(answer) == "no":
-        return _ask_next(held, chat_id, {"handled": True, "reply": confirm.CANCELLED_REPLY})
+        return _ask_next(held, chat_id, {"handled": True, "reply": lang.say("cancelled")})
     ids, rest = confirm.pick(answer, held.get("candidates") or [])
     if ids is None:
         again = confirm.asked_again(held)

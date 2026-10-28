@@ -6,7 +6,7 @@ import pytest
 from brain_fakes import A, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
 from app.blocks import entries, items
-from app.brain import confirm, loop, voice
+from app.brain import confirm, lang, loop, voice
 from app.brain import pending as P
 from app.utils.user_profiles import active_user_profile_context
 
@@ -69,7 +69,7 @@ def test_arabic_yes_runs_it_without_a_model_call(gym, yes):
 def test_arabic_no_cancels(gym, no):
     held = _ask_delete(gym)["pending_state"]
     state = _turn(ScriptedModel(), no, pending=held)
-    assert state["final_response"] == confirm.CANCELLED_REPLY
+    assert state["final_response"] == lang.PHRASES["cancelled"]["ar"]
     assert state["pending_state"] is None and _exists(gym)
 
 
@@ -89,7 +89,7 @@ def test_a_no_with_more_hands_the_rest_to_the_model(gym):
     model = ScriptedModel(tools_reply(call("list_update", id=gym[0], done=True)))
     state = _turn(model, "لا، بس خلّصيها", pending=held)
     assert "قال لأ" in model.seen[0][0]["content"]
-    assert not state["final_response"].startswith(confirm.CANCELLED_REPLY)
+    assert not state["final_response"].startswith(lang.PHRASES["cancelled"]["ar"])
     with active_user_profile_context(A):
         assert items.get(gym[0])["done"]
 
@@ -230,7 +230,7 @@ def test_voice_cancel(gym):
     with active_user_profile_context(A):
         voice.dispatch("list_delete", BULK, "userA")
         out = voice.dispatch("confirm", {"answer": "لأ"}, "userA")
-    assert out["reply"] == confirm.CANCELLED_REPLY and _exists(gym)
+    assert out["reply"] == lang.PHRASES["cancelled"]["ar"] and _exists(gym)
 
 
 def test_voice_marks_what_did_not_happen(brain_db):  # noqa: F811

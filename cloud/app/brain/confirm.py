@@ -11,14 +11,13 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.brain import pending as P
-from app.brain import tools
+from app.brain import lang, tools
 from app.brain.ctx import TurnCtx
 from app.brain.matching import match_key
 from app.utils.nlp_normalizer import normalize_user_message
 
 PENDING_TYPE = "brain_confirm"
 
-CANCELLED_REPLY = "تمام، ما عملت إشي."
 
 
 def hold(steps: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -43,7 +42,7 @@ def with_step(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
 
 
 def question(summary: str) -> str:
-    return f"متأكد إنك بدك {summary}؟ (اه/لأ)"
+    return lang.say("confirm_question", summary=summary)
 
 
 # ── one question at a time ──────────────────────────────────────────────────
@@ -94,23 +93,33 @@ def asked_again(held: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 _AFFIRM = {
     "اه", "نعم", "ايوه", "ايوا", "اكيد", "تمام", "تمم", "ماشي", "اوك", "اوكي", "حسنا",
-    "صح", "طبعا", "yes", "ok", "okay", "sure", "yep", "yup", "confirmed",
+    "صح", "طبعا", "yes", "ok", "okay", "sure", "yep", "yup", "confirmed", "yeah", "yea",
+    "alright", "absolutely", "definitely", "correct", "right", "fine", "proceed",
 }
 # Only as the whole reply: «اي واحدة؟» is a question, not a yes.
 _AFFIRM_ALONE = {"اي", "ايه", "y"}
 _CANCEL = {"لا", "لاء", "الغاء", "مش", "بطل", "بلاش", "انسي", "انسيها", "انساها",
-           "وقف", "وقفي", "no", "cancel", "nope", "dont", "stop", "nah", "n"}
+           "وقف", "وقفي", "no", "cancel", "nope", "dont", "don", "stop", "nah", "n", "wait",
+           "nevermind"}
 # «خلص» alone is «drop it»; next to a yes or the action's verb («خلص احذفيها») it is «go on».
 _SOFT_CANCEL = {"خلص", "خلاص"}
-_NEGATORS = {"لا", "ما", "مش"}
+_NEGATORS = {"لا", "ما", "مش", "dont", "t", "not", "never"}
 _FILLER = {"متاكد", "متاكده", "ساندي", "يا", "يلا", "طيب", "طب", "بس", "لو", "سمحت",
-           "please", "هلا", "هلق", "الان", "حبيبتي", "والله"}
+           "please", "هلا", "هلق", "الان", "حبيبتي", "والله", "sandy", "hey", "just", "it",
+           "them", "that", "this", "those", "these", "thanks", "thank", "you", "then"}
 # Whole phrases that are a yes («مش مشكلة احذفي»), read before the words.
-_YES_PHRASES = ("مش مشكله", "ما في مشكله", "مافي مشكله", "لا مشكله", "ولا يهمك", "عادي")
+_YES_PHRASES = ("مش مشكله", "ما في مشكله", "مافي مشكله", "لا مشكله", "ولا يهمك", "عادي",
+                "go ahead", "go on", "do it", "please do", "of course", "sounds good",
+                "sure thing", "why not")
+# Whole phrases that are a no («never mind»), read before the words as well.
+_NO_PHRASES = ("never mind", "no thanks", "no thank you", "leave it", "forget it", "keep it",
+               "hold on")
 # The held action's own verbs, by the verb its question opens with.
 _VERBS = {"تحذف": ("احذف", "امسح", "شيل"), "تلغي": ("الغ",), "تعدل": ("عدل", "غير"),
-          "تخلص": ("خلصي",)}
-_ANY_VERB = ("نفذ", "اعمل", "كمل", "امش")
+          "تخلص": ("خلصي",),
+          "delete": ("delete", "remove", "erase", "clear"), "cancel": ("cancel",),
+          "change": ("change", "edit", "update"), "finish": ("finish", "complete", "mark")}
+_ANY_VERB = ("نفذ", "اعمل", "كمل", "امش", "proceed")
 
 
 def _norm_answer(text: str) -> str:
@@ -145,6 +154,8 @@ def read(text: str, held: Optional[Dict[str, Any]] = None) -> Tuple[str, bool]:
     v = _norm_answer(text)
     if v in _AFFIRM_ALONE:
         return "yes", False
+    for phrase in _NO_PHRASES:
+        v = re.sub(rf"(^| ){phrase}(?= |$)", r"\1لا", v)
     for phrase in _YES_PHRASES:
         v = re.sub(rf"(^| ){phrase}(?= |$)", r"\1اه", v)
     words, roots = v.split(), _verbs(held)
@@ -181,7 +192,7 @@ def answer(text: str, held: Optional[Dict[str, Any]] = None) -> str:
 
 def dropped(summary: str) -> str:
     """What is said when a new request took the place of the answer."""
-    return f"اعتبرتك ما بدك {summary}، فما عملت إشي."
+    return lang.say("dropped", summary=summary)
 
 
 def run_held(pending: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -211,10 +222,13 @@ _ORDINALS = {"اول": 0, "اولي": 0, "تاني": 1, "تانيه": 1, "ثان
              "خامس": 4, "خامسه": 4, "اخير": -1, "اخيره": -1, "اخر": -1,
              # A bare number word is that one: «اتنين» is the second, not both.
              "واحد": 0, "وحده": 0, "اتنين": 1, "اثنين": 1, "تنتين": 1, "ثنتين": 1,
-             "تلاته": 2, "ثلاثه": 2, "اربعه": 3, "خمسه": 4}
-_ALL = {"كلهم", "كل", "كلهن", "كلها"}
+             "تلاته": 2, "ثلاثه": 2, "اربعه": 3, "خمسه": 4,
+             # «the first one»: «one» is the noun there, never a position.
+             "first": 0, "second": 1, "third": 2, "fourth": 3, "fifth": 4, "last": -1,
+             "two": 1, "three": 2, "four": 3, "five": 4}
+_ALL = {"كلهم", "كل", "كلهن", "كلها", "all", "everything"}
 # «الاتنين» / «التنتين» with the article is «both».
-_BOTH = {"الاتنين", "الاثنين", "التنتين", "الثنتين"}
+_BOTH = {"الاتنين", "الاثنين", "التنتين", "الثنتين", "both"}
 _ARABIC_NUMS = "١٢٣٤٥٦٧٨٩"
 
 
@@ -245,11 +259,12 @@ def add(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
 
 
 def choice_question(candidates: List[Dict[str, Any]]) -> str:
+    arabic = lang.current() == lang.AR
     lines = []
     for n, c in enumerate(candidates):
         due = f" ({c['due'][:10]})" if c.get("due") else ""
-        lines.append(f"{_ARABIC_NUMS[n] if n < 9 else n + 1}. {c['text']}{due}")
-    return "لقيت أكتر من وحدة:\n" + "\n".join(lines) + "\nأي وحدة؟ (رقمها، أو «كلهم»)"
+        lines.append(f"{_ARABIC_NUMS[n] if arabic and n < 9 else n + 1}. {c['text']}{due}")
+    return lang.say("choice_question", rows="\n".join(lines))
 
 
 def _position(word: str) -> Optional[int]:
@@ -264,7 +279,8 @@ def _position(word: str) -> Optional[int]:
 
 
 # Words a pick may open with that choose nothing: «اه التانية»، «رقم 2 يا ساندي».
-_PICK_FILLER = _FILLER | _AFFIRM | {"رقم", "هي", "هاي", "اللي", "يعني", "و"}
+_PICK_FILLER = _FILLER | _AFFIRM | {"رقم", "هي", "هاي", "اللي", "يعني", "و",
+                                    "the", "one", "ones", "number", "and", "of", "no"}
 
 
 def pick(text: str, candidates: List[Dict[str, Any]]) -> Tuple[Optional[List[str]], bool]:
