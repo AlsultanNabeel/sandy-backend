@@ -86,7 +86,7 @@ extension APIClient {
         onChunk: @MainActor @escaping (String) -> Void
     ) async throws -> (reply: String, image: ChatAttachment?, undo: ChatUndo?) {
         guard let url = URL(string: baseURL + "/api/agent/stream") else {
-            throw APIError(message: "عنوان غير صالح")
+            throw APIError(message: L10nErrors.s("badAddress"))
         }
         let lang = await LanguageManager.shared.lang.rawValue
         var bodyDict: [String: Any] = ["message": text, "lang": lang]
@@ -100,6 +100,7 @@ extension APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let sentToken = token
         if let t = sentToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.setValue(AppLocale.lang.rawValue, forHTTPHeaderField: "X-Lang")
         req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
         req.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
 
@@ -112,21 +113,21 @@ extension APIClient {
         } catch let urlError as URLError {
             // Cancellation keeps its identity (see `perform`).
             if urlError.code == .cancelled { throw urlError }
-            throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
+            throw APIError(message: L10nErrors.s("connection"), kind: .connection)
         }
         keepRenewed(resp, sent: sentToken)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 {
             // Same rule as `perform`: only the current session dying signs out.
             if let s = sentToken, s == token { onUnauthorized?() }
-            throw APIError(message: "انتهت الجلسة، سجّل دخولك من جديد.", kind: .unauthorized)
+            throw APIError(message: L10nErrors.s("sessionEnded"), kind: .unauthorized)
         }
         if code >= 400 {
             // ردود الخطأ ما بتنستريم — نقرأ الجسم الصغير عادي.
             var data = Data()
             for try await byte in bytes { data.append(byte) }
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            throw APIError(message: (json["message"] as? String) ?? (json["error"] as? String) ?? "خطأ \(code)",
+            throw APIError(message: (json["message"] as? String) ?? (json["error"] as? String) ?? String(format: L10nErrors.s("code"), "\(code)"),
                            code: json["error"] as? String, kind: .server)
         }
 
@@ -142,7 +143,7 @@ extension APIClient {
                 else { continue }
                 if let err = obj["error"] as? String {
                     let message = (obj["message"] as? String)
-                        ?? (err == "internal_error" ? "معلش، صار خطأ." : err)
+                        ?? (err == "internal_error" ? L10nErrors.s("sorry") : err)
                     throw APIError(message: message, code: err, kind: .server)
                 }
                 if obj["done"] as? Bool == true {
@@ -167,11 +168,11 @@ extension APIClient {
             }
         } catch let urlError as URLError {
             if urlError.code == .cancelled { throw urlError }
-            throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
+            throw APIError(message: L10nErrors.s("replyCut"), kind: .connection)
         }
         // A stream cut before `done` is a connection failure: the caller retries with the same key.
         if !sawDone {
-            throw APIError(message: "انقطع الرد قبل ما يكمل. جرّب مرة ثانية.", kind: .connection)
+            throw APIError(message: L10nErrors.s("replyCut"), kind: .connection)
         }
         return (finalReply, image, undo)
     }
@@ -183,13 +184,14 @@ extension APIClient {
     func uploadAttachment(_ data: Data, name: String, mime: String,
                           progress: @escaping @Sendable (Double) -> Void) async throws -> ChatAttachment {
         guard let url = URL(string: baseURL + "/api/attachments") else {
-            throw APIError(message: "عنوان غير صالح")
+            throw APIError(message: L10nErrors.s("badAddress"))
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 120
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.setValue(AppLocale.lang.rawValue, forHTTPHeaderField: "X-Lang")
         req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
         let body = try JSONSerialization.data(withJSONObject: [
             "data": data.base64EncodedString(), "name": name, "mime": mime])
@@ -199,13 +201,13 @@ extension APIClient {
                                                              delegate: UploadProgress(progress))
         } catch let urlError as URLError {
             if urlError.code == .cancelled { throw urlError }
-            throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
+            throw APIError(message: L10nErrors.s("connection"), kind: .connection)
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any] ?? [:]
         guard code < 400, let saved = try? JSONDecoder().decode(AttachmentSaved.self, from: out),
               let item = saved.item else {
-            throw APIError(message: json["message"] as? String ?? "خطأ \(code)",
+            throw APIError(message: json["message"] as? String ?? String(format: L10nErrors.s("code"), "\(code)"),
                            code: json["error"] as? String, kind: .server)
         }
         return item
@@ -231,7 +233,7 @@ extension APIClient {
         let r: CreateConversationResponse = try await fetch("/api/conversations", method: "POST",
                                                             body: [String: String]())
         guard let id = r.id, !id.isEmpty else {
-            throw APIError(message: "تعذّر إنشاء المحادثة")
+            throw APIError(message: L10nErrors.s("chatNotCreated"))
         }
         return id
     }
@@ -292,18 +294,19 @@ extension APIClient {
     /// صوت ساندي (WAV من جيميني) لنصّ معيّن؛ بايتات خام، فبيضل على URLSession مباشرة.
     func synthesizeVoice(text: String, mood: String = "neutral") async throws -> Data {
         guard let url = URL(string: baseURL + "/api/voice/tts") else {
-            throw APIError(message: "عنوان غير صالح")
+            throw APIError(message: L10nErrors.s("badAddress"))
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        req.setValue(AppLocale.lang.rawValue, forHTTPHeaderField: "X-Lang")
         req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
         req.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "mood": mood])
         let (data, resp) = try await APIClient.sendWithRetry(
             req, method: req.httpMethod ?? "GET")
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code >= 400 { throw APIError(message: "صوت غير متاح (\(code))") }
+        if code >= 400 { throw APIError(message: String(format: L10nErrors.s("voiceUnavailable"), "\(code)")) }
         return data
     }
 }

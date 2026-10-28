@@ -1361,6 +1361,14 @@ so folders are organisation only.
   extensions only when `mirrorsShared`; tests pass an in-memory store and `false`
   (`SandyAppTests` `TestClient.make()`), so running them never signs the app out.
   `APIClient.session` is a `var` only so tests can answer through `StubNetwork` (no server).
+- **Language.** Arabic and English are equal. The app starts in the first of the phone's
+  languages it speaks (`AppLang.initial`, else English) and keeps the user's choice
+  (`sandy_lang`); every call sends it as `X-Lang`, which the server keeps as the user's
+  language (pushes, the daily nudge, limits). Every string the app says itself is in a
+  table with both languages; its own errors are `L10nErrors` (`errors.*`), read off the
+  main thread with `L10nErrors.s`. The widgets, the share extension and Siri carry their
+  own pairs inline (they cannot read the app's tables) and follow `app_lang` in the shared
+  group, the phone's before the app has written it (`WidgetLanguage`).
 - **Two servers** (`Backend.Server`: production, staging at `Backend.stagingURL`, which
   takes the staging app's Heroku address once it is made). Each keeps its own sign-in: the
   token in use is always in the shared Keychain slot the widget and share extension read

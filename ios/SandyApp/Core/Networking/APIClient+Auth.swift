@@ -85,7 +85,7 @@ extension APIClient {
     func signInApple(idToken: String, name: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/apple", method: "POST",
                                               body: ["id_token": idToken, "name": name], auth: false)
-        guard let t = r.token else { throw APIError(message: "فشل التحقّق") }
+        guard let t = r.token else { throw APIError(message: L10nErrors.s("verifyFailed")) }
         token = t
         return r.onboardingDone ?? false
     }
@@ -93,7 +93,7 @@ extension APIClient {
     func signInGoogle(idToken: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/google", method: "POST",
                                               body: ["id_token": idToken], auth: false)
-        guard let t = r.token else { throw APIError(message: "فشل التحقّق من جوجل") }
+        guard let t = r.token else { throw APIError(message: L10nErrors.s("googleVerifyFailed")) }
         token = t
         return r.onboardingDone ?? false
     }
@@ -101,7 +101,7 @@ extension APIClient {
     func signUpEmail(email: String, password: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/email/register", method: "POST",
                                               body: ["email": email, "password": password], auth: false)
-        guard let t = r.token else { throw APIError(message: "فشل إنشاء الحساب") }
+        guard let t = r.token else { throw APIError(message: L10nErrors.s("signupFailed")) }
         token = t
         return r.onboardingDone ?? false
     }
@@ -109,7 +109,7 @@ extension APIClient {
     func signInEmail(email: String, password: String) async throws -> Bool {
         let r: AuthResponse = try await fetch("/api/auth/email/login", method: "POST",
                                               body: ["email": email, "password": password], auth: false)
-        guard let t = r.token else { throw APIError(message: "بيانات الدخول غلط") }
+        guard let t = r.token else { throw APIError(message: L10nErrors.s("wrongCredentials")) }
         token = t
         return r.onboardingDone ?? false
     }

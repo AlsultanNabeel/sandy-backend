@@ -44,7 +44,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
         audio.onLost = { [weak self] in
             Task { @MainActor in
                 guard let self, !self.stopped else { return }
-                self.fail("انقطع الصوت")
+                self.fail(L10nErrors.s("liveAudioCut"))
             }
         }
     }
@@ -102,7 +102,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
     private func connect(baseURL: String, token: String) {
         guard let url = Self.wsURL(from: baseURL) else {
-            errorText = "عنوان غير صالح"; return
+            errorText = L10nErrors.s("badAddress"); return
         }
         phase = .connecting
         // The app's one session, so its settings reach the call too.
@@ -144,7 +144,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
                     // A late failure from a previous socket must not end the call that replaced it.
                     guard !self.stopped, let task, task === self.ws else { return }
                     self.teardown()
-                    self.errorText = "انقطع الاتصال"
+                    self.errorText = L10nErrors.s("liveConnectionLost")
                     Haptics.play(.failure)
                 }
             case .success(let message):
@@ -172,7 +172,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
                 phase = .listening
             } catch {
                 // Not a call left open with no sound: the socket and the call bar go too.
-                fail("ما قدرت أشغّل الصوت")
+                fail(L10nErrors.s("liveAudioFailed"))
             }
         case "end_turn":
             audio.markEndTurn()
@@ -195,7 +195,7 @@ final class GeminiLiveManager: NSObject, ObservableObject {
     static func errorLine(_ code: String?) -> String {
         let lines = ["call_idle": "sandy.callIdle", "call_time_limit": "sandy.callTimeLimit",
                      "call_minutes_exceeded": "sandy.callMinutesExceeded"]
-        guard let code else { return "خطأ" }
+        guard let code else { return L10nErrors.s("generic") }
         guard let key = lines[code] else { return code }
         return LanguageManager.shared.s(key)
     }

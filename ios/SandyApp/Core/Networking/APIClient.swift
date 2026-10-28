@@ -101,7 +101,7 @@ final class APIClient: APIClientProtocol {
                          auth: Bool,
                          timeout: TimeInterval = 30,
                          bearer: String? = nil) async throws -> Data {
-        guard let url = URL(string: baseURL + path) else { throw APIError(message: "عنوان غير صالح") }
+        guard let url = URL(string: baseURL + path) else { throw APIError(message: L10nErrors.s("badAddress")) }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = timeout
@@ -110,6 +110,8 @@ final class APIClient: APIClientProtocol {
         let sentToken = auth ? (bearer ?? token) : nil
         if let t = sentToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Timezone")
+        // The app's language: what the server says outside a reply (pushes, limits) is in it.
+        req.setValue(AppLocale.lang.rawValue, forHTTPHeaderField: "X-Lang")
         req.httpBody = bodyData
 
         let data: Data
@@ -120,7 +122,7 @@ final class APIClient: APIClientProtocol {
             // Keep cancellation identity so callers can suppress it instead of showing "couldn't load".
             if urlError.code == .cancelled { throw urlError }
             // Offline, timeout or dropped connection → one "check your internet" error.
-            throw APIError(message: "تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة ثانية.", kind: .connection)
+            throw APIError(message: L10nErrors.s("connection"), kind: .connection)
         }
         keepRenewed(resp, sent: sentToken)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -133,14 +135,14 @@ final class APIClient: APIClientProtocol {
             // Only the current session dying signs out; a request with an older token (across a
             // sign-out/sign-in) must not end the new session.
             if let s = sentToken, s == token { onUnauthorized?() }
-            throw APIError(message: human ?? "انتهت الجلسة، سجّل دخولك من جديد.",
+            throw APIError(message: human ?? L10nErrors.s("sessionEnded"),
                            code: machine, kind: .unauthorized, status: code)
         }
         if code >= 400 {
             // `message` للعرض، `error` رمز آلي للتفريع.
             let wait = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After")
                 .flatMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }
-            throw APIError(message: human ?? machine ?? "خطأ \(code)",
+            throw APIError(message: human ?? machine ?? String(format: L10nErrors.s("code"), "\(code)"),
                            code: machine, kind: .server, status: code, retryAfter: wait)
         }
         return data
@@ -186,7 +188,7 @@ final class APIClient: APIClientProtocol {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            throw APIError(message: "تعذّر قراءة رد الخادم.", kind: .server)
+            throw APIError(message: L10nErrors.s("unreadable"), kind: .server)
         }
     }
 

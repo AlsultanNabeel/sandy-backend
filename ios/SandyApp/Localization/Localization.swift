@@ -51,6 +51,17 @@ enum AppLang: String {
     case ar
     case en
 
+    /// The language the app starts in before the user picks one: the phone's, when it is
+    /// one the app speaks (Arabic or English), else English.
+    static func initial(preferred: [String] = Locale.preferredLanguages) -> AppLang {
+        for tag in preferred {
+            let code = String(tag.prefix(2)).lowercased()
+            if code == "ar" { return .ar }
+            if code == "en" { return .en }
+        }
+        return .en
+    }
+
     /// Drives the app-wide SwiftUI layout direction (web `dir`: rtl/ltr).
     var layoutDirection: LayoutDirection {
         switch self {
@@ -124,6 +135,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nWeather.ns:       L10nWeather.table,
     L10nControl.ns:       L10nControl.table,
     L10nDeveloper.ns:     L10nDeveloper.table,
+    L10nErrors.ns:        L10nErrors.table,
 ]
 
 // MARK: - translate (mirrors web translate(lang, key))
@@ -181,9 +193,11 @@ final class LanguageManager: ObservableObject {
     @Published private(set) var lang: AppLang
 
     private init() {
-        // Initialize from the persisted value (default ar).
-        let stored = UserDefaults.standard.string(forKey: "sandy_lang")
-        lang = AppLang(rawValue: stored ?? AppLang.ar.rawValue) ?? .ar
+        // The persisted choice; the first time, the phone's language, kept so every reader agrees.
+        let stored = UserDefaults.standard.string(forKey: "sandy_lang").flatMap(AppLang.init(rawValue:))
+        let first = stored ?? AppLang.initial()
+        lang = first
+        if stored == nil { UserDefaults.standard.set(first.rawValue, forKey: "sandy_lang") }
     }
 
     /// Set the language explicitly (web setLang). Persists + publishes.

@@ -183,7 +183,7 @@ extension APIClient {
         let r: ImageURLResponse = try await fetch("/api/image", method: "POST",
                                                   body: ImagePrompt(prompt: prompt))
         guard let url = r.url, let data = decodeDataURI(url) else {
-            throw APIError(message: "تعذّر توليد الصورة")
+            throw APIError(message: L10nErrors.s("imageFailed"))
         }
         return data
     }
@@ -192,7 +192,7 @@ extension APIClient {
         let r: ImageURLResponse = try await fetch("/api/image/edit", method: "POST",
                                                   body: ImageEdit(prompt: prompt, image: image.base64EncodedString()))
         guard let url = r.url, let data = decodeDataURI(url) else {
-            throw APIError(message: "تعذّر تعديل الصورة")
+            throw APIError(message: L10nErrors.s("imageEditFailed"))
         }
         return data
     }

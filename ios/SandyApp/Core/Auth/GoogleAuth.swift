@@ -13,11 +13,11 @@ enum GoogleAuth {
     static func signIn() async throws -> String {
         #if !canImport(GoogleSignIn)
         // الحزمة مش مضافة: رسالة واضحة بدل زر ما بيعمل إشي.
-        throw APIError(message: "حزمة GoogleSignIn مش مضافة بالمشروع")
+        throw APIError(message: L10nErrors.s("googleMissing"))
         #else
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
         guard let root = rootViewController() else {
-            throw APIError(message: "ما قدرنا نفتح نافذة جوجل")
+            throw APIError(message: L10nErrors.s("googleWindow"))
         }
         return try await withCheckedThrowingContinuation { cont in
             GIDSignIn.sharedInstance.signIn(withPresenting: root) { result, error in
@@ -26,7 +26,7 @@ enum GoogleAuth {
                     return
                 }
                 guard let idToken = result?.user.idToken?.tokenString else {
-                    cont.resume(throwing: APIError(message: "ما رجع توكن من جوجل"))
+                    cont.resume(throwing: APIError(message: L10nErrors.s("googleNoToken")))
                     return
                 }
                 cont.resume(returning: idToken)

@@ -89,7 +89,7 @@ final class Outbox {
     func send(_ api: APIClient, _ path: String, method: String, body: (any Encodable)?) async throws {
         // No one signed in: nothing to queue it for (it must not land in an account's queue).
         guard api.currentUserId != nil else {
-            throw APIError(message: "انتهت الجلسة، سجّل دخولك من جديد.", kind: .unauthorized)
+            throw APIError(message: L10nErrors.s("sessionEnded"), kind: .unauthorized)
         }
         bind(api)
         let op = Op(id: UUID(), method: method, path: path,

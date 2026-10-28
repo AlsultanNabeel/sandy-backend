@@ -76,7 +76,7 @@ private enum TelemetryValue: Decodable {
         if let b = try? c.decode(Bool.self)   { self = .bool(b);   return }
         if let i = try? c.decode(Int.self)    { self = .int(i);    return }
         if let s = try? c.decode(String.self) { self = .string(s); return }
-        throw DecodingError.dataCorruptedError(in: c, debugDescription: "قيمة تليمتري غير مدعومة")
+        throw DecodingError.dataCorruptedError(in: c, debugDescription: "unsupported telemetry value")
     }
 }
 
@@ -181,9 +181,7 @@ extension APIClient {
     /// `isNotConnected` reads.
     static func reachedTheBoard(_ reply: [String: Any]) throws {
         if (reply["sent"] as? Bool) == false {
-            throw APIError(message: AppLocale.isArabic
-                               ? "الأمر ما وصل للجهاز. جرّب كمان شوي."
-                               : "The command didn't reach the device. Try again in a moment.",
+            throw APIError(message: L10nErrors.s("deviceNotSent"),
                            code: "not_sent", kind: .unknown)
         }
     }

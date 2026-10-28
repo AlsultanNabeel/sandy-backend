@@ -28,9 +28,9 @@ import Foundation
 // ─────────────────────────────────────────────────────────────────────────
 enum AppLocale {
 
-    /// The app's chosen language (default ar), readable from any thread.
+    /// The app's chosen language (the phone's until one is chosen), readable from any thread.
     static var lang: AppLang {
-        AppLang(rawValue: UserDefaults.standard.string(forKey: "sandy_lang") ?? "") ?? .ar
+        AppLang(rawValue: UserDefaults.standard.string(forKey: "sandy_lang") ?? "") ?? AppLang.initial()
     }
 
     /// True when the app language is Arabic.
