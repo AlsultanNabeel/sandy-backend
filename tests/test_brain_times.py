@@ -79,7 +79,11 @@ def test_repeat_changed_stopped_and_one_skipped(tenant):
     first = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=2)
     sid = schedules.add("reminder", "الدوا", first, recurrence="FREQ=DAILY")
     assert _run("schedule_update", id=sid, skip_next=True)["ok"]
-    assert W.aware_utc(schedules.get(sid)["fire_at"]) == first + timedelta(days=1)
+    # The same wall-clock time the next day: across a clock change that is 23 or 25 hours.
+    local = first.astimezone(T.current_zone())
+    tomorrow = datetime.combine(local.date() + timedelta(days=1), local.time().replace(tzinfo=None),
+                                tzinfo=T.current_zone())
+    assert W.aware_utc(schedules.get(sid)["fire_at"]) == tomorrow.astimezone(timezone.utc)
     assert _run("schedule_update", id=sid, recurrence="weekly")["ok"]
     assert schedules.get(sid)["recurrence"] == "FREQ=WEEKLY"
     assert _run("schedule_update", id=sid, stop_repeat=True)["ok"]
