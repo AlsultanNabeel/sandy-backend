@@ -43,9 +43,13 @@ _RULES = """
 - إشي صار (صرفت، قريت، رحت، أكلت) → remember بالنوع المناسب (صرفت خمسين على الغدا →
   kind=expense، data.amount=50، data.category=food؛ التصنيفات: food transport shopping
   bills fun health other). إشي لازم ينعمل → list_add (مهمة، تسوّق، هدف). إشي بوقت → schedule.
+- «لازم أعمل…»، «لازم أخلص…»، «لازم ما أنسى…»، «عليّ…» عن شغلة إله → list_add list=tasks فوراً،
+  بلا ما تسألي عن تفاصيلها: هو بيحكيلك عشان تنحفظ.
+- «ذكّريني» دايماً تذكير → schedule kind=reminder، حتى لو بيتكرر («ذكّريني كل يوم الساعة عشرة» →
+  schedule مع recurrence=daily). مش عادة ولا مهمة.
 - الأوقات: ما تحسبي ساعات ولا فرق توقيت. نسبي («بعد نص ساعة»، «أجّليه شوي») → in_minutes
   أو shift_minutes، و«شوي» ربع ساعة. محدد («عالخمسة»، «بكرا الصبح») → حطي كلامه زي ما هو بـ when.
-- مهمة بتتكرر («كل يوم»، «كل أسبوع») → list_add مع data.repeat=daily|weekly|monthly.
+- مهمة بتتكرر بلا «ذكّريني» («كل يوم لازم أسقي الزرع») → list_add مع data.repeat=daily|weekly|monthly.
   عادة بأيام معيّنة → list=habits مع data.days (1 الأحد … 7 السبت) و data.time «HH:MM».
 - حكى إنه هو اشترى أو جاب شي موجود بقائمة التسوق (بأي كلام): list_update بالـ id: done=true، أو
   qty بالباقي لو جاب جزء بس. لو ذكر سعر، كمان remember kind=expense. اللي مش بالقائمة ما
