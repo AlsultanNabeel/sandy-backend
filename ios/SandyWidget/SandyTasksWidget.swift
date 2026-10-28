@@ -11,7 +11,6 @@ import WidgetKit
 private enum TaskKeys {
     static let openTasks = "open_tasks"          // SandyApp/Widgets/WidgetData.swift
     static let activeTasks = "active_tasks"
-    static let lang = "app_lang"
     static let keychainService = "com.sandy.app" // SandyApp/Core/Auth/Keychain.swift
     static let keychainAccount = "auth.token"
     static let baseURL = "share_base_url"        // SandyApp/Core/Shared/SharedAuth.swift
@@ -64,7 +63,7 @@ private enum WidgetTaskCache {
         store?.set(max(0, n + delta), forKey: TaskKeys.activeTasks)
     }
 
-    static var isArabic: Bool { store?.string(forKey: TaskKeys.lang) != "en" }
+    static var isArabic: Bool { WidgetLanguage.isArabic }
 
     /// Open tasks in all, as the app last counted them (the widget's ✓ keeps it in step).
     static var activeCount: Int { store?.integer(forKey: TaskKeys.activeTasks) ?? 0 }
@@ -155,9 +154,11 @@ struct SandyTasksEntry: TimelineEntry {
 struct SandyTasksProvider: TimelineProvider {
     func placeholder(in context: Context) -> SandyTasksEntry {
         SandyTasksEntry(date: Date(),
-                        tasks: [WidgetTask(id: "1", text: "مهمة"),
-                                WidgetTask(id: "2", text: "مهمة تانية"),
-                                WidgetTask(id: "3", text: "مهمة تالتة")],
+                        tasks: WidgetLanguage.isArabic
+                            ? [WidgetTask(id: "1", text: "مهمة"), WidgetTask(id: "2", text: "مهمة تانية"),
+                               WidgetTask(id: "3", text: "مهمة تالتة")]
+                            : [WidgetTask(id: "1", text: "A task"), WidgetTask(id: "2", text: "Another task"),
+                               WidgetTask(id: "3", text: "A third task")],
                         total: 3, signedIn: true)
     }
 
@@ -275,8 +276,9 @@ struct SandyTasksWidget: Widget {
         StaticConfiguration(kind: Self.kind, provider: SandyTasksProvider()) { entry in
             SandyTasksWidgetView(entry: entry)
         }
-        .configurationDisplayName("مهام ساندي")
-        .description("أوّل تلات مهام — كمّلها من هون.")
+        .configurationDisplayName(WidgetLanguage.isArabic ? "مهام ساندي" : "Sandy's tasks")
+        .description(WidgetLanguage.isArabic ? "أوّل تلات مهام — كمّلها من هون."
+                                              : "Your first three tasks — finish them from here.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

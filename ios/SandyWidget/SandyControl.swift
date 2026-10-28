@@ -7,10 +7,7 @@ import WidgetKit
 struct TalkToSandyControl: ControlWidget {
     static let kind = "com.sandy.app.control.talk"
 
-    /// As the app last wrote it to the App Group (default Arabic).
-    private var isArabic: Bool {
-        UserDefaults(suiteName: SandyLinks.appGroup)?.string(forKey: "app_lang") != "en"
-    }
+    private var isArabic: Bool { WidgetLanguage.isArabic }
 
     var body: some ControlWidgetConfiguration {
         let ar = isArabic

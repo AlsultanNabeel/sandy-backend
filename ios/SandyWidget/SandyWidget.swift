@@ -18,7 +18,7 @@ struct SandyProvider: TimelineProvider {
     private var store: UserDefaults? { UserDefaults(suiteName: appGroup) }
 
     func placeholder(in context: Context) -> SandyEntry {
-        SandyEntry(date: Date(), reminderText: "تذكيرك الجاي",
+        SandyEntry(date: Date(), reminderText: WidgetLanguage.isArabic ? "تذكيرك الجاي" : "Your next reminder",
                    reminderAt: Date().addingTimeInterval(3600), activeTasks: 3)
     }
 
@@ -52,7 +52,7 @@ struct SandyProvider: TimelineProvider {
             reminderText: ring?.text,
             reminderAt: ring?.at,
             activeTasks: store?.integer(forKey: "active_tasks") ?? 0,
-            isArabic: (store?.string(forKey: "app_lang") ?? "ar") != "en")
+            isArabic: WidgetLanguage.isArabic)
     }
 }
 
@@ -217,8 +217,8 @@ struct SandyWidget: Widget {
         StaticConfiguration(kind: kind, provider: SandyProvider()) { entry in
             SandyWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("ساندي")
-        .description("تذكيرك الجاي ومهامك.")
+        .configurationDisplayName(WidgetLanguage.isArabic ? "ساندي" : "Sandy")
+        .description(WidgetLanguage.isArabic ? "تذكيرك الجاي ومهامك." : "Your next reminder and your tasks.")
         .supportedFamilies([.systemSmall, .systemMedium,
                             .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
