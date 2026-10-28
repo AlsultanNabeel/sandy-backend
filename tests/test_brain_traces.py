@@ -56,7 +56,7 @@ def test_tools_run_side_by_side_are_both_traced(brain_db, monkeypatch):  # noqa:
     _turn(ScriptedModel(tools_reply(call("weather", "c1", city="عمان"),
                                     call("web_search", "c2", query="أخبار")),
                         text_reply("تمام")), "الطقس والأخبار")
-    [row] = _rows(brain_db)
+    [row] = [r for r in _rows(brain_db) if r["source"] == "chat"]
     assert sorted(t["name"] for t in row["tools"]) == ["weather", "web_search"]
 
 
