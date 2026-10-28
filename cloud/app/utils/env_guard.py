@@ -16,7 +16,9 @@ A staging server is refused when it is wired to production in any way:
 
 Production is refused on a database marked staging. Every problem is named at once, by
 setting name only: no value is logged or raised, and no password is read for itself.
-`check` runs first thing in `bootstrap.bootstrap`; a refusal stops the boot.
+`check_settings` runs first in `bootstrap.init_runtime`, before any connection; `check`
+runs once the database is open and before anything else touches it or the broker opens.
+A refusal stops the boot.
 """
 
 from __future__ import annotations
@@ -67,6 +69,20 @@ def problems(environ: Mapping[str, str]) -> List[str]:
     return found
 
 
+def _refuse(env: str, found: List[str]) -> None:
+    for p in found:
+        logger.error("[env_guard] %s", p)
+    raise EnvGuardError(f"Sandy ({env}) refuses to start: " + "; ".join(found))
+
+
+def check_settings(environ: Optional[Mapping[str, str]] = None) -> None:
+    """Raise `EnvGuardError` when the settings alone wire this server to the other side."""
+    environ = os.environ if environ is None else environ
+    found = problems(environ)
+    if found:
+        _refuse(env_of(environ), found)
+
+
 def _marked(db: Any) -> Optional[str]:
     row = db[MARKER].find_one({"_id": "env"})
     return str(row.get("env")) if row else None
@@ -81,9 +97,7 @@ def check(db: Any, environ: Optional[Mapping[str, str]] = None) -> None:
     if marked is not None and marked != env:
         found.append(f"the database is marked {marked}; this server is {env}")
     if found:
-        for p in found:
-            logger.error("[env_guard] %s", p)
-        raise EnvGuardError(f"Sandy ({env}) refuses to start: " + "; ".join(found))
+        _refuse(env, found)
     if db is not None and marked is None:
         db[MARKER].update_one({"_id": "env"},
                               {"$setOnInsert": {"env": env, "at": datetime.now(timezone.utc)}},

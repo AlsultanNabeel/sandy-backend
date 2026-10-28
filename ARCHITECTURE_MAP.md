@@ -68,17 +68,18 @@ Heroku app name is inherited from the old project; the code and data on it are
 this one's. Production is also what the robot on the owner's desk is talking to.
 
 **Staging** is a second Heroku app with `APP_ENV=staging` and its own database (the
-owner's runbook, kept locally, is `docs/STAGING.md`). `utils/env_guard.py` runs first in
-`bootstrap.bootstrap` and refuses to start a staging server wired to production: the
+owner's runbook, kept locally, is `docs/STAGING.md`; the app itself is put off until before
+the first real user). `utils/env_guard.py` runs first in `bootstrap.init_runtime`: the
+settings before any connection (`check_settings`), the database's mark as soon as it is
+open and before any store or the broker (`check`). It refuses to start a staging server
+wired to production: the
 production database by name (`sandy-app`) or by its mark, production's broker login (host
 and `sandy-server` together, or the host inside `SANDY_BROKER_CREDS`), or any `APNS_*`,
 `REVENUECAT_WEBHOOK_AUTH` or `SANDY_FIRMWARE_TOKEN`. Each database is marked with the
 environment that first booted on it (`sandy_env`, `{_id: "env", env}`), and production
 refuses a database marked staging. Problems are named by setting, never by value. On
 staging `apns.is_configured()` is false whatever is set, and every Sentry event carries
-`environment` and an `env` tag. The guard runs after `init_runtime`, which has already
-opened the broker listener; a staging app given production's broker is refused within the
-same boot, before it serves a request.
+`environment` and an `env` tag.
 
 ---
 

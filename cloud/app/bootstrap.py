@@ -53,6 +53,10 @@ def init_runtime() -> None:
     global _initialized
     if _initialized:
         return
+    # Before any connection: a staging server wired to production (or the reverse) stops here.
+    from app.utils import env_guard
+
+    env_guard.check_settings()
     from app.config import MONGODB_DB_NAME, MONGODB_URI
     from app.db import configure
     from app.features.device_store import init_device_store
@@ -69,6 +73,8 @@ def init_runtime() -> None:
     from app.integrations.mqtt_ingest import start_mqtt_ingest
 
     _client, mongo_db = init_mongo_connection(MONGODB_URI, MONGODB_DB_NAME)
+    # The database's own mark, before any store writes to it and before the broker opens.
+    env_guard.check(mongo_db)
     # Every store reads the one handle through app.db.get_db().
     configure(mongo_db)
     for init in (init_users_store, init_speaker_store, init_photo_album, init_focus_store,
@@ -176,12 +182,6 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
 
     configure_logging(LOG_LEVEL)
 
-    # Before anything else: a staging server wired to production (or the reverse) stops here.
-    from app.db import get_db
-    from app.utils import env_guard
-
-    env_guard.check(get_db())
-
     fatal, warnings = validate_config()
     for msg in warnings:
         logger.warning("[Bootstrap] config warning: %s", msg)
@@ -207,6 +207,7 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
 
     # The Atlas vector index is made on Atlas's time, never boot's.
     from app.blocks import vector_index
+    from app.db import get_db
 
     if get_db() is not None:
         vector_index.ensure_in_background(get_db())

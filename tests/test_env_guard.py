@@ -106,15 +106,44 @@ def test_a_refused_staging_never_marks_the_database():
     assert db[G.MARKER].count_documents({}) == 0
 
 
-def test_boot_refuses_before_anything_else_runs(monkeypatch):
+def _boot(monkeypatch, env, marked=None):
+    """init_runtime with the database and the broker replaced by recorders."""
     from app import bootstrap as B
-    ran = []
-    monkeypatch.setattr(B, "ensure_indexes", lambda: ran.append("indexes"))
-    monkeypatch.setattr(B, "write_google_credentials", lambda: ran.append("google"))
-    monkeypatch.setattr("app.config.validate_config", lambda: ([], []))
-    monkeypatch.setattr("app.db.get_db", lambda: _db())
-    monkeypatch.setenv("APP_ENV", "staging")
-    monkeypatch.setenv("MONGODB_DB_NAME", "sandy-app")
+    from app.integrations import mongodb_store, mqtt_ingest
+
+    db = _db()
+    if marked:
+        db[G.MARKER].insert_one({"_id": "env", "env": marked})
+    calls = []
+    monkeypatch.setattr(B, "_initialized", False)
+    monkeypatch.setattr(mongodb_store, "init_mongo_connection",
+                        lambda uri, name: calls.append("mongo") or (None, db))
+    monkeypatch.setattr(mqtt_ingest, "start_mqtt_ingest", lambda: calls.append("broker"))
+    for k in list(G.STAGING_FORBIDDEN) + ["APP_ENV", "MONGODB_DB_NAME", "SANDY_MQTT_HOST",
+                                          "SANDY_MQTT_USER", "SANDY_BROKER_CREDS", "APNS_KEY_ID"]:
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    return B, calls, db
+
+
+def test_wrong_settings_stop_the_boot_before_any_connection(monkeypatch):
+    B, calls, _ = _boot(monkeypatch, {**CLEAN, "SANDY_MQTT_HOST": PROD_HOST,
+                                      "SANDY_MQTT_USER": "sandy-server"})
     with pytest.raises(G.EnvGuardError):
-        B.bootstrap(app_env="staging")
-    assert ran == []
+        B.init_runtime()
+    assert calls == [], f"connected before the guard: {calls}"
+
+
+def test_a_database_marked_production_stops_staging_before_the_broker(monkeypatch):
+    B, calls, _ = _boot(monkeypatch, CLEAN, marked="prod")
+    with pytest.raises(G.EnvGuardError):
+        B.init_runtime()
+    assert calls == ["mongo"], f"the broker was opened before the guard: {calls}"
+
+
+def test_a_clean_staging_boot_marks_then_opens_the_broker(monkeypatch):
+    B, calls, db = _boot(monkeypatch, CLEAN)
+    B.init_runtime()
+    assert calls == ["mongo", "broker"]
+    assert db[G.MARKER].find_one({"_id": "env"})["env"] == "staging"
