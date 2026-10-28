@@ -9,6 +9,8 @@ conversation. A step checks any of:
   entry                          a log row of `kind` (`has`, `amount`)
   pending                        True: it waits for a yes; False: nothing waits
   reply_has / english            words in the reply; the reply is in English
+  args                           {tool: {arg: value}}: one call of that tool carries these
+                                 values (a word of text is found inside the call's text)
 Checks look at what was done, not at the wording, so a good reply in other words passes.
 Add the sentence that went wrong in real use, not an invented one.
 """
@@ -23,6 +25,7 @@ CASES = [
     # ── Lists ──
     {"name": "shopping add", "steps": [
         {"say": "ضيفي حليب وخبز لقائمة الأغراض", "tools": ["list_add"],
+         "args": {"list_add": {"list": "shopping"}},
          "item": {"list": "shopping", "has": "خبز"}}]},
     {"name": "shopping implied", "steps": [
         {"say": "خلص الحليب من البيت", "tools": ["list_add"], "item": {"list": "shopping", "has": "حليب"}}]},
@@ -52,12 +55,14 @@ CASES = [
 
     # ── Reminders ──
     {"name": "reminder relative", "steps": [
-        {"say": "ذكريني بعد ساعة أتصل بأمي", "tools": ["schedule"], "schedule": {"has": "أمي"}}]},
+        {"say": "ذكريني بعد ساعة أتصل بأمي", "tools": ["schedule"], "schedule": {"has": "أمي"},
+         "args": {"schedule": {"kind": "reminder"}}}]},
     {"name": "reminder clock", "steps": [
         {"say": "ذكريني بكرا الساعة تسعة الصبح بموعد الدكتور", "tools": ["schedule"],
          "schedule": {"has": "الدكتور"}}]},
     {"name": "reminder repeats", "steps": [
         {"say": "ذكريني كل يوم الساعة عشرة بالليل آخد الدوا", "tools": ["schedule"],
+         "args": {"schedule": {"kind": "reminder"}},
          "schedule": {"has": "الدوا", "repeats": True}}]},
     {"name": "reminder move", "setup": [{"reminder": {"text": "اجتماع الفريق"}}], "steps": [
         {"say": "أجلي تذكير الاجتماع ساعة", "tools": ["schedule_update"], "schedule": {"has": "اجتماع"}}]},
@@ -88,9 +93,11 @@ CASES = [
 
     # ── Devices and the world ──
     {"name": "device on", "steps": [
-        {"say": "ممكن تشغلي ضو الصالون", "tools": ["device_control"]}]},
+        {"say": "ممكن تشغلي ضو الصالون", "tools": ["device_control"],
+         "args": {"device_control": {"action": "on"}}}]},
     {"name": "device room", "steps": [
-        {"say": "طفي كل إشي بالمطبخ", "tools": ["device_control"]}]},
+        {"say": "طفي كل إشي بالمطبخ", "tools": ["device_control"],
+         "args": {"device_control": {"action": "off"}}}]},
     {"name": "device later", "steps": [
         {"say": "طفي المكيف بعد ساعة", "tools": ["schedule"], "not_tools": ["device_control"]}]},
     {"name": "device question", "steps": [

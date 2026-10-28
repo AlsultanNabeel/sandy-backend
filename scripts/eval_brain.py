@@ -6,48 +6,68 @@ whether she actually understands. Run it before changing the model or the prompt
     ~/sandy_app_venv/bin/python scripts/eval_brain.py                 # every case
     ~/sandy_app_venv/bin/python scripts/eval_brain.py --model gpt-4.1 # another deployment
     ~/sandy_app_venv/bin/python scripts/eval_brain.py --only expense  # cases by name
+    ~/sandy_app_venv/bin/python scripts/eval_brain.py --repeat 2      # each case twice
+    ~/sandy_app_venv/bin/python scripts/eval_brain.py --save          # keep the result
 
-It costs model calls (about two per step). Nothing real is touched: the blocks live in
-an in-memory database, and the tools that reach outside (devices, scenes, search,
-weather, images) are stand-ins that only record they were called. The cases are in
-`eval_cases.py`.
+It costs model calls (about two per step), and prints what they cost (`features/pricing.py`,
+from the turn traces). Nothing real is touched: the blocks live in an in-memory database,
+and the tools that reach outside (devices, scenes, search, weather, images) are stand-ins
+that only record they were called. The cases are in `eval_cases.py`.
+
+`--repeat N` runs every case N times and names the ones whose outcome differed. `--save`
+writes the result to `eval_results/<when>.json`; the first one saved becomes
+`eval_results/baseline.json`, and every later run is compared with it: what fell, what
+rose. More than `ALLOWED_DIFFERENCES` cases moved, or a repeat disagreeing that often,
+fails the run.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "cloud"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 
-def _args() -> argparse.Namespace:
+RESULTS = ROOT / "scripts" / "eval_results"
+# Two runs of the same cases may disagree on this many and still count as the same.
+ALLOWED_DIFFERENCES = 2
+
+
+def _args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--model", help="Azure chat deployment to test (default: the .env one)")
     p.add_argument("--only", default="", help="run only the cases whose name contains this")
     p.add_argument("--verbose", action="store_true", help="print every reply")
-    return p.parse_args()
+    p.add_argument("--repeat", type=int, default=1, help="run every case this many times")
+    p.add_argument("--save", action="store_true",
+                   help="save the result under eval_results/ and compare it with the baseline")
+    return p.parse_args(argv)
 
 
-ARGS = _args()
-from dotenv import load_dotenv  # noqa: E402
+# Imported (by its tests) it reads no command line and no .env: only a run does.
+ARGS = _args() if __name__ == "__main__" else _args([])
+if __name__ == "__main__":
+    from dotenv import load_dotenv
 
-load_dotenv(ROOT / ".env", override=True)
-if ARGS.model:
-    os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT"] = ARGS.model
+    load_dotenv(ROOT / ".env", override=True)
+    if ARGS.model:
+        os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT"] = ARGS.model
 
 import mongomock  # noqa: E402
 
 from app import db as appdb  # noqa: E402
 from app.blocks import entries, init_blocks, items, schedules  # noqa: E402
 from app.brain import loop, tools  # noqa: E402
-from app.features import device_store  # noqa: E402
+from app.features import device_store, trace_store  # noqa: E402
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 from eval_cases import CASES, DEVICES  # noqa: E402
 
@@ -145,22 +165,89 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
     return bad
 
 
+def _arg_matches(want: Any, got: Any) -> bool:
+    """A word of text is found inside the call's text; anything else must be equal."""
+    if isinstance(want, str) and isinstance(got, str):
+        return want == got or want in got
+    return want == got
+
+
+def _args_check(want: Dict[str, Dict[str, Any]], calls: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
+    """For each tool in ``want``, one of its calls carries every value asked for."""
+    bad: List[str] = []
+    for name, expected in want.items():
+        made = [a for n, a in calls if n == name]
+        if not any(all(_arg_matches(v, a.get(k)) for k, v in expected.items()) for a in made):
+            bad.append(f"{name} ما انطلبت بـ {expected} (انطلبت بـ {made or 'ولا مرة'})")
+    return bad
+
+
+def _spent() -> Dict[str, Any]:
+    """Tokens and dollars of every turn in this database, from its traces."""
+    rows = list(appdb.get_db()[trace_store.COLLECTION].find(
+        {}, {"tokens_in": 1, "tokens_out": 1, "cost_usd": 1}).limit(10_000))
+    return {"tokens_in": sum(int(r.get("tokens_in") or 0) for r in rows),
+            "tokens_out": sum(int(r.get("tokens_out") or 0) for r in rows),
+            "usd": sum(float(r.get("cost_usd") or 0) for r in rows)}
+
+
 def _run_case(case: Dict[str, Any]) -> Dict[str, Any]:
     _fresh_db()
     pending, failures, seconds = None, [], 0.0
-    with active_user_profile_context(USER):
-        _setup(case.get("setup", []))
-        for n, step in enumerate(case["steps"], 1):
-            began = time.monotonic()
-            state = loop.run_turn(step["say"], user_id="eval", chat_id="eval",
-                                  source="web", pending_state=pending)
-            seconds += time.monotonic() - began
-            pending = state.get("pending_state")
-            used = list(state.get("tools_used") or [])
-            if ARGS.verbose:
-                print(f"    «{step['say']}» → {used} → {state.get('final_response')!r}")
-            failures += [f"خطوة {n}: {b}" for b in _check(step, state, used)]
-    return {"name": case["name"], "failures": failures, "seconds": seconds}
+    calls: List[Tuple[str, Dict[str, Any]]] = []
+    real_execute = tools.execute
+
+    def recording(name, args, ctx):
+        calls.append((name, dict(args or {})))
+        return real_execute(name, args, ctx)
+
+    tools.execute = recording
+    try:
+        with active_user_profile_context(USER):
+            _setup(case.get("setup", []))
+            for n, step in enumerate(case["steps"], 1):
+                calls.clear()
+                began = time.monotonic()
+                state = loop.run_turn(step["say"], user_id="eval", chat_id="eval",
+                                      source="web", pending_state=pending)
+                seconds += time.monotonic() - began
+                pending = state.get("pending_state")
+                used = list(state.get("tools_used") or [])
+                if ARGS.verbose:
+                    print(f"    «{step['say']}» → {calls} → {state.get('final_response')!r}")
+                bad = _check(step, state, used) + _args_check(step.get("args", {}), calls)
+                failures += [f"خطوة {n}: {b}" for b in bad]
+    finally:
+        tools.execute = real_execute
+    return {"name": case["name"], "failures": failures, "seconds": seconds, **_spent()}
+
+
+def _disagreeing(runs: Dict[str, List[bool]]) -> List[str]:
+    """The cases that passed in one repeat and failed in another."""
+    return sorted(name for name, outcomes in runs.items() if len(set(outcomes)) > 1)
+
+
+def _compare(base: Dict[str, Any], now: Dict[str, Any]) -> Dict[str, List[str]]:
+    before, after = base.get("cases") or {}, now.get("cases") or {}
+    return {"fell": sorted(n for n, ok in after.items() if n in before and before[n] and not ok),
+            "rose": sorted(n for n, ok in after.items() if n in before and not before[n] and ok),
+            "new": sorted(n for n in after if n not in before)}
+
+
+def _differences(moved: Dict[str, List[str]]) -> int:
+    return len(moved["fell"]) + len(moved["rose"])
+
+
+def _save(result: Dict[str, Any], folder: Path = RESULTS) -> Tuple[Path, Optional[Dict[str, Any]]]:
+    """Write the result; the baseline it is compared with, or None when this one became it."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{result['when'].replace(':', '')}.json"
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+    baseline = folder / "baseline.json"
+    if not baseline.exists():
+        baseline.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        return path, None
+    return path, json.loads(baseline.read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -170,22 +257,49 @@ def main() -> int:
     # Embeddings would cost a call per entry and find nothing in a fresh database.
     entries.embed_text = lambda text: None
 
+    model = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.environ.get("OPENAI_MODEL")
     cases = [c for c in CASES if ARGS.only in c["name"]]
-    print(f"model: {os.environ.get('AZURE_OPENAI_CHAT_DEPLOYMENT') or os.environ.get('OPENAI_MODEL')}"
-          f" — {len(cases)} cases\n")
-    results = []
+    repeat = max(ARGS.repeat, 1)
+    print(f"model: {model} — {len(cases)} cases × {repeat}\n")
+    runs: Dict[str, List[bool]] = {}
+    seconds, spent = 0.0, {"tokens_in": 0, "tokens_out": 0, "usd": 0.0}
     for case in cases:
-        r = _run_case(case)
-        results.append(r)
-        mark = "✓" if not r["failures"] else "✗"
-        print(f"{mark} {r['name']}  ({r['seconds']:.1f}s)")
-        for f in r["failures"]:
-            print(f"    {f}")
-    passed = sum(not r["failures"] for r in results)
-    total_s = sum(r["seconds"] for r in results)
-    print(f"\n{passed}/{len(results)} passed ({100 * passed // max(len(results), 1)}%), "
-          f"average {total_s / max(sum(len(c['steps']) for c in cases), 1):.1f}s a message")
-    return 0 if passed == len(results) else 1
+        for _ in range(repeat):
+            r = _run_case(case)
+            runs.setdefault(r["name"], []).append(not r["failures"])
+            seconds += r["seconds"]
+            for k in spent:
+                spent[k] += r[k]
+            mark = "✓" if not r["failures"] else "✗"
+            print(f"{mark} {r['name']}  ({r['seconds']:.1f}s)")
+            for f in r["failures"]:
+                print(f"    {f}")
+    # A case counts as passed only when every repeat passed.
+    outcome = {name: all(oks) for name, oks in runs.items()}
+    passed = sum(outcome.values())
+    messages = repeat * sum(len(c["steps"]) for c in cases)
+    print(f"\n{passed}/{len(outcome)} passed ({100 * passed // max(len(outcome), 1)}%), "
+          f"average {seconds / max(messages, 1):.1f}s a message")
+    print(f"cost: ${spent['usd']:.4f} ({spent['tokens_in']} tokens in, {spent['tokens_out']} out)")
+    ok = passed == len(outcome)
+    split = _disagreeing(runs)
+    if repeat > 1:
+        print(f"repeats disagreed on {len(split)} case(s): {split or '—'}")
+        ok &= len(split) <= ALLOWED_DIFFERENCES
+    if ARGS.save:
+        result = {"when": datetime.now().strftime("%Y-%m-%dT%H:%M"), "model": model,
+                  "repeat": repeat, "passed": passed, "total": len(outcome), "cases": outcome,
+                  "disagreed": split, "seconds": round(seconds, 1), **spent}
+        path, base = _save(result)
+        print(f"saved: {path.relative_to(ROOT)}")
+        if base is None:
+            print("this is the baseline now")
+        else:
+            moved = _compare(base, result)
+            print(f"against the baseline ({base['when']}, {base['passed']}/{base['total']}): "
+                  f"fell {moved['fell'] or '—'}, rose {moved['rose'] or '—'}, new {moved['new'] or '—'}")
+            ok &= _differences(moved) <= ALLOWED_DIFFERENCES
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
