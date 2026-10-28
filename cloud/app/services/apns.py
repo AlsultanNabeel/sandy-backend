@@ -39,6 +39,12 @@ def _key_p8() -> str:
 
 
 def is_configured() -> bool:
+    """Apple's keys are all there and this is not staging: a staging server never pushes,
+    even with the keys filled in by mistake (the boot guard refuses them too)."""
+    from app.utils.env_guard import env_of
+
+    if env_of(os.environ) == "staging":
+        return False
     return bool(
         _key_p8()
         and os.getenv("APNS_KEY_ID", "").strip()

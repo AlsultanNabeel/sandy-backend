@@ -80,6 +80,11 @@ def _before_send(event: Dict[str, Any], hint: Any) -> Optional[Dict[str, Any]]:
         for key in ("extra", "contexts", "tags"):
             if key in event:
                 event[key] = _scrub(event[key])
+        # Every event says which server sent it: staging's errors never pass for production's.
+        from app.config import APP_ENV
+
+        tags = event.get("tags")
+        event["tags"] = {**(tags if isinstance(tags, dict) else {}), "env": APP_ENV}
         # INFO breadcrumbs contain user text; keep only the "[tag]".
         crumbs = event.get("breadcrumbs")
         values = crumbs.get("values") if isinstance(crumbs, dict) else crumbs
