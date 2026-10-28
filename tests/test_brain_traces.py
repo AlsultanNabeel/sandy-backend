@@ -157,3 +157,36 @@ def test_the_direct_fallback_reports_its_tokens(monkeypatch):
     with trace_store.using(t):
         model._openai_direct([{"role": "user", "content": "x"}], [])
     assert [(c["provider"], c["tokens_in"]) for c in t.model_calls] == [("openai", 40)]
+
+
+def test_a_call_is_priced_by_the_model_that_answered_not_the_deployment():
+    """An Azure deployment has a name of its own («sandy-chat»); the reply names the model."""
+    usage = NS(prompt_tokens=10, completion_tokens=1, prompt_tokens_details=None)
+    t = trace_store.Trace("u", "chat")
+    with trace_store.using(t):
+        openai_client.create_chat_completion(
+            [{"role": "user", "content": "x"}], openai_client=None,
+            azure_openai_client=_client(lambda kw: NS(usage=usage, model="gpt-4.1-2025-04-14",
+                                                      choices=[])),
+            azure_chat_deployment="sandy-chat")
+    assert t.model_calls[0]["model"] == "gpt-4.1-2025-04-14"
+
+
+def test_a_stream_is_priced_by_the_model_its_chunks_name():
+    chunks = [NS(choices=[], model="gpt-4.1-mini-2025-04-14",
+                 usage=NS(prompt_tokens=5, completion_tokens=1, prompt_tokens_details=None))]
+    t = trace_store.Trace("u", "chat")
+    with trace_store.using(t):
+        list(openai_client.create_chat_completion(
+            [{"role": "user", "content": "x"}], openai_client=None, stream=True,
+            azure_openai_client=_client(lambda kw: iter(chunks)), azure_chat_deployment="sandy-chat"))
+    assert t.model_calls[0]["model"] == "gpt-4.1-mini-2025-04-14"
+
+
+def test_an_unpriced_model_is_logged_not_counted_free_in_silence(caplog):
+    import logging
+
+    from app.features import pricing
+    with caplog.at_level(logging.WARNING):
+        assert pricing.cost("no-such-model-xyz", tokens_in=1, tokens_out=1) == 0.0
+    assert "no-such-model-xyz" in caplog.text

@@ -85,7 +85,9 @@ def create_chat_completion(
         raise RuntimeError("[OpenAI] Circuit OPEN — AI service temporarily unavailable")
     if stream:
         return _counting_stream(resp, provider, str(model_name or ""), t0)
-    _note_usage(provider, str(model_name or ""), getattr(resp, "usage", None), t0)
+    # Priced by the model that answered: an Azure deployment has a name of its own.
+    _note_usage(provider, str(getattr(resp, "model", None) or model_name or ""),
+                getattr(resp, "usage", None), t0)
     return resp
 
 
@@ -100,7 +102,7 @@ def _counting_stream(stream: Any, provider: str, model: str, t0: float) -> Itera
     for chunk in stream:
         usage = getattr(chunk, "usage", None)
         if usage is not None:
-            _note_usage(provider, model, usage, t0)
+            _note_usage(provider, str(getattr(chunk, "model", None) or model), usage, t0)
         yield chunk
 
 

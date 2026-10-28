@@ -208,7 +208,8 @@ chat title, the daily nudge, photo tags). A row holds the request, the reply, ev
 ms), the cost in dollars (`features/pricing.py`, the one place prices live, dated
 `PRICES_UPDATED`), `skills` and `task_id` for the phases that fill them, and `error`.
 The tokens are counted at the one client (`openai_client.create_chat_completion`, a
-stream asks for them with `stream_options.include_usage`), on the direct fallback
+stream asks for them with `stream_options.include_usage`; a call is priced by the model the
+reply names, not the Azure deployment's own name, and a model with no price is a warning), on the direct fallback
 (`model._openai_direct`) and from the live call's `usage_metadata` (one model call a
 voice turn: every message reports the whole context in `prompt_tokens_details`, billed once
 a turn, so the input is the largest seen and only the answer's tokens add up; Google's
