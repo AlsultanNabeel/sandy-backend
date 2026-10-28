@@ -246,3 +246,21 @@ def test_the_rules_name_the_english_way_of_saying_each_thing():
     for phrase in ("undo", "bring it back", "delete", "remove", "remind me", "I need to",
                    "set up the room", "yes", "every Monday"):
         assert phrase in context._RULES, phrase
+
+
+@pytest.mark.parametrize("mood,arabic,english", [
+    ("sad", "للأسف ما زبط", "Unfortunately that didn't work"),
+    ("worried", "دير بالك عالطريق", "Watch out on the road"),
+    ("love", "بحبك كتير", "I love you too"),
+    ("big_happy", "ألف مبروك!", "Congratulations!"),
+    ("proud", "برافو عليك", "Great job on that"),
+    ("surprised", "عن جد؟", "No way!"),
+    ("playful", "ههههه", "hahaha"),
+    ("grateful", "شكراً إلك", "Thanks a lot"),
+    ("confused", "ما فهمت عليك", "I didn't understand that"),
+    ("thinking", "لحظة خليني أشوف", "Hold on, let me look"),
+    ("excited", "يلا نبلّش", "Let's do this"),
+])
+def test_her_face_reads_english_as_arabic(mood, arabic, english):
+    from app.api.voice_ws import face
+    assert face.mood_of(arabic) == mood and face.mood_of(english) == mood

@@ -12,17 +12,21 @@ _DIACRITICS = re.compile(r"[ً-ْـ]")
 
 # First match wins, so the sharper moods come before the broad ones.
 _MOODS = (
-    ("sad", r"للأسف|للاسف|آسفة|اسفة|بعتذر|معلش|زعلت|حزين|الله يرحم|بتمنالك الشفاء|sorry|sad"),
-    ("worried", r"انتبه|دير بالك|ديري بالك|خطر|قلقانة|خايفة|be careful|worried"),
-    ("love", r"بحبك|حبيبي|حبيبتي|يا قلبي|يا عمري|love you"),
-    ("big_happy", r"مبروك|ألف مبروك|الف مبروك|يا سلام|رائع|خطير|congrat|amazing"),
-    ("proud", r"أحسنت|احسنت|برافو|شاطر|فخورة|كفو|well done|proud"),
-    ("surprised", r"واو|معقول|عن جد|عنجد|يا الله|ما توقعت|wow|really\?"),
-    ("playful", r"ههه|هاها|بمزح|lol|haha"),
+    ("sad", r"للأسف|للاسف|آسفة|اسفة|بعتذر|معلش|زعلت|حزين|الله يرحم|بتمنالك الشفاء"
+            r"|sorry|sad|unfortunately|my condolences|get well"),
+    ("worried", r"انتبه|دير بالك|ديري بالك|خطر|قلقانة|خايفة"
+                r"|be careful|worried|watch out|careful|dangerous"),
+    ("love", r"بحبك|حبيبي|حبيبتي|يا قلبي|يا عمري|love you|sweetheart|my dear"),
+    ("big_happy", r"مبروك|ألف مبروك|الف مبروك|يا سلام|رائع|خطير|congrat|amazing|awesome|fantastic"),
+    ("proud", r"أحسنت|احسنت|برافو|شاطر|فخورة|كفو|well done|proud|great job|good job|nice work"),
+    ("surprised", r"واو|معقول|عن جد|عنجد|يا الله|ما توقعت|wow|really\?|no way|seriously\?"),
+    ("playful", r"ههه|هاها|بمزح|lol|haha|just kidding"),
     ("grateful", r"شكرا|شكراً|يسلمو|تسلم|thank"),
-    ("confused", r"ما فهمت|مش فاهمة|شو قصدك|ممكن تعيد|didn't catch|not sure what"),
-    ("thinking", r"خليني أشوف|خليني اشوف|لحظة|بفكر|let me check|one moment"),
-    ("excited", r"يلا|يلّا|متحمسة|let's go|excited"),
+    ("confused", r"ما فهمت|مش فاهمة|شو قصدك|ممكن تعيد|didn't catch|not sure what"
+                 r"|didn't understand|don't understand|what do you mean"),
+    ("thinking", r"خليني أشوف|خليني اشوف|لحظة|بفكر|let me check|one moment|let me look"
+                 r"|let me see|hold on|let me think"),
+    ("excited", r"يلا|يلّا|متحمسة|let's go|excited|let's do this"),
 )
 _COMPILED = tuple((name, re.compile(pattern, re.IGNORECASE)) for name, pattern in _MOODS)
 
