@@ -5,7 +5,7 @@ from __future__ import annotations
 from brain_fakes import A, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
 from app.blocks import items
-from app.brain import loop, voice
+from app.brain import lang, loop, voice
 from app.utils.user_profiles import active_user_profile_context
 
 
@@ -200,7 +200,7 @@ def test_a_turn_that_breaks_after_a_yes_ran_is_answered_not_raised(brain_db, mon
 
     monkeypatch.setattr(confirm, "following", _boom)
     state = _turn(ScriptedModel(), "اه", pending=held)      # raised before: a resend ran it again
-    assert _left(ids) == [] and state["final_response"] == loop.AFTER_WRITES_REPLY
+    assert _left(ids) == [] and state["final_response"] == lang.PHRASES["after_writes"]["ar"]
 
 
 # ── undo: a delete is kept seven days and comes back as it was ────────────────

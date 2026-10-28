@@ -7,7 +7,7 @@ from brain_fakes import (A, ScriptedModel, brain_db, call, on_node, text_reply, 
                          tools_reply)
 
 from app.blocks import items
-from app.brain import loop
+from app.brain import lang, loop
 from app.brain.model import Reply, clear_stream_hooks, set_stream_hooks
 from app.utils.user_profiles import active_user_profile_context
 
@@ -46,12 +46,12 @@ def test_iteration_cap_is_six_model_calls(brain_db):  # noqa: F811
                             for i in range(10)])
     state = _turn(model, "دوري")
     assert len(model.seen) == loop.MAX_STEPS == 6
-    assert state["final_response"] == loop.GAVE_UP_REPLY
+    assert state["final_response"] == lang.PHRASES["gave_up"]["ar"]
 
 
 def test_model_down_gives_the_error_sentence(brain_db):  # noqa: F811
     state = _turn(lambda m, t, on_text=None: None, "مرحبا")
-    assert state["final_response"] == loop.ERROR_REPLY and state["error"]
+    assert state["final_response"] == lang.PHRASES["error"]["ar"] and state["error"]
 
 
 def test_the_final_text_streams_through_the_hooks(brain_db):  # noqa: F811

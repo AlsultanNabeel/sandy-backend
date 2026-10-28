@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from app.blocks import _base as blocks_base
 from app.blocks import changes
 from app.utils.ltm_crypto import decrypt_field
-from app.brain import confirm, context, future, honesty, model, stm, stops, tools
+from app.brain import confirm, context, future, honesty, lang, model, stm, stops, tools
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
 from app.features import trace_store
@@ -28,11 +28,6 @@ from app.utils.tenant_version import turn_scope
 logger = logging.getLogger(__name__)
 
 MAX_STEPS = 6
-ERROR_REPLY = "حصل خطأ، حاول مرة ثانية."
-GAVE_UP_REPLY = "ما قدرت أكمّل هالطلب، جرّب تحكيه بطريقة تانية."
-# A turn that broke after it wrote: it happened, so it is answered (and kept in the send
-# ledger as done), never run again by a resend.
-AFTER_WRITES_REPLY = "صار خطأ بنص الطلب بعد ما نفّذت جزء منه. شوف القوائم قبل ما تعيده."
 # Tools whose `reply` is already the answer: when every call of the turn is one of these
 # and worked, that reply goes out with no second model call to restate it.
 ANSWER_TOOLS = frozenset({"device_control", "scene_apply", "room_restore", "image"})
@@ -83,13 +78,13 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
         if reply is None:
             if held is not None:
                 return _settled(replies, held, used)
-            return {"text": ERROR_REPLY, "pending": None, "tools": used, "error": True}
+            return {"text": lang.say("error"), "pending": None, "tools": used, "error": True}
         if not reply.tool_calls:
             if held is not None:
                 # The model's answer to the rest of the line stays (it has the tools'
                 # results), then the question; its own words replace the tools' replies.
                 return _settled([reply.text] if reply.text else replies, held, used)
-            return {"text": reply.text or GAVE_UP_REPLY, "pending": None, "tools": used}
+            return {"text": reply.text or lang.say("gave_up"), "pending": None, "tools": used}
         messages.append(_assistant_msg(reply))
         early = _run_side_by_side(reply.tool_calls, ctx)
         all_answered = True
@@ -158,7 +153,7 @@ def _settled(replies: List[str], held: Optional[Dict[str, Any]],
     the first part alone."""
     done = "\n".join(replies)
     if held is None:
-        return {"text": done or GAVE_UP_REPLY, "pending": None, "tools": used, "done": done}
+        return {"text": done or lang.say("gave_up"), "pending": None, "tools": used, "done": done}
     return {"text": "\n".join([*replies, confirm.ask(held)]), "pending": held, "tools": used,
             "done": done}
 
@@ -213,7 +208,7 @@ def _resolve_pending(pending: Dict[str, Any], message: str,
         settled = f"ما جاوب على «{summary}» وطلب إشي تاني، فانلغى وما انعمل"
     else:
         result = confirm.run_held(pending, ctx)
-        text = result.get("reply") or ("تم ✅" if result.get("ok") else GAVE_UP_REPLY)
+        text = result.get("reply") or (lang.say("done") if result.get("ok") else lang.say("gave_up"))
         outcome = {"text": text, "pending": None, "tools": used}
         settled = f"قال اه على «{summary}»، والنتيجة: {text}"
     if rest:
@@ -226,7 +221,7 @@ def _fast(message: str, ctx: TurnCtx, image_state) -> Optional[Dict[str, Any]]:
     if fc is None:
         return None
     result = tools.execute(fc["name"], fc.get("args") or {}, ctx)
-    return {"text": result.get("reply") or GAVE_UP_REPLY, "pending": None,
+    return {"text": result.get("reply") or lang.say("gave_up"), "pending": None,
             "tools": [fc["name"]], "fast": True}
 
 
@@ -239,7 +234,7 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
     trace = trace_store.Trace(user_id, "voice" if source == "voice" else "chat",
                               thread_id=str(conversation_id or chat_id))
     state = None
-    with turn_scope(), trace_store.using(trace):
+    with turn_scope(), trace_store.using(trace), lang.using(lang.of(message)):
         try:
             state = _run_turn(message, user_id, chat_id, pending_state=pending_state,
                               source=source, image_state=image_state,
@@ -253,6 +248,11 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
     trace.finish(request=message, reply=state["final_response"], routed_by=state["routed_by"],
                  error=state["error"])
     return state
+
+
+def _last_user_line(history: List[Dict[str, Any]]) -> str:
+    return next((str(m.get("content") or "") for m in reversed(history or [])
+                 if m.get("role") == "user"), "")
 
 
 def _user_content(message: str, attachments: List[Dict[str, Any]]) -> Any:
@@ -291,6 +291,8 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                   turn_id=turn_id)
     held = confirm.live(pending_state)
     _, history = stm.history(thread_id, user_id)
+    # A message with no letters («2», «👍») answers in the language the conversation is in.
+    lang.settle(lang.of(message, fallback=lang.of(_last_user_line(history))))
     # Everything the turn writes is journaled, a confirmed «yes» included, so a rewritten
     # or edited reply can take it all back.
     with blocks_base.journal() as effects, changes.recording(ctx.turn_id):
@@ -303,7 +305,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
             if not effects:
                 raise
             logger.exception("[brain] turn failed after it wrote %d row(s)", len(effects))
-            outcome = {"text": AFTER_WRITES_REPLY, "pending": None, "tools": [], "error": True}
+            outcome = {"text": lang.say("after_writes"), "pending": None, "tools": [], "error": True}
 
     if not (outcome.get("error") or outcome.get("stopped")):
         # Nothing is said to be done that no tool of the turn did (`honesty`).
@@ -403,5 +405,5 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
                                 stopped=lambda: stops.requested(user_id, thread_id, since=began))
         except Exception:  # noqa: BLE001 — the request boundary: answer, never 500
             logger.exception("[brain] turn failed")
-            outcome = {"text": ERROR_REPLY, "pending": None, "tools": [], "error": True}
+            outcome = {"text": lang.say("error"), "pending": None, "tools": [], "error": True}
     return outcome

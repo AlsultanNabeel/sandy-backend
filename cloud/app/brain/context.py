@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
 
-from app.brain import stm
+from app.brain import lang, stm
 from app.brain.persona import build_effective_persona
 from app.brain.tools_blocks import RANG_WINDOW
 from app.utils.ltm_crypto import decrypt_field
@@ -296,14 +296,10 @@ CHAT_CHANNEL = ("هلأ إنتِ بالشات المكتوب بالتطبيق: �
 SPOKEN_CHANNEL = ("هلأ إنتِ بتحكي معه بالصوت: ردّك بينسمع، فجمل قصيرة بدون إيموجي ولا رموز.")
 
 
-_ARABIC = re.compile(r"[\u0600-\u06ff]")
-_LATIN = re.compile(r"[A-Za-z]")
-
-
 def reply_language(message: str) -> str:
-    """The last line of the prompt: this message's language, whatever came before.
-    English when it has more Latin letters than Arabic ones, else Arabic."""
-    english = len(_LATIN.findall(message or "")) > len(_ARABIC.findall(message or ""))
+    """The last line of the prompt: this message's language, whatever came before
+    (`lang.of`; one with no letters keeps the turn's)."""
+    english = lang.of(message, fallback=lang.current()) == lang.EN
     return ("This message is in English: write your whole reply in English only, "
             "with no Arabic word in it." if english else
             "هالرسالة بالعربي: ردّك كله بالعربي بلهجتك، بدون ولا كلمة إنجليزي.")
