@@ -8,7 +8,8 @@ conversation. A step checks any of:
   schedule / no_schedule         a pending reminder (`has`; `repeats`)
   entry                          a log row of `kind` (`has`, `amount`)
   pending                        True: it waits for a yes; False: nothing waits
-  reply_has / english            words in the reply; the reply is in English
+  reply_has / reply_lacks        words that must / must not be in the reply
+  english                        the reply is in English
   args                           {tool: {arg: value}}: one call of that tool carries these
                                  values (a word of text is found inside the call's text)
 Checks look at what was done, not at the wording, so a good reply in other words passes.
@@ -52,6 +53,25 @@ CASES = [
                                                  {"item": {"list": "shopping", "text": "خبز"}}], "steps": [
         {"say": "فضّيلي قائمة التسوق", "pending": True},
         {"say": "لا خليها", "pending": False, "item": {"list": "shopping", "has": "حليب", "done": False}}]},
+
+    # ── What went wrong before: deletes, «no, put it back», missing rows, edits that change nothing ──
+    {"name": "delete one item", "setup": [{"item": {"list": "shopping", "text": "حليب"}},
+                                         {"item": {"list": "shopping", "text": "خبز"}}], "steps": [
+        {"say": "شيلي الخبز من الأغراض", "tools": ["list_delete"], "pending": False,
+         "no_item": {"list": "shopping", "has": "خبز"}, "item": {"list": "shopping", "has": "حليب"}}]},
+    {"name": "bulk delete asks then goes", "setup": [
+        {"item": {"list": "shopping", "text": t}} for t in ("حليب", "خبز", "بيض", "جبنة", "زيت", "سكر")], "steps": [
+        {"say": "امسحي كل قائمة التسوق", "pending": True, "item": {"list": "shopping", "has": "زيت"}},
+        {"say": "اه امسحيها", "pending": False, "no_item": {"list": "shopping", "has": "زيت"}}]},
+    {"name": "no put it back", "setup": [{"item": {"list": "tasks", "text": "أروح عالجيم"}}], "steps": [
+        {"say": "احذفي مهمة الجيم", "tools": ["list_delete"], "no_item": {"list": "tasks", "has": "الجيم"}},
+        {"say": "لا رجّعيه", "tools": ["undo"], "item": {"list": "tasks", "has": "الجيم"}}]},
+    {"name": "delete what is not there", "setup": [{"item": {"list": "shopping", "text": "حليب"}}], "steps": [
+        {"say": "احذفي البطيخ من الأغراض", "item": {"list": "shopping", "has": "حليب"},
+         "reply_lacks": ["حذفت", "شلت"]}]},
+    {"name": "an edit that changes nothing", "setup": [{"item": {"list": "tasks", "text": "أدفع الإيجار"}}], "steps": [
+        {"say": "غيّري مهمة الإيجار لأدفع الإيجار", "item": {"list": "tasks", "has": "أدفع الإيجار"},
+         "reply_lacks": ["عدّلت", "غيّرت"]}]},
 
     # ── Reminders ──
     {"name": "reminder relative", "steps": [

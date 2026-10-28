@@ -166,6 +166,9 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
         bad.append("لسا مستنية تأكيد")
     if step.get("reply_has") and not any(w in reply for w in step["reply_has"]):
         bad.append(f"الرد ما فيه أي من {step['reply_has']}")
+    said = [w for w in step.get("reply_lacks", []) if w in reply]
+    if said:
+        bad.append(f"الرد فيه {said} وما لازم")
     if step.get("english") and len(_LATIN.findall(reply)) <= len(_ARABIC.findall(reply)):
         bad.append("الرد مش بالإنجليزي")
     return bad
