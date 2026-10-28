@@ -74,3 +74,27 @@ def test_what_a_case_cost_comes_from_its_traces(db):
     spent = E._spent()
     assert spent["tokens_in"] == 1500 and spent["tokens_out"] == 200
     assert spent["usd"] == pytest.approx(1500 * 2.0 / 1e6 + 200 * 8.0 / 1e6)
+
+
+def test_a_case_the_model_could_not_answer_is_tried_again_then_set_apart(monkeypatch):
+    """A 429 or an outage is no outcome: the case waits and runs again, and one that still
+    gets no answer is counted apart, never as a fail."""
+    outcomes = iter([{"error": True}, {"error": True}, {"error": False, "failures": []}])
+    waits = []
+    monkeypatch.setattr(E, "_run_case", lambda case: {"name": "a", "seconds": 1.0, "tokens_in": 0,
+                                                     "tokens_out": 0, "usd": 0.0, "failures": [],
+                                                     **next(outcomes)})
+    monkeypatch.setattr(E.time, "sleep", waits.append)
+    r = E._run_answered({"name": "a"})
+    assert r["error"] is False and len(waits) == 2
+
+    monkeypatch.setattr(E, "_run_case", lambda case: {"name": "a", "seconds": 1.0, "tokens_in": 0,
+                                                     "tokens_out": 0, "usd": 0.0,
+                                                     "failures": ["x"], "error": True})
+    assert E._run_answered({"name": "a"})["error"] is True
+
+
+def test_cases_with_no_answer_are_left_out_of_the_comparison():
+    base = {"cases": {"a": True, "b": True}}
+    now = {"cases": {"a": True, "b": None}}
+    assert E._compare(base, now) == {"fell": [], "rose": [], "new": []}

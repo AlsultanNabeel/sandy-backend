@@ -14,7 +14,9 @@ from the turn traces). Nothing real is touched: the blocks live in an in-memory 
 and the tools that reach outside (devices, scenes, search, weather, images) are stand-ins
 that only record they were called. The cases are in `eval_cases.py`.
 
-`--repeat N` runs every case N times and names the ones whose outcome differed. `--save`
+`--repeat N` runs every case N times and names the ones whose outcome differed. A case the
+model could not answer (a rate limit, an outage) waits and runs again, and is left out of the
+score and the comparison when it still gets no answer: an error is not an outcome. `--save`
 writes the result to `eval_results/<when>.json`; the first one saved becomes
 `eval_results/baseline.json`, and every later run is compared with it: what fell, what
 rose. More than `ALLOWED_DIFFERENCES` cases moved, or a repeat disagreeing that often,
@@ -40,6 +42,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 RESULTS = ROOT / "scripts" / "eval_results"
 # Two runs of the same cases may disagree on this many and still count as the same.
 ALLOWED_DIFFERENCES = 2
+# A turn the model could not answer (a 429, an outage) is no outcome: the case waits and
+# runs again this many times, then is set apart as unanswered, never counted as a fail.
+ERROR_RETRIES = 2
+ERROR_WAIT_S = 30
 
 
 def _args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -193,7 +199,7 @@ def _spent() -> Dict[str, Any]:
 
 def _run_case(case: Dict[str, Any]) -> Dict[str, Any]:
     _fresh_db()
-    pending, failures, seconds = None, [], 0.0
+    pending, failures, seconds, error = None, [], 0.0, False
     calls: List[Tuple[str, Dict[str, Any]]] = []
     real_execute = tools.execute
 
@@ -212,6 +218,7 @@ def _run_case(case: Dict[str, Any]) -> Dict[str, Any]:
                                       source="web", pending_state=pending)
                 seconds += time.monotonic() - began
                 pending = state.get("pending_state")
+                error |= bool(state.get("error"))
                 used = list(state.get("tools_used") or [])
                 if ARGS.verbose:
                     print(f"    «{step['say']}» → {calls} → {state.get('final_response')!r}")
@@ -219,7 +226,20 @@ def _run_case(case: Dict[str, Any]) -> Dict[str, Any]:
                 failures += [f"خطوة {n}: {b}" for b in bad]
     finally:
         tools.execute = real_execute
-    return {"name": case["name"], "failures": failures, "seconds": seconds, **_spent()}
+    return {"name": case["name"], "failures": failures, "seconds": seconds, "error": error,
+            **_spent()}
+
+
+def _run_answered(case: Dict[str, Any]) -> Dict[str, Any]:
+    """The case, run again after a wait while the model gave no answer (`ERROR_RETRIES`)."""
+    r = _run_case(case)
+    for _ in range(ERROR_RETRIES):
+        if not r["error"]:
+            break
+        print(f"  … {case['name']}: the model gave no answer, again in {ERROR_WAIT_S}s")
+        time.sleep(ERROR_WAIT_S)
+        r = _run_case(case)
+    return r
 
 
 def _disagreeing(runs: Dict[str, List[bool]]) -> List[str]:
@@ -228,7 +248,9 @@ def _disagreeing(runs: Dict[str, List[bool]]) -> List[str]:
 
 
 def _compare(base: Dict[str, Any], now: Dict[str, Any]) -> Dict[str, List[str]]:
-    before, after = base.get("cases") or {}, now.get("cases") or {}
+    """What moved; a case left unanswered (None) on either side is left out."""
+    before = {n: ok for n, ok in (base.get("cases") or {}).items() if ok is not None}
+    after = {n: ok for n, ok in (now.get("cases") or {}).items() if ok is not None}
     return {"fell": sorted(n for n, ok in after.items() if n in before and before[n] and not ok),
             "rose": sorted(n for n, ok in after.items() if n in before and not before[n] and ok),
             "new": sorted(n for n in after if n not in before)}
@@ -262,10 +284,15 @@ def main() -> int:
     repeat = max(ARGS.repeat, 1)
     print(f"model: {model} — {len(cases)} cases × {repeat}\n")
     runs: Dict[str, List[bool]] = {}
+    unanswered: List[str] = []
     seconds, spent = 0.0, {"tokens_in": 0, "tokens_out": 0, "usd": 0.0}
     for case in cases:
         for _ in range(repeat):
-            r = _run_case(case)
+            r = _run_answered(case)
+            if r["error"]:
+                unanswered.append(r["name"])
+                print(f"? {r['name']}  (no answer from the model — left out)")
+                continue
             runs.setdefault(r["name"], []).append(not r["failures"])
             seconds += r["seconds"]
             for k in spent:
@@ -274,21 +301,27 @@ def main() -> int:
             print(f"{mark} {r['name']}  ({r['seconds']:.1f}s)")
             for f in r["failures"]:
                 print(f"    {f}")
-    # A case counts as passed only when every repeat passed.
-    outcome = {name: all(oks) for name, oks in runs.items()}
-    passed = sum(outcome.values())
+    # A case counts as passed only when every repeat passed; one never answered is None.
+    outcome: Dict[str, Optional[bool]] = {name: all(oks) for name, oks in runs.items()}
+    for name in unanswered:
+        outcome.setdefault(name, None)
+    scored = {n: ok for n, ok in outcome.items() if ok is not None}
+    passed = sum(scored.values())
     messages = repeat * sum(len(c["steps"]) for c in cases)
-    print(f"\n{passed}/{len(outcome)} passed ({100 * passed // max(len(outcome), 1)}%), "
+    print(f"\n{passed}/{len(scored)} passed ({100 * passed // max(len(scored), 1)}%), "
           f"average {seconds / max(messages, 1):.1f}s a message")
+    if unanswered:
+        print(f"no answer from the model (left out): {sorted(set(unanswered))}")
     print(f"cost: ${spent['usd']:.4f} ({spent['tokens_in']} tokens in, {spent['tokens_out']} out)")
-    ok = passed == len(outcome)
+    ok = passed == len(scored) and not unanswered
     split = _disagreeing(runs)
     if repeat > 1:
         print(f"repeats disagreed on {len(split)} case(s): {split or '—'}")
         ok &= len(split) <= ALLOWED_DIFFERENCES
     if ARGS.save:
         result = {"when": datetime.now().strftime("%Y-%m-%dT%H:%M"), "model": model,
-                  "repeat": repeat, "passed": passed, "total": len(outcome), "cases": outcome,
+                  "repeat": repeat, "passed": passed, "total": len(scored), "cases": outcome,
+                  "unanswered": sorted(set(unanswered)),
                   "disagreed": split, "seconds": round(seconds, 1), **spent}
         path, base = _save(result)
         print(f"saved: {path.relative_to(ROOT)}")
