@@ -126,7 +126,10 @@ CASES = [
     {"name": "device question", "steps": [
         {"say": "المكيف شغال؟", "tools": ["device_state"], "not_tools": ["device_control"]}]},
     {"name": "scene", "steps": [
-        {"say": "بدي أنام، جهزي الغرفة", "any_tools": ["scene_apply", "device_control"]}]},
+        {"say": "بدي أنام، جهزي الغرفة", "any_tools": ["scene_apply", "device_control"],
+         "not_tools": ["room_restore"]}]},
+    {"name": "apply a scene is not a restore", "steps": [
+        {"say": "طبّقي مشهد الفيلم", "tools": ["scene_apply"], "not_tools": ["room_restore"]}]},
     {"name": "weather", "steps": [
         {"say": "كيف الجو بكرا؟", "tools": ["weather"]}]},
     {"name": "search", "steps": [
