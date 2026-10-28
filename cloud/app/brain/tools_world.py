@@ -10,13 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.brain import lang
 from app.brain import when as W
 from app.brain.ctx import TurnCtx
 from app.brain.when import _chat_fn
 
 logger = logging.getLogger(__name__)
-
-SCENES_HINT = "ما عرفت هاد المشهد — جرّب: دراسة، قراءة، عصف ذهني، راحة، فيلم، نوم، صباح، إطفاء."
 
 
 def _no(reply: str) -> Dict[str, Any]:
@@ -44,21 +43,21 @@ def _confirm_text(label: str, action: str, payload: str) -> str:
     a = (action or "").strip().lower()
     p = (payload or "").strip().lower()
     if a == "on" or p == "on":
-        return f"شغّلت {label} ✨"
+        return lang.say("device_on", label=label)
     if a == "off" or p == "off":
-        return f"طفّيت {label}"
+        return lang.say("device_off", label=label)
     if p == "open":
-        return f"فتحت {label}"
+        return lang.say("device_open", label=label)
     if p == "close":
-        return f"سكّرت {label}"
+        return lang.say("device_close", label=label)
     if p.isdigit():
-        return f"ضبطت {label} على {p}"
-    return f"ضبطت {label}: {payload}"
+        return lang.say("device_level", label=label, value=p)
+    return lang.say("device_set", label=label, value=payload)
 
 
 def offline_line(label: str) -> str:
     """A device whose board is gone: not «it did not work», which reads as a fault to retry."""
-    return f"{label} مش متّصل هلّق، فما بعتّله الأمر. تأكّد إنه شغّال وعلى الشبكة."
+    return lang.say("device_offline", label=label)
 
 
 # «شوي» on a dimmer: a fifth of its range.
@@ -103,12 +102,12 @@ def _actuate_one(device: Dict[str, Any], action: str, value: Any) -> Tuple[bool,
     label = device.get("label", device.get("name", ""))
     res = command_payload(device, action, value)
     if not res.get("ok"):
-        allowed = "، ".join(str(a) for a in res.get("allowed", [])) or "—"
-        return False, f"ما ينفع هالأمر لـ {label}. المتاح: {allowed}."
+        allowed = lang.say("sep").join(str(a) for a in res.get("allowed", [])) or "—"
+        return False, lang.say("device_not_allowed", label=label, allowed=allowed)
     payload = res["payload"]
     topic = device_topic(device)
     if not topic:
-        return False, f"{label} مربوط بطريقة ما عادت مدعومة، فما بقدر أوصله. احذفه من التحكّم بالتطبيق."
+        return False, lang.say("device_unsupported", label=label)
     if device.get("board_gone"):
         # Its board said it went: the broker would take the command and drop it.
         return False, offline_line(label)
@@ -118,7 +117,7 @@ def _actuate_one(device: Dict[str, Any], action: str, value: Any) -> Tuple[bool,
         logger.warning("[brain] device send failed", exc_info=True)
         sent = False
     if not sent:
-        return False, f"ما اشتغل: ما قدرت أوصّل الأمر لـ {label}. جرّب كمان شوي."
+        return False, lang.say("device_not_sent", label=label)
     set_state(device["name"], payload)
     return True, _confirm_text(label, action, payload)
 
@@ -132,9 +131,9 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if not devices:
         known = list_devices()
         if not known:
-            return _no("ما في عندك أجهزة مضافة بعد — ضيفها من تبويب التحكّم بالتطبيق.")
-        names = "، ".join(d["label"] for d in known)
-        return _no(f"ما لقيت جهاز بهالاسم. أجهزتك: {names}. أي واحد تقصد؟")
+            return _no(lang.say("no_devices"))
+        names = lang.say("sep").join(d["label"] for d in known)
+        return _no(lang.say("no_such_device", names=names))
     action = str(args.get("action", "")).strip()
     done, lines = 0, []
     for d in devices:
@@ -144,12 +143,12 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             value = _relative(d, args["by"])
             act = "set"
             if value is None:
-                lines.append(f"ما فهمت قديش أغيّر {d.get('label', '')}.")
+                lines.append(lang.say("device_how_much", label=d.get("label", "")))
                 continue
         ok, line = _actuate_one(d, act, value)
         done += ok
         lines.append(line)
-    lines += [f"ما لقيت «{m}»." for m in missing]
+    lines += [lang.say("not_found_named", said=m) + "." for m in missing]
     return {"ok": done == len(devices) and not missing, "done": done,
             "reply": "\n".join(lines)}
 
@@ -161,7 +160,7 @@ def device_state(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if args.get("device") or args.get("room") or args.get("devices"):
         devices, missing = _targets(args)
         if not devices:
-            return _no(f"ما لقيت «{'، '.join(missing)}».")
+            return _no(lang.say("not_found_named", said=lang.say("sep").join(missing)) + ".")
     else:
         devices = [get_device(d["name"]) for d in list_devices()]
     rows = [{"device": d.get("label") or d.get("name"), "name": d.get("name"),
@@ -179,11 +178,12 @@ def scene_apply(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     # apply_scene sends each action once; it reports how many reached their device.
     r = apply_scene(str(args.get("name", "")))
     if not r.get("ok"):
-        return _no(SCENES_HINT)
+        return _no(lang.say("scene_unknown"))
     tail = _passed_over(r)
     if not r.get("sent"):
-        return _no(f"ما تطبّق مشهد «{r['label']}»، ما وصل ولا جهاز.{tail}")
-    return {"ok": not tail, "reply": f"✨ طبّقت مشهد «{r['label']}»{'.' + tail if tail else ' 🏠'}"}
+        return _no(lang.say("scene_not_sent", label=r["label"], tail=tail))
+    return {"ok": not tail, "reply": lang.say("scene_applied", label=r["label"],
+                                              tail="." + tail if tail else " 🏠")}
 
 
 def _passed_over(r: Dict[str, Any]) -> str:
@@ -191,11 +191,11 @@ def _passed_over(r: Dict[str, Any]) -> str:
     legacy words no device of his answers to, and the ones the command did not reach."""
     parts = []
     if r.get("skipped"):
-        parts.append(f" ما عندك {'، '.join(r['skipped'])}، فتخطّيتها.")
+        parts.append(lang.say("scene_skipped", names=lang.say("sep").join(r["skipped"])))
     if r.get("offline"):
-        parts.append(f" {'، '.join(r['offline'])} مش متّصل هلّق، فتخطّيته.")
+        parts.append(lang.say("scene_offline", names=lang.say("sep").join(r["offline"])))
     if r.get("missed"):
-        parts.append(f" وما وصل لـ: {'، '.join(r['missed'])}.")
+        parts.append(lang.say("scene_missed", names=lang.say("sep").join(r["missed"])))
     return "".join(parts)
 
 
@@ -204,11 +204,11 @@ def room_restore(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
     r = restore_room()
     if not r.get("ok"):
-        return _no("ما في مشهد طبّقته قبل هيك أرجّع عنه.")
+        return _no(lang.say("restore_nothing"))
     tail = _passed_over(r)
     if not r.get("sent"):
-        return _no(f"ما قدرت أرجّع الغرفة، ما وصل ولا جهاز.{tail}")
-    return {"ok": not tail, "reply": f"رجّعت الغرفة زي ما كانت{'.' + tail if tail else ' 🏠'}"}
+        return _no(lang.say("restore_not_sent", tail=tail))
+    return {"ok": not tail, "reply": lang.say("restored", tail="." + tail if tail else " 🏠")}
 
 
 def web_search(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -223,10 +223,10 @@ def weather(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
     city = str(args.get("city") or "").strip() or home_city(ctx.user_id)
     if not city:
-        return _no("ما بعرف وين ساكن. بأي مدينة بدك الطقس؟")
+        return _no(lang.say("weather_no_city"))
     data = get_weather(city)
     if not data:
-        return _no(f"ما قدرت أجيب بيانات الطقس لـ {city} حالياً.")
+        return _no(lang.say("weather_failed", city=city))
     return {"ok": True, "reply": format_weather_for_prompt(data)}
 
 
@@ -235,11 +235,11 @@ def image(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     from app.features.vision import generate_image_with_azure
 
     if ctx.artifacts.get("image_bytes"):
-        return _no("برسم صورة وحدة بكل مرة. هي الأولى جاهزة، اطلب التانية بعدها.")
+        return _no(lang.say("image_one_at_a_time"))
     prompt = str(args.get("prompt") or ctx.message or "").strip()
     image_bytes = generate_image_with_azure(prompt) if prompt else None
     if not image_bytes:
-        return _no("ما قدرت أولد الصورة حاليًا. جرّب تغيّر الوصف شوي أو أعد المحاولة.")
+        return _no(lang.say("image_failed"))
     ctx.artifacts["image_bytes"] = image_bytes
     ctx.artifacts["caption"] = prompt
-    return {"ok": True, "reply": "جهزت الصورة."}
+    return {"ok": True, "reply": lang.say("image_done")}

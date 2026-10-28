@@ -18,6 +18,8 @@ def test_a_message_is_read_as_english_or_arabic():
     assert lang.of("remind me at 5") == "en"
     assert lang.of("ذكريني بالـ meeting") == "ar"
     assert lang.of("2") == "ar" and lang.of("2", fallback="en") == "en"
+    assert lang.of("ok") == "ar" and lang.of("OK!", fallback="en") == "en"
+    assert lang.of("ok thanks") == "en"
 
 
 def test_a_phrase_comes_in_the_turns_language():
@@ -125,3 +127,62 @@ def test_the_questions_come_in_the_turns_language():
     with lang.using("ar"):
         assert confirm.question("تحذف «حليب»") == "متأكد إنك بدك تحذف «حليب»؟ (اه/لأ)"
         assert confirm.choice_question(rows).startswith("لقيت أكتر من وحدة:")
+
+
+# ── the tools' own replies come in the turn's language ──────────────────────
+
+def _run(name, **args):
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    with active_user_profile_context(A):
+        return tools.execute(name, args, TurnCtx(user_id="userA"))
+
+
+def test_a_list_reply_comes_in_english(brain_db):  # noqa: F811
+    with lang.using("en"):
+        assert _run("list_add", list="shopping", text="milk")["reply"] == "Added «milk» ✅"
+        assert _run("list_add", list="shopping", text="milk")["reply"] == "«milk» is already on the list"
+        assert _run("list_delete", list="shopping", match_text="milk")["reply"] == "Deleted «milk» ✅"
+        assert _run("list_delete", list="shopping", match_text="bread")["reply"].startswith(
+            "I couldn't find «bread»")
+    with lang.using("ar"):
+        assert _run("list_add", list="shopping", text="حليب")["reply"] == "ضفت «حليب» ✅"
+
+
+def test_a_bulk_delete_asks_in_english(brain_db):  # noqa: F811
+    for t in ("a1", "b2", "c3", "d4", "e5", "f6"):
+        _run("list_add", list="shopping", text=t)
+    with lang.using("en"):
+        r = _run("list_delete", list="shopping", everything=True)
+        from app.brain import confirm
+        assert r["needs_confirmation"] and confirm.question(r["summary"]).startswith(
+            "Are you sure you want to delete «a1», «b2», «c3» and 3 more?")
+        assert confirm.answer("yes", {"summary": r["summary"]}) == "yes"
+
+
+def test_a_device_reply_comes_in_english(brain_db, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace as NS
+
+    from brain_fakes import on_node
+
+    from app.features import device_store
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher",
+                        lambda: NS(send_to_topic=lambda topic, payload: True))
+    with active_user_profile_context(A):
+        device_store.add_device("lamp", "Lamp", "switch", on_node("lamp"))
+    with lang.using("en"):
+        assert _run("device_control", device="lamp", action="on")["reply"] == "Turned on Lamp ✨"
+        assert _run("device_control", device="nothing", action="on")["reply"].startswith(
+            "I couldn't find a device by that name.")
+
+
+def test_no_tool_reply_is_written_in_one_language_only():
+    """A reply the user reads is a phrase in both languages (`lang.PHRASES`), never a
+    literal in the tool's code."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "cloud" / "app" / "brain"
+    arabic_reply = re.compile(r"""(?:"reply":\s*|reply=)f?["'][^"'\n]*[؀-ۿ]""")
+    for name in ("tools_blocks.py", "tools_world.py", "confirm.py", "honesty.py", "loop.py"):
+        found = arabic_reply.findall((root / name).read_text(encoding="utf-8"))
+        assert not found, f"{name}: {found}"

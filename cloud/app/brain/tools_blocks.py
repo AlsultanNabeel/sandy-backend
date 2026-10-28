@@ -10,6 +10,7 @@ from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.utils.time import USER_TZ
 from app.blocks import _base, changes, entries, items, schedules
 from app.blocks.kinds import LIST, LOG, SCHEDULE, KindError, by_alias, get_kind, names
+from app.brain import lang
 from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
 from app.brain.matching import match_rows
@@ -101,7 +102,7 @@ def remember(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(str(exc))
     if not eid:
         return refused("not saved")
-    out = {"ok": True, "id": eid, "reply": f"سجّلتها ✅ «{text}»"}
+    out = {"ok": True, "id": eid, "reply": lang.say("logged", text=text)}
     categorize_later(eid, kind, text, args.get("data"))
     if kind == "expense":
         note = budget_note(ctx.user_id)
@@ -132,14 +133,14 @@ def undo(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     that many rows. Seven days back (`blocks.changes`). Devices are not undone."""
     recent = [c for c in changes.recent() if c.get("turn") != ctx.turn_id]
     if not recent:
-        return refused("nothing to undo", reply="ما في إشي غيّرته بآخر أسبوع لأرجّعه.")
+        return refused("nothing to undo", reply=lang.say("undo_nothing"))
     said = str(args.get("match_text") or "").strip()
     count = _minutes(args.get("count"))
     if said:
         rows = [{"id": c["_id"], "text": decrypt_field(c.get("label") or "")} for c in recent]
         m = match_rows(said, rows)
         if m["status"] not in ("matched", "ambiguous") or m.get("tier") == "fuzzy":
-            return refused("nothing by that name to undo", reply=f"ما لقيت «{said}» بين اللي غيّرته.")
+            return refused("nothing by that name to undo", reply=lang.say("undo_not_found", said=said))
         picked = [next(c for c in recent if c["_id"] == m["matches"][0]["id"])]
     elif count and count > 0:
         picked = recent[:count]
@@ -148,9 +149,10 @@ def undo(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     done = changes.undo(picked)
     names = list(dict.fromkeys(decrypt_field(c.get("label") or "") for c in picked))
     if not done:
-        return refused("nothing put back", reply="ما قدرت أرجّعه: شكله تغيّر من بعدها.")
+        return refused("nothing put back", reply=lang.say("undo_failed"))
     return {"ok": True, "undone": done, "items": names,
-            "reply": "رجّعته زي ما كان ✅ " + "، ".join(f"«{n}»" for n in names[:3] if n)}
+            "reply": lang.say("undo_done",
+                              names=lang.say("sep").join(f"«{n}»" for n in names[:3] if n))}
 
 
 def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -162,7 +164,7 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
-    held = _held(picked, "تعدّل", ctx)
+    held = _held(picked, "held_change", ctx)
     if held:
         return held
     amount = args.get("amount")
@@ -185,8 +187,8 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         except KindError as exc:
             return refused(str(exc))
     if _same([b for b in before if b], entries.get):
-        return refused("nothing changed", reply=NOTHING_CHANGED)
-    return {"ok": True, "changed": len(rows), "reply": f"عدّلت {_names(rows)} ✅"}
+        return refused("nothing changed", reply=lang.say("nothing_changed"))
+    return {"ok": True, "changed": len(rows), "reply": lang.say("edited", names=_names(rows))}
 
 
 def _log_pool(args: Dict[str, Any]):
@@ -207,7 +209,8 @@ def _log_targets(args: Dict[str, Any], ctx: TurnCtx, kind: Optional[str], pool, 
         return _named(args, pool, getter)
     if pool:
         return {"rows": pool[:1]}
-    return refused("nothing logged", reply=f"ما لقيت ولا {_kind_ar(kind) or 'إشي'} مسجّل.")
+    return refused("nothing logged",
+                   reply=lang.say("nothing_logged", kind=_kind_name(kind) or lang.say("something")))
 
 
 def _alias_filters(query: str) -> Tuple[Optional[str], Optional[str], str]:
@@ -371,7 +374,7 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(str(exc))
     if not iid:
         return refused("not saved")
-    return {"ok": True, "id": iid, "reply": f"ضفت «{text}» ✅"}
+    return {"ok": True, "id": iid, "reply": lang.say("added", text=text)}
 
 
 def _add_to_existing(row: Dict[str, Any], qty: Optional[float], due: Any) -> Dict[str, Any]:
@@ -379,7 +382,7 @@ def _add_to_existing(row: Dict[str, Any], qty: Optional[float], due: Any) -> Dic
     with nothing new it is only reported."""
     if qty is None and due is None:
         return {"ok": True, "id": row["id"], "already": True,
-                "reply": f"«{row['text']}» موجودة أصلاً بالقائمة"}
+                "reply": lang.say("already_listed", text=row["text"])}
     data = None
     if qty is not None:
         have = _number((row.get("data") or {}).get("qty")) or 1
@@ -388,23 +391,24 @@ def _add_to_existing(row: Dict[str, Any], qty: Optional[float], due: Any) -> Dic
         items.update(row["id"], data=data, due=due if due is not None else items._UNSET)
     except KindError as exc:
         return refused(str(exc))
-    parts = ([f"صاروا {data['qty']:g}"] if data else []) + ([W.local_text(due)] if due else [])
+    parts = ([lang.say("qty_now", qty=f"{data['qty']:g}")] if data else []) + (
+        [W.local_text(due)] if due else [])
     return {"ok": True, "id": row["id"], "updated": True,
-            "reply": f"«{row['text']}» كانت موجودة، عدّلتها: {'، '.join(parts)} ✅"}
+            "reply": lang.say("existed_updated", text=row["text"], parts=lang.say("sep").join(parts))}
 
 
-def _kind_ar(kind: Optional[str]) -> str:
+def _kind_name(kind: Optional[str]) -> str:
     row = get_kind(LOG, kind) if kind else None
-    return row.ar if row else ""
+    return (row.en if lang.current() == lang.EN else row.ar) if row else ""
 
 
 def _not_found(said: str, closest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Nothing by that name: said so, with the nearest spelling when there is one. A near
     spelling is never acted on («فاتورة المي» is not «فاتورة النت»)."""
-    reply = f"ما لقيت «{said}»" if said else "ما لقيت هالإشي، شكله انحذف أو تغيّر"
+    reply = lang.say("not_found_named", said=said) if said else lang.say("not_found")
     if closest is not None:
         return refused("not found", closest={"id": closest["id"], "text": closest["text"]},
-                       reply=f"{reply}؛ أقرب إشي «{closest['text']}». قصدك هو؟")
+                       reply=lang.say("not_found_closest", reply=reply, closest=closest["text"]))
     return refused("not found", reply=f"{reply}.")
 
 
@@ -449,12 +453,17 @@ def _held_rows(ctx: TurnCtx, getter) -> Optional[Dict[str, Any]]:
         return None
     rows = [r for r in (getter(i) for i in ctx.held_ids) if r]
     return {"rows": rows} if rows else refused(
-        "the rows asked about are gone", reply="ما لقيت اللي سألتك عنه، شكله انحذف أو تغيّر.")
+        "the rows asked about are gone", reply=lang.say("held_gone"))
 
 
 def _names(rows: List[Dict[str, Any]]) -> str:
-    shown = "» و«".join(r.get("text", "") for r in rows[:3])
-    return f"«{shown}»" + (f" وكمان {len(rows) - 3}" if len(rows) > 3 else "")
+    """«a» و«b» وكمان 3 / «a», «b» and 3 more."""
+    names = [f"«{r.get('text', '')}»" for r in rows[:3]]
+    if len(rows) > 3:
+        return lang.say("names_more", names=lang.say("sep").join(names), n=len(rows) - 3)
+    if len(names) > 1:
+        return lang.say("names_last", names=lang.say("sep").join(names[:-1]), last=names[-1])
+    return "".join(names)
 
 
 # More rows than this in one change is a bulk one, and waits for a yes; one row, or a few
@@ -463,14 +472,12 @@ BULK_ROWS = 5
 
 
 def _held(picked: Dict[str, Any], verb: str, ctx: TurnCtx) -> Optional[Dict[str, Any]]:
-    """The question when the change is a bulk one and waits for a yes."""
+    """The question when the change is a bulk one and waits for a yes; ``verb`` names its
+    phrase (`held_change`, `held_finish`), whose first word `confirm` reads a yes by."""
     rows = picked["rows"]
     if ctx.confirmed or len(rows) <= BULK_ROWS:
         return None
-    return needs_confirmation(f"{verb} {_names(rows)}", [r["id"] for r in rows])
-
-
-NOTHING_CHANGED = "ما تغيّر شي: ما في حقل جديد يتغيّر، والعنصر زي ما هو."
+    return needs_confirmation(lang.say(verb, names=_names(rows)), [r["id"] for r in rows])
 
 
 def _same(before: List[Dict[str, Any]], fetch) -> bool:
@@ -488,9 +495,10 @@ def _check_in(row: Dict[str, Any]) -> Dict[str, Any]:
     for e in entries.list_entries("habit", limit=200):
         data = e.get("data") or {}
         if data.get("habit_item_id") == row["id"] and data.get("date") == today:
-            return {"ok": True, "already": True, "reply": f"«{row['text']}» مسجّلة اليوم أصلاً ✅"}
+            return {"ok": True, "already": True,
+                    "reply": lang.say("checked_already", text=row["text"])}
     entries.add("habit", row.get("text", ""), {"habit_item_id": row["id"], "date": today})
-    return {"ok": True, "reply": f"سجّلت «{row['text']}» لليوم ✅"}
+    return {"ok": True, "reply": lang.say("checked_today", text=row["text"])}
 
 
 def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -501,7 +509,7 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
-    held = _held(picked, "تخلّص" if args.get("done") else "تعدّل", ctx)
+    held = _held(picked, "held_finish" if args.get("done") else "held_change", ctx)
     if held:
         return held
     due: Any = None if args.get("no_due") else items._UNSET
@@ -530,9 +538,9 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if replies and len(replies) == len(rows):
         return {"ok": True, "changed": len(rows), "reply": "\n".join(replies)}
     if not replies and _same([b for b in before if b], items.get):
-        return refused("nothing changed", reply=NOTHING_CHANGED)
-    done_verb = "خلّصت" if args.get("done") else "عدّلت"
-    return {"ok": True, "changed": len(rows), "reply": "\n".join([*replies, f"{done_verb} {_names(rows)} ✅"])}
+        return refused("nothing changed", reply=lang.say("nothing_changed"))
+    said = lang.say("finished" if args.get("done") else "edited", names=_names(rows))
+    return {"ok": True, "changed": len(rows), "reply": "\n".join([*replies, said])}
 
 
 # ── schedules ────────────────────────────────────────────────────────────────
@@ -611,10 +619,9 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(str(exc))
     if not sid:
         return refused("not saved")
-    said = (f"بعمل «{text}»" if kind == "scene" else
-            f"حطّيت منبه «{text}»" if payload else f"بذكّرك «{text}»")
+    said = "scheduled_scene" if kind == "scene" else "scheduled_alarm" if payload else "scheduled"
     return {"ok": True, "id": sid, "when": W.local_text(fire_at),
-            "reply": f"تمام، {said} {W.local_text(fire_at)} ⏰"}
+            "reply": lang.say(said, text=text, time=W.local_text(fire_at))}
 
 
 def _device_timers() -> List[Dict[str, Any]]:
@@ -657,7 +664,7 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
-    held = _held(picked, "تعدّل", ctx)
+    held = _held(picked, "held_change", ctx)
     if held:
         return held
     rule: Optional[str] = None
@@ -701,10 +708,11 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
                          payload=payload, keep_series=bool(args.get("skip_next")))
         moved = at or moved
     if _same([b for b in before if b], schedules.get) and not moved:
-        return refused("nothing changed", reply=NOTHING_CHANGED)
-    when = f" لـ{W.local_text(moved)}" if moved else ""
+        return refused("nothing changed", reply=lang.say("nothing_changed"))
+    reply = (lang.say("edited_to", names=_names(rows), time=W.local_text(moved)) if moved
+             else lang.say("edited", names=_names(rows)))
     return {"ok": True, "changed": len(rows), "when": W.local_text(moved) if moved else None,
-            "reply": f"عدّلت {_names(rows)}{when} ✅"}
+            "reply": reply}
 
 
 # ── deleting: one tool per block, so a delete is never a flag an edit forgets ─────
@@ -717,14 +725,14 @@ def _remove(picked: Dict[str, Any], ctx: TurnCtx, ask: str, said: str, remove,
         return picked
     rows = picked["rows"]
     if not rows:
-        return refused("nothing there", reply="ما في إشي هون أصلاً.")
+        return refused("nothing there", reply=lang.say("nothing_there"))
     if not ctx.confirmed and (everything or len(rows) > BULK_ROWS):
-        return needs_confirmation(f"{ask} {_names(rows)}", [r["id"] for r in rows])
+        return needs_confirmation(lang.say(ask, names=_names(rows)), [r["id"] for r in rows])
     gone = [r for r in rows if remove(r["id"])]
     if not gone:
         return _not_found("")
     missing = picked.get("missing", 0) + len(rows) - len(gone)
-    reply = f"{said} {_names(gone)} ✅" + (f" (وفي {missing} ما لقيتهم)" if missing else "")
+    reply = lang.say(said, names=_names(gone)) + (lang.say("missing", n=missing) if missing else "")
     return {"ok": True, "changed": len(gone), "reply": reply}
 
 
@@ -733,11 +741,11 @@ def list_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     name = _list_name(args) or None
     everything = bool(args.get("everything"))
     if everything and not name:
-        return refused("everything needs a list", reply="أي قائمة بدك أفضّي؟")
+        return refused("everything needs a list", reply=lang.say("which_list"))
     pool = items.match_pool(name, done=False)
     picked = _held_rows(ctx, items.get) or (
         {"rows": pool} if everything else _named(args, pool, items.get))
-    return _remove(picked, ctx, "تحذف", "حذفت", items.delete, everything)
+    return _remove(picked, ctx, "held_delete", "deleted", items.delete, everything)
 
 
 def log_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -745,10 +753,10 @@ def log_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, pool, getter = _log_pool(args)
     everything = bool(args.get("everything"))
     if everything and not kind:
-        return refused("everything needs a kind", reply="شو بدك أحذف بالزبط؟")
+        return refused("everything needs a kind", reply=lang.say("what_to_delete"))
     picked = _held_rows(ctx, getter) or (
         {"rows": pool} if everything else _log_targets(args, ctx, kind, pool, getter))
-    return _remove(picked, ctx, "تحذف", "حذفت", entries.delete, everything)
+    return _remove(picked, ctx, "held_delete", "deleted", entries.delete, everything)
 
 
 def schedule_cancel(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
@@ -764,4 +772,4 @@ def schedule_cancel(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     everything = bool(args.get("everything"))
     picked = _held_rows(ctx, getter) or (
         {"rows": pool} if everything else _named(args, pool, getter))
-    return _remove(picked, ctx, "تلغي", "لغيت", cancel, everything)
+    return _remove(picked, ctx, "held_cancel", "cancelled_rows", cancel, everything)
