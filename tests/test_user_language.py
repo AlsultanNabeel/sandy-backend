@@ -79,3 +79,30 @@ def test_the_daily_question_is_asked_in_the_users_language(env, monkeypatch):
 def test_the_language_survives_a_reset_like_the_zone():
     from app.features import account_delete
     assert "language" in account_delete.USER_ROW_KEPT
+
+
+def test_the_robots_parts_are_named_in_its_owners_language(monkeypatch):
+    from app import db as appdb
+    from app.features import device_store, node_provision
+    d = mongomock.MongoClient().db
+    appdb.configure(d)
+    device_store.init_device_store(d)
+    try:
+        d["sandy_users"].insert_many([{"_id": "en1", "language": "en"}, {"_id": "ar1", "language": "ar"}])
+        # Paired first: a part goes only on a node its owner paired.
+        d["sandy_nodes"].insert_many([{"node_id": "n1", "user_id": "en1"}, {"node_id": "n2", "user_id": "ar1"}])
+        outs = [{"id": "screen"}, {"id": "volume"}]
+        node_provision.provision_for_owner("n1", "en1", outs)
+        node_provision.provision_for_owner("n2", "ar1", outs)
+        en = {r["name"]: r for r in d["sandy_devices"].find({"user_id": "en1"})}
+        ar = {r["name"]: r for r in d["sandy_devices"].find({"user_id": "ar1"})}
+        assert en["sandy_screen"]["label"] == "Sandy's screen" and en["sandy_screen"]["room"] == "Sandy"
+        assert ar["sandy_screen"]["label"] == "شاشة ساندي" and ar["sandy_screen"]["room"] == "ساندي"
+    finally:
+        appdb.reset()
+
+
+def test_every_robot_part_has_both_names():
+    from app.features.node_provision import PART_CATALOGUE
+    for oid, spec in PART_CATALOGUE.items():
+        assert spec.get("label") and spec.get("label_en"), oid

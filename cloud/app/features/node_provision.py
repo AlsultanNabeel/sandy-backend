@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
+from app.brain import lang
+
 logger = logging.getLogger(__name__)
 
 # The display's 25 expressions, in firmware MOOD_MAP order (brain-core/main/sandy_mqtt.c).
@@ -43,73 +45,74 @@ ROBOT_LED = [
 # «on»/«off» there is refused rather than sent, and the app draws no switch.
 PART_CATALOGUE: Dict[str, Dict[str, Any]] = {
     "mood": {
-        "name": "sandy_face", "label": "وش ساندي", "control_type": "enum",
+        "name": "sandy_face", "label": "وش ساندي", "label_en": "Sandy's face", "control_type": "enum",
         "meta": {"values": ROBOT_MOODS},
     },
     "gesture": {
-        "name": "sandy_gesture", "label": "حركات ساندي", "control_type": "enum",
+        "name": "sandy_gesture", "label": "حركات ساندي", "label_en": "Sandy's gestures", "control_type": "enum",
         # `momentary`: the values that are one-shot commands, drawn as buttons (a picker
         # sends only when its value changes, so the same one twice was nothing).
         "meta": {"values": ROBOT_GESTURES, "momentary": ROBOT_GESTURES},
     },
     "servo": {
-        "name": "sandy_head", "label": "رقبة ساندي", "control_type": "dimmer",
+        "name": "sandy_head", "label": "رقبة ساندي", "label_en": "Sandy's neck", "control_type": "dimmer",
         # Degrees: 90 is centre.
         "meta": {"min": 0, "max": 180, "levels_only": True},
     },
     "led": {
-        "name": "sandy_led", "label": "إضاءة ساندي", "control_type": "enum",
+        "name": "sandy_led", "label": "إضاءة ساندي", "label_en": "Sandy's light", "control_type": "enum",
         "meta": {"values": ROBOT_LED},
     },
     "screen_size": {
-        "name": "sandy_screen_size", "label": "حجم الكتابة",
+        "name": "sandy_screen_size", "label": "حجم الكتابة", "label_en": "Text size",
         "control_type": "enum",
         "meta": {"values": ["small", "medium", "large"]},
     },
     "screen": {
-        "name": "sandy_screen", "label": "شاشة ساندي", "control_type": "text",
+        "name": "sandy_screen", "label": "شاشة ساندي", "label_en": "Sandy's screen", "control_type": "text",
         # نص حر؛ القيمة `dismiss` بتشيله وبترجّع الوش.
         "meta": {"placeholder": "اكتب اللي بدك يظهر ع وشها", "max_bytes": 255},
     },
     "buzzer": {
-        "name": "sandy_buzzer", "label": "جرس ساندي", "control_type": "enum",
+        "name": "sandy_buzzer", "label": "جرس ساندي", "label_en": "Sandy's chime", "control_type": "enum",
         "meta": {"values": ROBOT_MELODIES, "momentary": ROBOT_MELODIES},
     },
     "mic_l": {
-        "name": "sandy_mic_left", "label": "المايك الشمال", "control_type": "switch",
+        "name": "sandy_mic_left", "label": "المايك الشمال", "label_en": "Left mic", "control_type": "switch",
     },
     "mic_r": {
-        "name": "sandy_mic_right", "label": "المايك اليمين", "control_type": "switch",
+        "name": "sandy_mic_right", "label": "المايك اليمين", "label_en": "Right mic", "control_type": "switch",
     },
     "mic_l_gain": {
-        "name": "sandy_mic_left_gain", "label": "مكسب المايك الشمال",
+        "name": "sandy_mic_left_gain", "label": "مكسب المايك الشمال", "label_en": "Left mic gain",
         "control_type": "dimmer",
         # 100 is unity; the firmware also clamps at 300.
         "meta": {"min": 0, "max": 300, "levels_only": True},
     },
     "mic_r_gain": {
-        "name": "sandy_mic_right_gain", "label": "مكسب المايك اليمين",
+        "name": "sandy_mic_right_gain", "label": "مكسب المايك اليمين", "label_en": "Right mic gain",
         "control_type": "dimmer", "meta": {"min": 0, "max": 300, "levels_only": True},
     },
     "volume": {
-        "name": "sandy_volume", "label": "صوت ساندي", "control_type": "dimmer",
+        "name": "sandy_volume", "label": "صوت ساندي", "label_en": "Sandy's volume", "control_type": "dimmer",
         "meta": {"min": 0, "max": 100, "levels_only": True},
     },
     "speaker_test": {
-        "name": "sandy_speaker_test", "label": "أصوات السماعة", "control_type": "enum",
+        "name": "sandy_speaker_test", "label": "أصوات السماعة", "label_en": "Speaker sounds", "control_type": "enum",
         "meta": {"values": ["beep", "chime", "alert", "sweep", "soft", "happy"],
                  "momentary": ["beep", "chime", "alert", "sweep", "soft", "happy"]},
     },
 
     "ir": {
-        "name": "sandy_ir", "label": "ريموت ساندي", "control_type": "ir",
+        "name": "sandy_ir", "label": "ريموت ساندي", "label_en": "Sandy's remote", "control_type": "ir",
         # بلا `meta` بالقصد: الأزرار بيتعلّمها المالك، وميتا الكتالوج بتندمج بكل
         # نبضة، فحتى `{"buttons": {}}` كانت رح تدهس أزراره.
     },
 
 }
 
-ROBOT_ROOM = "ساندي"
+# The room the robot's parts go in, in its owner's language.
+ROBOT_ROOM = {"ar": "ساندي", "en": "Sandy"}
 
 
 def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
@@ -154,10 +157,10 @@ def provision_from_outputs(node_id: str, outputs: List[Dict[str, Any]],
 
         res = add_device(
             name=name,
-            label=spec["label"],
+            label=spec["label_en"] if lang.current() == lang.EN else spec["label"],
             control_type=spec["control_type"],
             transport={"kind": "node", "node_id": node_id, "output": oid},
-            room=(label or ROBOT_ROOM),
+            room=(label or ROBOT_ROOM[lang.current()]),
             meta=spec.get("meta", {}),
         )
         if res.get("ok"):
@@ -249,7 +252,8 @@ def provision_for_owner(node_id: str, owner_id: str,
 
     if not owner_id:
         return {"ok": False, "error": "no_owner"}
+    # Its parts are named in the owner's language (only when first made; a rename stays).
     with active_user_profile_context(
         {"chat_id": owner_id, "permissions": "all", "relation": "user"}
-    ):
+    ), lang.using(lang.for_user(owner_id)):
         return provision_from_outputs(node_id, outputs, label)
