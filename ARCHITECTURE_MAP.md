@@ -175,6 +175,16 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    question stays last. On the call her words are heard already, so at the turn's end
    (`session._handle`, `_turn_worked`) she is told to put it right (`VOICE_CORRECTION`, a
    turn of its own that she answers). The prompt's own rule is no longer the guarantee.
+3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
+   is English when it has more Latin letters than Arabic ones; one with none («2», «👍») or
+   only «ok» keeps the conversation's. Every sentence the server says itself (tool replies,
+   held questions and summaries, errors, the honesty check's) is a phrase in both languages
+   (`lang.PHRASES`, `lang.say` in the turn's language, a context variable). A reply that
+   still came in the other language (Arabic words outside «quoted» names in an English turn,
+   or mostly English in an Arabic one) is rewritten once by the model; if that fails it goes
+   out as it was. Outside a reply (pushes, the daily nudge, limits, a route's own message)
+   the user's own language is used: `sandy_users.language`, which the app sends as `X-Lang`
+   (`lang.note` in `require_auth`).
 4. Due `message_to_future_self` schedules (`future.py`) are pasted word for word at the end
    of the reply by the code, never shown to the model, and marked `sent` only when the reply
    went out whole (not an error, not stopped).

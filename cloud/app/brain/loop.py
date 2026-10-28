@@ -19,7 +19,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from app.blocks import _base as blocks_base
 from app.blocks import changes
 from app.utils.ltm_crypto import decrypt_field
-from app.brain import confirm, context, future, honesty, lang, model, stm, stops, tools
+from app.brain import (confirm, context, future, honesty, lang, language_guard, model, stm,
+                       stops, tools)
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
 from app.features import trace_store
@@ -310,8 +311,11 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     if not (outcome.get("error") or outcome.get("stopped")):
         # Nothing is said to be done that no tool of the turn did (`honesty`).
         question = confirm.ask(outcome["pending"]) if outcome.get("pending") else ""
-        outcome = {**outcome, "text": honesty.correct(outcome["text"], ctx.worked, ctx.results,
-                                                       question)}
+        text = honesty.correct(outcome["text"], ctx.worked, ctx.results, question)
+        # In the message's language (`language_guard`); the held question is ours, already in it.
+        body = text[: -len(question)].rstrip() if question and text.endswith(question) else text
+        body = language_guard.ensure(body, complete)
+        outcome = {**outcome, "text": "\n".join(t for t in (body, question) if t)}
     shown = None
     try:
         # Stopped from the app: memory keeps what was shown, marked as cut.

@@ -271,3 +271,42 @@ def test_an_english_reply_is_told_to_carry_no_arabic_endearment():
     line = context.reply_language("add milk please")
     assert "endearment" in line and "English" in line
     assert "dear" in persona.LANGUAGE_RULE
+
+
+# ── a reply in the wrong language is put into the message's ─────────────────
+
+def test_an_arabic_reply_to_an_english_message_is_rewritten_in_english(brain_db):  # noqa: F811
+    model = ScriptedModel(text_reply("تمام، رح أذكّرك بكرا ⏰"), text_reply("OK, I'll remind you tomorrow ⏰"))
+    state = _turn(model, "remind me tomorrow please")
+    assert state["final_response"] == "OK, I'll remind you tomorrow ⏰"
+    assert "English" in model.seen[1][0]["content"] and model.seen[1][-1]["content"] == "تمام، رح أذكّرك بكرا ⏰"
+
+
+def test_an_english_reply_to_an_arabic_message_is_rewritten_in_arabic(brain_db):  # noqa: F811
+    model = ScriptedModel(text_reply("Sure, I can help with that."), text_reply("أكيد، بساعدك."))
+    assert _turn(model, "ممكن تساعدني؟")["final_response"] == "أكيد، بساعدك."
+
+
+def test_a_reply_already_in_the_language_or_with_quoted_names_is_left(brain_db):  # noqa: F811
+    model = ScriptedModel(text_reply("Your list has «حليب» on it."))
+    assert _turn(model, "what's on my list?")["final_response"] == "Your list has «حليب» on it."
+    assert len(model.seen) == 1
+
+
+def test_a_rewrite_that_fails_keeps_the_reply(brain_db):  # noqa: F811
+    class Once(ScriptedModel):
+        def __call__(self, messages, specs, on_text=None):
+            if self.seen:
+                self.seen.append(messages)
+                return None
+            return super().__call__(messages, specs, on_text)
+    state = _turn(Once(text_reply("تمام")), "hello")
+    assert state["final_response"] == "تمام"
+
+
+def test_wrong_language_is_read_outside_quoted_names():
+    from app.brain import language_guard as G
+    assert G.wrong_language("Added «حليب» ✅", "en") is False
+    assert G.wrong_language("I added it, يا عيوني!", "en") is True
+    assert G.wrong_language("ضفت «milk» ✅", "ar") is False
+    assert G.wrong_language("Sure, I added milk.", "ar") is True
