@@ -197,7 +197,10 @@ ms), the cost in dollars (`features/pricing.py`, the one place prices live, date
 `PRICES_UPDATED`), `skills` and `task_id` for the phases that fill them, and `error`.
 The tokens are counted at the one client (`openai_client.create_chat_completion`, a
 stream asks for them with `stream_options.include_usage`), on the direct fallback
-(`model._openai_direct`) and from the live call's `usage_metadata`; tools report from
+(`model._openai_direct`) and from the live call's `usage_metadata` (one model call a
+voice turn: every message reports the whole context in `prompt_tokens_details`, billed once
+a turn, so the input is the largest seen and only the answer's tokens add up; Google's
+forum answer, not its reference — check one call against the billing console); tools report from
 `tools.execute`. The trace being kept is a context variable (`trace_store.using`), so the
 side-by-side tools of one step report into it too. The words — request, reply, tools'
 arguments and results — are sealed with `SANDY_LTM_KEY`; without the key none are kept,

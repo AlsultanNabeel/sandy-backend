@@ -86,15 +86,26 @@ def test_a_voice_tool_is_traced_into_the_calls_turn(brain_db):  # noqa: F811
     assert [x["name"] for x in t.tools] == ["list_add"]
 
 
-def test_voice_usage_adds_up_over_the_turn():
+def test_a_voice_turn_is_one_model_call_its_context_counted_once():
+    """Each live message reports the whole context in its details: billed once a turn."""
     t = trace_store.Trace("userA", "voice")
-    for n in (100, 50):
-        trace_store.note_live_usage(t, "gemini-live", NS(prompt_token_count=n,
-                                                         response_token_count=10,
-                                                         cached_content_token_count=None))
+    for whole in (900, 1200, 1100):
+        trace_store.note_live_usage(t, "gemini-live", NS(
+            prompt_token_count=25, response_token_count=10, cached_content_token_count=None,
+            prompt_tokens_details=[NS(modality="AUDIO", token_count=whole - 100),
+                                   NS(modality="TEXT", token_count=100)]))
     trace_store.note_live_usage(t, "gemini-live", None)
-    assert sum(c["tokens_in"] for c in t.model_calls) == 150
-    assert sum(c["tokens_out"] for c in t.model_calls) == 20
+    [c] = t.model_calls
+    assert (c["provider"], c["tokens_in"], c["tokens_out"]) == ("gemini", 1200, 30)
+
+
+def test_without_details_the_top_level_count_is_used():
+    t = trace_store.Trace("userA", "voice")
+    trace_store.note_live_usage(t, "gemini-live", NS(prompt_token_count=300,
+                                                     response_token_count=7,
+                                                     prompt_tokens_details=None,
+                                                     cached_content_token_count=None))
+    assert t.model_calls[0]["tokens_in"] == 300
 
 
 # ── the tokens of every model call, at the one client ──────────────────────

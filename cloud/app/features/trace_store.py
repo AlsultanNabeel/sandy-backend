@@ -182,13 +182,36 @@ def note_usage(provider: str, model: str, usage: Any, ms: float = 0) -> None:
                     tokens_cached=getattr(details, "cached_tokens", 0) or 0, ms=ms)
 
 
+def _context_tokens(usage: Any) -> int:
+    """The whole context a live message reports (`prompt_tokens_details`, per modality),
+    else its top-level prompt count."""
+    details = getattr(usage, "prompt_tokens_details", None) or []
+    whole = sum(int(getattr(d, "token_count", 0) or 0) for d in details)
+    return whole or int(getattr(usage, "prompt_token_count", 0) or 0)
+
+
 def note_live_usage(trace: Optional[Trace], model: str, usage: Any) -> None:
-    """A live voice message's ``usage_metadata`` into the call's turn."""
+    """A live voice message's ``usage_metadata`` into the call's turn, as one model call.
+
+    Every server message carries one. Its top-level prompt count is a small slice; the
+    whole context, which is billed once per turn, is in `prompt_tokens_details` and grows
+    through the turn, so the turn's input is the largest one seen, not their sum. The
+    answer's tokens are the message's own, so they add up."""
     if trace is None or usage is None:
         return
-    trace.add_model_call("gemini", model, tokens_in=getattr(usage, "prompt_token_count", 0) or 0,
-                         tokens_out=getattr(usage, "response_token_count", 0) or 0,
-                         tokens_cached=getattr(usage, "cached_content_token_count", 0) or 0)
+    seen_in = _context_tokens(usage)
+    out = int(getattr(usage, "response_token_count", 0) or 0)
+    cached = int(getattr(usage, "cached_content_token_count", 0) or 0)
+    with trace._lock:
+        call = next((c for c in trace.model_calls if c["provider"] == "gemini"), None)
+        if call is None:
+            trace.model_calls.append({"provider": "gemini", "model": str(model or ""),
+                                      "tokens_in": seen_in, "tokens_out": out,
+                                      "tokens_cached": cached, "ms": 0})
+            return
+        call["tokens_in"] = max(call["tokens_in"], seen_in)
+        call["tokens_cached"] = max(call["tokens_cached"], cached)
+        call["tokens_out"] += out
 
 
 def note_tool(name: str, args: Any, result: Any, ms: float = 0) -> None:
