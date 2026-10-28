@@ -303,7 +303,9 @@ def reply_language(message: str) -> str:
     (`lang.of`; one with no letters keeps the turn's)."""
     english = lang.of(message, fallback=lang.current()) == lang.EN
     return ("This message is in English: write your whole reply in English only, "
-            "with no Arabic word in it." if english else
+            "with no Arabic word in it — not even a term of endearment («يا عيوني», "
+            "«حبيبي»): say it in English («dear») or leave it out. The tools' words reach "
+            "you in Arabic sometimes; say them in English." if english else
             "هالرسالة بالعربي: ردّك كله بالعربي بلهجتك، بدون ولا كلمة إنجليزي.")
 
 

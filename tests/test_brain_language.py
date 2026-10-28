@@ -264,3 +264,10 @@ def test_the_rules_name_the_english_way_of_saying_each_thing():
 def test_her_face_reads_english_as_arabic(mood, arabic, english):
     from app.api.voice_ws import face
     assert face.mood_of(arabic) == mood and face.mood_of(english) == mood
+
+
+def test_an_english_reply_is_told_to_carry_no_arabic_endearment():
+    from app.brain import context, persona
+    line = context.reply_language("add milk please")
+    assert "endearment" in line and "English" in line
+    assert "dear" in persona.LANGUAGE_RULE
