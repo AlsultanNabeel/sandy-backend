@@ -128,3 +128,20 @@ def test_the_score_is_given_per_language_and_english_may_not_trail_by_more_than_
 
 def test_a_row_is_found_whatever_its_case():
     assert E._has([{"text": "Water the plants"}], "water")
+
+
+def test_an_english_reply_has_no_arabic_word_but_names_may_stay():
+    assert E._is_english("Added milk ✅")
+    assert not E._is_english("I added milk, يا عيوني!")
+    assert E._is_english("Turned on «ضو الصالون» ✨")
+    assert E._is_english("Turned on ضو الصالون ✨")
+
+
+def test_the_stand_ins_answer_in_the_turns_language():
+    from app.brain import lang
+    with lang.using("en"):
+        assert E._STAND_INS["device_control"]({"device": "living_light", "action": "off"}, None)["reply"] \
+            == "Turned off living_light"
+        assert "ا" not in E._STAND_INS["image"]({}, None)["reply"]
+    with lang.using("ar"):
+        assert E._STAND_INS["image"]({}, None)["reply"] == lang.PHRASES["image_done"]["ar"]

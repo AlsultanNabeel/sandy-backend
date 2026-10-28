@@ -72,7 +72,7 @@ import mongomock  # noqa: E402
 
 from app import db as appdb  # noqa: E402
 from app.blocks import entries, init_blocks, items, schedules  # noqa: E402
-from app.brain import loop, tools  # noqa: E402
+from app.brain import lang, loop, tools  # noqa: E402
 from app.features import device_store, trace_store  # noqa: E402
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 from eval_cases import CASES, DEVICES  # noqa: E402
@@ -81,15 +81,25 @@ USER = {"chat_id": "eval", "relation": "user", "permissions": "all"}
 _LATIN = re.compile(r"[A-Za-z]")
 _ARABIC = re.compile(r"[؀-ۿ]")
 
-# What the outside tools answer here: enough for the model to go on, nothing sent.
+# What the outside tools answer here, in the turn's language as the real ones do: enough
+# for the model to go on, nothing sent.
+def _device_line(a: Dict[str, Any]) -> str:
+    target = a.get("device") or a.get("room") or ""
+    action = str(a.get("action") or "").lower()
+    key = {"on": "device_on", "off": "device_off", "open": "device_open", "close": "device_close"}
+    if action in key:
+        return lang.say(key[action], label=target)
+    return lang.say("device_set", label=target, value=a.get("value") or action)
+
+
 _STAND_INS = {
-    "device_control": lambda a, c: {"ok": True, "reply": f"تم: {a.get('device') or a.get('room')} {a.get('action', '')}"},
+    "device_control": lambda a, c: {"ok": True, "reply": _device_line(a)},
     "device_state": lambda a, c: {"ok": True, "devices": [{**d, "state": "off", "connected": True} for d in DEVICES]},
-    "scene_apply": lambda a, c: {"ok": True, "reply": f"✨ طبّقت مشهد «{a.get('name', '')}» 🏠"},
-    "room_restore": lambda a, c: {"ok": True, "reply": "رجّعت الغرفة زي ما كانت 🏠"},
-    "web_search": lambda a, c: {"ok": True, "reply": "حسب آخر الأخبار: الخبر المطلوب (مصدر تجريبي)."},
-    "weather": lambda a, c: {"ok": True, "reply": "الطقس: ٢٤ درجة، مشمس."},
-    "image": lambda a, c: {"ok": True, "reply": "جهزت الصورة."},
+    "scene_apply": lambda a, c: {"ok": True, "reply": lang.say("scene_applied", label=a.get("name", ""), tail=" 🏠")},
+    "room_restore": lambda a, c: {"ok": True, "reply": lang.say("restored", tail=" 🏠")},
+    "web_search": lambda a, c: {"ok": True, "reply": "Latest news: the requested story (test source)."},
+    "weather": lambda a, c: {"ok": True, "reply": "weather: 24°C, sunny."},
+    "image": lambda a, c: {"ok": True, "reply": lang.say("image_done")},
 }
 
 
@@ -169,9 +179,18 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
     said = [w for w in step.get("reply_lacks", []) if w in reply]
     if said:
         bad.append(f"الرد فيه {said} وما لازم")
-    if step.get("english") and len(_LATIN.findall(reply)) <= len(_ARABIC.findall(reply)):
+    if step.get("english") and not _is_english(reply):
         bad.append("الرد مش بالإنجليزي")
     return bad
+
+
+def _is_english(reply: str) -> bool:
+    """English through and through: no Arabic word, though a name may stay as it is (a
+    «quoted» one, or a device's own label)."""
+    text = re.sub(r"«[^»]*»", "", reply)
+    for d in DEVICES:
+        text = text.replace(d["label"], "").replace(d["room"], "")
+    return bool(_LATIN.search(text)) and not _ARABIC.search(text)
 
 
 def _arg_matches(want: Any, got: Any) -> bool:
