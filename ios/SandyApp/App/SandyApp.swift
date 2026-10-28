@@ -98,6 +98,10 @@ struct RootView: View {
                 LaunchHandoff { handoffDone = true }
             }
         }
+        // On staging every screen says so, and the badge is the way back (`DeveloperView`).
+        .overlay(alignment: .top) {
+            if state.server == .staging { StagingBadge() }
+        }
         .task {
             if state.needsSessionRestore { await state.restoreSession() }
         }

@@ -57,8 +57,11 @@ enum TestClient {
 
 final class MemoryTokenStore: TokenStore {
     private var value: String?
+    private var parked: [Backend.Server: String] = [:]
     func load() -> String? { value }
     func save(_ token: String?) { value = token }
+    func loadParked(_ server: Backend.Server) -> String? { parked[server] }
+    func saveParked(_ token: String?, _ server: Backend.Server) { parked[server] = token }
 }
 
 /// The client tests used to sign the app out: a fake token went into the shared Keychain

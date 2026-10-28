@@ -18,8 +18,9 @@ final class AppState: ObservableObject {
     @Published private(set) var dataEpoch = 0
     /// الإقلاع بيجيب بيانات التعارف أصلًا، فالتبويبات ما لازم تعيد الطلب.
     private var onboardingLoaded = false
-    /// الميزات اللي أخفاها المالك من السيرفر.
-    @Published var serverHiddenFeatures: Set<String> = []
+    /// What the server says about features for this account: hidden app-wide, and the
+    /// switches on for it (`dev_tools` opens the developer screen).
+    @Published var serverFeatures = ServerFeatures()
     let api: APIClient
     let subscriptions = SubscriptionManager()
 
@@ -144,7 +145,7 @@ final class AppState: ObservableObject {
         subscriptions.configure(userId: api.currentUserId)
         Task { await subscriptions.refresh(api: api) }
 
-        Task { serverHiddenFeatures = (try? await api.getFeatures()) ?? [] }
+        Task { serverFeatures = (try? await api.getFeatures()) ?? ServerFeatures() }
     }
 
     func refreshOnboarding() async {
@@ -184,6 +185,39 @@ final class AppState: ObservableObject {
         let apiRef = api
         Task { await NotificationPrefs.pull(api: apiRef) }
         dataEpoch &+= 1
+    }
+
+    var server: Backend.Server { Backend.Server(url: baseURL) }
+
+    /// The developer screen: for an account with `dev_tools` on, and always on staging so
+    /// there is a way back.
+    var showsDeveloper: Bool { DeveloperAccess.shows(on: serverFeatures.on, server: server) }
+
+    enum SwitchOutcome { case done, unsent }
+
+    /// Moves the app to the other server. Changes not yet sent would go to the wrong one,
+    /// so the switch is refused while any wait. The phone then forgets this server's data
+    /// (as a sign-out does, the token kept for the way back) and opens the other with its
+    /// own sign-in, or the sign-in screen the first time.
+    func switchServer(to target: Backend.Server) async -> SwitchOutcome {
+        guard target != server else { return .done }
+        guard await sendUnsent() else { return .unsent }
+        if let session = api.token {
+            let apiRef = api
+            await NotificationManager.shared.leave(api: apiRef, bearer: session)
+        }
+        verifyTask?.cancel()
+        verifyTask = nil
+        clearLocal()
+        subscriptions.signOut()
+        api.switchServer(to: target)
+        baseURL = api.baseURL
+        serverFeatures = ServerFeatures()
+        onboarding = OnboardingData()
+        onboardingLoaded = false
+        stage = .launching
+        await restoreSession()
+        return .done
     }
 
     /// What sign-out and «reset my data» both clear on the phone. Widgets and scheduled

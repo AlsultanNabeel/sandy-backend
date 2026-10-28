@@ -1,0 +1,72 @@
+import Foundation
+
+// Namespace: developer — the owner's developer screen, its trace and cost pages, and the
+// staging badge (Features/Developer/).
+enum L10nDeveloper {
+    static let ns = "developer"
+
+    static let table = L10nTable(
+        ar: [
+            "title": .text("المطوّر"),
+            "server": .text("الخادم"),
+            "production": .text("الإنتاج"),
+            "staging": .text("التجريبي"),
+            "serverNote": .text("كل خادم إله دخوله وبياناته. التحويل بيمسح النسخة المحفوظة على الجوال، وبيفتح الخادم التاني بدخوله، أو بشاشة الدخول أول مرة."),
+            "switching": .text("عم بحوّل…"),
+            "unsent": .text("في تغييرات لسا ما وصلت للخادم هاد. استنّى توصل، وبعدين حوّل."),
+            "badge": .text("تجريبي"),
+            "traces": .text("التتبّع"),
+            "costs": .text("الكلفة"),
+            "tracesEmpty": .text("لسا ما في أدوار محفوظة."),
+            "loadFailed": .text("ما قدرت أجيبها هلّق، جرّب كمان شوي."),
+            "request": .text("الطلب"),
+            "reply": .text("الرد"),
+            "noWords": .text("النصوص بتطلع لأدوار حسابك بس."),
+            "tools": .text("الأدوات"),
+            "modelCalls": .text("استدعاءات النموذج"),
+            "args": .text("التفاصيل"),
+            "result": .text("النتيجة"),
+            "tokens": .text("%@ رمز داخل، %@ طالع"),
+            "total": .text("المجموع"),
+            "byUser": .text("لكل مستخدم"),
+            "bySource": .text("لكل مصدر"),
+            "turns": .text("%@ دور"),
+            "lastDays": .text("آخر %@ يوم"),
+            "error": .text("خطأ"),
+            "chat": .text("شات"),
+            "voice": .text("صوت"),
+            "background": .text("بالخلفية"),
+        ],
+        en: [
+            "title": .text("Developer"),
+            "server": .text("Server"),
+            "production": .text("Production"),
+            "staging": .text("Staging"),
+            "serverNote": .text("Each server has its own sign-in and data. Switching clears what the phone saved and opens the other server with its own sign-in, or the sign-in screen the first time."),
+            "switching": .text("Switching…"),
+            "unsent": .text("Some changes haven't reached this server yet. Wait for them, then switch."),
+            "badge": .text("Staging"),
+            "traces": .text("Traces"),
+            "costs": .text("Costs"),
+            "tracesEmpty": .text("No turns kept yet."),
+            "loadFailed": .text("Couldn't load that right now, try again in a bit."),
+            "request": .text("Request"),
+            "reply": .text("Reply"),
+            "noWords": .text("The words show for your own account's turns only."),
+            "tools": .text("Tools"),
+            "modelCalls": .text("Model calls"),
+            "args": .text("Arguments"),
+            "result": .text("Result"),
+            "tokens": .text("%@ tokens in, %@ out"),
+            "total": .text("Total"),
+            "byUser": .text("By user"),
+            "bySource": .text("By source"),
+            "turns": .text("%@ turns"),
+            "lastDays": .text("Last %@ days"),
+            "error": .text("Error"),
+            "chat": .text("Chat"),
+            "voice": .text("Voice"),
+            "background": .text("Background"),
+        ]
+    )
+}

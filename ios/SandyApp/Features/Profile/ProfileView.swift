@@ -127,6 +127,9 @@ struct ProfileView: View {
                 // حذف الحساب يكون **سهل الوصول**، وبترفض التطبيق لو كان مدفونًا.
                 archiveRow(icon: "person.crop.circle.badge.xmark",
                            titleKey: "account.title") { AccountView() }
+                if state.showsDeveloper {
+                    archiveRow(icon: "hammer.fill", titleKey: "developer.title") { DeveloperView() }
+                }
             }
         }
     }

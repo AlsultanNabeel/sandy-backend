@@ -69,6 +69,14 @@ private struct OnboardingSaveBody: Encodable {
 
 private struct FeaturesResponse: Decodable {
     let hidden: [String]?
+    let on: [String]?
+}
+
+/// What the server says about features for this account: those the owner hid app-wide,
+/// and the feature switches on for it (`utils/flags.py`).
+struct ServerFeatures: Equatable {
+    var hidden: Set<String> = []
+    var on: Set<String> = []
 }
 
 extension APIClient {
@@ -133,9 +141,9 @@ extension APIClient {
                        body: ["token": token], bearer: bearer)
     }
 
-    func getFeatures() async throws -> Set<String> {
+    func getFeatures() async throws -> ServerFeatures {
         let r: FeaturesResponse = try await fetch("/api/features")
-        return Set(r.hidden ?? [])
+        return ServerFeatures(hidden: Set(r.hidden ?? []), on: Set(r.on ?? []))
     }
 
     func getSubscription() async throws -> SubscriptionStatus {

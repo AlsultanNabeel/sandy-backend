@@ -123,6 +123,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nWiFi.ns:          L10nWiFi.table,
     L10nWeather.ns:       L10nWeather.table,
     L10nControl.ns:       L10nControl.table,
+    L10nDeveloper.ns:     L10nDeveloper.table,
 ]
 
 // MARK: - translate (mirrors web translate(lang, key))

@@ -1349,6 +1349,20 @@ so folders are organisation only.
   extensions only when `mirrorsShared`; tests pass an in-memory store and `false`
   (`SandyAppTests` `TestClient.make()`), so running them never signs the app out.
   `APIClient.session` is a `var` only so tests can answer through `StubNetwork` (no server).
+- **Two servers** (`Backend.Server`: production, staging at `Backend.stagingURL`, which
+  takes the staging app's Heroku address once it is made). Each keeps its own sign-in: the
+  token in use is always in the shared Keychain slot the widget and share extension read
+  (`auth.token`, with the mirrored address), and the other server's waits in a slot of its
+  own (`auth.token.<server>`, `TokenStore.loadParked` / `saveParked`,
+  `APIClient.switchServer`). `AppState.switchServer` refuses while anything is unsent (it
+  would reach the wrong server), then does a sign-out's local clearing with the token kept,
+  takes the phone's push token off the server it leaves, and opens the other with its own
+  sign-in or the sign-in screen. The developer screen (`Features/Developer/`) holds the
+  switch (two fixed choices) and the owner's trace and cost pages (`APIClient+Owner`,
+  `/api/owner/*`, through `OwnerStore`). It shows in Profile for an account with
+  `dev_tools` in `/api/features`' `on` (`ServerFeatures`, `DeveloperAccess`) and always on
+  staging, where an orange «تجريبي» badge sits over every screen and opens it, signed in or
+  not.
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
 - `Core/Stores/LoadableStore.swift` — the shared load/error/empty state machine.
 - `Features/Blocks/` — **the screens for the blocks (§2.12)**: one generic list screen

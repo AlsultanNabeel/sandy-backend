@@ -50,6 +50,19 @@ final class APIClient: APIClientProtocol {
         if mirrorsShared { SharedAuth.mirror(baseURL: baseURL) }
     }
 
+    /// Moves to the other server keeping each one's sign-in: this server's token waits in
+    /// its slot, the other's comes back (none the first time). The shared slot the widget
+    /// and the share extension read always holds the server in use, as does the mirrored
+    /// address.
+    func switchServer(to server: Backend.Server) {
+        let current = Backend.Server(url: baseURL)
+        guard server != current else { return }
+        tokenStore.saveParked(token, current)
+        baseURL = server.url
+        token = tokenStore.loadParked(server)
+        tokenStore.saveParked(nil, server)
+    }
+
     /// Retries only transport failures on safe methods; never cancellation or server errors.
     static func sendWithRetry(_ req: URLRequest,
                               method: String) async throws -> (Data, URLResponse) {
