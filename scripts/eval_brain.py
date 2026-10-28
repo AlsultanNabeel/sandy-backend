@@ -112,7 +112,7 @@ def _setup(steps: List[Dict[str, Any]]) -> None:
 
 
 def _has(rows: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
-    return [r for r in rows if text in str(r.get("text") or "")]
+    return [r for r in rows if text.lower() in str(r.get("text") or "").lower()]
 
 
 def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List[str]:
@@ -259,6 +259,27 @@ def _compare(base: Dict[str, Any], now: Dict[str, Any]) -> Dict[str, List[str]]:
             "new": sorted(n for n in after if n not in before)}
 
 
+# English may trail Arabic by at most this many points, and never the other way round
+# matters: they are meant to be equal.
+LANGUAGE_GAP = 5
+
+
+def _by_language(outcome: Dict[str, Optional[bool]], langs: Dict[str, str]) -> Dict[str, Tuple[int, int]]:
+    """(passed, scored) for each language, unanswered cases left out."""
+    out: Dict[str, Tuple[int, int]] = {}
+    for name, ok in outcome.items():
+        if ok is None:
+            continue
+        p, t = out.get(langs.get(name, "ar"), (0, 0))
+        out[langs.get(name, "ar")] = (p + bool(ok), t + 1)
+    return out
+
+
+def _language_gap_ok(scores: Dict[str, Tuple[int, int]]) -> bool:
+    pct = {k: 100 * p / t for k, (p, t) in scores.items() if t}
+    return "ar" not in pct or "en" not in pct or pct["en"] >= pct["ar"] - LANGUAGE_GAP
+
+
 def _differences(moved: Dict[str, List[str]]) -> int:
     return len(moved["fell"]) + len(moved["rose"])
 
@@ -316,7 +337,14 @@ def main() -> int:
     if unanswered:
         print(f"no answer from the model (left out): {sorted(set(unanswered))}")
     print(f"cost: ${spent['usd']:.4f} ({spent['tokens_in']} tokens in, {spent['tokens_out']} out)")
-    ok = passed == len(scored) and not unanswered
+    langs = {c["name"]: c.get("lang", "ar") for c in cases}
+    scores = _by_language(outcome, langs)
+    for language, (p, t) in sorted(scores.items()):
+        print(f"  {language}: {p}/{t} ({100 * p // max(t, 1)}%)")
+    gap_ok = _language_gap_ok(scores)
+    if not gap_ok:
+        print(f"English trails Arabic by more than {LANGUAGE_GAP} points")
+    ok = passed == len(scored) and not unanswered and gap_ok
     split = _disagreeing(runs)
     if repeat > 1:
         print(f"repeats disagreed on {len(split)} case(s): {split or '—'}")
@@ -325,6 +353,7 @@ def main() -> int:
         result = {"when": datetime.now().strftime("%Y-%m-%dT%H:%M"), "model": model,
                   "repeat": repeat, "passed": passed, "total": len(scored), "cases": outcome,
                   "unanswered": sorted(set(unanswered)),
+                  "by_language": {k: {"passed": p, "total": t} for k, (p, t) in scores.items()},
                   "disagreed": split, "seconds": round(seconds, 1), **spent}
         path, base = _save(result)
         print(f"saved: {path.relative_to(ROOT)}")

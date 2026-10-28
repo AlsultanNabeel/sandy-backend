@@ -98,3 +98,33 @@ def test_cases_with_no_answer_are_left_out_of_the_comparison():
     base = {"cases": {"a": True, "b": True}}
     now = {"cases": {"a": True, "b": None}}
     assert E._compare(base, now) == {"fell": [], "rose": [], "new": []}
+
+
+def test_every_arabic_case_has_an_english_sister_with_the_same_checks():
+    from eval_cases import CASES
+    by_name = {c["name"]: c for c in CASES}
+    arabic = [c for c in CASES if c.get("lang", "ar") == "ar"]
+    assert arabic
+    for c in arabic:
+        sister = by_name.get(f"{c['name']} · en")
+        assert sister, f"no English sister for {c['name']}"
+        assert sister["lang"] == "en"
+        assert len(sister["steps"]) == len(c["steps"])
+        for a, e in zip(c["steps"], sister["steps"]):
+            checks = set(a) - {"say", "english"}
+            assert checks <= set(e), f"{c['name']}: the English sister drops {checks - set(e)}"
+            assert e.get("english"), f"{sister['name']}: the reply must be checked to be English"
+
+
+def test_the_score_is_given_per_language_and_english_may_not_trail_by_more_than_five():
+    langs = {"a": "ar", "b": "ar", "a · en": "en", "b · en": "en"}
+    outcome = {"a": True, "b": True, "a · en": True, "b · en": False}
+    scores = E._by_language(outcome, langs)
+    assert scores == {"ar": (2, 2), "en": (1, 2)}
+    assert E._language_gap_ok(scores) is False
+    assert E._language_gap_ok({"ar": (19, 20), "en": (18, 20)}) is True
+    assert E._language_gap_ok({"ar": (18, 20), "en": (20, 20)}) is True
+
+
+def test_a_row_is_found_whatever_its_case():
+    assert E._has([{"text": "Water the plants"}], "water")

@@ -13,6 +13,8 @@ conversation. A step checks any of:
   args                           {tool: {arg: value}}: one call of that tool carries these
                                  values (a word of text is found inside the call's text)
 Checks look at what was done, not at the wording, so a good reply in other words passes.
+Every Arabic case has an English sister, `<name> · en`, with the same checks and its reply
+checked to be English (`EN_CASES`); `eval_brain.py` scores each language on its own.
 Add the sentence that went wrong in real use, not an invented one.
 """
 
@@ -142,7 +144,7 @@ CASES = [
         {"say": "كيفك ساندي؟", "no_tools": True}]},
     {"name": "venting", "steps": [
         {"say": "اليوم كان يوم صعب كتير بالشغل", "not_tools": ["list_add", "schedule"]}]},
-    {"name": "english", "steps": [
+    {"name": "english", "lang": "en", "steps": [
         {"say": "remind me to call John tomorrow at 5pm", "tools": ["schedule"], "english": True}]},
     {"name": "two at once", "steps": [
         {"say": "ضيفي بيض للأغراض وذكريني بعد ساعتين أطلع الزبالة", "tools": ["list_add", "schedule"],
@@ -151,3 +153,118 @@ CASES = [
         {"say": "بدي أعمل عزومة يوم الجمعة لصحابي", "not_tools": ["undo"]},
         {"say": "ضيفي لحمة وفحم إلها", "tools": ["list_add"], "item": {"list": "shopping", "has": "فحم"}}]},
 ]
+
+
+def _en(name, steps, setup=None):
+    case = {"name": f"{name} · en", "lang": "en", "steps": [{**st, "english": True} for st in steps]}
+    if setup:
+        case["setup"] = setup
+    return case
+
+
+def _item(list_name, text):
+    return {"item": {"list": list_name, "text": text}}
+
+
+EN_CASES = [
+    _en("shopping add", [{"say": "add milk and bread to the shopping list", "tools": ["list_add"],
+                          "args": {"list_add": {"list": "shopping"}},
+                          "item": {"list": "shopping", "has": "bread"}}]),
+    _en("shopping implied", [{"say": "we're out of milk at home", "tools": ["list_add"],
+                              "item": {"list": "shopping", "has": "milk"}}]),
+    _en("shopping bought", [{"say": "I bought the tomatoes", "tools": ["list_update"],
+                             "item": {"list": "shopping", "has": "tomato", "done": True}}],
+        [_item("shopping", "tomatoes")]),
+    _en("shopping more of", [{"say": "more milk", "not_tools": ["undo"]}], [_item("shopping", "milk")]),
+    _en("task add", [{"say": "I need to finish the work report", "tools": ["list_add"],
+                      "item": {"list": "tasks", "has": "report"}}]),
+    _en("task done", [{"say": "I paid the electricity", "tools": ["list_update"],
+                       "item": {"list": "tasks", "has": "electricity", "done": True}}],
+        [_item("tasks", "Pay the electricity bill")]),
+    _en("task repeats", [{"say": "every day I have to water the plants", "tools": ["list_add"],
+                          "item": {"has": "plants"}}]),
+    _en("habit days", [{"say": "I want a workout habit on Sundays, Tuesdays and Thursdays at 6pm",
+                        "tools": ["list_add"], "item": {"list": "habits", "has": "workout"}}]),
+    _en("delete at once", [{"say": "delete the gym task", "tools": ["list_delete"], "pending": False,
+                            "no_item": {"list": "tasks", "has": "gym"}}], [_item("tasks", "Go to the gym")]),
+    _en("empty a list asks first", [{"say": "empty my shopping list", "pending": True},
+                                    {"say": "no, keep it", "pending": False,
+                                     "item": {"list": "shopping", "has": "milk", "done": False}}],
+        [_item("shopping", "milk"), _item("shopping", "bread")]),
+    _en("delete one item", [{"say": "remove the bread from the shopping list", "tools": ["list_delete"],
+                             "pending": False, "no_item": {"list": "shopping", "has": "bread"},
+                             "item": {"list": "shopping", "has": "milk"}}],
+        [_item("shopping", "milk"), _item("shopping", "bread")]),
+    _en("delete is never an edit", [{"say": "remove the bank task", "tools": ["list_delete"],
+                                     "not_tools": ["list_update"], "no_item": {"list": "tasks", "has": "bank"}}],
+        [_item("tasks", "Call the bank")]),
+    _en("bulk delete asks then goes", [{"say": "clear my whole shopping list", "pending": True,
+                                        "item": {"list": "shopping", "has": "oil"}},
+                                       {"say": "yes, clear it", "pending": False,
+                                        "no_item": {"list": "shopping", "has": "oil"}}],
+        [_item("shopping", t) for t in ("milk", "bread", "eggs", "cheese", "oil", "sugar")]),
+    _en("no put it back", [{"say": "delete the gym task", "tools": ["list_delete"],
+                            "no_item": {"list": "tasks", "has": "gym"}},
+                           {"say": "no, bring it back", "tools": ["undo"], "item": {"list": "tasks", "has": "gym"}}],
+        [_item("tasks", "Go to the gym")]),
+    _en("delete what is not there", [{"say": "delete the watermelon from the shopping list",
+                                      "item": {"list": "shopping", "has": "milk"},
+                                      "reply_lacks": ["deleted", "removed"]}], [_item("shopping", "milk")]),
+    _en("an edit that changes nothing", [{"say": "change the rent task to Pay the rent",
+                                          "item": {"list": "tasks", "has": "Pay the rent"},
+                                          "reply_lacks": ["updated", "changed"]}], [_item("tasks", "Pay the rent")]),
+    _en("reminder relative", [{"say": "remind me in an hour to call my mom", "tools": ["schedule"],
+                               "schedule": {"has": "mom"}, "args": {"schedule": {"kind": "reminder"}}}]),
+    _en("reminder clock", [{"say": "remind me tomorrow at 9am about the doctor's appointment",
+                            "tools": ["schedule"], "schedule": {"has": "doctor"}}]),
+    _en("reminder repeats", [{"say": "remind me every day at 10pm to take my medicine", "tools": ["schedule"],
+                              "args": {"schedule": {"kind": "reminder"}},
+                              "schedule": {"has": "medicine", "repeats": True}}]),
+    _en("reminder move", [{"say": "push the meeting reminder back an hour", "tools": ["schedule_update"],
+                           "schedule": {"has": "meeting"}}], [{"reminder": {"text": "Team meeting"}}]),
+    _en("reminder cancel", [{"say": "cancel the gift reminder", "tools": ["schedule_cancel"],
+                             "no_schedule": "gift"}], [{"reminder": {"text": "Buy a gift"}}]),
+    _en("reminder before another", [{"say": "remind me fifteen minutes before the manager meeting",
+                                     "tools": ["schedule"]}],
+        [{"reminder": {"text": "Meeting with the manager", "in_hours": 5}}]),
+    _en("expense", [{"say": "I spent 50 shekels on lunch", "tools": ["remember"],
+                     "entry": {"kind": "expense", "amount": 50}}]),
+    _en("delete the last expense", [{"say": "I spent 20 on coffee", "tools": ["remember"]},
+                                    {"say": "delete the last expense", "tools": ["log_delete"],
+                                     "no_entry": {"kind": "expense"}}]),
+    _en("expense fix", [{"say": "I spent 50 on gas", "tools": ["remember"]},
+                        {"say": "no, I meant 60 not 50", "tools": ["log_update"],
+                         "entry": {"kind": "expense", "amount": 60}}]),
+    _en("fact", [{"say": "by the way, I'm allergic to peanuts", "tools": ["remember"],
+                  "entry": {"kind": "fact", "has": "peanut"}}]),
+    _en("spending question", [{"say": "how much did I spend today?", "reply_has": ["65"]}],
+        [{"entry": {"kind": "expense", "text": "lunch", "data": {"amount": 40, "category": "food"}}},
+         {"entry": {"kind": "expense", "text": "taxi", "data": {"amount": 25, "category": "transport"}}}]),
+    _en("undo", [{"say": "add cheese to the shopping list", "tools": ["list_add"]},
+                 {"say": "no, that was a mistake, undo it", "tools": ["undo"],
+                  "no_item": {"list": "shopping", "has": "cheese"}}]),
+    _en("device on", [{"say": "can you turn on the living room light", "tools": ["device_control"],
+                       "args": {"device_control": {"action": "on"}}}]),
+    _en("device room", [{"say": "turn off everything in the kitchen", "tools": ["device_control"],
+                         "args": {"device_control": {"action": "off"}}}]),
+    _en("device later", [{"say": "turn off the AC in an hour", "tools": ["schedule"],
+                          "not_tools": ["device_control"]}]),
+    _en("device question", [{"say": "is the AC on?", "tools": ["device_state"],
+                             "not_tools": ["device_control"]}]),
+    _en("scene", [{"say": "I'm going to sleep, set up the room", "any_tools": ["scene_apply", "device_control"],
+                   "not_tools": ["room_restore"]}]),
+    _en("apply a scene is not a restore", [{"say": "apply the movie scene", "tools": ["scene_apply"],
+                                            "not_tools": ["room_restore"]}]),
+    _en("weather", [{"say": "what's the weather like tomorrow?", "tools": ["weather"]}]),
+    _en("search", [{"say": "what's the latest Real Madrid news?", "tools": ["web_search"]}]),
+    _en("image", [{"say": "draw me a cat wearing glasses", "tools": ["image"]}]),
+    _en("plain chat", [{"say": "how are you, Sandy?", "no_tools": True}]),
+    _en("venting", [{"say": "today was a really hard day at work", "not_tools": ["list_add", "schedule"]}]),
+    _en("two at once", [{"say": "add eggs to the shopping list and remind me in two hours to take out the trash",
+                         "tools": ["list_add", "schedule"], "item": {"list": "shopping", "has": "eggs"},
+                         "schedule": {"has": "trash"}}]),
+    _en("remembers the thread", [{"say": "I'm having friends over for dinner on Friday", "not_tools": ["undo"]},
+                                 {"say": "add meat and charcoal for it", "tools": ["list_add"],
+                                  "item": {"list": "shopping", "has": "charcoal"}}]),
+]
+CASES += EN_CASES
