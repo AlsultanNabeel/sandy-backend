@@ -65,8 +65,20 @@ Three repos exist on the owner's Desktop; only one is worked in. See
 
 Deploy target: Heroku app `sandy-robot` (host `sandy-robot-3da0693d32f7.herokuapp.com`), database `sandy-app` (the `MONGODB_DB_NAME` config var; there is no default, and with a database address and no name the server refuses to start, `mongodb_store.init_mongo_connection`). The
 Heroku app name is inherited from the old project; the code and data on it are
-this one's. There is **no staging environment** — production is also what the
-robot on the owner's desk is talking to.
+this one's. Production is also what the robot on the owner's desk is talking to.
+
+**Staging** is a second Heroku app with `APP_ENV=staging` and its own database (the
+owner's runbook, kept locally, is `docs/STAGING.md`). `utils/env_guard.py` runs first in
+`bootstrap.bootstrap` and refuses to start a staging server wired to production: the
+production database by name (`sandy-app`) or by its mark, production's broker login (host
+and `sandy-server` together, or the host inside `SANDY_BROKER_CREDS`), or any `APNS_*`,
+`REVENUECAT_WEBHOOK_AUTH` or `SANDY_FIRMWARE_TOKEN`. Each database is marked with the
+environment that first booted on it (`sandy_env`, `{_id: "env", env}`), and production
+refuses a database marked staging. Problems are named by setting, never by value. On
+staging `apns.is_configured()` is false whatever is set, and every Sentry event carries
+`environment` and an `env` tag. The guard runs after `init_runtime`, which has already
+opened the broker listener; a staging app given production's broker is refused within the
+same boot, before it serves a request.
 
 ---
 
@@ -1756,8 +1768,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
 
 ### Real, but nobody hits it today
 
-5. **No staging environment.** Production is what the robot on the desk talks
-   to. §1.
+5. **Staging: built, not yet created.** The code side is in (§1, `env_guard`); the owner
+   creates the Heroku app from `docs/STAGING.md`.
 6. **`GeminiLiveManager`'s own `URLSession`: fixed.** The call's socket now comes
    from the app's shared `APIClient.session`. (A scene was also sent twice per apply —
    once by `apply_scene`, again by its callers; `apply_scene` alone sends it now.)

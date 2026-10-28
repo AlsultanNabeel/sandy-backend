@@ -88,7 +88,9 @@ def test_bootstrap_starts_it(monkeypatch):
     monkeypatch.setattr(config, "validate_config", lambda: ([], []))
     monkeypatch.setattr(process_leader, "claim_leadership", lambda name: False)
     monkeypatch.setattr(vector_index, "ensure_in_background", started.append)
-    appdb.configure(_db(_Entries([READY])))
+    # The boot guard marks the database first (`utils/env_guard.py`).
+    import mongomock
+    appdb.configure({**_db(_Entries([READY])), "sandy_env": mongomock.MongoClient().db["sandy_env"]})
     try:
         bootstrap.bootstrap(app_env="test")
     finally:

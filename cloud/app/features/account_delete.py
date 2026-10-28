@@ -120,6 +120,7 @@ NOT_ERASED: Dict[str, str] = {
     "sandy_auth": "sign-in attempt counters keyed by email and address, gone in their window",
     "sandy_device_keys": "a board's own key, keyed by device; unpairing (done first) revokes it",
     "node_pair_challenges": "pairing proofs keyed by node, five minutes then TTL",
+    "sandy_env": "the server's own environment mark (prod or staging), not a person's",
     "node_sightings": "boards nobody paired, keyed by board, a day then TTL; no person in it",
     "broker_logins_to_revoke": "released boards' broker logins, keyed by board, for the "
                                "owner to revoke; goes when the login leaves the table",

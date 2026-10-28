@@ -176,6 +176,12 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
 
     configure_logging(LOG_LEVEL)
 
+    # Before anything else: a staging server wired to production (or the reverse) stops here.
+    from app.db import get_db
+    from app.utils import env_guard
+
+    env_guard.check(get_db())
+
     fatal, warnings = validate_config()
     for msg in warnings:
         logger.warning("[Bootstrap] config warning: %s", msg)
@@ -201,7 +207,6 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
 
     # The Atlas vector index is made on Atlas's time, never boot's.
     from app.blocks import vector_index
-    from app.db import get_db
 
     if get_db() is not None:
         vector_index.ensure_in_background(get_db())
