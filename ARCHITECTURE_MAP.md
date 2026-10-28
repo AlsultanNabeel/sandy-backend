@@ -1634,7 +1634,11 @@ saved run says what fell and rose against it. More than two cases moved
 command line and no `.env`. It costs model calls, so it runs by hand before a model or
 prompt change, never in CI. First run on `gpt-4.1` (4 Oct 2026): 31/34;
 the misses were «خلص الحليب» and «لازم أخلص التقرير» answered without adding, and
-«ذكريني كل يوم» made a habit instead of a reminder.
+«ذكريني كل يوم» made a habit instead of a reminder. Baseline of 28 Oct 2026
+(`eval_results/baseline.json`, forty cases): 36/40 on the `sandy-chat` deployment, which is
+`gpt-4o-mini`; the run after it moved five cases (delete one item answered with
+`list_update`, «جهزي الغرفة» with `room_restore`, and three that rose), so two runs still
+differ by more than `ALLOWED_DIFFERENCES`.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
@@ -1788,6 +1792,12 @@ nobody re-reads becomes a way of believing things that stopped being true.
    answers a bare device command with none, and a turn of answer tools only
    (§2.3) skips the second call. `[turn] …ms total — brain tools=[…]`
    (§2.11) gives the time per message.
+
+9. **The chat model runs out under load, and its fallback has no credit.** On 28 Oct 2026
+   the `sandy-chat` deployment (`gpt-4o-mini`, Azure Spain Central) answered 429 «exceeded
+   token rate limit» at about 240 000 tokens a minute, and OpenAI direct, the fallback,
+   answered 429 «no credits remaining». The user sees `loop.ERROR_REPLY`. The fix is a
+   higher token quota on the deployment, or credit on the fallback.
 
 ### Real, but nobody hits it today
 
