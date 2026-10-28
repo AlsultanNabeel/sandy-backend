@@ -22,6 +22,7 @@ from app.utils.ltm_crypto import decrypt_field
 from app.brain import confirm, context, future, honesty, model, stm, stops, tools
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
+from app.features import trace_store
 from app.utils.tenant_version import turn_scope
 
 logger = logging.getLogger(__name__)
@@ -235,11 +236,23 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
              conversation_id: Optional[str] = None,
              attachments: Optional[List[Dict[str, Any]]] = None,
              complete: Optional[Callable] = None, client_msg_id: str = "") -> Dict[str, Any]:
-    with turn_scope():
-        return _run_turn(message, user_id, chat_id, pending_state=pending_state,
-                         source=source, image_state=image_state,
-                         conversation_id=conversation_id, attachments=attachments or [],
-                         complete=complete or model.complete, client_msg_id=client_msg_id)
+    trace = trace_store.Trace(user_id, "voice" if source == "voice" else "chat",
+                              thread_id=str(conversation_id or chat_id))
+    state = None
+    with turn_scope(), trace_store.using(trace):
+        try:
+            state = _run_turn(message, user_id, chat_id, pending_state=pending_state,
+                              source=source, image_state=image_state,
+                              conversation_id=conversation_id, attachments=attachments or [],
+                              complete=complete or model.complete, client_msg_id=client_msg_id,
+                              turn_id=trace.id)
+        finally:
+            if state is None:
+                # The turn raised: it is kept as one that broke, and the error goes on up.
+                trace.finish(request=message, routed_by="brain", error="turn raised")
+    trace.finish(request=message, reply=state["final_response"], routed_by=state["routed_by"],
+                 error=state["error"])
+    return state
 
 
 def _user_content(message: str, attachments: List[Dict[str, Any]]) -> Any:
@@ -268,13 +281,14 @@ def _remembered_line(message: str, attachments: List[Dict[str, Any]]) -> str:
 
 
 def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
-              conversation_id, attachments, complete, client_msg_id) -> Dict[str, Any]:
+              conversation_id, attachments, complete, client_msg_id,
+              turn_id) -> Dict[str, Any]:
     t0 = time.perf_counter()
     began = datetime.now(timezone.utc)
     thread_id = str(conversation_id or chat_id)
     ctx = TurnCtx(user_id=str(user_id), message=message, thread_id=thread_id,
                   source="voice" if source == "voice" else "chat", image_state=image_state,
-                  turn_id=blocks_base.new_id())
+                  turn_id=turn_id)
     held = confirm.live(pending_state)
     _, history = stm.history(thread_id, user_id)
     # Everything the turn writes is journaled, a confirmed «yes» included, so a rewritten

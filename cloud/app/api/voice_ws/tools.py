@@ -395,21 +395,23 @@ def _build_live_tools(types, end_call: bool = False) -> List:
 
 
 def _dispatch_tool(name: str, args: Dict[str, Any], user_id: str = "",
-                   turn: str = "") -> Dict[str, Any]:
+                   turn: str = "", trace: Optional[Any] = None) -> Dict[str, Any]:
     """Run one tool call in the caller's tenant (runs via run_in_executor); ``turn`` groups
-    the call's turn's writes for undo.
+    the call's turn's writes for undo, and ``trace`` (`trace_store.Trace`) is the turn's
+    trace the call is kept in.
 
     ``user_id`` is passed in because the pool thread lacks the session context;
     without it every scoped read/write goes nowhere.
     """
     from app.brain.voice import dispatch
+    from app.features import trace_store
     from app.utils.user_profiles import active_user_profile_context
 
     # Always, even when empty: a pool thread keeps its context between jobs.
     set_voice_identity(user_id)
     chat_id = _stm_chat_id() or user_id
     try:
-        with active_user_profile_context(_voice_profile(chat_id)):
+        with active_user_profile_context(_voice_profile(chat_id)), trace_store.using(trace):
             return dispatch(name, args, chat_id, turn)
     except Exception as exc:  # noqa: BLE001 — one tool never ends the call
         logger.error("[voice_ws] tool %s failed: %s", name, exc, exc_info=True)

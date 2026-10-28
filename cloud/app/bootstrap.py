@@ -62,6 +62,7 @@ def init_runtime() -> None:
     from app.features.push_tokens_store import init_push_tokens_store
     from app.features.scene_store import init_scene_store
     from app.features.speaker_id import init_speaker_store
+    from app.features.trace_store import init_trace_store
     from app.features.usage_store import init_usage_store
     from app.features.users_store import init_users_store
     from app.integrations.mongodb_store import init_mongo_connection
@@ -72,7 +73,7 @@ def init_runtime() -> None:
     configure(mongo_db)
     for init in (init_users_store, init_speaker_store, init_photo_album, init_focus_store,
                  init_scene_store, init_device_store, init_node_store, init_usage_store,
-                 init_push_tokens_store):
+                 init_push_tokens_store, init_trace_store):
         init(mongo_db)
     start_mqtt_ingest()
     _initialized = True

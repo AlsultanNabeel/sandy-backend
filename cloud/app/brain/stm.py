@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pymongo.errors import PyMongoError
 
+from app.features import trace_store
 from app.utils.thread_pool import submit_background
 
 logger = logging.getLogger(__name__)
@@ -140,8 +141,9 @@ def _summarize(thread_id: str, user_id: str, messages: List[Dict[str, Any]],
     turns = "\n".join(f"{user_label if m['role'] == 'user' else 'Sandy'}: {m['content']}"
                       for m in messages if m.get("content"))
     try:
-        resp = chat_fn()(messages=[{"role": "system", "content": _SUMMARY_PROMPT},
-                                   {"role": "user", "content": turns}], max_tokens=200)
+        with trace_store.background(user_id, "stm_summary"):
+            resp = chat_fn()(messages=[{"role": "system", "content": _SUMMARY_PROMPT},
+                                       {"role": "user", "content": turns}], max_tokens=200)
         summary = (resp.choices[0].message.content or "").strip()
     except Exception as exc:  # noqa: BLE001 — provider boundary; a lost summary costs no reply
         logger.warning("[stm] summary failed: %s", exc)

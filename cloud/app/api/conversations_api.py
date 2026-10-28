@@ -272,17 +272,19 @@ _TITLE_INPUT_CHARS = 500
 
 def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None:
     """Small LLM title from the first exchange; runs in the background."""
+    from app.features import trace_store
     from app.integrations.openai_client import chat_fn
 
     try:
-        resp = chat_fn()(max_tokens=20, messages=[
-            {"role": "system", "content": (
-                "اكتب عنوانًا قصيرًا جدًا (كلمتين لأربع كلمات) يلخّص موضوع المحادثة. "
-                "بنفس لغة المستخدم، بدون علامات اقتباس وبدون نقطة في الآخر."
-            )},
-            {"role": "user", "content": f"المستخدم: {user_msg[:_TITLE_INPUT_CHARS]}\n"
-                                        f"ساندي: {reply[:_TITLE_INPUT_CHARS]}"},
-        ])
+        with trace_store.background(uid, "title"):
+            resp = chat_fn()(max_tokens=20, messages=[
+                {"role": "system", "content": (
+                    "اكتب عنوانًا قصيرًا جدًا (كلمتين لأربع كلمات) يلخّص موضوع المحادثة. "
+                    "بنفس لغة المستخدم، بدون علامات اقتباس وبدون نقطة في الآخر."
+                )},
+                {"role": "user", "content": f"المستخدم: {user_msg[:_TITLE_INPUT_CHARS]}\n"
+                                            f"ساندي: {reply[:_TITLE_INPUT_CHARS]}"},
+            ])
         title = (resp.choices[0].message.content or "").strip().strip('"').strip("«»").strip()
         if title:
             coll.update_one({"_id": cid, "user_id": uid},
