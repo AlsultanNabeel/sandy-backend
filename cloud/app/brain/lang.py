@@ -67,4 +67,7 @@ PHRASES = {
                      "en": "Something went wrong partway, after part of it was done. "
                            "Check your lists before asking again."},
     "done": {"ar": "تم ✅", "en": "Done ✅"},
+    "nothing_done": {"ar": "لسا ما عملت هالإشي فعلياً. احكيلي مرة تانية شو بدك بالزبط وبعمله هلّق.",
+                     "en": "I haven't actually done that yet. Tell me once more exactly what you "
+                           "want and I'll do it now."},
 }

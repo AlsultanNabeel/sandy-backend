@@ -50,3 +50,39 @@ def test_a_reply_with_no_letters_follows_the_conversation(brain_db):  # noqa: F8
         def __call__(self, messages, specs, on_text=None):
             return None
     assert _turn(Down(), "2")["final_response"] == lang.PHRASES["error"]["en"]
+
+
+# ── the honesty check reads English claims as it reads Arabic ones ──────────
+
+def test_english_claims_are_read():
+    from app.brain import honesty
+    assert honesty.claims("I deleted the milk.") == {"delete"}
+    assert honesty.claims("Removed it from your list") == {"delete"}
+    assert honesty.claims("Added eggs ✅") == {"add"}
+    assert honesty.claims("I've cancelled the reminder.") == {"cancel"}
+    assert honesty.claims("Updated your task.") == {"edit"}
+    assert honesty.claims("Done!") == {"done"}
+
+
+def test_english_negations_and_futures_are_not_claims():
+    from app.brain import honesty
+    for text in ("I haven't deleted anything yet.", "It was not added.", "I didn't remove it.",
+                 "It will be deleted once you say yes.", "Do you want it to be added?",
+                 "Nothing was cancelled."):
+        assert honesty.claims(text) == set(), text
+
+
+def test_done_is_backed_by_any_tool_that_worked():
+    from app.brain import honesty
+    assert honesty.unbacked("Done!", []) == {"done"}
+    assert honesty.unbacked("Done!", ["device_control"]) == set()
+    assert honesty.unbacked("تم ✅", []) == {"done"}
+
+
+def test_an_english_reply_that_lies_is_answered_in_english():
+    from app.brain import honesty
+    with lang.using("en"):
+        out = honesty.correct("I deleted the milk.", [], [])
+    assert out == lang.PHRASES["nothing_done"]["en"]
+    with lang.using("ar"):
+        assert honesty.correct("حذفت الحليب.", [], []) == lang.PHRASES["nothing_done"]["ar"]

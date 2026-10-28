@@ -11,7 +11,7 @@ import pytest
 from brain_fakes import A, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
 from app.blocks import items
-from app.brain import honesty, loop
+from app.brain import honesty, lang, loop
 from app.utils.user_profiles import active_user_profile_context
 
 
@@ -45,7 +45,7 @@ def test_a_claim_with_no_tool_is_replaced(brain_db):  # noqa: F811
     milk = _milk()
     state = _turn(ScriptedModel(text_reply("شلت الحليب من القائمة ✅")), "شيلي الحليب من القائمة")
     assert "شلت" not in state["final_response"]
-    assert state["final_response"] == honesty.NOTHING_DONE
+    assert state["final_response"] == lang.PHRASES["nothing_done"]["ar"]
     with active_user_profile_context(A):
         assert items.get(milk) is not None
 

@@ -3,8 +3,10 @@
 On 19 Oct 2026 she said «حذفت» to four deletes that had not happened: one waited for a
 yes, one was an edit that changed nothing. The prompt already said «don't say you did it
 before its result comes back»; a rule the model can break is not a guarantee. So the
-words that claim a write (deleted, removed, added, changed, cancelled) are read here, and
-each must be backed by a tool of its kind that worked in the same turn.
+words that claim a write (deleted, removed, added, changed, cancelled, done; «حذفت»،
+«ضفت»، «تم»…) are read here, in Arabic and English alike, and each must be backed by a
+tool of its kind that worked in the same turn. «Done» names no kind: any tool that worked
+backs it.
 
 Chat replaces the sentence that claims it with what the tools really said; voice, whose
 words are already heard, is told to put it right at once (`VOICE_CORRECTION`).
@@ -16,6 +18,8 @@ import logging
 import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from app.brain import lang
+
 logger = logging.getLogger(__name__)
 
 # The past-tense words that say a write happened, by its kind, as `_norm` leaves them.
@@ -25,7 +29,21 @@ _CLAIMS: Dict[str, Tuple[str, ...]] = {
     "cancel": ("لغيت", "الغيت", "انلغي", "انلغت"),
     "edit": ("عدلت", "غيرت", "اتعدل", "اتعدلت"),
     "add": ("ضفت", "اضفت", "انضاف", "انضافت", "سجلت", "حطيت"),
+    "done": ("تم",),
 }
+# The same claims in English, whole words.
+_CLAIMS_EN: Dict[str, Tuple[str, ...]] = {
+    "delete": ("deleted", "removed", "erased", "cleared"),
+    "cancel": ("cancelled", "canceled"),
+    "edit": ("changed", "updated", "edited", "renamed", "moved", "rescheduled"),
+    "add": ("added", "saved", "created", "scheduled", "logged"),
+    "done": ("done",),
+}
+# What says it did not happen, or not yet: «I haven't deleted», «it will be added».
+_NOT_EN = {"not", "never", "no", "nothing", "haven't", "hasn't", "hadn't", "didn't", "wasn't",
+           "weren't", "won't", "can't", "couldn't", "isn't", "aren't", "don't", "doesn't",
+           "be", "will", "would", "to", "can", "could", "should", "shall", "may", "might",
+           "want", "gonna", "if"}
 # A pronoun ending: «حذفتها»، «شلتهم»، «ضفتلك».
 _ENDINGS = ("", "ها", "هم", "هن", "ه", "و", "ك", "لك", "لها", "له", "لهم", "ي")
 # What says it did not happen: «ما حذفت»، «لسا ما ضفته»، «مش رح».
@@ -39,13 +57,12 @@ BACKED_BY: Dict[str, Set[str]] = {
     "edit": {"list_update", "log_update", "schedule_update", "list_add", "undo", "confirm"},
     "add": {"list_add", "remember", "schedule", "undo"},
 }
-
-NOTHING_DONE = "لسا ما عملت هالإشي فعلياً. احكيلي مرة تانية شو بدك بالزبط وبعمله هلّق."
+_ANY = "done"
 
 VOICE_CORRECTION = ("[تنبيه من النظام، مش من المستخدم: قلتي إنك {what} بس ما في أداة نفّذت هالإشي "
                     "بهالدور، يعني ما انعمل. صحّحي حالك هلّق بجملة قصيرة: قوليله إنه ما انعمل لسا، "
                     "واسأليه إذا بدّه تعمليه، أو نفّذيه بالأداة إذا طلبه.]")
-_SAID = {"delete": "حذفتي", "cancel": "لغيتي", "edit": "عدّلتي", "add": "ضفتي"}
+_SAID = {"delete": "حذفتي", "cancel": "لغيتي", "edit": "عدّلتي", "add": "ضفتي", "done": "خلّصتي"}
 
 
 def _norm(text: str) -> List[str]:
@@ -63,8 +80,13 @@ def _kind_of(word: str) -> Optional[str]:
     return None
 
 
+def _english(text: str) -> List[str]:
+    return re.findall(r"[a-z']+", str(text or "").lower().replace("’", "'"))
+
+
 def claims(text: str) -> Set[str]:
-    """The kinds of write the text says happened; a negated one («ما حذفت») is not a claim."""
+    """The kinds of write the text says happened; a negated one («ما حذفت», «I haven't
+    deleted») or one still to come («it will be added») is not a claim."""
     words = _norm(text)
     found = set()
     for i, w in enumerate(words):
@@ -72,14 +94,19 @@ def claims(text: str) -> Set[str]:
         if kind and not ({words[j] for j in range(max(0, i - 2), i)} & _NOT
                          or any(words[j].startswith(("فما", "وما")) for j in range(max(0, i - 2), i))):
             found.add(kind)
+    english = _english(text)
+    for i, w in enumerate(english):
+        kind = next((k for k, forms in _CLAIMS_EN.items() if w in forms), None)
+        if kind and not {english[j] for j in range(max(0, i - 3), i)} & _NOT_EN:
+            found.add(kind)
     return found
 
 
 def unbacked(text: str, worked: Iterable[str]) -> Set[str]:
     """The claims in ``text`` that no tool in ``worked`` (the names of the tools of the turn
-    that worked) backs."""
+    that worked) backs; «done» is backed by any of them."""
     done = set(worked)
-    return {k for k in claims(text) if not BACKED_BY[k] & done}
+    return {k for k in claims(text) if not (done if k == _ANY else BACKED_BY[k] & done)}
 
 
 def _sentences(text: str) -> List[str]:
@@ -98,7 +125,7 @@ def honest(text: str, worked: Iterable[str], results: List[Tuple[str, Dict[str, 
             if r.get("reply") and not r.get("needs_confirmation")]
     out = "\n".join(t for t in [*dict.fromkeys(said), kept] if t)
     if not out and not question:
-        out = NOTHING_DONE
+        out = lang.say("nothing_done")
     return "\n".join(t for t in (out, question) if t)
 
 
