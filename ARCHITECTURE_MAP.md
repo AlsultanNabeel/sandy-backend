@@ -1638,7 +1638,10 @@ the misses were «خلص الحليب» and «لازم أخلص التقرير»
 (`eval_results/baseline.json`, forty cases): 36/40 on the `sandy-chat` deployment, which is
 `gpt-4o-mini`; the run after it moved five cases (delete one item answered with
 `list_update`, «جهزي الغرفة» with `room_restore`, and three that rose), so two runs still
-differ by more than `ALLOWED_DIFFERENCES`.
+differ by more than `ALLOWED_DIFFERENCES`. After the delete and scene rules (29 Oct, forty-two
+cases): `sandy-chat` 38/42 then 41/42, three cases apart, about $0.044 a run and 1.9 s a
+message; the `gpt-4.1` deployment (`--model gpt-4.1`) 40/42 once, about $0.52 a run and
+3.2 s a message.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
