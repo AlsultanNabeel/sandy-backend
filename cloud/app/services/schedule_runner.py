@@ -39,6 +39,7 @@ from pymongo.errors import PyMongoError
 
 from app.blocks import _base, schedules
 from app.features import notify_prefs, push_tokens_store
+from app.brain import lang
 from app.services import apns
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import active_user_profile_context
@@ -46,7 +47,6 @@ from app.utils.user_profiles import active_user_profile_context
 logger = logging.getLogger(__name__)
 
 RUNNABLE = ("reminder", "scene", "daily_nudge", "summary_nudge")
-PUSH_TITLE = "ساندي"
 # The phone's own reminder category and keys (NotificationManager.reminderCategory & co.).
 REMINDER_CATEGORY = "SANDY_REMINDER"
 # A reminder this late is not pushed: the phone already rang it, or it is stale news.
@@ -181,7 +181,8 @@ def _push(tokens: List[str], text: str, data: Dict[str, Any], silent: bool = Fal
     tried = took = 0
     for token in tokens:
         tried += 1
-        ok, status = apns.send(token, PUSH_TITLE, text, data=data, silent=silent, category=category)
+        ok, status = apns.send(token, lang.say("push_title"), text, data=data, silent=silent,
+                               category=category)
         if ok:
             took += 1
         elif status == "gone":
@@ -279,7 +280,13 @@ def _settle_failure(coll, doc: Dict[str, Any], lease: datetime, nxt: Optional[da
 
 
 def run_due(uid: str, now: Optional[datetime] = None) -> Dict[str, int]:
-    """Fire the current tenant's due rows; {"fired", "failed"}."""
+    """Fire the current tenant's due rows; {"fired", "failed"}. What it says (a push's
+    title) is in the user's own language."""
+    with lang.using(lang.for_user(uid)):
+        return _run_due(uid, now)
+
+
+def _run_due(uid: str, now: Optional[datetime]) -> Dict[str, int]:
     now = now or datetime.now(timezone.utc)
     coll = _base.coll(_base.SCHEDULES)
     counts = {"fired": 0, "failed": 0}

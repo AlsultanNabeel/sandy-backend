@@ -181,7 +181,14 @@ def require_auth(view):
             # The phone says where it is on every call; kept only when it changed.
             from app.utils.time import note_zone
             note_zone(claims.get("user_id"), request.headers["X-Timezone"])
-        response = view(*args, claims=claims, **kwargs)
+        from app.brain import lang
+        uid = str(claims.get("user_id") or "")
+        if claims.get("role") != "guest" and request.headers.get("X-Lang"):
+            # The app's language setting (the phone's at first); kept only when it changed.
+            lang.note(uid, request.headers["X-Lang"])
+        # A route's own message is in the user's language; a chat reply sets its message's.
+        with lang.using(lang.for_user(uid) if claims.get("role") != "guest" else lang.AR):
+            response = view(*args, claims=claims, **kwargs)
         renewed = renewed_token(claims)
         if renewed is None:
             return response

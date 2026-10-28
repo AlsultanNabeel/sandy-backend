@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.brain import lang
 from app.services import apns
 from app.utils.time import USER_TZ
 from app.utils.user_profiles import active_user_profile_context
@@ -64,8 +65,10 @@ def _send_one(mongo_db, uid: str, now: datetime) -> int:
     if nudge.get("qid"):
         data["qid"] = nudge["qid"]
     delivered = 0
+    with lang.using(lang.for_user(uid)):
+        title = lang.say("push_title")
     for token in push_tokens_store.tokens_for_user(uid):
-        ok, status = apns.send(token, "ساندي", text, data=data, silent=silent)
+        ok, status = apns.send(token, title, text, data=data, silent=silent)
         if ok:
             delivered += 1
         elif status == "gone":

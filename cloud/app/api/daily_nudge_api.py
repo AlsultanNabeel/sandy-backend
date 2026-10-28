@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from flask import jsonify, request
 
+from app.brain import lang
 from app.api.auth_handlers import require_auth, require_tenant
 from app.blocks import items, schedules
 from app.brain.persona import build_effective_persona
@@ -31,15 +32,8 @@ logger = logging.getLogger(__name__)
 
 _COLL = "sandy_daily_nudge"
 
-# Asked in order, every other day.
-_QUESTIONS: List[Dict[str, str]] = [
-    {"id": "unwind", "text": "شو أكتر إشي بيريّحك بعد يوم طويل؟"},
-    {"id": "peak", "text": "إنت أنشط الصبح ولا الليل؟"},
-    {"id": "procrastinate", "text": "شو الإشي اللي دايماً بتأجّله وودّك تخلّصه؟"},
-    {"id": "important_person", "text": "مين أهم شخص ما بدك تنسى مناسباته؟"},
-    {"id": "one_reminder", "text": "لو بذكّرك بإشي وحيد كل يوم، شو بدك يكون؟"},
-    {"id": "hobby", "text": "شو هوايتك اللي نفسك ترجعلها؟"},
-]
+# Asked in order, every other day; each one's words are `lang` phrase `nudge_q_<id>`.
+_QUESTIONS = ("unwind", "peak", "procrastinate", "important_person", "one_reminder", "hobby")
 
 _AGENDA_INSTRUCTION = (
     "\n\nاكتبي إشعاراً يومياً واحداً قصيراً (جملة أو جملتين) بصوتك، ذكياً وغير "
@@ -62,9 +56,9 @@ def _is_question_day() -> bool:
 def _next_question(uid: str) -> Optional[Dict[str, str]]:
     from app.features import users_store
     answered = users_store.get_nudge_answers(uid) or {}
-    for q in _QUESTIONS:
-        if q["id"] not in answered:
-            return q
+    for qid in _QUESTIONS:
+        if qid not in answered:
+            return {"id": qid, "text": lang.say(f"nudge_q_{qid}")}
     return None
 
 
@@ -113,7 +107,8 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
     heavy = summary["overdue"] > 0 or (summary["tasks"] + summary["overdue"]) >= 4
     late = bool(summary.get("late"))
     try:
-        system = build_effective_persona(uid) + _AGENDA_INSTRUCTION + "\n" + address_instruction()
+        system = (build_effective_persona(uid) + _AGENDA_INSTRUCTION + " " + lang.say("nudge_write_in")
+                  + "\n" + address_instruction())
         user = load_line + (" أبرز العناوين: " + "؛ ".join(titles) if titles else "")
         if late:
             user += (
@@ -137,22 +132,27 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.debug("[daily_nudge] LLM agenda failed, using fallback: %s", exc)
 
-    greet = "صباح الخير 🌙 كيفك بعد السهرة؟" if late else "صباح الخير 🌤️"
+    greet = lang.say("nudge_greet_late" if late else "nudge_greet")
     if summary["tasks"] == 0 and summary["overdue"] == 0:
-        return f"{greet} يومك فاضي — خليك مرتاح، وإذا حابب نخطّط لبكرا؟"
-    lead = titles[0] if titles else "مهامك"
-    tone = "يومك مضغوط شوي، بلاش تقاعس 💪" if heavy else "يومك محتمل، خليك ماشي 🙂"
-    return (
-        f"{greet} {tone} عندك اليوم {summary['tasks']} مهمة "
-        f"و{summary['reminders']} تذكير — أهمها: {lead}."
-    )
+        return lang.say("nudge_free_day", greet=greet)
+    lead = titles[0] if titles else lang.say("nudge_your_tasks")
+    tone = lang.say("nudge_heavy" if heavy else "nudge_light")
+    return lang.say("nudge_day", greet=greet, tone=tone, tasks=summary["tasks"],
+                    reminders=summary["reminders"], lead=lead)
 
 
 def get_daily_nudge(mongo_db, uid: str) -> Dict[str, Any]:
-    """Today's nudge, generated once per day; needs the user's profile context. Shared with the push scheduler."""
+    """Today's nudge, generated once per day in the user's own language; needs the user's
+    profile context. Shared with the push scheduler."""
+    with lang.using(lang.for_user(uid)):
+        return _daily_nudge(mongo_db, uid)
+
+
+def _daily_nudge(mongo_db, uid: str) -> Dict[str, Any]:
     # bump=False: the nudge feeds nothing the persona cache is built from.
     coll = scoped(mongo_db, _COLL, bump=False)
-    key = f"{uid}:{_today()}"
+    # Per language too: a language changed today gets today's nudge in it.
+    key = f"{uid}:{_today()}:{lang.current()}"
     if coll is not None:
         cached = coll.find_one({"_id": key})
         if cached and cached.get("nudge"):
@@ -205,7 +205,7 @@ def register_daily_nudge_api(app, mongo_db=None):
         if not qid or not answer:
             return jsonify({"error": "bad_request"}), 400
         # Only a question she asks: the id becomes a field path in the profile.
-        if qid not in {q["id"] for q in _QUESTIONS}:
+        if qid not in _QUESTIONS:
             return jsonify({"error": "unknown_question"}), 400
         from app.features import users_store
         uid = current_user_id()

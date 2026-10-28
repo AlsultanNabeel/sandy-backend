@@ -90,7 +90,7 @@ _KEPT_ON_RESET = frozenset({"sandy_push_tokens", "sandy_usage", "sandy_usage_dai
 USER_ROW_KEPT = frozenset({
     "_id", "provider", "provider_sub", "email", "password_hash",   # how they sign in
     "name", "picture",          # the sign-in provider's, never read by Sandy
-    "locale", "timezone", "created_at", "last_seen_at",
+    "locale", "timezone", "language", "created_at", "last_seen_at",
     "subscription", "token_gen",
 })
 USER_ROW_FORGOTTEN = frozenset({

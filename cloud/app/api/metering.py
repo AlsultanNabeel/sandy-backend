@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 from typing import Optional, Tuple
 
+from app.brain import lang
+
 # (daily, per minute). The owner (by token or by account) and subscribers share the top tier.
 SUBSCRIBER_DAILY, SUBSCRIBER_PER_MIN = 5000, 60
 FREE_DAILY, FREE_PER_MIN = 40, 12
@@ -15,12 +17,9 @@ FREE_DAILY, FREE_PER_MIN = 40, 12
 CALL_MINUTES_FREE = float(os.getenv("SANDY_CALL_MINUTES_FREE", "10"))
 CALL_MINUTES_SUBSCRIBER = float(os.getenv("SANDY_CALL_MINUTES_SUBSCRIBER", "60"))
 
-# The app shows the message; the code is for branching.
-_LIMIT_MESSAGES = {
-    "rate_limited": "شوي شوي 😄 وصلت للحد بهالدقيقة — جرّب بعد شوي.",
-    "daily_quota_exceeded": "خلص رصيدك لليوم. بيرجع بكرا، أو رقّي اشتراكك.",
-    "call_minutes_exceeded": "خلصت دقايق الحكي لليوم. بترجع بكرا، أو رقّي اشتراكك.",
-}
+# The app shows the message, in the user's language (`lang`, `limit_<code>`); the code is
+# for branching.
+_LIMIT_CODES = ("rate_limited", "daily_quota_exceeded", "call_minutes_exceeded")
 
 
 def _limits(role: str, user_id: str) -> Tuple[int, int]:
@@ -72,7 +71,7 @@ def voice_seconds_left(user_id: str) -> float:
 def limit_response(code: str) -> dict:
     return {
         "error": code,
-        "message": _LIMIT_MESSAGES.get(code, "وصلت للحد المسموح — جرّب لاحقاً."),
+        "message": lang.say(f"limit_{code}" if code in _LIMIT_CODES else "limit_other"),
     }
 
 

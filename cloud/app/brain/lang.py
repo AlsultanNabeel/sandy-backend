@@ -55,6 +55,25 @@ def current() -> str:
     return _current.get()
 
 
+def for_user(user_id: str) -> str:
+    """The user's own language: the app's setting, which starts as the phone's (`note`)."""
+    if not user_id:
+        return AR
+    from app.features import users_store
+    saved = (users_store.get_user(user_id) or {}).get("language")
+    return EN if saved == EN else AR
+
+
+def note(user_id: str, language: str) -> None:
+    """Keep the language the phone sent when it changed; one the app does not speak is not."""
+    language = str(language or "").strip().lower()[:2]
+    if not user_id or language not in (AR, EN):
+        return
+    from app.features import users_store
+    if (users_store.get_user(user_id) or {}).get("language") != language:
+        users_store.set_language(user_id, language)
+
+
 def say(key: str, **slots: object) -> str:
     """The phrase in the turn's language, its slots filled."""
     return PHRASES[key][_current.get()].format(**slots)
@@ -166,6 +185,34 @@ PHRASES = {
     "image_failed": {"ar": "ما قدرت أولد الصورة حاليًا. جرّب تغيّر الوصف شوي أو أعد المحاولة.",
                      "en": "I couldn't make the picture right now. Try changing the description a little, or again."},
     "image_done": {"ar": "جهزت الصورة.", "en": "Your picture is ready."},
+    # Outside a reply, in the user's own language (`for_user`).
+    "push_title": {"ar": "ساندي", "en": "Sandy"},
+    "limit_rate_limited": {"ar": "شوي شوي 😄 وصلت للحد بهالدقيقة — جرّب بعد شوي.",
+                           "en": "Easy 😄 you've hit this minute's limit — try again in a moment."},
+    "limit_daily_quota_exceeded": {"ar": "خلص رصيدك لليوم. بيرجع بكرا، أو رقّي اشتراكك.",
+                                   "en": "You've used today's allowance. It comes back tomorrow, or upgrade your plan."},
+    "limit_call_minutes_exceeded": {"ar": "خلصت دقايق الحكي لليوم. بترجع بكرا، أو رقّي اشتراكك.",
+                                    "en": "You've used today's call minutes. They come back tomorrow, or upgrade your plan."},
+    "limit_other": {"ar": "وصلت للحد المسموح — جرّب لاحقاً.", "en": "You've hit the limit — try again later."},
+    "nudge_q_unwind": {"ar": "شو أكتر إشي بيريّحك بعد يوم طويل؟", "en": "What helps you unwind most after a long day?"},
+    "nudge_q_peak": {"ar": "إنت أنشط الصبح ولا الليل؟", "en": "Are you sharper in the morning or at night?"},
+    "nudge_q_procrastinate": {"ar": "شو الإشي اللي دايماً بتأجّله وودّك تخلّصه؟",
+                              "en": "What do you always put off but wish you'd get done?"},
+    "nudge_q_important_person": {"ar": "مين أهم شخص ما بدك تنسى مناسباته؟",
+                                 "en": "Whose special days do you never want to forget?"},
+    "nudge_q_one_reminder": {"ar": "لو بذكّرك بإشي وحيد كل يوم، شو بدك يكون؟",
+                             "en": "If I reminded you of just one thing every day, what would it be?"},
+    "nudge_q_hobby": {"ar": "شو هوايتك اللي نفسك ترجعلها؟", "en": "Which hobby would you love to get back to?"},
+    "nudge_greet": {"ar": "صباح الخير 🌤️", "en": "Good morning 🌤️"},
+    "nudge_greet_late": {"ar": "صباح الخير 🌙 كيفك بعد السهرة؟", "en": "Good morning 🌙 how are you after the late night?"},
+    "nudge_free_day": {"ar": "{greet} يومك فاضي — خليك مرتاح، وإذا حابب نخطّط لبكرا؟",
+                       "en": "{greet} Your day is free — take it easy, or shall we plan tomorrow?"},
+    "nudge_your_tasks": {"ar": "مهامك", "en": "your tasks"},
+    "nudge_heavy": {"ar": "يومك مضغوط شوي، بلاش تقاعس 💪", "en": "Your day is a bit packed, don't slack off 💪"},
+    "nudge_light": {"ar": "يومك محتمل، خليك ماشي 🙂", "en": "Your day looks doable, keep going 🙂"},
+    "nudge_day": {"ar": "{greet} {tone} عندك اليوم {tasks} مهمة و{reminders} تذكير — أهمها: {lead}.",
+                  "en": "{greet} {tone} You have {tasks} tasks and {reminders} reminders today — first: {lead}."},
+    "nudge_write_in": {"ar": "اكتبيه بالعربي بلهجتك.", "en": "Write it in English only."},
     "nothing_done": {"ar": "لسا ما عملت هالإشي فعلياً. احكيلي مرة تانية شو بدك بالزبط وبعمله هلّق.",
                      "en": "I haven't actually done that yet. Tell me once more exactly what you "
                            "want and I'll do it now."},

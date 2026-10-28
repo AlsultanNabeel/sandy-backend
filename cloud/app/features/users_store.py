@@ -271,6 +271,16 @@ def set_timezone(user_id: str, zone: str) -> bool:
     return res.matched_count > 0
 
 
+def set_language(user_id: str, language: str) -> bool:
+    """The user's own language (``ar`` | ``en``): pushes, the daily nudge, limits."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return False
+    res = coll.update_one({"_id": user_id}, {"$set": {"language": language}})
+    _bump(user_id)
+    return res.matched_count > 0
+
+
 def set_city(user_id: str, city: str) -> bool:
     """The city the app shows weather for; Sandy's «شو الطقس؟» with no city."""
     coll = _coll()
