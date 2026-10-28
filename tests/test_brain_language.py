@@ -186,3 +186,55 @@ def test_no_tool_reply_is_written_in_one_language_only():
     for name in ("tools_blocks.py", "tools_world.py", "confirm.py", "honesty.py", "loop.py"):
         found = arabic_reply.findall((root / name).read_text(encoding="utf-8"))
         assert not found, f"{name}: {found}"
+
+
+# ── the fallback time reader reads English as it reads Arabic ───────────────
+
+import pytest  # noqa: E402
+
+from app.brain import when as W  # noqa: E402
+from app.utils.time import USER_TZ  # noqa: E402
+
+
+def _clock(text):
+    from datetime import datetime
+    sat_10am = datetime(2026, 10, 3, 10, 0, tzinfo=USER_TZ)
+    at = W._clock(text, sat_10am)
+    return at.astimezone(USER_TZ).strftime("%Y-%m-%d %H:%M") if at else None
+
+
+@pytest.mark.parametrize("text,want", [
+    ("tomorrow at 5", "2026-10-04 17:00"),
+    ("tomorrow at 5 pm", "2026-10-04 17:00"),
+    ("at 9am", "2026-10-04 09:00"),
+    ("5:30 pm", "2026-10-03 17:30"),
+    ("friday at 5", "2026-10-09 17:00"),
+    ("monday at 9 in the morning", "2026-10-05 09:00"),
+    ("tonight at 10", "2026-10-03 22:00"),
+    ("at 12 noon", "2026-10-03 12:00"),
+    ("at 12 at night", "2026-10-04 00:00"),
+    ("today at 5", "2026-10-03 17:00"),
+])
+def test_english_clock_words(text, want):
+    assert _clock(text) == want
+
+
+def test_an_english_relative_time_is_left_to_minutes_as_an_arabic_one_is():
+    assert _clock("in an hour") is None and _clock("in 30 minutes") is None
+    assert _clock("بعد ساعة") is None
+
+
+@pytest.mark.parametrize("text", ["in 2 days", "tomorrow", "next week"])
+def test_english_days_without_a_clock(text):
+    from app.utils.arabic_days import parse_date_from_text
+    assert parse_date_from_text(text) is not None
+
+
+@pytest.mark.parametrize("said,rule", [
+    ("every monday", "FREQ=WEEKLY;BYDAY=MO"), ("every Friday", "FREQ=WEEKLY;BYDAY=FR"),
+    ("كل اتنين", "FREQ=WEEKLY;BYDAY=MO"), ("كل جمعة", "FREQ=WEEKLY;BYDAY=FR"),
+    ("every day", "FREQ=DAILY"), ("كل يوم", "FREQ=DAILY"),
+    ("every week", "FREQ=WEEKLY"), ("كل شهر", "FREQ=MONTHLY"),
+])
+def test_a_spoken_repeat_is_a_rule(said, rule):
+    assert W.recurrence_rule(said) == rule

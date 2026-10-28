@@ -93,17 +93,19 @@ def local_text(dt: Optional[datetime]) -> str:
 
 
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
-_RELATIVE = re.compile(r"بعد|دقيق|دقايق|ساعات|ساعتين|يومين|أيام|ايام|اسبوع|أسبوع|شهر")
-# The number after «الساعة»/«عال» is the hour; a bare number is only when there is none.
-_MARKED = re.compile(r"(?:عال|ع ال|على ال|الساعة|الساعه|ساعة|ساعه)\s*(\d{1,2})(?:[:.](\d{2}))?")
+_RELATIVE = re.compile(r"بعد|دقيق|دقايق|ساعات|ساعتين|يومين|أيام|ايام|اسبوع|أسبوع|شهر"
+                       r"|\bin\s+(?:an?|\d+)\b|\bminutes?\b|\bhours?\b|\bdays?\b|\bweeks?\b")
+# The number after «الساعة»/«عال»/«at» is the hour; a bare number is only when there is none.
+_MARKED = re.compile(r"(?:عال|ع ال|على ال|الساعة|الساعه|ساعة|ساعه|\bat)\s*(\d{1,2})(?:[:.](\d{2}))?")
 _BARE = re.compile(r"(?<![\d:.])(\d{1,2})(?:[:.](\d{2}))?(?![\d:.])")
 # «يوم 15»، «15 بالشهر»: a day of the month, not an hour («اليوم 5» is today at 5).
 _MONTH_DAY = re.compile(r"(?<!ال)(?:\bيوم|\bبيوم)\s*(\d{1,2})(?![\d:.])|(\d{1,2})\s*(?:بالشهر|من الشهر|الشهر)")
 # Whole words only: «مع» is not «م», «صالة» is not «ص».
-_MORNING = {"الصبح", "صبح", "الصباح", "صباحا", "صباحاً", "الفجر", "ص"}
+_MORNING = {"الصبح", "صبح", "الصباح", "صباحا", "صباحاً", "الفجر", "ص", "am", "morning"}
 _EVENING = {"المسا", "مسا", "مساء", "مساءً", "مساءا", "بالليل", "الليل", "العصر", "الظهر",
-            "المغرب", "العشا", "م"}
-_NIGHT = {"بالليل", "الليل"}
+            "المغرب", "العشا", "م", "pm", "afternoon", "evening", "tonight", "night", "noon"}
+_NIGHT = {"بالليل", "الليل", "night"}
+_TOMORROW = {"بكرا", "بكرة", "بكره", "غدا", "غداً", "tomorrow"}
 
 
 def _month_day(day: int, minutes: int, now: datetime) -> Optional[date]:
@@ -125,7 +127,9 @@ def _clock(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
     → the next such moment. With no morning/evening word, the nearest one still ahead
     (5 → 17:00 after 5am); on another day 1–6 is the afternoon and 7–11 the morning, and a
     day named keeps the time on that day."""
-    t = " " + (text or "").translate(_DIGITS).strip() + " "
+    t = " " + (text or "").translate(_DIGITS).strip().lower() + " "
+    # «5pm», «5:30am»: the hour and its half of the day apart.
+    t = re.sub(r"(\d)\s*([ap])\.?m\b\.?", r"\1 \2m", t)
     month_day = _MONTH_DAY.search(t)
     if month_day:
         t = t[:month_day.start()] + " " + t[month_day.end():]
@@ -162,7 +166,7 @@ def _clock(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
         first = next_weekday_date(weekday, reference=now.date(), allow_today=True)
         days = [first, first + timedelta(days=7)]
     else:
-        first = now.date() + timedelta(days=1) if words & {"بكرا", "بكرة", "بكره", "غدا", "غداً"} else now.date()
+        first = now.date() + timedelta(days=1) if words & _TOMORROW else now.date()
         days = [first, first + timedelta(days=1)]
     for d in days:
         if len(hours) == 2 and d != now.date():
@@ -254,6 +258,9 @@ def recurrence_rule(value: str) -> Optional[str]:
         return ""
     if v.lower() in RECURRENCES:
         return RECURRENCES[v.lower()]
+    spoken = _spoken_repeat(v)
+    if spoken:
+        return spoken
     rule = v.upper()
     if not rule.startswith("FREQ="):
         return None
@@ -262,6 +269,25 @@ def recurrence_rule(value: str) -> Optional[str]:
     except (ValueError, TypeError):
         return None
     return rule
+
+
+_EVERY = re.compile(r"^(?:every|each|كل)\s+(.+)$", re.IGNORECASE)
+_EVERY_UNIT = {"day": "daily", "يوم": "daily", "week": "weekly", "اسبوع": "weekly",
+               "أسبوع": "weekly", "month": "monthly", "شهر": "monthly", "year": "yearly",
+               "سنة": "yearly", "سنه": "yearly"}
+_BYDAY = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+
+
+def _spoken_repeat(value: str) -> Optional[str]:
+    """«every Monday» / «كل اتنين» → weekly on that day; «every day» / «كل يوم» → daily."""
+    m = _EVERY.match(value.strip())
+    if not m:
+        return None
+    what = m.group(1).strip().lower()
+    if what in _EVERY_UNIT:
+        return RECURRENCES[_EVERY_UNIT[what]]
+    day = find_day_in_text(what)
+    return f"FREQ=WEEKLY;BYDAY={_BYDAY[day]}" if day is not None else None
 
 
 def iso(dt: Optional[datetime]) -> str:

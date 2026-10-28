@@ -1,4 +1,4 @@
-"""Arabic day-name variants → Python weekday (0=Monday … 6=Sunday)."""
+"""Day names, Arabic variants and English, → Python weekday (0=Monday … 6=Sunday)."""
 
 from __future__ import annotations
 
@@ -56,6 +56,9 @@ DAY_NAME_TO_WEEKDAY: dict[str, int] = {
     # Saturday = 5
     "سبت": 5,
     "السبت": 5,
+    # English, lower case (`find_day_in_text` lowers what it reads).
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5,
+    "sunday": 6, "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
 }
 
 WEEKDAY_TO_AR_NAME: dict[int, str] = {
@@ -113,7 +116,7 @@ def _iso_or_none(y: int, mo: int, d: int, hour: int) -> Optional[str]:
 
 def find_day_in_text(text: str) -> Optional[int]:
     for token in text.split():
-        token = token.strip("،.,!؟'\"()[]")
+        token = token.strip("،.,!؟'\"()[]").lower()
         wd = DAY_NAME_TO_WEEKDAY.get(token)
         if wd is not None:
             return wd
@@ -185,19 +188,20 @@ def parse_relative_simple(
     s = text.strip()
     ref_date = reference or datetime.now(USER_TZ).date()
 
-    m = re.search(r"بعد\s*(\d+)\s*(?:أيام|يوم)", s)
+    m = re.search(r"(?:بعد|\bin)\s*(\d+)\s*(?:أيام|يوم|days?\b)", s, re.IGNORECASE)
     if m:
         return _iso_at(ref_date + timedelta(days=int(m.group(1))), default_hour)
 
-    if re.search(r"بعد\s+يوم|بكرا|بكره|بكرة|غدا|غداً", s):
+    if re.search(r"بعد\s+يوم|بكرا|بكره|بكرة|غدا|غداً|\btomorrow\b|\bin a day\b", s, re.IGNORECASE):
         return _iso_at(ref_date + timedelta(days=1), default_hour)
 
-    m = re.search(r"بعد\s*(\d+)\s*(?:أسبوع|أسابيع)", s)
+    m = re.search(r"(?:بعد|\bin)\s*(\d+)\s*(?:أسبوع|أسابيع|weeks?\b)", s, re.IGNORECASE)
     if m:
         return _iso_at(ref_date + timedelta(weeks=int(m.group(1))), default_hour)
 
     if re.search(
-        r"بعد\s+أسبوع|الأسبوع\s+الجاي|الأسبوع\s+القادم|الأسبوع\s+اللي\s+جاي", s
+        r"بعد\s+أسبوع|الأسبوع\s+الجاي|الأسبوع\s+القادم|الأسبوع\s+اللي\s+جاي"
+        r"|\bnext week\b|\bin a week\b", s, re.IGNORECASE
     ):
         return _iso_at(ref_date + timedelta(weeks=1), default_hour)
 
