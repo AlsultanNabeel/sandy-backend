@@ -9,10 +9,12 @@ from brain_fakes import A, B, ScriptedModel, brain_db, call, text_reply  # noqa:
 
 from app.blocks import entries, schedules
 from app.brain import loop, tools
+from app.brain import when as W
 from app.brain.ctx import TurnCtx
 from app.features import push_tokens_store
 from app.services import apns
 from app.services import schedule_runner as R
+from app.utils import time as T
 from app.utils.user_profiles import active_user_profile_context
 
 # Real time: the brain's turn reads the clock itself.
@@ -44,6 +46,14 @@ def _add(kind="reminder", text="دوا", minutes_ago=1, profile=A, **kw):
 def _get(sid, profile=A):
     with active_user_profile_context(profile):
         return schedules.get(sid)
+
+
+def _tomorrow(t):
+    """The same wall-clock time the next day, where the user is: 23 or 25 hours across a
+    clock change."""
+    local = t.astimezone(T.current_zone())
+    return datetime.combine(local.date() + timedelta(days=1), local.time().replace(tzinfo=None),
+                            tzinfo=T.current_zone()).astimezone(timezone.utc)
 
 
 def _tick(profile=A, now=NOW):
@@ -118,7 +128,7 @@ def test_a_repeat_armed_for_its_next_ring_only_is_pushed_after_it(brain_db, push
     assert push["sent"] == []                         # the phone rang the first
     row = _get(sid)
     assert row["armed"] == [] and row["armed_once"] == []
-    assert _tick(now=NOW + timedelta(days=1)) == {"fired": 1, "failed": 0}
+    assert _tick(now=_tomorrow(NOW)) == {"fired": 1, "failed": 0}
     assert [t for t, *_ in push["sent"]] == ["tok-userA"]  # the next is the server's
 
 
@@ -186,10 +196,10 @@ def test_a_recurring_reminder_advances_to_its_next_time(brain_db, push):  # noqa
     assert _tick()["fired"] == 1
     row = _get(sid)
     assert row["status"] == "pending"
-    assert row["fire_at"].replace(tzinfo=timezone.utc) == NOW - timedelta(minutes=1) + timedelta(days=1)
+    assert row["fire_at"].replace(tzinfo=timezone.utc) == _tomorrow(NOW - timedelta(minutes=1))
     # Not due again until tomorrow.
     assert _tick(now=NOW + timedelta(hours=1))["fired"] == 0
-    assert _tick(now=NOW + timedelta(days=1))["fired"] == 1
+    assert _tick(now=_tomorrow(NOW))["fired"] == 1
     assert len(push["sent"]) == 2
 
 
@@ -203,9 +213,11 @@ def test_a_repeat_with_a_count_ends_after_that_many(brain_db, push):  # noqa: F8
     """The count runs from the series' start, not from each ring's own time."""
     sid = _add(recurrence="FREQ=DAILY;COUNT=2")
     assert _tick()["fired"] == 1
-    assert _tick(now=NOW + timedelta(days=1))["fired"] == 1
+    # The second ring is at the same wall-clock time tomorrow: 23 or 25 hours on a clock change.
+    second = W.aware_utc(_get(sid)["fire_at"])
+    assert _tick(now=second + timedelta(minutes=1))["fired"] == 1
     assert _get(sid)["status"] == "sent"
-    assert _tick(now=NOW + timedelta(days=2))["fired"] == 0
+    assert _tick(now=second + timedelta(days=1, minutes=1))["fired"] == 0
     assert len(push["sent"]) == 2
 
 
