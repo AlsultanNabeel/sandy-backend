@@ -310,3 +310,9 @@ def test_wrong_language_is_read_outside_quoted_names():
     assert G.wrong_language("I added it, يا عيوني!", "en") is True
     assert G.wrong_language("ضفت «milk» ✅", "ar") is False
     assert G.wrong_language("Sure, I added milk.", "ar") is True
+
+
+def test_the_rules_keep_tool_words_in_the_users_language():
+    from app.brain import context
+    assert "never translated" in context._RULES
+    assert "I paid" in context._RULES
