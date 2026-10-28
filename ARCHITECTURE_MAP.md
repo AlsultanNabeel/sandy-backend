@@ -1622,8 +1622,15 @@ isolation contract; the `test_brain_*` files drive the loop with a scripted mode
 deployment (`--model` picks another), on an in-memory database, with the outside tools
 (devices, scenes, search, weather, images) as recording stand-ins. Each case checks what
 was done (tools called, rows left behind, a held yes), not the wording, and the run
-prints a pass rate and the seconds per message. It costs model calls, so it runs by hand
-before a model or prompt change, never in CI. First run on `gpt-4.1` (4 Oct 2026): 31/34;
+prints a pass rate, the seconds per message and what the run cost (tokens and dollars from
+the turn traces, `features/pricing.py`). A step may also check a tool's arguments (`args`:
+one call of that tool carries the values; a word of text is found inside the call's text).
+`--repeat N` runs every case N times and names those whose outcome differed; `--save` writes
+`scripts/eval_results/<when>.json`, the first saved becomes `baseline.json`, and every later
+saved run says what fell and rose against it. More than two cases moved
+(`ALLOWED_DIFFERENCES`) fails the run. Imported (by `tests/test_eval_report.py`) it reads no
+command line and no `.env`. It costs model calls, so it runs by hand before a model or
+prompt change, never in CI. First run on `gpt-4.1` (4 Oct 2026): 31/34;
 the misses were «خلص الحليب» and «لازم أخلص التقرير» answered without adding, and
 «ذكريني كل يوم» made a habit instead of a reminder.
 
