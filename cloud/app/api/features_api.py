@@ -1,6 +1,8 @@
-"""GET /api/features → {"hidden": [...]}: features the owner hid app-wide via SANDY_HIDDEN_FEATURES.
+"""GET /api/features → {"hidden": [...], "on": [...]}.
 
-Keys are the iOS client's contract (Features/Daily/DailyView.swift); the backend only relays them.
+``hidden``: features the owner hid app-wide via SANDY_HIDDEN_FEATURES; the keys are the
+iOS client's contract (Features/Daily/DailyView.swift), the backend only relays them.
+``on``: the feature switches on for the caller (`utils/flags.py`).
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ import os
 from flask import jsonify
 
 from app.api.auth_handlers import require_auth
+from app.utils import flags
 
 
 def _hidden_features() -> list:
@@ -21,4 +24,5 @@ def register_features_api(app):
     @app.route("/api/features", methods=["GET"])
     @require_auth
     def api_features(claims):
-        return jsonify({"hidden": _hidden_features()}), 200
+        return jsonify({"hidden": _hidden_features(),
+                        "on": flags.enabled_for(str(claims.get("user_id") or ""))}), 200
