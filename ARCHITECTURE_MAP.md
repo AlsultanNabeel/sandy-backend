@@ -540,7 +540,15 @@ Who calls what:
   `/api/features`, `/api/subscription`, push register / unregister,
   `/api/voice/tts`, and the `/voice` socket for live calls. The share extension
   uses `/api/agent`, `/api/analyze-image`, `/api/photos`, `/api/entries` and
-  `/api/items`.
+  `/api/items`. `/api/features` answers `{hidden, on}`: what the owner hid app-wide
+  (`SANDY_HIDDEN_FEATURES`) and the feature switches on for the caller (`utils/flags.py`:
+  `SANDY_FLAGS`, a JSON object, `"all"` or a list of account ids per switch; missing or
+  unreadable is off; `flags.on(name, user_id)` is the one way the code asks).
+- **The owner** (`api/owner_api.py`, the accounts in `SANDY_OWNER_ACCOUNTS`; anyone else
+  404) — `GET /api/owner/traces?limit=&user=&source=` (newest first, never words),
+  `GET /api/owner/traces/<id>` (one turn; its words opened only when it is the owner's
+  own turn) and `GET /api/owner/costs?days=30` (`{days, total_usd, by_user, by_source,
+  by_task}`). These are the one deliberate read across tenants.
 - **The robot** — `/voice`, `/api/firmware/manifest` and `/api/firmware/image/<version>`
   (OTA; a `board` other than `brain` is a retired camera or room board asking, refused 400,
   never handed the brain's image). The camera's routes (the snapshot pair, `/api/cam/upload`)
