@@ -59,6 +59,9 @@ CASES = [
                                          {"item": {"list": "shopping", "text": "خبز"}}], "steps": [
         {"say": "شيلي الخبز من الأغراض", "tools": ["list_delete"], "pending": False,
          "no_item": {"list": "shopping", "has": "خبز"}, "item": {"list": "shopping", "has": "حليب"}}]},
+    {"name": "delete is never an edit", "setup": [{"item": {"list": "tasks", "text": "أتصل بالبنك"}}], "steps": [
+        {"say": "امسحي مهمة البنك", "tools": ["list_delete"], "not_tools": ["list_update"],
+         "no_item": {"list": "tasks", "has": "البنك"}}]},
     {"name": "bulk delete asks then goes", "setup": [
         {"item": {"list": "shopping", "text": t}} for t in ("حليب", "خبز", "بيض", "جبنة", "زيت", "سكر")], "steps": [
         {"say": "امسحي كل قائمة التسوق", "pending": True, "item": {"list": "shopping", "has": "زيت"}},

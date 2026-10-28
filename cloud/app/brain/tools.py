@@ -80,7 +80,7 @@ def _schemas() -> List[Dict[str, Any]]:
                              "qty": {"type": "number", "description": "قديش («كمان حليب» = 1)"},
                              "due": {**_S, "description": "كلام المستخدم زي ما هو («بكرا 5 المسا») أو YYYY-MM-DD HH:MM بتوقيته"},
                              "priority": _S, "data": data}, ["list", "text"])},
-        {"name": "list_update", "description": "عدّلي/خلّصي/انقلي عنصر قائمة (للحذف list_delete)؛ done لعادة بيسجّل التزام اليوم. خدي الـ id من «وضعه هلأ»، والنص بس لو مش ظاهر.",
+        {"name": "list_update", "description": "عدّلي/خلّصي/انقلي عنصر قائمة؛ ما بتحذف أبداً («احذفي/شيلي/امسحي» → list_delete)؛ done لعادة بيسجّل التزام اليوم. خدي الـ id من «وضعه هلأ»، والنص بس لو مش ظاهر.",
          "parameters": _obj({**target, "list": _list_enum(), "project": _S,
                              "priority": _S, "data": {**data, "description": "تفاصيل بتنضاف للعنصر (أيام العادة days، وقتها time، repeat...)"},
                              "move_to": {**_list_enum(), "description": "انقليه لهالقائمة"}, "move_to_project": _S,
