@@ -26,7 +26,9 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "cloud" / "app"
 # difference between a considered exception and quiet drift.
 #
 # 417 -> 169 on 30 Sep 2026: phase 5 deleted the old agent and stores.
-BROAD_EXCEPT_BASELINE = 169
+# 169 -> 170 on 28 Oct 2026: the turn trace's one write (`trace_store.Trace.finish`) — a
+# trace must never break the turn it records, whatever the database or the encoder raise.
+BROAD_EXCEPT_BASELINE = 170
 
 
 def test_subtypes_have_expected_status_and_code():

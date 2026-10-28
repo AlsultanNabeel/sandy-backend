@@ -187,6 +187,28 @@ thread that runs the turn.
 next turn) and `execution_result` (image bytes and caption when a tool made one).
 The `[turn] …ms total — brain tools=[…]` log line says where a slow turn went.
 
+**The trace** (`features/trace_store.py`): every turn leaves one row in `sandy_traces` —
+chat (`loop.run_turn`, its id is the turn's `turn_id`), voice (one per Gemini
+`turn_complete`, `voice_ws/session.py`, its tools through `_dispatch_tool(trace=…)`) and
+model calls made for a user outside a turn (`trace_store.background`: the STM summary, the
+chat title, the daily nudge, photo tags). A row holds the request, the reply, every tool
+(arguments, result, ok, ms), every model call (provider, model, tokens in / out / cached,
+ms), the cost in dollars (`features/pricing.py`, the one place prices live, dated
+`PRICES_UPDATED`), `skills` and `task_id` for the phases that fill them, and `error`.
+The tokens are counted at the one client (`openai_client.create_chat_completion`, a
+stream asks for them with `stream_options.include_usage`), on the direct fallback
+(`model._openai_direct`) and from the live call's `usage_metadata` (one model call a
+voice turn: every message reports the whole context in `prompt_tokens_details`, billed once
+a turn, so the input is the largest seen and only the answer's tokens add up; Google's
+forum answer, not its reference — check one call against the billing console); tools report from
+`tools.execute`. The trace being kept is a context variable (`trace_store.using`), so the
+side-by-side tools of one step report into it too. The words — request, reply, tools'
+arguments and results — are sealed with `SANDY_LTM_KEY`; without the key none are kept,
+only the numbers. Rows expire after thirty days (TTL on `expire_at`), are written under
+their user (`ScopedCollection`) and erased with the account. `finish` never raises: a
+trace that cannot be written is a warning, never a broken turn. Image generation and
+embeddings are not counted yet.
+
 ### 2.4 Tools
 
 Nineteen (`tools.py`), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
@@ -521,7 +543,15 @@ Who calls what:
   `/api/features`, `/api/subscription`, push register / unregister,
   `/api/voice/tts`, and the `/voice` socket for live calls. The share extension
   uses `/api/agent`, `/api/analyze-image`, `/api/photos`, `/api/entries` and
-  `/api/items`.
+  `/api/items`. `/api/features` answers `{hidden, on}`: what the owner hid app-wide
+  (`SANDY_HIDDEN_FEATURES`) and the feature switches on for the caller (`utils/flags.py`:
+  `SANDY_FLAGS`, a JSON object, `"all"` or a list of account ids per switch; missing or
+  unreadable is off; `flags.on(name, user_id)` is the one way the code asks).
+- **The owner** (`api/owner_api.py`, the accounts in `SANDY_OWNER_ACCOUNTS`; anyone else
+  404) — `GET /api/owner/traces?limit=&user=&source=` (newest first, never words),
+  `GET /api/owner/traces/<id>` (one turn; its words opened only when it is the owner's
+  own turn) and `GET /api/owner/costs?days=30` (`{days, total_usd, by_user, by_source,
+  by_task}`). These are the one deliberate read across tenants.
 - **The robot** — `/voice`, `/api/firmware/manifest` and `/api/firmware/image/<version>`
   (OTA; a `board` other than `brain` is a retired camera or room board asking, refused 400,
   never handed the brain's image). The camera's routes (the snapshot pair, `/api/cam/upload`)
@@ -1506,7 +1536,8 @@ Written today, and what reads it:
 - **Conversation** — `sandy_stm`, `sandy_pending_state`, `sandy_prompt_cache`,
   `sandy_cache_stamps`, `conversations` (the app's chat threads, filtered by
   `user_id` by hand in `conversations_api.py`), `agent_turns` (the send ledger,
-  keyed by the send's `client_msg_id` within its conversation, TTL a day) and `turn_stops` (a stopped reply, `_id` `<user>:<thread>`, TTL a day).
+  keyed by the send's `client_msg_id` within its conversation, TTL a day), `turn_stops` (a stopped reply, `_id` `<user>:<thread>`, TTL a day) and
+  `sandy_traces` (one row per turn, thirty days, §2.3).
 - **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
   `sandy_scenes`, `sandy_voiceprints`, `sandy_voice_enroll`, `sandy_firmware`, `sandy_firmware_chunks`,
   `node_pair_challenges`, `node_sightings`.

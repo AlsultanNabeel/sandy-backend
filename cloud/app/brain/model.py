@@ -12,10 +12,12 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from app.config import OPENAI_MODEL
+from app.features import trace_store
 from app.integrations.openai_client import DEFAULT_CHAT_TIMEOUT_S, chat_fn, openai_direct_client
 
 logger = logging.getLogger(__name__)
@@ -121,9 +123,13 @@ def _openai_direct(messages, tools):
         return None
     # The API refuses an empty tools list; a summary call sends none.
     extra = {"tools": tools} if tools else {}
-    return client.chat.completions.create(
+    t0 = time.perf_counter()
+    resp = client.chat.completions.create(
         model=OPENAI_MODEL, messages=messages, **extra,
         max_tokens=MAX_TOKENS, temperature=TEMPERATURE, timeout=DEFAULT_CHAT_TIMEOUT_S)
+    trace_store.note_usage("openai", OPENAI_MODEL, getattr(resp, "usage", None),
+                           ms=(time.perf_counter() - t0) * 1000)
+    return resp
 
 
 def complete(messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],

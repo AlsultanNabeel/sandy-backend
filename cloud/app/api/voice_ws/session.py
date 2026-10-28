@@ -73,6 +73,7 @@ from app.api.voice_ws.memory import (
 from app.api.metering import voice_seconds_left
 from app.brain import honesty
 from app.brain.voice import END_CALL
+from app.features import trace_store
 from app.features.usage_store import add_voice_seconds
 from app.api.voice_ws.tools import (
     _build_cached_instruction,
@@ -682,6 +683,7 @@ async def _live_session(ws, remote: str) -> None:
                 return
 
             remember_live_model(model_name)
+            live_state["model"] = model_name
             try:
                 # وين راح وقت فتح المكالمة (المايك شغّال طول الوقت؛ مئات المللي = الكاش انكسر).
                 logger.info(
@@ -1291,6 +1293,9 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
     # turn's id, under which its writes are kept for «تراجعي» (`blocks.changes`).
     _turn_worked: List[str] = []
     _turn_id = {"id": uuid.uuid4().hex}
+    # What the turn did, for the owner's trace (`trace_store`): tokens, tools, words.
+    _trace = {"t": trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
+                                     turn_id=_turn_id["id"])}
 
     # `_first`: first message of any kind from Gemini; `_audio_out`: what reached the speaker.
     _seen = {"any": False, "user_text": False, "audio_out": 0}
@@ -1345,6 +1350,9 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             live_state["goaway"] = True
             logger.info("[voice_ws] GoAway from Gemini (%s left) — will reconnect",
                         getattr(away, "time_left", "?"))
+
+        trace_store.note_live_usage(_trace["t"], live_state.get("model", ""),
+                                    getattr(response, "usage_metadata", None))
 
         # Capture user speech transcript
         if response.server_content and response.server_content.input_transcription:
@@ -1469,11 +1477,17 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                 loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text,
                                      get_voice_identity(), get_voice_channel())
 
+            done_trace = _trace["t"]
+            if user_text or sandy_text or done_trace.model_calls or done_trace.tools:
+                loop.run_in_executor(None, lambda: done_trace.finish(
+                    request=user_text, reply=sandy_text, routed_by="voice"))
             _user_buf.clear()
             _sandy_buf.clear()
             fix = honesty.voice_correction(sandy_text, _turn_worked)
             _turn_worked.clear()
             _turn_id["id"] = uuid.uuid4().hex
+            _trace["t"] = trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
+                                            turn_id=_turn_id["id"])
             if fix:
                 # She has said it already; she is told at once to put it right.
                 try:
@@ -1539,7 +1553,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     # The identity travels with the tool call.
                     result = await loop.run_in_executor(
                         tools_pool, _dispatch_tool, fc.name,
-                        dict(fc.args or {}), get_voice_identity(), _turn_id["id"]
+                        dict(fc.args or {}), get_voice_identity(), _turn_id["id"], _trace["t"]
                     )
                     if result.get("ok"):
                         _turn_worked.append(fc.name)

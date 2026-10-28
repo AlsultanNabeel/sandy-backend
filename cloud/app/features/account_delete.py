@@ -59,6 +59,7 @@ _BY_USER: List[str] = [
     "sandy_nudge_locks",
     "sandy_usage_daily",
     "sandy_usage_rl",
+    "sandy_traces",
     "sandy_active_user_profile",
     # Cached voice prompt: holds the user's name and lists verbatim.
     "sandy_prompt_cache",

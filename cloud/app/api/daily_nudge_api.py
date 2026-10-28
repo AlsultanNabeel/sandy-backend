@@ -120,13 +120,16 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
                 " (ملاحظة: كان ساهر لوقت متأخر مبارح — ابدئي بصباح دافئ واسأليه "
                 "بلطف كيف نام وكيف حاله بعد السهر قبل ما تحكي عن المهام.)"
             )
-        result = chat_fn()(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            max_tokens=120,
-        )
+        from app.features import trace_store
+
+        with trace_store.background(uid, "daily_nudge"):
+            result = chat_fn()(
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                max_tokens=120,
+            )
         text = result if isinstance(result, str) else result.choices[0].message.content
         text = (text or "").strip()
         if text:

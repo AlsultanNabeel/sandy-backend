@@ -7,7 +7,8 @@
 import logging
 import os
 import threading
-from typing import Any, Callable, Dict, List, Optional
+import time
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 
@@ -71,20 +72,43 @@ def create_chat_completion(
     kwargs["timeout"] = timeout if timeout is not None else DEFAULT_CHAT_TIMEOUT_S
     if stream:
         kwargs["stream"] = True
+        # The last chunk then carries the tokens of the whole answer.
+        kwargs["stream_options"] = {"include_usage": True}
     if tools:
         kwargs["tools"] = tools
 
+    provider = "azure" if client is azure_openai_client and client is not None else "openai"
+    t0 = time.perf_counter()
     try:
-        return _cb.call(_create_chat_adapting, client, kwargs)
+        resp = _cb.call(_create_chat_adapting, client, kwargs)
     except CircuitOpenError:
         raise RuntimeError("[OpenAI] Circuit OPEN — AI service temporarily unavailable")
+    if stream:
+        return _counting_stream(resp, provider, str(model_name or ""), t0)
+    _note_usage(provider, str(model_name or ""), getattr(resp, "usage", None), t0)
+    return resp
+
+
+def _note_usage(provider: str, model: str, usage: Any, t0: float) -> None:
+    """The call's tokens into the turn's trace, if one is being kept."""
+    from app.features import trace_store
+
+    trace_store.note_usage(provider, model, usage, ms=(time.perf_counter() - t0) * 1000)
+
+
+def _counting_stream(stream: Any, provider: str, model: str, t0: float) -> Iterator[Any]:
+    for chunk in stream:
+        usage = getattr(chunk, "usage", None)
+        if usage is not None:
+            _note_usage(provider, model, usage, t0)
+        yield chunk
 
 
 # Scanned by name so 'error' in the error repr is never mistaken for a param.
 _TUNABLE_PARAMS = (
     "max_tokens", "max_completion_tokens", "temperature", "top_p",
     "frequency_penalty", "presence_penalty", "logprobs", "tool_choice",
-    "reasoning_effort",
+    "reasoning_effort", "stream_options",
 )
 
 

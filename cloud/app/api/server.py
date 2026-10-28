@@ -108,6 +108,9 @@ def create_app(*, mongo_db=None):
     from app.api.features_api import register_features_api
     register_features_api(app)
 
+    from app.api.owner_api import register_owner_api
+    register_owner_api(app)
+
     from app.api.persona_api import register_persona_api
     register_persona_api(app)
 

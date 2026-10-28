@@ -27,6 +27,7 @@ ALLOWED_RAW = {
     "speaker_id.py": "owner voiceprint, keyed by _id=str(chat_id)",
     "node_store.py": "the paired robots, keyed by node_id (device infra)",
     "photo_album.py": "album meta keyed by chat_id/photo_id alongside GridFS",
+    "trace_store.py": "writes go through ScopedCollection; the owner-only trace and cost pages read across tenants",
 }
 
 _RAW_ACCESS = re.compile(r"get_db\(\)\[")
