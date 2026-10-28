@@ -238,3 +238,11 @@ def test_english_days_without_a_clock(text):
 ])
 def test_a_spoken_repeat_is_a_rule(said, rule):
     assert W.recurrence_rule(said) == rule
+
+
+def test_the_rules_name_the_english_way_of_saying_each_thing():
+    """The model is shown how each thing is said in English too, not in Arabic only."""
+    from app.brain import context
+    for phrase in ("undo", "bring it back", "delete", "remove", "remind me", "I need to",
+                   "set up the room", "yes", "every Monday"):
+        assert phrase in context._RULES, phrase
