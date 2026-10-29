@@ -257,3 +257,25 @@ def test_a_placeholder_setting_sends_nothing(post, monkeypatch, name):
         mail.ask_to_confirm("userB", "b@example.com")
     _deliver(body="held back")
     assert post.sent == []
+
+
+# The subject says what is new (owner, 30 Oct): «ساندي: انضاف «ليمون» لـ«shopping»», and with
+# more than one, the newest and how many more.
+@pytest.mark.parametrize("language, one, more", [
+    ("ar", "ساندي: انضاف «ليمون» لـ«shopping»", "ساندي: انضاف «بطيخ» لـ«shopping» وكمان 1"),
+    ("en", "Sandy: «lemon» was added to «shopping»", "Sandy: «melon» was added to «shopping» and 1 more"),
+])
+def test_the_subject_says_what_is_new(post, language, one, more):
+    post.db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
+    _confirmed(post)
+    first = one.split(": ", 1)[1]
+    _deliver(body=first)
+    assert post.sent[-1].subject == one
+    post.clock[0] += timedelta(minutes=10)
+    _deliver(body="held one")
+    post.clock[0] += timedelta(minutes=10)
+    _deliver(body=more.split(": ", 1)[1].rsplit(" وكمان", 1)[0].rsplit(" and 1 more", 1)[0])
+    post.clock[0] += timedelta(hours=1)
+    with active_user_profile_context(A):
+        notify.flush()
+    assert post.sent[-1].subject == more

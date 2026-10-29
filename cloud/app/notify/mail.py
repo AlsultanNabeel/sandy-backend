@@ -178,16 +178,22 @@ def _one_line(text: str) -> str:
     return " ".join(str(text or "").split())[:120]
 
 
+def _subject(rows: List[Dict[str, Any]]) -> str:
+    """What is new, from the newest result's first line, and how many more came with it."""
+    newest = str(rows[-1].get("body") or rows[-1].get("title") or "").strip().splitlines() or [""]
+    line = _one_line(newest[0])[:90]
+    if len(rows) == 1:
+        return lang.say("mail_result_subject", line=line)
+    return lang.say("mail_results_subject", line=line, n=len(rows) - 1)
+
+
 def _compose(rows: List[Dict[str, Any]]) -> tuple:
     titles = list(dict.fromkeys(_one_line(r.get("title")) for r in rows))
     if len(titles) > 1:
-        subject = lang.say("mail_digest_subject", n=len(rows))
         body = "\n\n———\n\n".join(f"«{_one_line(r.get('title'))}»\n{r.get('body') or ''}" for r in rows)
     else:
-        subject = (lang.say("mail_result_subject", title=titles[0]) if len(rows) == 1
-                   else lang.say("mail_results_subject", n=len(rows), title=titles[0]))
         body = "\n\n———\n\n".join(str(r.get("body") or "") for r in rows)
-    return subject, f"{body}\n\n—\n{lang.say('mail_footer')}"
+    return _subject(rows), f"{body}\n\n—\n{lang.say('mail_footer')}"
 
 
 def _last_slot(at: str, now: datetime) -> datetime:
