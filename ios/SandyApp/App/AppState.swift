@@ -192,6 +192,7 @@ final class AppState: ObservableObject {
     /// The developer screen: for an account with `dev_tools` on, and always on staging so
     /// there is a way back.
     var showsDeveloper: Bool { DeveloperAccess.shows(on: serverFeatures.on, server: server) }
+    var showsTasks: Bool { ScheduledTasksAccess.shows(on: serverFeatures.on) }
 
     enum SwitchOutcome { case done, unsent }
 

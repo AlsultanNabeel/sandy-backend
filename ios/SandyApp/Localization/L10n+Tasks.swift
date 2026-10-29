@@ -1,0 +1,72 @@
+import Foundation
+
+// Namespace: tasks — the tasks Sandy runs on her own, their results and the email they go
+// to (Features/Tasks/).
+enum L10nTasks {
+    static let ns = "tasks"
+
+    static let table = L10nTable(
+        ar: [
+            "title": .text("المهام"),
+            "empty": .text("لسا ما في مهام. احكي لساندي «كل ساعة شوفيلي…» أو «تابعي… وقلّيلي إذا…»."),
+            "running": .text("شغّالة"),
+            "paused": .text("موقّفة"),
+            "everyMinutes": .text("كل %@ دقيقة"),
+            "everyHours": .text("كل %@ ساعة"),
+            "next": .text("الجاية: %@"),
+            "unseen": .text("%@ جديد"),
+            "failures": .text("فشلت %@ مرة ورا بعض"),
+            "pause": .text("وقّفها"),
+            "resume": .text("رجّعها"),
+            "remove": .text("احذفها"),
+            "removeAsk": .text("أحذف المهمة ونتائجها؟"),
+            "results": .text("النتائج"),
+            "noResults": .text("لسا ما لقت إشي يستاهل تبليغ."),
+            "instructions": .text("المطلوب"),
+            "lastError": .text("آخر خطأ"),
+            "email": .text("الإيميل"),
+            "emailNote": .text("نتائج المهام بتوصلك عالإيميل بعد ما تأكّده، إيميل واحد بالساعة للمهمة بالكتير."),
+            "emailPlaceholder": .text("name@example.com"),
+            "sendLink": .text("ابعتلي رابط التأكيد"),
+            "confirmed": .text("مؤكّد"),
+            "waiting": .text("بانتظار التأكيد: افتح الرابط اللي وصلك"),
+            "stopEmail": .text("وقّف الإيميلات"),
+            "notReady": .text("الإيميل لسا مش مفعّل عندنا."),
+            "linkSent": .text("بعتتلك رابط. افتحه من إيميلك ليتأكّد."),
+            "emailConfirmed": .text("هالإيميل مؤكّد من قبل."),
+            "loadFailed": .text("ما قدرت أجيب المهام هلّق، جرّب كمان شوي."),
+            "saveFailed": .text("ما زبط هلّق، جرّب كمان شوي."),
+        ],
+        en: [
+            "title": .text("Tasks"),
+            "empty": .text("No tasks yet. Tell Sandy «every hour, check…» or «track… and tell me if…»."),
+            "running": .text("Running"),
+            "paused": .text("Paused"),
+            "everyMinutes": .text("Every %@ minutes"),
+            "everyHours": .text("Every %@ hours"),
+            "next": .text("Next: %@"),
+            "unseen": .text("%@ new"),
+            "failures": .text("Failed %@ times in a row"),
+            "pause": .text("Pause"),
+            "resume": .text("Resume"),
+            "remove": .text("Delete"),
+            "removeAsk": .text("Delete this task and its results?"),
+            "results": .text("Results"),
+            "noResults": .text("Nothing worth telling you yet."),
+            "instructions": .text("What it does"),
+            "lastError": .text("Last error"),
+            "email": .text("Email"),
+            "emailNote": .text("Your tasks' results come by email once you confirm it, one email an hour per task at most."),
+            "emailPlaceholder": .text("name@example.com"),
+            "sendLink": .text("Send me the confirmation link"),
+            "confirmed": .text("Confirmed"),
+            "waiting": .text("Waiting: open the link in your email"),
+            "stopEmail": .text("Stop the emails"),
+            "notReady": .text("Email isn't set up on our side yet."),
+            "linkSent": .text("Link sent. Open it from your email to confirm."),
+            "emailConfirmed": .text("That email is already confirmed."),
+            "loadFailed": .text("Couldn't load your tasks right now, try again in a bit."),
+            "saveFailed": .text("That didn't work right now, try again in a bit."),
+        ]
+    )
+}

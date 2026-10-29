@@ -121,6 +121,9 @@ struct ProfileView: View {
                 archiveRow(icon: "photo.stack.fill", titleKey: "sandy.photos") { PhotosView() }
                 archiveRow(icon: "cloud.sun.fill", titleKey: "weather.title") { WeatherView() }
                 archiveRow(icon: "sparkles", titleKey: "persona.title") { PersonaView() }
+                if state.showsTasks {
+                    archiveRow(icon: "checklist", titleKey: "tasks.title") { ScheduledTasksView() }
+                }
                 // ربط الروبوت، وفكّه للبيع، وحذف الحساب.
                 //
                 // بأسفل الملف الشخصي مش مخبّى بإعدادات فرعية: أبل بتشترط إنّ
