@@ -244,3 +244,16 @@ def test_a_link_is_alive_until_used_and_reading_it_uses_nothing(post):
     assert mail.link_owner(token) == "userA" and mail.link_owner(token) == "userA"
     assert mail.confirm(token) == "userA"
     assert mail.link_owner(token) is None and mail.link_owner("nope") is None
+
+
+# The settings filled by hand later (the owner's, 29 Oct): while the user or the password is
+# still CHANGE_ME, nothing is asked or sent, and Gmail is never tried with it.
+@pytest.mark.parametrize("name", ["SANDY_SMTP_USER", "SANDY_SMTP_PASSWORD"])
+def test_a_placeholder_setting_sends_nothing(post, monkeypatch, name):
+    _confirmed(post)
+    monkeypatch.setenv(name, "CHANGE_ME")
+    assert mail.ready() is False and mail.status("userA")["ready"] is False
+    with pytest.raises(RuntimeError, match="not_set_up"):
+        mail.ask_to_confirm("userB", "b@example.com")
+    _deliver(body="held back")
+    assert post.sent == []

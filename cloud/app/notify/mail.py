@@ -16,7 +16,8 @@ now; a sending service on our own domain later is the same settings with other v
   SANDY_SMTP_PASSWORD  its app password
   SANDY_EMAIL_FROM     who it is from (the user above by default)
   SANDY_PUBLIC_URL     this server's address, for the confirmation link
-Without the user, the password or the address nothing is asked or sent.
+Without the user, the password or the address, or with one still a placeholder (CHANGE_ME),
+nothing is asked or sent.
 """
 
 from __future__ import annotations
@@ -64,8 +65,13 @@ def _setting(name: str, default: str = "") -> str:
     return os.getenv(name, "").strip() or default
 
 
+# A value left to fill by hand on the dashboard is no value: nothing is asked or sent with it.
+_PLACEHOLDERS = frozenset({"change_me", "changeme", "todo", "xxx"})
+
+
 def ready() -> bool:
-    return all(_setting(n) for n in ("SANDY_SMTP_USER", "SANDY_SMTP_PASSWORD", "SANDY_PUBLIC_URL"))
+    return all(_setting(n) and _setting(n).lower() not in _PLACEHOLDERS
+               for n in ("SANDY_SMTP_USER", "SANDY_SMTP_PASSWORD", "SANDY_PUBLIC_URL"))
 
 
 def _post(to: str, subject: str, body: str) -> None:
