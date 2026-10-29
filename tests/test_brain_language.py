@@ -378,3 +378,14 @@ def test_a_device_named_in_the_other_language_is_not_rewritten(brain_db, monkeyp
     model = ScriptedModel(tools_reply(call("device_control", device="lamp", action="on")))
     assert _turn(model, message)["final_response"] == want
     assert len(model.seen) == 1
+
+
+# The rewrite is the model's too: what it claims is checked again (independent review).
+@pytest.mark.parametrize("message, first, rewrite, language", [
+    ("is the milk still on my list?", "لسا ما حذفت الحليب، بدك أحذفه؟", "Deleted the milk ✅", "en"),
+    ("الحليب لسا بالقائمة؟", "I haven't deleted the milk yet.", "حذفت الحليب ✅", "ar"),
+])
+def test_a_rewrite_that_claims_a_write_is_checked_again(brain_db, message, first,  # noqa: F811
+                                                        rewrite, language):
+    model = ScriptedModel(text_reply(first), text_reply(rewrite))
+    assert _turn(model, message)["final_response"] == lang.PHRASES["nothing_done"][language]

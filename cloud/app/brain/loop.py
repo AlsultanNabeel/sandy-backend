@@ -251,6 +251,15 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
     return state
 
 
+def _without(question: str, text: str) -> str:
+    """``text`` with the held ``question`` it ends with taken off."""
+    return text[: -len(question)].rstrip() if question and text.endswith(question) else text
+
+
+def _joined(body: str, question: str) -> str:
+    return "\n".join(t for t in (body, question) if t)
+
+
 def _last_user_line(history: List[Dict[str, Any]]) -> str:
     return next((str(m.get("content") or "") for m in reversed(history or [])
                  if m.get("role") == "user"), "")
@@ -313,10 +322,14 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
         question = confirm.ask(outcome["pending"]) if outcome.get("pending") else ""
         text = honesty.correct(outcome["text"], ctx.worked, ctx.results, question)
         # In the message's language (`language_guard`); the held question is ours, already in it.
-        body = text[: -len(question)].rstrip() if question and text.endswith(question) else text
-        body = language_guard.ensure(body, complete,
-                                     language_guard.names_of(message, ctx.results))
-        outcome = {**outcome, "text": "\n".join(t for t in (body, question) if t)}
+        body = _without(question, text)
+        rewritten = language_guard.ensure(body, complete,
+                                          language_guard.names_of(message, ctx.results))
+        if rewritten != body:
+            # The rewrite is the model's words too: what it says was done is checked again.
+            body = _without(question, honesty.correct(_joined(rewritten, question), ctx.worked,
+                                                      ctx.results, question))
+        outcome = {**outcome, "text": _joined(body, question)}
     shown = None
     try:
         # Stopped from the app: memory keeps what was shown, marked as cut.
