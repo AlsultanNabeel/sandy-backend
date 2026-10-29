@@ -223,3 +223,38 @@ def test_voice_a_claim_after_the_tool_did_it_stands(monkeypatch, brain_db):  # n
 ])
 def test_a_reassurance_is_not_the_verbs_negation(text, kinds):
     assert honesty.claims(text) == kinds, text
+
+
+class _SplitGemini(_Gemini):
+    """The call as the app's live model runs it (29 Oct 2026): the tool and his words end one
+    turn, and «ضفتها» comes alone in the next."""
+
+    def __init__(self, tool, heard, said):
+        super().__init__(tool)
+        self.heard, self.said = heard, said
+
+    async def receive(self):
+        self.turns += 1
+        if self.turns > 1:
+            self.done.set()
+            await asyncio.sleep(3600)
+        yield _content(input_transcription=NS(text=self.heard))
+        yield NS(server_content=None, go_away=None, session_resumption_update=None,
+                 tool_call=NS(function_calls=[NS(id="1", name=self.tool[0], args=self.tool[1])]))
+        await self.answered.wait()
+        yield _content(turn_complete=True)
+        yield _content(output_transcription=NS(text=self.said))
+        yield _content(turn_complete=True)
+
+
+# What the tool did stands until she answers: the honesty check told her «nothing was
+# added» after every add of a call, so she took back what was done.
+@pytest.mark.parametrize("heard, said", [
+    ("ضيفي حليب", "ضفت الحليب للقائمة"),
+    ("add milk", "I added the milk to your list."),
+])
+def test_voice_a_tool_in_one_turn_backs_the_claim_in_the_next(monkeypatch, brain_db, heard,  # noqa: F811
+                                                             said):
+    notes = _call(monkeypatch, _SplitGemini(("list_add", {"list": "shopping", "text": "حليب"}),
+                                            heard, said))
+    assert notes == []

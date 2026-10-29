@@ -1296,7 +1296,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
 
     _user_buf: List[str] = []
     _sandy_buf: List[str] = []
-    # The tools of this turn that worked: what she may say she did (`honesty`); and the
+    # The tools that worked since she last answered: what she may say she did (`honesty`); and the
     # turn's id, under which its writes are kept for «تراجعي» (`blocks.changes`).
     _turn_worked: List[str] = []
     _turn_id = {"id": uuid.uuid4().hex}
@@ -1503,7 +1503,10 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             _user_buf.clear()
             _sandy_buf.clear()
             fix = honesty.voice_correction(sandy_text, _turn_worked, spoken)
-            _turn_worked.clear()
+            if sandy_text:
+                # What the tools did stands until she answers: the live model ends the turn
+                # of the tool call and says «ضفتها» in the next one.
+                _turn_worked.clear()
             _turn_id["id"] = uuid.uuid4().hex
             _trace["t"] = trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
                                             turn_id=_turn_id["id"])
