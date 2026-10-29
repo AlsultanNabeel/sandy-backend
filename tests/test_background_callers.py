@@ -90,6 +90,16 @@ def test_an_images_answer(calls, monkeypatch):
     assert [(c["what"], c["user_id"]) for c in calls] == [("vision", "userA")]
 
 
+def test_a_tasks_new_check(monkeypatch):
+    from app.brain import tools_tasks
+    seen = []
+    monkeypatch.setattr(background, "call", lambda what, messages, **kw: seen.append((what, kw)) or NS(
+        choices=[NS(message=NS(content='{"tool": "weather", "args": {"city": "Amman"}}'))]))
+    assert tools_tasks.derive_check("tell me if it rains in Amman", "userA") == {
+        "tool": "weather", "args": {"city": "Amman"}}
+    assert seen[0][0] == "task_check" and seen[0][1]["priority"] == "direct"
+
+
 def test_no_model_call_is_made_outside_the_one_function():
     """Every model call outside a reply's loop is `background.call`: the chat's own client is
     called directly in the model adapter alone (`brain/model.py`)."""

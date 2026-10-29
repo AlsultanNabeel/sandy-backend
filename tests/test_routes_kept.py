@@ -78,7 +78,8 @@ KEPT = {
     "/api/weather": {"GET"},
     # The Tasks screen and where its results are emailed (the confirm link is opened from mail).
     "/api/scheduled-tasks": {"GET"},
-    "/api/scheduled-tasks/<task_id>": {"DELETE"},
+    "/api/scheduled-tasks/<task_id>": {"DELETE", "PATCH"},
+    "/api/scheduled-tasks/<task_id>/preview": {"POST"},
     "/api/scheduled-tasks/<task_id>/results": {"GET"},
     "/api/scheduled-tasks/<task_id>/seen": {"POST"},
     "/api/scheduled-tasks/<task_id>/pause": {"POST"},

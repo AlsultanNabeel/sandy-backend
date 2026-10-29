@@ -5,6 +5,12 @@
                                                last_error, last_result, unseen, delivery}]}
   GET    /api/scheduled-tasks/<id>/results    {results: [{id, title, body, at, seen}]}, newest first
   POST   /api/scheduled-tasks/<id>/seen       all of it seen («صباح الخير» no longer tells it)
+  POST   /api/scheduled-tasks/<id>/preview    {every_minutes?, delivery?, instructions?, title?}:
+                                               {summary, check?}: the question a change waits on,
+                                               the same as by talk; new words bring their check
+                                               (one model call, `tools_tasks.derive_check`); saves nothing
+  PATCH  /api/scheduled-tasks/<id>            the same, plus the preview's `check`: saved
+                                               (`tasks.edit`), {task}
   POST   /api/scheduled-tasks/<id>/pause | /resume
   DELETE /api/scheduled-tasks/<id>            the task, what it saw and its results
   GET    /api/notify/email                    {address, confirmed, ready}: where results go
@@ -74,6 +80,64 @@ def _shown(row: Dict[str, Any], unseen: Dict[str, int]) -> Dict[str, Any]:
             "unseen": unseen.get(row["id"], 0), "delivery": tasks.how(row)}
 
 
+class _Bad(Exception):
+    """A change that cannot be read: its code, said in his language."""
+
+    def __init__(self, code: str, status: int = 400):
+        super().__init__(code)
+        self.code, self.status = code, status
+
+
+def _change(row: Dict[str, Any], body: Dict[str, Any], uid: str, *, derive: bool) -> Dict[str, Any]:
+    """A change from the screen, read and checked: the values `tasks.edit` takes, and the
+    question it waits on. A new check must read; new words with none get one (`derive`)."""
+    from app.blocks.tasks import READ_TOOLS
+    from app.brain import tools_tasks
+
+    out: Dict[str, Any] = {}
+    if "every_minutes" in body:
+        every = body["every_minutes"]
+        if not isinstance(every, int) or isinstance(every, bool) or every < 1:
+            raise _Bad("bad_every")
+        out["every"] = every
+    if "delivery" in body:
+        way = body["delivery"] if isinstance(body["delivery"], dict) else {}
+        try:
+            out["delivery"] = tasks.clean_delivery(way.get("mode"), way.get("hours"), way.get("at"))
+        except ValueError:
+            raise _Bad("bad_delivery") from None
+    if "title" in body and str(body["title"] or "").strip():
+        out["title"] = str(body["title"]).strip()[:120]
+    if "instructions" in body:
+        words = str(body["instructions"] or "").strip()
+        if not words or len(words) > 2000:
+            raise _Bad("bad_instructions")
+        out["instructions"] = words
+        check = body.get("check")
+        if check is not None:
+            if (not isinstance(check, dict) or check.get("tool") not in READ_TOOLS
+                    or not isinstance(check.get("args", {}), dict)):
+                raise _Bad("bad_check")
+            out["probe"] = {"tool": check["tool"], "args": dict(check.get("args") or {})}
+        elif derive:
+            out["probe"] = tools_tasks.derive_check(words, uid)
+            if out["probe"] is None:
+                raise _Bad("check_failed", 503)
+    if not out:
+        raise _Bad("nothing_to_change")
+    payload = row.get("payload") or {}
+    out["summary"] = tools_tasks.edit_summary(
+        row, title=out.get("title") or row.get("text", ""),
+        instructions=out.get("instructions") or payload.get("instructions", ""),
+        every=out.get("every") or tasks.every_minutes(row) or 1,
+        delivery=out.get("delivery") or tasks.how(row))
+    return out
+
+
+def _bad(exc: _Bad):
+    return jsonify({"error": exc.code, "message": lang.say(f"task_{exc.code}")}), exc.status
+
+
 def _page(text: str, status: int, form: str = "") -> Response:
     body = (f'<!doctype html><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width,initial-scale=1"><title>Sandy</title>'
@@ -112,6 +176,34 @@ def register_tasks_api(app):
             return _missing()
         notify.seen_all(task_id)
         return jsonify({"ok": True}), 200
+
+    @app.route("/api/scheduled-tasks/<task_id>/preview", methods=["POST"])
+    @_switched
+    def api_task_preview(claims, task_id):
+        row = tasks.get(task_id)
+        if not row:
+            return _missing()
+        try:
+            change = _change(row, request.get_json(silent=True) or {}, claims.get("user_id") or "",
+                             derive=True)
+        except _Bad as exc:
+            return _bad(exc)
+        return jsonify({"summary": change["summary"], "check": change.get("probe")}), 200
+
+    @app.route("/api/scheduled-tasks/<task_id>", methods=["PATCH"])
+    @_switched
+    def api_task_change(claims, task_id):
+        row = tasks.get(task_id)
+        if not row:
+            return _missing()
+        try:
+            change = _change(row, request.get_json(silent=True) or {}, claims.get("user_id") or "",
+                             derive=True)
+        except _Bad as exc:
+            return _bad(exc)
+        change.pop("summary")
+        tasks.edit(task_id, **change)
+        return jsonify({"task": _shown(tasks.get(task_id), notify.unseen_by_task())}), 200
 
     @app.route("/api/scheduled-tasks/<task_id>/pause", methods=["POST"])
     @_switched

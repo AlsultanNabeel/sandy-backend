@@ -176,6 +176,35 @@ def edit_summary(row: Dict[str, Any], *, title: str, instructions: str, every: i
                     every=_every(every), instructions=instructions, how=_how(delivery))
 
 
+_CHECK = (
+    "A task Sandy runs on her own is checked by one read tool with fixed arguments, run by code "
+    "each time and compared with the last run. Given the task's words, answer only JSON "
+    '{"tool": ..., "args": {...}} with tool one of: web_search {"query"} for anything on the web; '
+    'recall {"list", "project", "kind", "query"} for his own lists, notes and reminders; '
+    'summarize {"period": "month"} for his spending; weather {"city"}; device_state {}. '
+    "Keep his words for the query.")
+
+
+def derive_check(instructions: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """The check new words need (the Tasks screen has no model of its own): one read tool and
+    its arguments, or None when none could be read from the answer."""
+    import json
+
+    from app.brain import background
+    try:
+        resp = background.call("task_check", [{"role": "system", "content": _CHECK},
+                                              {"role": "user", "content": instructions}],
+                               priority=background.DIRECT, user_id=user_id, max_tokens=150,
+                               temperature=0, response_format={"type": "json_object"})
+        found = json.loads(resp.choices[0].message.content or "")
+    except (ValueError, OSError, RuntimeError, AttributeError, IndexError):
+        return None
+    tool, args = (found.get("tool"), found.get("args")) if isinstance(found, dict) else (None, None)
+    if tool not in READ_TOOLS or not isinstance(args, dict):
+        return None
+    return {"tool": tool, "args": args}
+
+
 def _minutes(value: Any) -> Optional[int]:
     try:
         minutes = int(value)

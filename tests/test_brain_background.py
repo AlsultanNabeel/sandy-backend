@@ -85,7 +85,7 @@ def test_the_callers_say_their_priority(monkeypatch):
     want = {"when": "DIRECT", "web_summary": "DIRECT", "vision": "DIRECT",
             "stm_summary": "BACKGROUND", "title": "BACKGROUND", "photo_tags": "BACKGROUND",
             "categorize": "BACKGROUND", "daily_nudge": "BACKGROUND",
-            "task": "SCHEDULED", "task_review": "SCHEDULED"}
+            "task": "SCHEDULED", "task_review": "SCHEDULED", "task_check": "DIRECT"}
     root = Path(__file__).resolve().parents[1] / "cloud" / "app"
     found = {}
     for path in root.rglob("*.py"):

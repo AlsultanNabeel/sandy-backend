@@ -362,6 +362,14 @@ PHRASES = {
     "task_edit_confirm_reads_only": {
         "ar": "أخلّي «{title}» {every}: «{instructions}»، والتبليغ {how}، لأنه المهمة ما بتدفع ولا بتحوّل ولا بتبعت باسمك ولا بتنشر ولا بتحذف",
         "en": "make «{title}» {every}: «{instructions}», telling you {how}, since a task never pays, transfers, sends in your name, posts or deletes"},
+    "task_bad_every": {"ar": "كل قديش؟ لازم دقيقة أو أكتر.", "en": "How often? It has to be a minute or more."},
+    "task_bad_delivery": {"ar": "طريقة التبليغ مش مفهومة: الملخص اليومي بدّه ساعة، والكل كذا ساعة بين ساعة وأسبوع.",
+                          "en": "I can't read that way of telling you: a daily summary needs its hour, and every few hours is one hour to a week."},
+    "task_bad_check": {"ar": "المهمة بتقرا بس، وهالفحص مش قراية.", "en": "A task only reads, and that check doesn't."},
+    "task_bad_instructions": {"ar": "اكتب شو بدك المهمة تعمل.", "en": "Write what you want the task to do."},
+    "task_nothing_to_change": {"ar": "ما في شي تغيّر.", "en": "Nothing changed."},
+    "task_check_failed": {"ar": "ما قدرت أفهم شو أفحص لهالكلام هلّق، جرّب كمان شوي.",
+                          "en": "I couldn't work out what to check for that just now; try again in a bit."},
     "task_edited": {"ar": "تمام، صارت «{title}»: «{instructions}» ✅", "en": "Done, «{title}» now: «{instructions}» ✅"},
     "task_delivery": {"ar": "صار تبليغ «{title}» {how}", "en": "«{title}» now tells you {how}"},
     "task_confirm_reads_only": {

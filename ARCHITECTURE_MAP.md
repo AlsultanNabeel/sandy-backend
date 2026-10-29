@@ -622,7 +622,7 @@ Who calls what:
   `/api/research`, `/api/weather`, `/api/persona`, `/api/onboarding`,
   `/api/features`, `/api/subscription`, push register / unregister, the Tasks screen
   (`api/tasks_api.py`, behind the `tasks` switch, 404 without it: `/api/scheduled-tasks` with
-  each one's state, unseen count and `delivery`, `/<id>/results`, `/seen`, `/pause`, `/resume`, `DELETE`, the
+  each one's state, unseen count and `delivery`, `POST /<id>/preview` (the question a change waits on, `edit_summary`, the same as by talk; new words bring their check from one direct model call, `tools_tasks.derive_check`, `task_check`; nothing saved) and `PATCH /<id>` (`every_minutes`, `delivery`, `instructions` with the preview's `check`, `title`; read by `_change`, saved by `tasks.edit`; a change that cannot be read is 400 with its code and his-language message, a check the model could not find 503 `check_failed`), `/<id>/results`, `/seen`, `/pause`, `/resume`, `DELETE`, the
   results going with it; `/api/notify/email` get / set / forget (`too_many` 429 past `mail.LINKS_A_DAY` links a day), and `/api/notify/email/confirm?t=`,
   the emailed link, the one of them opened signed out: `GET` a small page with a «Confirm» button that
   confirms nothing itself (a mail scanner opens links), its `POST` the one that confirms),
