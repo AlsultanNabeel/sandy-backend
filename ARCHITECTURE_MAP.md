@@ -1758,7 +1758,7 @@ ar 38/41, en 40/42, two cases moved, $0.11, 3.3 s a message, 398 reasoning token
 `sandy-chat` ar 40/41, en 41/42, two moved, $0.18, 2.0 s (`T1752`). With the tasks' twelve cases
 (phase one, session A; their switch on for the run's account): ar 46/47, en 45/48, $0.13, 1.8 s
 (`2026-10-29T2031`); the task cases 10/12, «shop stock» asked which stock instead of making the
-task, in both languages.
+task, in both languages. Session B of phase one (`2026-10-29T2156`, two runs, the morning's case added in both languages): ar 45/48, en 47/49, four cases moved between the runs (4.1%), $0.25; against the baseline «empty a list asks first», «reminder before another» and «undo» fell, none of them touched by it.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
