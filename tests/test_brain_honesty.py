@@ -201,3 +201,25 @@ def test_voice_a_claim_after_the_tool_did_it_stands(monkeypatch, brain_db):  # n
     assert _call(monkeypatch, _Gemini(tool=("list_delete", {"id": milk}))) == []
     with active_user_profile_context(A):
         assert items.get(milk) is None
+
+
+# A reassurance before the verb is no negation: «لا تقلق، حذفته» says it was deleted. The
+# negation that counts is the verb's own, in its own clause (independent review, 29 Oct 2026).
+@pytest.mark.parametrize("text, kinds", [
+    ("لا تقلق، حذفته ✅", {"delete"}),
+    ("ما في مشكلة، شلته", {"delete"}),
+    ("لا تقلق حذفته", {"delete"}),
+    ("لا، ضفته", {"add"}),
+    ("ما حذفت", set()),
+    ("لسا ما ضفت", set()),
+    ("No worries, deleted it ✅", {"delete"}),
+    ("Don't worry, removed.", {"delete"}),
+    ("Don't worry I've removed it", {"delete"}),
+    ("No problem, I added it.", {"add"}),
+    ("I didn't delete it.", set()),
+    ("I haven't added it yet.", set()),
+    ("It hasn't been deleted.", set()),
+    ("Nothing was removed.", set()),
+])
+def test_a_reassurance_is_not_the_verbs_negation(text, kinds):
+    assert honesty.claims(text) == kinds, text

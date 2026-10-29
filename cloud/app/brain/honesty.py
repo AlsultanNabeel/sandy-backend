@@ -39,15 +39,28 @@ _CLAIMS_EN: Dict[str, Tuple[str, ...]] = {
     "add": ("added", "saved", "created", "scheduled", "logged"),
     "done": ("done",),
 }
-# What says it did not happen, or not yet: «I haven't deleted», «it will be added».
-_NOT_EN = {"not", "never", "no", "nothing", "haven't", "hasn't", "hadn't", "didn't", "wasn't",
-           "weren't", "won't", "can't", "couldn't", "isn't", "aren't", "don't", "doesn't",
-           "be", "will", "would", "to", "can", "could", "should", "shall", "may", "might",
-           "want", "gonna", "if"}
+# What says it did not happen, or not yet, when it is the verb's own: «I haven't deleted»,
+# «it will be added», «nothing was removed». Read back from the verb through `_VERB_EN` only,
+# so «don't worry, I've deleted it» is a claim: «don't» is worry's.
+_NOT_EN = {"not", "never", "no", "nothing", "none", "haven't", "hasn't", "hadn't", "didn't",
+           "wasn't", "weren't", "won't", "can't", "cannot", "couldn't", "isn't", "aren't",
+           "don't", "doesn't", "wouldn't", "shouldn't", "havent", "hasnt", "didnt", "wasnt",
+           "isnt", "dont", "wont", "cant", "be", "will", "would", "to", "can", "could",
+           "should", "shall", "may", "might", "must", "want", "wanna", "gonna", "if",
+           "i'll", "it'll", "we'll", "you'll", "they'll"}
+# What stands between a verb and its negation: «hasn't been deleted», «not yet added».
+_VERB_EN = {"i", "you", "it", "we", "they", "he", "she", "them", "all", "both", "also", "just",
+            "already", "actually", "really", "now", "yet", "fully", "successfully", "ever",
+            "been", "being", "have", "has", "had", "is", "are", "was", "were", "am", "get",
+            "got", "i've", "we've", "you've", "they've", "it's", "that's", "i'd", "i'm",
+            "and", "or", "nor"}
 # A pronoun ending: «حذفتها»، «شلتهم»، «ضفتلك».
 _ENDINGS = ("", "ها", "هم", "هن", "ه", "و", "ك", "لك", "لها", "له", "لهم", "ي")
-# What says it did not happen: «ما حذفت»، «لسا ما ضفته»، «مش رح».
-_NOT = {"ما", "مش", "لسا", "لسه", "ولا", "بدون", "قبل", "لم", "لا", "مو", "رح", "راح", "بدي"}
+# What says it did not happen, when it is the verb's own: «ما حذفت»، «لسا ما ضفته»، «ولا
+# شلته». «لا تقلق، حذفته» is a claim: «لا» is the reassurance's, not the verb's.
+_NOT = {"ما", "مش", "ولا", "لم", "مو", "فما", "وما"}
+# What stands between a verb and its negation: «ما كنت حذفته»، «ما فعلياً ضفته».
+_VERB = {"كنت", "كان", "كانت", "بعد", "فعليا", "اصلا", "هلق", "لسا", "لسه"}
 
 # The tools that back each claim when they worked. An undo puts a row back or takes it
 # away, so it backs any of them; on voice, `confirm` is the yes that ran a held bulk change.
@@ -84,21 +97,35 @@ def _english(text: str) -> List[str]:
     return re.findall(r"[a-z']+", str(text or "").lower().replace("’", "'"))
 
 
+def _clauses(text: str) -> List[str]:
+    """A negation reaches no further than its clause: «لا تقلق، حذفته», «No, deleted»."""
+    return re.split(r"[،,.!?؟;؛:\n—–]+", str(text or ""))
+
+
+def _negated(words: List[str], i: int, nots: Set[str], between: Set[str]) -> bool:
+    """Whether the verb at ``i`` is negated: read back through ``between`` to its negation."""
+    j = i - 1
+    while j >= 0 and words[j] in between:
+        j -= 1
+    return j >= 0 and words[j] in nots
+
+
 def claims(text: str) -> Set[str]:
     """The kinds of write the text says happened; a negated one («ما حذفت», «I haven't
-    deleted») or one still to come («it will be added») is not a claim."""
-    words = _norm(text)
+    deleted») or one still to come («it will be added») is not a claim. The negation is the
+    verb's own: a reassurance before it («لا تقلق، حذفته», «no worries, deleted it») is not."""
     found = set()
-    for i, w in enumerate(words):
-        kind = _kind_of(w)
-        if kind and not ({words[j] for j in range(max(0, i - 2), i)} & _NOT
-                         or any(words[j].startswith(("فما", "وما")) for j in range(max(0, i - 2), i))):
-            found.add(kind)
-    english = _english(text)
-    for i, w in enumerate(english):
-        kind = next((k for k, forms in _CLAIMS_EN.items() if w in forms), None)
-        if kind and not {english[j] for j in range(max(0, i - 3), i)} & _NOT_EN:
-            found.add(kind)
+    for clause in _clauses(text):
+        words = _norm(clause)
+        for i, w in enumerate(words):
+            kind = _kind_of(w)
+            if kind and not _negated(words, i, _NOT, _VERB):
+                found.add(kind)
+        english = _english(clause)
+        for i, w in enumerate(english):
+            kind = next((k for k, forms in _CLAIMS_EN.items() if w in forms), None)
+            if kind and not _negated(english, i, _NOT_EN, _VERB_EN):
+                found.add(kind)
     return found
 
 
