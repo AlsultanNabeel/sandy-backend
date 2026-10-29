@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,6 +16,8 @@ from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
 from app.brain.matching import match_rows
 from app.brain.matching import match_key
+
+logger = logging.getLogger(__name__)
 
 MAX_ROWS = 30
 SUMMARY_ROWS = 200
@@ -97,7 +100,8 @@ def remember(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if kind == "mood":
         return _mood(args, ctx)
     try:
-        eid = entries.add(kind, text, args.get("data") or None, source=ctx.source)
+        eid = entries.add(kind, text, _known_data(LOG, kind, args.get("data")) or None,
+                          source=ctx.source)
     except KindError as exc:
         return refused(str(exc))
     if not eid:
@@ -172,7 +176,7 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     for r in rows:
         current = entries.get(r["id"]) or {}
         data = dict(current.get("data") or {})
-        extra = args.get("data") if isinstance(args.get("data"), dict) else {}
+        extra = _known_data(LOG, str(current.get("kind") or kind or ""), args.get("data"))
         if extra or (isinstance(amount, (int, float)) and not isinstance(amount, bool)):
             data.update(extra)
             if isinstance(amount, (int, float)) and not isinstance(amount, bool):
@@ -367,7 +371,7 @@ def list_add(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     for row in items.match_pool(name, done=False):
         if match_key(row.get("text", "")) == same:
             return _add_to_existing(row, qty, due)
-    data = {**(args.get("data") or {}), **({"qty": qty} if qty is not None else {})}
+    data = {**_known_data(LIST, name, args.get("data")), **({"qty": qty} if qty is not None else {})}
     try:
         iid = items.add(name, text, data or None, due=due,
                         priority=str(args.get("priority") or ""))
@@ -530,7 +534,8 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         data = None
         if extra or qty is not None:
             # Merged into what the row has: days, time, qty, repeat, details.
-            data = {**(r.get("data") or {}), **extra, **({"qty": qty} if qty is not None else {})}
+            data = {**(r.get("data") or {}), **_known_data(LIST, str(r.get("list") or ""), extra),
+                    **({"qty": qty} if qty is not None else {})}
         try:
             items.update(r["id"], text=args.get("text"), done=args.get("done"), due=due, data=data,
                          priority=args.get("priority"), list_name=move)
@@ -548,10 +553,32 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 # ── schedules ────────────────────────────────────────────────────────────────
 
 def _minutes(value: Any) -> Optional[int]:
+    """Whole minutes from a number or a number written as text («30»); None otherwise."""
+    if value in (None, "") or isinstance(value, bool):
+        return None
     try:
-        return int(value) if value not in (None, "") else None
+        return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+# A time the tool could not read goes back to the model as what to do next, never a dead end.
+_ASK_TIME = ("could not read the time: in_minutes is a whole number of minutes from now above 0 "
+             "(«in half an hour» = 30), when is the user's own words («at 5», «بكرا الصبح»); if "
+             "neither is clear, ask the user when")
+
+
+def _known_data(block: str, kind: str, data: Any) -> Dict[str, Any]:
+    """The model's ``data`` without the fields the kind does not have («time» on a task):
+    set aside quietly, so a row is never refused for a detail it cannot hold."""
+    row = get_kind(block, kind) if kind else None
+    data = dict(data) if isinstance(data, dict) else {}
+    if row is None:
+        return data
+    dropped = sorted(k for k in data if k not in row.fields)
+    if dropped:
+        logger.info("[brain] %s %s: set aside data fields %s", block, kind, dropped)
+    return {k: v for k, v in data.items() if k in row.fields}
 
 
 # A reminder that rang this recently can still be snoozed («أجّليه ربع ساعة»).
@@ -598,6 +625,8 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         kind, text, payload = timer["kind"], timer["text"], timer["payload"]
     # The model gives minutes or the user's words; the clock arithmetic is ours.
     minutes = _minutes(args.get("in_minutes"))
+    if args.get("in_minutes") not in (None, "") and (minutes is None or minutes < 0):
+        return refused(_ASK_TIME, in_minutes=args.get("in_minutes"))
     if args.get("before_id"):
         anchor = _anchor_time(str(args["before_id"]))
         if anchor is None:
@@ -607,11 +636,12 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             return refused("that time has already passed", when=W.local_text(fire_at))
     elif minutes is not None and minutes > 0:
         fire_at = W.now_utc() + timedelta(minutes=minutes)
+    elif minutes == 0 or W.is_now(args.get("when")):
+        fire_at = W.now_utc() + W.NOW_DELAY
     else:
         fire_at = W.parse_when(args.get("when"))
     if fire_at is None:
-        return refused("could not read the time; pass in_minutes or the user's words as when",
-                       when=args.get("when"))
+        return refused(_ASK_TIME, when=args.get("when"))
     rule = W.recurrence_rule(args.get("recurrence"))
     if rule is None:
         return refused("recurrence must be daily|weekly|monthly|yearly or an RRULE")

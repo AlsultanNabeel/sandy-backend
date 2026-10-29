@@ -251,6 +251,7 @@ _PROMPTS = {
     "brain/persona.py": {"_ANTI_INJECTION", "LANGUAGE_RULE", "NO_PROMISES_RULE"},
     "brain/stm.py": {"_SUMMARY_PROMPT"},
     "brain/stops.py": {"CUT_NOTE"},
+    "brain/tools_blocks.py": {"_ASK_TIME"},
     "features/research.py": {"_SUMMARY_SYSTEM"},
     "features/vision.py": {"_VISION_CONTEXT"},
     "utils/user_profiles.py": {"HAS_NO_NAME"},

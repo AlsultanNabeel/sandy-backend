@@ -264,7 +264,10 @@ embeddings are not counted yet.
 Nineteen (`tools.py`), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
 `LIST_DATA`: amount, category, mood, habit days and time, repeat, qty…), never a
 free-form object, which the voice model drops. Enums come from `kinds.KINDS`, so a new
-kind needs no tool change.
+kind needs no tool change. A field the kind does not have («time» on a task) is set aside quietly
+(`tools_blocks._known_data`), never the row refused. A reminder «now» (`when` «now», «هلّق», or
+`in_minutes` 0) rings at the next minute (`when.is_now`); a time the tool cannot read goes back
+to the model saying what to pass, or to ask the user when (`_ASK_TIME`).
 
 | Tool | Does |
 |---|---|

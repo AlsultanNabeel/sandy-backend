@@ -191,6 +191,18 @@ def _is_iso(text: str) -> bool:
     return True
 
 
+# «now» as the whole of a time («remind me now», «ذكّرني هلّق»): it rings at the next minute.
+_NOW = {"now", "right now", "immediately", "right away", "هلق", "هلا", "هسا", "هسه", "حين",
+        "حالا", "فورا", "دغري"}
+NOW_DELAY = timedelta(minutes=1)
+
+
+def is_now(text: str) -> bool:
+    from app.brain.matching import match_key
+
+    return match_key(str(text or "")) in _NOW
+
+
 def parse_when(text: str) -> Optional[datetime]:
     """A future moment (UTC) from ISO or words ("بكرا الساعة 5"), else None."""
     text = str(text or "").strip()

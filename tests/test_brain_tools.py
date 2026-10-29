@@ -57,10 +57,15 @@ def test_remember_writes_an_entry(tenant_a):
     assert row["source"] == "chat"
 
 
-def test_remember_refuses_a_kind_or_field_the_table_does_not_have(tenant_a):
+def test_remember_refuses_a_kind_the_table_does_not_have(tenant_a):
     assert _run("remember", kind="gift", text="x")["ok"] is False
-    assert _run("remember", kind="expense", text="x", data={"mood": "sad"})["ok"] is False
     assert entries.list_entries() == []
+
+
+def test_remember_sets_aside_a_field_the_kind_does_not_have(tenant_a):
+    # A detail the kind cannot hold never costs the row (traces of 29 Oct 2026).
+    assert _run("remember", kind="expense", text="x", data={"mood": "sad"})["ok"] is True
+    assert [e.get("data") or {} for e in entries.list_entries("expense")] == [{}]
 
 
 def test_recall_searches_entries_items_and_schedules(tenant_a):
