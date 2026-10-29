@@ -29,14 +29,15 @@ CHANNELS: List[Callable[[Dict[str, Any]], None]] = [mail.send]
 FLUSHES: List[Callable[[], None]] = [mail.flush]
 
 
-def deliver(task_id: str, title: str, body: str, language: str) -> str:
-    """Keep the result and send it through every channel; its id ("" with no tenant)."""
+def deliver(task_id: str, title: str, body: str, language: str, state: str = "") -> str:
+    """Keep the result and send it through every channel; its id ("" with no tenant).
+    ``state`` is how things are now, in a line (`task_diff.describe`)."""
     coll = _base.coll(RESULTS)
     if coll is None:
         return ""
     row = {"_id": _base.new_id(), "task_id": str(task_id), "title": str(title or ""),
            "body": str(body or ""), "lang": language, "at": datetime.now(timezone.utc),
-           "seen": False}
+           "state": str(state or ""), "seen": False}
     coll.insert_one(row)
     from app.services import schedule_sync
     schedule_sync.changed("task")       # the Tasks screen shows it at once

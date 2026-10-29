@@ -187,13 +187,28 @@ def _subject(rows: List[Dict[str, Any]]) -> str:
     return lang.say("mail_results_subject", line=line, n=len(rows) - 1)
 
 
+def _block(row: Dict[str, Any], titled: bool) -> str:
+    """One result: what changed, when (his clock), and how things are now."""
+    from app.brain.when import local_text
+    lines = [f"«{_one_line(row.get('title'))}»"] if titled else []
+    lines.append(str(row.get("body") or "").strip())
+    lines.append(lang.say("mail_at", time=local_text(row.get("at"))))
+    if row.get("state"):
+        lines.append(lang.say("mail_now", state=row["state"]))
+    return "\n".join(lines)
+
+
+def _rtl(text: str) -> str:
+    """Arabic reads right to left in a plain-text email too: each line starts with the mark."""
+    if lang.current() != lang.AR:
+        return text
+    return "\n".join(f"\u200f{ln}" if ln.strip() else ln for ln in text.splitlines())
+
+
 def _compose(rows: List[Dict[str, Any]]) -> tuple:
-    titles = list(dict.fromkeys(_one_line(r.get("title")) for r in rows))
-    if len(titles) > 1:
-        body = "\n\n———\n\n".join(f"«{_one_line(r.get('title'))}»\n{r.get('body') or ''}" for r in rows)
-    else:
-        body = "\n\n———\n\n".join(str(r.get("body") or "") for r in rows)
-    return _subject(rows), f"{body}\n\n—\n{lang.say('mail_footer')}"
+    titled = len({_one_line(r.get("title")) for r in rows}) > 1
+    body = "\n\n———\n\n".join(_block(r, titled) for r in rows)
+    return _subject(rows), _rtl(f"{body}\n\n—\n{lang.say('mail_footer')}")
 
 
 def _last_slot(at: str, now: datetime) -> datetime:

@@ -279,3 +279,18 @@ def test_the_subject_says_what_is_new(post, language, one, more):
     with active_user_profile_context(A):
         notify.flush()
     assert post.sent[-1].subject == more
+
+
+# The body (owner, 30 Oct): what changed, when, and how things are now in a line, in his
+# language and right to left in Arabic.
+@pytest.mark.parametrize("language, at_word, now_word", [("ar", "الساعة", "هلّق:"), ("en", "At", "Now:")])
+def test_the_body_says_what_changed_when_and_how_things_are_now(post, language, at_word, now_word):
+    post.db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
+    _confirmed(post)
+    with active_user_profile_context(A):
+        notify.deliver("t1", "Mostaql", "انضاف «رمان» لـ«shopping»", language,
+                       state="21 لسا و11 تم" if language == "ar" else "21 open and 11 done")
+    body = post.sent[-1].body
+    assert "انضاف «رمان» لـ«shopping»" in body and at_word in body and now_word in body
+    lines = [ln for ln in body.splitlines() if ln.strip()]
+    assert all(ln.startswith("‏") for ln in lines) == (language == "ar")

@@ -428,6 +428,8 @@ PHRASES = {
               "إذا مش إنت اللي طلبته، تجاهله وما رح يوصلك شي.",
         "en": "Hi! This is Sandy asking you to confirm your email.\nOpen the link to get your "
               "tasks' results here:\n{link}\n\nIf it wasn't you, ignore it and nothing will be sent."},
+    "mail_at": {"ar": "الساعة {time}", "en": "At {time}"},
+    "mail_now": {"ar": "هلّق: {state}", "en": "Now: {state}"},
     "mail_result_subject": {"ar": "ساندي: {line}", "en": "Sandy: {line}"},
     "mail_results_subject": {"ar": "ساندي: {line} وكمان {n}", "en": "Sandy: {line} and {n} more"},
     "mail_footer": {"ar": "وصلك هاد من مهامك عند ساندي. بتقدر توقّف الإيميلات من شاشة المهام بالتطبيق.",

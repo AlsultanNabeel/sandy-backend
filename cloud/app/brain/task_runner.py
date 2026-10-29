@@ -282,4 +282,5 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             tasks.save_state(_id(doc), state)
             return None
         tasks.save_state(_id(doc), {**state, "last_result": message})
-        return notify.deliver(_id(doc), str(doc.get("text") or ""), message, lang.current())
+        return notify.deliver(_id(doc), str(doc.get("text") or ""), message, lang.current(),
+                              state=task_diff.describe(found))
