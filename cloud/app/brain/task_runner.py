@@ -4,8 +4,9 @@ and the result goes out through `notify.deliver`. Never a word aloud.
 
 1. The probe: one read tool with the task's fixed arguments (`READ_TOOLS`), run by the code;
    a web search gives its raw results (`research.web_results`), never a model's summary. Its
-   fingerprint is the same as the last run's: the run ends there, with no model call and no
-   message.
+   fingerprint (of what the data says: what moves by itself between reads, a device's last
+   seen or a period's end, and the order of a list are left out) is the same as the last
+   run's: the run ends there, with no model call and no message.
 2. The model, on what changed, with the task's own tools only (within `ALLOWED`), at most
    `MAX_STEPS` steps: it answers what is worth telling him, or `NOTHING`.
 3. The review: the model reads that once against the task and the data, and answers it as it
@@ -63,8 +64,25 @@ def _id(doc: Dict[str, Any]) -> str:
     return str(doc.get("_id") or doc.get("id") or "")
 
 
+# Fields that move by themselves between two reads of the same data: when a device was last
+# heard, where a period ends (now), when the read was made. They are no news.
+_MOVES_BY_ITSELF = frozenset({"last_seen", "to", "now", "read_at", "checked_at", "ago"})
+
+
+def _stable(found: Any) -> Any:
+    """``found`` without what moves by itself, its lists in one order."""
+    if isinstance(found, dict):
+        return {k: _stable(v) for k, v in found.items() if k not in _MOVES_BY_ITSELF}
+    if isinstance(found, list):
+        items = [_stable(v) for v in found]
+        return sorted(items, key=lambda v: json.dumps(v, sort_keys=True, ensure_ascii=False,
+                                                      default=str))
+    return found
+
+
 def fingerprint(found: Any) -> str:
-    text = json.dumps(found, sort_keys=True, ensure_ascii=False, default=str)
+    """What the data says, not when it was read (`_stable`)."""
+    text = json.dumps(_stable(found), sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 

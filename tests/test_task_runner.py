@@ -167,3 +167,31 @@ def test_an_urgent_task_is_never_batched(world, monkeypatch):
     world.answers += ["New: P1", "New: P1"]
     _run(_task({**_spec(), "urgent": True}))
     assert world.sent == ["New: P1"]
+
+
+# The fingerprint is of what the data says, not of when it was read (review of session A): a
+# device's «last seen», a period's end, the order results come in move by themselves.
+def test_the_same_data_read_at_another_time_has_the_same_fingerprint():
+    first = {"ok": True, "period": "month", "from": "2026-10-01", "to": "2026-10-29T20:00:00",
+             "devices": [{"device": "AC", "state": "on", "last_seen": "قبل دقيقة"}],
+             "results": [{"title": "P1", "url": "u1"}, {"title": "P2", "url": "u2"}]}
+    later = {"ok": True, "period": "month", "from": "2026-10-01", "to": "2026-10-29T21:00:00",
+             "devices": [{"device": "AC", "state": "on", "last_seen": "قبل ساعة"}],
+             "results": [{"title": "P2", "url": "u2"}, {"title": "P1", "url": "u1"}]}
+    assert task_runner.fingerprint(first) == task_runner.fingerprint(later)
+    changed = {**later, "devices": [{"device": "AC", "state": "off", "last_seen": "هلّق"}]}
+    assert task_runner.fingerprint(changed) != task_runner.fingerprint(first)
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_check_read_again_later_calls_no_model(world, monkeypatch, language):
+    reads = iter([{"ok": True, "devices": [{"device": "AC", "state": "on", "last_seen": f"{n} min"}]}
+                  for n in range(1, 30)])
+    monkeypatch.setattr("app.brain.tools.execute", lambda name, args, ctx: next(reads))
+    doc = _task(_spec(language, tool="device_state", args={}, allowed=("device_state",)))
+    world.answers.append("NOTHING")
+    _run(doc)
+    world.asked.clear()
+    for _ in range(20):
+        _run(doc)
+    assert world.asked == [] and world.sent == []
