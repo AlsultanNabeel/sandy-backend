@@ -845,6 +845,7 @@ pending reminders) and the last STM turn ("was up late").
 | `summary.py` | `/api/summary`: the `summarize` rows written up in one call |
 | `ctx.py` | `TurnCtx` — what a tool knows about its turn |
 | `responses.py` | the chat on Azure's Responses API, behind `responses_api`; chat completions when it fails |
+| `background.py` | `call`: every model call outside a reply's own loop, the one place a limit or cost cap goes; the deployment per kind of work from `SANDY_BACKGROUND_MODELS` (the chat's own by default) |
 | `takeback.py` | a call that would take back what the same turn did (3d), refused to the model |
 
 The speaker gate (`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's
