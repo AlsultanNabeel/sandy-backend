@@ -220,7 +220,6 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
         elif "amount" in want and (rows[0].get("data") or {}).get("amount") != want["amount"]:
             bad.append(f"المبلغ {(rows[0].get('data') or {}).get('amount')} مش {want['amount']}")
     if "timer" in step:
-        from app.blocks import schedules
         want = step["timer"]
         rows = [r for r in schedules.list_schedules("scene", status="pending")
                 if (r.get("payload") or {}).get("asked")]
