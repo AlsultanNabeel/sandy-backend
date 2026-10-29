@@ -140,13 +140,15 @@ def honest(text: str, worked: Iterable[str], results: List[Tuple[str, Dict[str, 
            question: str = "") -> str:
     """``text`` with every sentence that claims an unbacked write taken out and what the
     tools really said in its place; NOTHING_DONE when nothing is left to say. ``question``
-    is the held action's question, ours and already true, kept last."""
+    is the held action's question, ours and already true, kept last. A tool's reply the
+    kept text already holds is not put in again: a reply rewritten after a first correction
+    carries them already (`loop`, the second pass after the language check)."""
     worked = list(worked)
     body = text[: -len(question)] if question and text.endswith(question) else text
     kept = "".join(s for s in _sentences(body) if not unbacked(s, worked)).strip()
     said = [str(r["reply"]).strip() for _, r in results
             if r.get("reply") and not r.get("needs_confirmation")]
-    out = "\n".join(t for t in [*dict.fromkeys(said), kept] if t)
+    out = "\n".join(t for t in [*(t for t in dict.fromkeys(said) if t not in kept), kept] if t)
     if not out and not question:
         out = lang.say("nothing_done")
     return "\n".join(t for t in (out, question) if t)

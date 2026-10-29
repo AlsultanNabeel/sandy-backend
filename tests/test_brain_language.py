@@ -591,3 +591,19 @@ def test_the_web_summary_fallback_and_the_cut_file_note_come_in_the_language(lan
         cut = attachments.extract_text(b"x" * (attachments.MAX_TEXT_CHARS + 5), "text/plain")
     assert lang.PHRASES["research_no_summary"][language] in empty
     assert cut.endswith(lang.PHRASES["file_cut"][language])
+
+
+# The second honesty pass puts the tools' replies in once: the first pass already put them in
+# the body the rewrite translated (review of 29 Oct 2026).
+@pytest.mark.parametrize("message, item, first, rewrite", [
+    ("add milk please", "milk", "حذفت الخبز. القائمة جاهزة.",
+     "Added «milk» ✅\nDeleted the bread. The list is ready."),
+    ("ضيفي حليب", "حليب", "Deleted the bread. The list is ready.",
+     "ضفت «حليب» ✅\nحذفت الخبز. القائمة جاهزة."),
+])
+def test_the_second_honesty_pass_does_not_repeat_the_tools_replies(brain_db, message, item,  # noqa: F811
+                                                                   first, rewrite):
+    model = ScriptedModel(tools_reply(call("list_add", list="shopping", text=item)),
+                          text_reply(first), text_reply(rewrite))
+    out = _turn(model, message)["final_response"]
+    assert out.count(f"«{item}»") == 1, out

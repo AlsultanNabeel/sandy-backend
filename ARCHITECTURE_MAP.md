@@ -173,8 +173,8 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    added»; a reassurance before it, «لا تقلق، حذفته», «no worries, deleted it», is no
    negation) must have a tool of that kind that worked in the same turn
    (`ctx.worked`, kept by `tools.execute`). The sentence that claims it is taken out and
-   what the tools really said goes in its place («ما لقيت…»), or `NOTHING_DONE`; a held
-   question stays last. On the call her words are heard already, so at the turn's end
+   what the tools really said goes in its place («ما لقيت…»; a reply the kept text already
+   holds is not put in twice), or `NOTHING_DONE`; a held question stays last. On the call her words are heard already, so at the turn's end
    (`session._handle`, `_turn_worked`) she is told to put it right (`honesty.voice_correction`, in the turn's spoken language, a
    turn of its own that she answers). The prompt's own rule is no longer the guarantee.
 3d. **A turn does not take back what it just did** (`takeback.py`, asked by `log_delete`,
