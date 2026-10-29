@@ -23,8 +23,8 @@ def post(brain_db, monkeypatch):  # noqa: F811
     for k, v in SMTP.items():
         monkeypatch.setenv(k, v)
     sent, clock = [], [datetime(2026, 10, 29, 9, 0, tzinfo=timezone.utc)]
-    monkeypatch.setattr(mail, "_post", lambda to, subject, body: sent.append(
-        NS(to=to, subject=subject, body=body)))
+    monkeypatch.setattr(mail, "_post", lambda to, subject, body, html="": sent.append(
+        NS(to=to, subject=subject, body=body, html=html)))
     monkeypatch.setattr(mail, "_now", lambda: clock[0])
     monkeypatch.setattr(notify, "CHANNELS", [mail.send])
     for uid in ("userA", "userB"):
@@ -307,3 +307,47 @@ def test_quotes_are_guillemets(post, language, body, shown):
     email = post.sent[-1]
     assert shown in email.body and shown in email.subject
     assert '"' not in email.body + email.subject and "“" not in email.body
+
+
+# A simple, tidy email in Sandy's colours with a plain-text copy (owner, 30 Oct): right to left
+# in Arabic, every word of his escaped.
+@pytest.mark.parametrize("language, direction", [("ar", "rtl"), ("en", "ltr")])
+def test_the_email_has_a_tidy_html_part_and_a_plain_one(post, language, direction):
+    post.db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
+    _confirmed(post)
+    _deliver(body="انضاف «رمان» <b>bold</b>")
+    email = post.sent[-1]
+    assert f'dir="{direction}"' in email.html and f'lang="{language}"' in email.html
+    assert "#0077B6" in email.html and "&lt;b&gt;bold&lt;/b&gt;" in email.html
+    assert "<b>bold</b>" in email.body                 # the plain copy is the words as they are
+    assert "انضاف «رمان»" in email.html
+
+
+def test_both_parts_leave_together(monkeypatch):
+    for k, v in SMTP.items():
+        monkeypatch.setenv(k, v)
+    sent = []
+
+    class Server:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self, context=None):
+            pass
+
+        def login(self, user, password):
+            pass
+
+        def send_message(self, msg):
+            sent.append(msg)
+    monkeypatch.setattr(mail.smtplib, "SMTP", Server)
+    mail._post("a@example.com", "Sandy: hi", "plain words", "<p>html words</p>")
+    msg = sent[0]
+    assert msg.get_content_type() == "multipart/alternative"
+    assert [p.get_content_type() for p in msg.iter_parts()] == ["text/plain", "text/html"]

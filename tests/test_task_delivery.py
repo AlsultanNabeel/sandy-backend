@@ -33,8 +33,8 @@ def post(brain_db, monkeypatch):  # noqa: F811
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
     sent, clock = [], [NINE]
-    monkeypatch.setattr(mail, "_post", lambda to, subject, body: sent.append(
-        NS(to=to, subject=subject, body=body)))
+    monkeypatch.setattr(mail, "_post", lambda to, subject, body, html="": sent.append(
+        NS(to=to, subject=subject, body=body, html=html)))
     monkeypatch.setattr(mail, "_now", lambda: clock[0])
     monkeypatch.setattr(notify, "CHANNELS", [mail.send])
     brain_db["sandy_users"].insert_one({"_id": "userA", "language": "en"})

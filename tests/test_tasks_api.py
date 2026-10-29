@@ -35,7 +35,7 @@ def c(monkeypatch, brain_db):  # noqa: F811
 @pytest.fixture()
 def outbox(monkeypatch):
     sent = []
-    monkeypatch.setattr(mail, "_post", lambda to, subject, body: sent.append((to, subject, body)))
+    monkeypatch.setattr(mail, "_post", lambda to, subject, body, html="": sent.append((to, subject, body)))
     return sent
 
 

@@ -26,6 +26,7 @@ nothing is asked or sent.
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
 import os
 import re
@@ -79,14 +80,17 @@ def ready() -> bool:
                for n in ("SANDY_SMTP_USER", "SANDY_SMTP_PASSWORD", "SANDY_PUBLIC_URL"))
 
 
-def _post(to: str, subject: str, body: str) -> None:
-    """One email out; an OSError (smtplib's errors are) when it did not leave."""
+def _post(to: str, subject: str, body: str, html: str = "") -> None:
+    """One email out, plain text with its HTML beside it when given; an OSError (smtplib's
+    errors are) when it did not leave."""
     user = _setting("SANDY_SMTP_USER")
     msg = EmailMessage()
     msg["From"] = _setting("SANDY_EMAIL_FROM", user)
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
     host, port = _setting("SANDY_SMTP_HOST", "smtp.gmail.com"), int(_setting("SANDY_SMTP_PORT", "587"))
     context = ssl.create_default_context()
     if port == 465:
@@ -213,11 +217,45 @@ def _guillemets(text: str) -> str:
     return _QUOTED.sub(lambda m: f"«{m.group(1) or m.group(2)}»", text)
 
 
+# Sandy's own blue (the app's `Theme.Colors.accent` and `accentDeep`).
+_ACCENT, _DEEP = "#0077B6", "#005B8F"
+
+
+def _html(rows: List[Dict[str, Any]], titled: bool) -> str:
+    """The same email, simple and tidy in Sandy's colours: a card per result."""
+    from app.brain.when import local_text
+    rtl = lang.current() == lang.AR
+    side = "right" if rtl else "left"
+    cards = []
+    for r in rows:
+        title = (f'<div style="font-size:13px;color:{_DEEP};font-weight:600;margin-bottom:6px">'
+                 f'«{html.escape(_one_line(r.get("title")))}»</div>') if titled else ""
+        state = (f'<div style="font-size:13px;color:#555;margin-top:6px">'
+                 f'{html.escape(lang.say("mail_now", state=r["state"]))}</div>') if r.get("state") else ""
+        cards.append(
+            f'<div style="background:#fff;border-radius:14px;padding:16px 18px;margin:0 0 12px;'
+            f'border-{side}:4px solid {_ACCENT}">{title}'
+            f'<div style="font-size:16px;line-height:1.6;color:#111">'
+            f'{html.escape(_guillemets(str(r.get("body") or "").strip())).replace(chr(10), "<br>")}</div>'
+            f'<div style="font-size:12px;color:#888;margin-top:8px">'
+            f'{html.escape(lang.say("mail_at", time=local_text(r.get("at"))))}</div>{state}</div>')
+    return (f'<!doctype html><html lang="{lang.current()}" dir="{"rtl" if rtl else "ltr"}">'
+            f'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+            f'</head><body style="margin:0;background:#EEF6FB;font-family:-apple-system,'
+            f'Segoe UI,Tahoma,sans-serif;text-align:{side}">'
+            f'<div style="max-width:560px;margin:0 auto;padding:24px 16px">'
+            f'<div style="font-size:22px;font-weight:700;color:{_ACCENT};margin-bottom:16px">'
+            f'{html.escape(lang.say("mail_brand"))}</div>{"".join(cards)}'
+            f'<div style="font-size:12px;color:#777;margin-top:16px">'
+            f'{html.escape(lang.say("mail_footer"))}</div></div></body></html>')
+
+
 def _compose(rows: List[Dict[str, Any]]) -> tuple:
+    """(subject, plain text, HTML)."""
     titled = len({_one_line(r.get("title")) for r in rows}) > 1
     body = "\n\n———\n\n".join(_block(r, titled) for r in rows)
     return (_guillemets(_subject(rows)),
-            _rtl(_guillemets(f"{body}\n\n—\n{lang.say('mail_footer')}")))
+            _rtl(_guillemets(f"{body}\n\n—\n{lang.say('mail_footer')}")), _html(rows, titled))
 
 
 def _last_slot(at: str, now: datetime) -> datetime:
@@ -251,8 +289,8 @@ def _sent_this_hour(coll, now: datetime) -> int:
 
 def _email(coll, address: str, uid: str, rows: List[Dict[str, Any]]) -> None:
     with lang.using(lang.for_user(uid)):
-        subject, body = _compose(rows)
-    _post(address, subject, body)
+        subject, body, page = _compose(rows)
+    _post(address, subject, body, page)
     coll.update_many({"_id": {"$in": [r["_id"] for r in rows]}},
                      {"$set": {"email": SENT, "emailed_at": _now(), "email_id": _base.new_id()}})
 
