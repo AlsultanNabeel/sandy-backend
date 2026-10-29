@@ -10,7 +10,7 @@ from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.utils.time import USER_TZ
 from app.blocks import _base, changes, entries, items, schedules
 from app.blocks.kinds import LIST, LOG, SCHEDULE, KindError, by_alias, get_kind, names
-from app.brain import lang
+from app.brain import lang, takeback
 from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
 from app.brain.matching import match_rows
@@ -738,6 +738,9 @@ def _remove(picked: Dict[str, Any], ctx: TurnCtx, ask: str, said: str, remove,
 
 def list_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     """«شيلي الحليب»، «احذفي مهمة الجيم»، «فضّي قائمة التسوق»."""
+    taken_back = takeback.deleting("list_delete", args, ctx)
+    if taken_back:
+        return taken_back
     name = _list_name(args) or None
     everything = bool(args.get("everything"))
     if everything and not name:
@@ -750,6 +753,9 @@ def list_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 
 def log_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     """«احذفي آخر مصروف»، «احذفي هالمصروف»، «انسي إني بحب القهوة»."""
+    taken_back = takeback.deleting("log_delete", args, ctx)
+    if taken_back:
+        return taken_back
     kind, pool, getter = _log_pool(args)
     everything = bool(args.get("everything"))
     if everything and not kind:

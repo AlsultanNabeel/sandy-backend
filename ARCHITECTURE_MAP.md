@@ -177,12 +177,14 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    question stays last. On the call her words are heard already, so at the turn's end
    (`session._handle`, `_turn_worked`) she is told to put it right (`honesty.voice_correction`, in the turn's spoken language, a
    turn of its own that she answers). The prompt's own rule is no longer the guarantee.
-3d. **A turn does not take back what it just did** (`tools._undoes`, before the handler):
+3d. **A turn does not take back what it just did** (`takeback.py`, asked by `log_delete`,
+   `list_delete` and `device_control` themselves, not by `tools.execute`):
    a delete of a row the same turn corrected («no, I meant 60 not 50» → update, then
    delete) and a device switched now the way a schedule of the same turn set it for later
    («turn off the AC in an hour» → schedule, then off now; not when the message asks for it
-   now too, «… now and again at 11pm», `tools._asked_now`) are refused, `kept_corrected` /
-   `set_for_later`; `ctx.calls` holds each call's arguments.
+   now too, «… now and again at 11pm», `takeback._asked_now`) are refused; `ctx.calls` holds
+   each call's arguments. The refusal is for the model alone (an `error`, no `reply`), so the
+   honesty check never shows it and the model's answer says what stands.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
    is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»;
    letters only, `lang.LETTERS`: «؟» or «٢٢» names no language),
@@ -810,6 +812,7 @@ pending reminders) and the last STM turn ("was up late").
 | `future.py` | due messages to your future self |
 | `summary.py` | `/api/summary`: the `summarize` rows written up in one call |
 | `ctx.py` | `TurnCtx` — what a tool knows about its turn |
+| `takeback.py` | a call that would take back what the same turn did (3d), refused to the model |
 
 The speaker gate (`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's
 destructive voice calls (`speaker._is_sensitive_call`).

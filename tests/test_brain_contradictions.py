@@ -1,23 +1,32 @@
 """One turn does not undo what it just did (eval, 29 Oct 2026, on the real model): «no, I meant
 60 not 50» updated the expense and deleted it in the same step, and «turn off the AC in an
-hour» scheduled it and turned it off at once. The second call is refused, in the turn's
-language, and the first stands."""
+hour» scheduled it and turned it off at once. The second call is refused (`brain.takeback`)
+and the first stands; the refusal is the model's to read, and the user reads its answer."""
 from __future__ import annotations
+
+import json
+from types import SimpleNamespace as NS
 
 import pytest
 from brain_fakes import A, ScriptedModel, brain_db, call, text_reply, tools_reply  # noqa: F401
 
 from app.blocks import entries
-from app.brain import lang, loop, tools
+from app.brain import loop
 from app.utils.user_profiles import active_user_profile_context
 
 
-def _ac():
+@pytest.fixture
+def sent(monkeypatch):
+    """What reached the AC: a registered device on a stand-in broker."""
     from brain_fakes import on_node
 
     from app.features import device_store
+    out = []
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher",
+                        lambda: NS(send_to_topic=lambda topic, payload: out.append(payload) or True))
     with active_user_profile_context(A):
         device_store.add_device("ac", "AC", "switch", on_node("ac"))
+    return out
 
 
 def _turn(model, message):
@@ -26,54 +35,48 @@ def _turn(model, message):
                              complete=model)
 
 
-@pytest.mark.parametrize("message, language", [
-    ("no, I meant 60 not 50", "en"),
-    ("لا قصدي ستين مش خمسين", "ar"),
-])
-def test_a_row_corrected_in_the_turn_is_not_deleted_in_it(brain_db, message, language):  # noqa: F811
+def _result(model, call_id):
+    return json.loads(next(m for m in model.seen[1] if m.get("tool_call_id") == call_id)["content"])
+
+
+def _corrected_then_deleted(message, answer="ok"):
     with active_user_profile_context(A):
         rid = entries.add("expense", "gas", data={"amount": 50})
     model = ScriptedModel(tools_reply(call("log_update", "c1", id=rid, amount=60),
                                       call("log_delete", "c2", id=rid)),
-                          text_reply("ok"))
-    _turn(model, message)
+                          text_reply(answer))
+    return model, _turn(model, message)
+
+
+@pytest.mark.parametrize("message", ["no, I meant 60 not 50", "لا قصدي ستين مش خمسين"])
+def test_a_row_corrected_in_the_turn_is_not_deleted_in_it(brain_db, message):  # noqa: F811
+    model, _ = _corrected_then_deleted(message)
     with active_user_profile_context(A):
         rows = entries.list_entries("expense")
     assert [r["data"]["amount"] for r in rows] == [60]
-    refusal = next(m for m in model.seen[1] if m.get("tool_call_id") == "c2")["content"]
-    assert lang.PHRASES["kept_corrected"][language] in refusal
+    refusal = _result(model, "c2")
+    assert not refusal["ok"] and "corrected" in refusal["error"]
 
 
-@pytest.mark.parametrize("message, language", [
-    ("turn off the AC in an hour", "en"),
-    ("طفّي المكيف بعد ساعة", "ar"),
-])
-def test_a_device_set_for_later_is_not_switched_now(brain_db, monkeypatch, message, language):  # noqa: F811
-    _ac()
-    sent = []
-    monkeypatch.setitem(tools.HANDLERS, "device_control",
-                        lambda args, ctx: sent.append(args) or {"ok": True, "reply": "off"})
+@pytest.mark.parametrize("message", ["turn off the AC in an hour", "طفّي المكيف بعد ساعة"])
+def test_a_device_set_for_later_is_not_switched_now(brain_db, sent, message):  # noqa: F811
     model = ScriptedModel(tools_reply(call("schedule", "c1", kind="scene", text="AC off",
                                            in_minutes=60, device="ac", value="off"),
                                       call("device_control", "c2", device="ac", action="off")),
                           text_reply("ok"))
     _turn(model, message)
     assert sent == []
-    refusal = next(m for m in model.seen[1] if m.get("tool_call_id") == "c2")["content"]
-    assert lang.PHRASES["set_for_later"][language] in refusal
+    refusal = _result(model, "c2")
+    assert not refusal["ok"] and "later" in refusal["error"]
 
 
-def test_a_device_switched_now_and_set_otherwise_for_later_is_both(brain_db, monkeypatch):  # noqa: F811
-    _ac()
-    sent = []
-    monkeypatch.setitem(tools.HANDLERS, "device_control",
-                        lambda args, ctx: sent.append(args) or {"ok": True, "reply": "on"})
+def test_a_device_switched_now_and_set_otherwise_for_later_is_both(brain_db, sent):  # noqa: F811
     model = ScriptedModel(tools_reply(call("schedule", "c1", kind="scene", text="AC off",
                                            in_minutes=60, device="ac", value="off"),
                                       call("device_control", "c2", device="ac", action="on")),
                           text_reply("ok"))
     _turn(model, "turn on the AC now and off in an hour")
-    assert sent == [{"device": "ac", "action": "on"}]
+    assert sent == ["on"]
 
 
 # Asked for now and for later, both run: the refusal is for a command asked for later only
@@ -82,14 +85,22 @@ def test_a_device_switched_now_and_set_otherwise_for_later_is_both(brain_db, mon
     "turn off the AC now and again at 11pm",
     "طفّي المكيف هلّق ومرة كمان الساعة احدعش",
 ])
-def test_a_device_asked_for_now_and_for_later_is_both(brain_db, monkeypatch, message):  # noqa: F811
-    _ac()
-    sent = []
-    monkeypatch.setitem(tools.HANDLERS, "device_control",
-                        lambda args, ctx: sent.append(args) or {"ok": True, "reply": "off"})
+def test_a_device_asked_for_now_and_for_later_is_both(brain_db, sent, message):  # noqa: F811
     model = ScriptedModel(tools_reply(call("schedule", "c1", kind="scene", text="AC off",
                                            when="23:00", device="ac", value="off"),
                                       call("device_control", "c2", device="ac", action="off")),
                           text_reply("ok"))
     _turn(model, message)
-    assert sent == [{"device": "ac", "action": "off"}]
+    assert sent == ["off"]
+
+
+# The refusal is the model's, never the user's (review of 29 Oct 2026): a reply the honesty
+# check replaced said «I didn't delete what I just corrected» to someone who asked no delete.
+@pytest.mark.parametrize("message, claim", [
+    ("no, I meant 60 not 50", "Deleted it ✅"),
+    ("لا قصدي ستين مش خمسين", "حذفته ✅"),
+])
+def test_the_refusal_is_read_by_the_model_not_the_user(brain_db, message, claim):  # noqa: F811
+    model, state = _corrected_then_deleted(message, answer=claim)
+    assert "reply" not in _result(model, "c2")
+    assert state["final_response"] == _result(model, "c1")["reply"]

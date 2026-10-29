@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.brain import lang
+from app.brain import lang, takeback
 from app.brain import when as W
 from app.brain.ctx import TurnCtx
 from app.brain.when import _chat_fn
@@ -127,6 +127,9 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     relative to where it is («خفّفي الإضاءة شوي»)."""
     from app.features.device_store import list_devices
 
+    taken_back = takeback.switching(args, ctx)
+    if taken_back:
+        return taken_back
     devices, missing = _targets(args)
     if not devices:
         known = list_devices()
