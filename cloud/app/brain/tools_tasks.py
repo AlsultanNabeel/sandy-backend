@@ -37,6 +37,8 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
                      "«every hour check…», «track… and tell me if…»). check_tool أداة قراءة "
                      "بمدخلات ثابتة، الكود بيقارن نتيجتها كل مرة، وإنتِ بتشتغلي بس لما تتغيّر. "
                      "بتستنى موافقته قبل الحفظ؛ instructions و notify_when بكلامه هو وبلغته. "
+                     "المهمة بتقرا وبتبلّغ بس: «ذكّريني قبل يومين» بمهمة هو رسالتها، مش تذكير "
+                     "(«remind me» in a task is its message, never a reminder). "
                      "ما تسألي قبل: خمّني وهو بيصحّح (never ask first: guess, he corrects)."),
      "parameters": {"type": "object", "properties": {
          "title": {**_S, "description": "اسم قصير للمهمة بكلامه"},
@@ -111,7 +113,8 @@ def task_create(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if check not in READ_TOOLS:
         return refused(f"check_tool must read: one of {list(READ_TOOLS)}")
     if any(t not in ALLOWED for t in allowed):
-        return refused(f"a task's tools are within {list(ALLOWED)}")
+        return refused(f"a task only reads and tells: its tools are within {list(ALLOWED)}; "
+                       "«remind me» in a task is its own message, not a reminder")
     if _asks_to_act(f"{instructions} {args.get('notify_when') or ''}"):
         return refused("a task only reads and tells", reply=lang.say("task_forbidden"))
     if not ctx.confirmed:

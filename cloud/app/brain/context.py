@@ -51,6 +51,8 @@ TASKS_RULE = """
   period=month؛ موقع أو إشي برّا → web_search بكلامه. بلا وقت → كل يوم (every_minutes=1440).
 - إذا ما في ولا قائمة ولا إشي ينفحص لطلبه، سؤال واحد واضح مقبول (وين بتحفظ المخزون؟).
 - title و instructions و notify_when بكلامه هو وبلغته.
+- المهمة بتقرا وبتبلّغ بس. «ذكّريني قبل يومين» جوّا مهمة هو notify_when («قبل الموعد بيومين»)،
+  مش schedule ولا تذكير بيرن.
 - Never ask first, in either language: not which stock, not a template, not a threshold, not
   how often. Call task_create with your best guess now; the system shows it to him and he says
   yes or puts it right. A question instead of the call is the wrong answer.

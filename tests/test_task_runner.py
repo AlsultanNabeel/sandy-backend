@@ -229,3 +229,27 @@ def test_a_due_task_is_found_by_the_runners_own_scan_and_run(world, brain_db, la
         row = schedules.get(doc["id"])
     assert world.sent == [said] and row["status"] == "pending"
     assert row["fire_at"].replace(tzinfo=timezone.utc) > later
+
+
+# A task only reads and tells (review of phase one): a reminder or a device is never among its
+# tools, so its model cannot make one ring or switch anything without a yes. «Remind me two days
+# before» is the task's own message through its channels.
+def test_a_tasks_tools_only_read():
+    assert set(tasks.ALLOWED) == set(tasks.READ_TOOLS)
+    assert not {"schedule", "device_control", "scene_apply", "list_add", "remember"} & set(tasks.ALLOWED)
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_tasks_model_cannot_set_a_reminder_even_on_an_old_row(world, monkeypatch, language):
+    doc = _task(_spec(language, tool="recall", args={"list": "tasks"}, allowed=("recall", "schedule")))
+    ran = []
+    real = task_runner.tools.execute
+    monkeypatch.setattr("app.brain.tools.execute",
+                        lambda name, args, ctx: ran.append(name) or real(name, args, ctx))
+    calls = iter([NS(choices=[NS(message=NS(content=None, tool_calls=[
+        NS(id="c1", function=NS(name="schedule", arguments='{"text": "deadline", "in_minutes": 5}'))]))]),
+        NS(choices=[NS(message=NS(content="NOTHING", tool_calls=None))])])
+    monkeypatch.setattr(background, "call", lambda what, messages, **kw: next(calls))
+    _run(doc)
+    with active_user_profile_context(A):
+        assert ran == ["recall"] and schedules.list_schedules("reminder") == []

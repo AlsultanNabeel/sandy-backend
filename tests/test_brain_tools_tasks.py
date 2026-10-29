@@ -116,3 +116,21 @@ def test_the_tasks_rule_is_in_the_prompt_only_with_the_switch_on(brain_db, monke
     with active_user_profile_context(A):
         assert context.TASKS_RULE.strip() in context.build_system("userA", "hi")
         assert context.TASKS_RULE.strip() not in context.build_system("userB", "hi")
+
+
+@pytest.mark.parametrize("language, words", [
+    ("ar", "تابعي مواعيد تسليم مشاريعي، وذكّريني قبل يومين"),
+    ("en", "Track my project deadlines and remind me two days before"),
+])
+@pytest.mark.parametrize("extra", ["schedule", "device_control"])
+def test_a_task_is_never_given_a_tool_that_writes_or_switches(brain_db, on, language, words, extra):  # noqa: F811
+    args = {**MOSTAQL, "instructions": words, "check_tool": "recall", "tools": ["recall", extra]}
+    out = _run("task_create", language, confirmed=True, **args)
+    assert not out["ok"]
+    assert "schedule" not in tools_tasks_schema_enum()
+
+
+def tools_tasks_schema_enum():
+    from app.brain import tools_tasks
+    create = next(s for s in tools_tasks.TASK_SCHEMAS if s["name"] == "task_create")
+    return create["parameters"]["properties"]["tools"]["items"]["enum"]
