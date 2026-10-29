@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from app import notify
 from app.blocks import _base as blocks_base
 from app.blocks import changes
 from app.utils.ltm_crypto import decrypt_field
@@ -419,8 +420,9 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
         outcome = _fast(message, ctx, image_state)
     if outcome is None:
         try:
+            told = context.untold_results(user_id, spoken=ctx.source == "voice")
             system = context.build_system(user_id, message, history, spoken=ctx.source == "voice",
-                                          thread_id=thread_id)
+                                          thread_id=thread_id, results=told)
             if note:
                 system += "\n\n" + note
             messages = [{"role": "system", "content": system},
@@ -428,6 +430,8 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
                         {"role": "user", "content": _user_content(message, list(attachments))}]
             outcome = _run_loop(messages, ctx, complete,
                                 stopped=lambda: stops.requested(user_id, thread_id, since=began))
+            if told and not outcome.get("error") and not outcome.get("stopped"):
+                notify.mark_seen([r["id"] for r in told])
         except Exception:  # noqa: BLE001 — the request boundary: answer, never 500
             logger.exception("[brain] turn failed")
             outcome = {"text": lang.say("error"), "pending": None, "tools": [], "error": True}
