@@ -126,3 +126,15 @@ def test_undoing_an_edit_still_says_it_was_put_back(tenant):
     with lang.using("ar"):
         out = _run("undo")
     assert out["ok"] and out["reply"].startswith("رجّعته زي ما كان")
+
+
+# «لا غلط ارجعي عنه» right after an add is an undo, not a delete (review of phase one): the
+# prompt and the undo tool carry the example in both languages, and say an add is taken back
+# by undo, not by list_delete. The real model is scored by the eval's «undo» cases.
+def test_the_prompt_sends_taking_back_an_add_to_undo_in_both_languages(tenant):
+    from app.brain import context
+    system = context.build_system("userA", "لا غلط ارجعي عنه")
+    undo = next(s for s in tools.openai_tools() if s["function"]["name"] == "undo")
+    for words in ("لا غلط ارجعي عنه", "take it back"):
+        assert words in system and words in undo["function"]["description"]
+    assert "مش list_delete" in system
