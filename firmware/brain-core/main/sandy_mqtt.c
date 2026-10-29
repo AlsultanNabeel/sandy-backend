@@ -463,9 +463,10 @@ static void _handle_pair_code(const char *val) {
     for (int i = 0; i < 6; i++) {
         if (val[i] < '0' || val[i] > '9') { ESP_LOGW(TAG, "pair code: not digits"); return; }
     }
-    char text[64];
+    char text[80];
+    // Both languages: no account is paired yet, so there is no user's language to pick.
     // Two groups of three, easy to read and type.
-    snprintf(text, sizeof(text), "رمز الربط\n\n%.3s  %.3s", val, val + 3);
+    snprintf(text, sizeof(text), "Pairing code\nرمز الربط\n\n%.3s  %.3s", val, val + 3);
     screen_show_text(text);
     s_pair_shown = screen_shown();
     buzzer_play(MELODY_NOTIFY);
