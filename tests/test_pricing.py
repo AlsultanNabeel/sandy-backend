@@ -36,3 +36,14 @@ def test_gpt_6_luna_is_priced_and_marked_unconfirmed():
     # The name Azure answers with is dated; the price came from outside and waits on the bill.
     assert pricing.price_of("gpt-6-luna-2026-09-22") == {"in": 0.10, "cached": 0.01, "out": 0.50}
     assert "gpt-6-luna" in pricing.UNCONFIRMED
+
+
+def test_a_cost_from_an_unconfirmed_price_is_a_warning_once(caplog, monkeypatch):
+    # Nothing read UNCONFIRMED but this file's test (review of 29 Oct 2026): a cost from a
+    # price that waits on the bill now says so in the log, once a process, not every call.
+    monkeypatch.setattr(pricing, "_unconfirmed_seen", set())
+    with caplog.at_level("WARNING", logger="app.features.pricing"):
+        for name in ("gpt-6-luna-2026-09-22", "gpt-6-luna", "gpt-4.1"):
+            pricing.cost(name, tokens_in=10, tokens_out=10)
+    said = [r.getMessage() for r in caplog.records if "unconfirmed" in r.getMessage()]
+    assert len(said) == 1 and "gpt-6-luna" in said[0] and "azurespeed.com" in said[0]

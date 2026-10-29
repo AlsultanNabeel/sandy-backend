@@ -1857,7 +1857,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
    The deployment itself retires on 14 Apr 2027: the chat must move to another model,
    measured with the eval, well before then, and to Azure's `/v1/responses` with it:
    `gpt-6-luna` refuses reasoning with tools on `/v1/chat/completions`. Its price in
-   `pricing.py` is from an outside page (`pricing.UNCONFIRMED`), to check on the first bill.
+   `pricing.py` is from an outside page (`pricing.UNCONFIRMED`), to check on the first bill;
+   a cost counted from it is a warning in the log, once a process.
 
 10. **A streamed reply in the wrong language shows, then is swapped.** The model's words
    stream as they come; the language check (§2.3 3c) runs after, and the final event
