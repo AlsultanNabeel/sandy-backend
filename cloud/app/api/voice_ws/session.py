@@ -617,7 +617,7 @@ async def _live_session(ws, remote: str) -> None:
         _context = await _loop.run_in_executor(
             None, session_context_for, _who, _channel, _label, _recent)
         system_instruction = with_recent_turns(_base, _context)
-        live_tools = _build_live_tools(types, end_call=_channel == _ROBOT_CHANNEL)
+        live_tools = _build_live_tools(types, end_call=_channel == _ROBOT_CHANNEL, user_id=_who)
 
         voice_name = (GEMINI_TTS_VOICE or "Aoede").strip()
         config_kwargs: Dict[str, Any] = dict(

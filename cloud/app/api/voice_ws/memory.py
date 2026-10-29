@@ -106,17 +106,21 @@ def _load_stm_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
 
 
 def session_context(history: Optional[List[Dict[str, Any]]] = None) -> str:
-    """Fresh per-session context: the clock, time since the last message, his devices and
-    recent turns (never cached). The devices are here, not in the cached instruction: a
+    """Fresh per-session context: the clock, time since the last message, his devices, the
+    tasks' rule with their switch on, and recent turns (never cached). The devices are here, not in the cached instruction: a
     device added or renamed moves no tenant version, and «شغّلي الضو» must land on its name."""
-    from app.brain.context import devices_line
+    from app.brain import tools_tasks
+    from app.brain.context import TASKS_RULE, devices_line
     from app.utils.time_awareness import time_awareness_block
 
     history = _load_stm_history() if history is None else history
     devices = devices_line()
+    # Here, not in the cached instruction: turning the switch moves no tenant version.
+    who = get_voice_identity()
+    rule = TASKS_RULE.strip() if who and tools_tasks.offered(who) else ""
     return ("\n" + _channel_line() + "\n" + time_awareness_block(history)
             + "\n(هاد وقت بداية المكالمة.)" + (f"\n{devices}" if devices else "")
-            + _load_stm_context(history))
+            + (f"\n{rule}" if rule else "") + _load_stm_context(history))
 
 
 def session_context_for(user_id: str, channel: str, label: str,

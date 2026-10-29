@@ -45,8 +45,11 @@ END_CALL_TOOL = {
 }
 
 
-def declarations(end_call: bool = False) -> List[Dict[str, Any]]:
-    return tools.declarations() + [CONFIRM_TOOL] + ([END_CALL_TOOL] if end_call else [])
+def declarations(end_call: bool = False, user_id: str = "") -> List[Dict[str, Any]]:
+    """The call's tools: the brain's (the task tools with their switch on), `confirm`, and
+    `end_call` on the robot."""
+    return (tools.declarations(user_id) + [CONFIRM_TOOL]
+            + ([END_CALL_TOOL] if end_call else []))
 
 
 def _tagged(result: Dict[str, Any]) -> Dict[str, Any]:

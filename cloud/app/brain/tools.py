@@ -184,15 +184,36 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
 }
 
 
-def declarations() -> List[Dict[str, Any]]:
-    """Plain ``{name, description, parameters}`` for Gemini Live.
+def _free_form(schema: Dict[str, Any]) -> bool:
+    return schema.get("type") == "object" and not schema.get("properties")
+
+
+def _spoken_task(d: Dict[str, Any]) -> Dict[str, Any]:
+    """A task tool for the call: its check's arguments, free-form in the chat, are the read
+    tools' own fields, which the live model can fill."""
+    props = d["parameters"]["properties"]
+    if "check_args" not in props:
+        return d
+    fields: Dict[str, Any] = {}
+    for spec in _schemas():
+        if spec["name"] in T.READ_TOOLS:
+            for k, v in spec["parameters"]["properties"].items():
+                if not _free_form(v):
+                    fields.setdefault(k, v)
+    check = {**props["check_args"], "properties": fields}
+    return {**d, "parameters": {**d["parameters"], "properties": {**props, "check_args": check}}}
+
+
+def declarations(user_id: str = "") -> List[Dict[str, Any]]:
+    """Plain ``{name, description, parameters}`` for Gemini Live; the task tools too for an
+    account with their switch on (`_spoken_task`).
 
     Free-form ``data`` objects are dropped: Gemini refuses an object with no properties.
     """
+    extra = [_spoken_task(d) for d in T.TASK_SCHEMAS] if user_id and T.offered(user_id) else []
     out = []
-    for d in _schemas():
-        props = {k: v for k, v in d["parameters"]["properties"].items()
-                 if not (v.get("type") == "object" and not v.get("properties"))}
+    for d in [*_schemas(), *extra]:
+        props = {k: v for k, v in d["parameters"]["properties"].items() if not _free_form(v)}
         out.append({**d, "parameters": {**d["parameters"], "properties": props}})
     return out
 
