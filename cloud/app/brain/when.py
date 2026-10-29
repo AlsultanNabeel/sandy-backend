@@ -54,16 +54,17 @@ def _parse_with_model(text: str) -> Optional[str]:
     day = resolve_day_name_to_iso(normalized)
     if day and datetime.fromisoformat(day) > now:
         return day
-    complete = _chat_fn()
-    if complete is None:
-        return None
+    from app.brain import background
+    from app.utils.user_profiles import current_user_id
+
     try:
-        response = complete(
-            temperature=0, max_tokens=140, response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": _PARSE_SYSTEM},
-                      {"role": "user", "content": (f"current_datetime={now.isoformat()}\n"
-                                                   f"raw_text={text}\n"
-                                                   f"normalized_text={normalized}")}])
+        response = background.call(
+            "when", [{"role": "system", "content": _PARSE_SYSTEM},
+                     {"role": "user", "content": (f"current_datetime={now.isoformat()}\n"
+                                                  f"raw_text={text}\n"
+                                                  f"normalized_text={normalized}")}],
+            user_id=current_user_id(), temperature=0, max_tokens=140,
+            response_format={"type": "json_object"})
         payload = json.loads(response.choices[0].message.content or "{}")
         iso_value = str(payload.get("remind_at_iso") or "").strip()
         if not payload.get("success") or not iso_value:

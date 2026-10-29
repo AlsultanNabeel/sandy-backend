@@ -58,3 +58,12 @@ def test_an_expenses_category(calls):
     with active_user_profile_context(A):
         assert categorize.classify("قهوة") == "other"
     assert [(c["what"], c["user_id"], c["max_tokens"]) for c in calls] == [("categorize", "userA", 4)]
+
+
+def test_a_time_read_from_words(monkeypatch):
+    from app.brain import when
+    seen = []
+    monkeypatch.setattr(background, "call", lambda what, messages, **kw: seen.append((what, kw)) or NS(
+        choices=[NS(message=NS(content='{"success": false}'))]))
+    assert when._parse_with_model("بعد العيد") is None
+    assert seen[0][0] == "when" and seen[0][1]["response_format"] == {"type": "json_object"}

@@ -19,8 +19,16 @@ def _completion(iso_str, success=True):
 
 @pytest.fixture
 def model(monkeypatch):
+    """The model the time parse asks (`background.call`); None is no model at all."""
+    from app.brain import background
+    from app.errors import ConfigError
+
     def use(fn):
-        monkeypatch.setattr(when, "_chat_fn", lambda: fn)
+        def call(what, messages, **kw):
+            if fn is None:
+                raise ConfigError("no model")
+            return fn(messages=messages, **kw)
+        monkeypatch.setattr(background, "call", call)
     return use
 
 
