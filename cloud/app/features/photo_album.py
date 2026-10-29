@@ -105,11 +105,13 @@ def set_ai_metadata(photo_id: Any, caption: str, tags: List[str]) -> None:
         logger.debug("[photo_album] set_ai_metadata failed: %s", e)
 
 
-def generate_tags(image_bytes: bytes, create_chat_completion_fn) -> Tuple[str, List[str]]:
+def generate_tags(image_bytes: bytes, user_id: str) -> Tuple[str, List[str]]:
     """Vision → (وصف قصير بالعربي، قائمة وسوم). يرجّع ("", []) لو فشل."""
-    if not image_bytes or create_chat_completion_fn is None:
+    if not image_bytes:
         return "", []
     import base64
+
+    from app.brain import background
 
     try:
         b64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -120,20 +122,13 @@ def generate_tags(image_bytes: bytes, create_chat_completion_fn) -> Tuple[str, L
             '"tags": ["وسم1", "وسم2", "..."]}\n'
             "الوسوم كلمات مفتاحية عربية مفردة (أشخاص، مكان، مناسبة، ألوان، أشياء بارزة) — من 3 لـ 8 وسوم."
         )
-        response = create_chat_completion_fn(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                },
+        response = background.call("photo_tags", [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url}},
             ],
-            temperature=0.4,
-            max_tokens=300,
-            prefer_azure=True,
-        )
+        }], user_id=user_id, temperature=0.4, max_tokens=300)
         raw = (response.choices[0].message.content or "").strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         data = json.loads(raw)

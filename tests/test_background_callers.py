@@ -42,3 +42,12 @@ def test_the_daily_nudge(calls, monkeypatch):
     monkeypatch.setattr(nudge, "build_effective_persona", lambda uid: "p")
     out = nudge._generate_agenda("userA", {"tasks": 1, "overdue": 0, "reminders": 0, "titles": []})
     assert out == "ok" and [(c["what"], c["user_id"]) for c in calls] == [("daily_nudge", "userA")]
+
+
+def test_a_photos_tags(monkeypatch):
+    from app.features import photo_album
+    seen = []
+    monkeypatch.setattr(background, "call", lambda what, messages, **kw: seen.append((what, kw)) or NS(
+        choices=[NS(message=NS(content='{"caption": "c", "tags": ["a", "b"]}'))]))
+    assert photo_album.generate_tags(b"img", "userA") == ("c", ["a", "b"])
+    assert seen[0][0] == "photo_tags" and seen[0][1]["user_id"] == "userA"
