@@ -181,7 +181,12 @@ def test_nothing_the_server_says_is_written_in_one_language_only():
     model, a row's text) is a phrase in both languages (`lang.PHRASES`), never a literal,
     anywhere in cloud/app. A prompt or note only the model reads stays in one language
     (`lang` docstring), so `Part(text=…)` and system messages are not read here.
-    Arabic and English alike: a field the user reads may hold neither as a literal."""
+    Arabic and English alike: a field the user reads may hold neither as a literal.
+
+    Nor may a function give back or set aside Arabic it did not take from a phrase («text = …
+    + "[… الملف أطول]"», «body or "ما قدرت ألخص"»): only the field and the module-constant
+    checks ran until 29 Oct 2026, and a sentence put together inside a function slipped past
+    both. A function that writes what the model alone reads is named in `_PROMPT_FUNCTIONS`."""
     import ast
     import re
     from pathlib import Path
@@ -195,7 +200,7 @@ def test_nothing_the_server_says_is_written_in_one_language_only():
             return bool(arabic.search(node.value))
         if isinstance(node, ast.JoinedStr):
             return any(said(v) for v in node.values)
-        if isinstance(node, (ast.BinOp, ast.IfExp)):
+        if isinstance(node, (ast.BinOp, ast.IfExp, ast.BoolOp)):
             return any(said(v) for v in ast.iter_child_nodes(node))
         return False
 
@@ -219,6 +224,12 @@ def test_nothing_the_server_says_is_written_in_one_language_only():
                           and (said(v) or sentence(v))]
             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "AttachmentError":
                 found += [f"{where}:{node.lineno} AttachmentError" for a in node.args if said(a)]
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and fn.name not in _PROMPT_FUNCTIONS.get(where, set()):
+                found += [f"{where}:{node.lineno} {fn.name}" for node in ast.walk(fn)
+                          if isinstance(node, (ast.Assign, ast.AugAssign, ast.Return))
+                          and node.value is not None and said(node.value)]
         # A constant at the top of a module is a prompt the model reads, named here; anything
         # else in Arabic there is something said, and belongs in `lang.PHRASES`.
         for node in tree.body:
@@ -243,6 +254,25 @@ _PROMPTS = {
     "features/research.py": {"_SUMMARY_SYSTEM"},
     "features/vision.py": {"_VISION_CONTEXT"},
     "utils/user_profiles.py": {"HAS_NO_NAME"},
+}
+
+
+# Functions that write what the model alone reads: notes, context lines, tool descriptions.
+_PROMPT_FUNCTIONS = {
+    "api/daily_nudge_api.py": {"_generate_agenda"},
+    "api/voice_ws/memory.py": {"_channel_line", "_load_stm_context", "get_voice_channel",
+                               "session_context"},
+    "api/voice_ws/speaker.py": {"_learn_voice", "_speaker_directive"},
+    "api/voice_ws/tools.py": {"_system_instruction_body"},
+    "brain/context.py": {"devices_line", "facts_block", "profile_block", "reply_language",
+                         "state_block"},
+    "brain/loop.py": {"_resolve_pending", "_rest_note", "_user_content"},
+    "brain/tools.py": {"_list_enum"},
+    "brain/tools_blocks.py": {"budget_note"},
+    "features/photo_album.py": {"generate_tags"},
+    "utils/time_awareness.py": {"ago_ar", "last_contact_line", "now_line",
+                                "time_awareness_block", "when_ar"},
+    "utils/user_profiles.py": {"address_instruction"},
 }
 
 
@@ -550,3 +580,14 @@ def test_a_short_reply_in_the_other_language_is_caught(text, language):
 def test_a_short_english_reply_to_an_arabic_message_is_rewritten(brain_db):  # noqa: F811
     model = ScriptedModel(text_reply("Sure!"), text_reply("أكيد!"))
     assert _turn(model, "بتحبي القهوة؟")["final_response"] == "أكيد!"
+
+
+# What the review found Arabic-only on 29 Oct 2026, now in the turn's language.
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_the_web_summary_fallback_and_the_cut_file_note_come_in_the_language(language):
+    from app.features import attachments, research
+    with lang.using(language):
+        empty = research._with_sources("", [])
+        cut = attachments.extract_text(b"x" * (attachments.MAX_TEXT_CHARS + 5), "text/plain")
+    assert lang.PHRASES["research_no_summary"][language] in empty
+    assert cut.endswith(lang.PHRASES["file_cut"][language])

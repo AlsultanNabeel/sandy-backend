@@ -330,6 +330,7 @@ PHRASES = {
     "summary_empty": {"ar": "ما في إشي مسجّل بهالفترة.", "en": "There's nothing logged in that period."},
     "sealed_message": {"ar": "(رسالة مختومة لحد موعدها)", "en": "(sealed until its time)"},
     "new_chat": {"ar": "محادثة جديدة", "en": "New chat"},
+    "chat_untitled": {"ar": "محادثة", "en": "Chat"},
     "photo_title": {"ar": "صورة {when}", "en": "Photo {when}"},
     "demo_web_title": {"ar": "نتيجة بحث تجريبية", "en": "A sample search result"},
     "demo_web_text": {"ar": "هذه نتيجة تجريبية — سجّل دخولك ليبحث ساندي فعلياً على الويب.",
@@ -348,6 +349,23 @@ PHRASES = {
                          "en": "I couldn't find clear results for '{query}'."},
     "research_summary": {"ar": "📌 الملخص:\n{body}", "en": "📌 Summary:\n{body}"},
     "research_sources": {"ar": "📎 المصادر:", "en": "📎 Sources:"},
+    "research_no_summary": {"ar": "ما قدرت ألخص النتائج بشكل واضح حالياً.",
+                            "en": "I couldn't sum up the results clearly right now."},
+    "file_cut": {"ar": "[… الملف أطول من هيك، هاد أول جزء منه بس]",
+                 "en": "[… the file is longer than this; this is only its first part]"},
+    "weather_unavailable": {"ar": "الطقس: غير متوفر حالياً", "en": "Weather: not available right now"},
+    "weather_report": {"ar": "الطقس في {city} اليوم: {description}، الحرارة {temp}°C (الشعور الفعلي "
+                             "{feels}°C)، أعلى {high}°C وأدنى {low}°C، الرطوبة {humidity}%، "
+                             "الغروب الساعة {sunset}",
+                       "en": "Weather in {city} today: {description}, {temp}°C (feels like "
+                             "{feels}°C), high {high}°C and low {low}°C, humidity {humidity}%, "
+                             "sunset at {sunset}"},
+    "place_open": {"ar": "مفتوح الآن", "en": "Open now"},
+    "place_closed": {"ar": "مغلق الآن", "en": "Closed now"},
+    "price_1": {"ar": "رخيص", "en": "Inexpensive"},
+    "price_2": {"ar": "متوسط", "en": "Moderate"},
+    "price_3": {"ar": "غالي", "en": "Expensive"},
+    "price_4": {"ar": "فاخر", "en": "Very expensive"},
     "enroll_cancelled": {"ar": "أُلغي التسجيل.", "en": "Enrollment cancelled."},
     "enroll_unavailable": {"ar": "تمييز الصوت غير مفعّل (مكتبة sherpa-onnx ناقصة).",
                            "en": "Voice recognition is off (the sherpa-onnx library is missing)."},

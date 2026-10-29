@@ -335,7 +335,7 @@ def register_conversations_api(app, mongo_db=None):
         ).sort("updated_at", -1).limit(200):
             items.append({
                 "id": str(d["_id"]),
-                "title": d.get("title", "") or "محادثة",
+                "title": d.get("title", "") or lang.say("chat_untitled"),
                 "created_at": d.get("created_at", ""),
                 "updated_at": d.get("updated_at", ""),
             })
@@ -540,7 +540,7 @@ def register_conversations_api(app, mongo_db=None):
                 snippet = matched[0].get("text", "") or ""
             items.append({
                 "id": str(d["_id"]),
-                "title": title or "محادثة",
+                "title": title or lang.say("chat_untitled"),
                 "snippet": snippet[:120],
                 "updated_at": d.get("updated_at", ""),
             })
@@ -566,7 +566,7 @@ def register_conversations_api(app, mongo_db=None):
                 continue
             items.append({
                 "id": cid,
-                "title": c.get("title", "") or "محادثة",
+                "title": c.get("title", "") or lang.say("chat_untitled"),
                 "snippet": (summary or "")[:120],
                 "updated_at": c.get("updated_at", ""),
             })

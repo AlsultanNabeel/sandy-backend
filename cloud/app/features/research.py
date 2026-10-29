@@ -27,7 +27,7 @@ def _short_url(u: str) -> str:
 
 
 def _with_sources(body: str, sources: List[str]) -> str:
-    body = str(body or "").strip() or "ما قدرت ألخص النتائج بشكل واضح حالياً."
+    body = str(body or "").strip() or lang.say("research_no_summary")
     lines = [f"{i}. {_short_url(url)}" for i, url in enumerate(sources[:5], 1)]
     if lines:
         return "\n\n".join((lang.say("research_summary", body=body),

@@ -205,8 +205,10 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    the user's own language is used: `sandy_users.language`, which the app sends as `X-Lang`
    (`lang.note` in `require_auth`; a guest's `X-Lang` as it is). Every route's message and
    error, a row's own words (a sealed message, a new chat's title) and the call's own lines
-   are phrases; `tests/test_brain_language.py` reads all of `cloud/app` for a literal one,
-   and the prompts the model alone reads are named there.
+   are phrases; `tests/test_brain_language.py` reads all of `cloud/app` for a literal one
+   (a field's value, a module constant, and since 29 Oct what a function gives back or sets:
+   «body or "ما قدرت ألخص"» had slipped past), and the prompts and functions the model alone
+   reads are named there (`_PROMPTS`, `_PROMPT_FUNCTIONS`).
 4. Due `message_to_future_self` schedules (`future.py`) are pasted word for word at the end
    of the reply by the code, never shown to the model, and marked `sent` only when the reply
    went out whole (not an error, not stopped).

@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 import requests
 
+from app.brain import lang
 from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 
 logger = logging.getLogger(__name__)
@@ -92,13 +93,8 @@ def _get_weather_uncached(city: str) -> Optional[Dict[str, Any]]:
 
 def format_weather_for_prompt(weather: Optional[Dict[str, Any]]) -> str:
     if not weather:
-        return "الطقس: غير متوفر حالياً"
-
-    return (
-        f"الطقس في {weather['city']} اليوم: "
-        f"{weather['description']}، "
-        f"الحرارة {weather['temp_c']}°C (الشعور الفعلي {weather['feels_like_c']}°C)، "
-        f"أعلى {weather['max_temp_c']}°C وأدنى {weather['min_temp_c']}°C، "
-        f"الرطوبة {weather['humidity']}%، "
-        f"الغروب الساعة {weather['sunset']}"
-    )
+        return lang.say("weather_unavailable")
+    return lang.say("weather_report", city=weather["city"], description=weather["description"],
+                    temp=weather["temp_c"], feels=weather["feels_like_c"],
+                    high=weather["max_temp_c"], low=weather["min_temp_c"],
+                    humidity=weather["humidity"], sunset=weather["sunset"])

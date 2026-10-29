@@ -124,7 +124,7 @@ def extract_text(data: bytes, mime: str) -> str:
     if not text:
         raise AttachmentError("unreadable", lang.say("file_unreadable"), 422)
     if len(text) > MAX_TEXT_CHARS:
-        text = text[:MAX_TEXT_CHARS] + "\n[… الملف أطول من هيك، هاد أول جزء منه بس]"
+        text = text[:MAX_TEXT_CHARS] + "\n" + lang.say("file_cut")
     return text
 
 

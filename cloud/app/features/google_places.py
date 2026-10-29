@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from app.brain import lang
+
 logger = logging.getLogger(__name__)
 
 PLACES_API_URL = "https://places.googleapis.com/v1/places:searchText"
@@ -59,15 +61,15 @@ def search_places(
 
         results = []
         for place in places:
-            price_map = {1: "رخيص", 2: "متوسط", 3: "غالي", 4: "فاخر"}
-            price = price_map.get(place.get("priceLevel", 0), "")
+            level = place.get("priceLevel", 0)
+            price = lang.say(f"price_{level}") if level in (1, 2, 3, 4) else ""
 
             opening = ""
             hours = place.get("regularOpeningHours", {})
             if hours.get("openNow") is True:
-                opening = "مفتوح الآن"
+                opening = lang.say("place_open")
             elif hours.get("openNow") is False:
-                opening = "مغلق الآن"
+                opening = lang.say("place_closed")
 
             results.append(
                 {
