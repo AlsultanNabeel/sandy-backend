@@ -109,10 +109,12 @@ class Trace:
             self._live = None
 
     def add_model_call(self, provider: str, model: str, *, tokens_in: int = 0,
-                       tokens_out: int = 0, tokens_cached: int = 0, ms: float = 0) -> None:
+                       tokens_out: int = 0, tokens_cached: int = 0, tokens_reasoning: int = 0,
+                       ms: float = 0) -> None:
+        """``tokens_reasoning`` is the part of ``tokens_out`` a reasoning model thought."""
         call = {"provider": provider, "model": str(model or ""), "tokens_in": int(tokens_in or 0),
                 "tokens_out": int(tokens_out or 0), "tokens_cached": int(tokens_cached or 0),
-                "ms": round(float(ms or 0))}
+                "tokens_reasoning": int(tokens_reasoning or 0), "ms": round(float(ms or 0))}
         with self._lock:
             self.model_calls.append(call)
 
@@ -136,6 +138,7 @@ class Trace:
             "model_calls": calls,
             "tokens_in": sum(c["tokens_in"] for c in calls),
             "tokens_out": sum(c["tokens_out"] for c in calls),
+            "tokens_reasoning": sum(c.get("tokens_reasoning", 0) for c in calls),
             "cost_usd": round(cost, 8),
             "ms_total": round((time.perf_counter() - self._t0) * 1000),
             "skills": [], "task_id": None, "error": error,
@@ -173,11 +176,11 @@ def current() -> Optional[Trace]:
 
 
 def note_model_call(provider: str, model: str, *, tokens_in: int = 0, tokens_out: int = 0,
-                    tokens_cached: int = 0, ms: float = 0) -> None:
+                    tokens_cached: int = 0, tokens_reasoning: int = 0, ms: float = 0) -> None:
     trace = _current.get()
     if trace is not None:
         trace.add_model_call(provider, model, tokens_in=tokens_in, tokens_out=tokens_out,
-                             tokens_cached=tokens_cached, ms=ms)
+                             tokens_cached=tokens_cached, tokens_reasoning=tokens_reasoning, ms=ms)
 
 
 def note_usage(provider: str, model: str, usage: Any, ms: float = 0) -> None:
@@ -291,10 +294,13 @@ def costs(days: int = 30) -> Dict[str, Any]:
     match = {"$match": {"at": {"$gte": _now() - timedelta(days=days)}}}
     users = [{"user_id": str(g["_id"] or ""), "label": _label(str(g["_id"] or "")),
               "turns": g["turns"], "tokens_in": g["tokens_in"], "tokens_out": g["tokens_out"],
+              "tokens_reasoning": g["tokens_reasoning"],
               "usd": round(g["usd"], 6)}
              for g in _raw().aggregate([match, {"$group": {
                  "_id": "$user_id", "turns": {"$sum": 1}, "tokens_in": {"$sum": "$tokens_in"},
-                 "tokens_out": {"$sum": "$tokens_out"}, "usd": {"$sum": "$cost_usd"}}}])]
+                 "tokens_out": {"$sum": "$tokens_out"},
+                 "tokens_reasoning": {"$sum": {"$ifNull": ["$tokens_reasoning", 0]}},
+                 "usd": {"$sum": "$cost_usd"}}}])]
     sources = [{"source": str(g["_id"] or ""), "turns": g["turns"], "usd": round(g["usd"], 6)}
                for g in _raw().aggregate([match, {"$group": {
                    "_id": "$source", "turns": {"$sum": 1}, "usd": {"$sum": "$cost_usd"}}}])]

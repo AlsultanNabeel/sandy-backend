@@ -246,7 +246,8 @@ own model call, `Trace.end_live_turn`; `voice_ws/session.py`, its tools through 
 model calls made for a user outside a turn (`trace_store.background`: the STM summary, the
 chat title, the daily nudge, photo tags). A row holds the request, the reply, every tool
 (arguments, result, ok, ms), every model call (provider, model, tokens in / out / cached,
-ms), the cost in dollars (`features/pricing.py`, the one place prices live, dated
+and reasoning: the part of out a reasoning model thought, `tokens_reasoning`, summed on the row
+and on the cost page; ms), the cost in dollars (`features/pricing.py`, the one place prices live, dated
 `PRICES_UPDATED`), `skills` and `task_id` for the phases that fill them, and `error`.
 The tokens are counted at the one client (`openai_client.create_chat_completion`, a
 stream asks for them with `stream_options.include_usage`; a call is priced by the model the

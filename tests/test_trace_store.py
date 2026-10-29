@@ -153,3 +153,16 @@ def test_costs_by_user_and_by_source(db, key):
 def test_one_users_rows_are_written_under_that_user_only(db, key):
     _turn(user="u1")
     assert {r["user_id"] for r in db[trace_store.COLLECTION].find()} == {"u1"}
+
+
+def test_reasoning_tokens_are_their_own_column_in_the_row_and_the_costs(db, key):
+    # A reasoning model's thinking is billed as output; it is kept apart so it can be seen.
+    t = trace_store.Trace(OWNER, "chat", thread_id="th1")
+    t.add_model_call("azure", "gpt-6-luna", tokens_in=1000, tokens_out=300, tokens_reasoning=200)
+    t.add_model_call("azure", "gpt-4.1", tokens_in=1000, tokens_out=50)
+    t.finish(request="x", reply="y", routed_by="brain")
+    row = db[trace_store.COLLECTION].find_one({"user_id": OWNER})
+    assert row["tokens_reasoning"] == 200 and row["tokens_out"] == 350
+    assert row["model_calls"][0]["tokens_reasoning"] == 200
+    mine = next(u for u in trace_store.costs(days=1)["by_user"] if u["user_id"] == OWNER)
+    assert mine["tokens_reasoning"] == 200
