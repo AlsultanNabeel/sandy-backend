@@ -89,6 +89,10 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
             if held is not None:
                 # The model's answer to the rest of the line stays (it has the tools'
                 # results), then the question; its own words replace the tools' replies.
+                # A task that waits for its yes, with nothing else done: the model's words
+                # restate it, often as a second question, so the question alone is the reply.
+                if not ctx.worked and _only_tasks(held):
+                    return _settled([], held, used)
                 return _settled([reply.text] if reply.text else replies, held, used)
             return {"text": reply.text or lang.say("gave_up"), "pending": None, "tools": used}
         messages.append(_assistant_msg(reply))
@@ -126,6 +130,10 @@ def _run_side_by_side(calls, ctx: TurnCtx) -> Dict[str, Dict[str, Any]]:
         futures = {c.id: pool.submit(contextvars.copy_context().run,
                                      tools.execute, c.name, c.args, ctx) for c in slow}
     return {cid: f.result() for cid, f in futures.items()}
+
+
+def _only_tasks(held: Dict[str, Any]) -> bool:
+    return all(str(s.get("tool") or "").startswith("task_") for s in held.get("steps") or [])
 
 
 def _hold(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],

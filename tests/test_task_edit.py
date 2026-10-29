@@ -191,3 +191,48 @@ def test_another_user_or_the_switch_off_is_not_found(c, on, monkeypatch, model):
         assert c.open(path, method=method, json={"every_minutes": 30}, headers=_h("userB")).status_code == 404
     monkeypatch.setenv("SANDY_FLAGS", "{}")
     assert c.patch(f"/api/scheduled-tasks/{on}", json={"every_minutes": 30}, headers=_h()).status_code == 404
+
+
+# ── the yes a task waits on: one question, its time said as people say it (owner, 30 Oct) ──
+
+@pytest.mark.parametrize("language, minutes, said", [
+    ("ar", 1, "كل دقيقة"), ("ar", 2, "كل دقيقتين"), ("ar", 5, "كل 5 دقايق"), ("ar", 15, "كل 15 دقيقة"),
+    ("ar", 60, "كل ساعة"), ("ar", 120, "كل ساعتين"), ("ar", 180, "كل 3 ساعات"), ("ar", 720, "كل 12 ساعة"),
+    ("ar", 1440, "كل يوم"), ("ar", 2880, "كل يومين"),
+    ("en", 1, "every minute"), ("en", 2, "every 2 minutes"), ("en", 60, "every hour"),
+    ("en", 120, "every 2 hours"), ("en", 1440, "every day"), ("en", 4320, "every 3 days"),
+])
+def test_how_often_is_said_as_people_say_it(language, minutes, said):
+    from app.brain import tools_tasks
+    with lang.using(language):
+        assert tools_tasks._every(minutes) == said
+
+
+@pytest.mark.parametrize("language, hours, said", [
+    ("ar", 1, "بالكتير مرة بالساعة"), ("ar", 2, "بالكتير مرة كل ساعتين"), ("ar", 3, "بالكتير مرة كل 3 ساعات"),
+    ("en", 1, "at most once an hour"), ("en", 2, "at most once every 2 hours"),
+])
+def test_how_it_tells_is_said_as_people_say_it(language, hours, said):
+    from app.brain import tools_tasks
+    with lang.using(language):
+        assert tools_tasks._how({"mode": "every", "hours": hours}) == said
+
+
+@pytest.mark.parametrize("language, chatter", [
+    ("ar", "عملتلك المهمة. بدك أأكدها؟"),
+    ("en", "I've set up the task. Just let me know if you want to confirm it!"),
+])
+def test_a_task_waiting_for_its_yes_is_one_question(brain_db, monkeypatch, language, chatter):  # noqa: F811
+    from brain_fakes import ScriptedModel, call, text_reply, tools_reply
+
+    from app.brain import confirm, loop
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
+    args = {"title": "Gold", "instructions": "check gold" if language == "en" else "شوفي سعر الدهب",
+            "every_minutes": 60, "check_tool": "web_search", "check_args": {"query": "gold"}}
+    model = ScriptedModel(tools_reply(call("task_create", **args)), text_reply(chatter))
+    with active_user_profile_context(A):
+        state = loop.run_turn("check gold every hour" if language == "en" else "كل ساعة شوفيلي سعر الدهب",
+                              user_id="userA", chat_id="userA", source="web", complete=model)
+    with lang.using(language):
+        assert state["final_response"] == confirm.ask(state["pending_state"])
+    assert ("كل ساعة" if language == "ar" else "every hour") in state["final_response"]

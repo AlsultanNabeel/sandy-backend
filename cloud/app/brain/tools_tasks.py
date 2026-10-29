@@ -97,10 +97,20 @@ def offered(user_id: str) -> bool:
     return flags.on(SWITCH, user_id)
 
 
+def _span(n: int, unit: str) -> str:
+    """«دقيقة»، «ساعتين»، «3 ساعات»، «12 ساعة»; «hour», «2 hours»."""
+    size = "one" if n == 1 else "two" if n == 2 else "few" if n <= 10 else "many"
+    return lang.say(f"span_{size}_{unit}", n=n)
+
+
 def _every(minutes: int) -> str:
+    """«كل دقيقة»، «كل ساعتين»، «كل يوم»; «every minute», «every 2 hours»."""
+    minutes = max(int(minutes or 1), 1)
+    if minutes % 1440 == 0:
+        return lang.say("every_span", span=_span(minutes // 1440, "day"))
     if minutes % 60 == 0:
-        return lang.say("every_hours", n=minutes // 60)
-    return lang.say("every_minutes", n=minutes)
+        return lang.say("every_span", span=_span(minutes // 60, "hour"))
+    return lang.say("every_span", span=_span(minutes, "minute"))
 
 
 def _how(delivery: Dict[str, Any]) -> str:
@@ -110,7 +120,7 @@ def _how(delivery: Dict[str, Any]) -> str:
         return lang.say("delivery_daily", at=delivery["at"])
     if delivery["hours"] == 1:
         return lang.say("delivery_hourly")
-    return lang.say("delivery_hours", n=delivery["hours"])
+    return lang.say("delivery_hours", span=_span(delivery["hours"], "hour"))
 
 
 # The way, read from his own words when the model left the field out: only what he said.
