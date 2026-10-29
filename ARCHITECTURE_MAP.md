@@ -1679,7 +1679,9 @@ message; the `gpt-4.1` deployment (`--model gpt-4.1`) 40/42 once, about $0.52 a 
 3.2 s a message. Since 29 Oct every Arabic case has an English sister (`<name> · en`,
 `EN_CASES`) with the same checks and its reply checked to be English (no Arabic word but a
 «quoted» name or a device label); each language is scored on its own and English may not
-trail Arabic by more than `LANGUAGE_GAP` (5) points. Baseline: ar 40/41, en 40/42.
+trail Arabic by more than `LANGUAGE_GAP` (5) points. Baseline: ar 40/41, en 40/42. After the independent review's fixes (29 Oct, `eval_results/2026-10-29T1142.json`,
+two runs at temperature 0.5): ar 41/41, en 41/42, one case of 83 moved (1.2%), about $0.19
+for both. At 0.2 the score was no better (79/83, three moved), so 0.5 stays.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
