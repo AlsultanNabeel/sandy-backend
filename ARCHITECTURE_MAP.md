@@ -767,6 +767,7 @@ Every user feature is a row in one of three collections, reached through
 | `blocks/entries.py` | `sandy_entries` | LOG — what happened or what Sandy learned: `{kind, text, data, at, source, embedding, migrated_from}` |
 | `blocks/items.py` | `sandy_items` | LISTS — anything ticked off: `{list, text, done, due, priority, data, created_at, done_at, migrated_from}` |
 | `blocks/schedules.py` | `sandy_schedules` | SCHEDULES — anything that fires: `{kind, text, fire_at, recurrence (RRULE), series_start, payload, status, migrated_from}` |
+| `blocks/tasks.py` | `sandy_schedules` (kind `task`), `sandy_task_state` | a task: work she does on her own at its time, every N minutes (`FREQ=MINUTELY;INTERVAL=N`), `status: paused` never due; its payload the user's own words, a `probe` (one read tool), `notify_when`, its tools, language and urgency, nothing that names a field of work. Made only by its tool after a yes: `schedule` and `POST /api/schedules` refuse the kind. What it last saw is its state row, removed with it |
 | `blocks/kinds.py` | — | The kinds table: every log kind, list and schedule kind with labels, SF Symbol, the words a user says for it (`aliases`) and typed `data` fields. `validate()` refuses an unknown kind or an undeclared/mistyped field. A `project:` row matches any `project:<name>` list. |
 
 Each module is add / get / update / delete / list with filters (kind or list,

@@ -470,6 +470,9 @@ def register_blocks_api(app, mongo_db=None):
         if cid and schedules.get(cid):
             return _saved(cid, schedules.get, "payload")
         kind = str(body.get("kind") or "")
+        if kind == "task":
+            # Made only through its tool, after the user's yes (`blocks/tasks.py`).
+            raise _Invalid("invalid_kind")
         text = _text(body.get("text"), required=True)
         payload = _data(SCHEDULE, kind, body.get("payload")) or {}
         fire_at = _future(body.get("fire_at"))

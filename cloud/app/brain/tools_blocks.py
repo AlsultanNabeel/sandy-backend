@@ -614,6 +614,8 @@ def _device_timer(args: Dict[str, Any]) -> Dict[str, Any]:
 
 def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "reminder"), str(args.get("text") or "").strip()
+    if kind == "task":
+        return refused("a task is made with task_create, after the user's yes")
     payload = None
     if args.get("important") and kind == "reminder":
         # Through a Focus only when he asked for that, never by default.

@@ -38,7 +38,9 @@ def test_nineteen_tools_and_every_one_has_a_handler():
 def test_enums_come_from_the_kinds_table():
     by_name = {d["name"]: d for d in tools.declarations()}
     assert by_name["remember"]["parameters"]["properties"]["kind"]["enum"] == list(names(LOG))
-    assert by_name["schedule"]["parameters"]["properties"]["kind"]["enum"] == list(names(SCHEDULE))
+    # A task is the one kind left out: it has its own tool and waits for a yes.
+    assert by_name["schedule"]["parameters"]["properties"]["kind"]["enum"] == [
+        n for n in names(SCHEDULE) if n != "task"]
     list_enum = by_name["list_add"]["parameters"]["properties"]["list"]["enum"]
     assert set(list_enum) == {n for n in names(LIST) if not n.endswith(":")} | {"project"}
 

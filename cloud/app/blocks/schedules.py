@@ -20,7 +20,8 @@ from app.utils.time import USER_TZ
 
 logger = logging.getLogger(__name__)
 
-STATUSES = ("pending", "sent", "failed", "cancelled")
+# "paused": a task stopped by its user, never due until resumed (`blocks/tasks.py`).
+STATUSES = ("pending", "sent", "failed", "cancelled", "paused")
 
 
 def init_schedules_store(mongo_db) -> None:

@@ -21,7 +21,7 @@ def test_the_provisional_names_are_all_declared():
                                      "journal", "health", "photo", "note", "summary"}
     assert set(kinds.names(LIST)) >= {"tasks", "shopping", "goals", "reading", "habits"}
     assert set(kinds.names(SCHEDULE)) == {"reminder", "message_to_future_self", "scene",
-                                          "daily_nudge", "summary_nudge"}
+                                          "daily_nudge", "summary_nudge", "task"}
 
 
 def test_valid_data_passes_and_int_counts_as_float():

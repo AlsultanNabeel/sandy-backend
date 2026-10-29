@@ -104,6 +104,11 @@ KINDS: Tuple[Kind, ...] = (
         "nudge_kind": _S, "qid": _S, "date": _S}),
     Kind("summary_nudge", SCHEDULE, "تذكير بالملخص", "Summary nudge",
          "doc.text"),
+    # Work she does on her own at its time (`blocks/tasks.py`); made only through its tool,
+    # after a yes, never by `schedule`.
+    Kind("task", SCHEDULE, "مهمة", "Task", "sparkles", {
+        "instructions": _S, "probe": _D, "notify_when": _S, "tools": _L, "lang": _S,
+        "urgent": _B}),
 )
 
 _BY_KEY: Dict[Tuple[str, str], Kind] = {(k.block, k.name): k for k in KINDS}

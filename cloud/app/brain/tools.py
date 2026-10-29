@@ -26,10 +26,14 @@ def _obj(props: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
     return {"type": "object", "properties": props, "required": required}
 
 
+# Kinds the model never writes through the block tools: a task has its own tool and a yes.
+_NOT_BY_BLOCK_TOOLS = ("task",)
+
+
 def _enum(block: str, desc: str) -> Dict[str, Any]:
-    plain = [n for n in names(block) if not n.endswith(":")]
+    plain = [n for n in names(block) if not n.endswith(":") and n not in _NOT_BY_BLOCK_TOOLS]
     labels = "، ".join(f"{k.name}={k.ar}" for k in KINDS if k.block == block
-                      and not k.name.endswith(":"))
+                      and not k.name.endswith(":") and k.name not in _NOT_BY_BLOCK_TOOLS)
     return {"type": "string", "enum": plain, "description": f"{desc} ({labels})"}
 
 

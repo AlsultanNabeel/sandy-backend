@@ -584,3 +584,11 @@ def test_an_entry_comes_back_as_saved_before_its_category_is_filled(c, monkeypat
     assert item["data"] == {"amount": 3}
     r = c.patch(f"/api/entries/{item['id']}", json={"data": {"amount": 4}}, headers=_h())
     assert r.get_json()["item"]["data"] == {"amount": 4}
+
+
+def test_the_schedules_route_cannot_make_a_task(c):
+    # A task is made only through its tool, after a yes (`blocks/tasks.py`).
+    from datetime import datetime, timedelta, timezone
+    at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    _bad(c.post("/api/schedules", json={"kind": "task", "text": "x", "fire_at": at}, headers=_h()),
+         "invalid_kind", 400)
