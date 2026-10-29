@@ -43,6 +43,10 @@ AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "").str
 # A larger Azure deployment the chat falls to when the first fails or answers its rate limit,
 # before OpenAI direct. Unset means none.
 AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT", "").strip()
+# The chat on Azure's Responses API, for the accounts its switch is on for (`responses_api`
+# in SANDY_FLAGS): the deployment (unset means the path is off), and how hard it thinks.
+SANDY_RESPONSES_DEPLOYMENT = os.getenv("SANDY_RESPONSES_DEPLOYMENT", "").strip()
+SANDY_REASONING_EFFORT = os.getenv("SANDY_REASONING_EFFORT", "low").strip().lower() or "low"
 # text-embedding-3-small deployment (1536-dim index); set = embed via Azure.
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv(
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", ""

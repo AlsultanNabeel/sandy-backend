@@ -67,6 +67,9 @@ class ToolCall:
 class Reply:
     text: str = ""
     tool_calls: List[ToolCall] = field(default_factory=list)
+    # The Responses API's own output (sealed reasoning, its tool calls), handed back to it on
+    # the next step (`brain/responses.py`); empty on chat completions.
+    items: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _parse_args(raw: Any) -> Dict[str, Any]:
@@ -147,6 +150,8 @@ def _openai_direct(messages, tools):
 def complete(messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
              on_text: Optional[Callable[[str], None]] = None) -> Optional[Reply]:
     """One model step, or None when every provider failed."""
+    # What only the Responses API reads (`_items`) is never sent here.
+    messages = [{k: v for k, v in m.items() if not k.startswith("_")} for m in messages]
     try:
         if on_text is not None:
             return _from_stream(_primary(messages, tools, stream=True), on_text)

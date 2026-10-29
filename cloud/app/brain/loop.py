@@ -42,10 +42,14 @@ def _for_model(result: Dict[str, Any]) -> str:
 
 
 def _assistant_msg(reply: model.Reply) -> Dict[str, Any]:
-    return {"role": "assistant", "content": reply.text or None, "tool_calls": [
+    msg = {"role": "assistant", "content": reply.text or None, "tool_calls": [
         {"id": c.id, "type": "function",
          "function": {"name": c.name, "arguments": json.dumps(c.args, ensure_ascii=False)}}
         for c in reply.tool_calls]}
+    if reply.items:
+        # The Responses API's own answer, sealed reasoning included (`brain/responses.py`).
+        msg["_items"] = reply.items
+    return msg
 
 
 # What the model reads for a held call: the system asks, the model goes on with the rest.

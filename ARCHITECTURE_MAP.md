@@ -230,7 +230,18 @@ breaker and the param-quirk adapter — then, when it fails or answers its rate 
 other Azure deployment (`AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT`, `openai_client.fallback_fn`,
 its own breaker; none when unset or the same as the first), then OpenAI direct (`OPENAI_MODEL`), then
 `None` and a fixed error sentence. With no Azure configured the primary already is OpenAI direct
-(`openai_client.azure_is_primary`), so there is no second try. Text streams through thread-local hooks
+(`openai_client.azure_is_primary`), so there is no second try.
+
+**The Responses API path** (`responses.py`, behind the `responses_api` switch, phase one: the
+chat only; the call and the background work stay on chat completions): Azure's
+`/openai/v1/responses` on `SANDY_RESPONSES_DEPLOYMENT` (`gpt-6-luna`), the turn's messages and
+tools turned into its items and its answer back into a `model.Reply`, so the loop and the checks
+see no difference. `store: false` always: nothing is kept at Azure; the reasoning comes back
+sealed (`include: reasoning.encrypted_content`) and is handed back with its tool calls on the
+next step (`Reply.items`, the assistant message's `_items`, stripped before chat completions).
+Its own output limit (`responses.MAX_OUTPUT_TOKENS`, 2000: reasoning counts against it), effort
+`SANDY_REASONING_EFFORT` (low), no temperature, its own breaker; a failure goes on on the chat
+completions chain above. Unset `SANDY_RESPONSES_DEPLOYMENT` or the switch and it is off. Text streams through thread-local hooks
 (`model.set_stream_hooks`), cumulative, which `/api/agent/stream` sets on the
 thread that runs the turn.
 
@@ -826,6 +837,7 @@ pending reminders) and the last STM turn ("was up late").
 | `future.py` | due messages to your future self |
 | `summary.py` | `/api/summary`: the `summarize` rows written up in one call |
 | `ctx.py` | `TurnCtx` — what a tool knows about its turn |
+| `responses.py` | the chat on Azure's Responses API, behind `responses_api`; chat completions when it fails |
 | `takeback.py` | a call that would take back what the same turn did (3d), refused to the model |
 
 The speaker gate (`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's

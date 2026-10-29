@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 _cb = CircuitBreaker(name="openai", failure_threshold=5, recovery_timeout=60.0)
 # The fallback deployment's own: the first one's failures must not shut its way out.
 _cb_fallback = CircuitBreaker(name="openai-fallback", failure_threshold=5, recovery_timeout=60.0)
+# The Responses API's own: its failures fall to chat completions, never shut them.
+_cb_responses = CircuitBreaker(name="openai-responses", failure_threshold=5, recovery_timeout=60.0)
 
 # Hang ceiling when the caller passes no timeout.
 DEFAULT_CHAT_TIMEOUT_S = float(os.getenv("OPENAI_CHAT_TIMEOUT_S", "15"))
@@ -211,6 +213,7 @@ def make_chat_completion_fn(
 
 _chat_fn: Optional[Callable[..., Any]] = None
 _fallback_fn: Optional[Callable[..., Any]] = None
+_responses_client: Any = None
 _direct_client: Any = None
 _clients_lock = threading.Lock()
 
@@ -275,6 +278,32 @@ def fallback_fn() -> Optional[Callable[..., Any]]:
                 azure_chat_deployment=config.AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT,
                 breaker=_cb_fallback)
         return _fallback_fn
+
+
+def responses_client() -> Any:
+    """Azure's Responses API (its v1 path, `brain/responses.py`), or None when Azure or
+    `SANDY_RESPONSES_DEPLOYMENT` is not set."""
+    global _responses_client
+    from app import config
+
+    if not (config.AZURE_OPENAI_ENDPOINT and config.AZURE_OPENAI_API_KEY
+            and config.SANDY_RESPONSES_DEPLOYMENT):
+        return None
+    if _responses_client is None:
+        from openai import OpenAI
+        with _clients_lock:
+            if _responses_client is None:
+                # max_retries=0, as for chat: a retry would multiply every deadline.
+                _responses_client = OpenAI(
+                    base_url=config.AZURE_OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
+                    api_key=config.AZURE_OPENAI_API_KEY, max_retries=0,
+                    timeout=DEFAULT_CHAT_TIMEOUT_S * 2)
+    return _responses_client
+
+
+def create_response(**kwargs: Any) -> Any:
+    """One Responses API call behind its own breaker (twice the chat deadline: it thinks)."""
+    return _cb_responses.call(responses_client().responses.create, **kwargs)
 
 
 def azure_is_primary() -> bool:
