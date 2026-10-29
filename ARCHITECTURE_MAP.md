@@ -602,7 +602,7 @@ paired the code. **A heartbeat cannot nominate its own owner.**
 
 ### 2.9 HTTP surface
 
-85 HTTP route handlers on 68 paths, plus two WebSockets (`/voice`, `/voice/enroll`).
+111 HTTP route handlers on 90 paths, plus two WebSockets (`/voice`, `/voice/enroll`).
 All under `/api/*` except `/health`, `/`, `/webhook/revenuecat` and the sockets.
 Registered by explicit `register_*_api(app, …)` calls in `api/server.py` — there
 are no Flask blueprints, so **route discovery means reading `server.py`'s
@@ -620,7 +620,11 @@ Who calls what:
   (+ albums, file; `GET /api/photos` is a page of 200 newest first with `next` to pass back as `before`,
   its text search and the album counts run over the whole album in the database), images (`/api/image`, `/api/image/edit`, `/api/analyze-image`),
   `/api/research`, `/api/weather`, `/api/persona`, `/api/onboarding`,
-  `/api/features`, `/api/subscription`, push register / unregister,
+  `/api/features`, `/api/subscription`, push register / unregister, the Tasks screen
+  (`api/tasks_api.py`, behind the `tasks` switch, 404 without it: `/api/scheduled-tasks` with
+  each one's state and unseen count, `/<id>/results`, `/seen`, `/pause`, `/resume`, `DELETE`, the
+  results going with it; `/api/notify/email` get / set / forget, and `/api/notify/email/confirm?t=`,
+  the emailed link, the one of them opened signed out, answering a small page),
   `/api/voice/tts`, and the `/voice` socket for live calls. The share extension
   uses `/api/agent`, `/api/analyze-image`, `/api/photos`, `/api/entries` and
   `/api/items`. `/api/features` answers `{hidden, on}`: what the owner hid app-wide

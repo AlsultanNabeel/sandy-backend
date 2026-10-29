@@ -76,6 +76,15 @@ KEPT = {
     "/api/subscription": {"GET"},
     "/api/voice/tts": {"POST"},
     "/api/weather": {"GET"},
+    # The Tasks screen and where its results are emailed (the confirm link is opened from mail).
+    "/api/scheduled-tasks": {"GET"},
+    "/api/scheduled-tasks/<task_id>": {"DELETE"},
+    "/api/scheduled-tasks/<task_id>/results": {"GET"},
+    "/api/scheduled-tasks/<task_id>/seen": {"POST"},
+    "/api/scheduled-tasks/<task_id>/pause": {"POST"},
+    "/api/scheduled-tasks/<task_id>/resume": {"POST"},
+    "/api/notify/email": {"GET", "POST", "DELETE"},
+    "/api/notify/email/confirm": {"GET"},
     # The robot and the firmware tooling.
     "/voice": {"GET"},
     "/api/firmware/manifest": {"GET"},

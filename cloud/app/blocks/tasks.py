@@ -9,7 +9,8 @@ it is urgent. Nothing in it names a field of work: a student's deadlines, a free
 projects, a shop's stock and a home's budget are the same row with other words.
 
 What it saw last (a fingerprint of the probe, the last result, the failures in a row) is in
-`sandy_task_state`, one row per task under its user, removed with the task.
+`sandy_task_state`, one row per task under its user, removed with the task, as are its
+results (`notify.forget_task`).
 """
 
 from __future__ import annotations
@@ -32,6 +33,12 @@ def _rule(every_minutes: int) -> str:
     if minutes <= 0:
         raise ValueError("every_minutes must be above zero")
     return f"FREQ=MINUTELY;INTERVAL={minutes}"
+
+
+def every_minutes(row: Mapping[str, Any]) -> int:
+    """How many minutes apart it runs (0 for a row with no interval)."""
+    rule = str(row.get("recurrence") or "")
+    return int(rule.rsplit("INTERVAL=", 1)[-1]) if "INTERVAL=" in rule else 0
 
 
 def add(title: str, spec: Mapping[str, Any], *, every_minutes: int, first_at: datetime) -> str:
@@ -68,6 +75,8 @@ def remove(task_id: str) -> bool:
     state_coll = _base.coll(STATE)
     if state_coll is not None:
         state_coll.delete_one({"_id": task_id})
+    from app import notify
+    notify.forget_task(task_id)
     return True
 
 

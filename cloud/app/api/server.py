@@ -141,6 +141,8 @@ def create_app(*, mongo_db=None):
     register_attachments_api(app)
     from app.api.settings_api import register_settings_api
     register_settings_api(app)
+    from app.api.tasks_api import register_tasks_api
+    register_tasks_api(app)
 
     # Sign-in is Apple, Google or email (the shared owner-password /api/auth is gone).
     from app.api.metering import limit_response as _limit_response

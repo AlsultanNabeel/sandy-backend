@@ -67,3 +67,34 @@ def mark_seen(ids: List[str]) -> None:
     coll = _base.coll(RESULTS)
     if coll is not None and ids:
         coll.update_many({"_id": {"$in": list(ids)}}, {"$set": {"seen": True}})
+
+
+def of_task(task_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """One task's results, newest first."""
+    coll = _base.coll(RESULTS)
+    if coll is None:
+        return []
+    rows = coll.find({"task_id": str(task_id)}).sort("at", -1).limit(limit)
+    return [_base.out(r) for r in rows]
+
+
+def unseen_by_task() -> Dict[str, int]:
+    """How many results of each task he has not seen."""
+    coll = _base.coll(RESULTS)
+    counts: Dict[str, int] = {}
+    for r in coll.find({"seen": False}, {"task_id": 1}) if coll is not None else []:
+        counts[r["task_id"]] = counts.get(r["task_id"], 0) + 1
+    return counts
+
+
+def seen_all(task_id: str) -> None:
+    coll = _base.coll(RESULTS)
+    if coll is not None:
+        coll.update_many({"task_id": str(task_id), "seen": False}, {"$set": {"seen": True}})
+
+
+def forget_task(task_id: str) -> None:
+    """A removed task's results go with it."""
+    coll = _base.coll(RESULTS)
+    if coll is not None:
+        coll.delete_many({"task_id": str(task_id)})

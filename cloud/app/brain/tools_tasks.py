@@ -132,18 +132,13 @@ def _rows() -> List[Dict[str, Any]]:
     return tasks.running()
 
 
-def _every_of(row: Dict[str, Any]) -> int:
-    rule = str(row.get("recurrence") or "")
-    return int(rule.rsplit("INTERVAL=", 1)[-1]) if "INTERVAL=" in rule else 0
-
-
 def task_list(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if not offered(ctx.user_id):
         return refused("tasks are not on for this account")
     rows = _rows()
     if not rows:
         return {"ok": True, "tasks": [], "reply": lang.say("task_none")}
-    listed = [{"id": r["id"], "title": r.get("text", ""), "every_minutes": _every_of(r),
+    listed = [{"id": r["id"], "title": r.get("text", ""), "every_minutes": tasks.every_minutes(r),
                "paused": r.get("status") == "paused"} for r in rows]
     lines = [lang.say("task_row_paused" if t["paused"] else "task_row", title=t["title"],
                       every=_every(t["every_minutes"] or 1)) for t in listed]

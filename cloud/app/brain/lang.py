@@ -365,6 +365,13 @@ PHRASES = {
     "every_hours": {"ar": "كل {n} ساعة", "en": "every {n} hours"},
     "task_stopped": {"ar": "وقّفت مهمة «{title}»: فشلت تلات مرات ورا بعض. خبّرني إذا بدك أرجّعها.",
                      "en": "I stopped the task «{title}»: it failed three times in a row. Tell me if you want it back."},
+    "task_not_found": {"ar": "ما لقيت هالمهمة.", "en": "I couldn't find that task."},
+    "mail_bad_address": {"ar": "هالإيميل مش مزبوط، تأكّد منه.", "en": "That email doesn't look right; check it."},
+    "mail_too_soon": {"ar": "لسا باعتة رابط قبل شوي. استنى خمس دقايق وجرّب.",
+                      "en": "A link just went out. Wait five minutes and try again."},
+    "mail_not_set_up": {"ar": "الإيميل لسا مش مفعّل عندنا.", "en": "Email isn't set up on our side yet."},
+    "mail_not_sent": {"ar": "ما قدرت أبعت الرابط هلّق، جرّب كمان شوي.",
+                      "en": "I couldn't send the link right now; try again in a bit."},
     "mail_confirm_subject": {"ar": "ساندي: أكّد إيميلك", "en": "Sandy: confirm your email"},
     "mail_confirm_body": {
         "ar": "أهلاً! هاد إيميل تأكيد من ساندي.\nافتح الرابط لتوصلك نتائج مهامك على هالإيميل:\n{link}\n\n"
