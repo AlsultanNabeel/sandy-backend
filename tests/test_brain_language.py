@@ -247,7 +247,7 @@ _PROMPTS = {
     "api/voice_ws/session.py": {"_APP_CHANNEL", "_ROBOT_CHANNEL", "_UNHEARD_QUESTION"},
     "api/voice_ws/tools.py": {"_PAST_RECORD_NOTE", "_DEVICE_SCENE_RULES"},
     "brain/context.py": {"_RULES", "CHAT_CHANNEL", "SPOKEN_CHANNEL", "TOOL_WORDS_RULE",
-                         "TASKS_RULE"},
+                         "TASKS_RULE", "_RESULTS"},
     "brain/loop.py": {"HELD_NOTE"},
     "brain/persona.py": {"_ANTI_INJECTION", "LANGUAGE_RULE", "NO_PROMISES_RULE"},
     "brain/stm.py": {"_SUMMARY_PROMPT"},

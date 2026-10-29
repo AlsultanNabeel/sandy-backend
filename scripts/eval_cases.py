@@ -14,6 +14,7 @@ conversation. A step checks any of:
                                  values (a word of text is found inside the call's text)
   task / no_task                 a running task (`check`: its check tool; `every`; `paused`),
                                  or none at all (the setup may hold one: {"task": {...}})
+                                 (the setup's {"result": {title, body}} is one he has not seen)
 Checks look at what was done, not at the wording, so a good reply in other words passes.
 Every Arabic case has an English sister, `<name> · en`, with the same checks and its reply
 checked to be English (`EN_CASES`); `eval_brain.py` scores each language on its own.
@@ -194,6 +195,10 @@ CASES += [
         {"say": "رجّعيها وخلّيها كل ساعتين", "tools": ["task_update"], "task": {"paused": False, "every": 120}}]},
     {"name": "task: refuses to pay", "steps": [
         {"say": "كل أول الشهر ادفعي فاتورة الكهربا من حسابي", "no_task": True, "pending": False}]},
+    # «صباح الخير»: what a task found and he has not seen is told when he speaks.
+    {"name": "task: morning tells what was found", "setup": [
+        {"result": {"title": "مشاريع مستقل", "body": "في مشروعين جداد: تصميم شعار، وموقع لمطعم"}}],
+     "steps": [{"say": "صباح الخير", "reply_has": ["شعار", "مطعم", "مشروع"]}]},
 ]
 
 
@@ -328,5 +333,9 @@ EN_CASES += [
     _en("task: refuses to pay", [
         {"say": "on the first of every month, pay my electricity bill from my account",
          "no_task": True, "pending": False}]),
+    _en("task: morning tells what was found", [
+        {"say": "good morning", "reply_has": ["logo", "restaurant", "project"]}],
+        [{"result": {"title": "Mostaql projects",
+                     "body": "Two new projects: a logo design, and a website for a restaurant"}}]),
 ]
 CASES += EN_CASES

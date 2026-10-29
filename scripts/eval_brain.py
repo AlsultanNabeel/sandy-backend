@@ -143,6 +143,10 @@ def _setup(steps: List[Dict[str, Any]]) -> None:
                     "tools": ["web_search"], "lang": "ar", "urgent": False}
             tasks.add(s["task"]["title"], spec, every_minutes=s["task"].get("every", 60),
                       first_at=datetime.now(timezone.utc) + timedelta(hours=1))
+        elif "result" in s:
+            from app import notify
+            notify.CHANNELS = []                # a run never emails
+            notify.deliver("eval-task", s["result"]["title"], s["result"]["body"], "ar")
         elif "reminder" in s:
             from datetime import datetime, timedelta, timezone
             at = datetime.now(timezone.utc) + timedelta(hours=s["reminder"].get("in_hours", 3))
