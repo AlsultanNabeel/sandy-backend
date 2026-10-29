@@ -337,7 +337,8 @@ def test_an_arabic_reply_to_an_english_message_is_rewritten_in_english(brain_db)
     model = ScriptedModel(text_reply("تمام، رح أذكّرك بكرا ⏰"), text_reply("OK, I'll remind you tomorrow ⏰"))
     state = _turn(model, "remind me tomorrow please")
     assert state["final_response"] == "OK, I'll remind you tomorrow ⏰"
-    assert "English" in model.seen[1][0]["content"] and model.seen[1][-1]["content"] == "تمام، رح أذكّرك بكرا ⏰"
+    assert "English" in model.seen[1][0]["content"]
+    assert model.seen[1][-1]["content"].endswith("تمام، رح أذكّرك بكرا ⏰")
 
 
 def test_an_english_reply_to_an_arabic_message_is_rewritten_in_arabic(brain_db):  # noqa: F811
@@ -473,3 +474,17 @@ def test_a_device_command_with_a_time_is_a_schedule_in_both_languages():
     spec = next(t for t in tools.openai_tools() if t["function"]["name"] == "device_control")["function"]
     said = spec["description"] + spec["parameters"]["properties"]["value"].get("description", "")
     assert "بعد ساعة" in said and "in an hour" in said and "schedule" in said
+
+
+# «Rewrite this reply in English» came back in Arabic every time on the real model (29 Oct
+# 2026): the reply is handed over as text to translate, not as a message to answer.
+@pytest.mark.parametrize("message, first, head, word", [
+    ("is the AC on?", "حبيبي، المكيف مطفي.", "The reply to translate:", "Translate"),
+    ("المكيف شغال؟", "The AC is off.", "الرد اللي بدّه ترجمة:", "ترجمي"),
+])
+def test_the_rewrite_hands_the_reply_over_as_text_to_translate(brain_db, message, first,  # noqa: F811
+                                                               head, word):
+    model = ScriptedModel(text_reply(first), text_reply("ok"))
+    _turn(model, message)
+    system, user = model.seen[1][0]["content"], model.seen[1][-1]["content"]
+    assert word in system and user == f"{head}\n\n{first}"

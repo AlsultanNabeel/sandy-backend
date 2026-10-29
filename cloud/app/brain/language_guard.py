@@ -26,12 +26,16 @@ _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
 _ARABIC_RUN = re.compile(r"[ء-يٱ-ۓ]+(?:\s+[ء-يٱ-ۓ]+)*")
 _LATIN_RUN = re.compile(r"[A-Za-z][A-Za-z0-9'’-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’-]*)*")
 
+# Handed over as text to translate: asked to «rewrite this reply», the model answered the
+# Arabic in Arabic every time (29 Oct 2026).
 _REWRITE = {
-    lang.EN: ("Rewrite this reply in natural English only. Keep «quoted» names, numbers and "
-              "emoji as they are; add nothing, drop nothing. Answer with the reply alone."),
-    lang.AR: ("أعيدي كتابة هالرد بالعربي بلهجتك بس. خلّي الأسماء اللي بين «» والأرقام والإيموجي "
-              "زي ما هي؛ ما تزيدي ولا تشيلي إشي. جاوبي بالرد لحاله."),
+    lang.EN: ("You translate. Translate the reply below into natural, casual English. Keep «quoted» "
+              "names, numbers and emoji as they are; add nothing, drop nothing. Answer with the "
+              "English text alone."),
+    lang.AR: ("إنتِ بتترجمي. ترجمي الرد اللي تحت للعربي بلهجة شامية عفوية. خلّي الأسماء اللي بين «» "
+              "والأرقام والإيموجي زي ما هي؛ ما تزيدي ولا تشيلي إشي. جاوبي بالترجمة لحالها."),
 }
+_HEAD = {lang.EN: "The reply to translate:", lang.AR: "الرد اللي بدّه ترجمة:"}
 
 
 def names_of(message: str, results: Iterable[Tuple[str, Dict[str, Any]]]) -> List[str]:
@@ -71,7 +75,7 @@ def ensure(text: str, complete: Callable, names: Iterable[str] = ()) -> str:
         return text
     # `model.complete` answers None when the provider failed; it does not raise.
     reply = complete([{"role": "system", "content": _REWRITE[language]},
-                      {"role": "user", "content": text}], [])
+                      {"role": "user", "content": f"{_HEAD[language]}\n\n{text}"}], [])
     out = (getattr(reply, "text", "") or "").strip()
     if not out or wrong_language(out, language, names):
         logger.warning("[language] rewrite still not in %s; reply kept", language)

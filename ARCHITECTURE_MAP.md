@@ -186,7 +186,8 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    still came in the other language (an Arabic word in an English turn, or mostly English
    words in an Arabic one; names aside: «quoted» ones, the message's own words in the other
    script, the tools' replies and names, `language_guard.names_of`, and links, numbers and
-   Capitalised names in an Arabic reply) is rewritten once by the model, and the rewrite goes
+   Capitalised names in an Arabic reply) is translated once by the model (handed over as text
+   to translate: asked to «rewrite» it, the model answered in Arabic), and the rewrite goes
    through the honesty check again (3b); if the rewrite fails the reply goes out as it was. Outside a reply (pushes, the daily nudge, limits, a route's own message)
    the user's own language is used: `sandy_users.language`, which the app sends as `X-Lang`
    (`lang.note` in `require_auth`; a guest's `X-Lang` as it is). Every route's message and
