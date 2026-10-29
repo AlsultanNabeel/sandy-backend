@@ -19,8 +19,9 @@ model could not answer (a rate limit, an outage) waits and runs again, and is le
 score and the comparison when it still gets no answer: an error is not an outcome. `--save`
 writes the result to `eval_results/<when>.json`; the first one saved becomes
 `eval_results/baseline.json`, and every later run is compared with it: what fell, what
-rose. More than `ALLOWED_DIFFERENCES` cases moved, or a repeat disagreeing that often,
-fails the run.
+rose. More than `ALLOWED_SHARE` (five percent) of the cases moved, or repeats disagreeing on
+that many, fails the run. `--temperature` runs the brain at another temperature
+(`model.TEMPERATURE`), to measure what it does to the tool calls.
 """
 from __future__ import annotations
 
@@ -40,8 +41,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 
 RESULTS = ROOT / "scripts" / "eval_results"
-# Two runs of the same cases may disagree on this many and still count as the same.
-ALLOWED_DIFFERENCES = 2
+# Two runs of the same cases may disagree on at most this share of them and still count as
+# the same (the owner's rule, 29 Oct 2026: five percent, in place of two cases).
+ALLOWED_SHARE = 0.05
 # A turn the model could not answer (a 429, an outage) is no outcome: the case waits and
 # runs again this many times, then is set apart as unanswered, never counted as a fail.
 ERROR_RETRIES = 2
@@ -54,6 +56,8 @@ def _args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--only", default="", help="run only the cases whose name contains this")
     p.add_argument("--verbose", action="store_true", help="print every reply")
     p.add_argument("--repeat", type=int, default=1, help="run every case this many times")
+    p.add_argument("--temperature", type=float,
+                   help="the brain's temperature for this run (default: model.TEMPERATURE)")
     p.add_argument("--save", action="store_true",
                    help="save the result under eval_results/ and compare it with the baseline")
     return p.parse_args(argv)
@@ -72,7 +76,7 @@ import mongomock  # noqa: E402
 
 from app import db as appdb  # noqa: E402
 from app.blocks import entries, init_blocks, items, schedules  # noqa: E402
-from app.brain import lang, loop, tools  # noqa: E402
+from app.brain import lang, loop, model as brain_model, tools  # noqa: E402
 from app.features import device_store, trace_store  # noqa: E402
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 from eval_cases import CASES, DEVICES  # noqa: E402
@@ -294,6 +298,11 @@ def _by_language(outcome: Dict[str, Optional[bool]], langs: Dict[str, str]) -> D
     return out
 
 
+def _stable(moved: int, total: int) -> bool:
+    """Two runs count as the same while at most `ALLOWED_SHARE` of the cases moved."""
+    return moved <= ALLOWED_SHARE * total
+
+
 def _language_gap_ok(scores: Dict[str, Tuple[int, int]]) -> bool:
     pct = {k: 100 * p / t for k, (p, t) in scores.items() if t}
     return "ar" not in pct or "en" not in pct or pct["en"] >= pct["ar"] - LANGUAGE_GAP
@@ -322,10 +331,12 @@ def main() -> int:
     # Embeddings would cost a call per entry and find nothing in a fresh database.
     entries.embed_text = lambda text: None
 
+    if ARGS.temperature is not None:
+        brain_model.TEMPERATURE = ARGS.temperature
     model = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.environ.get("OPENAI_MODEL")
     cases = [c for c in CASES if ARGS.only in c["name"]]
     repeat = max(ARGS.repeat, 1)
-    print(f"model: {model} — {len(cases)} cases × {repeat}\n")
+    print(f"model: {model} at temperature {brain_model.TEMPERATURE} — {len(cases)} cases × {repeat}\n")
     runs: Dict[str, List[bool]] = {}
     unanswered: List[str] = []
     seconds, spent = 0.0, {"tokens_in": 0, "tokens_out": 0, "usd": 0.0}
@@ -366,11 +377,13 @@ def main() -> int:
     ok = passed == len(scored) and not unanswered and gap_ok
     split = _disagreeing(runs)
     if repeat > 1:
-        print(f"repeats disagreed on {len(split)} case(s): {split or '—'}")
-        ok &= len(split) <= ALLOWED_DIFFERENCES
+        print(f"repeats disagreed on {len(split)} case(s), "
+              f"{100 * len(split) / max(len(cases), 1):.1f}% of {len(cases)}: {split or '—'}")
+        ok &= _stable(len(split), len(cases))
     if ARGS.save:
         result = {"when": datetime.now().strftime("%Y-%m-%dT%H:%M"), "model": model,
-                  "repeat": repeat, "passed": passed, "total": len(scored), "cases": outcome,
+                  "repeat": repeat, "temperature": brain_model.TEMPERATURE, "passed": passed,
+                  "total": len(scored), "cases": outcome,
                   "unanswered": sorted(set(unanswered)),
                   "by_language": {k: {"passed": p, "total": t} for k, (p, t) in scores.items()},
                   "disagreed": split, "seconds": round(seconds, 1), **spent}
@@ -382,7 +395,7 @@ def main() -> int:
             moved = _compare(base, result)
             print(f"against the baseline ({base['when']}, {base['passed']}/{base['total']}): "
                   f"fell {moved['fell'] or '—'}, rose {moved['rose'] or '—'}, new {moved['new'] or '—'}")
-            ok &= _differences(moved) <= ALLOWED_DIFFERENCES
+            ok &= _stable(_differences(moved), len(scored))
     return 0 if ok else 1
 
 

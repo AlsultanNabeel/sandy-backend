@@ -145,3 +145,15 @@ def test_the_stand_ins_answer_in_the_turns_language():
         assert "ا" not in E._STAND_INS["image"]({}, None)["reply"]
     with lang.using("ar"):
         assert E._STAND_INS["image"]({}, None)["reply"] == lang.PHRASES["image_done"]["ar"]
+
+
+def test_two_runs_are_stable_while_at_most_five_percent_of_the_cases_moved():
+    # The share, not a count: 4 of 83 is 4.8%, 5 of 83 is 6%; Arabic and English alike.
+    assert E._stable(4, 83) is True and E._stable(5, 83) is False
+    assert E._stable(2, 41) is True and E._stable(3, 41) is False
+    assert E._stable(0, 0) is True
+
+
+def test_a_run_may_set_the_models_temperature():
+    assert E._args(["--temperature", "0.2"]).temperature == 0.2
+    assert E._args([]).temperature is None

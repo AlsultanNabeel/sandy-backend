@@ -1657,8 +1657,9 @@ the turn traces, `features/pricing.py`). A step may also check a tool's argument
 one call of that tool carries the values; a word of text is found inside the call's text).
 `--repeat N` runs every case N times and names those whose outcome differed; `--save` writes
 `scripts/eval_results/<when>.json`, the first saved becomes `baseline.json`, and every later
-saved run says what fell and rose against it. More than two cases moved
-(`ALLOWED_DIFFERENCES`) fails the run. Imported (by `tests/test_eval_report.py`) it reads no
+saved run says what fell and rose against it. More than five percent of the cases moved
+(`ALLOWED_SHARE`; two cases until 29 Oct), between repeats or against the baseline, fails the
+run. `--temperature` runs the brain at another `model.TEMPERATURE`. Imported (by `tests/test_eval_report.py`) it reads no
 command line and no `.env`. It costs model calls, so it runs by hand before a model or
 prompt change, never in CI. First run on `gpt-4.1` (4 Oct 2026): 31/34;
 the misses were «خلص الحليب» and «لازم أخلص التقرير» answered without adding, and
@@ -1666,7 +1667,7 @@ the misses were «خلص الحليب» and «لازم أخلص التقرير»
 (`eval_results/baseline.json`, forty cases): 36/40 on the `sandy-chat` deployment, which is
 `gpt-4o-mini`; the run after it moved five cases (delete one item answered with
 `list_update`, «جهزي الغرفة» with `room_restore`, and three that rose), so two runs still
-differ by more than `ALLOWED_DIFFERENCES`. After the delete and scene rules (29 Oct, forty-two
+differed by more than the two cases then allowed. After the delete and scene rules (29 Oct, forty-two
 cases): `sandy-chat` 38/42 then 41/42, three cases apart, about $0.044 a run and 1.9 s a
 message; the `gpt-4.1` deployment (`--model gpt-4.1`) 40/42 once, about $0.52 a run and
 3.2 s a message. Since 29 Oct every Arabic case has an English sister (`<name> · en`,
