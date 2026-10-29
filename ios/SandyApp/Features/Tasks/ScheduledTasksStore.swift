@@ -30,6 +30,13 @@ final class ScheduledTasksStore: LoadableStore {
         }
     }
 
+    /// The tasks again, quietly: a change made elsewhere (`TasksFollow`). No spinner, no notice;
+    /// a failed try waits for the next.
+    func refresh(api: APIClient) async {
+        guard !loading, let rows = try? await api.scheduledTasks() else { return }
+        tasks = rows
+    }
+
     /// One task's results; opening them is seeing them.
     func open(_ id: String, api: APIClient) async {
         let gen = beginLoad()

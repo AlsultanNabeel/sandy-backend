@@ -38,6 +38,8 @@ def deliver(task_id: str, title: str, body: str, language: str) -> str:
            "body": str(body or ""), "lang": language, "at": datetime.now(timezone.utc),
            "seen": False}
     coll.insert_one(row)
+    from app.services import schedule_sync
+    schedule_sync.changed("task")       # the Tasks screen shows it at once
     out = {**row, "id": row["_id"]}
     for channel in CHANNELS:
         try:

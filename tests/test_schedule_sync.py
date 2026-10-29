@@ -58,3 +58,18 @@ def test_without_push_keys_nothing_is_sent(pushes, monkeypatch):
     monkeypatch.setattr(apns, "is_configured", lambda: False)
     schedules.add("reminder", "الدوا", LATER)
     assert pushes == []
+
+
+# A task changed anywhere (chat, a call, the robot, the app, a result it found) is shown at
+# once on the phone's Tasks screen: its own silent push, `{"sync": "tasks"}`.
+def test_a_task_changed_anywhere_tells_the_phone_its_tasks_changed(pushes):
+    from app import notify
+    from app.blocks import tasks
+    spec = {"instructions": "check gold", "probe": {"tool": "web_search", "args": {"query": "gold"}},
+            "tools": ["web_search"], "lang": "en", "urgent": False}
+    tid = tasks.add("Gold", spec, every_minutes=60, first_at=LATER)
+    tasks.pause(tid)
+    tasks.set_every(tid, 120)
+    notify.deliver(tid, "Gold", "Gold is up", "en")
+    tasks.remove(tid)
+    assert [d for _, d in pushes] == [{"sync": "tasks"}] * 5

@@ -30,10 +30,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     /// The server's silent push (`{"sync": "schedules"}`): a reminder changed away from this
     /// phone (the robot, chat, another phone), so the reminders are fetched and scheduled
-    /// here, and the server hears which this phone now rings.
+    /// here, and the server hears which this phone now rings. `{"sync": "tasks"}`: a task
+    /// changed anywhere, or one found something, so an open Tasks screen reloads.
     func application(_ application: UIApplication,
                      didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                      fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        if userInfo["sync"] as? String == "tasks" {
+            NotificationCenter.default.post(name: .sandyTasksChanged, object: nil)
+            completionHandler(.newData)
+            return
+        }
         guard userInfo["sync"] as? String == "schedules" else { completionHandler(.noData); return }
         Task { @MainActor in
             await SchedulesStore.reloadReminders(api: NotificationManager.shared.client())

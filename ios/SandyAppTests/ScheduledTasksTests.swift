@@ -77,6 +77,28 @@ final class ScheduledTasksTests: XCTestCase {
         XCTAssertFalse(store.notice.isEmpty)
     }
 
+    /// A change made elsewhere (chat, a call, the robot) shows here: the quiet refresh takes the
+    /// server's tasks as they are now, and a failed one leaves the screen as it was.
+    func testAQuietRefreshShowsAChangeMadeElsewhere() async {
+        let api = TestClient.make()
+        let store = ScheduledTasksStore()
+        store.tasks = [ScheduledTask(id: "t1", title: "Gold", instructions: "", everyMinutes: 60,
+                                     status: "running", nextAt: "", failures: 0, lastError: "",
+                                     lastResult: "", unseen: 0)]
+        StubNetwork.install(json: """
+        {"tasks": [{"id": "t1", "title": "Gold", "instructions": "", "every_minutes": 120,
+          "status": "paused", "next_at": "", "failures": 0, "last_error": "", "last_result": "",
+          "unseen": 1}]}
+        """)
+        await store.refresh(api: api)
+        XCTAssertTrue(store.tasks[0].paused)
+        XCTAssertEqual(store.tasks[0].everyMinutes, 120)
+        StubNetwork.install(status: 500, json: #"{"error": "x"}"#)
+        await store.refresh(api: api)
+        XCTAssertEqual(store.tasks.count, 1)
+        XCTAssertTrue(store.notice.isEmpty, "a quiet refresh never shows a notice")
+    }
+
     func testTheStoreRemovesATask() async {
         let api = TestClient.make()
         let store = ScheduledTasksStore()

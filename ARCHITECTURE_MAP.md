@@ -820,7 +820,7 @@ after three and «every day at 8» is eight on the user's clock across a DST cha
 | `task` | `brain/task_runner.run` (§2.13), found by the same due query as every other kind (`RUNNABLE`; it was missing until the review of phase one, so no task ran on its own); its failures are its own and the row moves to its next time; it never rings. |
 | `message_to_future_self` | not fired here: the next chat reply delivers it (§2.3). |
 
-**The phone hears of every change** (`services/schedule_sync.py`): a reminder added, changed or
+**The phone hears of every change** (`services/schedule_sync.py`, `SYNC_BY_KIND`: a task's row changed anywhere, or a result it found, is `{"sync": "tasks"}`, which the app turns into `sandyTasksChanged` for the Tasks screen): a reminder added, changed or
 deleted through `blocks/schedules.py` (the robot, the app's call, Sandy in chat, the routes), put
 back or taken away by an undo, sends the user's phones a silent background push
 (`apns.send_background`, `{"sync": "schedules"}`, changes two seconds apart go as one), so a
@@ -1462,7 +1462,7 @@ so folders are organisation only.
   state, interval, next run, failures and unseen count; one opened shows what it does and its
   results (opening them marks them seen, `POST …/seen`), pause or resume (shown at once, put
   back when the server refused) and delete after a yes; and the email the results go to, with
-  the confirmation link asked from it (`APIClient+Tasks`, `/api/scheduled-tasks`,
+  the confirmation link asked from it; a change made anywhere else shows at once (`TasksFollow`: after a chat turn or a call, `sandyBlocksChanged`; the `{"sync": "tasks"}` push, `sandyTasksChanged`; back in the front; and every twenty seconds while it is open, since pushes wait on the paid account) (`APIClient+Tasks`, `/api/scheduled-tasks`,
   `/api/notify/email`, through `ScheduledTasksStore`). Tasks are made and changed by talk.
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
 - `Core/Stores/LoadableStore.swift` — the shared load/error/empty state machine.

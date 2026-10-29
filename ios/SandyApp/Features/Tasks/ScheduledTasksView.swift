@@ -36,6 +36,7 @@ struct ScheduledTasksView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.load(api: state.api) }
         .refreshable { await store.load(api: state.api) }
+        .modifier(TasksFollow(store: store))
     }
 
     private func row(_ task: ScheduledTask) -> some View {
@@ -170,6 +171,36 @@ struct ScheduledTaskView: View {
             await store.open(taskId, api: state.api)
         }
         .refreshable { await store.open(taskId, api: state.api) }
+    }
+}
+
+/// A change made anywhere else shows here at once: after a chat turn or a call (theirs end
+/// in `sandyBlocksChanged`), on the server's `{"sync": "tasks"}` push, back in the front, and
+/// every `TasksFollow.every` while the screen is open (pushes may not be set up, or held).
+struct TasksFollow: ViewModifier {
+    static let every: Duration = .seconds(20)
+    @EnvironmentObject var state: AppState
+    @Environment(\.scenePhase) private var phase
+    @ObservedObject var store: ScheduledTasksStore
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .sandyBlocksChanged)) { _ in
+                Task { await store.refresh(api: state.api) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .sandyTasksChanged)) { _ in
+                Task { await store.refresh(api: state.api) }
+            }
+            .onChange(of: phase) { _, now in
+                if now == .active { Task { await store.refresh(api: state.api) } }
+            }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.every)
+                    if Task.isCancelled { break }
+                    if phase == .active { await store.refresh(api: state.api) }
+                }
+            }
     }
 }
 

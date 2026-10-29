@@ -479,4 +479,6 @@ enum ChatStep {
 extension Notification.Name {
     /// Sandy changed the blocks from chat (a reply, or a reply taken back): the tabs reload.
     static let sandyBlocksChanged = Notification.Name("sandyBlocksChanged")
+    /// A task changed away from the Tasks screen (the server's `{"sync": "tasks"}`).
+    static let sandyTasksChanged = Notification.Name("sandyTasksChanged")
 }
