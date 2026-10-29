@@ -1673,8 +1673,9 @@ others — most by `user_id` or `chat_id`, `web_chat_history` and `sandy_voice_e
 `_id`, `turn_stops` by its `<user>:` prefix — so a deleted account leaves nothing behind.
 Every collection the code opens is either erased there or named in
 `account_delete.NOT_ERASED` with its reason (hardware keys, TTL'd nonces, firmware);
-`tests/test_every_collection_is_erased_or_excused.py` reads the code and fails on a
-collection that is neither. A partial erase answers 500 `partial` with a
+`tests/test_every_collection_is_erased_or_excused.py` reads the code (`db[...]`, `scoped(db, …)`,
+the blocks' `_base.coll(…)`, GridFS) and fails on a collection that is neither; a task's
+`sandy_task_state` and `sandy_task_results` go with the account and with a reset. A partial erase answers 500 `partial` with a
 `message`, keeps the account row, and keeps the photo rows when their GridFS bytes
 could not go (the rows are the way back to them), so asking again carries on from
 what is left; the app shows `account.reset.partial` / `account.delete.partial`.

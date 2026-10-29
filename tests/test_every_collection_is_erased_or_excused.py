@@ -70,6 +70,10 @@ def collections_in_code():
             elif isinstance(node, ast.Call) and getattr(node.func, "id", None) == "scoped" \
                     and len(node.args) >= 2:
                 name = _name(node.args[1], consts, by_module)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                    and node.func.attr == "coll" and getattr(node.func.value, "id", None) == "_base" \
+                    and node.args:
+                name = _name(node.args[0], consts, by_module)   # _base.coll(STATE): scoped too
             elif isinstance(node, ast.Call) and getattr(node.func, "id", None) == "GridFS":
                 for kw in node.keywords:
                     if kw.arg == "collection":
@@ -83,7 +87,8 @@ def collections_in_code():
 def test_the_reader_sees_the_stores():
     found = collections_in_code()
     for known in ("sandy_entries", "sandy_stm", "conversations", "turn_stops",
-                  "sandy_voice_enroll", "sandy_photo_files.files", "sandy_firmware"):
+                  "sandy_voice_enroll", "sandy_photo_files.files", "sandy_firmware",
+                  "sandy_task_state", "sandy_task_results"):
         assert known in found, known
 
 

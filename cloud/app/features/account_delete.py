@@ -69,6 +69,9 @@ _BY_USER: List[str] = [
     "sandy_entries",
     "sandy_items",
     "sandy_schedules",
+    # A task's memory of what it saw, and what it found (`blocks/tasks.py`, `notify`).
+    "sandy_task_state",
+    "sandy_task_results",
     # What was deleted or changed in the blocks, kept seven days for undo.
     "sandy_changes",
     # Chat attachments and the images Sandy drew (bytes inline).
