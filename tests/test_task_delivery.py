@@ -240,3 +240,23 @@ def test_a_way_he_said_is_kept_when_the_model_left_it_out(brain_db, monkeypatch,
     assert _run("task_create", language, confirmed=True, **args)["ok"]
     with active_user_profile_context(A):
         assert tasks.how(tasks.running()[0]) == {"mode": "instant"}
+
+
+# The way he is told is never in what he is told (owner, 30 Oct): «فوراً» leaked into the text.
+@pytest.mark.parametrize("language, words, way_word", [
+    ("ar", "كل ساعة شوفيلي سعر الدهب وبلّغيني فوراً كل ما يتغيّر", "فورا"),
+    ("en", "check gold every hour and tell me right away whenever it changes", "right away"),
+])
+def test_the_way_of_telling_never_reaches_the_message(brain_db, monkeypatch, language, words, way_word):  # noqa: F811
+    from app.brain import task_runner
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
+    monkeypatch.setattr("app.features.research.web_results", lambda q: [{"title": "P1", "url": "u1"}])
+    args = {**MOSTAQL, "instructions": words, "notify_when": "فوراً" if language == "ar" else "right away"}
+    assert _run("task_create", language, confirmed=True, **args)["ok"]
+    with active_user_profile_context(A):
+        [row] = tasks.running()
+    assert tasks.how(row) == {"mode": "instant"}
+    assert way_word not in row["payload"]["notify_when"].replace("ً", "").lower()
+    seen = task_runner._think_messages(row["payload"], {"added": [{"title": "P2", "url": "u2"}]}, {})
+    shown = " ".join(m["content"] for m in seen).replace("ً", "").lower()
+    assert way_word not in shown and "never say how or when" in shown

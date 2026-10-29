@@ -167,6 +167,20 @@ def said_delivery(words: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+# The words of the way he is told, taken out of what the task tells (they are its delivery).
+_WAY_WORDS = re.compile(r"(?:\b(?:و?بلغيني|و?قليلي|و?نبهيني|tell me|notify me|let me know)\s+)?"
+                        r"(?:\bفورا\b|\bفورن\b|right away|straight away|immediately|instantly)",
+                        re.IGNORECASE)
+
+
+def without_way(words: str) -> str:
+    """``words`` without how he is told («وبلّغيني فوراً», «right away»)."""
+    text = re.sub(r"[ًٌٍَُِّْـ]", "", str(words or ""))
+    for a, b in (("أ", "ا"), ("إ", "ا"), ("آ", "ا")):
+        text = text.replace(a, b)
+    return " ".join(_WAY_WORDS.sub(" ", text).split()).strip(" ،,.")
+
+
 def _delivery(args: Dict[str, Any]) -> Dict[str, Any]:
     """His way: the call's, else what his own words in the task ask for, else the default.
     ValueError when the call's cannot be read."""
@@ -257,7 +271,7 @@ def task_create(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         acts = _asks_to_act(f"{instructions} {args.get('notify_when') or ''}")
         return needs_confirmation(lang.say("task_confirm_reads_only" if acts else "task_confirm",
                                            title=title, every=_every(every), how=_how(delivery)))
-    spec = {"instructions": instructions, "notify_when": str(args.get("notify_when") or ""),
+    spec = {"instructions": instructions, "notify_when": without_way(str(args.get("notify_when") or "")),
             "probe": {"tool": check, "args": dict(args.get("check_args") or {})},
             "tools": list(dict.fromkeys([check, *allowed])), "lang": lang.current(),
             "urgent": bool(args.get("urgent")), "delivery": delivery}

@@ -59,11 +59,13 @@ _THINK = (
     "or changed, numbers before and after, paragraphs added or removed. Explain only that; "
     "never name anything that is not in it. Use your tools only if you need more. If nothing in "
     "it is worth telling him, answer exactly NOTHING. Otherwise answer the message to send him: "
-    "short, in {language}, names and his words kept as they are.")
+    "short, in {language}, names and his words kept as they are. Never say how or when he "
+    "is told; the way it reaches him is set apart. Only what changed.")
 _REVIEW = (
     "You check a message before it is sent to the user. The task, in his own words: "
     "{instructions}\nWorth telling him: {notify_when}\nRead the message against the task and "
-    "what changed. If it is wrong, or names anything that did not change, fix it; if it is not worth sending, answer exactly NOTHING. "
+    "what changed. If it is wrong, names anything that did not change, or says how or when he "
+    "is told, fix it; if it is not worth sending, answer exactly NOTHING. "
     "Otherwise answer the message as it should be sent, in {language}, and nothing else.")
 
 
@@ -148,20 +150,24 @@ def _think(doc: Dict[str, Any], spec: Dict[str, Any], diff: Dict[str, Any], befo
 
 
 def _think_messages(spec: Dict[str, Any], diff: Dict[str, Any], before: Dict[str, Any]) -> List[Dict[str, Any]]:
+    from app.brain.tools_tasks import without_way
     language = "English" if spec.get("lang") == lang.EN else "Arabic"
     return [
         {"role": "system", "content": _THINK.format(
-            instructions=spec.get("instructions", ""), notify_when=spec.get("notify_when", ""),
+            instructions=without_way(spec.get("instructions", "")),
+            notify_when=without_way(spec.get("notify_when", "")),
             last=before.get("last_result") or "nothing yet", language=language)},
         {"role": "user", "content": json.dumps({"changed": task_diff.shown(diff)},
                                                ensure_ascii=False, default=str)}]
 
 
 def _review(spec: Dict[str, Any], diff: Dict[str, Any], message: str, uid: str) -> str:
+    from app.brain.tools_tasks import without_way
     language = "English" if spec.get("lang") == lang.EN else "Arabic"
     return _text(background.call("task_review", [
         {"role": "system", "content": _REVIEW.format(
-            instructions=spec.get("instructions", ""), notify_when=spec.get("notify_when", ""),
+            instructions=without_way(spec.get("instructions", "")),
+            notify_when=without_way(spec.get("notify_when", "")),
             language=language)},
         {"role": "user", "content": json.dumps({"changed": task_diff.shown(diff), "message": message},
                                                ensure_ascii=False, default=str)}],
