@@ -1703,7 +1703,8 @@ trail Arabic by more than `LANGUAGE_GAP` (5) points. Baseline: ar 40/41, en 40/4
 two runs at temperature 0.5): ar 41/41, en 41/42, one case of 83 moved (1.2%), about $0.19
 for both. At 0.2 the score was no better (79/83, three moved), so 0.5 stays. After the second
 review's ten fixes (29 Oct, `eval_results/2026-10-29T1409.json`, one run): ar 40/41, en 41/42,
-about $0.09; against the baseline «bulk delete asks then goes» fell, «fact» and «weather · en» rose.
+about $0.09; against the baseline «bulk delete asks then goes» fell, «fact» and «weather · en» rose. After the
+traces' six fixes (`eval_results/2026-10-29T1548.json`): ar 41/41, en 41/42, nothing fell.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
