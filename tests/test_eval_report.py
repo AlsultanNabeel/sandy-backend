@@ -175,3 +175,23 @@ def test_a_run_fails_only_on_the_plans_conditions():
 def test_cases_with_no_answer_are_a_warning_not_a_failure():
     ok, warnings = E._verdict({"ar": (40, 40), "en": (41, 41)}, 0, 83, [], unanswered=["x"])
     assert ok is True and any("x" in w for w in warnings)
+
+
+def test_a_run_may_take_the_responses_api_and_an_effort():
+    a = E._args(["--model", "gpt-6-luna", "--api", "responses", "--reasoning", "medium"])
+    assert (a.api, a.reasoning) == ("responses", "medium")
+    assert (E._args([]).api, E._args([]).reasoning) == ("chat", "low")
+
+
+def test_a_runs_spend_counts_the_reasoning_tokens(monkeypatch):
+    from app import db as appdb
+    from app.features import trace_store
+    d = mongomock.MongoClient().db
+    d[trace_store.COLLECTION].insert_many([
+        {"tokens_in": 10, "tokens_out": 5, "tokens_reasoning": 3, "cost_usd": 0.1},
+        {"tokens_in": 10, "tokens_out": 5, "cost_usd": 0.1}])
+    appdb.configure(d)
+    try:
+        assert E._spent()["tokens_reasoning"] == 3
+    finally:
+        appdb.reset()

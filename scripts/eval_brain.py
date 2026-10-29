@@ -60,6 +60,10 @@ def _args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--repeat", type=int, default=1, help="run every case this many times")
     p.add_argument("--temperature", type=float,
                    help="the brain's temperature for this run (default: model.TEMPERATURE)")
+    p.add_argument("--api", choices=("chat", "responses"), default="chat",
+                   help="chat completions, or the Responses API (`brain/responses.py`) on --model")
+    p.add_argument("--reasoning", default="low",
+                   help="the Responses API's reasoning effort (default: low)")
     p.add_argument("--save", action="store_true",
                    help="save the result under eval_results/ and compare it with the baseline")
     return p.parse_args(argv)
@@ -71,7 +75,13 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / ".env", override=True)
-    if ARGS.model:
+    if ARGS.api == "responses":
+        # The real switch, on for this run's account: the turn takes the path a user would.
+        os.environ["SANDY_RESPONSES_DEPLOYMENT"] = ARGS.model or os.environ.get(
+            "SANDY_RESPONSES_DEPLOYMENT", "")
+        os.environ["SANDY_REASONING_EFFORT"] = ARGS.reasoning
+        os.environ["SANDY_FLAGS"] = json.dumps({"responses_api": ["eval"]})
+    elif ARGS.model:
         os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT"] = ARGS.model
 
 import mongomock  # noqa: E402
@@ -219,9 +229,10 @@ def _args_check(want: Dict[str, Dict[str, Any]], calls: List[Tuple[str, Dict[str
 def _spent() -> Dict[str, Any]:
     """Tokens and dollars of every turn in this database, from its traces."""
     rows = list(appdb.get_db()[trace_store.COLLECTION].find(
-        {}, {"tokens_in": 1, "tokens_out": 1, "cost_usd": 1}).limit(10_000))
+        {}, {"tokens_in": 1, "tokens_out": 1, "tokens_reasoning": 1, "cost_usd": 1}).limit(10_000))
     return {"tokens_in": sum(int(r.get("tokens_in") or 0) for r in rows),
             "tokens_out": sum(int(r.get("tokens_out") or 0) for r in rows),
+            "tokens_reasoning": sum(int(r.get("tokens_reasoning") or 0) for r in rows),
             "usd": sum(float(r.get("cost_usd") or 0) for r in rows)}
 
 
@@ -351,13 +362,16 @@ def main() -> int:
 
     if ARGS.temperature is not None:
         brain_model.TEMPERATURE = ARGS.temperature
-    model = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.environ.get("OPENAI_MODEL")
+    model = (os.environ.get("SANDY_RESPONSES_DEPLOYMENT") if ARGS.api == "responses" else None) \
+        or os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.environ.get("OPENAI_MODEL")
     cases = [c for c in CASES if ARGS.only in c["name"]]
     repeat = max(ARGS.repeat, 1)
-    print(f"model: {model} at temperature {brain_model.TEMPERATURE} — {len(cases)} cases × {repeat}\n")
+    how = (f"on the Responses API, reasoning {ARGS.reasoning}" if ARGS.api == "responses"
+           else f"at temperature {brain_model.TEMPERATURE}")
+    print(f"model: {model} {how} — {len(cases)} cases × {repeat}\n")
     runs: Dict[str, List[bool]] = {}
     unanswered: List[str] = []
-    seconds, spent = 0.0, {"tokens_in": 0, "tokens_out": 0, "usd": 0.0}
+    seconds, spent = 0.0, {"tokens_in": 0, "tokens_out": 0, "tokens_reasoning": 0, "usd": 0.0}
     for case in cases:
         for _ in range(repeat):
             r = _run_answered(case)
@@ -382,7 +396,8 @@ def main() -> int:
     messages = repeat * sum(len(c["steps"]) for c in cases)
     print(f"\n{passed}/{len(scored)} passed ({100 * passed // max(len(scored), 1)}%), "
           f"average {seconds / max(messages, 1):.1f}s a message")
-    print(f"cost: ${spent['usd']:.4f} ({spent['tokens_in']} tokens in, {spent['tokens_out']} out)")
+    print(f"cost: ${spent['usd']:.4f} ({spent['tokens_in']} tokens in, {spent['tokens_out']} out, "
+          f"{spent['tokens_reasoning']} of them reasoning)")
     langs = {c["name"]: c.get("lang", "ar") for c in cases}
     scores = _by_language(outcome, langs)
     for language, (p, t) in sorted(scores.items()):
@@ -400,6 +415,7 @@ def main() -> int:
         print(f"warning — {warning}")
     if ARGS.save:
         result = {"when": datetime.now().strftime("%Y-%m-%dT%H:%M"), "model": model,
+                  "api": ARGS.api, **({"reasoning": ARGS.reasoning} if ARGS.api == "responses" else {}),
                   "repeat": repeat, "temperature": brain_model.TEMPERATURE, "passed": passed,
                   "total": len(scored), "cases": outcome,
                   "unanswered": sorted(set(unanswered)),
