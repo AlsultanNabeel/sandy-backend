@@ -123,3 +123,18 @@ def test_what_only_it_reads_never_reaches_chat_completions(monkeypatch):
         choices=[NS(message=NS(content="ok", tool_calls=None))]))
     model.complete([{"role": "assistant", "content": None, "tool_calls": [], "_items": [{"x": 1}]}], [])
     assert "_items" not in seen[0][0]
+
+
+# Behind its switch (`responses_api`), on for the owner's account first: everyone else stays
+# on chat completions until he says so.
+@pytest.mark.parametrize("user, path", [("userA", "responses"), ("userB", "chat")])
+def test_the_switch_picks_the_path_by_account(brain_db, monkeypatch, user, path):  # noqa: F811
+    monkeypatch.setenv("SANDY_FLAGS", '{"responses_api": ["userA"]}')
+    asked = []
+    monkeypatch.setattr(responses, "complete",
+                        lambda m, t, on_text=None: asked.append("responses") or model.Reply(text="ok"))
+    monkeypatch.setattr(model, "complete",
+                        lambda m, t, on_text=None: asked.append("chat") or model.Reply(text="ok"))
+    with active_user_profile_context(A):
+        loop.run_turn("hello there", user_id=user, chat_id=user, source="web")
+    assert asked and set(asked) == {path}

@@ -143,6 +143,16 @@ def _call(messages, tools, on_text):
     return _reply(response)
 
 
+def for_user(user_id: str) -> Callable[..., Optional[Reply]]:
+    """The model step for this account's turn: this path where its switch is on, else chat
+    completions. Called at the turn, so the step is looked up then (and a test's stand-in is)."""
+    from app.utils import flags
+
+    if flags.on(SWITCH, user_id):
+        return lambda messages, tools, on_text=None: complete(messages, tools, on_text)
+    return lambda messages, tools, on_text=None: model.complete(messages, tools, on_text)
+
+
 def complete(messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
              on_text: Optional[Callable[[str], None]] = None) -> Optional[Reply]:
     """One model step on the Responses API; on the chat completions path when it fails."""

@@ -241,7 +241,9 @@ sealed (`include: reasoning.encrypted_content`) and is handed back with its tool
 next step (`Reply.items`, the assistant message's `_items`, stripped before chat completions).
 Its own output limit (`responses.MAX_OUTPUT_TOKENS`, 2000: reasoning counts against it), effort
 `SANDY_REASONING_EFFORT` (low), no temperature, its own breaker; a failure goes on on the chat
-completions chain above. Unset `SANDY_RESPONSES_DEPLOYMENT` or the switch and it is off. Text streams through thread-local hooks
+completions chain above. The switch is read per account at
+the turn (`responses.for_user`, from `loop.run_turn`): on for the owner's account first, every
+other account on chat completions. Unset `SANDY_RESPONSES_DEPLOYMENT` or the switch and it is off. Text streams through thread-local hooks
 (`model.set_stream_hooks`), cumulative, which `/api/agent/stream` sets on the
 thread that runs the turn.
 
