@@ -32,8 +32,6 @@ _ACTS_AR = ("ادفعي", "سددي", "حولي", "اشتري", "انشري", "�
 _ACTS_EN = ("pay", "pays", "paying", "buy", "purchase", "transfer", "transfers", "publish",
             "tweet", "delete", "remove", "send money", "on my behalf", "in my name", "post on",
             "post to", "post it", "send an email", "send email")
-# How soon a new task runs first, unless the user says.
-FIRST_RUN = timedelta(minutes=1)
 
 _S = {"type": "string"}
 # How his results are emailed: set only from his words, never guessed (`tasks.clean_delivery`).
@@ -263,13 +261,20 @@ def task_create(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             "probe": {"tool": check, "args": dict(args.get("check_args") or {})},
             "tools": list(dict.fromkeys([check, *allowed])), "lang": lang.current(),
             "urgent": bool(args.get("urgent")), "delivery": delivery}
+    # It runs once now (`task_runner.start`), so its next run is a whole interval away.
     first = _minutes(args.get("first_in_minutes"))
-    at = W.now_utc() + (timedelta(minutes=first) if first else FIRST_RUN)
-    tid = tasks.add(title, spec, every_minutes=every, first_at=at)
+    tid = tasks.add(title, spec, every_minutes=every,
+                    first_at=W.now_utc() + timedelta(minutes=first or every))
     if not tid:
         return refused("not saved")
-    return {"ok": True, "id": tid,
-            "reply": lang.say("task_saved", title=title, every=_every(every), how=_how(delivery))}
+    from app.brain import task_diff, task_runner
+    found = task_runner.start(tid, ctx.user_id)
+    if found is None:
+        reply = lang.say("task_started_blind", title=title, every=_every(every))
+    else:
+        reply = lang.say("task_started", title=title, every=_every(every),
+                         state=task_diff.describe(found), how=_how(delivery))
+    return {"ok": True, "id": tid, "reply": reply}
 
 
 def _rows() -> List[Dict[str, Any]]:

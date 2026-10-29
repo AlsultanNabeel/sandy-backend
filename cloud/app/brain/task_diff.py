@@ -135,6 +135,32 @@ def template(diff: Dict[str, Any]) -> Optional[str]:
     return "\n".join(lines)
 
 
+# How many names the state now shows before «and more».
+_SHOWN = 5
+
+
+def describe(found: Any) -> str:
+    """How things are now, in a line of his language: what a task saw when it started."""
+    rows = [r for v in _rows(found).values() for r in v]
+    if rows:
+        ticked = all("done" in r for r in rows)
+        open_rows = [r for r in rows if not r.get("done")] if ticked else rows
+        names = [_name(r) for r in open_rows if _name(r)]
+        listed = lang.say("sep").join(names[:_SHOWN])
+        if len(names) > _SHOWN:
+            listed = lang.say("state_more", names=listed)
+        if ticked:
+            return lang.say("state_list", open=len(open_rows), done=len(rows) - len(open_rows),
+                            names=listed)
+        return lang.say("state_rows", n=len(rows), names=listed)
+    numbers = _numbers(found)
+    if numbers:
+        return lang.say("state_numbers", pairs=lang.say("sep").join(
+            f"{k} {v:g}" for k, v in list(numbers.items())[:_SHOWN]))
+    text = _paragraphs(_texts(found))
+    return text[0][:160] if text else lang.say("state_nothing")
+
+
 def _plain(text: str) -> str:
     return re.sub(r"[ًٌٍَُِّْـ]", "", str(text or "")).lower()
 

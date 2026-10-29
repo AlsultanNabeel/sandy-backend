@@ -141,3 +141,44 @@ def test_a_simple_list_is_told_by_a_template_in_his_language(language, said):
     d = task_diff.compute({"rows": []}, {"rows": [{"id": "3", "list": "shopping", "text": "رمان", "done": False}]})
     with lang.using(language):
         assert task_diff.template(d) == said
+
+
+# ── a task starts at once on his yes (owner, 30 Oct): one run keeps where it starts, no email,
+# and her reply says it started and how things are now ──
+
+@pytest.mark.parametrize("language, started", [("ar", "بلّشت أراقب"), ("en", "I've started watching")])
+def test_a_task_starts_on_its_yes_with_the_state_now_and_no_email(world, language, started):
+    from app.brain import lang, tools
+    from app.brain.ctx import TurnCtx
+    args = {"title": "التسوق", "instructions": "تابعي قائمة التسوق", "every_minutes": 60,
+            "check_tool": "recall", "check_args": {"list": "shopping"}}
+    with active_user_profile_context(A), lang.using(language):
+        ctx = TurnCtx(user_id="userA")
+        ctx.confirmed = True
+        out = tools.execute("task_create", args, ctx)
+        [row] = tasks.running()
+        saw = tasks.state(row["id"])
+    assert out["ok"] and started in out["reply"] and "21" in out["reply"] and "11" in out["reply"]
+    assert "موز" in out["reply"] and "تفاح" not in out["reply"]            # the open ones named
+    assert saw["last_seen"]["rows"] and saw["fingerprint"] and world.sent == [] and world.asked == []
+    assert row["fire_at"].replace(tzinfo=timezone.utc) > datetime.now(timezone.utc) + timedelta(minutes=55)
+    _run(row)                                       # nothing changed since: nothing told
+    with active_user_profile_context(A):
+        items.add("shopping", "رمان")
+    _run(row)
+    told = "انضاف «رمان» لـ«shopping»" if language == "ar" else "«رمان» was added to «shopping»"
+    assert [b for _, b in world.sent] == [told]
+
+
+def test_a_check_that_cannot_read_on_its_yes_still_saves_and_says_so(world, monkeypatch):
+    from app.brain import lang, tools
+    from app.brain.ctx import TurnCtx
+    monkeypatch.setattr("app.features.research.web_results", lambda q: (_ for _ in ()).throw(RuntimeError("down")))
+    args = {"title": "Gold", "instructions": "check gold", "every_minutes": 60,
+            "check_tool": "web_search", "check_args": {"query": "gold"}}
+    with active_user_profile_context(A), lang.using("en"):
+        ctx = TurnCtx(user_id="userA")
+        ctx.confirmed = True
+        out = tools.execute("task_create", args, ctx)
+        assert out["ok"] and len(tasks.running()) == 1
+    assert "couldn't read" in out["reply"] and world.sent == []

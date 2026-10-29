@@ -32,6 +32,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAIError
+from pymongo.errors import PyMongoError
 
 from app import notify
 from app.blocks import tasks
@@ -190,6 +191,22 @@ def _failed(doc: Dict[str, Any], before: Dict[str, Any], error: str) -> None:
         tasks.pause(_id(doc))
         notify.deliver(_id(doc), str(doc.get("text") or ""),
                        lang.say("task_stopped", title=str(doc.get("text") or "")), lang.current())
+
+
+def start(task_id: str, uid: str) -> Any:
+    """On his yes: one read now, kept as where the task starts (nothing told, no email); what
+    it read, or None when the check could not read (its first run at its time starts it)."""
+    row = tasks.get(task_id)
+    spec = dict((row or {}).get("payload") or {})
+    tool = str((spec.get("probe") or {}).get("tool") or "")
+    try:
+        found = _kept(_probe(spec, TurnCtx(user_id=uid, source="app", whole=True)))
+    except (ValueError, RuntimeError, OSError, KeyError, PyMongoError) as exc:  # the task stands
+        logger.warning("[tasks] task %s: could not read at its start: %s", task_id, exc)
+        return None
+    tasks.save_state(task_id, {"fingerprint": fingerprint(found, tool), "last_seen": found,
+                               "failures": 0})
+    return found
 
 
 def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
