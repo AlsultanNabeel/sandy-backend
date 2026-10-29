@@ -136,7 +136,9 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     action = str(args.get("action", "")).strip()
     later: List[str] = []
     if args.get("by") in (None, ""):
-        devices, later = takeback.now_or_later(ctx, devices, action, args.get("value", ""))
+        devices, later, refused_timer = takeback.now_or_later(ctx, devices, action, args.get("value", ""))
+        if refused_timer and not devices:
+            return takeback.timer_refused(refused_timer)
         if not devices and not missing:
             return takeback.left_for_later()
     done, lines = 0, []

@@ -12,6 +12,7 @@ conversation. A step checks any of:
   english                        the reply is in English
   args                           {tool: {arg: value}}: one call of that tool carries these
                                  values (a word of text is found inside the call's text)
+  timer                          a timed device command he asked for: {device, value} as saved
   task / no_task                 a running task (`check`: its check tool; `every`; `paused`;
                                  `delivery`: how its results are emailed, as saved),
                                  or none at all (the setup may hold one: {"task": {...}})
@@ -128,7 +129,8 @@ CASES = [
         {"say": "طفي كل إشي بالمطبخ", "tools": ["device_control"],
          "args": {"device_control": {"action": "off"}}}]},
     {"name": "device later", "steps": [
-        {"say": "طفي المكيف بعد ساعة", "tools": ["schedule"], "not_tools": ["device_control"]}]},
+        {"say": "طفي المكيف بعد ساعة", "tools": ["schedule"], "not_tools": ["device_control"],
+         "timer": {"device": "bedroom_ac", "value": "off"}}]},
     {"name": "device question", "steps": [
         {"say": "المكيف شغال؟", "tools": ["device_state"], "not_tools": ["device_control"]}]},
     {"name": "scene", "steps": [
@@ -296,7 +298,7 @@ EN_CASES = [
     _en("device room", [{"say": "turn off everything in the kitchen", "tools": ["device_control"],
                          "args": {"device_control": {"action": "off"}}}]),
     _en("device later", [{"say": "turn off the AC in an hour", "tools": ["schedule"],
-                          "not_tools": ["device_control"]}]),
+                          "not_tools": ["device_control"], "timer": {"device": "bedroom_ac", "value": "off"}}]),
     _en("device question", [{"say": "is the AC on?", "tools": ["device_state"],
                              "not_tools": ["device_control"]}]),
     _en("scene", [{"say": "I'm going to sleep, set up the room", "any_tools": ["scene_apply", "device_control"],

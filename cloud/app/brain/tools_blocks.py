@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -595,16 +596,32 @@ def _anchor_time(row_id: str) -> Optional[Any]:
     return W.aware_utc(item["due"]) if item and item.get("due") else None
 
 
-def _device_timer(args: Dict[str, Any]) -> Dict[str, Any]:
+# A timed command left out by the model is read from his own words: off before on, so
+# «طفّي المكيف» is never read as «شغّل».
+_OFF = re.compile(r"(\bطف|\bاطف|\bسكر|\bوقف|\bturn(?:ed)? off\b|\bswitch off\b|\boff\b)")
+_ON = re.compile(r"(\bشغل|\bولع|\bافتح|\bturn(?:ed)? on\b|\bswitch on\b|\bon\b)")
+
+
+def _command_in(words: str) -> str:
+    text = re.sub(r"[ًٌٍَُِّْـ]", "", str(words or "").lower())
+    return "off" if _OFF.search(text) else "on" if _ON.search(text) else ""
+
+
+def _device_timer(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     """«طفّي المكيف بعد ساعة»: the device and the value, checked now, sent by the runner
-    at the time (a `scene` row marked `asked`, so a scene does not cancel it)."""
+    at the time (a `scene` row marked `asked`, so a scene does not cancel it). With no value,
+    the command his words say (`_command_in`), never a guess."""
     from app.brain.tools_world import _resolve_device
     from app.features.device_store import command_payload
 
-    device = _resolve_device(str(args.get("device") or ""))
+    asked = str(args.get("device") or "")
+    takeback.tried_for_later(ctx, asked.strip().lower())
+    device = _resolve_device(asked)
     if device is None:
         return refused("no device by that name")
-    value = str(args.get("value") or args.get("action") or "").strip()
+    takeback.tried_for_later(ctx, device["name"])
+    value = str(args.get("value") or args.get("action") or "").strip() or \
+        _command_in(f"{args.get('text') or ''} {ctx.message}")
     res = command_payload(device, value, value)
     if not res.get("ok"):
         return refused("that device does not take this value", allowed=res.get("allowed"))
@@ -614,6 +631,14 @@ def _device_timer(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    out = _schedule(args, ctx)
+    if args.get("device") and not out.get("ok") and not out.get("reply"):
+        # A timed device command that was not set says so; the device is left alone this turn.
+        out = {**out, "reply": lang.say("timer_failed", label=str(args.get("device")))}
+    return out
+
+
+def _schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, text = str(args.get("kind") or "reminder"), str(args.get("text") or "").strip()
     if kind == "task":
         return refused("a task is made with task_create, after the user's yes")
@@ -622,7 +647,7 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         # Through a Focus only when he asked for that, never by default.
         payload = {"important": True, **({"break_focus": True} if args.get("break_focus") else {})}
     if args.get("device"):
-        timer = _device_timer(args)
+        timer = _device_timer(args, ctx)
         if not timer.get("kind"):
             return timer
         kind, text, payload = timer["kind"], timer["text"], timer["payload"]

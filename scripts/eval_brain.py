@@ -111,8 +111,24 @@ def _device_line(a: Dict[str, Any]) -> str:
     return lang.say("device_set", label=target, value=a.get("value") or action)
 
 
+def _device_stand_in(a: Dict[str, Any], c: Any) -> Dict[str, Any]:
+    """Nothing is sent, but the turn's own guards hold as in `tools_world.device_control`: a
+    device set for later, or whose timer was refused, is not switched now (`takeback`)."""
+    from app.brain import takeback
+    from app.brain.tools_world import _resolve_device
+    d = _resolve_device(str(a.get("device") or ""))
+    if d is not None:
+        now, later, refused_timer = takeback.now_or_later(c, [d], str(a.get("action") or ""),
+                                                          a.get("value", ""))
+        if refused_timer:
+            return takeback.timer_refused(refused_timer)
+        if later:
+            return takeback.left_for_later()
+    return {"ok": True, "reply": _device_line(a)}
+
+
 _STAND_INS = {
-    "device_control": lambda a, c: {"ok": True, "reply": _device_line(a)},
+    "device_control": _device_stand_in,
     "device_state": lambda a, c: {"ok": True, "devices": [{**d, "state": "off", "connected": True} for d in DEVICES]},
     "scene_apply": lambda a, c: {"ok": True, "reply": lang.say("scene_applied", label=a.get("name", ""), tail=" 🏠")},
     "room_restore": lambda a, c: {"ok": True, "reply": lang.say("restored", tail=" 🏠")},
@@ -202,6 +218,14 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
             bad.append(f"ما انحفظ إشي من نوع {want['kind']}")
         elif "amount" in want and (rows[0].get("data") or {}).get("amount") != want["amount"]:
             bad.append(f"المبلغ {(rows[0].get('data') or {}).get('amount')} مش {want['amount']}")
+    if "timer" in step:
+        from app.blocks import schedules
+        want = step["timer"]
+        rows = [r for r in schedules.list_schedules("scene", status="pending")
+                if (r.get("payload") or {}).get("asked")]
+        if not any((r["payload"].get("device"), r["payload"].get("value")) == (want["device"], want["value"])
+                   for r in rows):
+            bad.append(f"ما انجدول {want['device']} → {want['value']} ({[r.get('payload') for r in rows]})")
     if "task" in step or step.get("no_task"):
         from app.blocks import tasks
         running = tasks.running()
@@ -389,7 +413,10 @@ def _save(result: Dict[str, Any], folder: Path = RESULTS) -> Tuple[Path, Optiona
 def main() -> int:
     for name, fn in _STAND_INS.items():
         tools.HANDLERS[name] = fn
-    device_store.list_devices = lambda: list(DEVICES)
+    # His devices as switches, read where the tools read them (a timer checks its command).
+    known = [{**d, "control_type": "switch"} for d in DEVICES]
+    device_store.list_devices = lambda: list(known)
+    device_store.get_device = lambda name: next((dict(d) for d in known if d["name"] == name), None)
     # Embeddings would cost a call per entry and find nothing in a fresh database.
     entries.embed_text = lambda text: None
 

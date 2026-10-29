@@ -34,6 +34,11 @@ def corrected(ctx: TurnCtx, rows: Iterable[Dict[str, Any]]) -> None:
     ctx.corrected.update(str(r["id"]) for r in rows)
 
 
+def tried_for_later(ctx: TurnCtx, device: str) -> None:
+    """A command for later was asked for this device this turn, whether it was set or not."""
+    ctx.timer_tried.add(device)
+
+
 def set_for_later(ctx: TurnCtx, device: str, command: str) -> None:
     """A device command this turn set for later: the device's name and what it will send."""
     ctx.for_later.add((device, command))
@@ -52,23 +57,36 @@ def not_corrected(name: str, picked: Dict[str, Any], ctx: TurnCtx) -> Dict[str, 
 
 
 def now_or_later(ctx: TurnCtx, devices: List[Dict[str, Any]], action: str, value: Any):
-    """(devices to switch now, labels left for later): a device whose command this turn set
-    for later is not switched now, unless the message asked for it now as well («… now and
-    again at 11pm»)."""
+    """(devices to switch now, labels left for later, labels whose timer was refused): a device
+    whose command this turn set for later is not switched now, unless the message asked for it
+    now as well («… now and again at 11pm»); one whose timer this turn was refused is not
+    switched at all, so «turn off the AC in an hour» never turns it off now."""
     from app.features.device_store import command_payload
 
-    if not ctx.for_later or _asked_now(ctx.message):
-        return devices, []
-    now, later = [], []
+    if not (ctx.for_later or ctx.timer_tried) or _asked_now(ctx.message):
+        return devices, [], []
+    now, later, refused_timer = [], [], []
+    set_later = {name for name, _ in ctx.for_later}
     for d in devices:
         res = command_payload(d, action, value)
+        label = d.get("label") or d["name"]
         if res.get("ok") and (d["name"], res["payload"]) in ctx.for_later:
-            later.append(d.get("label") or d["name"])
+            later.append(label)
+        elif ({d["name"], label.strip().lower()} & ctx.timer_tried) and d["name"] not in set_later:
+            refused_timer.append(label)
         else:
             now.append(d)
-    if later:
-        logger.warning("[brain] tool device_control: %d device(s) left for later", len(later))
-    return now, later
+    if later or refused_timer:
+        logger.warning("[brain] tool device_control: %d left for later, %d whose timer was refused",
+                       len(later), len(refused_timer))
+    return now, later, refused_timer
+
+
+def timer_refused(labels: List[str]) -> Dict[str, Any]:
+    from app.brain import lang
+    return refused("not sent now: its command for later was refused this turn; tell the user "
+                   "it could not be set, and switch nothing now",
+                   reply=lang.say("timer_failed", label=lang.say("sep").join(labels)))
 
 
 def left_for_later() -> Dict[str, Any]:

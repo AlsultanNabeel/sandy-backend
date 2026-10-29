@@ -130,3 +130,39 @@ def test_a_device_set_for_later_by_its_label_is_not_switched_now_by_its_name(
                           text_reply("ok"))
     _turn(model, message)
     assert sent == []
+
+
+# «طفّي المكيف بعد ساعة» on the real model (review, 30 Oct 2026): it scheduled the AC with no
+# command, the schedule was refused, and it switched the AC off at once, saying «طفّيت المكيف».
+# The command comes from his own words when the model leaves it out; a timer refused in a turn
+# leaves the device alone in that turn; and she says she could not.
+@pytest.mark.parametrize("message, text", [("طفّي المكيف بعد ساعة", "طفي المكيف"),
+                                           ("turn off the AC in an hour", "turn off the AC")])
+def test_a_timer_with_no_command_takes_it_from_his_words(brain_db, sent, message, text):  # noqa: F811
+    from app.blocks import schedules
+    model = ScriptedModel(tools_reply(call("schedule", "c1", kind="scene", text=text,
+                                           in_minutes=60, device="ac")),
+                          text_reply("ok"))
+    _turn(model, message)
+    assert _result(model, "c1")["ok"] and sent == []
+    with active_user_profile_context(A):
+        [row] = [r for r in schedules.list_schedules("scene") if (r.get("payload") or {}).get("asked")]
+    assert row["payload"]["device"] == "ac" and row["payload"]["value"] == "off"
+
+
+@pytest.mark.parametrize("message, language", [("طفّي المكيف بعد ساعة", "ar"),
+                                               ("turn off the AC in an hour", "en")])
+def test_a_refused_timer_never_switches_the_device_now_and_says_so(brain_db, sent, message, language):  # noqa: F811
+    from app.brain import lang
+    model = ScriptedModel(tools_reply(call("schedule", "c1", kind="scene", text="AC",
+                                           in_minutes=60, device="ac", value="explode")),
+                          tools_reply(call("device_control", "c2", device="ac", action="off")),
+                          text_reply("طفّيت المكيف ✅" if language == "ar" else "I turned off the AC ✅"))
+    state = _turn(model, message)
+    assert sent == []
+    assert not _result(model, "c1")["ok"]
+    refusal = json.loads(next(m for m in model.seen[2] if m.get("tool_call_id") == "c2")["content"])
+    assert not refusal["ok"]
+    reply = state["final_response"]
+    said = lang.PHRASES["timer_failed"][language].split("{")[0].strip()
+    assert said in reply and ("طفّيت" not in reply and "turned off" not in reply)

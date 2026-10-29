@@ -174,6 +174,8 @@ PHRASES = {
     "scheduled": {"ar": "تمام، بذكّرك «{text}» {time} ⏰", "en": "OK, I'll remind you «{text}» at {time} ⏰"},
     "scheduled_alarm": {"ar": "تمام، حطّيت منبه «{text}» {time} ⏰", "en": "OK, alarm «{text}» set for {time} ⏰"},
     "scheduled_scene": {"ar": "تمام، بعمل «{text}» {time} ⏰", "en": "OK, I'll do «{text}» at {time} ⏰"},
+    "timer_failed": {"ar": "ما قدرت أجدول «{label}» لبعدين، وما غيّرت إشي هلّق.",
+                     "en": "I couldn't schedule «{label}» for later, and I didn't change anything now."},
     "undo_nothing": {"ar": "ما في إشي غيّرته بآخر أسبوع لأرجّعه.",
                      "en": "There's nothing I changed in the last week to put back."},
     "undo_not_found": {"ar": "ما لقيت «{said}» بين اللي غيّرته.",

@@ -31,6 +31,7 @@ _CLAIMS: Dict[str, Tuple[str, ...]] = {
     "edit": ("عدلت", "غيرت", "اتعدل", "اتعدلت"),
     "add": ("ضفت", "اضفت", "انضاف", "انضافت", "سجلت", "حطيت"),
     "done": ("تم",),
+    "switch": ("طفيت", "اطفيت", "شغلت", "ولعت"),
 }
 # The same claims in English, whole words.
 _CLAIMS_EN: Dict[str, Tuple[str, ...]] = {
@@ -39,6 +40,7 @@ _CLAIMS_EN: Dict[str, Tuple[str, ...]] = {
     "edit": ("changed", "updated", "edited", "renamed", "moved", "rescheduled"),
     "add": ("added", "saved", "created", "scheduled", "logged"),
     "done": ("done",),
+    "switch": ("switched",),
 }
 # What says it did not happen, or not yet, when it is the verb's own: «I haven't deleted»,
 # «it will be added», «nothing was removed». Read back from the verb through `_VERB_EN` only,
@@ -70,6 +72,7 @@ BACKED_BY: Dict[str, Set[str]] = {
     "cancel": {"schedule_cancel", "undo", "confirm"},
     "edit": {"list_update", "log_update", "schedule_update", "list_add", "undo", "confirm"},
     "add": {"list_add", "remember", "schedule", "undo"},
+    "switch": {"device_control", "scene_apply", "room_restore", "confirm"},
 }
 _ANY = "done"
 
@@ -120,6 +123,8 @@ def claims(text: str) -> Set[str]:
         english = _english(clause)
         for i, w in enumerate(english):
             kind = next((k for k, forms in _CLAIMS_EN.items() if w in forms), None)
+            if w == "turned" and english[i + 1:i + 2] in (["on"], ["off"]):
+                kind = "switch"
             if kind and not _negated(english, i, _NOT_EN, _VERB_EN):
                 found.add(kind)
     return found

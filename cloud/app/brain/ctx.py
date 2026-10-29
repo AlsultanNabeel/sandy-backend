@@ -29,6 +29,8 @@ class TurnCtx:
     # tools resolved them: what a later call of the same turn may not take back (`takeback`).
     corrected: Set[str] = field(default_factory=set)
     for_later: Set[Tuple[str, str]] = field(default_factory=set)
+    # The devices a command for later was asked for this turn, set or refused (`takeback`).
+    timer_tried: Set[str] = field(default_factory=set)
 
 
 def needs_confirmation(summary: str, ids: Optional[List[str]] = None) -> Dict[str, Any]:
