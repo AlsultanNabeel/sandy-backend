@@ -120,7 +120,7 @@ struct CompleteTaskIntent: LiveActivityIntent {
             WidgetTaskCache.restore(removed.task, at: removed.index)
         }
         // ويدجت ساندي الأساسي يحدّث عدّاده كمان.
-        await WidgetCenter.shared.reloadAllTimelines()
+        WidgetCenter.shared.reloadAllTimelines()
         return .result()
     }
 
