@@ -447,3 +447,20 @@ def test_a_rewrite_that_claims_a_write_is_checked_again(brain_db, message, first
                                                         rewrite, language):
     model = ScriptedModel(text_reply(first), text_reply(rewrite))
     assert _turn(model, message)["final_response"] == lang.PHRASES["nothing_done"][language]
+
+
+# What fell in English on 29 Oct 2026: «what's the weather like tomorrow?» asked for a city
+# instead of calling the tool; «no, I meant 60 not 50» updated the row and deleted it in the
+# same step. The tools say it in both languages.
+def test_the_weather_tool_is_called_without_a_city_in_both_languages():
+    from app.brain import tools
+    spec = next(t for t in tools.openai_tools() if t["function"]["name"] == "weather")["function"]
+    said = spec["description"] + spec["parameters"]["properties"]["city"]["description"]
+    assert "ما تسألي" in said and "never ask" in said
+
+
+def test_a_correction_is_one_update_never_a_delete_in_both_languages():
+    from app.brain import context, tools
+    spec = next(t for t in tools.openai_tools() if t["function"]["name"] == "log_update")["function"]
+    assert "I meant 60 not 50" in spec["description"] and "ما تحذفي" in spec["description"]
+    assert "I meant 60 not 50" in context._RULES

@@ -90,7 +90,10 @@ def _schemas() -> List[Dict[str, Any]]:
         {"name": "list_delete", "description": "احذفي عنصر أو كم عنصر من قائمة («شيلي الحليب»)؛ خدي الـ id من «وضعه هلأ».",
          "parameters": _obj({**gone, "list": _list_enum(), "project": _S}, [])},
         {"name": "log_update",
-         "description": "صحّحي إشي بالسجلّ (مصروف، معلومة عنه...) (للحذف log_delete)؛ خدي الـ id من «سجّل اليوم» أو «معلومات بتعرفيها»، والنص بس لو مش ظاهر. بلا id ولا نص: آخر واحد من النوع.",
+         "description": ("صحّحي إشي بالسجلّ (مصروف، معلومة عنه...) (للحذف log_delete)؛ خدي الـ id من "
+                         "«سجّل اليوم» أو «معلومات بتعرفيها»، والنص بس لو مش ظاهر. بلا id ولا نص: آخر "
+                         "واحد من النوع. التصحيح («لا قصدي ستين مش خمسين»، «no, I meant 60 not 50») "
+                         "log_update وحدة بس، وما تحذفي السطر اللي صحّحتيه."),
          "parameters": _obj({**target, "kind": {**_S, "description": "نوع السجلّ (اختياري)"},
                              "text": _S, "amount": {"type": "number"}, "data": LOG_DATA}, [])},
         {"name": "log_delete",
@@ -142,7 +145,9 @@ def _schemas() -> List[Dict[str, Any]]:
          "parameters": _obj({}, [])},
         {"name": "web_search", "description": "ابحثي بالويب عن أخبار أو معلومة بتتغيّر.",
          "parameters": _obj({"query": _S}, ["query"])},
-        {"name": "weather", "description": "الطقس لمدينة.",
+        {"name": "weather", "description": ("الطقس لمدينة. بلا مدينة نادي الأداة فاضية وما تسألي عن "
+                                            "المدينة («كيف الجو بكرا؟»، «what's the weather like "
+                                            "tomorrow?»): the user's city is saved; never ask which one."),
          "parameters": _obj({"city": {**_S, "description": "فاضية = مدينته المحفوظة"}}, [])},
         {"name": "image", "description": "ولّدي صورة من وصف.",
          "parameters": _obj({"prompt": _S}, ["prompt"])},
