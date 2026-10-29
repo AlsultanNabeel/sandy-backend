@@ -17,7 +17,7 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-PRICES_UPDATED = date(2026, 10, 28)
+PRICES_UPDATED = date(2026, 10, 29)
 
 PRICES: Dict[str, Dict[str, float]] = {
     "gpt-4.1": {"in": 2.00, "cached": 0.50, "out": 8.00},
@@ -25,8 +25,16 @@ PRICES: Dict[str, Dict[str, float]] = {
     "gpt-4.1-nano": {"in": 0.10, "cached": 0.025, "out": 0.40},
     "gpt-4o": {"in": 2.50, "cached": 1.25, "out": 10.00},
     "gpt-4o-mini": {"in": 0.15, "cached": 0.075, "out": 0.60},
+    # Azure Global Standard, read from an outside page, not Microsoft's (see UNCONFIRMED).
+    "gpt-6-luna": {"in": 0.10, "cached": 0.01, "out": 0.50},
     "gemini-2.5-flash-native-audio": {"in": 3.00, "cached": 0.75, "out": 12.00},
     "gemini-3.1-flash-live": {"in": 3.00, "cached": 0.75, "out": 12.00},
+}
+
+# Prices taken from an outside source, not the provider's own: each must be checked against
+# the first official Azure invoice that bills it, then taken off this list.
+UNCONFIRMED: Dict[str, str] = {
+    "gpt-6-luna": "azurespeed.com/AzureAiModelPricing/Models/openai-gpt-6-luna, 29 Oct 2026",
 }
 
 _unpriced_seen: set = set()

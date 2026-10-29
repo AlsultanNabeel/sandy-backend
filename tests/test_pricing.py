@@ -30,3 +30,9 @@ def test_a_dated_deployment_name_finds_its_model():
 
 def test_an_unknown_model_costs_nothing_and_never_raises():
     assert pricing.cost("no-such-model", tokens_in=10, tokens_out=10) == 0.0
+
+
+def test_gpt_6_luna_is_priced_and_marked_unconfirmed():
+    # The name Azure answers with is dated; the price came from outside and waits on the bill.
+    assert pricing.price_of("gpt-6-luna-2026-09-22") == {"in": 0.10, "cached": 0.01, "out": 0.50}
+    assert "gpt-6-luna" in pricing.UNCONFIRMED
