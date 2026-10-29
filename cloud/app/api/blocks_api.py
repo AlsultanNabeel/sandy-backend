@@ -29,7 +29,7 @@ from pymongo.errors import DuplicateKeyError
 from app.utils.ltm_crypto import decrypt_field, encrypt_field
 from app.api.auth_handlers import require_auth, require_tenant
 from app.api.metering import meter_claims
-from app.blocks import _base, changes, entries, habits, items, schedules
+from app.blocks import _base, changes, entries, habits, items, schedules, tasks
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, KindError, get_kind
 from app.brain import summary
 from app.brain.categorize import categorize_later
@@ -440,6 +440,13 @@ def register_blocks_api(app, mongo_db=None):
             raise _Invalid("invalid_recurrence")
         return rule
 
+    def _a_task_hidden(row: Optional[Dict[str, Any]]) -> bool:
+        """A task's row answers here only for an account with the tasks switch on, as the
+        Tasks screen does (`api/tasks_api.py`)."""
+        from app.utils import flags
+        return bool(row) and row.get("kind") == tasks.KIND and not flags.on(
+            tasks.SWITCH, str(current_user_id() or ""))
+
     def _future(value: Any) -> datetime:
         if value in (None, ""):
             raise _Invalid("fire_at_required")
@@ -489,7 +496,7 @@ def register_blocks_api(app, mongo_db=None):
     def api_schedules_update(claims, schedule_id):
         body = _body()
         current = schedules.get(schedule_id)
-        if current is None:
+        if current is None or _a_task_hidden(current):
             raise _Invalid("not_found", 404)
         status = body.get("status")
         if status is not None and status not in APP_STATUSES:
@@ -551,6 +558,12 @@ def register_blocks_api(app, mongo_db=None):
     @require_tenant
     @_answers_invalid
     def api_schedules_delete(claims, schedule_id):
+        current = schedules.get(schedule_id)
+        if _a_task_hidden(current):
+            raise _Invalid("not_found", 404)
+        if current and current.get("kind") == tasks.KIND:
+            # What it saw and its results go with it (`tasks.remove`).
+            return _found(tasks.remove(schedule_id), schedule_id, lambda _i: None, "payload")
         return _found(schedules.delete(schedule_id), schedule_id, lambda _i: None, "payload")
 
     # ── summary ──────────────────────────────────────────────────────────────

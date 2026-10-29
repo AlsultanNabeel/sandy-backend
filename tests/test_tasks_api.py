@@ -179,3 +179,34 @@ def test_a_link_that_did_not_leave_is_said(c, monkeypatch):
 def test_a_wrong_link_is_a_page_not_an_error(c):
     r = c.get("/api/notify/email/confirm?t=nope")
     assert r.status_code == 400 and r.mimetype == "text/html"
+
+
+# The public schedule routes on a task's row (review of phase one): they ask the switch as the
+# Tasks screen does, and a delete takes what the task saw and its results with it.
+@pytest.mark.parametrize("method, body", [("PATCH", {"status": "cancelled"}), ("DELETE", None)])
+def test_the_schedule_routes_ask_the_switch_on_a_task(c, monkeypatch, method, body):
+    tid = _task()
+    monkeypatch.setenv("SANDY_FLAGS", "{}")
+    r = c.open(f"/api/schedules/{tid}", method=method, json=body, headers=_h())
+    assert r.status_code == 404
+    with active_user_profile_context(A):
+        assert tasks.get(tid)["status"] == "pending"
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_deleting_a_task_through_the_schedules_takes_its_state_and_results(c, language):
+    tid = _task()
+    with active_user_profile_context(A):
+        tasks.save_state(tid, {"fingerprint": "f", "last_result": "Gold is up"})
+    _result(tid, "Gold is up")
+    r = c.delete(f"/api/schedules/{tid}", headers={**_h(), "X-Lang": language})
+    assert r.status_code == 200
+    with active_user_profile_context(A):
+        assert tasks.get(tid) is None and tasks.state(tid) == {} and notify.of_task(tid) == []
+
+
+def test_another_users_task_is_not_found_through_the_schedules(c):
+    tid = _task()
+    assert c.delete(f"/api/schedules/{tid}", headers=_h("userB")).status_code == 404
+    with active_user_profile_context(A):
+        assert tasks.get(tid)
