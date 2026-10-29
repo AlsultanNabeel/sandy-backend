@@ -253,3 +253,25 @@ def test_a_tasks_model_cannot_set_a_reminder_even_on_an_old_row(world, monkeypat
     _run(doc)
     with active_user_profile_context(A):
         assert ran == ["recall"] and schedules.list_schedules("reminder") == []
+
+
+# The trace (review of phase one): every row a task's run leaves names the task, and its review
+# is a call marked as one, so «one review per result sent» is read off the trace.
+@pytest.mark.parametrize("language, said", [("en", "New: P1"), ("ar", "جديد: P1")])
+def test_a_runs_trace_names_its_task_and_marks_the_review(brain_db, monkeypatch, language, said):  # noqa: F811
+    from app.features import trace_store
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
+    monkeypatch.setattr("app.features.research.web_results", lambda q: [{"title": "P1", "url": "u1"}])
+    monkeypatch.setattr(notify, "CHANNELS", [])
+
+    def chat(**kw):
+        trace_store.note_model_call("azure", "gpt-4o-mini", tokens_in=100, tokens_out=10)
+        return NS(choices=[NS(message=NS(content=said, tool_calls=None))])
+    monkeypatch.setattr("app.integrations.openai_client.chat_fn", lambda: chat)
+    doc = _task(_spec(language))
+    _run(doc)
+    rows = list(brain_db[trace_store.COLLECTION].find({}))
+    assert rows and all(r["task_id"] == doc["id"] for r in rows)
+    assert [c.get("what") for r in rows for c in r["model_calls"]] == ["task", "task_review"]
+    by_task = trace_store.costs()["by_task"]
+    assert [(t["task_id"], t["runs"]) for t in by_task] == [(doc["id"], 1)]

@@ -20,7 +20,8 @@ A task that is not urgent sends its model step as an Azure batch when batches ar
 (`brain/batch.py`, off by default): the run submits it, and a later run collects the answer and
 goes on to the review. A run that fails counts; `FAILURES_TO_STOP` in a row pause the task and say so. Both model
 steps go through `background.call` ("task", "task_review": the deployment per step from the
-settings), in one background trace row per run. Only an account with the `tasks` switch on
+settings), in one background trace row per run that names its task (`task_id`), each call
+marked with its step (`what`: "task", "task_review"). Only an account with the `tasks` switch on
 runs its tasks.
 """
 
@@ -176,7 +177,8 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
     spec = dict(doc.get("payload") or {})
     before = tasks.state(_id(doc))
     ctx = TurnCtx(user_id=uid, source="app")
-    with lang.using(spec.get("lang") or lang.for_user(uid)), trace_store.background(uid, "task"):
+    with lang.using(spec.get("lang") or lang.for_user(uid)), \
+            trace_store.background(uid, "task", task_id=_id(doc)):
         # What a channel held inside its hour goes now, whatever the check finds.
         notify.flush(_id(doc))
         try:

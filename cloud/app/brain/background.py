@@ -62,9 +62,10 @@ def call(what: str, messages: List[Dict[str, Any]], *, priority: str,
         raise ValueError(f"priority must be one of {PRIORITIES}, got {priority!r}")
 
     def ask():
-        return chat_fn()(messages=messages, max_tokens=max_tokens, temperature=temperature,
-                         response_format=response_format, tools=tools,
-                         model_hint=model_for(what))
+        with trace_store.doing(what):
+            return chat_fn()(messages=messages, max_tokens=max_tokens, temperature=temperature,
+                             response_format=response_format, tools=tools,
+                             model_hint=model_for(what))
 
     if trace_store.current() is not None or not user_id:
         return ask()

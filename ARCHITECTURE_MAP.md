@@ -265,7 +265,7 @@ answer and a web summary; `tests/test_background_callers.py` refuses a direct ca
 (arguments, result, ok, ms), every model call (provider, model, tokens in / out / cached,
 and reasoning: the part of out a reasoning model thought, `tokens_reasoning`, summed on the row
 and on the cost page; ms), the cost in dollars (`features/pricing.py`, the one place prices live, dated
-`PRICES_UPDATED`), `skills` and `task_id` for the phases that fill them, and `error`.
+`PRICES_UPDATED`), `skills` for the phase that fills it, `task_id` (every row a task's run leaves names its task, `trace_store.background(…, task_id=)`; a model call made through `background.call` carries its kind of work as `what`, so a task's review is the call marked `task_review`), and `error`.
 The tokens are counted at the one client (`openai_client.create_chat_completion`, a
 stream asks for them with `stream_options.include_usage`; a call is priced by the model the
 reply names, not the Azure deployment's own name, and a model with no price is a warning), on the direct fallback
@@ -639,7 +639,7 @@ Who calls what:
   404) — `GET /api/owner/traces?limit=&user=&source=` (newest first, never words),
   `GET /api/owner/traces/<id>` (one turn; its words opened only when it is the owner's
   own turn) and `GET /api/owner/costs?days=30` (`{days, total_usd, by_user, by_source,
-  by_task}`). These are the one deliberate read across tenants.
+  by_task}`, `by_task` each task's `runs` and `usd` from its rows' `task_id`). These are the one deliberate read across tenants.
 - **The robot** — `/voice`, `/api/firmware/manifest` and `/api/firmware/image/<version>`
   (OTA; a `board` other than `brain` is a retired camera or room board asking, refused 400,
   never handed the brain's image). The camera's routes (the snapshot pair, `/api/cam/upload`)

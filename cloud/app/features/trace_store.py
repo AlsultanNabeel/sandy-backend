@@ -40,6 +40,9 @@ KEEP_DAYS = 30
 SOURCES = ("chat", "voice", "background")
 
 _current: ContextVar[Optional["Trace"]] = ContextVar("sandy_trace", default=None)
+# The kind of work a model call outside a turn is for (`background.call`: "task_review", …),
+# kept on the call so a task's review is told apart from its thinking.
+_doing: ContextVar[Optional[str]] = ContextVar("sandy_trace_doing", default=None)
 
 
 def init_trace_store(mongo_db) -> None:
@@ -89,8 +92,9 @@ class Trace:
     """What one turn did, gathered while it runs."""
 
     def __init__(self, user_id: str, source: str, *, thread_id: str = "",
-                 turn_id: Optional[str] = None):
+                 turn_id: Optional[str] = None, task_id: Optional[str] = None):
         self.id = turn_id or new_id()
+        self.task_id = str(task_id) if task_id else None
         self.user_id = str(user_id or "")
         self.source = source if source in SOURCES else "chat"
         self.thread_id = str(thread_id or "")
@@ -110,11 +114,14 @@ class Trace:
 
     def add_model_call(self, provider: str, model: str, *, tokens_in: int = 0,
                        tokens_out: int = 0, tokens_cached: int = 0, tokens_reasoning: int = 0,
-                       ms: float = 0) -> None:
-        """``tokens_reasoning`` is the part of ``tokens_out`` a reasoning model thought."""
+                       ms: float = 0, what: Optional[str] = None) -> None:
+        """``tokens_reasoning`` is the part of ``tokens_out`` a reasoning model thought; ``what``
+        the kind of work outside a turn it was for."""
         call = {"provider": provider, "model": str(model or ""), "tokens_in": int(tokens_in or 0),
                 "tokens_out": int(tokens_out or 0), "tokens_cached": int(tokens_cached or 0),
                 "tokens_reasoning": int(tokens_reasoning or 0), "ms": round(float(ms or 0))}
+        if what:
+            call["what"] = what
         with self._lock:
             self.model_calls.append(call)
 
@@ -141,7 +148,7 @@ class Trace:
             "tokens_reasoning": sum(c.get("tokens_reasoning", 0) for c in calls),
             "cost_usd": round(cost, 8),
             "ms_total": round((time.perf_counter() - self._t0) * 1000),
-            "skills": [], "task_id": None, "error": error,
+            "skills": [], "task_id": self.task_id, "error": error,
             "encrypted": ltm_crypto.encryption_ready(),
             "expire_at": self.at + timedelta(days=KEEP_DAYS),
         }
@@ -180,7 +187,8 @@ def note_model_call(provider: str, model: str, *, tokens_in: int = 0, tokens_out
     trace = _current.get()
     if trace is not None:
         trace.add_model_call(provider, model, tokens_in=tokens_in, tokens_out=tokens_out,
-                             tokens_cached=tokens_cached, tokens_reasoning=tokens_reasoning, ms=ms)
+                             tokens_cached=tokens_cached, tokens_reasoning=tokens_reasoning, ms=ms,
+                             what=_doing.get())
 
 
 def note_usage(provider: str, model: str, usage: Any, ms: float = 0) -> None:
@@ -232,10 +240,20 @@ def note_tool(name: str, args: Any, result: Any, ms: float = 0) -> None:
 
 
 @contextmanager
-def background(user_id: str, what: str) -> Iterator[Trace]:
-    """Model calls made for a user outside a turn (a summary, a title): a row of numbers,
-    written only when a model call was made."""
-    trace = Trace(user_id, "background")
+def doing(what: str) -> Iterator[None]:
+    """The model calls made inside are for ``what`` (kept on each call)."""
+    token = _doing.set(what)
+    try:
+        yield
+    finally:
+        _doing.reset(token)
+
+
+@contextmanager
+def background(user_id: str, what: str, task_id: Optional[str] = None) -> Iterator[Trace]:
+    """Model calls made for a user outside a turn (a summary, a title, a task's run, which
+    names its task): a row of numbers, written only when a model call was made."""
+    trace = Trace(user_id, "background", task_id=task_id)
     with using(trace):
         yield trace
     if trace.model_calls:
@@ -304,6 +322,14 @@ def costs(days: int = 30) -> Dict[str, Any]:
     sources = [{"source": str(g["_id"] or ""), "turns": g["turns"], "usd": round(g["usd"], 6)}
                for g in _raw().aggregate([match, {"$group": {
                    "_id": "$source", "turns": {"$sum": 1}, "usd": {"$sum": "$cost_usd"}}}])]
+    by_task = [{"task_id": str(g["_id"]["task"]), "user_id": str(g["_id"]["user"] or ""),
+                "runs": g["runs"], "usd": round(g["usd"], 6)}
+               for g in _raw().aggregate([
+                   {"$match": {"at": {"$gte": _now() - timedelta(days=days)},
+                               "task_id": {"$nin": [None, ""]}}},
+                   {"$group": {"_id": {"task": "$task_id", "user": "$user_id"},
+                               "runs": {"$sum": 1}, "usd": {"$sum": "$cost_usd"}}}])]
     return {"days": days, "total_usd": round(sum(u["usd"] for u in users), 6),
             "by_user": sorted(users, key=lambda u: -u["usd"]),
-            "by_source": sorted(sources, key=lambda s: -s["usd"]), "by_task": []}
+            "by_source": sorted(sources, key=lambda s: -s["usd"]),
+            "by_task": sorted(by_task, key=lambda t: -t["usd"])}
