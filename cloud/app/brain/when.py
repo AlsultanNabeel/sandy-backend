@@ -34,16 +34,6 @@ _PARSE_SYSTEM = (
 )
 
 
-def _chat_fn():
-    """The shared chat client (C4); None without credentials."""
-    from app.integrations.openai_client import chat_fn
-    try:
-        return chat_fn()
-    except Exception as exc:  # noqa: BLE001 — no key only disables the AI parse
-        logger.info("[brain] no model for time parsing: %s", exc)
-        return None
-
-
 def _parse_with_model(text: str) -> Optional[str]:
     """ISO in the user's zone for a time expression: a bare weekday without a
     model, else one JSON call. None when unreadable or in the past."""

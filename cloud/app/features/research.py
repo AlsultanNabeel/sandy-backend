@@ -1,7 +1,7 @@
 """Web research for the brain's `web_search`: Exa snippets, summarised in one model call."""
 
 import logging
-from typing import Any, Callable, List, Optional
+from typing import List
 from urllib.parse import urlparse
 
 from app.config import EXA_API_KEY
@@ -35,8 +35,7 @@ def _with_sources(body: str, sources: List[str]) -> str:
     return lang.say("research_summary", body=body)
 
 
-def web_answer(query: str, user_message: str,
-               complete: Optional[Callable[..., Any]] = None) -> str:
+def web_answer(query: str, user_message: str) -> str:
     """The answer to a web question, in the turn's language, with its sources; a sentence saying so
     when the search could not run or found nothing."""
     if not EXA_API_KEY:
@@ -65,14 +64,17 @@ def web_answer(query: str, user_message: str,
     if not snippets:
         return lang.say("research_unclear", query=query)
 
+    from app.brain import background
+    from app.utils.user_profiles import current_user_id
+
     reply = ""
-    if complete is not None:
-        try:
-            response = complete(temperature=0.3, max_tokens=600, messages=[
-                {"role": "system", "content": _SUMMARY_SYSTEM},
-                {"role": "user", "content": (f"طلب المستخدم: {user_message}\n\n"
-                                             "نتائج البحث:\n" + "\n".join(snippets))}])
-            reply = (response.choices[0].message.content or "").strip()
-        except Exception as exc:  # noqa: BLE001 — provider boundary; the snippets still answer
-            logger.warning("[research] summary failed: %s", exc)
+    try:
+        response = background.call("web_summary", [
+            {"role": "system", "content": _SUMMARY_SYSTEM},
+            {"role": "user", "content": (f"طلب المستخدم: {user_message}\n\n"
+                                         "نتائج البحث:\n" + "\n".join(snippets))}],
+            user_id=current_user_id(), temperature=0.3, max_tokens=600)
+        reply = (response.choices[0].message.content or "").strip()
+    except Exception as exc:  # noqa: BLE001 — provider boundary; the snippets still answer
+        logger.warning("[research] summary failed: %s", exc)
     return _with_sources(reply or "\n".join(snippets[:SHOWN_RESULTS]), sources)

@@ -21,7 +21,7 @@ def brain_db(monkeypatch):
     init_blocks(d)
     monkeypatch.setattr(entries, "embed_text", lambda text: None)
     # No model for time parsing in tests: words fall to the deterministic parser.
-    monkeypatch.setattr("app.brain.when._chat_fn", lambda: None)
+    monkeypatch.setattr("app.brain.when._parse_with_model", lambda text: None)
     yield d
     appdb.reset()
 

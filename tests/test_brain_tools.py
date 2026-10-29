@@ -186,7 +186,7 @@ def test_device_control_calls_the_same_handler_and_gate(tenant_a, monkeypatch):
 def test_world_tools_reach_their_providers(tenant_a, monkeypatch):
     seen = []
     monkeypatch.setattr("app.features.research.web_answer",
-                        lambda q, msg, complete: seen.append(("web", q)) or "📌 الملخص:\nخبر")
+                        lambda q, msg: seen.append(("web", q)) or "📌 الملخص:\nخبر")
     monkeypatch.setattr("app.features.weather.get_weather",
                         lambda city: seen.append(("weather", city)) or dict(
                             city=city, description="مشمس", temp_c=20, feels_like_c=19,

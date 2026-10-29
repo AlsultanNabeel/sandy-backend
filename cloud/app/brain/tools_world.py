@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.brain import lang, takeback
 from app.brain import when as W
 from app.brain.ctx import TurnCtx
-from app.brain.when import _chat_fn
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +222,7 @@ def web_search(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     from app.features.research import web_answer
 
     query = str(args.get("query") or ctx.message or "").strip()
-    return {"ok": True, "reply": web_answer(query, ctx.message, _chat_fn())}
+    return {"ok": True, "reply": web_answer(query, ctx.message)}
 
 
 def weather(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

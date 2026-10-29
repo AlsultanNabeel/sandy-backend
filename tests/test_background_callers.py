@@ -67,3 +67,16 @@ def test_a_time_read_from_words(monkeypatch):
         choices=[NS(message=NS(content='{"success": false}'))]))
     assert when._parse_with_model("بعد العيد") is None
     assert seen[0][0] == "when" and seen[0][1]["response_format"] == {"type": "json_object"}
+
+
+def test_a_web_summary(monkeypatch):
+    from app.features import research
+    monkeypatch.setattr(research, "EXA_API_KEY", "k")
+    monkeypatch.setattr(research, "search_exa", lambda *a, **k: [
+        {"title": "T", "text": "body", "url": "https://example.com/a"}])
+    seen = []
+    monkeypatch.setattr(background, "call", lambda what, messages, **kw: seen.append((what, kw)) or NS(
+        choices=[NS(message=NS(content="the summary"))]))
+    with active_user_profile_context(A):
+        assert "the summary" in research.web_answer("q", "what is new?")
+    assert seen[0][0] == "web_summary" and seen[0][1]["user_id"] == "userA"
