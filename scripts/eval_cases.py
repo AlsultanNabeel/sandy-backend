@@ -179,7 +179,8 @@ CASES += [
         {"say": "كل ساعة شوفي مشاريع جديدة على مستقل، وابعتيلي الجديد مع مسودة عرض",
          "tools": ["task_create"], "pending": True, "no_task": True},
         {"say": "اه", "pending": False, "task": {"check": "web_search", "every": 60}}]},
-    {"name": "task: shop stock", "setup": [_item("shopping", "سكر"), _item("shopping", "رز")], "steps": [
+    {"name": "task: shop stock", "setup": [_item("project:المخزون", t) for t in (
+        "سكر: ١٢ كيلو", "رز: ٣ أكياس", "زيت: ٢ قناني")], "steps": [
         {"say": "تابعي المخزون، ونبّهيني إذا شي قرب يخلص", "tools": ["task_create"],
          "pending": True, "no_task": True},
         {"say": "اه", "pending": False, "task": {}}]},
@@ -313,7 +314,8 @@ EN_CASES += [
     _en("task: shop stock", [
         {"say": "Track my stock and warn me when something is running low", "tools": ["task_create"],
          "pending": True, "no_task": True},
-        {"say": "yes", "pending": False, "task": {}}], [_item("shopping", "sugar"), _item("shopping", "rice")]),
+        {"say": "yes", "pending": False, "task": {}}],
+        [_item("project:Inventory", t) for t in ("Sugar: 12 kg", "Rice: 3 bags", "Oil: 2 bottles")]),
     _en("task: home budget", [
         {"say": "Track this month's spending and tell me if I go over budget", "tools": ["task_create"],
          "pending": True, "no_task": True},

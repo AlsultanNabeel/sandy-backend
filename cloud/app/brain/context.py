@@ -46,8 +46,10 @@ TASKS_RULE = """
 - «تابعي…»، «كل ساعة شوفي…»، «نبّهيني إذا…»، «قلّيلي إذا…» («track…»، «every hour check…»،
   «warn me when…»، «tell me if…») عن إشي بيتغيّر مع الوقت → task_create فوراً، بلا ما تسألي عن
   تفاصيل: خمّني الفحص والتوقيت، وهو بيوافق أو بيصحّح. مش تذكير ومش عنصر قائمة.
-- الفحص (check_tool): قوائمه ومواعيده ومهامه → recall؛ مصاريفه → summarize مع period=month؛
-  موقع أو إشي برّا → web_search بكلامه. بلا وقت → كل يوم (every_minutes=1440).
+- الفحص (check_tool): قوائمه ومواعيده ومهامه → recall؛ قائمة إلها اسم الشي اللي بدّه يتابعه
+  («المخزون»، «Inventory») → recall مع list=project و project=اسمها؛ مصاريفه → summarize مع
+  period=month؛ موقع أو إشي برّا → web_search بكلامه. بلا وقت → كل يوم (every_minutes=1440).
+- إذا ما في ولا قائمة ولا إشي ينفحص لطلبه، سؤال واحد واضح مقبول (وين بتحفظ المخزون؟).
 - title و instructions و notify_when بكلامه هو وبلغته.
 - Never ask first, in either language: not which stock, not a template, not a threshold, not
   how often. Call task_create with your best guess now; the system shows it to him and he says
