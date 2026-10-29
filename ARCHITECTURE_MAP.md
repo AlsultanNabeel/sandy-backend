@@ -1729,9 +1729,10 @@ the turn traces, `features/pricing.py`). A step may also check a tool's argument
 one call of that tool carries the values; a word of text is found inside the call's text).
 `--repeat N` runs every case N times and names those whose outcome differed; `--save` writes
 `scripts/eval_results/<when>.json`, the first saved becomes `baseline.json`, and every later
-saved run says what fell and rose against it. More than five percent of the cases moved
-(`ALLOWED_SHARE`; two cases until 29 Oct), between repeats or against the baseline, fails the
-run, as do a language under ninety percent (`PASS_SHARE`) and English more than `LANGUAGE_GAP`
+saved run says what fell and rose against it; a saved run that passes becomes the baseline
+(`_promote`, since 30 Oct). More than five percent of the cases moved between repeats, or fell
+against the baseline (`ALLOWED_SHARE`, `_fell`: what rose is no failure, since 30 Oct; two
+cases until 29 Oct), fails the run, as do a language under ninety percent (`PASS_SHARE`) and English more than `LANGUAGE_GAP`
 points behind Arabic (`_verdict`); nothing else does: a case that fell on its own, or got no
 answer, is printed as a warning. `--temperature` runs the brain at another `model.TEMPERATURE`. `--api responses --model <deployment>
 --reasoning <effort>` runs it on the Responses API path, its switch on for the run's account,

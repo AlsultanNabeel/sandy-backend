@@ -42,7 +42,7 @@ def test_compare_names_what_moved_against_the_baseline():
     now = {"cases": {"a": True, "b": False, "c": True, "d": True}}
     moved = E._compare(base, now)
     assert moved == {"fell": ["b"], "rose": ["c"], "new": ["d"]}
-    assert E._differences(moved) == 2
+    assert E._fell(moved) == 1          # what rose is no failure (the owner's, 30 Oct)
 
 
 def test_the_first_save_becomes_the_baseline_and_the_next_does_not(tmp_path):
@@ -54,6 +54,27 @@ def test_the_first_save_becomes_the_baseline_and_the_next_does_not(tmp_path):
     path2, base2 = E._save(second, tmp_path)
     assert path2 != path and base2["cases"] == {"a": True}
     assert json.loads((tmp_path / "baseline.json").read_text())["cases"] == {"a": True}
+
+
+def test_against_the_baseline_only_what_fell_counts():
+    base = {"cases": {f"c{n}": n >= 10 for n in range(83)}}
+    better = {"cases": {f"c{n}": True for n in range(83)}}          # ten rose, none fell
+    assert E._stable(E._fell(E._compare(base, better)), 83)
+    worse = {"cases": {f"c{n}": n >= 15 for n in range(83)}}
+    worse["cases"].update({f"c{n}": False for n in range(10, 15)})  # five fell
+    assert not E._stable(E._fell(E._compare(base, worse)), 83)
+
+
+def test_a_saved_run_that_passed_becomes_the_baseline_and_one_that_failed_does_not(tmp_path):
+    first = {"when": "2026-10-30T10:00", "cases": {"a": True}, "passed": 1, "total": 1}
+    E._save(first, tmp_path)
+    second = {"when": "2026-10-30T11:00", "cases": {"a": True, "b": True}, "passed": 2, "total": 2}
+    path, _ = E._save(second, tmp_path)
+    E._promote(path, tmp_path)
+    assert json.loads((tmp_path / "baseline.json").read_text())["when"] == "2026-10-30T11:00"
+    third = {"when": "2026-10-30T12:00", "cases": {"a": False, "b": True}, "passed": 1, "total": 2}
+    E._save(third, tmp_path)                                          # failed: not promoted
+    assert json.loads((tmp_path / "baseline.json").read_text())["when"] == "2026-10-30T11:00"
 
 
 @pytest.fixture

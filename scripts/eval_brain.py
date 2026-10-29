@@ -19,10 +19,11 @@ model could not answer (a rate limit, an outage) waits and runs again, and is le
 score and the comparison when it still gets no answer: an error is not an outcome. `--save`
 writes the result to `eval_results/<when>.json`; the first one saved becomes
 `eval_results/baseline.json`, and every later run is compared with it: what fell, what
-rose. The run fails only on the plan's conditions (`_verdict`): a language under ninety
-percent, more than `ALLOWED_SHARE` (five percent) of the cases moved between repeats or
-against the baseline, or English more than `LANGUAGE_GAP` points behind Arabic; a case that
-fell on its own, or got no answer, is a warning. `--temperature` runs the brain at another temperature
+rose, and a saved run that passes becomes the baseline in its turn (`_promote`). The run fails
+only on the plan's conditions (`_verdict`): a language under ninety percent, more than
+`ALLOWED_SHARE` (five percent) of the cases moved between repeats, or fell against the baseline
+(what rose is no failure), or English more than `LANGUAGE_GAP` points behind Arabic; a case
+that fell on its own, or got no answer, is a warning. `--temperature` runs the brain at another temperature
 (`model.TEMPERATURE`), to measure what it does to the tool calls.
 """
 from __future__ import annotations
@@ -394,8 +395,14 @@ def _language_gap_ok(scores: Dict[str, Tuple[int, int]]) -> bool:
     return "ar" not in pct or "en" not in pct or pct["en"] >= pct["ar"] - LANGUAGE_GAP
 
 
-def _differences(moved: Dict[str, List[str]]) -> int:
-    return len(moved["fell"]) + len(moved["rose"])
+def _fell(moved: Dict[str, List[str]]) -> int:
+    """Against the baseline only what fell counts: a case that rose is no failure."""
+    return len(moved["fell"])
+
+
+def _promote(path: Path, folder: Path = RESULTS) -> None:
+    """A saved run that passed is the baseline the next is compared with."""
+    (folder / "baseline.json").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _save(result: Dict[str, Any], folder: Path = RESULTS) -> Tuple[Path, Optional[Dict[str, Any]]]:
@@ -489,7 +496,10 @@ def main() -> int:
             moved = _compare(base, result)
             print(f"against the baseline ({base['when']}, {base['passed']}/{base['total']}): "
                   f"fell {moved['fell'] or '—'}, rose {moved['rose'] or '—'}, new {moved['new'] or '—'}")
-            ok &= _stable(_differences(moved), len(scored))
+            ok &= _stable(_fell(moved), len(scored))
+            if ok:
+                _promote(path)
+                print("this is the baseline now")
     return 0 if ok else 1
 
 
