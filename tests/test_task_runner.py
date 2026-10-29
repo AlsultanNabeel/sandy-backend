@@ -132,3 +132,38 @@ def test_a_task_due_is_run_and_never_rings_the_robot(world, monkeypatch):
         raw = {**doc, "_id": doc["id"]}
         assert schedule_runner._fire(raw, OWNER, datetime.now(timezone.utc)) == (True, "")
     assert world.sent == ["New: P1"]
+
+
+# A task that is not urgent may go as a batch, at half the price, when batches are set up
+# (off by default): the run submits its model step and a later run collects the answer.
+def test_a_task_that_is_not_urgent_goes_as_a_batch_when_batches_are_on(world, monkeypatch):
+    from app.brain import batch
+    jobs, answers = [], [None, "New: P1"]
+    monkeypatch.setenv("SANDY_BATCH_DEPLOYMENT", "sandy-batch")
+    monkeypatch.setattr(batch, "submit", lambda what, messages, **kw: jobs.append(what) or "b1")
+    monkeypatch.setattr(batch, "collect", lambda job: answers.pop(0))
+    doc = _task(_spec())
+    world.answers.append("New: P1")          # the review, made at once
+    _run(doc)                                # submitted
+    _run(doc)                                # still running
+    assert jobs == ["task"] and world.sent == [] and world.asked == []
+    _run(doc)                                # done: reviewed and sent
+    assert world.asked == ["task_review"] and world.sent == ["New: P1"]
+
+
+def test_batches_are_off_unless_set_up(world, monkeypatch):
+    from app.brain import batch
+    monkeypatch.delenv("SANDY_BATCH_DEPLOYMENT", raising=False)
+    monkeypatch.setattr(batch, "submit", lambda *a, **k: (_ for _ in ()).throw(AssertionError("batched")))
+    world.answers += ["New: P1", "New: P1"]
+    _run(_task(_spec()))
+    assert world.sent == ["New: P1"]
+
+
+def test_an_urgent_task_is_never_batched(world, monkeypatch):
+    from app.brain import batch
+    monkeypatch.setenv("SANDY_BATCH_DEPLOYMENT", "sandy-batch")
+    monkeypatch.setattr(batch, "submit", lambda *a, **k: (_ for _ in ()).throw(AssertionError("batched")))
+    world.answers += ["New: P1", "New: P1"]
+    _run(_task({**_spec(), "urgent": True}))
+    assert world.sent == ["New: P1"]

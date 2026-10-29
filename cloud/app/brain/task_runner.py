@@ -12,7 +12,9 @@ and the result goes out through `notify.deliver`. Never a word aloud.
    should be sent, or `NOTHING`.
 4. `notify.deliver`.
 
-A run that fails counts; `FAILURES_TO_STOP` in a row pause the task and say so. Both model
+A task that is not urgent sends its model step as an Azure batch when batches are set up
+(`brain/batch.py`, off by default): the run submits it, and a later run collects the answer and
+goes on to the review. A run that fails counts; `FAILURES_TO_STOP` in a row pause the task and say so. Both model
 steps go through `background.call` ("task", "task_review": the deployment per step from the
 settings), in one background trace row per run. Only an account with the `tasks` switch on
 runs its tasks.
@@ -27,7 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from app import notify
 from app.blocks import tasks
-from app.brain import background, lang, tools
+from app.brain import background, batch, lang, tools
 from app.brain.ctx import TurnCtx
 from app.brain.model import _from_message
 from app.features import trace_store
@@ -96,13 +98,7 @@ def _think(doc: Dict[str, Any], spec: Dict[str, Any], found: Any, before: Dict[s
     """The model's message on what changed, or NOTHING."""
     allowed = [t for t in spec.get("tools") or [] if t in ALLOWED]
     specs = [s for s in tools.openai_tools() if s["function"]["name"] in allowed]
-    language = "English" if spec.get("lang") == lang.EN else "Arabic"
-    messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": _THINK.format(
-            instructions=spec.get("instructions", ""), notify_when=spec.get("notify_when", ""),
-            last=before.get("last_result") or "nothing yet", language=language)},
-        {"role": "user", "content": json.dumps(
-            {"now": _compact(found), "before": before.get("last_probe") or ""}, ensure_ascii=False)}]
+    messages = _think_messages(spec, found, before)
     for _ in range(MAX_STEPS):
         reply = _from_message(background.call(
             "task", messages, priority=background.SCHEDULED, user_id=uid, tools=specs or None,
@@ -120,6 +116,16 @@ def _think(doc: Dict[str, Any], spec: Dict[str, Any], found: Any, before: Dict[s
                              "content": json.dumps(result, ensure_ascii=False, default=str)})
     logger.warning("[tasks] task %s reached the step cap", _id(doc))
     return NOTHING
+
+
+def _think_messages(spec: Dict[str, Any], found: Any, before: Dict[str, Any]) -> List[Dict[str, Any]]:
+    language = "English" if spec.get("lang") == lang.EN else "Arabic"
+    return [
+        {"role": "system", "content": _THINK.format(
+            instructions=spec.get("instructions", ""), notify_when=spec.get("notify_when", ""),
+            last=before.get("last_result") or "nothing yet", language=language)},
+        {"role": "user", "content": json.dumps(
+            {"now": _compact(found), "before": before.get("last_probe") or ""}, ensure_ascii=False)}]
 
 
 def _review(spec: Dict[str, Any], found: Any, message: str, uid: str) -> str:
@@ -154,14 +160,29 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
     ctx = TurnCtx(user_id=uid, source="app")
     with lang.using(spec.get("lang") or lang.for_user(uid)), trace_store.background(uid, "task"):
         try:
-            found = _probe(spec, ctx)
-            seen = fingerprint(found)
-            if seen == before.get("fingerprint"):
-                tasks.save_state(_id(doc), {"failures": 0})
-                return None
-            message = _think(doc, spec, found, before, ctx, uid)
-            if message.strip() != NOTHING:
+            if before.get("batch_id"):
+                # A batch this task submitted: its answer, once Azure has it.
+                message = batch.collect(before["batch_id"])
+                if message is None:
+                    return None
+                found, seen = before.get("batch_found") or "", before.get("batch_fingerprint")
+                tasks.save_state(_id(doc), {"batch_id": None})
+            else:
+                found = _probe(spec, ctx)
+                seen = fingerprint(found)
+                if seen == before.get("fingerprint"):
+                    tasks.save_state(_id(doc), {"failures": 0})
+                    return None
+                if not spec.get("urgent") and batch.enabled(background.SCHEDULED):
+                    job = batch.submit("task", _think_messages(spec, found, before),
+                                       max_tokens=700, temperature=0.3)
+                    tasks.save_state(_id(doc), {"batch_id": job, "batch_fingerprint": seen,
+                                                "batch_found": _compact(found), "failures": 0})
+                    return None
+                message = _think(doc, spec, found, before, ctx, uid)
+            if (message or NOTHING).strip() != NOTHING:
                 message = _review(spec, found, message, uid)
+            message = message or NOTHING
         except Exception as exc:  # noqa: BLE001 — a task's run is a background edge: it counts
             _failed(doc, before, f"{type(exc).__name__}: {exc}")
             return None
