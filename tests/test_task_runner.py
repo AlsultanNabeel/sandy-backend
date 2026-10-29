@@ -330,3 +330,29 @@ def test_a_resumed_task_starts_its_failures_from_zero(world, monkeypatch, langua
     with active_user_profile_context(A):
         assert schedules.get(doc["id"])["status"] == "pending"
         assert tasks.state(doc["id"])["failures"] == 1
+
+
+# A web search's raw results are fingerprinted on what stays put (review of phase one): their
+# title and link, in one order. The snippet under a result and the order they come in move
+# between two searches of the same page and are no news.
+def test_a_web_searchs_fingerprint_is_its_titles_and_links_in_one_order():
+    first = {"results": [{"title": "P1", "url": "u1", "text": "posted 2 minutes ago"},
+                         {"title": "P2", "url": "u2", "text": "budget $50"}]}
+    later = {"results": [{"title": "P2", "url": "u2", "text": "budget $50 – 3 offers"},
+                         {"title": "P1", "url": "u1", "text": "posted 9 minutes ago"}]}
+    assert task_runner.fingerprint(first, "web_search") == task_runner.fingerprint(later, "web_search")
+    new = {"results": later["results"] + [{"title": "P3", "url": "u3", "text": ""}]}
+    assert task_runner.fingerprint(new, "web_search") != task_runner.fingerprint(first, "web_search")
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_twenty_searches_whose_snippets_move_call_no_model(world, monkeypatch, language):
+    reads = iter([[{"title": "P1", "url": "u1", "text": f"{n} min ago"},
+                   {"title": "P2", "url": "u2", "text": f"{n} offers"}][::(-1) ** n] for n in range(30)])
+    monkeypatch.setattr("app.features.research.web_results", lambda q: next(reads))
+    doc = _task(_spec(language))
+    _run(doc)
+    world.asked.clear()
+    for _ in range(20):
+        _run(doc)
+    assert world.asked == [] and world.sent == []

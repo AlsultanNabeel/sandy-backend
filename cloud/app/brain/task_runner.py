@@ -5,7 +5,8 @@ and the result goes out through `notify.deliver`. Never a word aloud.
 1. The probe: one read tool with the task's fixed arguments (`READ_TOOLS`), run by the code;
    a web search gives its raw results (`research.web_results`), never a model's summary. Its
    fingerprint (of what the data says: what moves by itself between reads, a device's last
-   seen or a period's end, and the order of a list are left out) is the same as the last
+   seen or a period's end, and the order of a list are left out; of a web search, each
+   result's title and link alone) is the same as the last
    run's: the run ends there, with no model call and no message.
 2. The model, on what changed, with the task's own tools only (within `ALLOWED`), at most
    `MAX_STEPS` steps: it answers what is worth telling him, or `NOTHING`.
@@ -85,8 +86,17 @@ def _stable(found: Any) -> Any:
     return found
 
 
-def fingerprint(found: Any) -> str:
-    """What the data says, not when it was read (`_stable`)."""
+# Of a web search's results, what stays put between two searches of the same page; the snippet
+# under each moves («posted 2 minutes ago») and is shown to the model, never compared.
+_WEB_KEPT = ("title", "url")
+
+
+def fingerprint(found: Any, tool: str = "") -> str:
+    """What the data says, not when it was read (`_stable`); a web search's results by their
+    title and link alone, in one order."""
+    if tool == "web_search" and isinstance(found, dict):
+        found = sorted({tuple(str(r.get(k) or "") for k in _WEB_KEPT)
+                        for r in found.get("results") or [] if isinstance(r, dict)})
     text = json.dumps(_stable(found), sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -214,7 +224,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                 tasks.save_state(_id(doc), {"batch_id": None})
             if message is None:
                 found = _probe(spec, ctx)
-                seen = fingerprint(found)
+                seen = fingerprint(found, str((spec.get("probe") or {}).get("tool") or ""))
                 if seen == before.get("fingerprint"):
                     tasks.save_state(_id(doc), {"failures": 0})
                     return None
