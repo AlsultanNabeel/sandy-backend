@@ -531,3 +531,22 @@ def test_the_names_a_phrase_was_filled_with_are_still_names(language, label):
         reply = lang.say("device_on", label=label)
         names = G.names_of("hi" if language == "en" else "هلا", [("x", {"reply": reply})], named)
     assert G.wrong_language(reply, language, names) is False
+
+
+# A short reply all in the other language is caught: «Done ✅» on an Arabic turn had no word
+# counted (a Capitalised one is a name beside Arabic words, not with none at all).
+@pytest.mark.parametrize("text, language", [
+    ("Done ✅", "ar"),
+    ("Sure!", "ar"),
+    ("OK, Nabeel.", "ar"),
+    ("تم ✅", "en"),
+    ("أكيد!", "en"),
+])
+def test_a_short_reply_in_the_other_language_is_caught(text, language):
+    from app.brain import language_guard as G
+    assert G.wrong_language(text, language) is True, text
+
+
+def test_a_short_english_reply_to_an_arabic_message_is_rewritten(brain_db):  # noqa: F811
+    model = ScriptedModel(text_reply("Sure!"), text_reply("أكيد!"))
+    assert _turn(model, "بتحبي القهوة؟")["final_response"] == "أكيد!"

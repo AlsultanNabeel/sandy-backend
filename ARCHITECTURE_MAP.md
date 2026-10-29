@@ -190,7 +190,7 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    held questions and summaries, errors, the honesty check's) is a phrase in both languages
    (`lang.PHRASES`, `lang.say` in the turn's language, a context variable). A reply that
    still came in the other language (an Arabic word in an English turn, or mostly English
-   words in an Arabic one; names aside: «quoted» ones, the message's own words in the other
+   words in an Arabic one, or English with no Arabic word at all, «Done ✅»; names aside: «quoted» ones, the message's own words in the other
    script, the names the tools' results carry and those their phrases were filled with
    (`lang.naming`; a tool's reply itself is read, a web summary being the model's words),
    `language_guard.names_of`, and links, numbers and

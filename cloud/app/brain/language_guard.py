@@ -61,12 +61,16 @@ def _without_names(text: str, names: Iterable[str]) -> str:
 def wrong_language(text: str, language: str, names: Iterable[str] = ()) -> bool:
     """Whether ``text`` is not in ``language``, its names, links and numbers aside. An English
     reply may hold no Arabic word; an Arabic one may not be mostly English words (a
-    Capitalised one is a name: «iPhone Pro Max»)."""
+    Capitalised one beside Arabic is a name: «iPhone Pro Max»), nor English with no Arabic
+    word at all («Done ✅»)."""
     plain = _without_names(text, names)
     if language == lang.EN:
         return bool(_ARABIC.search(plain))
-    latin = [w for w in _LATIN_WORD.findall(plain) if not w[0].isupper()]
-    return len(latin) > 2 * len(_ARABIC_WORD.findall(plain))
+    arabic = len(_ARABIC_WORD.findall(plain))
+    words = _LATIN_WORD.findall(plain)
+    if not arabic:
+        return bool(words)
+    return len([w for w in words if not w[0].isupper()]) > 2 * arabic
 
 
 def ensure(text: str, complete: Callable, names: Iterable[str] = ()) -> str:
