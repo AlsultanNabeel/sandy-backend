@@ -115,6 +115,7 @@ struct ScheduledTaskView: View {
     let taskId: String
     @ObservedObject var store: ScheduledTasksStore
     @State private var confirmRemove = false
+    @State private var editing = false
 
     private var task: ScheduledTask? { store.tasks.first { $0.id == taskId } }
 
@@ -129,6 +130,9 @@ struct ScheduledTaskView: View {
                     Text(TaskFormat.state(task, lang))
                         .font(Theme.Typography.caption)
                         .foregroundColor(Theme.Colors.secondaryText)
+                    LabeledContent(lang.s("tasks.how"), value: TaskFormat.how(task.way, lang))
+                        .font(Theme.Typography.caption)
+                    Button(lang.s("tasks.edit")) { editing = true }
                     if task.failures > 0 && !task.lastError.isEmpty {
                         LabeledContent(lang.s("tasks.lastError"), value: task.lastError)
                             .font(Theme.Typography.caption)
@@ -163,6 +167,9 @@ struct ScheduledTaskView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $editing) {
+            if let task { TaskEditSheet(task: task, store: store) }
         }
         .navigationTitle(task?.title ?? lang.s("tasks.title"))
         .navigationBarTitleDisplayMode(.inline)
@@ -218,6 +225,19 @@ enum TaskFormat {
                                 task.failures.formatted(.number.locale(AppLocale.current))))
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// «فوراً كل ما يتغيّر», «ملخص مرة باليوم الساعة ٢١:٠٠», «بالكتير مرة كل ٣ ساعة».
+    @MainActor
+    static func how(_ way: TaskDelivery, _ lang: LanguageManager) -> String {
+        switch way.mode {
+        case TaskDelivery.instant: return lang.s("tasks.howInstant")
+        case TaskDelivery.daily: return String(format: lang.s("tasks.howDailyAt"), way.at ?? "")
+        default:
+            let n = way.hours ?? 1
+            return n == 1 ? lang.s("tasks.howHourly")
+                : String(format: lang.s("tasks.howEveryHours"), n.formatted(.number.locale(AppLocale.current)))
+        }
     }
 
     @MainActor

@@ -67,7 +67,7 @@ final class ScheduledTasksTests: XCTestCase {
         let store = ScheduledTasksStore()
         store.tasks = [ScheduledTask(id: "t1", title: "Gold", instructions: "", everyMinutes: 60,
                                      status: "running", nextAt: "", failures: 0, lastError: "",
-                                     lastResult: "", unseen: 0)]
+                                     lastResult: "", unseen: 0, delivery: nil)]
         StubNetwork.install(json: #"{"ok": true}"#)
         await store.setPaused(true, id: "t1", api: api)
         XCTAssertTrue(store.tasks[0].paused)
@@ -84,7 +84,7 @@ final class ScheduledTasksTests: XCTestCase {
         let store = ScheduledTasksStore()
         store.tasks = [ScheduledTask(id: "t1", title: "Gold", instructions: "", everyMinutes: 60,
                                      status: "running", nextAt: "", failures: 0, lastError: "",
-                                     lastResult: "", unseen: 0)]
+                                     lastResult: "", unseen: 0, delivery: nil)]
         StubNetwork.install(json: """
         {"tasks": [{"id": "t1", "title": "Gold", "instructions": "", "every_minutes": 120,
           "status": "paused", "next_at": "", "failures": 0, "last_error": "", "last_result": "",
@@ -99,12 +99,75 @@ final class ScheduledTasksTests: XCTestCase {
         XCTAssertTrue(store.notice.isEmpty, "a quiet refresh never shows a notice")
     }
 
+    private func gold(_ way: TaskDelivery? = nil) -> ScheduledTask {
+        ScheduledTask(id: "t1", title: "Gold", instructions: "check gold", everyMinutes: 60,
+                      status: "running", nextAt: "", failures: 0, lastError: "", lastResult: "",
+                      unseen: 0, delivery: way)
+    }
+
+    /// The screen changes what talk changes: only what differs is sent, and the way of telling
+    /// is read as the server keeps it (an old row with none is once an hour).
+    func testOnlyWhatChangedIsSent() {
+        let task = gold()
+        XCTAssertTrue(TaskEditSheet.change(from: task, words: "check gold ", minutes: 60,
+                                           way: .hourly).isEmpty)
+        let c = TaskEditSheet.change(from: task, words: "check silver", minutes: 120,
+                                     way: TaskDelivery(mode: TaskDelivery.daily, at: "21:00"))
+        XCTAssertEqual(c.instructions, "check silver")
+        XCTAssertEqual(c.everyMinutes, 120)
+        XCTAssertEqual(c.delivery, TaskDelivery(mode: TaskDelivery.daily, at: "21:00"))
+    }
+
+    /// A change is previewed (the question by talk), then saved with the check the preview
+    /// brought, and the screen shows the task as the server keeps it.
+    func testAChangeIsPreviewedThenSavedWithItsCheck() async throws {
+        let api = TestClient.make()
+        let store = ScheduledTasksStore()
+        store.tasks = [gold()]
+        StubNetwork.install(json: """
+        {"summary": "make «Gold» every 2 hours: «check silver», telling you right away",
+         "check": {"tool": "web_search", "args": {"query": "silver price"}}}
+        """)
+        var change = TaskChange(everyMinutes: 120, delivery: TaskDelivery(mode: TaskDelivery.instant),
+                                instructions: "check silver")
+        let preview = await store.preview(change, id: "t1", api: api)
+        XCTAssertEqual(paths(), ["POST /api/scheduled-tasks/t1/preview"])
+        XCTAssertEqual(preview?.check?.tool, "web_search")
+        XCTAssertEqual(store.tasks[0].instructions, "check gold", "a preview saved nothing")
+        change.check = preview?.check
+        StubNetwork.install(json: """
+        {"task": {"id": "t1", "title": "Gold", "instructions": "check silver", "every_minutes": 120,
+          "status": "running", "next_at": "", "failures": 0, "last_error": "", "last_result": "",
+          "unseen": 0, "delivery": {"mode": "instant"}}}
+        """)
+        let saved = await store.save(change, id: "t1", api: api)
+        XCTAssertTrue(saved)
+        XCTAssertEqual(store.tasks[0].instructions, "check silver")
+        XCTAssertEqual(store.tasks[0].way, TaskDelivery(mode: TaskDelivery.instant))
+        let sent = try XCTUnwrap(StubNetwork.requests.last?.httpBody)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: sent) as? [String: Any])
+        XCTAssertEqual((body["check"] as? [String: Any])?["tool"] as? String, "web_search")
+        XCTAssertEqual(paths(), ["PATCH /api/scheduled-tasks/t1"])
+    }
+
+    /// A change the server cannot read is said in its own words, and nothing changes here.
+    func testARefusedChangeSaysWhy() async {
+        let api = TestClient.make()
+        let store = ScheduledTasksStore()
+        store.tasks = [gold()]
+        StubNetwork.install(status: 400, json: #"{"error": "bad_delivery", "message": "needs its hour"}"#)
+        let ok = await store.save(TaskChange(delivery: TaskDelivery(mode: TaskDelivery.daily)), id: "t1", api: api)
+        XCTAssertFalse(ok)
+        XCTAssertEqual(store.notice, "needs its hour")
+        XCTAssertEqual(store.tasks[0].way, .hourly)
+    }
+
     func testTheStoreRemovesATask() async {
         let api = TestClient.make()
         let store = ScheduledTasksStore()
         store.tasks = [ScheduledTask(id: "t1", title: "Gold", instructions: "", everyMinutes: 60,
                                      status: "running", nextAt: "", failures: 0, lastError: "",
-                                     lastResult: "", unseen: 0)]
+                                     lastResult: "", unseen: 0, delivery: nil)]
         StubNetwork.install(json: #"{"ok": true}"#)
         await store.remove(id: "t1", api: api)
         XCTAssertTrue(store.tasks.isEmpty)

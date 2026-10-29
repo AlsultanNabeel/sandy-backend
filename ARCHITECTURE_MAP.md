@@ -1463,7 +1463,7 @@ so folders are organisation only.
   results (opening them marks them seen, `POST …/seen`), pause or resume (shown at once, put
   back when the server refused) and delete after a yes; and the email the results go to, with
   the confirmation link asked from it; a change made anywhere else shows at once (`TasksFollow`: after a chat turn or a call, `sandyBlocksChanged`; the `{"sync": "tasks"}` push, `sandyTasksChanged`; back in the front; and every twenty seconds while it is open, since pushes wait on the paid account) (`APIClient+Tasks`, `/api/scheduled-tasks`,
-  `/api/notify/email`, through `ScheduledTasksStore`). Tasks are made and changed by talk.
+  `/api/notify/email`, through `ScheduledTasksStore`). Tasks are made by talk and changed by talk or here, the same changes: `TaskEditSheet` (what it does, how often it checks, how it tells: right away, a daily summary at an hour, at most every N hours), only what differs sent (`TaskEditSheet.change`), «Review» asks `/preview` for the question Sandy asks by talk and only «Save» on it sends the change with the check the preview brought; the task's way of telling shows on it (`TaskFormat.how`).
 - `Core/Intents/` — App Intents / Siri shortcuts, including device intents.
 - `Core/Stores/LoadableStore.swift` — the shared load/error/empty state machine.
 - `Features/Blocks/` — **the screens for the blocks (§2.12)**: one generic list screen

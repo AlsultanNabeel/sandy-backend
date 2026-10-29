@@ -70,6 +70,39 @@ final class ScheduledTasksStore: LoadableStore {
         }
     }
 
+    /// The question a change waits on; nil (with the server's own words as the notice) when it
+    /// cannot be read.
+    func preview(_ change: TaskChange, id: String, api: APIClient) async -> TaskPreview? {
+        clearNotice()
+        do {
+            return try await api.previewScheduledTask(id: id, change: change)
+        } catch let error as APIError {
+            notice = error.message
+        } catch {
+            notify("tasks.saveFailed")
+        }
+        return nil
+    }
+
+    /// Saves what was previewed; the task as the server keeps it.
+    func save(_ change: TaskChange, id: String, api: APIClient) async -> Bool {
+        clearNotice()
+        do {
+            let saved = try await api.changeScheduledTask(id: id, change: change)
+            if let i = tasks.firstIndex(where: { $0.id == id }) {
+                var row = saved
+                row.unseen = tasks[i].unseen
+                tasks[i] = row
+            }
+            return true
+        } catch let error as APIError {
+            notice = error.message
+        } catch {
+            notify("tasks.saveFailed")
+        }
+        return false
+    }
+
     func remove(id: String, api: APIClient) async {
         clearNotice()
         do {

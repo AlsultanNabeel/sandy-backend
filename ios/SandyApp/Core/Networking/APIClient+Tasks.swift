@@ -20,15 +20,58 @@ struct ScheduledTask: Decodable, Identifiable, Hashable {
     let lastError: String
     let lastResult: String
     var unseen: Int
+    /// How its results are emailed; nil from a server before it was asked.
+    var delivery: TaskDelivery?
 
     var paused: Bool { status == "paused" }
     var nextDate: Date? { serverDate(nextAt) }
+    var way: TaskDelivery { delivery ?? .hourly }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, instructions, status, failures, unseen
+        case id, title, instructions, status, failures, unseen, delivery
         case everyMinutes = "every_minutes", nextAt = "next_at"
         case lastError = "last_error", lastResult = "last_result"
     }
+}
+
+/// How a task's results are emailed (`blocks/tasks.py` delivery): right away, a summary once
+/// a day at `at` («HH:MM» on his clock), or at most once every `hours`.
+struct TaskDelivery: Codable, Hashable {
+    var mode: String
+    var hours: Int?
+    var at: String?
+
+    static let instant = "instant", daily = "daily", every = "every"
+    static let hourly = TaskDelivery(mode: every, hours: 1)
+}
+
+/// The check new words bring (from the preview), handed back with the change so what was
+/// shown is what is saved.
+struct TaskCheck: Codable, Hashable {
+    let tool: String
+    let args: [String: JSONValue]
+}
+
+/// A change from the screen; what is nil stays as it is.
+struct TaskChange: Encodable, Equatable {
+    var everyMinutes: Int?
+    var delivery: TaskDelivery?
+    var instructions: String?
+    var check: TaskCheck?
+
+    var isEmpty: Bool { everyMinutes == nil && delivery == nil && instructions == nil }
+
+    enum CodingKeys: String, CodingKey {
+        case delivery, instructions, check
+        case everyMinutes = "every_minutes"
+    }
+}
+
+/// The question a change waits on, the same as Sandy asks by talk, and the check new words
+/// bring.
+struct TaskPreview: Decodable {
+    let summary: String
+    let check: TaskCheck?
 }
 
 struct ScheduledTaskResult: Decodable, Identifiable, Hashable {
@@ -49,6 +92,7 @@ struct NotifyEmail: Decodable, Equatable {
 }
 
 private struct ScheduledTasksResponse: Decodable { let tasks: [ScheduledTask] }
+private struct ScheduledTaskResponse: Decodable { let task: ScheduledTask }
 private struct ScheduledTaskResultsResponse: Decodable { let results: [ScheduledTaskResult] }
 private struct NotifyEmailAsked: Decodable { let state: String }
 private struct NotifyEmailBody: Encodable { let address: String }
@@ -79,6 +123,19 @@ extension APIClient {
 
     func removeScheduledTask(id: String) async throws {
         try await send("/api/scheduled-tasks/\(URLEscape.segment(id))", method: "DELETE")
+    }
+
+    /// What the change would be, asked before it is saved; nothing is saved.
+    func previewScheduledTask(id: String, change: TaskChange) async throws -> TaskPreview {
+        try await fetch("/api/scheduled-tasks/\(URLEscape.segment(id))/preview", method: "POST",
+                        body: change)
+    }
+
+    /// The change saved; the task as it is now.
+    func changeScheduledTask(id: String, change: TaskChange) async throws -> ScheduledTask {
+        let r: ScheduledTaskResponse = try await fetch("/api/scheduled-tasks/\(URLEscape.segment(id))",
+                                                       method: "PATCH", body: change)
+        return r.task
     }
 
     func notifyEmail() async throws -> NotifyEmail {
