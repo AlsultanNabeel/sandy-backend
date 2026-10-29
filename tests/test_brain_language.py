@@ -505,3 +505,29 @@ def test_arabic_punctuation_and_digits_name_no_language(text, want):
 
 def test_a_message_of_arabic_digits_alone_keeps_the_conversations_language():
     assert lang.of("٢٢", fallback="en") == "en" and lang.of("؟", fallback="en") == "en"
+
+
+# A tool's reply is ours only where a phrase made it: the web summary is the model's words,
+# and an Arabic one to an English message (or the other way) is caught, not set aside as a
+# name. The names a phrase was filled with (a device's label, a row's text) still are.
+@pytest.mark.parametrize("language, summary", [
+    ("en", "الأسعار ارتفعت مرة تانية هالأسبوع."),
+    ("ar", "Prices went up again this week, according to the news."),
+])
+def test_a_tools_reply_in_the_wrong_language_is_caught(language, summary):
+    from app.brain import language_guard as G
+    from app.features import research
+    with lang.using(language), lang.naming() as named:
+        reply = research._with_sources(summary, ["https://example.com/a"])
+        names = G.names_of("what's new?" if language == "en" else "شو الأخبار؟",
+                           [("web_search", {"ok": True, "reply": reply})], named)
+    assert G.wrong_language(reply, language, names) is True
+
+
+@pytest.mark.parametrize("language, label", [("en", "ضو الصالة"), ("ar", "Desk lamp")])
+def test_the_names_a_phrase_was_filled_with_are_still_names(language, label):
+    from app.brain import language_guard as G
+    with lang.using(language), lang.naming() as named:
+        reply = lang.say("device_on", label=label)
+        names = G.names_of("hi" if language == "en" else "هلا", [("x", {"reply": reply})], named)
+    assert G.wrong_language(reply, language, names) is False

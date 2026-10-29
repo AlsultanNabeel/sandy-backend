@@ -235,7 +235,8 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
     trace = trace_store.Trace(user_id, "voice" if source == "voice" else "chat",
                               thread_id=str(conversation_id or chat_id))
     state = None
-    with turn_scope(), trace_store.using(trace), lang.using(lang.of(message)):
+    with turn_scope(), trace_store.using(trace), lang.using(lang.of(message)), \
+            lang.naming():
         try:
             state = _run_turn(message, user_id, chat_id, pending_state=pending_state,
                               source=source, image_state=image_state,
@@ -324,7 +325,8 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
         # In the message's language (`language_guard`); the held question is ours, already in it.
         body = _without(question, text)
         rewritten = language_guard.ensure(body, complete,
-                                          language_guard.names_of(message, ctx.results))
+                                          language_guard.names_of(message, ctx.results,
+                                                                  lang.named()))
         if rewritten != body:
             # The rewrite is the model's words too: what it says was done is checked again.
             body = _without(question, honesty.correct(_joined(rewritten, question), ctx.worked,

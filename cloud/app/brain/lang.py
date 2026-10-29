@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator, Optional
+from typing import Iterator, List, Optional
 
 AR, EN = "ar", "en"
 
@@ -27,6 +27,10 @@ _LATIN = re.compile(r"[A-Za-z]")
 # A name the message quotes: «حليب», "milk", “milk”.
 _QUOTED = re.compile(r"«[^»]*»|\"[^\"]*\"|“[^”]*”")
 _current: ContextVar[str] = ContextVar("sandy_lang", default=AR)
+# Inside `naming`: every value a phrase was filled with (a device's label, a row's text).
+_named: ContextVar[Optional[List[str]]] = ContextVar("sandy_named", default=None)
+# Slots that hold the model's own words (a web summary), never a name.
+_MODEL_WORDS = {"body"}
 # Said the same in Arabic and English chats: they name no language.
 _BOTH_LANGUAGES = {"ok", "okay", "k", "kk"}
 
@@ -56,6 +60,22 @@ def using(language: str) -> Iterator[str]:
         yield _current.get()
     finally:
         _current.reset(token)
+
+
+@contextmanager
+def naming() -> Iterator[List[str]]:
+    """The names said in it: what `say` filled a phrase with, which a right reply may hold in
+    the other script (`language_guard.names_of`). The model's own words are not among them."""
+    token = _named.set([])
+    try:
+        yield _named.get()
+    finally:
+        _named.reset(token)
+
+
+def named() -> List[str]:
+    """The names said so far inside `naming` (none outside it)."""
+    return list(_named.get() or ())
 
 
 def settle(language: str) -> None:
@@ -88,7 +108,11 @@ def note(user_id: str, language: str) -> None:
 
 
 def say(key: str, **slots: object) -> str:
-    """The phrase in the turn's language, its slots filled."""
+    """The phrase in the turn's language, its slots filled (the names among them kept, see
+    `naming`)."""
+    named = _named.get()
+    if named is not None:
+        named += [v for k, v in slots.items() if isinstance(v, str) and k not in _MODEL_WORDS]
     return PHRASES[key][_current.get()].format(**slots)
 
 

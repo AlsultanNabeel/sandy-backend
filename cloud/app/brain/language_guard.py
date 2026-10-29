@@ -3,7 +3,7 @@
 The prompt says so, and the model mostly listens; but with a long Arabic prompt it writes
 Arabic to an English message now and then (and the other way round). So the reply is read
 here: an English turn's reply may hold no Arabic word, an Arabic turn's may not be mostly
-English words; names (quoted, the message's own, the tools'), links and numbers aside. One that breaks it is rewritten once by the model in the
+English words; names (quoted, the message's own, the tools' and their phrases'), links and numbers aside. One that breaks it is rewritten once by the model in the
 right language; if that fails, the reply goes out as it was.
 """
 
@@ -38,14 +38,16 @@ _REWRITE = {
 _HEAD = {lang.EN: "The reply to translate:", lang.AR: "الرد اللي بدّه ترجمة:"}
 
 
-def names_of(message: str, results: Iterable[Tuple[str, Dict[str, Any]]]) -> List[str]:
+def names_of(message: str, results: Iterable[Tuple[str, Dict[str, Any]]],
+             said: Iterable[str] = ()) -> List[str]:
     """What a right reply may still hold in the other script: the words of the message in it
-    («turn on ضو الصالة»), the tools' own replies (ours, already in the turn's language) and
-    every word their calls were given (a device's or a row's name)."""
-    found = [*_ARABIC_RUN.findall(message or ""), *_LATIN_RUN.findall(message or "")]
+    («turn on ضو الصالة»), the names the tools' results carry and those their phrases were
+    filled with (``said``, `lang.naming`: a device's label, a row's text). A tool's reply
+    itself is not a name: a web summary is the model's words, and is read like the rest."""
+    found = [*_ARABIC_RUN.findall(message or ""), *_LATIN_RUN.findall(message or ""), *said]
     for _, result in results or []:
         found += [str(v) for k, v in (result or {}).items()
-                  if isinstance(v, str) and k in ("reply", "label", "name", "text")]
+                  if isinstance(v, str) and k in ("label", "name", "text")]
     return [n for n in dict.fromkeys(n.strip() for n in found) if n]
 
 
