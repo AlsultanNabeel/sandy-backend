@@ -400,10 +400,13 @@ def test_summary_uses_the_brain_summarize_rows_and_one_model_call(c, monkeypatch
 
 
 def test_summary_with_nothing_recorded_costs_no_model_call(c, monkeypatch):
-    from app.brain import model, summary
+    from app.brain import lang, model
     monkeypatch.setattr(model, "complete", lambda *a, **k: pytest.fail("model called"))
     r = c.post("/api/summary", json={"period": "week", "focus": "expense"}, headers=_h())
-    assert r.get_json()["text"] == summary.EMPTY_REPLY
+    assert r.get_json()["text"] == lang.PHRASES["summary_empty"]["ar"]
+    r = c.post("/api/summary", json={"period": "week", "focus": "expense"},
+               headers={**_h(), "X-Lang": "en"})
+    assert r.get_json()["text"] == lang.PHRASES["summary_empty"]["en"]
 
 
 def test_summary_validation_failure_and_metering(c, monkeypatch):

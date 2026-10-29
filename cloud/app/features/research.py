@@ -6,13 +6,14 @@ from urllib.parse import urlparse
 
 from app.config import EXA_API_KEY
 from app.integrations.exa_client import search_exa
+from app.brain import lang
 
 logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 8
 SHOWN_RESULTS = 5
 _SUMMARY_SYSTEM = (
-    "أنت ساندي، مساعدة ذكية. لخّص نتائج البحث باللغة العربية "
+    "أنت ساندي، مساعدة ذكية. لخّص نتائج البحث بلغة طلب المستخدم (عربي أو إنجليزي) "
     "بشكل مختصر وواضح ومرتب حسب طلب المستخدم. "
     "لا تبدأ بـ'تفضل' أو كلمات فارغة — ابدأ مباشرة بالمعلومات."
 )
@@ -29,23 +30,24 @@ def _with_sources(body: str, sources: List[str]) -> str:
     body = str(body or "").strip() or "ما قدرت ألخص النتائج بشكل واضح حالياً."
     lines = [f"{i}. {_short_url(url)}" for i, url in enumerate(sources[:5], 1)]
     if lines:
-        return f"📌 الملخص:\n{body}\n\n📎 المصادر:\n" + "\n".join(lines)
-    return f"📌 الملخص:\n{body}"
+        return "\n\n".join((lang.say("research_summary", body=body),
+                             lang.say("research_sources") + "\n" + "\n".join(lines)))
+    return lang.say("research_summary", body=body)
 
 
 def web_answer(query: str, user_message: str,
                complete: Optional[Callable[..., Any]] = None) -> str:
-    """The Arabic answer to a web question, with its sources; a sentence saying so
+    """The answer to a web question, in the turn's language, with its sources; a sentence saying so
     when the search could not run or found nothing."""
     if not EXA_API_KEY:
-        return "ما قدرت أكمل البحث — خدمة البحث غير متوفرة حالياً."
+        return lang.say("research_no_service")
     try:
         results = search_exa(query, exa_api_key=EXA_API_KEY, num_results=MAX_RESULTS)
     except Exception as exc:  # noqa: BLE001 — provider boundary
         logger.warning("[research] Exa call raised: %s", exc)
-        return f"ما قدرت أجد نتائج عن '{query}' — خطأ في الاتصال بخدمة البحث."
+        return lang.say("research_error", query=query)
     if not results:
-        return f"ما قدرت أجد نتائج عن '{query}' الآن. جرب مرة ثانية لاحقاً."
+        return lang.say("research_none", query=query)
 
     snippets: List[str] = []
     sources: List[str] = []
@@ -61,7 +63,7 @@ def web_answer(query: str, user_message: str,
             if url:
                 sources.append(url)
     if not snippets:
-        return f"ما قدرت أجد نتائج واضحة عن '{query}'."
+        return lang.say("research_unclear", query=query)
 
     reply = ""
     if complete is not None:

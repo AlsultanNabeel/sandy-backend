@@ -149,6 +149,8 @@ def _enroll_session(ws, remote: str) -> None:
         return
 
     samples: List[bytes] = []
+    # Its own messages in the owner's language: no request sets one here.
+    language = lang.for_user(chat_id)
     cur = bytearray()
     total = 0
     while True:
@@ -177,13 +179,16 @@ def _enroll_session(ws, remote: str) -> None:
                 cur = bytearray()
             _send_json(ws, {"type": "enrolled", "n": len(samples)})
         elif kind == "enroll_cancel":
-            _send_json(ws, {"type": "enroll_result", "ok": False, "msg": "أُلغي التسجيل."})
+            with lang.using(language):
+                _send_json(ws, {"type": "enroll_result", "ok": False,
+                                "msg": lang.say("enroll_cancelled")})
             return
         elif kind == "enroll_done":
             if cur:  # آخر مقطع بدون utterance_end صريح
                 samples.append(bytes(cur))
                 cur = bytearray()
-            ok, n, text = speaker_id.enroll_speaker(chat_id, samples)
+            with lang.using(language):
+                ok, n, text = speaker_id.enroll_speaker(chat_id, samples)
             logger.info("[voice_ws] enroll result ok=%s n=%d (%s)", ok, n, remote)
             _send_json(ws, {"type": "enroll_result", "ok": ok, "n": n, "msg": text})
             return
@@ -1534,8 +1539,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         live_state["end_asked_at"] = time.monotonic()
                         fn_responses.append(types.FunctionResponse(
                             id=fc.id, name=fc.name,
-                            response={"output": ("تمام: المكالمة بتسكّر بعد هالجملة. "
-                                                 "ودّعيه بكلمة قصيرة وبس.")},
+                            response={"output": _in_turn_language("voice_end_call")},
                         ))
                         continue
                     # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.

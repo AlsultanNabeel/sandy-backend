@@ -35,6 +35,7 @@ from app.api.auth_handlers import require_auth
 from app.utils.tenant_db import ScopedCollection, scoped
 from app.utils.user_profiles import active_user_profile_context
 from app.utils.text_query import contains
+from app.brain import lang
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,7 @@ def _now() -> str:
 def _title_from(text: str) -> str:
     """Fallback title from the first user message, until the LLM title lands."""
     t = " ".join((text or "").split())
-    return t[:40] if t else "محادثة جديدة"
+    return t[:40] if t else lang.say("new_chat")
 
 
 # What of the first exchange the title model reads: the topic is in the opening words.
@@ -468,7 +469,7 @@ def register_conversations_api(app, mongo_db=None):
         keep_user = bool((request.get_json(silent=True) or {}).get("keep_user"))
         if turn_running(mongo_db, uid):
             return jsonify({"error": "turn_running",
-                            "message": "لسا عم خلّص الرد اللي وقّفته، جرّب كمان شوي."}), 409
+                            "message": lang.say("still_stopping")}), 409
         d = coll.find_one({"_id": cid, "user_id": uid}, {"messages": {"$slice": -2}})
         if not d:
             return jsonify({"error": "not_found"}), 404

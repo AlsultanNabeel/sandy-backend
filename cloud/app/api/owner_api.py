@@ -20,6 +20,7 @@ from flask import jsonify, request
 from app.api.auth_handlers import require_auth
 from app.api.metering import is_owner_account
 from app.features import trace_store
+from app.brain import lang
 
 
 def _iso(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -42,8 +43,7 @@ def _not_found():
 
 
 def _bad(name: str, top: int):
-    return jsonify({"error": "bad_request",
-                    "message": f"«{name}» لازم يكون رقم من واحد لـ {top}."}), 400
+    return jsonify({"error": "bad_request", "message": lang.say("bad_number", name=name, top=top)}), 400
 
 
 def register_owner_api(app):

@@ -10,14 +10,11 @@ import logging
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_tenant
+from app.brain import lang
 
 logger = logging.getLogger(__name__)
 
 # Shown by the app as they are. An erase is safe to ask again: it carries on from what is left.
-_PARTIAL_RESET = "ما انمسح كل شي، في جزء ضل. جرّب كمان مرّة وبكمّل من وين وقفت."
-_PARTIAL_DELETE = ("ما انحذف كل شي، في جزء ضل وحسابك لسا موجود. سجّل دخولك من جديد "
-                   "وجرّب الحذف كمان مرّة، وبكمّل من وين وقفت.")
-_UNAVAILABLE = "ما قدرت أحذف الحساب هلق، وما انمسح ولا شي. جرّب كمان شوي."
 
 
 def register_account_api(app):
@@ -55,7 +52,7 @@ def register_account_api(app):
         from app.features.account_delete import wipe_account_data
         r = wipe_account_data(uid)
         if not r.get("ok"):
-            return jsonify({**r, "message": _PARTIAL_RESET}), 500
+            return jsonify({**r, "message": lang.say("account_partial_reset")}), 500
         return jsonify(r), 200
 
     @app.route("/api/account", methods=["DELETE"])
@@ -73,7 +70,7 @@ def register_account_api(app):
         # Every token of the account dies before anything is touched.
         from app.features.account_delete import delete_account, revoke_sessions
         if not revoke_sessions(uid):
-            return jsonify({"error": "unavailable", "message": _UNAVAILABLE}), 503
+            return jsonify({"error": "unavailable", "message": lang.say("account_unavailable")}), 503
 
         # Release the hardware next: a half-deleted account must not keep a robot claimed.
         from app.features.node_store import list_nodes, unpair_node
@@ -82,5 +79,5 @@ def register_account_api(app):
 
         r = delete_account(uid)
         if not r.get("ok"):
-            return jsonify({**r, "message": _PARTIAL_DELETE}), 500
+            return jsonify({**r, "message": lang.say("account_partial_delete")}), 500
         return jsonify(r), 200

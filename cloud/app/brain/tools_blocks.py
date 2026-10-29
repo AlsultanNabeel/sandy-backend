@@ -51,7 +51,7 @@ def _schedule_row(s: Dict[str, Any]) -> Dict[str, Any]:
     # A message to his future self stays sealed until it is delivered.
     sealed = s.get("kind") == "message_to_future_self" and s.get("status") != "sent"
     row = {"id": s["id"], "kind": s.get("kind"),
-           "text": "(رسالة مختومة لحد موعدها)" if sealed else decrypt_field(s.get("text", "")),
+           "text": lang.say("sealed_message") if sealed else decrypt_field(s.get("text", "")),
            "when": W.iso(s.get("fire_at")), "status": s.get("status")}
     if s.get("recurrence"):
         row["recurrence"] = s["recurrence"]

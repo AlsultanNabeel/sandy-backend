@@ -7,6 +7,7 @@ from __future__ import annotations
 from flask import Response, jsonify, request
 
 from app.api.auth_handlers import require_auth, require_tenant
+from app.brain import lang
 
 
 def _wav_seconds(audio: bytes) -> float:
@@ -70,7 +71,7 @@ def register_voice_api(app) -> None:
 
         if not speaker_id.is_available():
             return jsonify({"error": "unavailable",
-                            "message": "تمييز الصوت مش مفعّل على السيرفر."}), 503
+                            "message": lang.say("voice_id_off")}), 503
         if not speaker_id.start_enrollment(str(claims.get("user_id") or "")):
             return jsonify({"error": "not_saved"}), 503
         return jsonify({"ok": True, "needed": speaker_id.ENROLL_CLIPS}), 200

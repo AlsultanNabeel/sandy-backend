@@ -15,6 +15,7 @@ from flask import jsonify, request
 from app.api.auth_handlers import require_auth
 from app.db import get_db
 from app.features import notify_prefs
+from app.brain import lang
 
 _MAX_FEEDBACK_CHARS = 4000
 _MAX_META_CHARS = 80
@@ -32,7 +33,7 @@ def register_settings_api(app):
         try:
             changes = notify_prefs.clean(request.get_json(silent=True) or {})
         except ValueError:
-            return jsonify({"error": "invalid_time", "message": "الوقت لازم يكون بصيغة ساعة ودقيقة."}), 400
+            return jsonify({"error": "invalid_time", "message": lang.say("time_format")}), 400
         return jsonify(notify_prefs.save(claims.get("user_id") or "", changes)), 200
 
     @app.route("/api/feedback", methods=["POST"])
@@ -41,10 +42,10 @@ def register_settings_api(app):
         body = request.get_json(silent=True) or {}
         text = str(body.get("text") or "").strip()
         if not text:
-            return jsonify({"error": "empty", "message": "اكتب ملاحظتك أول."}), 400
+            return jsonify({"error": "empty", "message": lang.say("note_empty")}), 400
         db = get_db()
         if db is None:
-            return jsonify({"error": "not_saved", "message": "ما وصلت، جرّب كمان شوي."}), 503
+            return jsonify({"error": "not_saved", "message": lang.say("not_saved")}), 503
         db["sandy_feedback"].insert_one({
             "user_id": claims.get("user_id") or "",
             "text": text[:_MAX_FEEDBACK_CHARS],

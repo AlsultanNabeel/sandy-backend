@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from app.db import configure, get_db
+from app.brain import lang
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def save_photo(
 def _default_name(caption: str) -> str:
     if caption:
         return caption[:40]
-    return "صورة " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return lang.say("photo_title", when=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"))
 
 
 def set_ai_metadata(photo_id: Any, caption: str, tags: List[str]) -> None:

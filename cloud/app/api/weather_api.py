@@ -7,6 +7,7 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
+from app.brain import lang
 from app.utils.user_profiles import (
     active_user_profile_context,
     build_user_profile,
@@ -30,7 +31,7 @@ def register_weather_api(app, mongo_db=None):
         city_now = city or home_city(uid)
         if not city_now:
             return jsonify({"error": "city_required",
-                            "message": "اختار مدينتك عشان أجيبلك الطقس."}), 400
+                            "message": lang.say("weather_pick_city")}), 400
         with active_user_profile_context(build_user_profile(claims)):
             data = get_weather(city_now)
 

@@ -189,7 +189,10 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    Capitalised names in an Arabic reply) is rewritten once by the model, and the rewrite goes
    through the honesty check again (3b); if the rewrite fails the reply goes out as it was. Outside a reply (pushes, the daily nudge, limits, a route's own message)
    the user's own language is used: `sandy_users.language`, which the app sends as `X-Lang`
-   (`lang.note` in `require_auth`).
+   (`lang.note` in `require_auth`; a guest's `X-Lang` as it is). Every route's message and
+   error, a row's own words (a sealed message, a new chat's title) and the call's own lines
+   are phrases; `tests/test_brain_language.py` reads all of `cloud/app` for a literal one,
+   and the prompts the model alone reads are named there.
 4. Due `message_to_future_self` schedules (`future.py`) are pasted word for word at the end
    of the reply by the code, never shown to the model, and marked `sent` only when the reply
    went out whole (not an error, not stopped).

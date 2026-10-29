@@ -187,7 +187,9 @@ def require_auth(view):
             # The app's language setting (the phone's at first); kept only when it changed.
             lang.note(uid, request.headers["X-Lang"])
         # A route's own message is in the user's language; a chat reply sets its message's.
-        with lang.using(lang.for_user(uid) if claims.get("role") != "guest" else lang.AR):
+        # A guest keeps no language: the one the app sends is used as it is.
+        guest = str(request.headers.get("X-Lang") or "").strip().lower()[:2]
+        with lang.using(lang.for_user(uid) if claims.get("role") != "guest" else guest):
             response = view(*args, claims=claims, **kwargs)
         renewed = renewed_token(claims)
         if renewed is None:

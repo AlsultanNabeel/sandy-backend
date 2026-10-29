@@ -10,11 +10,9 @@ from app.brain.persona import build_effective_persona
 from app.brain import model, tools_blocks
 from app.brain.ctx import TurnCtx
 from app.utils.user_profiles import address_instruction
+from app.brain import lang
 
 logger = logging.getLogger(__name__)
-
-EMPTY_REPLY = "ما في إشي مسجّل بهالفترة."
-
 
 def summarize_text(user_id: str, period: str, focus: str = "", *,
                    complete: Optional[Callable] = None) -> Dict[str, Any]:
@@ -24,7 +22,7 @@ def summarize_text(user_id: str, period: str, focus: str = "", *,
     if not result.get("ok"):
         return {"ok": False, "error": result.get("error", "bad_period")}
     if not result["rows"]:
-        return {"ok": True, "text": EMPTY_REPLY, "count": 0}
+        return {"ok": True, "text": lang.say("summary_empty"), "count": 0}
     system = "\n\n".join(p for p in (build_effective_persona(user_id or None),
                                      address_instruction(), result["instruction"]) if p)
     rows = json.dumps({k: result[k] for k in ("period", "from", "to", "rows")},

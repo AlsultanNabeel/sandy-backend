@@ -11,6 +11,7 @@ import os
 from flask import jsonify, request
 
 from app.api.auth_handlers import require_auth
+from app.brain import lang
 
 logger = logging.getLogger(__name__)
 
@@ -19,27 +20,16 @@ def _is_guest(claims) -> bool:
     return claims.get("role", "guest") == "guest"
 
 
-_DEMO_WEB = [
-    {
-        "title": "نتيجة بحث تجريبية",
-        "url": "https://example.com",
-        "text": "هذه نتيجة تجريبية — سجّل دخولك ليبحث ساندي فعلياً على الويب.",
-        "published_date": "",
-    },
-]
-_DEMO_PLACES = [
-    {
-        "name": "مقهى تجريبي",
-        "address": "وسط البلد",
-        "rating": 4.5,
-        "reviews_count": 120,
-        "phone": "",
-        "website": "",
-        "price_level": "متوسط",
-        "open_now": "مفتوح الآن",
-        "maps_url": "",
-    },
-]
+def _demo_web():
+    return [{"title": lang.say("demo_web_title"), "url": "https://example.com",
+             "text": lang.say("demo_web_text"), "published_date": ""}]
+
+
+def _demo_places():
+    return [{"name": lang.say("demo_place_name"), "address": lang.say("demo_place_address"),
+             "rating": 4.5, "reviews_count": 120, "phone": "", "website": "",
+             "price_level": lang.say("demo_place_price"), "open_now": lang.say("demo_place_open"),
+             "maps_url": ""}]
 
 
 def register_research_api(app):
@@ -54,7 +44,7 @@ def register_research_api(app):
             kind = "web"
 
         if _is_guest(claims):
-            demo = _DEMO_WEB if kind == "web" else _DEMO_PLACES
+            demo = _demo_web() if kind == "web" else _demo_places()
             return jsonify({"kind": kind, "items": demo, "demo": True}), 200
 
         from app.api.metering import meter_claims

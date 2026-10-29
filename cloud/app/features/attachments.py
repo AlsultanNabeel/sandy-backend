@@ -20,6 +20,7 @@ from bson import Binary
 
 from app.db import get_db
 from app.utils.tenant_db import scoped
+from app.brain import lang
 
 COLL = "sandy_attachments"
 
@@ -44,11 +45,6 @@ TEXT_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json", "te
 PDF = "application/pdf"
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-TOO_BIG_IMAGE = "الصورة أكبر من ثمانية ميغا. صغّرها أو اختار وحدة تانية."
-TOO_BIG_FILE = "الملف أكبر من خمسة ميغا. ابعت ملف أصغر أو جزء منه."
-UNSUPPORTED = "ما بقدر أقرأ هالنوع. ابعت صورة، أو PDF، أو Word، أو ملف نص."
-UNREADABLE = "ما قدرت أطلع نص من هالملف. ممكن يكون صور بس أو محمي."
-TOO_BIG_UNPACKED = "هالملف بيكبر كتير لما ينفتح، ما بقدر أقراه. ابعت جزء منه."
 
 
 class AttachmentError(ValueError):
@@ -75,18 +71,18 @@ def kind_of(mime: str) -> str:
         return "image"
     if mime in TEXT_TYPES or mime in (PDF, DOCX):
         return "file"
-    raise AttachmentError("unsupported_type", UNSUPPORTED, 415)
+    raise AttachmentError("unsupported_type", lang.say("file_unsupported"), 415)
 
 
 def _docx_text(data: bytes) -> str:
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         if z.getinfo("word/document.xml").file_size > MAX_DOCX_XML_BYTES:
-            raise AttachmentError("too_big", TOO_BIG_UNPACKED, 413)
+            raise AttachmentError("too_big", lang.say("file_too_big_unpacked"), 413)
         # Read past the cap by one byte at most, whatever the header claims.
         with z.open("word/document.xml") as f:
             raw = f.read(MAX_DOCX_XML_BYTES + 1)
         if len(raw) > MAX_DOCX_XML_BYTES:
-            raise AttachmentError("too_big", TOO_BIG_UNPACKED, 413)
+            raise AttachmentError("too_big", lang.say("file_too_big_unpacked"), 413)
         xml = raw.decode("utf-8", "ignore")
     xml = re.sub(r"</w:p>", "\n", xml)
     return re.sub(r"<[^>]+>", "", xml)
@@ -123,10 +119,10 @@ def extract_text(data: bytes, mime: str) -> str:
     except AttachmentError:
         raise
     except (ValueError, KeyError, zipfile.BadZipFile, OSError, PyPdfError) as exc:
-        raise AttachmentError("unreadable", UNREADABLE, 422) from exc
+        raise AttachmentError("unreadable", lang.say("file_unreadable"), 422) from exc
     text = re.sub(r"[ \t]+", " ", text).strip()
     if not text:
-        raise AttachmentError("unreadable", UNREADABLE, 422)
+        raise AttachmentError("unreadable", lang.say("file_unreadable"), 422)
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS] + "\n[… الملف أطول من هيك، هاد أول جزء منه بس]"
     return text
@@ -136,12 +132,13 @@ def save(data: bytes, name: str, mime: str, *, source: str = "upload") -> Dict[s
     """Store one attachment for the current user; raises AttachmentError when refused."""
     mime = (mime or "").lower().split(";")[0].strip()
     kind = kind_of(mime)
-    limit, too_big = (MAX_IMAGE_BYTES, TOO_BIG_IMAGE) if kind == "image" else (MAX_FILE_BYTES, TOO_BIG_FILE)
+    limit, too_big = ((MAX_IMAGE_BYTES, lang.say("file_too_big_image")) if kind == "image"
+                      else (MAX_FILE_BYTES, lang.say("file_too_big")))
     if len(data) > limit:
         raise AttachmentError("too_big", too_big, 413)
     coll = _coll()
     if coll is None:
-        raise AttachmentError("not_saved", "ما قدرت أحفظ المرفق هلّق، جرّب كمان شوي.", 503)
+        raise AttachmentError("not_saved", lang.say("attachment_not_saved"), 503)
     doc = {
         "_id": uuid.uuid4().hex,
         "kind": kind,

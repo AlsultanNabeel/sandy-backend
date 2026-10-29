@@ -11,6 +11,8 @@ import time
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 
+from app.brain import lang
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,10 +27,8 @@ _MAX_IMAGE_PROMPT_CHARS = 2000
 
 # A retried send whose first run is still going waits this long on the stream route.
 _DUPLICATE_WAIT_S = 120
-_STILL_PROCESSING = {
-    "error": "still_processing",
-    "message": "ساندي لسا عم تجاوب على هالرسالة، لحظة.",
-}
+def _still_processing() -> dict:
+    return {"error": "still_processing", "message": lang.say("still_answering")}
 
 
 def create_app(*, mongo_db=None):
@@ -256,7 +256,7 @@ def create_app(*, mongo_db=None):
             if turn == "done":
                 return jsonify(cached), 200
             if turn == "processing":
-                return jsonify(_STILL_PROCESSING), 409
+                return jsonify(_still_processing()), 409
 
         _over = _meter_or_error(role, user_id)
         if _over:
@@ -310,6 +310,9 @@ def create_app(*, mongo_db=None):
                 return Response(_sse({**cached, "done": True}),
                                 mimetype="text/event-stream", headers=sse_headers)
             if turn == "processing":
+                # Said now: the stream runs after the request, outside its language.
+                still = _still_processing()
+
                 def _await_first_run():
                     deadline = time.monotonic() + _DUPLICATE_WAIT_S
                     last_ping = time.monotonic()
@@ -325,7 +328,7 @@ def create_app(*, mongo_db=None):
                             last_ping = time.monotonic()
                             yield ": keep-alive\n\n"
                         time.sleep(0.5)
-                    yield _sse(_STILL_PROCESSING)
+                    yield _sse(still)
 
                 return Response(_await_first_run(), mimetype="text/event-stream",
                                 headers=sse_headers)
@@ -406,7 +409,7 @@ def create_app(*, mongo_db=None):
             if img_bytes:
                 b64 = base64.b64encode(img_bytes).decode()
                 return jsonify({"url": f"data:image/png;base64,{b64}"}), 200
-            return jsonify({"error": "تعذّر توليد الصورة"}), 500
+            return jsonify({"error": "image_failed", "message": lang.say("image_failed")}), 500
         except Exception:
             logger.exception("[web_image] image generation failed")
             return jsonify({"error": "internal_error"}), 500
@@ -419,7 +422,7 @@ def create_app(*, mongo_db=None):
         prompt = (body.get("prompt") or "").strip()
         image_b64 = (body.get("image") or "").strip()
         if not prompt or not image_b64:
-            return jsonify({"error": "no prompt or image"}), 400
+            return jsonify({"error": "no_prompt_or_image", "message": lang.say("image_needs_both")}), 400
         if len(prompt) > _MAX_IMAGE_PROMPT_CHARS:
             return jsonify({"error": "prompt_too_long"}), 413
 
@@ -439,7 +442,7 @@ def create_app(*, mongo_db=None):
             if img_bytes:
                 b64 = base64.b64encode(img_bytes).decode()
                 return jsonify({"url": f"data:image/png;base64,{b64}"}), 200
-            return jsonify({"error": "تعذّر تعديل الصورة"}), 500
+            return jsonify({"error": "image_edit_failed", "message": lang.say("image_edit_failed")}), 500
         except Exception:
             logger.exception("[web_image_edit] image edit failed")
             return jsonify({"error": "internal_error"}), 500
@@ -478,7 +481,7 @@ def create_app(*, mongo_db=None):
                                              user_id=claims.get("user_id") or None)
             if not reply:
                 return jsonify({"error": "vision_failed",
-                                "message": "ما قدرت أحلل الصورة هلّق. جرّب كمان شوي."}), 502
+                                "message": lang.say("image_read_failed")}), 502
             _meter_or_error(claims.get("role", "user"), claims.get("user_id") or "")
             return jsonify({"reply": reply}), 200
         except Exception:

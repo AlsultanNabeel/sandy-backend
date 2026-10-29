@@ -176,16 +176,74 @@ def test_a_device_reply_comes_in_english(brain_db, monkeypatch):  # noqa: F811
             "I couldn't find a device by that name.")
 
 
-def test_no_tool_reply_is_written_in_one_language_only():
-    """A reply the user reads is a phrase in both languages (`lang.PHRASES`), never a
-    literal in the tool's code."""
+def test_nothing_the_server_says_is_written_in_one_language_only():
+    """What the user reads (a reply, a route's message or error, a tool's output to the live
+    model, a row's text) is a phrase in both languages (`lang.PHRASES`), never a literal,
+    anywhere in cloud/app. A prompt or note only the model reads stays in one language
+    (`lang` docstring), so `Part(text=…)` and system messages are not read here.
+    Arabic and English alike: a field the user reads may hold neither as a literal."""
+    import ast
     import re
     from pathlib import Path
-    root = Path(__file__).resolve().parents[1] / "cloud" / "app" / "brain"
-    arabic_reply = re.compile(r"""(?:"reply":\s*|reply=)f?["'][^"'\n]*[؀-ۿ]""")
-    for name in ("tools_blocks.py", "tools_world.py", "confirm.py", "honesty.py", "loop.py"):
-        found = arabic_reply.findall((root / name).read_text(encoding="utf-8"))
-        assert not found, f"{name}: {found}"
+    root = Path(__file__).resolve().parents[1] / "cloud" / "app"
+    keys = {"reply", "message", "error", "title", "body", "text", "output", "detail", "msg",
+            "caption", "name", "address", "price_level", "open_now"}
+    arabic = re.compile(r"[ء-ي]")
+
+    def said(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return bool(arabic.search(node.value))
+        if isinstance(node, ast.JoinedStr):
+            return any(said(v) for v in node.values)
+        if isinstance(node, (ast.BinOp, ast.IfExp)):
+            return any(said(v) for v in ast.iter_child_nodes(node))
+        return False
+
+    english = re.compile(r"[A-Za-z]+ [A-Za-z]+ [A-Za-z]+")
+
+    def sentence(node):
+        return isinstance(node, ast.Constant) and isinstance(node.value, str) \
+            and bool(english.search(node.value))
+
+    found = []
+    for path in sorted(root.rglob("*.py")):
+        if path.name == "lang.py":
+            continue
+        where = str(path.relative_to(root))
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                found += [f"{where}:{v.lineno} {k.value}"
+                          for k, v in zip(node.keys, node.values)
+                          if isinstance(k, ast.Constant) and k.value in keys and v is not None
+                          and (said(v) or sentence(v))]
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "AttachmentError":
+                found += [f"{where}:{node.lineno} AttachmentError" for a in node.args if said(a)]
+        # A constant at the top of a module is a prompt the model reads, named here; anything
+        # else in Arabic there is something said, and belongs in `lang.PHRASES`.
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and said(node.value):
+                names = {t.id for t in node.targets if isinstance(t, ast.Name)}
+                if not names <= _PROMPTS.get(where, set()):
+                    found.append(f"{where}:{node.lineno} {sorted(names)}")
+    assert not found, found
+
+
+# The model reads these, never the user (`lang`: what the model reads stays in one language).
+_PROMPTS = {
+    "api/daily_nudge_api.py": {"_AGENDA_INSTRUCTION"},
+    "api/voice_ws/memory.py": {"_END_CALL_ROBOT", "_END_CALL_APP"},
+    "api/voice_ws/session.py": {"_APP_CHANNEL", "_ROBOT_CHANNEL", "_UNHEARD_QUESTION"},
+    "api/voice_ws/tools.py": {"_PAST_RECORD_NOTE", "_DEVICE_SCENE_RULES"},
+    "brain/context.py": {"_RULES", "CHAT_CHANNEL", "SPOKEN_CHANNEL"},
+    "brain/loop.py": {"HELD_NOTE"},
+    "brain/persona.py": {"_ANTI_INJECTION", "LANGUAGE_RULE", "NO_PROMISES_RULE"},
+    "brain/stm.py": {"_SUMMARY_PROMPT"},
+    "brain/stops.py": {"CUT_NOTE"},
+    "features/research.py": {"_SUMMARY_SYSTEM"},
+    "features/vision.py": {"_VISION_CONTEXT"},
+    "utils/user_profiles.py": {"HAS_NO_NAME"},
+}
 
 
 # ── the fallback time reader reads English as it reads Arabic ───────────────

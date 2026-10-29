@@ -18,6 +18,7 @@ from flask import Response, jsonify, request
 from app.api.auth_handlers import require_tenant
 from app.api.metering import meter_claims
 from app.features import attachments as A
+from app.brain import lang
 
 # The largest allowed upload in base64 characters, checked before decoding.
 _MAX_B64_CHARS = (A.MAX_IMAGE_BYTES // 3 + 1) * 4
@@ -30,13 +31,13 @@ def register_attachments_api(app):
         body = request.get_json(silent=True) or {}
         raw = body.get("data")
         if not isinstance(raw, str) or not raw:
-            return jsonify({"error": "no_data", "message": "ما وصلني الملف."}), 400
+            return jsonify({"error": "no_data", "message": lang.say("file_missing")}), 400
         if len(raw) > _MAX_B64_CHARS:
-            return jsonify({"error": "too_big", "message": A.TOO_BIG_IMAGE}), 413
+            return jsonify({"error": "too_big", "message": lang.say("file_too_big_image")}), 413
         try:
             data = base64.b64decode(raw, validate=True)
         except (binascii.Error, ValueError):
-            return jsonify({"error": "no_data", "message": "ما وصلني الملف."}), 400
+            return jsonify({"error": "no_data", "message": lang.say("file_missing")}), 400
         # A document is read (and kept) on upload: one unit of the day, like a message.
         over = meter_claims(claims)
         if over is not None:

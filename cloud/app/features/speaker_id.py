@@ -18,6 +18,7 @@ from typing import List, Optional, Tuple
 from pymongo.errors import PyMongoError
 
 from app.db import configure, get_db
+from app.brain import lang
 
 logger = logging.getLogger(__name__)
 
@@ -179,11 +180,11 @@ def _cosine(a, b) -> float:
 def enroll_speaker(chat_id: int, pcm_samples: List[bytes]) -> Tuple[bool, int, str]:
     """يبني بصمة من متوسّط المقاطع ويخزّنها؛ يرجّع (تمّ؟، عدد المقاطع المقبولة، رسالة للمستخدم)."""
     if not is_available():
-        return False, 0, "تمييز الصوت غير مفعّل (مكتبة sherpa-onnx ناقصة)."
+        return False, 0, lang.say("enroll_unavailable")
     if not pcm_samples:
-        return False, 0, "ما وصلني أي تسجيل."
+        return False, 0, lang.say("enroll_nothing")
     if _get_extractor() is None:
-        return False, 0, "ما قدرت أجهّز نموذج الصوت (تنزيل/تحميل فشل)."
+        return False, 0, lang.say("enroll_no_model")
 
     import numpy as np
     embeddings = []
@@ -193,14 +194,14 @@ def enroll_speaker(chat_id: int, pcm_samples: List[bytes]) -> Tuple[bool, int, s
             embeddings.append(emb)
 
     if not embeddings:
-        return False, 0, "التسجيلات قصيرة أو مش واضحة — جرّب تسجيلات أطول وأوضح."
+        return False, 0, lang.say("enroll_unclear")
 
     mean = _normalize(np.mean(embeddings, axis=0))
     if mean is None:
-        return False, 0, "صار خلل ببناء البصمة."
+        return False, 0, lang.say("enroll_broken")
     if not _save_profile(chat_id, mean.astype("float32").tobytes(), len(embeddings)):
-        return False, 0, "ما قدرت أحفظ بصمة صوتك بأمان هلق — جرّب بعدين."
-    return True, len(embeddings), f"تمام! صرت أعرف صوتك ✅ ({len(embeddings)} مقاطع)"
+        return False, 0, lang.say("enroll_not_saved")
+    return True, len(embeddings), lang.say("enroll_done", n=len(embeddings))
 
 
 # ── Learning the owner's voice from the robot itself ─────────────────────────
