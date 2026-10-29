@@ -1764,7 +1764,7 @@ ar 38/41, en 40/42, two cases moved, $0.11, 3.3 s a message, 398 reasoning token
 `sandy-chat` ar 40/41, en 41/42, two moved, $0.18, 2.0 s (`T1752`). With the tasks' twelve cases
 (phase one, session A; their switch on for the run's account): ar 46/47, en 45/48, $0.13, 1.8 s
 (`2026-10-29T2031`); the task cases 10/12, «shop stock» asked which stock instead of making the
-task, in both languages. Session B of phase one (`2026-10-29T2156`, two runs, the morning's case added in both languages): ar 45/48, en 47/49, four cases moved between the runs (4.1%), $0.25; against the baseline «empty a list asks first», «reminder before another» and «undo» fell, none of them touched by it.
+task, in both languages. Session B of phase one (`2026-10-29T2156`, two runs, the morning's case added in both languages): ar 45/48, en 47/49, four cases moved between the runs (4.1%), $0.25; against the baseline «empty a list asks first», «reminder before another» and «undo» fell, none of them touched by it. After the review of phase one's fixes (`2026-10-29T2327`, two runs): ar 48/48, en 47/49, one case moved (1.0%), $0.26, 1.6 s a message; every task case passed in both languages and both runs; «shopping implied · en» missed once and «apply a scene is not a restore · en» twice (it answered without a tool), neither touched by the fixes. The undo cases alone, five runs each after «لا غلط ارجعي عنه» was added to the prompt: ar 5/5, en 5/5.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
