@@ -89,13 +89,19 @@ def users_with_due(mongo_db, now: Optional[datetime] = None) -> List[str]:
     return [str(u) for u in ids if u]
 
 
-def next_occurrence(recurrence: str, first: datetime, after: datetime) -> Optional[datetime]:
+# A rule of elapsed time («every 60 minutes»), counted on the universal clock: on the user's,
+# minutes added inside the hour a clock goes back land on its first pass, an hour early.
+_ELAPSED = ("FREQ=SECONDLY", "FREQ=MINUTELY", "FREQ=HOURLY")
+
+
+def next_occurrence(recurrence: str, first: datetime, after: datetime,
+                    zone: tzinfo = USER_TZ) -> Optional[datetime]:
     """First occurrence of the RRULE (anchored at ``first``, the series' start,
     `schedules.series_anchor`) strictly after ``after``; None when it ended."""
     # Anchored in local time so "every day at 8" survives DST changes.
-    start = first.astimezone(USER_TZ)
+    start = first.astimezone(zone)
     rule = rrulestr(recurrence.removeprefix("RRULE:"), dtstart=start)
-    nxt = rule.after(after.astimezone(USER_TZ), inc=False)
+    nxt = rule.after(after.astimezone(zone), inc=False)
     return nxt.astimezone(timezone.utc) if nxt else None
 
 
@@ -104,6 +110,9 @@ def _next_time(doc: Dict[str, Any], now: datetime) -> Optional[datetime]:
     if not rule:
         return None
     try:
+        if any(f in rule for f in _ELAPSED):
+            # Counted on from its own time, not a wall time that a clock change makes ambiguous.
+            return next_occurrence(rule, _aware(doc["fire_at"]), now, zone=timezone.utc)
         return next_occurrence(rule, schedules.series_anchor(doc), now)
     except (ValueError, TypeError) as exc:
         logger.warning("[schedules] bad recurrence on %s: %s", doc.get("_id"), exc)

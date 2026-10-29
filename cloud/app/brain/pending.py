@@ -22,7 +22,9 @@ _COLL = "sandy_pending_state"
 
 
 def create(payload: Dict[str, Any]) -> Dict[str, Any]:
-    now = datetime.now(USER_TZ)
+    # Counted on the universal clock: ten minutes added to a wall time inside the hour a clock
+    # goes back land on its first pass, and the hold was dead the moment it was made.
+    now = datetime.now(timezone.utc)
     return {**payload, "created_at": now.isoformat(),
             "expires_at": (now + timedelta(minutes=TTL_MINUTES)).isoformat(),
             "nonce": uuid4().hex, "consumed_at": ""}
