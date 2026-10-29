@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 class TurnCtx:
     user_id: str
     message: str = ""
+    # Read whole, not the chat's capped rows: a task's check (`task_runner`).
+    whole: bool = False
     # The conversation's memory thread.
     thread_id: str = ""
     # The change group this turn's writes are kept under (`blocks.changes`), for undo.

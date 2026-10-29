@@ -400,6 +400,12 @@ PHRASES = {
     "span_few_day": {"ar": "{n} أيام", "en": "{n} days"},
     "span_many_day": {"ar": "{n} يوم", "en": "{n} days"},
     "every_span": {"ar": "كل {span}", "en": "every {span}"},
+    # A list's change, told with no model (`task_diff.template`).
+    "list_added": {"ar": "انضاف «{text}» لـ«{list}»", "en": "«{text}» was added to «{list}»"},
+    "list_removed": {"ar": "انشال «{text}» من «{list}»", "en": "«{text}» was removed from «{list}»"},
+    "list_done": {"ar": "«{text}» صار تم", "en": "«{text}» is done"},
+    "list_reopened": {"ar": "«{text}» رجع مش متمّم", "en": "«{text}» is open again"},
+    "list_renamed": {"ar": "«{before}» صار «{after}»", "en": "«{before}» is now «{after}»"},
     "task_stopped": {"ar": "وقّفت مهمة «{title}»: فشلت تلات مرات ورا بعض. خبّرني إذا بدك أرجّعها.",
                      "en": "I stopped the task «{title}»: it failed three times in a row. Tell me if you want it back."},
     "task_missing": {"ar": "ما لقيت هالمهمة.", "en": "I couldn't find that task."},

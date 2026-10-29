@@ -35,7 +35,7 @@ from openai import OpenAIError
 
 from app import notify
 from app.blocks import tasks
-from app.brain import background, lang, tools
+from app.brain import background, lang, task_diff, tools
 from app.brain.ctx import TurnCtx
 from app.brain.model import _from_message
 from app.features import trace_store
@@ -48,21 +48,21 @@ MAX_STEPS = 4
 FAILURES_TO_STOP = 3
 # What a batch's submit or answer raises (Azure's client, a failed or expired job, its file read).
 _BATCH_ERRORS = (OpenAIError, RuntimeError, OSError, ValueError, KeyError)
-# What of a probe the model is shown, and kept to compare (a long page is cut).
-_KEEP_CHARS = 6000
 
 _THINK = (
     "You are Sandy, doing on your own a task the user set up; there is no conversation. "
     "The task, in his own words: {instructions}\n"
     "Worth telling him: {notify_when}\n"
     "What you told him last time: {last}\n"
-    "Below is what the check found now, and what it found before. Use your tools only if "
-    "you need more. If nothing is worth telling him, answer exactly NOTHING. Otherwise answer "
-    "the message to send him: short, in {language}, names and his words kept as they are.")
+    "Below is exactly what changed since the last check, computed by code: rows added, removed "
+    "or changed, numbers before and after, paragraphs added or removed. Explain only that; "
+    "never name anything that is not in it. Use your tools only if you need more. If nothing in "
+    "it is worth telling him, answer exactly NOTHING. Otherwise answer the message to send him: "
+    "short, in {language}, names and his words kept as they are.")
 _REVIEW = (
     "You check a message before it is sent to the user. The task, in his own words: "
     "{instructions}\nWorth telling him: {notify_when}\nRead the message against the task and "
-    "the data. If it is wrong, fix it; if it is not worth sending, answer exactly NOTHING. "
+    "what changed. If it is wrong, or names anything that did not change, fix it; if it is not worth sending, answer exactly NOTHING. "
     "Otherwise answer the message as it should be sent, in {language}, and nothing else.")
 
 
@@ -71,15 +71,11 @@ def _id(doc: Dict[str, Any]) -> str:
     return str(doc.get("_id") or doc.get("id") or "")
 
 
-# Fields that move by themselves between two reads of the same data: when a device was last
-# heard, where a period ends (now), when the read was made. They are no news.
-_MOVES_BY_ITSELF = frozenset({"last_seen", "to", "now", "read_at", "checked_at", "ago"})
-
-
 def _stable(found: Any) -> Any:
-    """``found`` without what moves by itself, its lists in one order."""
+    """``found`` without what moves by itself (`task_diff.MOVES_BY_ITSELF`), its lists in one
+    order."""
     if isinstance(found, dict):
-        return {k: _stable(v) for k, v in found.items() if k not in _MOVES_BY_ITSELF}
+        return {k: _stable(v) for k, v in found.items() if k not in task_diff.MOVES_BY_ITSELF}
     if isinstance(found, list):
         items = [_stable(v) for v in found]
         return sorted(items, key=lambda v: json.dumps(v, sort_keys=True, ensure_ascii=False,
@@ -116,20 +112,21 @@ def _probe(spec: Dict[str, Any], ctx: TurnCtx) -> Any:
     return result
 
 
-def _compact(found: Any) -> str:
-    return json.dumps(found, ensure_ascii=False, default=str)[:_KEEP_CHARS]
+def _kept(found: Any) -> Any:
+    """The read as it is kept to compare with the next (JSON, dates as text)."""
+    return json.loads(json.dumps(found, ensure_ascii=False, default=str))
 
 
 def _text(resp: Any) -> str:
     return (resp.choices[0].message.content or "").strip()
 
 
-def _think(doc: Dict[str, Any], spec: Dict[str, Any], found: Any, before: Dict[str, Any],
+def _think(doc: Dict[str, Any], spec: Dict[str, Any], diff: Dict[str, Any], before: Dict[str, Any],
            ctx: TurnCtx, uid: str) -> str:
     """The model's message on what changed, or NOTHING."""
     allowed = [t for t in spec.get("tools") or [] if t in ALLOWED]
     specs = [s for s in tools.openai_tools() if s["function"]["name"] in allowed]
-    messages = _think_messages(spec, found, before)
+    messages = _think_messages(spec, diff, before)
     for _ in range(MAX_STEPS):
         reply = _from_message(background.call(
             "task", messages, priority=background.SCHEDULED, user_id=uid, tools=specs or None,
@@ -149,35 +146,35 @@ def _think(doc: Dict[str, Any], spec: Dict[str, Any], found: Any, before: Dict[s
     return NOTHING
 
 
-def _think_messages(spec: Dict[str, Any], found: Any, before: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _think_messages(spec: Dict[str, Any], diff: Dict[str, Any], before: Dict[str, Any]) -> List[Dict[str, Any]]:
     language = "English" if spec.get("lang") == lang.EN else "Arabic"
     return [
         {"role": "system", "content": _THINK.format(
             instructions=spec.get("instructions", ""), notify_when=spec.get("notify_when", ""),
             last=before.get("last_result") or "nothing yet", language=language)},
-        {"role": "user", "content": json.dumps(
-            {"now": _compact(found), "before": before.get("last_probe") or ""}, ensure_ascii=False)}]
+        {"role": "user", "content": json.dumps({"changed": task_diff.shown(diff)},
+                                               ensure_ascii=False, default=str)}]
 
 
-def _review(spec: Dict[str, Any], found: Any, message: str, uid: str) -> str:
+def _review(spec: Dict[str, Any], diff: Dict[str, Any], message: str, uid: str) -> str:
     language = "English" if spec.get("lang") == lang.EN else "Arabic"
     return _text(background.call("task_review", [
         {"role": "system", "content": _REVIEW.format(
             instructions=spec.get("instructions", ""), notify_when=spec.get("notify_when", ""),
             language=language)},
-        {"role": "user", "content": json.dumps({"data": _compact(found), "message": message},
-                                               ensure_ascii=False)}],
+        {"role": "user", "content": json.dumps({"changed": task_diff.shown(diff), "message": message},
+                                               ensure_ascii=False, default=str)}],
         priority=background.SCHEDULED, user_id=uid, max_tokens=500, temperature=0)) or NOTHING
 
 
-def _submitted(doc: Dict[str, Any], spec: Dict[str, Any], found: Any,
+def _submitted(doc: Dict[str, Any], spec: Dict[str, Any], diff: Dict[str, Any],
                before: Dict[str, Any]) -> Optional[str]:
     """The batch job its model step went as; None when it goes at once (urgent, batches off,
     or the submit failed)."""
     if spec.get("urgent") or not background.batching(background.SCHEDULED):
         return None
     try:
-        return background.call("task", _think_messages(spec, found, before),
+        return background.call("task", _think_messages(spec, diff, before),
                                priority=background.SCHEDULED, as_batch=True,
                                max_tokens=700, temperature=0.3)
     except _BATCH_ERRORS as exc:  # Azure's boundary: the ordinary way now
@@ -203,11 +200,13 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
         return None
     spec = dict(doc.get("payload") or {})
     before = tasks.state(_id(doc))
-    ctx = TurnCtx(user_id=uid, source="app")
+    # The check reads the whole of what it reads (a list past the chat's thirty rows).
+    ctx = TurnCtx(user_id=uid, source="app", whole=True)
+    tool = str((spec.get("probe") or {}).get("tool") or "")
     with lang.using(spec.get("lang") or lang.for_user(uid)), \
             trace_store.background(uid, "task", task_id=_id(doc)):
         try:
-            message, found, seen, direct = None, "", None, False
+            message, found, seen, diff, direct = None, None, None, None, False
             if before.get("batch_id"):
                 # A batch this task submitted: its answer, once Azure has it.
                 try:
@@ -219,27 +218,43 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                 else:
                     if message is None:
                         return None
-                    found, seen = before.get("batch_found") or "", before.get("batch_fingerprint")
+                    found, seen = before.get("batch_found"), before.get("batch_fingerprint")
+                    diff = before.get("batch_diff") or {}
                 tasks.save_state(_id(doc), {"batch_id": None})
             if message is None:
-                found = _probe(spec, ctx)
-                seen = fingerprint(found, str((spec.get("probe") or {}).get("tool") or ""))
+                found = _kept(_probe(spec, ctx))
+                seen = fingerprint(found, tool)
+                if before.get("last_seen") is None:
+                    # Its first run: where it starts, nothing told.
+                    tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0})
+                    return None
                 if seen == before.get("fingerprint"):
                     tasks.save_state(_id(doc), {"failures": 0})
                     return None
-                job = None if direct else _submitted(doc, spec, found, before)
-                if job:
-                    tasks.save_state(_id(doc), {"batch_id": job, "batch_fingerprint": seen,
-                                                "batch_found": _compact(found), "failures": 0})
-                    return None
-                message = _think(doc, spec, found, before, ctx, uid)
-            if (message or NOTHING).strip() != NOTHING:
-                message = _review(spec, found, message, uid)
+                diff = task_diff.compute(before["last_seen"], found)
+                message = NOTHING if task_diff.empty(diff) else task_diff.template(diff)
+                if message is None:
+                    job = None if direct else _submitted(doc, spec, diff, before)
+                    if job:
+                        tasks.save_state(_id(doc), {"batch_id": job, "batch_fingerprint": seen,
+                                                    "batch_found": found, "batch_diff": diff,
+                                                    "failures": 0})
+                        return None
+                    message = _think(doc, spec, diff, before, ctx, uid)
+                    if (message or NOTHING).strip() != NOTHING:
+                        message = _review(spec, diff, message, uid)
+            elif (message or NOTHING).strip() != NOTHING:
+                message = _review(spec, diff, message, uid)
             message = message or NOTHING
         except Exception as exc:  # noqa: BLE001 — a task's run is a background edge: it counts
             _failed(doc, before, f"{type(exc).__name__}: {exc}")
             return None
-        state = {"fingerprint": seen, "last_probe": _compact(found), "failures": 0}
+        if message.strip() != NOTHING and not task_diff.faithful(message, diff, before.get("last_seen"), found):
+            # It names what did not change: never sent.
+            logger.warning("[tasks] task %s: a message naming what did not change was held back", _id(doc))
+            message = NOTHING
+        # What it saw now is where the next run compares from, whatever was told.
+        state = {"fingerprint": seen, "last_seen": found, "failures": 0}
         if message.strip() == NOTHING:
             tasks.save_state(_id(doc), state)
             return None

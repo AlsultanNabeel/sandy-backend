@@ -284,7 +284,7 @@ def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     # A filter already chose the rows; leftover words ("هالشهر") must not empty them.
     if narrowed or not (kind or list_name):
         rows = narrowed
-    out = {"ok": True, "count": len(rows), "rows": rows[:MAX_ROWS]}
+    out = {"ok": True, "count": len(rows), "rows": rows if ctx.whole else rows[:MAX_ROWS]}
     if not list_name and kind in (None, "expense"):
         spent = _period_spending(since, until, lambda r: _matches_query(r, query),
                                  keep_all=bool(kind))

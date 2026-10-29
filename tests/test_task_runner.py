@@ -45,9 +45,12 @@ def world(brain_db, monkeypatch):  # noqa: F811
 
 
 def _task(spec):
+    """A task already started on an empty read (its first run is only where it starts), so
+    what the next read finds is a change."""
     with active_user_profile_context(A):
         tid = tasks.add("projects", spec, every_minutes=60,
                         first_at=datetime.now(timezone.utc) + timedelta(minutes=1))
+        tasks.save_state(tid, {"last_seen": {"results": []}, "fingerprint": "started"})
         return schedules.get(tid)
 
 

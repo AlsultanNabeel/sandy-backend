@@ -144,7 +144,7 @@ def edit(task_id: str, *, title: Optional[str] = None, instructions: Optional[st
     changed = schedules.update(task_id, text=title or None, payload=payload,
                                recurrence=_rule(every) if every else None)
     if instructions is not None or probe is not None:
-        save_state(task_id, {"fingerprint": None, "last_probe": None})
+        save_state(task_id, {"fingerprint": None, "last_seen": None})
     return bool(changed)
 
 
