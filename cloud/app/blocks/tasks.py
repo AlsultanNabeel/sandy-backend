@@ -64,7 +64,12 @@ def pause(task_id: str) -> bool:
 
 
 def resume(task_id: str) -> bool:
-    return bool(get(task_id)) and schedules.update(task_id, status="pending")
+    """Runs again, its failures counted from zero: one stopped by them is not stopped again by
+    the next one."""
+    if not get(task_id) or not schedules.update(task_id, status="pending"):
+        return False
+    save_state(task_id, {"failures": 0, "last_error": ""})
+    return True
 
 
 def set_every(task_id: str, every_minutes: int) -> bool:

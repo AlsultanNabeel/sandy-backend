@@ -275,3 +275,28 @@ def test_a_runs_trace_names_its_task_and_marks_the_review(brain_db, monkeypatch,
     assert [c.get("what") for r in rows for c in r["model_calls"]] == ["task", "task_review"]
     by_task = trace_store.costs()["by_task"]
     assert [(t["task_id"], t["runs"]) for t in by_task] == [(doc["id"], 1)]
+
+
+# A task stopped by its failures starts from zero when he resumes it (review of phase one):
+# one more failure after the resume used to stop it again at once.
+@pytest.mark.parametrize("language, how", [("en", "tool"), ("ar", "tool"), ("en", "store")])
+def test_a_resumed_task_starts_its_failures_from_zero(world, monkeypatch, language, how):
+    from app.brain import tools_tasks
+    from app.brain.ctx import TurnCtx
+    doc = _task(_spec(language))
+    monkeypatch.setattr("app.features.research.web_results",
+                        lambda q: (_ for _ in ()).throw(RuntimeError("down")))
+    for _ in range(3):
+        _run(doc)
+    with active_user_profile_context(A):
+        assert schedules.get(doc["id"])["status"] == "paused"
+        if how == "tool":
+            assert tools_tasks.task_update({"id": doc["id"], "resume": True},
+                                           TurnCtx(user_id=OWNER))["ok"]
+        else:
+            assert tasks.resume(doc["id"])
+        assert tasks.state(doc["id"])["failures"] == 0
+    _run(doc)
+    with active_user_profile_context(A):
+        assert schedules.get(doc["id"])["status"] == "pending"
+        assert tasks.state(doc["id"])["failures"] == 1
