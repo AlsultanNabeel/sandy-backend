@@ -182,8 +182,10 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    a delete of a row the same turn corrected («no, I meant 60 not 50» → update, then
    delete) and a device switched now the way a schedule of the same turn set it for later
    («turn off the AC in an hour» → schedule, then off now; not when the message asks for it
-   now too, «… now and again at 11pm», `takeback._asked_now`) are refused; `ctx.calls` holds
-   each call's arguments. The refusal is for the model alone (an `error`, no `reply`), so the
+   now too, «… now and again at 11pm», `takeback._asked_now`) are refused. What the turn
+   corrected and set for later is kept as the tools resolved it (`ctx.corrected`, row ids;
+   `ctx.for_later`, the device's name and the command it sends), never the model's words: an
+   update and a delete with no id name the same newest row, «AC» and «ac» one device. The refusal is for the model alone (an `error`, no `reply`), so the
    honesty check never shows it and the model's answer says what stands.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
    is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»;

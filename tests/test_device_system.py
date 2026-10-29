@@ -18,6 +18,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-for-devices")
 from app.utils.user_profiles import active_user_profile_context  # noqa: E402
 from app.features import device_store, node_store  # noqa: E402
 from brain_fakes import on_node  # noqa: E402
+from app.brain.ctx import TurnCtx  # noqa: E402
 
 
 def as_tenant(tenant_id):
@@ -170,7 +171,7 @@ def test_control_unknown_device_refuses_and_asks(db, mock_actuation):
 
     with as_tenant("t1"):
         _add_light()
-        out = device_control({"device": "غسالة", "action": "on"}, None)
+        out = device_control({"device": "غسالة", "action": "on"}, TurnCtx(user_id="u"))
     assert out["ok"] is False
     assert "ضوء الصالة" in out["reply"]          # lists what's available
     assert "topic" not in mock_actuation          # nothing was actuated
@@ -181,7 +182,7 @@ def test_control_on_actuates_real_topic(db, mock_actuation):
 
     with as_tenant("t1"):
         _add_light()
-        out = device_control({"device": "living_light", "action": "on"}, None)
+        out = device_control({"device": "living_light", "action": "on"}, TurnCtx(user_id="u"))
     assert mock_actuation["topic"] == "sandy/node/n1/light"
     assert mock_actuation["payload"] == "on"
     assert "شغّلت" in out["reply"]
@@ -193,7 +194,7 @@ def test_control_never_applies_the_opposite(db, mock_actuation):
 
     with as_tenant("t1"):
         _add_light()
-        device_control({"device": "living_light", "action": "on"}, None)
+        device_control({"device": "living_light", "action": "on"}, TurnCtx(user_id="u"))
     assert mock_actuation["payload"] == "on"
     assert mock_actuation["payload"] != "off"
 
@@ -203,7 +204,7 @@ def test_control_bad_action_refuses_without_actuating(db, mock_actuation):
 
     with as_tenant("t1"):
         device_store.add_device("salon_curtain", "ستارة", "cover", on_node("curtain"))
-        out = device_control({"device": "salon_curtain", "action": "on"}, None)
+        out = device_control({"device": "salon_curtain", "action": "on"}, TurnCtx(user_id="u"))
     assert "المتاح" in out["reply"]               # tells the allowed actions
     assert "topic" not in mock_actuation          # refused, nothing sent
 

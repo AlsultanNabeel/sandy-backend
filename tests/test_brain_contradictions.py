@@ -104,3 +104,29 @@ def test_the_refusal_is_read_by_the_model_not_the_user(brain_db, message, claim)
     model, state = _corrected_then_deleted(message, answer=claim)
     assert "reply" not in _result(model, "c2")
     assert state["final_response"] == _result(model, "c1")["reply"]
+
+
+# The target the tools resolved, not the words the model passed (review of 29 Oct 2026): an
+# update and a delete with no id both name the newest row, and «AC» and «ac» are one device.
+@pytest.mark.parametrize("message", ["no, I meant 60 not 50", "لا قصدي ستين مش خمسين"])
+def test_the_newest_row_corrected_with_no_id_is_not_deleted(brain_db, message):  # noqa: F811
+    with active_user_profile_context(A):
+        entries.add("expense", "gas", data={"amount": 50})
+    model = ScriptedModel(tools_reply(call("log_update", "c1", kind="expense", amount=60),
+                                      call("log_delete", "c2", kind="expense")),
+                          text_reply("ok"))
+    _turn(model, message)
+    with active_user_profile_context(A):
+        rows = entries.list_entries("expense")
+    assert [r["data"]["amount"] for r in rows] == [60]
+
+
+@pytest.mark.parametrize("message", ["turn off the AC in an hour", "طفّي المكيف بعد ساعة"])
+def test_a_device_set_for_later_by_its_label_is_not_switched_now_by_its_name(
+        brain_db, sent, message):  # noqa: F811
+    model = ScriptedModel(tools_reply(call("schedule", "c1", kind="scene", text="AC off",
+                                           in_minutes=60, device="AC", value="off"),
+                                      call("device_control", "c2", device="ac", action="off")),
+                          text_reply("ok"))
+    _turn(model, message)
+    assert sent == []

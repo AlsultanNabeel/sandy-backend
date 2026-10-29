@@ -188,6 +188,7 @@ def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             return refused(str(exc))
     if _same([b for b in before if b], entries.get):
         return refused("nothing changed", reply=lang.say("nothing_changed"))
+    takeback.corrected(ctx, rows)
     return {"ok": True, "changed": len(rows), "reply": lang.say("edited", names=_names(rows))}
 
 
@@ -539,6 +540,7 @@ def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return {"ok": True, "changed": len(rows), "reply": "\n".join(replies)}
     if not replies and _same([b for b in before if b], items.get):
         return refused("nothing changed", reply=lang.say("nothing_changed"))
+    takeback.corrected(ctx, rows)
     said = lang.say("finished" if args.get("done") else "edited", names=_names(rows))
     return {"ok": True, "changed": len(rows), "reply": "\n".join([*replies, said])}
 
@@ -619,6 +621,8 @@ def schedule(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(str(exc))
     if not sid:
         return refused("not saved")
+    if args.get("device"):
+        takeback.set_for_later(ctx, payload["device"], payload["value"])
     said = "scheduled_scene" if kind == "scene" else "scheduled_alarm" if payload else "scheduled"
     return {"ok": True, "id": sid, "when": W.local_text(fire_at),
             "reply": lang.say(said, text=text, time=W.local_text(fire_at))}
@@ -738,9 +742,6 @@ def _remove(picked: Dict[str, Any], ctx: TurnCtx, ask: str, said: str, remove,
 
 def list_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     """«شيلي الحليب»، «احذفي مهمة الجيم»، «فضّي قائمة التسوق»."""
-    taken_back = takeback.deleting("list_delete", args, ctx)
-    if taken_back:
-        return taken_back
     name = _list_name(args) or None
     everything = bool(args.get("everything"))
     if everything and not name:
@@ -748,20 +749,19 @@ def list_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     pool = items.match_pool(name, done=False)
     picked = _held_rows(ctx, items.get) or (
         {"rows": pool} if everything else _named(args, pool, items.get))
+    picked = takeback.not_corrected("list_delete", picked, ctx)
     return _remove(picked, ctx, "held_delete", "deleted", items.delete, everything)
 
 
 def log_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     """«احذفي آخر مصروف»، «احذفي هالمصروف»، «انسي إني بحب القهوة»."""
-    taken_back = takeback.deleting("log_delete", args, ctx)
-    if taken_back:
-        return taken_back
     kind, pool, getter = _log_pool(args)
     everything = bool(args.get("everything"))
     if everything and not kind:
         return refused("everything needs a kind", reply=lang.say("what_to_delete"))
     picked = _held_rows(ctx, getter) or (
         {"rows": pool} if everything else _log_targets(args, ctx, kind, pool, getter))
+    picked = takeback.not_corrected("log_delete", picked, ctx)
     return _remove(picked, ctx, "held_delete", "deleted", entries.delete, everything)
 
 

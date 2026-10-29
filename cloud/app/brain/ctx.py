@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -25,9 +25,10 @@ class TurnCtx:
     # of those that worked: what the reply may say was done (`honesty`).
     results: List[Tuple[str, Dict[str, Any]]] = field(default_factory=list)
     worked: List[str] = field(default_factory=list)
-    # Every call's name, arguments and whether it worked: what a later call of the same turn
-    # may not take back (`tools._undoes`).
-    calls: List[Tuple[str, Dict[str, Any], bool]] = field(default_factory=list)
+    # What the turn corrected (row ids) and set for later (device name, command), as the
+    # tools resolved them: what a later call of the same turn may not take back (`takeback`).
+    corrected: Set[str] = field(default_factory=set)
+    for_later: Set[Tuple[str, str]] = field(default_factory=set)
 
 
 def needs_confirmation(summary: str, ids: Optional[List[str]] = None) -> Dict[str, Any]:

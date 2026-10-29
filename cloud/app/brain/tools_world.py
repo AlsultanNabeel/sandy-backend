@@ -127,9 +127,6 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     relative to where it is («خفّفي الإضاءة شوي»)."""
     from app.features.device_store import list_devices
 
-    taken_back = takeback.switching(args, ctx)
-    if taken_back:
-        return taken_back
     devices, missing = _targets(args)
     if not devices:
         known = list_devices()
@@ -138,6 +135,11 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         names = lang.say("sep").join(d["label"] for d in known)
         return _no(lang.say("no_such_device", names=names))
     action = str(args.get("action", "")).strip()
+    later: List[str] = []
+    if args.get("by") in (None, ""):
+        devices, later = takeback.now_or_later(ctx, devices, action, args.get("value", ""))
+        if not devices and not missing:
+            return takeback.left_for_later()
     done, lines = 0, []
     for d in devices:
         value: Any = args.get("value", "")
@@ -152,8 +154,11 @@ def device_control(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         done += ok
         lines.append(line)
     lines += [lang.say("not_found_named", said=m) + "." for m in missing]
-    return {"ok": done == len(devices) and not missing, "done": done,
-            "reply": "\n".join(lines)}
+    out = {"ok": done == len(devices) and not missing, "done": done, "reply": "\n".join(lines)}
+    if later:
+        # For the model alone (`takeback`): what it set for later and did not send now.
+        out["left_for_later"] = later
+    return out
 
 
 def device_state(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

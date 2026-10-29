@@ -203,7 +203,6 @@ def execute(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         logger.exception("[brain] tool %s raised", name)
         result = {"ok": False, "broke": True, "error": f"tool failed: {type(exc).__name__}"}
     trace_store.note_tool(name, dict(args or {}), result, ms=(time.perf_counter() - t0) * 1000)
-    ctx.calls.append((name, dict(args or {}), bool(result.get("ok"))))
     ctx.results.append((name, result))
     if result.get("ok"):
         ctx.worked.append(name)
