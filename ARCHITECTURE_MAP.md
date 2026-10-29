@@ -1742,7 +1742,10 @@ say out of `_RULES` (190 tokens) fell to 79/83 (`2026-10-29T16*`) and was put ba
 The three models, two runs each (29 Oct): `gpt-6-luna` on the Responses API at low reasoning
 ar 38/41, en 40/42, two cases moved, $0.11, 3.3 s a message, 398 reasoning tokens in all
 (`2026-10-29T1735`); `gpt-4.1` ar 39/41, en 37/42, five moved, $2.28, 3.2 s (`T1746`);
-`sandy-chat` ar 40/41, en 41/42, two moved, $0.18, 2.0 s (`T1752`).
+`sandy-chat` ar 40/41, en 41/42, two moved, $0.18, 2.0 s (`T1752`). With the tasks' twelve cases
+(phase one, session A; their switch on for the run's account): ar 46/47, en 45/48, $0.13, 1.8 s
+(`2026-10-29T2031`); the task cases 10/12, «shop stock» asked which stock instead of making the
+task, in both languages.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
