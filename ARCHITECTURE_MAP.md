@@ -1729,6 +1729,10 @@ traces' six fixes (`eval_results/2026-10-29T1548.json`): ar 41/41, en 41/42, not
 lists' Arabic labels are on `list_add` only (`tools._list_enum`), about a hundred tokens a call
 less, at the same score (82/83 before and after); taking the rules that the tools' fields also
 say out of `_RULES` (190 tokens) fell to 79/83 (`2026-10-29T16*`) and was put back.
+The three models, two runs each (29 Oct): `gpt-6-luna` on the Responses API at low reasoning
+ar 38/41, en 40/42, two cases moved, $0.11, 3.3 s a message, 398 reasoning tokens in all
+(`2026-10-29T1735`); `gpt-4.1` ar 39/41, en 37/42, five moved, $2.28, 3.2 s (`T1746`);
+`sandy-chat` ar 40/41, en 41/42, two moved, $0.18, 2.0 s (`T1752`).
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
