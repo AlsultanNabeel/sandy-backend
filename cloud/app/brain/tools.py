@@ -14,6 +14,7 @@ from app.brain import lang
 from app.brain import tools_blocks as B
 from app.brain import tools_world as X
 from app.brain.ctx import TurnCtx, refused
+from app.brain.matching import match_key
 from app.brain.when import PERIODS
 from app.features import trace_store
 
@@ -200,20 +201,30 @@ def _ids(args: Dict[str, Any]) -> set:
     return {str(i) for i in [args.get("id"), *(args.get("ids") or [])] if i}
 
 
+# «now» said beside a time: the command is asked for now too, not for later only.
+_NOW = {"now", "immediately", "هلق", "هسا", "هسه", "حين", "حالا", "فورا", "دغري"}
+
+
+def _asked_now(message: str) -> bool:
+    key = match_key(message)
+    return bool(_NOW & set(key.split())) or "right away" in key
+
+
 def _undoes(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Optional[Dict[str, Any]]:
     """A refusal when this call takes back what an earlier call of the same turn did: «no, I
     meant 60 not 50» corrected the row and then deleted it, «turn off the AC in an hour» set
-    it for later and then turned it off now (eval, 29 Oct 2026)."""
+    it for later and then turned it off now (eval, 29 Oct 2026). The same command asked for
+    now as well («… now and again at 11pm») is not taken back."""
     if name in _CORRECTED_BY:
         fixed = {i for n, a, ok in ctx.calls if ok and n == _CORRECTED_BY[name] for i in _ids(a)}
         if _ids(args) & fixed:
             return refused("corrected in this turn", reply=lang.say("kept_corrected"))
-    if name == "device_control":
+    if name == "device_control" and not _asked_now(ctx.message):
         devices = {str(d) for d in [args.get("device"), *(args.get("devices") or [])] if d}
-        action = str(args.get("action") or "")
+        command = str(args.get("value") or args.get("action") or "")
         for n, a, ok in ctx.calls:
             if ok and n == "schedule" and str(a.get("device") or "") in devices \
-                    and str(a.get("value") or action) == action:
+                    and str(a.get("value") or a.get("action") or "") == command:
                 return refused("set for later in this turn", reply=lang.say("set_for_later"))
     return None
 

@@ -74,3 +74,22 @@ def test_a_device_switched_now_and_set_otherwise_for_later_is_both(brain_db, mon
                           text_reply("ok"))
     _turn(model, "turn on the AC now and off in an hour")
     assert sent == [{"device": "ac", "action": "on"}]
+
+
+# Asked for now and for later, both run: the refusal is for a command asked for later only
+# (review of 29 Oct 2026). «now» in the message is what says so.
+@pytest.mark.parametrize("message", [
+    "turn off the AC now and again at 11pm",
+    "طفّي المكيف هلّق ومرة كمان الساعة احدعش",
+])
+def test_a_device_asked_for_now_and_for_later_is_both(brain_db, monkeypatch, message):  # noqa: F811
+    _ac()
+    sent = []
+    monkeypatch.setitem(tools.HANDLERS, "device_control",
+                        lambda args, ctx: sent.append(args) or {"ok": True, "reply": "off"})
+    model = ScriptedModel(tools_reply(call("schedule", "c1", kind="scene", text="AC off",
+                                           when="23:00", device="ac", value="off"),
+                                      call("device_control", "c2", device="ac", action="off")),
+                          text_reply("ok"))
+    _turn(model, message)
+    assert sent == [{"device": "ac", "action": "off"}]

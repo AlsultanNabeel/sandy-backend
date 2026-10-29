@@ -180,7 +180,8 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
 3d. **A turn does not take back what it just did** (`tools._undoes`, before the handler):
    a delete of a row the same turn corrected («no, I meant 60 not 50» → update, then
    delete) and a device switched now the way a schedule of the same turn set it for later
-   («turn off the AC in an hour» → schedule, then off now) are refused, `kept_corrected` /
+   («turn off the AC in an hour» → schedule, then off now; not when the message asks for it
+   now too, «… now and again at 11pm», `tools._asked_now`) are refused, `kept_corrected` /
    `set_for_later`; `ctx.calls` holds each call's arguments.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
    is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»;
