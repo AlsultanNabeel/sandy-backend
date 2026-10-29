@@ -99,6 +99,14 @@ class Trace:
         self._lock = threading.Lock()
         self.model_calls: List[Dict[str, Any]] = []
         self.tools: List[Dict[str, Any]] = []
+        # The live model's turn being counted (`note_live_usage`); one voice turn of ours can
+        # span two of its turns, each billed on its own.
+        self._live: Optional[Dict[str, Any]] = None
+
+    def end_live_turn(self) -> None:
+        """The live model's turn ended: its next usage is a model call of its own."""
+        with self._lock:
+            self._live = None
 
     def add_model_call(self, provider: str, model: str, *, tokens_in: int = 0,
                        tokens_out: int = 0, tokens_cached: int = 0, ms: float = 0) -> None:
@@ -203,11 +211,11 @@ def note_live_usage(trace: Optional[Trace], model: str, usage: Any) -> None:
     out = int(getattr(usage, "response_token_count", 0) or 0)
     cached = int(getattr(usage, "cached_content_token_count", 0) or 0)
     with trace._lock:
-        call = next((c for c in trace.model_calls if c["provider"] == "gemini"), None)
+        call = trace._live
         if call is None:
-            trace.model_calls.append({"provider": "gemini", "model": str(model or ""),
-                                      "tokens_in": seen_in, "tokens_out": out,
-                                      "tokens_cached": cached, "ms": 0})
+            trace._live = {"provider": "gemini", "model": str(model or ""), "tokens_in": seen_in,
+                           "tokens_out": out, "tokens_cached": cached, "ms": 0}
+            trace.model_calls.append(trace._live)
             return
         call["tokens_in"] = max(call["tokens_in"], seen_in)
         call["tokens_cached"] = max(call["tokens_cached"], cached)

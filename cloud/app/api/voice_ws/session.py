@@ -1304,6 +1304,19 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
     _trace = {"t": trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
                                      turn_id=_turn_id["id"])}
 
+    # His words of the turn not yet answered (`_handle`, at each of the live model's turns).
+    _heard: List[str] = []
+
+    def _finish_trace(request: str, reply: str) -> None:
+        """Write the turn's trace, if it holds anything, and open the next turn's."""
+        done = _trace["t"]
+        if request or reply or done.model_calls or done.tools:
+            asyncio.get_running_loop().run_in_executor(None, lambda: done.finish(
+                request=request, reply=reply, routed_by="voice"))
+        _turn_id["id"] = uuid.uuid4().hex
+        _trace["t"] = trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
+                                        turn_id=_turn_id["id"])
+
     def _spoken_in(heard: str) -> str:
         """The turn's language: what was heard of it, else the last turn's, else the user's."""
         return lang.of(heard, fallback=(live_state or {}).get("lang"))
@@ -1491,25 +1504,25 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             goodbye_from = _turn_audio["first"]
             _turn_audio["n"] = 0
             _turn_audio["first"] = None
-            if user_text and sandy_text:
-                # مش `await`: كتابة القاعدة ما لازم توقف بثّ الصوت.
-                loop.run_in_executor(None, _save_voice_turn, user_text, sandy_text,
-                                     get_voice_identity(), get_voice_channel())
-
-            done_trace = _trace["t"]
-            if user_text or sandy_text or done_trace.model_calls or done_trace.tools:
-                loop.run_in_executor(None, lambda: done_trace.finish(
-                    request=user_text, reply=sandy_text, routed_by="voice"))
+            # One turn of ours lasts until she answers: the live model ends the turn of a
+            # tool call and says «ضفتها» in the next one. His words wait for her answer, and
+            # the trace and memory keep the two together.
+            if user_text:
+                _heard.append(user_text)
+            _trace["t"].end_live_turn()
+            fix = honesty.voice_correction(sandy_text, _turn_worked, spoken)
             _user_buf.clear()
             _sandy_buf.clear()
-            fix = honesty.voice_correction(sandy_text, _turn_worked, spoken)
             if sandy_text:
-                # What the tools did stands until she answers: the live model ends the turn
-                # of the tool call and says «ضفتها» in the next one.
+                heard = " ".join(_heard)
+                _heard.clear()
+                if heard:
+                    # مش `await`: كتابة القاعدة ما لازم توقف بثّ الصوت.
+                    loop.run_in_executor(None, _save_voice_turn, heard, sandy_text,
+                                         get_voice_identity(), get_voice_channel())
+                _finish_trace(heard, sandy_text)
+                # What the tools did stands until she answers.
                 _turn_worked.clear()
-            _turn_id["id"] = uuid.uuid4().hex
-            _trace["t"] = trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
-                                            turn_id=_turn_id["id"])
             if fix:
                 # She has said it already; she is told at once to put it right.
                 try:
@@ -1616,6 +1629,9 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         _audio["wait"], _audio["worst"], _audio["send"])
                 break
     finally:
+        # A turn she never answered (the call ended after its tool) is still kept.
+        if _heard or _trace["t"].model_calls or _trace["t"].tools:
+            _finish_trace(" ".join(_heard), "")
         ka.cancel()
         tx.shutdown(wait=False)
         tools_pool.shutdown(wait=False)

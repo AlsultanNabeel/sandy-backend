@@ -237,8 +237,10 @@ next turn) and `execution_result` (image bytes and caption when a tool made one)
 The `[turn] …ms total — brain tools=[…]` log line says where a slow turn went.
 
 **The trace** (`features/trace_store.py`): every turn leaves one row in `sandy_traces` —
-chat (`loop.run_turn`, its id is the turn's `turn_id`), voice (one per Gemini
-`turn_complete`, `voice_ws/session.py`, its tools through `_dispatch_tool(trace=…)`) and
+chat (`loop.run_turn`, its id is the turn's `turn_id`), voice (one per turn of ours, which
+lasts until she answers: the live model ends a tool call's turn and answers in the next, so his
+words, her answer and the tools are one row and one memory, each of its turns billed as its
+own model call, `Trace.end_live_turn`; `voice_ws/session.py`, its tools through `_dispatch_tool(trace=…)`) and
 model calls made for a user outside a turn (`trace_store.background`: the STM summary, the
 chat title, the daily nudge, photo tags). A row holds the request, the reply, every tool
 (arguments, result, ok, ms), every model call (provider, model, tokens in / out / cached,

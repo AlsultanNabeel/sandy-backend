@@ -152,7 +152,7 @@ class _Manager:
         return None
 
 
-def _call(monkeypatch, gemini):
+def _call(monkeypatch, gemini, save=None):
     pytest.importorskip("google.genai")
     from app.api.voice_ws import session as sess
 
@@ -165,7 +165,7 @@ def _call(monkeypatch, gemini):
     monkeypatch.setattr(sess, "remember_live_model", lambda name: None)
     monkeypatch.setattr(sess, "voice_seconds_left", lambda who: 3600.0)
     monkeypatch.setattr(sess, "add_voice_seconds", lambda who, s: None)
-    monkeypatch.setattr(sess, "_save_voice_turn", lambda *a: None)
+    monkeypatch.setattr(sess, "_save_voice_turn", save or (lambda *a: None))
 
     async def _open(client, config):
         return _Manager(), gemini, "fake-live", None
@@ -258,3 +258,23 @@ def test_voice_a_tool_in_one_turn_backs_the_claim_in_the_next(monkeypatch, brain
     notes = _call(monkeypatch, _SplitGemini(("list_add", {"list": "shopping", "text": "حليب"}),
                                             heard, said))
     assert notes == []
+
+
+# One voice turn is one trace row (29 Oct 2026): his words, her answer and the tool came as
+# two rows, one with no reply and one with no request, and the turn was never kept in
+# memory, which needs both.
+@pytest.mark.parametrize("heard, said", [
+    ("ضيفي حليب", "ضفت الحليب للقائمة"),
+    ("add milk", "I added the milk to your list."),
+])
+def test_voice_one_turn_is_one_trace_row_and_one_memory(monkeypatch, brain_db, heard, said):  # noqa: F811
+    from app.features import trace_store
+
+    rows, kept = [], []
+    monkeypatch.setattr(trace_store.Trace, "finish", lambda self, **kw: rows.append(
+        {**kw, "tools": [t["name"] for t in self.tools]}))
+    _call(monkeypatch, _SplitGemini(("list_add", {"list": "shopping", "text": "حليب"}), heard, said),
+          save=lambda *a: kept.append(a[:2]))
+    assert rows == [{"request": heard, "reply": said, "routed_by": "voice",
+                         "tools": ["list_add"]}]
+    assert kept == [(heard, said)]

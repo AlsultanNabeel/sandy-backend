@@ -71,8 +71,11 @@ def test_the_transcript_is_what_reaches_memory():
     after = src[i_join:i_join + 5000]
     assert "_save_voice_turn" in after, (
         "the assembled transcript no longer reaches memory — check this test")
+    # His words wait in `_heard` until she answers (one turn of ours can span two of the
+    # live model's), and reach memory from there.
+    assert "_heard.append(user_text)" in after
     call = after[after.index("_save_voice_turn"):][:200]
-    assert "user_text" in call and "sandy_text" in call
+    assert "heard" in call and "sandy_text" in call
 
 
 def test_both_speakers_are_assembled_the_same_way():
