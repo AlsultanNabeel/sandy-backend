@@ -291,6 +291,41 @@ def set_city(user_id: str, city: str) -> bool:
     return True
 
 
+# Where a task's results are emailed (`notify/mail.py`): {address, confirmed, token, asked_at}.
+NOTIFY_EMAIL_FIELD = "notify_email"
+
+
+def get_notify_email(user_id: str) -> Dict[str, Any]:
+    coll = _coll()
+    if coll is None or not user_id:
+        return {}
+    doc = coll.find_one({"_id": user_id}, {NOTIFY_EMAIL_FIELD: 1}) or {}
+    saved = dict(doc.get(NOTIFY_EMAIL_FIELD) or {})
+    if saved.get("asked_at") is not None:
+        saved["asked_at"] = _as_aware_utc(saved["asked_at"])
+    return saved
+
+
+def set_notify_email(user_id: str, value: Optional[Dict[str, Any]]) -> bool:
+    """Keep it, or with None forget it."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return False
+    change = ({"$set": {NOTIFY_EMAIL_FIELD: value}} if value
+              else {"$unset": {NOTIFY_EMAIL_FIELD: ""}})
+    return coll.update_one({"_id": user_id}, change).matched_count > 0
+
+
+def user_by_notify_token(token_hash: str) -> Optional[str]:
+    """The account whose confirmation link carries this token; the one read across accounts,
+    since the link is opened signed out."""
+    coll = _coll()
+    if coll is None or not token_hash:
+        return None
+    doc = coll.find_one({f"{NOTIFY_EMAIL_FIELD}.token": token_hash}, {"_id": 1})
+    return str(doc["_id"]) if doc else None
+
+
 def get_nudge_answers(user_id: str) -> Dict[str, Any]:
     """{qid: answer} for the daily-nudge questions."""
     coll = _coll()

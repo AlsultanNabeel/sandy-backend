@@ -96,6 +96,7 @@ USER_ROW_KEPT = frozenset({
 USER_ROW_FORGOTTEN = frozenset({
     "onboarding",       # preferred name, interests, notes, daily-question answers
     "persona", "budget", "city", "notifications",
+    "notify_email",     # where a task's results are emailed (`notify/mail.py`)
 })
 
 # Keyed by `_id` = the user's id, with no user field.

@@ -365,6 +365,22 @@ PHRASES = {
     "every_hours": {"ar": "كل {n} ساعة", "en": "every {n} hours"},
     "task_stopped": {"ar": "وقّفت مهمة «{title}»: فشلت تلات مرات ورا بعض. خبّرني إذا بدك أرجّعها.",
                      "en": "I stopped the task «{title}»: it failed three times in a row. Tell me if you want it back."},
+    "mail_confirm_subject": {"ar": "ساندي: أكّد إيميلك", "en": "Sandy: confirm your email"},
+    "mail_confirm_body": {
+        "ar": "أهلاً! هاد إيميل تأكيد من ساندي.\nافتح الرابط لتوصلك نتائج مهامك على هالإيميل:\n{link}\n\n"
+              "إذا مش إنت اللي طلبته، تجاهله وما رح يوصلك شي.",
+        "en": "Hi! This is Sandy asking you to confirm your email.\nOpen the link to get your "
+              "tasks' results here:\n{link}\n\nIf it wasn't you, ignore it and nothing will be sent."},
+    "mail_result_subject": {"ar": "ساندي: {title}", "en": "Sandy: {title}"},
+    "mail_results_subject": {"ar": "ساندي: {n} نتائج جديدة من «{title}»",
+                             "en": "Sandy: {n} new results from «{title}»"},
+    "mail_footer": {"ar": "وصلك هاد من مهامك عند ساندي. بتقدر توقّف الإيميلات من شاشة المهام بالتطبيق.",
+                    "en": "This came from your tasks with Sandy. You can stop these emails from "
+                          "the Tasks screen in the app."},
+    "mail_confirmed_page": {"ar": "تمام، تأكّد إيميلك. نتائج مهامك رح توصلك عليه.",
+                            "en": "Done, your email is confirmed. Your tasks' results will come here."},
+    "mail_link_dead_page": {"ar": "هالرابط انتهى أو انستعمل. اطلب رابط جديد من التطبيق.",
+                            "en": "This link has expired or was already used. Ask for a new one in the app."},
     "research_summary": {"ar": "📌 الملخص:\n{body}", "en": "📌 Summary:\n{body}"},
     "research_sources": {"ar": "📎 المصادر:", "en": "📎 Sources:"},
     "research_no_summary": {"ar": "ما قدرت ألخص النتائج بشكل واضح حالياً.",
