@@ -10,7 +10,6 @@ import pytest
 from brain_fakes import A, B, brain_db  # noqa: F401
 
 from app import notify
-from app.features import users_store
 from app.notify import mail
 from app.utils.user_profiles import active_user_profile_context
 

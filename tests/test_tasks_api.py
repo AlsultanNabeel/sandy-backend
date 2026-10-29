@@ -128,7 +128,7 @@ def test_pause_resume_and_remove(c):
 
 
 @pytest.mark.parametrize("language", ["ar", "en"])
-def test_an_unknown_task_is_404_with_a_message_in_his_language(c, brain_db, language):
+def test_an_unknown_task_is_404_with_a_message_in_his_language(c, brain_db, language):  # noqa: F811
     brain_db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}},
                                        upsert=True)
     r = c.post("/api/scheduled-tasks/nope/pause", headers=_h())

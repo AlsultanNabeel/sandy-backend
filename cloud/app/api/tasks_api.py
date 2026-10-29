@@ -58,7 +58,7 @@ def _switched(view):
 
 
 def _missing():
-    return jsonify({"error": "not_found", "message": lang.say("task_not_found")}), 404
+    return jsonify({"error": "not_found", "message": lang.say("task_missing")}), 404
 
 
 def _shown(row: Dict[str, Any], unseen: Dict[str, int]) -> Dict[str, Any]:
