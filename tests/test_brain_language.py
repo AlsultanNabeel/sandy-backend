@@ -464,3 +464,12 @@ def test_a_correction_is_one_update_never_a_delete_in_both_languages():
     spec = next(t for t in tools.openai_tools() if t["function"]["name"] == "log_update")["function"]
     assert "I meant 60 not 50" in spec["description"] and "ما تحذفي" in spec["description"]
     assert "I meant 60 not 50" in context._RULES
+
+
+# «turn off the AC in an hour» was sent to the device at once, its time as a value (eval,
+# 29 Oct 2026); a command with a time is a schedule, said in both languages.
+def test_a_device_command_with_a_time_is_a_schedule_in_both_languages():
+    from app.brain import tools
+    spec = next(t for t in tools.openai_tools() if t["function"]["name"] == "device_control")["function"]
+    said = spec["description"] + spec["parameters"]["properties"]["value"].get("description", "")
+    assert "بعد ساعة" in said and "in an hour" in said and "schedule" in said
