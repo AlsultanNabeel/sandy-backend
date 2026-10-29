@@ -332,3 +332,49 @@ def test_the_rules_keep_tool_words_in_the_users_language():
 ])
 def test_a_real_arabic_word_makes_the_message_arabic(text, want):
     assert lang.of(text) == want, text
+
+
+# A reply in the right language is not rewritten for a name, a brand, a link or a number in
+# the other one (independent review, 29 Oct 2026).
+@pytest.mark.parametrize("text, language, names", [
+    ("Turned on ضو الصالة ✨", "en", ["ضو الصالة"]),
+    ("Here it is: https://example.com/عربي", "en", []),
+    ("Your total is ٥٠ shekels.", "en", []),
+    ("Done, I told محمد.", "en", ["محمد"]),
+    ("شغّلت Desk lamp ✨", "ar", ["Desk lamp"]),
+    ("هاد الرابط: https://www.example.com/watch?v=abcdef", "ar", []),
+    ("أحسن تلفون هلّق iPhone 15 Pro Max", "ar", []),
+    ("ضفت Nescafe Gold Blend للقائمة", "ar", ["Nescafe Gold Blend"]),
+])
+def test_a_name_link_or_number_is_not_the_wrong_language(text, language, names):
+    from app.brain import language_guard as G
+    assert G.wrong_language(text, language, names) is False, text
+
+
+@pytest.mark.parametrize("text, language", [
+    ("I added it, يا عيوني!", "en"),
+    ("Sure, I added milk to your list.", "ar"),
+])
+def test_the_wrong_language_is_still_caught_beside_a_name(text, language):
+    from app.brain import language_guard as G
+    assert G.wrong_language(text, language, ["Desk lamp", "ضو الصالة"]) is True, text
+
+
+@pytest.mark.parametrize("message, label, want", [
+    ("turn on the hall light", "ضو الصالة", "Turned on ضو الصالة ✨"),
+    ("شغّلي الضو", "Desk lamp", "شغّلت Desk lamp ✨"),
+])
+def test_a_device_named_in_the_other_language_is_not_rewritten(brain_db, monkeypatch,  # noqa: F811
+                                                                message, label, want):
+    from types import SimpleNamespace as NS
+
+    from brain_fakes import on_node
+
+    from app.features import device_store
+    monkeypatch.setattr("app.integrations.device_publisher.get_device_publisher",
+                        lambda: NS(send_to_topic=lambda topic, payload: True))
+    with active_user_profile_context(A):
+        device_store.add_device("lamp", label, "switch", on_node("lamp"))
+    model = ScriptedModel(tools_reply(call("device_control", device="lamp", action="on")))
+    assert _turn(model, message)["final_response"] == want
+    assert len(model.seen) == 1

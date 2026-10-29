@@ -183,8 +183,10 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    only «ok» keeps the conversation's. Every sentence the server says itself (tool replies,
    held questions and summaries, errors, the honesty check's) is a phrase in both languages
    (`lang.PHRASES`, `lang.say` in the turn's language, a context variable). A reply that
-   still came in the other language (Arabic words outside «quoted» names in an English turn,
-   or mostly English in an Arabic one) is rewritten once by the model; if that fails it goes
+   still came in the other language (an Arabic word in an English turn, or mostly English
+   words in an Arabic one; names aside: «quoted» ones, the message's own words in the other
+   script, the tools' replies and names, `language_guard.names_of`, and links, numbers and
+   Capitalised names in an Arabic reply) is rewritten once by the model; if that fails it goes
    out as it was. Outside a reply (pushes, the daily nudge, limits, a route's own message)
    the user's own language is used: `sandy_users.language`, which the app sends as `X-Lang`
    (`lang.note` in `require_auth`).

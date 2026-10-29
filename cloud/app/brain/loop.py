@@ -314,7 +314,8 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
         text = honesty.correct(outcome["text"], ctx.worked, ctx.results, question)
         # In the message's language (`language_guard`); the held question is ours, already in it.
         body = text[: -len(question)].rstrip() if question and text.endswith(question) else text
-        body = language_guard.ensure(body, complete)
+        body = language_guard.ensure(body, complete,
+                                     language_guard.names_of(message, ctx.results))
         outcome = {**outcome, "text": "\n".join(t for t in (body, question) if t)}
     shown = None
     try:
