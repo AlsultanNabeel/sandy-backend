@@ -70,8 +70,9 @@ def test_a_task_is_shown_and_saved_only_after_his_yes(on, brain_db, language, ye
     assert row["payload"]["lang"] == language
 
 
-def test_a_task_that_asks_to_pay_is_refused_in_a_call_too(on, brain_db):  # noqa: F811
+def test_a_task_that_asks_to_pay_asks_first_in_a_call_too(on, brain_db):  # noqa: F811
     with active_user_profile_context(A), lang.using("ar"):
         out = voice.dispatch("task_create", {"title": "دفع", "instructions": "ادفعي الفاتورة كل شهر",
                                              "every_minutes": 1440, "check_tool": "recall"}, "userA")
-        assert tasks.running() == [] and out.get("ok") is False
+        assert tasks.running() == [] and out.get("ok") is not True
+        assert "ما بتدفع" in str(out)

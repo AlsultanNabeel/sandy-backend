@@ -351,8 +351,9 @@ PHRASES = {
     "task_confirm": {"ar": "أتابع «{title}» {every}، وأبلّغك بس إذا في جديد",
                      "en": "follow «{title}» {every}, and tell you only when there is something new"},
     "task_saved": {"ar": "تمام، بتابع «{title}» {every} ✅", "en": "Done, I'll follow «{title}» {every} ✅"},
-    "task_forbidden": {"ar": "المهمة بتقرا وبتبلّغ بس: ما بتدفع ولا بتبعت باسمك ولا بتنشر ولا بتحذف.",
-                       "en": "A task only reads and tells you: it never pays, sends in your name, publishes or deletes."},
+    "task_confirm_reads_only": {
+        "ar": "أتابع «{title}» {every} وأبلّغك بس، لأنه المهمة ما بتدفع ولا بتحوّل ولا بتبعت باسمك ولا بتنشر ولا بتحذف",
+        "en": "follow «{title}» {every} and only tell you, since a task never pays, transfers, sends in your name, posts or deletes"},
     "task_none": {"ar": "ما في مهام شغّالة.", "en": "No tasks are running."},
     "task_row": {"ar": "«{title}» {every}", "en": "«{title}» {every}"},
     "task_row_paused": {"ar": "«{title}» {every} (موقّفة)", "en": "«{title}» {every} (paused)"},

@@ -68,16 +68,46 @@ def test_the_yes_in_a_turn_saves_it(brain_db, on):  # noqa: F811
         assert len(tasks.running()) == 1
 
 
-@pytest.mark.parametrize("language, words", [
+# The words are a question, not the guard (review of phase one): a task's tools only read, so
+# nothing it is told can pay, send, publish or delete. Words that ask for one make the yes it
+# waits for say so; a read («tell me if its price drops») is asked plainly.
+_ACTS = [
     ("ar", "كل يوم ادفعي فاتورة الكهربا من حسابي"),
+    ("ar", "أول كل شهر سدّدي فاتورة النت"),
+    ("ar", "إذا وصل الراتب حوّلي ألف لحساب أمي"),
+    ("ar", "كل يوم ابعتي إيميل باسمي للزباين"),
+    ("ar", "كل أسبوع انشري صورة على إنستغرام"),
+    ("ar", "كل يوم امسحي الرسايل القديمة"),
     ("en", "every day pay my electricity bill from my account"),
-])
-def test_a_task_that_asks_for_something_not_allowed_is_refused_before_it_is_saved(
-        brain_db, on, language, words):  # noqa: F811
-    out = _run("task_create", language, confirmed=True, **{**MOSTAQL, "instructions": words})
-    assert not out["ok"] and out["reply"] == lang.PHRASES["task_forbidden"][language]
+    ("en", "when my salary arrives, transfer 500 to savings"),
+    ("en", "every morning post on Instagram what's new"),
+    ("en", "every week remove the old items from my list"),
+    ("en", "send an email in my name to my clients every Monday"),
+]
+_READS = [
+    ("ar", "كل ساعة شوفي سعر الدولار وقلّيلي إذا نزل سعره"),
+    ("ar", "كل ساعة شوفي مشاريع جديدة على مستقل وابعتيلي الجديد"),
+    ("en", "check the gold price every hour and tell me if it drops"),
+    ("en", "every hour, check Mostaql for new projects and send me the new ones"),
+]
+
+
+@pytest.mark.parametrize("language, words", _ACTS)
+def test_words_that_ask_to_act_make_the_yes_say_a_task_only_reads(brain_db, on, language, words):  # noqa: F811
+    out = _run("task_create", language, **{**MOSTAQL, "instructions": words})
+    assert out.get("needs_confirmation")
+    assert out["summary"] == lang.PHRASES["task_confirm_reads_only"][language].format(
+        title=MOSTAQL["title"], every=lang.PHRASES["every_hours"][language].format(n=1))
     with active_user_profile_context(A):
         assert tasks.running() == []
+
+
+@pytest.mark.parametrize("language, words", _READS)
+def test_a_read_is_asked_plainly(brain_db, on, language, words):  # noqa: F811
+    out = _run("task_create", language, **{**MOSTAQL, "instructions": words})
+    assert out.get("needs_confirmation")
+    assert out["summary"] == lang.PHRASES["task_confirm"][language].format(
+        title=MOSTAQL["title"], every=lang.PHRASES["every_hours"][language].format(n=1))
 
 
 @pytest.mark.parametrize("args", [{"check_tool": "list_delete"}, {"tools": ["device_control"]}])

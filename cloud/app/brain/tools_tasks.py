@@ -2,8 +2,9 @@
 
 A task is shown and waits for the user's yes before it is saved (`task_create` holds, and the
 yes replays it with `ctx.confirmed`). It may only read and tell: its check is one of
-`tasks.READ_TOOLS`, its tools within `tasks.ALLOWED`, and words that ask for money,
-sending in his name, publishing or deleting are refused before anything is saved. The tools
+`tasks.READ_TOOLS`, its tools within `tasks.ALLOWED` (reads only: that list is the guard).
+Words that ask for money, sending in his name, publishing or deleting only make the question
+say a task never does them. The tools
 are offered (`TASK_SCHEMAS`, `tools.openai_tools`) and answer only for an account with the
 `tasks` switch on. Nothing here names a field of work: what to check and what is worth
 telling are the user's own words.
@@ -21,12 +22,15 @@ from app.brain import when as W
 from app.brain.ctx import TurnCtx, needs_confirmation, refused
 from app.brain.matching import match_key, match_rows
 
-# A task only reads and tells: words that ask it to act for him with money, in his name, in
-# public or by deleting. An Arabic one counts as a word's start («ادفعي»), an English one
-# whole, and a phrase as it is.
-_FORBIDDEN_AR = ("ادفع", "اشتري", "انشري", "احذفي", "امسحي", "حولي مصاري", "ابعتي باسمي")
-_FORBIDDEN_EN = ("pay", "pays", "paying", "buy", "purchase", "publish", "delete",
-                 "transfer money", "send money", "on my behalf")
+# Words that ask a task to act for him: pay, transfer, buy, send in his name, publish, delete.
+# They are a question, not the guard: a task's tools only read (`tasks.ALLOWED`), so none of it
+# can happen whatever it is told; with these words the yes it waits for says so. An Arabic one
+# counts as a word's start («سدّديلي»), an English one whole, and a phrase as it is.
+_ACTS_AR = ("ادفعي", "سددي", "حولي", "اشتري", "انشري", "احذفي", "امسحي", "شيلي", "باسمي",
+            "نيابه عني", "ابعتي ايميل", "ابعتي رساله")
+_ACTS_EN = ("pay", "pays", "paying", "buy", "purchase", "transfer", "transfers", "publish",
+            "tweet", "delete", "remove", "send money", "on my behalf", "in my name", "post on",
+            "post to", "post it", "send an email", "send email")
 # How soon a new task runs first, unless the user says.
 FIRST_RUN = timedelta(minutes=1)
 
@@ -90,12 +94,12 @@ def _minutes(value: Any) -> Optional[int]:
 def _asks_to_act(words: str) -> bool:
     tokens = match_key(words).split()
     joined = f" {' '.join(tokens)} "
-    for word in (*_FORBIDDEN_AR, *_FORBIDDEN_EN):
+    for word in (*_ACTS_AR, *_ACTS_EN):
         key = match_key(word)
         if " " in key:
             if f" {key} " in joined:
                 return True
-        elif any(t == key or (word in _FORBIDDEN_AR and t.startswith(key)) for t in tokens):
+        elif any(t == key or (word in _ACTS_AR and t.startswith(key)) for t in tokens):
             return True
     return False
 
@@ -115,10 +119,10 @@ def task_create(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if any(t not in ALLOWED for t in allowed):
         return refused(f"a task only reads and tells: its tools are within {list(ALLOWED)}; "
                        "«remind me» in a task is its own message, not a reminder")
-    if _asks_to_act(f"{instructions} {args.get('notify_when') or ''}"):
-        return refused("a task only reads and tells", reply=lang.say("task_forbidden"))
     if not ctx.confirmed:
-        return needs_confirmation(lang.say("task_confirm", title=title, every=_every(every)))
+        acts = _asks_to_act(f"{instructions} {args.get('notify_when') or ''}")
+        return needs_confirmation(lang.say("task_confirm_reads_only" if acts else "task_confirm",
+                                           title=title, every=_every(every)))
     spec = {"instructions": instructions, "notify_when": str(args.get("notify_when") or ""),
             "probe": {"tool": check, "args": dict(args.get("check_args") or {})},
             "tools": list(dict.fromkeys([check, *allowed])), "lang": lang.current(),

@@ -193,8 +193,10 @@ CASES += [
         {"say": "شو المهام الشغّالة؟", "tools": ["task_list"]},
         {"say": "وقّفيها", "tools": ["task_update"], "task": {"paused": True}},
         {"say": "رجّعيها وخلّيها كل ساعتين", "tools": ["task_update"], "task": {"paused": False, "every": 120}}]},
-    {"name": "task: refuses to pay", "steps": [
-        {"say": "كل أول الشهر ادفعي فاتورة الكهربا من حسابي", "no_task": True, "pending": False}]},
+    # A task never pays: its tools only read. The words make her ask first or say so (review of
+    # phase one); either way nothing is saved on the request itself.
+    {"name": "task: never pays", "steps": [
+        {"say": "كل أول الشهر ادفعي فاتورة الكهربا من حسابي", "no_task": True}]},
     # «صباح الخير»: what a task found and he has not seen is told when he speaks.
     {"name": "task: morning tells what was found", "setup": [
         {"result": {"title": "مشاريع مستقل", "body": "في مشروعين جداد: تصميم شعار، وموقع لمطعم"}}],
@@ -330,9 +332,9 @@ EN_CASES += [
         {"say": "pause it", "tools": ["task_update"], "task": {"paused": True}},
         {"say": "start it again and make it every two hours", "tools": ["task_update"],
          "task": {"paused": False, "every": 120}}], [_task("Mostaql projects")]),
-    _en("task: refuses to pay", [
+    _en("task: never pays", [
         {"say": "on the first of every month, pay my electricity bill from my account",
-         "no_task": True, "pending": False}]),
+         "no_task": True}]),
     _en("task: morning tells what was found", [
         {"say": "good morning", "reply_has": ["logo", "restaurant", "project"]}],
         [{"result": {"title": "Mostaql projects",
