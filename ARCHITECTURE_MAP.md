@@ -1834,6 +1834,10 @@ nobody re-reads becomes a way of believing things that stopped being true.
    answered 429 «no credits remaining». The user sees `loop.ERROR_REPLY`. The fix is a
    higher token quota on the deployment, or credit on the fallback.
 
+10. **A streamed reply in the wrong language shows, then is swapped.** The model's words
+   stream as they come; the language check (§2.3 3c) runs after, and the final event
+   replaces the text. Low: the right reply lands, but the wrong one is seen first. Later.
+
 ### Real, but nobody hits it today
 
 5. **Staging: built, not yet created.** The code side is in (§1, `env_guard`); the owner
