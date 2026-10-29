@@ -1899,6 +1899,15 @@ nobody re-reads becomes a way of believing things that stopped being true.
    a cost counted from it is a warning in the log, once a process. The live voice model
    `gemini-3.8-live` is priced the same way (its audio rates from an outside page), to check
    on the first Google bill; before 29 Oct every voice turn was counted as free.
+   **The plan, owner's decision of 29 Oct 2026:** the chat stays on `sandy-chat` (with
+   `gpt-4.1` as its Azure fallback). `gpt-6-luna` on the Responses API is the one to replace
+   it before the April retirement, decided before January 2027. Its path is built and off
+   (`responses.py`; `SANDY_FLAGS` holds `"responses_api": []`, `SANDY_RESPONSES_DEPLOYMENT` is
+   set). Before the move: fix the two cases it fails every run, a fact about him to remember
+   (`fact`, both languages) and items understood from talk without an explicit ask
+   (`shopping implied`); then run the comparison again, two runs each against `sandy-chat`
+   (`--api responses --model gpt-6-luna --reasoning low --repeat 2`), and check its price on
+   the first Azure bill.
 
 10. **A streamed reply in the wrong language shows, then is swapped.** The model's words
    stream as they come; the language check (§2.3 3c) runs after, and the final event
