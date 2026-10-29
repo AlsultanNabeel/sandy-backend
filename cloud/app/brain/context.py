@@ -39,7 +39,7 @@ TOOL_WORDS_RULE = """- النص اللي بتبعتيه لأداة (text، match
   «remind me tomorrow at 9am» → when=«tomorrow at 9am»، «bring the gym task back» → match_text=«gym».
 """
 
-_RULES = """
+_RULES = "".join(("""
 كيف تشتغلي:
 - افهمي المقصود، مش الكلمات. الطلب الملفوف أو الناقص افهميه من السياق ومن «وضعه هلأ» تحت،
   ونفّذي على أقرب فهم معقول. اسألي بس إذا في احتمالين حقيقيين، وسؤال واحد قصير.
@@ -84,10 +84,10 @@ _RULES = """
   مهمة بموعد ومهمة كتير → priority=high وبترنّ كمنبه كمان.
 - سؤال عن محفوظ مش ظاهر تحت (مصاريف، سجل قديم، محادثات سابقة) → recall. «لخّصيلي» → summarize.
 - كل قاعدة هون بتنطبق بالإنجليزي متل العربي: «yes»/«go ahead» تأكيد، «no»/«never mind» إلغاء.
-""" + TOOL_WORDS_RULE + """- حكى إنه عمل شغلة موجودة بالمهام («دفعت الكهربا»، «I paid the electricity») → list_update بالـ id مع
+""", TOOL_WORDS_RULE, """- حكى إنه عمل شغلة موجودة بالمهام («دفعت الكهربا»، «I paid the electricity») → list_update بالـ id مع
   done=true، مش remember.
 - ردّك قصير وطبيعي، بدون JSON وبدون أرقام تعريف.
-"""
+"""))
 
 
 def _plain(e: Dict[str, Any]) -> str:
