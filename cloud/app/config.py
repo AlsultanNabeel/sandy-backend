@@ -40,6 +40,9 @@ AZURE_OPENAI_API_VERSION = os.getenv(
     "AZURE_OPENAI_API_VERSION", "2024-08-01-preview"
 ).strip()
 AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
+# A larger Azure deployment the chat falls to when the first fails or answers its rate limit,
+# before OpenAI direct. Unset means none.
+AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT", "").strip()
 # text-embedding-3-small deployment (1536-dim index); set = embed via Azure.
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv(
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", ""

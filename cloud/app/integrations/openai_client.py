@@ -15,6 +15,8 @@ from app.utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 logger = logging.getLogger(__name__)
 
 _cb = CircuitBreaker(name="openai", failure_threshold=5, recovery_timeout=60.0)
+# The fallback deployment's own: the first one's failures must not shut its way out.
+_cb_fallback = CircuitBreaker(name="openai-fallback", failure_threshold=5, recovery_timeout=60.0)
 
 # Hang ceiling when the caller passes no timeout.
 DEFAULT_CHAT_TIMEOUT_S = float(os.getenv("OPENAI_CHAT_TIMEOUT_S", "15"))
@@ -50,6 +52,7 @@ def create_chat_completion(
     timeout: Optional[float] = None,
     stream: bool = False,
     tools: Optional[List[Dict[str, Any]]] = None,
+    breaker: Optional[CircuitBreaker] = None,
 ) -> Any:
     """Unified chat completion with Azure-first routing and circuit breaker."""
     client, model_name = _chat_client_and_model(
@@ -80,7 +83,7 @@ def create_chat_completion(
     provider = "azure" if client is azure_openai_client and client is not None else "openai"
     t0 = time.perf_counter()
     try:
-        resp = _cb.call(_create_chat_adapting, client, kwargs)
+        resp = (breaker or _cb).call(_create_chat_adapting, client, kwargs)
     except CircuitOpenError:
         raise RuntimeError("[OpenAI] Circuit OPEN — AI service temporarily unavailable")
     if stream:
@@ -172,6 +175,7 @@ def make_chat_completion_fn(
     azure_openai_client: Optional[Any] = None,
     openai_model: Optional[str] = None,
     azure_chat_deployment: Optional[str] = None,
+    breaker: Optional[CircuitBreaker] = None,
 ) -> Callable[..., Any]:
 
     def _bound(
@@ -199,12 +203,14 @@ def make_chat_completion_fn(
             timeout=timeout,
             stream=stream,
             tools=tools,
+            breaker=breaker,
         )
 
     return _bound
 
 
 _chat_fn: Optional[Callable[..., Any]] = None
+_fallback_fn: Optional[Callable[..., Any]] = None
 _direct_client: Any = None
 _clients_lock = threading.Lock()
 
@@ -241,6 +247,34 @@ def chat_fn() -> Callable[..., Any]:
             openai_client=direct or azure, azure_openai_client=azure,
             openai_model=OPENAI_MODEL, azure_chat_deployment=AZURE_OPENAI_CHAT_DEPLOYMENT)
         return _chat_fn
+
+
+def fallback_fn() -> Optional[Callable[..., Any]]:
+    """The larger Azure deployment (`AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT`), behind a breaker
+    of its own; None when it is not set or Azure is not configured."""
+    global _fallback_fn
+    if _fallback_fn is not None:
+        return _fallback_fn
+    from openai import AzureOpenAI
+
+    from app import config
+
+    if not (config.AZURE_OPENAI_ENDPOINT and config.AZURE_OPENAI_API_KEY
+            and config.AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT):
+        return None
+    if config.AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT == config.AZURE_OPENAI_CHAT_DEPLOYMENT:
+        # The same deployment again is the same failure twice, billed twice.
+        return None
+    with _clients_lock:
+        if _fallback_fn is None:
+            azure = AzureOpenAI(azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
+                                api_key=config.AZURE_OPENAI_API_KEY,
+                                api_version=config.AZURE_OPENAI_API_VERSION, max_retries=0)
+            _fallback_fn = make_chat_completion_fn(
+                openai_client=azure, azure_openai_client=azure,
+                azure_chat_deployment=config.AZURE_OPENAI_CHAT_FALLBACK_DEPLOYMENT,
+                breaker=_cb_fallback)
+        return _fallback_fn
 
 
 def azure_is_primary() -> bool:

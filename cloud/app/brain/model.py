@@ -1,7 +1,9 @@
 """The one model call: messages + tools in, text or tool calls out.
 
 The Azure chat deployment through `openai_client.chat_fn` (breaker + param
-quirks), then OpenAI direct with ``OPENAI_MODEL``, then give up.
+quirks), then the larger Azure deployment (`openai_client.fallback_fn`, its own breaker)
+when it fails or answers its rate limit, then OpenAI direct with ``OPENAI_MODEL``, then
+give up.
 
 `/api/agent/stream` sets the stream hooks on the thread that runs the turn; the
 loop streams the reply's text through them, cumulative.
@@ -18,7 +20,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from app.config import OPENAI_MODEL
 from app.features import trace_store
-from app.integrations.openai_client import DEFAULT_CHAT_TIMEOUT_S, chat_fn, openai_direct_client
+from app.integrations.openai_client import (DEFAULT_CHAT_TIMEOUT_S, chat_fn, fallback_fn,
+                                            openai_direct_client)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +120,15 @@ def _primary(messages, tools, stream: bool):
                      max_tokens=MAX_TOKENS, temperature=TEMPERATURE)
 
 
+def _azure_fallback(messages, tools, stream: bool):
+    """The larger Azure deployment's answer, or None when there is none."""
+    fn = fallback_fn()
+    if fn is None:
+        return None
+    return fn(messages=messages, tools=tools, stream=stream, max_tokens=MAX_TOKENS,
+              temperature=TEMPERATURE)
+
+
 def _openai_direct(messages, tools):
     client = openai_direct_client()
     if client is None:
@@ -146,12 +158,19 @@ def complete(messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
             logger.error("[brain] model failed (OpenAI direct is the primary, no fallback): %s",
                          exc)
             return None
-        logger.warning("[brain] primary model failed, trying OpenAI direct: %s", exc)
-    try:
-        resp = _openai_direct(messages, tools)
-        if resp is None:
-            return None
-        return _from_message(resp.choices[0].message)
-    except Exception as exc:  # noqa: BLE001 — provider boundary
-        logger.error("[brain] OpenAI direct failed too: %s", exc)
-        return None
+        logger.warning("[brain] primary model failed, trying the fallback deployment: %s", exc)
+    # The larger Azure deployment streams as the primary did; OpenAI direct answers whole.
+    streamed = on_text is not None
+    for name, call in (("fallback deployment", lambda: _azure_fallback(messages, tools, streamed)),
+                       ("OpenAI direct", lambda: _openai_direct(messages, tools))):
+        try:
+            resp = call()
+            if resp is None:
+                continue
+            if streamed and name == "fallback deployment":
+                return _from_stream(resp, on_text)
+            return _from_message(resp.choices[0].message)
+        except Exception as exc:  # noqa: BLE001 — provider boundary; the next one below
+            logger.warning("[brain] %s failed: %s", name, exc)
+    logger.error("[brain] every model failed")
+    return None
