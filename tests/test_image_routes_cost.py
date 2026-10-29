@@ -64,8 +64,6 @@ def test_a_failed_analysis_is_an_error_and_costs_nothing(client, monkeypatch):
             raise RuntimeError("model down")
         return _call
     monkeypatch.setattr(openai_client, "chat_fn", _down)
-    from app.features import vision
-    monkeypatch.setattr(vision, "chat_fn", _down)
     r = c.post("/api/analyze-image", json={"image": _IMAGE}, headers=_bearer())
     assert r.status_code == 502 and r.get_json()["error"] == "vision_failed"
     assert "[think]" not in r.get_data(as_text=True)

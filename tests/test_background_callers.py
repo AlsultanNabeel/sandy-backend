@@ -80,3 +80,24 @@ def test_a_web_summary(monkeypatch):
     with active_user_profile_context(A):
         assert "the summary" in research.web_answer("q", "what is new?")
     assert seen[0][0] == "web_summary" and seen[0][1]["user_id"] == "userA"
+
+
+def test_an_images_answer(calls, monkeypatch):
+    from app.features import vision
+    monkeypatch.setattr(vision, "_build_sandy_vision_system", lambda uid: "s")
+    assert vision.analyze_image_with_azure(b"img", "what is it?", user_id="userA") == "ok"
+    assert [(c["what"], c["user_id"]) for c in calls] == [("vision", "userA")]
+
+
+def test_no_model_call_is_made_outside_the_one_function():
+    """Every model call outside a reply's loop is `background.call`: the chat's own client is
+    called directly in the model adapter alone (`brain/model.py`)."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "cloud" / "app"
+    allowed = {"brain/background.py", "brain/model.py", "integrations/openai_client.py"}
+    found = [str(p.relative_to(root)) for p in root.rglob("*.py")
+             if str(p.relative_to(root)) not in allowed
+             and re.search(r"chat_fn\(\)\s*\(|import chat_fn|chat\.completions\.create",
+                           p.read_text(encoding="utf-8"))]
+    assert not found, found

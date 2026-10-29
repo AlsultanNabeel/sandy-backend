@@ -258,8 +258,10 @@ chat (`loop.run_turn`, its id is the turn's `turn_id`), voice (one per turn of o
 lasts until she answers: the live model ends a tool call's turn and answers in the next, so his
 words, her answer and the tools are one row and one memory, each of its turns billed as its
 own model call, `Trace.end_live_turn`; `voice_ws/session.py`, its tools through `_dispatch_tool(trace=…)`) and
-model calls made for a user outside a turn (`trace_store.background`: the STM summary, the
-chat title, the daily nudge, photo tags). A row holds the request, the reply, every tool
+model calls made for a user outside a turn (`trace_store.background`, through `background.call`,
+the one function every model call outside a reply's loop goes through: the STM summary, the chat
+title, the daily nudge, photo tags, an expense's category, a time read from words, an image's
+answer and a web summary; `tests/test_background_callers.py` refuses a direct call anywhere else). A row holds the request, the reply, every tool
 (arguments, result, ok, ms), every model call (provider, model, tokens in / out / cached,
 and reasoning: the part of out a reasoning model thought, `tokens_reasoning`, summed on the row
 and on the cost page; ms), the cost in dollars (`features/pricing.py`, the one place prices live, dated

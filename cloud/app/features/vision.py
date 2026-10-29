@@ -5,7 +5,6 @@ import logging
 from typing import Optional
 
 from app.brain.persona import build_effective_persona
-from app.integrations.openai_client import chat_fn
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +31,15 @@ def analyze_image_with_azure(image_bytes: bytes, prompt: str, *,
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         data_url = f"data:image/jpeg;base64,{image_b64}"
-        response = chat_fn()(
-            messages=[
-                {"role": "system", "content": _build_sandy_vision_system(user_id)},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                },
-            ],
-            temperature=0.95,
-            max_tokens=120,
-        )
+        from app.brain import background
+
+        response = background.call("vision", [
+            {"role": "system", "content": _build_sandy_vision_system(user_id)},
+            {"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]},
+        ], user_id=user_id, temperature=0.95, max_tokens=120)
         return (response.choices[0].message.content or "").strip() or None
     except Exception as e:
         logger.warning(f"[Azure Vision] analysis failed: {e}")
