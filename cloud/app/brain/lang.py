@@ -155,6 +155,10 @@ PHRASES = {
     "undo_failed": {"ar": "ما قدرت أرجّعه: شكله تغيّر من بعدها.",
                     "en": "I couldn't put it back: it seems to have changed since."},
     "undo_done": {"ar": "رجّعته زي ما كان ✅ {names}", "en": "Put back as it was ✅ {names}"},
+    # A call that would take back what the same turn just did (`tools._undoes`).
+    "kept_corrected": {"ar": "ما حذفت اللي صحّحته هلّق: ضل زي ما صحّحته.",
+                       "en": "I didn't delete what I just corrected: it stays as corrected."},
+    "set_for_later": {"ar": "ما نفّذته هلّق: مضبوط لوقته.", "en": "I didn't do it now: it's set for its time."},
     # Devices, scenes and the world (`tools_world`).
     "device_on": {"ar": "شغّلت {label} ✨", "en": "Turned on {label} ✨"},
     "device_off": {"ar": "طفّيت {label}", "en": "Turned off {label}"},

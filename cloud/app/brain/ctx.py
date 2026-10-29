@@ -25,6 +25,9 @@ class TurnCtx:
     # of those that worked: what the reply may say was done (`honesty`).
     results: List[Tuple[str, Dict[str, Any]]] = field(default_factory=list)
     worked: List[str] = field(default_factory=list)
+    # Every call's name, arguments and whether it worked: what a later call of the same turn
+    # may not take back (`tools._undoes`).
+    calls: List[Tuple[str, Dict[str, Any], bool]] = field(default_factory=list)
 
 
 def needs_confirmation(summary: str, ids: Optional[List[str]] = None) -> Dict[str, Any]:

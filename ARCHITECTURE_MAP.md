@@ -177,6 +177,11 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    question stays last. On the call her words are heard already, so at the turn's end
    (`session._handle`, `_turn_worked`) she is told to put it right (`honesty.voice_correction`, in the turn's spoken language, a
    turn of its own that she answers). The prompt's own rule is no longer the guarantee.
+3d. **A turn does not take back what it just did** (`tools._undoes`, before the handler):
+   a delete of a row the same turn corrected («no, I meant 60 not 50» → update, then
+   delete) and a device switched now the way a schedule of the same turn set it for later
+   («turn off the AC in an hour» → schedule, then off now) are refused, `kept_corrected` /
+   `set_for_later`; `ctx.calls` holds each call's arguments.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
    is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»),
    else English when it has Latin letters («add «حليب» to my list»); one with none («2», «👍») or

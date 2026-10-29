@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, names
+from app.brain import lang
 from app.brain import tools_blocks as B
 from app.brain import tools_world as X
 from app.brain.ctx import TurnCtx, refused
@@ -191,18 +192,49 @@ def openai_tools() -> List[Dict[str, Any]]:
     return [{"type": "function", "function": d} for d in _schemas()]
 
 
+# A delete of a row the same turn corrected takes the correction back with it.
+_CORRECTED_BY = {"log_delete": "log_update", "list_delete": "list_update"}
+
+
+def _ids(args: Dict[str, Any]) -> set:
+    return {str(i) for i in [args.get("id"), *(args.get("ids") or [])] if i}
+
+
+def _undoes(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Optional[Dict[str, Any]]:
+    """A refusal when this call takes back what an earlier call of the same turn did: «no, I
+    meant 60 not 50» corrected the row and then deleted it, «turn off the AC in an hour» set
+    it for later and then turned it off now (eval, 29 Oct 2026)."""
+    if name in _CORRECTED_BY:
+        fixed = {i for n, a, ok in ctx.calls if ok and n == _CORRECTED_BY[name] for i in _ids(a)}
+        if _ids(args) & fixed:
+            return refused("corrected in this turn", reply=lang.say("kept_corrected"))
+    if name == "device_control":
+        devices = {str(d) for d in [args.get("device"), *(args.get("devices") or [])] if d}
+        action = str(args.get("action") or "")
+        for n, a, ok in ctx.calls:
+            if ok and n == "schedule" and str(a.get("device") or "") in devices \
+                    and str(a.get("value") or action) == action:
+                return refused("set for later in this turn", reply=lang.say("set_for_later"))
+    return None
+
+
 def execute(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     handler = HANDLERS.get(name)
     if handler is None:
         return refused(f"unknown tool {name}")
     logger.info("[brain] tool %s args=%s", name, sorted(args or {}))
     t0 = time.perf_counter()
-    try:
-        result = handler(dict(args or {}), ctx)
-    except Exception as exc:  # noqa: BLE001 — one tool never breaks the turn
-        logger.exception("[brain] tool %s raised", name)
-        result = {"ok": False, "broke": True, "error": f"tool failed: {type(exc).__name__}"}
+    result = _undoes(name, dict(args or {}), ctx)
+    if result is not None:
+        logger.warning("[brain] tool %s refused: %s", name, result["error"])
+    else:
+        try:
+            result = handler(dict(args or {}), ctx)
+        except Exception as exc:  # noqa: BLE001 — one tool never breaks the turn
+            logger.exception("[brain] tool %s raised", name)
+            result = {"ok": False, "broke": True, "error": f"tool failed: {type(exc).__name__}"}
     trace_store.note_tool(name, dict(args or {}), result, ms=(time.perf_counter() - t0) * 1000)
+    ctx.calls.append((name, dict(args or {}), bool(result.get("ok"))))
     ctx.results.append((name, result))
     if result.get("ok"):
         ctx.worked.append(name)
