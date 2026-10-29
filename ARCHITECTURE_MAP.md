@@ -77,7 +77,8 @@ production database by name (`sandy-app`) or by its mark, production's broker lo
 and `sandy-server` together, or the host inside `SANDY_BROKER_CREDS`), or any `APNS_*`,
 `REVENUECAT_WEBHOOK_AUTH` or `SANDY_FIRMWARE_TOKEN`. Each database is marked with the
 environment that first booted on it (`sandy_env`, `{_id: "env", env}`), and production
-refuses a database marked staging. Problems are named by setting, never by value. On
+refuses a database marked staging. Problems are named by setting, never by value; a boot
+that passes logs one line, `[env_guard] passed: <env>, database <name>`. On
 staging `apns.is_configured()` is false whatever is set, and every Sentry event carries
 `environment` and an `env` tag.
 

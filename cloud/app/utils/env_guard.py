@@ -18,7 +18,7 @@ Production is refused on a database marked staging. Every problem is named at on
 setting name only: no value is logged or raised, and no password is read for itself.
 `check_settings` runs first in `bootstrap.init_runtime`, before any connection; `check`
 runs once the database is open and before anything else touches it or the broker opens.
-A refusal stops the boot.
+A refusal stops the boot; a boot that passes says so in one line.
 """
 
 from __future__ import annotations
@@ -102,4 +102,5 @@ def check(db: Any, environ: Optional[Mapping[str, str]] = None) -> None:
         db[MARKER].update_one({"_id": "env"},
                               {"$setOnInsert": {"env": env, "at": datetime.now(timezone.utc)}},
                               upsert=True)
-        logger.info("[env_guard] database marked %s", env)
+    # One line a boot that passed: the environment and the database's name, nothing else.
+    logger.info("[env_guard] passed: %s, database %s", env, getattr(db, "name", "none"))

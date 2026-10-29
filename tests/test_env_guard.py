@@ -147,3 +147,19 @@ def test_a_clean_staging_boot_marks_then_opens_the_broker(monkeypatch):
     B.init_runtime()
     assert calls == ["mongo", "broker"]
     assert db[G.MARKER].find_one({"_id": "env"})["env"] == "staging"
+
+
+@pytest.mark.parametrize("env, name, marked", [
+    ({"APP_ENV": "prod", "MONGODB_DB_NAME": "sandy-app"}, "sandy-app", None),
+    (CLEAN, "sandy-staging", "staging"),
+])
+def test_a_boot_that_passes_says_so_in_one_line(caplog, env, name, marked):
+    # A guard that passed left nothing in the log (deploy of 29 Oct 2026): it now says
+    # the environment and the database's name, and nothing else, once a boot.
+    db = mongomock.MongoClient()[name]
+    if marked:
+        db[G.MARKER].insert_one({"_id": "env", "env": marked})
+    with caplog.at_level(logging.INFO, logger="app.utils.env_guard"):
+        G.check(db, env)
+    said = [r.getMessage() for r in caplog.records if r.name == "app.utils.env_guard"]
+    assert said == [f"[env_guard] passed: {G.env_of(env)}, database {name}"]
