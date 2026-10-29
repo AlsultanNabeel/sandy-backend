@@ -105,8 +105,8 @@ def _think(doc: Dict[str, Any], spec: Dict[str, Any], found: Any, before: Dict[s
             {"now": _compact(found), "before": before.get("last_probe") or ""}, ensure_ascii=False)}]
     for _ in range(MAX_STEPS):
         reply = _from_message(background.call(
-            "task", messages, user_id=uid, tools=specs or None, max_tokens=700,
-            temperature=0.3).choices[0].message)
+            "task", messages, priority=background.SCHEDULED, user_id=uid, tools=specs or None,
+            max_tokens=700, temperature=0.3).choices[0].message)
         if not reply.tool_calls:
             return reply.text or NOTHING
         messages.append({"role": "assistant", "content": reply.text or None, "tool_calls": [
@@ -130,7 +130,7 @@ def _review(spec: Dict[str, Any], found: Any, message: str, uid: str) -> str:
             language=language)},
         {"role": "user", "content": json.dumps({"data": _compact(found), "message": message},
                                                ensure_ascii=False)}],
-        user_id=uid, max_tokens=500, temperature=0)) or NOTHING
+        priority=background.SCHEDULED, user_id=uid, max_tokens=500, temperature=0)) or NOTHING
 
 
 def _failed(doc: Dict[str, Any], before: Dict[str, Any], error: str) -> None:

@@ -26,7 +26,8 @@ def test_the_stm_summary(brain_db, calls):  # noqa: F811
     from app.brain import stm
     with active_user_profile_context(A):
         stm._summarize("t1", "userA", [{"role": "user", "content": "hi"}], "chat")
-    assert calls == [{"what": "stm_summary", "user_id": "userA", "max_tokens": 200}]
+    assert calls == [{"what": "stm_summary", "priority": "background", "user_id": "userA",
+                      "max_tokens": 200}]
 
 
 def test_a_chats_title(calls):

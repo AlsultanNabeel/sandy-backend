@@ -142,7 +142,8 @@ def _summarize(thread_id: str, user_id: str, messages: List[Dict[str, Any]],
     try:
         resp = background.call("stm_summary", [{"role": "system", "content": _SUMMARY_PROMPT},
                                                {"role": "user", "content": turns}],
-                               user_id=user_id, max_tokens=200)
+                               priority=background.BACKGROUND, user_id=user_id,
+                               max_tokens=200)
         summary = (resp.choices[0].message.content or "").strip()
     except Exception as exc:  # noqa: BLE001 — provider boundary; a lost summary costs no reply
         logger.warning("[stm] summary failed: %s", exc)

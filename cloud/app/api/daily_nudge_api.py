@@ -118,7 +118,8 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
 
         result = background.call("daily_nudge", [{"role": "system", "content": system},
                                                  {"role": "user", "content": user}],
-                                 user_id=uid, max_tokens=120)
+                                 priority=background.BACKGROUND, user_id=uid,
+                                 max_tokens=120)
         text = result if isinstance(result, str) else result.choices[0].message.content
         text = (text or "").strip()
         if text:

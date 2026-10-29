@@ -86,7 +86,8 @@ def web_answer(query: str, user_message: str) -> str:
             {"role": "system", "content": _SUMMARY_SYSTEM},
             {"role": "user", "content": (f"طلب المستخدم: {user_message}\n\n"
                                          "نتائج البحث:\n" + "\n".join(snippets))}],
-            user_id=current_user_id(), temperature=0.3, max_tokens=600)
+            priority=background.DIRECT, user_id=current_user_id(), temperature=0.3,
+            max_tokens=600)
         reply = (response.choices[0].message.content or "").strip()
     except Exception as exc:  # noqa: BLE001 — provider boundary; the snippets still answer
         logger.warning("[research] summary failed: %s", exc)

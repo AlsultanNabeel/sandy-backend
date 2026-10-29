@@ -7,6 +7,12 @@ needed (none is today). Each kind of work (``what``) may run on a deployment of 
 (`SANDY_BACKGROUND_MODELS`, a JSON object of what → Azure deployment); unset, it is the
 chat's own (`AZURE_OPENAI_CHAT_DEPLOYMENT`, `sandy-chat`). Inside a turn the call is counted
 in the turn's trace; outside one it is a background row for its user (`trace_store.background`).
+
+Every call says how urgent it is (`priority`). There is no queue here: a call runs in the
+thread that makes it, so DIRECT (what the user waits on: a time read, a web summary, an
+image's answer) never waits behind BACKGROUND work (a summary, a title, tags, a category,
+the daily nudge), which runs on the shared pool, nor behind SCHEDULED (a task's steps), the
+only kind that may go as a batch (`may_batch`).
 """
 
 from __future__ import annotations
@@ -19,6 +25,14 @@ from typing import Any, Dict, List, Optional
 from app.features import trace_store
 
 logger = logging.getLogger(__name__)
+
+DIRECT, BACKGROUND, SCHEDULED = "direct", "background", "scheduled"
+PRIORITIES = (DIRECT, BACKGROUND, SCHEDULED)
+
+
+def may_batch(priority: str) -> bool:
+    """Only a scheduled task waits long enough for a batch; nothing the user waits on does."""
+    return priority == SCHEDULED
 
 
 def model_for(what: str) -> Optional[str]:
@@ -35,13 +49,17 @@ def model_for(what: str) -> Optional[str]:
     return str(chosen).strip() or None if chosen else None
 
 
-def call(what: str, messages: List[Dict[str, Any]], *, user_id: Optional[str] = None,
+def call(what: str, messages: List[Dict[str, Any]], *, priority: str,
+         user_id: Optional[str] = None,
          max_tokens: int = 500, temperature: float = 0.7,
          response_format: Optional[Dict[str, Any]] = None,
          tools: Optional[List[Dict[str, Any]]] = None) -> Any:
     """One model call for ``what``, its answer as chat completions gives it. Raises as the
     client does (`ConfigError` with no model, `OpenAIError`); the caller says what then."""
     from app.integrations.openai_client import chat_fn
+
+    if priority not in PRIORITIES:
+        raise ValueError(f"priority must be one of {PRIORITIES}, got {priority!r}")
 
     def ask():
         return chat_fn()(messages=messages, max_tokens=max_tokens, temperature=temperature,

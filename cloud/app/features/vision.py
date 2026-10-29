@@ -39,7 +39,8 @@ def analyze_image_with_azure(image_bytes: bytes, prompt: str, *,
                 {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": data_url}},
             ]},
-        ], user_id=user_id, temperature=0.95, max_tokens=120)
+        ], priority=background.DIRECT, user_id=user_id, temperature=0.95,
+            max_tokens=120)
         return (response.choices[0].message.content or "").strip() or None
     except Exception as e:
         logger.warning(f"[Azure Vision] analysis failed: {e}")

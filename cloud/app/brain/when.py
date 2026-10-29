@@ -53,7 +53,8 @@ def _parse_with_model(text: str) -> Optional[str]:
                      {"role": "user", "content": (f"current_datetime={now.isoformat()}\n"
                                                   f"raw_text={text}\n"
                                                   f"normalized_text={normalized}")}],
-            user_id=current_user_id(), temperature=0, max_tokens=140,
+            priority=background.DIRECT, user_id=current_user_id(), temperature=0,
+            max_tokens=140,
             response_format={"type": "json_object"})
         payload = json.loads(response.choices[0].message.content or "{}")
         iso_value = str(payload.get("remind_at_iso") or "").strip()

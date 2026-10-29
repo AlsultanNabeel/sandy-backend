@@ -128,7 +128,8 @@ def generate_tags(image_bytes: bytes, user_id: str) -> Tuple[str, List[str]]:
                 {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": data_url}},
             ],
-        }], user_id=user_id, temperature=0.4, max_tokens=300)
+        }], priority=background.BACKGROUND, user_id=user_id, temperature=0.4,
+            max_tokens=300)
         raw = (response.choices[0].message.content or "").strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         data = json.loads(raw)

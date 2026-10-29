@@ -36,7 +36,8 @@ def classify(text: str) -> str:
     try:
         resp = background.call("categorize", [{"role": "system", "content": _PROMPT},
                                               {"role": "user", "content": text[:300]}],
-                               user_id=current_user_id(), max_tokens=4, temperature=0)
+                               priority=background.BACKGROUND, user_id=current_user_id(),
+                               max_tokens=4, temperature=0)
         word = (resp.choices[0].message.content or "").strip().lower().strip(".")
     except (OpenAIError, ConfigError) as exc:  # no model: "other" is a fine answer
         logger.warning("[categorize] failed: %s", exc)

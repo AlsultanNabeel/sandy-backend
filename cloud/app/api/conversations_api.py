@@ -283,7 +283,7 @@ def _generate_title(coll, cid: str, uid: str, user_msg: str, reply: str) -> None
             )},
             {"role": "user", "content": f"المستخدم: {user_msg[:_TITLE_INPUT_CHARS]}\n"
                                         f"ساندي: {reply[:_TITLE_INPUT_CHARS]}"},
-        ], user_id=uid, max_tokens=20)
+        ], priority=background.BACKGROUND, user_id=uid, max_tokens=20)
         title = (resp.choices[0].message.content or "").strip().strip('"').strip("«»").strip()
         if title:
             coll.update_one({"_id": cid, "user_id": uid},
