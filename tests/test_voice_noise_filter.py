@@ -139,14 +139,14 @@ class _Ws:
         return [d for d in self.sent if isinstance(d, (bytes, bytearray))]
 
 
-def _relay(monkeypatch, heard: str, suspect: bool):
+def _relay(monkeypatch, heard: str, suspect: bool, language: str = ""):
     from app.api.voice_ws import session as sess
     from app.api.voice_ws.speaker import _RecentAudio
 
     saved = []
     monkeypatch.setattr(sess, "_save_voice_turn", lambda *a: saved.append(a))
     ws = _Ws()
-    state = {"turn_suspect": suspect}
+    state = {"turn_suspect": suspect, **({"lang": language} if language else {})}
     asyncio.run(sess._live_to_device(ws, _Live(heard), _RecentAudio(), state))
     time.sleep(0.1)   # the save runs on an executor
     return ws, state, saved
@@ -168,3 +168,18 @@ def test_the_same_words_said_close_and_clearly_go_through(monkeypatch):
 def test_a_quiet_turn_with_real_words_is_answered(monkeypatch):
     ws, _, saved = _relay(monkeypatch, "¿Qué hora es?", suspect=True)
     assert ws.audio() and saved
+
+
+# An invented turn is not the call's language: «¿Qué?» from the TV in an Arabic call, or
+# «شكراً على المشاهدة» in an English one, left the next tool reply in the other language.
+@pytest.mark.parametrize("heard, language", [("¿Qué?", "ar"), ("شكراً على المشاهدة", "en")])
+def test_an_invented_turn_does_not_change_the_calls_language(monkeypatch, heard, language):
+    _, state, _ = _relay(monkeypatch, heard, suspect=True, language=language)
+    assert state["lang"] == language
+
+
+@pytest.mark.parametrize("heard, before, after", [("¿Qué hora es?", "ar", "en"),
+                                                  ("شو الساعة؟", "en", "ar")])
+def test_a_real_turn_sets_the_calls_language(monkeypatch, heard, before, after):
+    _, state, _ = _relay(monkeypatch, heard, suspect=True, language=before)
+    assert state["lang"] == after

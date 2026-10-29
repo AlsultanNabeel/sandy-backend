@@ -314,8 +314,8 @@ first question asking for one, a «which one?» waits behind what is already ask
 (`voice._tagged`), because an unmarked refusal is exactly what Gemini reads as
 success and confirms to the user: `[فشل التنفيذ]` / `[failed]` for breakage, `[لم يُنفَّذ]` /
 `[not done]` for a refusal. Every reply a voice tool gives is a `lang` phrase in the turn's
-spoken language: what was heard of the turn so far, else the last turn's, else the user's
-own (`session._spoken_in`, `live_state["lang"]`, passed to `_dispatch_tool(language=…)`). A held action is "not done yet", neither.
+spoken language: what was heard of the turn so far, else the last turn's (one the noise check kept: an
+invented «¿Qué?» sets nothing), else the user's own (`session._spoken_in`, `live_state["lang"]`, passed to `_dispatch_tool(language=…)`). A held action is "not done yet", neither.
 
 ### 2.5 Memory
 

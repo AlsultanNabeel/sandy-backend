@@ -1449,9 +1449,10 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             user_text = "".join(_user_buf).strip()
             sandy_text = "".join(_sandy_buf).strip()
             spoken = _spoken_in(user_text)
-            if live_state is not None and user_text:
-                live_state["lang"] = spoken
             invented = _holding() and noise.is_invention(user_text)
+            if live_state is not None and user_text and not invented:
+                # Noise the recogniser wrote as a phrase is no language the call is in.
+                live_state["lang"] = spoken
             if invented:
                 # Noise the recogniser wrote as a phrase: her answer is never played, the
                 # turn is not kept, and the call's quiet clock does not move.
