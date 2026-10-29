@@ -292,7 +292,7 @@ def _system_instruction_body(chat_id: str, gate_on: bool) -> str:
         logger.info("[voice_ws] seed %s: %.0fms", what,
                     (_t.perf_counter() - _t0) * 1000)
 
-    from app.brain.context import facts_block, profile_block
+    from app.brain.context import TOOL_WORDS_RULE, facts_block, profile_block
     from app.brain.persona import build_effective_persona
 
     parts: List[str] = [build_effective_persona(chat_id or None).strip()]
@@ -311,6 +311,11 @@ def _system_instruction_body(chat_id: str, gate_on: bool) -> str:
     parts.append(_PAST_RECORD_NOTE)
 
     parts.append("\n" + _DEVICE_SCENE_RULES)
+
+    # The chat's rule: a tool gets his words as he said them, in his language.
+    parts.append("\n" + TOOL_WORDS_RULE.strip() + "\n"
+                 "بالمكالمة كمان: «add lemon to the list» → text=«lemon» مش «ليمون»، "
+                 "و«ضيفي حليب» → text=«حليب» مش «milk».")
 
     # إقرار قصير قبل التنفيذ وتأكيد قصير بعده.
     parts.append(

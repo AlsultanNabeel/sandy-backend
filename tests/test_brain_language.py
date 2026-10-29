@@ -246,7 +246,7 @@ _PROMPTS = {
     "api/voice_ws/memory.py": {"_END_CALL_ROBOT", "_END_CALL_APP"},
     "api/voice_ws/session.py": {"_APP_CHANNEL", "_ROBOT_CHANNEL", "_UNHEARD_QUESTION"},
     "api/voice_ws/tools.py": {"_PAST_RECORD_NOTE", "_DEVICE_SCENE_RULES"},
-    "brain/context.py": {"_RULES", "CHAT_CHANNEL", "SPOKEN_CHANNEL"},
+    "brain/context.py": {"_RULES", "CHAT_CHANNEL", "SPOKEN_CHANNEL", "TOOL_WORDS_RULE"},
     "brain/loop.py": {"HELD_NOTE"},
     "brain/persona.py": {"_ANTI_INJECTION", "LANGUAGE_RULE", "NO_PROMISES_RULE"},
     "brain/stm.py": {"_SUMMARY_PROMPT"},
@@ -608,3 +608,15 @@ def test_the_second_honesty_pass_does_not_repeat_the_tools_replies(brain_db, mes
                           text_reply(first), text_reply(rewrite))
     out = _turn(model, message)["final_response"]
     assert out.count(f"«{item}»") == 1, out
+
+
+# «add lemon to the list» on a call was saved as «ليمون» (29 Oct 2026): the chat's rule that a
+# tool gets his own words in his own language was not in the call's instructions.
+@pytest.mark.parametrize("words", ["text=«lemon»", "text=«حليب»"])
+def test_the_call_gives_a_tool_his_own_words_as_the_chat_does(monkeypatch, words):
+    from app.api.voice_ws import tools as voice_tools
+    from app.brain import context
+    monkeypatch.setattr("app.brain.context.profile_block", lambda chat_id: "")
+    body = voice_tools._system_instruction_body("", False)
+    assert context.TOOL_WORDS_RULE.strip() in body and "never translated" in body
+    assert words in body

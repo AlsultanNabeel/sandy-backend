@@ -348,7 +348,9 @@ success and confirms to the user: `[فشل التنفيذ]` / `[failed]` for bre
 `[not done]` for a refusal. Every reply a voice tool gives is a `lang` phrase in the turn's
 spoken language: what was heard of the turn so far, else the last turn's (one the noise check kept: an
 invented «¿Qué?» sets nothing), else the user's own (`session._spoken_in`, `live_state["lang"]`; every tool answer to the live model names it,
-`answer_in`, or it answered «add lemon to the list» in the Arabic of its instructions, passed to `_dispatch_tool(language=…)`). A held action is "not done yet", neither.
+`answer_in`, or it answered «add lemon to the list» in the Arabic of its instructions,
+and the call's instructions carry the chat's rule that a tool gets his own words in his own
+language, `context.TOOL_WORDS_RULE`, or «lemon» was saved as «ليمون»; passed to `_dispatch_tool(language=…)`). A held action is "not done yet", neither.
 
 ### 2.5 Memory
 
