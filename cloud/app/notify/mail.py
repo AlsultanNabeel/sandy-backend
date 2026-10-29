@@ -205,10 +205,19 @@ def _rtl(text: str) -> str:
     return "\n".join(f"\u200f{ln}" if ln.strip() else ln for ln in text.splitlines())
 
 
+_QUOTED = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
+
+
+def _guillemets(text: str) -> str:
+    """«…» for "…" and “…”, as Sandy writes them."""
+    return _QUOTED.sub(lambda m: f"«{m.group(1) or m.group(2)}»", text)
+
+
 def _compose(rows: List[Dict[str, Any]]) -> tuple:
     titled = len({_one_line(r.get("title")) for r in rows}) > 1
     body = "\n\n———\n\n".join(_block(r, titled) for r in rows)
-    return _subject(rows), _rtl(f"{body}\n\n—\n{lang.say('mail_footer')}")
+    return (_guillemets(_subject(rows)),
+            _rtl(_guillemets(f"{body}\n\n—\n{lang.say('mail_footer')}")))
 
 
 def _last_slot(at: str, now: datetime) -> datetime:

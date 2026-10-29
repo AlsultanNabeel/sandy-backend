@@ -294,3 +294,16 @@ def test_the_body_says_what_changed_when_and_how_things_are_now(post, language, 
     assert "انضاف «رمان» لـ«shopping»" in body and at_word in body and now_word in body
     lines = [ln for ln in body.splitlines() if ln.strip()]
     assert all(ln.startswith("‏") for ln in lines) == (language == "ar")
+
+
+@pytest.mark.parametrize("language, body, shown", [
+    ("ar", 'انضاف "رمان" و“بطيخ” للقائمة', "انضاف «رمان» و«بطيخ» للقائمة"),
+    ("en", 'New project "Logo design" posted', "New project «Logo design» posted"),
+])
+def test_quotes_are_guillemets(post, language, body, shown):
+    post.db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
+    _confirmed(post)
+    _deliver(body=body)
+    email = post.sent[-1]
+    assert shown in email.body and shown in email.subject
+    assert '"' not in email.body + email.subject and "“" not in email.body
