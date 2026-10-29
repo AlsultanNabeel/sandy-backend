@@ -1843,6 +1843,8 @@ nobody re-reads becomes a way of believing things that stopped being true.
    token rate limit» at about 240 000 tokens a minute, and OpenAI direct, the fallback,
    answered 429 «no credits remaining». The user sees `loop.ERROR_REPLY`. The fix is a
    higher token quota on the deployment, or credit on the fallback.
+   The deployment itself retires on 14 Apr 2027: the chat must move to another model,
+   measured with the eval, well before then.
 
 10. **A streamed reply in the wrong language shows, then is swapped.** The model's words
    stream as they come; the language check (§2.3 3c) runs after, and the final event
