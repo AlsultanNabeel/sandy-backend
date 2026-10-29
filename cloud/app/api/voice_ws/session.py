@@ -1321,6 +1321,13 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
         """The turn's language: what was heard of it, else the last turn's, else the user's."""
         return lang.of(heard, fallback=(live_state or {}).get("lang"))
 
+    def _tool_answer(fc: Any, output: str) -> Any:
+        """A tool call's answer, naming the language he just spoke: without it the live model
+        answered «add lemon to the list» in the Arabic of its instructions (29 Oct 2026)."""
+        spoken = _spoken_in("".join(_user_buf))
+        return types.FunctionResponse(id=fc.id, name=fc.name, response={
+            "output": output, "answer_in": "English" if spoken == lang.EN else "Arabic"})
+
     def _in_turn_language(key: str) -> str:
         with lang.using(_spoken_in("".join(_user_buf))):
             return lang.say(key)
@@ -1554,10 +1561,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         # The session's own: the call closes after the reply this starts.
                         live_state["end_after_reply"] = True
                         live_state["end_asked_at"] = time.monotonic()
-                        fn_responses.append(types.FunctionResponse(
-                            id=fc.id, name=fc.name,
-                            response={"output": _in_turn_language("voice_end_call")},
-                        ))
+                        fn_responses.append(_tool_answer(fc, _in_turn_language("voice_end_call")))
                         continue
                     # V4.4–V4.5: أمر حسّاس + البوابة مفعّلة → تأكّد إنه صوت المالك أولاً.
                     if gate_on and _is_sensitive_call(fc.name, dict(fc.args or {})):
@@ -1565,16 +1569,12 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                             None, _verify_owner, recent.snapshot(), get_voice_identity()
                         )
                         if verified is None:
-                            fn_responses.append(types.FunctionResponse(
-                                id=fc.id, name=fc.name,
-                                response={"output": _in_turn_language("voice_gate_not_ready")},
-                            ))
+                            fn_responses.append(
+                                _tool_answer(fc, _in_turn_language("voice_gate_not_ready")))
                             continue
                         if not verified:
-                            fn_responses.append(types.FunctionResponse(
-                                id=fc.id, name=fc.name,
-                                response={"output": _in_turn_language("voice_gate_refused")},
-                            ))
+                            fn_responses.append(
+                                _tool_answer(fc, _in_turn_language("voice_gate_refused")))
                             continue
                     # Bulk changes (more than five rows) hold for `confirm` inside the brain.
                     # The identity travels with the tool call.
@@ -1585,13 +1585,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     )
                     if result.get("ok"):
                         _turn_worked.append(fc.name)
-                    fn_responses.append(
-                        types.FunctionResponse(
-                            id=fc.id,
-                            name=fc.name,
-                            response={"output": result.get("reply", "")},
-                        )
-                    )
+                    fn_responses.append(_tool_answer(fc, result.get("reply", "")))
                 await session.send_tool_response(function_responses=fn_responses)
             finally:
                 keep_working.cancel()

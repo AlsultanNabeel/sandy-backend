@@ -278,3 +278,29 @@ def test_voice_one_turn_is_one_trace_row_and_one_memory(monkeypatch, brain_db, h
     assert rows == [{"request": heard, "reply": said, "routed_by": "voice",
                          "tools": ["list_add"]}]
     assert kept == [(heard, said)]
+
+
+class _ToolAnswers(_SplitGemini):
+    """Keeps what each tool call was answered with."""
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.answers = []
+
+    async def send_tool_response(self, function_responses):
+        self.answers += [r.response for r in function_responses]
+        self.answered.set()
+
+
+# «add lemon to buying list» was done right and answered in Arabic (29 Oct 2026): a tool's
+# answer went back with no word of the turn's language, and the live model fell back to the
+# Arabic of its instructions. Each answer now says which language he just spoke.
+@pytest.mark.parametrize("heard, said, language", [
+    ("add lemon to the shopping list", "I added lemon to your list.", "English"),
+    ("ضيفي ليمون للأغراض", "ضفت الليمون.", "Arabic"),
+])
+def test_voice_a_tools_answer_says_the_language_he_just_spoke(monkeypatch, brain_db, heard,  # noqa: F811
+                                                              said, language):
+    gemini = _ToolAnswers(("list_add", {"list": "shopping", "text": "lemon"}), heard, said)
+    _call(monkeypatch, gemini)
+    assert [a.get("answer_in") for a in gemini.answers] == [language]
