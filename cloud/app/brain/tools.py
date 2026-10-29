@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List
 
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, names
 from app.brain import tools_blocks as B
+from app.brain import tools_tasks as T
 from app.brain import tools_world as X
 from app.brain.ctx import TurnCtx, refused
 from app.brain.when import PERIODS
@@ -178,6 +179,8 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "device_control": X.device_control, "device_state": X.device_state, "scene_apply": X.scene_apply,
     "web_search": X.web_search, "weather": X.weather, "image": X.image,
     "undo": B.undo, "log_update": B.log_update, "room_restore": X.room_restore,
+    "task_create": T.task_create, "task_list": T.task_list, "task_update": T.task_update,
+    "task_cancel": T.task_cancel,
 }
 
 
@@ -194,8 +197,10 @@ def declarations() -> List[Dict[str, Any]]:
     return out
 
 
-def openai_tools() -> List[Dict[str, Any]]:
-    return [{"type": "function", "function": d} for d in _schemas()]
+def openai_tools(user_id: str = "") -> List[Dict[str, Any]]:
+    """The chat's tools; the task tools too for an account with their switch on."""
+    extra = T.TASK_SCHEMAS if user_id and T.offered(user_id) else []
+    return [{"type": "function", "function": d} for d in [*_schemas(), *extra]]
 
 
 def execute(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

@@ -36,10 +36,7 @@ from app.features import trace_store
 
 logger = logging.getLogger(__name__)
 
-SWITCH = "tasks"
-# What a probe may run, and what the model may use on top: reads, and a reminder of its own.
-READ_TOOLS = ("web_search", "recall", "summarize", "weather", "device_state")
-ALLOWED = READ_TOOLS + ("schedule",)
+SWITCH, READ_TOOLS, ALLOWED = tasks.SWITCH, tasks.READ_TOOLS, tasks.ALLOWED
 NOTHING = "NOTHING"
 MAX_STEPS = 4
 FAILURES_TO_STOP = 3

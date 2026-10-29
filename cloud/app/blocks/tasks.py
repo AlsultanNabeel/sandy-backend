@@ -21,6 +21,10 @@ from app.blocks import _base, schedules
 
 KIND = "task"
 STATE = "sandy_task_state"
+SWITCH = "tasks"
+# What a task's check may run, and what its model may use on top: reads, and a reminder.
+READ_TOOLS = ("web_search", "recall", "summarize", "weather", "device_state")
+ALLOWED = READ_TOOLS + ("schedule",)
 
 
 def _rule(every_minutes: int) -> str:

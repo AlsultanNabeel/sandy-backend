@@ -283,7 +283,7 @@ embeddings are not counted yet.
 
 ### 2.4 Tools
 
-Nineteen (`tools.py`), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
+Nineteen (`tools.py`), and four more for an account with the `tasks` switch on (`tools_tasks.py`: `task_create`, which shows the task and waits for a yes, refusing a check that does not read, a tool outside `tasks.ALLOWED` and words that ask to pay, send in his name, publish or delete; `task_list`, `task_update` for pause, resume and a new interval, `task_cancel`; `openai_tools(user_id)`, never on the call yet), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
 `LIST_DATA`: amount, category, mood, habit days and time, repeat, qty…), never a
 free-form object, which the voice model drops. Enums come from `kinds.KINDS`, so a new
 kind needs no tool change. A field the kind does not have («time» on a task) is set aside quietly

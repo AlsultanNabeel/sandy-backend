@@ -29,10 +29,12 @@ def tenant_a(brain_db):  # noqa: F811
         yield brain_db
 
 
-def test_nineteen_tools_and_every_one_has_a_handler():
+def test_nineteen_tools_and_every_one_has_a_handler(monkeypatch):
     specs = tools.openai_tools()
     assert len(specs) == 19
-    assert {s["function"]["name"] for s in specs} == set(tools.HANDLERS)
+    # The task tools are offered only behind their switch, and handled like the rest.
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["u1"]}')
+    assert {s["function"]["name"] for s in tools.openai_tools("u1")} == set(tools.HANDLERS)
 
 
 def test_enums_come_from_the_kinds_table():

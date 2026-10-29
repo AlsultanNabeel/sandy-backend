@@ -73,7 +73,7 @@ def _run_loop(messages: List[Dict[str, Any]], ctx: TurnCtx,
     used: List[str] = []
     replies: List[str] = []
     held: Optional[Dict[str, Any]] = None
-    specs = tools.openai_tools()
+    specs = tools.openai_tools(ctx.user_id)
     on_step = model.step_hook()
     for step in range(MAX_STEPS):
         if step and stopped():
