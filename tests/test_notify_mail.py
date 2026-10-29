@@ -84,17 +84,17 @@ def test_one_email_an_hour_per_task_and_the_rest_gathered_into_the_next(post):
     assert "first" not in post.sent[1].body
 
 
-def test_what_is_held_goes_out_on_the_tasks_next_run_after_the_hour(post):
+def test_what_is_held_goes_out_on_the_next_flush_after_the_hour(post):
     _confirmed(post)
     _deliver(body="first")
     post.clock[0] += timedelta(minutes=10)
     _deliver(body="second")
     with active_user_profile_context(A):
-        notify.flush("t1")
+        notify.flush()
         assert len(post.sent) == 1                               # still inside the hour
         post.clock[0] += timedelta(minutes=51)
-        notify.flush("t1")
-        notify.flush("t1")
+        notify.flush()
+        notify.flush()
     assert len(post.sent) == 2 and "second" in post.sent[1].body
 
 
@@ -174,7 +174,7 @@ def test_a_send_that_fails_keeps_the_result_for_the_next_email(post, monkeypatch
         assert [r["id"] for r in notify.unseen()] == [rid]
     monkeypatch.setattr(mail, "_post", real)
     with active_user_profile_context(A):
-        notify.flush("t1")
+        notify.flush()
     assert len(post.sent) == 1 and "kept" in post.sent[0].body
 
 

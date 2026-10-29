@@ -227,24 +227,6 @@ def test_a_check_read_again_later_calls_no_model(world, monkeypatch, language):
     assert world.asked == [] and world.sent == []
 
 
-def test_every_run_hands_its_channels_what_they_held_even_with_nothing_new(world, monkeypatch):
-    """What a channel held inside its hour (an email) goes on the task's next run after it."""
-    flushed = []
-    monkeypatch.setattr(notify, "FLUSHES", [flushed.append])
-    doc = _task(_spec())
-    _run(doc)
-    _run(doc)                       # nothing new: no model, but the held still goes
-    assert flushed == [doc["id"], doc["id"]]
-
-
-def test_an_account_without_the_switch_flushes_nothing(world, monkeypatch):
-    flushed = []
-    monkeypatch.setattr(notify, "FLUSHES", [flushed.append])
-    monkeypatch.setenv("SANDY_FLAGS", "{}")
-    _run(_task(_spec()))
-    assert flushed == []
-
-
 # The minute runner finds a due task through its own due query (review of phase one): its kind
 # was missing from `RUNNABLE`, so no task ever ran outside a direct call.
 @pytest.mark.parametrize("language, said", [("en", "New: P1"), ("ar", "جديد: P1")])

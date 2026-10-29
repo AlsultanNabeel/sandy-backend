@@ -330,7 +330,8 @@ def _run_due(uid: str, now: Optional[datetime]) -> Dict[str, int]:
 
 
 def run_all_due(mongo_db) -> int:
-    """One tick over every tenant with something due; returns how many fired."""
+    """One tick over every tenant with something due; returns how many fired. Then what the
+    channels hold for a task's results goes, for each account it may (`notify.flush`)."""
     total = 0
     for uid in users_with_due(mongo_db):
         try:
@@ -338,7 +339,22 @@ def run_all_due(mongo_db) -> int:
                 total += run_due(uid)["fired"]
         except Exception as exc:  # noqa: BLE001 — one tenant never stops the tick
             logger.warning("[schedules] user %s failed: %s", uid, exc)
+    _flush_held(mongo_db)
     return total
+
+
+def _flush_held(mongo_db) -> None:
+    from app import notify
+    from app.blocks import tasks
+    from app.utils import flags
+    for uid in notify.users_with_held(mongo_db):
+        if not flags.on(tasks.SWITCH, uid):
+            continue
+        try:
+            with active_user_profile_context(_profile_for(uid)):
+                notify.flush()
+        except PyMongoError as exc:  # one account never stops the tick
+            logger.warning("[schedules] held results for %s failed: %s", uid, exc)
 
 
 def start_schedule_runner(mongo_db) -> bool:

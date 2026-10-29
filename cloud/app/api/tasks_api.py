@@ -2,7 +2,7 @@
 
   GET    /api/scheduled-tasks                 {tasks: [{id, title, instructions, every_minutes,
                                                status (running | paused), next_at, failures,
-                                               last_error, last_result, unseen}]}
+                                               last_error, last_result, unseen, delivery}]}
   GET    /api/scheduled-tasks/<id>/results    {results: [{id, title, body, at, seen}]}, newest first
   POST   /api/scheduled-tasks/<id>/seen       all of it seen («صباح الخير» no longer tells it)
   POST   /api/scheduled-tasks/<id>/pause | /resume
@@ -71,7 +71,7 @@ def _shown(row: Dict[str, Any], unseen: Dict[str, int]) -> Dict[str, Any]:
             "status": "paused" if row.get("status") == "paused" else "running",
             "next_at": _iso(row.get("fire_at")), "failures": int(saw.get("failures") or 0),
             "last_error": saw.get("last_error") or "", "last_result": saw.get("last_result") or "",
-            "unseen": unseen.get(row["id"], 0)}
+            "unseen": unseen.get(row["id"], 0), "delivery": tasks.how(row)}
 
 
 def _page(text: str, status: int, form: str = "") -> Response:

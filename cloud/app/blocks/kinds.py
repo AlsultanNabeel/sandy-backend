@@ -108,7 +108,7 @@ KINDS: Tuple[Kind, ...] = (
     # after a yes, never by `schedule`.
     Kind("task", SCHEDULE, "مهمة", "Task", "sparkles", {
         "instructions": _S, "probe": _D, "notify_when": _S, "tools": _L, "lang": _S,
-        "urgent": _B}),
+        "urgent": _B, "delivery": _D}),
 )
 
 _BY_KEY: Dict[Tuple[str, str], Kind] = {(k.block, k.name): k for k in KINDS}

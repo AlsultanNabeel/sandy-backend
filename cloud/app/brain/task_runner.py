@@ -14,9 +14,6 @@ and the result goes out through `notify.deliver`. Never a word aloud.
    should be sent, or `NOTHING`.
 4. `notify.deliver`.
 
-Every run first hands the channels what they held for it (`notify.flush`: an email inside its
-hour goes on the next run after it), even when nothing changed.
-
 A task that is not urgent sends its model step as an Azure batch when batches are set up
 (`brain/batch.py`, off by default), through `background` like every other model call: the run
 submits it, and a later run collects the answer and goes on to the review. A batch that failed,
@@ -209,8 +206,6 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
     ctx = TurnCtx(user_id=uid, source="app")
     with lang.using(spec.get("lang") or lang.for_user(uid)), \
             trace_store.background(uid, "task", task_id=_id(doc)):
-        # What a channel held inside its hour goes now, whatever the check finds.
-        notify.flush(_id(doc))
         try:
             message, found, seen, direct = None, "", None, False
             if before.get("batch_id"):

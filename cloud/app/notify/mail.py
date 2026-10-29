@@ -3,10 +3,13 @@
 He gives the address in the app (`ask_to_confirm`, at most LINKS_A_DAY links a day); a link
 goes to it, and opening it shows a page with a «Confirm» button (`link_owner` reads it and uses
 nothing, since a mail scanner opens links on its own); until he presses it (`confirm`) no result
-is emailed, and what was found before is never sent later. Then one email
-per task an hour at most (`EVERY`): what comes inside the hour is held and goes in the next
-one, with the next result or on the task's next run after the hour (`flush`). A send that
-fails keeps it held for the next. The words around a result are in his saved language.
+is emailed, and what was found before is never sent later. Then each task's results go as he
+said (`tasks.how`): right away, a summary once a day at his hour, or at most once every N hours
+(once an hour when he said nothing). What is not due yet is held and goes in its next email,
+with the next result or when the minute runner hands the channels what they hold (`flush`).
+An account gets at most ACCOUNT_CAP emails an hour; the last of them gathers every result that
+was due, and the rest wait for the hour. A send that fails keeps it held for the next. The
+words around a result are in his saved language.
 
 How it leaves is the settings, never the code: any SMTP server. Gmail with an app password
 now; a sending service on our own domain later is the same settings with other values.
@@ -33,13 +36,15 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
-from app.blocks import _base
+from app.blocks import _base, tasks
 from app.brain import lang
 from app.features import users_store
 
 logger = logging.getLogger(__name__)
 
-EVERY = timedelta(hours=1)
+# At most this many emails an hour to one account; the last one gathers the rest.
+ACCOUNT_CAP = 20
+HOUR = timedelta(hours=1)
 LINK_LIVES = timedelta(hours=24)
 # A second link inside this is not sent: the same address waits, another is refused.
 RESEND_AFTER = timedelta(minutes=5)
@@ -174,49 +179,87 @@ def _one_line(text: str) -> str:
 
 
 def _compose(rows: List[Dict[str, Any]]) -> tuple:
-    title = _one_line(rows[-1].get("title"))
-    if len(rows) == 1:
-        subject = lang.say("mail_result_subject", title=title)
+    titles = list(dict.fromkeys(_one_line(r.get("title")) for r in rows))
+    if len(titles) > 1:
+        subject = lang.say("mail_digest_subject", n=len(rows))
+        body = "\n\n———\n\n".join(f"«{_one_line(r.get('title'))}»\n{r.get('body') or ''}" for r in rows)
     else:
-        subject = lang.say("mail_results_subject", n=len(rows), title=title)
-    body = "\n\n———\n\n".join(str(r.get("body") or "") for r in rows)
+        subject = (lang.say("mail_result_subject", title=titles[0]) if len(rows) == 1
+                   else lang.say("mail_results_subject", n=len(rows), title=titles[0]))
+        body = "\n\n———\n\n".join(str(r.get("body") or "") for r in rows)
     return subject, f"{body}\n\n—\n{lang.say('mail_footer')}"
 
 
-def _send_held(task_id: str) -> None:
-    from app import notify
-    from app.utils.user_profiles import current_user_id
+def _last_slot(at: str, now: datetime) -> datetime:
+    """The latest «at» on his clock that is not after now."""
+    from app.utils.time import USER_TZ
+    hour, minute = (int(x) for x in at.split(":"))
+    local = now.astimezone(USER_TZ)
+    slot = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if slot > local:
+        slot -= timedelta(days=1)
+    return slot.astimezone(timezone.utc)
 
-    uid, coll = current_user_id(), _base.coll(notify.RESULTS)
-    address = _address(uid or "") if coll is not None and ready() else ""
-    if not address:
-        return
+
+def _due(coll, task_id: str, now: datetime) -> bool:
+    """Whether this task's held results may go now, the way he said."""
+    way = tasks.how(tasks.get(task_id) or {})
+    if way["mode"] == tasks.INSTANT:
+        return True
+    if way["mode"] == tasks.DAILY:
+        # Its summary goes at his hour with what was held before it; what came after waits.
+        first = list(coll.find({"task_id": task_id, "email": HELD}).sort("held_at", 1).limit(1))
+        return bool(first) and _aware(first[0].get("held_at") or first[0]["at"]) <= _last_slot(
+            way["at"], now)
     last = list(coll.find({"task_id": task_id, "email": SENT}).sort("emailed_at", -1).limit(1))
-    if last and _now() - _aware(last[0]["emailed_at"]) < EVERY:
-        return
-    held = list(coll.find({"task_id": task_id, "email": HELD}).sort("at", 1))
-    if not held:
-        return
+    return not last or now - _aware(last[0]["emailed_at"]) >= way["hours"] * HOUR
+
+
+def _sent_this_hour(coll, now: datetime) -> int:
+    return len(coll.distinct("email_id", {"email": SENT, "emailed_at": {"$gt": now - HOUR}}))
+
+
+def _email(coll, address: str, uid: str, rows: List[Dict[str, Any]]) -> None:
     with lang.using(lang.for_user(uid)):
-        subject, body = _compose(held)
+        subject, body = _compose(rows)
     _post(address, subject, body)
-    coll.update_many({"_id": {"$in": [r["_id"] for r in held]}},
-                     {"$set": {"email": SENT, "emailed_at": _now()}})
+    coll.update_many({"_id": {"$in": [r["_id"] for r in rows]}},
+                     {"$set": {"email": SENT, "emailed_at": _now(), "email_id": _base.new_id()}})
 
 
 def send(row: Dict[str, Any]) -> None:
-    """The channel (`notify.CHANNELS`): hold the result, then send what is held if its hour
-    allows. Nothing for an address not confirmed."""
+    """The channel (`notify.CHANNELS`): hold the result, then send what may go now. Nothing for
+    an address not confirmed."""
     from app import notify
     from app.utils.user_profiles import current_user_id
 
     coll = _base.coll(notify.RESULTS)
     if coll is None or not ready() or not _address(current_user_id() or ""):
         return
-    coll.update_one({"_id": row["id"]}, {"$set": {"email": HELD}})
-    _send_held(str(row.get("task_id") or ""))
+    coll.update_one({"_id": row["id"]}, {"$set": {"email": HELD, "held_at": _now()}})
+    flush()
 
 
-def flush(task_id: str) -> None:
-    """On a task's run: what it held goes once its hour has passed."""
-    _send_held(str(task_id))
+def flush() -> None:
+    """The current user's held results that may go now, each task the way he said, at most
+    ACCOUNT_CAP emails an hour: the last one gathers every result that was due."""
+    from app import notify
+    from app.utils.user_profiles import current_user_id
+
+    uid, coll = current_user_id() or "", _base.coll(notify.RESULTS)
+    address = _address(uid) if coll is not None and ready() else ""
+    if not address:
+        return
+    now = _now()
+    held: Dict[str, List[Dict[str, Any]]] = {}
+    for r in coll.find({"email": HELD}).sort("at", 1):
+        held.setdefault(str(r.get("task_id") or ""), []).append(r)
+    due = [t for t in held if _due(coll, t, now)]
+    for n, task_id in enumerate(due):
+        sent = _sent_this_hour(coll, now)
+        if sent >= ACCOUNT_CAP:
+            return
+        if sent == ACCOUNT_CAP - 1 and n < len(due) - 1:
+            _email(coll, address, uid, [r for t in due[n:] for r in held[t]])
+            return
+        _email(coll, address, uid, held[task_id])

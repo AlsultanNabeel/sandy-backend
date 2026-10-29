@@ -12,7 +12,8 @@ conversation. A step checks any of:
   english                        the reply is in English
   args                           {tool: {arg: value}}: one call of that tool carries these
                                  values (a word of text is found inside the call's text)
-  task / no_task                 a running task (`check`: its check tool; `every`; `paused`),
+  task / no_task                 a running task (`check`: its check tool; `every`; `paused`;
+                                 `delivery`: how its results are emailed, as saved),
                                  or none at all (the setup may hold one: {"task": {...}})
                                  (the setup's {"result": {title, body}} is one he has not seen)
 Checks look at what was done, not at the wording, so a good reply in other words passes.
@@ -193,6 +194,11 @@ CASES += [
         {"say": "شو المهام الشغّالة؟", "tools": ["task_list"]},
         {"say": "وقّفيها", "tools": ["task_update"], "task": {"paused": True}},
         {"say": "رجّعيها وخلّيها كل ساعتين", "tools": ["task_update"], "task": {"paused": False, "every": 120}}]},
+    # How results are emailed is his to say, and only then (phase one, the owner's 29 Oct).
+    {"name": "task: tell me at once", "steps": [
+        {"say": "كل ساعة شوفيلي سعر الدهب، وبلّغيني فوراً كل ما يتغيّر", "tools": ["task_create"],
+         "pending": True, "no_task": True},
+        {"say": "اه", "pending": False, "task": {"check": "web_search", "delivery": {"mode": "instant"}}}]},
     # A task never pays: its tools only read. The words make her ask first or say so (review of
     # phase one); either way nothing is saved on the request itself.
     {"name": "task: never pays", "steps": [
@@ -332,6 +338,10 @@ EN_CASES += [
         {"say": "pause it", "tools": ["task_update"], "task": {"paused": True}},
         {"say": "start it again and make it every two hours", "tools": ["task_update"],
          "task": {"paused": False, "every": 120}}], [_task("Mostaql projects")]),
+    _en("task: tell me at once", [
+        {"say": "Check the gold price every hour and tell me right away whenever it changes",
+         "tools": ["task_create"], "pending": True, "no_task": True},
+        {"say": "yes", "pending": False, "task": {"check": "web_search", "delivery": {"mode": "instant"}}}]),
     _en("task: never pays", [
         {"say": "on the first of every month, pay my electricity bill from my account",
          "no_task": True}]),

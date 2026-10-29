@@ -217,6 +217,8 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
                 bad.append(f"المهمة {row.get('recurrence')} مش كل {want['every']} دقيقة")
             elif "paused" in want and (row.get("status") == "paused") != want["paused"]:
                 bad.append(f"المهمة {row.get('status')}")
+            elif want.get("delivery") and tasks.how(row) != want["delivery"]:
+                bad.append(f"التبليغ {tasks.how(row)} مش {want['delivery']}")
     if step.get("pending") is True and not state.get("pending_state"):
         bad.append("ما استنّت تأكيد")
     if step.get("pending") is False and state.get("pending_state"):

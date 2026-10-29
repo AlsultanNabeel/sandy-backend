@@ -3,7 +3,8 @@
 `deliver` keeps the result under its user (`sandy_task_results`: what the app shows, and what
 «صباح الخير» tells him when he speaks; `unseen` / `mark_seen`), then hands it to each channel
 in `CHANNELS`, a callable taking the result row: email now (`mail.py`), Apple's pushes beside
-it later. `flush` is a task's run giving a channel what it held (`FLUSHES`). A channel that
+it later. `flush` gives each channel the chance to send what it held for the current user
+(`FLUSHES`), every minute from the schedule runner (`users_with_held`). A channel that
 fails is logged and never loses the result. None of it speaks: Sandy never talks on her own.
 """
 
@@ -12,6 +13,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
+
+from pymongo.errors import PyMongoError
 
 from app.blocks import _base
 from app.notify import mail
@@ -22,8 +25,8 @@ RESULTS = "sandy_task_results"
 
 # Each takes the result row as `deliver` kept it.
 CHANNELS: List[Callable[[Dict[str, Any]], None]] = [mail.send]
-# Each takes a task's id when it runs, and sends what it held for it.
-FLUSHES: List[Callable[[str], None]] = [mail.flush]
+# Each sends what it held for the current user that may go now.
+FLUSHES: List[Callable[[], None]] = [mail.flush]
 
 
 def deliver(task_id: str, title: str, body: str, language: str) -> str:
@@ -44,13 +47,24 @@ def deliver(task_id: str, title: str, body: str, language: str) -> str:
     return row["_id"]
 
 
-def flush(task_id: str) -> None:
-    """A task runs: each channel sends what it held for it, when it may."""
+def flush() -> None:
+    """Each channel sends what it held for the current user, when it may."""
     for channel in FLUSHES:
         try:
-            channel(str(task_id))
+            channel()
         except (OSError, RuntimeError, ValueError):
-            logger.exception("[notify] a channel's held results failed for task %s", task_id)
+            logger.exception("[notify] a channel's held results failed")
+
+
+def users_with_held(mongo_db) -> List[str]:
+    """Accounts with a result a channel holds (raw cross-tenant read; only ids leave)."""
+    if mongo_db is None:
+        return []
+    try:
+        return [str(u) for u in mongo_db[RESULTS].distinct("user_id", {"email": mail.HELD}) if u]
+    except PyMongoError as exc:  # one failed scan waits for the next minute
+        logger.warning("[notify] held scan failed: %s", exc)
+        return []
 
 
 def unseen(limit: int = 20) -> List[Dict[str, Any]]:

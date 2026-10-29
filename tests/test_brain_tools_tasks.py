@@ -97,7 +97,8 @@ def test_words_that_ask_to_act_make_the_yes_say_a_task_only_reads(brain_db, on, 
     out = _run("task_create", language, **{**MOSTAQL, "instructions": words})
     assert out.get("needs_confirmation")
     assert out["summary"] == lang.PHRASES["task_confirm_reads_only"][language].format(
-        title=MOSTAQL["title"], every=lang.PHRASES["every_hours"][language].format(n=1))
+        title=MOSTAQL["title"], every=lang.PHRASES["every_hours"][language].format(n=1),
+        how=lang.PHRASES["delivery_hourly"][language])
     with active_user_profile_context(A):
         assert tasks.running() == []
 
@@ -107,7 +108,8 @@ def test_a_read_is_asked_plainly(brain_db, on, language, words):  # noqa: F811
     out = _run("task_create", language, **{**MOSTAQL, "instructions": words})
     assert out.get("needs_confirmation")
     assert out["summary"] == lang.PHRASES["task_confirm"][language].format(
-        title=MOSTAQL["title"], every=lang.PHRASES["every_hours"][language].format(n=1))
+        title=MOSTAQL["title"], every=lang.PHRASES["every_hours"][language].format(n=1),
+        how=lang.PHRASES["delivery_hourly"][language])
 
 
 @pytest.mark.parametrize("args", [{"check_tool": "list_delete"}, {"tools": ["device_control"]}])

@@ -4,8 +4,8 @@ A task is a `sandy_schedules` row of kind «task», so the minute runner claims,
 moves it on like any other row. It repeats every N minutes (an RRULE), may be paused
 (`status: paused`, never due), and carries what to do in its payload: the user's own words
 (`instructions`), a check the code runs first (`probe`: one read tool and its arguments),
-what is worth telling (`notify_when`), the tools the model may use, the language and whether
-it is urgent. Nothing in it names a field of work: a student's deadlines, a freelancer's new
+what is worth telling (`notify_when`), the tools the model may use, the language, whether it is
+urgent, and how its results are emailed (`delivery`, his own choice: `how`). Nothing in it names a field of work: a student's deadlines, a freelancer's new
 projects, a shop's stock and a home's budget are the same row with other words.
 
 What it saw last (a fingerprint of the probe, the last result, the failures in a row) is in
@@ -15,6 +15,7 @@ results (`notify.forget_task`).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -28,6 +29,52 @@ SWITCH = "tasks"
 # through its channels, never a reminder).
 READ_TOOLS = ("web_search", "recall", "summarize", "weather", "device_state")
 ALLOWED = READ_TOOLS
+
+
+# How its results are emailed, as he said it: on every change, a summary once a day at his hour,
+# or at most once every N hours. With nothing said, at most once an hour; Sandy never chooses.
+INSTANT, DAILY, EVERY = "instant", "daily", "every"
+DEFAULT_DELIVERY = {"mode": EVERY, "hours": 1}
+MAX_HOURS = 168
+_AT = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def clean_delivery(mode: Any = None, hours: Any = None, at: Any = None) -> Dict[str, Any]:
+    """The delivery from his words; the default with none. ValueError when it cannot be read."""
+    if not mode:
+        return dict(DEFAULT_DELIVERY)
+    if mode == INSTANT:
+        return {"mode": INSTANT}
+    if mode == DAILY:
+        found = _AT.match(str(at or "").strip())
+        if not found:
+            raise ValueError("a daily summary needs its hour, HH:MM")
+        return {"mode": DAILY, "at": f"{int(found[1]):02d}:{found[2]}"}
+    if mode == EVERY:
+        try:
+            n = int(hours if hours is not None else 1)
+        except (TypeError, ValueError):
+            raise ValueError("every needs a number of hours") from None
+        if not 1 <= n <= MAX_HOURS:
+            raise ValueError(f"every is 1 to {MAX_HOURS} hours")
+        return {"mode": EVERY, "hours": n}
+    raise ValueError(f"the way is one of {INSTANT}, {DAILY}, {EVERY}")
+
+
+def how(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """How this task's results are emailed (the default for a row saved before it was asked)."""
+    saved = (row.get("payload") or {}).get("delivery") or {}
+    try:
+        return clean_delivery(saved.get("mode"), saved.get("hours"), saved.get("at"))
+    except ValueError:
+        return dict(DEFAULT_DELIVERY)
+
+
+def set_delivery(task_id: str, delivery: Mapping[str, Any]) -> bool:
+    row = get(task_id)
+    if not row:
+        return False
+    return schedules.update(task_id, payload={**(row.get("payload") or {}), "delivery": dict(delivery)})
 
 
 def _rule(every_minutes: int) -> str:

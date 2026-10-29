@@ -51,6 +51,12 @@ TASKS_RULE = """
   period=month؛ موقع أو إشي برّا → web_search بكلامه. بلا وقت → كل يوم (every_minutes=1440).
 - إذا ما في ولا قائمة ولا إشي ينفحص لطلبه، سؤال واحد واضح مقبول (وين بتحفظ المخزون؟).
 - title و instructions و notify_when بكلامه هو وبلغته.
+- طريقة التبليغ بس إذا هو حكاها: «فوراً كل ما يتغيّر» → notify_how=instant؛ «ملخص مرة باليوم الساعة تسعة»
+  → daily مع notify_at «21:00» أو «09:00» حسب كلامه؛ «بالكتير مرة كل تلات ساعات» → every مع notify_hours=3.
+  ما حكى؟ لا تحطي notify_how أبداً (Sandy never picks the way herself).
+  How he wants to be told goes in notify_how, never in notify_when: «tell me right away / immediately /
+  as soon as it changes» → notify_how=instant; «a daily summary at 9pm» → daily, notify_at «21:00»;
+  «at most every 3 hours» → every, notify_hours=3.
 - المهمة بتقرا وبتبلّغ بس. «ذكّريني قبل يومين» جوّا مهمة هو notify_when («قبل الموعد بيومين»)،
   مش schedule ولا تذكير بيرن.
 - Never ask first, in either language: not which stock, not a template, not a threshold, not
