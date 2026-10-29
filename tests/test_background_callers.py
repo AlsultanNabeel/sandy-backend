@@ -51,3 +51,10 @@ def test_a_photos_tags(monkeypatch):
         choices=[NS(message=NS(content='{"caption": "c", "tags": ["a", "b"]}'))]))
     assert photo_album.generate_tags(b"img", "userA") == ("c", ["a", "b"])
     assert seen[0][0] == "photo_tags" and seen[0][1]["user_id"] == "userA"
+
+
+def test_an_expenses_category(calls):
+    from app.brain import categorize
+    with active_user_profile_context(A):
+        assert categorize.classify("قهوة") == "other"
+    assert [(c["what"], c["user_id"], c["max_tokens"]) for c in calls] == [("categorize", "userA", 4)]

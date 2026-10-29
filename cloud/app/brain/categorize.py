@@ -29,13 +29,14 @@ def classify(text: str) -> str:
     """One of CATEGORIES; "other" when the model is not reachable or unsure."""
     from openai import OpenAIError
 
+    from app.brain import background
     from app.errors import ConfigError
-    from app.integrations.openai_client import chat_fn
+    from app.utils.user_profiles import current_user_id
 
     try:
-        resp = chat_fn()(messages=[{"role": "system", "content": _PROMPT},
-                                   {"role": "user", "content": text[:300]}],
-                         max_tokens=4, temperature=0)
+        resp = background.call("categorize", [{"role": "system", "content": _PROMPT},
+                                              {"role": "user", "content": text[:300]}],
+                               user_id=current_user_id(), max_tokens=4, temperature=0)
         word = (resp.choices[0].message.content or "").strip().lower().strip(".")
     except (OpenAIError, ConfigError) as exc:  # no model: "other" is a fine answer
         logger.warning("[categorize] failed: %s", exc)
