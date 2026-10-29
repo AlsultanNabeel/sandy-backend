@@ -72,13 +72,20 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
     {"name": "task_list", "description": "المهام اللي شغّالة أو موقّفة («شو المهام الشغّالة؟»).",
      "parameters": {"type": "object", "properties": {}, "required": []}},
     {"name": "task_update",
-     "description": ("وقّفي أو رجّعي أو غيّري وقت مهمة أو طريقة تبليغها («وقّفيها»، «خلّيها كل "
-                     "ساعتين»، «بلّغيني فوراً»، «ابعتيلي ملخص الساعة تسعة»)؛ "
-                     "خدي الـ id من task_list، والاسم بس لو مش ظاهر."),
+     "description": ("وقّفي أو رجّعي أو غيّري وقت مهمة أو طريقة تبليغها أو شو بتعمل («وقّفيها»، "
+                     "«خلّيها كل ساعتين»، «بلّغيني فوراً»، «ابعتيلي ملخص الساعة تسعة»، «خلّيها تتابع "
+                     "الفضة بدل الدهب»: instructions بكلامه، ومعها check_tool و check_args الجداد)؛ "
+                     "تغيير شو بتعمل بيستنى موافقته. خدي الـ id من task_list، والاسم بس لو مش ظاهر."),
      "parameters": {"type": "object", "properties": {
          "id": _S, "match_text": {**_S, "description": "اسم المهمة كما سمّاها"},
          "pause": {"type": "boolean"}, "resume": {"type": "boolean"},
-         "every_minutes": {"type": "integer"}, **_HOW}, "required": []}},
+         "every_minutes": {"type": "integer"},
+         "title": {**_S, "description": "اسم جديد، بس إذا غيّره"},
+         "instructions": {**_S, "description": "شو بتعمل، بكلامه الجديد"},
+         "check_tool": {"type": "string", "enum": list(READ_TOOLS),
+                        "description": "الفحص الجديد مع instructions الجديدة"},
+         "check_args": {"type": "object", "description": "مدخلات check_tool الجديد، ثابتة"},
+         **_HOW}, "required": []}},
     {"name": "task_cancel", "description": "احذفي مهمة («الغي مهمة مستقل»).",
      "parameters": {"type": "object", "properties": {
          "id": _S, "match_text": {**_S, "description": "اسم المهمة كما سمّاها"}}, "required": []}},
@@ -159,6 +166,14 @@ def _delivery(args: Dict[str, Any]) -> Dict[str, Any]:
         return tasks.clean_delivery(args.get("notify_how"), args.get("notify_hours"), args.get("notify_at"))
     said = said_delivery(f"{args.get('instructions') or ''} . {args.get('notify_when') or ''}") or {}
     return tasks.clean_delivery(said.get("mode"), said.get("hours"), said.get("at"))
+
+
+def edit_summary(row: Dict[str, Any], *, title: str, instructions: str, every: int,
+                 delivery: Dict[str, Any]) -> str:
+    """The question a change of what a task does waits on, the same from talk and the screen."""
+    acts = _asks_to_act(f"{instructions} {(row.get('payload') or {}).get('notify_when') or ''}")
+    return lang.say("task_edit_confirm_reads_only" if acts else "task_edit_confirm", title=title,
+                    every=_every(every), instructions=instructions, how=_how(delivery))
 
 
 def _minutes(value: Any) -> Optional[int]:
@@ -256,6 +271,26 @@ def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if "row" not in found:
         return found
     row, said = found["row"], []
+    rewords = any(args.get(k) for k in ("instructions", "title", "check_tool"))
+    if rewords:
+        # What it does changes: shown, and done only after his yes.
+        check = str(args.get("check_tool") or "")
+        if check and check not in READ_TOOLS:
+            return refused(f"check_tool must read: one of {list(READ_TOOLS)}")
+        payload = row.get("payload") or {}
+        title = str(args.get("title") or row.get("text") or "").strip()
+        instructions = str(args.get("instructions") or payload.get("instructions") or "").strip()
+        every = _minutes(args.get("every_minutes")) or tasks.every_minutes(row) or 1
+        try:
+            delivery = _delivery(args) if args.get("notify_how") else tasks.how(row)
+        except ValueError as exc:
+            return refused(f"notify_how: {exc}")
+        if not ctx.confirmed:
+            return needs_confirmation(edit_summary(row, title=title, instructions=instructions,
+                                                   every=every, delivery=delivery))
+        probe = {"tool": check, "args": dict(args.get("check_args") or {})} if check else None
+        tasks.edit(row["id"], title=title, instructions=instructions, probe=probe)
+        said.append(lang.say("task_edited", title=title, instructions=instructions))
     if args.get("pause"):
         tasks.pause(row["id"])
         said.append(lang.say("task_paused", title=row.get("text", "")))
@@ -274,7 +309,8 @@ def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         tasks.set_delivery(row["id"], delivery)
         said.append(lang.say("task_delivery", title=row.get("text", ""), how=_how(delivery)))
     if not said:
-        return refused("say pause, resume, every_minutes or notify_how", reply=lang.say("nothing_changed"))
+        return refused("say pause, resume, every_minutes, notify_how or instructions",
+                       reply=lang.say("nothing_changed"))
     return {"ok": True, "changed": 1, "reply": "\n".join(said)}
 
 

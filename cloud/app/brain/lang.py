@@ -357,6 +357,12 @@ PHRASES = {
     "delivery_daily": {"ar": "ملخص مرة باليوم الساعة {at}", "en": "a summary once a day at {at}"},
     "delivery_hourly": {"ar": "بالكتير مرة بالساعة", "en": "at most once an hour"},
     "delivery_hours": {"ar": "بالكتير مرة كل {n} ساعات", "en": "at most once every {n} hours"},
+    "task_edit_confirm": {"ar": "أخلّي «{title}» {every}: «{instructions}»، والتبليغ {how}",
+                          "en": "make «{title}» {every}: «{instructions}», telling you {how}"},
+    "task_edit_confirm_reads_only": {
+        "ar": "أخلّي «{title}» {every}: «{instructions}»، والتبليغ {how}، لأنه المهمة ما بتدفع ولا بتحوّل ولا بتبعت باسمك ولا بتنشر ولا بتحذف",
+        "en": "make «{title}» {every}: «{instructions}», telling you {how}, since a task never pays, transfers, sends in your name, posts or deletes"},
+    "task_edited": {"ar": "تمام، صارت «{title}»: «{instructions}» ✅", "en": "Done, «{title}» now: «{instructions}» ✅"},
     "task_delivery": {"ar": "صار تبليغ «{title}» {how}", "en": "«{title}» now tells you {how}"},
     "task_confirm_reads_only": {
         "ar": "أتابع «{title}» {every} وأبلّغك بس، {how}، لأنه المهمة ما بتدفع ولا بتحوّل ولا بتبعت باسمك ولا بتنشر ولا بتحذف",

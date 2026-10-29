@@ -123,6 +123,31 @@ def set_every(task_id: str, every_minutes: int) -> bool:
     return bool(get(task_id)) and schedules.update(task_id, recurrence=_rule(every_minutes))
 
 
+def edit(task_id: str, *, title: Optional[str] = None, instructions: Optional[str] = None,
+         probe: Optional[Mapping[str, Any]] = None, every: Optional[int] = None,
+         delivery: Optional[Mapping[str, Any]] = None) -> bool:
+    """One change of a task, whatever asks for it (talk, a call, the Tasks screen): what is not
+    given stays. New words or a new check forget what it saw, so the next run starts afresh.
+    The caller has checked the values (`probe` reads, `delivery` is clean)."""
+    row = get(task_id)
+    if not row:
+        return False
+    payload = dict(row.get("payload") or {})
+    if instructions is not None:
+        payload["instructions"] = instructions
+    if probe is not None:
+        payload["probe"] = dict(probe)
+        payload["tools"] = list(dict.fromkeys(
+            [probe["tool"], *[t for t in payload.get("tools") or [] if t in ALLOWED]]))
+    if delivery is not None:
+        payload["delivery"] = dict(delivery)
+    changed = schedules.update(task_id, text=title or None, payload=payload,
+                               recurrence=_rule(every) if every else None)
+    if instructions is not None or probe is not None:
+        save_state(task_id, {"fingerprint": None, "last_probe": None})
+    return bool(changed)
+
+
 def remove(task_id: str) -> bool:
     if not get(task_id) or not schedules.delete(task_id):
         return False
