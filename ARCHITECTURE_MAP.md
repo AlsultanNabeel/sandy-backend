@@ -630,7 +630,11 @@ Who calls what:
   `/api/items`. `/api/features` answers `{hidden, on}`: what the owner hid app-wide
   (`SANDY_HIDDEN_FEATURES`) and the feature switches on for the caller (`utils/flags.py`:
   `SANDY_FLAGS`, a JSON object, `"all"` or a list of account ids per switch; missing or
-  unreadable is off; `flags.on(name, user_id)` is the one way the code asks).
+  unreadable is off; `flags.on(name, user_id)` is the one way the code asks). The owner's
+  account is `9125cd8fafb74c5e820e2bd8636759cd`; on production `SANDY_FLAGS` is
+  `{"dev_tools": ["9125cd8fafb74c5e820e2bd8636759cd"], "tasks": ["9125cd8fafb74c5e820e2bd8636759cd"]}`
+  for phase one's acceptance, and `SANDY_PUBLIC_URL` (the emailed link, `notify/mail.py`) is
+  `https://sandy-robot-3da0693d32f7.herokuapp.com`.
 - **The owner** (`api/owner_api.py`, the accounts in `SANDY_OWNER_ACCOUNTS`; anyone else
   404) — `GET /api/owner/traces?limit=&user=&source=` (newest first, never words),
   `GET /api/owner/traces/<id>` (one turn; its words opened only when it is the owner's

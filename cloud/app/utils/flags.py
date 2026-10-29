@@ -3,7 +3,7 @@
 ``SANDY_FLAGS`` is a JSON object, one key per switch: ``"all"`` turns it on for everyone,
 a list of account ids for those accounts only.
 
-    {"tasks": "all", "skills": ["3ab1c7f824c04e2aa3cd8bf0ca2f51d6"]}
+    {"dev_tools": ["9125cd8fafb74c5e820e2bd8636759cd"], "tasks": ["9125cd8fafb74c5e820e2bd8636759cd"]}
 
 A switch that is missing, or a value that cannot be read, is off; a setting that is not a
 JSON object turns every switch off and is logged, never a crash. `on` is the one way the
