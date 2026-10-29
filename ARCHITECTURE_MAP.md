@@ -239,7 +239,9 @@ tools turned into its items and its answer back into a `model.Reply`, so the loo
 see no difference. `store: false` always: nothing is kept at Azure; the reasoning comes back
 sealed (`include: reasoning.encrypted_content`) and is handed back with its tool calls on the
 next step (`Reply.items`, the assistant message's `_items`, stripped before chat completions).
-Its own output limit (`responses.MAX_OUTPUT_TOKENS`, 2000: reasoning counts against it), effort
+Its tools are sent `strict: false` (the API's default, strict, makes every field required and
+the model filled each with a blank: done=false, due="", so adds failed to the step cap). Its own
+output limit (`responses.MAX_OUTPUT_TOKENS`, 2000: reasoning counts against it), effort
 `SANDY_REASONING_EFFORT` (low), no temperature, its own breaker; a failure goes on on the chat
 completions chain above. The switch is read per account at
 the turn (`responses.for_user`, from `loop.run_turn`): on for the owner's account first, every

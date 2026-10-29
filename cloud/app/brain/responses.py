@@ -38,7 +38,9 @@ def _tools(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out = []
     for spec in specs or []:
         fn = spec.get("function") or {}
-        out.append({"type": "function", "name": fn.get("name", ""),
+        # Not strict (the API's default): strict makes every field required, and the model
+        # fills each optional one with a blank that means something (done=false, due="").
+        out.append({"type": "function", "name": fn.get("name", ""), "strict": False,
                     "description": fn.get("description", ""),
                     "parameters": fn.get("parameters") or {"type": "object", "properties": {}}})
     return out

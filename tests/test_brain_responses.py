@@ -138,3 +138,14 @@ def test_the_switch_picks_the_path_by_account(brain_db, monkeypatch, user, path)
     with active_user_profile_context(A):
         loop.run_turn("hello there", user_id=user, chat_id=user, source="web")
     assert asked and set(asked) == {path}
+
+
+def test_its_tools_are_not_strict(azure):
+    # Strict is the Responses API's default: every field becomes required, and the model
+    # filled each one with an empty value (done=false, due="", data of blanks), so adds failed
+    # and repeated to the step cap (eval, 29 Oct 2026).
+    from app.brain import tools
+    sent, script = azure
+    script.append(_response(_text("ok")))
+    responses.complete([{"role": "user", "content": "hi"}], tools.openai_tools())
+    assert sent[0]["tools"] and all(t["strict"] is False for t in sent[0]["tools"])
