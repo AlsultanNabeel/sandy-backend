@@ -95,6 +95,7 @@ USER_ROW_KEPT = frozenset({
     "name", "picture",          # the sign-in provider's, never read by Sandy
     "locale", "timezone", "language", "created_at", "last_seen_at",
     "subscription", "token_gen",
+    "notify_links",     # when confirmation links went: a reset does not lift their daily limit
 })
 USER_ROW_FORGOTTEN = frozenset({
     "onboarding",       # preferred name, interests, notes, daily-question answers

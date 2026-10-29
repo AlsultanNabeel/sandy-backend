@@ -34,6 +34,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from openai import OpenAIError
+
 from app import notify
 from app.blocks import tasks
 from app.brain import background, lang, tools
@@ -47,6 +49,8 @@ SWITCH, READ_TOOLS, ALLOWED = tasks.SWITCH, tasks.READ_TOOLS, tasks.ALLOWED
 NOTHING = "NOTHING"
 MAX_STEPS = 4
 FAILURES_TO_STOP = 3
+# What a batch's submit or answer raises (Azure's client, a failed or expired job, its file read).
+_BATCH_ERRORS = (OpenAIError, RuntimeError, OSError, ValueError, KeyError)
 # What of a probe the model is shown, and kept to compare (a long page is cut).
 _KEEP_CHARS = 6000
 
@@ -179,7 +183,7 @@ def _submitted(doc: Dict[str, Any], spec: Dict[str, Any], found: Any,
         return background.call("task", _think_messages(spec, found, before),
                                priority=background.SCHEDULED, as_batch=True,
                                max_tokens=700, temperature=0.3)
-    except Exception as exc:  # noqa: BLE001 — Azure's boundary: the ordinary way now
+    except _BATCH_ERRORS as exc:  # Azure's boundary: the ordinary way now
         logger.warning("[tasks] task %s: batch not submitted (%s); run at once", _id(doc), exc)
         return None
 
@@ -213,7 +217,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                 # A batch this task submitted: its answer, once Azure has it.
                 try:
                     message = background.collect("task", before["batch_id"], user_id=uid)
-                except Exception as exc:  # noqa: BLE001 — Azure's boundary: the ordinary way now
+                except _BATCH_ERRORS as exc:  # Azure's boundary: the ordinary way now
                     logger.warning("[tasks] task %s: batch %s failed (%s); run at once",
                                    _id(doc), before["batch_id"], exc)
                     direct = True
