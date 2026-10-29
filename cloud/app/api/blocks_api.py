@@ -299,8 +299,10 @@ def register_blocks_api(app, mongo_db=None):
         text = _text(body.get("text"), required=True)
         data = _data(LOG, kind, body.get("data"))
         new_id = entries.add(kind, text, data, at=_when(body.get("at")), source="app", doc_id=cid)
+        # The answer is the row as saved, read before the background category can land.
+        out = _saved(new_id, entries.get, "data")
         categorize_later(new_id, kind, text, data)
-        return _saved(new_id, entries.get, "data")
+        return out
 
     @app.route("/api/stats", methods=["GET"])
     @require_tenant
@@ -352,9 +354,10 @@ def register_blocks_api(app, mongo_db=None):
             text, embed = _sealed(text)[0], False
         data = _data(LOG, current["kind"], body.get("data"))
         ok = entries.update(entry_id, text=text, data=data, at=_when(body.get("at")), embed=embed)
+        out = _found(ok, entry_id, entries.get, "data")
         if data is not None:
             categorize_later(entry_id, current["kind"], text or current.get("text") or "", data)
-        return _found(ok, entry_id, entries.get, "data")
+        return out
 
     @app.route("/api/entries/<entry_id>", methods=["DELETE"])
     @require_tenant

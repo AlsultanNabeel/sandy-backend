@@ -570,3 +570,17 @@ def test_a_reply_that_only_added_or_read_offers_no_undo(c, monkeypatch):
     out = c.post("/api/agent", json={"message": "ضيفي خبز"}, headers=_h()).get_json()
     assert "undo" not in out
     assert c.post("/api/undo", json={}, headers=_h()).status_code == 400
+
+
+def test_an_entry_comes_back_as_saved_before_its_category_is_filled(c, monkeypatch):
+    # CI failed on 29 Oct 2026 when the background category landed before the answer was
+    # read: the answer is the row as the app sent it, the category comes after.
+    from app.brain import categorize
+    monkeypatch.setattr(categorize, "submit_background", lambda fn, *a, **k: fn(*a))
+    monkeypatch.setattr(categorize, "classify", lambda text: "food")
+    r = c.post("/api/entries", json={"kind": "expense", "text": "قهوة", "data": {"amount": 3}},
+               headers=_h())
+    item = r.get_json()["item"]
+    assert item["data"] == {"amount": 3}
+    r = c.patch(f"/api/entries/{item['id']}", json={"data": {"amount": 4}}, headers=_h())
+    assert r.get_json()["item"]["data"] == {"amount": 4}
