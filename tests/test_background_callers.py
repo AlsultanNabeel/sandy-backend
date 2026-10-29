@@ -1,0 +1,29 @@
+"""Each model call outside a reply's loop goes through `background.call`, named by its kind of
+work, so its model is set per kind and one place can limit them all."""
+from __future__ import annotations
+
+from types import SimpleNamespace as NS
+
+import pytest
+from brain_fakes import A, brain_db  # noqa: F401
+
+from app.brain import background
+from app.utils.user_profiles import active_user_profile_context
+
+
+@pytest.fixture
+def calls(monkeypatch):
+    seen = []
+
+    def call(what, messages, **kw):
+        seen.append({"what": what, **kw})
+        return NS(choices=[NS(message=NS(content=kw.pop("answer", "ok")))])
+    monkeypatch.setattr(background, "call", call)
+    return seen
+
+
+def test_the_stm_summary(brain_db, calls):  # noqa: F811
+    from app.brain import stm
+    with active_user_profile_context(A):
+        stm._summarize("t1", "userA", [{"role": "user", "content": "hi"}], "chat")
+    assert calls == [{"what": "stm_summary", "user_id": "userA", "max_tokens": 200}]

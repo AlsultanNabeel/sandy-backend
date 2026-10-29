@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pymongo.errors import PyMongoError
 
-from app.features import trace_store
 from app.utils.thread_pool import submit_background
 
 logger = logging.getLogger(__name__)
@@ -134,16 +133,16 @@ def _summarize(thread_id: str, user_id: str, messages: List[Dict[str, Any]],
                source: str) -> None:
     """The overflowing turns as one ``summary`` entry (runs on the background pool)."""
     from app.blocks import entries
-    from app.integrations.openai_client import chat_fn
+    from app.brain import background
     from app.utils.user_profiles import resolve_display_name
 
     user_label = resolve_display_name(user_id, default="المستخدم")
     turns = "\n".join(f"{user_label if m['role'] == 'user' else 'Sandy'}: {m['content']}"
                       for m in messages if m.get("content"))
     try:
-        with trace_store.background(user_id, "stm_summary"):
-            resp = chat_fn()(messages=[{"role": "system", "content": _SUMMARY_PROMPT},
-                                       {"role": "user", "content": turns}], max_tokens=200)
+        resp = background.call("stm_summary", [{"role": "system", "content": _SUMMARY_PROMPT},
+                                               {"role": "user", "content": turns}],
+                               user_id=user_id, max_tokens=200)
         summary = (resp.choices[0].message.content or "").strip()
     except Exception as exc:  # noqa: BLE001 — provider boundary; a lost summary costs no reply
         logger.warning("[stm] summary failed: %s", exc)
