@@ -178,7 +178,8 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    (`session._handle`, `_turn_worked`) she is told to put it right (`honesty.voice_correction`, in the turn's spoken language, a
    turn of its own that she answers). The prompt's own rule is no longer the guarantee.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
-   is English when it has more Latin letters than Arabic ones; one with none («2», «👍») or
+   is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»),
+   else English when it has Latin letters («add «حليب» to my list»); one with none («2», «👍») or
    only «ok» keeps the conversation's. Every sentence the server says itself (tool replies,
    held questions and summaries, errors, the honesty check's) is a phrase in both languages
    (`lang.PHRASES`, `lang.say` in the turn's language, a context variable). A reply that

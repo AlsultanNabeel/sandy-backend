@@ -1,8 +1,8 @@
 """Arabic and English are equal: the language of a turn, and every sentence the server
 says itself in both.
 
-A message is English when it has more Latin letters than Arabic ones, else Arabic; one
-with no letters at all («2», «👍»), or only a word everyone uses in both («ok»), keeps the
+A message with a real Arabic word (outside a quoted name) is Arabic, else one with Latin
+letters is English; one with no letters at all («2», «👍»), or only a word everyone uses in both («ok»), keeps the
 language the conversation was in. The turn's
 language is a context variable (`using`), set by `loop.run_turn` and read by `say`, so a
 tool, the confirmation and the honesty check answer in it without being passed it.
@@ -22,18 +22,29 @@ AR, EN = "ar", "en"
 
 _ARABIC = re.compile(r"[؀-ۿ]")
 _LATIN = re.compile(r"[A-Za-z]")
+# A name the message quotes: «حليب», "milk", “milk”.
+_QUOTED = re.compile(r"«[^»]*»|\"[^\"]*\"|“[^”]*”")
 _current: ContextVar[str] = ContextVar("sandy_lang", default=AR)
 # Said the same in Arabic and English chats: they name no language.
 _BOTH_LANGUAGES = {"ok", "okay", "k", "kk"}
 
 
 def of(text: str, fallback: Optional[str] = None) -> str:
-    """The language a text is written in; ``fallback`` (else Arabic) when it has no letters."""
-    latin, arabic = len(_LATIN.findall(text or "")), len(_ARABIC.findall(text or ""))
-    if (not latin and not arabic) or re.sub(r"[^a-z]", "", (text or "").lower()) in _BOTH_LANGUAGES \
-            and not arabic:
+    """The language a text is written in; ``fallback`` (else Arabic) when it has no letters.
+
+    A real Arabic word (outside a quoted name) makes it Arabic, however long the English
+    name or term beside it («ضيفي Nescafe Gold Blend»); an English message may quote an
+    Arabic name («add «حليب» to my list»)."""
+    text = text or ""
+    plain = _QUOTED.sub(" ", text)
+    if _ARABIC.search(plain):
+        return AR
+    if not _LATIN.search(plain):
+        # Nothing but a quoted name, or no letters at all.
+        return AR if _ARABIC.search(text) else (EN if _LATIN.search(text) else fallback or AR)
+    if re.sub(r"[^a-z]", "", plain.lower()) in _BOTH_LANGUAGES:
         return fallback or AR
-    return EN if latin > arabic else AR
+    return EN
 
 
 @contextmanager

@@ -316,3 +316,19 @@ def test_the_rules_keep_tool_words_in_the_users_language():
     from app.brain import context
     assert "never translated" in context._RULES
     assert "I paid" in context._RULES
+
+
+# A message with a real Arabic word is Arabic, however long the English name in it; an
+# English one may quote an Arabic name (independent review, 29 Oct 2026).
+@pytest.mark.parametrize("text, want", [
+    ("ضيفي Nescafe Gold Blend", "ar"),
+    ("شو يعني machine learning", "ar"),
+    ("ذكريني بال meeting مع John Smith بكرا", "ar"),
+    ("«حليب»", "ar"),
+    ("add Nescafe Gold Blend to the shopping list", "en"),
+    ("what does machine learning mean", "en"),
+    ("add «حليب» to my list", "en"),
+    ('add "خبز" please', "en"),
+])
+def test_a_real_arabic_word_makes_the_message_arabic(text, want):
+    assert lang.of(text) == want, text
