@@ -33,11 +33,14 @@ def _enum(block: str, desc: str) -> Dict[str, Any]:
     return {"type": "string", "enum": plain, "description": f"{desc} ({labels})"}
 
 
-def _list_enum() -> Dict[str, Any]:
-    spec = _enum(LIST, "القائمة")
+def _list_enum(labels: bool = False) -> Dict[str, Any]:
+    """The lists by name; their Arabic labels once, on `list_add` (``labels``): repeated on
+    every list field they cost the prompt hundreds of tokens and taught nothing more."""
+    spec = _enum(LIST, "القائمة") if labels else {"type": "string", "enum": [
+        n for n in names(LIST) if not n.endswith(":")]}
     if any(n.endswith(":") for n in names(LIST)):
         spec["enum"] = spec["enum"] + ["project"]
-        spec["description"] += "؛ project مع حقل project لقائمة مشروع"
+        spec["description"] = spec.get("description", "القائمة") + "؛ project مع حقل project لقائمة مشروع"
     return spec
 
 
@@ -76,7 +79,7 @@ def _schemas() -> List[Dict[str, Any]]:
                              "until": {**_S, "description": "ISO date"},
                              "list": _list_enum(), "project": _S}, [])},
         {"name": "list_add", "description": "ضيفي عنصر لقائمة (مهمة، تسوق، هدف...). لو موجود: qty بتنضاف عكميته و due بيتحدّث.",
-         "parameters": _obj({"list": _list_enum(), "project": _S, "text": _S,
+         "parameters": _obj({"list": _list_enum(labels=True), "project": _S, "text": _S,
                              "qty": {"type": "number", "description": "قديش («كمان حليب» = 1)"},
                              "due": {**_S, "description": "كلام المستخدم زي ما هو («بكرا 5 المسا») أو YYYY-MM-DD HH:MM بتوقيته"},
                              "priority": _S, "data": data}, ["list", "text"])},
