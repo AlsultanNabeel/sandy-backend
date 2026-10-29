@@ -213,7 +213,9 @@ final class GeminiLiveManager: NSObject, ObservableObject {
 
 /// The call's sound: the mic sent up, her voice played. `onLost` when it stopped and could
 /// not start again (an interruption that did not end well).
-protocol LiveAudio: AnyObject {
+/// Sendable: the socket's receive runs off the main actor and hands playback to it
+/// (`receiveLoop`); the real bridge guards its state with a lock.
+protocol LiveAudio: AnyObject, Sendable {
     var send: ((Data) -> Void)? { get set }
     var onMouth: ((CGFloat) -> Void)? { get set }
     var onSpeaking: ((Bool) -> Void)? { get set }

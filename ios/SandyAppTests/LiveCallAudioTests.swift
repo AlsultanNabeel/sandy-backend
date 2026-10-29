@@ -6,7 +6,8 @@ import XCTest
 /// M7: an interruption that did not end well left the call «listening» on a dead mic.
 @MainActor
 final class LiveCallAudioTests: XCTestCase {
-    private final class FakeAudio: LiveAudio {
+    /// Touched only on the main actor by these tests.
+    private final class FakeAudio: LiveAudio, @unchecked Sendable {
         var send: ((Data) -> Void)?
         var onMouth: ((CGFloat) -> Void)?
         var onSpeaking: ((Bool) -> Void)?
