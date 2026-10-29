@@ -423,6 +423,9 @@ def main() -> int:
     known = [{**d, "control_type": "switch"} for d in DEVICES]
     device_store.list_devices = lambda: list(known)
     device_store.get_device = lambda name: next((dict(d) for d in known if d["name"] == name), None)
+    # A task's check reads the web's raw results: a stand-in too, so a task starts on the same page.
+    from app.features import research
+    research.web_results = lambda query: [{"title": "Test result", "url": "https://example.com/1", "text": ""}]
     # Embeddings would cost a call per entry and find nothing in a fresh database.
     entries.embed_text = lambda text: None
 

@@ -1,9 +1,11 @@
 {
- "when": "2026-10-29T01:51",
+ "when": "2026-10-30T01:20",
  "model": "sandy-chat",
+ "api": "chat",
  "repeat": 1,
- "passed": 80,
- "total": 83,
+ "temperature": 0.5,
+ "passed": 95,
+ "total": 99,
  "cases": {
   "shopping add": true,
   "shopping implied": true,
@@ -30,7 +32,7 @@
   "expense": true,
   "delete the last expense": true,
   "expense fix": true,
-  "fact": false,
+  "fact": true,
   "spending question": true,
   "undo": true,
   "device on": true,
@@ -47,6 +49,14 @@
   "english": true,
   "two at once": true,
   "remembers the thread": true,
+  "task: student deadlines": true,
+  "task: freelancer projects": true,
+  "task: shop stock": true,
+  "task: home budget": true,
+  "task: run by talk": false,
+  "task: tell me at once": true,
+  "task: never pays": true,
+  "task: morning tells what was found": true,
   "shopping add · en": true,
   "shopping implied · en": true,
   "shopping bought · en": true,
@@ -81,28 +91,37 @@
   "device question · en": true,
   "scene · en": true,
   "apply a scene is not a restore · en": false,
-  "weather · en": false,
+  "weather · en": true,
   "search · en": true,
   "image · en": true,
   "plain chat · en": true,
   "venting · en": true,
   "two at once · en": true,
-  "remembers the thread · en": true
+  "remembers the thread · en": true,
+  "task: student deadlines · en": true,
+  "task: freelancer projects · en": false,
+  "task: shop stock · en": false,
+  "task: home budget · en": true,
+  "task: run by talk · en": true,
+  "task: tell me at once · en": true,
+  "task: never pays · en": true,
+  "task: morning tells what was found · en": true
  },
  "unanswered": [],
  "by_language": {
   "ar": {
-   "passed": 40,
-   "total": 41
+   "passed": 48,
+   "total": 49
   },
   "en": {
-   "passed": 40,
-   "total": 42
+   "passed": 47,
+   "total": 50
   }
  },
  "disagreed": [],
- "seconds": 204.3,
- "tokens_in": 851998,
- "tokens_out": 5085,
- "usd": 0.0902715
+ "seconds": 216.0,
+ "tokens_in": 1421853,
+ "tokens_out": 6909,
+ "tokens_reasoning": 0,
+ "usd": 0.14862975000000003
 }

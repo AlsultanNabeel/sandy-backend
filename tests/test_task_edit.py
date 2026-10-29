@@ -236,3 +236,20 @@ def test_a_task_waiting_for_its_yes_is_one_question(brain_db, monkeypatch, langu
     with lang.using(language):
         assert state["final_response"] == confirm.ask(state["pending_state"])
     assert ("كل ساعة" if language == "ar" else "every hour") in state["final_response"]
+
+
+# «وقّفيها» went to the delete tool on the real model (eval, 30 Oct): a task is deleted only
+# when his words ask for a delete.
+@pytest.mark.parametrize("language, message, deletes", [
+    ("ar", "وقّفيها", False), ("en", "pause it", False),
+    ("ar", "احذفي مهمة الدهب", True), ("ar", "الغيها", True), ("en", "delete the gold task", True),
+    ("en", "cancel it", True),
+])
+def test_a_task_is_deleted_only_when_he_asks_to_delete(on, language, message, deletes):
+    with active_user_profile_context(A), lang.using(language):
+        ctx = TurnCtx(user_id="userA", message=message)
+        out = tools.execute("task_cancel", {"id": on}, ctx)
+        assert bool(out.get("ok")) is deletes
+        assert (tasks.get(on) is None) is deletes
+    if not deletes:
+        assert "task_update" in out["error"]

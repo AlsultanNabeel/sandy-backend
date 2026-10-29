@@ -182,3 +182,18 @@ def test_a_check_that_cannot_read_on_its_yes_still_saves_and_says_so(world, monk
         out = tools.execute("task_create", args, ctx)
         assert out["ok"] and len(tasks.running()) == 1
     assert "couldn't read" in out["reply"] and world.sent == []
+
+
+def test_the_state_names_things_in_guillemets_so_they_read_as_names():
+    from app.brain import lang
+    with lang.using("en"):
+        said = task_diff.describe({"results": [{"title": "مشروع تصميم", "url": "u1"}]})
+    assert "«مشروع تصميم»" in said
+
+
+def test_pausing_by_talk_is_never_the_delete_tool():
+    from app.brain import tools_tasks
+    cancel = next(s for s in tools_tasks.TASK_SCHEMAS if s["name"] == "task_cancel")
+    update = next(s for s in tools_tasks.TASK_SCHEMAS if s["name"] == "task_update")
+    assert "وقّفيها" in update["description"] and "وقّفيها" in cancel["description"]
+    assert "task_update" in cancel["description"]

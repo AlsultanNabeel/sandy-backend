@@ -145,7 +145,7 @@ def describe(found: Any) -> str:
     if rows:
         ticked = all("done" in r for r in rows)
         open_rows = [r for r in rows if not r.get("done")] if ticked else rows
-        names = [_name(r) for r in open_rows if _name(r)]
+        names = [f"«{_name(r)}»" for r in open_rows if _name(r)]
         listed = lang.say("sep").join(names[:_SHOWN])
         if len(names) > _SHOWN:
             listed = lang.say("state_more", names=listed)

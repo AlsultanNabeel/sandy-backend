@@ -79,12 +79,16 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
          "pause": {"type": "boolean"}, "resume": {"type": "boolean"},
          "every_minutes": {"type": "integer"},
          "title": {**_S, "description": "اسم جديد، بس إذا غيّره"},
-         "instructions": {**_S, "description": "شو بتعمل، بكلامه الجديد"},
+         "instructions": {**_S, "description": ("بس إذا غيّر شو بتعمل المهمة، بكلامه الجديد؛ "
+                                                  "للتوقيت أو التوقيف أو التبليغ لا تحطيها "
+                                                  "(only when he changes what it does)")},
          "check_tool": {"type": "string", "enum": list(READ_TOOLS),
                         "description": "الفحص الجديد مع instructions الجديدة"},
          "check_args": {"type": "object", "description": "مدخلات check_tool الجديد، ثابتة"},
          **_HOW}, "required": []}},
-    {"name": "task_cancel", "description": "احذفي مهمة («الغي مهمة مستقل»).",
+    {"name": "task_cancel", "description": ("احذفي مهمة نهائياً، بس إذا قال احذف أو الغي («الغي مهمة مستقل»، "
+                                            "«delete the task»). «وقّفيها»، «pause it» مش حذف: هاد "
+                                            "task_update مع pause."),
      "parameters": {"type": "object", "properties": {
          "id": _S, "match_text": {**_S, "description": "اسم المهمة كما سمّاها"}}, "required": []}},
 ]
@@ -372,9 +376,18 @@ def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     return {"ok": True, "changed": 1, "reply": "\n".join(said)}
 
 
+# The words that ask for a task to be deleted; «وقّفيها», «pause it» are not among them.
+_DELETE = re.compile(r"(احذف|امسح|الغي|شيل|بطل|delete|remove|cancel|get rid|drop)", re.IGNORECASE)
+
+
 def task_cancel(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if not offered(ctx.user_id):
         return refused("tasks are not on for this account")
+    words = re.sub(r"[ًٌٍَُِّْـ]", "", ctx.message or "").replace("أ", "ا").replace("إ", "ا")
+    if words.strip() and not _DELETE.search(words):
+        # It deletes for good: only on his own words asking it.
+        return refused("not deleted: he did not ask to delete it; to pause it call task_update "
+                       "with pause")
     found = _one(args)
     if "row" not in found:
         return found
