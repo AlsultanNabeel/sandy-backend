@@ -147,9 +147,11 @@ def test_the_email_is_set_confirmed_by_its_link_and_forgotten(c, outbox):
     assert c.get("/api/notify/email", headers=_h()).get_json()["confirmed"] is False
     page = c.get(f"/api/notify/email/confirm?t={token}")
     assert page.status_code == 200 and page.mimetype == "text/html"
+    done = c.post("/api/notify/email/confirm", data={"t": token})
+    assert done.status_code == 200 and done.mimetype == "text/html"
     assert c.get("/api/notify/email", headers=_h()).get_json() == {
         "address": "me@example.com", "confirmed": True, "ready": True}
-    assert c.get(f"/api/notify/email/confirm?t={token}").status_code == 400   # once
+    assert c.post("/api/notify/email/confirm", data={"t": token}).status_code == 400   # once
     assert c.delete("/api/notify/email", headers=_h()).get_json() == {"ok": True}
     assert c.get("/api/notify/email", headers=_h()).get_json()["address"] == ""
 
@@ -179,6 +181,38 @@ def test_a_link_that_did_not_leave_is_said(c, monkeypatch):
 def test_a_wrong_link_is_a_page_not_an_error(c):
     r = c.get("/api/notify/email/confirm?t=nope")
     assert r.status_code == 400 and r.mimetype == "text/html"
+    r = c.post("/api/notify/email/confirm", data={"t": "nope"})
+    assert r.status_code == 400 and r.mimetype == "text/html"
+
+
+# Opening the link confirms nothing (review of phase one): a mail scanner or a preview opens
+# links on its own. The page has a «Confirm» button, and only that confirms, in his language.
+@pytest.mark.parametrize("language, button", [("ar", "أكّد"), ("en", "Confirm")])
+def test_opening_the_link_shows_a_button_and_only_the_button_confirms(c, outbox, brain_db, language,  # noqa: F811
+                                                                      button):
+    c.get("/api/notify/email", headers=_h())
+    brain_db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
+    c.post("/api/notify/email", headers=_h(), json={"address": "me@example.com"})
+    token = outbox[0][2].split("t=")[1].split()[0]
+    for _ in range(3):
+        page = c.get(f"/api/notify/email/confirm?t={token}")
+        assert page.status_code == 200 and button in page.get_data(as_text=True)
+        assert 'method="post"' in page.get_data(as_text=True)
+    assert c.get("/api/notify/email", headers=_h()).get_json()["confirmed"] is False
+    assert c.post("/api/notify/email/confirm", data={"t": token}).status_code == 200
+    assert c.get("/api/notify/email", headers=_h()).get_json()["confirmed"] is True
+
+
+def test_asking_for_links_has_a_limit(c, outbox, monkeypatch):
+    clock = [datetime(2026, 10, 29, 9, 0, tzinfo=timezone.utc)]
+    monkeypatch.setattr(mail, "_now", lambda: clock[0])
+    for n in range(mail.LINKS_A_DAY):
+        r = c.post("/api/notify/email", headers=_h(), json={"address": f"me{n}@example.com"})
+        assert r.get_json()["state"] == "sent"
+        clock[0] += mail.RESEND_AFTER
+    r = c.post("/api/notify/email", headers=_h(), json={"address": "more@example.com"})
+    assert r.status_code == 429 and r.get_json()["error"] == "too_many"
+    assert r.get_json()["message"].strip() and len(outbox) == mail.LINKS_A_DAY
 
 
 # The public schedule routes on a task's row (review of phase one): they ask the switch as the

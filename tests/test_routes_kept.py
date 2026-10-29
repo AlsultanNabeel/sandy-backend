@@ -84,7 +84,7 @@ KEPT = {
     "/api/scheduled-tasks/<task_id>/pause": {"POST"},
     "/api/scheduled-tasks/<task_id>/resume": {"POST"},
     "/api/notify/email": {"GET", "POST", "DELETE"},
-    "/api/notify/email/confirm": {"GET"},
+    "/api/notify/email/confirm": {"GET", "POST"},
     # The robot and the firmware tooling.
     "/voice": {"GET"},
     "/api/firmware/manifest": {"GET"},

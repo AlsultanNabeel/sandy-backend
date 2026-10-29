@@ -316,6 +316,29 @@ def set_notify_email(user_id: str, value: Optional[Dict[str, Any]]) -> bool:
     return coll.update_one({"_id": user_id}, change).matched_count > 0
 
 
+NOTIFY_LINKS_FIELD = "notify_links"
+
+
+def notify_links_since(user_id: str, since: datetime) -> int:
+    """How many confirmation links went to this account since ``since``; kept apart from the
+    address, so forgetting it does not start the count again."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return 0
+    doc = coll.find_one({"_id": user_id}, {NOTIFY_LINKS_FIELD: 1}) or {}
+    return sum(1 for at in doc.get(NOTIFY_LINKS_FIELD) or [] if _as_aware_utc(at) >= since)
+
+
+def note_notify_link(user_id: str, at: datetime, keep_since: datetime) -> None:
+    """A link went at ``at``; the ones before ``keep_since`` are let go."""
+    coll = _coll()
+    if coll is None or not user_id:
+        return
+    kept = [a for a in (coll.find_one({"_id": user_id}, {NOTIFY_LINKS_FIELD: 1}) or {}).get(
+        NOTIFY_LINKS_FIELD) or [] if _as_aware_utc(a) >= keep_since]
+    coll.update_one({"_id": user_id}, {"$set": {NOTIFY_LINKS_FIELD: [*kept, at]}})
+
+
 def user_by_notify_token(token_hash: str) -> Optional[str]:
     """The account whose confirmation link carries this token; the one read across accounts,
     since the link is opened signed out."""

@@ -222,3 +222,25 @@ def test_how_it_leaves_is_the_settings(monkeypatch, port, secure):
     assert (("starttls",) in done) == (secure == "starttls")
     assert ("login", "sandy@gmail.com", "app-password") in done
     assert ("send", "Sandy <hello@sandy.app>", "a@example.com", "Hi") in done
+
+
+# A limit on links (review of phase one): at most LINKS_A_DAY in a day, whatever the address,
+# and forgetting the address does not start the count again.
+def test_links_a_day_are_limited_and_forgetting_does_not_reset_them(post):
+    for n in range(mail.LINKS_A_DAY):
+        assert mail.ask_to_confirm("userA", f"a{n}@example.com") == "sent"
+        mail.forget("userA")
+        post.clock[0] += mail.RESEND_AFTER
+    with pytest.raises(ValueError, match="too_many"):
+        mail.ask_to_confirm("userA", "late@example.com")
+    assert mail.ask_to_confirm("userB", "b@example.com") == "sent"     # his own count
+    post.clock[0] += mail.LINKS_WINDOW
+    assert mail.ask_to_confirm("userA", "late@example.com") == "sent"
+
+
+def test_a_link_is_alive_until_used_and_reading_it_uses_nothing(post):
+    mail.ask_to_confirm("userA", "a@example.com")
+    token = post.sent[-1].body.split("t=")[1].split()[0]
+    assert mail.link_owner(token) == "userA" and mail.link_owner(token) == "userA"
+    assert mail.confirm(token) == "userA"
+    assert mail.link_owner(token) is None and mail.link_owner("nope") is None

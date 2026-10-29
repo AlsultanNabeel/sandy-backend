@@ -11,6 +11,8 @@
   POST   /api/notify/email                    {address}: a link goes to it (`notify/mail.py`)
   DELETE /api/notify/email                    no more emails
   GET    /api/notify/email/confirm?t=         the link itself, opened signed out: a small page
+                                               with a «Confirm» button; opening it confirms nothing
+  POST   /api/notify/email/confirm            {t} (the button): confirms it, once
 
 (`/api/tasks` was the old to-do list's, and stays retired.)
 
@@ -35,7 +37,7 @@ from app.notify import mail
 
 logger = logging.getLogger(__name__)
 
-_MAIL_ERRORS = {"bad_address": 400, "too_soon": 429, "not_set_up": 503}
+_MAIL_ERRORS = {"bad_address": 400, "too_soon": 429, "too_many": 429, "not_set_up": 503}
 
 
 def _iso(value: Any) -> str:
@@ -72,12 +74,18 @@ def _shown(row: Dict[str, Any], unseen: Dict[str, int]) -> Dict[str, Any]:
             "unseen": unseen.get(row["id"], 0)}
 
 
-def _page(text: str, status: int) -> Response:
+def _page(text: str, status: int, form: str = "") -> Response:
     body = (f'<!doctype html><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width,initial-scale=1"><title>Sandy</title>'
             f'<body style="font-family:-apple-system,sans-serif;padding:32px;font-size:18px;'
-            f'line-height:1.6" dir="auto">{html.escape(text).replace(chr(10), "<br>")}</body>')
+            f'line-height:1.6" dir="auto">{html.escape(text).replace(chr(10), "<br>")}{form}</body>')
     return Response(body, status=status, mimetype="text/html")
+
+
+def _dead_link() -> Response:
+    # Whose link it was is not known: both languages.
+    dead = [lang.PHRASES["mail_link_dead_page"][x] for x in (lang.AR, lang.EN)]
+    return _page("\n\n".join(dead), 400)
 
 
 def register_tasks_api(app):
@@ -146,11 +154,24 @@ def register_tasks_api(app):
         return jsonify({"ok": True}), 200
 
     @app.route("/api/notify/email/confirm", methods=["GET"])
-    def api_notify_email_confirm():
-        uid = mail.confirm(request.args.get("t", ""))
+    def api_notify_email_confirm_page():
+        """Opening the link confirms nothing (a mail scanner opens links on its own): a button."""
+        token = request.args.get("t", "")
+        uid = mail.link_owner(token)
         if not uid:
-            # Whose link it was is not known: both languages.
-            dead = [lang.PHRASES["mail_link_dead_page"][x] for x in (lang.AR, lang.EN)]
-            return _page("\n\n".join(dead), 400)
+            return _dead_link()
+        with lang.using(lang.for_user(uid)):
+            form = ('<form method="post" action="/api/notify/email/confirm" style="margin-top:24px">'
+                    f'<input type="hidden" name="t" value="{html.escape(token, quote=True)}">'
+                    '<button type="submit" style="font-size:18px;padding:12px 32px;border-radius:12px;'
+                    f'border:0;background:#007aff;color:#fff">{html.escape(lang.say("mail_confirm_button"))}'
+                    '</button></form>')
+            return _page(lang.say("mail_confirm_page"), 200, form)
+
+    @app.route("/api/notify/email/confirm", methods=["POST"])
+    def api_notify_email_confirm():
+        uid = mail.confirm(request.form.get("t", ""))
+        if not uid:
+            return _dead_link()
         with lang.using(lang.for_user(uid)):
             return _page(lang.say("mail_confirmed_page"), 200)

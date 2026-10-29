@@ -1,7 +1,9 @@
 """The email channel: what a task found, to the user's own address once he confirmed it.
 
-He gives the address in the app (`ask_to_confirm`); a link goes to it, and until he opens it
-(`confirm`) no result is emailed, and what was found before is never sent later. Then one email
+He gives the address in the app (`ask_to_confirm`, at most LINKS_A_DAY links a day); a link
+goes to it, and opening it shows a page with a «Confirm» button (`link_owner` reads it and uses
+nothing, since a mail scanner opens links on its own); until he presses it (`confirm`) no result
+is emailed, and what was found before is never sent later. Then one email
 per task an hour at most (`EVERY`): what comes inside the hour is held and goes in the next
 one, with the next result or on the task's next run after the hour (`flush`). A send that
 fails keeps it held for the next. The words around a result are in his saved language.
@@ -40,6 +42,9 @@ EVERY = timedelta(hours=1)
 LINK_LIVES = timedelta(hours=24)
 # A second link inside this is not sent: the same address waits, another is refused.
 RESEND_AFTER = timedelta(minutes=5)
+# At most this many links to one account in LINKS_WINDOW, whatever the address.
+LINKS_A_DAY = 5
+LINKS_WINDOW = timedelta(hours=24)
 TIMEOUT_S = 15
 HELD, SENT = "held", "sent"
 _ADDRESS = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -103,8 +108,8 @@ def status(user_id: str) -> Dict[str, Any]:
 
 def ask_to_confirm(user_id: str, address: str) -> str:
     """Send the link: "sent", "pending" (one went to it a moment ago) or "confirmed" (nothing
-    to do). ValueError `bad_address` / `too_soon`, RuntimeError `not_set_up`, OSError when the
-    link did not leave."""
+    to do). ValueError `bad_address` / `too_soon` / `too_many` (LINKS_A_DAY reached),
+    RuntimeError `not_set_up`, OSError when the link did not leave."""
     address = _clean(address)
     if not ready():
         raise RuntimeError("not_set_up")
@@ -117,24 +122,34 @@ def ask_to_confirm(user_id: str, address: str) -> str:
         if same:
             return "pending"
         raise ValueError("too_soon")
+    if users_store.notify_links_since(user_id, _now() - LINKS_WINDOW) >= LINKS_A_DAY:
+        raise ValueError("too_many")
     token = secrets.token_urlsafe(32)
     link = f"{_setting('SANDY_PUBLIC_URL').rstrip('/')}/api/notify/email/confirm?t={token}"
     with lang.using(lang.for_user(user_id)):
         _post(address, lang.say("mail_confirm_subject"), lang.say("mail_confirm_body", link=link))
     users_store.set_notify_email(user_id, {"address": address, "confirmed": False,
                                            "token": _hash(token), "asked_at": _now()})
+    users_store.note_notify_link(user_id, _now(), _now() - LINKS_WINDOW)
     return "sent"
 
 
-def confirm(token: str) -> Optional[str]:
-    """The account the link confirmed, once; None for a wrong, used or old one."""
+def link_owner(token: str) -> Optional[str]:
+    """The account whose live link this is; None for a wrong, used or old one. Reads only."""
     uid = users_store.user_by_notify_token(_hash(str(token or "")))
     if not uid:
         return None
-    saved = users_store.get_notify_email(uid)
-    asked = _aware(saved.get("asked_at"))
-    if not asked or _now() - asked > LINK_LIVES:
+    asked = _aware(users_store.get_notify_email(uid).get("asked_at"))
+    return uid if asked and _now() - asked <= LINK_LIVES else None
+
+
+def confirm(token: str) -> Optional[str]:
+    """The account the link confirmed, once (its button, never the opening); None for a wrong,
+    used or old one."""
+    uid = link_owner(token)
+    if not uid:
         return None
+    saved = users_store.get_notify_email(uid)
     users_store.set_notify_email(uid, {"address": saved["address"], "confirmed": True})
     return uid
 

@@ -385,6 +385,11 @@ PHRASES = {
     "mail_footer": {"ar": "وصلك هاد من مهامك عند ساندي. بتقدر توقّف الإيميلات من شاشة المهام بالتطبيق.",
                     "en": "This came from your tasks with Sandy. You can stop these emails from "
                           "the Tasks screen in the app."},
+    "mail_confirm_page": {"ar": "هاد الإيميل رح توصله نتائج مهامك من ساندي. اضغط «أكّد» إذا هاد إيميلك.",
+                          "en": "Your tasks' results from Sandy will come to this email. Press «Confirm» if it's yours."},
+    "mail_confirm_button": {"ar": "أكّد", "en": "Confirm"},
+    "mail_too_many": {"ar": "طلبت روابط كتير اليوم. جرّب بكرا.",
+                      "en": "You've asked for too many links today. Try again tomorrow."},
     "mail_confirmed_page": {"ar": "تمام، تأكّد إيميلك. نتائج مهامك رح توصلك عليه.",
                             "en": "Done, your email is confirmed. Your tasks' results will come here."},
     "mail_link_dead_page": {"ar": "هالرابط انتهى أو انستعمل. اطلب رابط جديد من التطبيق.",
