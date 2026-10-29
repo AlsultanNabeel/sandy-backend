@@ -1,7 +1,7 @@
 """Web research for the brain's `web_search`: Exa snippets, summarised in one model call."""
 
 import logging
-from typing import List
+from typing import Dict, List
 from urllib.parse import urlparse
 
 from app.config import EXA_API_KEY
@@ -35,13 +35,28 @@ def _with_sources(body: str, sources: List[str]) -> str:
     return lang.say("research_summary", body=body)
 
 
+def web_results(query: str) -> List[Dict[str, str]]:
+    """The search's own results (title, url, text), no model: what a task's check compares.
+    Raises when the search cannot run (no service, the provider failed)."""
+    if not EXA_API_KEY:
+        raise RuntimeError("no web search service configured")
+    results = search_exa(query, exa_api_key=EXA_API_KEY, num_results=MAX_RESULTS) or []
+    out = []
+    for r in results[:MAX_RESULTS]:
+        row = {"title": (r.get("title") or "").strip(), "url": (r.get("url") or "").strip(),
+               "text": (r.get("text") or "")[:400].strip()}
+        if row["title"] or row["text"]:
+            out.append(row)
+    return out
+
+
 def web_answer(query: str, user_message: str) -> str:
     """The answer to a web question, in the turn's language, with its sources; a sentence saying so
     when the search could not run or found nothing."""
     if not EXA_API_KEY:
         return lang.say("research_no_service")
     try:
-        results = search_exa(query, exa_api_key=EXA_API_KEY, num_results=MAX_RESULTS)
+        results = web_results(query)
     except Exception as exc:  # noqa: BLE001 — provider boundary
         logger.warning("[research] Exa call raised: %s", exc)
         return lang.say("research_error", query=query)
@@ -50,10 +65,8 @@ def web_answer(query: str, user_message: str) -> str:
 
     snippets: List[str] = []
     sources: List[str] = []
-    for r in results[:MAX_RESULTS]:
-        title = (r.get("title") or "").strip()
-        text = (r.get("text") or "")[:400].strip()
-        url = (r.get("url") or "").strip()
+    for r in results:
+        title, text, url = r["title"], r["text"], r["url"]
         line = f"- {title}" if title else ""
         if text:
             line += f": {text}" if line else f"- {text}"

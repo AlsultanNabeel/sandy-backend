@@ -35,7 +35,7 @@ def deliver(task_id: str, title: str, body: str, language: str) -> str:
     for channel in CHANNELS:
         try:
             channel(out)
-        except Exception:  # noqa: BLE001 — a channel's provider boundary; the result is kept
+        except (OSError, RuntimeError, ValueError):  # SMTP's errors are OSErrors; kept anyway
             logger.exception("[notify] a channel failed for task %s", task_id)
     return row["_id"]
 

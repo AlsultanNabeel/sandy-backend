@@ -849,6 +849,7 @@ pending reminders) and the last STM turn ("was up late").
 | `summary.py` | `/api/summary`: the `summarize` rows written up in one call |
 | `ctx.py` | `TurnCtx` — what a tool knows about its turn |
 | `responses.py` | the chat on Azure's Responses API, behind `responses_api`; chat completions when it fails |
+| `task_runner.py` | a due task's run: the probe (one read tool; a web search's raw results, `research.web_results`, never a model summary) and its fingerprint first, the run ending there when nothing changed (no model call, no message); then the model with the task's own tools (`ALLOWED`, `MAX_STEPS`) answering what is worth telling or `NOTHING`, one review (`task_review`), and `notify.deliver`; `FAILURES_TO_STOP` (3) in a row pause it and say so; only with the `tasks` switch; never a sound (the runner fires `task` before any ring) |
 | `background.py` | `call`: every model call outside a reply's own loop, the one place a limit or cost cap goes; the deployment per kind of work from `SANDY_BACKGROUND_MODELS` (the chat's own by default) |
 | `takeback.py` | a call that would take back what the same turn did (3d), refused to the model |
 

@@ -347,6 +347,9 @@ PHRASES = {
                       "en": "I couldn't find results for '{query}' right now. Try again later."},
     "research_unclear": {"ar": "ما قدرت أجد نتائج واضحة عن '{query}'.",
                          "en": "I couldn't find clear results for '{query}'."},
+    # Tasks (`brain/task_runner.py`, `brain/tools_tasks.py`).
+    "task_stopped": {"ar": "وقّفت مهمة «{title}»: فشلت تلات مرات ورا بعض. خبّرني إذا بدك أرجّعها.",
+                     "en": "I stopped the task «{title}»: it failed three times in a row. Tell me if you want it back."},
     "research_summary": {"ar": "📌 الملخص:\n{body}", "en": "📌 Summary:\n{body}"},
     "research_sources": {"ar": "📎 المصادر:", "en": "📎 Sources:"},
     "research_no_summary": {"ar": "ما قدرت ألخص النتائج بشكل واضح حالياً.",

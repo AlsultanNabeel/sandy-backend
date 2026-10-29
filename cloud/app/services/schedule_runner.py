@@ -197,6 +197,11 @@ def _fire(doc: Dict[str, Any], uid: str, now: datetime) -> Tuple[bool, str]:
     late = _aware(doc["fire_at"]) < now - timedelta(minutes=LOOKBACK_MIN)
     if doc.get("migrated_from") and late:
         return True, ""
+    if kind == "task":
+        # Its own work, and its own failures (`brain/task_runner.py`): the row moves on.
+        from app.brain import task_runner
+        task_runner.run(doc, uid)
+        return True, ""
     if kind == "scene":
         # Import here: scene_store pulls in the device/MQTT stack (C9).
         from app.features.scene_store import _actuate
