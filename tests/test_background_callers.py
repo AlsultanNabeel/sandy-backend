@@ -27,3 +27,11 @@ def test_the_stm_summary(brain_db, calls):  # noqa: F811
     with active_user_profile_context(A):
         stm._summarize("t1", "userA", [{"role": "user", "content": "hi"}], "chat")
     assert calls == [{"what": "stm_summary", "user_id": "userA", "max_tokens": 200}]
+
+
+def test_a_chats_title(calls):
+    import mongomock
+
+    from app.api import conversations_api
+    conversations_api._generate_title(mongomock.MongoClient().db.c, "c1", "userA", "hi", "hello")
+    assert [(c["what"], c["user_id"], c["max_tokens"]) for c in calls] == [("title", "userA", 20)]
