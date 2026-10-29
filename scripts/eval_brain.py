@@ -80,9 +80,12 @@ if __name__ == "__main__":
         os.environ["SANDY_RESPONSES_DEPLOYMENT"] = ARGS.model or os.environ.get(
             "SANDY_RESPONSES_DEPLOYMENT", "")
         os.environ["SANDY_REASONING_EFFORT"] = ARGS.reasoning
-        os.environ["SANDY_FLAGS"] = json.dumps({"responses_api": ["eval"]})
+        os.environ["SANDY_FLAGS"] = json.dumps({"responses_api": ["eval"], "tasks": ["eval"]})
     elif ARGS.model:
         os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT"] = ARGS.model
+    if ARGS.api != "responses":
+        # The tasks' cases need their switch on for the run's account, as for the owner's.
+        os.environ["SANDY_FLAGS"] = json.dumps({"tasks": ["eval"]})
 
 import mongomock  # noqa: E402
 
@@ -131,6 +134,15 @@ def _setup(steps: List[Dict[str, Any]]) -> None:
             items.add(s["item"]["list"], s["item"]["text"], s["item"].get("data"))
         elif "entry" in s:
             entries.add(s["entry"]["kind"], s["entry"]["text"], s["entry"].get("data"))
+        elif "task" in s:
+            from datetime import datetime, timedelta, timezone
+
+            from app.blocks import tasks
+            spec = {"instructions": s["task"]["title"], "notify_when": "something new",
+                    "probe": {"tool": "web_search", "args": {"query": s["task"]["title"]}},
+                    "tools": ["web_search"], "lang": "ar", "urgent": False}
+            tasks.add(s["task"]["title"], spec, every_minutes=s["task"].get("every", 60),
+                      first_at=datetime.now(timezone.utc) + timedelta(hours=1))
         elif "reminder" in s:
             from datetime import datetime, timedelta, timezone
             at = datetime.now(timezone.utc) + timedelta(hours=s["reminder"].get("in_hours", 3))
@@ -186,6 +198,21 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
             bad.append(f"ما انحفظ إشي من نوع {want['kind']}")
         elif "amount" in want and (rows[0].get("data") or {}).get("amount") != want["amount"]:
             bad.append(f"المبلغ {(rows[0].get('data') or {}).get('amount')} مش {want['amount']}")
+    if "task" in step or step.get("no_task"):
+        from app.blocks import tasks
+        running = tasks.running()
+        if step.get("no_task") and running:
+            bad.append(f"في مهمة وما لازم: {[r.get('text') for r in running]}")
+        if "task" in step:
+            want, row = step["task"], (running[0] if running else None)
+            if row is None:
+                bad.append("ما انعملت مهمة")
+            elif want.get("check") and (row.get("payload") or {}).get("probe", {}).get("tool") != want["check"]:
+                bad.append(f"فحص المهمة {(row.get('payload') or {}).get('probe')}")
+            elif want.get("every") and not str(row.get("recurrence") or "").endswith(f"INTERVAL={want['every']}"):
+                bad.append(f"المهمة {row.get('recurrence')} مش كل {want['every']} دقيقة")
+            elif "paused" in want and (row.get("status") == "paused") != want["paused"]:
+                bad.append(f"المهمة {row.get('status')}")
     if step.get("pending") is True and not state.get("pending_state"):
         bad.append("ما استنّت تأكيد")
     if step.get("pending") is False and state.get("pending_state"):

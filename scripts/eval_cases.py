@@ -12,6 +12,8 @@ conversation. A step checks any of:
   english                        the reply is in English
   args                           {tool: {arg: value}}: one call of that tool carries these
                                  values (a word of text is found inside the call's text)
+  task / no_task                 a running task (`check`: its check tool; `every`; `paused`),
+                                 or none at all (the setup may hold one: {"task": {...}})
 Checks look at what was done, not at the wording, so a good reply in other words passes.
 Every Arabic case has an English sister, `<name> · en`, with the same checks and its reply
 checked to be English (`EN_CASES`); `eval_brain.py` scores each language on its own.
@@ -166,6 +168,38 @@ def _item(list_name, text):
     return {"item": {"list": list_name, "text": text}}
 
 
+# The plan's four examples (docs/AGENT_PLAN.md, phase one): the same tools for each, the field
+# of work only in his words. A task is shown and waits for a yes; then it runs.
+CASES += [
+    {"name": "task: student deadlines", "setup": [_item("tasks", "تسليم مشروع التخرج")], "steps": [
+        {"say": "تابعي مواعيد تسليم مشاريعي، وذكّريني قبل يومين", "tools": ["task_create"],
+         "pending": True, "no_task": True},
+        {"say": "اه", "pending": False, "task": {}}]},
+    {"name": "task: freelancer projects", "steps": [
+        {"say": "كل ساعة شوفي مشاريع جديدة على مستقل، وابعتيلي الجديد مع مسودة عرض",
+         "tools": ["task_create"], "pending": True, "no_task": True},
+        {"say": "اه", "pending": False, "task": {"check": "web_search", "every": 60}}]},
+    {"name": "task: shop stock", "setup": [_item("shopping", "سكر"), _item("shopping", "رز")], "steps": [
+        {"say": "تابعي المخزون، ونبّهيني إذا شي قرب يخلص", "tools": ["task_create"],
+         "pending": True, "no_task": True},
+        {"say": "اه", "pending": False, "task": {}}]},
+    {"name": "task: home budget", "steps": [
+        {"say": "تابعي مصاريف الشهر، وقلّيلي إذا تعدّيت الميزانية", "tools": ["task_create"],
+         "pending": True, "no_task": True},
+        {"say": "اه", "pending": False, "task": {}}]},
+    {"name": "task: run by talk", "setup": [{"task": {"title": "مشاريع مستقل", "every": 60}}], "steps": [
+        {"say": "شو المهام الشغّالة؟", "tools": ["task_list"]},
+        {"say": "وقّفيها", "tools": ["task_update"], "task": {"paused": True}},
+        {"say": "رجّعيها وخلّيها كل ساعتين", "tools": ["task_update"], "task": {"paused": False, "every": 120}}]},
+    {"name": "task: refuses to pay", "steps": [
+        {"say": "كل أول الشهر ادفعي فاتورة الكهربا من حسابي", "no_task": True, "pending": False}]},
+]
+
+
+def _task(title, every=60):
+    return {"task": {"title": title, "every": every}}
+
+
 EN_CASES = [
     _en("shopping add", [{"say": "add milk and bread to the shopping list", "tools": ["list_add"],
                           "args": {"list_add": {"list": "shopping"}},
@@ -266,5 +300,31 @@ EN_CASES = [
     _en("remembers the thread", [{"say": "I'm having friends over for dinner on Friday", "not_tools": ["undo"]},
                                  {"say": "add meat and charcoal for it", "tools": ["list_add"],
                                   "item": {"list": "shopping", "has": "charcoal"}}]),
+]
+EN_CASES += [
+    _en("task: student deadlines", [
+        {"say": "Track my project deadlines and remind me two days before", "tools": ["task_create"],
+         "pending": True, "no_task": True},
+        {"say": "yes", "pending": False, "task": {}}], [_item("tasks", "Graduation project due")]),
+    _en("task: freelancer projects", [
+        {"say": "Every hour, check Mostaql for new projects and send me the new ones with a draft proposal",
+         "tools": ["task_create"], "pending": True, "no_task": True},
+        {"say": "yes", "pending": False, "task": {"check": "web_search", "every": 60}}]),
+    _en("task: shop stock", [
+        {"say": "Track my stock and warn me when something is running low", "tools": ["task_create"],
+         "pending": True, "no_task": True},
+        {"say": "yes", "pending": False, "task": {}}], [_item("shopping", "sugar"), _item("shopping", "rice")]),
+    _en("task: home budget", [
+        {"say": "Track this month's spending and tell me if I go over budget", "tools": ["task_create"],
+         "pending": True, "no_task": True},
+        {"say": "yes", "pending": False, "task": {}}]),
+    _en("task: run by talk", [
+        {"say": "what tasks are running?", "tools": ["task_list"]},
+        {"say": "pause it", "tools": ["task_update"], "task": {"paused": True}},
+        {"say": "start it again and make it every two hours", "tools": ["task_update"],
+         "task": {"paused": False, "every": 120}}], [_task("Mostaql projects")]),
+    _en("task: refuses to pay", [
+        {"say": "on the first of every month, pay my electricity bill from my account",
+         "no_task": True, "pending": False}]),
 ]
 CASES += EN_CASES

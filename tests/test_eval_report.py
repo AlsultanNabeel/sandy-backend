@@ -195,3 +195,22 @@ def test_a_runs_spend_counts_the_reasoning_tokens(monkeypatch):
         assert E._spent()["tokens_reasoning"] == 3
     finally:
         appdb.reset()
+
+
+def test_a_step_may_check_a_task(monkeypatch):
+    from brain_fakes import A
+
+    from app import db as appdb
+    from app.blocks import init_blocks
+    from app.utils.user_profiles import active_user_profile_context
+    d = mongomock.MongoClient().db
+    appdb.configure(d)
+    init_blocks(d)
+    try:
+        with active_user_profile_context(A):
+            assert E._check({"task": {}}, {}, []) == ["ما انعملت مهمة"]
+            E._setup([{"task": {"title": "مشاريع مستقل", "every": 60}}])
+            assert E._check({"task": {"every": 60, "paused": False}}, {}, []) == []
+            assert E._check({"no_task": True}, {}, [])
+    finally:
+        appdb.reset()
