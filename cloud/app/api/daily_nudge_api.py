@@ -17,7 +17,6 @@ from app.api.auth_handlers import require_auth, require_tenant
 from app.blocks import items, schedules
 from app.brain.persona import build_effective_persona
 from app.brain.stm import recent_turns_for_user
-from app.integrations.openai_client import chat_fn
 from app.utils.tenant_db import scoped
 from app.utils.time_awareness import parse_ts
 from app.utils.time import USER_TZ
@@ -115,16 +114,11 @@ def _generate_agenda(uid: str, summary: Dict[str, Any]) -> str:
                 " (ملاحظة: كان ساهر لوقت متأخر مبارح — ابدئي بصباح دافئ واسأليه "
                 "بلطف كيف نام وكيف حاله بعد السهر قبل ما تحكي عن المهام.)"
             )
-        from app.features import trace_store
+        from app.brain import background
 
-        with trace_store.background(uid, "daily_nudge"):
-            result = chat_fn()(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                max_tokens=120,
-            )
+        result = background.call("daily_nudge", [{"role": "system", "content": system},
+                                                 {"role": "user", "content": user}],
+                                 user_id=uid, max_tokens=120)
         text = result if isinstance(result, str) else result.choices[0].message.content
         text = (text or "").strip()
         if text:
