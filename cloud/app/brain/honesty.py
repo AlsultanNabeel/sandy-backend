@@ -9,7 +9,8 @@ tool of its kind that worked in the same turn. «Done» names no kind: any tool 
 backs it.
 
 Chat replaces the sentence that claims it with what the tools really said; voice, whose
-words are already heard, is told to put it right at once (`VOICE_CORRECTION`).
+words are already heard, is told to put it right at once (`voice_correction`, in
+the language the turn was spoken in).
 """
 
 from __future__ import annotations
@@ -71,11 +72,6 @@ BACKED_BY: Dict[str, Set[str]] = {
     "add": {"list_add", "remember", "schedule", "undo"},
 }
 _ANY = "done"
-
-VOICE_CORRECTION = ("[تنبيه من النظام، مش من المستخدم: قلتي إنك {what} بس ما في أداة نفّذت هالإشي "
-                    "بهالدور، يعني ما انعمل. صحّحي حالك هلّق بجملة قصيرة: قوليله إنه ما انعمل لسا، "
-                    "واسأليه إذا بدّه تعمليه، أو نفّذيه بالأداة إذا طلبه.]")
-_SAID = {"delete": "حذفتي", "cancel": "لغيتي", "edit": "عدّلتي", "add": "ضفتي", "done": "خلّصتي"}
 
 
 def _norm(text: str) -> List[str]:
@@ -166,10 +162,16 @@ def correct(text: str, worked: Iterable[str], results: List[Tuple[str, Dict[str,
     return honest(text, worked, results, question)
 
 
-def voice_correction(text: str, worked: Iterable[str]) -> Optional[str]:
-    """What she is told when what she just said claims a write no tool of the turn did."""
+def voice_correction(text: str, worked: Iterable[str],
+                     language: Optional[str] = None) -> Optional[str]:
+    """What she is told when what she just said claims a write no tool of the turn did, in
+    ``language`` (the turn's spoken one; else the current)."""
     missing = unbacked(text, worked)
     if not missing:
         return None
     logger.warning("[honesty] voice reply claimed %s with no tool behind it", sorted(missing))
-    return VOICE_CORRECTION.format(what=" و".join(_SAID[k] for k in sorted(missing)))
+    with lang.using(language or lang.current()):
+        said = [lang.say(f"said_{k}") for k in sorted(missing)]
+        what = said[0] if len(said) == 1 else lang.say(
+            "names_last", names=lang.say("sep").join(said[:-1]), last=said[-1])
+        return lang.say("voice_correction", what=what)

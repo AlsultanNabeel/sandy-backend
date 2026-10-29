@@ -321,7 +321,7 @@ def _system_instruction_body(chat_id: str, gate_on: bool) -> str:
         "• بعد ما ترجع نتيجة الأداة: تأكيد قصير جداً بصيغة الماضي، زي «هيني طفّيت» "
         "أو «نوّرت الغرفة». لازم يعكس النجاح أو الفشل الحقيقي اللي رجعتك الأداة.\n"
         "• **الإقرار الأول مش تأكيد تنفيذ.** «هلأ بطفّي» معناها إنك سمعتِ وبتحاولي، "
-        "مش إنه صار. إذا رجعت النتيجة تقول [فشل التنفيذ] أو أي خطأ، قولي إنه ما زبط "
+        "مش إنه صار. إذا رجعت النتيجة تقول [فشل التنفيذ] أو [failed] أو [لم يُنفَّذ] أو [not done] أو أي خطأ، قولي إنه ما زبط "
         "بصراحة — «ما قدرت أطفّيها» — وما تحكي أبداً إنك نفّذتِ. "
         "**ممنوع منعاً باتاً تقولي إنك عملتِ إشي ما رجعت الأداة إنه نجح.** "
         "المستخدم بيصدّقك وبيمشي، وبيكتشف بعد ساعة إنه ما صار — وهاد أسوأ من "
@@ -395,14 +395,17 @@ def _build_live_tools(types, end_call: bool = False) -> List:
 
 
 def _dispatch_tool(name: str, args: Dict[str, Any], user_id: str = "",
-                   turn: str = "", trace: Optional[Any] = None) -> Dict[str, Any]:
+                   turn: str = "", trace: Optional[Any] = None,
+                   language: str = "") -> Dict[str, Any]:
     """Run one tool call in the caller's tenant (runs via run_in_executor); ``turn`` groups
-    the call's turn's writes for undo, and ``trace`` (`trace_store.Trace`) is the turn's
-    trace the call is kept in.
+    the call's turn's writes for undo, ``trace`` (`trace_store.Trace`) is the turn's
+    trace the call is kept in, and ``language`` the one the turn is spoken in, which its
+    replies come in (`lang`).
 
     ``user_id`` is passed in because the pool thread lacks the session context;
     without it every scoped read/write goes nowhere.
     """
+    from app.brain import lang
     from app.brain.voice import dispatch
     from app.features import trace_store
     from app.utils.user_profiles import active_user_profile_context
@@ -410,9 +413,10 @@ def _dispatch_tool(name: str, args: Dict[str, Any], user_id: str = "",
     # Always, even when empty: a pool thread keeps its context between jobs.
     set_voice_identity(user_id)
     chat_id = _stm_chat_id() or user_id
-    try:
-        with active_user_profile_context(_voice_profile(chat_id)), trace_store.using(trace):
-            return dispatch(name, args, chat_id, turn)
-    except Exception as exc:  # noqa: BLE001 — one tool never ends the call
-        logger.error("[voice_ws] tool %s failed: %s", name, exc, exc_info=True)
-        return {"handled": False, "reply": f"[فشل التنفيذ] ما قدرت أنفّذ {name}."}
+    with lang.using(language or lang.AR):
+        try:
+            with active_user_profile_context(_voice_profile(chat_id)), trace_store.using(trace):
+                return dispatch(name, args, chat_id, turn)
+        except Exception as exc:  # noqa: BLE001 — one tool never ends the call
+            logger.error("[voice_ws] tool %s failed: %s", name, exc, exc_info=True)
+            return {"handled": False, "reply": lang.say("voice_tool_failed", name=name)}

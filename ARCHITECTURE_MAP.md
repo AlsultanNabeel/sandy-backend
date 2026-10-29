@@ -175,7 +175,7 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    (`ctx.worked`, kept by `tools.execute`). The sentence that claims it is taken out and
    what the tools really said goes in its place («ما لقيت…»), or `NOTHING_DONE`; a held
    question stays last. On the call her words are heard already, so at the turn's end
-   (`session._handle`, `_turn_worked`) she is told to put it right (`VOICE_CORRECTION`, a
+   (`session._handle`, `_turn_worked`) she is told to put it right (`honesty.voice_correction`, in the turn's spoken language, a
    turn of its own that she answers). The prompt's own rule is no longer the guarantee.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
    is English when it has more Latin letters than Arabic ones; one with none («2», «👍») or
@@ -297,8 +297,10 @@ first question asking for one, a «which one?» waits behind what is already ask
 
 **On the voice path everything that did not happen is marked**
 (`voice._tagged`), because an unmarked refusal is exactly what Gemini reads as
-success and confirms to the user: `[فشل التنفيذ]` for breakage, `[لم يُنفَّذ]`
-for a refusal. A held action is "not done yet", neither.
+success and confirms to the user: `[فشل التنفيذ]` / `[failed]` for breakage, `[لم يُنفَّذ]` /
+`[not done]` for a refusal. Every reply a voice tool gives is a `lang` phrase in the turn's
+spoken language: what was heard of the turn so far, else the last turn's, else the user's
+own (`session._spoken_in`, `live_state["lang"]`, passed to `_dispatch_tool(language=…)`). A held action is "not done yet", neither.
 
 ### 2.5 Memory
 

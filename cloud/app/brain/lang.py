@@ -213,6 +213,46 @@ PHRASES = {
     "nudge_day": {"ar": "{greet} {tone} عندك اليوم {tasks} مهمة و{reminders} تذكير — أهمها: {lead}.",
                   "en": "{greet} {tone} You have {tasks} tasks and {reminders} reminders today — first: {lead}."},
     "nudge_write_in": {"ar": "اكتبيه بالعربي بلهجتك.", "en": "Write it in English only."},
+    # The call (`brain/voice.py`, `voice_ws`): what the live model reads back from a tool,
+    # tagged when it did not happen (`[failed]`, `[not done]`), in the speaker's language.
+    "voice_failed": {"ar": "[فشل التنفيذ] {text}", "en": "[failed] {text}"},
+    "voice_tool_broke": {"ar": "الأداة ما اشتغلت.", "en": "The tool didn't work."},
+    "voice_tool_failed": {"ar": "[فشل التنفيذ] ما قدرت أنفّذ {name}.", "en": "[failed] I couldn't run {name}."},
+    "voice_not_done": {"ar": "[لم يُنفَّذ] {text}", "en": "[not done] {text}"},
+    "voice_nothing_held": {"ar": "ما في إشي مستني تأكيد.", "en": "Nothing is waiting for a yes."},
+    "voice_unclear_twice": {"ar": "[لم يُنفَّذ] ما فهمت جوابه مرتين، فما عملت: {summary}.",
+                            "en": "[not done] Their answer wasn't clear twice, so I didn't {summary}."},
+    "voice_ask_again": {"ar": "ما فهمت اه ولا لأ — اسأليه مرة تانية: {question}",
+                        "en": "It wasn't clear if that was a yes or a no — ask once more: {question}"},
+    "voice_unclear_pick_twice": {"ar": "[لم يُنفَّذ] ما فهمت أي وحدة مرتين، فما عملت إشي.",
+                                 "en": "[not done] Which one wasn't clear twice, so nothing was done."},
+    "voice_ask_pick_again": {"ar": "ما فهمت أي وحدة — اسأليه مرة تانية:\n{question}",
+                             "en": "It wasn't clear which one — ask once more:\n{question}"},
+    "voice_said_more": {"ar": "قال كمان إشي بعد جوابه: نفّذيه هلأ.",
+                        "en": "They asked for more after the answer: do it now."},
+    "voice_said_more_pick": {"ar": "قال كمان إشي بعد اختياره: نفّذيه هلأ.",
+                             "en": "They asked for more after choosing: do it now."},
+    "voice_still_waiting": {"ar": "لسا ما نفّذت — اسأليه:\n{question}",
+                            "en": "Not done yet — ask them:\n{question}"},
+    "voice_gate_not_ready": {"ar": "[لم يُنفَّذ] التحقق من الصوت مش جاهز هلّق. لا تنفّذي الأمر — قولي "
+                                   "إنك مش قادرة تتأكدي من صوته هلّق، وخلّيه يجرّب كمان شوي.",
+                             "en": "[not done] Voice checking isn't ready right now. Don't run it — say "
+                                   "you can't confirm their voice right now, and to try again shortly."},
+    "voice_gate_refused": {"ar": "ما قدرت أتأكد إنه صوتك. لا تنفّذي الأمر — اسألي بلطف: مين معي؟",
+                           "en": "I couldn't confirm it's their voice. Don't run it — kindly ask who is speaking."},
+    # The honesty check on the call: what she is told when she said she did what no tool did.
+    "voice_correction": {"ar": "[تنبيه من النظام، مش من المستخدم: قلتي إنك {what} بس ما في أداة نفّذت "
+                               "هالإشي بهالدور، يعني ما انعمل. صحّحي حالك هلّق بجملة قصيرة: قوليله "
+                               "إنه ما انعمل لسا، واسأليه إذا بدّه تعمليه، أو نفّذيه بالأداة إذا طلبه.]",
+                         "en": "[A note from the system, not the user: you said you {what}, but no tool "
+                               "did that in this turn, so it did not happen. Put it right now in one "
+                               "short sentence: tell them it isn't done yet and ask if they want it, or "
+                               "do it with the tool if they asked.]"},
+    "said_delete": {"ar": "حذفتي", "en": "deleted it"},
+    "said_cancel": {"ar": "لغيتي", "en": "cancelled it"},
+    "said_edit": {"ar": "عدّلتي", "en": "changed it"},
+    "said_add": {"ar": "ضفتي", "en": "added it"},
+    "said_done": {"ar": "خلّصتي", "en": "did it"},
     "nothing_done": {"ar": "لسا ما عملت هالإشي فعلياً. احكيلي مرة تانية شو بدك بالزبط وبعمله هلّق.",
                      "en": "I haven't actually done that yet. Tell me once more exactly what you "
                            "want and I'll do it now."},

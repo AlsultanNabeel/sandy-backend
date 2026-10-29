@@ -71,7 +71,7 @@ from app.api.voice_ws.memory import (
     set_voice_identity,
 )
 from app.api.metering import voice_seconds_left
-from app.brain import honesty
+from app.brain import honesty, lang
 from app.brain.voice import END_CALL
 from app.features import trace_store
 from app.features.usage_store import add_voice_seconds
@@ -593,12 +593,14 @@ async def _live_session(ws, remote: str) -> None:
         _t_seed = time.monotonic()
         # The speaker gate too: a voiceprint lookup, read once here and handed down,
         # never again on the loop that relays audio.
-        _label, _base, _recent, gate_on, _left = await asyncio.gather(
+        _label, _base, _recent, gate_on, _left, live_state["lang"] = await asyncio.gather(
             _loop.run_in_executor(None, resolve_speaker_label, _who),
             _loop.run_in_executor(None, _build_cached_instruction, _who, _channel),
             _loop.run_in_executor(None, load_recent_turns, _who),
             _loop.run_in_executor(None, speaker_gate, _who, _channel),
             _loop.run_in_executor(None, voice_seconds_left, _who),
+            # The language a turn with nothing heard yet is answered in, till one is heard.
+            _loop.run_in_executor(None, lang.for_user, _who),
         )
         if _left <= 0:
             # The day's minutes are spent (a robot's are its owner's).
@@ -1297,6 +1299,14 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
     _trace = {"t": trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
                                      turn_id=_turn_id["id"])}
 
+    def _spoken_in(heard: str) -> str:
+        """The turn's language: what was heard of it, else the last turn's, else the user's."""
+        return lang.of(heard, fallback=(live_state or {}).get("lang"))
+
+    def _in_turn_language(key: str) -> str:
+        with lang.using(_spoken_in("".join(_user_buf))):
+            return lang.say(key)
+
     # `_first`: first message of any kind from Gemini; `_audio_out`: what reached the speaker.
     _seen = {"any": False, "user_text": False, "audio_out": 0}
     # The mood her face shows for this reply (robot only), sent again only when it changes.
@@ -1433,6 +1443,9 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
             # their own spaces (this text is stored as memory).
             user_text = "".join(_user_buf).strip()
             sandy_text = "".join(_sandy_buf).strip()
+            spoken = _spoken_in(user_text)
+            if live_state is not None and user_text:
+                live_state["lang"] = spoken
             invented = _holding() and noise.is_invention(user_text)
             if invented:
                 # Noise the recogniser wrote as a phrase: her answer is never played, the
@@ -1483,7 +1496,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     request=user_text, reply=sandy_text, routed_by="voice"))
             _user_buf.clear()
             _sandy_buf.clear()
-            fix = honesty.voice_correction(sandy_text, _turn_worked)
+            fix = honesty.voice_correction(sandy_text, _turn_worked, spoken)
             _turn_worked.clear()
             _turn_id["id"] = uuid.uuid4().hex
             _trace["t"] = trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
@@ -1533,27 +1546,21 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         if verified is None:
                             fn_responses.append(types.FunctionResponse(
                                 id=fc.id, name=fc.name,
-                                response={"output": (
-                                    "[لم يُنفَّذ] التحقق من الصوت مش جاهز هلّق. لا تنفّذي "
-                                    "الأمر — قولي إنك مش قادرة تتأكدي من صوته هلّق، "
-                                    "وخلّيه يجرّب كمان شوي."
-                                )},
+                                response={"output": _in_turn_language("voice_gate_not_ready")},
                             ))
                             continue
                         if not verified:
                             fn_responses.append(types.FunctionResponse(
                                 id=fc.id, name=fc.name,
-                                response={"output": (
-                                    "ما قدرت أتأكد إنه صوتك. لا تنفّذي الأمر — "
-                                    "اسألي بلطف: مين معي؟"
-                                )},
+                                response={"output": _in_turn_language("voice_gate_refused")},
                             ))
                             continue
                     # Bulk changes (more than five rows) hold for `confirm` inside the brain.
                     # The identity travels with the tool call.
                     result = await loop.run_in_executor(
                         tools_pool, _dispatch_tool, fc.name,
-                        dict(fc.args or {}), get_voice_identity(), _turn_id["id"], _trace["t"]
+                        dict(fc.args or {}), get_voice_identity(), _turn_id["id"], _trace["t"],
+                        _spoken_in("".join(_user_buf))
                     )
                     if result.get("ok"):
                         _turn_worked.append(fc.name)
