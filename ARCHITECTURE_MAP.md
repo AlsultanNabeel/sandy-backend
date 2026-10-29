@@ -183,7 +183,8 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    («turn off the AC in an hour» → schedule, then off now) are refused, `kept_corrected` /
    `set_for_later`; `ctx.calls` holds each call's arguments.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
-   is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»),
+   is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»;
+   letters only, `lang.LETTERS`: «؟» or «٢٢» names no language),
    else English when it has Latin letters («add «حليب» to my list»); one with none («2», «👍») or
    only «ok» keeps the conversation's. Every sentence the server says itself (tool replies,
    held questions and summaries, errors, the honesty check's) is a phrase in both languages

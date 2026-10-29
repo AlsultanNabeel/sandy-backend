@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 _QUOTED = re.compile(r"«[^»]*»")
 _LINK = re.compile(r"https?://\S+|www\.\S+|\S+@\S+\.\S+")
-# Letters only: Arabic punctuation («،», «؟») and digits («٥٠») name no language.
-_ARABIC = re.compile(r"[ء-يٱ-ۓ]")
-_ARABIC_WORD = re.compile(r"[ء-يٱ-ۓ]+")
+# Letters only (`lang.LETTERS`): Arabic punctuation and digits («٥٠») name no language.
+_ARABIC = re.compile(f"[{lang.LETTERS}]")
+_ARABIC_WORD = re.compile(f"[{lang.LETTERS}]+")
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
-_ARABIC_RUN = re.compile(r"[ء-يٱ-ۓ]+(?:\s+[ء-يٱ-ۓ]+)*")
+_ARABIC_RUN = re.compile(f"[{lang.LETTERS}]+(?:\\s+[{lang.LETTERS}]+)*")
 _LATIN_RUN = re.compile(r"[A-Za-z][A-Za-z0-9'’-]*(?:\s+[A-Za-z0-9][A-Za-z0-9'’-]*)*")
 
 # Handed over as text to translate: asked to «rewrite this reply», the model answered the

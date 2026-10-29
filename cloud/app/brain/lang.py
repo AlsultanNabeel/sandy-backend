@@ -20,7 +20,9 @@ from typing import Iterator, Optional
 
 AR, EN = "ar", "en"
 
-_ARABIC = re.compile(r"[؀-ۿ]")
+# Arabic letters only: its punctuation («،», «؟») and digits («٢٢») name no language.
+LETTERS = "ء-يٱ-ۓ"
+_ARABIC = re.compile(f"[{LETTERS}]")
 _LATIN = re.compile(r"[A-Za-z]")
 # A name the message quotes: «حليب», "milk", “milk”.
 _QUOTED = re.compile(r"«[^»]*»|\"[^\"]*\"|“[^”]*”")

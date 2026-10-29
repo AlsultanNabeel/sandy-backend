@@ -488,3 +488,20 @@ def test_the_rewrite_hands_the_reply_over_as_text_to_translate(brain_db, message
     _turn(model, message)
     system, user = model.seen[1][0]["content"], model.seen[1][-1]["content"]
     assert word in system and user == f"{head}\n\n{first}"
+
+
+# Arabic punctuation and digits name no language: one «؟» or «٢٢» in an English message
+# made the turn Arabic (review of 29 Oct 2026). Letters only, as the language check reads.
+@pytest.mark.parametrize("text, want", [
+    ("what time is my meeting؟", "en"),
+    ("set the AC to ٢٢", "en"),
+    ("ok، thanks", "en"),
+    ("شو الساعة؟", "ar"),
+    ("خلّيه ٢٢", "ar"),
+])
+def test_arabic_punctuation_and_digits_name_no_language(text, want):
+    assert lang.of(text) == want, text
+
+
+def test_a_message_of_arabic_digits_alone_keeps_the_conversations_language():
+    assert lang.of("٢٢", fallback="en") == "en" and lang.of("؟", fallback="en") == "en"
