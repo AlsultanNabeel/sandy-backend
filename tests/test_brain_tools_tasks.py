@@ -108,3 +108,11 @@ def test_it_is_run_by_talk(brain_db, on, language):  # noqa: F811
     with active_user_profile_context(A):
         assert tasks.running() == []
     assert _run("task_list", language)["reply"] == lang.PHRASES["task_none"][language]
+
+
+def test_the_tasks_rule_is_in_the_prompt_only_with_the_switch_on(brain_db, monkeypatch):  # noqa: F811
+    from app.brain import context
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
+    with active_user_profile_context(A):
+        assert context.TASKS_RULE.strip() in context.build_system("userA", "hi")
+        assert context.TASKS_RULE.strip() not in context.build_system("userB", "hi")

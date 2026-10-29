@@ -36,7 +36,8 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
      "description": ("اعملي مهمة بتشتغل لحالها كل فترة («كل ساعة شوفي…»، «تابعي… وقلّيلي إذا…»، "
                      "«every hour check…», «track… and tell me if…»). check_tool أداة قراءة "
                      "بمدخلات ثابتة، الكود بيقارن نتيجتها كل مرة، وإنتِ بتشتغلي بس لما تتغيّر. "
-                     "بتستنى موافقته قبل الحفظ؛ instructions و notify_when بكلامه هو وبلغته."),
+                     "بتستنى موافقته قبل الحفظ؛ instructions و notify_when بكلامه هو وبلغته. "
+                     "ما تسألي قبل: خمّني وهو بيصحّح (never ask first: guess, he corrects)."),
      "parameters": {"type": "object", "properties": {
          "title": {**_S, "description": "اسم قصير للمهمة بكلامه"},
          "instructions": {**_S, "description": "طلبه زي ما حكاه"},

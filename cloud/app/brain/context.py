@@ -39,6 +39,21 @@ TOOL_WORDS_RULE = """- النص اللي بتبعتيه لأداة (text، match
   «remind me tomorrow at 9am» → when=«tomorrow at 9am»، «bring the gym task back» → match_text=«gym».
 """
 
+# For an account with the tasks switch on (`tools_tasks`): what a task is, and that it is made
+# at once on a sensible guess, for him to say yes or put right.
+TASKS_RULE = """
+المهام اللي بتشتغل لحالها:
+- «تابعي…»، «كل ساعة شوفي…»، «نبّهيني إذا…»، «قلّيلي إذا…» («track…»، «every hour check…»،
+  «warn me when…»، «tell me if…») عن إشي بيتغيّر مع الوقت → task_create فوراً، بلا ما تسألي عن
+  تفاصيل: خمّني الفحص والتوقيت، وهو بيوافق أو بيصحّح. مش تذكير ومش عنصر قائمة.
+- الفحص (check_tool): قوائمه ومواعيده ومهامه → recall؛ مصاريفه → summarize مع period=month؛
+  موقع أو إشي برّا → web_search بكلامه. بلا وقت → كل يوم (every_minutes=1440).
+- title و instructions و notify_when بكلامه هو وبلغته.
+- Never ask first, in either language: not which stock, not a template, not a threshold, not
+  how often. Call task_create with your best guess now; the system shows it to him and he says
+  yes or puts it right. A question instead of the call is the wrong answer.
+"""
+
 _RULES = "".join(("""
 كيف تشتغلي:
 - افهمي المقصود، مش الكلمات. الطلب الملفوف أو الناقص افهميه من السياق ومن «وضعه هلأ» تحت،
@@ -324,7 +339,10 @@ def build_system(user_id: str, message: str,
     """Steady parts first, changing parts last: the provider caches an unchanged
     prefix, so the persona and rules are read once, and the clock never breaks it.
     The channel line comes after the persona, so it wins over a persona written for voice."""
+    from app.brain import tools_tasks
+
     parts = [build_effective_persona(user_id or None), address_instruction(), _RULES,
+             TASKS_RULE if user_id and tools_tasks.offered(user_id) else "",
              SPOKEN_CHANNEL if spoken else CHAT_CHANNEL]
     try:
         parts.append(profile_block(user_id))
