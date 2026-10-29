@@ -80,6 +80,8 @@ KEPT = {
     "/api/scheduled-tasks": {"GET"},
     "/api/scheduled-tasks/<task_id>": {"DELETE", "PATCH"},
     "/api/scheduled-tasks/<task_id>/preview": {"POST"},
+    "/api/notify/task/open": {"GET"},
+    "/api/notify/task/stop": {"GET", "POST"},
     "/api/scheduled-tasks/<task_id>/results": {"GET"},
     "/api/scheduled-tasks/<task_id>/seen": {"POST"},
     "/api/scheduled-tasks/<task_id>/pause": {"POST"},

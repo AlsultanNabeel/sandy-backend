@@ -16,6 +16,9 @@
   GET    /api/notify/email                    {address, confirmed, ready}: where results go
   POST   /api/notify/email                    {address}: a link goes to it (`notify/mail.py`)
   DELETE /api/notify/email                    no more emails
+  GET    /api/notify/task/open?t=             an email's «open the task»: a page that opens the app
+  GET    /api/notify/task/stop?t=             an email's «stop the alerts»: a page with a button
+  POST   /api/notify/task/stop                {t} (the button): the task paused
   GET    /api/notify/email/confirm?t=         the link itself, opened signed out: a small page
                                                with a «Confirm» button; opening it confirms nothing
   POST   /api/notify/email/confirm            {t} (the button): confirms it, once
@@ -244,6 +247,56 @@ def register_tasks_api(app):
     def api_notify_email_forget(claims):
         mail.forget(claims.get("user_id") or "")
         return jsonify({"ok": True}), 200
+
+    def _linked_task(token: str):
+        """(account, task row) of an email's signed link, in that account; None when not ours."""
+        from app.utils.user_profiles import active_user_profile_context
+        found = mail.read_task_link(token)
+        if not found:
+            return None, None
+        uid, tid = found
+        with active_user_profile_context({"chat_id": uid, "user_id": uid, "relation": "user",
+                                          "permissions": "all"}):
+            return uid, tasks.get(tid)
+
+    @app.route("/api/notify/task/open", methods=["GET"])
+    def api_notify_task_open():
+        uid, row = _linked_task(request.args.get("t", ""))
+        if not row:
+            return _dead_link()
+        target = f"sandy://tasks/{row['id']}"
+        with lang.using(lang.for_user(uid)):
+            link = (f'<p><a href="{html.escape(target, quote=True)}">'
+                    f'{html.escape(lang.say("mail_open_task"))}</a></p>'
+                    f'<meta http-equiv="refresh" content="0;url={html.escape(target, quote=True)}">')
+            return _page(lang.say("mail_open_page"), 200, link)
+
+    @app.route("/api/notify/task/stop", methods=["GET"])
+    def api_notify_task_stop_page():
+        """Opening it pauses nothing (a mail scanner opens links): a button."""
+        token = request.args.get("t", "")
+        uid, row = _linked_task(token)
+        if not row:
+            return _dead_link()
+        with lang.using(lang.for_user(uid)):
+            form = ('<form method="post" action="/api/notify/task/stop" style="margin-top:24px">'
+                    f'<input type="hidden" name="t" value="{html.escape(token, quote=True)}">'
+                    '<button type="submit" style="font-size:18px;padding:12px 32px;border-radius:12px;'
+                    f'border:0;background:#0077B6;color:#fff">{html.escape(lang.say("mail_stop_task"))}'
+                    '</button></form>')
+            return _page(lang.say("mail_stop_page", title=row.get("text", "")), 200, form)
+
+    @app.route("/api/notify/task/stop", methods=["POST"])
+    def api_notify_task_stop():
+        from app.utils.user_profiles import active_user_profile_context
+        uid, row = _linked_task(request.form.get("t", ""))
+        if not row:
+            return _dead_link()
+        with active_user_profile_context({"chat_id": uid, "user_id": uid, "relation": "user",
+                                          "permissions": "all"}):
+            tasks.pause(row["id"])
+        with lang.using(lang.for_user(uid)):
+            return _page(lang.say("mail_stopped_page", title=row.get("text", "")), 200)
 
     @app.route("/api/notify/email/confirm", methods=["GET"])
     def api_notify_email_confirm_page():

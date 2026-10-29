@@ -159,6 +159,9 @@ struct MainTabView: View {
             // Adding anything is the ask bar on Today now.
             selection = .today
             AskBarFocus.shared.request &+= 1
+        case .scheduledTasks:
+            // Only an account the server shows the Tasks screen to.
+            if state.showsTasks { notifs.pendingRoute = .scheduledTasks }
         }
     }
 
@@ -170,6 +173,7 @@ struct MainTabView: View {
         case .future:     SchedulesView(kind: "message_to_future_self")
         case .insights:   LogView()
         case .dailyNudge: EmptyView()
+        case .scheduledTasks: ScheduledTasksView()
         }
     }
 }

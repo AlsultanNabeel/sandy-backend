@@ -244,3 +244,46 @@ def test_another_users_task_is_not_found_through_the_schedules(c):
     assert c.delete(f"/api/schedules/{tid}", headers=_h("userB")).status_code == 404
     with active_user_profile_context(A):
         assert tasks.get(tid)
+
+
+# The email's two buttons (owner, 30 Oct): «افتح المهمة» opens it in the app, «وقّف التنبيهات»
+# opens a page whose button pauses it; opening a link changes nothing (a mail scanner opens
+# them), a link is signed for its task and its account alone, and the words are his language.
+@pytest.mark.parametrize("language, open_word, stop_word", [("ar", "افتح المهمة", "وقّف التنبيهات"),
+                                                            ("en", "Open the task", "Stop the alerts")])
+def test_the_email_carries_open_and_stop_buttons(c, outbox, brain_db, monkeypatch, language,  # noqa: F811
+                                                 open_word, stop_word):
+    from types import SimpleNamespace as NS
+    c.get("/api/notify/email", headers=_h())
+    brain_db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
+    c.post("/api/notify/email", headers=_h(), json={"address": "me@example.com"})
+    token = outbox[0][2].split("t=")[1].split()[0]
+    c.post("/api/notify/email/confirm", data={"t": token})
+    sent = []
+    monkeypatch.setattr(mail, "_post", lambda to, subject, body, html="": sent.append(NS(body=body, html=html)))
+    monkeypatch.setattr(notify, "CHANNELS", [mail.send])
+    tid = _task()
+    _result(tid, "Gold is up 2%")
+    email = sent[-1]
+    assert open_word in email.html and stop_word in email.html
+    assert "/api/notify/task/open?t=" in email.body and "/api/notify/task/stop?t=" in email.body
+    stop = email.body.split("/api/notify/task/stop?t=")[1].split()[0]
+    opened = email.body.split("/api/notify/task/open?t=")[1].split()[0]
+    r = c.get(f"/api/notify/task/open?t={opened}")
+    assert r.status_code == 200 and f"sandy://tasks/{tid}" in r.get_data(as_text=True)
+    page = c.get(f"/api/notify/task/stop?t={stop}")
+    assert page.status_code == 200 and 'method="post"' in page.get_data(as_text=True)
+    with active_user_profile_context(A):
+        assert tasks.get(tid)["status"] == "pending"            # opening paused nothing
+    assert c.post("/api/notify/task/stop", data={"t": stop}).status_code == 200
+    with active_user_profile_context(A):
+        assert tasks.get(tid)["status"] == "paused"
+
+
+def test_a_forged_or_other_tasks_link_does_nothing(c):
+    tid = _task()
+    good = mail.task_link_token("userA", tid)
+    for bad in ("nope", good[:-2] + "xx", mail.task_link_token("userB", tid)):
+        assert c.post("/api/notify/task/stop", data={"t": bad}).status_code == 400
+    with active_user_profile_context(A):
+        assert tasks.get(tid)["status"] == "pending"

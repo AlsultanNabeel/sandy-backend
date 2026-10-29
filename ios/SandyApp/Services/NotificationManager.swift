@@ -73,7 +73,7 @@ extension UNUserNotificationCenter: NotificationScheduler {
 }
 
 enum NotifRoute: String, Identifiable {
-    case reminders, tasks, future, dailyNudge, insights
+    case reminders, tasks, future, dailyNudge, insights, scheduledTasks
     var id: String { rawValue }
 }
 

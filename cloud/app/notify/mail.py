@@ -191,15 +191,63 @@ def _subject(rows: List[Dict[str, Any]]) -> str:
     return lang.say("mail_results_subject", line=line, n=len(rows) - 1)
 
 
+def task_link_token(user_id: str, task_id: str) -> str:
+    """A link for one task of one account, signed: its buttons in the email. "" with no key."""
+    import base64
+    import hmac
+    from app import config
+    if not config.JWT_SECRET:
+        return ""
+    body = base64.urlsafe_b64encode(f"{user_id}:{task_id}".encode()).decode().rstrip("=")
+    sig = hmac.new(config.JWT_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{body}.{sig}"
+
+
+def read_task_link(token: str) -> Optional[tuple]:
+    """(account, task) a link names, or None for one that is not ours."""
+    import base64
+    import hmac
+    body, _, sig = str(token or "").partition(".")
+    if not body or not sig:
+        return None
+    try:
+        uid, _, tid = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)).decode().partition(":")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    good = task_link_token(uid, tid)
+    return (uid, tid) if good and hmac.compare_digest(good, token) else None
+
+
+def _links(row: Dict[str, Any]) -> Optional[tuple]:
+    """(open, stop) for a result's task, or None with no key or no address to point at."""
+    from app.utils.user_profiles import current_user_id
+    token = task_link_token(current_user_id() or "", str(row.get("task_id") or ""))
+    base = _setting("SANDY_PUBLIC_URL").rstrip("/")
+    if not token or not base:
+        return None
+    return f"{base}/api/notify/task/open?t={token}", f"{base}/api/notify/task/stop?t={token}"
+
+
 def _block(row: Dict[str, Any], titled: bool) -> str:
-    """One result: what changed, when (his clock), and how things are now."""
+    """One result: what changed, when (his clock), how things are now, and its two links."""
     from app.brain.when import local_text
     lines = [f"«{_one_line(row.get('title'))}»"] if titled else []
     lines.append(str(row.get("body") or "").strip())
     lines.append(lang.say("mail_at", time=local_text(row.get("at"))))
     if row.get("state"):
         lines.append(lang.say("mail_now", state=row["state"]))
+    links = _links(row)
+    if links:
+        lines += [f"{lang.say('mail_open_task')}: {links[0]}", f"{lang.say('mail_stop_task')}: {links[1]}"]
     return "\n".join(lines)
+
+
+def _button(href: str, label: str, filled: bool) -> str:
+    colors = (f"background:{_ACCENT};color:#fff" if filled
+              else f"background:#fff;color:{_ACCENT};border:1px solid {_ACCENT}")
+    return (f'<a href="{html.escape(href, quote=True)}" style="display:inline-block;{colors};'
+            f'text-decoration:none;border-radius:10px;padding:8px 14px;margin:10px 0 0 6px;'
+            f'font-size:14px">{html.escape(label)}</a>')
 
 
 def _rtl(text: str) -> str:
@@ -221,6 +269,14 @@ def _guillemets(text: str) -> str:
 _ACCENT, _DEEP = "#0077B6", "#005B8F"
 
 
+def _buttons(row: Dict[str, Any]) -> str:
+    links = _links(row)
+    if not links:
+        return ""
+    return (f'<div>{_button(links[0], lang.say("mail_open_task"), True)}'
+            f'{_button(links[1], lang.say("mail_stop_task"), False)}</div>')
+
+
 def _html(rows: List[Dict[str, Any]], titled: bool) -> str:
     """The same email, simple and tidy in Sandy's colours: a card per result."""
     from app.brain.when import local_text
@@ -238,7 +294,8 @@ def _html(rows: List[Dict[str, Any]], titled: bool) -> str:
             f'<div style="font-size:16px;line-height:1.6;color:#111">'
             f'{html.escape(_guillemets(str(r.get("body") or "").strip())).replace(chr(10), "<br>")}</div>'
             f'<div style="font-size:12px;color:#888;margin-top:8px">'
-            f'{html.escape(lang.say("mail_at", time=local_text(r.get("at"))))}</div>{state}</div>')
+            f'{html.escape(lang.say("mail_at", time=local_text(r.get("at"))))}</div>{state}'
+            f'{_buttons(r)}</div>')
     return (f'<!doctype html><html lang="{lang.current()}" dir="{"rtl" if rtl else "ltr"}">'
             f'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
             f'</head><body style="margin:0;background:#EEF6FB;font-family:-apple-system,'

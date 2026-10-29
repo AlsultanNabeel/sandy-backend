@@ -2,10 +2,11 @@ import Combine
 import Foundation
 
 enum DeepLink: Equatable {
-    case call, chat, quickAdd
+    case call, chat, quickAdd, scheduledTasks
 }
 
-/// Routes sandy://call, call/end, chat, quickadd, focus/stop.
+/// Routes sandy://call, call/end, chat, quickadd, focus/stop, tasks (a task's email:
+/// «افتح المهمة» opens the Tasks screen).
 /// A link arriving before the main screen exists waits in `pending` for `MainTabView`, a
 /// minute at most and never across a sign-out: a «talk to Sandy» tapped signed out must not
 /// open the mic minutes later, once sign-in is done.
@@ -54,6 +55,8 @@ final class DeepLinkRouter: ObservableObject {
             ask(.chat)
         case "quickadd":
             ask(.quickAdd)
+        case "tasks":
+            ask(.scheduledTasks)
         case "focus":
             if path == "/stop" { FocusLiveActivity.shared.stopFromLink() }
         default:

@@ -162,6 +162,14 @@ final class ScheduledTasksTests: XCTestCase {
         XCTAssertEqual(store.tasks[0].way, .hourly)
     }
 
+    /// A task's email «افتح المهمة» comes in as sandy://tasks/<id> and opens the Tasks screen.
+    func testATasksEmailLinkOpensTheTasksScreen() {
+        let router = DeepLinkRouter.shared
+        XCTAssertTrue(router.handle(URL(string: "sandy://tasks/t1")!))
+        XCTAssertEqual(router.take(), .scheduledTasks)
+        XCTAssertNil(router.take(), "a link is taken once")
+    }
+
     func testTheStoreRemovesATask() async {
         let api = TestClient.make()
         let store = ScheduledTasksStore()
