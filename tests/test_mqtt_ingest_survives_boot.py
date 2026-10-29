@@ -121,3 +121,66 @@ def test_reading_the_suback_cannot_kill_the_network_thread():
     assert "could not read SUBACK" in _SRC, (
         "no guard around SUBACK parsing — an exception here silently ends "
         "message delivery for the whole worker")
+
+
+class _Stop(Exception):
+    pass
+
+
+def _watch_once(monkeypatch, caplog, **stats):
+    """One watchdog pass on a listener silent for long, with ``stats`` set; what it logged."""
+    import logging
+    import time
+    from types import SimpleNamespace as NS
+
+    import app.integrations.mqtt_ingest as M
+
+    fake = NS(is_connected=lambda: True, loop_stop=lambda: None, disconnect=lambda: None)
+    passes = []
+
+    def sleep(_seconds):
+        # One pass, then out of the endless loop.
+        if passes:
+            raise _Stop
+        passes.append(1)
+    monkeypatch.setattr(M.time, "sleep", sleep)
+    monkeypatch.setattr(M, "_client", fake)
+    monkeypatch.setattr(M, "_new_client", lambda *a: fake)
+    monkeypatch.setattr(M, "_stats", {"last_message_at": time.time() - 1000, "rebuilt_at": 0,
+                                      "silent_streak": 0, **stats})
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="app.integrations.mqtt_ingest"):
+        try:
+            M._watchdog("h", 1, "u", "p")
+        except _Stop:
+            pass
+    return [r for r in caplog.records if "heard nothing" in r.getMessage()]
+
+
+def test_silence_with_no_robot_is_information_not_an_error(monkeypatch, caplog):
+    # «heard nothing» went to Sentry as an error every two minutes with no robot on
+    # (29 Oct 2026): with no board heard since the last rebuild, silence is the normal state.
+    said = _watch_once(monkeypatch, caplog)
+    assert [r.levelname for r in said] == ["INFO"]
+
+
+def test_a_robot_that_was_beating_and_went_quiet_is_an_error(monkeypatch, caplog):
+    import time
+    said = _watch_once(monkeypatch, caplog, board_heard_at=time.time() - 1000)
+    assert [r.levelname for r in said] == ["ERROR"]
+
+
+def test_a_retained_heartbeat_replayed_on_connect_is_no_robot(monkeypatch):
+    # The broker replays each board's last heartbeat on every (re)subscribe, however old:
+    # that is not a robot beating, or every rebuild would be an error again.
+    from types import SimpleNamespace as NS
+
+    import app.integrations.mqtt_ingest as M
+
+    monkeypatch.setattr(M, "_stats", dict(M._stats))
+    monkeypatch.setattr(M, "_INGEST", NS(_work_queue=NS(qsize=lambda: 0), submit=lambda *a: None))
+    M._stats.pop("board_heard_at", None)
+    M._on_message(None, None, NS(topic="sandy/node/x/status", payload=b"{}", retain=True))
+    assert M._stats.get("board_heard_at") is None
+    M._on_message(None, None, NS(topic="sandy/node/x/status", payload=b"{}", retain=False))
+    assert M._stats.get("board_heard_at")

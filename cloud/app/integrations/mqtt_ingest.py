@@ -62,6 +62,9 @@ _stats = {
     "last_disconnect": None,   # why the broker last hung up — its words, not ours
     "last_disconnect_flags": None,
     "last_message_at": None,
+    # A board's own live message (a retained one replayed on subscribe is none): whether a
+    # robot was beating at all, which makes silence a fault.
+    "board_heard_at": None,
 }
 
 
@@ -82,6 +85,8 @@ def _node_id_from_topic(topic: str) -> str:
 def _on_message(client, userdata, msg) -> None:  # noqa: ANN001
     """Runs on paho's network thread: copy the message and queue the work."""
     _stats["last_message_at"] = time.time()
+    if not getattr(msg, "retain", False):
+        _stats["board_heard_at"] = _stats["last_message_at"]
     pending = _INGEST._work_queue.qsize()
     if pending >= _INGEST_MAX_PENDING:
         _stats["dropped"] += 1
@@ -256,7 +261,7 @@ def _new_client(host: str, port: int, user: str, password: str):
 
 
 # ── Watchdog ─────────────────────────────────────────────────────────────────
-# Boards heartbeat every 5–10s, so silence is a fault. If paho's network thread
+# Boards heartbeat every 5–10s, so silence after a board was heard is a fault. If paho's network thread
 # dies, is_connected() stays True forever; rebuild the client instead.
 _WATCHDOG_SILENCE_S = 90
 _WATCHDOG_PERIOD_S = 30
@@ -280,7 +285,11 @@ def _watchdog(host: str, port: int, user: str, password: str) -> None:
             if silent_for < _WATCHDOG_SILENCE_S * (2 ** min(streak, 6)):
                 continue
 
-            (logger.error if streak == 0 else logger.warning)(
+            # A fault only when a board was beating since the last rebuild and stopped; with
+            # no robot on, silence is the normal state, not an error for Sentry.
+            heard = _stats.get("board_heard_at")
+            beating = heard is not None and heard > _stats.get("rebuilt_at", 0)
+            (logger.info if not beating else logger.error if streak == 0 else logger.warning)(
                 "[mqtt_ingest] worker %d heard nothing for %.0fs (connected=%s) "
                 "— rebuilding the listener",
                 os.getpid(), silent_for, c.is_connected())
